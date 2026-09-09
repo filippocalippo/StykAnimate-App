@@ -1,0 +1,2 @@
+# Optional compiled JSON encoder; the service retains its stdlib fallback.
+orjson==3.12.0

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "path": "native/vfw-bridge.cpp",
+    "sha256": "d604ca2bcee24890bfe72bf22064a235153d14f132bcfc3245499cff9256e736"
+  },
+  "toolchain": {
+    "msvc": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.44.35207",
+    "msvcVersion": "14.44.35207",
+    "sdk": "C:\\Program Files (x86)\\Windows Kits\\10",
+    "sdkVersion": "10.0.26100.0",
+    "standard": "c++17",
+    "runtime": "static"
+  },
+  "helpers": [
+    {
+      "architecture": "x64",
+      "path": "native/bin/x64/styk-vfw.exe",
+      "sha256": "cc0a8778ce001b11b0eb32948fb21b0604222e4a9304de1cf7f8753bd351d065",
+      "bytes": 318976
+    },
+    {
+      "architecture": "x86",
+      "path": "native/bin/x86/styk-vfw.exe",
+      "sha256": "b828bf489bd5ba1044d26c8df383256ea51c8627d8bc8013409afd0fde80e7a2",
+      "bytes": 259584
+    }
+  ]
+}

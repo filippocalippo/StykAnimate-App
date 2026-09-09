@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "abiVersion": 1,
+  "platform": "win32",
+  "architecture": "x64",
+  "source": {
+    "path": "native/piv-frame-scan.cpp",
+    "sha256": "f3864d0e42a8106d31bc4321cc58342a3efd260d3357301794feb0cf36666d84"
+  },
+  "library": {
+    "path": "native/bin/x64/styk-piv-frame-scan.dll",
+    "sha256": "7018d38a768594015ec4aa9ecb7fdeb86edc8493b3613b7996072d251932f11f",
+    "bytes": 132096
+  },
+  "toolchain": {
+    "compiler": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe",
+    "msvcVersion": "14.44.35207",
+    "sdkVersion": "10.0.26100.0",
+    "runtime": "static",
+    "standard": "c++17"
+  }
+}

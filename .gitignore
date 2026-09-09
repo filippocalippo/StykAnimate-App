@@ -1,0 +1,15 @@
+node_modules/
+.npm-cache/
+build/
+release/
+artifacts/
+__pycache__/
+*.pyc
+.pip-cache/
+.desktop-data/
+*.log
+*.obj
+.env
+.env.*
+!.env.example
+!.env.sample

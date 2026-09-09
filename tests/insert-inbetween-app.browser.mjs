@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import {mkdir,writeFile} from 'node:fs/promises';
+import path from 'node:path';
+import {chromium} from 'playwright';
+import backend from '../desktop/backend.cjs';
+const service = process.env.STYK_URL ? null : await backend.startBackend({appRoot:process.cwd()});
+const out=path.resolve('artifacts');await mkdir(out,{recursive:true});
+const browser=await chromium.launch({channel:'chrome',headless:true,args:['--disable-gpu']});
+const page=await browser.newPage({viewport:{width:1480,height:960}}),errors=[],checks=[];
+page.on('pageerror',error=>errors.push(error.message));
+const check=(label)=>checks.push(label);
+try{
+  await page.goto(process.env.STYK_URL??service.origin);await page.waitForFunction(()=>window.styk?.ready);
+  await page.locator('#file-input').setInputFiles(path.resolve('../Pivot Animator v5/Animations/tween_pendulum.piv'));
+  await page.waitForFunction(()=>styk.editor.name==='tween_pendulum');
+  await page.evaluate(()=>{styk.editor.selectFrame(1);styk.timeline.setMode('frames');styk.timeline._setSelectedFrames([1,2],2)});
+  await page.waitForFunction(()=>styk.timeline.selectedFrameIndices.length===2);
+  const original=await page.evaluate(()=>JSON.stringify(styk.editor.report));
+  const rect=await page.locator('.styk-timeline-scroll').boundingBox();
+  const click=await page.evaluate(()=>{const t=styk.timeline;return {x:12+(t.editor.timeline[1].start+.5)*t.pxPerTick-t.scroll.scrollLeft,y:16}});
+  await page.mouse.click(rect.x+click.x,rect.y+click.y,{button:'right'});
+  await page.getByRole('menuitem',{name:'Insert inbetween…',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.styk-inbetween-dialog[open] [data-inbetween-insert]')?.disabled===false);
+  check('Real imported PIV context menu opens shared-worker preview');
+  await page.getByRole('spinbutton',{name:'Interpolation percentage'}).fill('37.5');
+  await page.waitForFunction(()=>document.querySelector('[data-inbetween-insert]')?.disabled===false);
+  const preview=await page.locator('[aria-label="Inbetween pose preview"]').evaluate(canvas=>{const data=canvas.getContext('2d').getImageData(0,0,512,288).data;let dark=0;for(let i=0;i<data.length;i+=4)if(data[i]<190&&data[i+1]<190&&data[i+2]<190)dark++;return dark});
+  assert.ok(preview>50);check('Chosen ratio renders actual imported geometry');
+  const expected=await page.evaluate(()=>({count:styk.editor.report.keyframes.length+2,ticks:styk.editor.totalTicks+[1,2].reduce((n,index)=>n+styk.editor.report.keyframes[index].duration_raw,0)}));
+  await page.screenshot({path:path.join(out,'insert-inbetween-app.png')});
+  await page.locator('[data-inbetween-insert]').click();
+  await page.waitForFunction(()=>!document.querySelector('.styk-inbetween-dialog[open]'));
+  assert.deepEqual(await page.evaluate(()=>({count:styk.editor.report.keyframes.length,ticks:styk.editor.totalTicks})),expected);
+  assert.deepEqual(await page.evaluate(()=>styk.timeline.selectedFrameIndices),[1,3]);
+  assert.equal(await page.evaluate(()=>styk.editor._undo.length),1);check('Insert applies selected native range with correct exposures and one undo');
+  await page.keyboard.press('Control+z');
+  assert.equal(await page.evaluate(()=>JSON.stringify(styk.editor.report)),original);check('Root app undo restores imported native document exactly');
+  assert.equal(await page.evaluate(()=>typeof styk.editor._inbetweenPlanner),'function');check('Root insertion uses the connected worker planner');
+  assert.deepEqual(errors,[]);
+  const result={passed:true,checks,previewDarkPixels:preview,renderer:await page.evaluate(()=>styk.state.renderer.stats.backend),errors};
+  await writeFile(path.join(out,'insert-inbetween-app.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+}catch(error){await page.screenshot({path:path.join(out,'insert-inbetween-app-failure.png')});await writeFile(path.join(out,'insert-inbetween-app.json'),JSON.stringify({passed:false,checks,errors,failure:error.stack},null,2));throw error}
+finally{await browser.close();await service?.stop()}

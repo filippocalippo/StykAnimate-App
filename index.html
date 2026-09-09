@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8f8fa" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob: data:; object-src 'none'"
+    />
+    <title>StykAnimate — First steps</title>
+    <link rel="icon" type="image/svg+xml" href="./mark.svg" />
+    <link rel="stylesheet" href="./src/style.css" />
+    <link rel="stylesheet" href="./src/studio.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="titlebar">
+        <button class="brand" data-action="menu" aria-label="Main menu">
+          <img src="./mark.svg" alt="" /><span>StykAnimate</span
+          ><span class="chevron" data-icon="chevronDown"></span>
+        </button>
+        <nav class="app-menubar" role="menubar" aria-label="Application menu">
+          <button role="menuitem" data-app-menu="file" aria-haspopup="menu" aria-expanded="false">File</button>
+          <button role="menuitem" data-app-menu="edit" aria-haspopup="menu" aria-expanded="false">Edit</button>
+          <button role="menuitem" data-app-menu="view" aria-haspopup="menu" aria-expanded="false">View</button>
+          <button role="menuitem" data-app-menu="editor" aria-haspopup="menu" aria-expanded="false">Editor</button>
+          <button role="menuitem" data-app-menu="animation" aria-haspopup="menu" aria-expanded="false">Animation</button>
+          <button role="menuitem" data-app-menu="help" aria-haspopup="menu" aria-expanded="false">Help</button>
+        </nav>
+        <div class="title-divider"></div>
+        <button class="document-tab" data-action="rename">
+          <span class="file-symbol" data-icon="file"></span
+          ><span id="project-name">First steps</span><span id="dirty-dot"></span>
+        </button>
+        <span id="save-state" class="save-state">Saved</span>
+        <div class="title-spacer"></div>
+        <button
+          class="button subtle"
+          data-action="open"
+          title="Open a project · Ctrl+O"
+          data-icon="folder"
+        >
+          Open
+        </button>
+        <button
+          class="button subtle"
+          data-action="save"
+          title="Save project · Ctrl+S"
+          data-icon="save"
+        >
+          Save
+        </button>
+        <button class="button primary" data-action="export" data-icon="export">
+          Export<span class="chevron" data-icon="chevronDown"></span>
+        </button>
+        <div id="window-controls" hidden>
+          <button
+            data-action="minimize"
+            aria-label="Minimize"
+            data-icon="window-minimize"
+          ></button
+          ><button
+            data-action="maximize"
+            aria-label="Maximize"
+            data-icon="window-maximize"
+          ></button
+          ><button
+            data-action="close"
+            aria-label="Close"
+            data-icon="x"
+          ></button>
+        </div>
+      </header>
+      <section class="workspace">
+        <nav class="studio-rail" aria-label="Editor tools">
+          <button class="rail-add" id="open-insert" title="Add to scene" aria-label="Add to scene" data-icon="plus"></button>
+          <span class="rail-divider"></span>
+<div class="tool-dock" role="toolbar" aria-label="Contextual tools" aria-orientation="vertical">
+<button class="tool" data-tool="select" data-icon="cursor" aria-label="Select and move" title="Select and move · V"><span class="tool-label">Select</span></button>
+<button class="tool" data-tool="pose" data-icon="nodes" aria-label="Pose joints" title="Pose joints · P"><span class="tool-label">Pose</span></button>
+<button class="tool" data-tool="handle-edit" data-icon="move" aria-label="Handle edit" title="Handle edit · R"><span class="tool-label">Handles</span></button>
+<button class="tool" data-tool="rig" data-icon="sliders" aria-label="Edit rig" title="Edit rig"><span class="tool-label">Joints</span></button>
+<button class="tool" data-tool="line" data-icon="line" aria-label="Add line segment" title="Add line segment · L"><span class="tool-label">Line</span></button>
+<button class="tool" data-tool="circle" data-icon="circle" aria-label="Add circle segment" title="Add circle segment · C"><span class="tool-label">Circle</span></button>
+<button class="tool" data-tool="polygon" data-icon="polygon" aria-label="Create polygon" title="Create polygon"><span class="tool-label">Polygon</span></button>
+<button class="tool" data-tool="hand" data-icon="hand" aria-label="Pan canvas" title="Pan canvas · H"><span class="tool-label">Pan</span></button>
+<button class="tool" data-action="toggle-isolate" data-icon="detach" title="Isolate joint · Hold Caps Lock" aria-label="Isolate joint" aria-pressed="false"><span class="tool-label">Isolate</span></button>
+</div>
+          <div class="rail-bottom">
+            <button class="tool" data-action="help" title="Keyboard shortcuts" aria-label="Keyboard shortcuts" data-icon="help"></button>
+            <button class="tool" data-action="settings" title="Editor settings" aria-label="Editor settings" data-icon="settings"></button>
+          </div>
+        </nav>
+        <main class="center">
+          <div class="canvas-toolbar">
+            <div class="workspace-switch" role="group" aria-label="Editing workspace">
+              <button type="button" data-workspace-mode="animate" aria-pressed="true">Animate</button>
+              <button type="button" data-workspace-mode="rig" aria-pressed="false">Build figure</button>
+            </div>
+            <div class="crumb">
+              <button class="scene-control" data-action="scene-settings" title="Scene properties" data-icon="frame">Scene</button><span>/</span
+              ><span id="stage-size">960 × 540</span>
+            </div>
+            <div class="canvas-options">
+              <button class="button subtle small" data-action="undo" title="Undo · Ctrl+Z" aria-label="Undo" data-icon="undo"></button>
+              <button class="button subtle small" data-action="redo" title="Redo · Ctrl+Shift+Z" aria-label="Redo" data-icon="redo"></button>
+              <span class="divider"></span>
+              <button
+                class="icon-button active"
+                id="handles-button"
+                data-action="toggle-handles"
+                title="Show joints · J"
+                data-icon="nodes"
+              ></button
+              ><span class="divider"></span
+              ><button
+                class="zoom-label"
+                data-action="zoom-menu"
+                id="zoom-label"
+                title="Zoom options"
+                aria-label="Canvas zoom"
+                aria-haspopup="menu"
+              >
+                100%
+              </button>
+            </div>
+          </div>
+          <div class="context-strip"><strong id="tool-context">Select</strong><span id="edit-scope">Current frame</span><button id="leave-rig" hidden>Return to animation →</button></div>
+          <div
+            id="viewport"
+            tabindex="0"
+            aria-label="Animation canvas. V to select, H to pan. Drag a figure or joint to pose it."
+          >
+            <div id="artboard"><span class="artboard-name">Scene 01</span></div>
+            <canvas id="scene" aria-label="WebGPU animation scene"></canvas>
+            <canvas
+              id="overlay"
+              aria-label="Figure selection and joint handles"
+            ></canvas>
+            <div class="viewport-top" aria-hidden="true">
+              <span id="frame-badge">FRAME 01</span
+              ><span id="preview-badge" hidden>PLAYING</span>
+            </div>
+            <div id="canvas-empty" hidden>Drop a .piv or .stk file here</div>
+            <output id="playback-fps" aria-label="Playback frames per second" hidden>— fps</output>
+            <div id="renderer-error" hidden></div>
+            <div id="polygon-controls" class="polygon-controls" hidden>
+              <span id="polygon-count">0 joints</span
+              ><button
+                id="finish-polygon"
+                class="button primary small"
+                data-action="finish-polygon"
+                disabled
+              >
+                Finish</button
+              ><button
+                class="icon-button"
+                data-action="cancel-polygon"
+                aria-label="Cancel polygon"
+                data-icon="x"
+              ></button>
+            </div>
+            <div class="viewport-help" id="viewport-hint"></div>
+          </div>
+          <section class="timeline-panel">
+            <div class="timeline-toolbar">
+              <div class="timeline-title">Timeline</div>
+              <button id="timeline-workflow" class="workflow-button" title="Choose animation workflow">Keyframes <span>⌄</span></button>
+              <div class="playback-controls">
+                <button
+                  class="icon-button"
+                  data-action="first-frame"
+                  title="First frame · Home"
+                  data-icon="first"
+                ></button
+                ><button
+                  class="icon-button"
+                  data-action="previous-frame"
+                  title="Previous frame · ←"
+                  data-icon="previous"
+                ></button
+                ><button
+                  class="play-button"
+                  id="play-button"
+                  data-action="play"
+                  title="Play / pause · Space"
+                  aria-label="Play"
+                  data-icon="play"
+                ></button
+                ><button
+                  class="icon-button"
+                  data-action="next-frame"
+                  title="Next frame · →"
+                  data-icon="next"
+                ></button
+                ><button
+                  class="icon-button active"
+                  id="loop-button"
+                  data-action="toggle-loop"
+                  title="Loop playback"
+                  data-icon="loop"
+                ></button
+                ><span id="time-display">00:00:00</span
+                ><span class="divider"></span
+                ><label class="fps-control"
+                  ><input
+                    id="fps"
+                    type="number"
+                    min="1"
+                    max="120"
+                    value="24"
+                    aria-label="Frames per second"
+                  />fps</label
+                >
+              </div>
+              <div class="timeline-onion-controls"><button class="icon-button" id="onion-button" data-action="toggle-onion" data-icon="onion" title="Onion skin · O" aria-label="Onion skin" aria-pressed="false"></button><button class="icon-button onion-options-button" id="onion-settings-button" title="Onion skin settings" aria-label="Onion skin settings">⌄</button></div>
+              <button id="expand-timeline" class="icon-button" title="Expand timeline" aria-label="Expand timeline" aria-pressed="false" data-icon="maximize"></button>
+              <div class="timeline-actions">
+                <span data-icon="zoom"></span
+                ><input
+                  type="range"
+                  id="timeline-zoom"
+                  min="5"
+                  max="40"
+                  value="18"
+                  aria-label="Timeline zoom"
+                />
+              </div>
+            </div>
+            <div id="timeline"></div>
+            <div class="timeline-footer">
+              <span id="timeline-summary">24 frames</span
+              ><span id="selection-summary">No figure selected</span>
+            </div>
+          </section>
+        </main>
+        <aside class="right-panel panel">
+          <div class="inspector-header"><div><strong class="panel-tab-title">Properties</strong><span id="inspector-context">Figure</span></div><button id="object-actions" class="icon-button" aria-label="Selection actions" title="Selection actions">•••</button></div>
+          <div id="inspector"></div>
+        </aside>
+      </section>
+      <footer class="statusbar">
+        <div>
+          <span class="status-dot" id="status-dot"></span
+          ><span id="status">Ready</span>
+        </div>
+        <div>
+          <span id="renderer-label">Initializing WebGPU</span
+          ><span class="status-separator">·</span><span id="render-time">—</span
+          ><span class="status-separator">·</span
+          ><span id="object-count">0 figures</span
+          ><button
+            data-action="performance"
+            title="Performance details"
+            data-icon="activity"
+          ></button>
+        </div>
+      </footer>
+    </div>
+    <input
+      type="file"
+      id="file-input"
+      accept=".piv,.stk,.styk,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp"
+      multiple
+      hidden
+    />
+    <input
+      type="file"
+      id="media-input"
+      accept="image/png,image/jpeg,image/gif,image/bmp,image/webp"
+      hidden
+    />
+    <div id="toast" role="status" hidden></div>
+    <div id="menu" role="menu" hidden></div>
+    <dialog id="insert-dialog" aria-labelledby="insert-title">
+      <div class="dialog-head"><div><span class="eyebrow">CREATE</span><h2 id="insert-title">Add to your scene</h2></div><button class="icon-button" id="close-insert" aria-label="Close add dialog" data-icon="x"></button></div>
+      <div class="insert-actions">
+        <button data-action="add-figure" data-icon="person"><strong>Stick figure</strong><small>Start with a character</small></button>
+        <button data-action="add-text" data-icon="text"><strong>Text</strong><small>Add a title or caption</small></button>
+        <button data-action="import-sprite" data-icon="image"><strong>Image</strong><small>Place an image</small></button>
+        <button data-action="import" data-icon="import"><strong>Import figure</strong><small>Open a Pivot figure</small></button>
+      </div>
+      <div class="insert-library"><h3>Figures in this project <span>Click to add an instance</span></h3><div id="asset-list"></div></div>
+      <details class="insert-examples"><summary>Example animations</summary><div id="sample-list"></div></details>
+    </dialog>
+    <dialog id="dialog"><div id="dialog-content"></div></dialog>
+    <script type="module" src="./src/app.mjs"></script>
+  </body>
+</html>

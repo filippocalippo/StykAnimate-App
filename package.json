@@ -1,0 +1,85 @@
+{
+  "name": "stykanimate-webapp",
+  "productName": "StykAnimate",
+  "version": "0.3.0",
+  "description": "A WebGPU desktop workspace for Pivot animation and stick figures.",
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "serve": "node scripts/serve.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:ui": "node tests/app.browser.mjs",
+    "test:renderer": "node tests/renderer-gpu-smoke.mjs",
+    "test:timeline": "node tests/timeline.browser.mjs",
+    "test:recovery": "node --test scripts/recovery.test.mjs",
+    "test:streams": "node --test scripts/file-streams.test.mjs",
+    "test:streams:desktop": "node scripts/smoke-native-streams.mjs",
+    "test:preferences": "node --test scripts/preferences.test.mjs",
+    "test:preferences:desktop": "node scripts/smoke-preferences.mjs",
+    "test:project-files": "node --test scripts/project-files.test.mjs",
+    "test:project-files:desktop": "node scripts/smoke-project-files.mjs",
+    "test:recovery:desktop": "node scripts/smoke-recovery.mjs",
+    "benchmark:native-import": "node scripts/benchmark-native-import.mjs",
+    "benchmark:dense": "node scripts/benchmark-dense-scene.mjs",
+    "test:desktop": "node scripts/smoke-desktop.mjs",
+    "test:desktop:packaged": "node scripts/smoke-desktop.mjs --packaged",
+    "build:sidecar": "python scripts/build-sidecar.py",
+    "build:video-encoder": "python scripts/stage-video-encoder.py",
+    "build:vfw": "python scripts/build-vfw-bridge.py",
+    "build:frame-scan": "python scripts/build-frame-scan.py",
+    "test:clipboard": "node --test tests/editor-frame-clipboard.test.mjs tests/frame-clipboard-authored.test.mjs",
+    "test:clipboard:desktop": "node scripts/smoke-frame-clipboard.mjs",
+    "verify:sidecar": "node scripts/verify-sidecar.mjs",
+    "pack": "electron-builder --dir",
+    "verify:package": "node scripts/verify-package.mjs",
+    "mark:release": "node scripts/mark-release.mjs",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "earcut": "3.2.3"
+  },
+  "devDependencies": {
+    "electron": "39.8.10",
+    "electron-builder": "26.15.3",
+    "playwright": "1.63.0"
+  },
+  "build": {
+    "beforePack": "scripts/before-pack.cjs",
+    "appId": "app.stykanimate.desktop",
+    "productName": "StykAnimate",
+    "artifactName": "StykAnimate-${version}-${os}-${arch}.${ext}",
+    "directories": { "output": "release" },
+    "files": ["desktop/**/*", "package.json"],
+    "extraResources": [
+      {
+        "from": ".",
+        "to": "web",
+        "filter": ["index.html", "*.css", "*.svg", "*.png", "src/**/*", "assets/**/*", "vendor/**/*", "node_modules/earcut/src/earcut.js"]
+      },
+      { "from": "backend", "to": "backend", "filter": ["**/*.py"] },
+      { "from": "node_modules/earcut/src/earcut.js", "to": "web/node_modules/earcut/src/earcut.js" },
+      { "from": "../tools", "to": "tools", "filter": ["*.py"] },
+      { "from": "../StykAnimate/tools/codec_bridge.py", "to": "codec_bridge.py" },
+      { "from": "build/sidecar", "to": "sidecar", "filter": ["**/*"] },
+      { "from": "build/video-encoder", "to": "video-encoder", "filter": ["**/*"] }
+    ],
+    "fileAssociations": [
+      { "ext": "piv", "name": "Pivot animation", "role": "Editor" },
+      { "ext": "stk", "name": "Pivot stick figure", "role": "Editor" },
+      { "ext": "styk", "name": "StykAnimate project", "role": "Editor" }
+    ],
+    "win": { "target": ["nsis", "portable"], "signAndEditExecutable": false,
+      "extraResources": [{"from":"native/bin","to":"vfw","filter":["build-info.json","x86/*.exe","x64/*.exe"]}] },
+    "nsis": { "artifactName": "StykAnimate-${version}-Setup-${arch}.${ext}", "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true },
+    "portable": { "artifactName": "StykAnimate-${version}-Portable-${arch}.${ext}" },
+    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.graphics-design", "hardenedRuntime": true },
+    "linux": { "target": ["AppImage"], "category": "Graphics" }
+  }
+}

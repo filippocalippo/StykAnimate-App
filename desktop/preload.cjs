@@ -1,0 +1,73 @@
+'use strict';
+
+const { contextBridge, ipcRenderer } = require('electron');
+
+function subscribe(channel, callback) {
+  if (typeof callback !== 'function') throw new TypeError('A callback is required.');
+  const listener = (_event, value) => callback(value);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
+// Every privileged operation has a narrow handler in main.cjs. No filesystem,
+// Node.js, Electron object, or arbitrary IPC channel crosses this boundary.
+contextBridge.exposeInMainWorld('stykDesktop', Object.freeze({
+  isDesktop: true,
+  platform: process.platform,
+  importTransport: 'source-bytes-v1',
+  getWorkspacePreferences: () => ipcRenderer.invoke('styk:workspace-preferences-get'),
+  setWorkspacePreferences: (preferences) => ipcRenderer.invoke('styk:workspace-preferences-set', preferences),
+  getEditorSettings: () => ipcRenderer.invoke('styk:editor-settings-get'),
+  setEditorSettings: (settings) => ipcRenderer.invoke('styk:editor-settings-set', settings),
+  listFonts: () => ipcRenderer.invoke('styk:fonts-list'),
+  readFont: (id) => ipcRenderer.invoke('styk:fonts-read', id),
+  readClipboardText: () => ipcRenderer.invoke('styk:clipboard-text-read'),
+  writeClipboardText: text => ipcRenderer.invoke('styk:clipboard-text-write', text),
+  getVideoCapabilities: options => ipcRenderer.invoke('styk:video-capabilities', options),
+  beginVideoExport: options => ipcRenderer.invoke('styk:video-begin', options),
+  beginVideoFrame: (token, options) => ipcRenderer.invoke('styk:video-frame-begin', token, options),
+  writeVideoChunk: (token, bytes) => ipcRenderer.invoke('styk:video-frame-chunk', token, bytes),
+  endVideoFrame: token => ipcRenderer.invoke('styk:video-frame-end', token),
+  finishVideoExport: token => ipcRenderer.invoke('styk:video-finish', token),
+  readVideoChunk: token => ipcRenderer.invoke('styk:video-read', token),
+  cancelVideoExport: token => ipcRenderer.invoke('styk:video-cancel', token),
+  getVfwCapabilities: options => ipcRenderer.invoke('styk:vfw-capabilities', options),
+  configureVfwCodec: options => ipcRenderer.invoke('styk:vfw-configure', options),
+  beginVfwExport: options => ipcRenderer.invoke('styk:vfw-begin', options),
+  beginVfwFrame: (token, options) => ipcRenderer.invoke('styk:vfw-frame-begin', token, options),
+  writeVfwChunk: (token, bytes) => ipcRenderer.invoke('styk:vfw-frame-chunk', token, bytes),
+  endVfwFrame: token => ipcRenderer.invoke('styk:vfw-frame-end', token),
+  finishVfwExport: token => ipcRenderer.invoke('styk:vfw-finish', token),
+  readVfwChunk: token => ipcRenderer.invoke('styk:vfw-read', token),
+  cancelVfwExport: token => ipcRenderer.invoke('styk:vfw-cancel', token),
+  activateDocument: (options) => ipcRenderer.invoke('styk:document-activate', options),
+  openFile: () => ipcRenderer.invoke('styk:open-file'),
+  listRecentFiles: () => ipcRenderer.invoke('styk:recent-list'),
+  openRecentFile: id => ipcRenderer.invoke('styk:recent-open', id),
+  clearRecentFiles: () => ipcRenderer.invoke('styk:recent-clear'),
+  saveFile: (options) => ipcRenderer.invoke('styk:save-file', options),
+  beginFileWrite: (options) => ipcRenderer.invoke('styk:file-write-begin', options),
+  beginProjectWrite: (options) => ipcRenderer.invoke('styk:project-write-begin', options),
+  beginRecoveryWrite: (options) => ipcRenderer.invoke('styk:recovery-write-begin', options),
+  beginClipboardWrite: (options) => ipcRenderer.invoke('styk:clipboard-write-begin', options),
+  beginClipboardRead: () => ipcRenderer.invoke('styk:clipboard-read-begin'),
+  writeFileChunk: (token, bytes) => ipcRenderer.invoke('styk:file-write-chunk', token, bytes),
+  finishFileWrite: (token) => ipcRenderer.invoke('styk:file-write-finish', token),
+  cancelFileWrite: (token) => ipcRenderer.invoke('styk:file-write-cancel', token),
+  getRecoveryInfo: () => ipcRenderer.invoke('styk:recovery-info'),
+  beginRecoveryRead: () => ipcRenderer.invoke('styk:recovery-read-begin'),
+  readFileChunk: (token) => ipcRenderer.invoke('styk:file-read-chunk', token),
+  closeFileRead: (token) => ipcRenderer.invoke('styk:file-read-close', token),
+  saveRecovery: (options) => ipcRenderer.invoke('styk:recovery-save', options),
+  getRecovery: () => ipcRenderer.invoke('styk:recovery-get'),
+  deleteRecovery: () => ipcRenderer.invoke('styk:recovery-delete'),
+  minimize: () => ipcRenderer.invoke('styk:window', 'minimize'),
+  maximize: () => ipcRenderer.invoke('styk:window', 'maximize'),
+  close: () => ipcRenderer.invoke('styk:window', 'close'),
+  getWindowState: () => ipcRenderer.invoke('styk:window-state'),
+  setDocumentState: (state) => ipcRenderer.invoke('styk:document-state', state),
+  onMenuAction: (callback) => subscribe('styk:menu-action', callback),
+  onOpenFile: (callback) => subscribe('styk:file-opened', callback),
+  onWindowState: (callback) => subscribe('styk:window-state', callback),
+  onBackendError: (callback) => subscribe('styk:backend-error', callback),
+}));
