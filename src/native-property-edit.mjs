@@ -2,7 +2,7 @@
 import { objectBounds } from "./renderer-geometry.mjs";
 import { cameraValues } from "./editor-camera.mjs";
 import { commitNativePoseRange } from "./native-property-ranges.mjs";
-import { animationStyleValue, setAnimationStyle } from "./animation-style.mjs";
+import { animationStyleValue, setAnimationStyle, polygonIdentity, resolveInstanceFigure } from "./animation-style.mjs";
 import { builderStyleProperty, previewBuilderStyleProperty } from './editor-builder-style.mjs';
 import { builderBranchStyleBinding } from './editor-builder-branch.mjs';
 import { branchOpacityPlan, branchGradientOpacityBinding, beginBranchStyleAnimation, previewBranchStyleAnimation, commitBranchStyleAnimation, cancelBranchStyleAnimation } from './editor-branch-style.mjs';
@@ -65,15 +65,21 @@ const radians = (value) => (value * Math.PI) / 180;
 function styleBinding(editor, key) {
   const uid = editor.object?.unique_id;
   if (uid === undefined) return null;
+  const polygon=/^polygon_(\d+)_opacity$/.exec(key);
+  if (polygon) {
+    const index=Number(polygon[1]),item=editor.figure?.polyfills?.[index];
+    return item ? {target:{kind:'polygon',uid,polygonId:polygonIdentity(item,index),figureTypeId:editor.figure.figure_type_id},property:'opacity'} : null;
+  }
   if (key === "outline_opacity")
     return { target: { kind: "figure", uid }, property: "outlineOpacity" };
-  if (!["segment_opacity", "segment_gradient_opacity"].includes(key))
+  if (key === 'outline_width') return {target:{kind:'figure',uid}, property:'outlineWidth'};
+  if (!["segment_opacity", "segment_gradient_opacity", 'thickness'].includes(key))
     return null;
   const handleId = editor.figure?.segments[editor.selectedJoint]?.segment_id;
   if (!Number.isInteger(handleId)) return null;
   return {
     target: { kind: "segment", uid, handleId },
-    property: key === "segment_opacity" ? "opacity" : "gradientOpacity",
+    property: key === 'thickness' ? 'thickness' : key === "segment_opacity" ? "opacity" : "gradientOpacity",
   };
 }
 function capturedStyleBinding(editor, key) {
@@ -120,7 +126,7 @@ export function canEditNativeProperty(editor, key) {
     return Boolean(builderStyleProperty(editor, key));
   if (!keys.has(key)) return false;
   if (key === "segment_gradient_opacity")
-    return Boolean(editor.figure?.segments[editor.selectedJoint]?.secondary);
+    return Boolean(resolveInstanceFigure(editor.figure,editor.object)?.segments[editor.selectedJoint]?.secondary);
   if (
     key.startsWith("group_") ||
     ["root_x", "root_y", "scale", "rotation", "figure_opacity"].includes(key)
@@ -138,6 +144,8 @@ export function canEditNativeProperty(editor, key) {
 export function getNativePropertyValue(editor, key, { bounds } = {}) {
   if (!canEditNativeProperty(editor, key)) return undefined;
   const builder = builderStyleProperty(editor, key);
+  const appearance=editor.propertyChannels && styleBinding(editor,key);
+  if (appearance) return animationStyleValue(editor.figure,editor.object,appearance.target,appearance.property) * (['thickness','outlineWidth'].includes(appearance.property) ? 1 : 100);
   if (builder) return builder.value;
   const object = editor.object,
     figure = editor.figure,
@@ -146,7 +154,7 @@ export function getNativePropertyValue(editor, key, { bounds } = {}) {
   const style = styleBinding(editor, key);
   if (style)
     return (
-      animationStyleValue(figure, object, style.target, style.property) * 100
+      animationStyleValue(figure, object, style.target, style.property) * (['thickness','outlineWidth'].includes(style.property) ? 1 : 100)
     );
   if (key === "root_x" || key === "root_y") return object[key];
   if (key === "scale") return object.scale * 100;
@@ -364,7 +372,7 @@ export function beginNativePropertyEdit(
   const selection = editor._selectionState(),
     builder = builderStyleProperty(editor, key, {branch}),
     branchPlan = branch ? branchOpacityPlan(editor, key) : null,
-    branchStyle = branch && key === 'thickness' ? builderBranchStyleBinding(editor, {thickness: 0})
+    branchStyle = branch && key === 'thickness' && !branchPlan?.authored ? builderBranchStyleBinding(editor, {thickness: 0})
       : branchPlan && !branchPlan.authored ? branchPlan.property === 'opacity'
         ? builderBranchStyleBinding(editor, {opacity: 0}) : branchGradientOpacityBinding(editor, branchPlan) : null,
     capturedStyle = branchPlan ? null : capturedStyleBinding(editor, key),
@@ -408,7 +416,13 @@ export function beginNativePropertyEdit(
   if (!Number.isFinite(token.value))
     throw new Error("The selected property has no finite value.");
   token.initialValue = token.value;
-  if (token.pose && token.indices.length > 1 && editor.animationChannels.length)
+  const scalar = editor.propertyChannels && !branchPlan ? styleBinding(editor, key) : null;
+  if (scalar) {
+    token.scalar = scalar; token.factor = ['thickness','outlineWidth'].includes(scalar.property) ? 1 : 100;
+    editor.beginAnimationEdit(scalar.target, scalar.property);
+    active.set(editor, token); return token;
+  }
+  if (token.pose && token.indices.length > 1 && editor.animationChannels.length && !editor.propertyChannels)
     throw new Error("Choose native frames to apply an absolute value range.");
   if (branchPlan?.authored) {
     token.branchAnimation = beginBranchStyleAnimation(editor, branchPlan);
@@ -471,8 +485,10 @@ export function previewNativePropertyEdit(token, value) {
   validate(token.key, value);
   if (token.value === value && ((!token.branchStyle && !token.branchAnimation) || token.branchStyleApplied)) return false;
   const { editor, key } = token;
-  if (token.branchAnimation) {
-    previewBranchStyleAnimation(editor, value / 100);
+  if (token.scalar) {
+    editor.previewAnimationEdit(value / token.factor);
+  } else if (token.branchAnimation) {
+    previewBranchStyleAnimation(editor, value / (key === 'thickness' ? 1 : 100));
     token.branchStyleApplied = true;
   } else if (token.camera) {
     const field = key === "camera_angle" ? "angle_rad" : key.slice(7);
@@ -607,9 +623,18 @@ export function commitNativePropertyEdit(token) {
     return false;
   }
   const { editor } = token;
+  if (token.scalar) {
+    let result;
+    if(token.indices.length>1){editor.cancelAnimationEdit();result=editor.addAnimationKeys(token.indices.map(index=>({...token.scalar,tick:editor.timeline[index].start,value:token.value/token.factor})));}
+    else result = editor.commitAnimationEdit(); token.closed = true; active.delete(editor); return result;
+  }
   if (token.branchAnimation) {
     try {
-      const result = commitBranchStyleAnimation(editor);
+      let result;
+      if (token.indices.length > 1) {
+        const entries=token.indices.flatMap(index=>token.branchPlan.entries.map(entry=>({target:entry.target,property:token.branchPlan.property,tick:editor.timeline[index].start,value:token.value/(token.key==='thickness'?1:100)})));
+        cancelBranchStyleAnimation(editor);result=editor.addAnimationKeys(entries);
+      } else result = commitBranchStyleAnimation(editor);
       token.closed = true; active.delete(editor); return result;
     } catch (error) { cancelNativePropertyEdit(token); throw error; }
   } else if (token.camera) {
@@ -711,6 +736,7 @@ export function cancelNativePropertyEdit(token) {
   token.closed = true;
   active.delete(editor);
   if (editor.report !== token.report) return false;
+  if (token.scalar) return editor.cancelAnimationEdit();
   if (token.branchAnimation) return cancelBranchStyleAnimation(editor);
   if (token.pose || token.camera) {
     editor.cancelDrag();

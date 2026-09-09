@@ -18,7 +18,7 @@ async function fixture(names, options = {}) {
 }
 
 test('recent native files survive restart in newest-first order with stable opaque IDs', async () => {
-  const { directory, files, recent } = await fixture(['animation.piv', 'figure.stk', 'Scène 日本語.STYK']);
+  const { directory, files, recent } = await fixture(['animation.piv', 'figure.stk', 'Native.STKZ', 'Scène 日本語.STYK']);
   assert.deepEqual(await recent.list(), []);
   const entries = [];
   for (const file of files) entries.push(await recent.remember(file));

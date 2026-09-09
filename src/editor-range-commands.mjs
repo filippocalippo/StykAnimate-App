@@ -5,6 +5,8 @@ import {frameOrder, setOrder} from './pivot/structure.mjs';
 import {evaluatedFrame, buildGeometry} from './pivot/geometry.mjs';
 import {validateObjectChanges, validateScene} from './pivot/model.mjs';
 import {animationChannelId, animationPropertyValue, validateAnimationDocument, validateAnimationValue} from './animation-channels.mjs';
+import {AUTHORING_PROPERTIES, isDiscreteAnimationProperty} from './animation-properties.mjs';
+import {splitPosePropertyChanges} from './pose-property-split.mjs';
 
 const clone = value => structuredClone(value);
 const equal = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
@@ -48,7 +50,7 @@ function targets(editor, options) {
     return {authored: true, frames: ticks.map(tick => sample(editor, tick))};
   }
   const indices = editor._frameIndices(options.indices ?? [editor.frameIndex]);
-  if (editor.animationChannels.length) return {authored: true, frames: [...new Set(indices.map(index => editor.timeline[index].start))].map(tick => sample(editor, tick))};
+  if (editor.propertyChannels || editor.animationChannels.length) return {authored: true, frames: [...new Set(indices.map(index => editor.timeline[index].start))].map(tick => sample(editor, tick))};
   return {authored: false, frames: indices.map(index => ({index, tick: editor.timeline[index].start, frame: editor.report.keyframes[index]}))};
 }
 function insertionPlan(editor, operation) {
@@ -97,22 +99,31 @@ function insert(frame, payload) {
   const out = {...frame, objects}; setOrder(out, [...frameOrder(frame), ...payload.order]); if ('object_count' in out) out.object_count = objects.length;
   return {frame: out, changedUids: added.map(object => object.unique_id), structural: true};
 }
-function authoredDraft(editor, entries) {
+function authoredDraft(editor, entries, sources = {}) {
   const before = editor.report._styk.animation ?? null, after = {...before, version: 1, nextKeyId: before?.nextKeyId ?? 1, channels: [...editor.animationChannels]};
   const edited = new Map();
   for (const entry of entries) {
     const id = animationChannelId(entry.target, entry.property); let channel = edited.get(id);
     if (!channel) {
-      const index = after.channels.findIndex(value => value.id === id), previous = index < 0 && entry.property === 'pose' ? editor.nativePoseChannel(entry.target) : after.channels[index];
+      const index = after.channels.findIndex(value => value.id === id), previous = index < 0 ? entry.property === 'pose' ? editor.nativePoseChannel(entry.target) : editor.propertyChannels ? editor.nativePropertyChannel(entry.target, entry.property) : undefined : after.channels[index];
       channel = {...previous, id, target: entry.target, property: entry.property, source: 'authored', keys: (previous?.keys ?? []).map(clone)};
       edited.set(id, channel); if (index < 0) after.channels.push(channel); else after.channels[index] = channel;
     }
     const value = validateAnimationValue(entry.target, entry.property, entry.value); let key = channel.keys.find(key => key.tick === entry.tick && !key.hidden);
-    if (key) key.value = value;
+    if (key) { key.value = value; delete key.passthrough; }
     else {
       const used = new Set(channel.keys.map(key => key.id)); let keyId;
       do { keyId = `key-${after.nextKeyId++}`; } while (used.has(keyId));
-      key = {id: keyId, tick: entry.tick, value, interpolation: entry.property === 'pose' ? 'hold' : 'linear'}; channel.keys.push(key);
+      key = {id: keyId, tick: entry.tick, value, interpolation: entry.property === 'pose' || isDiscreteAnimationProperty(entry.property) ? 'hold' : 'linear'}; channel.keys.push(key);
+    }
+  }
+  if (editor.propertyChannels) for (const entry of entries) if(entry.property === 'pose') {
+    if(edited.get(animationChannelId(entry.target,'pose'))?.nativeProperties)continue;
+    const targets=entry.target.kind === 'layer' ? (editor.layers.find(layer=>layer.id===entry.target.id)?.figureUids??[]).map(uid=>({kind:'figure',uid})) : [entry.target];
+    for(const target of targets)for(const property of AUTHORING_PROPERTIES[target.kind]??[]) {
+      if(property==='pose')continue;const id=animationChannelId(target,property);
+      if(target.kind==='figure'&&['x','y','rotation'].includes(property)&&[...editor.report.keyframes,...Object.values(sources)].some(frame=>frame.objects.some(object=>object.unique_id===target.uid&&object.join)))continue;
+      if(!after.channels.some(channel=>channel.id===id)) {const native=editor.nativePropertyChannel(target,property);if(native.keys.some(key=>!Object.is(key.value,native.keys[0]?.value)))after.channels.push(native);}
     }
   }
   for (const channel of edited.values()) channel.keys.sort((a, b) => a.tick - b.tick || Number(Boolean(b.hidden)) - Number(Boolean(a.hidden)));
@@ -126,6 +137,7 @@ export const editorRangeCommandMethods = {
     if (this._drag) this.commitDrag(); if (this._animationEdit) this.commitAnimationEdit();
     const uids = [...new Set(options.uids ?? this.selectedUids)], target = targets(this, options);
     if (!target.frames.length) return zero();
+    if (operation.kind === 'order' && target.authored) operation = {...operation, numericOrder: true};
     let payload = ['add', 'paste'].includes(operation.kind) ? insertionPlan(this, operation) : null;
     if (operation.kind === 'duplicate') {
       const wanted = new Set(uids), present = new Set();
@@ -192,37 +204,45 @@ export const editorRangeCommandMethods = {
   },
   _commitAuthoredFigureRange(plans, operation, payload, report, label, selection) {
     const entries = [], sources = {}; let nextSource = this._nextFrameIdentity;
-    const scalarOnly = operation.kind === 'scale' || (operation.kind === 'appearance' && !Object.keys(operation.patch ?? {}).some(key => !['field28', 'opacity'].includes(key)));
+    const numericOrder = operation.kind === 'order' && operation.numericOrder;
+    const scalarOnly = numericOrder || operation.kind === 'scale' || (operation.kind === 'appearance' && !Object.keys(operation.patch ?? {}).some(key => !['field28', 'opacity'].includes(key)));
     for (const plan of plans) {
       const changed = new Set(plan.changedUids), objects = new Map(plan.frame.objects.map(object => [object.unique_id, object]));
       const previous = new Map(plan.beforeFrame.objects.map(object => [object.unique_id, object])), geometries = new WeakMap();
+      const split=this.propertyChannels ? splitPosePropertyChanges(report,plan.beforeFrame,plan.frame,changed,plan.tick) : null;
+      if(split)entries.push(...split.entries);
       const valueAt = (target, property, frame) => animationPropertyValue(report, frame, target, property, {resolveGeometry: (r, f) => {
         let geometry = geometries.get(f); if (!geometry) { geometry = buildGeometry(r, f); geometries.set(f, geometry); } return geometry;
       }});
-      if (!scalarOnly) {
-        const source = clone(plan.frame), id = `frame-${nextSource++}`; source._styk = {...source._styk, frameId: id};
+      if (!numericOrder && (split ? split.shapeIds.size || operation.kind === 'order' : !scalarOnly)) {
+        const source = clone(split?.frame ?? plan.frame), id = `frame-${nextSource++}`; source._styk = {...source._styk, frameId: id};
         for (const object of source.objects) delete object.runtime_segments; sources[id] = source;
-        const layers = new Set([...plan.beforeFrame.objects, ...plan.frame.objects].filter(object => changed.has(object.unique_id)).map(object => payload?.hints.get(object.unique_id) ??
+        const independent=new Set([...changed].filter(uid=>this.propertyChannels&&operation.kind==='pose'||this.animationChannel({kind:'figure',uid},'pose')));
+        for(const uid of independent)entries.push({target:{kind:'figure',uid},property:'pose',tick:plan.tick,value:{frameId:id}});
+        const layers = new Set([...plan.beforeFrame.objects, ...plan.frame.objects].filter(object => changed.has(object.unique_id)&&!independent.has(object.unique_id)).map(object => payload?.hints.get(object.unique_id) ??
           (payload?.order.includes(object.unique_id) ? (this.getLayer(this.activeLayerId)?.kind === 'layer' ? this.activeLayerId : this.report._styk.layers.defaultLayerId) : this.layerForUid(object.unique_id))));
         if (operation.kind === 'order') for (const uid of optionsUids(plan, operation, changed)) layers.add(this.layerForUid(uid));
         for (const layer of layers) entries.push({target: {kind: 'layer', id: layer}, property: 'pose', tick: plan.tick, value: {frameId: id}});
       }
+      if(split)continue;
       const required = new Map();
       const add = (uid, property) => { if (!objects.has(uid)) return; const properties = required.get(uid) ?? new Set(); properties.add(property); required.set(uid, properties); };
+      if (operation.kind === 'order') for (const uid of changed)
+        if ((objects.get(uid)?._stykZIndex ?? 0) !== (previous.get(uid)?._stykZIndex ?? 0)) add(uid, 'zIndex');
       if (operation.kind === 'scale') for (const uid of operation.uids) {
         const object = objects.get(uid), before = previous.get(uid); if (!object || !before) continue;
         if (object.scale !== before.scale) add(uid, 'scale');
         if (!object.join) { if (object.root_x !== before.root_x) add(uid, 'x'); if (object.root_y !== before.root_y) add(uid, 'y'); }
       }
       if (operation.kind === 'appearance' && ('field28' in (operation.patch ?? {}) || 'opacity' in (operation.patch ?? {}) || operation.opacity !== undefined)) for (const uid of changed) add(uid, 'opacity');
-      for (const channel of this.animationChannels) if (channel.target.kind === 'figure' && changed.has(channel.target.uid) && objects.has(channel.target.uid) &&
+      for (const channel of this.animationChannels) if (channel.keys.length && channel.target.kind === 'figure' && channel.property !== 'pose' && changed.has(channel.target.uid) && objects.has(channel.target.uid) &&
         !equal(valueAt(channel.target, channel.property, plan.beforeFrame), valueAt(channel.target, channel.property, plan.frame))) add(channel.target.uid, channel.property);
       for (const [uid, properties] of required) for (const property of properties) {
         const target = {kind: 'figure', uid}; entries.push({target, property, tick: plan.tick,
           value: valueAt(target, property, plan.frame)});
       }
     }
-    const animation = authoredDraft(this, entries), sourceTable = {...this.report._styk.frameSources, ...sources};
+    const animation = authoredDraft(this, entries, sources), sourceTable = {...this.report._styk.frameSources, ...sources};
     validateAnimationDocument({...report, _styk: {...this.report._styk, animation: animation.after, frameSources: sourceTable}});
     if (payload?.definitions.length) this.report.figure_types.push(...payload.definitions);
     if (payload) { this._nextUid = payload.nextUid; this._newLayerHints = payload.hints; }

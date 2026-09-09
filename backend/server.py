@@ -36,6 +36,7 @@ sys.path.insert(0, str(TOOLS))
 import piv_codec
 import import_wire
 import fast_decode
+import native_format
 
 # Optional compiled serializer. Source checkouts discover the same local wheels
 # used by the desktop build; a plain Python installation remains supported.
@@ -102,7 +103,7 @@ MAX_DOCUMENT = 256 * 1024 * 1024
 MAX_CACHE = 384 * 1024 * 1024
 MAX_CACHE_ENTRIES = 24
 MAX_SAMPLE_COUNT = 5000
-IMPORT_SUFFIXES = {".piv", ".stk", ".styk", ".json"}
+IMPORT_SUFFIXES = {".piv", ".stk", ".styk", ".stkz", ".json"}
 PRIVATE_PARTS = {".git", ".codex", ".agents", "__pycache__", "node_modules"}
 EXCLUDED_DIRS = PRIVATE_PARTS | {
     "reports", "tests", "vendor", "reference", "references", "reference_runs",
@@ -115,6 +116,20 @@ class ApiError(ValueError):
     def __init__(self, status: int, code: str, message: str):
         super().__init__(message)
         self.status, self.code = status, code
+
+
+def validate_native_figure(document):
+    figures, frames = document.get("figure_types"), document.get("keyframes")
+    if (not isinstance(figures, list) or len(figures) != 1 or not isinstance(figures[0], dict) or
+            not isinstance(frames, list) or len(frames) != 1 or
+            not isinstance(frames[0], dict) or not isinstance(frames[0].get("objects"), list) or
+            len(frames[0]["objects"]) != 1 or not isinstance(frames[0]["objects"][0], dict)):
+        raise ApiError(422, "invalid_native_figure", "A .stkz file must contain one reusable figure and one pose.")
+    pose = frames[0]["objects"][0]
+    metadata = document.get("_styk", {})
+    if (not isinstance(metadata, dict) or pose.get("figure_type_id") != figures[0].get("figure_type_id") or pose.get("join") is not None or
+            document.get("backgrounds") or metadata.get("animation") or metadata.get("simpleFrameDraft")):
+        raise ApiError(422, "invalid_native_figure", "The .stkz figure must be self-contained.")
 
 
 def encoded_json(value: object, *, validated: bool = False) -> bytes:
@@ -186,7 +201,7 @@ def filename_only(filename: str) -> str:
     name = filename.replace("\\", "/").rsplit("/", 1)[-1]
     name = re.sub(r'[\x00-\x1f\x7f:*?"<>|]', "_", name).strip(" .")[:220]
     if not name or Path(name).suffix.lower() not in IMPORT_SUFFIXES:
-        raise ApiError(415, "unsupported_file", "Choose a .piv, .stk, or .styk project file.")
+        raise ApiError(415, "unsupported_file", "Choose a .styk project, .stkz figure, .piv, or .stk file.")
     return name
 
 
@@ -278,7 +293,7 @@ class ProjectStore:
             raise ApiError(415, "unsupported_sample", "Use file import to open a native JSON project.")
         if not path.is_file():
             raise ApiError(404, "file_not_found", "This project file no longer exists.")
-        data = bridge.read_bounded(path, MAX_DOCUMENT if path.suffix.lower() == ".styk" else MAX_SOURCE)
+        data = bridge.read_bounded(path, MAX_DOCUMENT if path.suffix.lower() in (".styk", ".stkz") else MAX_SOURCE)
         return self.import_bytes(data, path.name, as_json=as_json, prefer_native=prefer_native)
 
     def import_bytes(self, data: bytes, filename: str, *, as_json: bool = False, prefer_native: bool = False) -> dict | bytes:
@@ -287,7 +302,7 @@ class ProjectStore:
         kind = Path(name).suffix[1:].lower()
         if kind == "json":
             kind = "styk"
-        if len(data) > (MAX_DOCUMENT if kind == "styk" else MAX_SOURCE):
+        if len(data) > (MAX_DOCUMENT if kind in ("styk", "stkz") else MAX_SOURCE):
             raise ApiError(413, "file_too_large", "This file exceeds the import size limit.")
         if not data:
             raise ApiError(400, "empty_file", "This file is empty.")
@@ -321,7 +336,7 @@ class ProjectStore:
                             path.write_bytes(data)
                             document = bridge.stk_document(path, data)
                     else:
-                        document = json.loads(data.decode("utf-8-sig"))
+                        document = json.loads(native_format.decode(data, kind).decode("utf-8-sig"))
                         # Compatibility with the web editor's early native-save
                         # wrapper. Current saves use the canonical document plus
                         # embedded source metadata, so original bytes survive.
@@ -334,6 +349,8 @@ class ProjectStore:
                                 document["_stykSource"] = wrapper["_stykSource"]
                     if not isinstance(document, dict):
                         raise ApiError(400, "invalid_document", "Project data must be a JSON object.")
+                    if kind == "stkz":
+                        validate_native_figure(document)
                     document.pop("editable_paths", None)
                     document.pop("_codec", None)
                     document.pop("_stykWeb", None)
@@ -363,7 +380,7 @@ class ProjectStore:
                     # Native JSON already embeds the original binary source.
                     # Keeping its uploaded JSON as well doubles retained memory
                     # and made large projects save successfully but fail reopen.
-                    retained_source = b"" if kind == "styk" else data
+                    retained_source = b"" if kind in ("styk", "stkz") else data
                     entry = Source(source_id, retained_source, packed, None, name,
                         kind, document["version"], (time.perf_counter() - decode_started) * 1000)
                     entry.native_wire = wire_parts
@@ -416,9 +433,17 @@ class ProjectStore:
         if not isinstance(document, dict):
             raise ApiError(400, "invalid_document", "Export requires an editable document.")
         format_name = request.get("format", "piv")
-        if format_name not in ("piv", "stk", "styk"):
-            raise ApiError(415, "unsupported_export", "Export as piv, stk, or styk.")
+        if format_name not in ("piv", "stk", "styk", "stkz"):
+            raise ApiError(415, "unsupported_export", "Export as piv, stk, styk, or stkz.")
         bridge.validate_document(document)
+        if format_name == "stkz":
+            validate_native_figure(document)
+            output_doc = dict(document)
+            output_doc.pop("_stykSource", None)
+            output_doc["_styk"] = {**document.get("_styk", {}), "format": "StykAnimate", "format_version": 1}
+            output = native_format.encode(encoded_json(output_doc, validated=True), "stkz")
+            base = re.sub(r'[\x00-\x1f\x7f/\\:*?"<>|]', "_", str(request.get("filename") or "Figure")).strip(" .")[:180] or "Figure"
+            return output, f"{base}.stkz"
         source_id = request.get("sourceId")
         with self.lock:
             entry = self.sources.get(source_id) if isinstance(source_id, str) else None
@@ -464,7 +489,7 @@ class ProjectStore:
                     "source_base64": base64.b64encode(entry.data).decode("ascii"),
                     "sha256": hashlib.sha256(entry.data).hexdigest(),
                     "document_sha256": entry.digest, "document_digest_version": 3}
-            output = encoded_json(output_doc, validated=True)
+            output = native_format.encode(encoded_json(output_doc, validated=True), "styk")
         elif format_name == "stk":
             selected = request.get("figureTypeId")
             selection_matches = selected in (None, 2)
@@ -620,7 +645,7 @@ class Handler(BaseHTTPRequestHandler):
                 scanner = fast_decode.native_scan.status()
                 self._json(200, {"ok": True, "name": "StykAnimate-webapp", "schemaVersion": 1,
                     "codec": "Pivot verified grammar / bulk reader", "versions": [2, 3, 4, 5],
-                    "formats": ["piv", "stk", "styk"], "maxImportBytes": MAX_SOURCE,
+                    "formats": ["piv", "stk", "styk", "stkz"], "maxImportBytes": MAX_SOURCE,
                     "jsonEncoder": JSON_ENCODER,
                     "nativeFrameScanner": "cpp" if scanner["available"] else "python",
                     "nativeFrameScannerInfo": {"abi": scanner["abi"], "sha256": scanner["sha256"]} if scanner["available"] else None})
@@ -651,7 +676,7 @@ class Handler(BaseHTTPRequestHandler):
             parsed = urlsplit(self.path)
             if parsed.path == "/api/import":
                 name = parse_qs(parsed.query).get("filename", ["imported.piv"])[0]
-                result = self.server.store.import_bytes(self._body(MAX_DOCUMENT if name.lower().endswith((".styk", ".json")) else MAX_SOURCE), name, as_json=True,
+                result = self.server.store.import_bytes(self._body(MAX_DOCUMENT if name.lower().endswith((".styk", ".stkz", ".json")) else MAX_SOURCE), name, as_json=True,
                     prefer_native=import_wire.CONTENT_TYPE in self.headers.get("Accept", ""))
                 self._send(200, result, import_wire.CONTENT_TYPE if result.startswith(import_wire.MAGIC) else "application/json; charset=utf-8")
             elif parsed.path in ("/api/open", "/api/export"):

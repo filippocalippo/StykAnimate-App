@@ -7,9 +7,9 @@ const exporter = new DocumentExporter();
 const controller = new AbortController();
 const blob = await exporter.export(editor.report, {
   sourceId,
-  format: 'styk', // 'piv' or 'stk'
+  format: 'styk', // 'stkz', 'piv' or 'stk'
   name: editor.name,
-  figureTypeId: selectedFigureId, // STK only; optional
+  figureTypeId: selectedFigureId, // STK/STKZ selection
   signal: controller.signal,
   getRevision: () => editor.revision,
 });
@@ -49,3 +49,7 @@ native persistence across an actual backend restart, preserved unknown fields,
 fractional edits, cancellation, and export long-task measurements. Pass a file
 path to test another project. Results are written to
 `artifacts/document-export-browser.json` (or the Akane-specific report).
+
+Native `.styk` and `.stkz` results use the versioned compressed container
+described in [Native file format](native-file-format.md). Do not parse a saved
+file directly as JSON; reopen it through `ImportClient`.

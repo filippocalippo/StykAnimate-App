@@ -1,3 +1,4 @@
+import {readNativeDocument} from './read-native-document.mjs';
 import {_electron as electron} from 'playwright';
 import assert from 'node:assert/strict';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
@@ -27,7 +28,7 @@ try {
   await page.waitForFunction(()=>styk.editor.frameDraft.empty);assert.equal(await page.evaluate(()=>styk.editor.frame.objects[0].root_x),85);
   pass('First Add promotes one key; Undo and Delete-all return to zero while keeping the working pose.');
   await app.evaluate(({dialog},files)=>{globalThis.__saveFiles=files;dialog.showSaveDialog=async()=>({canceled:false,filePath:globalThis.__saveFiles.shift()});},[stykFile,pivFile]);
-  await page.evaluate(()=>styk.actions.save());const saved=JSON.parse(await readFile(stykFile,'utf8'));
+  await page.evaluate(()=>styk.actions.save());const saved=await readNativeDocument(stykFile);
   assert.equal(saved._styk.simpleFrameDraft.empty,true);assert.equal(saved.keyframes[0].objects[0].root_x,85);
   await page.evaluate(()=>styk.actions['export-piv']());await readFile(pivFile);
   await page.locator('#file-input').setInputFiles(pivFile);await page.waitForFunction(()=>styk.editor.name==='Zero stored'&&styk.editor.frameDraft?.empty);

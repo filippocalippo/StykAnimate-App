@@ -1,3 +1,4 @@
+import {readNativeDocument} from './read-native-document.mjs';
 import { _electron as electron } from 'playwright';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -124,7 +125,7 @@ try {
   const closed = page.waitForEvent('close', { timeout: 10000 });
   await page.evaluate(() => window.stykDesktop.close());
   await closed;
-  const savedOnClose = JSON.parse(await readFile(closeSavePath, 'utf8'));
+  const savedOnClose = await readNativeDocument(closeSavePath);
   if (!savedOnClose.keyframes?.length) throw new Error('Save-on-close did not persist a complete project.');
   actual.closeSavedAndClosed = true;
   if (errors.length) throw new Error(`Renderer errors:\n${errors.join('\n')}`);

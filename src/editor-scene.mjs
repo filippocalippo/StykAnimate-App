@@ -59,21 +59,30 @@ function validateBackground(report, background) {
 }
 
 function draft(editor) {
-  const animation = editor.report._styk?.animation;
+  const originalAnimation = editor.report._styk?.animation;
+  const animation = originalAnimation ?? {version:1,nextKeyId:1,channels:[]};
   const nextKey = animation?.nextKeyId ?? 1;
-  return {before: {frames: [], assets: [], channels: []}, after: {frames: [], assets: [], channels: []},
+  return {before: {frames: [], assets: [], channels: [], animationExists:Boolean(originalAnimation)}, after: {frames: [], assets: [], channels: [], animationExists:true},
     animation, nextKey, channels: new Map(), sources: [], touched: 0,
     authoredScene: Boolean(sceneChannel(editor.report, 'pose') || sceneChannel(editor.report, 'color') || sceneChannel(editor.report, 'backgroundId')),
     channel(property) {
       if (this.channels.has(property)) return this.channels.get(property);
-      const original = sceneChannel(editor.report, property); if (!original) throw new Error('Create this Scene channel before editing its keys.');
-      const index = animation.channels.indexOf(original), channel = {...original, target: {...original.target}, keys: original.keys.map(key => ({...key}))};
+      const original = sceneChannel(editor.report, property);
+      if (!original && !editor.propertyChannels) throw new Error('Create this Scene channel before editing its keys.');
+      const source = original ?? editor.nativePropertyChannel({kind:'scene'}, property);
+      const index = original ? animation.channels.indexOf(original) : animation.channels.length + [...this.channels.values()].filter(value => !value.original).length;
+      const channel = {...source, target: {...source.target}, keys: source.keys.map(key => ({...key}))};
+      // Scene color has its own easing; a native Pose hold is not a color hold.
+      if(!original && property==='color')for(const key of channel.keys){key.interpolation='linear';delete key.bezier;}
       const state = {index, original, channel, ticks: new Map(channel.keys.filter(key => !key.hidden).map(key => [key.tick, key])), ids: new Set(channel.keys.map(key => key.id))};
       this.channels.set(property, state); return state;
     },
     key(property, tick, value) {
       const state = this.channel(property), checked = validateAnimationValue({kind: 'scene'}, property, value), existing = state.ticks.get(tick);
-      if (existing) { existing.value = checked; return; }
+      if (existing) {
+        if(property==='color'&&(existing.value===null||existing.passthrough)){existing.interpolation='linear';delete existing.bezier;}
+        existing.value = checked;delete existing.passthrough;return;
+      }
       let id; do {
         if (!Number.isSafeInteger(this.nextKey) || this.nextKey < 1) throw new Error('Animation key identity capacity exceeded.');
         id = `key-${this.nextKey++}`;
@@ -135,10 +144,10 @@ function assignBackground(editor, state, id, indices) {
     const next = {...current, background_id: id, background_id_b: 0, background_mix: 0}; delete next._stykBackgroundColor;
     if (same(current, next)) continue;
     state.touched++;
-    if (background) state.key('backgroundId', tick, id);
+    if (background || editor.propertyChannels) state.key('backgroundId', tick, id);
     else if (pose) state.pose(index, tick, next);
     else { state.before.frames.push(keyframeFields(editor, index)); state.after.frames.push({index, fields: next}); }
-    if (color) state.key('color', tick, null);
+    if (color || editor.propertyChannels) state.key('color', tick, null);
   }
 }
 
@@ -160,11 +169,14 @@ export const editorSceneMethods = {
       for (const field of sceneFields) { if (own(entry.fields, field)) frame[field] = entry.fields[field]; else delete frame[field]; }
     }
     if (snapshot.channels.length) {
-      const animation = this.report._styk.animation, channels = animation.channels.slice();
-      for (const entry of snapshot.channels) channels[entry.index] = clone(entry.channel);
+      const animation = this.report._styk.animation ?? {version:1,nextKeyId:1,channels:[]}, channels = animation.channels.slice();
+      for (const entry of [...snapshot.channels].sort((a,b) => b.index-a.index)) {
+        if (entry.channel == null) channels.splice(entry.index,1); else channels[entry.index] = clone(entry.channel);
+      }
       this.report._styk.animation = {...animation, channels};
       if (snapshot.nextKeyId?.exists) this.report._styk.animation.nextKeyId = snapshot.nextKeyId.value;
       else delete this.report._styk.animation.nextKeyId;
+      if (snapshot.animationExists === false) delete this.report._styk.animation;
     }
   },
 
@@ -172,7 +184,7 @@ export const editorSceneMethods = {
     if (!Number.isInteger(argb) || argb < 0 || argb > 0xffffffff) throw new Error('Scene color must be a 32-bit ARGB value.');
     editable(this); const selected = this._frameIndices(indices); if (!selected.length) return 0;
     const state = draft(this), color = sceneChannel(this.report, 'color');
-    if (color) {
+    if (color || this.propertyChannels) {
       for (const index of selected) {
         const tick = selected.length === 1 && index === this.frameIndex ? this.tick : this.timeline[index].start;
         if (sceneValuesAt(this, index, tick)._stykBackgroundColor === argb) continue;

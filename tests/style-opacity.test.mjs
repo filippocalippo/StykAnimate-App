@@ -136,15 +136,16 @@ test("inspector displays outline opacity and both endpoints only for an enabled 
   const editor = fixture();
   const html = inspectorView({ editor });
   for (const key of [
-    "outline_opacity",
     "segment_opacity",
     "segment_gradient_opacity",
   ]) {
     assert.match(html, new RegExp(`data-property="${key}"`));
     assert.match(html, new RegExp(`data-property-row="${key}"`));
   }
-  assert.match(html, /Start opacity/);
-  assert.match(html, /End opacity/);
+  const selection=editor.selectedJoint;editor.select(editor.selectedUid,-1);
+  assert.match(inspectorView({editor}),/data-property="outline_opacity"/);editor.select(editor.selectedUid,selection);
+  assert.match(html, /Primary opacity/);
+  assert.match(html, /Secondary opacity/);
   editor.figure.segments[0].secondary = null;
   assert.doesNotMatch(
     inspectorView({ editor }),

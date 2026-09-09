@@ -3,10 +3,11 @@
  * not the document size, and playback repaints only the playhead overlay.
  */
 import {keyEasing} from './keyframe-easing.mjs';
-import {connectedTimelineGroups} from './connected-timeline.mjs';
+import {connectedTimelineGroups, connectedGroupIndex} from './connected-timeline.mjs';
 import {createTimelineDialog} from './timeline-dialog.mjs';
 import {showKeyframeEasingPopover} from './keyframe-easing-popover.mjs';
 import {animationChannelId} from './animation-channels.mjs';
+import {ANIMATION_PROPERTIES, AUTHORING_PROPERTIES, ANIMATION_PROPERTY_NAMES} from './animation-properties.mjs';
 const LABEL_WIDTH = 176;
 const TOOLBAR_HEIGHT = 32;
 const RULER_HEIGHT = 31;
@@ -125,9 +126,9 @@ const TOOL_ICONS = {
   more: '<circle cx="4" cy="10" r="1" fill="currentColor"/><circle cx="10" cy="10" r="1" fill="currentColor"/><circle cx="16" cy="10" r="1" fill="currentColor"/>',
 };
 
-const PROPERTY_NAMES = {pose: 'Pose', x: 'Position X', y: 'Position Y', scale: 'Scale', rotation: 'Rotation', opacity: 'Opacity', outlineOpacity: 'Outline opacity', gradientOpacity: 'Gradient opacity', backgroundId: 'Background', color: 'Color'};
-const TRACK_PROPERTIES = {figure: ['x', 'y', 'scale', 'rotation', 'opacity', 'outlineOpacity'], segment: ['opacity', 'gradientOpacity'], camera: ['pose', 'x', 'y', 'scale', 'rotation'], scene: ['pose', 'backgroundId', 'color'], layer: ['pose']};
-const targetTrackId = target => target.kind === 'figure' ? `figure:${target.uid}` : target.kind === 'segment' ? `segment:${target.uid}:${target.handleId}${target.figureTypeId === undefined ? '' : `@${target.figureTypeId}`}` : target.kind === 'layer' ? `layer:${target.layerId ?? target.id}` : target.kind;
+const PROPERTY_NAMES = ANIMATION_PROPERTY_NAMES;
+const TRACK_PROPERTIES = {...ANIMATION_PROPERTIES, figure: ANIMATION_PROPERTIES.figure.filter(property => property !== 'pose')};
+const targetTrackId = target => target.kind === 'polygon' ? `polygon:${target.uid}:${target.polygonId}@${target.figureTypeId}` : target.kind === 'figure' ? `figure:${target.uid}` : target.kind === 'segment' ? `segment:${target.uid}:${target.handleId}${target.figureTypeId === undefined ? '' : `@${target.figureTypeId}`}` : target.kind === 'layer' ? `layer:${target.layerId ?? target.id}` : target.kind;
 const TRACK_ICONS = {
   assembly: '<path d="m6 10 4-4M5 9l-1 1a2.8 2.8 0 0 0 4 4l3-3a2.8 2.8 0 0 0 0-4M11 7l1-1a2.8 2.8 0 0 0-4-4L5 5a2.8 2.8 0 0 0 0 4"/>',
   scene: '<rect x="2" y="2" width="12" height="12" rx="2"/><path d="m3 11 3-4 3 3 2-2 3 4"/>',
@@ -140,7 +141,8 @@ const TRACK_ICONS = {
 
 /** Project real property channels into the user's layer hierarchy. Summary keys
  * contain references to engine keys; they never stand in for document frames. */
-export function buildChannelTimelineTracks(layers, channels, report, expanded = new Set(), {nativePoseChannel, figureNames, figurePoses = false, connectedGroups} = {}) {
+export function buildChannelTimelineTracks(layers, channels, report, expanded = new Set(), {nativePoseChannel, nativePropertyChannel, figureNames, figurePoses = false, connectedGroups, focused = false, resolveLayerId} = {}) {
+  const connections=connectedGroups ?? connectedTimelineGroups(report),connectionIndex=connectedGroupIndex(connections);
   const definitions = new Map((report?.figure_types ?? []).map(item => [item.figure_type_id, item]));
   const figures = figureNames ?? new Map();
   if (!figureNames) for (const frame of report?.keyframes ?? []) for (const object of frame.objects ?? []) {
@@ -156,25 +158,48 @@ export function buildChannelTimelineTracks(layers, channels, report, expanded = 
     byTarget.get(targetId).push(channel);
   }
   const summaries = sources => {
-    const ticks = new Map();
-    for (const channel of sources) for (const key of channel.keys) {
+    const ticks = new Map(), groups = new Map();
+    // Native members share one marker sequence. Keep group references compact
+    // until a key is actually selected instead of allocating members × frames.
+    for (const channel of sources) {
+      const keys = channel.markerKeys ?? channel.keys;
+      let group = groups.get(keys); if (!group) groups.set(keys, group = []);
+      group.push(channel);
+    }
+    for (const [keys, channels] of groups) for (const key of keys) {
       let summary = ticks.get(key.tick);
-      if (!summary) { summary = {id: `tick:${key.tick}`, tick: key.tick, refs: []}; ticks.set(key.tick, summary); }
-      summary.refs.push({channelId: channel.id, keyId: key.id});
-      if (key.blank || key.value?.frameId === null) summary.blank = true;
+      if (!summary) {
+        const blocks = []; let refs;
+        summary = {id:`tick:${key.tick}`, tick:key.tick, get refs() {
+          return refs ??= blocks.flatMap(({channels,key}) => channels.map(channel => ({channelId:channel.id,keyId:channel.markerKeyId?.(key) ?? key.id})));
+        }};
+        Object.defineProperty(summary,'_blocks',{value:blocks}); ticks.set(key.tick, summary);
+      }
+      summary._blocks.push({channels,key});
+      if (key.blank || channels[0].property === 'pose' && key.value?.frameId === null) summary.blank = true;
     }
     return [...ticks.values()].sort((a, b) => a.tick - b.tick);
   };
   const sourceChannels = (target, placeholders = false) => {
     const targetId = targetTrackId(target);
-    const sources = [...(byTarget.get(targetId) ?? [])];
-    if (nativePoseChannel && (['scene', 'camera', 'layer'].includes(target.kind) || figurePoses && target.kind === 'figure') && !sources.some(channel => channel.property === 'pose')) {
+    const fixedProperties = nativePropertyChannel && ['scene','camera'].includes(target.kind);
+    const sources = [...(byTarget.get(targetId) ?? [])].filter(channel => !fixedProperties || channel.property !== 'pose');
+    if (!fixedProperties && nativePoseChannel && (['scene', 'camera', 'layer'].includes(target.kind) || figurePoses && target.kind === 'figure') && !sources.some(channel => channel.property === 'pose')) {
       const id = animationChannelId(target, 'pose');
-      sources.unshift({id, target, property: 'pose', get keys() { return nativePoseChannel(target).keys; }});
+      let descriptor;
+      const native = () => descriptor ??= nativePoseChannel(target);
+      sources.unshift({id, target, property: 'pose', get keys() { return native().keys; },
+        get markerKeys() { return native().markerKeys; },
+        markerKeyId(key) { return native().markerKeyId?.(key) ?? key.id; }});
     }
-    for (const property of placeholders ? TRACK_PROPERTIES[target.kind] ?? [] : []) {
-      if (target.kind === 'segment' && property === 'gradientOpacity' && !segmentDefinition(target.uid, target.handleId, target.figureTypeId)?.secondary) continue;
-      if (!sources.some(channel => channel.property === property)) sources.push({id: animationChannelId(target, property), target, property, keys: []});
+    for (const property of placeholders || fixedProperties ? TRACK_PROPERTIES[target.kind] ?? [] : []) {
+      if(nativePropertyChannel && !AUTHORING_PROPERTIES[target.kind]?.includes(property))continue;
+      if (fixedProperties && property === 'pose') continue;
+      if (target.kind === 'segment' && ['gradientOpacity','gradientColor'].includes(property) && !segmentDefinition(target.uid, target.handleId, target.figureTypeId)?.secondary) continue;
+      if (!sources.some(channel => channel.property === property)) {
+        const id = animationChannelId(target, property);
+        sources.push(nativePropertyChannel && property !== 'pose' ? {id, target, property, get keys() {return nativePropertyChannel(target, property).keys;}} : {id, target, property, keys:[]});
+      }
     }
     const properties = TRACK_PROPERTIES[target.kind] ?? [];
     sources.sort((a, b) => properties.indexOf(a.property) - properties.indexOf(b.property));
@@ -185,13 +210,20 @@ export function buildChannelTimelineTracks(layers, channels, report, expanded = 
       return {id: `channel:${channel.id}`, channelId: channel.id, kind: 'channel', target,
         property: channel.property, name: PROPERTY_NAMES[channel.property] ?? channel.property,
         parentId, depth, locked,
-        get keys() { return keys ??= channel.keys.map(key => ({...key, refs: [{channelId: channel.id, keyId: key.id}]})); },
+        // Rows contain marker metadata only. Editing resolves refs against the
+        // original channel, so rendering never copies or samples key payloads.
+        get keys() { return keys ??= channel.keys.map(key => ({id:key.id,tick:key.tick,
+          interpolation:key.interpolation,bezier:key.bezier,hidden:key.hidden,
+          blank:key.blank || channel.property==='pose' && key.value?.frameId===null,
+          refs:[{channelId:channel.id,keyId:key.id}]})); },
       };
     });
   // Hidden descendants remain addressable for selection/clipboard commands,
   // without allocating their figure and property rows during every pose edit.
   let uidLayers;
+  const layersById=new Map(layers.map(layer=>[layer.id,layer]));
   const layerForUid = uid => {
+    if(resolveLayerId)return layersById.get(resolveLayerId(uid));
     if (!uidLayers) {
       uidLayers = new Map();
       for (const layer of layers) for (const id of layer.figureUids ?? []) uidLayers.set(id, layer);
@@ -199,10 +231,10 @@ export function buildChannelTimelineTracks(layers, channels, report, expanded = 
     return uidLayers.get(uid);
   };
   const figureChannelsByLayer = new Map(), segmentChannelsByFigure = new Map();
-  for (const channel of channels ?? []) if (channel.target.kind === 'figure' || channel.target.kind === 'segment') {
+  for (const channel of channels ?? []) if (['figure','segment','polygon'].includes(channel.target.kind)) {
     const layer = layerForUid(channel.target.uid); if (!layer) continue;
     const list = figureChannelsByLayer.get(layer.id) ?? []; list.push(channel); figureChannelsByLayer.set(layer.id, list);
-    if (channel.target.kind === 'segment') {
+    if (['segment','polygon'].includes(channel.target.kind)) {
       const segments = segmentChannelsByFigure.get(channel.target.uid) ?? []; segments.push(channel); segmentChannelsByFigure.set(channel.target.uid, segments);
     }
   }
@@ -210,8 +242,18 @@ export function buildChannelTimelineTracks(layers, channels, report, expanded = 
     get(id) {
       const existing = super.get(id); if (existing) return existing;
       if (typeof id !== 'string') return undefined;
+      if (id.startsWith('assembly:')) {
+        const groupId=id.split(':').slice(0,2).join(':'),group=connectionIndex.byId.get(groupId);
+        const row=group?assemblyRow(group):undefined;
+        return id===groupId?row:row?.children.find(child=>child.id===id);
+      }
       if (id.startsWith('figure:')) {
         const uid = Number(id.slice(7)), layer = layerForUid(uid); return layer ? figureRow(uid, layer) : undefined;
+      }
+      if (id.startsWith('polygon:')) {
+        const match=/^polygon:(\d+):(\d+)@(\d+)$/.exec(id);if(!match)return undefined;
+        const target={kind:'polygon',uid:Number(match[1]),polygonId:Number(match[2]),figureTypeId:Number(match[3])},layer=layerForUid(target.uid);
+        return layer ? polygonRow(target,layer) : undefined;
       }
       if (id.startsWith('segment:')) {
         const parts = id.slice(8).split(':'), scope = parts[1]?.split('@'), uid = Number(parts[0]), handleId = Number(scope?.[0]), layer = layerForUid(uid);
@@ -223,7 +265,7 @@ export function buildChannelTimelineTracks(layers, channels, report, expanded = 
       }
       if (id.startsWith('channel:')) {
         const channelId = id.slice(8), propertyAt = channelId.lastIndexOf(':'), parent = channelId.slice(0, propertyAt);
-        const parentId = parent.startsWith('layer:') ? parent.slice(6) : parent.startsWith('segment:') ? `segment:${decodeURIComponent(parent.slice(8)).replace('/', ':')}` : parent;
+        const parentId = parent.startsWith('layer:') ? parent.slice(6) : /^(segment|polygon):/.test(parent) ? `${parent.slice(0,8)}${decodeURIComponent(parent.slice(8)).replace('/', ':')}` : parent;
         const owner = this.get(parentId); return owner?.channelChildren?.find(child => child.id === id);
       }
       return undefined;
@@ -231,8 +273,20 @@ export function buildChannelTimelineTracks(layers, channels, report, expanded = 
     has(id) { return Boolean(this.get(id)); }
   }
   const byId = new TrackIndex();
-  const assemblyByUid = new Map();
+  class AssemblyIndex extends Map {
+    get(uid){const row=super.get(uid);if(row)return row;const group=connectionIndex.byUid.get(uid);return group?assemblyRow(group):undefined;}
+  }
+  const assemblyByUid = new AssemblyIndex();
   const registerChildren = children => { for (const child of children) byId.set(child.id, child); return children; };
+  const polygonRow = (target,layer) => {
+    const id=targetTrackId(target),existing=Map.prototype.get.call(byId,id);if(existing)return existing;
+    let children,keys;
+    const row={id,kind:'polygon',uid:target.uid,target,parentId:`figure:${target.uid}`,layerId:layer.id,depth:2,
+      name:`Polygon ${target.polygonId}`,locked:layer.locked,hasChildren:true,
+      get channelChildren(){return children ??= registerChildren(channelRows(target,id,3,layer.locked));},
+      get children(){return this.channelChildren;},get keys(){return keys ??= summaries(sourceChannels(target));}};
+    byId.set(id,row);return row;
+  };
   const figureSegments = uid => definitions.get(figures.get(uid)?.figureTypeId)?.segments ?? [];
   const segmentIndices = new Map();
   const segmentDefinition = (uid, handleId, figureTypeId = figures.get(uid)?.figureTypeId) => {
@@ -271,7 +325,7 @@ export function buildChannelTimelineTracks(layers, channels, report, expanded = 
             if (authoredTargets.has(id) || !authoredTargets.has(targetTrackId({...target,figureTypeId}))) targets.set(id,target);
           }
           for (const [id,target] of authoredTargets) targets.set(id,target);
-          children = [...this.channelChildren, ...[...targets.values()].map(target => segmentRow(uid,target.handleId,layer,target.figureTypeId)).filter(Boolean)];
+          children = [...this.channelChildren, ...[...targets.values()].map(target => target.kind === 'polygon' ? polygonRow(target,layer) : segmentRow(uid,target.handleId,layer,target.figureTypeId)).filter(Boolean)];
         }
         return children;
       },
@@ -291,26 +345,45 @@ export function buildChannelTimelineTracks(layers, channels, report, expanded = 
     byId.set(root.id, root);
     return root;
   });
-  for (const group of connectedGroups ?? connectedTimelineGroups(report)) {
+  const assemblyRow = group => {
+    const existing=Map.prototype.get.call(byId,group.id);if(existing)return existing;
     const uids = group.figureUids.filter(uid => layerForUid(uid));
-    if (uids.length < 2) continue;
-    let children, keys;
+    if (uids.length < 2) return undefined;
+    let children, keys, sources;
+    const memberSources = () => sources ??= uids.flatMap(uid => {
+      const target = {kind:'figure', uid}, own = sourceChannels(target);
+      if (nativePoseChannel && !own.some(channel => channel.property === 'pose')) own.unshift(nativePoseChannel(target));
+      return [...own, ...(segmentChannelsByFigure.get(uid) ?? [])];
+    });
     const row = {...group, figureUids: uids, kind: 'assembly', depth: 0, hasChildren: true,
-      name: `${figures.get(group.rootUid)?.name || 'Figure'} · Connected (${uids.length})`,
+      name: figures.get(group.rootUid)?.name || 'Connected figure',
       locked: uids.some(uid => layerForUid(uid).locked),
-      get children() { return children ??= uids.map(uid => figureRow(uid, layerForUid(uid))); },
-      get keys() { return keys ??= summaries(uids.flatMap(uid => {
-        const target = {kind:'figure', uid}, sources = sourceChannels(target);
-        if (nativePoseChannel && !sources.some(channel => channel.property === 'pose')) sources.unshift(nativePoseChannel(target));
-        return [...sources, ...(segmentChannelsByFigure.get(uid) ?? [])];
-      })); },
+      get children() {
+        if (!children) {
+          const properties = new Map();
+          for (const channel of memberSources()) {
+            const list = properties.get(channel.property) ?? []; list.push(channel); properties.set(channel.property,list);
+          }
+          children = registerChildren([...properties].map(([property, channels]) => {
+            let markers;
+            return {id:`${group.id}:${property}`,kind:'assembly-property',property,figureUids:uids,parentId:group.id,
+              depth:1,locked:row.locked,name:PROPERTY_NAMES[property] ?? property,hasChildren:false,
+              targets:channels.map(channel=>channel.target),get keys(){return markers ??= summaries(channels);}};
+          }));
+        }
+        return children;
+      },
+      get keys() { return keys ??= summaries(memberSources()); },
     };
     byId.set(row.id, row);
     for (const uid of uids) assemblyByUid.set(uid, row);
-  }
+    return row;
+  };
+  if(!focused)for(const group of connections)assemblyRow(group);
   const roots = [];
   const inserted = new Set();
   for (const layer of layerRoots) {
+    if(focused){if(layer.kind!=='layer')roots.push(layer);continue;}
     for (const uid of layer.figureUids ?? []) {
       const assembly = assemblyByUid.get(uid);
       if (assembly && !inserted.has(assembly.id)) { roots.push(assembly); inserted.add(assembly.id); }
@@ -509,6 +582,7 @@ export class Timeline {
     this._on(editor, 'change', event => {
       const {kind, structural, timing, layers, animation, layerSelection} = event.detail ?? {};
       if (kind === 'document' || kind === 'history' || structural) this._connectedGroups = null;
+      if (kind === 'document' || structural) this._nativeConnectedGroups = null;
       if (structural && !layers && !animation) this._figureNameIndex = null;
       if (layerSelection && this.channelMode) { this.selectedTrackId = this.editor.activeLayerId; this._fullDirty = true; }
       if (kind === 'document' || structural || layers || (timing && this.channelMode) || (animation && this.mode !== 'frames')) { this._reindex(); this.resize(); }
@@ -647,13 +721,23 @@ export class Timeline {
     if (this.channelMode) {
       if (documentChanged) this._figureNameIndex = this.editor._loadedFigureNames ?? null;
       const sourceCount = Object.keys(this.report._styk?.frameSources ?? {}).length;
-      if (documentChanged || !this._connectedGroups || sourceCount !== this._connectedSourceCount) {
-        this._connectedGroups = connectedTimelineGroups(this.report); this._connectedSourceCount = sourceCount;
+      if (documentChanged || !this._nativeConnectedGroups)
+        this._nativeConnectedGroups = connectedTimelineGroups({...this.report,_styk:{...this.report._styk,animation:null}});
+      if (documentChanged || !this._connectedGroups || sourceCount !== this._connectedSourceCount || this._connectedAnimation !== this.report._styk?.animation) {
+        this._connectedGroups = connectedTimelineGroups(this.report,{nativeGroups:this._nativeConnectedGroups}); this._connectedSourceCount = sourceCount;
+        this._connectedAnimation = this.report._styk?.animation;
       }
       this._channelDescriptors = new Map(this.editor.animationChannels.map(channel => [channel.id, channel]));
       const layers = [...this.editor.layers.filter(layer => layer.kind !== 'layer'), ...this.editor.layers.filter(layer => layer.kind === 'layer').reverse()];
       const projection = buildChannelTimelineTracks(layers, this.editor.animationChannels, this.report, this.expandedTracks, {
         figurePoses: this.actionMode,
+        focused:this.actionMode,
+        resolveLayerId:uid=>this.editor._layerUidCounts?.has(uid)?this.editor.layerForUid(uid):null,
+        nativePropertyChannel: this.editor.propertyChannels ? (target, property) => {
+          const channel = this.editor.nativePropertyChannel(target, property, {markersOnly:true});
+          this.editor._nativeAnimationChannels ??= new Map(); this.editor._nativeAnimationChannels.set(channel.id, channel);
+          this._channelDescriptors.set(channel.id, channel); return channel;
+        } : null,
         connectedGroups: this._connectedGroups,
         figureNames: this._figureNameIndex,
         nativePoseChannel: this.editor.nativePoseChannel ? target => { const channel = this.editor.nativePoseChannel(target); this._channelDescriptors.set(channel.id, channel); return channel; } : null,
@@ -685,7 +769,8 @@ export class Timeline {
 
   _filterActionTracks() {
     const fixed = ['camera','scene'].includes(this.externalTrack) ? this.externalTrack : null;
-    const ids = fixed ? [fixed] : [...new Set([...(this.editor.selectedUids ?? [])].map(uid => this.assemblyByUid?.get(uid)?.id ?? `figure:${uid}`))];
+    const selected = [...(this.editor.selectedUids ?? [])];
+    const ids = selected.length === 0 ? ['scene','camera'] : fixed ? [fixed] : [...new Set(selected.map(uid => this.assemblyByUid?.get(uid)?.id ?? `figure:${uid}`))];
     const signature=ids.join('|');
     if (signature !== this._actionSignature) { this._animationSelection.clear(); this._focusedTrackKey=null; this._keyAnchor=null; this._actionSignature=signature; }
     const tracks=[];
@@ -695,10 +780,10 @@ export class Timeline {
         if(this.expandedTracks.has(root.id))for(const child of root.children)visit(child,depth+1,root.id);
         return;
       }
-      if(this.collapsedActions.has(root.id))return;
-      for(const child of root.channelChildren ?? [])if(child.property==='pose'||child.keys.length){child.depth=depth+1;tracks.push(child);}
+      if(root.kind==='assembly-property'||this.collapsedActions.has(root.id))return;
+      for(const child of root.channelChildren ?? [])if(this.editor.propertyChannels || child.property==='pose'||child.keys.length){child.depth=depth+1;tracks.push(child);}
       if(root.kind==='figure'){
-        const segments=new Set(this.editor.animationChannels.filter(c=>c.target.kind==='segment'&&c.target.uid===root.uid).map(c=>targetTrackId(c.target)));
+        const segments=new Set(this.editor.animationChannels.filter(c=>['segment','polygon'].includes(c.target.kind)&&c.target.uid===root.uid).map(c=>targetTrackId(c.target)));
         for(const sid of segments){const segment=this.trackById.get(sid);if(!segment)continue;segment.depth=depth+1;tracks.push(segment);
           if(!this.collapsedActions.has(sid))for(const child of segment.channelChildren)if(child.keys.length){child.depth=depth+2;tracks.push(child);}}
       }
@@ -1529,6 +1614,7 @@ export class Timeline {
   }
 
   _animationKeySelected(key) {
+    if (!this._animationSelection.size) return false;
     return key.refs.some(ref => this._animationSelection.get(ref.channelId)?.has(ref.keyId));
   }
 
@@ -1557,7 +1643,7 @@ export class Timeline {
   }
 
   _assertKeysEditable(records = this._channelSelectionRecords()) {
-    if (this._selectedTrack()?.kind === 'assembly' && this._selectedTrack().locked) throw new Error('Unlock every connected figure before editing this group.');
+    if (['assembly','assembly-property'].includes(this._selectedTrack()?.kind) && this._selectedTrack().locked) throw new Error('Unlock every connected figure before editing this group.');
     for (const {channel} of records) {
       const target = channel.target;
       const id = ['figure', 'segment'].includes(target.kind) ? this.editor.layerForUid?.(target.uid) : target.kind === 'layer' ? target.id : target.kind;
@@ -1581,15 +1667,18 @@ export class Timeline {
     const track = this._selectedTrack();
     if (!this._canInsertTrackKey(track)) return false;
     this.onSeek?.(this.editor.tick, this.editor.frameIndex);
-    if (track.kind === 'assembly') {
-      const entries = track.figureUids.map(uid => ({target:{kind:'figure',uid},property:'pose',tick:this.editor.tick}));
-      for (const entry of entries) this.editor.nativePoseChannel(entry.target);
+    if (track.kind === 'assembly' || track.kind === 'assembly-property') {
+      const property = track.property ?? 'pose', present = new Set(this.editor.selectionFrame.objects.map(object=>object.unique_id));
+      const targets = track.targets ?? track.figureUids.map(uid => ({kind:'figure',uid}));
+      const entries = targets.filter(target=>present.has(target.uid)).map(target=>({target,property,tick:this.editor.tick}));
+      if (property === 'pose') for (const entry of entries) this.editor.nativePoseChannel(entry.target);
+      if (!entries.length) return false;
       this.editor.addAnimationKeys(entries);
     }
     else if (track.kind === 'channel') this.editor.addAnimationKey(track.target, track.property, this.editor.tick, undefined, {exactTarget:true});
     else if (track.kind === 'figure' && this.actionMode) { this.editor.nativePoseChannel(track.target); this.editor.addAnimationKey(track.target,'pose',this.editor.tick); }
-    else if (track.kind === 'figure') this.editor.addAnimationKeys(['x', 'y', 'scale', 'rotation', 'opacity'].map(property => ({target: track.target, property, tick: this.editor.tick})));
-    else if (track.kind === 'segment') this.editor.addAnimationKeys(track.channelChildren.map(channel => ({target: track.target, property: channel.property, tick: this.editor.tick,exactTarget:true})));
+    else if (track.kind === 'figure') this.editor.addAnimationKeys((this.editor.propertyChannels?AUTHORING_PROPERTIES.figure:['x', 'y', 'scale', 'rotation', 'opacity']).map(property => ({target: track.target, property, tick: this.editor.tick})));
+    else if (['segment','polygon'].includes(track.kind) || this.editor.propertyChannels && ['camera','scene'].includes(track.kind)) this.editor.addAnimationKeys(track.channelChildren.filter(channel=>channel.property!=='pose').map(channel => ({target: track.target, property: channel.property, tick: this.editor.tick,exactTarget:true})));
     else this.editor.addAnimationKey(track.target, 'pose', this.editor.tick);
     this.update();
     const current = this.trackById.get(track.id), key = current?.keys.find(item => item.tick === this.editor.tick);
@@ -1599,6 +1688,7 @@ export class Timeline {
 
   _blankPoseTarget(track = this._selectedTrack()) {
     if (!track) return null;
+    if(this.editor.propertyChannels && ['scene','camera'].includes(track.target?.kind))return null;
     if (track.kind === 'channel') return track.property === 'pose' ? track.target : null;
     return ['scene', 'camera', 'layer', ...(this.actionMode ? ['figure'] : [])].includes(track.kind) ? track.target : null;
   }
@@ -2000,7 +2090,7 @@ export class Timeline {
           if (active) { ctx.fillStyle = '#dceeff'; ctx.fillRect(x - Math.max(7, step * .42), y + 3, Math.max(14, step * .84), ROW_HEIGHT - 6); }
           ctx.fillStyle = active ? '#087ed2' : group ? '#78889e' : '#7f8b9e';
           if (moving) ctx.globalAlpha *= .3;
-          if (key.blank || key.value?.frameId === null) {
+          if (key.blank || pose && key.value?.frameId === null) {
             ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 1.6;
             ctx.beginPath(); ctx.arc(x, y + ROW_HEIGHT / 2, group ? 4 : 3.5, 0, Math.PI * 2);
             ctx.fillStyle = active ? '#dceeff' : track.depth === 0 ? '#f3f5f8' : '#fff'; ctx.fill(); ctx.stroke();

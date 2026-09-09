@@ -5,6 +5,7 @@ import {validateAnimationDocumentSteps} from './animation-channels.mjs';
 import {validateFrameIdentitySteps} from './editor-frames.mjs';
 import {validateSimpleFrameDraft} from './editor-frame-draft.mjs';
 import {createFrame} from './demo.mjs';
+import {internPoseSequencesSteps} from './pose-sequences.mjs';
 
 const own = (value,key) => Object.prototype.hasOwnProperty.call(value,key);
 export const yieldLoadTask = globalThis.scheduler?.yield
@@ -27,6 +28,7 @@ export function* prepareEditorLoadSteps(document, {sliceMs=4}={}) {
   const layers=ensureLayerState(report);
   yield* validateLayerStateSteps(layers);
   yield* validateAnimationDocumentSteps(report);
+  yield* internPoseSequencesSteps(report);
   let nextFrameIdentity=yield* validateFrameIdentitySteps(report);
   if (empty) {
     if (report._styk.simpleFrameDraft !== undefined) throw new Error('An empty native animation cannot contain a saved working frame.');
@@ -44,6 +46,8 @@ export function* prepareEditorLoadSteps(document, {sliceMs=4}={}) {
   if (sources.length) yield* validateSceneSteps({...report,keyframes:sources},{sliceMs});
   if (report._styk.simpleFrameDraft?.baseline)
     yield* validateSceneSteps({...report,keyframes:[report._styk.simpleFrameDraft.baseline]},{sliceMs});
+  if (own(report._styk.simpleFrameDraft ?? {}, 'animationBaseline'))
+    yield* validateAnimationDocumentSteps({...report, _styk: {...report._styk, animation: report._styk.simpleFrameDraft.animationBaseline}});
 
   const layerUidCounts=new Map(), layerSeenUids=new Set(), layerGroups=new Map(layers.order.map(id=>[id,new Set()]));
   const figureNames=new Map(), tracks=[], trackByUid=new Map();

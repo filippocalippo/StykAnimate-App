@@ -7,6 +7,29 @@ import {rotateOriginSupport} from './animation-origin-support.mjs';
 const tracks = new WeakMap();
 const sourceIndices = new WeakMap();
 const SCENE_FIELDS = ['background_id', 'background_id_b', 'background_mix', 'background_color', '_stykBackgroundColor'];
+const NATIVE_PROPERTY_FIELDS = ['scale', 'field28', 'color_override_raw', 'color_override_rgb', 'color_override_mix', '_stykZIndex'];
+const NATIVE_OUTLINE_FIELDS = ['outlineColor', 'outlineWidth', 'outlineOpacity'];
+
+/** Compact native property inheritance replaces eager scalar-track baking.
+ * Pose owns presence, joins and skeleton; explicit scalar channels still win
+ * afterward. Missing native instances retain their sampled appearance. */
+function nativeAppearance(object, native) {
+  if (!native || native.figure_type_id !== object.figure_type_id) return object;
+  const out = {...object};
+  for (const field of NATIVE_PROPERTY_FIELDS) {
+    if (Object.hasOwn(native, field)) out[field] = native[field]; else delete out[field];
+  }
+  if (object._stykStyle || native._stykStyle) {
+    out._stykStyle = {...object._stykStyle};
+    for (const field of NATIVE_OUTLINE_FIELDS) {
+      if (Object.hasOwn(native._stykStyle ?? {}, field)) out._stykStyle[field] = native._stykStyle[field];
+      else delete out._stykStyle[field];
+    }
+    if (!Object.keys(out._stykStyle).length) delete out._stykStyle;
+  }
+  if (out.scale !== object.scale) delete out.runtime_segments;
+  return out;
+}
 
 function blankPoseFrame(template) {
   const {background_color, _stykBackgroundColor, ...fields} = template || {};
@@ -114,11 +137,20 @@ export function composePoseChannels(report, baseFrame, tick, options = {}) {
   if (typeof options.sampleNative !== 'function') throw new Error('Pose channels require the native frame evaluator.');
   let result = baseFrame;
   const replacements = new Map();
+  const nativePropertyOwners = new Set(channels.filter(channel => channel.nativeProperties)
+    .map(channel => channel.target.kind === 'figure' ? `figure:${channel.target.uid}` : channel.target.id));
+  const nativeObjects = nativePropertyOwners.size ? new Map(baseFrame.objects.map(object => [object.unique_id, object])) : null;
   const figureReplacements = new Set(channels.filter(channel => channel.target.kind === 'figure').map(channel => channel.target.uid));
   const owner = uid => figureReplacements.has(uid) ? `figure:${uid}` : layerId(report, uid);
+  const sampledPoses = new Map();
   for (const channel of channels) {
-    const sampled = samplePoseTrack(report, channel, tick, options) || blankPoseFrame(baseFrame);
     const kind = channel.target?.kind;
+    const fixed = kind === 'camera' || kind === 'scene';
+    let sampled = !fixed && sampledPoses.get(channel.keys);
+    if (!sampled) {
+      sampled = samplePoseTrack(report, channel, tick, options) || blankPoseFrame(baseFrame);
+      if (!fixed) sampledPoses.set(channel.keys, sampled);
+    }
     if (kind === 'layer') replacements.set(channel.target.id, sampled);
     else if (kind === 'figure') replacements.set(`figure:${channel.target.uid}`, sampled);
     else if (kind === 'camera') result = { ...result, camera: { ...(sampled.camera || { is_default: true, x: 0, y: 0, scale: 1, angle_rad: 0 }) } };
@@ -128,6 +160,14 @@ export function composePoseChannels(report, baseFrame, tick, options = {}) {
     }
   }
   if (!replacements.size) return result;
+  const replacementObjects=new Map(),visitedPoses=new Set();
+  for(const sampled of replacements.values()) {
+    if(visitedPoses.has(sampled))continue;visitedPoses.add(sampled);
+    for(const object of orderedObjects(sampled)) {
+      const id=owner(object.unique_id);if(replacements.get(id)!==sampled)continue;
+      let list=replacementObjects.get(id);if(!list)replacementObjects.set(id,list=[]);list.push(object);
+    }
+  }
   const records = [], included = new Set();
   // Retain base slot order for unchanged instances; new appearances are appended
   // in source paint order. Layer ordering is applied after this composition.
@@ -135,7 +175,7 @@ export function composePoseChannels(report, baseFrame, tick, options = {}) {
     const sampled = replacements.get(owner(object.unique_id));
     if (!sampled) { records.push({ object, source: baseFrame }); included.add(object.unique_id); }
   }
-  for (const [id, sampled] of replacements) for (const object of orderedObjects(sampled)) {
+  for (const [id, sampled] of replacements) for (const object of replacementObjects.get(id) ?? []) {
     if (owner(object.unique_id) !== id || included.has(object.unique_id)) continue;
     records.push({ object, source: sampled }); included.add(object.unique_id);
   }
@@ -153,7 +193,8 @@ export function composePoseChannels(report, baseFrame, tick, options = {}) {
     return resolved.geometry.objects.get(sourceSlot)?.root || { x: record.object.root_x, y: record.object.root_y };
   };
   const objects = records.map((record, slot) => {
-    const object = record.object;
+    const object = nativePropertyOwners.has(owner(record.object.unique_id))
+      ? nativeAppearance(record.object, nativeObjects.get(record.object.unique_id)) : record.object;
     if (!object.join) return object.object_slot === slot ? object : { ...object, object_slot: slot };
     const parent = record.source.objects[object.join.target_object_slot], parentSlot = slots.get(parent?.unique_id);
     const targetHandle = object.join.target_handle_id;
@@ -203,7 +244,7 @@ export function composePoseChannels(report, baseFrame, tick, options = {}) {
   const appendLayer = id => {
     if (emittedLayers.has(id)) return;
     emittedLayers.add(id);
-    for (const object of orderedObjects(replacements.get(id)))
+    for (const object of replacementObjects.get(id) ?? [])
       if (owner(object.unique_id) === id) append(object);
   };
   for (const object of orderedObjects(baseFrame)) {

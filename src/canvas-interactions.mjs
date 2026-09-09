@@ -139,8 +139,9 @@ export function getPivotHandles(geometry, {
     const first=result.length;
     const add = (point, joint, id, kind, isStatic = false, joined = false) => {
       const screenRadius = getPivotHandleRadius(g, id, options);
-      result.push({ g, uid, joint, id, kind, point, selected, joined, static: isStatic,
-        action: kind === 'origin' ? 'move' : isStatic && !attaching && !allowStaticManipulation ? 'select' : 'pose',
+      const ik = !builder && Boolean(g.obj._stykIK?.[id]?.enabled);
+      result.push({ g, uid, joint, id, kind, point, selected, joined, static: isStatic, ik,
+        action: kind === 'origin' ? 'move' : isStatic && !ik && !attaching && !allowStaticManipulation ? 'select' : 'pose',
         color: builder && isStatic && !joined ? (builderSelection?.has(joint)?'#cc4444':'#999999') : pivotHandleColor({ selected, origin: kind === 'origin', joined, static: isStatic }),
         radius: screenRadius / scale, screenRadius });
     };
@@ -153,9 +154,9 @@ export function getPivotHandles(geometry, {
         if(!builderSelection.has(child)){builderSelection.add(child);queue.push(child);}
     }
     if (!g.obj.join) add(g.root, -1, 0, 'origin');
-    for (const index of showStatic||attaching||selectedStatic?topology.allOrdered:topology.dynamicOrdered) {
+    for (const index of showStatic||attaching||selectedStatic||g.obj._stykIK?topology.allOrdered:topology.dynamicOrdered) {
       const segment=g.segments[index];
-      if(segment.static&&!showStatic&&!attaching&&!builderSelection?.has(index))continue;
+      if(segment.static&&!showStatic&&!attaching&&!builderSelection?.has(index)&&!g.obj._stykIK?.[segmentId(segment)]?.enabled)continue;
       const id = segmentId(segment), joined = Boolean(joinedVertices?.has(id));
       if (allEndpoints || joined) add(segment.end, segment.index, id, 'segment', Boolean(segment.static), joined);
     }

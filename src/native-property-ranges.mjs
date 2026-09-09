@@ -1,5 +1,5 @@
 /** Absolute native values on selected frames; only touched components are copied. */
-import { buildGeometry } from "./pivot/geometry.mjs";
+import { buildGeometry, evaluatedFrame } from "./pivot/geometry.mjs";
 import { rotationEdits } from "./pivot/structure.mjs";
 import { validateObjectChanges } from "./pivot/model.mjs";
 import { objectBounds } from "./renderer-geometry.mjs";
@@ -239,6 +239,26 @@ function mutatePose(
 export function commitNativePoseRange(token) {
   const { editor, key } = token,
     drag = editor._drag;
+  if(drag?.authored && editor.propertyChannels) {
+    editor.cancelDrag();
+    const selected=new Set(token.selection.uids),plans=[];
+    for(const index of token.indices) {
+      const tick=editor.timeline[index].start,source=evaluatedFrame(editor.report,index,0,tick);
+      const eligible=new Set(source.objects.filter(object=>selected.has(object.unique_id)).map(object=>object.unique_id));
+      if(!eligible.size)continue;
+      const slots=affectedSlots(source,eligible,['root_x','root_y'].includes(key)||key.startsWith('group_'));
+      const frame={...source,objects:source.objects.slice()},snapshots=slots.map(slot=>source.objects[slot]);
+      for(const slot of slots)frame.objects[slot]=clone(source.objects[slot]);
+      mutatePose(editor,frame,slots,eligible,key,token.value,token.joint,token.uid,token.capturedStyle);
+      editor._synchronizeAnimationOrigins(frame,snapshots);
+      const changedUids=slots.map(slot=>frame.objects[slot].unique_id);
+      validateObjectChanges(editor.report,frame,new Set(changedUids));
+      if(JSON.stringify(snapshots)!==JSON.stringify(slots.map(slot=>frame.objects[slot])))plans.push({tick,beforeFrame:source,frame,changedUids});
+    }
+    if(!plans.length)return false;
+    editor._commitAuthoredFigureRange(plans,{kind:'pose'},null,editor.report,`${token.label} in ${plans.length} frames`,token.selection);
+    return true;
+  }
   if (drag?.authored)
     throw new Error("Choose native frames to apply an absolute value range.");
   const selected = new Set(token.selection.uids),

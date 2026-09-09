@@ -134,6 +134,7 @@ export const editorBuilderStyleMethods={
   },
   setPolygonOpacity(index,opacity){
     if(typeof opacity!=='number'||!Number.isFinite(opacity)||opacity<0||opacity>1)throw new Error('Polygon opacity must be from 0 to 1.');
+    if (this.propertyChannels) return this.updatePolygon(index,{opacity});
     const binding=builderStyleProperty(this,`polygon_${index}_opacity`);if(!binding)throw new Error('Select an existing polygon.');
     return command(this,binding.label,binding.paths,()=>previewBuilderStyleProperty(this.figure,binding,opacity*100));
   },

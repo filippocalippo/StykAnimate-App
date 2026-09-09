@@ -4,6 +4,7 @@ import {synchronizeExistingDerived} from './document-normalize.mjs';
 import {materializePivotDocument} from './pivot-export-materialize.mjs';
 import {validateAnimationDocument} from './animation-channels.mjs';
 import {materializeStyledFigureForStk} from './pivot-style-materialize.mjs';
+import {nativeFigureDocument} from './native-figure.mjs';
 
 let document, config, running = false;
 const timings = {};
@@ -28,6 +29,11 @@ self.addEventListener('message', async event => {
         ...(config.name ? {name: config.name} : {})};
       for (const frame of document.keyframes || []) for (const object of frame.objects || []) delete object.runtime_segments;
       validateAnimationDocument(document);
+      if (config.format === 'stkz') {
+        document = nativeFigureDocument(document, config);
+        config.sourceId = undefined;
+        config.name = document._styk.name;
+      }
       if (config.format === 'piv') {
         const composing = performance.now(), originalFrames = document.keyframes.length;
         document = materializePivotDocument(document);

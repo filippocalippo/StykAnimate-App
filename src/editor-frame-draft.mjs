@@ -1,6 +1,8 @@
 /** Simple timeline checkpoints reuse command snapshots; they never copy an animation. */
 import {validateScene} from './pivot/model.mjs';
 import {createFrame} from './demo.mjs';
+import {validateAnimationDocument} from './animation-channels.mjs';
+import {planDraftFrameAppend, rebaseDraftAnimation} from './frame-draft-animation.mjs';
 
 const clone = value => structuredClone(value);
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
@@ -17,6 +19,11 @@ export function validateSimpleFrameDraft(report, {validateFrame = true} = {}) {
   if (state.baseline !== undefined) {
     if (state.baseline?._styk?.frameId !== state.frameId) throw new Error('The working frame checkpoint has a different identity.');
     if (validateFrame) validateScene({...report, keyframes: [state.baseline]});
+  }
+  if (own(state, 'animationBaseline')) {
+    if (state.animationBaseline === undefined) throw new Error('An animation checkpoint must be a channel table or null.');
+    if (!state.baseline) throw new Error('An animation checkpoint requires a working frame baseline.');
+    if (validateFrame) validateAnimationDocument({...report, _styk: {...report._styk, animation: state.animationBaseline}});
   }
 }
 const current = editor => {
@@ -35,11 +42,12 @@ function sync(editor) {
   const previousTiming = previous?.empty ? 'empty' : previous?.mode === 'add' && previous.baseline ? `${previous.index}:${previous.baseline.duration_raw ?? 1}` : '';
   const nextTiming = draft.empty ? 'empty' : draft.mode === 'add' && draft.baseline ? `${draft.index}:${draft.baseline.duration_raw ?? 1}` : '';
   if (previousTiming !== nextTiming) editor._invalidate({timing:true});
-  if (Boolean(previous?.empty) !== draft.empty || previous?.mode !== draft.mode || previous?.index !== draft.index || previous?.frameId !== draft.frameId || previous?.baseline !== (draft.baseline ?? undefined))
+  if (Boolean(previous?.empty) !== draft.empty || previous?.mode !== draft.mode || previous?.index !== draft.index || previous?.frameId !== draft.frameId || previous?.baseline !== (draft.baseline ?? undefined) || previous?.animationBaseline !== draft.animationBaseline)
     editor._frameDraftRevision = (editor._frameDraftRevision ?? 0) + 1;
   editor.report._styk.simpleFrameDraft = {version: 1, mode: draft.mode, index: draft.index, frameId: draft.frameId,
     ...(draft.empty ? {empty:true} : {}),
-    ...(draft.baseline ? {baseline: draft.baseline} : {})};
+    ...(draft.baseline ? {baseline: draft.baseline} : {}),
+    ...(own(draft, 'animationBaseline') ? {animationBaseline: draft.animationBaseline} : {})};
 }
 function restore(editor, {validateFrame = true, preservePreparedScene = false} = {}) {
   validateSimpleFrameDraft(editor.report, {validateFrame});
@@ -50,6 +58,7 @@ function restore(editor, {validateFrame = true, preservePreparedScene = false} =
   editor.frameIndex = state.index; editor.tick = tick;
   if (!samePreparedTarget) editor._invalidate({viewOnly: true});
   const draft = fresh(editor, state.mode, Boolean(state.empty));
+  if (own(state, 'animationBaseline')) draft.animationBaseline = state.animationBaseline;
   if (state.baseline) {
     draft.baseline = {...state.baseline, objects: state.baseline.objects.slice()};
     const live = new Map(editor.frame.objects.map(object => [object.unique_id, object]));
@@ -65,10 +74,13 @@ function rememberHistory(command, before, after) {
 function snapshot(draft) {
   return draft && {version: 1, mode: draft.mode, index: draft.index, frameId: draft.frameId,
     ...(draft.empty ? {empty:true} : {}),
-    ...(draft.baseline ? {baseline: draft.baseline} : {})};
+    ...(draft.baseline ? {baseline: draft.baseline} : {}),
+    ...(own(draft, 'animationBaseline') ? {animationBaseline: draft.animationBaseline} : {})};
 }
 function topologyState(editor, draft, value) {
   const state = {version: 1, mode: draft.mode, index: draft.index, frameId: draft.frameId, ...(draft.empty ? {empty:true} : {})};
+  if (own(draft, 'animationBaseline')) state.animationBaseline = draft.animationBaseline;
+  if (own(value ?? {}, 'animationBaseline')) state.animationBaseline = value.animationBaseline;
   if (!draft.baseline) return {state};
   const frame = editor.report.keyframes[draft.index], live = new Map(frame.objects.map(object => [object.unique_id, object]));
   const affected = new Map((value?.frames?.find(entry => entry.draft)?.objects ?? []).map(object => [object.unique_id, object]));
@@ -90,12 +102,18 @@ function prepareTopologyState(editor, plan) {
   editor.report._styk.simpleFrameDraft = state;
 }
 function overlay(editor) {
-  return {state: clone(snapshot(current(editor))), frame: clone(editor.frame)};
+  return {state: clone(snapshot(current(editor))), frame: clone(editor.frame), animation: editor.report._styk.animation ?? null, tick: editor.tick};
+}
+function assignAnimation(editor, animation) {
+  if (animation === null) delete editor.report._styk.animation;
+  else editor.report._styk.animation = animation;
 }
 function restoreOverlay(editor, value) {
   editor.report.keyframes[value.state.index] = clone(value.frame);
   editor.report._styk.simpleFrameDraft = clone(value.state);
-  restore(editor);
+  if (own(value, 'animation')) assignAnimation(editor, value.animation);
+  editor._invalidate({timing: true});
+  restore(editor, {validateFrame: false});
 }
 function retainedBytes(value) {
   const queue = [value]; let bytes = 0;
@@ -177,6 +195,8 @@ export const editorFrameDraftMethods = {
   /** Enable only for the Simple timeline. Switching to Advanced keeps all edits. */
   enableFrameDrafts({mode = 'update', index = this.frameIndex, restoreSaved = true, empty = false} = {}) {
     if (!['add', 'update'].includes(mode)) throw new Error('Choose Add or Update frame mode.');
+    if (this._animationEdit) this.commitAnimationEdit();
+    this.commitDrag();
     if (!this._frameDraftListener) {
       this._frameDraftListener = event => {
         const kind = event.detail?.kind;
@@ -200,6 +220,7 @@ export const editorFrameDraftMethods = {
     // An explicit switch to direct editing must retain both the stored key and
     // a distinct Add working pose, including a project opened in Advanced mode.
     this.endFrameDraftPreview();
+    if (this._animationEdit) this.commitAnimationEdit();
     if (!this._frameDraftEnabled && this.report._styk.simpleFrameDraft) {
       this._frameDraftEnabled = true; restore(this);
     }
@@ -248,35 +269,40 @@ export const editorFrameDraftMethods = {
     throw new Error('Add the working frame, or discard its draft before changing saved frames.');
   },
   _applyFrameDraftHistory(command, direction) {
-    if (!this._frameDraftEnabled) return;
+    if (!this._frameDraftEnabled) {
+      delete this.report._styk.simpleFrameDraft; this._frameDraft = null; return;
+    }
     if (command.frameDraftStored) {
       restoreOverlay(this, command.frameDraftStored[direction]); this._frameDraftRevision = (this._frameDraftRevision ?? 0) + 1; return;
     }
     if (command.frameDraftTopology || command.frameDraftJournal) {
-      restore(this); this._frameDraftRevision = (this._frameDraftRevision ?? 0) + 1; return;
+      restore(this, {validateFrame: false}); this._frameDraftRevision = (this._frameDraftRevision ?? 0) + 1; return;
     }
     const state = command.frameDraftState?.[direction];
-    if (state) { this.report._styk.simpleFrameDraft = state; restore(this); }
+    if (state) { this.report._styk.simpleFrameDraft = state; restore(this, {validateFrame: false}); }
     else this._frameDraft = fresh(this, 'update');
     this._frameDraftRevision = (this._frameDraftRevision ?? 0) + 1; sync(this);
   },
   _prepareFrameDraftHistory(command, direction) {
-    if (this._frameDraftEnabled && command.frameDraftStored) {
+    if (command.frameDraftStored) {
       const previous = command.frameDraftStored[direction === 'before' ? 'after' : 'before'];
       if (previous.state.empty) this.report.keyframes=[];
       else if (previous.state.baseline) this.report.keyframes[previous.state.index] = clone(previous.state.baseline);
+      if (own(previous.state, 'animationBaseline')) assignAnimation(this, previous.state.animationBaseline);
       delete this.report._styk.simpleFrameDraft; this._frameDraft = null; return;
     }
     const plan = command.frameDraftTopology ?? command.frameDraftJournal;
-    if (this._frameDraftEnabled && plan) prepareTopologyState(this, plan[direction]);
+    if (plan) prepareTopologyState(this, plan[direction]);
   },
   _restoreFrameDraftOverlay(command,direction) {
-    if (this._frameDraftEnabled && command.frameDraftStored) {
+    if (command.frameDraftStored) {
       const value=command.frameDraftStored[direction];
       this.report.keyframes[value.state.index]=clone(value.frame); this.report._styk.simpleFrameDraft=clone(value.state);
+      if (own(value, 'animation')) assignAnimation(this, value.animation);
     }
   },
   commitFrameDraft({mode = current(this)?.mode ?? 'update'} = {}) {
+    if (this._animationEdit) this.commitAnimationEdit();
     this.commitDrag();
     if (!this._frameDraftEnabled) return false;
     const changed = Boolean(current(this)?.baseline);
@@ -303,6 +329,11 @@ export const editorFrameDraftMethods = {
           this._frameDraft.baseline = baseline;
           this._frameDraft.captured = new Set(baseline.objects.map(object => object.unique_id));
           this._frameDraft.fields = new Set(Object.keys(baseline).filter(key => key !== 'objects'));
+        }
+        if (own(pending.before.state, 'animationBaseline')) {
+          this._frameDraft.animationBaseline = this.report._styk.animation ?? null;
+          assignAnimation(this, rebaseDraftAnimation(pending.before.state.animationBaseline, pending.before.animation,
+            this._frameDraft.animationBaseline, pending.before.tick, this.tick));
         }
       } else this._frameDraft = fresh(this, 'add',pending.empty);
       this._invalidate({viewOnly:true}); this._restoreSelection({...pending.selection,frameIndex:index,tick:this.tick}); sync(this);
@@ -333,9 +364,37 @@ export const editorFrameDraftMethods = {
         before: topologyState(this, draft, command.before), after: topologyState(this, draft, command.after)}, configurable: true});
       return;
     }
-    // Authored keys and multi-frame operations have a wider lifetime.
-    // Keep those operations whole instead of offering a partial discard.
-    if (command.kind === 'animation' || command.layerAnimationPatch || command.frameSourceChanges?.length) {
+    // Sparse keys are part of the working pose too. Their immutable channel
+    // table is a checkpoint reference; no animation-length pose copy is needed.
+    if (command.kind === 'animation') {
+      const before = snapshot(draft);
+      ensure(this, draft);
+      if (!own(draft, 'animationBaseline')) draft.animationBaseline = command.before;
+      rememberHistory(command, before, snapshot(draft));
+      originalDraft = null;
+      return;
+    }
+    if (command.kind === 'scene' && command.before.channels.length) {
+      const before = snapshot(draft);
+      ensure(this, draft);
+      if (!own(draft, 'animationBaseline')) {
+        const animation = this.report._styk.animation;
+        const channels = animation.channels.slice();
+        for (const entry of [...command.before.channels].sort((a,b)=>b.index-a.index)) {
+          if(entry.channel == null)channels.splice(entry.index,1);else channels[entry.index]=entry.channel;
+        }
+        draft.animationBaseline = command.before.animationExists === false ? null : {...animation, channels};
+        const counter = command.before.nextKeyId;
+        if(draft.animationBaseline) {
+          if (counter?.exists) draft.animationBaseline.nextKeyId = counter.value;
+          else delete draft.animationBaseline.nextKeyId;
+        }
+      }
+      for (const entry of command.before.frames) if (entry.index === draft.index)
+        for (const key of sceneFields) field(this, draft, key, own(entry.fields, key), entry.fields[key]);
+      rememberHistory(command, before, snapshot(draft)); originalDraft = null; return;
+    }
+    if (command.layerAnimationPatch || command.frameSourceChanges?.length) {
       this._frameDraft = fresh(this, draft.mode); return;
     }
     if (command.kind === 'objects' && command.index === draft.index) objects(this, draft, command.before);
@@ -388,6 +447,7 @@ export const editorFrameDraftMethods = {
     const pending = {before:overlay(this),selection:this._selectionState(),preserveWorking,empty,recorded:false};
     this._frameDraftStoredEdit = pending; this._frameDraftSuspended = true;
     if (draft.baseline) this.report.keyframes[draft.index] = draft.baseline;
+    if (own(draft, 'animationBaseline')) assignAnimation(this, draft.animationBaseline);
     this._frameDraft = fresh(this,'update'); sync(this);
     if(draft.empty) this.report.keyframes=[];
     this._invalidate({timing:true});
@@ -402,6 +462,7 @@ export const editorFrameDraftMethods = {
     } finally { this._frameDraftStoredEdit = null; this._frameDraftSuspended = false; sync(this); this._emit('frame-draft'); }
   },
   discardFrameDraft() {
+    if (this._animationEdit) this.commitAnimationEdit();
     this.commitDrag(); const draft = current(this);
     if (!this._frameDraftEnabled || !draft?.baseline) return false;
     const before = clone(this.frame), after = clone(draft.baseline), beforeSelection = this._selectionState();
@@ -409,10 +470,16 @@ export const editorFrameDraftMethods = {
     this._frameDraftSuspended = true;
     try {
       this.report.keyframes[draft.index] = after;
+      const draftAnimation = own(draft, 'animationBaseline')
+        ? {before: this.report._styk.animation ?? null, after: draft.animationBaseline} : undefined;
+      if (draftAnimation) {
+        if (draftAnimation.after === null) delete this.report._styk.animation;
+        else this.report._styk.animation = draftAnimation.after;
+      }
       this._invalidate({timing: true}); this.tick = this.timeline[draft.index]?.start ?? 0;
       this._restoreSelection({...beforeSelection, tick: this.tick});
       this._record({kind: 'frame', label: 'Discard frame edits', index: draft.index, before, after: clone(after), beforeSelection,
-        afterSelection: this._selectionState(), structural: true, timing: true});
+        afterSelection: this._selectionState(), structural: true, timing: true, ...(draftAnimation ? {draftAnimation} : {})});
       rememberHistory(this._undo.at(-1), snapshot(draft), {version: 1, mode: draft.empty?'add':'update', index: draft.index, frameId: draft.frameId,...(draft.empty?{empty:true}:{})});
     } finally { this._frameDraftSuspended = false; }
     this._frameDraft = fresh(this, draft.empty?'add':'update',draft.empty);
@@ -420,6 +487,7 @@ export const editorFrameDraftMethods = {
   },
   /** Store an Add-mode working pose at the end without overwriting its source. */
   addDraftFrame({blank=false}={}) {
+    if (this._animationEdit) this.commitAnimationEdit();
     this.commitDrag(); const draft = current(this), frames = this.report.keyframes, beforeDraft=snapshot(draft);
     if (frames.length >= 100000) throw new Error('Remove a keyframe before adding beyond the 100,000-keyframe document limit.');
     if(draft?.empty) {
@@ -429,11 +497,24 @@ export const editorFrameDraftMethods = {
         this._frameDraft=fresh(this,'add'); sync(this);
         this._rangesEdit('Add keyframe',[{index:0,before:[clone(this.frame)],after:[source]}],{selectIndex:0});
       } finally {this._frameDraftSuspended=false;}
-    } else if (this.animationChannels.length) {
-      // Existing authored channels retain their direct editing behavior.
-      this.commitFrameDraft(); this._frameSplice('Add keyframe', frames.length, 0, [clone(this.evaluatedFrame)]);
+    } else if (this.animationChannels.length || own(draft ?? {}, 'animationBaseline')) {
+      const source = blank ? createFrame([]) : clone(this.evaluatedFrame);
+      source.duration_raw = this.frame.duration_raw;
+      const identity = this._nextFrameIdentity;
+      let insert, animationPlan;
+      try {
+        insert = this._newInsertedFrames([source])[0];
+        animationPlan = planDraftFrameAppend(this, insert);
+      } catch (error) { this._nextFrameIdentity = identity; throw error; }
+      const changes = [];
+      if (draft?.mode === 'add' && draft.baseline)
+        changes.push({index: draft.index, before: [clone(this.frame)], after: [clone(draft.baseline)]});
+      const index = frames.length; changes.push({index, before: [], after: [insert]});
+      this._frameDraftSuspended = true;
+      try { this._rangesEdit('Add keyframe', changes, {selectIndex: index, animationPlan}); }
+      finally { this._frameDraftSuspended = false; }
     } else {
-      const source = clone(this.frame), insert = this._newInsertedFrames([source])[0], changes = [];
+      const source = blank ? createFrame([]) : clone(this.frame), insert = this._newInsertedFrames([source])[0], changes = [];
       if (draft?.mode === 'add' && draft.baseline)
         changes.push({index: draft.index, before: [clone(this.frame)], after: [clone(draft.baseline)]});
       const index = frames.length; changes.push({index, before: [], after: [insert]});

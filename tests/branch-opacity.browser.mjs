@@ -1,3 +1,4 @@
+import {readNativeDocument} from '../scripts/read-native-document.mjs';
 import {chromium} from 'playwright';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -43,7 +44,7 @@ try{
  await page.waitForFunction(()=>window.styk.editor._animationEdit?.branchStyle&&window.styk.editor._animationEdit.changed);
  const expected=await page.evaluate(()=>window.styk.editor.animationValue({kind:'segment',uid:window.styk.editor.selectedUid,handleId:3},'opacity'));
  const download=page.waitForEvent('download');await page.keyboard.press('Control+s');const saved=await download;await page.mouse.up();const filename=path.join(out,'branch-authored.styk');await saved.saveAs(filename);
- const bundle=JSON.parse(await readFile(filename,'utf8')),document=bundle.document??bundle;
+ const bundle=await readNativeDocument(filename),document=bundle.document??bundle;
  check(document._styk.animation.channels.filter(c=>c.property==='opacity'&&c.keys.some(k=>k.tick===6&&k.value===expected)).length===2,'Save while scrub is held commits both branch keys to real STYK output');
  check(await page.evaluate(()=>!window.styk.editor._animationEdit),'Held Save finalizes the public batch gesture');
  await page.evaluate(()=>window.styk.editor.markSaved());await page.locator('#file-input').setInputFiles(filename);await page.waitForFunction(()=>window.styk.editor.report!==window.__branch.original);

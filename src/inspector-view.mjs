@@ -5,6 +5,8 @@ import { formatPropertyValue } from "./property-controls.mjs";
 import { cameraActionsView } from "./camera-view.mjs";
 import { builderDrawables } from './editor-builder-style.mjs';
 import { isBuilderContext } from './builder-aids.mjs';
+import {resolveInstanceFigure} from './animation-style.mjs';
+import {ikControlsView} from './ik-view.mjs';
 const esc = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -20,12 +22,12 @@ const hex = (rgb) =>
     .join("");
 const num = (n) => Number(Number(n ?? 0).toFixed(2));
 const animatedProperties = new Set([
-  "root_x",
-  "root_y",
   "scale",
-  "rotation",
   "figure_opacity",
+  "figure_z_order",
   "outline_opacity",
+  "outline_width",
+  "thickness",
   "segment_opacity",
   "segment_gradient_opacity",
   "camera_x",
@@ -54,15 +56,24 @@ function numericField(
   const description =
     options.description || `${label}${unit ? ` (${unit})` : ""}`;
   const keys = animated
-    ? `<div class="property-key-controls">${keyControls(key, description, state)}</div>`
+    ? keyControlGroup(key, description, state)
     : "";
-  return `<div class="property-row${animated ? " is-animatable" : options.wide ? " is-wide" : ""}" data-property-row="${key}"><label class="field"><span class="property-scrub" data-property-scrub tabindex="0" role="button" aria-label="Scrub ${esc(description)}" title="Drag to adjust · Shift: fine · Alt: extra fine">${label}</span><input type="number" ${options.id ? `id="${options.id}"` : ""} ${options.legacyField === false ? "" : `data-field="${key}"`} data-property="${key}" data-property-value="${esc(value)}" data-property-precision="${precision}" data-property-step="1" value="${formatPropertyValue(value, precision)}" step="any" aria-label="${esc(description)}" ${limits}><small>${unit}</small></label>${keys}</div>`;
+  return `<div class="property-row${keys ? " is-animatable" : options.wide ? " is-wide" : ""}" data-property-row="${key}" data-animation-source="${state?.source ?? ''}"><label class="field"><span class="property-scrub" data-property-scrub tabindex="0" role="button" aria-label="Scrub ${esc(description)}" title="Drag to adjust · Shift: fine · Alt: extra fine">${label}</span><input type="number" ${options.id ? `id="${options.id}"` : ""} ${options.legacyField === false ? "" : `data-field="${key}"`} data-property="${key}" data-property-value="${esc(value)}" data-property-precision="${precision}" data-property-step="1" value="${formatPropertyValue(value, precision)}" step="any" aria-label="${esc(description)}" ${limits}><small>${unit}</small></label>${keys}</div>`;
 }
 function keyControls(key, label, state = {}) {
-  return `<button type="button" data-property-nav="${key}" data-direction="-1" title="Previous ${esc(label)} keyframe" aria-label="Previous ${esc(label)} keyframe" ${state?.previous ? "" : "disabled"}>${icon("chevron-left")}</button><button type="button" data-property-key="${key}" class="${state?.keyed ? "is-keyed" : state?.animated ? "is-animated" : ""}" aria-pressed="${Boolean(state?.keyed)}" title="${state?.keyed ? "Remove" : "Add"} ${esc(label)} keyframe" aria-label="${state?.keyed ? "Remove" : "Add"} ${esc(label)} keyframe">${icon("diamond")}</button><button type="button" data-property-nav="${key}" data-direction="1" title="Next ${esc(label)} keyframe" aria-label="Next ${esc(label)} keyframe" ${state?.next ? "" : "disabled"}>${icon("chevron-right")}</button>`;
+  if (state?.poseOnly || (state?.source === 'pose' || state?.poseKeyed || state?.poseAnimated) && !state?.animated && !state?.keyed) return '';
+  const title = `${state?.keyed ? 'Remove' : 'Add'} ${label} keyframe`;
+  const classes = state?.keyed ? 'is-keyed' : state?.animated ? 'is-animated' : '';
+  const marker =
+    `<button type="button" data-property-key="${key}" class="${classes}" aria-pressed="${Boolean(state?.keyed)}" title="${esc(title)}" aria-label="${esc(title)}">${icon('diamond')}</button>`;
+  return `<button type="button" data-property-nav="${key}" data-direction="-1" title="Previous ${esc(label)} keyframe" aria-label="Previous ${esc(label)} keyframe" ${state?.previous ? '' : 'disabled'}>${icon('chevron-left')}</button>${marker}<button type="button" data-property-nav="${key}" data-direction="1" title="Next ${esc(label)} keyframe" aria-label="Next ${esc(label)} keyframe" ${state?.next ? '' : 'disabled'}>${icon('chevron-right')}</button>`;
 }
-const heading = (title, detail, symbol) =>
-  `<div class="property-context-heading"><span>${icon(symbol)}</span><div><strong>${esc(title)}</strong><small>${esc(detail)}</small></div></div>`;
+function keyControlGroup(key, label, state) {
+  const controls = keyControls(key, label, state);
+  return controls ? `<div class="property-key-controls">${controls}</div>` : '';
+}
+const heading = (title, symbol) =>
+  `<div class="property-context-heading"><span>${icon(symbol)}</span><div><strong>${esc(title)}</strong></div></div>`;
 const button = (action, symbol, title, disabled = false) =>
   `<button class="icon-button" data-action="${action}" title="${title}" aria-label="${title}" ${disabled ? "disabled" : ""}>${icon(symbol)}</button>`;
 const secondarySections = new Set(["Connections", "Polygons", "Canvas alignment", "Neighboring pose"]);
@@ -128,7 +139,7 @@ export function inspectorView({
   if (selectionCount > 1) {
     const b = bounds;
     return (
-      heading(`${selectionCount} figures`, "Selection", "layers") +
+      heading(`${selectionCount} figures`, "layers") +
       group(
         "Selection",
         tools(
@@ -184,7 +195,7 @@ export function inspectorView({
       )
     );
   }
-  const figure = editor.figure,
+  const figure = resolveInstanceFigure(editor.figure, object),
     joint = editor.selectedJoint,
     segment = figure.segments[joint],
     style = figure.segment_decode?.global_style || {},
@@ -211,12 +222,12 @@ export function inspectorView({
   if (!jointScope) {
     if (object.join || frame.objects.some(part => part.join?.target_object_slot === object.object_slot)) {
       html += group('Connected figure',
-        `<button type="button" class="button" data-action="combine-figures">${icon('combine')}Merge into one figure</button><p class="property-note">Combines all connected parts at the current pose. Earlier poses stay editable. Undo restores the separate parts.</p>`);
+        `<button type="button" class="button" data-action="combine-figures">${icon('combine')}Merge into one figure</button>`);
     }
     if (tool === "rig")
       html += group(
         "Edit rig",
-        `<select id="rig-mode" class="inline-select" aria-label="Rig edit mode"><option value="move" ${rigMode === "move" ? "selected" : ""}>Move joint</option><option value="rotate" ${rigMode === "rotate" ? "selected" : ""}>Rotate branch</option></select><p class="property-note">Updates every instance of this figure.</p><button type="button" class="button" data-action="add-sprite-segment">${icon('image')}Add sprite part…</button>`,
+        `<select id="rig-mode" class="inline-select" aria-label="Rig edit mode"><option value="move" ${rigMode === "move" ? "selected" : ""}>Move joint</option><option value="rotate" ${rigMode === "rotate" ? "selected" : ""}>Rotate branch</option></select><button type="button" class="button" data-action="add-sprite-segment">${icon('image')}Add sprite part…</button>`,
       );
     if (figure.text_assets?.some((asset) => asset.glyphs?.length))
       html += group(
@@ -241,8 +252,13 @@ export function inspectorView({
     );
     html += group(
       "Appearance",
-      `<div class="property-paint-row">${colorRow("figure-color", "Figure color", fill)}${field("Opacity", "figure_opacity", (1 - (object.field28 || 0) / 255) * 100, "%", 'min="0" max="100"', { id: "figure-opacity", legacyField: false })}</div>`,
+      `<div class="property-paint-row">${colorRow("figure-color", "Figure color", fill)}${keyControlGroup('figure_color', 'figure color', propertyState?.('figure_color'))}${field("Opacity", "figure_opacity", (1 - (object.field28 || 0) / 255) * 100, "%", 'min="0" max="100"', { id: "figure-opacity", legacyField: false })}</div>`,
       button("reset-color", "undo", "Reset colors"),
+    );
+    html += group(
+      "Stacking",
+      grid(field('Z-index', 'figure_z_order', object._stykZIndex ?? 0, '', 'min="-1000000" max="1000000"')) +
+      tools(button('layer-back', 'send-to-back', 'Send to back') + button('layer-down', 'chevron-left', 'Send backward') + button('layer-up', 'chevron-right', 'Bring forward') + button('layer-front', 'bring-to-front', 'Bring to front')),
     );
     html += group(
       "Outline",
@@ -251,11 +267,12 @@ export function inspectorView({
         field("Opacity", "outline_opacity", (1 - (style.u30 ?? 0) / 255) * 100, "%", 'min="0" max="100"', {
           id: "outline-opacity", legacyField: false, description: "Outline opacity",
         }),
-      ) + colorRow("outline-color", "Outline color", hex(style.rgb)),
+      ) + `<div class="property-row property-color-line">${colorRow("outline-color", "Outline color", hex(style.rgb))}${keyControlGroup('outline_color','outline color',propertyState?.('outline_color'))}</div>`,
     );
   }
   if (jointScope && segment) {
-    html += heading(`${editor.branchSelected ? 'Branch from joint' : 'Joint'} ${segment.segment_id}`, figure.name || "Figure", "nodes");
+    html += heading(`${editor.branchSelected ? 'Branch from joint' : 'Joint'} ${segment.segment_id}`, "nodes");
+    const ik = editor.getIKSettings();
     const shape = [
       "line",
       "circle",
@@ -289,7 +306,7 @@ export function inspectorView({
               Math.PI,
             "°",
         ),
-      ),
+      ) + ikControlsView(ik),
     );
     html += group("Appearance",
         grid(field("Width", "thickness", segment.thickness, "px", 'min="0"') +
@@ -297,7 +314,8 @@ export function inspectorView({
         (isBuilderContext(tool) ? `<label class="check-row"><input type="checkbox" id="builder-branch" ${builderBranch ? 'checked' : ''}>Apply to branch</label>` : '') +
         `<select id="segment-shape" class="inline-select" aria-label="Segment shape" ${["image", "text"].includes(shape) ? "disabled" : ""}>${[["line", "Round line"], ["squareLine", "Square line"], ["circle", "White circle"], ["circleFill", "Filled circle"], ["circleClear", "Clear circle"], ...(["image", "text"].includes(shape) ? [[shape, shape]] : [])].map(([v, n]) => `<option value="${v}" ${shape === v ? "selected" : ""}>${n}</option>`).join("")}</select>` +
         `<div class="property-paint-row"><button type="button" id="segment-color" data-paint-picker class="paint-trigger" aria-label="Segment color"><i style="background:${paintCSS(segmentPaint(segment))}"></i><span>${segmentPaint(segment).type === 'solid' ? hex(segment.color_rgb).toUpperCase() : segmentPaint(segment).type[0].toUpperCase()+segmentPaint(segment).type.slice(1)+' gradient'}</span></button>` +
-        `${field("Opacity", "segment_opacity", (1 - (segment.transparency || 0) / 255) * 100, "%", 'min="0" max="100"', { id: "segment-opacity", legacyField: false, description: "Segment start opacity" })}</div>` +
+        `${keyControlGroup('segment_color','segment color',propertyState?.('segment_color'))}${field(segment.secondary ? "Primary opacity" : "Opacity", "segment_opacity", (1 - (segment.transparency || 0) / 255) * 100, "%", 'min="0" max="100"', { id: "segment-opacity", legacyField: false, description: "Primary color opacity" })}</div>` +
+        (segment.secondary ? grid(field("Secondary opacity", "segment_gradient_opacity", (1-(segment.secondary.a??0)/255)*100, "%", 'min="0" max="100"', {description:"Secondary gradient color opacity"})) : '') +
         `<label class="check-row"><input type="checkbox" id="static-joint" ${isStatic(segment) ? "checked" : ""}>Static</label>`,
     );
   }
@@ -328,7 +346,7 @@ export function inspectorView({
         .slice(start, start + 12)
         .map(
           (p, i) =>
-            `<div class="polygon-item"><div class="polygon-row"><span>Polygon ${start + i + 1}</span><input type="color" data-polygon-color="${start + i}" aria-label="Polygon ${start + i + 1} color" value="${hex(p.color_rgb)}"><button class="icon-button" data-delete-polygon="${start + i}" aria-label="Delete polygon ${start + i + 1}">${icon("trash")}</button></div><details class="polygon-style-details" data-polygon-index="${start+i}"><summary>Opacity &amp; draw order</summary>${field('Opacity', `polygon_${start+i}_opacity`, (p.alpha_raw !== undefined ? 1-p.alpha_raw/255 : p.color_alpha ?? 1)*100, '%', 'min="0" max="100"', {animated:false})}${field('Order', `polygon_${start+i}_z_order`, drawOrder.get(`polygon:${start+i}`), '', orderLimits, {animated:false})}${builderOrderButtons('polygon',start+i)}</details></div>`,
+            `<div class="polygon-item"><div class="polygon-row"><span>Polygon ${start + i + 1}</span><input type="color" data-polygon-color="${start + i}" aria-label="Polygon ${start + i + 1} color" value="${hex(p.color_rgb)}"><button class="icon-button" data-delete-polygon="${start + i}" aria-label="Delete polygon ${start + i + 1}">${icon("trash")}</button></div><details class="polygon-style-details" data-polygon-index="${start+i}"><summary>Opacity &amp; draw order</summary>${field('Opacity', `polygon_${start+i}_opacity`, (p.alpha_raw !== undefined ? 1-p.alpha_raw/255 : p.color_alpha ?? 1)*100, '%', 'min="0" max="100"', {animated:Boolean(editor.propertyChannels)})}${field('Order', `polygon_${start+i}_z_order`, drawOrder.get(`polygon:${start+i}`), '', orderLimits, {animated:false})}${builderOrderButtons('polygon',start+i)}</details></div>`,
         )
         .join("") +
         (polygons.length > 12
@@ -355,7 +373,6 @@ function sceneView(editor, field, propertyState) {
   return (
     heading(
       "Scene",
-      `${r.canvas_width} × ${r.canvas_height} · ${r.fps} fps`,
       "frame",
     ) +
     group(
@@ -379,8 +396,8 @@ function sceneView(editor, field, propertyState) {
     ) +
     group(
       "Background",
-      `<div class="property-row property-color-line">${colorRow("background-color", "Background color", color)}<div class="property-key-controls">${keyControls("scene_color", "background color", colorState)}</div></div>` +
-        `<div class="property-row property-background-line"><span class="property-background-name" title="${esc(bg?.name || "White")}">${esc(bg?.name || "White")}</span><div class="property-key-controls">${keyControls("scene_background", "background", backgroundState)}</div></div>` +
+      `<div class="property-row property-color-line">${colorRow("background-color", "Background color", color)}${keyControlGroup("scene_color", "background color", colorState)}</div>` +
+        `<div class="property-row property-background-line"><span class="property-background-name" title="${esc(bg?.name || "White")}">${esc(bg?.name || "White")}</span>${keyControlGroup("scene_background", "background", backgroundState)}</div>` +
         tools(
           button("background-style", "sliders", "Background settings") +
             button("import-background", "image", "Import background"),
@@ -388,8 +405,7 @@ function sceneView(editor, field, propertyState) {
     ) +
     group(
       "Playback",
-      grid(field("Rate", "fps", r.fps, "fps", 'min="1" max="120"')) +
-        `<p class="inspector-hint">Double-click a timeline keyframe to edit its easing.</p>`,
+      grid(field("Rate", "fps", r.fps, "fps", 'min="1" max="120"')),
     )
   );
 }
@@ -397,7 +413,7 @@ function sceneView(editor, field, propertyState) {
 function cameraView(editor, field) {
   const c = editor.frame.camera || {};
   return (
-    heading("Camera", "Animation view", "camera") +
+    heading("Camera", "camera") +
     group(
       "Transform",
       grid(
@@ -424,12 +440,10 @@ function cameraView(editor, field) {
 
 function frameView(editor, field) {
   const frame = editor.frame,
-    tick = editor.tick ?? 0,
     index = editor.frameIndex ?? 0;
   return (
     heading(
       `Keyframe ${index + 1}`,
-      `Frame ${tick + 1} of ${editor.totalTicks ?? editor.report.keyframes.length}`,
       "diamond",
     ) +
     group(
@@ -442,8 +456,7 @@ function frameView(editor, field) {
           "ticks",
           'min="0" max="65535"',
         ),
-      ) +
-        `<p class="property-context-caption">Duration includes this pose and its transition to the next keyframe. Zero hides the key during playback. Double-click the key to edit easing.</p>`,
+      ),
     )
   );
 }
@@ -456,11 +469,9 @@ function layerView(editor) {
     locked: false,
     figureUids: [],
   };
-  const count = layer.figureUids?.length ?? 0;
   return (
     heading(
       layer.name,
-      `${count} ${count === 1 ? "figure" : "figures"} in layer`,
       "layers",
     ) +
     group(

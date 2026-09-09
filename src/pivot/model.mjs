@@ -1,7 +1,9 @@
 import {normalizePaint} from '../paint.mjs';
+import {validateIK} from '../ik.mjs';
 import { timeline } from "./geometry.mjs";
 import { inverseCameraScale } from "./background.mjs";
 import { validateAnimationStyle } from '../animation-style.mjs';
+import {validateFigureZIndex} from '../animation-properties.mjs';
 import {validateOriginObject,validateOriginObjectSteps,validateOriginSupportSteps} from '../animation-origin-validation.mjs';
 export const MAX_EXPORT_PIXELS = 64 * 1024 * 1024;
 const finite = (value, label) => {
@@ -35,7 +37,9 @@ const rgb = (value, label) => {
 // commands validate their replacement definitions before the next object edit.
 const validatedDefinitions = new WeakMap();
 function validateObjectPose(report, object, figure, origin = true) {
+  validateIK(object);
   validateAnimationStyle(object);
+  if (object._stykZIndex !== undefined) validateFigureZIndex(object._stykZIndex);
   if(origin&&(object._stykAnimationOrigin!==undefined||figure._styk?.animationOrigin))validateOriginObject(object,figure);
   for (const key of ['root_x', 'root_y', 'scale']) float32(object[key], `Object ${key}`);
   integer(object.unique_id, 0, 0xffffffff, 'Object identity');

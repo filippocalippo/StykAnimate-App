@@ -88,5 +88,5 @@ test('sparse segment styles appear under their owning figure, with stable handle
   assert.equal(nativeCalls, 1, 'Only the layer may request a native pose channel');
   const expanded = buildChannelTimelineTracks(layers, [channel], report, new Set(['layer-1', 'figure:7', 'segment:7:600']));
   assert.deepEqual(expanded.tracks.filter(row => row.kind === 'segment').map(row => row.handleId), [42, 600]);
-  assert.equal(expanded.tracks.filter(row => row.parentId === 'segment:7:600').length, 2);
+  assert.deepEqual(expanded.tracks.filter(row => row.parentId === 'segment:7:600').map(row=>row.property), ['color','opacity','thickness','gradientColor','gradientOpacity','paint']);
 });

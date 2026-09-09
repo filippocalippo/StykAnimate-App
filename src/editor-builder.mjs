@@ -4,6 +4,7 @@ import {editorBuilderTopologyMethods} from './editor-builder-topology.mjs';
 import {editorSpriteSegmentMethods} from './editor-sprite-segment.mjs';
 import {editorBuilderStyleMethods} from './editor-builder-style.mjs';
 import {editorBuilderBranchMethods} from './editor-builder-branch.mjs';
+import {styleColor, polygonIdentity} from './animation-style.mjs';
 
 const clone = value => structuredClone(value);
 const MAX_SEGMENTS = 30000;
@@ -95,7 +96,8 @@ export const editorBuilderMethods = {
     editDefinition(this, 'Create polygon', figure => {
       figure.polyfills ??= [];
       if (figure.polyfills.length >= 20000) throw new Error('A figure supports at most 20,000 polygons.');
-      const id = Math.max(0, ...figure.polyfills.map((p, i) => p.polyfill_id ?? i + 1)) + 1;
+      const id = Math.max(figure._styk?.nextPolygonId ?? 1, Math.max(0, ...figure.polyfills.map((p, i) => p.polyfill_id ?? i + 1)) + 1);
+      figure._styk={...figure._styk,nextPolygonId:id+1};
       // Fills start behind their skeleton so posing remains visually legible.
       const order = zOrder ?? Math.min(1, ...figure.segments.map(s => s.z_order ?? 1), ...figure.polyfills.map(p => p.z_order ?? 1)) - 1;
       polygon = {polyfill_id: id};
@@ -106,14 +108,27 @@ export const editorBuilderMethods = {
   updatePolygon(index, patch = {}) {
     if (!Number.isInteger(index) || !this.figure?.polyfills?.[index]) throw new Error('Select an existing polygon.');
     for (const key of Object.keys(patch)) if (!['handleIds', 'color', 'opacity', 'zOrder'].includes(key)) throw new Error(`Polygon property ${key} is not editable.`);
+    if (this.propertyChannels && this.object && Object.keys(patch).every(key => ['color','opacity'].includes(key))) {
+      const target={kind:'polygon',uid:this.object.unique_id,polygonId:polygonIdentity(this.figure.polyfills[index],index),figureTypeId:this.figure.figure_type_id};
+      return this.addAnimationKeys(Object.entries(patch).map(([property,value]) => ({target,property,value:property === 'color' ? styleColor(rgb(value)) : value})));
+    }
     return editDefinition(this, 'Edit polygon', figure => {const polygon = figure.polyfills[index]; patchPolygon(figure, polygon, patch); if ('handleIds' in patch) rejectDuplicatePolygon(figure, polygon);});
   },
   removePolygon(index) {
     if (!Number.isInteger(index) || !this.figure?.polyfills?.[index]) return false;
-    return editDefinition(this, 'Delete polygon', figure => { figure.polyfills.splice(index, 1); });
+    return editDefinition(this, 'Delete polygon', figure => {
+      figure.polyfills.forEach((polygon,i)=>polygon.polyfill_id ??= i+1);
+      figure._styk={...figure._styk,nextPolygonId:Math.max(figure._styk?.nextPolygonId??1,...figure.polyfills.map(p=>p.polyfill_id+1))};
+      figure.polyfills.splice(index, 1);
+    });
   },
   updateFigureStyle(patch = {}) {
     for (const key of Object.keys(patch)) if (!['name', 'outlineWidth', 'outlineColor', 'outlineOpacity'].includes(key)) throw new Error(`Figure property ${key} is not editable.`);
+    if (this.propertyChannels && this.object && !('name' in patch)) {
+      const target = {kind:'figure',uid:this.object.unique_id};
+      return this.addAnimationKeys(Object.entries(patch).map(([property, value]) => ({target, property,
+        value:property === 'outlineColor' ? styleColor(rgb(value)) : value})).filter(entry=>entry.value!==this.animationValue(target,entry.property)));
+    }
     return editDefinition(this, 'Edit figure style', figure => {
       if ('name' in patch) {
         if (typeof patch.name !== 'string' || !patch.name.trim() || patch.name.length > 255) throw new Error('Figure names must contain 1–255 characters.');

@@ -342,7 +342,8 @@ export class EditorSettings {
     if (patch.builderCanvasColor !== undefined) patch = {...patch,useBuilderCanvasColor:true};
     if (patch.autosaveSeconds !== undefined)
       patch.autosaveSeconds = Number(patch.autosaveSeconds);
-    const next = normalizeEditorSettings({ ...this.value, ...patch });
+    const previous = this.value;
+    const next = normalizeEditorSettings({ ...previous, ...patch });
     this.value = next;
     if (patch.locale !== undefined) this.localization.setLocale(next.locale);
     const normalizedPatch = Object.fromEntries(
@@ -355,7 +356,10 @@ export class EditorSettings {
         (error) => this.showError(error),
       );
     } catch (error) {
+      this.value = previous;
+      if (patch.locale !== undefined) this.localization.setLocale(previous.locale);
       this.showError(error);
+      return;
     }
     this.pending = { ...next };
     this.pendingRevision = (this.pendingRevision || 0) + 1;

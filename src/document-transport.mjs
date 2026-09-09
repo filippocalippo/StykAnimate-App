@@ -4,7 +4,8 @@ const ownSet = (object, key, value) => {
   if (key === '__proto__') Object.defineProperty(object, key, { value, writable: true, configurable: true, enumerable: true });
   else object[key] = value;
 };
-const keysOf = value => Array.isArray(value) ? null : Object.keys(value);
+const keysOf = value => Array.isArray(value) ? null : value.property === 'pose' && Array.isArray(value.keys)
+  ? ['property',...Object.keys(value).filter(key=>key!=='property'&&key!=='keys'),'keys'] : Object.keys(value);
 const countOf = (value, keys) => keys ? keys.length : value.length;
 
 /** Stops scanning as soon as a subtree would exceed a single bounded packet. */
@@ -42,6 +43,7 @@ export function* documentChunks(report, options = 1000) {
   if (!report || typeof report !== 'object' || Array.isArray(report)) throw new Error('Document transport requires a document record.');
   yield { header: {} };
   const stack = [{ value: report, path: [], keys: Object.keys(report), index: 0 }];
+  const poseSequences = new WeakMap();
   const atomicLimit = Math.floor(maxBytes * .7), stringLength = Math.floor(maxBytes * .3);
   let operations = [], bytes = 64, started = performance.now();
   while (stack.length) {
@@ -57,8 +59,19 @@ export function* documentChunks(report, options = 1000) {
       const { runtime_segments, ...nativePose } = value; value = nativePose;
     }
     const pathBytes = path.reduce((sum, part) => sum + (typeof part === 'string' ? part.length * 2 + 16 : 16), 64);
+    if (key === 'keys' && frame.value.property === 'pose' && Array.isArray(value)) {
+      const reference=poseSequences.get(value);
+      if(reference){
+        const size=pathBytes+reference.reduce((sum,part)=>sum+String(part).length*2+16,64);
+        if(operations.length&&bytes+size>maxBytes){yield {operations,estimatedBytes:bytes};operations=[];bytes=64;started=performance.now();}
+        operations.push({path,reference});bytes+=size;continue;
+      }
+      poseSequences.set(value,path);
+    }
     const visitPoses = omitRuntimeSegments && path[0] === 'keyframes' && (path.length <= 2 || (path.length === 3 && path[2] === 'objects'));
-    const size = visitPoses ? atomicLimit + 1 : boundedSize(value, atomicLimit);
+    // Visit channel records even when small so shared sequences survive ACK
+    // boundaries instead of being cloned again for every connected member.
+    const size = visitPoses || value?.property === 'pose' && Array.isArray(value.keys) ? atomicLimit + 1 : boundedSize(value, atomicLimit);
     if (size <= atomicLimit) {
       if (operations.length && bytes + size + pathBytes > maxBytes) {
         yield { operations, estimatedBytes: bytes }; operations = []; bytes = 64; started = performance.now();
@@ -98,7 +111,16 @@ export function applyDocumentChunk(report, chunk) {
       }
       const key = path.at(-1);
       if (!parent || typeof parent !== 'object' || !['string', 'number'].includes(typeof key)) throw new Error('Invalid document transport destination.');
-      if (Object.hasOwn(operation, 'append')) {
+      if (Object.hasOwn(operation, 'reference')) {
+        if(!Array.isArray(operation.reference)||!operation.reference.length)throw new Error('Invalid document sequence reference.');
+        let value=report;
+        for(const part of operation.reference){
+          if(!value||typeof value!=='object'||!Object.hasOwn(value,part))throw new Error('Document sequence reference has not arrived.');
+          value=value[part];
+        }
+        if(!Array.isArray(value)||key!=='keys'||parent.property!=='pose')throw new Error('Document references require a pose key sequence.');
+        ownSet(parent,key,value);
+      } else if (Object.hasOwn(operation, 'append')) {
         if (!Object.hasOwn(parent, key) || typeof parent[key] !== 'string' || typeof operation.append !== 'string') throw new Error('Document string fragments arrived out of order.');
         ownSet(parent, key, parent[key] + operation.append);
       } else ownSet(parent, key, operation.value);

@@ -66,6 +66,7 @@ export function initStudioShell({editor, state, setTool, renderAssets, showComma
     const context = state.inspectorContext;
     const figureName = editor.figure?.name || 'Figure';
     const count = editor.selectedUids?.size || 0;
+    document.querySelectorAll('[data-selection-order]').forEach(button => { button.disabled = !editor.selectedObjects.length; });
     let scope = context === 'camera' ? 'Camera' : context === 'scene' ? 'Scene' : context === 'layer' ? 'Layer' : context === 'frame' ? 'Timing' : count > 1 ? `${count} figures` : editor.object ? figureName : 'Scene';
     const joint = editor.figure?.segments?.[editor.selectedJoint];
     const inspectingFigure = !['camera', 'scene', 'layer', 'frame'].includes(context) && editor.object;
@@ -90,7 +91,7 @@ const categories = [
   ['video', 'Video', ['export-mp4', 'export-video', 'export-avi', 'export-wmv', 'export-vfw']],
   ['animated', 'Animated image', ['export-gif', 'export-apng']],
   ['frames', 'Frames & sequences', ['export-png', 'export-svg', 'export-png-sequence', 'export-jpeg-sequence', 'export-gif-sequence', 'export-svg-sequence']],
-  ['editable', 'Editable file', ['export-piv', 'export-stk']],
+  ['editable', 'Editable file', ['export-stkz', 'export-piv', 'export-stk']],
 ];
 
 /** Keep codec/export commands intact; expose only the chosen output's settings. */

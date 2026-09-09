@@ -57,15 +57,24 @@ export function layerLocked(report, uid) { const state = report._styk?.layers; r
 
 /** Back-to-front grouping preserves the source order within each user layer. */
 export function applyLayerOrder(report, frame) {
-  const state = report._styk?.layers; if (!state || state.order.length < 2) return frame;
-  const order = frame.object_draw_order ?? frame.objects.map((_, slot) => slot), groups = new Map(state.order.map(id => [id, []]));
+  const state = report._styk?.layers;
+  const hasDepth = frame.objects.some(object => object._stykZIndex);
+  if ((!state || state.order.length < 2) && !hasDepth) return frame;
+  const layerOrder = state?.order ?? ['layer-1'];
+  const order = frame.object_draw_order ?? frame.objects.map((_, slot) => slot), groups = new Map(layerOrder.map(id => [id, []]));
   for (const slot of order) {
     const object = frame.objects[slot]; if (!object) throw new Error('Invalid native figure order.');
     const id = layerIdForUid(report, object.unique_id), group = groups.get(id);
     if (!group) throw new Error('Figure references a missing user layer.');
     group.push(slot);
   }
-  const next = []; for (const id of state.order) for (const slot of groups.get(id)) next.push(slot);
+  const next = [];
+  for (const id of layerOrder) {
+    const group = groups.get(id);
+    // Stable ties retain the native pose order; never reorder object slots or joins.
+    if (hasDepth) group.sort((a, b) => (frame.objects[a]._stykZIndex ?? 0) - (frame.objects[b]._stykZIndex ?? 0));
+    for (const slot of group) next.push(slot);
+  }
   if (next.every((slot, index) => slot === order[index])) return frame;
   return {...frame, object_draw_order: next, object_draw_order_unique_ids: next.map(slot => frame.objects[slot].unique_id)};
 }

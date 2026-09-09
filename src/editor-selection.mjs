@@ -19,6 +19,8 @@ function applySelection(editor, ids, preferred = editor.selectedUid) {
 }
 
 function partitionLayers(editor, front) {
+  if (editor.propertyChannels || editor.animationChannels.length || editor.selectionFrame.objects.some(object => object._stykZIndex !== undefined))
+    return editor.applyFigureRange({kind: 'order', direction: front ? 'front' : 'back'}, {ticks: [editor.tick]});
   const before = frameOrder(editor.selectionFrame), groups = new Map();
   for (const uid of before) { const id = editor.layerForUid(uid), group = groups.get(id) ?? {selected: [], others: [], cursor: 0};
     (editor.selectedUids.has(uid) ? group.selected : group.others).push(uid); groups.set(id, group); }

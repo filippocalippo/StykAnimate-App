@@ -9,6 +9,7 @@ import {animationOriginLayout, animationOriginAngle, animationOriginBend, correc
 import {interpolateOriginSupport} from '../animation-origin-support.mjs';
 import {easedProgress, usesLegacyNativeEasing, easingMode, autoValue} from '../keyframe-easing.mjs';
 import {geometryDefinition} from './geometry-definition.mjs';
+import {hasPinnedIK, solveObjectIK, interpolateIK} from '../ik.mjs';
 const authoredTimelines = new WeakMap();
 export function invalidateEvaluationCaches(report) {
   authoredTimelines.delete(report);
@@ -213,6 +214,11 @@ export function evaluatedNativeFrame(report, index, t = 0, tweenCache) {
         const item = objects.get(o.unique_id);
         return item?.figure_type_id === o.figure_type_id ? item : undefined;
       };
+      if (o._stykIK) out._stykIK = interpolateIK(o, next, t, (id, section, key, angular) =>
+        parameter(report, index, t, f => {
+          const controller = matching(f)?._stykIK?.[id];
+          return controller?.enabled && controller.pinned === o._stykIK[id].pinned ? controller[section]?.[key] : undefined;
+        }, angular));
       for (const k of ["root_x", "root_y", "scale"])
         out[k] = parameter(report, index, t, (f) => matching(f)?.[k]);
       if (fig._styk?.animationOrigin && o._stykAnimationOrigin && next._stykAnimationOrigin) {
@@ -433,6 +439,7 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
     }
     let plan = definitionPlans.get(fig);
     if (!plan) {plan = geometryDefinition(fig); definitionPlans.set(fig, plan);}
+    const ik = hasPinnedIK(obj) ? solveObjectIK(fig, obj, root, plan) : null;
     const joints = new Map([[0, root]]),
       renders = new Map(),
       {segments, ids} = plan;
@@ -453,7 +460,7 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
       const start = joints.get(Number(seg.parent_id)) || root,
         rt = obj.runtime_segments?.[i];
       const angle = Number(
-        obj.angles?.[i] ?? rt?.angle_rad ?? seg.angle_rad ?? 0,
+        ik?.angles[i] ?? obj.angles?.[i] ?? rt?.angle_rad ?? seg.angle_rad ?? 0,
       );
       const bend = Number(
         obj.bend_flag
@@ -462,9 +469,9 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
       );
       const length =
         Number(
-          obj.len_flag
+          ik?.lengths?.[i] ?? (obj.len_flag
             ? (obj.lengths?.[i] ?? seg.length)
-            : (rt?.length ?? seg.length ?? 0),
+            : (rt?.length ?? seg.length ?? 0)),
         ) * scale;
       const points = arc(start, angle, length, bend),
         last = points.at(-1) || start,
@@ -589,6 +596,7 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
     });
     const geometry = {
       slot,
+      ...(ik ? {ik: ik.results, solvedAngles: ik.angles, solvedLengths: ik.lengths} : {}),
       obj,
       fig,
       root,

@@ -1,11 +1,14 @@
 import {installColorPickers} from './color-picker.mjs';
+import {animationPropertyState} from './animation-property-state.mjs';
 import {segmentPaint, parseColor, hexColor, backgroundPaint, paintBackground} from './paint.mjs';
+import {resolveInstanceFigure, polygonIdentity} from './animation-style.mjs';
 import { applicationMenuItems } from "./application-menu.mjs";
 import { Editor } from "./editor.mjs";
 import { createRenderer } from "./renderer.mjs";
 import { Timeline } from "./timeline.mjs";
 import { SimpleTimeline } from "./simple-timeline.mjs";
 import { OnionSkinCache } from "./onion-skin.mjs";
+import {hasPinnedIK} from './ik.mjs';
 import { OnionControls } from "./onion-controls.mjs";
 import { ThumbnailRenderer } from "./thumbnail-renderer.mjs";
 import { BackgroundDialog } from "./background-dialog.mjs";
@@ -97,7 +100,7 @@ const $ = (id) => document.getElementById(id),
           "'": "&#39;",
         })[c],
     );
-const editor = new Editor({ demo: true }),
+const editor = new Editor({ demo: true, propertyChannels: true }),
   desktop = window.stykDesktop,
   importer = new ImportClient(),
   documentExporter = new DocumentExporter(),
@@ -486,20 +489,28 @@ function propertyChannel(key) {
     camera_angle: "rotation",
   };
   const figure = {
-    root_x: "x",
-    root_y: "y",
     scale: "scale",
-    rotation: "rotation",
     figure_opacity: "opacity",
     outline_opacity: "outlineOpacity",
+    outline_width: "outlineWidth",
+    figure_color: "color",
+    outline_color: "outlineColor",
+    figure_z_order: "zIndex",
   };
   const segment = {
     segment_opacity: "opacity",
     segment_gradient_opacity: "gradientOpacity",
+    segment_color: "color",
+    segment_paint: "paint",
+    segment_gradient_color: "gradientColor",
+    thickness: "thickness",
   };
   const scene = { scene_color: "color", scene_background: "backgroundId" };
   let target, property, options;
-  if (camera[key]) {
+  const polygon=/^polygon_(\d+)_(color|opacity)$/.exec(key);
+  if (polygon && editor.object && editor.figure?.polyfills?.[Number(polygon[1])]) {
+    const index=Number(polygon[1]);target={kind:'polygon',uid:editor.object.unique_id,polygonId:polygonIdentity(editor.figure.polyfills[index],index),figureTypeId:editor.figure.figure_type_id};property=polygon[2];
+  } else if (camera[key]) {
     target = { kind: "camera" };
     property = camera[key];
   } else if (scene[key]) {
@@ -509,7 +520,7 @@ function propertyChannel(key) {
     target = { kind: "figure", uid: editor.object.unique_id };
     property = figure[key];
   } else if (segment[key] && editor.object && selection().size === 1) {
-    const selected = editor.figure?.segments?.[editor.selectedJoint];
+    const selected = resolveInstanceFigure(editor.figure,editor.object)?.segments?.[editor.selectedJoint];
     if (
       !selected ||
       (key === "segment_gradient_opacity" && !selected.secondary)
@@ -562,12 +573,6 @@ function propertyChannel(key) {
 function propertyState(key) {
   const binding = propertyChannel(key);
   if (!binding || !editor.animationChannel) return {};
-  const channel = editor.animationChannel(
-      binding.target,
-      binding.property,
-      binding.options,
-    ),
-    keys = channel?.keys || [];
   const value = editor.animationValue(
     binding.target,
     binding.property,
@@ -575,11 +580,8 @@ function propertyState(key) {
     binding.options,
   );
   return {
+    ...animationPropertyState(editor, binding.target, binding.property, binding.options),
     value: value === undefined ? undefined : binding.toUI(value),
-    keyed: keys.some((key) => key.tick === editor.tick),
-    animated: keys.length > 0,
-    previous: keys.some((key) => key.tick < editor.tick),
-    next: keys.some((key) => key.tick > editor.tick),
   };
 }
 function selectionBounds() {
@@ -894,10 +896,10 @@ function paintHandle(context, handle, delta) {
   context.beginPath();
   context.arc(p.x, p.y, handle.screenRadius, 0, Math.PI * 2);
   context.fillStyle = handle.color;
-  context.strokeStyle = "#000000";
+  context.strokeStyle = handle.ik ? '#0d99ff' : '#000000';
   context.lineWidth = 1;
   context.fill();
-  if (state.settings.outlineHandles) context.stroke();
+  if (state.settings.outlineHandles || handle.ik) context.stroke();
 }
 function gpuHandlesEnabled() {
   return Boolean(state.renderer?.handleRenderer) && !state.playing && !state.previewing &&
@@ -1373,7 +1375,7 @@ function renderAssets() {
             `<button class="sample-item" data-sample="${esc(s.path)}">${icon(s.kind === "stk" ? "person" : "file")}<span>${esc(s.name)}</span><small>${esc(s.kind?.toUpperCase() || "PIV")}</small></button>`,
         )
         .join("")
-    : '<p class="property-note" style="padding:0 15px">Import any .piv or .stk from your computer.</p>';
+    : '<p class="property-note" style="padding:0 15px">Open .styk projects or import .stkz, .piv and .stk files.</p>';
 }
 function renderInspector() {
   if (propertyControls?.active || (state.drag && state.drag.kind !== "pan"))
@@ -1770,6 +1772,7 @@ overlay.addEventListener(
     if (
       hit.joint >= 0 &&
       hit.g.segments[hit.joint].static &&
+      !hit.g.obj._stykIK?.[hit.g.segments[hit.joint].seg.segment_id]?.enabled &&
       state.tool !== "rig" &&
       state.tool !== "handle-edit" &&
       !state.handleEditHeld
@@ -1808,11 +1811,12 @@ overlay.addEventListener(
       moved: false,
     };
     if (hit.joint < 0 && !handleEdit) {
-      state.drag.geometry = editor.geometry;
       const uids = editor.resolveTranslationSelection().affectedUids;
-      state.drag.translations = new Map(
-        [...uids].map((uid) => [uid, { x: 0, y: 0 }]),
-      );
+      state.drag.ikLive = editor._drag.before.some(hasPinnedIK);
+      if (!state.drag.ikLive) {
+        state.drag.geometry = editor.geometry;
+        state.drag.translations = new Map([...uids].map((uid) => [uid, { x: 0, y: 0 }]));
+      }
     }
     requestRender();
   }),
@@ -1893,8 +1897,8 @@ overlay.addEventListener(
         x: drag.axis === "y" ? 0 : dx,
         y: drag.axis === "x" ? 0 : dy,
       };
-      for (const uid of drag.translations.keys())
-        drag.translations.set(uid, delta);
+      if (drag.ikLive) { drag.delta = delta; editor.moveSelection(delta.x, delta.y, {fromStart: true}); }
+      else for (const uid of drag.translations.keys()) drag.translations.set(uid, delta);
     } else if (drag.kind === "handle-edit")
       editor.editHandlePosition(p.x, p.y, { bend: drag.bend });
     else if (drag.kind === "figure-transform")
@@ -1982,11 +1986,11 @@ function endDrag() {
   } else if (drag.kind === "camera") editor.commitCameraDrag();
   else if (drag.kind !== "pan") {
     if (drag.kind === "move" && drag.moved) {
-      const delta = drag.translations.get(editor.selectedUid);
+      const delta = drag.ikLive ? drag.delta : drag.translations.get(editor.selectedUid);
       if (rangeFrames()) {
         editor.cancelDrag();
         moveSelected(delta.x, delta.y);
-      } else editor.moveSelection(delta.x, delta.y, { fromStart: true });
+      } else if (!drag.ikLive) editor.moveSelection(delta.x, delta.y, { fromStart: true });
     }
     editor.commitDrag();
   }
@@ -2119,7 +2123,7 @@ async function acceptImport(
     ((name || result.filename || "").toLowerCase().endsWith(".stk")
       ? "stk"
       : "piv");
-  if (kind === "stk") {
+  if (kind === "stk" || kind === "stkz") {
     finishCurrentEdit();
     editor.importFigure(report);
     status(`Imported ${result.filename || name || "figure"}`);
@@ -2137,7 +2141,7 @@ async function acceptImport(
       await editor.loadAsync(
         report,
         (name || result.filename || "Untitled").replace(
-          /\.(piv|stk|styk|json)$/i,
+          /\.(piv|stk|styk|stkz|json)$/i,
           "",
         ),
         {
@@ -2465,7 +2469,7 @@ async function exportPivot(format = "piv") {
   finishCurrentEdit();
   interruptRecovery();
   status(`Writing .${format}…`, false, true);
-  const filename = `${format === "stk" ? nameOf(editor.object) : editor.name || "Untitled"}.${format}`;
+  const filename = `${["stk", "stkz"].includes(format) ? nameOf(editor.object) : editor.name || "Untitled"}.${format}`;
   let saved;
   try {
     saved = await runDocumentExport(format, (blob, signal) =>
@@ -2481,7 +2485,7 @@ async function exportPivot(format = "piv") {
   if (saved) {
     status(`Exported .${format}`);
     toast(
-      `Your ${format === "stk" ? "figure" : "animation"} was exported as .${format}.`,
+      `Your ${["stk", "stkz"].includes(format) ? "figure" : "animation"} was exported as .${format}.`,
     );
   }
   closeDialog();
@@ -2841,7 +2845,7 @@ function showExport() {
   vfwExportControls?.dispose();
   showDialog(
     "Export your animation",
-    `<details class="export-settings"><summary>Render settings <span>${editor.report.canvas_width} × ${editor.report.canvas_height} · ${editor.totalTicks} frames</span></summary><div class="text-options"><label>Width<input id="export-width" type="number" min="1" value="${editor.report.canvas_width}"></label><label>Height<input id="export-height" type="number" min="1" value="${editor.report.canvas_height}"></label><label class="check-row"><input type="checkbox" id="export-aspect" checked>Lock ratio</label></div><div class="text-options"><label>First frame<input id="export-start" type="number" min="1" max="${editor.totalTicks}" value="1"></label><label>Last frame<input id="export-end" type="number" min="1" max="${editor.totalTicks}" value="${editor.totalTicks}"></label><label>Lossy quality %<input id="export-quality" type="number" min="1" max="100" value="94"></label></div></details><div class="export-grid"><button class="export-option" data-action="export-piv">${icon("file")}<span><strong>Pivot animation</strong><small>.piv · Editable animation and media</small></span></button><button class="export-option" data-action="export-stk" ${editor.object ? "" : "disabled"}>${icon("person")}<span><strong>Selected figure</strong><small>.stk · Reusable Pivot figure</small></span></button><button class="export-option" data-action="export-png">${icon("frame")}<span><strong>Current frame</strong><small>.png · Full canvas resolution</small></span></button><button class="export-option" data-action="export-svg">${icon("nodes")}<span><strong>Vector frame</strong><small>.svg · Editable paths and embedded media</small></span></button><button class="export-option" data-action="export-video">${icon("play")}<span><strong>Animation video</strong><small>.webm · Exact frame timing</small></span></button><button class="export-option" data-action="export-gif">${icon("loop")}<span><strong>Animated GIF</strong><small>.gif · Looping animation</small></span></button><button class="export-option" data-action="export-apng">${icon("frame")}<span><strong>Animated PNG</strong><small>.png · Lossless color and transparency</small></span></button><button class="export-option" data-action="export-png-sequence">${icon("duplicate")}<span><strong>PNG sequence</strong><small>.zip · Numbered lossless frames</small></span></button><button class="export-option" data-action="export-jpeg-sequence">${icon("duplicate")}<span><strong>JPEG sequence</strong><small>.zip · Numbered compact frames</small></span></button></div>`,
+    `<details class="export-settings"><summary>Render settings <span>${editor.report.canvas_width} × ${editor.report.canvas_height} · ${editor.totalTicks} frames</span></summary><div class="text-options"><label>Width<input id="export-width" type="number" min="1" value="${editor.report.canvas_width}"></label><label>Height<input id="export-height" type="number" min="1" value="${editor.report.canvas_height}"></label><label class="check-row"><input type="checkbox" id="export-aspect" checked>Lock ratio</label></div><div class="text-options"><label>First frame<input id="export-start" type="number" min="1" max="${editor.totalTicks}" value="1"></label><label>Last frame<input id="export-end" type="number" min="1" max="${editor.totalTicks}" value="${editor.totalTicks}"></label><label>Lossy quality %<input id="export-quality" type="number" min="1" max="100" value="94"></label></div></details><div class="export-grid"><button class="export-option" data-action="export-stkz" ${editor.object ? "" : "disabled"}>${icon("person")}<span><strong>StykAnimate figure</strong><small>.stkz · Compact editable figure</small></span></button><button class="export-option" data-action="export-piv">${icon("file")}<span><strong>Pivot animation</strong><small>.piv · Editable animation and media</small></span></button><button class="export-option" data-action="export-stk" ${editor.object ? "" : "disabled"}>${icon("person")}<span><strong>Pivot figure</strong><small>.stk · Reusable Pivot figure</small></span></button><button class="export-option" data-action="export-png">${icon("frame")}<span><strong>Current frame</strong><small>.png · Full canvas resolution</small></span></button><button class="export-option" data-action="export-svg">${icon("nodes")}<span><strong>Vector frame</strong><small>.svg · Editable paths and embedded media</small></span></button><button class="export-option" data-action="export-video">${icon("play")}<span><strong>Animation video</strong><small>.webm · Exact frame timing</small></span></button><button class="export-option" data-action="export-gif">${icon("loop")}<span><strong>Animated GIF</strong><small>.gif · Looping animation</small></span></button><button class="export-option" data-action="export-apng">${icon("frame")}<span><strong>Animated PNG</strong><small>.png · Lossless color and transparency</small></span></button><button class="export-option" data-action="export-png-sequence">${icon("duplicate")}<span><strong>PNG sequence</strong><small>.zip · Numbered lossless frames</small></span></button><button class="export-option" data-action="export-jpeg-sequence">${icon("duplicate")}<span><strong>JPEG sequence</strong><small>.zip · Numbered compact frames</small></span></button></div>`,
   );
   $("dialog-content")
     .querySelector(".export-settings")
@@ -2908,6 +2912,7 @@ function showExport() {
   const singleFrameActions = new Set([
     "export-piv",
     "export-stk",
+    "export-stkz",
     "export-png",
     "export-svg",
   ]);
@@ -3311,6 +3316,7 @@ const actions = {
   export: showExport,
   "export-piv": () => exportPivot(),
   "export-stk": () => exportPivot("stk"),
+  "export-stkz": () => exportPivot("stkz"),
   "export-png": exportPNG,
   "export-video": () => exportVideo(),
   "export-mp4": () => exportVideo("mp4"),
@@ -3747,7 +3753,8 @@ document.addEventListener(
         if (e.ctrlKey || e.metaKey) return previewFrame();
       }
       if (action.dataset.action !== "menu") $("menu").hidden = true;
-      return actions[action.dataset.action]?.(action, e);
+      const name = e.shiftKey ? action.dataset.shiftAction ?? action.dataset.action : action.dataset.action;
+      return actions[name]?.(action, e);
     }
     if (!$("menu").contains(e.target)) $("menu").hidden = true;
     const tool = e.target.closest("[data-tool]");
@@ -3816,6 +3823,12 @@ $("inspector").addEventListener(
       state.rigMode = target.value;
       return;
     }
+    if (target.id === 'node-is-ik') { editor.setNodeIK({enabled: target.checked}); return; }
+    if (target.id === 'node-ik-pinned') { editor.setNodeIK({pinned: target.checked}); return; }
+    if (target.id === 'node-ik-chain') { editor.setNodeIK({chainLength: target.valueAsNumber}); return; }
+    if (target.id === 'node-ik-rotation') { editor.rotateIKTarget(target.valueAsNumber * Math.PI / 180); return; }
+    if (target.id === 'node-ik-stretch') { editor.setNodeIK({allowStretch: target.checked}); return; }
+    if (target.name === 'node-ik-bend') { editor.setNodeIK({bendDirection: Number(target.value)}); return; }
     if (target.id === "apply-range-movement") {
       state.applyRange = target.checked;
       return;
@@ -4987,11 +5000,17 @@ async function performClipboardOperation(kind, execute) {
 }
 function mountTimeline() {
   pause();
+  finishKeyboardHandle();
+  propertyControls?.commit();
+  if (editor._animationEdit) editor.commitAnimationEdit();
+  if (editor.dragging) editor.commitDrag();
+  if (state.settings.timelineMode === "advanced") editor.disableFrameDrafts();
+  state.rangeIndices = [];
+  state.loopRange = null;
   timelineUI?.destroy();
   $("timeline").replaceChildren();
   const TimelineClass =
     state.settings.timelineMode === "simple" ? SimpleTimeline : Timeline;
-  if (state.settings.timelineMode === "advanced") editor.disableFrameDrafts();
   timelineUI = new TimelineClass($("timeline"), editor, {
     runClipboardOperation,
     confirmDiscardFrame: () =>
@@ -5091,13 +5110,15 @@ async function init() {
     localization: appLocalization.localization,
     onChange: (patch, next) => {
       const previousMode = state.settings.timelineMode;
+      const previousSettings = state.settings;
       state.settings = next;
+      try { if (previousMode !== next.timelineMode) mountTimeline(); }
+      catch (error) { state.settings = previousSettings; throw error; }
       onionControls?.sync();
       state.handles = next.showHandles;
       state.loop = next.loopPlayback;
       appLocalization.setLocale(next.locale);
       blueHandles = null;
-      if (previousMode !== next.timelineMode) mountTimeline();
       scheduleRecovery();
       requestRender();
       queueUI();
@@ -5157,18 +5178,18 @@ async function init() {
           : propertyChannel(key);
       if (
         binding &&
-        editor.animationChannel(
+        (editor.propertyChannels || binding.property === 'zIndex' || editor.animationChannel(
           binding.target,
           binding.property,
           binding.options,
-        )
+        )?.keys.length)
       ) {
         editor.beginAnimationEdit(
           binding.target,
           binding.property,
           binding.options,
         );
-        return { binding };
+        return { binding, indices:rangeFrames() };
       }
       return {
         native: beginNativePropertyEdit(editor, key, {
@@ -5185,8 +5206,11 @@ async function init() {
       else previewNativePropertyEdit(token.native, value);
       requestRender();
     },
-    commit: ({ token }) => {
-      if (token.binding) editor.commitAnimationEdit();
+    commit: ({ token, value }) => {
+      if (token.binding && token.indices?.length > 1) {
+        editor.cancelAnimationEdit();editor.addAnimationKeys(token.indices.map(index=>({target:token.binding.target,property:token.binding.property,
+          tick:editor.timeline[index].start,value:token.binding.fromUI(value),...token.binding.options})));
+      } else if (token.binding) editor.commitAnimationEdit();
       else commitNativePropertyEdit(token.native);
       queueUI();
     },
@@ -5205,7 +5229,7 @@ async function init() {
           binding.property,
           binding.options,
         ),
-        existing = channel?.keys.find((key) => key.tick === editor.tick);
+        existing = channel?.keys.find((key) => key.tick === editor.tick && !key.hidden && !key.passthrough);
       if (existing)
         editor.deleteAnimationKeys([
           { channelId: channel.id, keyIds: [existing.id] },
@@ -5226,15 +5250,8 @@ async function init() {
       queueUI();
     },
     navigate: ({ key, direction }) => {
-      const binding = propertyChannel(key);
-      if (!binding) return;
-      const next = editor.nearestAnimationKey(
-        binding.target,
-        binding.property,
-        direction,
-        editor.tick,
-        binding.options,
-      );
+      const info = propertyState(key);
+      const next = direction < 0 ? info.previousKey : info.nextKey;
       if (next) {
         pause();
         editor.seek(next.tick);
@@ -5338,7 +5355,7 @@ init().catch((error) => {
 installColorPickers((input, event) => {
   if (input.id === 'segment-color') {
     const uid=editor.selectedUid, joint=editor.selectedJoint, figure=editor.figure;
-    return {anchor:input, paint:segmentPaint(figure.segments[joint]), onChange:paint=>{
+    return {anchor:input, paint:segmentPaint(resolveInstanceFigure(figure,editor.object).segments[joint]), onChange:paint=>{
       if(editor.selectedUid!==uid || editor.selectedJoint!==joint || editor.figure!==figure) throw new Error('Selection changed. Reopen the color picker.');
       pause(); updateBuilderStyle({paint},event);
     }};
@@ -5350,8 +5367,8 @@ installColorPickers((input, event) => {
       else editor.importSceneBackground({...paintBackground(paint),name:paint.type+' gradient'},{indices:rangeFrames()});
     }};
   }
-  if(input.id==='outline-color')return {anchor:input,gradients:false,paint:{type:'solid',stops:[{offset:0,color:parseColor(input.value).color,opacity:1-(editor.figure?.segment_decode?.global_style?.u30??0)/255}]},onChange:paint=>editor.updateFigureStyle({outlineColor:paint.stops[0].color,outlineOpacity:paint.stops[0].opacity})};
-  if(input.dataset.polygonColor!==undefined){const index=Number(input.dataset.polygonColor),p=editor.figure.polyfills[index];return {anchor:input,gradients:false,paint:{type:'solid',stops:[{offset:0,color:p.color_rgb,opacity:p.alpha_raw!==undefined?1-p.alpha_raw/255:p.color_alpha??1}]},onChange:paint=>editor.updatePolygon(index,{color:paint.stops[0].color,opacity:paint.stops[0].opacity})};}
+  if(input.id==='outline-color')return {anchor:input,gradients:false,paint:{type:'solid',stops:[{offset:0,color:parseColor(input.value).color,opacity:1-(resolveInstanceFigure(editor.figure,editor.object)?.segment_decode?.global_style?.u30??0)/255}]},onChange:paint=>editor.updateFigureStyle({outlineColor:paint.stops[0].color,outlineOpacity:paint.stops[0].opacity})};
+  if(input.dataset.polygonColor!==undefined){const index=Number(input.dataset.polygonColor),p=resolveInstanceFigure(editor.figure,editor.object).polyfills[index];return {anchor:input,gradients:false,paint:{type:'solid',stops:[{offset:0,color:p.color_rgb,opacity:p.alpha_raw!==undefined?1-p.alpha_raw/255:p.color_alpha??1}]},onChange:paint=>editor.updatePolygon(index,{color:paint.stops[0].color,opacity:paint.stops[0].opacity})};}
   const pairs = {'background-first':'background-alpha','background-second':'background-alpha-b','text-color':'text-opacity','figure-color':'figure-opacity'};
   const opacityId=pairs[input.id], opacity=opacityId && document.getElementById(opacityId);
   if(opacity) return {anchor:input,paint:{type:'solid',stops:[{offset:0,color:parseColor(input.value).color,opacity:Number(opacity.value)/100}]},gradients:false,onChange:paint=>{

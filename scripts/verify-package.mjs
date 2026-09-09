@@ -66,7 +66,7 @@ if (!snapshot) {
   const sidecarBinary = process.platform === 'win32' ? 'styk-codec.exe' : 'styk-codec';
   for (const [relative, sourcePath] of [
     ['backend/server.py', path.join(appRoot, 'backend', 'server.py')],
-    ...['fast_decode.py','import_wire.py','native_scan.py'].map(filename=>[`backend/${filename}`,path.join(appRoot,'backend',filename)]),
+    ...['fast_decode.py','import_wire.py','native_scan.py','native_format.py'].map(filename=>[`backend/${filename}`,path.join(appRoot,'backend',filename)]),
     ['codec_bridge.py', path.join(appRoot, '..', 'StykAnimate', 'tools', 'codec_bridge.py')],
     ['sidecar/build-info.json', path.join(appRoot, 'build', 'sidecar', 'build-info.json')],
     [`sidecar/styk-codec/${sidecarBinary}`, path.join(appRoot, 'build', 'sidecar', 'styk-codec', sidecarBinary)],

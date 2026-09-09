@@ -253,14 +253,41 @@ export function planFigureFrameOperation(report, frame, uids, input) {
   }
   if (operation.kind === 'order') {
     const before = nativeOrder(frame), groups = new Map();
+    let ranks;
     for (const slot of before) {
       const layer = layerIdForUid(report, objects[slot].unique_id), group = groups.get(layer) ?? {order: [], cursor: 0};
       group.order.push(slot); groups.set(layer, group);
     }
-    for (const group of groups.values()) group.order = movedOrder(group.order, selected, operation.direction);
+    for (const group of groups.values()) {
+      const depths = group.order.map(slot => objects[slot]._stykZIndex ?? 0);
+      const moved = movedOrder(group.order, selected, operation.direction);
+      if (moved.every((slot, index) => slot === group.order[index])) continue;
+      group.order = moved;
+      if (operation.numericOrder) {
+        // Independent figure poses can override a layer's native paint order.
+        // Separate reordered ties, retaining equal values for unchanged runs.
+        // Work in the movement direction so front/back usually key only selection.
+        ranks ??= new Map(before.map((slot, index) => [slot, index]));
+        const gap = (a, b) => Number(ranks.get(a) > ranks.get(b) || (objects[a]._stykZIndex ?? 0) !== (objects[b]._stykZIndex ?? 0));
+        if (operation.direction === 'back' || operation.direction < 0)
+          for (let i = depths.length - 2; i >= 0; i--) depths[i] = Math.min(depths[i], depths[i + 1] - gap(group.order[i], group.order[i + 1]));
+        else for (let i = 1; i < depths.length; i++) depths[i] = Math.max(depths[i], depths[i - 1] + gap(group.order[i - 1], group.order[i]));
+        const overflow = Math.max(0, depths.at(-1) - 1000000);
+        if (overflow) for (let i = 0; i < depths.length; i++) depths[i] -= overflow;
+        const underflow = Math.max(0, -1000000 - depths[0]);
+        if (underflow && depths.at(-1) + underflow <= 1000000) for (let i = 0; i < depths.length; i++) depths[i] += underflow;
+        if (depths[0] < -1000000) {
+          if (depths.length > 2000001) throw new Error('Too many figures to assign distinct Z-index values in this layer.');
+          for (let i = 0; i < depths.length; i++) depths[i] = i - Math.floor(depths.length / 2);
+        }
+      }
+      group.order.forEach((slot, index) => {
+        if ((objects[slot]._stykZIndex ?? 0) !== depths[index]) patchObject(slot, {_stykZIndex: depths[index]});
+      });
+    }
     const after = before.map(slot => { const group = groups.get(layerIdForUid(report, objects[slot].unique_id)); return group.order[group.cursor++]; });
-    const changedUids = after.filter((slot, index) => slot !== before[index]).map(slot => objects[slot].unique_id);
-    return changedUids.length ? {frame: {...frame, object_draw_order: after, object_draw_order_unique_ids: after.map(slot => objects[slot].unique_id)},
+    const changedUids = [...new Set([...after.filter((slot, index) => slot !== before[index]), ...changes.keys()])].map(slot => objects[slot].unique_id);
+    return changedUids.length ? {frame: {...frame, ...(changes.size ? {objects: objects.map((object, slot) => changes.get(slot) ?? object)} : {}), object_draw_order: after, object_draw_order_unique_ids: after.map(slot => objects[slot].unique_id)},
       changedUids, structural: true} : null;
   }
   if (operation.kind === 'delete') {

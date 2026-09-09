@@ -34,7 +34,7 @@ test('native STYK activation consumes its open token and exposes only the basena
 
 test('PIV, STK, and JSON native opens activate documents without a save target', () => {
   const files = new ProjectFiles();
-  for (const filename of ['animation.piv', 'figure.stk', 'decoded.json', 'ANIMATION.PIV', 'FIGURE.STK']) {
+  for (const filename of ['animation.piv', 'figure.stk', 'native.stkz', 'NATIVE.STKZ', 'decoded.json', 'ANIMATION.PIV', 'FIGURE.STK']) {
     const previous = files.activate({ openToken: files.rememberOpen(nativePath('previous.styk')) });
     const openToken = files.rememberOpen(nativePath(filename));
     assert.equal(openToken, null);

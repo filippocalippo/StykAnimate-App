@@ -2,13 +2,13 @@ import {keyEasing} from './keyframe-easing.mjs';
 /** A uniform scalar edit across one selected branch. Native definitions remain
  * shared unless an authored/captured style already owns an affected value. */
 import {animationChannels,animationChannelId,validateAnimationValue} from './animation-channels.mjs';
-import {nativeSegmentOpacity} from './animation-style.mjs';
+import {animationStyleValue, polygonIdentity, resolveInstanceFigure} from './animation-style.mjs';
 import {branchSegmentIndices} from './editor-builder-branch.mjs';
 
-const properties={segment_opacity:'opacity',segment_gradient_opacity:'gradientOpacity'};
+const properties={segment_opacity:'opacity',segment_gradient_opacity:'gradientOpacity',thickness:'thickness'};
 export function branchOpacityPlan(editor,key) {
   const property=properties[key],figure=editor.figure,object=editor.object;
-  if(!property||!figure||!object)return null;
+  if(!property||!figure||!object||(property==='thickness'&&!editor.propertyChannels))return null;
   const scoped=new Set(),overridden=new Set();
   for(const channel of animationChannels(editor.report)){
     const target=channel.target;
@@ -16,14 +16,22 @@ export function branchOpacityPlan(editor,key) {
     if(target.figureTypeId!==undefined)scoped.add(target.handleId);
     if(target.figureTypeId===undefined||target.figureTypeId===figure.figure_type_id)overridden.add(target.handleId);
   }
-  let authored=false;
-  const entries=[];
+  let authored=Boolean(editor.propertyChannels);
+  const entries=[], resolved=resolveInstanceFigure(figure,object);
   for(const index of branchSegmentIndices(figure,editor.selectedJoint)){
-    const segment=figure.segments[index];if(property==='gradientOpacity'&&!segment.secondary)continue;
+    const segment=resolved.segments[index];if(property==='gradientOpacity'&&!segment.secondary)continue;
     const handleId=Number(segment.segment_id),captured=object._stykStyle?.segments?.[handleId]?.[property];
     authored ||= overridden.has(handleId)||Number.isFinite(captured);
-    const target={kind:'segment',uid:object.unique_id,handleId,...(scoped.has(handleId)?{figureTypeId:figure.figure_type_id}:{})};
-    entries.push({target,index,initialValue:Number.isFinite(captured)?captured:property==='opacity'?nativeSegmentOpacity(segment):1-Number(segment.secondary.a??0)/255});
+    const target={kind:'segment',uid:object.unique_id,handleId,...(editor.propertyChannels||scoped.has(handleId)?{figureTypeId:figure.figure_type_id}:{})};
+    entries.push({target,index,initialValue:animationStyleValue(figure,object,target,property)});
+  }
+  if(editor.propertyChannels && property==='opacity') {
+    const handles=new Set(entries.map(entry=>entry.target.handleId));handles.add(figure.segments[editor.selectedJoint]?.parent_id);
+    figure.polyfills?.forEach((polygon,index)=>{
+      if(!polygon.segment_ids?.every(id=>handles.has(id)))return;
+      const target={kind:'polygon',uid:object.unique_id,polygonId:polygonIdentity(polygon,index),figureTypeId:figure.figure_type_id};
+      entries.push({target,index,initialValue:animationStyleValue(figure,object,target,'opacity')});
+    });
   }
   return entries.length?{property,entries,authored,uid:object.unique_id}:null;
 }
@@ -49,7 +57,8 @@ export function beginBranchStyleAnimation(editor,plan) {
   const indices=new Map(after.channels.map((channel,index)=>[channel.id,index])),entries=[],keys=[],channelIds=[];
   for(const source of plan.entries){
     const target={...source.target},property=plan.property,id=animationChannelId(target,property),index=indices.get(id),original=index===undefined?null:after.channels[index];
-    const channel=original?{...original,target:{...original.target},keys:original.keys.map(key=>({...key}))}:{id,target,property,keys:[]};
+    const baseline=original ?? (editor.propertyChannels ? editor.nativePropertyChannel(target,property) : null);
+    const channel=baseline?{...baseline,target:{...baseline.target},keys:baseline.keys.map(key=>({...key}))}:{id,target,property,keys:[]};
     if(index===undefined){indices.set(id,after.channels.length);after.channels.push(channel);}else after.channels[index]=channel;
     let key=channel.keys.find(key=>key.tick===editor.tick&&!key.hidden);
     if(!key){

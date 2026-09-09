@@ -17,7 +17,7 @@ module.exports = async function beforePack(context) {
     throw new Error(`Codec ${manifest.platform}/${manifest.architecture} cannot be packaged for ${context.electronPlatformName}/${architecture}. Build the sidecar on the target OS and architecture.`);
   }
   if (manifest.orjson !== '3.12.0') throw new Error('The desktop release requires the pinned orjson 3.12.0 sidecar.');
-  for (const filename of ['server.py','fast_decode.py','import_wire.py','native_scan.py']) {
+  for (const filename of ['server.py','fast_decode.py','import_wire.py','native_scan.py','native_format.py']) {
     if (manifest.runtimeSources?.[filename] !== hash(await fs.readFile(path.join(appRoot,'backend',filename))))
       throw new Error(`The frozen codec is stale for ${filename}; run npm run build:sidecar.`);
   }

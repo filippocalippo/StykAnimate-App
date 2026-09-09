@@ -1,4 +1,6 @@
 import {normalizePaint} from './paint.mjs';
+import {styleColor, polygonIdentity, resolveInstanceFigure, animationStyleValue} from './animation-style.mjs';
+import {segmentPaint} from './paint.mjs';
 /** Native Shift operations. Styles journal small fields; topology is committed
  * once across every source pose. See artifacts/native-static/builder-branch-rules.md. */
 import {builderDrawables} from './editor-builder-style.mjs';
@@ -196,6 +198,40 @@ export const editorBuilderBranchMethods = {
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Choose a segment style patch.');
     const {shape, ...style} = patch, targets = branch(figure, selected, whole, 'color' in patch || 'opacity' in patch);
     const changes = stylePatch(figure, selected, style, targets);
+    if (this.propertyChannels && this.object && !('shape' in patch) && !('static' in patch)) {
+      const entries = [];
+      for (const index of targets.indices) {
+        const target = {kind:'segment',uid:this.object.unique_id,handleId:figure.segments[index].segment_id,figureTypeId:figure.figure_type_id};
+        let values={...patch};
+        if ('gradient' in values && !('paint' in values)) {
+          const paint=segmentPaint(resolveInstanceFigure(figure,this.object).segments[index]);
+          if (!values.gradient) {paint.type='solid';paint.stops=[paint.stops[0]];}
+          else {paint.type=paint.type === 'solid' ? 'linear' : paint.type;paint.stops=[paint.stops[0],{offset:1,color:rgb(values.gradient.color ?? '#ffffff'),opacity:values.gradient.opacity ?? 1}];}
+          values.paint=paint;
+        }
+        delete values.gradient;
+        if (values.paint) {
+          const paint=normalizePaint(values.paint);values={...values,paint,color:paint.stops[0].color,opacity:paint.stops[0].opacity};
+          if(paint.type !== 'solid') {values.gradientColor=styleColor(paint.stops.at(-1).color);values.gradientOpacity=paint.stops.at(-1).opacity;}
+          const current=segmentPaint(resolveInstanceFigure(figure,this.object).segments[index]);
+          const layout=p=>JSON.stringify({...p,stops:p.stops.map((stop,i)=>i===0||i===p.stops.length-1?{offset:stop.offset}:stop)});
+          if(layout(paint)===layout(current))delete values.paint;
+          else {
+            values.paint={...paint,stops:paint.stops.map(stop=>({...stop}))};
+            Object.assign(values.paint.stops[0],{color:current.stops[0].color,opacity:current.stops[0].opacity});
+            if(paint.type!=='solid')Object.assign(values.paint.stops.at(-1),{color:current.stops.at(-1).color,opacity:current.stops.at(-1).opacity});
+          }
+        }
+        for (const [property,raw] of Object.entries(values)) {
+          const value=property === 'color' ? styleColor(rgb(raw)) : raw;
+          if(JSON.stringify(value)!==JSON.stringify(animationStyleValue(figure,this.object,target,property)))entries.push({target,property,value});
+        }
+      }
+      for (const index of targets.polygons) for (const property of ['color','opacity']) if (property in patch) entries.push({
+        target:{kind:'polygon',uid:this.object.unique_id,polygonId:polygonIdentity(figure.polyfills[index],index),figureTypeId:figure.figure_type_id},property,
+        value:property === 'color' ? styleColor(rgb(patch[property])) : patch[property]});
+      return this.addAnimationKeys(entries);
+    }
     if ('shape' in patch) {
       if (whole) throw new Error('Use the branch caps or circle-fill command to change shape.');
       if ([2, 5].includes(code(figure.segments[selected]))) throw new Error('Image and text segments retain their media type.');
@@ -215,6 +251,13 @@ export const editorBuilderBranchMethods = {
   },
   changeBranchThickness(delta) {
     finite(delta, 'Thickness change'); if (!this.figure?.segments[this.selectedJoint]) return false;
+    if(this.propertyChannels) {
+      const figure=this.figure,object=this.object,resolved=resolveInstanceFigure(figure,object);
+      return this.addAnimationKeys(branchSegmentIndices(figure,this.selectedJoint).map(index=>({
+        target:{kind:'segment',uid:object.unique_id,handleId:figure.segments[index].segment_id,figureTypeId:figure.figure_type_id},
+        property:'thickness',value:Math.fround(Math.min(1000,Math.max(0,resolved.segments[index].thickness+delta))),
+      })));
+    }
     const entries = [];
     for (const index of branchSegmentIndices(this.figure, this.selectedJoint)) {
       const segment = this.figure.segments[index], value = Math.fround(Math.min(1000, Math.max(0, segment.thickness + delta)));

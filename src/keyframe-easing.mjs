@@ -1,4 +1,5 @@
 /** One outgoing timing curve per key. Native Pivot auto curves are import-only. */
+import {isDiscreteAnimationProperty} from './animation-properties.mjs';
 export const DEFAULT_BEZIER = Object.freeze([0.42, 0, 0.58, 1]);
 const EASE_IN = Object.freeze([0.42, 0, 1, 1]), EASE_OUT = Object.freeze([0, 0, 0.58, 1]);
 export const EASING_MODES = Object.freeze([
@@ -16,7 +17,7 @@ export function validateKeyEasing(key, property) {
   if (key?.bezier !== undefined && (easingMode(key) !== 'bezier' || !Array.isArray(key.bezier) || key.bezier.length !== 4 ||
     !key.bezier.every(value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1)))
     throw new Error('Bezier requires four control coordinates between 0 and 1.');
-  if (property === 'backgroundId' && easingMode(key) !== 'constant') throw new Error('Background identities use Constant easing.');
+  if (isDiscreteAnimationProperty(property) && easingMode(key) !== 'constant') throw new Error(`${property === 'paint' ? 'Gradient layouts' : property === 'zIndex' ? 'Z-index values' : 'Background identities'} use Constant easing.`);
   return key;
 }
 /** Canonical fields for writes/copies. `hold` is a read-compatible legacy alias. */

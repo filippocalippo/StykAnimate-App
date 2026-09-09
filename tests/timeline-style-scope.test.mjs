@@ -37,7 +37,7 @@ test('collapsed scoped segment rows retain exact lookup, target identity and spa
   assert.equal(projection.byId.get('segment:7:1@2').name,'Segment 1 · Beta rig');
   assert.equal(projection.byId.get(`channel:${animationChannelId(targetA,'gradientOpacity')}`),undefined);
   for(const id of ['segment:7:1@0','segment:7:1@01','segment:7:1@2@3','segment:7:1@nope','segment:7:1@2:extra']) assert.equal(projection.byId.get(id),undefined);
-  assert.ok(projection.byId.size<12,'Direct lookup does not allocate unrelated figures or properties');
+  assert.ok([...projection.byId.values()].every(row=>row.kind!=='figure'&&(row.target?.uid===undefined||row.target.uid===7)), 'Direct lookup does not allocate unrelated figures');
 });
 
 test('expanded mixed-rig scopes are separate rows without duplicate base placeholders or shared keys', () => {
@@ -47,8 +47,8 @@ test('expanded mixed-rig scopes are separate rows without duplicate base placeho
   assert.deepEqual(segments.map(row=>row.id),['segment:7:1@1','segment:7:1@2']);
   assert.deepEqual(segments[0].keys.map(key=>key.tick),[1]);
   assert.deepEqual(segments[1].keys.map(key=>key.tick),[6,7]);
-  assert.equal(projection.tracks.filter(row=>row.parentId==='segment:7:1@1').length,1);
-  assert.equal(projection.tracks.filter(row=>row.parentId==='segment:7:1@2').length,2);
+  assert.equal(projection.tracks.filter(row=>row.parentId==='segment:7:1@1').length,4);
+  assert.equal(projection.tracks.filter(row=>row.parentId==='segment:7:1@2').length,6);
   assert.equal(projection.tracks.filter(row=>row.kind==='segment'&&row.handleId===2).length,1,'Unkeyed base handles retain one row');
   assert.equal(new Set(projection.tracks.map(row=>row.id)).size,projection.tracks.length);
   const global=channel(targetGlobal,'opacity',3,'global');

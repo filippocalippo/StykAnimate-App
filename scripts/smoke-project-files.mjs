@@ -37,7 +37,10 @@ try {
   await page.evaluate(async () => {
     const response = await fetch('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ document: window.styk.editor.serialize(), format: 'styk' }) });
     if (!response.ok) throw new Error('Could not create a valid native project fixture.');
-    window.__projectBase = JSON.parse(await response.text());
+    const {ImportClient} = await import('/src/import-client.mjs');
+    const importer = new ImportClient();
+    try { window.__projectBase = (await importer.importFile(new File([await response.blob()], 'fixture.styk'))).document; }
+    finally { importer.dispose(); }
     window.__saveHelper = (await import('/src/native-files.mjs')).writeNativeBlob;
     window.__projectSession = await window.stykDesktop.activateDocument({});
   });

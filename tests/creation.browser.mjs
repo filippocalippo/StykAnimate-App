@@ -1,3 +1,4 @@
+import {readNativeDocument} from '../scripts/read-native-document.mjs';
 /** Real editor UI regression for multi-selection, portable text, and persistence. */
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
@@ -133,7 +134,7 @@ try {
   await page.evaluate(textUid => styk.editor.select(textUid), textUid);
   await page.screenshot({path: path.join(out, 'creation-text-ui.png')});
   const nativePath = await saveDownload(() => page.locator('[data-action="save"]').first().click(), 'creation-authored.styk');
-  const native = JSON.parse(await readFile(nativePath, 'utf8')), doc = native.document || native;
+  const native = await readNativeDocument(nativePath), doc = native.document || native;
   check('Actual native save contains editable text options and embedded glyphs', doc.figure_types.some(f => f._styk?.textAuthoring?.text === 'Move together\nCafé • Привет' && f.text_assets[0].glyphs.length > 0));
   check('Native save contains joined groups and both animation frames', doc.keyframes.length === 2 && doc.keyframes[0].objects.filter(o => o.join).length === 2);
   await page.locator('#file-input').setInputFiles(nativePath); await page.waitForFunction(() => styk.editor.name === 'creation-authored');

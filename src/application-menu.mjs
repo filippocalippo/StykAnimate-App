@@ -11,6 +11,7 @@ export function applicationMenuItems(name, editor, desktop) {
       null,
       ['save', 'save', 'Save', 'Ctrl S'],
       ['save-as', 'save', 'Save as…', 'Ctrl Shift S'],
+      ['export-stkz', 'person', 'Save figure…', '', noFigure],
       ['rename', 'file', 'Rename project…'],
       null,
       ['import', 'import', 'Import figures…'],

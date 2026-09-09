@@ -35,6 +35,9 @@ import {invalidateAnimationOriginLayout,animationOriginOffset,animationRotation,
 import {repairOriginSupport} from './editor-origin-support.mjs';
 import {rotateOriginSupport,mirrorOriginSupport,resetOriginSupport} from './animation-origin-support.mjs';
 import {applySparseClipboardFrames} from './editor-clipboard-sparse.mjs';
+import {animationHistoryBytes} from './animation-history.mjs';
+import {editorIKMethods} from './editor-ik.mjs';
+import {hasPinnedIK, translateIKTargets} from './ik.mjs';
 
 const clone = value => structuredClone(value);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -46,15 +49,16 @@ function initialLoadState(report,{initialFrameIndex=0,initialTick}={},draftEnabl
   if(initialTick!==undefined)finite(initialTick,'Initial tick');
   const draft=draftEnabled?report._styk?.simpleFrameDraft:null;
   const draftIndex=draft?.mode==='add'&&draft.baseline?draft.index:-1,draftDuration=draftIndex>=0?draft.baseline.duration_raw:undefined;
-  const source=draftIndex>=0&&draftDuration!==report.keyframes[draftIndex]?.duration_raw?
+  let source=draftIndex>=0&&draftDuration!==report.keyframes[draftIndex]?.duration_raw?
     {...report,keyframes:report.keyframes.map((frame,index)=>index===draftIndex?{...frame,duration_raw:draftDuration}:frame)}:report;
+  if(draftIndex>=0&&Object.hasOwn(draft,'animationBaseline'))source={...source,_styk:{...source._styk,animation:draft.animationBaseline}};
   const rows=draft?.empty?[]:timeline(source),last=rows.at(-1),total=last?last.start+last.count:0;
   let tick=initialTick===undefined?rows[frameIndex]?.start??0:clamp(initialTick,0,Math.max(0,total-1));
   if(initialTick!==undefined){let low=0,high=rows.length-1;while(low<high){const mid=Math.ceil((low+high)/2);if(rows[mid].start<=tick)low=mid;else high=mid-1;}frameIndex=low;}
   // Simple restores this saved working frame during the document event. Prepare
   // the same target so that no earlier or incomplete scene can become visible.
   if(draft){frameIndex=draft.index;tick=rows[frameIndex]?.start??0;}
-  return {frameIndex,tick,timeline:rows,draftIndex,draftDuration};
+  return {frameIndex,tick,timeline:rows,draftIndex,draftDuration,draftAnimation:source._styk?.animation};
 }
 const event = detail => {
   if (typeof CustomEvent !== 'undefined') return new CustomEvent('change', {detail});
@@ -107,8 +111,8 @@ function resolveJoinSelection(frame, uids, ancestors = false) {
  * caches are invalidated independently, avoiding whole-project work while posing.
  */
 export class Editor extends EventTarget {
-  constructor({demo = true, historyLimit = 80, historyBytes = 48 * 1024 * 1024} = {}) {
-    super(); this.historyLimit = historyLimit; this.historyBytes = historyBytes;
+  constructor({demo = true, historyLimit = 80, historyBytes = 48 * 1024 * 1024, propertyChannels = false} = {}) {
+    super(); this.historyLimit = historyLimit; this.historyBytes = historyBytes; this.propertyChannels = propertyChannels;
     this._undo = []; this._redo = []; this._historySize = 0; this._nextUid = 1;
     this._revision = 0; this._savedRevision = 0; this._revisionSerial = 0;
     this.load(demo ? createDemo() : emptyDocument());
@@ -130,10 +134,13 @@ export class Editor extends EventTarget {
     if (draft?.empty) return this._emptyTimeline ??= [];
     const index = draft?.mode === 'add' && draft.baseline ? draft.index : -1;
     const duration = index >= 0 ? draft.baseline.duration_raw : undefined;
-    if (this._timeline && this._timelineDraftIndex === index && this._timelineDraftDuration === duration) return this._timeline;
+    const animation = index >= 0 && Object.hasOwn(draft, 'animationBaseline') ? draft.animationBaseline : this.report._styk?.animation;
+    if (this._timeline && this._timelineDraftIndex === index && this._timelineDraftDuration === duration && this._timelineDraftAnimation === animation) return this._timeline;
     this._timelineDraftIndex = index; this._timelineDraftDuration = duration;
-    const report = index >= 0 && duration !== this.report.keyframes[index]?.duration_raw
+    this._timelineDraftAnimation = animation;
+    let report = index >= 0 && duration !== this.report.keyframes[index]?.duration_raw
       ? {...this.report, keyframes:this.report.keyframes.map((frame, i) => i === index ? {...frame, duration_raw:duration} : frame)} : this.report;
+    if (animation !== report._styk?.animation) report = {...report, _styk: {...report._styk, animation}};
     return this._timeline = timeline(report);
   }
   get totalTicks() { const last = this.timeline.at(-1); return last ? last.start + last.count : 0; }
@@ -195,7 +202,10 @@ export class Editor extends EventTarget {
     this.dispatchEvent(event({kind, frameIndex: this.frameIndex, tick: this.tick,
       structural: false, timing: false, ...detail}));
   }
-  _invalidate({timing = false, viewOnly = false, retainGeometry = false} = {}) {
+  _invalidate({timing = false, viewOnly = false, retainGeometry = false, retainPropertyMarkers = false} = {}) {
+    if (!viewOnly && retainPropertyMarkers && this._propertyChannelCache) {
+      this._propertyChannelCache.frames.clear();this._propertyChannelCache.values.clear();this._propertyChannelCache.dependencies.clear();
+    } else if (!viewOnly) this._propertyChannelCache = null;
     if (!viewOnly) {invalidateEvaluationCaches(this.report);if(!retainGeometry)this._seekGeometry?.clear();}
     const preview = this._authoredCommitPreview;
     this._geometry = preview?.geometry ?? null; this._evaluated = preview?.frame ?? null; this._incremental = preview?.incremental ?? null;
@@ -247,7 +257,8 @@ export class Editor extends EventTarget {
       id: change.id, before: {exists: change.before.exists}, after: {exists: change.after.exists},
     }))} : command;
     command.bytes = (Number.isFinite(command.precomputedBytes) && command.precomputedBytes >= 0
-      ? command.precomputedBytes : JSON.stringify(sized).length * 2 + (command.sourceBytes ?? 0)) + (this._pendingSourceBytes ?? 0);
+      ? command.precomputedBytes : command.kind === 'animation' || command.draftAnimation
+        ? animationHistoryBytes(sized) : JSON.stringify(sized).length * 2 + (command.sourceBytes ?? 0)) + (this._pendingSourceBytes ?? 0);
     this._pendingSourceBytes = 0;
     this._historySize += command.bytes; this._undo.push(command); this._redo = [];
     while (this._undo.length > this.historyLimit || (this._historySize > this.historyBytes && this._undo.length > 1)) {
@@ -273,7 +284,9 @@ export class Editor extends EventTarget {
       ? {previous: this._geometry ?? this._incremental?.previous, dirtySlots: this._geometry ? [] : this._incremental?.dirtySlots ?? []} : null;
     this._prepareFrameDraftHistory?.(command, direction);
     const sparseClipboard = applySparseClipboardFrames(this, command, direction);
-    const value = sparseClipboard ? undefined : clone(command[direction]);
+    // Animation commands publish immutable tables/channels; later edits copy the
+    // touched channel. Replay must not copy every unrelated key in the project.
+    const value = sparseClipboard ? undefined : command.kind === 'animation' ? command[direction] : clone(command[direction]);
     if (command.kind === 'frame') this.report.keyframes[command.index] = value;
     else if(command.kind==='frame-timing')applyFrameTiming(this,command,direction);
     else if (command.kind === 'objects') this._replaceObjects(command.index, value);
@@ -324,6 +337,11 @@ export class Editor extends EventTarget {
     this._trackLayerCommand(command, direction);
     this._applyFrameSourceChanges(command, direction);
     if (command.layerAnimationPatch) this._applyLayerAnimationPatch(command.layerAnimationPatch, direction);
+    if (command.draftAnimation) {
+      const animation = command.draftAnimation[direction];
+      if (animation === null) delete this.report._styk.animation;
+      else this.report._styk.animation = animation;
+    }
     if (['frame', 'splice', 'ranges', 'import', 'figure-splice', 'project'].includes(command.kind)) invalidateFrameIndex(this.report);
     if (command.kind === 'layers') this._applyLayerChanges(command.changes, direction);
     else if (command.layerChanges) this._applyLayerChanges(command.layerChanges, direction);
@@ -408,7 +426,7 @@ export class Editor extends EventTarget {
     this._layerRevision = (this._layerRevision ?? 0) + 1; this._layerDescriptors = null; this._layerUidArrays = new Map();
     this._loadedFigureNames = prepared.figureNames; this._loadedTimelineTracks = prepared.tracks;
     this._invalidate({timing: true}); invalidateFrameIndex(report);
-    this.tick=initial.tick;this._timeline=initial.timeline;this._timelineDraftIndex=initial.draftIndex;this._timelineDraftDuration=initial.draftDuration;
+    this.tick=initial.tick;this._timeline=initial.timeline;this._timelineDraftIndex=initial.draftIndex;this._timelineDraftDuration=initial.draftDuration;this._timelineDraftAnimation=initial.draftAnimation;
     if(prepared.scene){this._evaluated=prepared.scene.frame;this._geometry=prepared.scene.geometry;this.selectedUid=prepared.scene.frame.objects[0]?.unique_id??null;}
     const published = performance.now();
     this._emit('document', {structural: true, timing: true, prepared: true,scenePrepared:Boolean(prepared.scene)});
@@ -502,7 +520,8 @@ export class Editor extends EventTarget {
     if(this._drag)this._synchronizeAnimationOrigins(this.frame,this._drag.before);
     if (this._drag) this._drag.changed = true;
     else this._revision = ++this._revisionSerial;
-    this._invalidateObjects(this._drag?.before.map(o => o.unique_id) ?? [this.selectedUid],null,{translation:translation && !this.animationChannels.length && !this._drag?.before.some(o=>o.runtime_segments)});
+    this._invalidateObjects(this._drag?.before.map(o => o.unique_id) ?? [this.selectedUid],null,{translation:translation && !this.animationChannels.length && !this._drag?.before.some(o=>o.runtime_segments || hasPinnedIK(o))});
+    this._rememberIKBends();
     this._emit('edit', {live: Boolean(this._drag),
       changedUids: this._drag?.before.map(o => o.unique_id) ?? [this.selectedUid]});
   }
@@ -544,10 +563,22 @@ export class Editor extends EventTarget {
     const drag = this._drag; this._drag = null; this._replaceObjects(drag.index, drag.before);
     this._invalidateObjects(drag.before.map(o => o.unique_id)); this._emit('edit', {label: 'Cancel pose', changedUids: drag.before.map(o => o.unique_id)}); return true;
   }
-  _objectEdit(label, mutate, {translation = false} = {}) {
+  _objectEdit(label, mutate, {translation = false, posed = false} = {}) {
     if (!this.object) return false;
     const active = Boolean(this._drag); if (!active) this.beginDrag(label);
-    try { mutate(this.object); this.touch({translation}); if (!active) this.commitDrag(); }
+    try {
+      // Edit the displayed constrained pose. Only captured objects are owned by
+      // this gesture; untouched frames/figures retain their source and caches.
+      if (posed && this._drag?.before.some(hasPinnedIK)) {
+        const geometry = this.geometry;
+        for (const before of this._drag.before) if (hasPinnedIK(before)) {
+          const object = this.frame.objects.find(o => o.unique_id === before.unique_id);
+          const solved = geometry.objects.get(object?.object_slot)?.solvedAngles;
+          if (solved) object.angles = solved.slice();
+        }
+      }
+      mutate(this.object); this.touch({translation}); if (!active) this.commitDrag();
+    }
     catch (error) { this.cancelDrag(); throw error; }
     return true;
   }
@@ -569,6 +600,7 @@ export class Editor extends EventTarget {
     this._newLayerHints ??= new Map(); this._newLayerHints.set(copy.unique_id, this.layerForUid(this.object.unique_id));
     const worldRoot = this.geometry.objects.get(this.selectedSlot)?.root;
     copy.root_x = (worldRoot?.x ?? copy.root_x) + 24; copy.root_y = (worldRoot?.y ?? copy.root_y) + 24;
+    translateIKTargets(copy, 24, 24);
     copy.join = null;
     this.transaction('Duplicate figure', frame => {
       const ids = frameOrder(frame); frame.objects.push(copy); setOrder(frame, [...ids, copy.unique_id]);
@@ -607,6 +639,7 @@ export class Editor extends EventTarget {
     const object = clone(clipboard.object), uid = this._identity();
     object.unique_id = uid; object.figure_type_id = figure.figure_type_id; object.join = null;
     object.root_x += clipboard.offset * (clipboard.pastes + 1); object.root_y += clipboard.offset * (clipboard.pastes + 1);
+    translateIKTargets(object, clipboard.offset * (clipboard.pastes + 1), clipboard.offset * (clipboard.pastes + 1));
     // A figure edited in the same document may have acquired or lost joints
     // since copying. Preserve the captured pose by native handle identity.
     const oldIndices = new Map(clipboard.figure.segments.map((segment, i) => [segment.segment_id, i]));
@@ -756,6 +789,8 @@ export class Editor extends EventTarget {
   moveSelectionLayer(direction) {
     if (!this.selectedObjects.length) return false;
     if (!Number.isInteger(direction)) throw new Error('Layer direction must be a whole number.');
+    if (this.propertyChannels || this.animationChannels.length || this.selectionFrame.objects.some(object => object._stykZIndex !== undefined))
+      return this.applyFigureRange({kind: 'order', direction}, {ticks: [this.tick]});
     return this.transaction('Reorder figures', frame => {
       const before = frameOrder(frame), selected = this.selectedUids, groups = new Map();
       for (const uid of before) { const id = this.layerForUid(uid), group = groups.get(id) ?? {order: [], cursor: 0}; group.order.push(uid); groups.set(id, group); }
@@ -816,6 +851,7 @@ export class Editor extends EventTarget {
         const object = clone(original), {figure, original: oldFigure} = typeMap.get(original.figure_type_id);
         object.unique_id = uidMap.get(original.unique_id); object.figure_type_id = figure.figure_type_id;
         object.root_x += offset; object.root_y += offset;
+        translateIKTargets(object, offset, offset);
         const oldIndices = new Map(oldFigure.segments.map((s, i) => [s.segment_id, i]));
         for (const [field, flag, base] of [['angles', null, 'angle_rad'], ['lengths', 'len_flag', 'length'], ['bends', 'bend_flag', 'bend_rad']]) {
           if (flag && !object[flag]) continue;
@@ -872,7 +908,7 @@ export class Editor extends EventTarget {
     const selected = this._frameIndices(indices); this._frameClipboard = selected.map(i => clone(this.report.keyframes[i]));
     return selected.length;
   }
-  _rangesEdit(label, changes, {retainSelection = false, structural = true, timing = true, timingOnly = false, selectIndex, frameEasing = false} = {}) {
+  _rangesEdit(label, changes, {retainSelection = false, structural = true, timing = true, timingOnly = false, selectIndex, frameEasing = false, animationPlan} = {}) {
     if (!changes.length) return false;
     if (this._drag) this.commitDrag();
     const beforeSelection = this._selectionState();
@@ -884,6 +920,15 @@ export class Editor extends EventTarget {
     this._reconcileFrameIds(previous);
     for (const [change, inserted] of applied) change.after = clone(inserted);
     const command = {kind: 'ranges', label, changes, beforeSelection, structural, timing, timingOnly};
+    if (animationPlan) {
+      command.draftAnimation = {before: animationPlan.before, after: animationPlan.after};
+      command.hadFrameSourceTable = this.report._styk.frameSources !== undefined;
+      command.frameSourceChanges = animationPlan.frameSourceChanges;
+      this._applyFrameSourceChanges(command, 'after');
+      if (animationPlan.after === null) delete this.report._styk.animation;
+      else this.report._styk.animation = animationPlan.after;
+      this._nextFrameIdentity = animationPlan.nextFrameIdentity;
+    }
     if (frameEasing) command.frameEasing = true;
     this._captureRemovedFrameSources(command);
     this._invalidate({timing});
@@ -950,7 +995,7 @@ export class Editor extends EventTarget {
         obj.bend_flag = 1; obj.bends[index] = pose.bend_rad;
       }
       delete obj.runtime_segments;
-    });
+    }, {posed: true});
     if (!Object.keys(definition).length) return true;
     for (const field of ['segment_id', 'parent_id']) if (field in definition) throw new Error('Use the figure builder to change joint hierarchy.');
     if ('thickness' in definition && finite(definition.thickness, 'Thickness') < 0) throw new Error('Thickness cannot be negative.');
@@ -968,6 +1013,7 @@ export class Editor extends EventTarget {
     this._invalidate(); this._emit('edit', {label: 'Edit segment style', definition: true}); return true;
   }
   _rotateJoint(delta, includeJoint = true, {isolate = false} = {}) {
+    if (includeJoint) this._rotateIKFollower(delta);
     const slot = this.selectedSlot, joint = this.selectedJoint, key = `${slot}:${joint}${isolate ? ':isolated' : ''}`;
     let targets = this._drag?.rotationTargets?.get(key);
     if (!targets) {
@@ -989,7 +1035,7 @@ export class Editor extends EventTarget {
   }
   rotateJoint(delta, options = {}) {
     finite(delta, 'Joint rotation'); if (!this.figure?.segments[this.selectedJoint]) return false;
-    return this._objectEdit('Rotate joint', () => this._rotateJoint(delta, true, options));
+    return this._objectEdit('Rotate joint', () => this._rotateJoint(delta, true, options), {posed: true});
   }
   _poseSnapState() {
     const key = `${this.selectedUid}:${this.selectedJoint}`;
@@ -1010,6 +1056,7 @@ export class Editor extends EventTarget {
     finite(x, 'Joint X'); finite(y, 'Joint Y');
     finite(snapTolerance, 'Snap tolerance'); if (snapTolerance < 0) throw new Error('Snap tolerance cannot be negative.');
     if (!this.object || this.selectedJoint < 0) return false;
+    if (this.object._stykIK?.[this.figure?.segments[this.selectedJoint]?.segment_id]?.enabled) return this.poseIKTarget(x, y);
     const seg = this.figure?.segments[this.selectedJoint]; if (!seg || isStatic(seg)) return false;
     const shape = this.geometry.objects.get(this.selectedSlot)?.segments[this.selectedJoint]; if (!shape) return false;
     const angle = Math.atan2(y - shape.start.y, x - shape.start.x) - shape.bend / 2;
@@ -1025,7 +1072,7 @@ export class Editor extends EventTarget {
         if (snap && defaults.lengthEnabled && Math.abs(length - defaults.length) * Math.abs(obj.scale) * chord <= snapTolerance) length = defaults.length;
         obj.lengths[this.selectedJoint] = length;
       }
-    });
+    }, {posed: true});
   }
   /** Bend keeps the start tangent fixed; optional stretching reaches the cursor. */
   bendJoint(x, y, {stretch = false, isolate = false, snap = true, snapTolerance = 6} = {}) {
@@ -1054,7 +1101,7 @@ export class Editor extends EventTarget {
       this._rotateJoint(bend - shape.bend, false, {isolate});
       if (!object.bend_flag) object.bends = this.figure.segments.map(s => s.bend_rad ?? 0);
       object.bend_flag = 1; object.bends[this.selectedJoint] = bend;
-    });
+    }, {posed: true});
   }
   mirrorFigure(axis = 'horizontal') {
     if (this.selectedObjects.length > 1) return this.mirrorSelection(axis);
@@ -1141,6 +1188,11 @@ export class Editor extends EventTarget {
     state.baseline = copy;
     if (this._frameDraft?.baseline === baseline) this._frameDraft.baseline = copy;
   }
+  _restoreDraftTopologyAnimation(before) {
+    if (!Object.hasOwn(before, 'animationBaseline') || !this.report._styk.simpleFrameDraft) return;
+    this.report._styk.simpleFrameDraft.animationBaseline = before.animationBaseline;
+    if (this._frameDraft) this._frameDraft.animationBaseline = before.animationBaseline;
+  }
   _topologySnapshot(typeId, reference = null) {
     const key = entry => entry.draft ? 'simple-draft' : entry.sourceId ?? entry.index;
     const references = reference ? new Map(reference.frames.map(entry => [key(entry),
@@ -1149,7 +1201,7 @@ export class Editor extends EventTarget {
     const entries = [...this.report.keyframes.map((frame, index) => ({frame, index})),
       ...Object.entries(this.report._styk.frameSources ?? {}).map(([sourceId, frame]) => ({frame, index: -1, sourceId})),
       ...(draft?.baseline ? [{frame:draft.baseline, index:draft.index, draft:true}] : [])];
-    return {figure: clone(this.report.figure_types.find(f => f.figure_type_id === typeId)),
+    const snapshot = {figure: clone(this.report.figure_types.find(f => f.figure_type_id === typeId)),
       frames: entries.map(({frame, index, sourceId, draft}) => {
         let identities = references?.get(key({index, sourceId, draft}));
         if (references && !identities) return null;
@@ -1160,6 +1212,11 @@ export class Editor extends EventTarget {
         }
         return {index, ...(sourceId ? {sourceId} : {}), ...(draft ? {draft:true} : {}), objects: frame.objects.filter(object => identities.has(object.unique_id)).map(clone)};
       }).filter(Boolean)};
+    // The draft journal retains this immutable table separately. Do not clone
+    // the entire channel table with the affected rig poses during history replay.
+    if (Object.hasOwn(draft ?? {}, 'animationBaseline'))
+      Object.defineProperty(snapshot, 'animationBaseline', {value: draft.animationBaseline});
+    return snapshot;
   }
   _topologyEdit(label, mutate, {segmentMap, reversedGradients, preserveAnimationOrigins=false, originReRoot, originSplit, originSplits, originFreezeHandles} = {}) {
     if (!this.figure) return false;
@@ -1175,6 +1232,7 @@ export class Editor extends EventTarget {
       validateScene({...this.report, keyframes: this._allSourceFrames()}); } catch (error) {
       this.report.figure_types[index] = before.figure;
       if (beforeAnimation === undefined) delete this.report._styk.animation; else this.report._styk.animation = beforeAnimation;
+      this._restoreDraftTopologyAnimation(before);
       for (const entry of before.frames) this._replaceObjects(entry.index, entry.objects, entry.sourceId, entry.draft);
       this._restoreSelection(beforeSelection); this._invalidate(); throw error;
     }
@@ -1240,6 +1298,7 @@ export class Editor extends EventTarget {
     } catch (error) {
       this.report.figure_types[index] = before.figure;
       if (beforeAnimation === undefined) delete this.report._styk.animation; else this.report._styk.animation = beforeAnimation;
+      this._restoreDraftTopologyAnimation(before);
       for (const entry of before.frames) this._replaceObjects(entry.index, entry.objects, entry.sourceId, entry.draft);
       this._restoreSelection(beforeSelection); this._invalidate(); throw error;
     }
@@ -1303,7 +1362,7 @@ export class Editor extends EventTarget {
       for (const poly of fig.polyfills ?? []) poly.segment_ids = poly.segment_ids.map(remap);
       this.selectedJoint = -1;
     }, {preserveAnimationOrigins: true, originReRoot: {handleId, mappings: new Map(figure.segments.map((segment,index) => [segment.segment_id, orientation.get(index)]))}, segmentMap: new Map(figure.segments.map((segment, index) => [segment.segment_id, [orientation.get(index).id]])),
-      reversedGradients: new Set(figure.segments.filter((segment, index) => segment.secondary && orientation.get(index).reverse).map(segment => segment.segment_id))});
+      reversedGradients: new Set(figure.segments.filter((segment, index) => orientation.get(index).reverse).map(segment => segment.segment_id))});
   }
   addSegment({parentId, type = 'line', length = 50, angle = 0, thickness = 8, start} = {}) {
     if (this.animationChannels.length && !this.figure && !this._authoredPoseEdit) {
@@ -1458,6 +1517,7 @@ export class Editor extends EventTarget {
     const sourceObject = source.keyframes?.[0]?.objects?.[0], newType = map.get(sourceObject?.figure_type_id) ?? map.values().next().value;
     const figure = this.report.figure_types.find(f => f.figure_type_id === newType), uid = this._identity();
     const object = sourceObject ? clone(sourceObject) : createObject(figure, uid, 0, 0);
+    translateIKTargets(object, this.report.canvas_width / 2 - object.root_x, this.report.canvas_height / 2 - object.root_y);
     Object.assign(object, {figure_type_id: newType, unique_id: uid, root_x: this.report.canvas_width / 2, root_y: this.report.canvas_height / 2, join: null});
     const order = frameOrder(this.frame); this.frame.objects.push(object); setOrder(this.frame, [...order, uid]); normalizeFrame(this.frame);
     this.selectedUid = uid; this.selectedJoint = -1; this._invalidate();
@@ -1486,6 +1546,7 @@ Object.assign(Editor.prototype, editorFrameClipboardMethods);
 Object.assign(Editor.prototype, editorAuthoredPoseMethods);
 Object.assign(Editor.prototype, editorCameraMethods);
 Object.assign(Editor.prototype, editorHandleEditMethods);
+Object.assign(Editor.prototype, editorIKMethods);
 Object.assign(Editor.prototype, editorFigureTransformMethods);
 Object.assign(Editor.prototype, editorRangeCommandMethods);
 Object.assign(Editor.prototype, editorSceneMethods);

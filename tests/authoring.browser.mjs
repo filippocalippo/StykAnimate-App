@@ -1,3 +1,4 @@
+import {readNativeDocument} from '../scripts/read-native-document.mjs';
 /** Bounded application authoring flows. Requires the local app at STYK_URL. */
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
@@ -113,7 +114,7 @@ try {
   await value(() => styk.editor.select(styk.editor.frame.objects[0].unique_id));
   await page.locator('[data-field="root_x"]').fill('77'); await page.locator('[data-field="root_x"]').press('Tab');
   const stykPath = await saveDownload(() => page.locator('[data-action="save"]').first().click(), 'authoring-source.styk');
-  const native = JSON.parse(await readFile(stykPath, 'utf8'));
+  const native = await readNativeDocument(stykPath);
   const savedDocument = native.document || native, source = await readFile(sourcePath);
   check('Native save retains edited pose and inline original PIV source', savedDocument.keyframes[0].objects.some(o => o.root_x === 77) && Buffer.from(savedDocument._stykSource.source_base64, 'base64').equals(source));
   check('Native source fingerprint matches the supplied original', savedDocument._stykSource.sha256 === createHash('sha256').update(source).digest('hex'));

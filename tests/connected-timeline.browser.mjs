@@ -39,7 +39,8 @@ try {
   assert.deepEqual(await page.evaluate(()=>styk.editor.animationChannels.filter(c=>c.property==='pose'&&c.target.kind==='figure').map(c=>c.keys.at(-1).tick)),[start*2,start*2]);
   await page.evaluate(()=>styk.editor.undo());await settle();
   await page.getByRole('button',{name:`Expand ${group[0].name}`,exact:true}).click();await settle();
-  assert.equal(await page.evaluate(()=>styk.timeline.tracks.filter(t=>t.kind==='figure').length),2);
+  assert.equal(await page.evaluate(()=>styk.timeline.tracks.filter(t=>t.kind==='figure').length),0);
+  assert.deepEqual(await page.evaluate(()=>styk.timeline.tracks.filter(t=>t.kind==='assembly-property').map(t=>t.property)),['pose']);
   await page.screenshot({path:'artifacts/connected-timeline-expanded.png'});
   await page.getByRole('button',{name:`Collapse ${group[0].name}`,exact:true}).click();await settle();
   // Use the real figure selection path so the inspector displays origin tools.

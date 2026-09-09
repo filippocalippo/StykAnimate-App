@@ -1,9 +1,11 @@
 /** Keep instance styles and authored keys attached to physical rig segments. */
 import {animationChannelId, validateAnimationDocument} from './animation-channels.mjs';
 import {nativeSegmentOpacity} from './animation-style.mjs';
+import {repairIKTopology} from './ik-topology.mjs';
 
 const clone = value => structuredClone(value);
-const reverseProperty = property => property === 'opacity' ? 'gradientOpacity' : property === 'gradientOpacity' ? 'opacity' : property;
+const reverseProperty = property => ({opacity:'gradientOpacity', gradientOpacity:'opacity', color:'gradientColor', gradientColor:'color'})[property] ?? property;
+const reversePaint = paint => paint.type==='solid' ? clone(paint) : {...clone(paint),angle:((paint.angle-180)%360+540)%360-180};
 
 /** Reversing a gradient's geometry retains each endpoint's original color. */
 export function reverseGradientEndpoints(segment) {
@@ -15,10 +17,15 @@ export function reverseGradientEndpoints(segment) {
     secondary:{...segment.secondary,rgb:clone(segment.color_rgb),a:Math.round(255*(1-nativeSegmentOpacity(segment)))}};
 }
 
-function reverseOverrides(style) {
+function reverseOverrides(style, swapEndpoints = true) {
+  if(style.paint)return {...style,paint:reversePaint(style.paint)};
+  if(!swapEndpoints)return style;
   const out = {...style}; delete out.opacity; delete out.gradientOpacity;
   if ('opacity' in style) out.gradientOpacity = style.opacity;
   if ('gradientOpacity' in style) out.opacity = style.gradientOpacity;
+  delete out.color; delete out.gradientColor;
+  if ('color' in style) out.gradientColor = style.color;
+  if ('gradientColor' in style) out.color = style.gradientColor;
   return out;
 }
 
@@ -35,6 +42,22 @@ export function topologyAnimationPatch(before, after) {
 /** Map old endpoint IDs to physical replacements. Missing map entries retain
  * their ID if it still exists; an empty replacement removes the old segment. */
 export function repairTopologyStyles(editor, before, figure, explicit = new Map(), reversedGradients = new Set()) {
+  repairIKTopology(editor, before, figure, explicit);
+  const state = editor.report._styk.simpleFrameDraft;
+  let view;
+  if (Object.hasOwn(state ?? {}, 'animationBaseline')) {
+    view = Object.create(editor);
+    view.report = {...editor.report, _styk: {...editor.report._styk, animation: state.animationBaseline}};
+    repairStyles(view, before, figure, explicit, reversedGradients, true);
+  }
+  repairStyles(editor, before, figure, explicit, reversedGradients, false);
+  if (view) {
+    state.animationBaseline = view.report._styk.animation;
+    if (editor._frameDraft) editor._frameDraft.animationBaseline = state.animationBaseline;
+  }
+}
+
+function repairStyles(editor, before, figure, explicit, reversedGradients, channelsOnly) {
   const handles = new Set(figure.segments.map(segment => segment.segment_id)), changes = new Map();
   for (const segment of before.figure.segments) {
     const old = segment.segment_id, next = explicit.has(old) ? explicit.get(old) : handles.has(old) ? [old] : [];
@@ -47,6 +70,11 @@ export function repairTopologyStyles(editor, before, figure, explicit = new Map(
   const animation = editor.report._styk.animation, channels = animation?.channels ?? [];
   const affectedChannels = channels.filter(channel => channel.target.kind === 'segment' && uids.has(channel.target.uid) && changes.has(channel.target.handleId) &&
     (channel.target.figureTypeId===undefined||channel.target.figureTypeId===figure.figure_type_id));
+  const paintOwners=new Set(affectedChannels.filter(channel=>channel.property==='paint'&&channel.keys.length).map(channel=>`${channel.target.uid}:${channel.target.handleId}`));
+  for(const entry of before.frames)for(const object of entry.objects)if(object.figure_type_id===figure.figure_type_id)
+    for(const [handle,style] of Object.entries(object._stykStyle?.segments??{}))if(style.paint)paintOwners.add(`${object.unique_id}:${handle}`);
+  const nativeEndpointSwaps=new Set(before.figure.segments.filter(segment=>segment.secondary&&!['radial','angular','diamond'].includes(segment.paint?.type)).map(segment=>segment.segment_id));
+  const swapsEndpoints=(uid,handle)=>nativeEndpointSwaps.has(handle)&&!paintOwners.has(`${uid}:${handle}`);
   const keyed = new Set(affectedChannels.filter(channel=>channel.target.figureTypeId===undefined).map(channel => channel.target.uid)),typesByUid=new Map();
   // UID tracks may switch native rig definitions. Split only the affected
   // legacy curve into definition-specific curves; no timeline sampling or pose
@@ -54,7 +82,7 @@ export function repairTopologyStyles(editor, before, figure, explicit = new Map(
   if(keyed.size)for(const frame of editor._allSourceFrames())for(const object of frame.objects)if(keyed.has(object.unique_id)){
     const types=typesByUid.get(object.unique_id)??new Set();types.add(object.figure_type_id);typesByUid.set(object.unique_id,types);
   }
-  for (const entry of before.frames) {
+  for (const entry of channelsOnly ? [] : before.frames) {
     const frame = entry.draft ? editor.report._styk.simpleFrameDraft?.baseline : entry.sourceId ? editor.report._styk.frameSources[entry.sourceId] : editor.report.keyframes[entry.index];
     for (const object of frame.objects) {
       if (object.figure_type_id !== figure.figure_type_id || !object._stykStyle?.segments) continue;
@@ -64,7 +92,7 @@ export function repairTopologyStyles(editor, before, figure, explicit = new Map(
       const segments = {};
       for (const [handle, style] of entries) {
         const replacements = changes.get(Number(handle));
-        if (replacements) for (const target of replacements) segments[target] = clone(reversedGradients.has(Number(handle)) ? reverseOverrides(style) : style);
+        if (replacements) for (const target of replacements) segments[target] = clone(reversedGradients.has(Number(handle)) ? reverseOverrides(style,swapsEndpoints(object.unique_id,Number(handle))) : style);
         else segments[handle] = style;
       }
       const style = {...object._stykStyle};
@@ -93,9 +121,10 @@ export function repairTopologyStyles(editor, before, figure, explicit = new Map(
   for (const channel of channels) {
     if (!affected.has(channel)) {emit(channel,channel);continue;}
     const replacements = changes.get(channel.target.handleId);
-    const property = reversedGradients.has(channel.target.handleId) ? reverseProperty(channel.property) : channel.property;
+    const reversed=reversedGradients.has(channel.target.handleId);
+    const property = reversed&&swapsEndpoints(channel.target.uid,channel.target.handleId) ? reverseProperty(channel.property) : channel.property;
     const scopes=typesByUid.get(channel.target.uid),split=channel.target.figureTypeId===undefined&&scopes?.size>1;
-    const mapped=replacements.map((handleId,index)=>({target:{...channel.target,handleId,...(split?{figureTypeId:figure.figure_type_id}:{})},property,
+    const mapped=replacements.map((handleId,index)=>({target:{...channel.target,handleId,...(split?{figureTypeId:figure.figure_type_id}:{})},property,reversePaint:reversed&&channel.property==='paint',
       copied:(handleId!==channel.target.handleId&&replacements.includes(channel.target.handleId))||index>0}));
     if(split)for(const type of scopes)if(type!==figure.figure_type_id)mapped.push({target:{...channel.target,figureTypeId:type},property:channel.property,copied:mapped.length>0});
     for(const result of mapped){
@@ -104,9 +133,9 @@ export function repairTopologyStyles(editor, before, figure, explicit = new Map(
       // legacy fallback must not replace that curve during a split.
       const existing=channelById.get(id);
       if(existing&&existing!==channel&&!affected.has(existing))continue;
-      if(id===channel.id){emit(channel,channel);continue;}
+      if(id===channel.id&&!result.reversePaint){emit(channel,channel);continue;}
       emit({...channel,target:result.target,property:result.property,id,
-        keys:result.copied?channel.keys.map(key=>({...clone(key),id:freshKey()})):channel.keys},channel);
+        keys:result.copied||result.reversePaint?channel.keys.map(key=>({...clone(key),...(result.copied?{id:freshKey()}:{}),...(result.reversePaint?{value:reversePaint(key.value)}:{})})):channel.keys},channel);
     }
   }
   validateAnimationDocument({...editor.report,_styk:{...editor.report._styk,animation:after}});

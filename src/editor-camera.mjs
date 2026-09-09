@@ -52,7 +52,7 @@ function finishGesture(editor) {
 }
 
 function hasAuthoredCamera(editor) {
-  return animationChannels(editor.report).some(channel => channel.target.kind === 'camera' && channel.keys?.length);
+  return editor.propertyChannels || animationChannels(editor.report).some(channel => channel.target.kind === 'camera' && channel.keys?.length);
 }
 
 function composedFrame(editor, index, tick = editor.timeline[index].start) {
@@ -82,7 +82,7 @@ function previewCameraKeys(editor, drag, entries) {
   for (const [id, values] of active) {
     let cached = drag.previewChannels.get(id);
     if (!cached) {
-      const source = channels.find(channel => channel.id === id) ?? editor._nativeAnimationChannels?.get(id);
+      const source = channels.find(channel => channel.id === id) ?? (editor.propertyChannels ? editor.nativePropertyChannel(values[0].target, values[0].property) : editor._nativeAnimationChannels?.get(id));
       const property = values[0].property, field = property === 'rotation' ? 'angle_rad' : property;
       const keys = source?.keys?.slice() ?? [], byTick = new Map(keys.filter(key => !key.hidden).map(key => [key.tick, key]));
       const baseline = new Map(drag.cameraBaseline.map(entry => [entry.tick ?? editor.timeline[entry.index].start, entry.camera[field]]));
@@ -202,7 +202,8 @@ export const editorCameraMethods = {
       beforeSelection, cameraBefore: selected.map(index => snapshot(this, index)), documentToken: this._documentToken};
     const drag = this._drag;
     if (authored) {
-      drag.animationBefore = this.report._styk.animation;
+      drag.animationOriginal = this.report._styk.animation;
+      drag.animationBefore = this.report._styk.animation ?? {version:1, nextKeyId:1, channels:[]};
       drag.cameraBaseline = selected.map(index => {
         const tick = selected.length === 1 && index === this.frameIndex ? this.tick : this.timeline[index].start;
         return {index, tick, camera: cameraValues(composedFrame(this, index, tick).camera)};
@@ -244,7 +245,9 @@ export const editorCameraMethods = {
   commitCameraDrag() {
     const drag = this._drag; if (!drag?.camera) return false;
     if (drag.animationBefore) {
-      this._drag = null; this.report._styk.animation = drag.animationBefore; this._invalidate();
+      this._drag = null;
+      if (drag.animationOriginal) this.report._styk.animation = drag.animationOriginal; else delete this.report._styk.animation;
+      this._invalidate();
       if (!drag.cameraEntries?.length) return false;
       this.addAnimationKeys(drag.cameraEntries); return true;
     }
@@ -257,7 +260,9 @@ export const editorCameraMethods = {
   cancelCameraDrag() {
     const drag = this._drag; if (!drag?.camera) return false;
     this._drag = null;
-    if (drag.animationBefore) this.report._styk.animation = drag.animationBefore;
+    if (drag.animationBefore) {
+      if (drag.animationOriginal) this.report._styk.animation = drag.animationOriginal; else delete this.report._styk.animation;
+    }
     else this._applyCameraSnapshot(drag.cameraBefore);
     this._invalidate();
     this._emit('edit', {label: 'Cancel camera move', camera: true, changedFrames: drag.cameraBefore.map(entry => entry.index)});

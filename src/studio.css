@@ -200,6 +200,7 @@ dialog::backdrop { background: #18273c55; backdrop-filter: blur(2px); }
 #inspector .property-key-controls button:hover:not(:disabled) { background: #e5f4ff; color: #0088e8; }
 #inspector .property-key-controls [data-property-key].is-keyed { background: #e5f4ff; color: #0088e8; }
 #inspector .property-key-controls [data-property-key].is-animated { color: #0088e8; }
+#inspector .field-grid > .property-row[data-property-row="figure_z_order"] { grid-column: 1 / -1; }
 #inspector .property-key-controls [data-property-nav] { display: none; position: absolute; z-index: 8; top: 23px; width: 24px; height: 26px; background: #fff; border: 1px solid #ddd; box-shadow: 0 2px 6px #00000012; opacity: 1; }
 #inspector .property-key-controls [data-direction="-1"] { right: 16px; }
 #inspector .property-key-controls [data-direction="1"] { right: -7px; }
@@ -214,6 +215,9 @@ dialog::backdrop { background: #18273c55; backdrop-filter: blur(2px); }
 #inspector .property-paint-row > .property-row.is-animatable { grid-column: auto; }
 #inspector .property-paint-row .property-scrub { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 #inspector .property-paint-row .field input { text-align: left; }
+#inspector .property-paint-row:has(> .property-key-controls) { grid-template-columns: minmax(0, 1fr) auto; }
+#inspector .property-paint-row:has(> .property-key-controls) > .property-row { grid-column: 1 / -1; }
+#inspector .property-paint-row:has(> .property-key-controls) .property-scrub { position: static; width: auto; height: auto; clip-path: none; }
 #inspector .paint-trigger { display: flex; justify-content: flex-start; align-items: center; gap: 8px; width: 100%; height: 32px; min-width: 0; padding: 0 8px; margin: 0; border: 1px solid transparent; border-radius: 5px; background: #f0f0f0; color: #292929; font-size: 11px; text-align: left; }
 #inspector .paint-trigger:hover { border-color: #d4d4d4; }
 #inspector .paint-trigger i { display: block; width: 18px; height: 18px; border-radius: 3px; border: 1px solid #0000001a; flex-shrink: 0; }
@@ -244,3 +248,4 @@ dialog::backdrop { background: #18273c55; backdrop-filter: blur(2px); }
   .titlebar .document-tab, .titlebar .title-divider { display: none; }
   .app-menubar > button { padding-inline: 6px; }
 }
+#inspector .field-grid > .property-row[data-property-row="segment_gradient_opacity"] { grid-column: 1 / -1; }

@@ -79,7 +79,7 @@ class CodecTests(unittest.TestCase):
     def test_older_native_digest_remains_readable(self):
         imported = self.store.import_bytes(self.modern.read_bytes(), self.modern.name)
         saved, _ = self.store.export({**imported, "format": "styk"})
-        native = json.loads(saved)
+        native = json.loads(server.native_format.decode(saved))
         native["_stykSource"].pop("document_digest_version")
         native["_stykSource"]["document_sha256"] = server.document_digest(imported["document"], canonical=False)
         restored = server.ProjectStore(server.WORKSPACE).import_bytes(server.encoded_json(native), "older.styk")
@@ -117,7 +117,7 @@ class CodecTests(unittest.TestCase):
         imported["document"]["opaque"] = "large opaque asset " * 10000
         native, _ = self.store.export({**imported, "format": "styk"})
         # Enough for one native document, deliberately less than two copies.
-        restarted = server.ProjectStore(server.WORKSPACE, max_cache=len(native) + 1024)
+        restarted = server.ProjectStore(server.WORKSPACE, max_cache=len(server.native_format.decode(native)) + 1024)
         reopened = restarted.import_bytes(native, "large.styk")
         entry = restarted.sources[reopened["sourceId"]]
         self.assertEqual(entry.data, b"")
@@ -153,7 +153,7 @@ class CodecTests(unittest.TestCase):
         exact, _ = self.store.export({**imported, "format": "piv"})
         self.assertEqual(exact, original)
         native, _ = self.store.export({**imported, "format": "styk"})
-        older = json.loads(native)
+        older = json.loads(server.native_format.decode(native))
         older["_stykSource"].update(document_digest_version=2, document_sha256=old_digest)
         restarted = server.ProjectStore(server.WORKSPACE)
         reopened = restarted.import_bytes(server.encoded_json(older), "older.styk")

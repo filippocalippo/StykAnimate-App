@@ -31,5 +31,5 @@ export function geometryDefinition(figure) {
         return {end: b, index: forward ?? backward, reverse: forward === undefined};
       })};
   });
-  return {segments, ids, order, polygons};
+  return {segments, ids, order, polygons, children};
 }

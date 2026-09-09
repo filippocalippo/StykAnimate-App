@@ -17,7 +17,7 @@ r=json.load(sys.stdin);store=server.ProjectStore(server.WORKSPACE)
 if 'path' in r:
  p=server.WORKSPACE/r['path']; imported=store.import_bytes(p.read_bytes(),p.name)
  raw,_=store.export({'document':imported['document'],'sourceId':imported['sourceId'],'format':'styk'})
- print(raw.decode('utf-8'))
+ print(json.dumps(store.import_bytes(raw,'roundtrip.styk')['document']))
 else:
  raw,name=store.export(r); imported=store.import_bytes(raw,name)
  print(json.dumps(imported['document']))

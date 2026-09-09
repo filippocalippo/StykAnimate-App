@@ -1,3 +1,4 @@
+import {readNativeDocument} from './read-native-document.mjs';
 import { _electron as electron } from 'playwright';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -15,7 +16,7 @@ const pivot = path.join(appRoot, '..', 'Goku_Broly_Movie_by_Killer1.piv');
 const pivotDigest = createHash('sha256').update(await readFile(pivot)).digest('hex');
 const applications = [], checks = [], errors = [];
 const launch = () => electron.launch({ args: [appRoot], cwd: appRoot, timeout: 45000, env: { ...process.env, STYK_USER_DATA_DIR: profile } });
-const documentAt = async filename => JSON.parse(await readFile(filename, 'utf8'));
+const documentAt = async filename => await readNativeDocument(filename);
 const record = name => { checks.push(name); console.log(`PASS ${name}`); };
 async function mocks(app) {
   await app.evaluate(({ dialog }) => {

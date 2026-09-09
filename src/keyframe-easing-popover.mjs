@@ -1,4 +1,5 @@
 import {keyEasing} from './keyframe-easing.mjs';
+import {isDiscreteAnimationProperty} from './animation-properties.mjs';
 import {createEasingControls} from './keyframe-easing-view.mjs';
 import {storedFrameReport} from './pivot-frame-draft.mjs';
 
@@ -50,7 +51,7 @@ export function showKeyframeEasingPopover() {
   const settings = channelMode ? records.map(({key, channel}) => key.interpolation === undefined && channel.property === 'pose' && report.auto_easing ? null : keyEasing(key)) :
     indices.map(index => frameReport.keyframes[index]._styk?.easing ?? (report.auto_easing ? null : {interpolation: 'linear'}));
   const initial = settings.every(value => JSON.stringify(value) === JSON.stringify(settings[0])) ? settings[0] : null;
-  const discrete = records.some(({channel}) => channel.property === 'backgroundId');
+  const discrete = records.some(({channel}) => isDiscreteAnimationProperty(channel.property));
   this.easingPopover?.hidePopover();
   if (this.menu) this.menu.hidden = true;
   this.onSeek?.(this.editor.tick, this.editor.frameIndex);

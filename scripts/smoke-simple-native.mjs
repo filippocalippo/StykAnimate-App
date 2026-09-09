@@ -1,3 +1,4 @@
+import {readNativeDocument} from './read-native-document.mjs';
 import {_electron as electron} from 'playwright';
 import assert from 'node:assert/strict';
 import {mkdir, writeFile, readFile} from 'node:fs/promises';
@@ -102,7 +103,7 @@ try {
   await page.evaluate(() => { styk.editor.select(1); styk.editor.beginTranslationDrag(); styk.editor.moveSelection(20,0,{fromStart:true}); });
   await app.evaluate(({dialog}, filename) => { dialog.showSaveDialog = async () => ({canceled: false, filePath: filename}); }, saved);
   await page.evaluate(() => styk.actions.save());
-  const native = JSON.parse(await readFile(saved, 'utf8'));
+  const native = await readNativeDocument(saved);
   assert.equal(native.keyframes.length, 5); assert.equal(native._styk.simpleFrameDraft.mode, 'add');
   assert.equal(native._styk.simpleFrameDraft.baseline.objects[0].root_x, 370); assert.equal(native.keyframes[4].objects[0].root_x, 470);
   const recent = await page.evaluate(() => stykDesktop.listRecentFiles()); assert.equal(recent[0].name, 'Working draft.styk');

@@ -1,5 +1,5 @@
 /** Native Pivot stores segment/outline appearance on reusable figure types. */
-import {resolveInstanceFigure, nativeSegmentOpacity} from './animation-style.mjs';
+import {resolveInstanceFigure, nativeSegmentOpacity, styleColor, polygonIdentity} from './animation-style.mjs';
 import {evaluatedFrame, timeline} from './pivot/geometry.mjs';
 
 const byte = value => Math.round((1 - value) * 255);
@@ -15,9 +15,16 @@ export function createNativeStyleTable(report) {
     const figure = figures.get(object.figure_type_id), style = object._stykStyle; if (!figure || !style) return object.figure_type_id;
     let indices = handles.get(figure); if (!indices) {indices = new Map(figure.segments.map(segment => [segment.segment_id, segment])); handles.set(figure, indices);}
     const signature = [];
+    for (const [id,values] of Object.entries(style.polygons ?? {})) if (figure.polyfills?.some((polygon,index) => polygonIdentity(polygon,index) === Number(id))) signature.push(`p:${id}:${JSON.stringify(values)}`);
+    if (Number.isFinite(style.outlineColor) && style.outlineColor !== styleColor(figure.segment_decode?.global_style?.rgb)) signature.push(`oc:${style.outlineColor}`);
+    if (Number.isFinite(style.outlineWidth) && style.outlineWidth !== Number(figure.segment_decode?.global_style?.outline_thickness ?? 0)) signature.push(`ow:${style.outlineWidth}`);
     if (Number.isFinite(style.outlineOpacity)) {const alpha = byte(style.outlineOpacity); if (alpha !== Number(figure.segment_decode?.global_style?.u30 ?? 0)) signature.push(`o:${alpha}`);}
     for (const id of Object.keys(style.segments ?? {}).sort((a,b) => Number(a)-Number(b))) {
       const segment = indices.get(Number(id)), override = style.segments[id]; if (!segment || !override) continue;
+      if (override.paint) signature.push(`paint:${id}:${JSON.stringify(override)}`);
+      if (Number.isFinite(override.color) && override.color !== styleColor(segment.color_rgb)) signature.push(`c:${id}:${override.color}`);
+      if (Number.isFinite(override.thickness) && override.thickness !== segment.thickness) signature.push(`w:${id}:${override.thickness}`);
+      if (segment.secondary && Number.isFinite(override.gradientColor) && override.gradientColor !== styleColor(segment.secondary.rgb)) signature.push(`gc:${id}:${override.gradientColor}`);
       if (Number.isFinite(override.opacity)) {const alpha = byte(override.opacity); if (alpha !== byte(nativeSegmentOpacity(segment))) signature.push(`s:${id}:${alpha}`);}
       if (segment.secondary && Number.isFinite(override.gradientOpacity)) {const alpha = byte(override.gradientOpacity); if (alpha !== Number(segment.secondary.a ?? 0)) signature.push(`g:${id}:${alpha}`);}
     }

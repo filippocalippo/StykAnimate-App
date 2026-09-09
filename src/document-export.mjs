@@ -24,11 +24,11 @@ export class DocumentExporter {
     this.lastTimings = null;
   }
 
-  /** @returns {Promise<Blob>} Native .styk project or Pivot .piv/.stk bytes. */
+  /** @returns {Promise<Blob>} Native .styk/.stkz or Pivot .piv/.stk bytes. */
   async export(report, {sourceId, format = 'styk', name, figureTypeId, figureUid, tick, signal, getRevision} = {}) {
     if (this.disposed) throw new Error('The document exporter has been disposed.');
     if (!report || typeof report !== 'object') throw new TypeError('Export requires an editable document.');
-    if (!['piv', 'stk', 'styk'].includes(format)) throw new Error('Choose a .piv, .stk, or .styk export.');
+    if (!['piv', 'stk', 'styk', 'stkz'].includes(format)) throw new Error('Choose a .piv, .stk, .styk, or .stkz export.');
     if (signal?.aborted) throw abortError();
     const originalRevision = getRevision?.(), started = performance.now();
     const worker = new Worker(new URL('./document-export-worker.mjs', import.meta.url), {type: 'module', name: 'StykAnimate document export'});

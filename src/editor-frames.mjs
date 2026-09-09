@@ -6,13 +6,19 @@ const channelSources = new WeakMap();
 // Report-owned frames can be reused after removal without sharing mutable
 // objects with the immutable history snapshots they were copied from.
 const sourceCopies = new WeakMap();
-function references(channel, retained) {
-  if (!channel || channel.property !== 'pose') return;
+function references(channel, retained, candidates, visited) {
+  if (!channel || channel.property !== 'pose' || visited.has(channel)) return;
+  visited.add(channel);
   let entry = channelSources.get(channel);
   if (!entry || entry.keys !== channel.keys) {
     entry = {keys: channel.keys, ids: new Set(channel.keys.map(key => key.value?.frameId).filter(Boolean))}; channelSources.set(channel, entry);
   }
-  for (const id of entry.ids) retained.add(id);
+  // Native references can outnumber collectible captures by many orders of
+  // magnitude. Intersect the smaller set instead of scanning the whole movie
+  // once for each history snapshot.
+  if (candidates.size < entry.ids.size) {
+    for (const id of candidates) if (entry.ids.has(id)) retained.add(id);
+  } else for (const id of entry.ids) if (candidates.has(id)) retained.add(id);
 }
 
 /** Validate persisted references before replacing the currently open document. */
@@ -86,7 +92,7 @@ export const editorFrameMethods = {
     const frames = beforeFrames(command); if (!frames.length) return;
     invalidateFrameIndex(this.report);
     const referenced = new Set();
-    for (const channel of this.animationChannels) if (channel.property === 'pose')
+    for (const channel of [...this.animationChannels, ...(this._frameDraftStoredEdit?.before.animation?.channels ?? [])]) if (channel.property === 'pose')
       for (const key of channel.keys) if (key.value?.frameId) referenced.add(key.value.frameId);
     if (!referenced.size) return;
     const sources = this.report._styk.frameSources, changes = [];
@@ -116,12 +122,21 @@ export const editorFrameMethods = {
   _pruneFrameSources() {
     if (!this._generatedFrameSources?.size) return;
     const retained = new Set();
-    for (const channel of this.animationChannels) references(channel, retained);
+    const visited = new Set(), keep = channel => references(channel, retained, this._generatedFrameSources, visited);
+    for (const channel of this.animationChannels) keep(channel);
+    for (const channel of this.report._styk.simpleFrameDraft?.animationBaseline?.channels ?? []) keep(channel);
     for (const command of [...this._undo, ...this._redo]) {
+      for (const side of ['before', 'after']) {
+        for (const channel of command.draftAnimation?.[side]?.channels ?? []) keep(channel);
+        const state = command.frameDraftState?.[side] ?? command.frameDraftJournal?.[side]?.state ?? command.frameDraftTopology?.[side]?.state;
+        for (const channel of state?.animationBaseline?.channels ?? []) keep(channel);
+        for (const channel of command.frameDraftStored?.[side]?.animation?.channels ?? []) keep(channel);
+        for (const channel of command.frameDraftStored?.[side]?.state?.animationBaseline?.channels ?? []) keep(channel);
+      }
       for (const id of command.retainedFrameSourceIds ?? []) retained.add(id);
-      if (command.kind === 'animation') for (const value of [command.before, command.after]) for (const channel of value?.channels ?? []) references(channel, retained);
-      if (command.kind === 'scene') for (const side of ['before', 'after']) for (const entry of command[side]?.channels ?? []) references(entry.channel, retained);
-      for (const change of command.layerAnimationPatch?.changes ?? []) for (const side of ['before', 'after']) references(change[side]?.channel, retained);
+      if (command.kind === 'animation') for (const value of [command.before, command.after]) for (const channel of value?.channels ?? []) keep(channel);
+      if (command.kind === 'scene') for (const side of ['before', 'after']) for (const entry of command[side]?.channels ?? []) keep(entry.channel);
+      for (const change of command.layerAnimationPatch?.changes ?? []) for (const side of ['before', 'after']) keep(change[side]?.channel);
       for (const change of command.frameSourceChanges ?? []) retained.add(change.id);
       if (command.kind === 'topology') for (const side of ['before', 'after']) for (const entry of command[side]?.frames ?? []) if (entry.sourceId) retained.add(entry.sourceId);
     }

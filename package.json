@@ -25,6 +25,10 @@
     "test:recovery:desktop": "node scripts/smoke-recovery.mjs",
     "benchmark:native-import": "node scripts/benchmark-native-import.mjs",
     "benchmark:dense": "node scripts/benchmark-dense-scene.mjs",
+    "benchmark:animation-modes": "node --expose-gc scripts/benchmark-animation-modes.mjs",
+    "benchmark:animation-memory": "node --expose-gc scripts/benchmark-animation-memory.mjs",
+    "test:animation-performance": "node --test tests/animation-performance.test.mjs",
+    "test:animation-performance:browser": "node tests/animation-mode-performance.browser.mjs",
     "test:desktop": "node scripts/smoke-desktop.mjs",
     "test:desktop:packaged": "node scripts/smoke-desktop.mjs --packaged",
     "build:sidecar": "python scripts/build-sidecar.py",
@@ -73,6 +77,7 @@
     "fileAssociations": [
       { "ext": "piv", "name": "Pivot animation", "role": "Editor" },
       { "ext": "stk", "name": "Pivot stick figure", "role": "Editor" },
+      { "ext": "stkz", "name": "StykAnimate figure", "role": "Editor" },
       { "ext": "styk", "name": "StykAnimate project", "role": "Editor" }
     ],
     "win": { "target": ["nsis", "portable"], "signAndEditExecutable": false,

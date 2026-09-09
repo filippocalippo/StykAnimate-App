@@ -79,7 +79,7 @@ class LegacyUpgradeExportTests(unittest.TestCase):
             with self.subTest(version=version):
                 store, imported, legacy, modern, source = self.upgraded(version)
                 native, _ = store.export({**imported, "document": modern, "format": "styk"})
-                saved = json.loads(native)
+                saved = json.loads(server.native_format.decode(native))
                 metadata = saved["_stykSource"]
                 self.assertEqual(metadata["version"], version)
                 self.assertEqual(metadata["sha256"], hashlib.sha256(source).hexdigest())
@@ -92,13 +92,13 @@ class LegacyUpgradeExportTests(unittest.TestCase):
                 output, _ = restarted.export({"document": reopened["document"], "format": "piv"})
                 self.assert_exported_scene(output, modern)
                 native_again, _ = restarted.export({**reopened, "format": "styk"})
-                self.assertEqual(json.loads(native_again)["_stykSource"], metadata)
+                self.assertEqual(json.loads(server.native_format.decode(native_again))["_stykSource"], metadata)
                 self.assertEqual(reopened["document"]["source_sha256"], legacy["source_sha256"])
 
     def test_editable_embedded_version_cannot_choose_the_wrong_writer(self):
         store, imported, _, modern, _ = self.upgraded(3)
         native, _ = store.export({**imported, "document": modern, "format": "styk"})
-        saved = json.loads(native)
+        saved = json.loads(server.native_format.decode(native))
         saved["_stykSource"]["version"] = 5
         # The embedded file is actually V3; use its validated header.
         output, _ = store.export({"document": saved, "format": "piv"})
@@ -137,7 +137,7 @@ print(json.dumps({'original_sha256': hashlib.sha256(server.bridge.source_bytes(o
         modern["source_sha256"] = "0" * 64
         with self.assertRaisesRegex(server.piv_codec.PivError, "different original source"):
             store.export({**imported, "document": modern, "format": "piv"})
-        saved = json.loads(native)
+        saved = json.loads(server.native_format.decode(native))
         saved["source_sha256"] = "0" * 64
         with self.assertRaisesRegex(server.piv_codec.PivError, "different original source"):
             store.export({"document": saved, "format": "piv"})
@@ -145,7 +145,7 @@ print(json.dumps({'original_sha256': hashlib.sha256(server.bridge.source_bytes(o
     def test_corrupt_embedded_fingerprint_or_legacy_grammar_remains_rejected(self):
         store, imported, _, modern, _ = self.upgraded()
         native, _ = store.export({**imported, "document": modern, "format": "styk"})
-        saved = json.loads(native)
+        saved = json.loads(server.native_format.decode(native))
         saved["_stykSource"]["sha256"] = "0" * 64
         with self.assertRaisesRegex(server.piv_codec.PivError, "fingerprint"):
             store.export({"document": saved, "format": "piv"})
@@ -162,7 +162,7 @@ print(json.dumps({'original_sha256': hashlib.sha256(server.bridge.source_bytes(o
         store, imported, _, modern, _ = self.upgraded()
         native, _ = store.export({**imported, "document": modern, "format": "styk"})
         with self.assertRaises(server.ApiError) as error:
-            store.export({"sourceId": "expired", "document": json.loads(native), "format": "piv"})
+            store.export({"sourceId": "expired", "document": json.loads(server.native_format.decode(native)), "format": "piv"})
         self.assertEqual(error.exception.status, 410)
         self.assertEqual(error.exception.code, "source_expired")
 
@@ -195,7 +195,7 @@ print(json.dumps({'original_sha256': hashlib.sha256(server.bridge.source_bytes(o
             status, output = request(modern, imported["sourceId"])
             self.assertEqual(status, 200)
             self.assert_exported_scene(output, modern)
-            saved = json.loads(native)
+            saved = json.loads(server.native_format.decode(native))
             status, output = request(saved, "expired")
             self.assertEqual(status, 410)
             self.assertEqual(json.loads(output)["code"], "source_expired")

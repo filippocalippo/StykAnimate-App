@@ -12,6 +12,7 @@
     <link rel="icon" type="image/svg+xml" href="./mark.svg" />
     <link rel="stylesheet" href="./src/style.css" />
     <link rel="stylesheet" href="./src/studio.css" />
+    <link rel="stylesheet" href="./src/ik.css" />
   </head>
   <body>
     <div id="app">
@@ -106,6 +107,9 @@
               <button class="button subtle small" data-action="undo" title="Undo · Ctrl+Z" aria-label="Undo" data-icon="undo"></button>
               <button class="button subtle small" data-action="redo" title="Redo · Ctrl+Shift+Z" aria-label="Redo" data-icon="redo"></button>
               <span class="divider"></span>
+              <button type="button" class="icon-button" data-selection-order data-action="layer-front" data-shift-action="layer-up" title="Bring to front · Shift-click: one step forward" aria-label="Bring to front" data-icon="bring-to-front" disabled></button>
+              <button type="button" class="icon-button" data-selection-order data-action="layer-back" data-shift-action="layer-down" title="Send to back · Shift-click: one step backward" aria-label="Send to back" data-icon="send-to-back" disabled></button>
+              <span class="divider"></span>
               <button
                 class="icon-button active"
                 id="handles-button"
@@ -142,7 +146,7 @@
               <span id="frame-badge">FRAME 01</span
               ><span id="preview-badge" hidden>PLAYING</span>
             </div>
-            <div id="canvas-empty" hidden>Drop a .piv or .stk file here</div>
+            <div id="canvas-empty" hidden>Drop a .styk, .stkz, .piv or .stk file here</div>
             <output id="playback-fps" aria-label="Playback frames per second" hidden>— fps</output>
             <div id="renderer-error" hidden></div>
             <div id="polygon-controls" class="polygon-controls" hidden>
@@ -261,7 +265,7 @@
     <input
       type="file"
       id="file-input"
-      accept=".piv,.stk,.styk,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp"
+      accept=".styk,.stkz,.piv,.stk,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp"
       multiple
       hidden
     />

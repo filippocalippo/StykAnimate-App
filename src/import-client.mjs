@@ -97,7 +97,7 @@ export class ImportClient {
     if (!file || typeof file.arrayBuffer !== 'function' || typeof file.name !== 'string') {
       throw new TypeError('Choose a Pivot animation, stick figure, or StykAnimate project file.');
     }
-    const native = /\.(styk|json)$/i.test(file.name);
+    const native = /\.(styk|stkz|json)$/i.test(file.name);
     const limit = (native ? 256 : 128) * 1024 * 1024;
     if (Number(file.size) > limit) throw new Error(`The file exceeds the ${limit / 1024 / 1024} MiB import limit.`);
     const bytes = await file.arrayBuffer();
@@ -106,8 +106,8 @@ export class ImportClient {
   }
 
   importNative(file) {
-    if (!/\.(styk|json)$/i.test(file?.name || '')) {
-      return Promise.reject(new Error('Choose a .styk or .json project file.'));
+    if (!/\.(styk|stkz|json)$/i.test(file?.name || '')) {
+      return Promise.reject(new Error('Choose a .styk project, .stkz figure, or .json file.'));
     }
     return this.importFile(file);
   }

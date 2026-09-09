@@ -1,6 +1,7 @@
 import {validateObjectChanges, validateScene} from './pivot/model.mjs';
 import {animationPropertyValue} from './animation-channels.mjs';
 import {buildGeometry} from './pivot/geometry.mjs';
+import {splitPosePropertyChanges} from './pose-property-split.mjs';
 const clone = value => structuredClone(value);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -22,7 +23,7 @@ export const editorAuthoredPoseMethods = {
     } catch (error) { this.report.keyframes[index] = native; this.report.figure_types.length = definitionCount; this.cancelAuthoredPoseDrag(); throw error; }
   },
   _beginAuthoredPoseDrag(label, scope) {
-    if (!this.animationChannels.length) return null;
+    if (!this.propertyChannels && !this.animationChannels.length) return null;
     if (!Number.isInteger(this.tick)) { this.tick = Math.round(this.tick); this._invalidate({viewOnly: true}); }
     const source = this.evaluatedFrame;
     if (!source.objects.some(object => this.selectedUids.has(object.unique_id))) return false;
@@ -71,32 +72,51 @@ export const editorAuthoredPoseMethods = {
       }
       if (edit.transaction) validateScene({...this.report, keyframes: [edit.frame]});
     } catch (error) { this.cancelAuthoredPoseDrag(); throw error; }
-    const entries = [];
-    const sourceId = this.captureFrameSource(edit.frame);
+    const split = this.propertyChannels ? splitPosePropertyChanges(this.report, edit.source, edit.frame, ids, edit.tick) : null;
+    const entries = split?.entries ?? [];
+    let sourceId;
+    const poseSource = () => sourceId ??= this.captureFrameSource(split?.frame ?? edit.frame);
+    if (!split || split.shapeIds.size) poseSource();
     const currentObjects = new Map(edit.frame.objects.map(object => [object.unique_id, object]));
     const changedObjects = [...after, ...drag.before].filter(object => {
+      if (split && !split.shapeIds.has(object.unique_id)) return false;
       if (!edit.transaction) return true;
       const current = currentObjects.get(object.unique_id);
       return !current || !same(previous.get(object.unique_id), current);
     });
-    const independent = new Set(changedObjects.filter(object => this.animationChannel({kind:'figure',uid:object.unique_id},'pose')).map(object => object.unique_id));
+    const independent = new Set(changedObjects.filter(object => split && !edit.transaction || this.animationChannel({kind:'figure',uid:object.unique_id},'pose')).map(object => object.unique_id));
     const layers = new Set(changedObjects.filter(object => !independent.has(object.unique_id)).map(object => this.layerForUid(object.unique_id)));
-    for (const uid of independent) entries.push({target:{kind:'figure',uid},property:'pose',tick:edit.tick,value:{frameId:sourceId}});
+    for (const uid of independent) {
+      const target={kind:'figure',uid};this.nativePoseChannel(target);
+      entries.push({target,property:'pose',tick:edit.tick,value:{frameId:poseSource()}});
+    }
     if (edit.transaction && !same(edit.source.object_draw_order_unique_ids, edit.frame.object_draw_order_unique_ids))
       for (const object of after) layers.add(this.layerForUid(object.unique_id));
     for (const id of layers) {
       this.nativePoseChannel({kind: 'layer', id});
-      entries.push({target: {kind: 'layer', id}, property: 'pose', tick: edit.tick, value: {frameId: sourceId}});
+      entries.push({target: {kind: 'layer', id}, property: 'pose', tick: edit.tick, value: {frameId: poseSource()}});
     }
-    if (edit.transaction && !same(edit.source.camera, edit.frame.camera)) entries.push({target: {kind: 'camera'}, property: 'pose', tick: edit.tick, value: {frameId: sourceId}});
+    if (edit.transaction && !same(edit.source.camera, edit.frame.camera)) {
+      if (split) for (const property of ['x','y','scale','rotation']) {
+        const target = {kind:'camera'}, value = animationPropertyValue(this.report, edit.frame, target, property);
+        if (value !== animationPropertyValue(this.report, edit.source, target, property)) entries.push({target, property, tick:edit.tick, value});
+      } else entries.push({target: {kind: 'camera'}, property: 'pose', tick: edit.tick, value: {frameId: poseSource()}});
+    }
     if (edit.transaction && ['background_id', 'background_id_b', 'background_mix', '_stykBackgroundColor'].some(field => !same(edit.source[field], edit.frame[field])))
-      entries.push({target: {kind: 'scene'}, property: 'pose', tick: edit.tick, value: {frameId: sourceId}});
+      if (split) {
+        for (const property of ['backgroundId','color']) {
+          const target = {kind:'scene'}, value = animationPropertyValue(this.report, edit.frame, target, property);
+          if (value !== animationPropertyValue(this.report, edit.source, target, property)) entries.push({target, property, tick:edit.tick, value});
+        }
+      } else entries.push({target: {kind: 'scene'}, property: 'pose', tick: edit.tick, value: {frameId: poseSource()}});
     // Existing absolute transform curves must not snap the edited pose back.
-    let committedGeometry;
-    for (const channel of this.animationChannels) if (channel.target.kind === 'figure' && ids.has(channel.target.uid) && channel.property !== 'pose') {
+    let committedGeometry, sourceGeometry;
+    for (const channel of split ? [] : this.animationChannels) if (channel.keys.length && channel.target.kind === 'figure' && ids.has(channel.target.uid) && channel.property !== 'pose') {
       const value = animationPropertyValue(this.report, edit.frame, channel.target, channel.property,
         {resolveGeometry: (report, frame) => committedGeometry ??= this._geometry ?? buildGeometry(report, frame)});
-      if (value !== undefined) entries.push({target: channel.target, property: channel.property, tick: edit.tick, value});
+      const beforeValue = animationPropertyValue(this.report, edit.source, channel.target, channel.property,
+        {resolveGeometry: (report, frame) => sourceGeometry ??= buildGeometry(report, frame)});
+      if (value !== undefined && value !== beforeValue) entries.push({target: channel.target, property: channel.property, tick: edit.tick, value});
     }
     // A pose key stores exactly the displayed frame at this tick. Keep its
     // geometry during the synchronous key-change notification; rebuilding every
@@ -107,7 +127,7 @@ export const editorAuthoredPoseMethods = {
       this._invalidate();
       this._authoredCommandLabel = drag.label;
       this.addAnimationKeys(entries);
-    } catch (error) { delete this.report._styk.frameSources[sourceId]; this._authoredCommitPreview = null; this._invalidate(); throw error; }
+    } catch (error) { if (sourceId) delete this.report._styk.frameSources[sourceId]; this._authoredCommitPreview = null; this._invalidate(); throw error; }
     finally { this._authoredCommandLabel = null; this._authoredCommitPreview = null; }
     return true;
   },

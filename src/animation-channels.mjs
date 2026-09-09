@@ -2,17 +2,19 @@
 import {isAnimationStyleProperty, animationStyleValue, setAnimationStyle} from './animation-style.mjs';
 import {animationRotation, animationOriginOffset, correctAnimationOrigins} from './animation-origin.mjs';
 import {rotateOriginSupport} from './animation-origin-support.mjs';
+import {normalizePaint} from './paint.mjs';
+import {sampleNativePropertyCurve, shortestPropertyAngle} from './native-property-curve.mjs';
 import {validateKeyEasing, easedProgress, easingMode, autoValue} from './keyframe-easing.mjs';
-const properties = {
-  figure: new Set(['x', 'y', 'scale', 'rotation', 'opacity', 'outlineOpacity', 'pose']),
-  segment: new Set(['opacity', 'gradientOpacity']),
-  camera: new Set(['x', 'y', 'scale', 'rotation', 'pose']),
-  scene: new Set(['backgroundId', 'color', 'pose']),
-  layer: new Set(['pose']),
-};
+import {ANIMATION_PROPERTIES, isDiscreteAnimationProperty, isColorAnimationProperty, validateFigureZIndex} from './animation-properties.mjs';
+const properties = Object.fromEntries(Object.entries(ANIMATION_PROPERTIES).map(([kind, values]) => [kind, new Set(values)]));
 export function normalizeAnimationTarget(target) {
   if (!target || !properties[target.kind]) throw new Error('Choose a figure, segment, layer, camera, or scene animation target.');
-  if (target.figureTypeId !== undefined && target.kind !== 'segment') throw new Error('Only segment animation can be scoped to a figure definition.');
+  if (target.figureTypeId !== undefined && !['segment','polygon'].includes(target.kind)) throw new Error('Only segment and polygon animation can be scoped to a figure definition.');
+  if (target.kind === 'polygon') {
+    if (!Number.isInteger(target.uid) || target.uid < 0 || !Number.isInteger(target.polygonId) || target.polygonId < 1 || target.polygonId > 65535 || !Number.isSafeInteger(target.figureTypeId) || target.figureTypeId < 1)
+      throw new Error('Polygon animation requires a figure UID, polygon identity, and figure definition identity.');
+    return {kind:'polygon', uid:target.uid, polygonId:target.polygonId, figureTypeId:target.figureTypeId};
+  }
   if (target.kind === 'figure' || target.kind === 'segment') {
     if (!Number.isInteger(target.uid) || target.uid < 0) throw new Error('Figure animation requires a native figure identity.');
     if (target.kind === 'segment') {
@@ -32,11 +34,12 @@ export function normalizeAnimationTarget(target) {
 export function animationChannelId(target, property) {
   target = normalizeAnimationTarget(target);
   if (!properties[target.kind].has(property)) throw new Error(`Property ${property} cannot animate on ${target.kind}.`);
-  const identity = target.kind === 'segment' ? `${target.uid}/${target.handleId}${target.figureTypeId === undefined ? '' : `@${target.figureTypeId}`}` : target.uid ?? target.id ?? '';
+  const identity = target.kind === 'polygon' ? `${target.uid}/${target.polygonId}@${target.figureTypeId}` : target.kind === 'segment' ? `${target.uid}/${target.handleId}${target.figureTypeId === undefined ? '' : `@${target.figureTypeId}`}` : target.uid ?? target.id ?? '';
   return `${target.kind}:${encodeURIComponent(identity)}:${property}`;
 }
 export function validateAnimationValue(target, property, value) {
   animationChannelId(target, property);
+  if (property === 'paint') return normalizePaint(value);
   if (property === 'pose') {
     if (value === null) return {frameId: null};
     if (!value || !(value.frameId === null || typeof value.frameId === 'string' && value.frameId.length > 0)) throw new Error('A pose key must reference a native frame identity or a blank pose.');
@@ -44,10 +47,13 @@ export function validateAnimationValue(target, property, value) {
   }
   if (target.kind === 'scene' && property === 'color' && value === null) return null;
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('Animation values must be finite numbers.');
+  if (property === 'zIndex') return validateFigureZIndex(value);
   if (property === 'scale' && (value < (target.kind === 'camera' ? 0.000001 : 0) || value > 1e6)) throw new Error('Animation scale is outside the supported range.');
   if (['opacity', 'outlineOpacity', 'gradientOpacity'].includes(property) && (value < 0 || value > 1)) throw new Error('Animation opacity must be between zero and one.');
   if (property === 'backgroundId' && (!Number.isInteger(value) || value < 0 || value > 0xffffffff)) throw new Error('Choose a valid background identity.');
-  if (property === 'color' && (!Number.isInteger(value) || value < 0 || value > 0xffffffff)) throw new Error('Scene color must be a 32-bit ARGB color.');
+  if (isColorAnimationProperty(property) && (!Number.isInteger(value) || value < 0 || value > 0xffffffff)) throw new Error('Color must be a 32-bit color.');
+  if (isColorAnimationProperty(property) && (target.kind === 'segment' || target.kind === 'polygon' || property === 'outlineColor') && value > 0xffffff) throw new Error('Style colors use RGB; opacity has its own channel.');
+  if (['outlineWidth', 'thickness'].includes(property) && (value < 0 || value > 1e6)) throw new Error('Width must be between zero and 1,000,000.');
   return value;
 }
 const EMPTY_CHANNELS = Object.freeze([]), channelIndices = new WeakMap();
@@ -79,6 +85,8 @@ export function* validateAnimationDocumentSteps(report) {
   const channels = new Set(); let keyCount = 0, sourceIds, figureTypeIds, visited = 0;
   for (const channel of animation.channels) {
     if (channel.id !== animationChannelId(channel.target, channel.property) || channels.has(channel.id) || !Array.isArray(channel.keys)) throw new Error('Animation channels must have unique stable identities.');
+    if (channel.nativeProperties !== undefined && (channel.nativeProperties !== true || channel.property !== 'pose' || !['figure','layer'].includes(channel.target.kind)))
+      throw new Error('Native property inheritance is only valid on figure and layer pose channels.');
     if (channel.target.figureTypeId !== undefined) {
       if (!figureTypeIds) {
         figureTypeIds = new Set();
@@ -96,9 +104,14 @@ export function* validateAnimationDocumentSteps(report) {
       if (!Number.isInteger(key.tick) || key.tick < 0 || key.tick > 10000000 || key.tick < previous) throw new Error('Animation keys must be sorted at valid whole-frame times.');
       if (key.hidden && channel.property !== 'pose') throw new Error('Only native pose keys can be hidden.');
       if (key.passthrough !== undefined && (typeof key.passthrough !== 'boolean' || channel.property === 'pose')) throw new Error('Only scalar keys support a boolean passthrough interval.');
+      if (key.nativeCurve !== undefined && (key.nativeCurve !== 'pchip' || !['x','y','scale','rotation'].includes(channel.property))) throw new Error('Invalid native property curve.');
+      if (key.nativeRotation !== undefined && (key.nativeRotation !== true || channel.property !== 'rotation')) throw new Error('Invalid native rotation curve.');
+      if (key.nativeValueMode !== undefined && (channel.target.kind !== 'figure' || !['color','opacity'].includes(key.nativeValueMode) || key.nativeValueMode !== channel.property)) throw new Error('Invalid native property sampling mode.');
       if (!key.hidden && occupied.has(key.tick)) throw new Error('Multiple property keys occupy the same frame.');
       if (!key.hidden) occupied.add(key.tick); ids.add(key.id); previous = key.tick;
-      validateKeyEasing(key);
+      // Older documents may label background holds as linear. Preserve their
+      // read compatibility; newly introduced depth tracks require explicit holds.
+      validateKeyEasing(key, channel.property === 'zIndex' ? channel.property : undefined);
       validateAnimationValue(channel.target, channel.property, key.value);
       if (channel.property === 'pose' && key.value?.frameId != null) {
         if (!sourceIds) {
@@ -141,9 +154,10 @@ export function sampleAnimationChannel(channel, tick) {
   const a = keys[low], b = keys[low + 1];
   if (a.passthrough) return undefined;
   if (b?.passthrough) return a.value;
-  if (!b || a.tick === tick || ['backgroundId', 'pose'].includes(channel.property)) return a.value;
+  if (!b || a.tick === tick || channel.property === 'pose' || isDiscreteAnimationProperty(channel.property)) return a.value;
   const fraction = (tick - a.tick) / (b.tick - a.tick), auto = easingMode(a) === 'auto';
   const t = auto ? fraction : easedProgress(a, fraction);
+  if (a.nativeCurve === 'pchip') return sampleNativePropertyCurve(keys,low,t,a.nativeRotation);
   const value = get => {
     if (!auto) return get(a) + (get(b) - get(a)) * t;
     const previous = keys[low - 1], following = keys[low + 2];
@@ -152,13 +166,35 @@ export function sampleAnimationChannel(channel, tick) {
       easingMode(previous) === 'auto' ? neighbour(previous, a.tick - previous.tick) : undefined,
       easingMode(b) === 'auto' ? neighbour(following, following?.tick - b.tick) : undefined);
   };
-  if (channel.property === 'color') {
+  if (isColorAnimationProperty(channel.property)) {
     // Null explicitly returns control to the Scene background track; it is not
     // an ARGB zero and cannot be numerically interpolated into a solid color.
     if (a.value === null || b.value === null) return a.value;
+    if (a.nativeValueMode === 'color' && !auto) {
+      const am=a.value>>>24,bm=b.value>>>24;if(!am&&!bm)return a.value;
+      let color=0;
+      for(let shift=0;shift<32;shift+=8) {
+        let av=a.value>>>shift&255,bv=b.value>>>shift&255;
+        if(shift<24){if(!am)av=bv;if(!bm)bv=av;}
+        color|=(av+Math.trunc((bv-av)*t))<<shift;
+      }
+      return color>>>0;
+    }
     let out = 0;
     for (let shift = 0; shift < 32; shift += 8) out |= Math.round(value(key => (key.value >>> shift) & 255)) << shift;
     return out >>> 0;
+  }
+  if(a.nativeValueMode === 'opacity' && !auto) {
+    const av=Math.round((1-a.value)*255),bv=Math.round((1-b.value)*255);
+    return 1-(av+Math.trunc((bv-av)*t))/255;
+  }
+  if(a.nativeRotation) {
+    const end=a.value+shortestPropertyAngle(b.value-a.value);
+    if(!auto)return a.value+(end-a.value)*t;
+    const previous=keys[low-1],following=keys[low+2];
+    return autoValue(a.value,end,t,b.tick-a.tick,
+      previous && easingMode(previous)==='auto' ? {value:a.value-shortestPropertyAngle(a.value-previous.value),duration:a.tick-previous.tick} : undefined,
+      following && easingMode(b)==='auto' ? {value:end+shortestPropertyAngle(following.value-b.value),duration:following.tick-b.tick} : undefined);
   }
   return value(key => key.value);
 }
@@ -174,6 +210,8 @@ export function animationPropertyValue(report, frame, target, property, {resolve
   }
   const slot = frame.objects.findIndex(object => object.unique_id === target.uid), object = frame.objects[slot];
   if (!object) return undefined;
+  if (target.kind === 'figure' && property === 'color') return Number(object.color_override_raw ?? 0) >>> 0;
+  if (property === 'zIndex') return object._stykZIndex ?? 0;
   if (isAnimationStyleProperty(target, property)) return animationStyleValue(report.figure_types.find(figure => figure.figure_type_id === object.figure_type_id), object, target, property);
   if (property === 'opacity') return 1 - Number(object.field28 ?? 0) / 255;
   if (property === 'rotation') {
@@ -196,6 +234,7 @@ export function animationPropertyValue(report, frame, target, property, {resolve
 export function composeAnimationChannels(report, frame, tick, {resolveGeometry} = {}) {
   const channels = animationChannels(report); if (!frame || !channels.length) return frame;
   const active = channels.filter(channel => channel.property !== 'pose').map(channel => ({channel, value: sampleAnimationChannel(channel, tick)})).filter(entry => entry.value !== undefined);
+  active.sort((a,b) => Number(b.channel.property === 'paint') - Number(a.channel.property === 'paint'));
   if (!active.length) return frame;
   let out = frame, clonedObjects = false;
   const cloned = new Set(); let slots;
@@ -213,17 +252,19 @@ export function composeAnimationChannels(report, frame, tick, {resolveGeometry} 
       out.camera[channel.property === 'rotation' ? 'angle_rad' : channel.property] = value;
     } else if (channel.target.kind === 'scene') {
       sceneValues[channel.property] = value;
-    } else if (channel.target.kind === 'figure' || channel.target.kind === 'segment') {
+    } else if (['figure','segment','polygon'].includes(channel.target.kind)) {
       slots ??= new Map(frame.objects.map((object, index) => [object.unique_id, index]));
       const slot = slots.get(channel.target.uid); if (slot === undefined) continue;
+      if (channel.target.kind === 'figure' && channel.property === 'color') { editObject(slot, false).color_override_raw = value; continue; }
+      if (channel.property === 'zIndex') { editObject(slot, false)._stykZIndex = value; continue; }
       if (isAnimationStyleProperty(channel.target, channel.property)) {
         styleTypes ??= new Map(report.figure_types.map(figure => [figure.figure_type_id, figure]));
         // Missing/replaced handles stay dormant instead of styling a new segment.
-        if (animationStyleValue(styleTypes.get(frame.objects[slot].figure_type_id), frame.objects[slot], channel.target, channel.property) !== undefined) {
+        if (animationStyleValue(styleTypes.get(frame.objects[slot].figure_type_id), out.objects[slot], channel.target, channel.property) !== undefined) {
           // An applicable definition scope wins over the legacy global curve,
           // independently of their persisted order. Dormant scopes do not win.
           const scoped = channel.target.figureTypeId !== undefined;
-          const identity = scoped || scopedStyles ? `${channel.target.uid}/${channel.target.handleId}:${channel.property}` : null;
+          const identity = scoped || scopedStyles ? `${channel.target.kind}:${channel.target.uid}/${channel.target.handleId ?? channel.target.polygonId}:${channel.property}` : null;
           if (!scoped && scopedStyles?.has(identity)) continue;
           setAnimationStyle(editObject(slot, false), channel.target, channel.property, value);
           if (scoped) { scopedStyles ??= new Set(); scopedStyles.add(identity); }

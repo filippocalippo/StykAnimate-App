@@ -9,14 +9,18 @@ import {createNativeStyleTable, hasNativeStyleOverrides} from './pivot-style-mat
 import {hasAnimationOrigins} from './animation-origin.mjs';
 
 import {hasFrameEasing} from './keyframe-easing.mjs';
+import {hasPinnedIK} from './ik.mjs';
+const hasIK = report => report.keyframes.some(frame => frame.objects.some(hasPinnedIK));
 const MAX_FRAMES = 100000, MAX_OBJECTS = 2000000, MAX_BACKGROUNDS = 65534;
 const activeChannels = report => animationChannels(report).filter(channel => channel.property === 'pose' || channel.keys.length);
 
 export function needsPivotMaterialization(report) {
+  if (hasIK(report)) return true;
   if (hasFrameEasing(report)) return true;
   if (activeChannels(report).length) return true;
   if (hasAnimationOrigins(report)) return true;
   if (hasNativeStyleOverrides(report)) return true;
+  if (report.keyframes.some(frame => frame.objects.some(object => object._stykZIndex !== undefined))) return true;
   const layers = report._styk?.layers;
   if (!layers) return false;
   if (layers.fixed?.camera?.visible === false || layers.fixed?.scene?.visible === false ||
@@ -84,7 +88,7 @@ export function materializePivotDocument(report) {
   validateAnimationDocument(report);
   if (report._styk?.layers) validateLayerState(report._styk.layers);
   const channels = activeChannels(report), layers = report._styk?.layers;
-  const authored = hasFrameEasing(report) || channels.length > 0 || hasAnimationOrigins(report) || hasNativeStyleOverrides(report) || layers?.order.some(id => layers.byId[id]?.visible === false), rows = nativeTimeline(report), outputRows = timeline(report);
+  const authored = hasIK(report) || hasFrameEasing(report) || channels.length > 0 || hasAnimationOrigins(report) || hasNativeStyleOverrides(report) || layers?.order.some(id => layers.byId[id]?.visible === false), rows = nativeTimeline(report), outputRows = timeline(report);
   const totalTicks = outputRows.at(-1).start + outputRows.at(-1).count;
   const {events: hidden, extraSources} = authored ? hiddenExposures(report, rows, channels) : {events: [], extraSources: {}};
   const outputCount = authored ? totalTicks + hidden.length : report.keyframes.length;
@@ -105,13 +109,17 @@ export function materializePivotDocument(report) {
     output.backgrounds.push({background_id: id, kind: 2, color, name: `Color #${(color & 0xffffff).toString(16).padStart(6, '0')}`}); return id;
   };
   const append = (frame, duration) => {
-    const geometry = frame.objects.some(object => object.join) ? buildGeometry(report, frame) : null;
+    const geometry = frame.objects.some(object => object.join || hasPinnedIK(object)) ? buildGeometry(report, frame) : null;
     const oldToNew = new Map(), objects = [];
     frame.objects.forEach((object, slot) => {
       if (!layerVisible(report, object.unique_id)) return;
       oldToNew.set(slot, objects.length);
       const next = {...object, object_slot: objects.length}; delete next.runtime_segments;
+      if (geometry?.objects.get(slot)?.solvedAngles) next.angles = geometry.objects.get(slot).solvedAngles.slice();
+      if (geometry?.objects.get(slot)?.solvedLengths) {next.len_flag = 1; next.lengths = geometry.objects.get(slot).solvedLengths.slice();}
+      delete next._stykIK;
       delete next._stykAnimationOrigin;
+      delete next._stykZIndex;
       next.figure_type_id = styleTypeId(object); delete next._stykStyle;
       if (object.join) {
         const root = geometry.objects.get(slot)?.root;

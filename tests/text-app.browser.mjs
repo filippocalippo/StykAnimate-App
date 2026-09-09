@@ -1,3 +1,4 @@
+import {readNativeDocument} from '../scripts/read-native-document.mjs';
 /** Actual app integration: native import, contextual Edit text, undo, Save and native exports. */
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
@@ -146,7 +147,7 @@ try {
     () => page.locator('[data-action="save"]').first().click(),
     "native-text-edited.styk",
   );
-  const saved = JSON.parse(await readFile(nativeFile, "utf8")),
+  const saved = await readNativeDocument(nativeFile),
     savedDoc = saved.document || saved;
   check(
     "Actual Save writes portable glyphs and editable original-font metadata",

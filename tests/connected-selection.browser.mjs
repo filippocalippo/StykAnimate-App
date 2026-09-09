@@ -37,7 +37,11 @@ try {
   assert.equal(await page.locator('#builder-branch').isChecked(),true);
   await page.locator('[data-field="thickness"]').fill('17');
   await page.locator('[data-field="thickness"]').press('Tab');
-  assert.deepEqual(await page.evaluate(()=>styk.editor.figure.segments.map(s=>s.thickness)),[11,8,17,17,9,8,11,10,11,10]);
+  assert.deepEqual(await page.evaluate(async()=>{
+    const {resolveInstanceFigure}=await import('/src/animation-style.mjs');
+    return resolveInstanceFigure(styk.editor.figure,styk.editor.object).segments.map(s=>s.thickness);
+  }),[11,8,17,17,9,8,11,10,11,10]);
+  assert.deepEqual(await page.evaluate(()=>styk.editor.figure.segments.map(s=>s.thickness)),[11,8,9,8,9,8,11,10,11,10]);
   await page.keyboard.press('Control+z');
   assert.equal(await page.evaluate(()=>styk.editor.branchSelected),true);
   await page.locator('#viewport').focus();

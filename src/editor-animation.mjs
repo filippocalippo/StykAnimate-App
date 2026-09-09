@@ -5,6 +5,8 @@ import {buildGeometry, evaluatedFrame, nativeTimeline} from './pivot/geometry.mj
 import {previewBranchStyleAnimation,commitBranchStyleAnimation,cancelBranchStyleAnimation} from './editor-branch-style.mjs';
 
 import {keyEasing, assignKeyEasing, validateKeyEasing} from './keyframe-easing.mjs';
+import {AUTHORING_PROPERTIES, isDiscreteAnimationProperty} from './animation-properties.mjs';
+import {projectNativePropertyChannel} from './native-property-projection.mjs';
 const MAX_TICK = 10000000;
 const checkTick = tick => { if (!Number.isInteger(tick) || tick < 0 || tick > MAX_TICK) throw new Error('Keyframe time must be an integer from 0 to 10,000,000.'); return tick; };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -12,16 +14,43 @@ const sortKeys = keys => keys.sort((a, b) => a.tick - b.tick || Number(Boolean(b
 function context(editor) { return {resolveGeometry: (report, frame) => frame === editor._evaluated ? editor.geometry : buildGeometry(report, frame)}; }
 function currentAnimation(editor) { return editor.report._styk?.animation ?? null; }
 function assignAnimation(editor, animation) {
+  const previousPoses=animationChannels(editor.report).filter(channel=>channel.property==='pose');
+  const nextPoses=(animation?.channels??[]).filter(channel=>channel.property==='pose');
+  const retainPropertyMarkers=previousPoses.length===nextPoses.length && previousPoses.every((channel,index)=>channel===nextPoses[index]);
   editor.report._styk ??= {};
   if (animation) editor.report._styk.animation = animation; else delete editor.report._styk.animation;
-  editor._invalidate({timing: true});
+  editor._invalidate({timing: true, retainPropertyMarkers});
 }
 function draftAnimation(editor) {
   const before = currentAnimation(editor), after = {...before, version: 1, nextKeyId: before?.nextKeyId ?? 1, channels: [...animationChannels(editor.report)]};
   const cloned = new Map(), indices = new Map(after.channels.map((channel, index) => [channel.id, index]));
-  return {before, after, sources: {}, poseSources: new Map(), changed: false,
-    finalize() { for (const channel of cloned.values()) sortKeys(channel.keys); },
+  const draft = {before, after, sources: {}, poseSources: new Map(), changed: false,
+    finalize() { const sorted=new Set();for (const channel of cloned.values()) if(!sorted.has(channel.keys)){sortKeys(channel.keys);sorted.add(channel.keys);} },
     addChannel(channel) { indices.set(channel.id, after.channels.length); after.channels.push(channel); cloned.set(channel.id, channel); return channel; },
+    shareChannel(source, target, id) {
+      const channel={...source,target,id},index=indices.get(id);
+      if(index===undefined)this.addChannel(channel);else{after.channels[index]=channel;cloned.set(id,channel);}
+      this.changed=true;return channel;
+    },
+    detachPoseProperties(channel) {
+      if (!editor.propertyChannels || channel.property !== 'pose') return;
+      // Native appearance stays on the native clock until that property is
+      // explicitly authored. One pose edit must not expand an entire layer
+      // into figures × properties × frames scalar keys.
+      if (channel.nativeProperties) return;
+      const target = channel.target, targets = target.kind === 'layer'
+        ? (editor.layers.find(layer => layer.id === target.id)?.figureUids ?? []).map(uid => ({kind:'figure',uid})) : [target];
+      for (const owner of targets) for (const property of AUTHORING_PROPERTIES[owner.kind] ?? []) {
+        if (property === 'pose') continue;
+        if(owner.kind==='figure' && ['x','y','rotation'].includes(property) && [editor.evaluatedFrame,...editor.report.keyframes].some(frame=>frame.objects.some(object=>object.unique_id===owner.uid&&object.join))) continue;
+        const id = animationChannelId(owner, property);
+        if (indices.has(id)) continue;
+        const native = editor.nativePropertyChannel(owner, property);
+        // Moving a Pose cannot alter a property that is constant in every source.
+        if(native.keys.every(key=>Object.is(key.value,native.keys[0]?.value)))continue;
+        if (native.keys.length) { draft.addChannel({...native, source:'authored', keys:native.keys.map(key => ({...key}))}); draft.changed = true; }
+      }
+    },
     channel(id, {adopt = true} = {}) {
     if (cloned.has(id)) return cloned.get(id);
     let index = indices.get(id);
@@ -31,8 +60,9 @@ function draftAnimation(editor) {
     }
     if (index === undefined) return null;
     const channel = {...after.channels[index], target: {...after.channels[index].target}, keys: after.channels[index].keys.map(key => ({...key}))};
-    after.channels[index] = channel; cloned.set(id, channel); return channel;
+    after.channels[index] = channel; cloned.set(id, channel); draft.detachPoseProperties(channel); return channel;
   }};
+  return draft;
 }
 function recordAnimation(editor, label, draft, selection = editor._selectionState()) {
   if (!draft.changed) return false;
@@ -53,8 +83,8 @@ function mutateAnimation(editor, label, mutate) {
   const draft = draftAnimation(editor), selection = editor._selectionState(), result = mutate(draft);
   recordAnimation(editor, label, draft, selection); return result;
 }
-function frameAtTick(editor, tick) {
-  if (tick === editor.tick) return {frame: editor.evaluatedFrame, index: editor.frameIndex};
+function frameAtTick(editor, tick, ignorePreview = false) {
+  if (!ignorePreview && tick === editor.tick) return {frame: editor.evaluatedFrame, index: editor.frameIndex};
   const rows = editor.timeline; let low = 0, high = rows.length - 1;
   while (low < high) { const mid = Math.ceil((low + high) / 2); if (rows[mid].start <= tick) low = mid; else high = mid - 1; }
   const row = rows[low];
@@ -76,7 +106,13 @@ function putKey(editor, draft, entry) {
     ? normalizeAnimationTarget(entry.target) : editor.resolveAnimationTarget(entry.target,property,tick);
   const id = animationChannelId(target, property);
   let channel = draft.channel(id);
+  if (!channel && editor.propertyChannels && property !== 'pose') {
+    const native = editor.nativePropertyChannel(target, property);
+    channel = draft.addChannel({...native, source: 'authored', keys: native.keys.map(key => ({...key}))});
+    draft.changed = true;
+  }
   if (!channel) channel = draft.addChannel({id, target, property, keys: []});
+  draft.detachPoseProperties(channel);
   let raw=entry.value;
   if(raw===undefined){
     if(property==='pose')raw=poseValue(editor,draft,tick);
@@ -92,12 +128,12 @@ function putKey(editor, draft, entry) {
   let ticks = draft.keyTicks.get(channel);
   if (!ticks) { ticks = new Map(channel.keys.filter(key => !key.hidden).map(key => [key.tick, key])); draft.keyTicks.set(channel, ticks); }
   let key = ticks.get(tick);
-  const value = validateAnimationValue(target, property, raw), interpolation = entry.interpolation ?? key?.interpolation ?? (['pose', 'backgroundId'].includes(property) ? 'hold' : 'linear');
+  const value = validateAnimationValue(target, property, raw), interpolation = entry.interpolation ?? key?.interpolation ?? (property === 'pose' || isDiscreteAnimationProperty(property) ? 'hold' : 'linear');
   const easing = {interpolation, ...(interpolation === 'bezier' ? {bezier: entry.bezier ?? key?.bezier} : {})};
   validateKeyEasing(easing, property);
   if (key) {
     if (!same(key.value, value) || key.interpolation !== interpolation || !same(key.bezier, easing.bezier) || key.passthrough) {
-      key.value = value; assignKeyEasing(key, easing); delete key.passthrough; draft.changed = true;
+      key.value = value; assignKeyEasing(key, easing); delete key.passthrough; delete key.nativeCurve; delete key.nativeValueMode; delete key.nativeRotation; draft.changed = true;
     }
   } else {
     key = {id: nextKeyIdentity(draft, channel), tick, value, ...keyEasing(easing)}; channel.keys.push(key); ticks.set(tick, key); draft.changed = true;
@@ -134,6 +170,11 @@ function checkCollisions(keys) {
 }
 
 export const editorAnimationMethods = {
+  /** Detach only the property being authored, retaining its original frame keys.
+   * Source poses remain immutable assets; no composed frame is baked per tick. */
+  nativePropertyChannel(target, property, options={}) {
+    return projectNativePropertyChannel(this,target,property,options,tick=>frameAtTick(this,tick,true).frame);
+  },
   get animationChannels() { return animationChannels(this.report); },
   get animationEndTick() { return animationEndTick(this.report); },
   segmentAnimationTarget(uid,handleId,property,tick=this.tick){
@@ -164,22 +205,30 @@ export const editorAnimationMethods = {
     return null;
   },
   /** Native descriptors are lazy, so unopened tracks allocate no per-frame keys. */
-  nativePoseChannel(target) {
+  nativePoseChannel(target, {nativeOnly = false} = {}) {
     target = normalizeAnimationTarget(target); const id = animationChannelId(target, 'pose');
-    const authored = this.animationChannel(target, 'pose'); if (authored) return authored;
+    const authored = !nativeOnly && this.animationChannel(target, 'pose'); if (authored) return authored;
     this._nativeAnimationChannels ??= new Map();
-    const cached = this._nativeAnimationChannels.get(id), timing = this.timeline;
+    const cacheId = nativeOnly ? `${id}:native-baseline` : id;
+    const cached = this._nativeAnimationChannels.get(cacheId), timing = this.timeline;
     if (cached?._timeline === timing && cached?._document === this._documentToken) return cached;
-    const rows = nativeTimeline(this.report);
+    let markers = this._nativePoseMarkerCache;
+    if (markers?.timing !== timing || markers?.document !== this._documentToken) {
+      const keys = nativeTimeline(this.report).map((row, index) => ({id:`native:pose:${this.getFrameId(index)}`, tick:row.start,
+        value:{frameId:this.getFrameId(index)}, ...(this.report.keyframes[index]._styk?.easing ?? (this.report.version < 5 ? {interpolation:'constant'} : this.report.auto_easing ? {} : {interpolation:'linear'})),
+        ...(row.count === 0 ? {hidden:true} : {})}));
+      this._nativePoseMarkerCache = markers = {timing, document:this._documentToken, keys};
+    }
     const emptyLayer = target.kind === 'layer' && !this.layers?.find(layer => layer.id === target.id)?.figureUids?.length;
-    const inherited = target.kind === 'figure' ? this.animationChannel({kind:'layer',id:this.layerForUid(target.uid)}, 'pose') : null;
-    const keys = inherited ? inherited.keys.map(key => ({...key, id:`native:${id}:${key.id}`})) : emptyLayer ? [] : rows.map((row, index) => {
-      const frameId = this.getFrameId(index);
-      return {id: `native:${id}:${frameId}`, tick: row.start, value: {frameId}, ...(this.report.keyframes[index]._styk?.easing ?? (this.report.version < 5 ? {interpolation: 'constant'} : this.report.auto_easing ? {} : {interpolation: 'linear'})), ...(row.count === 0 ? {hidden: true} : {})};
-    });
-    const descriptor = {id, target, property: 'pose', source: 'native', keys};
-    Object.defineProperties(descriptor, {_timeline: {value: timing}, _document: {value: this._documentToken}});
-    this._nativeAnimationChannels.set(id, descriptor); return descriptor;
+    const inherited = !nativeOnly && target.kind === 'figure' ? this.animationChannel({kind:'layer',id:this.layerForUid(target.uid)}, 'pose') : null;
+    const markerKeys = inherited ? inherited.keys : emptyLayer ? [] : markers.keys;
+    // Key identity is scoped by channel ID. Native figures therefore share the
+    // same immutable sequence, and connected edits can preserve that sharing.
+    const descriptor = {id, target, property: 'pose', source: 'native', keys:markerKeys};
+    if (['figure','layer'].includes(target.kind) && (inherited ? inherited.nativeProperties : this.propertyChannels)) descriptor.nativeProperties = true;
+    Object.defineProperties(descriptor, {_timeline: {value: timing}, _document: {value: this._documentToken},
+      markerKeys:{value:markerKeys}, markerKeyId:{value:key=>key.id}});
+    this._nativeAnimationChannels.set(cacheId, descriptor); return descriptor;
   },
   adoptNativePoseTrack(target) {
     const descriptor = this.nativePoseChannel(target);
@@ -189,7 +238,25 @@ export const editorAnimationMethods = {
   addAnimationKey(target, property, tick = this.tick, value, {exactTarget=false}={}) { return this.addAnimationKeys([{target, property, tick, value,exactTarget}])[0]; },
   addAnimationKeys(entries) {
     if (!Array.isArray(entries) || !entries.length) return [];
-    return mutateAnimation(this, 'Add animation keys', draft => entries.map(entry => putKey(this, draft, entry)));
+    return mutateAnimation(this, 'Add animation keys', draft => {
+      const shared=new Map(), occurrences=new Map();
+      for(const entry of entries){const id=animationChannelId(entry.target,entry.property);occurrences.set(id,(occurrences.get(id)??0)+1);}
+      return entries.map(entry=>{
+        const target=entry.target,id=animationChannelId(target,entry.property);
+        const source=this.animationChannel(target,entry.property) ?? this._nativeAnimationChannels?.get(id);
+        // Equal native/connected pose sequences with the same edit remain one
+        // sequence. Independent curves and repeated edits of a target use COW.
+        const eligible=target.kind==='figure'&&entry.property==='pose'&&source?.nativeProperties&&occurrences.get(id)===1;
+        const signature=eligible?JSON.stringify({...entry,target:undefined}):null;
+        const prior=eligible?shared.get(source.keys)?.get(signature):null;
+        if(prior){if(prior.changed)draft.shareChannel({...source,source:'authored',keys:prior.channel.keys},target,id);return prior.key;}
+        const key=putKey(this,draft,entry);
+        if(eligible){let edits=shared.get(source.keys);if(!edits)shared.set(source.keys,edits=new Map());
+          edits.set(signature,{channel:draft.after.channels.find(channel=>channel.id===id),key,
+            changed:!same(source.keys.find(value=>value.tick===(entry.tick??this.tick)&&!value.hidden),key)});}
+        return key;
+      });
+    });
   },
   setAnimationKey(channelId, keyId, patch) {
     return mutateAnimation(this, 'Edit animation key', draft => {
@@ -197,6 +264,7 @@ export const editorAnimationMethods = {
       if (!key) throw new Error('The animation key no longer exists.');
       if ('tick' in patch) key.tick = checkTick(patch.tick);
       if ('value' in patch) { key.value = validateAnimationValue(channel.target, channel.property, patch.value); delete key.passthrough; }
+      if ('value' in patch || 'interpolation' in patch || 'bezier' in patch) {delete key.nativeCurve;delete key.nativeValueMode;delete key.nativeRotation;}
       if ('hidden' in patch) {
         if (channel.property !== 'pose' || typeof patch.hidden !== 'boolean') throw new Error('Only pose keys can be hidden.');
         if (patch.hidden) key.hidden = true; else delete key.hidden;
@@ -217,7 +285,7 @@ export const editorAnimationMethods = {
           const key = keys.get(id);
           if (!key) throw new Error('The animation key no longer exists.');
           validateKeyEasing(fields, channel.property);
-          if (!same(keyEasing(key), fields) || key.interpolation === undefined) { assignKeyEasing(key, fields); draft.changed = true; }
+          if (!same(keyEasing(key), fields) || key.interpolation === undefined || key.nativeCurve || key.nativeRotation || key.nativeValueMode) { assignKeyEasing(key, fields); delete key.nativeCurve;delete key.nativeValueMode;delete key.nativeRotation;draft.changed = true; }
         }
       }
       return draft.changed;

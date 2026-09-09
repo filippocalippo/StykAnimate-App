@@ -20,7 +20,7 @@ tool is modified. It does not approximate unsupported files.
 | `GET /api/samples` | `{ok,samples:[{path,name,kind,size}]}` |
 | `POST /api/import?filename=name.piv` with raw bytes | `{ok,document,sourceId,filename,kind,version,timings}` |
 | `POST /api/open` with `{path}` | Same import response; path is workspace-relative |
-| `POST /api/export` with `{document,sourceId?,format,filename?,figureTypeId?}` | Binary `.piv`, `.stk`, or `.styk`, with `Content-Disposition` |
+| `POST /api/export` with `{document,sourceId?,format,filename?,figureTypeId?}` | Binary `.piv`, `.stk`, `.styk`, or `.stkz`, with `Content-Disposition` |
 
 Errors are non-2xx JSON `{ok:false,error,code}`. `source_expired` (410) explicitly
 requires reopening the original source; it never silently drops unknown bytes.
@@ -196,3 +196,7 @@ limits, alongside the existing complete corpus/header differential suite.
 the Python scanner. Both produced identical definition/header and duration
 digests. These sequential CPU measurements exclude HTTP, frontend work and
 rendering; the matched desktop benchmark determines user-visible import latency.
+
+Native `.styk` projects and `.stkz` figures now use lossless, versioned compressed
+containers with bounded inflation and SHA-256 checksums. Older JSON projects
+remain readable. See [Native file format](../docs/native-file-format.md).
