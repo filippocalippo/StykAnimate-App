@@ -1,7 +1,7 @@
 {
   "name": "stykanimate-webapp",
   "productName": "StykAnimate",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "description": "A WebGPU desktop workspace for Pivot animation and stick figures.",
   "private": true,
   "type": "module",
@@ -19,6 +19,11 @@
     "test:streams": "node --test scripts/file-streams.test.mjs",
     "test:streams:desktop": "node scripts/smoke-native-streams.mjs",
     "test:preferences": "node --test scripts/preferences.test.mjs",
+    "test:telemetry": "node --test tests/telemetry.test.mjs",
+    "test:telemetry:desktop": "node scripts/smoke-telemetry.mjs",
+    "benchmark:telemetry": "node scripts/benchmark-telemetry.mjs",
+    "site:dev": "node cloud/local-server.mjs",
+    "site:test": "node --test cloud/tests/*.test.mjs",
     "test:preferences:desktop": "node scripts/smoke-preferences.mjs",
     "test:project-files": "node --test scripts/project-files.test.mjs",
     "test:project-files:desktop": "node scripts/smoke-project-files.mjs",
@@ -31,6 +36,8 @@
     "test:animation-performance:browser": "node tests/animation-mode-performance.browser.mjs",
     "test:desktop": "node scripts/smoke-desktop.mjs",
     "test:desktop:packaged": "node scripts/smoke-desktop.mjs --packaged",
+    "test:library": "node --test scripts/library-store.test.mjs tests/user-library.test.mjs",
+    "test:library:desktop": "node scripts/smoke-library.mjs",
     "build:sidecar": "python scripts/build-sidecar.py",
     "build:video-encoder": "python scripts/stage-video-encoder.py",
     "build:vfw": "python scripts/build-vfw-bridge.py",
@@ -44,10 +51,16 @@
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
-    "dist:linux": "electron-builder --linux"
+    "dist:linux": "electron-builder --linux",
+    "test:updates": "node --test tests/updates.test.mjs tests/release-assets.test.mjs",
+    "test:updates:desktop": "node scripts/smoke-updates.mjs",
+    "release:prepare": "node scripts/prepare-release.mjs",
+    "release:verify": "node scripts/release-assets.mjs",
+    "release:publish": "node scripts/publish-release.mjs"
   },
   "dependencies": {
-    "earcut": "3.2.3"
+    "earcut": "3.2.3",
+    "electron-updater": "6.6.2"
   },
   "devDependencies": {
     "electron": "39.8.10",
@@ -57,38 +70,170 @@
   "build": {
     "beforePack": "scripts/before-pack.cjs",
     "appId": "app.stykanimate.desktop",
+    "protocols": [
+      {
+        "name": "StykAnimate",
+        "schemes": [
+          "stykanimate"
+        ]
+      }
+    ],
     "productName": "StykAnimate",
     "artifactName": "StykAnimate-${version}-${os}-${arch}.${ext}",
-    "directories": { "output": "release" },
-    "files": ["desktop/**/*", "package.json"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**/*",
+      "package.json"
+    ],
     "extraResources": [
       {
         "from": ".",
         "to": "web",
-        "filter": ["index.html", "*.css", "*.svg", "*.png", "src/**/*", "assets/**/*", "vendor/**/*", "node_modules/earcut/src/earcut.js"]
+        "filter": [
+          "index.html",
+          "*.css",
+          "*.svg",
+          "*.png",
+          "src/**/*",
+          "assets/**/*",
+          "vendor/**/*",
+          "node_modules/earcut/src/earcut.js"
+        ]
       },
-      { "from": "backend", "to": "backend", "filter": ["**/*.py"] },
-      { "from": "node_modules/earcut/src/earcut.js", "to": "web/node_modules/earcut/src/earcut.js" },
-      { "from": "../tools", "to": "tools", "filter": ["*.py"] },
-      { "from": "../StykAnimate/tools/codec_bridge.py", "to": "codec_bridge.py" },
-      { "from": "build/sidecar", "to": "sidecar", "filter": ["**/*"] },
-      { "from": "build/video-encoder", "to": "video-encoder", "filter": ["**/*"] }
+      {
+        "from": "backend",
+        "to": "backend",
+        "filter": [
+          "**/*.py"
+        ]
+      },
+      {
+        "from": "node_modules/earcut/src/earcut.js",
+        "to": "web/node_modules/earcut/src/earcut.js"
+      },
+      {
+        "from": "codecs",
+        "to": "tools",
+        "filter": [
+          "*.py"
+        ]
+      },
+      {
+        "from": "codecs/codec_bridge.py",
+        "to": "codec_bridge.py"
+      },
+      {
+        "from": "build/sidecar",
+        "to": "sidecar",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "build/video-encoder",
+        "to": "video-encoder",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "fileAssociations": [
-      {"ext":"nodes","name":"Stick Nodes figure","role":"Viewer"},
-      {"ext":"nodemc","name":"Stick Nodes movie clip","role":"Viewer"},
-      {"ext":"stknds","name":"Stick Nodes project","role":"Viewer"},
-      { "ext": "piv", "name": "Pivot animation", "role": "Editor" },
-      { "ext": "stk", "name": "Pivot stick figure", "role": "Editor" },
-      { "ext": "stykmov", "name": "StykAnimate movieclip", "role": "Editor" },
-      { "ext": "stkz", "name": "StykAnimate figure", "role": "Editor" },
-      { "ext": "styk", "name": "StykAnimate project", "role": "Editor" }
+      {
+        "ext": "nodes",
+        "name": "Stick Nodes figure",
+        "role": "Viewer"
+      },
+      {
+        "ext": "nodemc",
+        "name": "Stick Nodes movie clip",
+        "role": "Viewer"
+      },
+      {
+        "ext": "stknds",
+        "name": "Stick Nodes project",
+        "role": "Viewer"
+      },
+      {
+        "ext": "piv",
+        "name": "Pivot animation",
+        "role": "Editor"
+      },
+      {
+        "ext": "stk",
+        "name": "Pivot stick figure",
+        "role": "Editor"
+      },
+      {
+        "ext": "stykmov",
+        "name": "StykAnimate movieclip",
+        "role": "Editor"
+      },
+      {
+        "ext": "stkz",
+        "name": "StykAnimate figure",
+        "role": "Editor"
+      },
+      {
+        "ext": "styk",
+        "name": "StykAnimate project",
+        "role": "Editor"
+      }
     ],
-    "win": { "target": ["nsis", "portable"], "signAndEditExecutable": false,
-      "extraResources": [{"from":"native/bin","to":"vfw","filter":["build-info.json","x86/*.exe","x64/*.exe"]}] },
-    "nsis": { "include": "desktop/installer.nsh", "artifactName": "StykAnimate-${version}-Setup-${arch}.${ext}", "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true },
-    "portable": { "artifactName": "StykAnimate-${version}-Portable-${arch}.${ext}" },
-    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.graphics-design", "hardenedRuntime": true },
-    "linux": { "target": ["AppImage"], "category": "Graphics" }
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "signAndEditExecutable": false,
+      "extraResources": [
+        {
+          "from": "native/bin",
+          "to": "vfw",
+          "filter": [
+            "build-info.json",
+            "x86/*.exe",
+            "x64/*.exe"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "include": "desktop/installer.nsh",
+      "artifactName": "StykAnimate-${version}-Setup-${arch}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "portable": {
+      "artifactName": "StykAnimate-${version}-Portable-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.graphics-design",
+      "hardenedRuntime": true
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Graphics"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "filippocalippo",
+        "repo": "styk-animate-releases",
+        "private": false,
+        "releaseType": "draft"
+      }
+    ],
+    "releaseInfo": {
+      "releaseNotesFile": "release-notes.md"
+    }
   }
 }

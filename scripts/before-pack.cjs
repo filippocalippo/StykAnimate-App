@@ -8,6 +8,8 @@ const { Arch } = require('builder-util');
 module.exports = async function beforePack(context) {
   const appRoot = context.packager.info.appDir;
   const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+  const notes = JSON.parse(await fs.readFile(path.join(appRoot, 'desktop', 'release-info.json'), 'utf8'));
+  if (notes.version !== context.packager.appInfo.version) throw new Error('Release notes must match the packaged version. Run npm run release:prepare.');
   const manifestPath = path.join(context.packager.info.appDir, 'build', 'sidecar', 'build-info.json');
   let manifest;
   try { manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')); }
@@ -17,6 +19,10 @@ module.exports = async function beforePack(context) {
     throw new Error(`Codec ${manifest.platform}/${manifest.architecture} cannot be packaged for ${context.electronPlatformName}/${architecture}. Build the sidecar on the target OS and architecture.`);
   }
   if (manifest.orjson !== '3.12.0') throw new Error('The desktop release requires the pinned orjson 3.12.0 sidecar.');
+  for (const filename of (await fs.readdir(path.join(appRoot, 'codecs'))).filter(name => name.endsWith('.py'))) {
+    if (manifest.codecSources?.[filename] !== hash(await fs.readFile(path.join(appRoot, 'codecs', filename))))
+      throw new Error(`The frozen codec is stale for ${filename}; run npm run build:sidecar.`);
+  }
   for (const filename of ['server.py','fast_decode.py','import_wire.py','native_scan.py','native_format.py']) {
     if (manifest.runtimeSources?.[filename] !== hash(await fs.readFile(path.join(appRoot,'backend',filename))))
       throw new Error(`The frozen codec is stale for ${filename}; run npm run build:sidecar.`);

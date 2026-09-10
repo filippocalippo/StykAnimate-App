@@ -63,7 +63,7 @@ export function applicationMenuItems(name, editor, desktop) {
       ['duplicate-frame-after', 'duplicate', 'Duplicate frame after current', 'Ctrl Enter'],
       ['blank-frame', 'circle', 'Insert blank keyframe', '', !editor.report._styk?.layerSheet],
     ],
-    help: [['help', 'help', 'Keyboard shortcuts', '?'], ['performance', 'activity', 'Performance']],
+    help: [['help', 'help', 'Keyboard shortcuts', '?'], ['performance', 'activity', 'Performance'], ...(desktop?.getUpdateState ? [null, ['check-updates', 'import', 'Check for updates…'], ['release-notes', 'file', 'What’s new'], ['donate', 'help', 'Support development']] : []), ...(desktop?.getTelemetryState ? [null, ['privacy', 'settings', 'Privacy & diagnostics'], ['website', 'help', 'StykAnimate website']] : [])],
   };
   return menus[name] || menus.file;
 }

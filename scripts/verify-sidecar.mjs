@@ -15,7 +15,7 @@ const origin = `http://127.0.0.1:${port}`;
 let output = '', exited = false;
 const child = spawn(binary, ['--host', '127.0.0.1', '--port', String(port)], {
   cwd: appRoot, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, STYK_WEB_ROOT: appRoot, STYK_TOOLS_ROOT: path.join(workspace, 'tools'), STYK_BRIDGE_PATH: path.join(workspace, 'StykAnimate', 'tools', 'codec_bridge.py') },
+  env: { ...process.env, STYK_WEB_ROOT: appRoot, STYK_TOOLS_ROOT: path.join(appRoot, 'codecs'), STYK_BRIDGE_PATH: path.join(appRoot, 'codecs', 'codec_bridge.py') },
 });
 child.on('error', error => { output += error.message; exited = true; });
 child.on('exit', () => { exited = true; });

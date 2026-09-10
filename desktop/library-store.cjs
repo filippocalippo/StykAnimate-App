@@ -7,8 +7,8 @@ const {FileStreams} = require('./file-streams.cjs');
 const EXTENSIONS = new Set(['.stkz', '.stykmov']);
 const PNG = Buffer.from('89504e470d0a1a0a', 'hex');
 
-function validName(value) {
-  if (typeof value !== 'string' || !value.trim() || value.length > 120 || /[<>:"/\\|?*\x00-\x1f]/.test(value) || /[. ]$/.test(value) || value.startsWith('.') || /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(value))
+function validName(value, max = 120) {
+  if (typeof value !== 'string' || !value.trim() || value.length > max || /[<>:"/\\|?*\x00-\x1f]/.test(value) || /[. ]$/.test(value) || value.startsWith('.') || /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(value))
     throw new Error('Use a name of 1–120 characters without reserved filename characters.');
   return value.trim();
 }
@@ -16,7 +16,7 @@ function validName(value) {
 /** Every renderer path is relative to one fixed Documents library. Never follow links. */
 class LibraryStore {
   constructor(root) { this.root = path.resolve(root); this.streams = new FileStreams(); this.pending = new Map(); this.chain = Promise.resolve(); }
-  serial(operation) { const result = this.chain.then(operation); this.chain = result.catch(() => {}); return result; }
+  serial(operation) { const result = this.chain.then(() => { for (const token of this.pending.keys()) if (!this.streams.jobs.has(token)) this.pending.delete(token); return operation(); }); this.chain = result.catch(() => {}); return result; }
   async init() {
     await fs.mkdir(this.root, {recursive: true});
     await this.resolve('');
@@ -26,7 +26,7 @@ class LibraryStore {
     if (typeof relative !== 'string' || relative.length > 2000 || relative.includes('\\') || path.isAbsolute(relative) || relative.split('/').some(p => p && (p === '.' || p === '..' || /[:\x00-\x1f]/.test(p)))) throw new Error('Invalid library path.');
     let current = this.root;
     for (const part of ['', ...relative.split('/').filter(Boolean)]) {
-      if (part) current = path.join(current, part);
+      if (part) { validName(part, 255); current = path.join(current, part); }
       const stat = await fs.lstat(current);
       if (stat.isSymbolicLink()) throw new Error('Linked folders and files are not supported in the library.');
     }
@@ -37,7 +37,7 @@ class LibraryStore {
     const names = new Set((await fs.readdir(folder)).map(n => n.toLocaleLowerCase()));
     for (const item of this.pending.values()) if (path.dirname(item.destination) === folder) names.add(path.basename(item.destination).toLocaleLowerCase());
     let candidate = name + suffix, i = 2;
-    while (names.has(candidate.toLocaleLowerCase())) {
+    while (names.has(candidate.toLocaleLowerCase()) || suffix && ['.png','.json'].some(ext => names.has((candidate + ext).toLocaleLowerCase()))) {
       if (!unique) throw new Error('An item with this name already exists.');
       candidate = `${name} (${i++})${suffix}`;
     }
@@ -53,8 +53,12 @@ class LibraryStore {
       if (!item.isDirectory() && (!item.isFile() || !EXTENSIONS.has(extension))) continue;
       const target = path.join(folder, item.name), stat = await fs.stat(target).catch(() => null);
       if (!stat) continue;
+      let kind = item.isDirectory() ? 'folder' : extension === '.stykmov' ? 'movieclip' : 'figure';
+      if (kind === 'figure') {
+        try { const meta = await this.resolve(`${this.relative(target)}.json`); if ((await fs.stat(meta)).size < 4096 && JSON.parse(await fs.readFile(meta,'utf8')).kind === 'set') kind = 'set'; } catch { /* Optional metadata from older or external assets. */ }
+      }
       entries.push({path: this.relative(target), name: item.isDirectory() ? item.name : item.name.slice(0, -extension.length),
-        kind: item.isDirectory() ? 'folder' : extension === '.stykmov' ? 'movieclip' : 'figure', extension, size: stat.size, modified: stat.mtimeMs});
+        kind, extension, size: stat.size, modified: stat.mtimeMs});
     }
     entries.sort((a,b) => Number(b.kind === 'folder') - Number(a.kind === 'folder') || a.name.localeCompare(b.name, undefined, {numeric: true}));
     return {root: this.root, path: relative, entries};
@@ -66,14 +70,14 @@ class LibraryStore {
     catch (error) { if (error.code === 'ENOENT') return null; throw error; }
   }
   async asset(relative) { const target = await this.resolve(relative); if (!EXTENSIONS.has(path.extname(target).toLowerCase()) || !(await fs.stat(target)).isFile()) throw new Error('Choose a saved figure or movieclip.'); return target; }
-  beginSave({folder = '', name, extension, size, thumbnail}) { return this.serial(async () => {
+  beginSave({folder = '', name, extension, size, thumbnail, kind}) { return this.serial(async () => {
     if (!EXTENSIONS.has(extension)) throw new Error('Unsupported library format.');
     if (typeof thumbnail !== 'string' || thumbnail.length > 1400000 || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(thumbnail)) throw new Error('A PNG thumbnail is required.');
     const png = Buffer.from(thumbnail.split(',')[1], 'base64');
     if (!png.subarray(0,8).equals(PNG)) throw new Error('Invalid PNG thumbnail.');
     const parent = await this.folder(folder), destination = await this.available(parent, validName(name), extension, true);
-    const transfer = await this.streams.beginWrite({destination, size});
-    this.pending.set(transfer.token, {destination, png});
+    const transfer = await this.streams.beginWrite({destination, size, exclusive:true});
+    this.pending.set(transfer.token, {destination, png, kind: kind === 'set' ? 'set' : extension === '.stykmov' ? 'movieclip' : 'figure'});
     return {...transfer, path: this.relative(destination)};
   }); }
   write(token, bytes) { return this.streams.write(token, bytes); }
@@ -85,13 +89,24 @@ class LibraryStore {
       // Refuse overwriting a file created externally during a transfer.
       try { await fs.lstat(item.destination); throw new Error('This name was taken while saving. Try again.'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       await fs.writeFile(temporary, item.png, {flag: 'wx'});
-      await fs.rename(temporary, thumb);
-      try { await this.streams.finish(token); } catch (error) { await fs.unlink(thumb).catch(() => {}); throw error; }
+      await fs.link(temporary, thumb);
+      let metadataCreated = false;
+      try { await fs.writeFile(`${item.destination}.json`, JSON.stringify({version:1,kind:item.kind}), {flag:'wx'}); metadataCreated = true; await this.streams.finish(token); }
+      catch (error) { await fs.unlink(thumb).catch(() => {}); if (metadataCreated) await fs.unlink(`${item.destination}.json`).catch(() => {}); throw error; }
       return {saved: true, path: this.relative(item.destination)};
     } finally { this.pending.delete(token); await fs.unlink(temporary).catch(() => {}); await this.streams.cancel(token); }
   }); }
   async cancel(token) { this.pending.delete(token); return this.streams.cancel(token); }
   async beginRead(relative) { const target = await this.asset(relative); return {...await this.streams.beginRead(target), name: path.basename(target)}; }
+  async cacheThumbnail({path:relative, thumbnail, modified, kind}) {
+    const target = await this.asset(relative);
+    if ((await fs.stat(target)).mtimeMs !== modified) return false;
+    if (typeof thumbnail !== 'string' || thumbnail.length > 1400000 || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(thumbnail)) throw new Error('A PNG thumbnail is required.');
+    const png = Buffer.from(thumbnail.split(',')[1],'base64'); if (!png.subarray(0,8).equals(PNG)) throw new Error('Invalid PNG thumbnail.');
+    try { await fs.writeFile(`${target}.png`,png,{flag:'wx'}); } catch(error) { if (error.code !== 'EEXIST') throw error; }
+    if (kind === 'set') try { await fs.writeFile(`${target}.json`,JSON.stringify({version:1,kind}),{flag:'wx'}); } catch(error) { if (error.code !== 'EEXIST') throw error; }
+    return true;
+  }
   read(token) { return this.streams.read(token); }
   change({path: relative, name, folder}) { return this.serial(async () => {
     if (!relative) throw new Error('The library root cannot be moved or renamed.');
@@ -102,13 +117,28 @@ class LibraryStore {
     if (stat.isDirectory() && (parent === source || parent.startsWith(source + path.sep))) throw new Error('A folder cannot be moved into itself.');
     const ext = stat.isDirectory() ? '' : path.extname(source), stem = name === undefined ? path.basename(source, ext) : validName(name);
     if (parent === path.dirname(source) && stem + ext === path.basename(source)) return {path: relative};
-    const destination = await this.available(parent, stem, ext);
+    const desired = path.join(parent, stem + ext);
+    const destination = process.platform === 'win32' && desired.toLowerCase() === source.toLowerCase() ? desired : await this.available(parent, stem, ext);
     await fs.rename(source, destination);
     if (!stat.isDirectory()) {
-      try { await this.resolve(`${relative}.png`); await fs.rename(`${source}.png`, `${destination}.png`); }
-      catch (error) { if (error.code !== 'ENOENT') { await fs.rename(destination, source); throw error; } }
+      const moved = [];
+      try { for (const ext of ['.png','.json']) {
+        try { await this.resolve(`${relative}${ext}`); await fs.rename(`${source}${ext}`, `${destination}${ext}`); moved.push(ext); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+      } } catch (error) { for (const ext of moved) await fs.rename(`${destination}${ext}`,`${source}${ext}`); await fs.rename(destination, source); throw error; }
     }
     return {path: this.relative(destination)};
+  }); }
+  trash(relative, trashItem) { return this.serial(async () => {
+    if (!relative) throw new Error('The library root cannot be removed.');
+    const target = await this.resolve(relative), stat = await fs.stat(target);
+    if (!stat.isDirectory()) await this.asset(relative);
+    for (const item of this.pending.values()) if (item.destination === target || item.destination.startsWith(target + path.sep)) throw new Error('Wait for the current save to finish.');
+    await trashItem(target);
+    if (!stat.isDirectory()) for (const ext of ['.png','.json']) {
+      try { await this.resolve(`${relative}${ext}`); await trashItem(`${target}${ext}`); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    return {removed:true};
   }); }
   async dispose() { await this.streams.dispose(); this.pending.clear(); }
 }

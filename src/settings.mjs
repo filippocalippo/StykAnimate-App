@@ -137,6 +137,7 @@ export class EditorSettings {
     onResetWorkspace,
     shortcuts = SHORTCUTS,
     localization,
+    onPrivacy,
   } = {}) {
     if (value === undefined) {
       try {
@@ -155,6 +156,7 @@ export class EditorSettings {
       ((next) =>
         localStorage.setItem(EDITOR_SETTINGS_KEY, JSON.stringify(next)));
     this.onResetWorkspace = onResetWorkspace;
+    this.onPrivacy = onPrivacy;
     this.shortcuts = shortcuts;
     this.tab = "interface";
     this.chain = Promise.resolve();
@@ -183,6 +185,11 @@ export class EditorSettings {
       )}</nav><section id="styk-settings-content" class="styk-settings-content" role="tabpanel"></section></div>`;
     document.body.append(this.dialog);
     this.content = this.dialog.querySelector(".styk-settings-content");
+    if (onPrivacy) {
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Privacy & diagnostics'; button.dataset.settingsPrivacy = '';
+      button.onclick = () => { this.close(); void this.onPrivacy(); };
+      this.dialog.querySelector('.styk-settings-tabs').append(button);
+    }
     this.unsubscribeLocale = this.localization.subscribe(() => this.refreshLanguage());
     this.dialog.querySelector(".styk-settings-head button").onclick = () =>
       this.close();

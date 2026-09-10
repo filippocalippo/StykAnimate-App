@@ -30,8 +30,8 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 sys.dont_write_bytecode = True
 APP = Path(__file__).resolve().parents[1]
 WORKSPACE = APP.parent
-TOOLS = Path(os.environ.get("STYK_TOOLS_ROOT", WORKSPACE / "tools")).resolve()
-BRIDGE = Path(os.environ.get("STYK_BRIDGE_PATH", WORKSPACE / "StykAnimate/tools/codec_bridge.py")).resolve()
+TOOLS = Path(os.environ.get("STYK_TOOLS_ROOT", APP / "codecs")).resolve()
+BRIDGE = Path(os.environ.get("STYK_BRIDGE_PATH", APP / "codecs/codec_bridge.py")).resolve()
 sys.path.insert(0, str(TOOLS))
 import piv_codec
 import import_wire
@@ -120,19 +120,26 @@ class ApiError(ValueError):
 
 def validate_native_figure(document, kind="stkz"):
     figures, frames = document.get("figure_types"), document.get("keyframes")
-    if (not isinstance(figures, list) or len(figures) != 1 or not isinstance(figures[0], dict) or
+    if (not isinstance(figures, list) or not figures or any(not isinstance(f, dict) for f in figures) or
             not isinstance(frames, list) or len(frames) != 1 or
             not isinstance(frames[0], dict) or not isinstance(frames[0].get("objects"), list) or
-            len(frames[0]["objects"]) != 1 or not isinstance(frames[0]["objects"][0], dict)):
-        raise ApiError(422, "invalid_native_figure", f"A .{kind} file must contain one reusable figure and one pose.")
-    pose = frames[0]["objects"][0]
+            not frames[0]["objects"] or any(not isinstance(o, dict) for o in frames[0]["objects"])):
+        raise ApiError(422, "invalid_native_figure", f"A .{kind} file must contain reusable figures and one pose.")
+    objects = frames[0]["objects"]
+    figure_ids = {f.get("figure_type_id") for f in figures}
     metadata = document.get("_styk", {})
-    if (not isinstance(metadata, dict) or pose.get("figure_type_id") != figures[0].get("figure_type_id") or pose.get("join") is not None or
-            document.get("backgrounds") or metadata.get("animation") or metadata.get("simpleFrameDraft")):
+    if (not isinstance(metadata, dict) or any(o.get("figure_type_id") not in figure_ids for o in objects) or
+            document.get("backgrounds") or metadata.get("animation") or metadata.get("simpleFrameDraft") or metadata.get("layerSheet")):
         raise ApiError(422, "invalid_native_figure", f"The .{kind} figure must be self-contained.")
+    for pose in objects:
+        join = pose.get("join")
+        if join is not None and (not isinstance(join, dict) or type(join.get("target_object_slot")) is not int or
+                                 not 0 <= join["target_object_slot"] < len(objects)):
+            raise ApiError(422, "invalid_native_figure", "Figure set joins must stay inside the saved set.")
 
-    if kind == "stykmov" and not figures[0].get("_styk", {}).get("movieclip"):
-        raise ApiError(422, "invalid_movieclip", "A .stykmov file must contain a movieclip.")
+    if kind == "stykmov" and (len(figures) != 1 or len(objects) != 1 or objects[0].get("join") is not None or
+                              not figures[0].get("_styk", {}).get("movieclip")):
+        raise ApiError(422, "invalid_movieclip", "A .stykmov file must contain one movieclip.")
 
 def encoded_json(value: object, *, validated: bool = False) -> bytes:
     if validated and _fast_json is not None:

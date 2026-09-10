@@ -1,3 +1,4 @@
+import { supportCard } from './support-ui.mjs';
 const construction = new Set(['rig', 'line', 'circle', 'polygon']);
 const names = {select: 'Select', pose: 'Pose joints', 'handle-edit': 'Edit handles', rig: 'Edit shared rig', line: 'Draw a line', circle: 'Draw a circle', polygon: 'Draw a polygon', hand: 'Pan canvas', attach: 'Attach figure'};
 
@@ -116,6 +117,7 @@ export function mountExportFlow(content) {
   footer.className = 'export-flow-footer';
   footer.innerHTML = '<span>Export a copy. Your project stays editable.</span><button type="button" class="button primary" id="export-submit">Export file</button>';
   grid.after(footer);
+  footer.after(supportCard({ compact: true }));
   const select = header.querySelector('select');
   const submit = footer.querySelector('button');
   const description = header.querySelector('#output-description');

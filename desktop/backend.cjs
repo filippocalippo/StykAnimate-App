@@ -48,8 +48,8 @@ async function startBackend({ appRoot, resourcesPath, packaged = false, onError 
   const resourceRoot = packaged ? resourcesPath : appRoot;
   const server = path.join(resourceRoot, 'backend', 'server.py');
   const webRoot = packaged ? path.join(resourcesPath, 'web') : appRoot;
-  const toolsRoot = packaged ? path.join(resourcesPath, 'tools') : path.resolve(appRoot, '..', 'tools');
-  const bridgePath = packaged ? path.join(resourcesPath, 'codec_bridge.py') : path.resolve(appRoot, '..', 'StykAnimate', 'tools', 'codec_bridge.py');
+  const toolsRoot = packaged ? path.join(resourcesPath, 'tools') : path.join(appRoot, 'codecs');
+  const bridgePath = packaged ? path.join(resourcesPath, 'codec_bridge.py') : path.join(appRoot, 'codecs', 'codec_bridge.py');
   const binary = path.join(resourcesPath || appRoot, 'sidecar', 'styk-codec', process.platform === 'win32' ? 'styk-codec.exe' : 'styk-codec');
   const commands = packaged && fs.existsSync(binary)
     ? [{ command: binary, args: [] }]
