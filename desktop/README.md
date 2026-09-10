@@ -1,5 +1,7 @@
 # Desktop runtime
 
+For GitHub automatic updates, release publishing, the startup splash, and update testing, see [UPDATES.md](../docs/UPDATES.md). Desktop codec sources now live in this private repository's `codecs/` directory; release builds no longer require sibling codec directories.
+
 Run `npm ci` then `npm start` from `StykAnimate-webapp`, or use the root Windows launcher. Node.js 22 or newer and Python 3.11 or newer are required for development. The reproducible build workflow pins Node.js 24.11.0 and Python 3.12.9. `STYK_PYTHON` selects an explicit Python executable; activated virtual environments, conda installations, and standard Python commands are discovered automatically.
 
 Electron runs the WebGPU workspace in an isolated, sandboxed renderer. A private Python child process loads the existing Pivot codecs once and listens on a dynamically allocated loopback port. Parsing and export stay out of the animation render loop. The native bridge exposes file dialogs, document state, menu actions, and window controls; it cannot execute arbitrary commands or access arbitrary paths.

@@ -64,12 +64,27 @@ jobs:
             release/*/*.blockmap
             artifacts/sidecar-smoke.json
           retention-days: 7
+  publish:
+    needs: windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.11.0'
+          cache: npm
+      - name: Install release verification dependencies
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release-evidence
+          path: .
       - name: Upload release to the public assets repository
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           PUBLISH_RELEASE: ${{ startsWith(github.ref, 'refs/tags/') || inputs.publish }}
-        shell: pwsh
         run: |
-          if (!$env:GH_TOKEN) { throw 'Add the RELEASES_TOKEN secret with Contents write access to styk-animate-releases.' }
-          if ($env:PUBLISH_RELEASE -eq 'true') { npm run release:publish -- --publish }
-          else { npm run release:publish }
+          test -n "$GH_TOKEN" || { echo 'Add RELEASES_TOKEN with Contents write access to styk-animate-releases.'; exit 1; }
+          if [ "$PUBLISH_RELEASE" = "true" ]; then npm run release:publish -- --publish
+          else npm run release:publish; fi
