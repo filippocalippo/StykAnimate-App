@@ -25,5 +25,8 @@ test('public update feed contains no private repository or credentials', async (
   assert.deepEqual(config.build.publish, [{ provider: 'github', owner: 'filippocalippo', repo: 'styk-animate-releases', private: false, releaseType: 'draft' }]);
   const notes = JSON.parse(await readFile('desktop/release-info.json', 'utf8'));
   assert.equal(notes.version, config.version);
+  const { DONATE_URL } = await import('../src/support-ui.mjs');
+  const links = await import('../desktop/release-links.cjs');
+  assert.equal(DONATE_URL, links.default.DONATE_URL);
   assert.ok(!config.build.extraResources.some(item => item.from.startsWith('..')));
 });

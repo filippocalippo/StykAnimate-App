@@ -1,14 +1,16 @@
 import { _electron as electron } from 'playwright';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 const root = process.cwd();
+const { version } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+const executablePath = process.env.STYK_PACKAGED_EXECUTABLE;
 const output = path.join(root, 'artifacts', 'updates');
 await mkdir(output, { recursive: true });
 const profile = path.join(output, `profile-${Date.now()}`);
 await mkdir(profile, { recursive: true });
 await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now() } }));
-const launch = () => electron.launch({ args: [root], cwd: root, timeout: 45000, env: { ...process.env, STYK_USER_DATA_DIR: profile } });
+const launch = () => electron.launch({ executablePath, args: executablePath ? [] : [root], cwd: root, timeout: 45000, env: { ...process.env, STYK_USER_DATA_DIR: profile } });
 let application = await launch();
 const evidence = {};
 try {
@@ -16,7 +18,7 @@ try {
   await page.waitForFunction(() => window.styk?.ready, undefined, { timeout: 30000 });
   const splash = page.locator('.release-splash');
   await splash.waitFor({ state: 'visible' });
-  assert.match(await splash.innerText(), /Version 0\.5\.0/);
+  assert.ok((await splash.innerText()).includes(`Version ${version}`));
   assert.equal(await splash.locator('.support-donate').getAttribute('href'), 'https://ko-fi.com/Q5Q41WY7QC');
   await page.screenshot({ path: path.join(output, 'startup.png') });
   evidence.startup = true;
