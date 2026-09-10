@@ -1,7 +1,7 @@
 {
   "name": "stykanimate-webapp",
   "productName": "StykAnimate",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "A WebGPU desktop workspace for Pivot animation and stick figures.",
   "private": true,
   "type": "module",

@@ -4,7 +4,7 @@ The private `filippocalippo/StykAnimate-App` repository builds the application. 
 
 ## Runtime
 
-Installed Windows NSIS copies check 10 seconds after startup and every four hours. Help → Check for updates also checks immediately. The updater downloads stable versions newer than the installed version, verifies the installer SHA-512, and reports progress to a narrow preload bridge. Checks/downloads are deduplicated. Failures allow retry; completed downloads remain cached until the user chooses **Restart to update**. Normal app exit does not silently install updates.
+Installed Windows NSIS copies check 10 seconds after startup and every hour. Help → Check for updates also checks immediately. The updater downloads stable versions newer than the installed version, verifies the installer SHA-512, and reports progress to a narrow preload bridge. Checks/downloads are deduplicated. Failures allow retry; completed downloads remain cached until the user chooses **Restart to update**. Normal app exit does not silently install updates.
 
 Restart flushes workspace settings and clipboard persistence. Unsaved projects offer Save and restart / Cancel / Discard and restart. A cancelled or unsuccessful save never launches the installer. The installer updates the existing installation directory and relaunches the app. Settings and projects remain outside the installation directory.
 

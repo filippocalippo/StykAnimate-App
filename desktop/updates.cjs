@@ -67,7 +67,7 @@ class UpdateService {
   start() {
     if (this.state.status === 'unavailable' || this.timer) return;
     this.initialTimer = setTimeout(() => void this.check(), 10000);
-    this.timer = setInterval(() => void this.check(), 4 * 60 * 60 * 1000);
+    this.timer = setInterval(() => void this.check(), 60 * 60 * 1000);
     this.initialTimer.unref?.(); this.timer.unref?.();
   }
   dispose() { clearTimeout(this.initialTimer); clearInterval(this.timer); }

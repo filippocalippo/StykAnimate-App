@@ -74,3 +74,16 @@ test('current, development, portable and unsupported copies report the correct s
     disabled.start(); assert.equal(disabled.timer, undefined);
   }
 });
+test('checks after startup and every hour, without duplicate timers', t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const { service } = fixture();
+  let checks = 0;
+  service.check = async () => { checks++; };
+  service.start(); service.start();
+  t.mock.timers.tick(9999); assert.equal(checks, 0);
+  t.mock.timers.tick(1); assert.equal(checks, 1);
+  t.mock.timers.tick(3590000); assert.equal(checks, 2);
+  t.mock.timers.tick(3600000); assert.equal(checks, 3);
+  service.dispose();
+  t.mock.timers.tick(3600000); assert.equal(checks, 3);
+});
