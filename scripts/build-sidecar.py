@@ -52,8 +52,7 @@ def main() -> int:
         "--distpath", str(app_root / "build" / "sidecar"),
         "--workpath", str(app_root / "build" / "pyinstaller"),
         "--specpath", str(app_root / "build"),
-        "--paths", str(workspace / "tools"),
-        "--paths", str(workspace / "StykAnimate" / "tools"),
+        "--paths", str(app_root / "codecs"),
         "--paths", str(app_root / "backend"),
         "--add-binary", str(scanner_library) + os.pathsep + "native",
         "--copy-metadata", "orjson",
@@ -63,7 +62,7 @@ def main() -> int:
     modules = [
         "codec_bridge", "piv_codec", "piv_document", "piv_full_writer",
         "piv_asset_writer", "piv_migrate", "piv_legacy", "piv_legacy_v2",
-        "piv_legacy_v4", "piv_side_tables", "pivot_decoder", "pivot_ik", "orjson",
+        "piv_legacy_v4", "piv_side_tables", "pivot_decoder", "orjson",
         "fast_decode", "import_wire", "native_scan", "native_format",
     ]
     for module in modules:
@@ -84,7 +83,8 @@ def main() -> int:
                 shutil.copyfile(distribution.locate_file(entry), license_output / Path(entry).name)
         manifest = {"platform": sys.platform, "architecture": architecture, "python": platform.python_version(),
                     "orjson": orjson.__version__, "pyinstaller": importlib.metadata.version("PyInstaller"), "nativeScanner": scanner,
-                    "runtimeSources": {name: digest(app_root / "backend" / name) for name in ["server.py", "fast_decode.py", "import_wire.py", "native_scan.py", "native_format.py"]}}
+                    "runtimeSources": {name: digest(app_root / "backend" / name) for name in ["server.py", "fast_decode.py", "import_wire.py", "native_scan.py", "native_format.py"]},
+                    "codecSources": {file.name: digest(file) for file in sorted((app_root / "codecs").glob("*.py"))}}
         (output / "build-info.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         print(f"Codec sidecar ready for {sys.platform}: {app_root / 'build' / 'sidecar'}")
         print(f"Bundled encoder: orjson {orjson.__version__}; licenses: {license_output}")

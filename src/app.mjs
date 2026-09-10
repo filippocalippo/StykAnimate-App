@@ -22,6 +22,10 @@ import { VfwExportControls } from "./vfw-export-controls.mjs";
 import { getExportCapabilities } from "./export-capabilities.mjs";
 import { PlaybackCache } from "./playback.mjs";
 import { PlaybackMetrics } from "./playback-metrics.mjs";
+import { DesktopTelemetryClient } from './telemetry-core.mjs';
+import { PrivacyUI } from './privacy-ui.mjs';
+import { UpdateUI } from './update-ui.mjs';
+import { ReleaseSplash } from './support-ui.mjs';
 import { EditableScenePreparation } from './editable-scene-preparation.mjs';
 import { TextDialog } from "./text-dialog.mjs";
 import { SegmentValuesDialog } from "./segment-values-dialog.mjs";
@@ -124,6 +128,9 @@ async function runDocumentExport(format, consume, { recovery = false } = {}) {
   const controller = new AbortController(),
     job = { controller, recovery };
   exportJobs.add(job);
+  const metric = recovery ? 'recovery' : format === 'styk' ? 'save' : 'export';
+  const started = performance.now();
+  if (!recovery) telemetry.count(metric + '_started');
   try {
     const blob = await documentExporter.export(recovery ? editor.movieclipProjectReport() : editor.report, {
       format,
@@ -135,7 +142,18 @@ async function runDocumentExport(format, consume, { recovery = false } = {}) {
       signal: controller.signal,
       getRevision: () => `${editor.revision}:${editor.frameDraftRevision}`,
     });
-    return await consume(blob, controller.signal);
+    telemetry.timing(metric + '_ms', performance.now() - started);
+    const saved = await consume(blob, controller.signal);
+    if (recovery) { if (saved) telemetry.count('recovery_saved'); }
+    else {
+      telemetry.count(metric + (saved ? '_succeeded' : '_cancelled'));
+      if (saved) { telemetry.milestone(metric === 'save' ? 'first_save' : 'first_export'); if (metric === 'export') telemetry.count(['piv', 'stk'].includes(format) ? 'export_pivot' : 'export_native'); }
+    }
+    return saved;
+  } catch (error) {
+    if (!recovery || error.name !== 'AbortError') telemetry.count(metric + (error.name === 'AbortError' ? '_cancelled' : '_failed'));
+    if (error.name !== 'AbortError') telemetry.error(error, metric);
+    throw error;
   } finally {
     exportJobs.delete(job);
     state.lastExport = documentExporter.lastTimings;
@@ -214,6 +232,26 @@ let warmTimer = null,
   playStarted = false,
   uiScheduled = 0;
 const playbackMetrics = new PlaybackMetrics();
+const exportTelemetry = new WeakMap();
+const telemetry = new DesktopTelemetryClient(desktop, { getContext: () => ({
+  mode: state.settings.timelineMode, locale: state.settings.locale,
+  playing: state.playing,
+  backend: state.renderer?.stats?.backend === 'WebGPU' ? 'webgpu' : 'unavailable',
+  gauges: { gpu_memory_mb: state.renderer?.stats?.gpuBytes / 1048576, draw_calls: state.renderer?.stats?.drawCalls,
+    upload_kb: state.renderer?.stats?.uploadBytes / 1024, scene_figures: state.renderer?.stats?.objects,
+    scene_primitives: state.renderer?.stats?.primitives, scene_frames: editor.totalTicks },
+  gpuFamily: coarseGPUFamily(state.renderer?.stats?.adapter),
+}) });
+function coarseGPUFamily(value = '') {
+  return ['nvidia', 'amd', 'intel', 'apple', 'qualcomm', 'software'].find(name => String(value).toLowerCase().includes(name)) || 'unknown';
+}
+const privacyUI = new PrivacyUI(desktop, telemetry);
+const releaseSplash = new ReleaseSplash(desktop);
+let updateNotice;
+const telemetryInit = telemetry.init().catch(() => null);
+globalThis.addEventListener('error', event => telemetry.error(event.error));
+globalThis.addEventListener('unhandledrejection', event => telemetry.error(event.reason));
+globalThis.addEventListener('pagehide', () => { void telemetry.flush(); telemetry.dispose(); });
 const editablePreparation = new EditableScenePreparation(editor, {
   onPending(pending) {
     state.editablePreparing=pending;
@@ -699,6 +737,7 @@ function toast(text) {
   toastTimer = setTimeout(() => ($("toast").hidden = true), 4400);
 }
 function fail(error) {
+  telemetry.error(error);
   const message = error?.message || String(error);
   status(message, true);
   toast(message);
@@ -1261,6 +1300,10 @@ function loop(now) {
     }
     const elapsed = performance.now() - start;
     state.renderSamples.push(elapsed);
+    if (telemetry.consent.diagnostics && state.drawCalls % 30 === 0) {
+      telemetry.timing('frame_ms', elapsed);
+      if (elapsed > 33) telemetry.count('slow_frames');
+    }
     if (state.renderSamples.length > 300) state.renderSamples.shift();
     state.lastPresent = elapsed;
     state.drawCalls++;
@@ -1302,6 +1345,7 @@ function play() {
       ? range.start
       : editor.tick;
   playStart = performance.now();
+  telemetry.count('playback_started');
   playbackMetrics.reset(playStart, editor.report.frame_delay_ms
     ? 1000 / editor.report.frame_delay_ms : editor.report.fps);
   lastFpsUI = playStart;
@@ -1323,7 +1367,16 @@ function play() {
 }
 function pause() {
   const wasPlaying = state.playing || state.previewing;
-  if (state.playing) playbackMetrics.stop(performance.now());
+  if (state.playing) {
+    playbackMetrics.stop(performance.now());
+    const summary = playbackMetrics.snapshot(performance.now());
+    telemetry.count('playback_frames', summary.totalFrames);
+    telemetry.count('playback_seconds', Math.round(summary.elapsedMs / 1000));
+    telemetry.count('playback_buffering', summary.bufferingEvents);
+    telemetry.timing('playback_startup_ms', summary.startupMs);
+    telemetry.timing('playback_buffering_ms', summary.bufferingMs);
+    for (const interval of summary.intervalsMs) telemetry.timing('playback_interval_ms', interval);
+  }
   $("playback-fps").hidden = true;
   if (wasPlaying && state.playbackPacket)
     state.editingPacket = {
@@ -1394,6 +1447,7 @@ function updateTitle() {
   desktop?.setDocumentState?.({
     name: editor.name || "Untitled",
     dirty: editor.dirty,
+    revision: `${state.documentToken}:${editor.revision}:${editor.frameDraftRevision}`,
   });
 }
 function updateUI() {
@@ -1497,6 +1551,7 @@ function renderInspector() {
 }
 
 function setTool(tool) {
+  if (tool !== state.tool && ['rig', 'line', 'circle', 'polygon', 'handle-edit'].includes(tool)) telemetry.count('builder');
   if (isMovieclip(editor.figure) && ['rig','line','circle','polygon','handle-edit'].includes(tool)) {
     editor.enterMovieclip();
   }
@@ -2421,6 +2476,19 @@ async function chooseSticknodesFile(file,isCurrent=()=>true) {
   return isCurrent()?result:null;
 }
 async function importFiles(files) {
+  const started = performance.now(); telemetry.count('import_started');
+  try {
+    const result = await importFilesTracked(files);
+    telemetry.count(result === false ? 'import_cancelled' : 'import_succeeded');
+    if (result !== false) telemetry.timing('import_ms', performance.now() - started);
+    return result;
+  } catch (error) { telemetry.count(error.name === 'AbortError' ? 'import_cancelled' : 'import_failed'); telemetry.error(error, 'import'); throw error; }
+}
+function recordImportKind(filename = '') {
+  const extension = filename.split('.').at(-1)?.toLowerCase();
+  telemetry.count(['piv', 'stk'].includes(extension) ? 'import_pivot' : ['nodes', 'nodemc', 'stknds', 'zip'].includes(extension) ? 'import_sticknodes' : ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'].includes(extension) ? 'import_media' : 'import_native');
+}
+async function importFilesTracked(files) {
   finishCurrentEdit();
   const seq = ++importSequence;
   importer.cancelPending();
@@ -2428,21 +2496,24 @@ async function importFiles(files) {
   status("Importing…", false, true);
   try {
     for (const file of files) {
+      recordImportKind(file.name);
       if (/\.(png|jpe?g|gif|bmp|webp)$/i.test(file.name)) {
         if (
           !(await importMediaFile(file, {
             isCurrent: () => seq === importSequence,
           }))
         )
-          return;
+          return false;
         continue;
       }
       const result = await chooseSticknodesFile(file,()=>seq===importSequence);
-      if (!result || seq !== importSequence) return;
+      if (!result || seq !== importSequence) return false;
       await acceptImport(result, file.name);
+      telemetry.timing('import_decode_ms', result.timings?.decode_ms);
     }
   } catch(error) {
     if(error.name!=="AbortError")throw error;
+    return false;
   } finally {
     if(seq===importSequence)state.importing = false;
   }
@@ -2460,6 +2531,16 @@ async function openFile() {
   }
 }
 async function acceptNativeFile(result) {
+  const started = performance.now(); telemetry.count('import_started'); recordImportKind(result.filename);
+  try {
+    const accepted = await acceptNativeFileTracked(result);
+    telemetry.count(accepted === false ? 'import_cancelled' : 'import_succeeded');
+    if (accepted !== false) telemetry.timing('import_ms', performance.now() - started);
+    telemetry.timing('import_decode_ms', state.lastImport?.decode_ms);
+    return accepted;
+  } catch (error) { telemetry.count(error.name === 'AbortError' ? 'import_cancelled' : 'import_failed'); telemetry.error(error, 'import'); throw error; }
+}
+async function acceptNativeFileTracked(result) {
   pause();
   const decoded = result.bytes
     ? await chooseSticknodesFile(new File([result.bytes], result.filename))
@@ -2476,6 +2557,8 @@ async function openSample(path) {
   await acceptImport(await importer.openSample(path));
 }
 async function saveBlob(blob, filename, signal) {
+  const exportStart = signal && exportTelemetry.get(signal);
+  if (exportStart !== undefined) { telemetry.timing('export_ms', performance.now() - exportStart); exportTelemetry.delete(signal); }
   if (desktop) {
     return writeNativeBlob(desktop, blob, {
       signal,
@@ -2628,6 +2711,7 @@ async function withExportRenderer(
     job = { controller, recovery: false },
     source = editor.report;
   exportJobs.add(job);
+  telemetry.count('export_started'); exportTelemetry.set(controller.signal, performance.now());
   let frameRenderer;
   showDialog(
     title,
@@ -2656,7 +2740,7 @@ async function withExportRenderer(
     });
     await frameRenderer.load(report);
     progress.value = 0;
-    return await render(
+    const saved = await render(
       frameRenderer,
       controller.signal,
       ({ completed, total }) => {
@@ -2665,7 +2749,12 @@ async function withExportRenderer(
         progress.value = completed;
       },
     );
+    telemetry.count(saved ? 'export_succeeded' : 'export_cancelled');
+    if (saved) telemetry.milestone('first_export');
+    return saved;
   } catch (error) {
+    telemetry.count(error.name === 'AbortError' ? 'export_cancelled' : 'export_failed');
+    if (error.name !== 'AbortError') telemetry.error(error, 'export');
     if (error.name === "AbortError") {
       status("Export cancelled");
       return false;
@@ -2679,6 +2768,7 @@ async function withExportRenderer(
   }
 }
 async function exportPNG() {
+  telemetry.count('export_png');
   finishCurrentEdit();
   const options = exportOptions({ animation: false }),
     frame = currentFrame(),
@@ -2702,6 +2792,7 @@ async function exportPNG() {
   );
 }
 async function exportSVGFrame() {
+  telemetry.count('export_svg');
   finishCurrentEdit();
   const options = {
       ...exportOptions({ animation: false }),
@@ -2722,6 +2813,7 @@ async function exportSVGFrame() {
   );
 }
 async function exportImages(format) {
+  telemetry.count(format.startsWith('svg') ? 'export_svg' : format.startsWith('gif') ? 'export_gif' : format.startsWith('jpeg') ? 'export_jpeg' : 'export_png');
   finishCurrentEdit();
   const options = exportOptions(),
     report =
@@ -2765,6 +2857,7 @@ async function exportImages(format) {
   );
 }
 async function exportVideo(format = "webm") {
+  telemetry.count('export_video');
   finishCurrentEdit();
   const vfw = format === "vfw" ? vfwExportControls.getOptions() : null;
   const codec = $(`export-${format}-codec`)?.value || undefined;
@@ -3314,6 +3407,7 @@ overlay.addEventListener(
         ["copy", "duplicate", "Copy", "Ctrl C", disabled],
         ["paste", "clipboard", "Paste", "Ctrl V"],
         ["duplicate", "duplicate", "Duplicate", "Ctrl D", disabled],
+        ["add-to-library", "plus", "Add to library", "", disabled],
         null,
         ["mirror", "flip", "Flip horizontal", "Shift H", disabled],
         ["mirror-vertical", "flip", "Flip vertical", "Shift V", disabled],
@@ -3390,6 +3484,18 @@ const actions = {
   },
   save: () => saveNative(),
   "save-as": () => saveNative({ saveAs: true }),
+  'check-updates': () => updateNotice?.check(),
+  'release-notes': () => releaseSplash.open(),
+  donate: () => desktop?.openDonate(),
+  'restart-update': async () => {
+    finishCurrentEdit();
+    await workspaceLayout?.flushPreferences();
+    await editorSettings?.flush();
+    await nativeFrameClipboard?.flush();
+    await desktop?.setDocumentState({ name: editor.name, dirty: editor.dirty, revision: `${state.documentToken}:${editor.revision}:${editor.frameDraftRevision}` });
+    await desktop?.restartForUpdate();
+  },
+  'save-and-update': async () => { if (await saveNative()) await actions['restart-update'](); },
   "save-and-close": async () => {
     if (await saveNative()) {
       await workspaceLayout?.flushPreferences();
@@ -3747,6 +3853,8 @@ const actions = {
   ),
   "scene-settings": () => selectTrack({ id: "scene", kind: "scene" }),
   settings: () => editorSettings?.open(),
+  privacy: () => privacyUI.open(),
+  website: () => desktop?.openServicePage('home'),
   "builder-static-handles": () =>
     editorSettings.commit({
       builderShowStaticHandles: !state.settings.builderShowStaticHandles,
@@ -3806,6 +3914,11 @@ const actions = {
 const polygonSafeActions = new Set([
   "menu",
   "settings",
+  "privacy",
+  "check-updates",
+  "release-notes",
+  "donate",
+  "website",
   "help",
   "about",
   "performance",
@@ -3841,6 +3954,7 @@ for (const [name, action] of Object.entries(actions)) {
         return false;
       }
     }
+    telemetry.action(name);
     return action(...args);
   };
 }
@@ -3935,7 +4049,7 @@ $("inspector").addEventListener(
       return;
     }
     if (target.id === 'node-is-ik') { editor.setNodeIK({enabled: target.checked}); return; }
-    if (target.id === 'node-ik-pinned') { editor.setNodeIK({pinned: target.checked}); return; }
+    if (target.id === 'node-ik-pinned') { telemetry.count('ik'); editor.setNodeIK({pinned: target.checked}); return; }
     if (target.id === 'node-ik-chain') { editor.setNodeIK({chainLength: target.valueAsNumber}); return; }
     if (target.id === 'node-ik-rotation') { editor.rotateIKTarget(target.valueAsNumber * Math.PI / 180); return; }
     if (target.id === 'node-ik-stretch') { editor.setNodeIK({allowStretch: target.checked}); return; }
@@ -4620,6 +4734,7 @@ document.addEventListener(
 );
 editor.addEventListener("change", (e) => {
   const kind = e.detail?.kind;
+  if (kind === 'edit' && !e.detail?.live) { telemetry.count('edits'); telemetry.milestone('first_edit'); }
   if(['edit','history','document','preview','frame-draft','seek'].includes(kind))editablePreparation.cancel();
   const selectedTrack = ["seek", "history", "frame-draft"].includes(kind)
     ? timelineUI?.trackById?.get(state.selectedTrackId)
@@ -4905,6 +5020,7 @@ function showRecovery(record) {
       editor.dirty = true;
       fit();
       updateUI();
+      telemetry.count('recovery_restored');
       banner.remove();
     }
   });
@@ -5243,6 +5359,7 @@ async function init() {
       ? (value) => desktop.setEditorSettings(value)
       : undefined,
     onResetWorkspace: () => workspaceLayout?.reset(),
+    onPrivacy: desktop?.getTelemetryState ? () => privacyUI.open() : undefined,
   });
   state.settings = editorSettings.value;
   appLocalization.bindChrome();
@@ -5390,9 +5507,11 @@ async function init() {
   });
   window.styk.assets = assetLibrary;
   window.styk.library = new UserLibrary({editor, desktop, exporter:documentExporter, importer, pause, finishEdit:finishCurrentEdit, setTool});
-  actions['add-to-library'] = () => window.styk.library.run(() => window.styk.library.save());
+  $('library-tab')?.addEventListener('click', () => telemetry.count('library'));
+  actions['add-to-library'] = () => { telemetry.count('library'); return window.styk.library.run(() => window.styk.library.save()); };
   window.styk.movieclips = installMovieclipUI({editor,actions,pause,finishEdit:finishCurrentEdit,
     getTimeline:()=>timelineUI,setTool,onError:fail,queueUI,exportClip:()=>exportPivot('stykmov')});
+  for (const [name, action] of Object.entries(actions)) if (name.startsWith('movieclip-')) actions[name] = (...args) => { telemetry.count('movieclip'); return action(...args); };
   editor.addEventListener('change',event=>{
     if(event.detail?.kind==='movieclip-scope' || event.detail?.movieclipScope) {
       mountTimeline(); state.inspectorContext=editor.object?'figure':'scene';state.inspectorTab='design';queueUI();
@@ -5416,6 +5535,17 @@ async function init() {
   updateUI();
   status("Ready");
   window.styk.ready = true;
+  window.styk.telemetry = telemetry;
+  window.styk.privacyUI = privacyUI;
+  updateNotice = new UpdateUI(desktop, { onRestart: () => actions['restart-update']() });
+  void releaseSplash.open({ startup: true }).catch(console.warn);
+  void telemetryInit.then(info => {
+    telemetry.timing('startup_ms', performance.now());
+    if (info && !info.decided) {
+      const offer = () => { if (document.querySelector('dialog[open]')) return; document.removeEventListener('close', offer, true); void privacyUI.open({ firstRun: true }).catch(() => {}); };
+      document.addEventListener('close', offer, true); setTimeout(offer, 300);
+    }
+  });
   warmPlayback();
   offerRecovery();
   try {
@@ -5444,6 +5574,7 @@ function rendererOptions() {
         typeof message === "string" ? message : message.message || "Ready",
       );
       if (message.backend === "WebGPU device lost") {
+        telemetry.count('gpu_errors'); telemetry.error({ name: 'GPUError' }, 'gpu');
         pause();
         propertyControls?.cancel();
         cancelDrag();

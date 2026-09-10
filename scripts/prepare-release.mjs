@@ -1,0 +1,11 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+const metadata = JSON.parse(await readFile('package.json', 'utf8'));
+const info = JSON.parse(await readFile('desktop/release-info.json', 'utf8'));
+assert.match(metadata.version, /^\d+\.\d+\.\d+$/, 'Use a stable x.y.z release version.');
+assert.equal(info.version, metadata.version, 'Update desktop/release-info.json to match package.json.');
+assert.ok(typeof info.title === 'string' && info.title.trim());
+assert.ok(Array.isArray(info.notes) && info.notes.length && info.notes.every(note => typeof note === 'string' && note.trim()));
+if (process.env.GITHUB_REF_TYPE === 'tag') assert.equal(process.env.GITHUB_REF_NAME, `v${metadata.version}`, 'Release tag must match package.json.');
+await writeFile('release-notes.md', `# StykAnimate ${info.version}\n\n${info.title}\n\n${info.notes.map(note => `- ${note}`).join('\n')}\n\nStykAnimate is completely free. [Support development on Ko-fi](https://ko-fi.com/Q5Q41WY7QC).\n\nInstall the **Setup** version for automatic updates. Portable copies require manual updates.\n`);
+console.log(`Release notes prepared for ${info.version}.`);

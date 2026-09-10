@@ -1,0 +1,75 @@
+name: Build and release Windows app
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified release (otherwise upload a draft)
+        type: boolean
+        default: false
+  push:
+    branches: ['codex/auto-updates']
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.11.0'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.9'
+          cache: pip
+          cache-dependency-path: scripts/requirements-build.txt
+      - name: Install locked dependencies
+        run: |
+          npm ci --no-audit --no-fund
+          python -m pip install -r scripts/requirements-build.txt
+      - name: Validate release and source
+        run: |
+          npm run release:prepare
+          npm run check
+          npm run test:updates
+      - name: Build the standalone codecs and video encoder
+        run: |
+          npm run build:frame-scan
+          npm run build:vfw
+          npm run build:sidecar
+          npm run verify:sidecar
+          npm run build:video-encoder
+      - name: Build Windows installers and update metadata
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        shell: pwsh
+        run: |
+          $releaseVersion = (Get-Content package.json | ConvertFrom-Json).version
+          npm run dist:win -- --x64 --publish never "--config.directories.output=release/$releaseVersion"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run release:verify
+      - name: Upload private build evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-evidence
+          path: |
+            release/*/latest.yml
+            release/*/*.exe
+            release/*/*.blockmap
+            artifacts/sidecar-smoke.json
+          retention-days: 7
+      - name: Upload release to the public assets repository
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          PUBLISH_RELEASE: ${{ startsWith(github.ref, 'refs/tags/') || inputs.publish }}
+        shell: pwsh
+        run: |
+          if (!$env:GH_TOKEN) { throw 'Add the RELEASES_TOKEN secret with Contents write access to styk-animate-releases.' }
+          if ($env:PUBLISH_RELEASE -eq 'true') { npm run release:publish -- --publish }
+          else { npm run release:publish }

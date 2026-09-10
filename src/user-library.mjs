@@ -3,7 +3,7 @@ import {librarySnapshot, libraryPreview, saveLibraryFile, readLibraryFile} from 
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const folderIcon = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>';
-const label = item => item.kind === 'folder' ? 'Folder' : item.kind === 'movieclip' ? 'Movieclip' : 'Figure / set';
+const label = item => item.kind === 'folder' ? 'Folder' : item.kind === 'movieclip' ? 'Movieclip' : item.kind === 'set' ? 'Figure set' : 'Figure';
 
 export class UserLibrary {
   constructor({editor, desktop, exporter, importer, pause, finishEdit, setTool}) {
@@ -14,12 +14,11 @@ export class UserLibrary {
     tabs.innerHTML = '<button type="button" role="tab" id="properties-tab" aria-controls="inspector" aria-selected="true">Properties</button><button type="button" role="tab" id="library-tab" aria-controls="user-library" aria-selected="false">Library</button>';
     this.panel.prepend(tabs);
     this.container = document.createElement('section'); this.container.id = 'user-library'; this.container.hidden = true; this.container.setAttribute('role','tabpanel'); this.container.setAttribute('aria-labelledby','library-tab');
-    this.container.innerHTML = `<div class="library-heading"><div><strong>Your library</strong><span>Ready for the next scene</span></div><button type="button" class="icon-button" data-library-action="reveal" aria-label="Open library folder" title="Open folder in Explorer">${folderIcon}</button></div>
-      <div class="library-tools"><label class="library-search">${icon('search')}<input type="search" aria-label="Search library" placeholder="Search this folder" spellcheck="false"></label><button type="button" class="icon-button" data-library-action="refresh" aria-label="Refresh library" title="Refresh">${icon('rotate')}</button><button type="button" class="icon-button" data-library-action="folder" aria-label="New library folder" title="New folder">${icon('plus')}</button></div>
+    this.container.innerHTML = `<div class="library-tools"><label class="library-search">${icon('search')}<input type="search" aria-label="Search library" placeholder="Search" spellcheck="false"></label><button type="button" class="icon-button" data-library-action="refresh" aria-label="Refresh library" title="Refresh">${icon('rotate')}</button><button type="button" class="icon-button" data-library-action="folder" aria-label="New library folder" title="New folder">${icon('plus')}</button><button type="button" class="icon-button" data-library-action="reveal" aria-label="Open library folder" title="Open folder in Explorer">${folderIcon}</button></div>
       <nav class="library-breadcrumbs" aria-label="Library folders"></nav><div class="library-filter"><select aria-label="Filter library assets"><option value="all">All assets</option><option value="figure">Figures & sets</option><option value="movieclip">Movieclips</option></select><span class="library-count"></span></div>
-      <div class="library-content"><div class="library-grid" role="list" aria-label="Saved assets"></div><div class="library-empty">${folderIcon}<strong>A home for your artwork</strong><p>Select figures or a movieclip, then add them to this folder.</p></div></div>
-      <div class="library-item-actions" hidden><button type="button" data-library-action="insert">Insert</button><button type="button" data-library-action="rename">Rename</button><button type="button" data-library-action="move">Move to…</button></div>
-      <div class="library-message" role="status" aria-live="polite"></div><div class="library-save"><button type="button" class="button primary" data-library-action="save">${icon('plus')}<span>Add to library</span></button><span class="library-selection"></span></div>`;
+      <div class="library-content"><div class="library-grid" role="list" aria-label="Saved assets"></div><div class="library-empty">No assets in this folder</div></div>
+      <div class="library-item-actions" hidden><button type="button" data-library-action="insert">Insert</button><button type="button" data-library-action="rename">Rename</button><button type="button" data-library-action="move">Move to…</button><button type="button" class="library-trash" data-library-action="trash" aria-label="Remove library item" title="Move to Recycle Bin">${icon('trash')}</button></div>
+      <div class="library-message" role="status" aria-live="polite"></div><div class="library-save"><button type="button" class="button primary" data-library-action="save">${icon('plus')}<span>Add to library</span></button></div>`;
     this.panel.append(this.container);
     this.propertySave = document.createElement('div'); this.propertySave.className = 'properties-library-save';
     this.propertySave.innerHTML = `<button type="button" class="button" data-library-action="save">${icon('plus')} Add to library</button>`; this.panel.append(this.propertySave);
@@ -63,7 +62,8 @@ export class UserLibrary {
   syncSelection() {
     const count = this.editor.selectedObjects.length, available = Boolean(this.desktop?.listLibrary);
     for (const button of this.panel.querySelectorAll('[data-library-action="save"]')) button.disabled = this.busy || !count || !available;
-    this.container.querySelector('.library-selection').textContent = count ? `${count === 1 && this.editor.figure?._styk?.movieclip ? 'Movieclip' : `${count} ${count === 1 ? 'figure' : 'figures'}`} selected` : 'Select artwork on the canvas';
+    this.container.querySelector('[data-library-action="save"] span').textContent = count > 1 ? `Add ${count} figures to library` : 'Add to library';
+    for (const button of this.panel.querySelectorAll('[data-library-action="save"]')) button.title = count ? `Save selection in ${this.folder || 'Library'}` : 'Select figures or a movieclip';
   }
   async refresh(folder = this.folder) {
     if (!this.desktop?.listLibrary) { this.message.textContent = 'Open the desktop app to use your Documents library.'; return; }
@@ -84,14 +84,13 @@ export class UserLibrary {
   }
   render() {
     this.observer.disconnect(); this.grid.replaceChildren();
-    const query = this.input.value.trim().toLocaleLowerCase(), items = this.entries.filter(item => item.name.toLocaleLowerCase().includes(query) && (this.filter.value === 'all' || item.kind === 'folder' || item.kind === this.filter.value));
+    const query = this.input.value.trim().toLocaleLowerCase(), items = this.entries.filter(item => item.name.toLocaleLowerCase().includes(query) && (this.filter.value === 'all' || item.kind === 'folder' || item.kind === this.filter.value || this.filter.value === 'figure' && item.kind === 'set'));
     this.container.querySelector('.library-count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}`;
     const empty = this.container.querySelector('.library-empty'); empty.hidden = items.length > 0;
-    empty.querySelector('strong').textContent = query || this.filter.value !== 'all' ? 'No matching assets' : 'A home for your artwork';
-    empty.querySelector('p').textContent = query || this.filter.value !== 'all' ? 'Try another name or show all assets.' : 'Select figures or a movieclip, then add them to this folder.';
+    empty.textContent = query || this.filter.value !== 'all' ? 'No matching assets' : 'No assets in this folder';
     for (const item of items) {
       const card = document.createElement('div'); card.className = `library-card ${item.kind}`; card.dataset.libraryPath = item.path; card.tabIndex = 0; card.setAttribute('role','listitem'); card.setAttribute('aria-label',`${item.name}, ${label(item)}`); card.title = `Double-click to ${item.kind === 'folder' ? 'open' : 'insert'} ${item.name}`;
-      card.innerHTML = `<div class="library-thumbnail">${item.kind === 'folder' ? folderIcon : '<span class="library-preview-loading"></span>'}${item.kind === 'movieclip' ? `<span class="library-clip-badge">${icon('play')}</span>` : ''}</div><div class="library-card-info"><span class="library-name">${esc(item.name)}</span><small>${label(item)}</small></div>`;
+      card.innerHTML = `<div class="library-thumbnail">${item.kind === 'folder' ? folderIcon : '<span class="library-preview-loading"></span>'}${['movieclip','set'].includes(item.kind) ? `<span class="library-clip-badge" title="${label(item)}">${icon(item.kind === 'movieclip' ? 'play' : 'duplicate')}</span>` : ''}</div><div class="library-card-info"><span class="library-name">${esc(item.name)}</span></div>`;
       this.grid.append(card); if (item.kind !== 'folder') this.observer.observe(card);
     }
     this.select(this.entries.some(item => item.path === this.selected) ? this.selected : null);
@@ -100,7 +99,19 @@ export class UserLibrary {
     const path = card.dataset.libraryPath, item = this.entries.find(item => item.path === path); if (!item) return;
     const key = `${path}:${item.modified}`;
     try {
-      const url = this.thumbnails.get(key) ?? await this.desktop.getLibraryThumbnail(path);
+      let url = this.thumbnails.get(key) ?? await this.desktop.getLibraryThumbnail(path);
+      if (!url) {
+        // Missing previews (for files copied in Explorer) are repaired one at a time.
+        const generate = async () => {
+          if (generation !== this.generation || !card.isConnected) return null;
+          const file = await readLibraryFile(this.desktop,path), result = await this.importer.importFile(file), report = result.document ?? result.report ?? result;
+          const thumbnail = await libraryPreview(report), kind = report.keyframes[0].objects.length > 1 ? 'set' : item.kind;
+          await this.desktop.cacheLibraryThumbnail({path, thumbnail, modified:item.modified, kind});
+          if (generation === this.generation && card.isConnected) { item.kind = kind; card.setAttribute('aria-label',`${item.name}, ${label(item)}`); }
+          return thumbnail;
+        };
+        const pending = (this.previewChain ?? Promise.resolve()).then(generate); this.previewChain = pending.catch(() => {}); url = await pending;
+      }
       if (generation !== this.generation || !card.isConnected) return;
       const target = card.querySelector('.library-thumbnail'); target.querySelector('.library-preview-loading')?.remove();
       if (url) {
@@ -122,6 +133,7 @@ export class UserLibrary {
     if (action === 'folder') return this.newFolder();
     if (action === 'rename') return this.rename();
     if (action === 'move') return this.move();
+    if (action === 'trash') return this.trash();
     if (action === 'insert') return this.open(this.selected);
   }
   async save() {
@@ -132,8 +144,10 @@ export class UserLibrary {
     try {
       const report = librarySnapshot(this.editor), format = report._styk.libraryKind === 'movieclip' ? 'stykmov' : 'stkz';
       const [thumbnail, blob] = await Promise.all([libraryPreview(report), this.exporter.export(report, {format, figureUids:report.keyframes[0].objects.map(o => o.unique_id)})]);
-      const result = await saveLibraryFile(this.desktop, blob, {folder, name:report._styk.name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'-').replace(/[. ]+$/g,'') || 'Untitled asset', extension:`.${format}`, thumbnail});
-      await this.refresh(folder); this.select(result.path); this.message.textContent = `Saved to ${folder || 'Library'}`;
+      let name = report._styk.name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'-').replace(/^\.+|[. ]+$/g,'').slice(0,110).trim() || 'Untitled asset';
+      if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(name)) name = `Asset ${name}`;
+      const result = await saveLibraryFile(this.desktop, blob, {folder, name, kind:report._styk.libraryKind, extension:`.${format}`, thumbnail});
+      this.input.value = ''; this.filter.value = 'all'; await this.refresh(folder); this.select(result.path); this.message.textContent = `Saved to ${folder || 'Library'}`;
       [...this.grid.children].find(card => card.dataset.libraryPath === result.path)?.scrollIntoView({block:'nearest'});
     } finally { this.busy = false; this.syncSelection(); }
   }
@@ -145,7 +159,9 @@ export class UserLibrary {
     try {
       const file = await readLibraryFile(this.desktop, path), result = await this.importer.importFile(file);
       if (this.editor.report !== report) throw new Error('The document changed. Insert the asset again.');
-      this.pause(); this.finishEdit(); this.editor.importFigure(result.document ?? result.report ?? result); this.setTool('select'); this.message.textContent = `${item.name} added to the scene`;
+      const document = result.document ?? result.report ?? result;
+      if (document.figure_types?.length === 1) document.figure_types[0].name = item.name;
+      this.pause(); this.finishEdit(); this.editor.importFigure(document); this.setTool('select'); this.message.textContent = `${item.name} added to the scene`;
     } finally { this.busy = false; this.syncSelection(); }
   }
   rename() {
@@ -163,7 +179,7 @@ export class UserLibrary {
   }
   newFolder() {
     this.dialog.setAttribute('aria-label','New library folder');
-    this.dialog.innerHTML = '<form><h2>New folder</h2><p>Keep related artwork together.</p><label>Folder name<input name="name" aria-label="Folder name" value="New folder" maxlength="120" required></label><div class="library-dialog-error" role="alert"></div><footer><button class="button" type="button" data-cancel>Cancel</button><button class="button primary" type="submit">Create folder</button></footer></form>';
+    this.dialog.innerHTML = '<form><h2>New folder</h2><label>Folder name<input name="name" aria-label="Folder name" value="New folder" maxlength="120" required></label><div class="library-dialog-error" role="alert"></div><footer><button class="button" type="button" data-cancel>Cancel</button><button class="button primary" type="submit">Create folder</button></footer></form>';
     this.dialog.querySelector('[data-cancel]').onclick = () => this.dialog.close();
     this.dialog.querySelector('form').onsubmit = async event => {
       event.preventDefault(); const submit = event.submitter; submit.disabled = true;
@@ -175,7 +191,7 @@ export class UserLibrary {
   async move() {
     const item = this.entries.find(item => item.path === this.selected); if (!item) return;
     this.dialog.setAttribute('aria-label','Move library item'); let destination = ''; let sequence = 0;
-    this.dialog.innerHTML = `<h2>Move ${esc(item.name)}</h2><p>Choose a destination folder.</p><div class="library-move-location"></div><div class="library-move-folders"></div><div role="alert" class="library-dialog-error"></div><footer><button type="button" class="button" data-cancel>Cancel</button><button type="button" class="button primary" data-move>Move here</button></footer>`;
+    this.dialog.innerHTML = `<h2>Move ${esc(item.name)}</h2><div class="library-move-location"></div><div class="library-move-folders"></div><div role="alert" class="library-dialog-error"></div><footer><button type="button" class="button" data-cancel>Cancel</button><button type="button" class="button primary" data-move>Move here</button></footer>`;
     const browse = async folder => {
       const id = ++sequence, result = await this.desktop.listLibrary(folder); if (id !== sequence) return; destination = folder;
       this.dialog.querySelector('.library-move-location').textContent = `Library${folder ? ` / ${folder.replaceAll('/',' / ')}` : ''}`;
@@ -191,5 +207,17 @@ export class UserLibrary {
       catch (error) { this.dialog.querySelector('[role="alert"]').textContent = error.message; } finally { event.target.disabled = false; }
     };
     await browse(''); this.dialog.showModal();
+  }
+  trash() {
+    const item = this.entries.find(item => item.path === this.selected); if (!item) return;
+    this.dialog.setAttribute('aria-label','Remove library item');
+    this.dialog.innerHTML = `<h2>Remove ${esc(item.name)}?</h2><p>${item.kind === 'folder' ? 'This folder and its contents' : 'This asset and its preview'} will move to the Recycle Bin. Copies already in your scenes stay available.</p><div class="library-dialog-error" role="alert"></div><footer><button type="button" class="button" data-cancel>Cancel</button><button type="button" class="button primary" data-remove>Move to Recycle Bin</button></footer>`;
+    this.dialog.querySelector('[data-cancel]').onclick = () => this.dialog.close();
+    this.dialog.querySelector('[data-remove]').onclick = async event => {
+      event.target.disabled = true;
+      try { await this.desktop.trashLibraryItem(item.path); this.dialog.close(); this.selected = null; await this.refresh(); this.message.textContent = 'Moved to Recycle Bin'; }
+      catch (error) { this.dialog.querySelector('[role="alert"]').textContent = error.message; } finally { event.target.disabled = false; }
+    };
+    this.dialog.showModal(); this.dialog.querySelector('[data-cancel]').focus();
   }
 }

@@ -1,0 +1,27 @@
+dialog.release-splash { width: min(600px, calc(100vw - 48px)); max-width: 600px; max-height: calc(100dvh - 48px); padding: 0; overflow: auto; border: 1px solid #e0e5eb; border-radius: 22px; background: #fff; color: #242c36; box-shadow: 0 24px 90px #1b2b4840; }
+.release-splash::backdrop { background: #18223340; backdrop-filter: blur(5px); }
+.splash-close { position: absolute; top: 16px; right: 16px; z-index: 1; display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid #dbe1e8; border-radius: 50%; background: #ffffffa6; color: #5c6572; font-size: 23px; line-height: 1; cursor: pointer; }
+.splash-close:hover { background: #fff; color: #222; }
+.splash-intro { padding: 30px 32px 25px; background: linear-gradient(125deg, #f6faff, #edf6fd 70%, #edf9f6); }
+.splash-intro img { display: block; margin-bottom: 20px; }
+.splash-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; color: #506275; }
+.splash-version { display: inline-block; margin-left: 12px; padding: 4px 9px; border: 1px solid #c9dcea; border-radius: 20px; color: #276492; background: #ffffffb0; font-size: 10px; font-weight: 600; }
+.splash-intro h1 { max-width: 420px; font-size: 30px; line-height: 1.15; letter-spacing: -.9px; margin: 16px 0 10px; font-weight: 650; }
+.splash-intro p { margin: 0; font-size: 13px; color: #697b8b; }
+.splash-notes { padding: 23px 32px 12px; }
+.splash-notes h2 { font-size: 13px; margin: 0 0 12px; }
+.splash-notes ul { padding-left: 17px; margin: 0; display: grid; gap: 10px; color: #647180; font-size: 12px; line-height: 1.55; }
+.splash-notes li::marker { color: #1789d4; }
+.support-card { margin: 20px 32px; padding: 20px; border-radius: 13px; border: 1px solid #f0d9d4; background: #fff7f4; }
+.support-card strong { color: #713e32; font-size: 13px; }
+.support-card p { color: #856257; font-size: 12px; line-height: 1.55; margin: 8px 0 15px; }
+.support-donate { display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 11px 18px; border-radius: 8px; background: #e45d42; color: #fff; font-size: 12px; font-weight: 650; text-decoration: none; box-shadow: 0 2px 3px #974e2918; }
+.support-donate:hover { background: #ce4d34; color: #fff; }
+.support-donate:focus-visible, .splash-close:focus-visible { outline: 3px solid #1789d4; outline-offset: 3px; }
+.splash-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 32px 24px; }
+.splash-footer > span { color: #8a929b; font-size: 10px; }
+.splash-footer .button { font-size: 12px; gap: 12px; }
+.support-card-compact { display: flex; align-items: center; gap: 18px; margin: 18px 0 0; padding: 16px; }
+.support-card-compact p { margin-bottom: 0; }
+.support-card-compact .support-donate { flex-shrink: 0; white-space: nowrap; }
+@media (max-width: 540px) { .splash-intro, .splash-notes { padding-left: 22px; padding-right: 22px; } .release-splash .support-card { margin-left: 22px; margin-right: 22px; } .splash-intro h1 { font-size: 26px; } .splash-version { margin: 10px 0 0; } .splash-eyebrow { display: block; } .support-card-compact { flex-wrap: wrap; } .splash-footer { padding-left: 22px; padding-right: 22px; } }

@@ -43,13 +43,13 @@ class FileStreams {
     finally { job.busy = false; job.resolveIdle?.(); job.idle = null; if (this.jobs.has(token) && !job.cancelled) this.touch(job); }
   }
 
-  async beginWrite({ destination, size, onCommit } = {}) {
+  async beginWrite({ destination, size, onCommit, exclusive = false } = {}) {
     this.validateSize(size);
     if (typeof destination !== 'string' || !path.isAbsolute(destination)) throw new Error('A native-approved destination is required.');
     if (this.jobs.size >= this.maxSessions) throw new Error('Too many file transfers are active.');
     const temporary = path.join(path.dirname(destination), `.${path.basename(destination)}.${randomUUID()}.tmp`);
     const handle = await fs.open(temporary, 'wx');
-    try { return this.register({ mode: 'write', destination, temporary, handle, size, position: 0, onCommit }); }
+    try { return this.register({ mode: 'write', destination, temporary, handle, size, position: 0, onCommit, exclusive }); }
     catch (error) { await handle.close(); await fs.unlink(temporary); throw error; }
   }
 
@@ -81,7 +81,8 @@ class FileStreams {
       job.handle = null;
       if (job.cancelled) throw new Error('The file transfer was cancelled.');
       try {
-        await fs.rename(job.temporary, job.destination);
+        if (job.exclusive) { await fs.link(job.temporary, job.destination); await fs.unlink(job.temporary); }
+        else await fs.rename(job.temporary, job.destination);
         this.jobs.delete(token);
         clearTimeout(job.timer);
         if (job.onCommit) await job.onCommit();
