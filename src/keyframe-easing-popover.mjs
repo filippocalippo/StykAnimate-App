@@ -30,7 +30,7 @@ const STYLES = `
 
 function keyAnchor(host, records, indices) {
   if (host.strip) {
-    const card = host.cards.get(indices[0]), rect = card?.querySelector('.styk-simple-preview')?.getBoundingClientRect() ?? host.strip.getBoundingClientRect();
+    const card = host.cards.get(indices[0]), rect = card?.querySelector('.styk-simple-preview, .sheet-preview')?.getBoundingClientRect() ?? host.strip.getBoundingClientRect();
     return {x: rect.left + rect.width / 2, y: rect.top};
   }
   const rect = host.scroll.getBoundingClientRect();
@@ -48,7 +48,7 @@ export function showKeyframeEasingPopover() {
   if (channelMode) this._assertKeysEditable(records);
   const selection = this.selectedAnimationKeys, report = this.editor.report;
   const frameReport = this.strip ? storedFrameReport(report) : report;
-  const settings = channelMode ? records.map(({key, channel}) => key.interpolation === undefined && channel.property === 'pose' && report.auto_easing ? null : keyEasing(key)) :
+  const settings = this.easingSettings ? this.easingSettings(indices) : channelMode ? records.map(({key, channel}) => key.interpolation === undefined && channel.property === 'pose' && report.auto_easing ? null : keyEasing(key)) :
     indices.map(index => frameReport.keyframes[index]._styk?.easing ?? (report.auto_easing ? null : {interpolation: 'linear'}));
   const initial = settings.every(value => JSON.stringify(value) === JSON.stringify(settings[0])) ? settings[0] : null;
   const discrete = records.some(({channel}) => isDiscreteAnimationProperty(channel.property));
@@ -80,7 +80,8 @@ export function showKeyframeEasingPopover() {
     try {
       if (this.editor.report !== report) throw new Error('The animation document has changed. Reopen the keyframe.');
       const easing = controls.read();
-      if (channelMode) { this._assertKeysEditable(records); this.editor.setAnimationKeysEasing(selection, easing); }
+      if (this.applyEasing) this.applyEasing(indices, easing);
+      else if (channelMode) { this._assertKeysEditable(records); this.editor.setAnimationKeysEasing(selection, easing); }
       else if (this.strip && this.editor.frameDraft?.mode === 'add' && this.editor.frameDraft.dirty)
         this.editor.editStoredFrames(() => this.editor.setFramesEasing(indices, easing));
       else this.editor.setFramesEasing(indices, easing);

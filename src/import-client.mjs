@@ -9,6 +9,7 @@ export class ImportClient {
     this.token = token;
     this.timeoutMs = timeoutMs;
     this.sequence = 0;
+    this.cancelGeneration = 0;
     this.pending = new Map();
     this.disposed = false;
     this.failure = null;
@@ -24,6 +25,7 @@ export class ImportClient {
   _receive(message) {
     const request = this.pending.get(message?.id);
     if (!request) return;
+    if(message.progress){request.onProgress?.(message.progress);return;}
     if(message.ok && message.nativeFrames) {
       if(request.materializing) return;
       request.materializing=true;
@@ -68,7 +70,7 @@ export class ImportClient {
     this.pending.clear();
   }
 
-  _request(operation, payload, transfer = []) {
+  _request(operation, payload, transfer = [], onProgress) {
     if (this.disposed) return Promise.reject(new Error('The file importer has been disposed.'));
     if (this.failure) return Promise.reject(this.failure);
     const id = ++this.sequence;
@@ -80,7 +82,7 @@ export class ImportClient {
         error.code = 'import_timeout';
         reject(error);
       }, this.timeoutMs) : null;
-      this.pending.set(id, {resolve, reject, timer});
+      this.pending.set(id, {resolve, reject, timer, onProgress});
       try {
         this.worker.postMessage({id, operation, baseURL: this.baseURL, token: this.token, ...payload}, transfer);
       } catch (error) {
@@ -91,23 +93,30 @@ export class ImportClient {
     });
   }
 
-  async importFile(file) {
+  async importFile(file,{entryIndex,onProgress}={}) {
     if (this.disposed) throw new Error('The file importer has been disposed.');
     if (this.failure) throw this.failure;
     if (!file || typeof file.arrayBuffer !== 'function' || typeof file.name !== 'string') {
-      throw new TypeError('Choose a Pivot animation, stick figure, or StykAnimate project file.');
+      throw new TypeError('Choose a StykAnimate, Pivot or Stick Nodes file.');
     }
-    const native = /\.(styk|stkz|json)$/i.test(file.name);
+    const native = /\.(styk|stkz|stykmov|json)$/i.test(file.name);
     const limit = (native ? 256 : 128) * 1024 * 1024;
     if (Number(file.size) > limit) throw new Error(`The file exceeds the ${limit / 1024 / 1024} MiB import limit.`);
-    const bytes = await file.arrayBuffer();
+    const generation=this.cancelGeneration,bytes = await file.arrayBuffer();
+    if(generation!==this.cancelGeneration)throw new DOMException('Import superseded.','AbortError');
     // Transfer ownership rather than structured-cloning a second upload buffer.
-    return this._request('import', {filename: file.name, bytes}, [bytes]);
+    return this._request('import', {filename: file.name, bytes,entryIndex}, [bytes],onProgress);
+  }
+
+  cancelPending() {
+    this.cancelGeneration++;
+    for(const [id,request] of this.pending){clearTimeout(request.timer);this.worker.postMessage({operation:'cancel',id});request.reject(new DOMException('Import superseded.','AbortError'));}
+    this.pending.clear();
   }
 
   importNative(file) {
-    if (!/\.(styk|stkz|json)$/i.test(file?.name || '')) {
-      return Promise.reject(new Error('Choose a .styk project, .stkz figure, or .json file.'));
+    if (!/\.(styk|stkz|stykmov|json)$/i.test(file?.name || '')) {
+      return Promise.reject(new Error('Choose a .styk project, .stkz figure, .stykmov movieclip, or .json file.'));
     }
     return this.importFile(file);
   }

@@ -13,6 +13,15 @@ export function translateIKTargets(object, dx, dy) {
   object._stykIK = Object.fromEntries(Object.entries(object._stykIK).map(([id, c]) => [id,
     {...c, target: {...c.target, x: c.target.x + dx, y: c.target.y + dy}}]));
 }
+export function remapIKFollowers(object, uidMap) {
+  if (!object._stykIK) return;
+  object._stykIK = Object.fromEntries(Object.entries(object._stykIK).map(([id, c]) => {
+    const next = {...c};
+    for (const field of ['joinedFollowers','joinedAttachmentOffsets']) if (c[field]) next[field] = Object.fromEntries(Object.entries(c[field])
+      .filter(([uid]) => uidMap.has(Number(uid))).map(([uid, followers]) => [uidMap.get(Number(uid)), followers]));
+    return [id,next];
+  }));
+}
 
 export function ikLayout(figure) {
   const ids = new Map(), children = new Map(), order = [];
@@ -34,6 +43,63 @@ export function ikChain(figure, handle, length, layout = ikLayout(figure)) {
   return chain.reverse();
 }
 
+export const ikConstruction = s => s.aux_code !== undefined ? Boolean(s.aux_code & 1)
+  : s.static_raw !== undefined ? Boolean(s.static_raw) : Boolean(s.flag_bits?.is_static ?? s.is_static ?? (Number(s.flags || 0) & 256));
+
+/** Find the next articulated bones at the endpoint. Static artwork belongs to
+ * the incoming bone; near-zero construction pivots can sit between an ankle
+ * and its foot. Polygon-connected sibling branches must use one space so a
+ * filled foot cannot tear apart when its vertices use different tree branches. */
+export function ikFollowerIndices(figure, handle, layout = ikLayout(figure)) {
+  const candidates = [], owners = new Map(), queue = (layout.children.get(Number(handle)) ?? []).map(i => [i, null]);
+  for (let q = 0; q < queue.length; q++) {
+    const [i, owner] = queue[q], s = figure.segments[i];
+    const anchor = owner === null && ikConstruction(s) && Math.abs(s.length) <= .001;
+    const branch = anchor ? null : owner ?? i;
+    if (branch !== null) {owners.set(s.segment_id, branch); if (owner === null) candidates.push(i);}
+    for (const child of layout.children.get(s.segment_id) ?? []) queue.push([child, branch]);
+  }
+  const groups = new Map(candidates.map(i => [i, i]));
+  const find = i => {let root = i; while (groups.get(root) !== root) root = groups.get(root); return root;};
+  for (const polygon of figure.polyfills ?? []) {
+    const branches = (polygon.segment_ids ?? []).map(id => owners.get(Number(id))).filter(i => i !== undefined);
+    if (branches.length > 1) for (const i of branches.slice(1)) groups.set(find(i), find(branches[0]));
+  }
+  const articulated = new Set(candidates.filter(i => !ikConstruction(figure.segments[i])).map(find));
+  return candidates.filter(i => articulated.has(find(i)));
+}
+
+/** Capture only controller-owned branches. Old tables may still name static
+ * attachment pivots: use their captured rotation to recover missing offsets,
+ * but never promote those pivots (and the shin artwork) into target space. */
+export function ikFollowers(figure, object, handle, controller, layout = ikLayout(figure)) {
+  const children = ikFollowerIndices(figure, handle, layout), followers = {};
+  const anchor = children.find(i => Number.isFinite(controller.followers?.[figure.segments[i].segment_id]))
+    ?? (layout.children.get(Number(handle)) ?? []).find(i => Number.isFinite(controller.followers?.[figure.segments[i].segment_id]));
+  const offset = anchor === undefined ? -controller.target.rotation : controller.followers[figure.segments[anchor].segment_id] - object.angles[anchor];
+  for (const i of children) {
+    const id = figure.segments[i].segment_id;
+    followers[id] = controller.followers?.[id] ?? object.angles[i] + offset;
+  }
+  return followers;
+}
+
+/** Artwork rooted on the constrained node stays in the incoming bone's space.
+ * Older all-child target tables may have baked frozen artwork into later poses;
+ * recover those attachments from the figure's original local articulation. */
+export function ikAttachments(figure, object, handle, controller, layout = ikLayout(figure), followers = ikFollowers(figure, object, handle, controller, layout)) {
+  const endpoint = layout.ids.get(Number(handle)), offsets = {};
+  if (endpoint === undefined) return offsets;
+  for (const i of layout.children.get(Number(handle)) ?? []) {
+    const s = figure.segments[i]; if (Number.isFinite(followers[s.segment_id])) continue;
+    const legacy = Number.isFinite(controller.followers?.[s.segment_id]);
+    offsets[s.segment_id] = controller.attachmentOffsets?.[s.segment_id] ?? (legacy
+      ? (s.angle_rad ?? object.angles[i]) - (figure.segments[endpoint].angle_rad ?? object.angles[endpoint])
+      : object.angles[i] - object.angles[endpoint]);
+  }
+  return offsets;
+}
+
 export function validateIK(object) {
   if (object._stykIK === undefined) return;
   const table = object._stykIK;
@@ -49,6 +115,12 @@ export function validateIK(object) {
     if (!c.followers || typeof c.followers !== 'object' || Array.isArray(c.followers) ||
         Object.entries(c.followers).some(([id, a]) => !/^[1-9]\d*$/.test(id) || !Number.isFinite(a)))
       throw new Error('Invalid IK controller orientation.');
+    if (c.attachmentOffsets !== undefined && (!c.attachmentOffsets || typeof c.attachmentOffsets !== 'object' || Array.isArray(c.attachmentOffsets) ||
+        Object.entries(c.attachmentOffsets).some(([id,a]) => !/^[1-9]\d*$/.test(id) || !Number.isFinite(a)))) throw new Error('Invalid IK attachment orientation.');
+    for (const field of ['joinedFollowers','joinedAttachmentOffsets']) if (c[field] !== undefined && (!c[field] || typeof c[field] !== 'object' || Array.isArray(c[field]) ||
+        Object.entries(c[field]).some(([uid, children]) => !/^[1-9]\d*$/.test(uid) || !children || typeof children !== 'object' || Array.isArray(children) ||
+          Object.entries(children).some(([id, a]) => !/^[1-9]\d*$/.test(id) || !Number.isFinite(a)))))
+      throw new Error('Invalid joined IK orientation.');
     if (c.bendReference !== undefined && (!c.bendReference || ![-1, 1].includes(c.bendReference.side) ||
         !['angle', 'axis', 'ratio'].every(k => Number.isFinite(c.bendReference[k])) || c.bendReference.ratio < 0 ||
         c.bendReference.shape !== undefined && (!Array.isArray(c.bendReference.shape) || c.bendReference.shape.length > MAX_IK_CHAIN || !c.bendReference.shape.every(Number.isFinite))))
@@ -208,21 +280,25 @@ export function solveObjectIK(figure, object, root, layout = ikLayout(figure), c
       const a = Math.atan2(positions[j + 1].y - positions[j].y, positions[j + 1].x - positions[j].x) - chords[j].bend / 2 - (chords[j].signed < 0 ? Math.PI : 0);
       const delta = wrap(a - angles[i]); angles[i] += delta; deltas.set(figure.segments[i].segment_id, delta);
     });
-    // Off-chain branches retain their local articulation. Outgoing branches at the
-    // effector are parented to the virtual controller, not the solved incoming bone.
+    // Only the next articulated group follows the target. Construction artwork
+    // attached to the constrained bone continues to inherit its solved rotation.
+    const followers = ikFollowers(figure, object, id, c, layout);
+    const attachmentOffsets = ikAttachments(figure, object, id, c, layout, followers);
     const affected = [...chain], visited = new Set(chain);
     for (let q = 0; q < affected.length; q++) {
       const i = affected[q], s = figure.segments[i];
       if (!chainSet.has(i)) {
-        let delta = deltas.get(s.parent_id);
-        if (s.parent_id === Number(id) && Number.isFinite(c.followers?.[s.segment_id]))
-          delta = wrap(c.target.rotation + c.followers[s.segment_id] - angles[i]);
+        const delta = Number.isFinite(followers[s.segment_id])
+          ? wrap(c.target.rotation + followers[s.segment_id] - angles[i])
+          : Number.isFinite(attachmentOffsets[s.segment_id])
+          ? wrap(angles[chain.at(-1)] + attachmentOffsets[s.segment_id] - angles[i])
+          : deltas.get(s.parent_id);
         if (delta !== undefined) { angles[i] += delta; deltas.set(s.segment_id, delta); }
       }
       forward(i);
       for (const child of layout.children.get(s.segment_id) ?? []) if (!visited.has(child)) { visited.add(child); affected.push(child); }
     }
-    results.set(Number(id), {...result, target: c.target, chain, stretch});
+    results.set(Number(id), {...result, target: c.target, chain, stretch, followers, attachmentOffsets});
   }
   return {angles, lengths, results, points};
 }
@@ -236,10 +312,13 @@ export function interpolateIK(a, b, t, sample) {
     const target = {...c.target}, followers = {...c.followers};
     for (const k of ['x', 'y', 'rotation']) target[k] = sample ? sample(id, 'target', k, k === 'rotation') : target[k] + (k === 'rotation' ? wrap(next.target[k] - target[k]) : next.target[k] - target[k]) * t;
     for (const child of Object.keys(followers)) if (Number.isFinite(next.followers[child])) followers[child] = sample ? sample(id, 'followers', child, true) : followers[child] + wrap(next.followers[child] - followers[child]) * t;
+    const joinedFollowers = c.joinedFollowers ? Object.fromEntries(Object.entries(c.joinedFollowers).map(([uid, children]) => [uid,
+      Object.fromEntries(Object.entries(children).map(([child, angle]) => [child, Number.isFinite(next.joinedFollowers?.[uid]?.[child])
+        ? angle + wrap(next.joinedFollowers[uid][child] - angle) * t : angle]))])) : undefined;
     let bendReference = c.bendReference;
     if (bendReference?.shape?.length && bendReference.shape.length === next.bendReference?.shape?.length)
       bendReference = {...bendReference, shape: bendReference.shape.map((a, i) => a + wrap(next.bendReference.shape[i] - a) * t)};
-    table[id] = {...c, target, followers, ...(bendReference ? {bendReference} : {})};
+    table[id] = {...c, target, followers, ...(joinedFollowers ? {joinedFollowers} : {}), ...(bendReference ? {bendReference} : {})};
   }
   return table;
 }

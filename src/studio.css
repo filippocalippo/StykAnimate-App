@@ -1,4 +1,8 @@
 /* StykAnimate studio: one canvas, one timeline, contextual tools. */
+.figure-layer-field{display:flex;align-items:center;gap:12px;padding:8px 18px 12px;font-size:11px}
+.figure-layer-field>label{display:flex;align-items:center;gap:6px;color:var(--muted);flex-shrink:0}
+.figure-layer-field .icon{width:14px;height:14px}
+#inspector .figure-layer-field>.inline-select{margin:0;min-width:0;flex:1}
 :root {
   --text: #2c2c2c;
   --muted: #767676;
@@ -249,3 +253,29 @@ dialog::backdrop { background: #18273c55; backdrop-filter: blur(2px); }
   .app-menubar > button { padding-inline: 6px; }
 }
 #inspector .field-grid > .property-row[data-property-row="segment_gradient_opacity"] { grid-column: 1 / -1; }
+
+/* Camera workspace: live output, readable controls, and shared blue gizmo accents. */
+.camera-heading {display:flex;align-items:center;gap:10px;padding:16px 16px 12px;}
+.camera-heading>span:first-child {display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:#eaf4ff;color:#1689ee;}
+.camera-heading strong {display:block;font-size:15px;font-weight:650;}
+.camera-heading small {display:block;color:#737373;font-size:12px;margin-top:2px;}
+.camera-heading .camera-live {margin-left:auto;padding:4px 7px;border-radius:5px;background:#eaf4ff;color:#1671bd;font-size:11px;font-weight:600;}
+.camera-monitor {margin:0 16px;border:1px solid #dce5ef;border-radius:9px;overflow:hidden;background:repeating-conic-gradient(#f1f3f6 0 25%,#fff 0 50%) 0 / 14px 14px;}
+.camera-monitor canvas {display:block;width:100%;height:auto;aspect-ratio:16/10;}
+.camera-monitor-caption {display:flex;justify-content:space-between;gap:8px;padding:7px 9px;background:#f7f9fc;border-top:1px solid #e6ebf1;font-size:11px;color:#5d6c7e;font-variant-numeric:tabular-nums;}
+.camera-quick-actions {display:flex;gap:6px;padding:10px 16px 4px;}
+.camera-quick-actions button {display:flex;align-items:center;justify-content:center;gap:5px;flex:1;min-width:0;height:32px;border:1px solid #e2e7ed;border-radius:6px;font-size:12px;background:#fff;color:#526173;}
+.camera-quick-actions button[aria-pressed=true] {background:#eaf4ff;color:#1671bd;border-color:#c7e2fc;}
+.camera-quick-actions button:hover {background:#f0f5fa;}
+.camera-quick-actions .icon {width:14px;height:14px;}
+#inspector .camera-inspector .field {min-height:34px;border-radius:6px;}
+#inspector .camera-inspector .field input {font-size:13px;font-variant-numeric:tabular-nums;}
+#inspector .camera-inspector .property-scrub {font-size:12px;}
+.camera-help {margin:0;padding:0 16px 14px;font-size:12px;line-height:1.6;color:#667587;}
+.camera-help kbd {font-family:inherit;font-size:11px;padding:1px 4px;border:1px solid #dce3eb;border-radius:4px;background:#f7f9fc;}
+.camera-inspector button:focus-visible {outline:2px solid #1689ee;outline-offset:2px;}
+@media (max-height: 850px) {
+  .camera-heading {padding-block:10px 8px;}
+  .camera-monitor canvas {height:100px;aspect-ratio:auto;}
+  .camera-help {font-size:11px;}
+}

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
 import {emptyDocument,defaultFigure,createFrame,createObject} from '../src/demo.mjs';
 import {animationChannelId} from '../src/animation-channels.mjs';
-import {Timeline} from '../src/timeline.mjs';
 const global={kind:'segment',uid:7,handleId:1},a={...global,figureTypeId:1},b={...global,figureTypeId:2};
 function fixture(){
   const report=emptyDocument();report.figure_types.push(defaultFigure(2));
@@ -34,15 +33,7 @@ test('exact target paste retains global identity and explicit dormant scope valu
   assert.equal(channel(editor,a).keys.find(key=>key.tick===6).value,.22);
   assert.deepEqual(channel(editor,b),before.channels.find(value=>value.id===animationChannelId(b,'opacity')));
 });
-test('timeline insertion eligibility follows the composed rig while existing dormant keys stay available',()=>{
-  const editor=fixture(),view={editor},track={target:a,locked:false};
-  assert.equal(Timeline.prototype._canInsertTrackKey.call(view,track),true);
-  editor.seek(6);assert.equal(Timeline.prototype._canInsertTrackKey.call(view,track),false);
-  assert.equal(Timeline.prototype._canInsertTrackKey.call(view,{target:global}),true);
-  assert.equal(Timeline.prototype._canInsertTrackKey.call(view,{target:b,locked:true}),false);
-  assert.ok(channel(editor,a).keys.length);editor.seek(10);
-  assert.equal(Timeline.prototype._canInsertTrackKey.call(view,track),true);
-});
+
 test('explicit global inspector reads, previews, navigation and commit preserve exact channel identity',()=>{
   const editor=fixture(),options={exactTarget:true};editor.seek(4);
   assert.equal(editor.animationValue(global,'opacity',4,options),.4);

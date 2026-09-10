@@ -2,6 +2,7 @@ import { icon } from "./icons.mjs";
 import { createObject, createFrame } from "./demo.mjs";
 import { buildGeometry, drawGeometry } from "./pivot/geometry.mjs";
 import { objectBounds } from "./renderer-geometry.mjs";
+import {movieclipAssetFigures} from './movieclips.mjs';
 
 const ROW_HEIGHT = 74;
 const THUMB_SIZE = 54;
@@ -13,7 +14,7 @@ const MAX_PATH_CHARS = 160000;
 const nameOf = (figure) =>
   String(figure.name || `Figure ${figure.figure_type_id}`);
 const kindOf = (figure) =>
-  figure.text_assets?.length
+  figure._styk?.movieclip ? 'Movieclip' : figure.text_assets?.length
     ? "Text"
     : figure.image_assets?.length
       ? "Image"
@@ -501,7 +502,9 @@ export class AssetLibrary {
         }
       }
     }
-    const imageAssets = figure.image_assets || [];
+    const nested=movieclipAssetFigures(figure);
+    if(nested.reduce((n,f)=>n+(f.segments?.length??0),0)>MAX_SEGMENTS)complexity=true;
+    const imageAssets = nested.flatMap(f=>f.image_assets??[]);
     if (
       imageAssets.length > 8 ||
       imageAssets.some(

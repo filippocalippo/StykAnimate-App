@@ -27,7 +27,7 @@ function compact(support) {
     vertices: Object.fromEntries(Object.entries(support.vertices).map(([handle, index]) => [handle, index < 0 ? -1 : map.get(index)])),
     path, rotation: map.get(support.rotation)}};
 }
-function frameAt(editor, entry) {return entry.draft ? editor.report._styk.simpleFrameDraft.baseline : entry.sourceId ? editor.report._styk.frameSources[entry.sourceId] : editor.report.keyframes[entry.index];}
+function frameAt(editor, entry) {return editor._sourceFrame(entry);}
 /** Keep continuous angular dependencies; removed joints become numeric ghosts,
  * while every surviving segment retains native construction geometry. */
 export function repairOriginSupport(editor, before, figure, {originReRoot, originSplit, originSplits, originFreezeHandles} = {}) {

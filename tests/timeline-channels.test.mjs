@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildChannelTimelineTracks} from '../src/timeline.mjs';
+import {buildChannelTimelineTracks} from './helpers/legacy-timeline-projection.mjs';
 import {animationChannelId} from '../src/animation-channels.mjs';
 
 test('summary keys retain exact scoped engine references and hidden leaf keys', () => {

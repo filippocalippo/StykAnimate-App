@@ -1,7 +1,7 @@
 import {canvasPaint} from './paint.mjs';
-import { buildGeometry, drawGeometry, releaseGeometryResources } from './pivot/geometry.mjs';
+import { buildGeometry, buildGeometrySteps, drawGeometry, releaseGeometryResources } from './pivot/geometry.mjs';
 import { drawBackground, backgroundBounds, sceneBackgroundColor, effectiveCamera } from './pivot/background.mjs';
-import { SHAPE, SHAPE_BYTES, SHAPE_FLOATS, shapeRecord, compileVectorObject, requiresCompatibilityTexture, adoptPreparedVectors, objectBounds, cameraMatrix, argbFloats } from './renderer-geometry.mjs';
+import { SHAPE, SHAPE_BYTES, SHAPE_FLOATS, shapeRecord, compileVectorObjectSteps, requiresCompatibilityTexture, adoptPreparedVectors, objectBounds, cameraMatrix, argbFloats } from './renderer-geometry.mjs';
 import { PreparedFrameCache } from './prepared-frames.mjs';
 import { RasterSurfacePool } from './raster-surfaces.mjs';
 import { EditorRasterCache } from './renderer-raster-cache.mjs';
@@ -391,11 +391,15 @@ class WebGPURenderer {
     return output;
   }
   objectEntry(g, items, opacity, key, index, scale, isOnion = false) {
+    const steps=this.objectEntrySteps(g,items,opacity,key,index,scale,isOnion);
+    for(;;){const step=steps.next();if(step.done)return step.value;}
+  }
+  *objectEntrySteps(g, items, opacity, key, index, scale, isOnion = false) {
     const uid = uidOf(g), prior = this.entries.get(key),source=g.renderSource||g,sourceItems=g.renderSource?source.drawables:items; let data, texture;
     let compatibility = this.compatibilityCache.get(source);
     if (compatibility === undefined) { compatibility = requiresCompatibilityTexture(sourceItems); this.compatibilityCache.set(source, compatibility); }
     if (compatibility) {
-      const artwork=this.artworkAliases.get(source) ?? (this.options.sharedArtwork===false||this.liveEditing?source:this.artworks.get(source,sourceItems));
+      const artwork=this.artworkAliases.get(source) ?? (this.options.sharedArtwork===false||this.liveEditing?source:yield* this.artworks.getSteps(source,sourceItems));
       this.artworkAliases.set(g,artwork);
       texture = this.rasterObject(source, sourceItems, scale, artwork);
       this.rasterLease?.add(texture);
@@ -403,7 +407,7 @@ class WebGPURenderer {
       else { const b = texture.bounds, origin=texture.origin; data = new Float32Array(shapeRecord({ a: [b.x - origin.x, b.y - origin.y, b.x + b.width - origin.x, b.y + b.height - origin.y], color: [1, 1, 1, 1], mode: SHAPE.TEXTURE, transform: index })); }
     } else {
       let compiled = this.vectorCache.get(source);
-      if (!compiled) { compiled = compileVectorObject(sourceItems, source.root); this.vectorCache.set(source, compiled); this.stats.compiledObjects++; }
+      if (!compiled) { compiled = yield* compileVectorObjectSteps(sourceItems, source.root); this.vectorCache.set(source, compiled); this.stats.compiledObjects++; }
       if (prior?.source === source && prior.transform === index) data = prior.data;
       else { data = compiled.slice(); for (let j = 21; j < data.length; j += SHAPE_FLOATS) data[j] = index; }
     }
@@ -421,7 +425,7 @@ class WebGPURenderer {
     const ordered = geometry.orderedObjects, before = old.orderedObjects;
     if (!ordered || ordered.length !== before?.length || ordered.some((g, i) => g.slot !== before[i].slot || uidOf(g) !== uidOf(before[i]))) return false;
     const matrix = cameraMatrix(options), scale = Math.hypot(matrix[0], matrix[1]) * this.dpr, updates = [];
-    this.artworks.begin();
+    this.artworks.begin(options.artworkRevision);
     this.stats.compiledObjects = 0; this.stats.rasterizedObjects = 0;
     for (const slot of geometry.changedSlots) {
       const g = geometry.objects.get(slot), previous = this.entriesBySlot.get(slot);
@@ -452,14 +456,14 @@ class WebGPURenderer {
     for (;;) { const step = steps.next(); if (step.done) return step.value; }
   }
   *prepareSteps(options, geometry) {
-    this.artworks.begin();
+    this.artworks.begin(options.artworkRevision);
     const matrix = cameraMatrix(options), scale = Math.hypot(matrix[0], matrix[1]) * this.dpr, next = [];
     this.stats.compiledObjects = 0; this.stats.rasterizedObjects = 0;
     const reuseOnions = this.lastGeneration === this.generation && (this.lastGeometry === geometry || geometry.previousToken === this.lastGeometry?.token);
     const previousOnions = reuseOnions ? this.onionScenes || [] : [], onionScenes = [];
     for (const [i, onion] of (options.onionFrames || []).entries()) {
       const frame = onion.frame || onion;
-      const scene = onion.geometry || previousOnions.find(cached => cached.frame === frame)?.geometry || buildGeometry(options.report, frame);
+      const scene = onion.geometry || previousOnions.find(cached => cached.frame === frame)?.geometry || (yield* buildGeometrySteps(options.report, frame));
       onionScenes.push({frame, geometry: scene, opacity: onion.opacity, beforeUid: onion.beforeUid, showOnTop: onion.showOnTop});
     }
     this.onionScenes = onionScenes;
@@ -468,7 +472,7 @@ class WebGPURenderer {
     for (const bg of this.background(options)) { next.push({ key: `background-${next.length}`, transform: 0, root: { x: 0, y: 0 }, count: bg.data.length / SHAPE_FLOATS, data: bg.data, texture: bg.texture }); }
     for (const { g, items, opacity, key, isOnion } of groups) {
       if (this.vectorCache.has(g)) cached++;
-      const entry = this.objectEntry(g, items, opacity, key, index++, scale, isOnion);
+      const entry = yield* this.objectEntrySteps(g, items, opacity, key, index++, scale, isOnion);
       if (entry.texture) compatibilityCount++;
       next.push(entry);
       yield {phase: 'GPU primitives', completed: index - 1, total: groups.length};

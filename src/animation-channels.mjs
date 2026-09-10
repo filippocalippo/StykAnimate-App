@@ -82,11 +82,16 @@ export function* validateAnimationDocumentSteps(report) {
   const animation = report?._styk?.animation; if (animation == null) return report;
   if (animation.version !== 1 || !Array.isArray(animation.channels) || animation.channels.length > 100000) throw new Error('Invalid authored animation channel table.');
   if (animation.nextKeyId !== undefined && (!Number.isSafeInteger(animation.nextKeyId) || animation.nextKeyId < 1)) throw new Error('Invalid animation key identity counter.');
-  const channels = new Set(); let keyCount = 0, sourceIds, figureTypeIds, visited = 0;
+  const channels = new Set(), validatedPoses = new WeakSet(); let keyCount = 0, sourceIds, figureTypeIds, visited = 0;
   for (const channel of animation.channels) {
     if (channel.id !== animationChannelId(channel.target, channel.property) || channels.has(channel.id) || !Array.isArray(channel.keys)) throw new Error('Animation channels must have unique stable identities.');
     if (channel.nativeProperties !== undefined && (channel.nativeProperties !== true || channel.property !== 'pose' || !['figure','layer'].includes(channel.target.kind)))
       throw new Error('Native property inheritance is only valid on figure and layer pose channels.');
+    if(channel.maskedRanges!==undefined && (channel.property!=='pose' || channel.target.kind!=='figure' || !Array.isArray(channel.maskedRanges) || channel.maskedRanges.length>100000 || channel.maskedRanges.some((range,i)=>
+      !Array.isArray(range)||range.length!==2||!Number.isInteger(range[0])||range[0]<0||!Number.isInteger(range[1])||range[1]<=range[0]||range[1]>10000001||i>0&&range[0]<=channel.maskedRanges[i-1][1])))
+      throw new Error('Invalid pose visibility ranges.');
+    if(channel.useBasePose!==undefined && (channel.useBasePose!==true||channel.property!=='pose'||channel.target.kind!=='figure'))throw new Error('Invalid native pose passthrough.');
+    if(channel.orderAnchor!==undefined && (channel.property!=='pose'||channel.target.kind!=='figure'||!Number.isInteger(channel.orderAnchor)||channel.orderAnchor<0||channel.orderAnchor>0xffffffff||channel.orderAnchor===channel.target.uid))throw new Error('Invalid pose stacking anchor.');
     if (channel.target.figureTypeId !== undefined) {
       if (!figureTypeIds) {
         figureTypeIds = new Set();
@@ -97,11 +102,19 @@ export function* validateAnimationDocumentSteps(report) {
       }
       if (!figureTypeIds.has(channel.target.figureTypeId)) throw new Error(`Animation segment scope references missing figure definition ${channel.target.figureTypeId}.`);
     }
-    channels.add(channel.id); const ids = new Set(), occupied = new Set(); let previous = -1;
+    if(channel.movieclipCurve!==undefined&&(channel.movieclipCurve!==true||!['figure','segment','polygon'].includes(channel.target.kind)))throw new Error('Invalid movieclip curve context.');
+    if(channel.clipEnd!==undefined&&(channel.property!=='pose'||channel.target.kind!=='figure'||!Number.isInteger(channel.clipEnd)||channel.clipEnd<0||channel.clipEnd>10000001))throw new Error('Invalid movieclip end.');
+    if(channel.movieclipPart!==undefined&&(channel.property!=='pose'||channel.target.kind!=='figure'||!Number.isInteger(channel.movieclipPart?.instance)||channel.movieclipPart.instance<0||channel.movieclipPart.instance>0xffffffff||typeof channel.movieclipPart.path!=='string'||channel.movieclipPart.path.length>1024))throw new Error('Invalid expanded movieclip identity.');
+    if(channel.keys[0]?.tick<0&&!channel.movieclipCurve)throw new Error('Only movieclip curves can retain keys before the scene.');
+    channels.add(channel.id); const ids = new Set(), occupied = new Set(); let previous = channel.movieclipCurve?-10000000:-1;
+    if (channel.property === 'pose' && validatedPoses.has(channel.keys)) {
+      if (++visited % 256 === 0) yield {phase:'animation',channels:channels.size,keys:keyCount};
+      continue;
+    }
     for (const key of channel.keys) {
       if (++keyCount > 1000000) throw new Error('Authored animation exceeds the one-million-key limit.');
       if (typeof key.id !== 'string' || !key.id || ids.has(key.id)) throw new Error('Animation keys must have unique stable identities.');
-      if (!Number.isInteger(key.tick) || key.tick < 0 || key.tick > 10000000 || key.tick < previous) throw new Error('Animation keys must be sorted at valid whole-frame times.');
+      if (!Number.isInteger(key.tick) || key.tick < (channel.movieclipCurve?-10000000:0) || key.tick > 10000000 || key.tick < previous) throw new Error('Animation keys must be sorted at valid whole-frame times.');
       if (key.hidden && channel.property !== 'pose') throw new Error('Only native pose keys can be hidden.');
       if (key.passthrough !== undefined && (typeof key.passthrough !== 'boolean' || channel.property === 'pose')) throw new Error('Only scalar keys support a boolean passthrough interval.');
       if (key.nativeCurve !== undefined && (key.nativeCurve !== 'pchip' || !['x','y','scale','rotation'].includes(channel.property))) throw new Error('Invalid native property curve.');
@@ -130,6 +143,7 @@ export function* validateAnimationDocumentSteps(report) {
       }
       if (++visited % 256 === 0) yield {phase:'animation',channels:channels.size,keys:keyCount};
     }
+    if (channel.property === 'pose') validatedPoses.add(channel.keys);
     if (++visited % 256 === 0) yield {phase:'animation',channels:channels.size,keys:keyCount};
   }
   return report;
@@ -142,7 +156,7 @@ export function animationEndTick(report) {
     // Imported authoring files may place coincident hidden references after a
     // visible key. Every visible key still owns its final display frame.
     for (let i = keys.length - 1; i >= 0 && keys[i].tick === tick; i--) if (!keys[i].hidden) { visible = true; break; }
-    end = Math.max(end, tick + (visible ? 1 : 0));
+    end = Math.max(end, channel.clipEnd??0, tick + (visible ? 1 : 0));
   }
   return end;
 }
@@ -200,7 +214,7 @@ export function sampleAnimationChannel(channel, tick) {
 }
 
 /** Read a property from an already evaluated frame (used for diamonds and controls). */
-export function animationPropertyValue(report, frame, target, property, {resolveGeometry} = {}) {
+export function animationPropertyValue(report, frame, target, property, {resolveGeometry, objectIndex, figureIndex} = {}) {
   animationChannelId(target, property);
   if (property === 'pose') throw new Error('Pose keys reference source frames, not scalar property values.');
   if (target.kind === 'camera') return frame.camera?.[property === 'rotation' ? 'angle_rad' : property] ?? (property === 'scale' ? 1 : 0);
@@ -208,21 +222,22 @@ export function animationPropertyValue(report, frame, target, property, {resolve
     if (property === 'backgroundId') return frame.background_id ?? 0;
     return frame._stykBackgroundColor ?? report.backgrounds?.find(bg => bg.background_id === frame.background_id && bg.kind === 2)?.color ?? 0xffffffff;
   }
-  const slot = frame.objects.findIndex(object => object.unique_id === target.uid), object = frame.objects[slot];
+  const slot = objectIndex ? objectIndex.get(target.uid) ?? -1 : frame.objects.findIndex(object => object.unique_id === target.uid), object = frame.objects[slot];
   if (!object) return undefined;
   if (target.kind === 'figure' && property === 'color') return Number(object.color_override_raw ?? 0) >>> 0;
   if (property === 'zIndex') return object._stykZIndex ?? 0;
-  if (isAnimationStyleProperty(target, property)) return animationStyleValue(report.figure_types.find(figure => figure.figure_type_id === object.figure_type_id), object, target, property);
+  const definition=()=>figureIndex?figureIndex.get(object.figure_type_id):report.figure_types.find(figure => figure.figure_type_id === object.figure_type_id);
+  if (isAnimationStyleProperty(target, property)) return animationStyleValue(definition(), object, target, property);
   if (property === 'opacity') return 1 - Number(object.field28 ?? 0) / 255;
   if (property === 'rotation') {
-    const figure = report.figure_types.find(figure => figure.figure_type_id === object.figure_type_id);
+    const figure = definition();
     return animationRotation(figure, object);
   }
   if (property === 'x' || property === 'y') {
     const world = object.join && resolveGeometry ? resolveGeometry(report, frame)?.objects.get(slot)?.root : null;
     if (object._stykAnimationOrigin) {
       if (!world) return object._stykAnimationOrigin[property];
-      const figure = report.figure_types.find(figure => figure.figure_type_id === object.figure_type_id);
+      const figure = definition();
       return world[property] + animationOriginOffset(figure, object)[property];
     }
     return world?.[property] ?? object[property === 'x' ? 'root_x' : 'root_y'];

@@ -13,11 +13,13 @@ const { FontService } = require('./font-service.cjs');
 const { VideoExportService } = require('./video-export-service.cjs');
 const { VfwExportService } = require('./vfw-export-service.cjs');
 const { RecentFiles } = require('./recent-files.cjs');
+const { LibraryStore } = require('./library-store.cjs');
 
 const APP_ROOT = path.resolve(__dirname, '..');
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
 const FILE_FILTERS = [
-  { name: 'Animation and stick figures', extensions: ['styk', 'stkz', 'piv', 'stk', 'json'] },
+  { name: 'Animation and stick figures', extensions: ['styk', 'stykmov', 'stkz', 'piv', 'stk', 'json', 'nodes', 'nodemc', 'stknds', 'zip'] },
+  { name: 'StykAnimate movieclip', extensions: ['stykmov'] },
   { name: 'StykAnimate figure', extensions: ['stkz'] },
   { name: 'Pivot animation', extensions: ['piv'] },
   { name: 'Pivot stick figure', extensions: ['stk'] },
@@ -29,10 +31,11 @@ let fileStreams;
 let videoExports;
 let vfwExports;
 let recentFiles;
+let library;
 const projectFiles = new ProjectFiles();
 let documentState = { name: 'Untitled', dirty: false };
 let quitting = false;
-let pendingFiles = process.argv.slice(app.isPackaged ? 1 : 2).filter((arg) => /\.(piv|stk|styk|stkz|json)$/i.test(arg));
+let pendingFiles = process.argv.slice(app.isPackaged ? 1 : 2).filter((arg) => /\.(piv|stk|styk|stkz|stykmov|json|nodes|nodemc|stknds|zip)$/i.test(arg));
 
 // WebGPU uses Chromium's normal driver allowlist. The opt-in switch is useful
 // for Linux development on drivers Chromium has not yet qualified.
@@ -50,7 +53,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', (_event, argv) => {
     if (window) { if (window.isMinimized()) window.restore(); window.focus(); }
-    for (const file of argv.filter((arg) => /\.(piv|stk|styk|stkz|json)$/i.test(arg))) queueOpenFile(file);
+    for (const file of argv.filter((arg) => /\.(piv|stk|styk|stkz|stykmov|json|nodes|nodemc|stknds|zip)$/i.test(arg))) queueOpenFile(file);
   });
   app.on('open-file', (event, file) => { event.preventDefault(); queueOpenFile(file); });
   app.whenReady().then(start).catch(async (error) => {
@@ -115,8 +118,8 @@ function nativeMenu() {
 async function readImportFile(file) {
   const started = performance.now();
   const extension = path.extname(file).toLowerCase();
-  if (!['.piv', '.stk', '.styk', '.stkz', '.json'].includes(extension)) throw new Error('Choose a Pivot animation, stick figure, or StykAnimate project file.');
-  const limit = ['.styk', '.stkz', '.json'].includes(extension) ? MAX_FILE_BYTES : 128 * 1024 * 1024;
+  if (!['.piv', '.stk', '.styk', '.stkz', '.stykmov', '.json', '.nodes', '.nodemc', '.stknds', '.zip'].includes(extension)) throw new Error('Choose a StykAnimate, Pivot or Stick Nodes file.');
+  const limit = ['.styk', '.stkz', '.stykmov', '.json'].includes(extension) ? MAX_FILE_BYTES : 128 * 1024 * 1024;
   const stat = await fs.stat(file);
   if (!stat.isFile()) throw new Error('Choose an animation or stick figure file.');
   if (stat.size > limit) throw new Error(`This file exceeds the ${limit / 1024 / 1024} MB import limit.`);
@@ -131,14 +134,14 @@ async function readImportFile(file) {
     filename: path.basename(file),
     nativePath: file,
     openToken: projectFiles.rememberOpen(path.resolve(file)),
-    kind: extension === '.stkz' ? 'stkz' : extension === '.stk' ? 'stk' : extension === '.piv' ? 'piv' : 'styk',
+    kind: extension === '.stykmov' ? 'stykmov' : extension === '.stkz' ? 'stkz' : extension === '.stk' ? 'stk' : extension === '.piv' ? 'piv' : 'styk',
     sourceBytes: bytes.length,
     timings: { native_read_ms: +(performance.now() - started).toFixed(3) },
   };
 }
 
 async function rememberRecent(file) {
-  if (!recentFiles || !/\.(piv|stk|styk|stkz|json)$/i.test(file)) return;
+  if (!recentFiles || !/\.(piv|stk|styk|stkz|stykmov|json|nodes|nodemc|stknds|zip)$/i.test(file)) return;
   // A damaged preferences directory must not turn a completed save into failure.
   try { await recentFiles.remember(path.resolve(file)); }
   catch (error) { console.warn('Recent files could not be updated:', error.message); }
@@ -151,6 +154,9 @@ async function queueOpenFile(file) {
 }
 
 function registerIpc() {
+  for (const [channel, method] of [['list','list'], ['mkdir','createFolder'], ['thumbnail','thumbnail'], ['save-begin','beginSave'], ['write','write'], ['finish','finish'], ['cancel','cancel'], ['read-begin','beginRead'], ['read','read'], ['change','change']])
+    ipcMain.handle(`styk:library-${channel}`, (event, ...args) => { trusted(event); return library[method](...args); });
+  ipcMain.handle('styk:library-reveal', async (event, folder = '') => { trusted(event); const error = await shell.openPath(await library.folder(folder)); if (error) throw new Error(error); });
   recentFiles = new RecentFiles({directory: app.getPath('userData'), limit: 20});
   ipcMain.handle('styk:recent-list', event => { trusted(event); return recentFiles.list(); });
   ipcMain.handle('styk:recent-open', async (event, id) => { trusted(event); return readImportFile(await recentFiles.resolve(id)); });
@@ -430,6 +436,9 @@ async function createWindow() {
 }
 
 async function start() {
+  library = new LibraryStore(process.env.STYK_LIBRARY_DIR || path.join(app.getPath('documents'), 'StykAnimate', 'library'));
+  // A temporarily unavailable Documents volume should not prevent animation work.
+  await library.init().catch(error => console.warn('Library initialization:', error.message));
   backend = await startBackend({
     appRoot: APP_ROOT, resourcesPath: process.resourcesPath, packaged: app.isPackaged,
     log: (message) => { if (process.env.STYK_DEBUG === '1') process.stderr.write(message); },
@@ -448,5 +457,5 @@ app.on('before-quit', (event) => {
   else quitting = true;
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('will-quit', () => { backend?.stop(); fileStreams?.dispose().catch(() => {}); videoExports?.dispose().catch(() => {}); vfwExports?.dispose().catch(() => {}); });
+app.on('will-quit', () => { backend?.stop(); library?.dispose().catch(() => {}); fileStreams?.dispose().catch(() => {}); videoExports?.dispose().catch(() => {}); vfwExports?.dispose().catch(() => {}); });
 process.on('exit', () => backend?.stop());

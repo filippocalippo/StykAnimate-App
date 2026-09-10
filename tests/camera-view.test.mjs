@@ -9,7 +9,7 @@ test('camera command groups expose distinct actions with clipboard, selection an
     button: (action, icon, title, disabled = false) => { actions.push({action, icon, title, disabled}); return `[${action}]`; },
     group: (title, body) => `${title}:${body}`, tools: body => body});
   assert.match(render(), /Camera pose.*Center on selection.*Canvas alignment.*Neighboring pose/);
-  assert.equal(actions.length, 10); assert.equal(new Set(actions.map(action => action.action)).size, 10);
+  assert.equal(actions.length, 9); assert.equal(new Set(actions.map(action => action.action)).size, 9);
   const byId = new Map(actions.map(action => [action.action, action]));
   for (const action of ['camera-paste', 'camera-center', 'camera-center-x', 'camera-center-y', 'camera-locate-previous']) assert.equal(byId.get(action).disabled, true);
   assert.equal(byId.get('camera-locate-next').disabled, false);

@@ -369,6 +369,7 @@ export function beginNativePropertyEdit(
   if (active.has(editor)) cancelNativePropertyEdit(active.get(editor));
   if (editor._animationEdit) editor.commitAnimationEdit();
   if (editor.dragging) editor.commitDrag();
+  if(key==='duration'&&editor.report._styk?.layerSheet){const span=editor.sheetSpan();const token={editor,key,sheetDuration:true,report:editor.report,frameIndex:editor.frameIndex,uid:editor.selectedUid,joint:editor.selectedJoint,selection:editor._selectionState(),layerId:editor.activeLayerId,tick:editor.tick,value:span.end-span.start,initialValue:span.end-span.start,closed:false};active.set(editor,token);return token;}
   const selection = editor._selectionState(),
     builder = builderStyleProperty(editor, key, {branch}),
     branchPlan = branch ? branchOpacityPlan(editor, key) : null,
@@ -394,6 +395,7 @@ export function beginNativePropertyEdit(
     pose: poseKeys.has(key) || Boolean(capturedStyle),
     capturedStyle,
     camera: cameraKeys.has(key),
+    sheetTicks: editor.report._styk?.layerSheet ? editor.sheetEditTimes(indices??[editor.frameIndex]) : null,
     indices: editor._frameIndices(
       indices?.length ? [...indices, editor.frameIndex] : [editor.frameIndex],
     ),
@@ -413,6 +415,7 @@ export function beginNativePropertyEdit(
     bounds: b,
     closed: false,
   };
+  if(token.sheetTicks)token.indices.sheetTicks=token.sheetTicks;
   if (!Number.isFinite(token.value))
     throw new Error("The selected property has no finite value.");
   token.initialValue = token.value;
@@ -483,6 +486,7 @@ export function beginNativePropertyEdit(
 export function previewNativePropertyEdit(token, value) {
   assertCurrent(token);
   validate(token.key, value);
+  if(token.sheetDuration){token.value=value;return true;}
   if (token.value === value && ((!token.branchStyle && !token.branchAnimation) || token.branchStyleApplied)) return false;
   const { editor, key } = token;
   if (token.scalar) {
@@ -623,16 +627,19 @@ export function commitNativePropertyEdit(token) {
     return false;
   }
   const { editor } = token;
+  const rangeCount=token.sheetTicks?.length??token.indices?.length;
+  const rangeTimes=()=>token.sheetTicks??token.indices.map(index=>editor.timeline[index].start);
+  if(token.sheetDuration){token.closed=true;active.delete(editor);return editor.sheetSetDuration(token.value,token.layerId,token.tick);}
   if (token.scalar) {
     let result;
-    if(token.indices.length>1){editor.cancelAnimationEdit();result=editor.addAnimationKeys(token.indices.map(index=>({...token.scalar,tick:editor.timeline[index].start,value:token.value/token.factor})));}
+    if(rangeCount>1){editor.cancelAnimationEdit();result=editor.addAnimationKeys(rangeTimes().map(tick=>({...token.scalar,tick,value:token.value/token.factor})));}
     else result = editor.commitAnimationEdit(); token.closed = true; active.delete(editor); return result;
   }
   if (token.branchAnimation) {
     try {
       let result;
-      if (token.indices.length > 1) {
-        const entries=token.indices.flatMap(index=>token.branchPlan.entries.map(entry=>({target:entry.target,property:token.branchPlan.property,tick:editor.timeline[index].start,value:token.value/(token.key==='thickness'?1:100)})));
+      if (rangeCount > 1) {
+        const entries=rangeTimes().flatMap(tick=>token.branchPlan.entries.map(entry=>({target:entry.target,property:token.branchPlan.property,tick,value:token.value/(token.key==='thickness'?1:100)})));
         cancelBranchStyleAnimation(editor);result=editor.addAnimationKeys(entries);
       } else result = commitBranchStyleAnimation(editor);
       token.closed = true; active.delete(editor); return result;
@@ -640,7 +647,7 @@ export function commitNativePropertyEdit(token) {
   } else if (token.camera) {
     try {
       let result;
-      if (token.indices.length > 1) {
+      if (rangeCount > 1) {
         editor.cancelCameraDrag();
         const field =
           token.key === "camera_angle" ? "angle_rad" : token.key.slice(7);
@@ -666,7 +673,7 @@ export function commitNativePropertyEdit(token) {
   } else if (token.pose) {
     try {
       const result =
-        token.indices.length > 1
+        rangeCount > 1
           ? commitNativePoseRange(token)
           : editor.commitDrag();
       token.closed = true;
@@ -736,6 +743,7 @@ export function cancelNativePropertyEdit(token) {
   token.closed = true;
   active.delete(editor);
   if (editor.report !== token.report) return false;
+  if(token.sheetDuration)return true;
   if (token.scalar) return editor.cancelAnimationEdit();
   if (token.branchAnimation) return cancelBranchStyleAnimation(editor);
   if (token.pose || token.camera) {

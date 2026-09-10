@@ -1,12 +1,14 @@
 import {installColorPickers} from './color-picker.mjs';
+import {installMovieclipUI} from './movieclip-ui.mjs';
+import {isMovieclip} from './movieclips.mjs';
 import {animationPropertyState} from './animation-property-state.mjs';
 import {segmentPaint, parseColor, hexColor, backgroundPaint, paintBackground} from './paint.mjs';
 import {resolveInstanceFigure, polygonIdentity} from './animation-style.mjs';
 import { applicationMenuItems } from "./application-menu.mjs";
 import { Editor } from "./editor.mjs";
 import { createRenderer } from "./renderer.mjs";
-import { Timeline } from "./timeline.mjs";
-import { SimpleTimeline } from "./simple-timeline.mjs";
+import { Timeline } from "./layer-timeline.mjs";
+import { SheetFilmstrip as SimpleTimeline } from "./sheet-filmstrip.mjs";
 import { OnionSkinCache } from "./onion-skin.mjs";
 import {hasPinnedIK} from './ik.mjs';
 import { OnionControls } from "./onion-controls.mjs";
@@ -46,7 +48,10 @@ import {
 import { initWorkspaceLayout } from "./studio-layout.mjs";
 import { initStudioShell, mountExportFlow } from "./studio-shell.mjs";
 import { inspectorView } from "./inspector-view.mjs";
+import { updateInspectorDOM } from "./inspector-dom.mjs";
+import {syncCameraControls, drawCameraMonitor} from './camera-monitor.mjs';
 import { AssetLibrary } from "./asset-library.mjs";
+import { UserLibrary } from './user-library.mjs';
 import { PropertyControls } from "./property-controls.mjs";
 import {
   canEditNativeProperty,
@@ -67,6 +72,7 @@ import {
   pickCameraHandle,
   cameraDragDelta,
   cameraKeyboardDelta,
+  cameraHandleCursor,
   drawCameraViewport,
 } from "./camera-overlay.mjs";
 import { EditorSettings, normalizeEditorSettings } from "./settings.mjs";
@@ -100,7 +106,7 @@ const $ = (id) => document.getElementById(id),
           "'": "&#39;",
         })[c],
     );
-const editor = new Editor({ demo: true, propertyChannels: true }),
+const editor = new Editor({ demo: true, propertyChannels: true, layerTimeline: true }),
   desktop = window.stykDesktop,
   importer = new ImportClient(),
   documentExporter = new DocumentExporter(),
@@ -119,9 +125,9 @@ async function runDocumentExport(format, consume, { recovery = false } = {}) {
     job = { controller, recovery };
   exportJobs.add(job);
   try {
-    const blob = await documentExporter.export(editor.report, {
+    const blob = await documentExporter.export(recovery ? editor.movieclipProjectReport() : editor.report, {
       format,
-      name: editor.name,
+      name: recovery ? editor._movieclipScopes?.[0]?.parent.name ?? editor.name : editor.name,
       sourceId: state.sourceId,
       figureTypeId: editor.object?.figure_type_id,
       figureUid: editor.selectedUid,
@@ -177,6 +183,7 @@ const state = {
   rangeIndices: [],
   applyRange: false,
   scrubbing: false,
+  cameraGuides: true,
 };
 const viewport = $("viewport"),
   canvas = $("scene"),
@@ -210,16 +217,19 @@ const playbackMetrics = new PlaybackMetrics();
 const editablePreparation = new EditableScenePreparation(editor, {
   onPending(pending) {
     state.editablePreparing=pending;
+    thumbnailRenderer?.setPaused(pending||state.playing||editingGestureActive());
+    playback.setInteractionActive(pending||editingGestureActive()||state.scrubbing);
     if(!pending){
+      timelineUI?.setPaused?.(state.playing);
       state.editablePreparationStats=editablePreparation.stats;
-      thumbnailRenderer?.setPaused(state.playing);timelineUI?.setPaused?.(state.playing);
       queueUI();requestRender();
     }
   },
-  onReady(){state.editingPacket=null;status('Ready');},
+  onReady(){state.editingPacket=null;status('Ready');warmPlayback();},
   onError:fail,
 });
 let lastFpsUI = 0;
+function editingGestureActive(){return Boolean(state.drag||keyboardHandleGesture||editor._drag||editor._authoredPoseEdit||propertyControls?.active);}
 function queueUI() {
   if(state.editablePreparing)return;
   if (!uiScheduled)
@@ -255,7 +265,7 @@ function playbackScale() {
 function syncPlayback() {
   const scale = playbackScale(),
     cameraEnabled = !state.scrubbing,
-    storedFrames = state.settings.timelineMode === "simple";
+    storedFrames = !editor.report._styk?.layerSheet && state.settings.timelineMode === "simple";
   if (
     state.playbackRevision !== editor.revision ||
     playback.report !== editor.report ||
@@ -340,6 +350,31 @@ function warmPlayback() {
 function previewScrub() {
   // Scrubbing is editing: render the current pose with selection and onions.
   requestRender();
+}
+
+let preparationDefinitions, preparationRevision, preparationSizes;
+let preparationRequest=0;
+function queueEditingFrame(){
+  const request=++preparationRequest;
+  // Simple mode updates its working-frame checkpoint in a nested change event.
+  // Capture the final revision after every listener has finished that seek.
+  queueMicrotask(()=>{if(request===preparationRequest)prepareEditingFrame();});
+}
+function prepareEditingFrame() {
+  const renderer=state.renderer;
+  if(state.playing||state.previewing||state.drag||propertyControls?.active||!renderer?.prepareSceneUpdate||renderer.activeReport!==editor.report)return;
+  if(preparationDefinitions!==editor.report.figure_types||preparationRevision!==editor.definitionRevision){
+    preparationDefinitions=editor.report.figure_types;preparationRevision=editor.definitionRevision;
+    preparationSizes=new Map(preparationDefinitions.map(figure=>[figure.figure_type_id,figure.segments.length]));
+  }
+  const objects=editor.frame.objects;
+  const dense=objects.length>=128||objects.reduce((count,object)=>count+(preparationSizes.get(object.figure_type_id)||0),0)>=2000;
+  if(!dense)return;
+  editablePreparation.start(renderer,geometry=>({
+    frame:currentFrame(),view:{...state.view},getView:()=>({...state.view}),cameraEnabled:false,
+    editorBackgroundColor:builderBackgroundColor(state.settings,state),onionFrames:onionSkins(),
+    geometry,artworkRevision:editor.definitionRevision,
+  }));
 }
 
 let nameRevision = -1,
@@ -440,7 +475,8 @@ function selectTrack(track) {
     : target.id || track.id;
   pause();
   propertyControls?.cancel();
-  if (id !== "camera") editor.select(null);
+  if(editor.report._styk?.layerSheet&&target.kind==='layer'){if(editor._sheetSelection?.id!==id)editor.selectSheetLayer(id);}
+  else if (id !== "camera") editor.select(null);
   if (editor.layers?.some((layer) => layer.id === id))
     editor.setActiveLayer(id);
   state.selectedTrackId = track.id || id;
@@ -606,7 +642,13 @@ function alignSelection(axis, edge) {
     return editor.alignFiguresInFrames(axis, edge, rangeFrames(), { boundsOf });
   return editor.alignSelection(axis, edge, { boundsOf });
 }
+function orderSelection(direction) {
+  pause();
+  finishCurrentEdit();
+  return editor.orderSelection(direction, {frameIndices: rangeFrames()});
+}
 function rangeFrames() {
+  if(editor.report._styk?.layerSheet){if(!state.applyRange||timelineUI?.selectedTicks?.length<2)return undefined;const indices=[editor.frameIndex];indices.sheetTicks=[...new Set([...timelineUI.selectedTicks,editor.tick])];return indices;}
   if (editor.frameDraft?.mode === "add") return undefined;
   return state.applyRange && state.rangeIndices.length > 1
     ? [...new Set([...state.rangeIndices, editor.frameIndex])]
@@ -621,9 +663,7 @@ function updateSelection(patch) {
 }
 function moveSelected(dx, dy) {
   if (rangeFrames())
-    return editor.moveSelectionInFrames(dx, dy, [
-      ...new Set([...state.rangeIndices, editor.frameIndex]),
-    ]);
+    return editor.moveSelectionInFrames(dx, dy, rangeFrames());
   return editor.moveSelection(dx, dy);
 }
 const assetUrl = (a) =>
@@ -723,9 +763,12 @@ function worldPoint(event) {
     true,
   );
 }
+function cameraSelected() {
+  return state.inspectorContext === 'camera' && state.selectedTrackId === 'camera';
+}
 function activeCameraHandle(point) {
   const track = editor.report._styk?.layers?.fixed?.camera;
-  if (!state.settings.showCamera || track?.visible === false || track?.locked)
+  if (!cameraSelected() || !state.settings.showCamera || track?.visible === false || track?.locked)
     return null;
   return pickCameraHandle(
     cameraViewport(editor.report, currentFrame(), state.view),
@@ -969,6 +1012,7 @@ function overlayRender(geometry) {
     });
   if (state.handles && !gpuHandlesEnabled()) drawCanvasHandles(geometry);
   if (
+    cameraSelected() &&
     editor.report._styk?.layers?.fixed?.camera?.visible !== false &&
     (state.settings.showCamera || !cameraIsIdentity(currentFrame().camera))
   ) {
@@ -991,6 +1035,9 @@ function overlayRender(geometry) {
         active:
           state.settings.showCamera &&
           editor.report._styk?.layers?.fixed?.camera?.locked !== true,
+        guides: state.cameraGuides,
+        hover: state.hoverCameraHandle,
+        dragging: state.drag?.kind === 'camera' ? state.drag.handle : null,
       },
     );
   }
@@ -1073,6 +1120,8 @@ function overlayRender(geometry) {
 }
 function loop(now) {
   raf = 0;
+  playback.setInteractionActive(Boolean(editingGestureActive()||state.scrubbing||state.editablePreparing));
+  thumbnailRenderer?.setPaused(Boolean(editingGestureActive()||state.playing||state.editablePreparing));
   let advancedPlayback = false;
   if (!$("renderer-error").hidden) return;
   if (state.playing) {
@@ -1189,6 +1238,7 @@ function loop(now) {
         selectedUid: null,
         showHandles: false,
         liveEditing: Boolean(state.drag || keyboardHandleGesture),
+        artworkRevision: editor.definitionRevision,
         canvasHandles: state.handles && gpuHandlesEnabled() ? canvasHandles(geometry) : undefined,
         outlineHandles: state.settings.outlineHandles,
         onionFrames,
@@ -1196,8 +1246,18 @@ function loop(now) {
         clipToCanvas: false,
         dragTranslations: state.drag?.translations,
       });
+      state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
+        sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
       if (advancedPlayback) playbackMetrics.present(performance.now());
       overlayRender(geometry);
+    }
+    if (state.inspectorContext === 'camera') {
+      const frame = currentFrame();
+      syncCameraControls($('inspector'), frame, {activeKey:propertyControls?.activeKey,guides:state.cameraGuides});
+      if (!state.editablePreparing) drawCameraMonitor($('inspector').querySelector('[data-camera-monitor]'), {
+        report:editor.report,frame,geometry:state.playing?null:state.drag?.geometry || keyboardHandleGesture?.geometry || editor.geometry,
+        resources:state.renderer.resources,hiddenUids:effectiveHidden(),
+      });
     }
     const elapsed = performance.now() - start;
     state.renderSamples.push(elapsed);
@@ -1236,7 +1296,6 @@ function play() {
   state.previewing = false;
   if (editor.totalTicks < 1) return;
   cancelDrag();
-  editor.beginFrameDraftPreview();
   const range = playbackRange();
   playTick =
     editor.tick >= range.end - 1 || editor.tick < range.start
@@ -1289,7 +1348,7 @@ function pause() {
     editablePreparation.start(state.renderer,geometry=>({
       frame:currentFrame(),view:{...state.view},getView:()=>({...state.view}),
       cameraEnabled:false,editorBackgroundColor:builderBackgroundColor(state.settings,state),
-      onionFrames:onionSkins(),geometry,
+      onionFrames:onionSkins(),geometry,artworkRevision:editor.definitionRevision,
     }));
   }
   requestRender();
@@ -1319,12 +1378,12 @@ function updateTransport() {
   $("frame-badge").textContent = `FRAME ${String(tick + 1).padStart(2, "0")}`;
   const storedSummary =
     state.settings.timelineMode === "simple"
-      ? `${editor.frameDraft?.storedCount ?? editor.report.keyframes.length} keys · `
+      ? `${editor.report._styk?.layerSheet ? timelineUI?.frameCount ?? 0 : editor.frameDraft?.storedCount ?? editor.report.keyframes.length} keys · `
       : "";
   $("timeline-summary").textContent =
     `${storedSummary}${editor.totalTicks} frames · ${(editor.totalTicks / fps).toFixed(2)}s`;
   $("fps").value = fps;
-  timelineUI?.update();
+  timelineUI?.update(state.settings.timelineMode !== 'advanced');
 }
 function updateTitle() {
   document.title = `${editor.dirty ? "• " : ""}${editor.name || "Untitled"} — StykAnimate`;
@@ -1375,7 +1434,7 @@ function renderAssets() {
             `<button class="sample-item" data-sample="${esc(s.path)}">${icon(s.kind === "stk" ? "person" : "file")}<span>${esc(s.name)}</span><small>${esc(s.kind?.toUpperCase() || "PIV")}</small></button>`,
         )
         .join("")
-    : '<p class="property-note" style="padding:0 15px">Open .styk projects or import .stkz, .piv and .stk files.</p>';
+    : '<p class="property-note" style="padding:0 15px">Open StykAnimate, Pivot or Stick Nodes projects, figures and movie clips.</p>';
 }
 function renderInspector() {
   if (propertyControls?.active || (state.drag && state.drag.kind !== "pan"))
@@ -1396,7 +1455,7 @@ function renderInspector() {
         ...$("inspector").querySelectorAll("details[data-polygon-index][open]"),
       ].map((element) => element.dataset.polygonIndex)
     : [];
-  $("inspector").innerHTML = inspectorView({
+  updateInspectorDOM($("inspector"), inspectorView({
     editor,
     tab: state.inspectorTab,
     context: editor.branchSelected ? "figure" : state.inspectorContext,
@@ -1409,7 +1468,7 @@ function renderInspector() {
     rangeIndices: editor.frameDraft?.mode === "add" ? [] : state.rangeIndices,
     applyRange: state.applyRange,
     polygonPage: state.polygonPage || 0,
-  });
+  }), {preserveDisclosure});
   if (state.polygon) {
     for (const input of $("inspector").querySelectorAll(
       "input,select,textarea,button",
@@ -1438,6 +1497,9 @@ function renderInspector() {
 }
 
 function setTool(tool) {
+  if (isMovieclip(editor.figure) && ['rig','line','circle','polygon','handle-edit'].includes(tool)) {
+    editor.enterMovieclip();
+  }
   if (tool === "polygon" && state.tool === "polygon" && state.polygon) {
     finishPolygon();
     return;
@@ -1579,6 +1641,7 @@ function pick(p) {
   return pickCanvasHandle(geometry, p, {
     handles: canvasHandles(geometry),
     project: screenPoint,
+    projectionScale: !state.playing&&!state.previewing?state.view.scale:undefined,
     minRadius: 8,
     nearest: true,
   });
@@ -1593,6 +1656,7 @@ overlay.addEventListener(
       return;
     }
     finishKeyboardHandle();
+    playback.setInteractionActive(true);
     interruptRecovery();
     $("toast").hidden = true;
     clearTimeout(toastTimer);
@@ -1679,6 +1743,7 @@ overlay.addEventListener(
       ["select", "pose"].includes(state.tool)
     ) {
       selectTrack({ id: "camera", kind: "camera" });
+      renderInspector();
       const geometry = editor.geometry;
       editor.beginCameraDrag({
         indices: rangeFrames(),
@@ -1841,13 +1906,17 @@ overlay.addEventListener(
         requestRender();
         return;
       }
+      const previousCameraHandle = state.hoverCameraHandle;
       state.hoverCameraHandle = activeCameraHandle(worldPoint(e));
+      overlay.style.cursor = cameraHandleCursor(state.hoverCameraHandle, cameraViewport(editor.report,currentFrame(),state.view));
+      if (previousCameraHandle?.index !== state.hoverCameraHandle?.index) requestRender();
       const geometry = editor.geometry;
       const handle =
         state.handles && !state.hoverCameraHandle
           ? pickCanvasHandle(geometry, worldPoint(e), {
               handles: canvasHandles(geometry),
               project: screenPoint,
+              projectionScale: !state.playing&&!state.previewing?state.view.scale:undefined,
               minRadius: 8,
               nearest: true,
             })
@@ -1877,6 +1946,7 @@ overlay.addEventListener(
       )
         return;
       drag.constrain ??= e.ctrlKey || e.metaKey;
+      drag.snap = e.shiftKey;
       drag.lastPoint = p;
       editor.updateCameraDrag(cameraDragDelta(drag, p));
       requestRender();
@@ -2049,6 +2119,8 @@ overlay.addEventListener("pointerleave", () => {
   }
   state.hoverHandle = null;
   state.hoverCameraHandle = null;
+  if (!state.drag) overlay.style.cursor = '';
+  requestRender();
 });
 viewport.addEventListener(
   "wheel",
@@ -2123,7 +2195,7 @@ async function acceptImport(
     ((name || result.filename || "").toLowerCase().endsWith(".stk")
       ? "stk"
       : "piv");
-  if (kind === "stk" || kind === "stkz") {
+  if (kind === "stk" || kind === "stkz" || kind === "stykmov") {
     finishCurrentEdit();
     editor.importFigure(report);
     status(`Imported ${result.filename || name || "figure"}`);
@@ -2141,7 +2213,7 @@ async function acceptImport(
       await editor.loadAsync(
         report,
         (name || result.filename || "Untitled").replace(
-          /\.(piv|stk|styk|stkz|json)$/i,
+          /\.(piv|stk|styk|stkz|stykmov|json|nodes|nodemc|stknds)$/i,
           "",
         ),
         {
@@ -2179,17 +2251,6 @@ async function acceptImport(
         initialScene.dispose();
       }
     }
-    if (state.settings.timelineMode === "simple" && !savedDraft)
-      editor.beginFrameDraft({
-        mode: "add",
-        index: editor.report.keyframes.length - 1,
-        empty: Boolean(editor.report._styk?.simpleFrameDraft?.empty),
-      });
-    else if (
-      state.settings.timelineMode === "advanced" &&
-      editor.report._styk?.simpleFrameDraft
-    )
-      editor.disableFrameDrafts();
     state.sourceId = result.sourceId || null;
     if (!initialScene?.activated) {
       state.hidden.clear();
@@ -2202,6 +2263,8 @@ async function acceptImport(
         await desktop.activateDocument({ openToken })
       ).documentToken;
   }
+  state.lastImportWarnings = result.warnings || report._styk?.sticknodes?.warnings || [];
+  if(state.lastImportWarnings.length)showDialog('Stick Nodes import notes',`<p>The asset is ready to edit. These source features may look or behave differently:</p><ul>${state.lastImportWarnings.map(w=>`<li>${esc(w.message)}</li>`).join('')}</ul>`);
   state.lastImport = result.timings || null;
   const ms = result.timings?.total_ms ?? result.timings?.decode_ms;
   status(
@@ -2340,9 +2403,27 @@ async function importMediaFile(
     editor.removeEventListener("change", changed);
   }
 }
+async function chooseSticknodesFile(file,isCurrent=()=>true) {
+  const onProgress=p=>{if(isCurrent())status(`${p.phase || 'Importing'}…`,false,true);};
+  let result=await importer.importFile(file,{onProgress});
+  if(!isCurrent())return null;
+  if(result.kind==='sticknodes-archive'){
+    const index=await new Promise(resolve=>{
+      showDialog('Choose a Stick Nodes asset',`<p>This pack contains ${result.entries.length} assets.</p><select id="sticknodes-archive-entry" style="width:100%" size="12">${result.entries.map(e=>`<option value="${e.index}">${esc(e.name)}</option>`).join('')}</select><div class="dialog-actions"><button id="sticknodes-archive-open" class="primary">Import selected asset</button></div>`);
+      const dialog=$('dialog'),select=$('sticknodes-archive-entry');select.selectedIndex=0;
+      const cancel=()=>{dialog.removeEventListener('close',cancel);resolve(null);};
+      dialog.addEventListener('close',cancel,{once:true});
+      $('sticknodes-archive-open').onclick=()=>{const index=Number(select.value);dialog.removeEventListener('close',cancel);dialog.close();resolve(index);};
+    });
+    if(index===null||!isCurrent())return null;
+    result=await importer.importFile(file,{entryIndex:index,onProgress});
+  }
+  return isCurrent()?result:null;
+}
 async function importFiles(files) {
   finishCurrentEdit();
   const seq = ++importSequence;
+  importer.cancelPending();
   state.importing = true;
   status("Importing…", false, true);
   try {
@@ -2356,12 +2437,14 @@ async function importFiles(files) {
           return;
         continue;
       }
-      const result = await importer.importFile(file);
-      if (seq !== importSequence) return;
+      const result = await chooseSticknodesFile(file,()=>seq===importSequence);
+      if (!result || seq !== importSequence) return;
       await acceptImport(result, file.name);
     }
+  } catch(error) {
+    if(error.name!=="AbortError")throw error;
   } finally {
-    state.importing = false;
+    if(seq===importSequence)state.importing = false;
   }
 }
 async function openFile() {
@@ -2379,8 +2462,9 @@ async function openFile() {
 async function acceptNativeFile(result) {
   pause();
   const decoded = result.bytes
-    ? await importer.importFile(new File([result.bytes], result.filename))
+    ? await chooseSticknodesFile(new File([result.bytes], result.filename))
     : result;
+  if(!decoded)return false;
   decoded.timings = { ...decoded.timings, ...result.timings };
   return acceptImport(decoded, result.filename, {
     openToken: result.openToken,
@@ -2414,6 +2498,7 @@ async function saveBlob(blob, filename, signal) {
 }
 async function saveNative({ saveAs = false } = {}) {
   finishCurrentEdit();
+  while(editor._movieclipScopes?.length)editor.leaveMovieclip();
   interruptRecovery();
   status("Saving project…", false, true);
   const revision = editor.revision,
@@ -2469,7 +2554,7 @@ async function exportPivot(format = "piv") {
   finishCurrentEdit();
   interruptRecovery();
   status(`Writing .${format}…`, false, true);
-  const filename = `${["stk", "stkz"].includes(format) ? nameOf(editor.object) : editor.name || "Untitled"}.${format}`;
+  const filename = `${["stk", "stkz", "stykmov"].includes(format) ? nameOf(editor.object) : editor.name || "Untitled"}.${format}`;
   let saved;
   try {
     saved = await runDocumentExport(format, (blob, signal) =>
@@ -2485,7 +2570,7 @@ async function exportPivot(format = "piv") {
   if (saved) {
     status(`Exported .${format}`);
     toast(
-      `Your ${["stk", "stkz"].includes(format) ? "figure" : "animation"} was exported as .${format}.`,
+      `Your ${["stk", "stkz", "stykmov"].includes(format) ? "figure" : "animation"} was exported as .${format}.`,
     );
   }
   closeDialog();
@@ -2845,7 +2930,7 @@ function showExport() {
   vfwExportControls?.dispose();
   showDialog(
     "Export your animation",
-    `<details class="export-settings"><summary>Render settings <span>${editor.report.canvas_width} × ${editor.report.canvas_height} · ${editor.totalTicks} frames</span></summary><div class="text-options"><label>Width<input id="export-width" type="number" min="1" value="${editor.report.canvas_width}"></label><label>Height<input id="export-height" type="number" min="1" value="${editor.report.canvas_height}"></label><label class="check-row"><input type="checkbox" id="export-aspect" checked>Lock ratio</label></div><div class="text-options"><label>First frame<input id="export-start" type="number" min="1" max="${editor.totalTicks}" value="1"></label><label>Last frame<input id="export-end" type="number" min="1" max="${editor.totalTicks}" value="${editor.totalTicks}"></label><label>Lossy quality %<input id="export-quality" type="number" min="1" max="100" value="94"></label></div></details><div class="export-grid"><button class="export-option" data-action="export-stkz" ${editor.object ? "" : "disabled"}>${icon("person")}<span><strong>StykAnimate figure</strong><small>.stkz · Compact editable figure</small></span></button><button class="export-option" data-action="export-piv">${icon("file")}<span><strong>Pivot animation</strong><small>.piv · Editable animation and media</small></span></button><button class="export-option" data-action="export-stk" ${editor.object ? "" : "disabled"}>${icon("person")}<span><strong>Pivot figure</strong><small>.stk · Reusable Pivot figure</small></span></button><button class="export-option" data-action="export-png">${icon("frame")}<span><strong>Current frame</strong><small>.png · Full canvas resolution</small></span></button><button class="export-option" data-action="export-svg">${icon("nodes")}<span><strong>Vector frame</strong><small>.svg · Editable paths and embedded media</small></span></button><button class="export-option" data-action="export-video">${icon("play")}<span><strong>Animation video</strong><small>.webm · Exact frame timing</small></span></button><button class="export-option" data-action="export-gif">${icon("loop")}<span><strong>Animated GIF</strong><small>.gif · Looping animation</small></span></button><button class="export-option" data-action="export-apng">${icon("frame")}<span><strong>Animated PNG</strong><small>.png · Lossless color and transparency</small></span></button><button class="export-option" data-action="export-png-sequence">${icon("duplicate")}<span><strong>PNG sequence</strong><small>.zip · Numbered lossless frames</small></span></button><button class="export-option" data-action="export-jpeg-sequence">${icon("duplicate")}<span><strong>JPEG sequence</strong><small>.zip · Numbered compact frames</small></span></button></div>`,
+    `<details class="export-settings"><summary>Render settings <span>${editor.report.canvas_width} × ${editor.report.canvas_height} · ${editor.totalTicks} frames</span></summary><div class="text-options"><label>Width<input id="export-width" type="number" min="1" value="${editor.report.canvas_width}"></label><label>Height<input id="export-height" type="number" min="1" value="${editor.report.canvas_height}"></label><label class="check-row"><input type="checkbox" id="export-aspect" checked>Lock ratio</label></div><div class="text-options"><label>First frame<input id="export-start" type="number" min="1" max="${editor.totalTicks}" value="1"></label><label>Last frame<input id="export-end" type="number" min="1" max="${editor.totalTicks}" value="${editor.totalTicks}"></label><label>Lossy quality %<input id="export-quality" type="number" min="1" max="100" value="94"></label></div></details><div class="export-grid"><button class="export-option" data-action="export-stkz" ${editor.object ? "" : "disabled"}>${icon("person")}<span><strong>${isMovieclip(editor.figure)?"StykAnimate movieclip":"StykAnimate figure"}</strong><small>${isMovieclip(editor.figure)?".stykmov":".stkz"}</small></span></button><button class="export-option" data-action="export-piv">${icon("file")}<span><strong>Pivot animation</strong><small>.piv · Editable animation and media</small></span></button><button class="export-option" data-action="export-stk" ${editor.object ? "" : "disabled"}>${icon("person")}<span><strong>Pivot figure</strong><small>.stk · Reusable Pivot figure</small></span></button><button class="export-option" data-action="export-png">${icon("frame")}<span><strong>Current frame</strong><small>.png · Full canvas resolution</small></span></button><button class="export-option" data-action="export-svg">${icon("nodes")}<span><strong>Vector frame</strong><small>.svg · Editable paths and embedded media</small></span></button><button class="export-option" data-action="export-video">${icon("play")}<span><strong>Animation video</strong><small>.webm · Exact frame timing</small></span></button><button class="export-option" data-action="export-gif">${icon("loop")}<span><strong>Animated GIF</strong><small>.gif · Looping animation</small></span></button><button class="export-option" data-action="export-apng">${icon("frame")}<span><strong>Animated PNG</strong><small>.png · Lossless color and transparency</small></span></button><button class="export-option" data-action="export-png-sequence">${icon("duplicate")}<span><strong>PNG sequence</strong><small>.zip · Numbered lossless frames</small></span></button><button class="export-option" data-action="export-jpeg-sequence">${icon("duplicate")}<span><strong>JPEG sequence</strong><small>.zip · Numbered compact frames</small></span></button></div>`,
   );
   $("dialog-content")
     .querySelector(".export-settings")
@@ -3048,6 +3133,7 @@ function showHelp() {
       ["Isolate joint", "Caps Lock"],
       ["Add line / circle", "L / C"],
       ["New keyframe", "F6"],
+      ["Duplicate frame after current", "Ctrl+Enter"],
       ["Previous / next frame", "← / →"],
       ["Onion skins / joints", "O / J"],
       ["Stretch a joint", "Ctrl + drag"],
@@ -3316,7 +3402,8 @@ const actions = {
   export: showExport,
   "export-piv": () => exportPivot(),
   "export-stk": () => exportPivot("stk"),
-  "export-stkz": () => exportPivot("stkz"),
+  "export-stkz": () => exportPivot(isMovieclip(editor.figure)?"stykmov":"stkz"),
+  "export-stykmov": () => exportPivot("stykmov"),
   "export-png": exportPNG,
   "export-video": () => exportVideo(),
   "export-mp4": () => exportVideo("mp4"),
@@ -3334,8 +3421,6 @@ const actions = {
     if (await confirmReplace()) {
       pause();
       editor.newDocument();
-      if (state.settings.timelineMode === "simple")
-        editor.beginFrameDraft({ mode: "add", index: 0, empty: true });
       if (desktop?.activateDocument)
         state.documentToken = (
           await desktop.activateDocument({})
@@ -3384,24 +3469,25 @@ const actions = {
   "previous-frame": () => {
     pause();
     if (state.settings.timelineMode === "simple")
-      return timelineUI.selectFrame(Math.max(0, editor.frameIndex - 1));
+      return timelineUI.selectFrame(Math.max(0, timelineUI.selectedIndex - 1));
     editor.seek(Math.max(0, editor.tick - 1));
   },
   "next-frame": () => {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(
-        Math.min(editor.report.keyframes.length - 1, editor.frameIndex + 1),
+        Math.min(timelineUI.frameCount - 1, timelineUI.selectedIndex + 1),
       );
     editor.seek(Math.min(editor.totalTicks - 1, editor.tick + 1));
   },
   "last-frame": () => {
     pause();
     if (state.settings.timelineMode === "simple")
-      return timelineUI.selectFrame(editor.report.keyframes.length - 1);
+      return timelineUI.selectFrame(timelineUI.frameCount - 1);
     editor.seek(Math.max(0, editor.totalTicks - 1));
   },
   "add-frame": () => {
+    if(editor.report._styk?.layerSheet){pause();return state.settings.timelineMode === "simple"?editor.sheetAppendFrame():editor.sheetInsertKey();}
     pause();
     if (state.settings.timelineMode === "simple")
       timelineUI.action(
@@ -3409,8 +3495,21 @@ const actions = {
       );
     else editor.addFrame();
   },
+  "duplicate-frame-after": () => {
+    pause();finishCurrentEdit();
+    if(editor.report._styk?.layerSheet) {
+      const ids=state.settings.timelineMode==='simple'?['scene','camera',...editor.report._styk.layers.order]:timelineUI.ids;
+      return editor.sheetDuplicateFrameAfter(ids);
+    }
+    return editor.duplicateFrame();
+  },
+  "blank-frame": () => {
+    pause();finishCurrentEdit();
+    if(editor.report._styk?.layerSheet)return editor.sheetInsertKey(timelineUI.ids,editor.tick,{blank:true});
+  },
   "delete-frame": () => {
     pause();
+    if(editor.report._styk?.layerSheet)return state.settings.timelineMode === "simple"?timelineUI.action("delete"):timelineUI.removeFrames();
     editor.deleteFrame();
   },
   "add-figure": () => {
@@ -3533,6 +3632,10 @@ const actions = {
       ? editor.resetPoseInFrames(rangeFrames())
       : editor.resetPose?.(),
   "reset-color": () => updateSelection({ color_override_raw: 0 }),
+  "selection-up": () => orderSelection(1),
+  "selection-down": () => orderSelection(-1),
+  "selection-front": () => orderSelection("front"),
+  "selection-back": () => orderSelection("back"),
   "layer-up": () =>
     rangeFrames()
       ? editor.orderFiguresInFrames(1, rangeFrames())
@@ -3662,9 +3765,13 @@ const actions = {
     editor.copyCamera();
     queueUI();
   },
-  "toggle-camera": () =>
-    editorSettings?.commit({ showCamera: !state.settings.showCamera }),
+  "toggle-camera": () => {
+    if(!cameraSelected())selectTrack({id:'camera',kind:'camera'});
+    else editorSettings?.commit({showCamera:!state.settings.showCamera});
+  },
   "camera-paste": () => editor.pasteCamera(rangeFrames()),
+  "camera-guides": () => {state.cameraGuides=!state.cameraGuides;requestRender();},
+  "camera-level": () => editor.setCameraValues({angle_rad:0},rangeFrames()),
   "camera-reset": () => editor.resetCamera(rangeFrames()),
   "camera-center": () =>
     editor.centerCamera("both", rangeFrames(), { boundsOf }),
@@ -3780,6 +3887,10 @@ $("inspector").addEventListener(
     const target = e.target,
       key = target.dataset.field;
     pause();
+    if(target.id==='figure-layer'){
+      finishCurrentEdit();editor.assignFiguresToLayer([...editor.selectedUids],target.value);
+      editor.setActiveLayer(target.value);state.selectedTrackId=target.value;timelineUI?.selectTrack?.(target.value);queueUI();requestRender();return;
+    }
     if (target.id === "builder-branch") {
       state.builderBranch = target.checked;
       if (!target.checked && editor.branchSelected) {
@@ -4123,7 +4234,7 @@ function cycleFigure(direction) {
 function keyboardHandle(event, key) {
   if (
     keyboardHandleGesture?.camera ||
-    (state.settings.showCamera &&
+    (cameraSelected() && state.settings.showCamera &&
       (state.hoverCameraHandle || state.inspectorContext === "camera"))
   ) {
     if (
@@ -4132,7 +4243,7 @@ function keyboardHandle(event, key) {
     )
       return;
     const target = keyboardHandleGesture?.target ||
-      state.hoverCameraHandle || { kind: "position", index: 0 };
+      state.hoverCameraHandle || { kind: "position", index: 4 };
     if (!keyboardHandleGesture) {
       pause();
       interruptRecovery();
@@ -4327,6 +4438,9 @@ document.addEventListener(
       }
       return;
     }
+    if (mod && k === 'enter') {
+      e.preventDefault();if(!e.repeat)actions['duplicate-frame-after']();return;
+    }
     if (!mod && k === "a" && state.settings.timelineMode === "simple") {
       e.preventDefault();
       if (!e.repeat) actions["add-frame"]();
@@ -4354,7 +4468,7 @@ document.addEventListener(
     ) {
       e.preventDefault();
       timelineUI.selectFrame(
-        editor.frameIndex + (["<", ","].includes(k) ? -1 : 1),
+        timelineUI.selectedIndex + (["<", ","].includes(k) ? -1 : 1),
         e,
       );
       return;
@@ -4552,7 +4666,8 @@ editor.addEventListener("change", (e) => {
   if (["edit", "history", "document", "preview", "frame-draft"].includes(kind))
     state.editingPacket = null;
   if (
-    (kind === "selection" || e.detail?.structural) &&
+    (kind === "selection" || (e.detail?.structural &&
+      !(e.detail?.layerSheet && ['camera','scene'].includes(state.inspectorContext)))) &&
     editor.selectedUid != null
   ) {
     state.inspectorContext = "figure";
@@ -4564,10 +4679,14 @@ editor.addEventListener("change", (e) => {
     state.selectedTrackId = editor.activeLayerId;
   }
   if (selectedTrack) reconcileSelectedSegmentTrack(selectedTrack);
+  if (!cameraSelected()) {
+    state.hoverCameraHandle=null;
+    overlay.style.cursor='';
+  }
   if (
     e.detail?.definition ||
     e.detail?.structural ||
-    kind === "history" ||
+    (kind === "history" && !e.detail?.animation) ||
     kind === "document"
   ) {
     invalidatePivotHandleTopology();
@@ -4578,7 +4697,7 @@ editor.addEventListener("change", (e) => {
   if (["edit", "history", "document", "frame-draft"].includes(kind))
     for (const job of exportJobs) job.controller.abort();
   if (
-    (kind === "edit" || kind === "frame-draft" || (kind === "history" && e.detail.frameIndices && !e.detail.structural)) &&
+    (kind === "edit" || kind === "frame-draft" || (kind === "history" && (e.detail.frameIndices || e.detail.animation) && !e.detail.structural)) &&
     !e.detail?.live &&
     playback.report === editor.report &&
     (state.playbackRevision !== editor.revision ||
@@ -4607,6 +4726,7 @@ editor.addEventListener("change", (e) => {
   }
   if (kind === "seek") interruptRecovery();
   if (kind === "seek") {
+    queueEditingFrame();
     requestRender();
     if (!state.playing && !state.scrubbing) {
       queueUI();
@@ -4644,7 +4764,7 @@ function scheduleRecovery() {
     }
     if (!editor.dirty) return;
     const report = editor.report,
-      name = editor.name;
+      name = editor._movieclipScopes?.[0]?.parent.name ?? editor.name;
     try {
       await runDocumentExport(
         "styk",
@@ -4776,11 +4896,6 @@ function showRecovery(record) {
         )
           return;
         await editor.loadAsync(record.document, record.name);
-        if (
-          state.settings.timelineMode === "advanced" &&
-          editor.report._styk?.simpleFrameDraft
-        )
-          editor.disableFrameDrafts();
         if (desktop?.activateDocument)
           state.documentToken = (
             await desktop.activateDocument({})
@@ -4838,6 +4953,7 @@ window.styk = {
   acceptImport,
   fit,
   performance: () => ({
+    editingPresentation:state.lastEditingPresentation,
     editablePreparation:{pending:editablePreparation.pending,...editablePreparation.stats},
     samples: [...state.renderSamples],
     renderer: state.renderer?.stats,
@@ -5037,7 +5153,7 @@ function mountTimeline() {
     renderThumbnail: (index, canvas, options) =>
       thumbnailRenderer.renderThumbnail(index, canvas, {
         ...options,
-        storedFrames: state.settings.timelineMode === "simple",
+        storedFrames: !editor.report._styk?.layerSheet && state.settings.timelineMode === "simple",
       }),
     onInsertInbetween: (indices) => {
       finishKeyboardHandle();
@@ -5050,7 +5166,7 @@ function mountTimeline() {
         renderThumbnail: (index, canvas, options) =>
           thumbnailRenderer.renderThumbnail(index, canvas, {
             ...options,
-            storedFrames: state.settings.timelineMode === "simple",
+            storedFrames: !editor.report._styk?.layerSheet && state.settings.timelineMode === "simple",
           }),
         onApply: queueUI,
         onClose: queueUI,
@@ -5189,7 +5305,7 @@ async function init() {
           binding.property,
           binding.options,
         );
-        return { binding, indices:rangeFrames() };
+        const indices=rangeFrames();return { binding, indices, ticks:indices?.sheetTicks };
       }
       return {
         native: beginNativePropertyEdit(editor, key, {
@@ -5207,7 +5323,8 @@ async function init() {
       requestRender();
     },
     commit: ({ token, value }) => {
-      if (token.binding && token.indices?.length > 1) {
+      if(token.binding&&token.ticks){editor.cancelAnimationEdit();editor.addAnimationKeys(token.ticks.map(tick=>({target:token.binding.target,property:token.binding.property,tick,value:token.binding.fromUI(value),...token.binding.options})));
+      } else if (token.binding && token.indices?.length > 1) {
         editor.cancelAnimationEdit();editor.addAnimationKeys(token.indices.map(index=>({target:token.binding.target,property:token.binding.property,
           tick:editor.timeline[index].start,value:token.binding.fromUI(value),...token.binding.options})));
       } else if (token.binding) editor.commitAnimationEdit();
@@ -5272,6 +5389,15 @@ async function init() {
     resources,
   });
   window.styk.assets = assetLibrary;
+  window.styk.library = new UserLibrary({editor, desktop, exporter:documentExporter, importer, pause, finishEdit:finishCurrentEdit, setTool});
+  actions['add-to-library'] = () => window.styk.library.run(() => window.styk.library.save());
+  window.styk.movieclips = installMovieclipUI({editor,actions,pause,finishEdit:finishCurrentEdit,
+    getTimeline:()=>timelineUI,setTool,onError:fail,queueUI,exportClip:()=>exportPivot('stykmov')});
+  editor.addEventListener('change',event=>{
+    if(event.detail?.kind==='movieclip-scope' || event.detail?.movieclipScope) {
+      mountTimeline(); state.inspectorContext=editor.object?'figure':'scene';state.inspectorTab='design';queueUI();
+    }
+  });
   studioShell = initStudioShell({editor, state, setTool, renderAssets, renderInspector, showCommandMenu,
     actions, openTimelineSettings: () => editorSettings.open("interface"), getTimeline: () => timelineUI});
   window.styk.studio = studioShell;

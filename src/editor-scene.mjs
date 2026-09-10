@@ -4,6 +4,7 @@ import {samplePoseTrack} from './animation-pose.mjs';
 import {tweenBackground} from './pivot/background.mjs';
 import {validateScene} from './pivot/model.mjs';
 import {createFrame} from './demo.mjs';
+import {evaluatedFrame} from './pivot/geometry.mjs';
 
 const sceneFields = ['background_id', 'background_id_b', 'background_mix', 'background_color', '_stykBackgroundColor'];
 const clone = value => structuredClone(value);
@@ -23,6 +24,7 @@ function sampleNativeScene(report, index, t = 0) {
 
 /** Scene sampling touches no figures, even inside a large inbetweened scene. */
 export function sceneValuesAt(editor, index = editor.frameIndex, tick = editor.tick) {
+  if(editor.report._styk?.layerSheet)return pickScene(evaluatedFrame(editor.report,index,0,tick));
   const row = editor.timeline[index];
   let scene = sampleNativeScene(editor.report, index, row.count > 1 ? (tick - row.start) / row.count : 0);
   const pose = sceneChannel(editor.report, 'pose');
@@ -111,6 +113,13 @@ function commit(editor, state, label) {
     state.before.channels.push({index, channel: original}); state.after.channels.push({index, channel});
   }
   if (!state.after.frames.length && !state.after.channels.length && !state.after.assets.length) return 0;
+  if(editor.report._styk?.layerSheet)return editor.movieclipBatch(label,()=>{
+    const before={...state.before,channels:[],frames:[]},after={...state.after,channels:[],frames:[]},selection=editor._selectionState();
+    if(after.assets.length||state.sources.length){const command={kind:'scene',label,before,after,frameSourceChanges:state.sources,beforeSelection:selection,afterSelection:selection,structural:true,timing:true};
+      editor._applyFrameSourceChanges(command,'after');editor._applySceneSnapshot(after);editor._record(command);editor._invalidate();}
+    if(state.after.channels.length)editor.sheetApplyChannels(state.after.channels.map(entry=>entry.channel),label);
+    return state.touched;
+  });
   if (state.after.channels.length) {
     state.before.nextKeyId = {exists: own(state.animation, 'nextKeyId'), value: state.animation.nextKeyId};
     state.after.nextKeyId = {exists: true, value: state.nextKey};
@@ -182,6 +191,7 @@ export const editorSceneMethods = {
 
   setSceneColor(argb, {indices = [this.frameIndex]} = {}) {
     if (!Number.isInteger(argb) || argb < 0 || argb > 0xffffffff) throw new Error('Scene color must be a 32-bit ARGB value.');
+    if(this.report._styk?.layerSheet)return this._sheetPropertyEntries(this.sheetEditTimes(indices).map(tick=>({target:{kind:'scene'},property:'color',tick,value:argb})),'Set scene color');
     editable(this); const selected = this._frameIndices(indices); if (!selected.length) return 0;
     const state = draft(this), color = sceneChannel(this.report, 'color');
     if (color || this.propertyChannels) {
@@ -204,6 +214,7 @@ export const editorSceneMethods = {
   setSceneBackground(id, {indices = [this.frameIndex]} = {}) {
     if (!Number.isInteger(id) || id < 0 || id !== 0 && !this.report.backgrounds?.some(background => background.background_id === id))
       throw new Error('Choose an existing background.');
+    if(this.report._styk?.layerSheet)return this._sheetPropertyEntries(this.sheetEditTimes(indices).flatMap(tick=>['backgroundId','color'].map(property=>({target:{kind:'scene'},property,tick,value:property==='color'?null:id}))),'Set scene background');
     editable(this); const selected = this._frameIndices(indices); if (!selected.length) return 0;
     const state = draft(this); assignBackground(this, state, id, selected);
     return commit(this, state, 'Set scene background');
@@ -214,6 +225,10 @@ export const editorSceneMethods = {
     const source = background?.background ?? background;
     const imported = {...clone(source), background_id: nextBackgroundId(this.report)}; imported.name ||= 'Background';
     validateBackground(this.report, imported);
+    if(this.report._styk?.layerSheet)return this.movieclipBatch('Import scene background',()=>{
+      const state=draft(this);state.asset(imported);commit(this,state,'Import background asset');
+      this.setSceneBackground(imported.background_id,{indices});return this.report.backgrounds.find(asset=>asset.background_id===imported.background_id);
+    });
     const state = draft(this); state.asset(imported); assignBackground(this, state, imported.background_id, selected);
     commit(this, state, 'Import scene background');
     return this.report.backgrounds.find(asset => asset.background_id === imported.background_id);

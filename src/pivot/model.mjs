@@ -1,4 +1,6 @@
+import {validateSticknodesShape,validateSticknodesObject} from '../sticknodes/validation.mjs';
 import {normalizePaint} from '../paint.mjs';
+import {validatePlayback} from '../movieclips.mjs';
 import {validateIK} from '../ik.mjs';
 import { timeline } from "./geometry.mjs";
 import { inverseCameraScale } from "./background.mjs";
@@ -37,6 +39,7 @@ const rgb = (value, label) => {
 // commands validate their replacement definitions before the next object edit.
 const validatedDefinitions = new WeakMap();
 function validateObjectPose(report, object, figure, origin = true) {
+  if(object._sticknodesShapes||object._sticknodesSprite)validateSticknodesObject(object,figure);
   validateIK(object);
   validateAnimationStyle(object);
   if (object._stykZIndex !== undefined) validateFigureZIndex(object._stykZIndex);
@@ -173,6 +176,7 @@ export function* validateSceneSteps(report, {sliceMs=4} = {}) {
     const parents = new Map();
     for (const s of fig.segments) {
       if(s.paint)normalizePaint(s.paint);
+      if(s._sticknodes)validateSticknodesShape(s._sticknodes);
       if (
         !Number.isInteger(s.segment_id) ||
         s.segment_id <= 0 ||
@@ -222,6 +226,7 @@ export function* validateSceneSteps(report, {sliceMs=4} = {}) {
         throw new Error("Unknown figure or repeated object identity.");
       uids.add(o.unique_id);
       validateObjectPose(report, o, fig, false);
+      if (o._stykMovieclip) validatePlayback(o._stykMovieclip);
       if(o._stykAnimationOrigin!==undefined||fig._styk?.animationOrigin)yield* validateOriginObjectSteps(o,fig,{sliceMs});
       if (o.join) {
         const parent = frame.objects[o.join.target_object_slot],
@@ -342,6 +347,7 @@ export function syncDerived(report) {
     fig.segment_count = fig.segments.length;
     for (const s of fig.segments) {
       if(s.paint)normalizePaint(s.paint);
+      if(s._sticknodes)validateSticknodesShape(s._sticknodes);
       if (s.primitive_code !== undefined && s.aux_code !== undefined) {
         s.flags = s.primitive_code | (s.aux_code << 8);
         s.is_static = Boolean(s.aux_code & 1);

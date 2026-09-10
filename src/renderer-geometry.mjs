@@ -72,7 +72,12 @@ function needsEvenOddRaster(points) {
   return false;
 }
 export function requiresCompatibilityTexture(items) {
-  return items.some(s => (s.seg?.paint && s.seg.paint.type !== 'solid') || s.type === 'text' || s.type === 'image' || s.opacity < .999999 || s.fig?.segment_decode?.global_style?.u28 || ((s.alpha < .999999 || s.seg?.secondary?.a > 0) && Math.abs(s.bend) > 1e-7) || (s.type === 'poly' && needsEvenOddRaster(s.points)));
+  return items.some(s => movieclipTransparency(s) || (s.seg?.paint && s.seg.paint.type !== 'solid') || s.type === 'text' || s.type === 'image' || s.opacity < .999999 || s.fig?.segment_decode?.global_style?.u28 || ((s.alpha < .999999 || s.seg?.secondary?.a > 0) && Math.abs(s.bend) > 1e-7) || (s.type === 'poly' && needsEvenOddRaster(s.points)));
+}
+function movieclipTransparency(item) {
+  if(item._movieclipOwner?.opacity < .999999)return true;
+  for(let inner=item._movieclipInner;inner;inner=inner.inner)if(inner.owner.opacity < .999999)return true;
+  return false;
 }
 
 /** Reuse worker vectors for the same document revision/tick when editing resumes.
@@ -109,6 +114,10 @@ export function adoptPreparedVectors(packet, geometry, vectorCache, compatibilit
 
 /** Tessellate one figure into GPU-native primitives, in the decoder's painter order. */
 export function compileVectorObject(items, root = { x: 0, y: 0 }, transform = 0) {
+  const steps = compileVectorObjectSteps(items, root, transform);
+  for (;;) { const step = steps.next(); if (step.done) return step.value; }
+}
+export function* compileVectorObjectSteps(items, root = { x: 0, y: 0 }, transform = 0) {
   let result = new Float32Array(Math.max(1, items.length * 2) * SHAPE_FLOATS), used = 0, paint;
   const add = (mode, ax, ay, bx, by, cx = 0, cy = 0, radius = 0, inner = 0, white = false) => {
     if (used + SHAPE_FLOATS > result.length) { const grown = new Float32Array(result.length * 2); grown.set(result); result = grown; }
@@ -119,7 +128,9 @@ export function compileVectorObject(items, root = { x: 0, y: 0 }, transform = 0)
     result.set(paint.gradient, used + 16); result[used + 20] = mode; result[used + 21] = transform;
     used += SHAPE_FLOATS;
   };
+  let completed = 0;
   for (const s of items) {
+    if ((++completed & 127) === 0) yield {phase:'GPU vectors',completed,total:items.length};
     paint = brush(s, root);
     if (s.type === 'poly') {
       if (s.points.length < 3) continue;
@@ -129,6 +140,7 @@ export function compileVectorObject(items, root = { x: 0, y: 0 }, transform = 0)
       for (let i = 0; i < indices.length; i += 3) {
         const a = indices[i] * 2, b = indices[i + 1] * 2, c = indices[i + 2] * 2;
         add(SHAPE.TRIANGLE, points[a], points[a + 1], points[b], points[b + 1], points[c], points[c + 1]);
+        if (i && i % 1536 === 0) yield {phase:'GPU polygon',completed:i,total:indices.length};
       }
     } else if (s.type === 'circle') {
       const width = Math.max(0, s.thickness), filled = s.seg.segment_kind === 'circleFill' || width >= Math.abs(s.length);
@@ -160,7 +172,7 @@ export function objectBounds(items, resources = {}) {
     else for (const p of s.points || []) include(p.x, p.y, pad);
     if (s.type === 'image' && s.asset) {
       const a = s.asset, image = resources.image?.(resources.url?.(a));
-      const width = image?.naturalWidth || a.width || a.pixel_width || 1, height = image?.naturalHeight || a.height || a.pixel_height || 1;
+      const width = a.display_width ?? (image?.naturalWidth || a.width || a.pixel_width || 1), height = a.display_height ?? (image?.naturalHeight || a.height || a.pixel_height || 1);
       const reverse = Boolean(s.seg.extra_u8_a ?? s.seg.extra?.[1]), mirror = Boolean(s.seg.extra_u8_b ?? s.seg.extra?.[2]) !== Boolean(s.obj.image_text_flags);
       const start = reverse ? s.end : s.start, angle = (mirror ? s.angle + a.anchor_angle_rad - Math.PI : s.angle - a.anchor_angle_rad) + (reverse ? Math.PI : 0);
       const scale = Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y) / (a.anchor_length || 1), cos = Math.cos(angle), sin = Math.sin(angle);

@@ -25,6 +25,7 @@ export function fixture(options = {}) {
   const editor = new Editor({demo: false, ...options}).load(document); editor.select(1, 1); return editor;
 }
 const g = e => e.geometry.objects.get(0);
+const angleNear = (a,b) => near(Math.atan2(Math.sin(a-b),Math.cos(a-b)),0);
 
 test('Both follows a full circular drag without mirroring across the original knee axis', () => {
   for (const pinned of [true, false]) for (const side of [-1, 1]) {
@@ -36,7 +37,7 @@ test('Both follows a full circular drag without mirroring across the original kn
       const angle = i * Math.PI / 120, target = {x: 300 + 120 * Math.cos(angle), y: 150 + 120 * Math.sin(angle)};
       e.poseJoint(target.x, target.y);
       const posed = g(e), knee = posed.joints.get(11);
-      point(posed.joints.get(22), target); near(posed.segments[2].angle, 0);
+      point(posed.joints.get(22), target); angleNear(posed.segments[2].angle, 0);
       assert.ok(Math.hypot(knee.x - previous.x, knee.y - previous.y) < 3, `knee snapped at step ${i}`);
       const cross = (target.x - 300) * (knee.y - 150) - (target.y - 150) * (knee.x - 300);
       assert.equal(Math.sign(cross), side); previous = knee;
@@ -66,11 +67,11 @@ test('Both switches once through a fully folded limb, preserving knee continuity
 
 test('moving the root through a Both pin keeps the knee continuous and the foot planted', () => {
   const e = fixture(); e.setNodeIK({enabled: true}); e.poseJoint(360, 150);
-  const foot = g(e).joints.get(33); let previous = g(e).joints.get(11);
+  const foot = g(e).joints.get(22); let previous = g(e).joints.get(11);
   e.select(1, -1); e.beginTranslationDrag();
   for (let dx = 1; dx <= 120; dx++) {
     e.moveSelection(dx, 0, {fromStart: true}); const knee = g(e).joints.get(11);
-    point(g(e).joints.get(33), foot);
+    point(g(e).joints.get(22), foot); angleNear(g(e).segments[2].angle,0);
     assert.ok(Math.hypot(knee.x - previous.x, knee.y - previous.y) < 2, `root crossing snapped at ${dx}`);
     previous = knee;
   }
@@ -141,7 +142,7 @@ test('stretch reaches distant targets without changing rest lengths or unrelated
   point(g(e).joints.get(22), {x: 600, y: 150});
   near(g(e).segments[0].length, 150); near(g(e).segments[1].length, 150);
   near(g(e).segments[2].length, 35); near(g(e).segments[3].length, 90);
-  near(g(e).segments[2].angle, 0); assert.deepEqual(e.object.lengths, original);
+  angleNear(g(e).segments[2].angle,0); assert.deepEqual(e.object.lengths, original);
   e.setNodeIK({allowStretch: false}); point(g(e).joints.get(22), {x: 480, y: 150});
   e.undo(); point(g(e).joints.get(22), {x: 600, y: 150});
   e.poseJoint(400, 230); point(g(e).joints.get(22), {x: 400, y: 230});
@@ -211,23 +212,23 @@ test('IK retains normal circular handle descriptors and accepts older metadata w
   assert.throws(() => e.setNodeIK({allowStretch: 1}), /Invalid IK/);
 });
 
-test('IK enables pinned without changing the visible pose; foot has independent orientation', () => {
+test('IK enables without a jump and outgoing children follow target orientation', () => {
   const e = fixture(), before = g(e);
   e.setNodeIK({enabled: true});
   assert.equal(e.getIKSettings().pinned, true); assert.equal(e.getIKSettings().chainLength, 2);
   for (const [id, p] of before.joints) point(g(e).joints.get(id), p);
   const target = {x: 365, y: 265}; e.poseJoint(target.x, target.y);
-  point(g(e).joints.get(22), target); near(g(e).segments[2].angle, before.segments[2].angle);
+  point(g(e).joints.get(22), target); angleNear(g(e).segments[2].angle, before.segments[2].angle);
   for (const i of [0, 1]) near(g(e).segments[i].length, 90);
-  e.rotateIKTarget(.4); near(g(e).segments[2].angle, .4);
+  const footAngle = g(e).segments[2].angle; e.rotateIKTarget(.4); angleNear(g(e).segments[2].angle, footAngle+.4);
 });
 
-test('both feet remain in world space while root translates and rotates; unrelated limbs are retained', () => {
+test('both complete feet stay planted during root translation and rotation', () => {
   const e = fixture(); e.setNodeIK({enabled: true}); e.select(1, 4); e.setNodeIK({enabled: true});
   const before = g(e); e.select(1, -1); e.moveSelection(12, -15);
-  for (const id of [22, 55, 33, 66]) point(g(e).joints.get(id), before.joints.get(id));
+  for (const id of [22, 33, 55, 66]) point(g(e).joints.get(id), before.joints.get(id));
   e.rotateSelection(.1);
-  for (const id of [22, 55, 33, 66]) point(g(e).joints.get(id), before.joints.get(id));
+  for (const id of [22, 33, 55, 66]) point(g(e).joints.get(id), before.joints.get(id));
 });
 
 test('unpin/disable bake the visible pose without a jump and unpinned IK still poses the limb', () => {
@@ -244,7 +245,7 @@ test('unpin/disable bake the visible pose without a jump and unpinned IK still p
 test('FK edits to the outgoing foot remain editable while the ankle is pinned', () => {
   const e = fixture(); e.setNodeIK({enabled: true}); e.select(1, 2); e.rotateJoint(.3);
   near(g(e).segments[2].angle, .3); const p = g(e).joints.get(22);
-  e.select(1, -1); e.moveSelection(10, -10); point(g(e).joints.get(22), p); near(g(e).segments[2].angle, .3);
+  e.select(1, -1); e.moveSelection(10, -10); point(g(e).joints.get(22), p); angleNear(g(e).segments[2].angle,.3);
 });
 
 test('gesture previews produce one history entry; cancellation, undo, redo and serialization preserve targets', () => {
@@ -265,7 +266,7 @@ test('pins solve at interpolated ticks and native export bakes identical visible
   const before = JSON.stringify(e.report), materialized = materializePivotDocument(e.report);
   for (let tick = 0; tick < 8; tick++) {
     const frame = evaluatedFrame(e.report, 0, tick / 8, tick), live = buildGeometry(e.report, frame).objects.get(0);
-    point(live.joints.get(22), target); near(live.segments[2].angle, 0);
+    point(live.joints.get(22), target); angleNear(live.segments[2].angle,0);
     const baked = buildGeometry(materialized, materialized.keyframes[tick]).objects.get(0);
     for (const [id, p] of live.joints) point(baked.joints.get(id), p);
     assert.equal(materialized.keyframes[tick].objects[0]._stykIK, undefined);
@@ -279,7 +280,7 @@ test('target movement interpolates, while pin state changes are discrete', () =>
   b.objects[0]._stykIK[22].target.x += 20; b.objects[0]._stykIK[22].target.rotation = .4;
   e.report.keyframes = [a, b];
   const frame = evaluatedFrame(e.report, 0, .5), posed = buildGeometry(e.report, frame).objects.get(0);
-  point(posed.joints.get(22), {x: first.x + 10, y: first.y}); near(posed.segments[2].angle, .2);
+  point(posed.joints.get(22), {x: first.x + 10, y: first.y}); angleNear(posed.segments[2].angle,.2);
   b.objects[0]._stykIK[22].pinned = false;
   assert.equal(evaluatedFrame(e.report, 0, .5).objects[0]._stykIK[22].pinned, true);
 });
@@ -355,7 +356,7 @@ test('rig splitting preserves chain base and deleting an IK node removes its con
 test('curved links, arbitrary segment order, and off-chain branches preserve length and local articulation', () => {
   const e = fixture(); e.figure.segments[0].bend_rad = .3; e.figure.segments[1].bend_rad = -.2; e._invalidate();
   e.setNodeIK({enabled: true}); e.poseJoint(360, 265); point(g(e).joints.get(22), {x: 360, y: 265});
-  near(g(e).segments[0].length, 90); near(g(e).segments[0].bend, .3); near(g(e).segments[2].angle, 0);
+  near(g(e).segments[0].length, 90); near(g(e).segments[0].bend, .3); angleNear(g(e).segments[2].angle,0);
   const report = e.serialize(), object = report.keyframes[0].objects[0], figure = report.figure_types[0];
   figure.segments.reverse(); object.angles.reverse(); if (object.len_flag) object.lengths.reverse(); if (object.bend_flag) object.bends.reverse();
   point(buildGeometry(report, report.keyframes[0]).objects.get(0).joints.get(22), {x: 360, y: 265});

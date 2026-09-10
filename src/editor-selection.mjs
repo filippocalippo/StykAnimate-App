@@ -54,6 +54,7 @@ function selectedComponents(editor) {
 }
 
 function defaultBounds(geometry) {
+  if (geometry.fig?._styk?.movieclip && geometry.drawables?.length) return objectBounds(geometry.drawables);
   return objectBounds([
     ...geometry.segments.filter(segment => segment.seg.visible !== false).map(segment => ({
       ...segment, type: segment.seg.segment_type || 'line',
@@ -186,6 +187,19 @@ export const editorSelectionMethods = {
     return applySelection(this, ids);
   },
 
+  /** Order the actual selection; figure-only commands stay explicit for the
+   * figure inspector. Internal ordering uses the shared rig's native command. */
+  orderSelection(direction, {frameIndices} = {}) {
+    if (![1, -1, 'front', 'back'].includes(direction)) throw new Error('Choose a valid draw-order direction.');
+    if (!this.selectedObjects.length) return false;
+    if ((this.branchSelected || this.selectedObjects.length === 1) && this.figure?.segments[this.selectedJoint])
+      return this.moveBuilderOrder({kind: 'segment', index: this.selectedJoint},
+        direction === 1 ? 'up' : direction === -1 ? 'down' : direction, {branch: this.branchSelected});
+    if (this.report._styk?.layerSheet)
+      return this.applyFigureRange({kind: 'order', direction}, {ticks: frameIndices ? this.sheetEditTimes(frameIndices) : [this.tick]});
+    if (frameIndices) return this.orderFiguresInFrames(direction, frameIndices);
+    return direction === 'front' ? this.bringToFront() : direction === 'back' ? this.sendToBack() : this.moveSelectionLayer(direction);
+  },
   bringToFront() { return partitionLayers(this, true); },
   sendToBack() { return partitionLayers(this, false); },
 

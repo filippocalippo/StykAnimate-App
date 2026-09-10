@@ -32,6 +32,9 @@ try {
   });
   await page.waitForTimeout(500);
   const client=await page.context().newCDPSession(page);
+  await client.send('Performance.enable');
+  const clockMetrics=(await client.send('Performance.getMetrics')).metrics;
+  const navigationStart=clockMetrics.find(metric=>metric.name==='NavigationStart')?.value;
   await client.send('Profiler.enable');await client.send('Profiler.start');
   const measured=await page.evaluate(async()=>{
     const e=styk.editor,b=connectedBench,raf=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
@@ -43,6 +46,15 @@ try {
     const observer=new PerformanceObserver(list=>tasks.push(...list.getEntries().map(x=>({start:x.startTime,ms:x.duration}))));observer.observe({type:'longtask'});
     const heartbeat=now=>{if(last!==undefined)intervals.push(now-last);last=now;if(!done)requestAnimationFrame(heartbeat);};requestAnimationFrame(heartbeat);
     const measure=(name,fn)=>{const start=performance.now(),value=fn();(timings[name]??=[]).push(performance.now()-start);return value;};
+    const seekPresented=async(name,index)=>{
+      const start=performance.now();measure(name,()=>e.selectFrame(index));
+      await raf();
+      while(styk.state.editablePreparing||styk.performance().editingPresentation?.tick!==e.tick||styk.performance().editingPresentation?.revision!==e.revision){
+        if(performance.now()-start>10000)throw Error('Seek did not present the requested frame.');await raf();
+      }
+      await styk.state.renderer.device?.queue.onSubmittedWorkDone();
+      (timings[`${name}ToPresent`]??=[]).push(performance.now()-start);
+    };
     measure('coldSelection',()=>e.select(b.group.uid));await raf();
     const geometry=e.geometry,g=geometry.objects.get(e.selectedSlot),joint=g.segments.find(s=>!s.static);
     const capture=()=>{const geo=e.geometry;return b.group.affectedUids.map(uid=>{const object=e.evaluatedFrame.objects.find(o=>o.unique_id===uid),g=geo.objects.get(object.object_slot);return {uid,root:{...g.root},angles:[...object.angles],join:object.join?{...object.join}:null};});};
@@ -60,13 +72,13 @@ try {
       for(let step=0;step<12;step++){measure('move',()=>e.moveSelection(1,.5));await raf();}
       measure(iteration?'warmCommitMove':'coldCommitMove',()=>e.commitDrag());recordCommit();await raf();
       if(!iteration){
-        for(let i=0;i<8;i++){measure('authoredSeek',()=>e.selectFrame(Math.max(0,b.heaviest.i-(i%3))));await raf();}
-        e.selectFrame(b.heaviest.i);await raf();
+        for(let i=0;i<24;i++)await seekPresented('authoredSeek',Math.max(0,b.heaviest.i-(i%8)));
+        await seekPresented('authoredSeek',b.heaviest.i);
       }
       measure('undoMove',()=>e.undo());await raf();
     }
-    for(let i=0;i<8;i++){measure('seek',()=>e.selectFrame(Math.max(0,b.heaviest.i-(i%3))));await raf();}
-    e.selectFrame(b.heaviest.i);await raf();
+    for(let i=0;i<24;i++)await seekPresented('seek',Math.max(0,b.heaviest.i-(i%8)));
+    await seekPresented('seek',b.heaviest.i);
     done=true;observer.disconnect();e.markSaved();
     const summary=a=>{const sorted=a.slice().sort((a,b)=>a-b);return {n:a.length,p50:sorted[Math.floor(a.length*.5)],p95:sorted[Math.floor(a.length*.95)],max:sorted.at(-1)};};
     return {timings:Object.fromEntries(Object.entries(timings).map(([k,v])=>[k,summary(v)])),calls,commits,longTasks:tasks,frameIntervals:summary(intervals),poseChanged:b.poseChanged,poseUndo:b.poseUndo,rows:(styk.timeline.tracks??[]).map(t=>({id:t.id,kind:t.kind,name:t.name})),channels:e.animationChannels.length};
@@ -109,7 +121,7 @@ try {
   },{target,picked});
   await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
   await page.screenshot({path:`${output}/scene.png`});
-  await writeFile(`${output}/report.json`,JSON.stringify({source,mode,scene,...measured,pointer,errors},null,2));
+  await writeFile(`${output}/report.json`,JSON.stringify({source,mode,scene,navigationStart,...measured,pointer,errors},null,2));
   console.log(JSON.stringify({scene,timings:measured.timings,frameIntervals:measured.frameIntervals,longTasks:measured.longTasks,poseUndo:measured.poseUndo,errors}));
   if(errors.length||!measured.poseChanged||!measured.poseUndo)throw new Error('Connected pose/undo verification failed.');
   if(picked.kind!=='pose'||!pointer.changed||pointer.commands!==1||!pointer.restored)throw new Error(`Pointer verification failed: ${JSON.stringify(pointer)}`);

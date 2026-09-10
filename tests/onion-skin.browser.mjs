@@ -56,7 +56,7 @@ try {
       const sprite=new OffscreenCanvas(10,10),brush=sprite.getContext('2d');brush.fillStyle='red';brush.fillRect(0,0,10,10);
       const target=new OffscreenCanvas(10,10),context=target.getContext('2d');context.globalAlpha=.4;
       drawGeometry(context,{drawables:[{type:'image',slot:0,opacity:1,alpha:.5,seg:{},obj:{},start:{x:0,y:0},end:{x:10,y:0},angle:0,
-        asset:{anchor_length:10,anchor_angle_rad:0,anchor_start:{x:0,y:0}}}]},{url:()=>'',image:()=>Object.assign(sprite,{complete:true,naturalWidth:10})});
+        asset:{anchor_length:10,anchor_angle_rad:0,anchor_start:{x:0,y:0}}}]},{url:()=>'',image:()=>Object.assign(sprite,{complete:true,naturalWidth:10,naturalHeight:10})});
       const spriteAlpha=context.getImageData(5,5,1,1).data[3];
       // Product-level state: a single moving line makes before/current/after
       // ordering obvious in the screenshot and independent pixel assertions.
@@ -70,32 +70,33 @@ try {
     } finally {gpu.destroy();reference.destroy();fallback.destroy();}
   });
   await page.screenshot({path:path.join(output,'onion-before-current-after.png')});
-  // Exercise the app's persistent cache after enabling onion skin, with keys
-  // authored independently of the native frame list.
+  // Exercise the app's persistent cache after enabling onion skin. The app
+  // authors the layer sheet; legacy channel sampling is covered by unit tests.
   const authored=await page.evaluate(async()=>{
     const {emptyDocument,createObject,createFrame}=await import('/src/demo.mjs');
     const {editor,state}=styk,scene=emptyDocument(),figure=scene.figure_types[0];
     figure.segments=[{...figure.segments[0],length:100,thickness:18,angle_rad:0}];figure.segment_count=1;
     scene.keyframes=[createFrame([createObject(figure,1,180,270)],1)];
     editor.load(scene);editor.disableFrameDrafts();editor.select(1);
+    editor.sheetInsertFrames(['scene','camera',...editor.report._styk.layers.order],1,29);
     Object.assign(state.settings,{onionBefore:1,onionAfter:1,onionMode:'keyframes'});
     state.onion=true;styk.fit();
     const paint=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     await paint();
-    const target={kind:'figure',uid:1},observations=[];
+    const observations=[];
     const capture=async name=>{
       await paint();await state.renderer.device?.queue.onSubmittedWorkDone();
       const skins=state.renderer.last.onionFrames;
       observations.push({name,roots:skins.map(skin=>skin.geometry.objects.get(0).root.x)});
     };
-    editor.addAnimationKeys([0,10,20].map((tick,i)=>({target,property:'x',tick,value:[180,400,620][i]})));
+    for(const [tick,x] of [[0,180],[10,400],[20,620]]){
+      editor.sheetInsertKey(['layer-1'],tick);editor.seek(tick);editor.select(1);editor.updateObject({root_x:x});
+    }
     editor.seek(10);await capture('insert');
-    const channel=editor.animationChannel(target,'x'),future=channel.keys.find(key=>key.tick===20);
-    editor.setAnimationKey(channel.id,future.id,{value:740});await capture('edit');
-    editor.addAnimationKey(target,'x',15,560);await capture('insert-nearer');
-    const nearer=editor.animationChannel(target,'x').keys.find(key=>key.tick===15);
-    editor.moveAnimationKeys([{channelId:channel.id,keyIds:[nearer.id]}],10);await capture('retime');
-    editor.deleteAnimationKeys([{channelId:channel.id,keyIds:[future.id]}]);await capture('delete');
+    editor.seek(20);editor.updateObject({root_x:740});editor.seek(10);await capture('edit');
+    editor.sheetInsertKey(['layer-1'],15);editor.seek(15);editor.updateObject({root_x:560});editor.seek(10);await capture('insert-nearer');
+    editor.sheetMoveFrames(['layer-1'],15,15,10);await capture('retime');
+    editor.sheetClearKeys(['layer-1'],20);await capture('delete');
     editor.undo();await capture('undo');editor.redo();await capture('redo');
     return observations;
   });

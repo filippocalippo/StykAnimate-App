@@ -2,7 +2,7 @@
 import {validateScene} from './pivot/model.mjs';
 import {createFrame} from './demo.mjs';
 import {validateAnimationDocument} from './animation-channels.mjs';
-import {planDraftFrameAppend, rebaseDraftAnimation} from './frame-draft-animation.mjs';
+import {planDraftFrameAppend, rebaseDraftAnimation,placeAddedMovieclips} from './frame-draft-animation.mjs';
 
 const clone = value => structuredClone(value);
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
@@ -192,6 +192,29 @@ function figureRange(editor, draft, change) {
 }
 
 export const editorFrameDraftMethods = {
+  /** Placement edits belong to the saved timeline, not an Add-mode pose draft. */
+  editFrameDraftTimeline(operation) {
+    if(!this._frameDraftEnabled||this._frameDraftSuspended)return operation();
+    this._beforeFrameDraftGlobalEdit();
+    const draft=current(this),before=draft&&topologyState(this,draft),animation=this.report._styk.animation,previous=this._undo.at(-1);
+    this._frameDraftSuspended=true;
+    try {
+      const result=operation();
+      if(result?.then)throw new Error('Prepare timeline edits before publishing them.');
+      if(draft&&own(draft,'animationBaseline')){
+        const old=new Map((animation?.channels??[]).map(c=>[c.id,c])),after=this.report._styk.animation;
+        const changed=new Map((after?.channels??[]).filter(c=>old.get(c.id)!==c).map(c=>[c.id,c]));
+        const remaining=new Set((after?.channels??[]).map(c=>c.id));
+        const removed=new Set([...old.keys()].filter(id=>!remaining.has(id)));
+        draft.animationBaseline={version:1,...draft.animationBaseline,nextKeyId:after?.nextKeyId??1,
+          channels:[...(draft.animationBaseline?.channels??[]).filter(c=>!changed.has(c.id)&&!removed.has(c.id)),...changed.values()]};
+      }
+      if(!current(this))this._frameDraft=fresh(this,draft?.mode??'update');
+      const command=this._undo.at(-1);
+      if(command&&command!==previous&&before)Object.defineProperty(command,'frameDraftJournal',{value:{before,after:topologyState(this,this._frameDraft)},configurable:true});
+      sync(this);return result;
+    } finally {this._frameDraftSuspended=false;this._emit('frame-draft');}
+  },
   /** Enable only for the Simple timeline. Switching to Advanced keeps all edits. */
   enableFrameDrafts({mode = 'update', index = this.frameIndex, restoreSaved = true, empty = false} = {}) {
     if (!['add', 'update'].includes(mode)) throw new Error('Choose Add or Update frame mode.');
@@ -359,7 +382,7 @@ export const editorFrameDraftMethods = {
     let draft = current(this);
     if (!draft) draft = this._frameDraft = fresh(this, 'update');
     originalDraft = draft; wasDirty = Boolean(draft.baseline);
-    if (command.kind === 'topology') {
+    if (command.kind === 'topology' || command.kind === 'movieclip-poses') {
       Object.defineProperty(command, 'frameDraftTopology', {value: {
         before: topologyState(this, draft, command.before), after: topologyState(this, draft, command.after)}, configurable: true});
       return;
@@ -497,8 +520,8 @@ export const editorFrameDraftMethods = {
         this._frameDraft=fresh(this,'add'); sync(this);
         this._rangesEdit('Add keyframe',[{index:0,before:[clone(this.frame)],after:[source]}],{selectIndex:0});
       } finally {this._frameDraftSuspended=false;}
-    } else if (this.animationChannels.length || own(draft ?? {}, 'animationBaseline')) {
-      const source = blank ? createFrame([]) : clone(this.evaluatedFrame);
+    } else if (this.animationChannels.length || own(draft ?? {}, 'animationBaseline') || this.evaluatedFrame.objects.some(object=>object._stykMovieclip)) {
+      const source = blank ? createFrame([]) : placeAddedMovieclips(this,clone(this.evaluatedFrame));
       source.duration_raw = this.frame.duration_raw;
       const identity = this._nextFrameIdentity;
       let insert, animationPlan;
@@ -514,7 +537,7 @@ export const editorFrameDraftMethods = {
       try { this._rangesEdit('Add keyframe', changes, {selectIndex: index, animationPlan}); }
       finally { this._frameDraftSuspended = false; }
     } else {
-      const source = blank ? createFrame([]) : clone(this.frame), insert = this._newInsertedFrames([source])[0], changes = [];
+      const source = blank ? createFrame([]) : placeAddedMovieclips(this,clone(this.frame)), insert = this._newInsertedFrames([source])[0], changes = [];
       if (draft?.mode === 'add' && draft.baseline)
         changes.push({index: draft.index, before: [clone(this.frame)], after: [clone(draft.baseline)]});
       const index = frames.length; changes.push({index, before: [], after: [insert]});

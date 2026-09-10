@@ -7,6 +7,8 @@ import {validateObjectChanges, validateScene} from './pivot/model.mjs';
 import {animationChannelId, animationPropertyValue, validateAnimationDocument, validateAnimationValue} from './animation-channels.mjs';
 import {AUTHORING_PROPERTIES, isDiscreteAnimationProperty} from './animation-properties.mjs';
 import {splitPosePropertyChanges} from './pose-property-split.mjs';
+import {snapshotPoseFrame, snapshotPoseObject} from './pose-snapshot.mjs';
+import {translateIKTargets, remapIKFollowers} from './ik.mjs';
 
 const clone = value => structuredClone(value);
 const equal = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
@@ -44,13 +46,16 @@ function sample(editor, tick) {
   const entry = entries[low]; return {index: low, tick, frame: evaluatedFrame(editor.report, low, entry.count > 0 ? Math.min(1, (tick - entry.start) / entry.count) : 0, tick)};
 }
 function targets(editor, options) {
+  if (options.atPlayhead) return {authored: Boolean(editor.report._styk?.layerSheet || editor.animationChannels.length || editor.report._styk?.movieclipSource),
+    frames: [{index: editor.frameIndex, tick: editor.tick, frame: editor.selectionFrame}]};
+  if(editor.report._styk?.layerSheet&&options.indices?.sheetTicks)options={...options,ticks:options.indices.sheetTicks};
   if (options.ticks !== undefined) {
     const ticks = [...new Set(options.ticks)].sort((a, b) => a - b);
     if (ticks.some(tick => !Number.isInteger(tick) || tick < 0 || tick > 10000000)) throw new Error('Select whole animation ticks from 0 to 10,000,000.');
     return {authored: true, frames: ticks.map(tick => sample(editor, tick))};
   }
   const indices = editor._frameIndices(options.indices ?? [editor.frameIndex]);
-  if (editor.propertyChannels || editor.animationChannels.length) return {authored: true, frames: [...new Set(indices.map(index => editor.timeline[index].start))].map(tick => sample(editor, tick))};
+  if (editor.report._styk?.layerSheet || editor.propertyChannels || editor.animationChannels.length) return {authored: true, frames: [...new Set(indices.map(index => editor.timeline[index].start))].map(tick => sample(editor, tick))};
   return {authored: false, frames: indices.map(index => ({index, tick: editor.timeline[index].start, frame: editor.report.keyframes[index]}))};
 }
 function insertionPlan(editor, operation) {
@@ -69,19 +74,21 @@ function insertionPlan(editor, operation) {
   if (!clipboard) return null;
   const sourceObjects = clipboard.objects ?? [clipboard.object], sourceFigures = clipboard.figures ?? [clipboard.figure];
   const uidMap = new Map(sourceObjects.map(object => [object.unique_id, identity()])), types = new Map();
+  const existingTypes = new Map(editor.report.figure_types.map(figure => [figure.figure_type_id, figure]));
   for (const original of sourceFigures) {
-    let figure = clipboard.documentToken === editor._documentToken ? editor.report.figure_types.find(value => value.figure_type_id === original.figure_type_id) : null;
+    let figure = clipboard.documentToken === editor._documentToken && !clipboard.freshTypes?.has(original.figure_type_id) ? existingTypes.get(original.figure_type_id) : null;
     if (!figure) { figure = {...clone(original), figure_type_id: nextType++}; definitions.push(figure); }
-    types.set(original.figure_type_id, {figure, original});
+    types.set(original.figure_type_id, {figure, indices: new Map(original.segments.map((segment, index) => [segment.segment_id, index])),
+      handles: new Set([0, ...figure.segments.map(segment => segment.segment_id)])});
   }
   const offset = operation.offset ?? 0;
   if (!Number.isFinite(offset)) throw new Error('Paste offset must be finite.');
   const objects = sourceObjects.map(original => {
-    const object = clone(original), {figure, original: oldFigure} = types.get(original.figure_type_id);
+    const object = snapshotPoseObject(original), {figure, indices} = types.get(original.figure_type_id);
     object.unique_id = uidMap.get(original.unique_id); object.figure_type_id = figure.figure_type_id; object.root_x += offset; object.root_y += offset;
-    const old = new Map(oldFigure.segments.map((segment, index) => [segment.segment_id, index]));
+    translateIKTargets(object, offset, offset); remapIKFollowers(object, uidMap);
     for (const [field, enabled, fallback] of [['angles', true, 'angle_rad'], ['lengths', object.len_flag, 'length'], ['bends', object.bend_flag, 'bend_rad']])
-      if (enabled) object[field] = figure.segments.map(segment => original[field]?.[old.get(segment.segment_id)] ?? segment[fallback] ?? 0);
+      if (enabled) object[field] = figure.segments.map(segment => original[field]?.[indices.get(segment.segment_id)] ?? segment[fallback] ?? 0);
     if (object.join) {
       const target = uidMap.get(object.join.target_unique_id);
       if (target === undefined) object.join = null; else object.join.target_unique_id = target;
@@ -90,6 +97,11 @@ function insertionPlan(editor, operation) {
     if (clipboard.documentToken === editor._documentToken && editor.getLayer(layer)) hints.set(object.unique_id, layer);
     delete object.runtime_segments; return object;
   });
+  const originals = new Map(sourceObjects.map(object => [object.unique_id, object]));
+  for (let i = 0; i < objects.length; i++) if (objects[i].join) {
+    const parent = originals.get(sourceObjects[i].join.target_unique_id);
+    if (!parent || !types.get(parent.figure_type_id).handles.has(objects[i].join.target_handle_id)) objects[i].join = null;
+  }
   return {objects, order: (clipboard.order ?? sourceObjects.map(object => object.unique_id)).map(uid => uidMap.get(uid)), definitions, hints, nextUid};
 }
 function insert(frame, payload) {
@@ -153,7 +165,7 @@ export const editorRangeCommandMethods = {
     if (operation.kind === 'paste' && !payload) return zero();
     if (!payload && !uids.length) return zero();
     const report = payload?.definitions.length ? {...this.report, figure_types: [...this.report.figure_types, ...payload.definitions]} : this.report;
-    if (payload?.definitions.length) validateScene({...report, keyframes: [{objects: [], duration_raw: 1}]});
+    if (payload?.definitions.length) validateScene({...report, figure_types: payload.definitions, backgrounds: [], keyframes: [{objects: [], duration_raw: 1}]});
     const plans = [];
     for (const entry of target.frames) {
       const planned = payload && operation.kind !== 'duplicate' ? insert(entry.frame, payload) : planFigureFrameOperation(report, entry.frame, uids, {...operation, referenceUid: operation.referenceUid ?? this.selectedUid});
@@ -164,7 +176,7 @@ export const editorRangeCommandMethods = {
       plans.push({...entry, ...planned, beforeFrame: entry.frame});
     }
     if (!plans.length) return zero();
-    const label = labels[operation.kind], selection = this._selectionState(), insertedUids = payload?.order ?? [];
+    const label = options.label ?? labels[operation.kind], selection = this._selectionState(), insertedUids = payload?.order ?? [];
     if (target.authored) this._commitAuthoredFigureRange(plans, {...operation, uids}, payload, report, label, selection);
     else {
       const changes = plans.map(plan => diffFrame(plan.index, plan.beforeFrame, plan.frame));
@@ -172,9 +184,10 @@ export const editorRangeCommandMethods = {
       if (payload?.definitions.length) this.report.figure_types.push(...payload.definitions);
       for (const plan of plans) this.report.keyframes[plan.index] = plan.frame;
       if (payload) { this._nextUid = payload.nextUid; this._newLayerHints = payload.hints; }
-      this._invalidate(); if (insertedUids.length) this._selectIds(insertedUids);
+      const retainGeometry=Boolean(payload?.objects);
+      this._invalidate({retainGeometry}); if (insertedUids.length) this._selectIds(insertedUids);
       this._record({kind: 'figure-range', label, changes, ...(payload?.definitions.length ? {figureIndex, figures: clone(payload.definitions)} : {}),
-        beforeSelection: selection, afterSelection: this._selectionState(), structural: plans.some(plan => plan.structural), timing: false});
+        beforeSelection: selection, afterSelection: this._selectionState(), structural: plans.some(plan => plan.structural), timing: false, retainGeometry});
       this._emit('edit', {label, structural: plans.some(plan => plan.structural), changedUids: [...new Set(plans.flatMap(plan => plan.changedUids))], frameIndices: plans.map(plan => plan.index)});
     }
     return {changedFrames: plans.length, changedTicks: plans.map(plan => plan.tick), insertedUids};
@@ -203,6 +216,7 @@ export const editorRangeCommandMethods = {
     }
   },
   _commitAuthoredFigureRange(plans, operation, payload, report, label, selection) {
+    if(this.report._styk?.layerSheet)return this._commitSheetRange(plans,payload,label,selection);
     const entries = [], sources = {}; let nextSource = this._nextFrameIdentity;
     const numericOrder = operation.kind === 'order' && operation.numericOrder;
     const scalarOnly = numericOrder || operation.kind === 'scale' || (operation.kind === 'appearance' && !Object.keys(operation.patch ?? {}).some(key => !['field28', 'opacity'].includes(key)));
@@ -215,8 +229,8 @@ export const editorRangeCommandMethods = {
         let geometry = geometries.get(f); if (!geometry) { geometry = buildGeometry(r, f); geometries.set(f, geometry); } return geometry;
       }});
       if (!numericOrder && (split ? split.shapeIds.size || operation.kind === 'order' : !scalarOnly)) {
-        const source = clone(split?.frame ?? plan.frame), id = `frame-${nextSource++}`; source._styk = {...source._styk, frameId: id};
-        for (const object of source.objects) delete object.runtime_segments; sources[id] = source;
+        const source = snapshotPoseFrame(split?.frame ?? plan.frame), id = `frame-${nextSource++}`; source._styk = {...source._styk, frameId: id};
+        sources[id] = source;
         const independent=new Set([...changed].filter(uid=>this.propertyChannels&&operation.kind==='pose'||this.animationChannel({kind:'figure',uid},'pose')));
         for(const uid of independent)entries.push({target:{kind:'figure',uid},property:'pose',tick:plan.tick,value:{frameId:id}});
         const layers = new Set([...plan.beforeFrame.objects, ...plan.frame.objects].filter(object => changed.has(object.unique_id)&&!independent.has(object.unique_id)).map(object => payload?.hints.get(object.unique_id) ??
@@ -244,12 +258,14 @@ export const editorRangeCommandMethods = {
     }
     const animation = authoredDraft(this, entries, sources), sourceTable = {...this.report._styk.frameSources, ...sources};
     validateAnimationDocument({...report, _styk: {...this.report._styk, animation: animation.after, frameSources: sourceTable}});
+    const figureIndex = this.report.figure_types.length;
     if (payload?.definitions.length) this.report.figure_types.push(...payload.definitions);
     if (payload) { this._nextUid = payload.nextUid; this._newLayerHints = payload.hints; }
     if (Object.keys(sources).length) { this.report._styk.frameSources ??= {}; Object.assign(this.report._styk.frameSources, sources); this._registerFrameSources(Object.values(sources)); }
     this._nextFrameIdentity = nextSource; this.report._styk.animation = animation.after; this._invalidate({timing: true});
     if (payload?.order.length) this._selectIds(payload.order);
-    this._record({kind: 'animation', label, before: animation.before, after: animation.after, beforeSelection: selection, afterSelection: this._selectionState(), structural: true, timing: true});
+    this._record({kind: 'animation', label, before: animation.before, after: animation.after, beforeSelection: selection, afterSelection: this._selectionState(), structural: true, timing: true,
+      ...(payload?.definitions.length ? {figureDefinitionSplice: {index: figureIndex, figures: clone(payload.definitions)}} : {})});
     this._emit('edit', {label, animation: true, structural: true, timing: true, changedUids: [...new Set(plans.flatMap(plan => plan.changedUids))]});
   },
   addFigureInFrames(typeId, indices, options = {}) { return this.applyFigureRange({kind: 'add', typeId, x: options.x, y: options.y}, {...options, indices}); },

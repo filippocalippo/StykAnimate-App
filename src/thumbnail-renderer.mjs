@@ -108,7 +108,7 @@ export class ThumbnailRenderer {
     this.version++;
     if (
       detail.kind === "document" ||
-      detail.kind === "history" ||
+      (detail.kind === "history" && !detail.animation && !detail.frameIndices) ||
       detail.structural
     )
       this.fullSnapshot = true;
@@ -120,6 +120,7 @@ export class ThumbnailRenderer {
     this.currentAbort?.abort();
   }
   setPaused(paused) {
+    if(this.paused===Boolean(paused))return;
     this.paused = Boolean(paused);
     if (this.paused) this.currentAbort?.abort();
   }
@@ -229,7 +230,7 @@ export class ThumbnailRenderer {
     this.definitionsChanged = false;
     full ? this.stats.snapshots++ : this.stats.patches++;
   }
-  renderThumbnail = (index, canvas, { signal, inbetween, storedFrames = this.options.storedFrames } = {}) => {
+  renderThumbnail = (index, canvas, { signal, inbetween, tick, storedFrames = this.options.storedFrames } = {}) => {
     if (this.disposed || this.paused || signal?.aborted)
       return Promise.resolve(false);
     // A caller outside the virtual filmstrip still cannot queue an unbounded scene backlog.
@@ -260,6 +261,7 @@ export class ThumbnailRenderer {
               width: canvas.width,
               height: canvas.height,
               storedFrames,
+              ...(tick!==undefined?{tick}:{}),
               ...(inbetween ? {inbetween} : {}),
             },
             controller.signal,

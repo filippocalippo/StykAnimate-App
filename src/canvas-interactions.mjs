@@ -166,6 +166,32 @@ export function getPivotHandles(geometry, {
   return result;
 }
 
+const handleSpatialIndices=new WeakMap();
+function nearbyHandles(handles,point,options){
+  // The caller supplies the scale only for a uniform affine projection. Other
+  // projections retain the exact general scan. Published handle arrays are immutable.
+  if(!options.handles||!options.project&&!options.spatial)return null;
+  const scale=options.project?Math.abs(options.projectionScale):1;
+  if(handles.length<512||!Number.isFinite(scale)||scale<=0)return null;
+  let index=handleSpatialIndices.get(handles);
+  if(!index){
+    const cells=new Map();let screenRadius=0,worldRadius=0;
+    handles.forEach((handle,i)=>{
+      const key=`${Math.floor(handle.point.x/32)},${Math.floor(handle.point.y/32)}`;
+      let cell=cells.get(key);if(!cell)cells.set(key,cell=[]);cell.push(i);
+      screenRadius=Math.max(screenRadius,handle.screenRadius??0);worldRadius=Math.max(worldRadius,handle.radius??0);
+    });
+    handleSpatialIndices.set(handles,index={cells,screenRadius,worldRadius});
+  }
+  const radius=Math.max(options.minRadius??0,options.radius??(options.project?index.screenRadius:index.worldRadius))/scale*(options.nearest?1:Math.SQRT2);
+  if(!Number.isFinite(radius))return null;
+  const x0=Math.floor((point.x-radius)/32),x1=Math.floor((point.x+radius)/32),y0=Math.floor((point.y-radius)/32),y1=Math.floor((point.y+radius)/32);
+  if((x1-x0+1)*(y1-y0+1)>256)return null;
+  const candidates=[];
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)for(const i of index.cells.get(`${x},${y}`)??[])candidates.push(i);
+  return candidates.sort((a,b)=>b-a);
+}
+
 /** First native open-square hit, without a distance or selected-first pass.
  * point and optional radius override use world coordinates. Reuse descriptors
  * via options.handles for allocation-free scanning of an unchanged scene.
@@ -174,8 +200,10 @@ export function pickCanvasHandle(geometry, point, options = {}) {
   if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
   const handles = options.handles || getPivotHandles(geometry, options);
   const projectedPoint = options.project ? options.project(point) : point;
+  const candidates=nearbyHandles(handles,point,options);
   let best = null;
-  for (let index = handles.length - 1; index >= 0; index--) {
+  for (let position=0;position<(candidates?.length??handles.length);position++) {
+    const index=candidates?candidates[position]:handles.length-1-position;
     const handle = handles[index], center = options.project ? options.project(handle.point) : handle.point;
     const radius = Math.max(options.minRadius ?? 0, options.radius ?? (options.project ? handle.screenRadius : handle.radius));
     const dx = projectedPoint.x - center.x, dy = projectedPoint.y - center.y;

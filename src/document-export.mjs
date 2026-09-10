@@ -25,10 +25,10 @@ export class DocumentExporter {
   }
 
   /** @returns {Promise<Blob>} Native .styk/.stkz or Pivot .piv/.stk bytes. */
-  async export(report, {sourceId, format = 'styk', name, figureTypeId, figureUid, tick, signal, getRevision} = {}) {
+  async export(report, {sourceId, format = 'styk', name, figureTypeId, figureUid, figureUids, tick, signal, getRevision} = {}) {
     if (this.disposed) throw new Error('The document exporter has been disposed.');
     if (!report || typeof report !== 'object') throw new TypeError('Export requires an editable document.');
-    if (!['piv', 'stk', 'styk', 'stkz'].includes(format)) throw new Error('Choose a .piv, .stk, .styk, or .stkz export.');
+    if (!['piv', 'stk', 'styk', 'stkz', 'stykmov'].includes(format)) throw new Error('Choose a .piv, .stk, .styk, .stkz, or .stykmov export.');
     if (signal?.aborted) throw abortError();
     const originalRevision = getRevision?.(), started = performance.now();
     const worker = new Worker(new URL('./document-export-worker.mjs', import.meta.url), {type: 'module', name: 'StykAnimate document export'});
@@ -69,7 +69,7 @@ export class DocumentExporter {
     signal?.addEventListener('abort', abort, {once: true});
     const timer = this.timeoutMs > 0 ? setTimeout(() => fail(new Error('Document export timed out.')), this.timeoutMs) : null;
     try {
-      await request('start', {options: {sourceId, format, name, figureTypeId, figureUid, tick, baseURL: this.baseURL, token: this.token}});
+      await request('start', {options: {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, baseURL: this.baseURL, token: this.token}});
       const snapshotStarted = performance.now();
       const chunks = documentChunks(report, {maxRecords: this.targetRecords, maxBytes: this.targetBytes,
         timeBudgetMs: 3, omitRuntimeSegments: true});

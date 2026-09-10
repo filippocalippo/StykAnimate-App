@@ -35,6 +35,13 @@ export function portableFigure(figure, legacy) {
     }
   }
   if (legacy) next.implicit = false;
+  if(next._styk?.movieclip){
+    const visit=document=>{
+      document.figure_types=document.figure_types.map(f=>portableFigure(f,document.version<5));
+      if(document._styk?.movieclipSource?.document)visit(document._styk.movieclipSource.document);
+    };
+    visit(next._styk.movieclip.document);
+  }
   return next;
 }
 

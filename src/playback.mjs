@@ -9,6 +9,9 @@ import {playbackRetentionSnapshot,unchangedPlaybackTicks} from './playback-reten
 
 const abortError = message => { const error = new Error(message); error.name = 'AbortError'; return error; };
 const closePacket = closePacketBitmaps;
+const yieldToInput = () => globalThis.scheduler?.yield ? scheduler.yield() : new Promise(resolve => {
+  const channel=new MessageChannel();channel.port1.onmessage=()=>{channel.port1.close();channel.port2.close();resolve();};channel.port2.postMessage(null);
+});
 
 /**
  * Bounded CPU packet LRU backed by one native-evaluation worker. Rendering calls
@@ -40,6 +43,14 @@ export class PlaybackCache {
     this.invalidate(); this.report = report?.document ?? report?.report ?? report; this.scale = scale; this.cameraEnabled = cameraEnabled;
     this.documentRevision = revision; this.storedFrames = storedFrames; this._refreshTimeline();
     this.needsLoad = true; this._loadWorker(); return this;
+  }
+  setInteractionActive(active) {
+    this.interactionActive=Boolean(active);
+    if(!active){this._releaseInteraction?.();this._releaseInteraction=null;this._interactionPromise=null;}
+  }
+  async _yieldLoad() {
+    await yieldToInput();
+    if(this.interactionActive&&!this.disposed)await (this._interactionPromise??=new Promise(resolve=>{this._releaseInteraction=resolve;}));
   }
   updateView({ scale = this.scale, cameraEnabled = this.cameraEnabled, storedFrames = this.storedFrames } = {}) {
     if (this.disposed) throw new Error('The playback cache has been disposed.');
@@ -113,6 +124,7 @@ export class PlaybackCache {
         const sent = this._sendLoad({type: 'patch-chunk', revision: generation, sequence: sequence++, chunk: next.value});
         this.stats.loadMaxTaskMs = Math.max(this.stats.loadMaxTaskMs, performance.now() - step);
         this.stats.maxChunkBytes = Math.max(this.stats.maxChunkBytes, next.value.estimatedBytes || 0); await sent;
+        await this._yieldLoad();
       }
       await this._sendLoad({type: 'patch-complete', revision: generation, sequence}, 'loaded');
       if (generation === this.revision) {
@@ -172,6 +184,7 @@ export class PlaybackCache {
       for (const chunk of documentChunks(renderReport)) {
         if (revision !== this.revision || this.disposed) throw abortError('Playback snapshot was superseded.');
         await this._sendLoad({ type: 'load-chunk', revision, sequence: sequence++, chunk, options });
+        await this._yieldLoad();
       }
       await this._sendLoad({ type: 'load-complete', revision, sequence }, 'loaded');
       if (revision === this.revision) { this.stats.loadMs = performance.now() - start; this._mirrorAvailable = true; this._mirrorTables = tables; this._mirrorSources = sources; }
@@ -350,6 +363,7 @@ export class PlaybackCache {
   }
   dispose() {
     if (this.disposed) return;
+    this.setInteractionActive(false);
     this.disposed = true; this.invalidate(); this.worker.terminate(); this.report = null; this.entries = [];
   }
 }

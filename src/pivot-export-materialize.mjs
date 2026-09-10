@@ -3,18 +3,22 @@
 import {evaluatedFrame, nativeTimeline, timeline, buildGeometry} from './pivot/geometry.mjs';
 import {validateScene} from './pivot/model.mjs';
 import {animationChannels, animationChannelId, validateAnimationDocument} from './animation-channels.mjs';
-import {applyLayerOrder, layerVisible, validateLayerState} from './layers.mjs';
+import {applyLayerOrder, layerVisible, validateLayerState,ensureLayerState} from './layers.mjs';
 import {materializeSimpleFrameDraftForPivot} from './pivot-frame-draft.mjs';
 import {createNativeStyleTable, hasNativeStyleOverrides} from './pivot-style-materialize.mjs';
 import {hasAnimationOrigins} from './animation-origin.mjs';
 
 import {hasFrameEasing} from './keyframe-easing.mjs';
 import {hasPinnedIK} from './ik.mjs';
+import {movieclipTypes} from './movieclips.mjs';
+import {createMovieclipMaterializer} from './movieclip-materialize.mjs';
 const hasIK = report => report.keyframes.some(frame => frame.objects.some(hasPinnedIK));
 const MAX_FRAMES = 100000, MAX_OBJECTS = 2000000, MAX_BACKGROUNDS = 65534;
 const activeChannels = report => animationChannels(report).filter(channel => channel.property === 'pose' || channel.keys.length);
 
 export function needsPivotMaterialization(report) {
+  if (report._styk?.layerSheet) return true;
+  if (movieclipTypes(report).size || report._styk?.movieclipSource) return true;
   if (hasIK(report)) return true;
   if (hasFrameEasing(report)) return true;
   if (activeChannels(report).length) return true;
@@ -74,6 +78,21 @@ function sampleAt(report, rows, tick, hidden) {
 
 export function materializePivotDocument(report) {
   report = materializeSimpleFrameDraftForPivot(report);
+  if (report.keyframes.length && movieclipTypes(report).size) {
+    const materializer=createMovieclipMaterializer(report),rows=timeline(report),total=rows.at(-1).start+rows.at(-1).count;
+    if(total>MAX_FRAMES)throw new Error('Movieclip export exceeds the 100,000-frame limit.');
+    const frames=[];let index=0,objects=0;
+    for(let tick=0;tick<total;tick++){
+      while(index+1<rows.length&&rows[index+1].start<=tick)index++;
+      const row=rows[index],frame=materializer.frame(evaluatedFrame(report,index,row.count?(tick-row.start)/row.count:0,tick));
+      frame.duration_raw=1;objects+=frame.objects.length;if(objects>MAX_OBJECTS)throw new Error('Movieclip export exceeds the object limit.');frames.push(frame);
+    }
+    const metadata={...report._styk};delete metadata.animation;delete metadata.frameSources;delete metadata.movieclipSource;delete metadata.layerSheet;
+    const fixed=metadata.layers?.fixed;delete metadata.layers;
+    const output={...report,figure_types:materializer.figures,keyframes:frames,_styk:metadata,auto_easing:false,auto_easing_disabled_raw:1};
+    if(fixed)ensureLayerState(output).fixed=fixed;
+    return materializePivotDocument(output);
+  }
   if (report.keyframes.length === 0) {
     // The working placeholder is absent from native stored-frame export. Its
     // authored overlays cannot create stored exposures after Delete All.
@@ -88,15 +107,16 @@ export function materializePivotDocument(report) {
   validateAnimationDocument(report);
   if (report._styk?.layers) validateLayerState(report._styk.layers);
   const channels = activeChannels(report), layers = report._styk?.layers;
-  const authored = hasIK(report) || hasFrameEasing(report) || channels.length > 0 || hasAnimationOrigins(report) || hasNativeStyleOverrides(report) || layers?.order.some(id => layers.byId[id]?.visible === false), rows = nativeTimeline(report), outputRows = timeline(report);
+  const authored = !!report._styk?.layerSheet || hasIK(report) || hasFrameEasing(report) || channels.length > 0 || hasAnimationOrigins(report) || hasNativeStyleOverrides(report) || layers?.order.some(id => layers.byId[id]?.visible === false), rows = nativeTimeline(report), outputRows = timeline(report);
   const totalTicks = outputRows.at(-1).start + outputRows.at(-1).count;
-  const {events: hidden, extraSources} = authored ? hiddenExposures(report, rows, channels) : {events: [], extraSources: {}};
+  const {events: hidden, extraSources} = authored && !report._styk?.layerSheet ? hiddenExposures(report, rows, channels) : {events: [], extraSources: {}};
   const outputCount = authored ? totalTicks + hidden.length : report.keyframes.length;
   if (outputCount < 1 || outputCount > MAX_FRAMES) throw new Error(`Native Pivot export needs ${outputCount.toLocaleString()} keys; the supported limit is ${MAX_FRAMES.toLocaleString()}. Reduce the authored duration before exporting.`);
   const output = {...report, backgrounds: [...(report.backgrounds ?? [])], keyframes: []};
+  if(report._styk?.layerSheet)output.version=5;
   const styleTypeId = createNativeStyleTable(output);
   if (output._styk) {
-    output._styk = {...output._styk}; delete output._styk.animation; delete output._styk.layers; delete output._styk.frameSources;
+    output._styk = {...output._styk}; delete output._styk.animation; delete output._styk.layers; delete output._styk.frameSources; delete output._styk.layerSheet;
   }
   if (authored) { output.auto_easing = false; output.auto_easing_disabled_raw = 1; output.auto_easing_source = 'file'; }
   const colorIds = new Map(output.backgrounds.filter(bg => bg.kind === 2).map(bg => [bg.color, bg.background_id]));

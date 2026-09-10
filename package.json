@@ -75,14 +75,18 @@
       { "from": "build/video-encoder", "to": "video-encoder", "filter": ["**/*"] }
     ],
     "fileAssociations": [
+      {"ext":"nodes","name":"Stick Nodes figure","role":"Viewer"},
+      {"ext":"nodemc","name":"Stick Nodes movie clip","role":"Viewer"},
+      {"ext":"stknds","name":"Stick Nodes project","role":"Viewer"},
       { "ext": "piv", "name": "Pivot animation", "role": "Editor" },
       { "ext": "stk", "name": "Pivot stick figure", "role": "Editor" },
+      { "ext": "stykmov", "name": "StykAnimate movieclip", "role": "Editor" },
       { "ext": "stkz", "name": "StykAnimate figure", "role": "Editor" },
       { "ext": "styk", "name": "StykAnimate project", "role": "Editor" }
     ],
     "win": { "target": ["nsis", "portable"], "signAndEditExecutable": false,
       "extraResources": [{"from":"native/bin","to":"vfw","filter":["build-info.json","x86/*.exe","x64/*.exe"]}] },
-    "nsis": { "artifactName": "StykAnimate-${version}-Setup-${arch}.${ext}", "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true },
+    "nsis": { "include": "desktop/installer.nsh", "artifactName": "StykAnimate-${version}-Setup-${arch}.${ext}", "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true },
     "portable": { "artifactName": "StykAnimate-${version}-Portable-${arch}.${ext}" },
     "mac": { "target": ["dmg", "zip"], "category": "public.app-category.graphics-design", "hardenedRuntime": true },
     "linux": { "target": ["AppImage"], "category": "Graphics" }

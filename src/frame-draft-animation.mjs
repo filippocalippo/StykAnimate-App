@@ -2,8 +2,22 @@
  * Planning reads a stored projection and publishes no partial animation state. */
 import {storedFrameReport} from './pivot-frame-draft.mjs';
 import {planAuthoredClipboard} from './frame-clipboard-authored.mjs';
-import {animationEndTick} from './animation-channels.mjs';
-import {nativeTimeline} from './pivot/geometry.mjs';
+import {animationEndTick,animationChannelId} from './animation-channels.mjs';
+import {nativeTimeline,evaluatedFrame} from './pivot/geometry.mjs';
+import {movieclipTypes,playbackSettings} from './movieclips.mjs';
+
+export function placeAddedMovieclips(editor,frame){
+  const types=movieclipTypes(editor.report);if(!types.size)return frame;
+  const report=storedFrameReport(editor.report,{validate:false}),rows=nativeTimeline(report);
+  let index=0;while(index+1<rows.length&&rows[index+1].start<=editor.tick)index++;
+  const row=rows[index],before=evaluatedFrame(report,index,row.count?(editor.tick-row.start)/row.count:0,editor.tick);
+  const existing=new Set(before.objects.map(o=>o.unique_id)),at=(rows.at(-1)?.start??0)+(report.keyframes.at(-1)?.duration_raw??0),delta=at-editor.tick;
+  for(const object of frame.objects)if(types.has(object.figure_type_id)&&!existing.has(object.unique_id)){
+    const p=playbackSettings(object);object._stykMovieclip={...p,start:Math.max(0,p.start+delta),end:(p.end??editor.tick+frame.duration_raw)+delta,
+      ...(p.restarts?{restarts:p.restarts.map(key=>({...key,tick:key.tick+delta})).filter(key=>key.tick>=0)}:{})};
+  }
+  return frame;
+}
 
 export function planDraftFrameAppend(editor, frame) {
   let report = storedFrameReport(editor.report, {validate: false});
@@ -22,7 +36,18 @@ export function planDraftFrameAppend(editor, frame) {
   const append = animationEndTick(report) <= at && (report._styk.animation?.channels ?? []).every(channel => channel.keys.every(key => key.tick < at));
   const plan = planAuthoredClipboard(view, {frames: [frame], assets: {layers: {additions: []}},
     index: report.keyframes.length, nextFrameIdentity: editor._nextFrameIdentity, append, trustedSource: true, authoringAppend:editor.propertyChannels});
-  return {before: editor.report._styk.animation ?? null, after: plan?.after ?? report._styk.animation ?? null,
+  let after=plan?.after??report._styk.animation??null;
+  const clips=frame.objects.filter(object=>object._stykMovieclip?.start===at);
+  if(clips.length){
+    const owners=new Set(clips.map(object=>animationChannelId({kind:'figure',uid:object.unique_id},'pose')));
+    after={version:1,nextKeyId:1,...after,channels:[...(after?.channels??[]).filter(channel=>!owners.has(channel.id)),...clips.map(object=>{
+      const uid=object.unique_id,target={kind:'figure',uid};
+      return {id:animationChannelId(target,'pose'),target,property:'pose',clipEnd:object._stykMovieclip.end,
+        keys:[...(at>0?[{id:`clip-add-blank-${uid}`,tick:0,interpolation:'hold',value:{frameId:null}}]:[]),
+          {id:`clip-add-${uid}`,tick:at,interpolation:'hold',value:{frameId:frame._styk.frameId}}]};
+    })]};
+  }
+  return {before: editor.report._styk.animation ?? null, after,
     frameSourceChanges: plan?.frameSourceChanges ?? [], nextFrameIdentity: plan?.nextFrameIdentity ?? editor._nextFrameIdentity};
 }
 

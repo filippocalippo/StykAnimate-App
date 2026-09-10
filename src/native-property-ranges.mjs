@@ -242,8 +242,9 @@ export function commitNativePoseRange(token) {
   if(drag?.authored && editor.propertyChannels) {
     editor.cancelDrag();
     const selected=new Set(token.selection.uids),plans=[];
-    for(const index of token.indices) {
-      const tick=editor.timeline[index].start,source=evaluatedFrame(editor.report,index,0,tick);
+    const targets=token.sheetTicks?token.sheetTicks.map(tick=>({tick,index:Math.max(0,editor.timeline.findLastIndex(row=>row.start<=tick))})):token.indices.map(index=>({index,tick:editor.timeline[index].start}));
+    for(const {index,tick} of targets) {
+      const row=editor.timeline[index],source=evaluatedFrame(editor.report,index,row.count?(tick-row.start)/row.count:0,tick);
       const eligible=new Set(source.objects.filter(object=>selected.has(object.unique_id)).map(object=>object.unique_id));
       if(!eligible.size)continue;
       const slots=affectedSlots(source,eligible,['root_x','root_y'].includes(key)||key.startsWith('group_'));

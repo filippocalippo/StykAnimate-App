@@ -1,13 +1,14 @@
-import {_electron as electron} from 'playwright';
+import {_electron as electron,chromium} from 'playwright';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const root=process.cwd(),output=path.join(root,'artifacts',`editable-app-${Date.now()}`);await mkdir(output,{recursive:true});
-const app=await electron.launch({args:[root],cwd:root,env:{...process.env,STYK_USER_DATA_DIR:path.join(output,'profile')}});
+const browser=process.env.STYK_BROWSER_URL?await chromium.launch({channel:'chrome',headless:true}):null;
+const app=browser?null:await electron.launch({args:[root],cwd:root,env:{...process.env,STYK_USER_DATA_DIR:path.join(output,'profile')}});
 const checks=[],errors=[];let page;
 try{
-  page=await app.firstWindow();
-  await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];w.setIgnoreMouseEvents(true);w.setFocusable(false);w.webContents.setBackgroundThrottling(false);});
+  page=browser?await browser.newPage():await app.firstWindow();if(browser)await page.goto(process.env.STYK_BROWSER_URL);
+  if(app)await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];w.setIgnoreMouseEvents(true);w.setFocusable(false);w.webContents.setBackgroundThrottling(false);});
   page.on('pageerror',error=>errors.push(error.message));await page.waitForFunction(()=>window.styk?.ready);
   await page.evaluate(async()=>{
     const {createDemo}=await import('/src/demo.mjs');styk.editor.load(createDemo());styk.editor.markSaved();
@@ -63,4 +64,4 @@ try{
   await exact('Dragging while preparation is pending preserves the gesture and exact output');
   assert.deepEqual(errors,[]);
 }catch(error){errors.push(error.stack);await page?.screenshot({path:path.join(output,'failure.png')});throw error;}
-finally{await writeFile(path.join(output,'report.json'),JSON.stringify({checks,errors},null,2));console.log('REPORT',output);await app.evaluate(({app})=>app.exit(0)).catch(()=>{});}
+finally{await writeFile(path.join(output,'report.json'),JSON.stringify({checks,errors},null,2));console.log('REPORT',output);if(browser)await browser.close();else await app.evaluate(({app})=>app.exit(0)).catch(()=>{});}

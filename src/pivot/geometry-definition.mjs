@@ -1,8 +1,17 @@
-/** Compile definition-only traversal data. The owner scopes this cache to one
- * geometry build, so mutable figure edits need no global invalidation protocol.
- * Instance coordinates, Float32 rounding, styles and warnings stay in the builder.
+/** Retain definition traversal plans across frames, checking only the fields
+ * that affect topology. In-place edits are detected without allocating maps on
+ * every frame. Coordinates, styles and native rounding stay in the builder.
  */
+const plans = new WeakMap();
 export function geometryDefinition(figure) {
+  const cached = plans.get(figure), current = figure.segments || [], polygons = figure.polyfills || [];
+  if (cached && cached.plan.segments === current && cached.ids.length === current.length * 2 &&
+      cached.polygons.length === polygons.length && current.every((segment, i) =>
+        Number(segment.segment_id) === cached.ids[i * 2] && Number(segment.parent_id) === cached.ids[i * 2 + 1]) &&
+      polygons.every((polygon, i) => {
+        const ids = polygon.segment_ids || [], previous = cached.polygons[i];
+        return ids.length === previous.length && ids.every((id, j) => Number(id) === previous[j]);
+      })) return cached.plan;
   const segments = figure.segments || [], ids = new Map(), children = new Map(), order = [];
   for (let i = 0; i < segments.length; i++) ids.set(Number(segments[i].segment_id), i);
   for (let i = 0; i < segments.length; i++) {
@@ -22,7 +31,7 @@ export function geometryDefinition(figure) {
   // exclude unreachable cyclic segments exactly as the native builder does.
   const edges = new Map();
   for (const i of order) edges.set(`${segments[i].parent_id}:${segments[i].segment_id}`, i);
-  const polygons = (figure.polyfills || []).map(poly => {
+  const polygonPlans = (figure.polyfills || []).map(poly => {
     const handles = poly.segment_ids || [];
     return {first: handles.length ? Number(handles[0]) : undefined,
       edges: handles.map((id, j) => {
@@ -31,5 +40,8 @@ export function geometryDefinition(figure) {
         return {end: b, index: forward ?? backward, reverse: forward === undefined};
       })};
   });
-  return {segments, ids, order, polygons, children};
+  const plan = {segments, ids, order, polygons: polygonPlans, children};
+  plans.set(figure, {plan, ids: segments.flatMap(segment => [Number(segment.segment_id), Number(segment.parent_id)]),
+    polygons: polygons.map(polygon => (polygon.segment_ids || []).map(Number))});
+  return plan;
 }

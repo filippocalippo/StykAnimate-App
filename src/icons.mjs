@@ -161,6 +161,8 @@ const shapes = Object.freeze({
     '<rect width="18" height="18" x="3" y="3" rx="2" ry="2" /> <circle cx="9" cy="9" r="2" /> <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />',
   camera:
     '<path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5" /> <rect x="2" y="6" width="14" height="12" rx="2" />',
+  scene:
+    '<rect x="3" y="8" width="18" height="13" rx="2"/><path d="M3 8h18M3 8l-1-4 18-3 1 4-18 3M7 3l3 4m3-5 3 4M7 13h10M7 17h6"/>',
   clock: '<circle cx="12" cy="12" r="10" /> <path d="M12 6v6h4" />',
   cut: '<circle cx="6" cy="6" r="3" /> <path d="M8.12 8.12 12 12" /> <path d="M20 4 8.12 15.88" /> <circle cx="6" cy="18" r="3" /> <path d="M14.8 14.8 20 20" />',
   clipboard:

@@ -30,13 +30,17 @@ export function initStudioShell({editor, state, setTool, renderAssets, showComma
   document.getElementById('object-actions').addEventListener('click', event => {
     showCommandMenu([
       ['duplicate', 'duplicate', 'Duplicate selection', 'Ctrl D', !editor.object],
+      ['add-to-library', 'plus', 'Add to library', '', !editor.object],
       ['mirror', 'flip', 'Flip horizontally', '', !editor.object],
       ['rotate', 'rotate', 'Rotate 15°', '', !editor.object],
       ['center', 'center', 'Center selection', '', !editor.object],
       ['reset-pose', 'undo', 'Reset pose', '', !editor.object],
+      ['movieclip-create', 'frame', 'Create movieclip', '', !editor.object],
+      ['movieclip-edit', 'frame', 'Edit movieclip', '', !editor.figure?._styk?.movieclip],
+      ['movieclip-range', 'frame', 'Movieclip from frame range', ''],
       ['toggle-isolate', 'detach', state.isolateMode ? 'Disable joint isolation' : 'Isolate joint', 'Caps Lock', !editor.object],
-      ['layer-up', 'bring-to-front', 'Bring forward', '', !editor.object],
-      ['layer-down', 'send-to-back', 'Send backward', '', !editor.object],
+      ['selection-up', 'bring-to-front', 'Bring forward', '', !editor.object],
+      ['selection-down', 'send-to-back', 'Send backward', '', !editor.object],
       null,
       ['delete', 'trash', 'Delete selection', 'Delete', !editor.object],
       null,
@@ -78,7 +82,7 @@ export function initStudioShell({editor, state, setTool, renderAssets, showComma
     document.getElementById('edit-scope').textContent = scopeText;
     document.getElementById('leave-rig').hidden = mode !== 'rig';
     document.getElementById('selection-summary').textContent = scopeText;
-    document.getElementById('timeline-workflow').textContent = state.settings.timelineMode === 'simple' ? 'Frame-by-frame ⌄' : 'Keyframes ⌄';
+    document.getElementById('timeline-workflow').textContent = state.settings.timelineMode === 'simple' ? 'Frame-by-frame ⌄' : 'Layers & Frames ⌄';
     const hint = document.getElementById('viewport-hint');
     if (!hint.textContent) hint.textContent = 'Drag to select · Shift-click to add · Drag a joint to pose';
     hint.hidden = Boolean(state.playing || state.previewing || ['select', 'pose', 'hand'].includes(state.tool));

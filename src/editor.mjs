@@ -37,7 +37,12 @@ import {rotateOriginSupport,mirrorOriginSupport,resetOriginSupport} from './anim
 import {applySparseClipboardFrames} from './editor-clipboard-sparse.mjs';
 import {animationHistoryBytes} from './animation-history.mjs';
 import {editorIKMethods} from './editor-ik.mjs';
-import {hasPinnedIK, translateIKTargets} from './ik.mjs';
+import {editorMovieclipMethods, applyMovieclipCommand} from './editor-movieclips.mjs';
+import {editorLayerSheetMethods, initializeLayerSheet, applyLayerSheetCommand} from './editor-layer-sheet.mjs';
+import {validateLayerSheet} from './layer-sheet.mjs';
+import {isMovieclip, invalidateMovieclipTypes,movieclipSourceFrames} from './movieclips.mjs';
+import {hasPinnedIK, translateIKTargets, remapIKFollowers} from './ik.mjs';
+import {snapshotPoseObject} from './pose-snapshot.mjs';
 
 const clone = value => structuredClone(value);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -111,14 +116,15 @@ function resolveJoinSelection(frame, uids, ancestors = false) {
  * caches are invalidated independently, avoiding whole-project work while posing.
  */
 export class Editor extends EventTarget {
-  constructor({demo = true, historyLimit = 80, historyBytes = 48 * 1024 * 1024, propertyChannels = false} = {}) {
+  constructor({demo = true, historyLimit = 80, historyBytes = 48 * 1024 * 1024, propertyChannels = false, layerTimeline = false} = {}) {
     super(); this.historyLimit = historyLimit; this.historyBytes = historyBytes; this.propertyChannels = propertyChannels;
+    this.layerTimeline=layerTimeline;
     this._undo = []; this._redo = []; this._historySize = 0; this._nextUid = 1;
     this._revision = 0; this._savedRevision = 0; this._revisionSerial = 0;
     this.load(demo ? createDemo() : emptyDocument());
   }
   get frame() { return this._authoredPoseEdit?.frame ?? this.report.keyframes[this.frameIndex]; }
-  get selectionFrame() { return this._authoredPoseEdit?.frame ?? (this.animationChannels.length ? this.evaluatedFrame : this.frame); }
+  get selectionFrame() { return this._authoredPoseEdit?.frame ?? (this.report._styk?.layerSheet || this.animationChannels.length ? this.evaluatedFrame : this.frame); }
   get selectedUid() {
     if (!this.selectedUids?.has(this._selectedUid)) this._selectedUid = [...(this.selectedUids ?? [])].at(-1) ?? null;
     return this._selectedUid;
@@ -145,6 +151,7 @@ export class Editor extends EventTarget {
   }
   get totalTicks() { const last = this.timeline.at(-1); return last ? last.start + last.count : 0; }
   get evaluatedFrame() {
+    if(this._sheetPropertyPreview)return this._sheetPropertyPreview;
     if (this._authoredPoseEdit) return this._authoredPoseEdit.frame;
     const entry = this.timeline[this.frameIndex];
     const t = entry?.count > 1 ? (this.tick - entry.start) / entry.count : 0;
@@ -152,6 +159,7 @@ export class Editor extends EventTarget {
   }
   get geometry() {
     const retained=this._seekGeometry??=new RetainedGeometryCache();
+    if(this._retainGeometryRevision){retained.retainRevision(this.revision);this._retainGeometryRevision=false;}
     if (!this._geometry) {
       this._geometry = this._incremental?buildGeometry(this.report, this.evaluatedFrame, this._incremental)
         :retained.get(this.report,this.evaluatedFrame,this.revision);
@@ -169,6 +177,7 @@ export class Editor extends EventTarget {
     const checkCurrent=()=>!this._geometry&&this.report===report&&this.revision===revision&&this.tick===tick&&
       this._evaluated===evaluated&&this._authoredPoseEdit===authored&&this._incremental===incremental&&options.checkCurrent?.()!==false;
     const retained=this._seekGeometry??=new RetainedGeometryCache();
+    if(this._retainGeometryRevision){retained.retainRevision(this.revision);this._retainGeometryRevision=false;}
     const settings={...options,checkCurrent};
     const geometry=incremental?await buildGeometryAsync(report,frame,incremental,settings):await retained.getAsync(report,frame,revision,settings);
     if(!checkCurrent())throw new DOMException('Editable geometry was superseded.', 'AbortError');
@@ -179,7 +188,7 @@ export class Editor extends EventTarget {
   get canRedo() { return this._redo.length > 0; }
   get undoLabel() { return this._undo.at(-1)?.label ?? ''; }
   get redoLabel() { return this._redo.at(-1)?.label ?? ''; }
-  get dirty() { return this._revision !== this._savedRevision || Boolean(this._drag?.changed || this._animationEdit?.changed); }
+  get dirty() { return this._revision !== this._savedRevision || Boolean(this._drag?.changed || this._animationEdit?.changed) || Boolean(this._movieclipScopes?.some(scope=>scope.parent._revision!==scope.parent._savedRevision)); }
   set dirty(value) {
     if (value) { if (!this.dirty) this._revision = ++this._revisionSerial; this._emit('edit', {label: 'Project metadata'}); }
     else { this._savedRevision = this._revision; this._emit('saved'); }
@@ -187,6 +196,7 @@ export class Editor extends EventTarget {
   get dragging() { return Boolean(this._drag); }
   get historySize() { return this._historySize; }
   get revision() { return this._revision; }
+  get definitionRevision() { return this._definitionRevision ?? 0; }
   get layers() { return this.getLayers(); }
   get layerRevision() { return this._layerRevision ?? 0; }
   get activeLayerId() { return this.report?._styk?.layers?.activeId ?? this.report?._styk?.layers?.defaultLayerId ?? 'layer-1'; }
@@ -196,6 +206,10 @@ export class Editor extends EventTarget {
   get hasFigureClipboard() { return Boolean(this._figureClipboard || this._selectionClipboard); }
 
   _emit(kind, detail = {}) {
+    if(kind==='seek')this._followSheetSelection();
+    if(kind==='selection'&&!detail.sheetSelection)this._sheetSelection=null;
+    if(detail.structural&&kind!=='document'){this._loadedFigureNames=null;this._loadedTimelineTracks=null;}
+    if (kind === 'document' || detail.definition || detail.structural) this._definitionRevision = this.definitionRevision + 1;
     if (this._layerEventPending && ['edit', 'history', 'document'].includes(kind)) {
       detail = {layers: true, layerRevision: this.layerRevision, ...detail}; this._layerEventPending = false;
     }
@@ -203,8 +217,10 @@ export class Editor extends EventTarget {
       structural: false, timing: false, ...detail}));
   }
   _invalidate({timing = false, viewOnly = false, retainGeometry = false, retainPropertyMarkers = false} = {}) {
+    if(!viewOnly)this._retainGeometryRevision=retainGeometry;
     if (!viewOnly && retainPropertyMarkers && this._propertyChannelCache) {
       this._propertyChannelCache.frames.clear();this._propertyChannelCache.values.clear();this._propertyChannelCache.dependencies.clear();
+      this._propertyChannelCache.indices=new WeakMap();this._propertyChannelCache.coordinates=new WeakMap();
     } else if (!viewOnly) this._propertyChannelCache = null;
     if (!viewOnly) {invalidateEvaluationCaches(this.report);if(!retainGeometry)this._seekGeometry?.clear();}
     const preview = this._authoredCommitPreview;
@@ -216,7 +232,7 @@ export class Editor extends EventTarget {
   _invalidateObjects(uids, retained = null, {translation = false} = {}) {
     const previous = retained?.previous ?? this._geometry ?? this._incremental?.previous;
     const pending = retained?.dirtySlots ?? (this._geometry ? [] : this._incremental?.dirtySlots ?? []);
-    const affected=resolveJoinSelection(this.frame, uids).affectedSlots;
+    const affected=this._ikPoseSlots(this.frame, resolveJoinSelection(this.frame, uids).affectedSlots);
     const dirtySlots = new Set([...pending, ...affected]), pendingSet=new Set(pending);
     const renderSources=new Map(this._geometry||retained?[]:this._incremental?.renderSources);
     for(const slot of affected){
@@ -227,7 +243,7 @@ export class Editor extends EventTarget {
     this._invalidate();
     if (previous) this._incremental = {previous, dirtySlots, renderSources};
   }
-  _selectionState() { return {frameIndex: this.frameIndex, tick: this.tick, uid: this.selectedUid, uids: [...this.selectedUids], joint: this.selectedJoint, activeLayerId: this.activeLayerId, ...(this.branchSelected ? {branch: {...this._branchSelection}} : {})}; }
+  _selectionState() { return {frameIndex: this.frameIndex, tick: this.tick, uid: this.selectedUid, uids: [...this.selectedUids], joint: this.selectedJoint, activeLayerId: this.activeLayerId, sheetSelection:this._sheetSelection?{...this._sheetSelection}:null, ...(this.branchSelected ? {branch: {...this._branchSelection}} : {})}; }
   _restoreSelection(state) {
     this.frameIndex = clamp(state.frameIndex, 0, this.report.keyframes.length - 1);
     this.tick = clamp(state.tick, 0, Math.max(0, this.totalTicks - 1));
@@ -239,9 +255,10 @@ export class Editor extends EventTarget {
     this._branchSelection = state.branch ? {...state.branch} : null;
     const layers = this.report._styk?.layers;
     if (layers) layers.activeId = this.getLayer(state.activeLayerId) ? state.activeLayerId : layers.defaultLayerId;
+    this._sheetSelection=state.sheetSelection?{...state.sheetSelection}:null;
   }
   _record(command) {
-    if (this._authoredPoseEdit?.transaction && command.kind === 'import') return;
+    if (this._authoredPoseEdit?.transaction && (command.kind === 'import'||this.report._styk?.layerSheet&&command.kind==='project')) return;
     this._recordFrameDraft?.(command);
     if (this._authoredCommandLabel) command.label = this._authoredCommandLabel;
     if (this._pendingSourceLayerChanges?.length) {
@@ -260,6 +277,7 @@ export class Editor extends EventTarget {
       ? command.precomputedBytes : command.kind === 'animation' || command.draftAnimation
         ? animationHistoryBytes(sized) : JSON.stringify(sized).length * 2 + (command.sourceBytes ?? 0)) + (this._pendingSourceBytes ?? 0);
     this._pendingSourceBytes = 0;
+    if (this._movieclipBatch) {this._movieclipBatch.push(command); return;}
     this._historySize += command.bytes; this._undo.push(command); this._redo = [];
     while (this._undo.length > this.historyLimit || (this._historySize > this.historyBytes && this._undo.length > 1)) {
       this._historySize -= this._undo.shift().bytes;
@@ -267,14 +285,26 @@ export class Editor extends EventTarget {
     }
     if (collectSources) this._pruneFrameSources();
   }
-  _replaceObjects(index, objects, sourceId, draft = false) {
-    const frame = draft ? this.report._styk.simpleFrameDraft?.baseline : sourceId ? this.report._styk.frameSources[sourceId] : this.report.keyframes[index];
+  _sourceFrame({index,sourceId,draft,sourceDepth=0}){
+    let report=this.report;for(let depth=0;depth<sourceDepth;depth++)report=report._styk.movieclipSource.document;
+    return draft?report._styk.simpleFrameDraft?.baseline:sourceId?report._styk.frameSources[sourceId]:report.keyframes[index];
+  }
+  _replaceObjects(index, objects, sourceId, draft = false,sourceDepth=0) {
+    const frame = this._sourceFrame({index,sourceId,draft,sourceDepth});
     if (!frame && draft) return;
     const replacements = new Map(objects.map(o => [o.unique_id, clone(o)]));
     for (let i = 0; i < frame.objects.length; i++) if (replacements.has(frame.objects[i].unique_id))
       frame.objects[i] = replacements.get(frame.objects[i].unique_id);
   }
   _applyCommand(command, direction) {
+    if(applyLayerSheetCommand(this,command,direction))return;
+    if (command.kind === 'movieclip-batch') {
+      for (const child of direction === 'before' ? [...command.commands].reverse() : command.commands) this._applyCommand(child,direction);
+      if(command.frameDraftJournal){this._prepareFrameDraftHistory(command,direction);this._applyFrameDraftHistory(command,direction);}
+      if(command[`${direction}Selection`])this._restoreSelection(command[`${direction}Selection`]);
+      this._revision=command[`${direction}Revision`];return;
+    }
+    if (applyMovieclipCommand(this,command,direction)) return;
     const timingGeometry=command.kind==='frame-timing'?captureTimingGeometry(this):null;
     const selection = command[`${direction}Selection`];
     const localObjects = command.kind === 'objects' && !command.structural && !command.timing &&
@@ -313,7 +343,8 @@ export class Editor extends EventTarget {
       this.report.keyframes[command.index] = value.frame;
     } else if (command.kind === 'topology') {
       this.report.figure_types[command.index] = value.figure;
-      for (const entry of value.frames) this._replaceObjects(entry.index, entry.objects, entry.sourceId, entry.draft);
+      for (const entry of value.frames) this._replaceObjects(entry.index, entry.objects, entry.sourceId, entry.draft,entry.sourceDepth);
+      this._restoreMovieclipSourceAnimations(value);
     } else if (command.kind === 'project') {
       Object.assign(this.report, value.fields);
       if (value.frame) this.report.keyframes[command.index] = value.frame;
@@ -345,15 +376,20 @@ export class Editor extends EventTarget {
     if (['frame', 'splice', 'ranges', 'import', 'figure-splice', 'project'].includes(command.kind)) invalidateFrameIndex(this.report);
     if (command.kind === 'layers') this._applyLayerChanges(command.changes, direction);
     else if (command.layerChanges) this._applyLayerChanges(command.layerChanges, direction);
+    if(command.layerSheetPatch)this.report._styk.layerSheet=command.layerSheetPatch[direction];
     this._restoreFrameDraftOverlay?.(command, direction);
-    this._invalidate({timing: true});
+    invalidateMovieclipTypes(this.report);
+    this._invalidate({timing: true, retainGeometry: command.kind === 'animation' || command.retainGeometry});
     this._restoreSelection(command[`${direction}Selection`]);
     this._revision = command[`${direction}Revision`];
     this._applyFrameDraftHistory?.(command, direction);
     restoreTimingGeometry(this,timingGeometry);
     if (retained?.previous) this._invalidateObjects(value.map(o => o.unique_id), retained);
-    this._emit('history', {label: command.label, structural: command.structural, timing: command.timing, timingOnly: command.timingOnly, animation: command.kind === 'animation' || Boolean(command.layerAnimationPatch),
+    this._emit('history', {label: command.label, structural: command.structural, timing: command.timing, timingOnly: command.timingOnly,
+      definition: Boolean(command.definition || command.figureDefinitionSplice || ['figure','import','figure-splice','topology'].includes(command.kind)),
+      animation: command.kind === 'animation' || Boolean(command.layerAnimationPatch),
       ...(command.kind==='frame-timing'?{frameIndices:command.changes.map(change=>change.index)}:{}),
+      ...(['objects','frame'].includes(command.kind)&&!command.structural&&!command.frameDraftStored?{frameIndices:[command.index]}:{}),
       ...(localObjects ? {frameIndices: [command.index], changedUids: value.map(o => o.unique_id)} : {})});
   }
   undo() {
@@ -413,6 +449,9 @@ export class Editor extends EventTarget {
     if (name !== undefined && name !== null && typeof name !== 'string') throw new Error('The document name must be text.');
     const initial=prepared.scene??initialLoadState(report,{initialFrameIndex,initialTick},this._frameDraftEnabled),index=initial.frameIndex;
     const started = performance.now();
+    this._movieclipScopes=[];
+    this._sheetSelection=null;this._sheetPropertyPreview=null;
+    if(this.layerTimeline)initializeLayerSheet(report);
     this.report = report; this.name = name?.replace(/\.(piv|stk|styk)$/i, '') || report._styk?.name || 'Untitled animation';
     this._documentToken = {};
     this.frameIndex = index; this.tick = 0; this.selectedUid = report.keyframes[index].objects[0]?.unique_id ?? null; this.selectedJoint = -1;
@@ -438,6 +477,7 @@ export class Editor extends EventTarget {
     this._branchSelection = null;
     if (joint && typeof joint === 'object') return this.select(uid, -1, joint);
     const valid = this.selectionFrame.objects.some(o => o.unique_id === uid);
+    if(valid&&this.report._styk?.layerSheet)this.report._styk.layers.activeId=this.layerForUid(uid);
     if (!valid) this.selectedUid = null;
     else if (toggle || add) {
       if (toggle && this.selectedUids.has(uid)) this.selectedUids.delete(uid); else this.selectedUids.add(uid);
@@ -473,7 +513,7 @@ export class Editor extends EventTarget {
   /** Callback receives the editable frame, followed by the report. One frame is snapshotted. */
   transaction(label, mutateFn, {structural = false, timing = false} = {}) {
     if (this._drag) this.commitDrag();
-    if (this.animationChannels.length) return this._authoredTransaction(label, mutateFn, {structural, timing});
+    if (this.report._styk?.layerSheet || this.animationChannels.length || this.report._styk?.movieclipSource) return this._authoredTransaction(label, mutateFn, {structural, timing});
     const index = this.frameIndex, before = clone(this.frame), beforeSelection = this._selectionState();
     try { mutateFn(this.frame, this.report); this._synchronizeAnimationOrigins(this.frame,before.objects,{includeNew:true}); validateScene({...this.report, keyframes: [this.report.keyframes[index]]}); }
     catch (error) { this.report.keyframes[index] = before; this._restoreSelection(beforeSelection); this._invalidate(); throw error; }
@@ -504,7 +544,7 @@ export class Editor extends EventTarget {
     // does not lose every unchanged figure merely because no paint ran yet.
     if(!this._geometry&&!this._incremental&&this._seekGeometry?.geometry)this.geometry;
     const resolved = resolveJoinSelection(this.frame, this.selectedUids, scope === 'translation');
-    this._drag = {label, scope, index: this.frameIndex, before: resolved.affectedSlots.map(i => clone(this.frame.objects[i])),
+    this._drag = {label, scope, index: this.frameIndex, before: this._ikPoseSlots(this.frame, resolved.affectedSlots).map(i => clone(this.frame.objects[i])),
       beforeSelection: this._selectionState(), changed: false}; return true;
   }
   _expandTranslationDrag() {
@@ -571,9 +611,10 @@ export class Editor extends EventTarget {
       // this gesture; untouched frames/figures retain their source and caches.
       if (posed && this._drag?.before.some(hasPinnedIK)) {
         const geometry = this.geometry;
-        for (const before of this._drag.before) if (hasPinnedIK(before)) {
+        for (const before of this._drag.before) {
           const object = this.frame.objects.find(o => o.unique_id === before.unique_id);
-          const solved = geometry.objects.get(object?.object_slot)?.solvedAngles;
+          const posedGeometry = geometry.objects.get(object?.object_slot), solved = posedGeometry?.solvedAngles;
+          this._bakeIKFollowers(object, posedGeometry);
           if (solved) object.angles = solved.slice();
         }
       }
@@ -586,10 +627,12 @@ export class Editor extends EventTarget {
   addFigure(typeId = this.report.figure_types[0]?.figure_type_id) {
     const fig = this.report.figure_types.find(f => f.figure_type_id === typeId);
     if (!fig) throw new Error('Choose a figure from the library.');
+    if(isMovieclip(fig)&&!this._insertingMovieclip)return this._insertMovieclip(()=>this.addFigure(typeId));
     const uid = this._identity();
     this.transaction('Add figure', frame => {
       const ids = frameOrder(frame);
-      frame.objects.push(createObject(fig, uid, this.report.canvas_width / 2, this.report.canvas_height / 2));
+      frame.objects.push(createObject(fig, uid, this.report.canvas_width / 2, this.report.canvas_height / 2,
+        isMovieclip(fig) ? {_stykMovieclip:{start:this.tick,end:null,offset:0,speed:1,mode:'loop'}} : {}));
       setOrder(frame, [...ids, uid]); normalizeFrame(frame); this.selectedUid = uid; this.selectedJoint = -1;
     }, {structural: true}); return this.object;
   }
@@ -610,7 +653,7 @@ export class Editor extends EventTarget {
   copyFigure() {
     if (this.selectedObjects.length > 1) return Boolean(this.copySelection());
     if (!this.object || !this.figure) return false;
-    const object = clone(this.object), root = this.geometry.objects.get(this.selectedSlot)?.root;
+    const object = snapshotPoseObject(this.object), root = this.geometry.objects.get(this.selectedSlot)?.root;
     if (root) { object.root_x = root.x; object.root_y = root.y; }
     object.join = null; delete object.runtime_segments;
     this._selectionClipboard = null;
@@ -623,41 +666,12 @@ export class Editor extends EventTarget {
     this._figureClipboard.offset = 0; return this.deleteFigure();
   }
   pasteFigure() {
-    if (this._selectionClipboard) return this.pasteSelection().at(-1) ?? null;
-    const clipboard = this._figureClipboard; if (!clipboard) return null;
-    if (this.animationChannels.length && !this._authoredPoseEdit) {
-      let result; this.transaction('Paste figure', () => { result = this.pasteFigure(); }, {structural: true}); return result;
-    }
-    if (this._drag && !this._authoredPoseEdit?.transaction) this.commitDrag();
-    let figure = clipboard.documentToken === this._documentToken
-      ? this.report.figure_types.find(f => f.figure_type_id === clipboard.figure.figure_type_id) : null;
-    const beforeSelection = this._selectionState(), before = {figures: clone(this.report.figure_types), frame: clone(this.frame)};
-    if (!figure) {
-      figure = clone(clipboard.figure); figure.figure_type_id = Math.max(0, ...this.report.figure_types.map(f => f.figure_type_id)) + 1;
-      this.report.figure_types.push(figure);
-    }
-    const object = clone(clipboard.object), uid = this._identity();
-    object.unique_id = uid; object.figure_type_id = figure.figure_type_id; object.join = null;
-    object.root_x += clipboard.offset * (clipboard.pastes + 1); object.root_y += clipboard.offset * (clipboard.pastes + 1);
-    translateIKTargets(object, clipboard.offset * (clipboard.pastes + 1), clipboard.offset * (clipboard.pastes + 1));
-    // A figure edited in the same document may have acquired or lost joints
-    // since copying. Preserve the captured pose by native handle identity.
-    const oldIndices = new Map(clipboard.figure.segments.map((segment, i) => [segment.segment_id, i]));
-    for (const [field, flag, base] of [['angles', null, 'angle_rad'], ['lengths', 'len_flag', 'length'], ['bends', 'bend_flag', 'bend_rad']]) {
-      if (flag && !object[flag]) continue;
-      const captured = object[field]; object[field] = figure.segments.map(segment => captured?.[oldIndices.get(segment.segment_id)] ?? segment[base] ?? 0);
-    }
-    const order = frameOrder(this.frame); this.frame.objects.push(object); setOrder(this.frame, [...order, uid]); normalizeFrame(this.frame);
-    this.selectedUid = uid; this.selectedJoint = -1; clipboard.pastes++;
-    this._record({kind: 'import', label: 'Paste figure', index: this.frameIndex, before,
-      after: {figures: clone(this.report.figure_types), frame: clone(this.frame)}, beforeSelection,
-      afterSelection: this._selectionState(), structural: true, timing: false});
-    this._invalidate(); this._emit('edit', {label: 'Paste figure', structural: true}); return object;
+    return this.pasteSelection().at(-1) ?? null;
   }
   deleteFigure() {
     return this.deleteSelection();
   }
-  _selectIds(uids) { this.selectedUids = new Set(uids); this._selectedUid = [...this.selectedUids].at(-1) ?? null; this.selectedJoint = -1; }
+  _selectIds(uids) { this._branchSelection = null; this.selectedUids = new Set(uids); this._selectedUid = [...this.selectedUids].at(-1) ?? null; this.selectedJoint = -1; }
   deleteSelection() {
     if (this.branchSelected) return this.deleteSegment();
     const selected = new Set(this.selectedObjects.map(o => o.unique_id)); if (!selected.size) return false;
@@ -707,6 +721,7 @@ export class Editor extends EventTarget {
   }
   moveSelectionInFrames(dx, dy, indices = [this.frameIndex]) {
     finite(dx, 'Translation X'); finite(dy, 'Translation Y');
+    if(this.report._styk?.layerSheet)return this.sheetMoveSelection(dx,dy,indices.sheetTicks??indices.map(index=>indices.length===1?this.tick:this.timeline[index].start));
     if (!dx && !dy) return 0;
     const selectedFrames = this._frameIndices(indices), selectedIds = new Set(this.selectedUids);
     if (!selectedIds.size) return 0;
@@ -811,7 +826,7 @@ export class Editor extends EventTarget {
     const geometry = this.geometry, ids = new Set(selected.map(o => o.unique_id));
     const figures = [...new Set(selected.map(o => o.figure_type_id))].map(id => clone(this.report.figure_types.find(f => f.figure_type_id === id)));
     const objects = selected.map(object => {
-      const out = clone(object), root = geometry.objects.get(object.object_slot)?.root;
+      const out = snapshotPoseObject(object), root = geometry.objects.get(object.object_slot)?.root;
       if (root) { out.root_x = root.x; out.root_y = root.y; }
       if (out.join) {
         const targetUid = this.selectionFrame.objects[out.join.target_object_slot]?.unique_id;
@@ -827,57 +842,17 @@ export class Editor extends EventTarget {
     this._selectionClipboard.offset = 0; this.deleteSelection(); return count;
   }
   pasteSelection() {
-    const clipboard = this._selectionClipboard;
-    if (!clipboard) { const object = this._figureClipboard ? this.pasteFigure() : null; return object ? [object] : []; }
-    if (this.animationChannels.length && !this._authoredPoseEdit) {
-      this.transaction('Paste figures', () => this.pasteSelection(), {structural: true}); return this.selectedObjects;
+    const clipboard = this._selectionClipboard ?? this._figureClipboard;
+    if (!clipboard) return [];
+    if (!Number.isInteger(this.tick) && (this.report._styk?.layerSheet || this.animationChannels.length || this.report._styk?.movieclipSource)) {
+      this.tick = Math.round(this.tick); this._invalidate({viewOnly: true});
     }
-    if (this._drag && !this._authoredPoseEdit?.transaction) this.commitDrag();
-    const before = {figures: clone(this.report.figure_types), frame: clone(this.frame)}, beforeSelection = this._selectionState();
-    const typeMap = new Map(), uidMap = new Map(clipboard.objects.map(o => [o.unique_id, this._identity()]));
-    if (clipboard.documentToken === this._documentToken) {
-      this._newLayerHints ??= new Map();
-      for (const [original, uid] of uidMap) { const id = clipboard.layers?.get(original); if (this.getLayer(id)) this._newLayerHints.set(uid, id); }
-    }
-    let nextType = Math.max(0, ...this.report.figure_types.map(f => f.figure_type_id)) + 1;
-    try {
-      for (const original of clipboard.figures) {
-        let figure = clipboard.documentToken === this._documentToken && !clipboard.freshTypes?.has(original.figure_type_id) ? this.report.figure_types.find(f => f.figure_type_id === original.figure_type_id) : null;
-        if (!figure) { figure = clone(original); figure.figure_type_id = nextType++; this.report.figure_types.push(figure); }
-        typeMap.set(original.figure_type_id, {figure, original});
-      }
-      const offset = clipboard.offset * (clipboard.pastes + 1), firstSlot = this.frame.objects.length;
-      const pasted = clipboard.objects.map(original => {
-        const object = clone(original), {figure, original: oldFigure} = typeMap.get(original.figure_type_id);
-        object.unique_id = uidMap.get(original.unique_id); object.figure_type_id = figure.figure_type_id;
-        object.root_x += offset; object.root_y += offset;
-        translateIKTargets(object, offset, offset);
-        const oldIndices = new Map(oldFigure.segments.map((s, i) => [s.segment_id, i]));
-        for (const [field, flag, base] of [['angles', null, 'angle_rad'], ['lengths', 'len_flag', 'length'], ['bends', 'bend_flag', 'bend_rad']]) {
-          if (flag && !object[flag]) continue;
-          const captured = object[field]; object[field] = figure.segments.map(s => captured?.[oldIndices.get(s.segment_id)] ?? s[base] ?? 0);
-        }
-        return object;
-      });
-      const slots = new Map(pasted.map((o, i) => [o.unique_id, firstSlot + i]));
-      const pastedById = new Map(pasted.map(o => [o.unique_id, o]));
-      for (const object of pasted) if (object.join) {
-        const targetUid = uidMap.get(object.join.target_unique_id), target = pastedById.get(targetUid);
-        const figure = this.report.figure_types.find(f => f.figure_type_id === target?.figure_type_id);
-        if (!target || (object.join.target_handle_id !== 0 && !figure.segments.some(s => s.segment_id === object.join.target_handle_id))) object.join = null;
-        else { object.join.target_unique_id = targetUid; object.join.target_object_slot = slots.get(targetUid); }
-      }
-      const order = frameOrder(this.frame); this.frame.objects.push(...pasted);
-      setOrder(this.frame, [...order, ...clipboard.order.map(id => uidMap.get(id))]); normalizeFrame(this.frame);
-      validateScene({...this.report, keyframes: [this.frame]}); this._selectIds(pasted.map(o => o.unique_id)); clipboard.pastes++;
-      this._record({kind: 'import', label: 'Paste figures', index: this.frameIndex, before,
-        after: {figures: clone(this.report.figure_types), frame: clone(this.frame)}, beforeSelection,
-        afterSelection: this._selectionState(), structural: true, timing: false});
-      this._invalidate(); this._emit('edit', {label: 'Paste figures', structural: true}); return this.selectedObjects;
-    } catch (error) {
-      this.report.figure_types = before.figures; this.report.keyframes[this.frameIndex] = before.frame;
-      this._restoreSelection(beforeSelection); this._invalidate(); throw error;
-    }
+    // One prepared insertion owns validation, IDs, assets and history. The
+    // destination's unchanged figures and library never become paste snapshots.
+    const result = this.applyFigureRange({kind: 'paste', offset: clipboard.offset * (clipboard.pastes + 1)},
+      {atPlayhead: true, label: this._selectionClipboard ? 'Paste figures' : 'Paste figure'});
+    if (result.insertedUids.length) clipboard.pastes++;
+    return this.selectedObjects;
   }
   duplicateSelection() {
     const groupClipboard = this._selectionClipboard, singleClipboard = this._figureClipboard;
@@ -1013,7 +988,6 @@ export class Editor extends EventTarget {
     this._invalidate(); this._emit('edit', {label: 'Edit segment style', definition: true}); return true;
   }
   _rotateJoint(delta, includeJoint = true, {isolate = false} = {}) {
-    if (includeJoint) this._rotateIKFollower(delta);
     const slot = this.selectedSlot, joint = this.selectedJoint, key = `${slot}:${joint}${isolate ? ':isolated' : ''}`;
     let targets = this._drag?.rotationTargets?.get(key);
     if (!targets) {
@@ -1023,6 +997,11 @@ export class Editor extends EventTarget {
       });
       if (this._drag) { this._drag.rotationTargets ??= new Map(); this._drag.rotationTargets.set(key, targets); }
     }
+    this._applyJointRotation(targets, delta, includeJoint);
+  }
+  _applyJointRotation(targets, delta, includeJoint = true) {
+    const slot = this.selectedSlot, joint = this.selectedJoint;
+    this._rotateIKFollowers(targets, delta, includeJoint);
     const children = new Set();
     for (const [objectSlot, segment] of targets) if (includeJoint || objectSlot !== slot || segment !== joint) {
       this.frame.objects[objectSlot].angles[segment] += delta;
@@ -1173,14 +1152,14 @@ export class Editor extends EventTarget {
   joinFigure(targetUid, handleId = 0) { return targetUid === null ? this.unjoinFigure() : this.joinTo(targetUid, handleId); }
   _allSourceFrames() {
     const baseline = this.report._styk.simpleFrameDraft?.baseline;
-    return [...this.report.keyframes, ...Object.values(this.report._styk.frameSources ?? {}), ...(baseline ? [baseline] : [])];
+    return [...this.report.keyframes, ...Object.values(this.report._styk.frameSources ?? {}), ...(baseline ? [baseline] : []), ...[...movieclipSourceFrames(this.report)].map(entry=>entry.frame)];
   }
   _prepareDraftTopology(typeId) {
     const state = this.report._styk.simpleFrameDraft, baseline = state?.baseline;
     if (!baseline) return;
     const instances = baseline.objects.filter(object => object.figure_type_id === typeId).map(object => object.unique_id);
     if (!instances.length) return;
-    const affected = new Set(resolveJoinSelection(baseline, instances).affectedUids);
+    const affected = new Set(this._ikPoseSlots(baseline, resolveJoinSelection(baseline, instances).affectedSlots).map(slot => baseline.objects[slot].unique_id));
     // The lazy journal shares untouched objects with the working frame. A
     // shared rig operation visits both frames, so detach its affected poses
     // before either visit can mutate those aliases twice.
@@ -1189,51 +1168,75 @@ export class Editor extends EventTarget {
     if (this._frameDraft?.baseline === baseline) this._frameDraft.baseline = copy;
   }
   _restoreDraftTopologyAnimation(before) {
+    this._restoreMovieclipSourceAnimations(before);
     if (!Object.hasOwn(before, 'animationBaseline') || !this.report._styk.simpleFrameDraft) return;
     this.report._styk.simpleFrameDraft.animationBaseline = before.animationBaseline;
     if (this._frameDraft) this._frameDraft.animationBaseline = before.animationBaseline;
   }
   _topologySnapshot(typeId, reference = null) {
-    const key = entry => entry.draft ? 'simple-draft' : entry.sourceId ?? entry.index;
+    const key = entry => entry.draft ? 'simple-draft' : `${entry.sourceDepth??0}:${entry.sourceId??entry.index}`;
     const references = reference ? new Map(reference.frames.map(entry => [key(entry),
       new Set(entry.objects.map(object => object.unique_id))])) : null;
     const draft = this.report._styk.simpleFrameDraft;
     const entries = [...this.report.keyframes.map((frame, index) => ({frame, index})),
       ...Object.entries(this.report._styk.frameSources ?? {}).map(([sourceId, frame]) => ({frame, index: -1, sourceId})),
-      ...(draft?.baseline ? [{frame:draft.baseline, index:draft.index, draft:true}] : [])];
+      ...(draft?.baseline ? [{frame:draft.baseline, index:draft.index, draft:true}] : []),...movieclipSourceFrames(this.report)];
     const snapshot = {figure: clone(this.report.figure_types.find(f => f.figure_type_id === typeId)),
-      frames: entries.map(({frame, index, sourceId, draft}) => {
-        let identities = references?.get(key({index, sourceId, draft}));
+      frames: entries.map(({frame, index, sourceId, draft,sourceDepth}) => {
+        let identities = references?.get(key({index, sourceId, draft,sourceDepth}));
         if (references && !identities) return null;
         if (!references) {
           const instances = frame.objects.filter(object => object.figure_type_id === typeId).map(object => object.unique_id);
           if (!instances.length) return null;
-          identities = new Set(resolveJoinSelection(frame, instances).affectedUids);
+          identities = new Set(this._ikPoseSlots(frame, resolveJoinSelection(frame, instances).affectedSlots).map(slot => frame.objects[slot].unique_id));
         }
-        return {index, ...(sourceId ? {sourceId} : {}), ...(draft ? {draft:true} : {}), objects: frame.objects.filter(object => identities.has(object.unique_id)).map(clone)};
+        return {index, ...(sourceId ? {sourceId} : {}), ...(draft ? {draft:true} : {}), ...(sourceDepth?{sourceDepth}:{}),objects: frame.objects.filter(object => identities.has(object.unique_id)).map(clone)};
       }).filter(Boolean)};
     // The draft journal retains this immutable table separately. Do not clone
     // the entire channel table with the affected rig poses during history replay.
     if (Object.hasOwn(draft ?? {}, 'animationBaseline'))
       Object.defineProperty(snapshot, 'animationBaseline', {value: draft.animationBaseline});
+    const sources=[];let source=this.report._styk.movieclipSource?.document;
+    while(source){sources.push(source._styk?.animation??null);source=source._styk?.movieclipSource?.document;}
+    if(sources.length)snapshot.movieclipSourceAnimations=sources;
+    const sheetAnimations=[];let document=this.report,depth=0;
+    while(document){
+      if(document._styk?.layerSheet)sheetAnimations.push({depth,animation:document._styk.layerSheet.legacyAnimation??null});
+      document=document._styk?.movieclipSource?.document;depth++;
+    }
+    if(sheetAnimations.length)snapshot.sheetAnimations=sheetAnimations;
     return snapshot;
+  }
+  _restoreMovieclipSourceAnimations(snapshot){
+    for(const {depth,animation} of snapshot.sheetAnimations??[]){
+      let document=this.report;for(let i=0;i<depth;i++)document=document._styk.movieclipSource.document;
+      const sheet={...document._styk.layerSheet};
+      if(animation===null)delete sheet.legacyAnimation;else sheet.legacyAnimation=animation;
+      document._styk.layerSheet=sheet;
+    }
+    let source=this.report._styk.movieclipSource?.document;
+    for(const animation of snapshot.movieclipSourceAnimations??[]){
+      if(animation===null)delete source._styk.animation;else source._styk.animation=animation;
+      source=source._styk?.movieclipSource?.document;
+    }
   }
   _topologyEdit(label, mutate, {segmentMap, reversedGradients, preserveAnimationOrigins=false, originReRoot, originSplit, originSplits, originFreezeHandles} = {}) {
     if (!this.figure) return false;
+    if(isMovieclip(this.figure))throw new Error('Open the movieclip to edit its figures.');
     if (this._drag) this.commitDrag();
     const figure = this.figure, index = this.report.figure_types.indexOf(figure), typeId = figure.figure_type_id;
     const before = this._topologySnapshot(typeId), beforeSelection = this._selectionState(), beforeAnimation = this.report._styk.animation;
     this._prepareDraftTopology(typeId);
     try { mutate(figure); invalidateAnimationOriginLayout(figure); repairOriginSupport(this, before, figure, {originReRoot, originSplit, originSplits, originFreezeHandles}); repairTopologyStyles(this, before, figure, segmentMap, reversedGradients);
       if(!preserveAnimationOrigins&&originGeometryChanged(before.figure,figure))for(const entry of before.frames){
-        const frame=entry.draft?this.report._styk.simpleFrameDraft.baseline:entry.sourceId?this.report._styk.frameSources[entry.sourceId]:this.report.keyframes[entry.index];
+        const frame=this._sourceFrame(entry);
         this._synchronizeAnimationOrigins(frame,entry.objects,{force:true});
       }
       validateScene({...this.report, keyframes: this._allSourceFrames()}); } catch (error) {
       this.report.figure_types[index] = before.figure;
       if (beforeAnimation === undefined) delete this.report._styk.animation; else this.report._styk.animation = beforeAnimation;
       this._restoreDraftTopologyAnimation(before);
-      for (const entry of before.frames) this._replaceObjects(entry.index, entry.objects, entry.sourceId, entry.draft);
+      for (const entry of before.frames) this._replaceObjects(entry.index, entry.objects, entry.sourceId, entry.draft,entry.sourceDepth);
       this._restoreSelection(beforeSelection); this._invalidate(); throw error;
     }
     figure.segment_count = figure.segments.length;
@@ -1286,7 +1289,7 @@ export class Editor extends EventTarget {
       }
       this.report.figure_types[index] = replacement; repairOriginSupport(this, before, replacement); repairTopologyStyles(this, before, replacement);
       if(originGeometryChanged(oldFigure,replacement))for(const entry of before.frames){
-        const frame=entry.draft?this.report._styk.simpleFrameDraft.baseline:entry.sourceId?this.report._styk.frameSources[entry.sourceId]:this.report.keyframes[entry.index];
+        const frame=this._sourceFrame(entry);
         this._synchronizeAnimationOrigins(frame,entry.objects,{force:true});
       }
       validateScene({...this.report, keyframes: this._allSourceFrames()});
@@ -1299,7 +1302,7 @@ export class Editor extends EventTarget {
       this.report.figure_types[index] = before.figure;
       if (beforeAnimation === undefined) delete this.report._styk.animation; else this.report._styk.animation = beforeAnimation;
       this._restoreDraftTopologyAnimation(before);
-      for (const entry of before.frames) this._replaceObjects(entry.index, entry.objects, entry.sourceId, entry.draft);
+      for (const entry of before.frames) this._replaceObjects(entry.index, entry.objects, entry.sourceId, entry.draft,entry.sourceDepth);
       this._restoreSelection(beforeSelection); this._invalidate(); throw error;
     }
   }
@@ -1448,6 +1451,7 @@ export class Editor extends EventTarget {
     this._emit('edit', {label, timing, projectFields: Object.keys(patch)}); return true;
   }
   setFrameDuration(ticks) {
+    if(this.report._styk?.layerSheet)return this.sheetSetDuration(ticks);
     if (!Number.isInteger(ticks) || ticks < 0 || ticks > 65535) throw new Error('Keyframe duration must be 0–65,535 frames.');
     return Boolean(this.setFramesDuration([this.frameIndex], ticks));
   }
@@ -1465,6 +1469,7 @@ export class Editor extends EventTarget {
     return this._fields('Project settings', fields, {timing: 'fps' in fields});
   }
   setBackgroundColor(color) {
+    if(this.report._styk?.layerSheet&&!this._authoredPoseEdit)return this._sheetPropertyEntries([{target:{kind:'scene'},property:'color',tick:this.tick,value:color}],'Background color');
     if (!Number.isInteger(color) || color < 0 || color > 0xffffffff) throw new Error('Background color must be an ARGB value.');
     if (this._drag) this.commitDrag();
     const before = {fields: {backgrounds: clone(this.report.backgrounds ?? [])}, frame: clone(this.frame)}, beforeSelection = this._selectionState();
@@ -1484,9 +1489,10 @@ export class Editor extends EventTarget {
     this._invalidate(); this._emit('edit', {label: 'Background color'}); return true;
   }
   importBackground(background) {
+    if(this.report._styk?.layerSheet&&!this._authoredPoseEdit){let result;this.transaction('Import background',()=>{result=this.importBackground(background);});return result;}
     const source = background?.background ?? background;
     if (!source || ![0, 1, 2, 3, 4].includes(source.kind)) throw new Error('Expected a decoded image, color, or gradient background.');
-    if (this._drag) this.commitDrag();
+    if (this._drag && !this._authoredPoseEdit?.transaction) this.commitDrag();
     const imported = clone(source);
     imported.background_id = Math.max(0, ...(this.report.backgrounds ?? []).map(bg => bg.background_id)) + 1;
     imported.name ||= 'Background';
@@ -1501,12 +1507,15 @@ export class Editor extends EventTarget {
     this._invalidate(); this._emit('edit', {label: 'Import background'}); return imported;
   }
   importFigure(document) {
-    if (this.animationChannels.length && !this._authoredPoseEdit) {
+    const incoming=document?.document??document?.report??document;
+    if(!this._insertingMovieclip&&incoming?.figure_types?.some(isMovieclip))return this._insertMovieclip(()=>this.importFigure(document));
+    if ((this.report._styk?.layerSheet || this.animationChannels.length) && !this._authoredPoseEdit) {
       let result; this.transaction('Import figure', () => { result = this.importFigure(document); }, {structural: true}); return result;
     }
     const source = document?.document ?? document?.report ?? document;
     const figures = source.figure_types ?? (source.segments ? [source] : []);
     if (!figures.length) throw new Error('The imported file contains no figure definitions.');
+    if(figures.some(isMovieclip))prepareEditorLoad(source);
     const before = {figures: clone(this.report.figure_types), frame: clone(this.frame)}, selection = this._selectionState();
     let nextType = Math.max(0, ...this.report.figure_types.map(f => f.figure_type_id)) + 1;
     const map = new Map();
@@ -1514,13 +1523,25 @@ export class Editor extends EventTarget {
       const figure = clone(original), oldId = figure.figure_type_id;
       figure.figure_type_id = nextType++; map.set(oldId, figure.figure_type_id); this.report.figure_types.push(figure);
     }
-    const sourceObject = source.keyframes?.[0]?.objects?.[0], newType = map.get(sourceObject?.figure_type_id) ?? map.values().next().value;
-    const figure = this.report.figure_types.find(f => f.figure_type_id === newType), uid = this._identity();
-    const object = sourceObject ? clone(sourceObject) : createObject(figure, uid, 0, 0);
-    translateIKTargets(object, this.report.canvas_width / 2 - object.root_x, this.report.canvas_height / 2 - object.root_y);
-    Object.assign(object, {figure_type_id: newType, unique_id: uid, root_x: this.report.canvas_width / 2, root_y: this.report.canvas_height / 2, join: null});
-    const order = frameOrder(this.frame); this.frame.objects.push(object); setOrder(this.frame, [...order, uid]); normalizeFrame(this.frame);
-    this.selectedUid = uid; this.selectedJoint = -1; this._invalidate();
+    const sourceFrame = source.keyframes?.[0], sources = sourceFrame?.objects?.length ? sourceFrame.objects : [createObject(figures[0], 1, 0, 0)];
+    const roots = sources.filter(o => !o.join), anchors = roots.length ? roots : sources;
+    const dx = this.report.canvas_width / 2 - anchors.reduce((n,o) => n + o.root_x, 0) / anchors.length;
+    const dy = this.report.canvas_height / 2 - anchors.reduce((n,o) => n + o.root_y, 0) / anchors.length;
+    const slotMap = new Map(sources.map((o,i) => [o.object_slot ?? i, this.frame.objects.length + i])), uidMap = new Map();
+    const imported = sources.map(original => {
+      const object = clone(original), newType = map.get(original.figure_type_id), uid = this._identity();
+      const figure = this.report.figure_types.find(f => f.figure_type_id === newType);
+      uidMap.set(original.unique_id, uid); delete object._movieclipSample;
+      if(isMovieclip(figure))object._stykMovieclip={start:this.tick,end:null,offset:0,speed:1,mode:'loop'};
+      translateIKTargets(object, dx, dy);
+      Object.assign(object, {figure_type_id: newType, unique_id: uid, root_x: object.root_x + dx, root_y: object.root_y + dy,
+        join: original.join && slotMap.has(original.join.target_object_slot) ? {...original.join, target_object_slot: slotMap.get(original.join.target_object_slot)} : null});
+      return object;
+    });
+    const order = frameOrder(this.frame), incomingOrder = sourceFrame ? frameOrder(sourceFrame).map(id => uidMap.get(id)) : imported.map(o => o.unique_id);
+    this.frame.objects.push(...imported); setOrder(this.frame, [...order, ...incomingOrder]); normalizeFrame(this.frame);
+    const object = imported[0];
+    this.selectedUid = object.unique_id; this.selectedUids = new Set(imported.map(o => o.unique_id)); this.selectedJoint = -1; this._invalidate();
     this._record({kind: 'import', label: 'Import figure', index: this.frameIndex, before,
       after: {figures: clone(this.report.figure_types), frame: clone(this.frame)},
       beforeSelection: selection, afterSelection: this._selectionState(), structural: true, timing: false});
@@ -1529,7 +1550,7 @@ export class Editor extends EventTarget {
   serialize() {
     const document = clone(this.report); document._styk = {...document._styk, format: 'StykAnimate', format_version: 1, name: this.name};
     for (const frame of document.keyframes) for (const object of frame.objects) delete object.runtime_segments;
-    syncDerived(document); validateScene(document); validateLayerState(document._styk.layers); validateAnimationDocument(document); validateFrameIdentities(document); return document;
+    syncDerived(document); validateScene(document); validateLayerState(document._styk.layers); validateAnimationDocument(document); validateFrameIdentities(document); validateLayerSheet(document); return document;
   }
 }
 
@@ -1547,6 +1568,8 @@ Object.assign(Editor.prototype, editorAuthoredPoseMethods);
 Object.assign(Editor.prototype, editorCameraMethods);
 Object.assign(Editor.prototype, editorHandleEditMethods);
 Object.assign(Editor.prototype, editorIKMethods);
+Object.assign(Editor.prototype, editorMovieclipMethods);
+Object.assign(Editor.prototype, editorLayerSheetMethods);
 Object.assign(Editor.prototype, editorFigureTransformMethods);
 Object.assign(Editor.prototype, editorRangeCommandMethods);
 Object.assign(Editor.prototype, editorSceneMethods);

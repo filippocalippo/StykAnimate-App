@@ -1,6 +1,8 @@
 import {buildGeometry, evaluatedFrame} from './pivot/geometry.mjs';
 import {storedFrameReport} from './pivot-frame-draft.mjs';
 import {easingMode} from './keyframe-easing.mjs';
+import {sheetKeyTimes} from './layer-sheet.mjs';
+import {RetainedGeometryCache} from './playback-geometry-cache.mjs';
 
 // A changed parent also moves its joined descendants, even when their own
 // native object records have not changed.
@@ -19,7 +21,10 @@ function affectedSlots(frame, uids) {
   return slots;
 }
 
-function animationKeyTicks(editor, rows) {
+function sceneKeyTicks(editor, rows) {
+  // The exposure sheet owns authored time. Native frames are compatibility
+  // sources, so their indices cannot identify the sheet's neighboring poses.
+  if (editor.report._styk?.layerSheet) return sheetKeyTimes(editor.report);
   const channels=editor.report._styk.animation.channels,ticks=new Set();
   const figurePoses=new Set(),layerPoses=new Set();
   for(const channel of channels){
@@ -42,14 +47,33 @@ export class OnionSkinCache {
   constructor({evaluate = evaluatedFrame, geometry = buildGeometry, maxEntries = 24} = {}) {
     this.evaluate = evaluate; this.geometry = geometry; this.maxEntries = maxEntries;
     this.samples = new Map(); this.styles = new WeakMap(); this.objectStyles = new WeakMap(); this.stats = {builds:0,hits:0};
+    this.retained = new RetainedGeometryCache();
+  }
+  clear() {
+    this.samples.clear(); this.styles = new WeakMap(); this.objectStyles = new WeakMap();
+    this.last = null; this.keyTicks = null; this.retained.clear();
   }
   invalidate(detail = {}) {
     if (!['document','edit','history'].includes(detail.kind)) return;
     // Revision changes are explained by the editor's change event. A revision
     // change without an event still clears the cache defensively in get().
     this.revision = this.editor?.revision;
+    // Layer pose gestures edit a private working frame. Ghosts sample the
+    // committed sheet, which publishes a new state when the gesture commits.
+    if (detail.kind === 'edit' && detail.live && this.layerSheet && this.layerSheet === this.editor?.report._styk?.layerSheet &&
+      !detail.definition && !detail.structural && !detail.animation && !detail.layers) return;
+    if (detail.layerSheet && detail.kind !== 'document' && !detail.definition && this.report === this.editor?.report &&
+      this.figures === this.report.figure_types && this.layerSheet) {
+      // Re-evaluate published poses, but retain exact object geometry and tint
+      // identities. Rebuilding unchanged ghosts also evicts their GPU textures.
+      for (const sample of this.samples.values()) sample.stale = true;
+      this.layerSheet = this.report._styk.layerSheet;
+      this.retained.retainRevision(this.revision);
+      this.last = null; this.keyTicks = null;
+      return;
+    }
     if((detail.changedUids || detail.live || detail.frameIndices) && !detail.animation && !detail.definition && !detail.structural && !detail.timing &&
-      !this.editor?.report._styk?.animation?.channels?.length && detail.kind !== 'document'){
+      !this.editor?.report._styk?.animation?.channels?.length && !this.editor?.report._styk?.layerSheet && detail.kind !== 'document'){
       const indices=new Set(detail.frameIndices||detail.changedFrames||[detail.frameIndex]);
       // Add edits affect only the working copy; stored ghosts stay still.
       const draft=this.editor?.frameDraft;
@@ -61,7 +85,7 @@ export class OnionSkinCache {
         } else this.samples.delete(id);
         this.last=null;
       }
-    }else {this.samples.clear();this.styles=new WeakMap();this.objectStyles=new WeakMap();this.last=null;this.keyTicks=null;}
+    }else this.clear();
   }
   get(editor, settings, {selected = new Set(), hidden = new Set(), visibilityKey} = {}) {
     if(this.editor !== editor){
@@ -70,10 +94,15 @@ export class OnionSkinCache {
       editor.addEventListener('change',this.listener);
       this.report=null;
     }
-    const report = editor.report;
-    if (this.report !== report || this.revision !== editor.revision) {
-      this.samples.clear(); this.styles = new WeakMap(); this.objectStyles = new WeakMap(); this.last = null;
+    const report = editor.report, layerSheet = report._styk?.layerSheet;
+    // Sheet publications replace immutable state, including during history.
+    // Check it at the read boundary as well as listening for change events;
+    // native frame dependency hints do not describe authored layer exposures.
+    if (this.report !== report || this.revision !== editor.revision || this.layerSheet !== layerSheet) {
+      this.clear();
       this.report = report; this.revision = editor.revision;
+      this.figures = report.figure_types;
+      this.layerSheet = layerSheet;
       this.keyTicks = null;
     }
     const hiddenKey=visibilityKey ?? (hidden[Symbol.iterator] ? [...hidden] : []);
@@ -93,12 +122,12 @@ export class OnionSkinCache {
     const sourceReport=adding?storedFrameReport(report,{validate:false}):report;
     const currentIndex=adding?rows.length:editor.frameIndex;
     const currentTick=adding?editor.totalTicks:editor.tick;
-    // Advanced keys live on animation channels, independently of native frame
-    // indices. Sample their actual times as well as the underlying stored keys.
-    const authoredKeys=!adding && settings.onionMode!=='frames' && report._styk?.animation?.channels?.length;
+    // Both timeline views sample authored scene keys. The legacy channel path
+    // remains available for documents that have not adopted the layer sheet.
+    const authoredKeys=!adding && settings.onionMode!=='frames' && (layerSheet || report._styk?.animation?.channels?.length);
     let keyTicks, previousKey, nextKey;
     if(authoredKeys){
-      keyTicks=this.keyTicks??=animationKeyTicks(editor,rows);
+      keyTicks=this.keyTicks??=sceneKeyTicks(editor,rows);
       let low=0,high=keyTicks.length;
       while(low<high){const mid=(low+high)>>>1;if(keyTicks[mid]<currentTick)low=mid+1;else high=mid;}
       previousKey=low-1;nextKey=keyTicks[low]===currentTick?low+1:low;
@@ -122,13 +151,17 @@ export class OnionSkinCache {
         }
         const id=`${index}:${tick}`;
         let sample=this.samples.get(id);
-        if(!sample || sample.dirtyUids){
+        if(!sample || sample.dirtyUids || sample.stale){
           let frame=this.evaluate(sourceReport,index,ratio,tick);
           // Before the first Add edit the evaluator can return the mutable
           // working frame itself. Keep its stored pose independent of edits.
           if(adding && !report._styk?.simpleFrameDraft?.baseline && index===draft.index)frame=structuredClone(frame);
-          const incremental=sample?.dirtyUids?{previous:sample.geometry,dirtySlots:affectedSlots(frame,sample.dirtyUids)}:null;
-          sample={frame,geometry:this.geometry(sourceReport,frame,incremental),dependencies:ratio>0?(report.auto_easing?null:
+          if (layerSheet && sample) this.retained.adopt(sourceReport, sample.frame, editor.revision, sample.geometry);
+          const incremental=layerSheet?this.retained.plan(sourceReport,frame,editor.revision):
+            sample?.dirtyUids?{previous:sample.geometry,dirtySlots:affectedSlots(frame,sample.dirtyUids)}:null;
+          let geometry=this.geometry(sourceReport,frame,incremental);
+          if (layerSheet) geometry=this.retained.publish(sourceReport,frame,editor.revision,geometry,incremental);
+          sample={frame,geometry,dependencies:layerSheet?null:ratio>0?(report.auto_easing?null:
             easingMode(sourceReport.keyframes[index]?._styk?.easing)==='auto'?[index-1,index,index+1,index+2]:[index,index+1]):[index]};
           this.samples.set(id,sample);this.stats.builds++;
         }

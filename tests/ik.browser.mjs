@@ -12,6 +12,7 @@ const snapshot = () => page.evaluate(() => {
     history: e._undo.length, target: g.obj._stykIK?.[22]?.target, drag: styk.state.drag?.kind};
 });
 const near = (a, b) => Math.abs(a - b) < .05;
+const angleNear = (a,b) => Math.abs(Math.atan2(Math.sin(a-b),Math.cos(a-b))) < 1e-5;
 const point = (a, b) => assert.ok(near(a.x, b.x) && near(a.y, b.y), `${JSON.stringify(a)} != ${JSON.stringify(b)}`);
 const screen = p => page.evaluate(p => {
   const rect = document.querySelector('#viewport').getBoundingClientRect(), v = styk.state.view;
@@ -77,8 +78,8 @@ try {
   await page.mouse.up(); await page.waitForFunction(() => !styk.state.drag);
   check('Both changes side smoothly through the root during an actual pointer drag');
   const before = await snapshot();
-  await drag(before.joints[22], {x: 355, y: 275}, live => {point(live.joints[22], {x: 355, y: 275}); assert.ok(near(live.angles[2], 0));});
-  check('Actual target drag solves the leg and preserves foot orientation during the gesture');
+  await drag(before.joints[22], {x: 355, y: 275}, live => {point(live.joints[22], {x: 355, y: 275}); assert.ok(angleNear(live.angles[2], before.angles[2]));});
+  check('Actual target drag solves the leg while preserving foot orientation');
   await page.evaluate(() => {styk.editor.select(1, 4); styk.editor._emit('selection');});
   await page.getByText('Joint 55', {exact: true}).waitFor();
   await page.locator('#node-is-ik').check();
@@ -87,14 +88,25 @@ try {
   await drag(planted.joints[0], {x: 310, y: 140}, live => {
     point(live.joints[22], planted.joints[22]); point(live.joints[55], planted.joints[55]);
     point(live.joints[33], planted.joints[33]); point(live.joints[66], planted.joints[66]);
+    assert.ok(angleNear(live.angles[2],planted.angles[2]));
+    assert.ok(angleNear(live.angles[5],planted.angles[5]));
   });
   const moved = await snapshot(); point(moved.joints[0], {x: 310, y: 140});
   point(moved.joints[22], planted.joints[22]); point(moved.joints[55], planted.joints[55]);
-  check('Root dragging keeps both feet planted throughout GPU preview and after release');
+  point(moved.joints[33], planted.joints[33]); point(moved.joints[66], planted.joints[66]);
+  check('Root dragging keeps both complete feet planted in position and rotation');
   await page.evaluate(() => {styk.editor.select(1, 1); styk.editor._emit('selection');});
   await page.getByText('Joint 22', {exact: true}).waitFor();
+  const rotationBefore=(await snapshot()).angles[2];
   await page.locator('#node-ik-rotation').fill('20'); await page.locator('#node-ik-rotation').press('Tab');
-  assert.ok(near((await snapshot()).angles[2], 20 * Math.PI / 180)); check('Target rotation controls the outgoing foot');
+  assert.ok(near((await snapshot()).angles[2], rotationBefore + 20 * Math.PI / 180)); check('Target rotation explicitly turns the planted foot');
+  const rotated = await snapshot();
+  await drag(rotated.joints[0], {x: 315, y: 135}, live => {
+    for (const id of [22, 33, 55, 66]) point(live.joints[id], rotated.joints[id]);
+  });
+  check('The edited target rotation remains planted through another root drag');
+  await page.evaluate(() => {styk.editor.select(1, 1); styk.editor._emit('selection');});
+  await page.locator('#node-ik-pinned').waitFor();
   const saved = await snapshot();
   await page.locator('#node-ik-pinned').uncheck();
   point((await snapshot()).joints[33], saved.joints[33]);
@@ -141,6 +153,83 @@ try {
     assert.equal(result.hasControllers, result.format !== 'piv');
   }
   check('Real worker/backend STYK and STKZ round trips retain controllers; PIV round trip retains baked pose');
+  await page.evaluate(async () => {
+    const {emptyDocument,createObject,createFrame}=await import('/src/demo.mjs');
+    const document=emptyDocument(), figure=document.figure_types[0], base=figure.segments[0];
+    const segment=(id,parent,length,angle,fixed=false)=>({...base,segment_id:id,parent_id:parent,length,angle_rad:angle,is_static:fixed,aux_code:fixed?1:0});
+    const groups=[[segment(11,0,90,.8)],[segment(22,0,90,2),segment(24,22,20,1.1,true)],[segment(33,0,35,0),segment(35,0,25,1.5,true),segment(36,35,40,0,true)],[segment(41,0,18,1.1,true)]];
+    document.figure_types=groups.map((segments,i)=>({...structuredClone(figure),name:['Thigh','Shin','Foot','Attachment'][i],figure_type_id:i+1,segments,segment_count:segments.length}));
+    document.figure_types[2].polyfills=[{polyfill_id:1,segment_ids:[0,35,36,33],color_rgb:[10,35,65],alpha_raw:0,z_order:0}];
+    const objects=document.figure_types.map((f,i)=>createObject(f,i+1,300,150));
+    for(const [slot,parent,handle] of [[1,0,11],[2,1,22],[3,1,22]])objects[slot].join={target_object_slot:parent,target_unique_id:parent+1,target_handle_id:handle};
+    document.keyframes=[createFrame(objects,8)]; styk.editor.load(document);styk.editor.select(2,0);styk.editor._emit('selection');
+  });
+  await page.getByText('Joint 22',{exact:true}).waitFor(); await page.locator('#node-is-ik').check();
+  assert.equal(await page.locator('#node-ik-chain').getAttribute('max'),'2');
+  const joinedSnapshot=()=>page.evaluate(()=>Object.fromEntries([...styk.editor.geometry.objects.values()].flatMap(g=>g.segments.map(s=>[s.seg.segment_id,{start:s.start,end:s.end,angle:s.angle}]))));
+  const joinedBefore=await joinedSnapshot();
+  await drag(joinedBefore[22].end,{x:355,y:275},async()=>{
+    const live=await joinedSnapshot();point(live[22].end,{x:355,y:275});assert.ok(angleNear(live[33].angle,0));
+    for(const id of [35,36])assert.ok(angleNear(live[id].angle,joinedBefore[id].angle));
+    for(const id of [24,41])assert.ok(angleNear(live[id].angle-live[22].angle,joinedBefore[id].angle-joinedBefore[22].angle));
+  });
+  check('Joined IK keeps shin attachments on the shin and the polygon foot in target space');
+  const joinedPlanted=await joinedSnapshot();
+  await page.evaluate(()=>{styk.editor.select(1,-1);styk.editor._emit('selection');});
+  await drag(joinedPlanted[11].start,{x:310,y:140},async()=>{
+    const live=await joinedSnapshot();
+    for(const id of [22,33,35,36])point(live[id].end,joinedPlanted[id].end);
+    for(const id of [24,41])assert.ok(angleNear(live[id].angle-live[22].angle,joinedPlanted[id].angle-joinedPlanted[22].angle));
+  });
+  check('Actual joined-root dragging keeps the whole foot planted');
+  await drag((await joinedSnapshot())[22].end,{x:430,y:140});
+  const attachmentStart=await joinedSnapshot(), pointerStart=await screen(attachmentStart[22].end);
+  let maximumRelativeRotationError=0;
+  await page.mouse.move(pointerStart.x,pointerStart.y);await page.mouse.down();
+  for(let i=1;i<=120;i++){
+    const a=i*Math.PI/60,p=await screen({x:310+120*Math.cos(a),y:140+120*Math.sin(a)});
+    await page.mouse.move(p.x,p.y);await page.evaluate(()=>new Promise(requestAnimationFrame));
+    const live=await joinedSnapshot();
+    for(const id of [24,35,36,41]){
+      const difference=live[id].angle-attachmentStart[id].angle-([24,41].includes(id)?live[22].angle-attachmentStart[22].angle:0);
+      maximumRelativeRotationError=Math.max(maximumRelativeRotationError,Math.abs(Math.atan2(Math.sin(difference),Math.cos(difference))));
+    }
+    assert.ok(maximumRelativeRotationError<1e-5,`Attachment acquired extra rotation: ${maximumRelativeRotationError}`);
+  }
+  await page.mouse.up();await page.waitForFunction(()=>!styk.state.drag);
+  check('Every pointer sample preserves shin attachment offsets and foot orientation');
+  await page.evaluate(()=>{styk.editor.select(2,0);styk.editor._emit('selection');});
+  await page.locator('#node-ik-pinned').uncheck();
+  const freeFoot=await joinedSnapshot();
+  await drag(freeFoot[22].end,{x:355,y:265},async()=>{
+    const live=await joinedSnapshot();
+    for(const id of [33,35,36])assert.ok(angleNear(live[id].angle,freeFoot[id].angle));
+    for(const id of [24,41])assert.ok(angleNear(live[id].angle-live[22].angle,freeFoot[id].angle-freeFoot[22].angle));
+    assert.ok(Math.abs(live[22].angle-freeFoot[22].angle)>.1);
+  });
+  check('Unpinned target dragging preserves the foot orientation');
+  const styledFoot=await joinedSnapshot();
+  await page.locator('[data-field="thickness"]').fill('32');
+  await page.locator('[data-field="thickness"]').press('Tab');
+  for(const [id,s] of Object.entries(styledFoot)){const live=(await joinedSnapshot())[id];point(live.end,s.end);assert.ok(near(live.angle,s.angle));}
+  await page.locator('#node-ik-pinned').check();
+  await drag((await joinedSnapshot())[22].end,{x:365,y:255},async()=>{const live=await joinedSnapshot();assert.ok(angleNear(live[33].angle,styledFoot[33].angle));});
+  check('Thickness editing and re-pinning preserve the child articulation');
+  await page.screenshot({path:'artifacts/ik/joined-attachments.png'});
+  const joinedRoundtrips=await page.evaluate(async()=>{
+    const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{Editor}=await import('/src/editor.mjs');
+    const exporter=new DocumentExporter(),importer=new ImportClient(),results=[];
+    const sample=e=>[...e.geometry.objects.values()].map(g=>({uid:g.obj.unique_id,segments:g.segments.map(s=>({end:s.end,angle:s.angle}))}));
+    try{for(const format of ['styk','piv']){
+      const blob=await exporter.export(styk.editor.serialize(),{format}),loaded=await importer.importFile(new File([blob],`joined.${format}`));
+      results.push({format,expected:sample(styk.editor),actual:sample(new Editor({demo:false}).load(loaded.document))});
+    }}finally{exporter.dispose();importer.dispose();}return results;
+  });
+  for(const result of joinedRoundtrips)for(const expected of result.expected){
+    const actual=result.actual.find(o=>o.uid===expected.uid);assert.ok(actual);
+    expected.segments.forEach((s,i)=>{point(actual.segments[i].end,s.end);assert.ok(near(actual.segments[i].angle,s.angle));});
+  }
+  check('Joined IK and attachment poses survive real STYK/PIV worker and backend round trips');
   assert.deepEqual(errors, []);
-  await writeFile('artifacts/ik/browser-report.json', JSON.stringify({checks, largestKneeStep, largestFoldStep, roundtrips, errors}, null, 2));
+  await writeFile('artifacts/ik/browser-report.json', JSON.stringify({checks, largestKneeStep, largestFoldStep, maximumRelativeRotationError, roundtrips, joinedRoundtrips, errors}, null, 2));
 } finally {await browser.close();}

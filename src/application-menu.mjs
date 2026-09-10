@@ -1,7 +1,7 @@
 /** Classic application menus use the same commands as keyboard and canvas actions. */
 export function applicationMenuItems(name, editor, desktop) {
   const noFigure = !editor.object;
-  const noJoint = noFigure || editor.selectedJoint < 0 || editor.selectedUids?.size > 1;
+  const noJoint = noFigure || Boolean(editor.figure?._styk?.movieclip) || editor.selectedJoint < 0 || editor.selectedUids?.size > 1;
   const segment = (action, symbol, label, shortcut = '') => [action, symbol, label, shortcut, noJoint];
   const menus = {
     file: [
@@ -53,10 +53,15 @@ export function applicationMenuItems(name, editor, desktop) {
       segment('delete-segment', 'trash', 'Delete branch', 'Shift Delete'),
     ],
     animation: [
+      ['movieclip-new', 'frame', 'New movieclip…'],
+      ['movieclip-create', 'frame', 'Movieclip from selection…', '', noFigure],
+      ['movieclip-range', 'frame', 'Movieclip from frame range…'], null,
       ['play', 'play', 'Play / pause', 'Space'], ['toggle-loop', 'loop', 'Toggle loop'], null,
       ['first-frame', 'first', 'First frame', 'Home'], ['previous-frame', 'previous', 'Previous frame', '←'],
       ['next-frame', 'next', 'Next frame', '→'], ['last-frame', 'next', 'Last frame', 'End'], null,
       ['add-frame', 'plus', 'Add keyframe', 'F6'], ['delete-frame', 'trash', 'Delete keyframe'],
+      ['duplicate-frame-after', 'duplicate', 'Duplicate frame after current', 'Ctrl Enter'],
+      ['blank-frame', 'circle', 'Insert blank keyframe', '', !editor.report._styk?.layerSheet],
     ],
     help: [['help', 'help', 'Keyboard shortcuts', '?'], ['performance', 'activity', 'Performance']],
   };

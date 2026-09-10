@@ -5,7 +5,7 @@ import {emptyDocument,createFrame,createObject} from '../src/demo.mjs';
 import {composePoseChannels} from '../src/animation-pose.mjs';
 import {evaluatedNativeFrame,buildGeometry} from '../src/pivot/geometry.mjs';
 import {documentChunks,applyDocumentChunk} from '../src/document-transport.mjs';
-import {buildChannelTimelineTracks} from '../src/timeline.mjs';
+import {buildChannelTimelineTracks} from './helpers/legacy-timeline-projection.mjs';
 import {connectedTimelineGroups} from '../src/connected-timeline.mjs';
 
 function fixture({frames=30,parts=24}={}) {
@@ -18,6 +18,44 @@ function fixture({frames=30,parts=24}={}) {
   const editor=new Editor({demo:false,propertyChannels:true}).load(report);editor.select(1);return editor;
 }
 function move(e){e.beginTranslationDrag();e.moveSelection(20,5);e.commitDrag();}
+
+for (const operation of ['move', 'scale', 'delete', 'duplicate', 'easing']) test(`shared rig ${operation} stays shared through undo and independent edits`, () => {
+  const e = fixture({frames: 500, parts: 40}); move(e);
+  const original = e.animationChannels[0].keys, before = structuredClone(e.report._styk.animation);
+  const selection = e.animationChannels.map(c => ({channelId: c.id, keyIds: operation === 'scale' ? c.keys.map(k => k.id) : [c.keys[1].id]}));
+  if (operation === 'move') e.moveAnimationKeys(selection, 1);
+  if (operation === 'scale') e.scaleAnimationKeys(selection, 2, 0);
+  if (operation === 'delete') e.deleteAnimationKeys(selection);
+  if (operation === 'duplicate') {
+    const copies = e.duplicateAnimationKeys(selection, 1);
+    assert.equal(copies.length, 40);
+    for (const entry of copies) assert.ok(e.animationChannels.find(c => c.id === entry.channelId).keys.some(k => k.id === entry.keyIds[0] && k.tick === 4));
+  }
+  if (operation === 'easing') e.setAnimationKeysEasing(selection, {interpolation: 'hold'});
+  assert.equal(new Set(e.animationChannels.map(c => c.keys)).size, 1);
+  assert.notStrictEqual(e.animationChannels[0].keys, original);
+  assert.ok(e._undo.at(-1).bytes < 600000);
+  let samples = 0;
+  composePoseChannels(e.report, e.report.keyframes[0], 2, {sampleNative(...args) { samples++; return evaluatedNativeFrame(...args); }, resolveGeometry: buildGeometry});
+  assert.equal(samples, 1);
+  e.undo(); assert.deepEqual(e.report._styk.animation, before); e.redo();
+  const sibling = e.animationChannels[1].keys, first = e.animationChannels[0];
+  e.setAnimationKey(first.id, first.keys[0].id, {interpolation: 'linear'});
+  assert.strictEqual(e.animationChannels[1].keys, sibling);
+  assert.notStrictEqual(e.animationChannels[0].keys, sibling);
+});
+
+test('shared batch no-ops and a collision in one member are atomic', () => {
+  const e = fixture(); move(e);
+  const selection = e.animationChannels.map(c => ({channelId: c.id, keyIds: [c.keys[0].id]}));
+  const before = e.report._styk.animation, count = e._undo.length;
+  assert.equal(e.scaleAnimationKeys(selection, 1, 0), false);
+  assert.equal(e._undo.length, count); assert.strictEqual(e.report._styk.animation, before);
+  assert.throws(() => e.moveAnimationKeys(selection, 3), /occupies/);
+  assert.strictEqual(e.report._styk.animation, before);
+  e.moveAnimationKeys([selection[0], {...selection[1], keyIds: [e.animationChannels[1].keys[1].id]}], 1);
+  assert.notStrictEqual(e.animationChannels[0].keys, e.animationChannels[1].keys);
+});
 
 test('connected edits share one immutable pose sequence and history stays proportional to that sequence',()=>{
   const e=fixture({frames:500});move(e);
@@ -94,4 +132,21 @@ test('focused projection lazily resolves a connected group without constructing 
   assert.equal(group.id,'assembly:1');assert.equal(project.byId.get(group.id),group);
   assert.equal(project.byId.get('assembly:1:pose').kind,'assembly-property');
   assert.equal(project.assemblyByUid.get(1),group);
+});
+
+test('history source collection visits each shared sequence once and collects only unreachable captures',()=>{
+  const e=fixture({frames:60,parts:40});move(e);
+  for(let i=0;i<12;i++){
+    const keyIds=e.animationChannels[0].keys.map(key=>key.id);
+    e.moveAnimationKeys(e.animationChannels.map(c=>({channelId:c.id,keyIds})),1);
+  }
+  const sequences=new Set(e._undo.flatMap(command=>[command.before,command.after].flatMap(animation=>(animation?.channels??[]).map(c=>c.keys))));
+  let visits=0,total=0;
+  for(const keys of sequences)for(const key of keys){const value=key.value;total++;Object.defineProperty(key,'value',{enumerable:true,configurable:true,get(){visits++;return value;}});}
+  const live=[...e._generatedFrameSources],dead=e.captureFrameSource(e.frame);e._generatedFrameSources.add(dead);
+  e._pruneFrameSources();assert.ok(visits<=total,'Shared keys must not be rescanned for every member/history entry.');
+  assert.equal(e.report._styk.frameSources[dead],undefined);for(const id of live)assert.ok(e.report._styk.frameSources[id]);
+  e.undo();for(const id of live)assert.ok(e.report._styk.frameSources[id]);
+  e._undo=[];e._redo=[];e.report._styk.animation.channels=[];e._pruneFrameSources();
+  for(const id of live)assert.equal(e.report._styk.frameSources?.[id],undefined);
 });

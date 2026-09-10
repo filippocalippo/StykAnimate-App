@@ -224,6 +224,10 @@ export function applyAuthoredCameraToFigures(editor, indices, { ticks } = {}) {
     changedFrames.add(index);
   }
   if (!changedTicks.length) return 0;
+  if(editor.report._styk?.layerSheet){
+    const entries=[...points.values()].flatMap(entry=>[...entry.values].map(([tick,value])=>({target:entry.target,property:entry.property,tick,value})));
+    editor._sheetPropertyEntries(entries,'Apply camera to figures');return changedTicks.length;
+  }
   const before = editor.report._styk?.animation ?? null,
     after = guardedChannels(before, points, endTick);
   const candidate = {

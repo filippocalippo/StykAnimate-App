@@ -10,7 +10,7 @@ export const editorAuthoredPoseMethods = {
   _authoredTransaction(label, mutate, {structural = false, timing = false} = {}) {
     if (!Number.isInteger(this.tick)) { this.tick = Math.round(this.tick); this._invalidate({viewOnly: true}); }
     const source = this.evaluatedFrame, index = this.frameIndex, native = this.report.keyframes[index], definitionCount = this.report.figure_types.length;
-    this._authoredPoseEdit = {frame: clone(source), source, owned: new Set(source.objects.map((_, slot) => slot)), tick: this.tick, transaction: true};
+    this._authoredPoseEdit = {frame: clone(source), source, owned: new Set(source.objects.map((_, slot) => slot)), tick: this.tick, transaction: true, beforeFigures:this.report.figure_types.slice(), beforeBackgrounds:(this.report.backgrounds??[]).slice()};
     this._drag = {label, scope: 'selection', authored: true, index, before: source.objects, beforeSelection: this._selectionState(), changed: false};
     try {
       mutate(this.frame, this.report);
@@ -23,13 +23,13 @@ export const editorAuthoredPoseMethods = {
     } catch (error) { this.report.keyframes[index] = native; this.report.figure_types.length = definitionCount; this.cancelAuthoredPoseDrag(); throw error; }
   },
   _beginAuthoredPoseDrag(label, scope) {
-    if (!this.propertyChannels && !this.animationChannels.length) return null;
+    if (!this.report._styk?.layerSheet && !this.propertyChannels && !this.animationChannels.length) return null;
     if (!Number.isInteger(this.tick)) { this.tick = Math.round(this.tick); this._invalidate({viewOnly: true}); }
     const source = this.evaluatedFrame;
     if (!source.objects.some(object => this.selectedUids.has(object.unique_id))) return false;
     const resolved = this.resolveTranslationSelection(this.selectedUids, {frame: source});
     // Ordinary posing includes descendants but leaves external ancestors fixed.
-    const slots = scope === 'translation' ? resolved.affectedSlots : this._resolvePoseSlots(source);
+    const slots = this._ikPoseSlots(source, scope === 'translation' ? resolved.affectedSlots : this._resolvePoseSlots(source));
     const geometry = this._geometry;
     this._authoredPoseEdit = {frame: {...source, objects: source.objects.slice()}, source, owned: new Set(), tick: this.tick};
     this._ownAuthoredSlots(slots);
@@ -72,10 +72,12 @@ export const editorAuthoredPoseMethods = {
       }
       if (edit.transaction) validateScene({...this.report, keyframes: [edit.frame]});
     } catch (error) { this.cancelAuthoredPoseDrag(); throw error; }
+    if(this.report._styk?.layerSheet)return this._commitSheetPose(edit,drag);
     const split = this.propertyChannels ? splitPosePropertyChanges(this.report, edit.source, edit.frame, ids, edit.tick) : null;
     const entries = split?.entries ?? [];
     let sourceId;
-    const poseSource = () => sourceId ??= this.captureFrameSource(split?.frame ?? edit.frame);
+    const poseSource = () => sourceId ??= this.captureFrameSource(split?.frame ?? edit.frame,
+      {uids: edit.transaction ? undefined : split?.shapeIds ?? ids});
     if (!split || split.shapeIds.size) poseSource();
     const currentObjects = new Map(edit.frame.objects.map(object => [object.unique_id, object]));
     const changedObjects = [...after, ...drag.before].filter(object => {

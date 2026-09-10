@@ -36,6 +36,11 @@ function errorMessage(error) {
 
 async function importRequest(message, signal) {
   const started = performance.now();
+  if(message.operation==='import' && /\.(nodes|nodemc|stknds|zip)$/i.test(message.filename??'')){
+    if(!(message.bytes instanceof ArrayBuffer))throw new Error('The importer did not receive the complete file bytes.');
+    const {importStickNodes}=await import('./sticknodes/adapter.mjs');
+    return importStickNodes(new Uint8Array(message.bytes),{filename:message.filename,entryIndex:message.entryIndex,signal,onProgress:progress=>self.postMessage({id:message.id,progress})});
+  }
   const headers = {Accept: `${NATIVE_FRAME_CONTENT_TYPE}, application/json`};
   if (message.token) headers.Authorization = `Bearer ${message.token}`;
   let path, body;

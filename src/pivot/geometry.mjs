@@ -9,9 +9,16 @@ import {animationOriginLayout, animationOriginAngle, animationOriginBend, correc
 import {interpolateOriginSupport} from '../animation-origin-support.mjs';
 import {easedProgress, usesLegacyNativeEasing, easingMode, autoValue} from '../keyframe-easing.mjs';
 import {geometryDefinition} from './geometry-definition.mjs';
-import {hasPinnedIK, solveObjectIK, interpolateIK} from '../ik.mjs';
+import {hasPinnedIK, interpolateIK} from '../ik.mjs';
+import {evaluateIKPose} from '../ik-evaluation.mjs';
+import {solveJoinedIK} from '../ik-joined.mjs';
+import {isMovieclip, sampleMovieclipObjects,movieclipTypes,movieclipSourceDocument} from '../movieclips.mjs';
+import {buildMovieclipGeometry} from '../movieclip-geometry.mjs';
+import {sampleLayerSheet,invalidateLayerSheet} from '../layer-sheet.mjs';
+import {sticknodesShape,sticknodesCurve,sticknodesDrawables,sticknodesSpriteAsset} from '../sticknodes/geometry.mjs';
 const authoredTimelines = new WeakMap();
 export function invalidateEvaluationCaches(report) {
+  invalidateLayerSheet(report);
   authoredTimelines.delete(report);
   invalidatePoseCache(report);
 }
@@ -86,8 +93,10 @@ export function nativeTimeline(report) {
   });
 }
 export function timeline(report) {
-  const entries = nativeTimeline(report), last = entries.at(-1);
-  if (last) last.count = Math.max(last.count, animationEndTick(report) - last.start);
+  const sheet=report._styk?.layerSheet;
+  const entries = nativeTimeline(report).filter(entry=>!sheet||entry.start<sheet.duration), last = entries.at(-1);
+  if(sheet){for(const entry of entries)entry.count=Math.min(entry.count,sheet.duration-entry.start);if(last)last.count=sheet.duration-last.start;return entries;}
+  if (last) last.count = Math.max(last.count, (report._styk?.layerSheet?.duration ?? animationEndTick(report)) - last.start);
   return entries;
 }
 function sameSign(a, b) {
@@ -183,7 +192,7 @@ function colorTween(a, b, t) {
   }
   return out >>> 0;
 }
-export function evaluatedNativeFrame(report, index, t = 0, tweenCache) {
+export function evaluatedNativeFrame(report, index, t = 0, tweenCache, requestedUids) {
   const a = report.keyframes[index],
     b = report.keyframes[index + 1];
   if (!a || !b || t <= 0 || report.version < 5 && !a._styk?.easing) return correctAnimationOrigins(report, a);
@@ -199,9 +208,26 @@ export function evaluatedNativeFrame(report, index, t = 0, tweenCache) {
   // made tween evaluation quadratic in the number of figures in large scenes.
   const identities = new Map([[a, new Map(a.objects.map(o => [o.unique_id, o]))], [b, byId]]);
   const layouts = new Map();
+  // A figure trajectory owns only its figures and their attachment ancestors.
+  // Retain unrelated native records by reference instead of interpolating every
+  // segment in the movie once for each independently authored trajectory.
+  let needed;
+  if (requestedUids) {
+    needed = new Set(requestedUids);
+    const queue = [...needed];
+    for (let i = 0; i < queue.length; i++) {
+      for (const source of [a, b]) {
+        const objects = identities.get(source);
+        const object = objects.get(queue[i]);
+        const parent = source.objects[object?.join?.target_object_slot];
+        if (parent && !needed.has(parent.unique_id)) { needed.add(parent.unique_id); queue.push(parent.unique_id); }
+      }
+    }
+  }
   const frame = {
     ...a,
     objects: a.objects.map((o) => {
+      if (needed && !needed.has(o.unique_id)) return o;
       const next = byId.get(o.unique_id),
         fig = types.get(o.figure_type_id);
       if (!next || next.figure_type_id !== o.figure_type_id || !fig) return o;
@@ -373,8 +399,29 @@ export function evaluatedNativeFrame(report, index, t = 0, tweenCache) {
 }
 /** Every editor, worker and export samples the same authored scene. Native
  * documents take the original evaluator path without channel indexing work. */
-export function evaluatedFrame(report, index, t = 0, absoluteTick, {tweenCache} = {}) {
+export function evaluatedFrame(report, index, t = 0, absoluteTick, {tweenCache,skipMovieclips=false} = {}) {
+  if(report._styk?.layerSheet){
+    const row=timeline(report)[index],tick=absoluteTick??((row?.start??0)+t*(row?.count??0));
+    let frame=sampleLayerSheet(report,tick,{sampleNative:evaluatedNativeFrame,sampleLegacy:(source,time)=>{
+      let rows=authoredTimelines.get(source);if(!rows){rows=timeline(source);authoredTimelines.set(source,rows);}
+      let low=0,high=rows.length-1;while(low<high){const mid=(low+high+1)>>>1;if(rows[mid].start<=time)low=mid;else high=mid-1;}
+      const current=rows[low];return evaluatedFrame(source,low,current?.count?(time-current.start)/current.count:0,time,{skipMovieclips:true});
+    }});
+    if(!skipMovieclips&&movieclipTypes(report).size)frame=sampleMovieclipObjects(report,frame,tick,buildGeometry);
+    return applyLayerOrder(report,frame);
+  }
   let frame = evaluatedNativeFrame(report, index, t, tweenCache);
+  const source = movieclipSourceDocument(report);
+  if (source) {
+    const a=report.keyframes[index],b=report.keyframes[index+1];
+    const start=a?._styk?.movieclipSourceTick;
+    if (Number.isFinite(start)) {
+      const finish=b?._styk?.movieclipSourceTick??start,sourceTick=start+(finish-start)*Math.max(0,Math.min(1,t));
+      let rows=authoredTimelines.get(source);if(!rows){rows=timeline(source);authoredTimelines.set(source,rows);}
+      let low=0,high=rows.length-1;while(low<high){const mid=Math.ceil((low+high)/2);if(rows[mid].start<=sourceTick)low=mid;else high=mid-1;}
+      const row=rows[low];frame={...evaluatedFrame(source,low,row.count?(sourceTick-row.start)/row.count:0,sourceTick),duration_raw:a.duration_raw,_styk:a._styk};
+    }
+  }
   if (report._styk?.animation?.channels?.length) {
     let entries = authoredTimelines.get(report);
     if (!entries) authoredTimelines.set(report, entries = timeline(report));
@@ -382,6 +429,11 @@ export function evaluatedFrame(report, index, t = 0, absoluteTick, {tweenCache} 
     const tick = absoluteTick ?? ((entry?.start || 0) + Math.max(0, t) * (entry?.count || 0));
     frame = composePoseChannels(report, frame, tick, { sampleNative: evaluatedNativeFrame, resolveGeometry: buildGeometry });
     frame = composeAnimationChannels(report, frame, tick, { resolveGeometry: buildGeometry });
+  }
+  if(!skipMovieclips&&movieclipTypes(report).size){
+    let entries=authoredTimelines.get(report);if(absoluteTick===undefined&&!entries){entries=timeline(report);authoredTimelines.set(report,entries);}
+    const row=entries?.[index];
+    frame = sampleMovieclipObjects(report, frame, absoluteTick ?? ((row?.start ?? 0) + t * (row?.count ?? 0)),buildGeometry);
   }
   return applyLayerOrder(report, frame);
 }
@@ -393,8 +445,8 @@ export function buildGeometry(report, frame, incremental = null) {
   }
 }
 
-/** Shares the exact synchronous builder, with checkpoints between figure units.
- * A single figure's segment construction remains one indivisible unit. */
+/** Shares the exact synchronous builder, with checkpoints inside dense figures
+ * as well as between objects. Partial geometry is never published. */
 export function* buildGeometrySteps(report, frame, incremental = null) {
   const types = new Map(), definitions = report.figure_types || [];
   for (let index = 0; index < definitions.length; index++) {
@@ -417,7 +469,9 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
       if ((++completed & 255) === 0) yield {phase: 'geometry', stage: 'invalidation', completed};
     }
   }
-  function objectAt(slot, seen = new Set()) {
+  const joinedIK = solveJoinedIK(report, frame, incremental?.previous ? incremental.dirtySlots : null);
+  for (const slot of joinedIK.keys()) cache.delete(slot);
+  function* objectAt(slot, seen = new Set()) {
     if (cache.has(slot)) return cache.get(slot);
     const obj = frame.objects[slot],
       fig = resolveInstanceFigure(types.get(Number(obj?.figure_type_id)), obj);
@@ -429,7 +483,7 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
     seen.add(slot);
     let root = { x: Number(obj.root_x ?? 0), y: Number(obj.root_y ?? 0) };
     if (obj.join) {
-      const parent = objectAt(
+      const parent = yield* objectAt(
         Number(obj.join.target_object_slot),
         new Set(seen),
       );
@@ -437,9 +491,13 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
       if (p) root = { ...p };
       else warnings.push(`Unresolved join at object ${slot}`);
     }
+    if (isMovieclip(fig)) {
+      const geometry = buildMovieclipGeometry(fig,obj,root,slot,{timeline,evaluatedFrame,buildGeometry});
+      cache.set(slot,geometry); return geometry;
+    }
     let plan = definitionPlans.get(fig);
     if (!plan) {plan = geometryDefinition(fig); definitionPlans.set(fig, plan);}
-    const ik = hasPinnedIK(obj) ? solveObjectIK(fig, obj, root, plan) : null;
+    const ik = joinedIK.get(slot) ?? (hasPinnedIK(obj) ? evaluateIKPose(report, `local:${obj.unique_id}`, fig, obj, root, plan) : null);
     const joints = new Map([[0, root]]),
       renders = new Map(),
       {segments, ids} = plan;
@@ -543,10 +601,17 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
         opacity,
         static: isStatic(seg),
       };
+      const sourceShape=sticknodesShape(seg,obj);
+      if(sourceShape?.sagitta&&Math.abs(bend)<1e-7){render.points=sticknodesCurve(sourceShape,start,angle,length,scale);render.bend=1e-6;render._sticknodesCurve=true;}
+      if(obj._sticknodesSprite)render.asset=sticknodesSpriteAsset(asset,obj);
       renders.set(i, render);
       return render;
     }
-    for (const i of plan.order) segmentAt(i);
+    let built = 0;
+    for (const i of plan.order) {
+      segmentAt(i);
+      if ((++built & 127) === 0) yield {phase:'geometry',stage:'segments',slot,completed:built,total:plan.order.length};
+    }
     if (plan.order.length < segments.length)
       warnings.push(`Cyclic segment hierarchy in object ${slot}`);
     const malformedEdges = ids.size !== segments.length ? new Map(
@@ -555,7 +620,9 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
         s,
       ]),
     ) : null;
-    const polys = (fig.polyfills || []).map((poly, i) => {
+    const polys = [];
+    for (let i = 0; i < (fig.polyfills?.length ?? 0); i++) {
+      const poly = fig.polyfills[i];
       const polygon = plan.polygons[i], points = [];
       if (polygon.first !== undefined && joints.has(polygon.first)) points.push(joints.get(polygon.first));
       for (let j = 0; j < polygon.edges.length; j++) {
@@ -570,6 +637,7 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
             ...(reverse ? [...edge.points].reverse() : edge.points).slice(1),
           );
         else if (joints.has(b)) points.push(joints.get(b));
+        if ((j & 255) === 255) yield {phase:'geometry',stage:'polygon',slot,completed:j+1,total:polygon.edges.length};
       }
       if (
         points.length > 1 &&
@@ -577,7 +645,7 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
         points[0].y === points.at(-1).y
       )
         points.pop();
-      return {
+      polys.push({
         type: "poly",
         poly,
         obj,
@@ -592,8 +660,9 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
             ? (poly.color_alpha ?? 1)
             : 1 - poly.alpha_raw / 255,
         opacity,
-      };
-    });
+      });
+      if ((i & 31) === 31) yield {phase:'geometry',stage:'polygons',slot,completed:i+1,total:fig.polyfills.length};
+    }
     const geometry = {
       slot,
       ...(ik ? {ik: ik.results, solvedAngles: ik.angles, solvedLengths: ik.lengths} : {}),
@@ -619,7 +688,7 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
       if ((++completed & 255) === 0) yield {phase: 'geometry', stage: 'joins', completed, total: dirty.size};
     }
     for (let q = 0; q < ready.length; q++) {
-      objectAt(ready[q]); ready.push(...(children.get(ready[q]) || []));
+      yield* objectAt(ready[q]); ready.push(...(children.get(ready[q]) || []));
       yield {phase: 'geometry', stage: 'objects', completed: q + 1, total: dirty.size};
     }
     completed = 0;
@@ -644,7 +713,7 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
   }
   for (let q = 0; q < ready.length; q++) {
     const slot = ready[q];
-    objectAt(slot);
+    yield* objectAt(slot);
     ready.push(...(joinedChildren.get(slot) || []));
     yield {phase: 'geometry', stage: 'objects', completed: q + 1, total: frame.objects.length};
   }
@@ -661,7 +730,7 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
     orderedObjects = [];
   let collected = 0;
   for (const slot of order) {
-    const g = objectAt(Number(slot));
+    const g = yield* objectAt(Number(slot));
     if (!g) {
       yield {phase: 'geometry', stage: 'drawables', completed: ++collected, total: order.length};
       continue;
@@ -670,12 +739,12 @@ export function* buildGeometrySteps(report, frame, incremental = null) {
       ...g.polys,
       ...g.segments
         .filter((s) => s.seg.visible !== false)
-        .map((s) => ({
+        .flatMap((s) => sticknodesDrawables(s) ?? [{
           ...s,
           type: ["circle", "image", "text"].includes(s.seg.segment_type)
             ? s.seg.segment_type
             : "line",
-        })),
+        }]),
     ];
     if (!g.drawables) { local.sort((a, b) => a.z - b.z); g.drawables = local; }
     if (local.length) orderedObjects.push(g);
@@ -695,8 +764,8 @@ const yieldGeometryTask = globalThis.scheduler?.yield ? () => globalThis.schedul
   channel.port2.postMessage(null);
 });
 
-/** Prepare unpublished geometry without blocking across many small figures.
- * sliceMs is a scheduling target, not a maximum for an individual large figure. */
+/** Prepare unpublished geometry with cancellation checkpoints inside figures.
+ * sliceMs is a scheduling target; individual native primitives stay exact. */
 export async function buildGeometryAsync(report, frame, incremental = null,
   {sliceMs = 4, signal, checkCurrent, yieldControl = yieldGeometryTask, onProgress, onTiming} = {}) {
   if (!Number.isFinite(sliceMs) || sliceMs < 0) throw new Error('Choose a nonnegative geometry preparation slice duration.');
@@ -796,7 +865,15 @@ export function drawGeometry(ctx, geometry, resources = {}) {
     }
     g.items.push(s);
   }
-  for (const g of groups)
+  for (const g of groups) {
+    const owner = g.items[0]?._movieclipOwner;
+    if (owner) {
+      isolated(ctx, owner.opacity, target => drawGeometry(target, {drawables:g.items.map(item => {
+        const inner=item._movieclipInner;
+        return {...item,slot:item._movieclipPart,_movieclipOwner:inner?.owner,_movieclipPart:inner?.part,_movieclipInner:inner?.inner};
+      })},resources), groupCanvases);
+      continue;
+    }
     isolated(
       ctx,
       g.opacity,
@@ -836,6 +913,7 @@ export function drawGeometry(ctx, geometry, resources = {}) {
       },
       groupCanvases,
     );
+  }
 }
 const vectorPaths = new WeakMap();
 function gradient(ctx, s) {
@@ -973,7 +1051,7 @@ function drawPrimitives(ctx, items, resources, stroke) {
       ctx.globalAlpha *= s.alpha;
       // Pivot requests FMX's high-speed (nearest-neighbor) bitmap sampler.
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, a.display_width ?? img.naturalWidth, a.display_height ?? img.naturalHeight);
       ctx.restore();
       continue;
     }

@@ -1,4 +1,4 @@
-"""Versioned, lossless STYK/STKZ containers, independent of the Pivot codec.
+"""Versioned, lossless STYK/STKZ/STMV containers, independent of the Pivot codec.
 
 The payload is UTF-8 JSON compressed with zlib at level 3. A fixed header
 identifies the kind/version and bounds inflation before any JSON is parsed.
@@ -10,7 +10,7 @@ import zlib
 HEADER = struct.Struct('<4sBBHQQ32s')
 VERSION = 1
 MAX_BYTES = 256 * 1024 * 1024
-MAGIC = {'styk': b'STYK', 'stkz': b'STKZ'}
+MAGIC = {'styk': b'STYK', 'stkz': b'STKZ', 'stykmov': b'STMV'}
 
 
 def encode(payload: bytes, kind: str, *, max_bytes=MAX_BYTES) -> bytes:

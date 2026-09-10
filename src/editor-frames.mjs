@@ -1,17 +1,19 @@
 import {getFrameById, frameIndexForId, invalidateFrameIndex} from './frame-ids.mjs';
+import {snapshotPoseFrame} from './pose-snapshot.mjs';
 const clone = value => structuredClone(value);
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const validId = id => typeof id === 'string' && /^[a-z][a-z0-9-]{0,127}$/.test(id);
-const channelSources = new WeakMap();
+const sequenceSources = new WeakMap();
 // Report-owned frames can be reused after removal without sharing mutable
 // objects with the immutable history snapshots they were copied from.
 const sourceCopies = new WeakMap();
+function* historyCommands(commands) {for(const command of commands){yield command;if(command.commands)yield* historyCommands(command.commands);}}
 function references(channel, retained, candidates, visited) {
-  if (!channel || channel.property !== 'pose' || visited.has(channel)) return;
-  visited.add(channel);
-  let entry = channelSources.get(channel);
-  if (!entry || entry.keys !== channel.keys) {
-    entry = {keys: channel.keys, ids: new Set(channel.keys.map(key => key.value?.frameId).filter(Boolean))}; channelSources.set(channel, entry);
+  if (!channel || channel.property !== 'pose' || visited.has(channel.keys)) return;
+  visited.add(channel.keys);
+  let entry = sequenceSources.get(channel.keys);
+  if (!entry) {
+    entry = {ids: new Set(channel.keys.map(key => key.value?.frameId).filter(Boolean))}; sequenceSources.set(channel.keys, entry);
   }
   // Native references can outnumber collectible captures by many orders of
   // magnitude. Intersect the smaller set instead of scanning the whole movie
@@ -91,9 +93,9 @@ export const editorFrameMethods = {
     if (command.frameSourceChanges) return;
     const frames = beforeFrames(command); if (!frames.length) return;
     invalidateFrameIndex(this.report);
-    const referenced = new Set();
+    const referenced = new Set(), sequences=new Set();
     for (const channel of [...this.animationChannels, ...(this._frameDraftStoredEdit?.before.animation?.channels ?? [])]) if (channel.property === 'pose')
-      for (const key of channel.keys) if (key.value?.frameId) referenced.add(key.value.frameId);
+      if(!sequences.has(channel.keys)){sequences.add(channel.keys);for (const key of channel.keys) if (key.value?.frameId) referenced.add(key.value.frameId);}
     if (!referenced.size) return;
     const sources = this.report._styk.frameSources, changes = [];
     for (const frame of frames) {
@@ -124,8 +126,14 @@ export const editorFrameMethods = {
     const retained = new Set();
     const visited = new Set(), keep = channel => references(channel, retained, this._generatedFrameSources, visited);
     for (const channel of this.animationChannels) keep(channel);
+    const keepSheet=sheet=>{for(const track of Object.values(sheet?.tracks??{}))keep({property:'pose',keys:track.keys});for(const channel of sheet?.legacyAnimation?.channels??[])keep(channel);};
+    keepSheet(this.report._styk.layerSheet);
     for (const channel of this.report._styk.simpleFrameDraft?.animationBaseline?.channels ?? []) keep(channel);
-    for (const command of [...this._undo, ...this._redo]) {
+    // The usual retime still references every captured source. History cannot
+    // make any of those collectible, so avoid traversing the undo window.
+    if(retained.size===this._generatedFrameSources.size)return;
+    for (const command of historyCommands([...this._undo, ...this._redo])) {
+      if(command.kind==='layer-sheet'){keepSheet(command.before);keepSheet(command.after);}
       for (const side of ['before', 'after']) {
         for (const channel of command.draftAnimation?.[side]?.channels ?? []) keep(channel);
         const state = command.frameDraftState?.[side] ?? command.frameDraftJournal?.[side]?.state ?? command.frameDraftTopology?.[side]?.state;
@@ -138,7 +146,7 @@ export const editorFrameMethods = {
       if (command.kind === 'scene') for (const side of ['before', 'after']) for (const entry of command[side]?.channels ?? []) keep(entry.channel);
       for (const change of command.layerAnimationPatch?.changes ?? []) for (const side of ['before', 'after']) keep(change[side]?.channel);
       for (const change of command.frameSourceChanges ?? []) retained.add(change.id);
-      if (command.kind === 'topology') for (const side of ['before', 'after']) for (const entry of command[side]?.frames ?? []) if (entry.sourceId) retained.add(entry.sourceId);
+      if (command.kind === 'topology' || command.kind === 'movieclip-poses') for (const side of ['before', 'after']) for (const entry of command[side]?.frames ?? []) if (entry.sourceId) retained.add(entry.sourceId);
     }
     const removed = [], sources = this.report._styk.frameSources;
     for (const id of this._generatedFrameSources) if (!retained.has(id)) {
@@ -148,12 +156,10 @@ export const editorFrameMethods = {
     if (removed.length) this._trackLayerCommand({kind: 'splice', before: removed, after: []}, 'after');
     if (sources && !Object.keys(sources).length && !this._sourceTableWasPresent) delete this.report._styk.frameSources;
   },
-  captureFrameSource(frame = this.evaluatedFrame) {
+  captureFrameSource(frame = this.evaluatedFrame, {uids} = {}) {
     // Runtime segment caches can dwarf the saved pose. Omit them before cloning
     // while independently retaining every authoritative/unknown object field.
-    const objects = frame.objects.map(object => Object.fromEntries(Object.keys(object)
-      .filter(key => key !== 'runtime_segments').map(key => [key, object[key]])));
-    const source = clone({...frame, objects}), id = this._assignFrameId(source);
+    const source = snapshotPoseFrame(frame,uids), id = this._assignFrameId(source);
     (this.report._styk.frameSources ??= {})[id] = source;
     this._registerFrameSources([source]);
     return id;

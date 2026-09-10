@@ -37,6 +37,11 @@ function blankPoseFrame(template) {
     background_id: 0, background_id_b: 0, background_mix: 0,
     camera: {is_default: true, x: 0, y: 0, scale: 1, angle_rad: 0}};
 }
+function maskedAt(ranges,tick){
+  if(!ranges?.length)return false;let low=0,high=ranges.length;
+  while(low<high){const mid=(low+high)>>>1;if(ranges[mid][0]<=tick)low=mid+1;else high=mid;}
+  return low>0&&tick<ranges[low-1][1];
+}
 
 export function invalidatePoseCache(report) {
   if (report) { tracks.delete(report); sourceIndices.delete(report); }
@@ -102,7 +107,7 @@ export function samplePoseTrack(report, channel, tick, options) {
   const current = keys[low], next = keys[low + 1];
   const fraction = !next || next.tick <= current.tick
     ? 0 : Math.max(0, Math.min(1, (tick - current.tick) / (next.tick - current.tick)));
-  return options.sampleNative(track.report, low, fraction);
+  return options.sampleNative(track.report, low, fraction, undefined, options.sampleUids);
 }
 
 function layerId(report, uid) {
@@ -116,7 +121,7 @@ function orderedObjects(frame) {
   return ordered;
 }
 
-function handleOrientation(object, handle, definitions, handleIndices) {
+export function handleOrientation(object, handle, definitions, handleIndices) {
   const figure = definitions.get(object?.figure_type_id);
   if (!figure) return null;
   if (figure._styk?.animationOrigin) return animationOriginHandleOrientation(figure, object, handle);
@@ -142,14 +147,24 @@ export function composePoseChannels(report, baseFrame, tick, options = {}) {
   const nativeObjects = nativePropertyOwners.size ? new Map(baseFrame.objects.map(object => [object.unique_id, object])) : null;
   const figureReplacements = new Set(channels.filter(channel => channel.target.kind === 'figure').map(channel => channel.target.uid));
   const owner = uid => figureReplacements.has(uid) ? `figure:${uid}` : layerId(report, uid);
-  const sampledPoses = new Map();
+  const sampledPoses = new Map(), sequenceOwners = new Map();
+  for (const channel of channels) {
+    if (channel.target.kind === 'layer') sequenceOwners.set(channel.keys, null);
+    else if (channel.target.kind === 'figure' && sequenceOwners.get(channel.keys) !== null) {
+      let owners = sequenceOwners.get(channel.keys);
+      if (!owners) sequenceOwners.set(channel.keys, owners = new Set());
+      owners.add(channel.target.uid);
+    }
+  }
   for (const channel of channels) {
     const kind = channel.target?.kind;
     const fixed = kind === 'camera' || kind === 'scene';
-    let sampled = !fixed && sampledPoses.get(channel.keys);
+    const sampleKey=channel.maskedRanges?.length||channel.useBasePose?channel:channel.keys;
+    let sampled = !fixed && sampledPoses.get(sampleKey);
     if (!sampled) {
-      sampled = samplePoseTrack(report, channel, tick, options) || blankPoseFrame(baseFrame);
-      if (!fixed) sampledPoses.set(channel.keys, sampled);
+      const masked=maskedAt(channel.maskedRanges,tick);
+      sampled = (masked?null:channel.useBasePose?baseFrame:samplePoseTrack(report, channel, tick, {...options, sampleUids: sequenceOwners.get(channel.keys)})) || blankPoseFrame(baseFrame);
+      if (!fixed) sampledPoses.set(sampleKey, sampled);
     }
     if (kind === 'layer') replacements.set(channel.target.id, sampled);
     else if (kind === 'figure') replacements.set(`figure:${channel.target.uid}`, sampled);
@@ -237,9 +252,16 @@ export function composePoseChannels(report, baseFrame, tick, options = {}) {
   // Each layer owns its sampled pose's internal stacking order. Native baseline
   // order is relevant only to layers whose pose track was not replaced.
   const order = [], ordered = new Set(), emittedLayers = new Set();
+  const anchors=new Map(),anchored=new Set();
+  for(const channel of channels)if(channel.orderAnchor!==undefined){const list=anchors.get(channel.orderAnchor)??[];list.push(channel.target.uid);anchors.set(channel.orderAnchor,list);}
+  const appendAnchors=uid=>{
+    if(anchored.has(uid))return;anchored.add(uid);
+    for(const child of anchors.get(uid)??[]){const record=records[slots.get(child)];if(record)append(record.object);else appendAnchors(child);}
+  };
   const append = object => {
     const slot = slots.get(object.unique_id);
     if (slot !== undefined && !ordered.has(slot)) { order.push(slot); ordered.add(slot); }
+    appendAnchors(object.unique_id);
   };
   const appendLayer = id => {
     if (emittedLayers.has(id)) return;
@@ -250,6 +272,7 @@ export function composePoseChannels(report, baseFrame, tick, options = {}) {
   for (const object of orderedObjects(baseFrame)) {
     const id = owner(object.unique_id);
     if (replacements.has(id)) appendLayer(id); else append(object);
+    appendAnchors(object.unique_id);
   }
   for (const id of replacements.keys()) appendLayer(id);
   objects.forEach((_, slot) => { if (!ordered.has(slot)) order.push(slot); });

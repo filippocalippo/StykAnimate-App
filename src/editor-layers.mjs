@@ -73,6 +73,12 @@ export const editorLayerMethods = {
     for (const change of changes) write(state, change.path, change.after);
     if (activeId !== undefined) state.activeId = activeId;
     const command = {kind: 'layers', label, changes, beforeSelection, structural, timing: Boolean(migration)};
+    if(this.report._styk.layerSheet){
+      const before=this.report._styk.layerSheet,tracks={...before.tracks};
+      for(const id of state.order)tracks[id]??={keys:[],end:0};
+      for(const id of Object.keys(tracks))if(!FIXED_LAYER_IDS.includes(id)&&!state.order.includes(id))delete tracks[id];
+      const after={...before,tracks};this.report._styk.layerSheet=after;command.layerSheetPatch={before,after};command.timing=true;
+    }
     if (migration) {
       command.layerAnimationPatch = animationPatch(migration);
       command.frameSourceChanges = migration.frameSourceChanges;
@@ -117,12 +123,17 @@ export const editorLayerMethods = {
     return this._layerEdit('Rename layer', [[['byId', id, 'name'], cleanName(name)]]);
   },
   deleteLayer(id, {targetLayerId} = {}) {
+    if(this.report._styk?.layerSheet&&!targetLayerId)return this.sheetDeleteLayer(id);
     if (this._drag) this.commitDrag();
     const state = ensureLayerState(this.report), position = state.order.indexOf(id);
     if (position < 0) throw new Error('Scene and Camera cannot be deleted.');
     if (state.order.length === 1) throw new Error('Keep at least one user layer.');
     const target = targetLayerId ?? state.order[position - 1] ?? state.order[position + 1];
     if (target === id || !owns(state.byId, target)) throw new Error('Choose another user layer for its figures.');
+    if(this.report._styk.layerSheet&&!this._sheetDeletingLayer){
+      return this.movieclipBatch('Delete layer',()=>{this.sheetAssignFigures(this.getLayerFigureUids(id),target);this._sheetDeletingLayer=true;
+        try{return this.deleteLayer(id,{targetLayerId:target});}finally{this._sheetDeletingLayer=false;}});
+    }
     const migration = planLayerMembershipMigration(this, this.getLayerFigureUids(id), target, {deletedLayerId: id});
     const updates = [[['order'], state.order.filter(value => value !== id)], [['byId', id], undefined, true]];
     if (state.defaultLayerId === id) updates.push([['defaultLayerId'], target]);
@@ -140,6 +151,7 @@ export const editorLayerMethods = {
     const order = state.order.slice(); order.splice(from, 1); order.splice(index, 0, id); return this.reorderLayers(order);
   },
   assignFiguresToLayer(uids, id) {
+    if(this.report._styk?.layerSheet)return this.sheetAssignFigures(uids,id);
     if (this._drag) this.commitDrag();
     const state = ensureLayerState(this.report); if (!owns(state.byId, id)) throw new Error('Figures belong to user layers, not Scene or Camera.');
     const ids = [...new Set(uids)]; if (ids.some(uid => !this._layerUidCounts.has(uid))) throw new Error('Choose figures present in this animation.');

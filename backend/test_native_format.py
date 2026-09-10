@@ -11,7 +11,7 @@ class NativeFormatTests(unittest.TestCase):
         self.payload = json.dumps({'name': 'Scène 日本語', 'poses': [[0.125, 1, None, True]] * 10000}).encode()
 
     def test_lossless_compact_deterministic_both_kinds(self):
-        for kind in ('styk', 'stkz'):
+        for kind in ('styk', 'stkz', 'stykmov'):
             encoded = native.encode(self.payload, kind)
             self.assertEqual(encoded[:4], native.MAGIC[kind])
             self.assertEqual(native.decode(encoded, kind), self.payload)

@@ -6,6 +6,10 @@ import {validateFrameIdentitySteps} from './editor-frames.mjs';
 import {validateSimpleFrameDraft} from './editor-frame-draft.mjs';
 import {createFrame} from './demo.mjs';
 import {internPoseSequencesSteps} from './pose-sequences.mjs';
+import {expandPoseSequencesSteps} from './pose-sequence-storage.mjs';
+import {validateMovieclipGraph, movieclipAsset,movieclipSourceDocument,normalizeLegacyMovieclips,movieclipTypes} from './movieclips.mjs';
+import {nativeTimeline,timeline} from './pivot/geometry.mjs';
+import {validateLayerSheet,legacySheetReport} from './layer-sheet.mjs';
 
 const own = (value,key) => Object.prototype.hasOwnProperty.call(value,key);
 export const yieldLoadTask = globalThis.scheduler?.yield
@@ -18,16 +22,28 @@ export const yieldLoadTask = globalThis.scheduler?.yield
 
 /** Incoming report ownership transfers to the editor on success. Its pose and
  * definition arrays are never cloned; no current-editor field is changed here. */
-export function* prepareEditorLoadSteps(document, {sliceMs=4}={}) {
+export function* prepareEditorLoadSteps(document, {sliceMs=4, movieclipVisited}={}) {
   const report=document?.document ?? document?.report ?? document;
+  if (!movieclipVisited) {validateMovieclipGraph(report); movieclipVisited = new Set();}
+  movieclipVisited.add(report);
+  yield* expandPoseSequencesSteps(report);
   // Pivot permits a zero-key animation. Keep one private editable working pose;
   // Simple's stored-frame/export view represents the original zero-key file.
   const empty=report && Array.isArray(report.keyframes) && report.keyframes.length===0;
   if (empty) report.keyframes=[createFrame([],1)];
   yield* validateSceneSteps(report,{sliceMs});
+  const movieclipSource=movieclipSourceDocument(report);
+  if(movieclipSource&&!movieclipVisited.has(movieclipSource))yield* prepareEditorLoadSteps(movieclipSource,{sliceMs,movieclipVisited});
+  for (const figure of report.figure_types) {
+    const asset = movieclipAsset(figure);
+    if (asset && !movieclipVisited.has(asset.document)) yield* prepareEditorLoadSteps(asset.document,{sliceMs,movieclipVisited});
+  }
   const layers=ensureLayerState(report);
   yield* validateLayerStateSteps(layers);
   yield* validateAnimationDocumentSteps(report);
+  validateLayerSheet(report);
+  if(report._styk.layerSheet?.legacyAnimation)yield* validateAnimationDocumentSteps(legacySheetReport(report));
+  if(movieclipTypes(report).size){const rows=timeline(report),last=rows.at(-1);normalizeLegacyMovieclips(report,nativeTimeline(report),(last?.start??0)+(last?.count??1));}
   yield* internPoseSequencesSteps(report);
   let nextFrameIdentity=yield* validateFrameIdentitySteps(report);
   if (empty) {

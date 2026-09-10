@@ -22,6 +22,14 @@ test('subpixel geometry differences are not quantized away',()=>{
   const first=cache.get(g,g.drawables);moved.drawables[0].points[0]={...moved.drawables[0].points[0],x:moved.drawables[0].points[0].x+1e-9};
   assert.notEqual(first,cache.get(moved,moved.drawables));
 });
+
+test('runtime cache payloads do not duplicate the exact evaluated artwork signature',()=>{
+  const {g,moved}=pair(),cache=new ArtworkRegistry();
+  g.obj.runtime_segments=[{length:1}];moved.obj.runtime_segments=[{length:999,cacheOnly:true}];
+  assert.equal(cache.get(g,g.drawables),cache.get(moved,moved.drawables));
+  moved.drawables=moved.drawables.map((item,i)=>i?item:{...item,length:item.length+1});
+  assert.notEqual(cache.get(g,g.drawables),cache.get(moved,moved.drawables));
+});
 test('instance styles, tint, image flags and unknown future properties distinguish artwork',()=>{
   for(const change of [o=>o.image_text_flags=1,o=>o.futureRenderFlag=123]){
     const {g,moved}=pair(),cache=new ArtworkRegistry(),first=cache.get(g,g.drawables);change(moved.obj);

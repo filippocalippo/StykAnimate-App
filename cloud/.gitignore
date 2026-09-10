@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+*.sqlite*
+worker-configuration.d.ts
+test-output/

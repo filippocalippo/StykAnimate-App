@@ -5,6 +5,8 @@ import {materializePivotDocument} from './pivot-export-materialize.mjs';
 import {validateAnimationDocument} from './animation-channels.mjs';
 import {materializeStyledFigureForStk} from './pivot-style-materialize.mjs';
 import {nativeFigureDocument} from './native-figure.mjs';
+import {validateMovieclipGraph,isMovieclip} from './movieclips.mjs';
+import {packPoseSequences} from './pose-sequence-storage.mjs';
 
 let document, config, running = false;
 const timings = {};
@@ -29,10 +31,21 @@ self.addEventListener('message', async event => {
         ...(config.name ? {name: config.name} : {})};
       for (const frame of document.keyframes || []) for (const object of frame.objects || []) delete object.runtime_segments;
       validateAnimationDocument(document);
-      if (config.format === 'stkz') {
+      validateMovieclipGraph(document);
+      if (config.format === 'stkz' || config.format === 'stykmov') {
         document = nativeFigureDocument(document, config);
+        if(config.format==='stykmov'&&!isMovieclip(document.figure_types[0]))throw new Error('Select a movieclip to export as .stykmov.');
         config.sourceId = undefined;
         config.name = document._styk.name;
+      }
+      if(['piv','stk'].includes(config.format)) {
+        const visited=new Set(),hasSourceShapes=doc=>{
+          if(visited.has(doc))return false;visited.add(doc);
+          return doc.figure_types.some(f=>f.segments.some(s=>s._sticknodes)||
+            (f._styk?.movieclip&&hasSourceShapes(f._styk.movieclip.document)))||
+            doc.keyframes.some(f=>f.objects.some(o=>o._sticknodesSprite));
+        };
+        if(hasSourceShapes(document))throw new Error('Pivot cannot retain these Stick Nodes shapes. Save as .styk, .stykmov or .stkz to keep them editable, or export SVG, PNG or video.');
       }
       if (config.format === 'piv') {
         const composing = performance.now(), originalFrames = document.keyframes.length;
@@ -40,6 +53,8 @@ self.addEventListener('message', async event => {
         timings.compose_ms = performance.now() - composing;
         timings.source_keyframes = originalFrames; timings.export_keyframes = document.keyframes.length;
       } else if (config.format === 'stk') {
+        if(isMovieclip(document.figure_types.find(f=>f.figure_type_id===config.figureTypeId)))
+          throw new Error('Save movieclips as .stykmov. Use Break apart to export a still figure to Pivot.');
         const resolved = materializeStyledFigureForStk(document, config);
         document = resolved.report; config.figureTypeId = resolved.figureTypeId;
       }
@@ -57,7 +72,7 @@ self.addEventListener('message', async event => {
         ? {...document, keyframes: [{objects: [], duration_raw: 0}]} : document);
       timings.normalize_ms = performance.now() - started;
       const serializing = performance.now();
-      const body = JSON.stringify({document, sourceId: config.sourceId, format: config.format,
+      const body = JSON.stringify({document: config.format === 'styk' ? packPoseSequences(document) : document, sourceId: config.sourceId, format: config.format,
         filename: config.name, figureTypeId: config.figureTypeId});
       timings.stringify_ms = performance.now() - serializing;
       timings.json_characters = body.length;

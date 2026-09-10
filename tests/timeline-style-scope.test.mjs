@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildChannelTimelineTracks} from '../src/timeline.mjs';
+import {buildChannelTimelineTracks} from './helpers/legacy-timeline-projection.mjs';
 import {animationChannelId, animationPropertyValue} from '../src/animation-channels.mjs';
 import {emptyDocument, defaultFigure, createFrame, createObject} from '../src/demo.mjs';
 import {Editor} from '../src/editor.mjs';

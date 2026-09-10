@@ -3,10 +3,14 @@ import { icon } from "./icons.mjs";
 import { isStatic } from "./pivot/geometry.mjs";
 import { formatPropertyValue } from "./property-controls.mjs";
 import { cameraActionsView } from "./camera-view.mjs";
+import { cameraValues } from "./editor-camera.mjs";
 import { builderDrawables } from './editor-builder-style.mjs';
 import { isBuilderContext } from './builder-aids.mjs';
 import {resolveInstanceFigure} from './animation-style.mjs';
 import {ikControlsView} from './ik-view.mjs';
+import {isMovieclip} from './movieclips.mjs';
+import {movieclipInspector} from './movieclip-ui.mjs';
+import {sheetKeyAt} from './layer-sheet.mjs';
 const esc = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -89,6 +93,12 @@ const builderOrderButtons = (kind, index) => tools(
 const colorRow = (id, label, value, opacityId, opacity) =>
   `<div class="color-row"><input id="${id}" type="color" value="${value}" aria-label="${label}"><span class="hex-label">${value.slice(1).toUpperCase()}</span>${opacityId ? `<input id="${opacityId}" type="number" value="${num(opacity)}" min="0" max="100" aria-label="${label} opacity"><small>%</small>` : ""}</div>`;
 
+function figureLayerField(editor){
+  if(!editor.selectedUids.size)return '';
+  const ids=new Set([...editor.selectedUids].map(uid=>editor.layerForUid(uid))),current=ids.size===1?[...ids][0]:'';
+  return `<div class="figure-layer-field"><label for="figure-layer">${icon('layers')}Layer</label><select id="figure-layer" class="inline-select" aria-label="Figure layer">${!current?'<option value="" disabled selected>Mixed</option>':''}${editor.layers.filter(layer=>layer.kind==='layer').reverse().map(layer=>`<option value="${esc(layer.id)}" ${layer.id===current?'selected':''} ${layer.locked?'disabled':''}>${esc(layer.name)}</option>`).join('')}</select></div>`;
+}
+
 export function inspectorView({
   editor,
   tab = "design",
@@ -103,6 +113,7 @@ export function inspectorView({
   propertyState,
   builderBranch = false,
 }) {
+  if(editor.report._styk?.layerSheet){const original=propertyState;propertyState=key=>({...original?.(key),poseOnly:true});}
   const report = editor.report,
     frame = editor.frame,
     object = editor.object;
@@ -129,6 +140,7 @@ export function inspectorView({
   if (resolvedContext === "frame") return frameView(editor, field);
   if (resolvedContext === "scene" || !object)
     return sceneView(editor, field, propertyState);
+  if (selectionCount===1 && isMovieclip(editor.figure)) return figureLayerField(editor)+movieclipInspector(editor,field);
   const range =
     rangeIndices.length > 1
       ? group(
@@ -139,7 +151,7 @@ export function inspectorView({
   if (selectionCount > 1) {
     const b = bounds;
     return (
-      heading(`${selectionCount} figures`, "layers") +
+      heading(`${selectionCount} figures`, "layers") + figureLayerField(editor) +
       group(
         "Selection",
         tools(
@@ -218,7 +230,7 @@ export function inspectorView({
   );
   // Pivot origins use -1; segment endpoint indices start at zero.
   const jointScope = joint >= 0 && Boolean(segment);
-  let html = (jointScope ? "" : title) + range;
+  let html = (jointScope ? "" : title) + figureLayerField(editor) + range;
   if (!jointScope) {
     if (object.join || frame.objects.some(part => part.join?.target_object_slot === object.object_slot)) {
       html += group('Connected figure',
@@ -373,7 +385,7 @@ function sceneView(editor, field, propertyState) {
   return (
     heading(
       "Scene",
-      "frame",
+      "scene",
     ) +
     group(
       "Canvas",
@@ -411,9 +423,12 @@ function sceneView(editor, field, propertyState) {
 }
 
 function cameraView(editor, field) {
-  const c = editor.frame.camera || {};
+  const c = cameraValues((editor.evaluatedFrame || editor.frame).camera);
   return (
-    heading("Camera", "camera") +
+    '<div class="camera-inspector">' +
+    `<div class="camera-heading"><span>${icon('camera')}</span><div><strong>Camera</strong><small>Compose your shot</small></div><span class="camera-live">Live</span></div>` +
+    `<div class="camera-monitor"><canvas data-camera-monitor aria-label="Live camera output"></canvas><div class="camera-monitor-caption"><span>${editor.report.canvas_width} × ${editor.report.canvas_height}</span><span data-camera-magnification>${num(100/c.scale)}% zoom</span></div></div>` +
+    `<div class="camera-quick-actions"><button data-action="camera-guides" aria-pressed="true" title="Show composition guides">${icon('grid')}<span>Guides</span></button><button data-action="camera-level" title="Set camera rotation to zero">${icon('rotate')}<span>Level</span></button><button data-action="camera-reset" title="Reset camera pose">${icon('undo')}<span>Reset</span></button></div>` +
     group(
       "Transform",
       grid(
@@ -427,18 +442,22 @@ function cameraView(editor, field) {
             'min="0.01"',
           ) +
           field(
-            "Angle",
+            "Rotation",
             "camera_angle",
             ((c.angle_rad || 0) * 180) / Math.PI,
             "°",
           ),
       ),
     ) +
-    cameraActionsView({ editor, button, group, tools })
+    `<p class="camera-help">Drag the center to move, corners to scale, or the top grip to rotate. <kbd>Shift</kbd> snaps rotation and scale. <kbd>Ctrl</kbd> locks movement to an axis.</p>` +
+    cameraActionsView({ editor, button, group, tools }) + '</div>'
   );
 }
 
 function frameView(editor, field) {
+  if(editor.report._styk?.layerSheet){const track=editor.report._styk.layerSheet.tracks[editor.activeLayerId],{key,next}=sheetKeyAt(track,editor.tick);
+    return heading(`Frame ${editor.tick+1}`,'diamond')+group(editor.getLayer(editor.activeLayerId)?.name??'Layer',
+      grid(field('Exposure','duration',(next?.tick??track?.end??editor.tick+1)-(key?.tick??editor.tick),'frames','min="1" max="65535"')))+group('Frames',tools(button('add-frame','diamond','Insert keyframe (F6)')));}
   const frame = editor.frame,
     index = editor.frameIndex ?? 0;
   return (

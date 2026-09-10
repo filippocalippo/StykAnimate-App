@@ -6,7 +6,7 @@ const browser = await chromium.launch({channel: 'chrome', headless: true});
 const page = await browser.newPage({viewport: {width: 1440, height: 1000}}), errors = [], checks = [];
 page.on('pageerror', error => errors.push(error.message));
 const out = 'artifacts/figure-order-controls';
-const toolbar = action => page.locator(`.canvas-toolbar [data-action="${action}"]`);
+const toolbar = action => page.locator(`.canvas-toolbar [data-action="${action.replace(/^layer-/, 'selection-')}"]`);
 const order = () => page.evaluate(() => styk.editor.evaluatedFrame.object_draw_order_unique_ids);
 const check = (name, value) => { assert.ok(value, name); checks.push(name); console.log('PASS', name); };
 async function reset(selection = [1]) {

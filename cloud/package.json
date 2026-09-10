@@ -1,0 +1,17 @@
+{
+  "name": "stykanimate-cloud",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "dev:sqlite": "node local-server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check worker.mjs && node --check analytics.mjs && node --check ../website/public/admin/admin.js",
+    "types": "wrangler types",
+    "deploy": "wrangler deploy",
+    "migrate:local": "wrangler d1 migrations apply stykanimate-analytics --local",
+    "migrate:remote": "wrangler d1 migrations apply stykanimate-analytics --remote"
+  },
+  "devDependencies": { "wrangler": "latest" }
+}

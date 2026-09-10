@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "stykanimate",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-09-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "assets": {
+    "directory": "../website/public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/admin", "/admin/*"]
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "stykanimate-analytics",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }],
+  "ratelimits": [
+    { "name": "INGEST_LIMITER", "namespace_id": "73101", "simple": { "limit": 6, "period": 60 } },
+    { "name": "EDGE_LIMITER", "namespace_id": "73102", "simple": { "limit": 120, "period": 60 } },
+    { "name": "ADMIN_LIMITER", "namespace_id": "73103", "simple": { "limit": 10, "period": 60 } }
+  ],
+  "triggers": { "crons": ["17 3 * * *"] },
+  "observability": { "enabled": false },
+  "vars": {
+    "TELEMETRY_ENABLED": "true",
+    "PRIVACY_CONTACT": "ale.ripreso@gmail.com",
+    "PUBLISHER_NAME": "StykAnimate",
+    "DAILY_UPLOAD_LIMIT": "12000",
+    "MAX_INSTALLATION_UPLOADS_PER_DAY": "100",
+    "MAX_STORED_SUMMARY_BYTES": "350000000",
+    "RETENTION_DAYS": "30",
+    "FEEDBACK_RETENTION_DAYS": "90",
+    "AGGREGATE_RETENTION_DAYS": "365",
+    "LATEST_RELEASE_JSON": "{\"available\":false,\"version\":null,\"downloads\":[]}"
+  }
+}

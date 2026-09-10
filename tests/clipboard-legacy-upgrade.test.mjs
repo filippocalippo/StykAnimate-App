@@ -7,7 +7,6 @@ import {validateScene} from '../src/pivot/model.mjs';
 import {validateFrameIdentities} from '../src/editor-frames.mjs';
 import {planLegacyDestinationUpgrade} from '../src/clipboard-legacy-upgrade.mjs';
 import {beginNativePropertyEdit,previewNativePropertyEdit,commitNativePropertyEdit} from '../src/native-property-edit.mjs';
-import {Timeline} from '../src/timeline.mjs';
 
 const clone=structuredClone;
 function legacy(version=4) {
@@ -82,16 +81,7 @@ test('Simple mode upgrade preserves working-copy colors through stored-frame pas
   e.redo();assert.deepEqual(e.report,after);
 });
 
-test('Advanced range selection includes only pasted keys after legacy holds expand around the insertion',()=>{
-  const e=editor(),ui=Object.create(Timeline.prototype);
-  Object.assign(ui,{editor:e,_selectionChanged(){}});
-  assert.equal(ui.pasteSelection(),2);
-  assert.equal(e.frameIndex,2);
-  assert.deepEqual(ui.selectedFrameIndices,[2,3]);
-  assert.deepEqual(e.report.keyframes.slice(0,2).map(frame=>frame.duration_raw),[3,1]);
-  assert.equal(e.report.keyframes[4].duration_raw,0,'Existing hidden gap is not selected');
-  const selection=ui.selectedFrameIndices,after=clone(e.report);e.undo();e.redo();assert.deepEqual(e.report,after);assert.deepEqual(ui.selectedFrameIndices,selection);
-});
+
 
 test('zero stored legacy frames upgrade without retaining a placeholder and undo restores the empty working copy',()=>{
   const e=editor(),report=legacy();report.keyframes=[createFrame([])];e.load(report);e.enableFrameDrafts();e.beginFrameDraft({mode:'add',empty:true});

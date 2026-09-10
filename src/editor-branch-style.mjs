@@ -1,7 +1,8 @@
 import {keyEasing} from './keyframe-easing.mjs';
 /** A uniform scalar edit across one selected branch. Native definitions remain
  * shared unless an authored/captured style already owns an affected value. */
-import {animationChannels,animationChannelId,validateAnimationValue} from './animation-channels.mjs';
+import {animationChannels,animationChannelId,validateAnimationValue,composeAnimationChannels} from './animation-channels.mjs';
+import {buildGeometry} from './pivot/geometry.mjs';
 import {animationStyleValue, polygonIdentity, resolveInstanceFigure} from './animation-style.mjs';
 import {branchSegmentIndices} from './editor-builder-branch.mjs';
 
@@ -37,6 +38,10 @@ export function branchOpacityPlan(editor,key) {
 }
 
 function publish(editor,edit,animation,live,label) {
+  if(editor.report._styk?.layerSheet){
+    editor._sheetPropertyPreview=live&&edit.changed?composeAnimationChannels({...editor.report,_styk:{...editor.report._styk,animation}},edit.frame,edit.tick,{resolveGeometry:buildGeometry}):null;
+    editor._invalidate();editor._emit('edit',{label,live,changedUids:[edit.uid]});return;
+  }
   editor.report._styk ??= {};
   if(animation)editor.report._styk.animation=animation;else delete editor.report._styk.animation;
   editor._invalidate({timing:true});
@@ -69,7 +74,7 @@ export function beginBranchStyleAnimation(editor,plan) {
     delete key.passthrough;
     entries.push({target,property,tick:editor.tick,value:source.initialValue,exactTarget:true,...keyEasing(key)});keys.push(key);channelIds.push(id);
   }
-  return editor._animationEdit={branchStyle:true,report:editor.report,uid:plan.uid,tick:editor.tick,before,after,selection:editor._selectionState(),entries,keys,channelIds,initialValues:plan.entries.map(entry=>entry.initialValue),changed:false};
+  return editor._animationEdit={branchStyle:true,report:editor.report,frame:editor.evaluatedFrame,uid:plan.uid,tick:editor.tick,before,after,selection:editor._selectionState(),entries,keys,channelIds,initialValues:plan.entries.map(entry=>entry.initialValue),changed:false};
 }
 export function previewBranchStyleAnimation(editor,value) {
   const edit=current(editor);
@@ -88,6 +93,7 @@ export function commitBranchStyleAnimation(editor) {
   const edit=editor._animationEdit;if(!edit?.branchStyle)return false;
   editor._animationEdit=null;
   if(editor.report!==edit.report)return false;
+  editor._sheetPropertyPreview=null;
   editor.report._styk ??= {};
   if(edit.before)editor.report._styk.animation=edit.before;else delete editor.report._styk.animation;
   editor._invalidate({timing:true});

@@ -1,5 +1,5 @@
 /** Authored animation metadata and bounded, undoable sparse-key operations. */
-import {animationChannels, animationEndTick, animationChannelId, findAnimationChannel, normalizeAnimationTarget,
+import {composeAnimationChannels,animationChannels, animationEndTick, animationChannelId, findAnimationChannel, normalizeAnimationTarget,
   validateAnimationValue, animationPropertyValue, sampleAnimationChannel} from './animation-channels.mjs';
 import {buildGeometry, evaluatedFrame, nativeTimeline} from './pivot/geometry.mjs';
 import {previewBranchStyleAnimation,commitBranchStyleAnimation,cancelBranchStyleAnimation} from './editor-branch-style.mjs';
@@ -7,6 +7,7 @@ import {previewBranchStyleAnimation,commitBranchStyleAnimation,cancelBranchStyle
 import {keyEasing, assignKeyEasing, validateKeyEasing} from './keyframe-easing.mjs';
 import {AUTHORING_PROPERTIES, isDiscreteAnimationProperty} from './animation-properties.mjs';
 import {projectNativePropertyChannel} from './native-property-projection.mjs';
+import {figurePoseSequences} from './native-pose-projection.mjs';
 const MAX_TICK = 10000000;
 const checkTick = tick => { if (!Number.isInteger(tick) || tick < 0 || tick > MAX_TICK) throw new Error('Keyframe time must be an integer from 0 to 10,000,000.'); return tick; };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -19,7 +20,7 @@ function assignAnimation(editor, animation) {
   const retainPropertyMarkers=previousPoses.length===nextPoses.length && previousPoses.every((channel,index)=>channel===nextPoses[index]);
   editor.report._styk ??= {};
   if (animation) editor.report._styk.animation = animation; else delete editor.report._styk.animation;
-  editor._invalidate({timing: true, retainPropertyMarkers});
+  editor._invalidate({timing: true, retainPropertyMarkers, retainGeometry: true});
 }
 function draftAnimation(editor) {
   const before = currentAnimation(editor), after = {...before, version: 1, nextKeyId: before?.nextKeyId ?? 1, channels: [...animationChannels(editor.report)]};
@@ -27,6 +28,12 @@ function draftAnimation(editor) {
   const draft = {before, after, sources: {}, poseSources: new Map(), changed: false,
     finalize() { const sorted=new Set();for (const channel of cloned.values()) if(!sorted.has(channel.keys)){sortKeys(channel.keys);sorted.add(channel.keys);} },
     addChannel(channel) { indices.set(channel.id, after.channels.length); after.channels.push(channel); cloned.set(channel.id, channel); return channel; },
+    sourceChannel(id) {
+      const index = indices.get(id);
+      if (index !== undefined) return after.channels[index];
+      const native = editor._nativeAnimationChannels?.get(id);
+      return native ? {...native, source: 'authored'} : null;
+    },
     shareChannel(source, target, id) {
       const channel={...source,target,id},index=indices.get(id);
       if(index===undefined)this.addChannel(channel);else{after.channels[index]=channel;cloned.set(id,channel);}
@@ -60,6 +67,7 @@ function draftAnimation(editor) {
     }
     if (index === undefined) return null;
     const channel = {...after.channels[index], target: {...after.channels[index].target}, keys: after.channels[index].keys.map(key => ({...key}))};
+    delete channel.useBasePose;
     after.channels[index] = channel; cloned.set(id, channel); draft.detachPoseProperties(channel); return channel;
   }};
   return draft;
@@ -128,8 +136,15 @@ function putKey(editor, draft, entry) {
   let ticks = draft.keyTicks.get(channel);
   if (!ticks) { ticks = new Map(channel.keys.filter(key => !key.hidden).map(key => [key.tick, key])); draft.keyTicks.set(channel, ticks); }
   let key = ticks.get(tick);
-  const value = validateAnimationValue(target, property, raw), interpolation = entry.interpolation ?? key?.interpolation ?? (property === 'pose' || isDiscreteAnimationProperty(property) ? 'hold' : 'linear');
-  const easing = {interpolation, ...(interpolation === 'bezier' ? {bezier: entry.bezier ?? key?.bezier} : {})};
+  // Inserting a pose continues its outgoing curve. Defaulting every new pose
+  // to Hold silently freezes an otherwise interpolated animation.
+  let previous;
+  if (property === 'pose' && !key) for (const candidate of channel.keys)
+    if (candidate.tick < tick && !candidate.hidden && (!previous || candidate.tick > previous.tick)) previous = candidate;
+  const inherited = previous?.interpolation === undefined && previous && editor.report.auto_easing ? 'auto' : previous?.interpolation;
+  const value = validateAnimationValue(target, property, raw), interpolation = entry.interpolation ?? key?.interpolation ?? inherited ??
+    (isDiscreteAnimationProperty(property) || property === 'pose' && editor.report.version < 5 ? 'hold' : 'linear');
+  const easing = {interpolation, ...(interpolation === 'bezier' ? {bezier: entry.bezier ?? key?.bezier ?? previous?.bezier} : {})};
   validateKeyEasing(easing, property);
   if (key) {
     if (!same(key.value, value) || key.interpolation !== interpolation || !same(key.bezier, easing.bezier) || key.passthrough) {
@@ -153,12 +168,48 @@ function nextKeyIdentity(draft, channel) {
 }
 function selectionGroups(selection) {
   if (!Array.isArray(selection)) throw new Error('Choose animation keys.');
-  const groups = new Map();
+  const groups = new Map(), arrays = new WeakMap();
   for (const item of selection) {
     if (!item || typeof item.channelId !== 'string' || !Array.isArray(item.keyIds)) throw new Error('Key selections require channel IDs and key IDs.');
-    const ids = groups.get(item.channelId) ?? new Set(); for (const id of item.keyIds) ids.add(id); groups.set(item.channelId, ids);
+    let ids=arrays.get(item.keyIds);if(!ids)arrays.set(item.keyIds,ids=new Set(item.keyIds));
+    const previous=groups.get(item.channelId);
+    groups.set(item.channelId,previous&&previous!==ids?new Set([...previous,...ids]):ids);
   }
   return groups;
+}
+/** One copy per distinct sequence and selection; independent member edits keep
+ * copy-on-write isolation. New key identities remain channel-scoped. */
+function editSelectedChannels(draft, selection, edit, {skipMissing = false} = {}) {
+  const shared = new WeakMap(), signatures = new WeakMap(), results = [], allKeys = Symbol('all keys');
+  for (const [channelId, ids] of selectionGroups(selection)) {
+    const source = draft.sourceChannel(channelId);
+    if (!source) { if (skipMissing) continue; throw new Error('The animation channel no longer exists.'); }
+    const eligible = source.property === 'pose' && source.nativeProperties && source.target.kind === 'figure';
+    let signature = null;
+    if(eligible){
+      let bySelection=signatures.get(source.keys);if(!bySelection)signatures.set(source.keys,bySelection=new WeakMap());
+      signature=bySelection.get(ids);
+      if(signature===undefined){
+        signature=ids.size===source.keys.length&&source.keys.every(key=>ids.has(key.id))?allKeys:JSON.stringify([...ids].sort());
+        bySelection.set(ids,signature);
+      }
+    }
+    const previous = eligible ? shared.get(source.keys)?.get(signature) : null;
+    if (previous) {
+      if (previous.changed) draft.shareChannel({...source, keys: previous.keys}, source.target, channelId);
+      results.push({channelId, value: previous.value});
+      continue;
+    }
+    const channel = draft.channel(channelId), outcome = edit(channel, ids);
+    draft.changed ||= outcome.changed;
+    if (eligible) {
+      let selections = shared.get(source.keys);
+      if (!selections) shared.set(source.keys, selections = new Map());
+      selections.set(signature, {...outcome, keys: channel.keys});
+    }
+    results.push({channelId, value: outcome.value});
+  }
+  return results;
 }
 function checkCollisions(keys) {
   const occupied = new Set();
@@ -206,6 +257,13 @@ export const editorAnimationMethods = {
   },
   /** Native descriptors are lazy, so unopened tracks allocate no per-frame keys. */
   nativePoseChannel(target, {nativeOnly = false} = {}) {
+    if(this.report._styk?.layerSheet){
+      const id=['camera','scene'].includes(target.kind)?target.kind:target.kind==='layer'?target.id:this.layerForUid(target.uid),track=this.report._styk.layerSheet.tracks[id];
+      if(track&&!track.keys.some(k=>k.sourceTick!==undefined)){
+        const keys=target.kind==='figure'?figurePoseSequences(this.report,track.keys)(target.uid):track.keys;
+        return {id:animationChannelId(target,'pose'),target,property:'pose',source:'authored',keys};
+      }
+    }
     target = normalizeAnimationTarget(target); const id = animationChannelId(target, 'pose');
     const authored = !nativeOnly && this.animationChannel(target, 'pose'); if (authored) return authored;
     this._nativeAnimationChannels ??= new Map();
@@ -221,7 +279,14 @@ export const editorAnimationMethods = {
     }
     const emptyLayer = target.kind === 'layer' && !this.layers?.find(layer => layer.id === target.id)?.figureUids?.length;
     const inherited = !nativeOnly && target.kind === 'figure' ? this.animationChannel({kind:'layer',id:this.layerForUid(target.uid)}, 'pose') : null;
-    const markerKeys = inherited ? inherited.keys : emptyLayer ? [] : markers.keys;
+    let markerKeys = inherited ? inherited.keys : emptyLayer ? [] : markers.keys;
+    if (target.kind === 'figure') {
+      if (markers.figuresRevision !== this.layerRevision) { markers.figures = new WeakMap(); markers.figuresRevision = this.layerRevision; }
+      markers.figures ??= new WeakMap();
+      let sequences = markers.figures.get(markerKeys);
+      if (!sequences) markers.figures.set(markerKeys, sequences = figurePoseSequences(this.report, markerKeys));
+      markerKeys = sequences(target.uid);
+    }
     // Key identity is scoped by channel ID. Native figures therefore share the
     // same immutable sequence, and connected edits can preserve that sharing.
     const descriptor = {id, target, property: 'pose', source: 'native', keys:markerKeys};
@@ -238,6 +303,7 @@ export const editorAnimationMethods = {
   addAnimationKey(target, property, tick = this.tick, value, {exactTarget=false}={}) { return this.addAnimationKeys([{target, property, tick, value,exactTarget}])[0]; },
   addAnimationKeys(entries) {
     if (!Array.isArray(entries) || !entries.length) return [];
+    if(this.report._styk?.layerSheet)return this._sheetPropertyEntries(entries.map(entry=>({...entry,value:entry.value===undefined&&entry.property!=='pose'?this.animationValue(entry.target,entry.property,entry.tick??this.tick):entry.value})));
     return mutateAnimation(this, 'Add animation keys', draft => {
       const shared=new Map(), occurrences=new Map();
       for(const entry of entries){const id=animationChannelId(entry.target,entry.property);occurrences.set(id,(occurrences.get(id)??0)+1);}
@@ -277,17 +343,19 @@ export const editorAnimationMethods = {
   setAnimationKeysEasing(selection, easing) {
     const fields = keyEasing(easing);
     return mutateAnimation(this, 'Change keyframe easing', draft => {
-      for (const [channelId, ids] of selectionGroups(selection)) {
-        const channel = draft.channel(channelId);
-        if (!channel) throw new Error('The animation channel no longer exists.');
+      editSelectedChannels(draft, selection, (channel, ids) => {
+        let changed = false;
         const keys = new Map(channel.keys.map(key => [key.id, key]));
         for (const id of ids) {
           const key = keys.get(id);
           if (!key) throw new Error('The animation key no longer exists.');
           validateKeyEasing(fields, channel.property);
-          if (!same(keyEasing(key), fields) || key.interpolation === undefined || key.nativeCurve || key.nativeRotation || key.nativeValueMode) { assignKeyEasing(key, fields); delete key.nativeCurve;delete key.nativeValueMode;delete key.nativeRotation;draft.changed = true; }
+          if (!same(keyEasing(key), fields) || key.interpolation === undefined || key.nativeCurve || key.nativeRotation || key.nativeValueMode) {
+            assignKeyEasing(key, fields); delete key.nativeCurve; delete key.nativeValueMode; delete key.nativeRotation; changed = true;
+          }
         }
-      }
+        return {changed};
+      });
       return draft.changed;
     });
   },
@@ -305,16 +373,17 @@ export const editorAnimationMethods = {
     if (!Number.isFinite(factor) || factor <= 0) throw new Error('Timing scale must be greater than zero.');
     checkTick(anchorTick);
     return mutateAnimation(this, 'Scale animation timing', draft => {
-      for (const [channelId, ids] of selectionGroups(selection)) {
-        const channel = draft.channel(channelId);
-        if (!channel) throw new Error('The animation channel no longer exists.');
-        if ([...ids].some(id => !channel.keys.some(key => key.id === id))) throw new Error('The animation key no longer exists.');
+      editSelectedChannels(draft, selection, (channel, ids) => {
+        let changed = false;
+        const existing = new Set(channel.keys.map(key => key.id));
+        if ([...ids].some(id => !existing.has(id))) throw new Error('The animation key no longer exists.');
         for (const key of channel.keys) if (ids.has(key.id)) {
           const tick = checkTick(Math.round(anchorTick + (key.tick - anchorTick) * factor));
-          draft.changed ||= tick !== key.tick; key.tick = tick;
+          changed ||= tick !== key.tick; key.tick = tick;
         }
         checkCollisions(channel.keys);
-      }
+        return {changed};
+      });
       return draft.changed;
     });
   },
@@ -322,8 +391,7 @@ export const editorAnimationMethods = {
     if (!Number.isInteger(deltaTick)) throw new Error('Move keys by a whole number of frames.');
     if (!deltaTick) return false;
     return mutateAnimation(this, 'Move animation keys', draft => {
-      for (const [channelId, ids] of selectionGroups(selection)) {
-        const channel = draft.channel(channelId); if (!channel) throw new Error('The animation channel no longer exists.');
+      editSelectedChannels(draft, selection, (channel, ids) => {
         const existing = new Set(channel.keys.map(key => key.id));
         if ([...ids].some(id => !existing.has(id))) throw new Error('The animation key no longer exists.');
         for (const key of channel.keys) if (ids.has(key.id)) key.tick = checkTick(key.tick + deltaTick);
@@ -331,36 +399,36 @@ export const editorAnimationMethods = {
           const destinations = new Set(channel.keys.filter(key => ids.has(key.id) && !key.hidden).map(key => key.tick));
           channel.keys = channel.keys.filter(key => ids.has(key.id) || key.hidden || !destinations.has(key.tick));
         }
-        checkCollisions(channel.keys); sortKeys(channel.keys); draft.changed ||= ids.size > 0;
-      }
+        checkCollisions(channel.keys);
+        return {changed: ids.size > 0};
+      });
       return draft.changed;
     });
   },
   deleteAnimationKeys(selection) {
     return mutateAnimation(this, 'Delete animation keys', draft => {
-      for (const [channelId, ids] of selectionGroups(selection)) {
-        const channel = draft.channel(channelId); if (!channel) continue;
-        const count = channel.keys.length; channel.keys = channel.keys.filter(key => !ids.has(key.id)); draft.changed ||= count !== channel.keys.length;
-        // Empty pose channels intentionally represent an empty layer/camera/scene track.
-      }
+      editSelectedChannels(draft, selection, (channel, ids) => {
+        const count = channel.keys.length; channel.keys = channel.keys.filter(key => !ids.has(key.id));
+        // Empty pose channels intentionally represent an empty owner.
+        return {changed: count !== channel.keys.length};
+      }, {skipMissing: true});
       return draft.changed;
     });
   },
   duplicateAnimationKeys(selection, deltaTick = 1, {replace = false} = {}) {
     if (!Number.isInteger(deltaTick)) throw new Error('Duplicate keys by a whole number of frames.');
     return mutateAnimation(this, 'Duplicate animation keys', draft => {
-      const result = [];
-      for (const [channelId, ids] of selectionGroups(selection)) {
-        const channel = draft.channel(channelId); if (!channel) throw new Error('The animation channel no longer exists.');
+      const result = editSelectedChannels(draft, selection, (channel, ids) => {
         const copies = channel.keys.filter(key => ids.has(key.id)).map(key => ({...key, id: nextKeyIdentity(draft, channel), tick: checkTick(key.tick + deltaTick)}));
         if (replace) {
           const destinations = new Set(copies.filter(key => !key.hidden).map(key => key.tick));
           channel.keys = channel.keys.filter(key => key.hidden || !destinations.has(key.tick));
         }
-        channel.keys.push(...copies); checkCollisions(channel.keys); sortKeys(channel.keys); draft.changed ||= copies.length > 0;
-        result.push({channelId, keyIds: copies.map(key => key.id)});
-      }
-      return result;
+        for (const key of copies) channel.keys.push(key);
+        checkCollisions(channel.keys);
+        return {changed: copies.length > 0, value: copies.map(key => key.id)};
+      });
+      return result.map(({channelId, value}) => ({channelId, keyIds: value}));
     });
   },
   beginAnimationEdit(target, property, {exactTarget=false}={}) {
@@ -370,10 +438,17 @@ export const editorAnimationMethods = {
     if (property === 'pose') throw new Error('Use pose keys to edit a layer pose track.');
     const initialValue=this.animationValue(target,property,this.tick,{exactTarget});
     if(initialValue===undefined)throw new Error('The selected figure is not present at this time.');
+    if(this.report._styk?.layerSheet){this._animationEdit={sheet:true,target,property,exactTarget,tick:this.tick,initialValue,value:initialValue,frame:this.evaluatedFrame,selection:this._selectionState(),changed:false};return this._animationEdit;}
     this._animationEdit = {target, property,exactTarget, tick: this.tick, before: currentAnimation(this), beforeChannel: this.animationChannel(target, property,{exactTarget}),
       initialValue, selection: this._selectionState(), changed: false}; return this._animationEdit;
   },
   previewAnimationEdit(value) {
+    if(this._animationEdit?.sheet){
+      const edit=this._animationEdit;edit.value=validateAnimationValue(edit.target,edit.property,value);edit.changed=edit.value!==edit.initialValue;
+      const channel={id:animationChannelId(edit.target,edit.property),target:edit.target,property:edit.property,keys:[{id:'preview',tick:edit.tick,value:edit.value,interpolation:'constant'}]};
+      this._sheetPropertyPreview=composeAnimationChannels({...this.report,_styk:{...this.report._styk,animation:{channels:[channel]}}},edit.frame,edit.tick,{resolveGeometry:buildGeometry});
+      this._geometry=null;this._emit('edit',{live:true});return value;
+    }
     if(this._animationEdit?.branchStyle)return previewBranchStyleAnimation(this,value);
     const edit = this._animationEdit; if (!edit) throw new Error('Begin a property edit before previewing it.');
     value = validateAnimationValue(edit.target, edit.property, value);
@@ -384,6 +459,8 @@ export const editorAnimationMethods = {
     this._emit('edit', {live: true, animation: true, changedChannels: [animationChannelId(edit.target, edit.property)]}); return value;
   },
   commitAnimationEdit() {
+    if(this._animationEdit?.sheet){const edit=this._animationEdit;this._animationEdit=null;this._sheetPropertyPreview=null;this._invalidate();
+      if(!edit.changed)return false;this._sheetPropertyEntries([{target:edit.target,property:edit.property,tick:edit.tick,value:edit.value}],`Edit ${edit.property}`);return true;}
     if(this._animationEdit?.branchStyle)return commitBranchStyleAnimation(this);
     const edit = this._animationEdit; if (!edit) return false;
     this._animationEdit = null;
@@ -396,6 +473,7 @@ export const editorAnimationMethods = {
     return recordAnimation(this, `Animate ${edit.property}`, {before: edit.before, after: currentAnimation(this), changed: true}, edit.selection);
   },
   cancelAnimationEdit() {
+    if(this._animationEdit?.sheet){this._animationEdit=null;this._sheetPropertyPreview=null;this._invalidate();this._emit('edit',{label:'Cancel property edit'});return true;}
     if(this._animationEdit?.branchStyle)return cancelBranchStyleAnimation(this);
     const edit = this._animationEdit; if (!edit) return false;
     this._animationEdit = null; assignAnimation(this, edit.before);

@@ -12,6 +12,8 @@
     <link rel="icon" type="image/svg+xml" href="./mark.svg" />
     <link rel="stylesheet" href="./src/style.css" />
     <link rel="stylesheet" href="./src/studio.css" />
+    <link rel="stylesheet" href="./src/user-library.css" />
+    <link rel="stylesheet" href="./src/layer-timeline.css" />
     <link rel="stylesheet" href="./src/ik.css" />
   </head>
   <body>
@@ -107,8 +109,8 @@
               <button class="button subtle small" data-action="undo" title="Undo · Ctrl+Z" aria-label="Undo" data-icon="undo"></button>
               <button class="button subtle small" data-action="redo" title="Redo · Ctrl+Shift+Z" aria-label="Redo" data-icon="redo"></button>
               <span class="divider"></span>
-              <button type="button" class="icon-button" data-selection-order data-action="layer-front" data-shift-action="layer-up" title="Bring to front · Shift-click: one step forward" aria-label="Bring to front" data-icon="bring-to-front" disabled></button>
-              <button type="button" class="icon-button" data-selection-order data-action="layer-back" data-shift-action="layer-down" title="Send to back · Shift-click: one step backward" aria-label="Send to back" data-icon="send-to-back" disabled></button>
+              <button type="button" class="icon-button" data-selection-order data-action="selection-front" data-shift-action="selection-up" title="Bring to front · Shift-click: one step forward" aria-label="Bring to front" data-icon="bring-to-front" disabled></button>
+              <button type="button" class="icon-button" data-selection-order data-action="selection-back" data-shift-action="selection-down" title="Send to back · Shift-click: one step backward" aria-label="Send to back" data-icon="send-to-back" disabled></button>
               <span class="divider"></span>
               <button
                 class="icon-button active"
@@ -146,7 +148,7 @@
               <span id="frame-badge">FRAME 01</span
               ><span id="preview-badge" hidden>PLAYING</span>
             </div>
-            <div id="canvas-empty" hidden>Drop a .styk, .stkz, .piv or .stk file here</div>
+            <div id="canvas-empty" hidden>Drop a StykAnimate, Pivot or Stick Nodes file here</div>
             <output id="playback-fps" aria-label="Playback frames per second" hidden>— fps</output>
             <div id="renderer-error" hidden></div>
             <div id="polygon-controls" class="polygon-controls" hidden>
@@ -265,7 +267,7 @@
     <input
       type="file"
       id="file-input"
-      accept=".styk,.stkz,.piv,.stk,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp"
+      accept=".styk,.stykmov,.stkz,.piv,.stk,.json,.nodes,.nodemc,.stknds,.zip,.png,.jpg,.jpeg,.gif,.bmp,.webp"
       multiple
       hidden
     />
@@ -283,9 +285,10 @@
         <button data-action="add-figure" data-icon="person"><strong>Stick figure</strong><small>Start with a character</small></button>
         <button data-action="add-text" data-icon="text"><strong>Text</strong><small>Add a title or caption</small></button>
         <button data-action="import-sprite" data-icon="image"><strong>Image</strong><small>Place an image</small></button>
-        <button data-action="import" data-icon="import"><strong>Import figure</strong><small>Open a Pivot figure</small></button>
+        <button data-action="import" data-icon="import"><strong>Import figure</strong><small>Open a figure or movie clip</small></button>
       </div>
-      <div class="insert-library"><h3>Figures in this project <span>Click to add an instance</span></h3><div id="asset-list"></div></div>
+      <div class="movieclip-actions"><button class="button" data-action="movieclip-new">New movieclip</button><button class="button" data-action="movieclip-create">From selection</button><button class="button" data-action="movieclip-range">From frame range</button></div>
+      <div class="insert-library"><h3>Project library</h3><div id="asset-list"></div></div>
       <details class="insert-examples"><summary>Example animations</summary><div id="sample-list"></div></details>
     </dialog>
     <dialog id="dialog"><div id="dialog-content"></div></dialog>

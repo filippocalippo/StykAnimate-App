@@ -228,7 +228,7 @@ export async function exportSVG({report, frame, frameIndex = 0, geometry, width,
         const a = s.asset, image = await bitmap(a), reverse = Boolean(s.seg.extra_u8_a ?? s.seg.extra?.[1]), mirror = Boolean(s.seg.extra_u8_b ?? s.seg.extra?.[2]) !== Boolean(s.obj.image_text_flags);
         const start = reverse ? s.end : s.start, angle = (mirror ? s.angle + a.anchor_angle_rad - Math.PI : s.angle - a.anchor_angle_rad) + (reverse ? Math.PI : 0);
         const scale = Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y) / a.anchor_length;
-        parts.push(await imageElement(image, `translate(${number(start.x)} ${number(start.y)}) rotate(${number(angle * 180 / Math.PI)}) scale(${number(mirror ? -scale : scale)} ${number(scale)}) translate(${number(-a.anchor_start.x)} ${number(-a.anchor_start.y)})`, scale, s.alpha));
+        parts.push(await imageElement(image, `translate(${number(start.x)} ${number(start.y)}) rotate(${number(angle * 180 / Math.PI)}) scale(${number(mirror ? -scale : scale)} ${number(scale)}) translate(${number(-a.anchor_start.x)} ${number(-a.anchor_start.y)}) scale(${number(a.display_width ? a.display_width / a.width : 1)} ${number(a.display_height !== undefined ? a.display_height / a.height : 1)})`, scale, s.alpha));
       } else if (s.type === 'poly') {
         if (s.points.length < 3) continue;
         const width = strokeWidth(stroke, s.outline ? 2 * s.outline : 0);
@@ -248,15 +248,22 @@ export async function exportSVG({report, frame, frameIndex = 0, geometry, width,
     }
     return parts.join('');
   }
-  const groups = [], mainStroke = {width: 1};
-  for (const s of geometry.drawables) {
+  const mainStroke = {width: 1};
+  async function renderGroups(items){
+  const groups=[];
+  for (const s of items) {
     let group = groups.at(-1);
     if (!group || group.slot !== s.slot) { group = {slot: s.slot, opacity: s.opacity, items: []}; groups.push(group); }
     group.items.push(s);
   }
-  let scene = override !== undefined ? rect(argb(override)) : await background(frame.background_id);
-  if (override === undefined && frame.background_mix) scene += await background(frame.background_id_b, frame.background_mix / 255);
+  let output='';
   for (const group of groups) {
+    const owner=group.items[0]._movieclipOwner;
+    if(owner){
+      const children=group.items.map(item=>{const child={...item,slot:item._movieclipPart};delete child._movieclipOwner;delete child._movieclipPart;delete child._movieclipInner;
+        if(item._movieclipInner){child._movieclipOwner=item._movieclipInner.owner;child._movieclipPart=item._movieclipInner.part;child._movieclipInner=item._movieclipInner.inner;}return child;});
+      output+=`<g data-movieclip-id="${escape(group.items[0].obj.unique_id)}" opacity="${number(clamp(owner.opacity))}">${await renderGroups(children)}</g>`;continue;
+    }
     if (group.opacity <= 0) continue;
     const stroke = group.opacity < 1 ? {width: 1} : mainStroke;
     const style = group.items.find(s => s.fig)?.fig.segment_decode?.global_style, outlineWidth = style ? floatBits(style.u28) : 0;
@@ -267,8 +274,13 @@ export async function exportSVG({report, frame, frameIndex = 0, geometry, width,
       if (opacity > 0) content += `<g opacity="${number(opacity)}">${await primitives(outline, opacity < 1 ? {width: 1} : stroke)}</g>`;
     }
     content += await primitives(group.items, stroke);
-    scene += `<g data-object-id="${escape(group.items[0].obj.unique_id ?? group.slot)}" opacity="${number(clamp(group.opacity ?? 1))}">${content}</g>`;
+    output += `<g data-object-id="${escape(group.items[0].obj.unique_id ?? group.slot)}" opacity="${number(clamp(group.opacity ?? 1))}">${content}</g>`;
   }
+  return output;
+  }
+  let scene = override !== undefined ? rect(argb(override)) : await background(frame.background_id);
+  if (override === undefined && frame.background_mix) scene += await background(frame.background_id_b, frame.background_mix / 255);
+  scene+=await renderGroups(geometry.drawables);
   // SVG remains editable vector artwork. Crisp edges is an actual SVG rasterizer
   // hint; supersampling is reserved for fixed-resolution raster exports.
   const rendering = smoothing === 'none' ? ' shape-rendering="crispEdges"' : '';

@@ -2,6 +2,7 @@
 import {animationChannelId, validateAnimationDocument} from './animation-channels.mjs';
 import {nativeSegmentOpacity} from './animation-style.mjs';
 import {repairIKTopology} from './ik-topology.mjs';
+import {movieclipSourceDocument} from './movieclips.mjs';
 
 const clone = value => structuredClone(value);
 const reverseProperty = property => ({opacity:'gradientOpacity', gradientOpacity:'opacity', color:'gradientColor', gradientColor:'color'})[property] ?? property;
@@ -9,6 +10,7 @@ const reversePaint = paint => paint.type==='solid' ? clone(paint) : {...clone(pa
 
 /** Reversing a gradient's geometry retains each endpoint's original color. */
 export function reverseGradientEndpoints(segment) {
+  if(segment._sticknodes)segment={...segment,_sticknodes:{...segment._sticknodes,reversed:!segment._sticknodes.reversed}};
   if(segment.paint && ['radial','angular','diamond'].includes(segment.paint.type))return {...segment,paint:{...clone(segment.paint),angle:segment.paint.angle-180}};
   if (!segment.secondary) return segment;
   const transparency = Number(segment.secondary.a ?? 0);
@@ -51,10 +53,35 @@ export function repairTopologyStyles(editor, before, figure, explicit = new Map(
     repairStyles(view, before, figure, explicit, reversedGradients, true);
   }
   repairStyles(editor, before, figure, explicit, reversedGradients, false);
+  repairSheetStyles(editor, before, figure, explicit, reversedGradients);
+  let parent=editor.report;
+  while(parent._styk?.movieclipSource){
+    const source=movieclipSourceDocument(parent),scoped=Object.create(editor);
+    scoped.report={...source,_styk:{...source._styk}};
+    repairStyles(scoped,before,figure,explicit,reversedGradients,true);
+    repairSheetStyles(scoped,before,figure,explicit,reversedGradients);
+    const stored=parent._styk.movieclipSource.document;
+    if(scoped.report._styk.animation)stored._styk.animation=scoped.report._styk.animation;
+    if(scoped.report._styk.layerSheet)stored._styk.layerSheet=scoped.report._styk.layerSheet;
+    parent=source;
+  }
   if (view) {
     state.animationBaseline = view.report._styk.animation;
     if (editor._frameDraft) editor._frameDraft.animationBaseline = state.animationBaseline;
   }
+}
+
+// Imported channels are an immutable evaluation baseline, not active authoring
+// tracks. Rig edits must still remap their handles before the project is saved.
+function repairSheetStyles(editor, before, figure, explicit, reversedGradients) {
+  const sheet=editor.report._styk.layerSheet;
+  if(!sheet?.legacyAnimation)return;
+  const view=Object.create(editor);
+  view.report={...editor.report,_styk:{...editor.report._styk,animation:sheet.legacyAnimation}};
+  delete view.report._styk.layerSheet;
+  repairStyles(view,before,figure,explicit,reversedGradients,true);
+  if(view.report._styk.animation!==sheet.legacyAnimation)
+    editor.report._styk.layerSheet={...sheet,legacyAnimation:view.report._styk.animation};
 }
 
 function repairStyles(editor, before, figure, explicit, reversedGradients, channelsOnly) {
@@ -83,8 +110,16 @@ function repairStyles(editor, before, figure, explicit, reversedGradients, chann
     const types=typesByUid.get(object.unique_id)??new Set();types.add(object.figure_type_id);typesByUid.set(object.unique_id,types);
   }
   for (const entry of channelsOnly ? [] : before.frames) {
-    const frame = entry.draft ? editor.report._styk.simpleFrameDraft?.baseline : entry.sourceId ? editor.report._styk.frameSources[entry.sourceId] : editor.report.keyframes[entry.index];
+    const frame = editor._sourceFrame(entry);
     for (const object of frame.objects) {
+      if(object.figure_type_id===figure.figure_type_id && object._sticknodesShapes){
+        const shapes={};
+        for(const [handle,shape] of Object.entries(object._sticknodesShapes)){
+          const targets=changes.get(Number(handle))??[Number(handle)];
+          for(const target of targets)shapes[target]=clone(reversedGradients.has(Number(handle))?{...shape,reversed:!shape.reversed}:shape);
+        }
+        if(Object.keys(shapes).length)object._sticknodesShapes=shapes;else delete object._sticknodesShapes;
+      }
       if (object.figure_type_id !== figure.figure_type_id || !object._stykStyle?.segments) continue;
       const original = object._stykStyle.segments;
       const entries = Object.entries(original);

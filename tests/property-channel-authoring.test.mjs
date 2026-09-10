@@ -10,7 +10,7 @@ import {beginNativePropertyEdit, previewNativePropertyEdit, commitNativeProperty
 import {createNativeStyleTable} from '../src/pivot-style-materialize.mjs';
 import {sampleAnimationChannel} from '../src/animation-channels.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
-import {buildChannelTimelineTracks} from '../src/timeline.mjs';
+import {buildChannelTimelineTracks} from './helpers/legacy-timeline-projection.mjs';
 import {segmentPaint,paintGeometry} from '../src/paint.mjs';
 
 function fixture() {

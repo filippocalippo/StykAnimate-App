@@ -7,7 +7,7 @@ const { atomicWrite } = require('./recovery.cjs');
 
 const MAX_RECENT_BYTES = 512 * 1024;
 // Main remembers .json only after the existing legacy STYK Open path validates it.
-const EXTENSIONS = new Set(['.piv', '.stk', '.styk', '.stkz', '.json']);
+const EXTENSIONS = new Set(['.piv', '.stk', '.styk', '.stkz', '.stykmov', '.json', '.nodes', '.nodemc', '.stknds', '.zip']);
 const OPAQUE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Input has already been normalized/realpathed by the native process. */
@@ -103,7 +103,7 @@ class RecentFiles {
 
   remember(absolutePath) {
     return this.enqueue(async () => {
-      if (!validPath(absolutePath)) throw new Error('Recent files accepts an absolute .piv, .stk, .stkz or .styk filename.');
+      if (!validPath(absolutePath)) throw new Error('Recent files accepts an absolute .piv, .stk, .stkz, .stykmov or .styk filename.');
       let filename, stat;
       try {
         filename = await fs.realpath(absolutePath);
@@ -113,7 +113,7 @@ class RecentFiles {
         throw error;
       }
       if (!stat.isFile()) throw unavailable(absolutePath);
-      if (!validPath(filename)) throw new Error('Recent files accepts .piv, .stk, .stkz or .styk documents.');
+      if (!validPath(filename)) throw new Error('Recent files accepts .piv, .stk, .stkz, .stykmov or .styk documents.');
       const key = canonicalPathKey(filename);
       const previous = this.entries.find(entry => canonicalPathKey(entry.path) === key);
       const entry = { id: previous?.id ?? randomUUID(), path: filename };

@@ -175,3 +175,18 @@ test('Pivot handle role colors retain separate orange and unselected origin colo
   assert.equal(pivotHandleColor({ static: true, selected: true, active: true }), '#b04040');
   assert.equal(pivotHandleColor({ static: true }), '#808080');
 });
+
+test('indexed picking preserves native order, ties, zoom, rotation and strict hit boundaries',()=>{
+  const handles=Array.from({length:2000},(_,i)=>({uid:i,point:{x:(i%100)*20-1000,y:Math.floor(i/100)*20-100},radius:5,screenRadius:5}));
+  handles.push({...handles[750],uid:2000});
+  for(const scale of [.01,.5,2,12])for(const angle of [0,.3])for(const nearest of [false,true]){
+    let projections=0;const project=p=>{projections++;return {x:scale*(p.x*Math.cos(angle)-p.y*Math.sin(angle))+81,y:scale*(p.x*Math.sin(angle)+p.y*Math.cos(angle))-23};};
+    for(const point of [handles[750].point,{x:31,y:99},{x:-995,y:-100},{x:9000,y:1000}]){
+      const options={handles,project,nearest,minRadius:8},full=pickCanvasHandle(null,point,options);
+      projections=0;const indexed=pickCanvasHandle(null,point,{...options,projectionScale:scale});
+      assert.deepEqual(indexed,full);
+      if(scale>=.5)assert.ok(projections<50,'Only nearby handles should be projected.');
+    }
+  }
+  assert.equal(pickCanvasHandle(null,handles[750].point,{handles,nearest:true,spatial:true}).uid,2000);
+});

@@ -89,6 +89,7 @@ async function receive(message) {
       throw new Error("Thumbnail worker already has a pending frame.");
     if (message.revision !== revision || !report) throw abortError();
     if (message.storedFrames !== undefined && typeof message.storedFrames !== 'boolean') throw new Error('Invalid stored-frame preview mode.');
+    if(message.tick!==undefined&&(!Number.isInteger(message.tick)||message.tick<0||message.tick>10000000))throw new Error('Invalid thumbnail time.');
     if (!Number.isInteger(message.index) || !report.keyframes[message.index])
       throw new RangeError("Thumbnail frame is unavailable.");
     if (
@@ -120,7 +121,7 @@ async function receive(message) {
         frameReport,
         message.index,
         0,
-        frameEntries[message.index]?.start,
+        message.tick??frameEntries[message.index]?.start,
       );
       const geometry = buildGeometry(frameReport, frame);
       const drawables = geometry.drawables.filter((item) =>

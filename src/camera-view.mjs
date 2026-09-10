@@ -3,8 +3,7 @@ export function cameraActionsView({editor, button, group, tools}) {
   const selected = Boolean(editor.selectedObjects?.length ?? editor.object);
   return group('Camera pose', tools(
     button('camera-copy', 'duplicate', 'Copy camera pose') +
-    button('camera-paste', 'clipboard', 'Paste camera pose', !editor._cameraClipboard) +
-    button('camera-reset', 'undo', 'Reset camera pose'),
+    button('camera-paste', 'clipboard', 'Paste camera pose', !editor._cameraClipboard),
   )) + group('Center on selection', tools(
     button('camera-center', 'center', 'Center camera on selection', !selected) +
     button('camera-center-x', 'align-horizontal-center', 'Center camera horizontally', !selected) +

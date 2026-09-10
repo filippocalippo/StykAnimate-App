@@ -1,10 +1,11 @@
-import {_electron as electron} from 'playwright';
+import {_electron as electron,chromium} from 'playwright';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 const root=process.cwd(),output=path.join(root,'artifacts',`artwork-gpu-${Date.now()}`);await mkdir(output,{recursive:true});
-const app=await electron.launch({args:[root],cwd:root,env:{...process.env,STYK_USER_DATA_DIR:path.join(output,'profile')}});
+const browser=process.env.STYK_BROWSER_URL?await chromium.launch({channel:'chrome',headless:true}):null;
+const app=browser?null:await electron.launch({args:[root],cwd:root,env:{...process.env,STYK_USER_DATA_DIR:path.join(output,'profile')}});
 try{
-  const page=await app.firstWindow();await page.waitForFunction(()=>window.styk?.ready);
+  const page=browser?await browser.newPage():await app.firstWindow();if(browser)await page.goto(process.env.STYK_BROWSER_URL);await page.waitForFunction(()=>window.styk?.ready);
   const result=await page.evaluate(async()=>{
     const {createRenderer}=await import('/src/renderer.mjs');
     const make=async sharedArtwork=>{const c=document.createElement('canvas');c.width=256;c.height=128;document.body.append(c);const r=await createRenderer(c,{sharedArtwork});r.resize(256,128,1);return{r,c};};
@@ -227,4 +228,4 @@ try{
     a.r.destroy();b.r.destroy();return observations;
   });
   await writeFile(path.join(output,'report.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({output,checks:result}));
-}finally{await app.evaluate(({app})=>app.exit(0)).catch(()=>{});}
+}finally{if(browser)await browser.close();else await app.evaluate(({app})=>app.exit(0)).catch(()=>{});}

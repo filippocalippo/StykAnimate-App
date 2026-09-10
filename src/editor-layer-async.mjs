@@ -81,6 +81,7 @@ export const editorLayerAsyncMethods = {
     this._layerMigrationPlanner = planner; return this;
   },
   async assignFiguresToLayerAsync(uids, id, options = {}) {
+    if(this.report._styk?.layerSheet)return this.assignFiguresToLayer(uids,id);
     const context = start(this, options), state = checkLayer(this, id), ids = [...new Set(uids)];
     if (ids.some(uid => !this._layerUidCounts.has(uid))) throw new Error('Choose figures present in this animation.');
     const updates = ids.filter(uid => this.layerForUid(uid) !== id).map(uid => [['assignments', String(uid)], id]);
@@ -90,6 +91,7 @@ export const editorLayerAsyncMethods = {
     return this._layerEdit('Assign figures to layer', updates, {structural: true, reindex: true, migration});
   },
   async deleteLayerAsync(id, options = {}) {
+    if(this.report._styk?.layerSheet)return this.deleteLayer(id,options);
     const context = start(this, options), state = checkLayer(this, id), position = state.order.indexOf(id);
     if (state.order.length === 1) throw new Error('Keep at least one user layer.');
     const target = options.targetLayerId ?? state.order[position - 1] ?? state.order[position + 1];
