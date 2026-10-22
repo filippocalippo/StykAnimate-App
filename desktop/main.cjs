@@ -12,7 +12,7 @@ const { applyGpuSwitches, relaunchOnX11 } = require('./gpu-switches.cjs');
 const { RecoveryStore, atomicWrite } = require('./recovery.cjs');
 const { FileStreams } = require('./file-streams.cjs');
 const { SharedClipboard } = require('./shared-clipboard.cjs');
-const { workspaceDirectory } = require('./workspace-instance.cjs');
+const { workspaceDirectory, claimPrimaryWorkspace } = require('./workspace-instance.cjs');
 const { spawn } = require('node:child_process');
 const { randomBytes } = require('node:crypto');
 const { WorkspacePreferences } = require('./preferences.cjs');
@@ -28,6 +28,7 @@ const { LibraryStore } = require('./library-store.cjs');
 const { PublicLibrary, DownloadLedger, isPublicId } = require('./public-library.cjs');
 const { TelemetryService } = require('./telemetry.cjs');
 const { UpdateService, updateAvailabilityDetails } = require('./updates.cjs');
+const { nativeMenuTemplate, TEXT_EDIT_COMMANDS } = require('./native-menu.cjs');
 const releaseInfo = require('./release-info.json');
 const getReleaseHistory = require('./release-history.cjs').createReleaseHistory();
 let telemetryBuild = {};
@@ -102,7 +103,9 @@ if (profileDirectory) {
   app.setPath('sessionData', profileDirectory);
   app.setPath('crashDumps', path.join(profileDirectory, 'crashes'));
 }
-const primaryInstance = app.requestSingleInstanceLock();
+// On macOS a failed requestSingleInstanceLock() stops `ready` from ever firing, which would leave
+// a second window (New Window) without one; see workspace-instance.cjs.
+const primaryInstance = process.platform === 'darwin' ? claimPrimaryWorkspace(app.getPath('userData')) !== null : app.requestSingleInstanceLock();
 const instanceDirectory = primaryInstance ? app.getPath('userData') : workspaceDirectory(app.getPath('userData'));
 if (!primaryInstance) {
   mkdirSync(instanceDirectory, {recursive: true});
@@ -142,9 +145,9 @@ function handle(channel, listener) {
   });
 }
 
-function sendAction(action) {
+function sendAction(action, details) {
   if (!window || window.isDestroyed()) return;
-  window.webContents.send('styk:menu-action', action);
+  window.webContents.send('styk:menu-action', action, details);
 }
 
 function windowState() {
@@ -152,43 +155,7 @@ function windowState() {
 }
 
 function nativeMenu() {
-  // Editor shortcuts belong to the renderer's customizable, focus-aware dispatcher.
-  // Native accelerators would intercept disabled/reassigned keys and text editing.
-  const item = (label, action) => ({ label, click: () => sendAction(action) });
-  const template = [
-    ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
-    { label: t('desktop.main.file'), submenu: [
-      item(t('menu.newAnimation'), 'new'),
-      item(t('desktop.main.newWindow'), 'new-window'),
-      item(t('menu.openProject'), 'open'),
-      { type: 'separator' },
-      item(t('common.save'), 'save'),
-      item(t('common.saveAs'), 'save-as'),
-      item(t('desktop.main.saveFigure'), 'export-stkz'),
-      item(t('common.export'), 'export'),
-      { type: 'separator' },
-      process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },
-    ] },
-    { label: t('desktop.main.edit'), submenu: [
-      item(t('common.undo'), 'undo'), item(t('common.redo'), 'redo'),
-      { type: 'separator' },
-      item(t('common.cut'), 'cut'), item(t('common.copy'), 'copy'), item(t('common.paste'), 'paste'),
-      item(t('common.duplicate'), 'duplicate'), item(t('common.delete'), 'delete'),
-      { type: 'separator' }, item(t('desktop.main.selectAll'), 'select-all'),
-    ] },
-    { label: t('desktop.main.animation'), submenu: [
-      item(t('desktop.main.playPause'), 'play'), item(t('timeline.addFrame'), 'add-frame'),
-      item(t('desktop.main.previousFrame'), 'previous-frame'), item(t('desktop.main.nextFrame'), 'next-frame'),
-      { type: 'separator' }, item(t('timeline.onion'), 'toggle-onion'),
-    ] },
-    { label: t('desktop.main.view'), submenu: [
-      item(t('desktop.main.zoomIn'), 'zoom-in'), item(t('desktop.main.zoomOut'), 'zoom-out'),
-      item(t('desktop.main.fitCanvas'), 'zoom-reset'), { type: 'separator' }, { role: 'togglefullscreen', accelerator: '' },
-      ...(!app.isPackaged ? [{ role: 'toggleDevTools', accelerator: '' }] : []),
-    ] },
-    { label: t('desktop.main.help'), submenu: [item(t('menu.shortcuts'), 'help'), item(t('desktop.main.checkForUpdates'), 'check-updates'), item(t('desktop.main.whatSNew'), 'release-notes'), item(t('desktop.main.supportDevelopment'), 'donate'), item(t('desktop.main.aboutStykAnimate'), 'about')] },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(nativeMenuTemplate({ packaged: app.isPackaged, t, send: sendAction })));
 }
 
 async function readImportFile(file) {
@@ -720,6 +687,13 @@ function registerIpc() {
     return windowState();
   });
   handle('styk:window-state', (event) => { trusted(event); return windowState(); });
+  // Native text editing for the focused field, for menu items and macOS key equivalents (native-menu.cjs).
+  handle('styk:edit-text', (event, command) => {
+    trusted(event);
+    if (!Object.hasOwn(TEXT_EDIT_COMMANDS, command)) throw messageError(new Error(''), 'desktop.main.errors.unknownWindowAction', {});
+    window.webContents[TEXT_EDIT_COMMANDS[command]]();
+    return true;
+  });
   // Only the trusted workspace frame receives the codec session token.
   ipcMain.on('styk:api-token', (event) => {
     try { trusted(event); event.returnValue = apiToken; }
@@ -907,7 +881,9 @@ app.on('before-quit', (event) => {
     if (telemetry && !telemetryClosed) { event.preventDefault(); telemetryClosed = true; void telemetry.close().catch(() => {}).finally(() => app.quit()); }
   }
 });
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+// On macOS the primary workspace stays running without windows, as Mac apps do. A secondary workspace
+// (New Window) is a process of its own and ends with its window rather than lingering in the Dock.
+app.on('window-all-closed', () => { if (process.platform !== 'darwin' || !primaryInstance) app.quit(); });
 app.on('will-quit', () => updates?.dispose());
 app.on('will-quit', () => { backend?.stop(); library?.dispose().catch(() => {}); fileStreams?.dispose().catch(() => {}); videoExports?.dispose().catch(() => {}); vfwExports?.dispose().catch(() => {}); audioImports?.dispose().catch(() => {}); });
 process.on('exit', () => backend?.stop());

@@ -5,7 +5,7 @@ import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {chooseExport} from './helpers/export-dialog.mjs';
 const root=process.cwd(),out=path.join(root,'artifacts','audio-desktop'); await mkdir(out,{recursive:true});
-const ffmpeg=path.join(root,'build','video-encoder','ffmpeg.exe');
+const ffmpeg=path.join(root,'build','video-encoder',process.platform==='win32'?'ffmpeg.exe':'ffmpeg');
 const encoded=spawnSync(ffmpeg,['-hide_banner','-loglevel','error','-y','-f','lavfi','-i','sine=frequency=440:duration=3:sample_rate=48000','-c:a','libmp3lame',path.join(out,'Voice.mp3')],{windowsHide:true});
 assert.equal(encoded.status,0,encoded.stderr?.toString());
 const app=await electron.launch({args:[root],cwd:root,timeout:45000,env:{...process.env,STYK_USER_DATA_DIR:path.join(out,`profile-${Date.now()}`)}});
@@ -67,4 +67,4 @@ try {
   await page.screenshot({path:path.join(out,'desktop.png')});assert.deepEqual(errors,[]);
   await writeFile(path.join(out,'report.json'),JSON.stringify({measured,sync,cancelled:results.cancelled,maxChunk:Math.max(...results.chunks),errors},null,2));
   console.log('PASS real Electron MP3 decoding, bounded IPC, four audio/video codecs, ranged export, cancellation, recovery and sync',measured,sync);
-}finally{await app.close();}
+}finally{await app.evaluate(({app})=>app.exit(0)).catch(()=>{});}

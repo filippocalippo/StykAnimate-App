@@ -24,7 +24,9 @@ const unpacked = process.platform === 'win32' ? ['win-unpacked', 'StykAnimate.ex
   : process.platform === 'darwin' ? [process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'StykAnimate.app', 'Contents', 'MacOS', 'StykAnimate']
   : [process.arch === 'arm64' ? 'linux-arm64-unpacked' : 'linux-unpacked', 'stykanimate'];
 const executablePath = packaged ? process.env.STYK_PACKAGED_EXECUTABLE || path.join(appRoot, 'release', ...unpacked) : undefined;
-const resources = packaged ? path.join(path.dirname(executablePath), 'resources') : path.join(appRoot, 'build');
+// A macOS bundle keeps resources in Contents/Resources, beside Contents/MacOS rather than inside it.
+const resources = !packaged ? path.join(appRoot, 'build')
+  : process.platform === 'darwin' ? path.resolve(path.dirname(executablePath), '..', 'Resources') : path.join(path.dirname(executablePath), 'resources');
 const ffmpeg = path.join(resources, 'video-encoder', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
 if (!existsSync(ffmpeg)) { console.error(`The bundled encoder is missing (${ffmpeg}). Run npm run build:video-encoder.`); process.exit(2); }
 

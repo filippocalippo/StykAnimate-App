@@ -3,6 +3,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { checkMachOTree, macMinimumVersion, sameBinary } from './macos-binaries.mjs';
 
 const appRoot = process.env.STYK_PACKAGE_SOURCE_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const manifestDirectory = process.env.STYK_PACKAGE_MANIFEST_DIR || path.join(appRoot, 'artifacts');
@@ -73,18 +76,18 @@ if (!snapshot) {
     [`sidecar/styk-codec/${sidecarBinary}`, path.join(appRoot, 'build', 'sidecar', 'styk-codec', sidecarBinary)],
   ]) {
     const source = await readFile(sourcePath), packaged = await readFile(path.join(resources, relative));
-    if (hash(source) !== hash(packaged)) throw new Error(`Packaged runtime differs from the verified build: ${relative}`);
+    if (hash(source) !== hash(packaged) && !(await sameBinary(sourcePath, path.join(resources, relative)))) throw new Error(`Packaged runtime differs from the verified build: ${relative}`);
     manifest.push({ path: relative, sha256: hash(packaged), bytes: packaged.length });
   }
   const scannerName=process.platform==='win32'?'styk-piv-frame-scan.dll':process.platform==='darwin'?'libstyk-piv-frame-scan.dylib':'libstyk-piv-frame-scan.so';
   const scannerRelative=`sidecar/styk-codec/_internal/native/${scannerName}`;
   const scannerSource=await readFile(path.join(appRoot,'build',scannerRelative)),scannerPackaged=await readFile(path.join(resources,scannerRelative));
-  if(hash(scannerSource)!==hash(scannerPackaged))throw new Error('Packaged PIV scanner differs from its verified sidecar.');
+  if(hash(scannerSource)!==hash(scannerPackaged)&&!(await sameBinary(path.join(appRoot,'build',scannerRelative),path.join(resources,scannerRelative))))throw new Error('Packaged PIV scanner differs from its verified sidecar.');
   manifest.push({path:scannerRelative,sha256:hash(scannerPackaged),bytes:scannerPackaged.length});
   for (const filename of await readdir(path.join(appRoot, 'build', 'video-encoder'))) {
     const relative = `video-encoder/${filename}`;
     const source = await readFile(path.join(appRoot, 'build', relative)), packaged = await readFile(path.join(resources, relative));
-    if (hash(source) !== hash(packaged)) throw new Error(`Packaged video encoder differs from the staged build: ${relative}`);
+    if (hash(source) !== hash(packaged) && !(await sameBinary(path.join(appRoot, 'build', relative), path.join(resources, relative)))) throw new Error(`Packaged video encoder differs from the staged build: ${relative}`);
     manifest.push({path: relative, sha256: hash(packaged), bytes: packaged.length});
   }
   if (process.platform === 'win32') for (const filename of ['build-info.json','x86/styk-vfw.exe','x64/styk-vfw.exe']) {
@@ -93,7 +96,18 @@ if (!snapshot) {
     manifest.push({path:relative,sha256:hash(packaged),bytes:packaged.length});
   }
 }
+let bundle = '';
+if (process.platform === 'darwin') {
+  // Packaging signs every native file, so the comparisons above ignore code signatures (sameBinary);
+  // the bundle's own signature must then seal them, and each must run on the declared oldest macOS.
+  const app = path.resolve(resources, '..', '..'), minimum = await macMinimumVersion(appRoot);
+  const { count, problems } = await checkMachOTree(app, { arch: process.arch, minimum });
+  if (problems.length) throw new Error(`The app has native code that cannot run on macOS ${minimum} (${process.arch}):\n${problems.slice(0, 12).join('\n')}`);
+  try { await promisify(execFile)('codesign', ['--verify', '--deep', '--strict', app]); }
+  catch (error) { throw new Error(`The app bundle's code signature is not intact; package it with npm run dist:mac:local (ad hoc) or a signing identity.\n${(error.stderr || error.message).trim()}`); }
+  bundle = ` ${count} ${process.arch} Mach-O files target macOS ${minimum} or earlier; bundle signature intact.`;
+}
 await mkdir(manifestDirectory, { recursive: true });
 manifest.push({ path: 'app.asar/package.json', sha256: hash(packagedMetadata), bytes: packagedMetadata.length });
 await writeFile(path.join(manifestDirectory, snapshot ? `package-baseline-${version}.json` : 'package-manifest.json'), JSON.stringify({ version, snapshot, verifiedAt: new Date().toISOString(), synchronized, files: manifest }, null, 2));
-console.log(snapshot ? `${files.length} web assets and ${nativeFiles.length} native modules hashed for the ${version} baseline.` : `Version ${version}: ${files.length} web assets and ${nativeFiles.length} native modules match source; ${synchronized} web files synchronized.`);
+console.log(snapshot ? `${files.length} web assets and ${nativeFiles.length} native modules hashed for the ${version} baseline.` : `Version ${version}: ${files.length} web assets and ${nativeFiles.length} native modules match source; ${synchronized} web files synchronized.${bundle}`);

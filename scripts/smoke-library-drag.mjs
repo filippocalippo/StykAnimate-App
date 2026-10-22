@@ -1,4 +1,4 @@
-import {_electron as electron} from '../tests/support/playwright.mjs';
+import {_electron as electron, closeStartupPrompts} from '../tests/support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -14,8 +14,7 @@ try {
   app.process().stderr.on('data', data => process.stderr.write(data));
   page = await app.firstWindow(); page.on('pageerror', error => errors.push(error.message));
   await page.waitForFunction(() => window.styk?.ready);
-  const welcome = page.getByRole('button', {name: 'Close welcome screen'});
-  if (await welcome.isVisible()) await welcome.click();
+  await closeStartupPrompts(page);
   await page.evaluate(() => window.styk.editor.select(1));
   await page.getByRole('tab', {name: 'Library', exact: true}).click();
   await page.locator('#user-library [data-library-action="save"]').click();
@@ -104,7 +103,7 @@ try {
   await page.waitForFunction(n => !window.styk.library.busy && window.styk.editor.selectionFrame.objects.length === n + 1, count);
   check('Double-click insertion still works');
   await page.evaluate(() => window.styk.editor.undo());
-  await page.getByRole('button', {name: 'Rename', exact: true}).click();
+  await card.click(); await page.keyboard.press('F2');
   const input = page.getByRole('textbox', {name: 'Asset name', exact: true});
   await input.fill('Drag check'); await input.press('Escape');
   await unchanged(); check('Inline rename retains normal input handling');

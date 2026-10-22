@@ -1,7 +1,9 @@
-import {_electron as electron} from '../tests/support/playwright.mjs';
+import {_electron as electron, closeStartupPrompts} from '../tests/support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
+// Mod is Command on macOS.
+const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 const root = process.cwd(), run = path.join(root, 'artifacts', `shared-clipboard-${Date.now()}`), profile = path.join(run, 'profile');
 await mkdir(profile, {recursive:true});
@@ -13,7 +15,7 @@ async function launch() {
   apps.push(app); const page = await app.firstWindow(); page.on('pageerror', error => errors.push(error.message));
   page.setDefaultTimeout(15000);
   await page.waitForFunction(() => window.styk?.ready, undefined, {timeout:45000});
-  await page.evaluate(() => { for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); });
+  await closeStartupPrompts(page);
   return {app,page};
 }
 async function flush(page) { await page.evaluate(() => window.styk.clipboard.pending); }
@@ -23,22 +25,24 @@ try {
   const a = await launch(), b = await launch();
   assert.notEqual(new URL(a.page.url()).origin, new URL(b.page.url()).origin);
   checks.push('Two simultaneous processes with the same profile own separate projects and backend origins');
+  // New documents start with one figure; these checks copy between figures of the three-figure demo scene.
+  await a.page.evaluate(async () => { const {createDemo}=await import('/src/demo.mjs'); window.styk.editor.load(createDemo()); });
   await a.page.evaluate(() => { const e=window.styk.editor; e.select(1); e.select(3,{add:true}); });
-  await selectCanvas(a.page); await a.page.keyboard.press('Control+c'); await flush(a.page);
-  await empty(b.page); await selectCanvas(b.page); await b.page.keyboard.press('Control+v'); await flush(b.page);
+  await selectCanvas(a.page); await a.page.keyboard.press(`${mod}+c`); await flush(a.page);
+  await empty(b.page); await selectCanvas(b.page); await b.page.keyboard.press(`${mod}+v`); await flush(b.page);
   assert.equal(await b.page.evaluate(() => window.styk.editor.selectedObjects.length), 2);
-  await b.page.keyboard.press('Control+z'); assert.equal(await b.page.evaluate(() => window.styk.editor.selectionFrame.objects.length), 0);
-  await b.page.keyboard.press('Control+Shift+z'); assert.equal(await b.page.evaluate(() => window.styk.editor.selectionFrame.objects.length), 2);
+  await b.page.keyboard.press(`${mod}+z`); assert.equal(await b.page.evaluate(() => window.styk.editor.selectionFrame.objects.length), 0);
+  await b.page.keyboard.press(`${mod}+Shift+z`); assert.equal(await b.page.evaluate(() => window.styk.editor.selectionFrame.objects.length), 2);
   checks.push('Real Ctrl+C/Ctrl+V exchange selected figures across desktop instances with undo/redo');
   await b.page.evaluate(() => window.styk.editor.select(window.styk.editor.selectedObjects[0].unique_id));
-  await selectCanvas(b.page); await b.page.keyboard.press('Control+x'); await flush(b.page);
-  await selectCanvas(a.page); await a.page.keyboard.press('Control+v'); await flush(a.page);
+  await selectCanvas(b.page); await b.page.keyboard.press(`${mod}+x`); await flush(b.page);
+  await selectCanvas(a.page); await a.page.keyboard.press(`${mod}+v`); await flush(a.page);
   assert.equal(await a.page.evaluate(() => window.styk.editor.selectedObjects.length), 1);
   checks.push('Cut in the destination replaces the previous clipboard and pastes back in the source');
 
   await a.page.evaluate(() => {const e=window.styk.editor; e.select(1); e.createMovieclip({start:0,end:12,name:'Shared walk'});});
-  await selectCanvas(a.page); await a.page.keyboard.press('Control+c'); await flush(a.page);
-  await selectCanvas(b.page); await b.page.keyboard.press('Control+v'); await flush(b.page);
+  await selectCanvas(a.page); await a.page.keyboard.press(`${mod}+c`); await flush(a.page);
+  await selectCanvas(b.page); await b.page.keyboard.press(`${mod}+v`); await flush(b.page);
   assert.equal(await b.page.evaluate(() => window.styk.editor.figure._styk.movieclip.duration), 12);
   checks.push('Movieclip animation survives the native OS clipboard');
 
@@ -57,7 +61,8 @@ try {
   await a.page.locator('.library-thumbnail img').first().waitFor();
   const count = await a.page.evaluate(() => window.styk.editor.selectionFrame.objects.length);
   const card = a.page.locator('.library-card:not(.folder)').first();
-  assert.equal(await card.getAttribute('draggable'), 'false');
+  // The card is dragged with the pointer, never as an HTML drag.
+  assert.equal(await card.evaluate(element => element.draggable), false);
   await card.dragTo(a.page.locator('#viewport'), {targetPosition:{x:260,y:220}});
   await a.page.waitForFunction(n => !window.styk.library.busy && window.styk.editor.selectionFrame.objects.length === n+1, count);
   const drop = await a.page.evaluate(() => {
@@ -72,9 +77,9 @@ try {
   await b.page.screenshot({path:path.join(run,'pasted-frames.png')});
 
   await a.page.evaluate(() => { window.styk.settingsUI.commit({timelineMode:'advanced'}); const t=window.styk.timeline; t.selectedLayers=new Set([window.styk.editor.report._styk.layers.order.at(-1)]); t.start=t.end=0; });
-  await a.page.locator('.sheet-scroll').focus(); await a.page.keyboard.press('Control+c'); await flush(a.page);
+  await a.page.locator('.sheet-scroll').focus(); await a.page.keyboard.press(`${mod}+c`); await flush(a.page);
   await empty(b.page); await b.page.evaluate(() => window.styk.settingsUI.commit({timelineMode:'advanced'}));
-  await b.page.locator('.sheet-scroll').focus(); await b.page.keyboard.press('Control+v'); await flush(b.page);
+  await b.page.locator('.sheet-scroll').focus(); await b.page.keyboard.press(`${mod}+v`); await flush(b.page);
   assert.ok(await b.page.evaluate(() => window.styk.editor.selectionFrame.objects.length > 0));
   checks.push('Advanced layer timeline Ctrl+C/Ctrl+V exchanges selected frame cells');
 
@@ -91,9 +96,9 @@ try {
       return buildGeometry(styk.editor.report,styk.editor.selectionFrame).drawables.map(s=>[s.rgb,s.alpha]);
     });
     const expected=await colors(a.page);
-    await selectCanvas(a.page);await a.page.keyboard.press('Control+c');await flush(a.page);
+    await selectCanvas(a.page);await a.page.keyboard.press(`${mod}+c`);await flush(a.page);
     await empty(b.page);await b.page.evaluate(version=>{const report=styk.editor.serialize();report.version=version;report.frame_delay_ms=40;styk.editor.load(report);},targetVersion);
-    await selectCanvas(b.page);await b.page.keyboard.press('Control+v');await flush(b.page);
+    await selectCanvas(b.page);await b.page.keyboard.press(`${mod}+v`);await flush(b.page);
     assert.deepEqual(await colors(b.page),expected);
     await b.page.evaluate(()=>styk.fit());
     await b.page.waitForFunction(()=>!styk.state.editablePreparing&&styk.state.renderer.last?.report===styk.editor.report);
@@ -108,9 +113,9 @@ try {
     const blob=await new Promise(resolve=>c.toBlob(resolve));
     window.styk.editor.importFigure(await imageFileToFigure(new File([blob],'Shared red sprite.png',{type:'image/png'}),{preserveOpaqueBackground:true}));
   });
-  await selectCanvas(a.page); await a.page.keyboard.press('Control+c'); await flush(a.page);
+  await selectCanvas(a.page); await a.page.keyboard.press(`${mod}+c`); await flush(a.page);
   await a.app.evaluate(({app}) => app.exit(0));
-  await selectCanvas(b.page); await b.page.keyboard.press('Control+v'); await flush(b.page);
+  await selectCanvas(b.page); await b.page.keyboard.press(`${mod}+v`); await flush(b.page);
   assert.ok(await b.page.evaluate(() => window.styk.editor.figure.image_assets.some(asset => /^data:image\//.test(asset.data_url ?? asset.data_uri ?? ''))));
   await b.page.screenshot({path:path.join(run,'sprite-after-source-close.png')});
   checks.push('Embedded sprite pastes and renders after its source process and backend have closed');

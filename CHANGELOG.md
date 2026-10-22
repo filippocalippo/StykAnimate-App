@@ -22,6 +22,7 @@ What's new in each version of StykAnimate.
 
 - Ctrl-dragging a node that uses IK stretches it like any other node.
 - A calmer top bar: the menus are in the StykAnimate menu, and your open projects take their place.
+- On a Mac, showing or hiding unselected handles is now Shift+Command+H, so Command+H hides the app as usual.
 
 ### Fixed
 
