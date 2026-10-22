@@ -157,6 +157,7 @@ contextBridge.exposeInMainWorld('stykDesktop', Object.freeze({
   saveVfwExport: (token, options) => ipcRenderer.invoke('styk:vfw-save', token, options),
   cancelVfwExport: token => ipcRenderer.invoke('styk:vfw-cancel', token),
   activateDocument: (options) => ipcRenderer.invoke('styk:document-activate', options),
+  reloadDocument: (documentToken) => ipcRenderer.invoke('styk:document-reload', documentToken),
   selectDocument: (documentToken) => ipcRenderer.invoke('styk:document-select', documentToken),
   releaseDocument: (documentToken) => ipcRenderer.invoke('styk:document-release', documentToken),
   openFile: () => ipcRenderer.invoke('styk:open-file'),

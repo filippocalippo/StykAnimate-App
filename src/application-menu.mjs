@@ -15,6 +15,7 @@ export function applicationMenuItems(name, editor, desktop) {
       messageTuple(['new', 'plus', interfaceText("applicationMenu.newAnimation"), 'Ctrl N'], {2: {key: "applicationMenu.newAnimation", params: {}}}),
       messageTuple(['new-window', 'plus', interfaceText("applicationMenu.newWindow"), '', !desktop?.newWindow], {2: {key: "applicationMenu.newWindow", params: {}}}),
       messageTuple(['open', 'folder', interfaceText("applicationMenu.openProject"), 'Ctrl O'], {2: {key: "applicationMenu.openProject", params: {}}}),
+      messageTuple(['reload-project', 'folder', interfaceText("applicationMenu.reloadProject"), '', !desktop?.reloadDocument], {2: {key: "applicationMenu.reloadProject", params: {}}}),
       messageTuple(['open-recent', 'clock', interfaceText("applicationMenu.openRecent"), '', !desktop?.listRecentFiles], {2: {key: "applicationMenu.openRecent", params: {}}}),
       null,
       messageTuple(['save', 'save', interfaceText("common.save"), 'Ctrl S'], {2: {key: "common.save", params: {}}}),

@@ -98,6 +98,10 @@ class ProjectFiles {
     return this.current;
   }
 
+  reloadFilename(documentToken) {
+    return this.requireCurrent(documentToken).filename;
+  }
+
   commit(documentToken, filename) {
     const document = this.requireCurrent(documentToken);
     document.filename = this.validateDestination(filename);

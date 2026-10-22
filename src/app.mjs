@@ -1,3 +1,4 @@
+import {createProjectReloader} from './project-reload.mjs';
 import {tupleMessages, messageTuple, messageHTML, localizedAttribute, localizedText, appendLocalized, localizedMarkup, clearTranslation, AppLocalization, menuLabelKey} from './localization-bindings.mjs';
 
 import {messageError} from './localized-error.mjs';
@@ -219,7 +220,7 @@ const projects = createProjectTabsHost({editor, hooks: {
   blank: () => blankProject(),
   release: (record) => releaseProject(record),
   refuse: (reason) => projectRefused(reason),
-  busy: () => Boolean(projectTransitions || manualSave.active || state.importing || finalizingDocument || [...exportJobs].some((job) => job.raster)),
+  busy: () => Boolean(projectReload.active || projectTransitions || manualSave.active || state.importing || finalizingDocument || [...exportJobs].some((job) => job.raster)),
   idle: () => !(state.playing || state.scrubbing || state.importing || manualSave.active || exportJobs.size || editingGestureActive()),
   checkpoint: (record, signal) => writeRestingRecovery(record, signal),
   checkpointFailed: (error) => status({messageKey: "app.recoveryCopyCouldNotBeWritten", messageParams: {message: error.message}}, true),
@@ -3433,7 +3434,7 @@ async function api(path, options = {}) {
 async function acceptImport(
   result,
   name,
-  { openToken, recoveryId } = {},
+  { openToken, recoveryId, replaceCurrent = false } = {},
 ) {
   try {
   let report = result.document ?? result.report ?? result;
@@ -3485,7 +3486,7 @@ async function acceptImport(
               }
             : undefined,
         },
-      ), {openToken, recoveryId})) return false;
+      ), {openToken, recoveryId, replaceCurrent})) return false;
       state.sourceId = result.sourceId || null;
       importer.adoptSource(result);
       if(result.playbackFrames) {
@@ -3526,9 +3527,10 @@ async function acceptImport(
  * The new project then gets its own save target on the desktop (`openToken`: the file it came from;
  * `recoveryId`: the recovery copy it was restored from). Resolves false when nothing opened.
  */
-async function openProject(load, { blank = false, openToken, recoveryId } = {}) {
-  if (!projects.canOpen() || !(await projects.settle()) || !projects.canOpen()) return false;
-  const beside = !projects.replaceable(), replaced = beside ? null : state.documentToken;
+async function openProject(load, { blank = false, openToken, recoveryId, replaceCurrent = false } = {}) {
+  if (projectReload.active && !replaceCurrent) return false;
+  if (!replaceCurrent && (!projects.canOpen() || !(await projects.settle()) || !projects.canOpen())) return false;
+  const beside = !replaceCurrent && !projects.replaceable(), replaced = beside ? null : state.documentToken;
   projectTransitions++;
   try {
     try { await load(beside ? { onDetach: (session) => projects.park(session) } : {}); }
@@ -3537,9 +3539,10 @@ async function openProject(load, { blank = false, openToken, recoveryId } = {}) 
     // The open document is a new project: nothing of the previous one in front applies to it.
     state.documentToken = null; state.sourceId = null; state.lastImport = null; state.lastImportWarnings = [];
     lastSave = null; recoveredEpoch = -1; recoveryDeadline.reset(); state.recoveryBackoff = 1;
-    if (!beside) { importer.adoptSource(null); if (replaced) void desktop?.releaseDocument?.(replaced)?.catch(fail); }
+    if (!beside) { importer.adoptSource(null); if (replaced && !replaceCurrent) void desktop?.releaseDocument?.(replaced)?.catch(fail); }
     scheduleProjectPicture();
-    if (desktop?.activateDocument) {
+    if (replaceCurrent) state.documentToken = replaced;
+    if (!replaceCurrent && desktop?.activateDocument) {
       // A launch-time file open races init()'s document activation; the file's
       // activation must be the one that binds the native save target.
       await documentActivation;
@@ -3901,6 +3904,21 @@ async function importFilesTracked(files) {
     if(seq===importSequence)state.importing = false;
   }
 }
+const projectReload = createProjectReloader({
+  busy: () => Boolean(!desktop?.reloadDocument || projectTransitions || manualSave.active || state.importing || finalizingDocument || [...exportJobs].some(job => job.raster)),
+  settle: async () => { pause(); return settleProject(); },
+  confirm: () => dialogs.confirmReplace({discardOnly: true}),
+  capture: () => documentCheckpoint(editor, state.documentToken, saveMutationEpoch),
+  isCurrent: checkpoint => matchesDocumentCheckpoint(checkpoint, editor, state.documentToken, {epoch: saveMutationEpoch}),
+  read: async checkpoint => {
+    const result = await desktop.reloadDocument(checkpoint.token);
+    if (!result) notify(interfaceText("app.reloadSaveFirst"), "app.reloadSaveFirst");
+    return result;
+  },
+  decode: file => chooseSticknodesFile(new File([file.bytes], file.filename)),
+  apply: (decoded, file) => acceptImport(decoded, file.filename, {openToken: file.openToken, replaceCurrent: true}),
+  release: result => result.sourceOwner !== importer.activeSourceOwner ? importer.releaseSource(result) : undefined,
+});
 async function openFile() {
   pause();
   if (desktop) {
@@ -3950,6 +3968,7 @@ async function openSample(path) {
   try { await acceptImport(await importer.openSample(path,{project:/\.piv$/i.test(path)})); } catch (error) { throw persistentFailure(error); }
 }
 function saveNative({ saveAs = false } = {}) {
+  if (projectReload.active) return Promise.resolve(false);
   if (!manualSave.active) finishCurrentEdit();
   return manualSave.run({...documentCheckpoint(editor, state.documentToken, saveMutationEpoch), saveAs}, async () => {
     savingDocument = true;
@@ -4315,6 +4334,7 @@ function projectMenuItems(id) {
   return [
     messageTuple(["save", "save", interfaceText("common.save"), "Ctrl S"], {2: {key: "common.save", params: {}}}),
     messageTuple(["save-as", "save", interfaceText("common.saveAs"), "Ctrl Shift S"], {2: {key: "common.saveAs", params: {}}}),
+    messageTuple(["reload-project", "folder", interfaceText("applicationMenu.reloadProject"), "", !desktop?.reloadDocument], {2: {key: "applicationMenu.reloadProject", params: {}}}),
     messageTuple(["rename", "file", interfaceText("commands.rename")], {2: {key: "commands.rename", params: {}}}),
     null,
     messageTuple(["close-project", "close", interfaceText("commands.closeProject"), "Ctrl W"], {2: {key: "commands.closeProject", params: {}}}),
@@ -4334,6 +4354,7 @@ function showMenu(anchor) {
     messageTuple(["open-recent", "clock", interfaceText("app.openRecent"), "", !desktop?.listRecentFiles], {2: {key: "app.openRecent", params: {}}}),
     messageTuple(["save", "save", interfaceText("common.save"), "Ctrl S"], {2: {key: "common.save", params: {}}}),
     messageTuple(["save-as", "save", interfaceText("common.saveAs"), "Ctrl Shift S"], {2: {key: "common.saveAs", params: {}}}),
+    messageTuple(["reload-project", "folder", interfaceText("applicationMenu.reloadProject"), "", !desktop?.reloadDocument], {2: {key: "applicationMenu.reloadProject", params: {}}}),
     null,
     messageTuple(["undo", "undo", interfaceText("common.undo"), "Ctrl Z"], {2: {key: "common.undo", params: {}}}),
     messageTuple(["redo", "redo", interfaceText("common.redo"), "Ctrl Shift Z"], {2: {key: "common.redo", params: {}}}),
@@ -4637,6 +4658,7 @@ const actions = {
   menu: (e) =>
     showMenu(e?.closest?.("button") || document.querySelector(".brand")),
   open: openFile,
+  "reload-project": () => projectReload.run(),
   'new-window': () => desktop?.newWindow(),
   import: () => {
     if (builderMode?.active) return toast(interfaceText("app.finishTheFigureOrReturnToAnimateTo6"), "app.finishTheFigureOrReturnToAnimateTo6", {});
@@ -5185,6 +5207,7 @@ const polygonSafeActions = new Set([
   "new",
   "open",
   "open-recent",
+  "reload-project",
   "undo",
   "redo",
   "finish-polygon",
@@ -5204,7 +5227,7 @@ for (const [name, action] of Object.entries(actions)) {
     if(drawingBusy())
       return drawingController.afterGesture(()=>actions[name](...args));
     if (state.polygon) {
-      if (["new", "open", "open-recent", "close", "close-project", "close-saved-projects", "next-project", "previous-project", "recent-project"].includes(name))
+      if (["new", "open", "open-recent", "reload-project", "close", "close-project", "close-saved-projects", "next-project", "previous-project", "recent-project"].includes(name))
         cancelPolygonDraft();
       else if (
         !polygonSafeActions.has(name) &&
@@ -5590,6 +5613,7 @@ const onDesktop = (available) => Boolean(available) || requirementReason("deskto
 const commandRequirements = {
   desktop: () => onDesktop(desktop),
   "desktop:newWindow": () => onDesktop(desktop?.newWindow),
+  "desktop:reload": () => onDesktop(desktop?.reloadDocument),
   "desktop:recentFiles": () => onDesktop(desktop?.listRecentFiles),
   "desktop:updates": () => onDesktop(desktop?.getUpdateState),
   "desktop:feedback": () => onDesktop(desktop?.sendTelemetryFeedback),

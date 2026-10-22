@@ -191,7 +191,7 @@ function nativeMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-async function readImportFile(file) {
+async function readImportFile(file, {rememberOpen = true} = {}) {
   const started = performance.now();
   const extension = path.extname(file).toLowerCase();
   if (!['.piv', '.stk', '.styk', '.stkz', '.stykmov', '.json', '.nodes', '.nodemc', '.stknds', '.zip'].includes(extension)) throw messageError(new Error(''), 'desktop.main.errors.chooseAStykAnimatePivotOrStickNodesFile', {});
@@ -209,7 +209,7 @@ async function readImportFile(file) {
     bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
     filename: path.basename(file),
     nativePath: file,
-    openToken: projectFiles.rememberOpen(path.resolve(file)),
+    openToken: rememberOpen ? projectFiles.rememberOpen(path.resolve(file)) : null,
     kind: extension === '.stykmov' ? 'stykmov' : extension === '.stkz' ? 'stkz' : extension === '.stk' ? 'stk' : extension === '.piv' ? 'piv' : 'styk',
     sourceBytes: bytes.length,
     timings: { native_read_ms: +(performance.now() - started).toFixed(3) },
@@ -527,6 +527,11 @@ function registerIpc() {
     const document = projectFiles.select(documentToken);
     await cancelProjectTransfers();
     return document;
+  });
+  handle('styk:document-reload', async (event, documentToken) => {
+    trusted(event);
+    const filename = projectFiles.reloadFilename(documentToken);
+    return filename ? readImportFile(filename, {rememberOpen: false}) : null;
   });
   handle('styk:document-release', (event, documentToken) => { trusted(event); return projectFiles.release(documentToken); });
   handle('styk:project-write-begin', async (event, options) => {

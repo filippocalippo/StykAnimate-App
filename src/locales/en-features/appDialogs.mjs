@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "appDialogs.reloadFromDisk": "Reload {value} from disk?",
   "appDialogs.saveChangesTo": "Save changes to {value}?",
   "appDialogs.donTSave": "Don't save",
   "appDialogs.theAssetIsReadyToEditTheseSource": "The asset is ready to edit. These source features may look or behave differently:",
