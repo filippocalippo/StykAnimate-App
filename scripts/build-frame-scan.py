@@ -69,9 +69,15 @@ def main():
         library = output / ("libstyk-piv-frame-scan.dylib" if sys.platform == "darwin" else "libstyk-piv-frame-scan.so")
         command = [compiler, "-std=c++17", "-O3", "-fPIC", "-fvisibility=hidden", "-Wall", "-Wextra", "-Werror",
             "-dynamiclib" if sys.platform == "darwin" else "-shared", str(source), "-o", str(library)]
-        if sys.platform == "darwin":
-            command += ["-arch", {"x64": "x86_64", "arm64": "arm64"}.get(args.arch, args.arch)]
         toolchain = {"compiler": compiler, "runtime": "system C++ runtime", "standard": "c++17"}
+        if sys.platform == "darwin":
+            # Without an explicit target clang stamps the build host's macOS as the minimum. The
+            # @rpath install name keeps the build checkout's path out of the library, so freezing
+            # it changes nothing but its code signature (scripts/before-pack.cjs relies on that).
+            minimum = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["build"]["mac"]["minimumSystemVersion"]
+            command += ["-arch", {"x64": "x86_64", "arm64": "arm64"}.get(args.arch, args.arch),
+                        f"-mmacosx-version-min={minimum}", "-install_name", f"@rpath/{library.name}"]
+            toolchain["minimumMacOS"] = minimum
     subprocess.run(command, cwd=ROOT, env=environment, check=True)
     digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
     manifest = {"schemaVersion": 1, "abiVersion": 1, "platform": sys.platform, "architecture": args.arch,

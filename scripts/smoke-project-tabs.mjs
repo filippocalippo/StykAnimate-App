@@ -1,7 +1,7 @@
 // Project tabs in the desktop app (docs/PROJECT-TABS.md): each open project saves to its own file, closing the
 // window asks once for every unsaved project, and each project's recovery copy is its own, across a restart.
 //   node scripts/smoke-project-tabs.mjs
-import {_electron as electron} from '../tests/support/playwright.mjs';
+import {_electron as electron, closeStartupPrompts} from '../tests/support/playwright.mjs';
 import {mkdir, readFile, readdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -17,11 +17,10 @@ const launch = () => electron.launch({args: [appRoot], cwd: appRoot, timeout: 60
   env: {...process.env, STYK_USER_DATA_DIR: profile, STYK_STARTUP_VIEW: 'editor'}});
 const checks = [], check = (name, value) => { assert.ok(value, name); checks.push(name); console.log('PASS', name); };
 const ready = page => page.waitForFunction(() => window.styk?.ready, null, {timeout: 60000});
-const dismissPrompts = async page => { for (const selector of ['.styk-privacy [data-decline]', '.release-splash [aria-label="Close welcome screen"]']) await page.locator(selector).click({timeout: 1500}).catch(() => {}); };
 let app;
 try {
   app = await launch();
-  let page = await app.firstWindow(); await ready(page); await dismissPrompts(page);
+  let page = await app.firstWindow(); await ready(page); await closeStartupPrompts(page);
   await app.evaluate(({dialog}) => {
     globalThis.__saveTo = [];
     globalThis.__messages = [];
@@ -71,7 +70,7 @@ try {
   // ---- a crash: the next start offers both copies, and each restores into a tab of its own
   await app.evaluate(({app}) => app.exit(0)); app = null;
   app = await launch();
-  page = await app.firstWindow(); await ready(page); await dismissPrompts(page);
+  page = await app.firstWindow(); await ready(page); await closeStartupPrompts(page);
   const offered = await page.waitForFunction(async () => (await stykDesktop.listRecoveries()).length, null, {timeout: 20000}).then(handle => handle.jsonValue());
   check('The next start offers every project\'s copy', offered === 2);
   await page.locator('#manage-recovery').click();

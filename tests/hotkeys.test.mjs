@@ -1,11 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {HotkeyManager, HOTKEY_COMMANDS, DEFAULT_HOTKEYS, DESKTOP_PANEL_KEYS, normalizeBinding, normalizeHotkeys, eventBinding, findHotkeyConflicts, isHotkeyInput, shortcutLabel} from '../src/hotkeys.mjs';
+import {HotkeyManager, HOTKEY_COMMANDS, DEFAULT_HOTKEYS, DESKTOP_PANEL_KEYS, defaultHotkeys, normalizeBinding, normalizeHotkeys, eventBinding, findHotkeyConflicts, isHotkeyInput, shortcutLabel} from '../src/hotkeys.mjs';
 import {normalizeEditorSettings} from '../src/settings.mjs';
 
 function key(code, props = {}) {
   return {code, key:code, preventDefault() {this.defaultPrevented = true;}, ...props};
 }
+// Mod is Ctrl on Windows and Linux and Command on macOS; each case names its platform rather than inheriting the host's.
+const PLATFORMS = [
+  {name: 'Windows and Linux', mac: false, mod: 'ctrlKey', modKey: 'ControlLeft'},
+  {name: 'macOS', mac: true, mod: 'metaKey', modKey: 'MetaLeft'},
+];
 
 test('motion path falloff has no shortcuts, including persisted former bindings', () => {
   const bindings = normalizeHotkeys({'falloff-hold': ['KeyQ'], 'falloff-smaller': ['BracketLeft'], 'falloff-larger': ['BracketRight']});
@@ -16,22 +21,27 @@ test('motion path falloff has no shortcuts, including persisted former bindings'
   for (const code of ['KeyF', 'KeyQ', 'BracketLeft', 'BracketRight']) assert.equal(manager.resolve(key(code)), null);
 });
 
-test('Ctrl V pastes normally and Ctrl Shift V pastes in place', () => {
-  const manager = new HotkeyManager();
-  assert.equal(manager.resolve(key('KeyV', {ctrlKey: true}))?.id, 'paste');
-  assert.equal(manager.resolve(key('KeyV', {ctrlKey: true, shiftKey: true}))?.id, 'paste-in-place');
-  assert.deepEqual(normalizeHotkeys({})['paste-in-place'], ['Mod+Shift+KeyV']);
+test('Mod V pastes normally and Mod Shift V pastes in place', () => {
+  for (const {name, mac, mod} of PLATFORMS) {
+    const manager = new HotkeyManager({mac});
+    assert.equal(manager.resolve(key('KeyV', {[mod]: true}))?.id, 'paste', name);
+    assert.equal(manager.resolve(key('KeyV', {[mod]: true, shiftKey: true}))?.id, 'paste-in-place', name);
+    assert.deepEqual(normalizeHotkeys({}, mac)['paste-in-place'], ['Mod+Shift+KeyV'], name);
+  }
+  assert.equal(new HotkeyManager({mac: true}).resolve(key('KeyV', {ctrlKey: true})), null, 'Control+V is not Paste on macOS');
 });
 
 test('builder split supports extra Shift without treating a remapped binding Shift as scope', () => {
-  const calls = [], manager = new HotkeyManager({run: (id, event, modifiers) => calls.push([id, modifiers.shift])});
-  assert.equal(manager.resolve(key('KeyS')), null);
-  manager.keydown(key('KeyS'), ['builder']);
-  manager.keydown(key('KeyS', {shiftKey: true}), ['builder']);
-  manager.keydown(key('KeyB'), ['builder']);
-  manager.setBindings({'split-segment': ['Mod+Shift+KeyQ']});
-  manager.keydown(key('KeyQ', {ctrlKey: true, shiftKey: true}), ['builder']);
-  assert.deepEqual(calls, [['split-segment', false], ['split-segment', true], ['toggle-builder-branch', false], ['split-segment', false]]);
+  for (const {name, mac, mod} of PLATFORMS) {
+    const calls = [], manager = new HotkeyManager({mac, run: (id, event, modifiers) => calls.push([id, modifiers.shift])});
+    assert.equal(manager.resolve(key('KeyS')), null, name);
+    manager.keydown(key('KeyS'), ['builder']);
+    manager.keydown(key('KeyS', {shiftKey: true}), ['builder']);
+    manager.keydown(key('KeyB'), ['builder']);
+    manager.setBindings({'split-segment': ['Mod+Shift+KeyQ']});
+    manager.keydown(key('KeyQ', {[mod]: true, shiftKey: true}), ['builder']);
+    assert.deepEqual(calls, [['split-segment', false], ['split-segment', true], ['toggle-builder-branch', false], ['split-segment', false]], name);
+  }
 });
 
 test('J joins and unjoins once; Shift J controls visibility and old defaults migrate', () => {
@@ -85,11 +95,13 @@ test('a custom binding replaces its previous default immediately', () => {
   assert.deepEqual(calls, ['add-frame']);
 });
 test('exact modifier matching avoids destructive plain-key fallthrough', () => {
-  const manager = new HotkeyManager();
-  assert.equal(manager.resolve(key('KeyA', {ctrlKey:true}))?.id, 'select-all');
-  assert.equal(manager.resolve(key('KeyA', {altKey:true})), null);
-  assert.equal(manager.resolve(key('KeyA', {shiftKey:true}))?.id, 'extend-keyframe');
-  assert.equal(manager.resolve(key('Delete', {ctrlKey:true})), null);
+  for (const {name, mac, mod} of PLATFORMS) {
+    const manager = new HotkeyManager({mac});
+    assert.equal(manager.resolve(key('KeyA', {[mod]:true}))?.id, 'select-all', name);
+    assert.equal(manager.resolve(key('KeyA', {altKey:true})), null, name);
+    assert.equal(manager.resolve(key('KeyA', {shiftKey:true}))?.id, 'extend-keyframe', name);
+    assert.equal(manager.resolve(key('Delete', {[mod]:true})), null, name);
+  }
 });
 test('context precedence preserves canvas nudging, hovered locate and builder shortcuts', () => {
   const manager = new HotkeyManager();
@@ -120,12 +132,14 @@ test('non-repeat commands execute once, navigation repeats, blocked commands are
   assert.deepEqual(calls, ['add-frame','next-frame','next-frame']);
 });
 test('remapped held keys release by physical code after modifiers and focus change', () => {
-  const calls = [], manager = new HotkeyManager({bindings:{'handle-edit-hold':['Mod+KeyQ']}, run:id=>calls.push(['down',id]), release:(id,event)=>calls.push(['up',id,Boolean(event.cancelled)])});
-  manager.keydown(key('KeyQ', {ctrlKey:true}));
-  manager.keyup(key('ControlLeft')); assert.equal(manager.held.size,1);
-  manager.keyup(key('KeyQ', {target:{}}));
-  assert.deepEqual(calls,[['down','handle-edit-hold'],['up','handle-edit-hold',false]]);
-  assert.equal(manager.held.size,0);
+  for (const {name, mac, mod, modKey} of PLATFORMS) {
+    const calls = [], manager = new HotkeyManager({mac, bindings:{'handle-edit-hold':['Mod+KeyQ']}, run:id=>calls.push(['down',id]), release:(id,event)=>calls.push(['up',id,Boolean(event.cancelled)])});
+    manager.keydown(key('KeyQ', {[mod]:true}));
+    manager.keyup(key(modKey)); assert.equal(manager.held.size,1,name);
+    manager.keyup(key('KeyQ', {target:{}}));
+    assert.deepEqual(calls,[['down','handle-edit-hold'],['up','handle-edit-hold',false]],name);
+    assert.equal(manager.held.size,0,name);
+  }
 });
 test('blur, cancellation and rebinding release all held actions without tap actions', () => {
   const releases=[], manager = new HotkeyManager({release:(id,event)=>releases.push([id,event.cancelled])});
@@ -156,11 +170,13 @@ test('hints show alternatives and cleared shortcuts without reverting to default
   assert.equal(isHotkeyInput(null),false);
 });
 test('Shift inside a custom binding does not accidentally extend or align the action', () => {
-  const gestures=[],manager=new HotkeyManager({bindings:{'timeline-layer-down':['Mod+Shift+KeyB'],'handle-right':['KeyQ']},run:(id,event,modifiers)=>gestures.push([id,modifiers.shift])});
-  manager.keydown(key('KeyB',{ctrlKey:true,shiftKey:true}), ['timeline']);
-  manager.keydown(key('KeyQ'),['canvas']);
-  manager.keydown(key('KeyQ',{shiftKey:true,repeat:true}),['canvas']);
-  assert.deepEqual(gestures,[['timeline-layer-down',false],['handle-right',false],['handle-right',true]]);
+  for (const {name, mac, mod} of PLATFORMS) {
+    const gestures=[],manager=new HotkeyManager({mac,bindings:{'timeline-layer-down':['Mod+Shift+KeyB'],'handle-right':['KeyQ']},run:(id,event,modifiers)=>gestures.push([id,modifiers.shift])});
+    manager.keydown(key('KeyB',{[mod]:true,shiftKey:true}), ['timeline']);
+    manager.keydown(key('KeyQ'),['canvas']);
+    manager.keydown(key('KeyQ',{shiftKey:true,repeat:true}),['canvas']);
+    assert.deepEqual(gestures,[['timeline-layer-down',false],['handle-right',false],['handle-right',true]],name);
+  }
 });
 
 test('retired frame commands migrate without losing custom or disabled bindings', () => {
@@ -194,10 +210,12 @@ test('origin selection settings normalize safely and selection commands can be r
   assert.equal(normalizeEditorSettings({marqueeSelection:'origins'}).marqueeSelection, 'origins');
   assert.equal(normalizeEditorSettings({marqueeSelection:'unknown'}).marqueeSelection, 'origins');
   assert.equal(normalizeEditorSettings({marqueeSelection:'bounds'}).marqueeSelection, 'bounds');
-  const manager = new HotkeyManager({bindings: {'toggle-selection-origins': ['Mod+Shift+KeyB'], 'toggle-range-edit': ['Mod+Shift+KeyR']}});
-  manager.setBindings({'toggle-selection-origins': ['Mod+Shift+KeyB'], 'toggle-range-edit': ['Mod+Shift+KeyR']});
-  assert.equal(manager.resolve(key('KeyB', {ctrlKey:true,shiftKey:true}))?.id, 'toggle-selection-origins');
-  assert.equal(manager.resolve(key('KeyR', {ctrlKey:true,shiftKey:true}))?.id, 'toggle-range-edit');
+  for (const {name, mac, mod} of PLATFORMS) {
+    const manager = new HotkeyManager({mac, bindings: {'toggle-selection-origins': ['Mod+Shift+KeyB'], 'toggle-range-edit': ['Mod+Shift+KeyR']}});
+    manager.setBindings({'toggle-selection-origins': ['Mod+Shift+KeyB'], 'toggle-range-edit': ['Mod+Shift+KeyR']});
+    assert.equal(manager.resolve(key('KeyB', {[mod]:true,shiftKey:true}))?.id, 'toggle-selection-origins', name);
+    assert.equal(manager.resolve(key('KeyR', {[mod]:true,shiftKey:true}))?.id, 'toggle-range-edit', name);
+  }
   assert.deepEqual(DEFAULT_HOTKEYS['toggle-selection-origins'], []);
   assert.deepEqual(DEFAULT_HOTKEYS['toggle-range-edit'], []);
 });
@@ -234,4 +252,19 @@ test('the shell keys reach their commands in every scope without taking another 
     for (const binding of keys) assert.deepEqual(findHotkeyConflicts(desktop, id, binding, false).map(command => command.id), [], `${binding} is free`);
   }
   assert.deepEqual(Object.values(DESKTOP_PANEL_KEYS).flat(), ['Mod+Digit1', 'Mod+Digit2', 'Mod+Digit3', 'Mod+Digit4']);
+});
+
+test('macOS leaves Command+H to the system and keeps every default free of conflicts', () => {
+  assert.deepEqual(defaultHotkeys(false)['toggle-unselected-handles'], ['Mod+KeyH']);
+  assert.deepEqual(defaultHotkeys(true)['toggle-unselected-handles'], ['Mod+Shift+KeyH'], 'Command+H hides the app on macOS');
+  const mac = new HotkeyManager({mac: true}), pc = new HotkeyManager({mac: false});
+  assert.equal(mac.resolve(key('KeyH', {metaKey: true})), null, 'Command+H reaches the app menu');
+  assert.equal(mac.resolve(key('KeyH', {metaKey: true, shiftKey: true}))?.id, 'toggle-unselected-handles');
+  assert.equal(pc.resolve(key('KeyH', {ctrlKey: true}))?.id, 'toggle-unselected-handles');
+  assert.equal(mac.label('toggle-unselected-handles'), 'Cmd+Shift+H');
+  assert.equal(pc.label('toggle-unselected-handles'), 'Ctrl+H');
+  // Conflict recovery drops a binding claimed twice; no platform's defaults may lose one.
+  for (const {name, mac: isMac} of PLATFORMS) assert.deepEqual(normalizeHotkeys({}, isMac), defaultHotkeys(isMac), name);
+  // A binding someone saved stays theirs on either platform.
+  assert.deepEqual(normalizeHotkeys({'toggle-unselected-handles': ['Mod+KeyH']}, true)['toggle-unselected-handles'], ['Mod+KeyH']);
 });

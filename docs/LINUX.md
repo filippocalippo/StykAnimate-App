@@ -2,7 +2,7 @@
 
 StykAnimate develops and ships for Windows and Linux from one source tree. A
 change is not done until it works on both; CI runs the unit suite on both.
-macOS packaging exists in `package.json` but is not verified.
+Apple Silicon Macs build a local app as described in [macOS support](MACOS.md).
 
 ## GPU (WebGPU)
 

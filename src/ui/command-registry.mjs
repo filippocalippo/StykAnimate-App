@@ -127,7 +127,7 @@ export class CommandRegistry extends EventTarget {
    */
   constructor({actions = {}, dispatch = null, runHotkey = null, hotkeys = null, localization = null, catalog = COMMAND_CATALOG,
     hotkeyCommands = HOTKEY_COMMANDS, context = () => ({}), requirements = {}, availability = null, checked = null,
-    formatBinding: format = binding => formatBinding(binding), maxRecent = 8, onError = error => globalThis.reportError?.(error)} = {}) {
+    formatBinding: format = binding => formatBinding(binding, this.hotkeys?.mac ?? isMacPlatform()), maxRecent = 8, onError = error => globalThis.reportError?.(error)} = {}) {
     super();
     Object.assign(this, {actions, dispatch, runHotkey, hotkeys, localization, context, requirements, availability, checkedState: checked,
       format, maxRecent, onError});
@@ -164,7 +164,10 @@ export class CommandRegistry extends EventTarget {
     return this.hotkeyCommands.has(hotkey) ? hotkey : null;
   }
 
-  #bindings(hotkey) { return this.hotkeys?.bindings?.[hotkey] ?? this.hotkeyCommands.get(hotkey)?.defaults ?? []; }
+  #bindings(hotkey) {
+    const command = this.hotkeyCommands.get(hotkey), mac = this.hotkeys?.mac ?? isMacPlatform();
+    return this.hotkeys?.bindings?.[hotkey] ?? command?.platformDefaults?.[mac ? 'mac' : 'pc'] ?? command?.defaults ?? [];
+  }
 
   /**
    * The bindings that run the command in `context`: the user's, less those a

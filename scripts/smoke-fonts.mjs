@@ -1,4 +1,4 @@
-import { _electron as electron } from "../tests/support/playwright.mjs";
+import { _electron as electron, closeStartupPrompts } from "../tests/support/playwright.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -32,6 +32,8 @@ try {
     { timeout: 30000 },
   );
   await page.waitForLoadState("networkidle");
+  // What's new opens after the first frame; measure the font flow on its own, not under that prompt.
+  await closeStartupPrompts(page);
   await page.evaluate(() => {
     window.fontLongTasks = [];
     window.fontObserver = new PerformanceObserver((list) =>

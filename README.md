@@ -35,7 +35,7 @@ Everything (decoding, editing, saving and rendering) runs locally. Optional, con
 
 ## Build from source
 
-Requirements: Node.js 22+ (CI uses 24.11) and Python 3.11+ (CI uses 3.12). Windows and Linux are tested on every change; macOS has an untested build target.
+Requirements: Node.js 22+ (CI uses 24.11) and Python 3.11+ (CI uses 3.12). Windows and Linux are tested on every change; Apple Silicon Macs can build and run a local, ad hoc signed app ([macOS support](docs/MACOS.md)), which is not yet signed for distribution.
 
 ```sh
 npm ci
@@ -52,7 +52,7 @@ Packaging, on the matching operating system:
 python -m pip install -r scripts/requirements-build.txt
 npm run build:sidecar
 npm run pack && npm run verify:package
-npm run dist:win     # or dist:linux, dist:mac
+npm run dist:win     # or dist:linux; dist:mac:local on Apple Silicon (docs/MACOS.md)
 ```
 
 The browser build: `npm run web:build`, then `npm run web:preview`. See [Web build](docs/WEB.md), [Linux](docs/LINUX.md) and [Touch interface](docs/TOUCH.md).

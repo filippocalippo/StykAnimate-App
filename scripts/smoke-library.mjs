@@ -1,4 +1,4 @@
-import {_electron as electron} from '../tests/support/playwright.mjs';
+import {_electron as electron, closeStartupPrompts} from '../tests/support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir, readFile, writeFile, copyFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -11,7 +11,7 @@ async function launch() {
   // Isolated automated profiles keep optional collection off and skip onboarding.
   await writeFile(path.join(profile,'telemetry-state.json'),JSON.stringify({decided:true,consent:{analytics:false,diagnostics:false,policyVersion:'2026-09-10',updatedAt:Date.now()}}));
   const app=await electron.launch({executablePath:packaged?process.env.STYK_PACKAGED_EXECUTABLE||path.join(root,'release','win-unpacked','StykAnimate.exe'):undefined,args:packaged?[]:[root],cwd:root,timeout:45000,env:{...process.env,STYK_LIBRARY_DIR:library,STYK_USER_DATA_DIR:profile,STYK_DEBUG:'1'}});
-  const page=await app.firstWindow(); page.on('pageerror',e=>errors.push(e.message)); await page.waitForFunction(()=>window.styk?.ready,{timeout:30000});
+  const page=await app.firstWindow(); page.on('pageerror',e=>errors.push(e.message)); await page.waitForFunction(()=>window.styk?.ready,{timeout:30000}); await closeStartupPrompts(page);
   return {app,page};
 }
 let current;

@@ -72,6 +72,30 @@ export function editorFirst(browser) {
   return browser;
 }
 
+// What's new closes with its footer button: in a window under about 830 px tall, a recovery notice
+// shown at the same time covers the close button in its corner.
+const PROMPT_CLOSERS = { 'release-notes': '.release-splash[open] .splash-footer button', 'privacy-first-run': '.styk-privacy[open] [data-decline]' };
+/**
+ * Closes the desktop app's startup prompts as they open: What's new (once per process) and, on a
+ * profile without a privacy choice, that choice. They open one at a time after the first frame
+ * (src/ui/overlay-manager.mjs), so closing them at a fixed moment races them. Resolves once none is
+ * open or waiting. The privacy prompt is queued only once that choice has loaded, possibly after this
+ * returns, so scripts that need a quiet editor record the choice in their profile first.
+ */
+export async function closeStartupPrompts(page, { timeout = 30000 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const active = await page.waitForFunction(() => {
+      const overlays = window.styk?.ui?.overlays;
+      return overlays && (overlays.activePrompt ?? (overlays.pendingPrompts().length ? false : 'none'));
+    }, undefined, { timeout: Math.max(1, deadline - Date.now()) }).then(handle => handle.jsonValue());
+    if (active === 'none') return;
+    if (!PROMPT_CLOSERS[active]) throw new Error(`Unexpected startup prompt: ${active}`);
+    await page.locator(PROMPT_CLOSERS[active]).click({ timeout: Math.max(1, deadline - Date.now()) });
+    await page.waitForFunction(id => window.styk.ui.overlays.activePrompt !== id, active, { timeout: Math.max(1, deadline - Date.now()) });
+  }
+}
+
 // Attach Playwright to the process that owns the window. The app normally
 // relaunches from Wayland into X11; attaching to that supervisor cannot find it.
 export function electronArguments(args = [], {platform = process.platform, env = process.env} = {}) {

@@ -28,7 +28,8 @@ const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 function subscribe(channel, callback) {
   if (typeof callback !== 'function') throw messageError(new TypeError(''), 'desktop.preload.errors.aCallbackIsRequired', {});
-  const listener = (_event, value) => callback(value);
+  // Menu actions carry a second argument, {fromKeyboard}; other channels send one value.
+  const listener = (_event, value, details) => callback(value, details);
   ipcRenderer.on(channel, listener);
   return () => ipcRenderer.removeListener(channel, listener);
 }
@@ -195,6 +196,7 @@ contextBridge.exposeInMainWorld('stykDesktop', Object.freeze({
   getWindowState: () => ipcRenderer.invoke('styk:window-state'),
   setDocumentState: (state) => ipcRenderer.invoke('styk:document-state', state),
   onMenuAction: (callback) => subscribe('styk:menu-action', callback),
+  editText: (command) => ipcRenderer.invoke('styk:edit-text', command),
   onOpenFile: (callback) => subscribe('styk:file-opened', callback),
   onWindowState: (callback) => subscribe('styk:window-state', callback),
   onBackendError: (callback) => subscribe('styk:backend-error', callback),

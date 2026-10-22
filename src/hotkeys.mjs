@@ -4,9 +4,14 @@
  * [] explicitly disables a command; missing entries inherit future defaults.
  */
 const commands = [];
+// `defaults` are this platform's; `platformDefaults` keeps both so either can be resolved explicitly.
+// A row's `mac` option replaces its keys on macOS, where the system owns some Command shortcuts.
+const HOST_MAC = isMacPlatform();
 function group(category, rows, scope = 'global') {
-  for (const [id, label, keys = [], options = {}] of rows)
-    commands.push(Object.freeze({id, label, category, scope, ...options, defaults: Object.freeze(keys)}));
+  for (const [id, label, keys = [], {mac, ...options} = {}] of rows) {
+    const platformDefaults = Object.freeze({pc: Object.freeze(keys), mac: Object.freeze(mac ?? keys)});
+    commands.push(Object.freeze({id, label, category, scope, ...options, platformDefaults, defaults: platformDefaults[HOST_MAC ? 'mac' : 'pc']}));
+  }
 }
 group('Project & editing', [
   ['new', 'New animation', ['Mod+KeyN']], ['open', 'Open project', ['Mod+KeyO']],
@@ -67,7 +72,8 @@ group('View & camera', [
   ['toggle-handles', 'Show / hide joints', ['Shift+KeyJ']],
   ['toggle-motion-paths', 'Show / hide motion paths', ['KeyM']],
   ['toggle-grid', 'Show / hide grid', ['Mod+Quote']],
-  ['toggle-unselected-handles', 'Show / hide unselected handles', ['Mod+KeyH']],
+  // Command+H hides the app on macOS.
+  ['toggle-unselected-handles', 'Show / hide unselected handles', ['Mod+KeyH'], {mac: ['Mod+Shift+KeyH']}],
   ['toggle-camera', 'Show / hide camera', ['Mod+KeyK']], ['camera-reset', 'Reset camera', ['Mod+Alt+KeyK']],
   ['camera-center', 'Center camera', ['F8']], ['camera-align-view', 'Align camera to view', ['F10']],
   ['camera-copy', 'Copy camera', ['F11']], ['camera-paste', 'Paste camera', ['F12']],
@@ -116,15 +122,15 @@ group('Drawing', [
 group('Library', [['library-open', 'Open / insert library item', ['Enter']], ['library-rename', 'Rename library item', ['F2']]], 'library');
 /** The project tabs' keys work in the desktop app only: a browser keeps Ctrl+W, Ctrl+Tab and Ctrl+Page Up/Down for its own tabs. */
 export const DESKTOP_PROJECT_KEYS = Object.freeze({
-  'close-project': Object.freeze(['Mod+KeyW']),
-  // Command+Tab belongs to macOS; Control+Tab is what its apps use for tabs.
-  'recent-project': Object.freeze([isMacPlatform() ? 'Ctrl+Tab' : 'Mod+Tab']),
+  'close-project': Object.freeze(['Mod+KeyW']), 'recent-project': Object.freeze(['Mod+Tab']),
   'next-project': Object.freeze(['Mod+PageDown']), 'previous-project': Object.freeze(['Mod+PageUp']),
 });
-const projectKeys = id => (globalThis.stykDesktop ? DESKTOP_PROJECT_KEYS[id] : []);
+// Command+Tab belongs to macOS; Control+Tab is what its apps use for tabs.
+export const DESKTOP_PROJECT_MAC_KEYS = Object.freeze({'recent-project': Object.freeze(['Ctrl+Tab'])});
+const projectKeys = (id, mac = false) => (globalThis.stykDesktop ? (mac && DESKTOP_PROJECT_MAC_KEYS[id]) || DESKTOP_PROJECT_KEYS[id] : []);
 group('Projects', [
   ['close-project', 'Close project', projectKeys('close-project')],
-  ['recent-project', 'Last used project', projectKeys('recent-project'), {repeat: true}],
+  ['recent-project', 'Last used project', projectKeys('recent-project'), {repeat: true, mac: projectKeys('recent-project', true)}],
   ['next-project', 'Next project', projectKeys('next-project')],
   ['previous-project', 'Previous project', projectKeys('previous-project')],
   ['save-all', 'Save all projects'],
@@ -150,7 +156,9 @@ group('Panels & layout', [
 export const HOTKEY_COMMANDS = Object.freeze(commands);
 export const HOTKEY_BY_ID = new Map(commands.map(command => [command.id, command]));
 export const HOTKEY_SCOPES = Object.freeze({global: 'Editor', canvas: 'Canvas focused', hover: 'Handle hovered', builder: 'Figure builder', timeline: 'Advanced timeline focused', simple: 'Simple timeline mode', polygon: 'Drawing polygon', library: 'Library focused',drawing:'Drawing workspace'});
-export const DEFAULT_HOTKEYS = Object.freeze(Object.fromEntries(commands.map(c => [c.id, c.defaults])));
+/** Default bindings for macOS (`mac` true) or Windows and Linux. */
+export function defaultHotkeys(mac = HOST_MAC) { return Object.fromEntries(commands.map(c => [c.id, c.platformDefaults[mac ? 'mac' : 'pc']])); }
+export const DEFAULT_HOTKEYS = Object.freeze(defaultHotkeys(HOST_MAC));
 const codePattern = /^(Key[A-Z]|Digit[0-9]|F([1-9]|1[0-9]|2[0-4])|Arrow(Left|Right|Up|Down)|Space|Enter|Escape|Tab|Backspace|Delete|Insert|Home|End|PageUp|PageDown|CapsLock|Comma|Period|Slash|Backslash|Semicolon|Quote|BracketLeft|BracketRight|Minus|Equal|Backquote|Numpad[0-9]|Numpad(Add|Subtract|Multiply|Divide|Decimal|Enter))$/;
 const modifierOrder = ['Mod', 'Ctrl', 'Meta', 'Alt', 'Shift'];
 export function normalizeBinding(value) {
@@ -174,7 +182,7 @@ export function findHotkeyConflicts(bindings, id, candidate, mac = isMacPlatform
   if (!command) return [];
   // Scoped shortcuts deliberately take precedence over general shortcuts.
   return commands.filter(other => other.id !== id && other.scope === command.scope &&
-    (bindings[other.id] ?? other.defaults).some(binding => variants(other, binding).some(a => variants(command, candidate).some(b => physical(a, mac) === physical(b, mac)))));
+    (bindings[other.id] ?? other.platformDefaults[mac ? 'mac' : 'pc']).some(binding => variants(other, binding).some(a => variants(command, candidate).some(b => physical(a, mac) === physical(b, mac)))));
 }
 export function normalizeHotkeys(value, mac = isMacPlatform()) {
   const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -197,10 +205,10 @@ export function normalizeHotkeys(value, mac = isMacPlatform()) {
     migrated['add-frame'] = input['duplicate-frame-after'];
   const result = {}, customized = new Set();
   for (const command of commands) {
-    const candidate = migrated[command.id];
+    const candidate = migrated[command.id], defaults = command.platformDefaults[mac ? 'mac' : 'pc'];
     const valid = Array.isArray(candidate) && candidate.length <= 4 && candidate.every(key => normalizeBinding(key));
-    result[command.id] = [...new Set(valid ? candidate.map(normalizeBinding) : command.defaults)];
-    if (valid && JSON.stringify(result[command.id]) !== JSON.stringify(command.defaults)) customized.add(command.id);
+    result[command.id] = [...new Set(valid ? candidate.map(normalizeBinding) : defaults)];
+    if (valid && JSON.stringify(result[command.id]) !== JSON.stringify(defaults)) customized.add(command.id);
   }
   // Deterministic recovery from corrupt/old preferences: custom bindings win
   // over defaults, then catalog order breaks ties. Never execute two commands.
@@ -213,7 +221,7 @@ const keyLabels = {Space: 'Space', Escape: 'Esc', ArrowLeft: '←', ArrowRight: 
 export function formatBinding(binding, mac = isMacPlatform()) {
   return binding.split('+').map(part => part === 'Mod' ? (mac ? 'Cmd' : 'Ctrl') : part === 'Meta' ? (mac ? 'Cmd' : 'Meta') : keyLabels[part] || part.replace(/^Key|^Digit/, '').replace(/^Numpad/, 'Num ')).join('+');
 }
-export function shortcutLabel(bindings, id) { return (bindings?.[id] ?? DEFAULT_HOTKEYS[id] ?? []).map(key => formatBinding(key)).join(' / '); }
+export function shortcutLabel(bindings, id, mac = isMacPlatform()) { return (bindings?.[id] ?? defaultHotkeys(mac)[id] ?? []).map(key => formatBinding(key, mac)).join(' / '); }
 export function isHotkeyInput(target) { return Boolean(target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]')); }
 
 /** Resolves and tracks held keys independently of DOM/event-listener ordering. */
@@ -263,5 +271,5 @@ export class HotkeyManager {
     const held = [...this.held.values()]; this.held.clear();
     for (const command of held) this.release(command.id, {cancelled: true});
   }
-  label(id) { return shortcutLabel(this.bindings, id); }
+  label(id) { return shortcutLabel(this.bindings, id, this.mac); }
 }

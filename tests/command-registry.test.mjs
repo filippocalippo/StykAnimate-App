@@ -212,7 +212,7 @@ test('list() ranks palette rows: matches first, recents early, internal and alia
 });
 
 test('items() turns a menu model into resolved menu items', () => {
-  const registry = new CommandRegistry({actions: actions(), context: () => ({mode: 'animate'}), checked: () => true});
+  const registry = new CommandRegistry({actions: actions(), context: () => ({mode: 'animate'}), checked: () => true, hotkeys: {mac: false}});
   const items = registry.items(['undo', null, {label: 'Canvas'}, 'toggle-handles', 'delete-single-segment', {command: 'save', label: 'Save now'},
     {label: 'More', submenu: ['redo']}]);
   assert.equal(items.length, 6, 'the Build-only command is left out');
@@ -222,6 +222,13 @@ test('items() turns a menu model into resolved menu items', () => {
   assert.equal(items[3].checked, true);
   assert.equal(items[4].label, 'Save now', 'model overrides win');
   assert.equal(items[5].submenu[0].command, 'redo');
+});
+
+test('menu items show Command shortcuts on macOS and Ctrl elsewhere', () => {
+  const item = mac => new CommandRegistry({actions: actions(), context: () => ({mode: 'animate'}), hotkeys: {mac}}).items(['undo', 'toggle-unselected-handles']);
+  assert.deepEqual(item(false).map(row => [row.shortcut, row.keyshortcuts]), [['Ctrl+Z', 'Control+Z'], ['Ctrl+H', 'Control+H']]);
+  assert.deepEqual(item(true).map(row => [row.shortcut, row.keyshortcuts]), [['Cmd+Z', 'Meta+Z'], ['Cmd+Shift+H', 'Meta+Shift+H']],
+    'macOS defaults, with Command+H left to the system');
 });
 
 test('fuzzyMatch() is case and accent insensitive and reports ranges', () => {

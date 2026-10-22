@@ -84,6 +84,7 @@
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
+    "dist:mac:local": "electron-builder --mac --arm64 --publish never -c.mac.identity=-",
     "dist:linux": "electron-builder --linux",
     "test:updates": "node --test tests/updates.test.mjs tests/appimage-updater.test.mjs tests/release-assets.test.mjs",
     "test:updates:linux": "node scripts/verify-appimage-update.mjs",
@@ -262,7 +263,8 @@
         "zip"
       ],
       "category": "public.app-category.graphics-design",
-      "hardenedRuntime": true
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "12.0"
     },
     "linux": {
       "icon": "desktop/assets/stykanimate.png",

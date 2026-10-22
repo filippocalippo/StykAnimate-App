@@ -22,7 +22,7 @@ class Node {
   querySelector(selector) { return selector === 'kbd' ? this.kbd : null; }
 }
 const root = nodes => ({querySelectorAll: () => nodes});
-const hotkeys = bindings => new HotkeyManager({bindings, mac: false});
+const hotkeys = (bindings, mac = false) => new HotkeyManager({bindings, mac});
 
 test('a control shows the shortcut of its own command, including the aliases of the Build part commands and drawing tools', () => {
   const keys = hotkeys();
@@ -75,4 +75,10 @@ test('the tooltip names a control by data-tooltip, data-hotkey-title or aria-lab
   assert.equal(tooltipContent(new Node({'aria-label': 'Scene properties', title: 'Scene properties'})), null, 'no second tooltip over a native title');
   assert.equal(tooltipContent(new Node({'aria-label': 'Save'}, {text: 'Save'})), null, 'a visible word with no shortcut adds nothing');
   assert.equal(tooltipContent(new Node({'data-tooltip': ''})), null, 'an empty data-tooltip opts out');
+});
+
+test('hints use Command on macOS', () => {
+  const labelled = new Node({'data-action': 'undo', title: 'Undo', 'aria-label': 'Undo'});
+  refreshHotkeyHints(hotkeys(undefined, true), root([labelled]));
+  assert.deepEqual([labelled.dataset.hotkeyHint, labelled.getAttribute('aria-keyshortcuts')], ['Cmd+Z', 'Meta+Z']);
 });

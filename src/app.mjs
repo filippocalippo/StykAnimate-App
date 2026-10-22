@@ -6110,25 +6110,18 @@ function showRecovery(record, records = [record]) {
 if (desktop) {
   if (desktop.platform !== "darwin") $("window-controls").hidden = false;
   else document.querySelector(".titlebar").style.paddingLeft = "84px";
+  // `fromKeyboard` marks a macOS key equivalent (desktop/native-menu.cjs). The editor saw that key
+  // first and declined it, so it only edits a focused text field, or closes the project for Command+W.
+  const TEXT_FIELD = 'textarea,[contenteditable]:not([contenteditable="false"]),input:not([type=button],[type=checkbox],[type=color],[type=file],[type=hidden],[type=image],[type=radio],[type=range],[type=reset],[type=submit])';
   desktop.onMenuAction?.(
-    guarded((action) => {
-      if (['undo','redo'].includes(action) && vfxInspector?.ownsHistoryTarget(document.activeElement) && !$("dialog").open) return actions[action]();
-      if (
-        document.activeElement?.matches(
-          "input,textarea,[contenteditable=true]",
-        ) &&
-        [
-          "cut",
-          "copy",
-          "paste",
-          "select-all",
-          "undo",
-          "redo",
-          "delete",
-        ].includes(action)
-      ) {
-        document.execCommand(action === "select-all" ? "selectAll" : action);
-        return;
+    guarded((action, {fromKeyboard = false} = {}) => {
+      if (!fromKeyboard && ['undo','redo'].includes(action) && vfxInspector?.ownsHistoryTarget(document.activeElement) && !$("dialog").open) return actions[action]();
+      if (document.activeElement?.matches?.(TEXT_FIELD) && ["cut", "copy", "paste", "select-all", "undo", "redo", "delete"].includes(action))
+        return desktop.editText(action);
+      if (fromKeyboard) {
+        if (action !== 'close-project' || overlays.blocksHotkeys() || $("dialog").open) return;
+        // Home has no project in front; Command+W then closes the window, as it would any other.
+        return state.home ? desktop.close() : actions['close-project']();
       }
       if (!$("dialog").open) return actions[action]?.();
     }),

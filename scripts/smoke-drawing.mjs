@@ -1,4 +1,4 @@
-import {_electron as electron} from '../tests/support/playwright.mjs';
+import {_electron as electron, closeStartupPrompts} from '../tests/support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -11,6 +11,8 @@ const output=path.join(root,'artifacts','drawing-desktop'),profile=path.join(out
 await mkdir(profile,{recursive:true});
 await writeFile(path.join(profile,'telemetry-state.json'),JSON.stringify({decided:true,consent:{analytics:false,diagnostics:false,policyVersion:'2026-09-10',updatedAt:Date.now()}}));
 const checks=[],errors=[];
+// Mod is Command on macOS.
+const mod=process.platform==='darwin'?'Meta':'Control';
 const check=(name,value=true)=>{assert.ok(value,name);checks.push(name);console.log('PASS',name);};
 let app;
 const launch=async()=>{
@@ -19,7 +21,7 @@ const launch=async()=>{
   await app.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});dialog.showMessageBox=async()=>({response:1});},file);
   const page=await app.firstWindow();page.on('pageerror',error=>errors.push(error.message));
   await page.waitForFunction(()=>window.styk?.ready,undefined,{timeout:30000});
-  const welcome=page.getByRole('button',{name:'Close welcome screen'});if(await welcome.isVisible())await welcome.click();
+  await closeStartupPrompts(page);
   return page;
 };
 const snapshot=page=>page.evaluate(async()=>{
@@ -40,8 +42,12 @@ try{
   await page.locator('[data-tool="drawing-brush"]').click();await page.locator('[data-draw-preset="ink"]').click();
   await stroke([{x:cx-300,y:cy},{x:cx,y:cy-40},{x:cx+300,y:cy}]);
   check('a brush stroke paints in the desktop app',await alphaAt(cx,cy-40)===255||await alphaAt(cx,cy-38)===255);
-  await page.locator('[data-draw-preset="blender"]').click();await stroke([{x:cx-100,y:cy-10},{x:cx-100,y:cy+40}]);
-  check('the smudge brush drags paint',await alphaAt(cx-100,cy+25)>0);
+  // Smudge from the stroke's edge into blank canvas found by reading pixels: the stroke's width on
+  // screen follows the canvas zoom, which follows the window size.
+  const lineY=cy-40*200/300;let edge=lineY;while(await alphaAt(cx-100,edge)>0&&edge<lineY+120)edge++;
+  check('the smudge starts at the edge of the paint',await alphaAt(cx-100,edge-2)>0&&await alphaAt(cx-100,edge+3)===0);
+  await page.locator('[data-draw-preset="blender"]').click();await stroke([{x:cx-100,y:edge-2},{x:cx-100,y:edge+40}]);
+  check('the smudge brush drags paint',await alphaAt(cx-100,edge+3)>0);
   await page.keyboard.press('u');await page.evaluate(()=>Object.assign(styk.drawing.settings,{shapeKind:'ellipse',shapeFill:true,color:'#d04020',opacity:1}));
   await stroke([{x:cx+120,y:cy+60},{x:cx+240,y:cy+140}]);await page.waitForFunction(()=>styk.editor.undoLabel==='Fill shape');
   check('a filled ellipse applies',await alphaAt(cx+180,cy+100)===255);
@@ -50,13 +56,13 @@ try{
   await page.locator('details[data-section="Filters"] summary').click();await page.locator('[data-draw-action="filter-blur"]').click();
   await page.waitForFunction(()=>styk.editor.undoLabel==='Blur drawing');
   check('a filter applies to the selection',true);
-  await page.keyboard.press('Control+Shift+A');
+  await page.keyboard.press(`${mod}+Shift+A`);
   // Second frame with its own drawing.
   await page.locator('[data-tool="drawing-brush"]').click();await page.locator('[data-draw-preset="ink"]').click();await page.evaluate(()=>styk.drawing.action('next-blank'));await page.waitForTimeout(200);
   await stroke([{x:cx-200,y:cy-150},{x:cx+200,y:cy+150}]);
   const before=await snapshot(page);
   check('two cels hold artwork',before.length>=2&&before.every(c=>c.bounds));
-  await page.keyboard.press('Control+s');
+  await page.keyboard.press(`${mod}+s`);
   await page.waitForFunction(()=>!styk.editor.dirty,undefined,{timeout:30000});
   check('the drawing saves natively');
   await page.evaluate(async()=>{styk.editor.markSaved();await stykDesktop.setDocumentState({name:styk.editor.name,dirty:false});}).catch(()=>{});

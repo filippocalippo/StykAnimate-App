@@ -33,7 +33,22 @@ module.exports = async function beforePack(context) {
       scanner.source?.sha256 !== hash(await fs.readFile(path.join(appRoot,'native','piv-frame-scan.cpp'))))
     throw new Error('Build and freeze the current native PIV scanner before packaging.');
   const scannerName=context.electronPlatformName==='win32'?'styk-piv-frame-scan.dll':context.electronPlatformName==='darwin'?'libstyk-piv-frame-scan.dylib':'libstyk-piv-frame-scan.so';
-  if(scanner.library?.sha256!==hash(await fs.readFile(path.join(appRoot,'build','sidecar','styk-codec','_internal','native',scannerName))))
+  const frozenScanner=path.join(appRoot,'build','sidecar','styk-codec','_internal','native',scannerName);
+  if (context.electronPlatformName === 'darwin') {
+    // PyInstaller re-signs the libraries it collects on macOS. The frozen copy must still be the
+    // verified build byte for byte once code signatures are removed (scripts/macos-binaries.mjs).
+    const binaries = await import('./macos-binaries.mjs'), built = path.join(appRoot, scanner.library?.path || '');
+    let verified = false;
+    try { verified = scanner.library?.sha256 === hash(await fs.readFile(built)) && await binaries.unsignedDigest(built) === await binaries.unsignedDigest(frozenScanner); }
+    catch { /* A missing build or frozen copy is reported below. */ }
+    if (!verified) throw new Error('The frozen native PIV scanner differs from its verified build.');
+    const minimum = await binaries.macMinimumVersion(appRoot);
+    for (const directory of ['sidecar', 'video-encoder']) {
+      const { problems } = await binaries.checkMachOTree(path.join(appRoot, 'build', directory), { arch: architecture, minimum });
+      // pip picks wheels for the build machine's macOS; docs/MACOS.md installs them for the oldest supported one.
+      if (problems.length) throw new Error(`The ${directory} cannot run on every supported macOS (${minimum} or later, ${architecture}). Rebuild it with a Python built for ${minimum} or earlier and wheels installed with python -m pip install --target build/python-build-deps --platform macosx_${minimum.replace('.', '_')}_${architecture === 'x64' ? 'x86_64' : architecture} --only-binary=:all: -r scripts/requirements-build.txt:\n${problems.slice(0, 12).join('\n')}`);
+    }
+  } else if(scanner.library?.sha256!==hash(await fs.readFile(frozenScanner)))
     throw new Error('The frozen native PIV scanner differs from its verified build.');
   let video;
   try { video = JSON.parse(await fs.readFile(path.join(context.packager.info.appDir, 'build', 'video-encoder', 'build-info.json'), 'utf8')); }
