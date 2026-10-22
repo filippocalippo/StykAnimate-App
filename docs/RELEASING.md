@@ -27,12 +27,12 @@ The initial 0.5.5 section comes from existing release metadata, with overlapping
 
 ## Prepare the next version
 
-1. Inspect the working diff, current package version, and existing release tags. Select the requested new higher version; do not reuse a published version.
+1. Start a release branch from a freshly fetched `origin/main` (for example `release/<version>`). Inspect the working diff, current package version, and existing release tags. Select the requested new higher version; do not reuse a published version.
 2. Move all completed pending entries from Unreleased into one new highest version section, immediately below an empty Unreleased heading. Add a concise title. Move entries rather than copying them; leave older sections unchanged. Do not leave changes included in the release stranded in Unreleased.
 3. Set that version in `package.json`, `package-lock.json` at the top level, and `package-lock.json` at `packages[""].version`. `npm version <version> --no-git-tag-version` can update these in a suitable checkout; review its diff.
 4. Run `npm run release:prepare`, then `npm run changelog:check`. Preparation validates the entire history before writing and replaces each generated file through a sibling temporary file. It is deterministic and safe to rerun. An interrupted update of the two files is detected by the check; rerun preparation to repair it. Use one writer for release metadata at a time and reread after concurrent edits.
 5. Review the new section for accuracy, semantic duplicates, omissions, and ordering. Confirm generated files contain only the newest version, excluding Unreleased and older history. Run `node --test tests/changelog.test.mjs`, `npm run check`, `npm run test:updates`, and relevant feature, browser, desktop, and performance checks. Run `npm run test:updates:desktop` for releases.
-6. Commit the history, both package files, both generated files, and intended source changes together. Confirm all required files are saved in the reviewed diff. A generated file should never be fixed by hand. Subsequent development entries go only into Unreleased.
+6. Commit the history, both package files, both generated files, and intended source changes together. Confirm all required files are saved in the reviewed diff. A generated file should never be fixed by hand. Open a release pull request against `main`; features and fixes are merged before it, never inside it. Subsequent development entries go only into Unreleased.
 
 ## Build and ship
 
@@ -59,13 +59,13 @@ npm run release:verify -- "release/$releaseVersion" --platform=win32
 
 Check each command's exit status and stop on failure; PowerShell does not automatically stop after a failed native command. Build and verify Linux on its own host as described in `docs/LINUX.md`. Combine its AppImage and `latest-linux.yml` with the four Windows assets in `release/<version>`, then run `npm run release:verify`. The default verification and publisher require both platforms.
 
-For a coordinated candidate, push the prepared source and run:
+Releases are built only from commits on `origin/main`. For a coordinated candidate, merge the release pull request and run:
 
 ```bash
 gh workflow run desktop-release.yml --ref main -f publish=false -f upload_draft=false
 ```
 
-This retains private Windows/Linux assets, browser files and verification evidence for 30 days. It includes an actual installed Windows upgrade from the previous public release. No public draft or deployment is created. Before retaining anything, each platform verifies its versioned unpacked package against the source and staged runtimes, boots that executable, and exports and decodes videos from its startup scene; these checks need no private samples. The package hash manifest stays with the private evidence, and CI never synchronizes advancing source into the package. Review the successful run for that exact commit; old reports do not certify new bytes.
+This retains private Windows/Linux assets, browser files and verification evidence for 30 days. It includes an actual installed Windows upgrade from the previous public release. No public draft or deployment is created. Before retaining anything, each platform verifies its versioned unpacked package against the source and staged runtimes, boots that executable, and exports and decodes videos from its startup scene; these checks need no private samples. The package hash manifest stays with the private evidence, and CI never synchronizes advancing source into the package. Review the successful run for that exact commit; old reports do not certify new bytes. If the candidate fails, fix it in another pull request and run it again; nothing is public until publication.
 
 When publication is authorized, dispatch with `upload_draft=true` for a verified draft or `publish=true` to publish. A matching `v<version>` tag push also publishes automatically. Locally, `npm run release:publish` uploads the verified combined directory as a draft, and adding `--publish` publishes it. The publisher checks saved notes before any remote action and refuses to replace a public version. Only the fixed asset allowlist is uploaded. Deploy the browser editor from the verified commit, run its live checks, then refresh and deploy the website catalogue as documented in `docs/WEB.md` and `docs/website.md`.
 
