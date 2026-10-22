@@ -61,6 +61,7 @@ group('file', [
   ['new', english["menu.newAnimation"], 'new-file', {labelKey: 'menu.newAnimation', keywords: ['create', 'blank', 'project']}],
   ['new-window', english["commands.newWindow"], 'plus', {labelKey: "commands.newWindow", requires: ['desktop:newWindow']}],
   ['open', english["menu.openProject"], 'folder', {labelKey: 'menu.openProject', keywords: ['load', 'piv', 'stk']}],
+  ['reload-project', english['applicationMenu.reloadProject'], 'folder', {labelKey: 'applicationMenu.reloadProject', requires: ['desktop:reload'], keywords: ['refresh', 'external', 'disk']}],
   ['open-recent', english["menu.openRecent"], 'clock', {labelKey: 'menu.openRecent', requires: ['desktop:recentFiles']}],
   ['save', english["common.save"], 'save', {labelKey: 'common.save'}],
   ['save-as', english["common.saveAs"], 'save', {labelKey: 'common.saveAs', keywords: ['copy', 'duplicate project']}],

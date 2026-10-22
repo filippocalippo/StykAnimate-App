@@ -85,18 +85,18 @@ export function createAppDialogs(ctx) {
    * project is saved), Don't save, or Cancel (Escape and × too). Resolves
    * true when the document may be replaced.
    */
-  async function confirmReplace() {
+  async function confirmReplace({discardOnly = false} = {}) {
     finishCurrentEdit();
     if (!editor.dirty) return true;
     const projectName = editor.name || {messageKey: "app.untitled"};
     const dialog = dialogOf({
       size: "sm",
-      title: interfaceText("appDialogs.saveChangesTo", {value: projectName}), titleKey: "appDialogs.saveChangesTo", titleParams: {value: projectName},
+      title: interfaceText(discardOnly ? "appDialogs.reloadFromDisk" : "appDialogs.saveChangesTo", {value: projectName}), titleKey: discardOnly ? "appDialogs.reloadFromDisk" : "appDialogs.saveChangesTo", titleParams: {value: projectName},
       body: interfaceText("appDialogs.yourChangesWillBeLostIfYouDon"), bodyKey: "appDialogs.yourChangesWillBeLostIfYouDon",
       actions: [
         { label: interfaceText("appDialogs.donTSave"), labelKey: "appDialogs.donTSave", value: "discard", id: "discard-changes", variant: "ghost", tone: "danger" },
-        { label: kitText(t, "common.cancel"), labelKey: "common.cancel", labelParams: {}, cancel: true, id: "keep-editing", variant: "ghost" },
-        { label: interfaceText("common.save"), labelKey: "common.save", value: "save", id: "save-changes", variant: "primary", autofocus: true },
+        { label: kitText(t, "common.cancel"), labelKey: "common.cancel", labelParams: {}, cancel: true, id: "keep-editing", variant: "ghost", autofocus: discardOnly },
+        ...(!discardOnly ? [{ label: interfaceText("common.save"), labelKey: "common.save", value: "save", id: "save-changes", variant: "primary", autofocus: true }] : []),
       ],
       onSubmit: (value) => {
         if (value !== "save") return undefined;

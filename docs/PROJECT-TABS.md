@@ -102,3 +102,12 @@ the desktop build (Electron), GPU memory, and resting projects with large drawin
   cross-project paste, closing, saving, recovery copies, twelve tabs, Ctrl+Tab, reordering)
 - `npm run test:project-tabs:desktop` (Electron: a save target per project, the window-close question for
   several unsaved projects, a recovery copy per project, and restoring them after a restart)
+
+## Reload from disk
+
+On desktop, File → Reload from disk (also in the active tab’s context menu)
+reopens the current saved `.styk` in the same tab. Unsaved projects must be saved
+first. Unsaved edits require choosing Don’t save or Cancel; reload never writes
+over the externally updated file. Missing or invalid files leave the current
+project intact. Other tabs are retained. Reload resets the playhead and undo
+history, as opening a project does. Browser projects do not offer disk reload.

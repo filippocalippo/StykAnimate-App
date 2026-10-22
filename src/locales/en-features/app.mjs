@@ -1,5 +1,6 @@
 export default Object.freeze({
   "app.sendFeedback": "Send feedback",
+  "app.reloadSaveFirst": "Save this project as a .styk file before reloading from disk.",
   "app.ready": "Ready",
   "app.toolOptions": "Tool options",
   "app.drag": "Drag",

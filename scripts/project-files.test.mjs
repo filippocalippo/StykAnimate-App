@@ -201,3 +201,17 @@ test('a reloaded page starts without documents while pending native opens stay v
   assert.throws(() => files.select(tokens[0]), /different document/);
   assert.equal(files.select(tokens[3]).documentToken, tokens[3]);
 });
+
+test('disk reload uses only the current document capability and follows Save as', () => {
+  const files = new ProjectFiles();
+  const a = files.activate({openToken: files.rememberOpen(path.resolve('first.styk'))});
+  assert.equal(files.reloadFilename(a.documentToken), path.resolve('first.styk'));
+  files.commit(a.documentToken, path.resolve('renamed.styk'));
+  assert.equal(files.reloadFilename(a.documentToken), path.resolve('renamed.styk'));
+  const b = files.activate();
+  assert.equal(files.reloadFilename(b.documentToken), null);
+  assert.throws(() => files.reloadFilename(a.documentToken));
+  assert.throws(() => files.reloadFilename(path.resolve('first.styk')));
+  files.release(b.documentToken);
+  assert.throws(() => files.reloadFilename(b.documentToken));
+});

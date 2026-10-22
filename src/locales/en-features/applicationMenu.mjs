@@ -2,6 +2,7 @@ export default Object.freeze({
   "applicationMenu.newAnimation": "New animation",
   "applicationMenu.newWindow": "New window",
   "applicationMenu.openProject": "Open project…",
+  "applicationMenu.reloadProject": "Reload from disk",
   "applicationMenu.openRecent": "Open recent…",
   "applicationMenu.renameProject": "Rename project…",
   "applicationMenu.import": "Import",
