@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include "piv.h"
+#include "native_container.h"
 #include "styk_core.h"
 
 extern "C" {
@@ -18,23 +18,29 @@ Java_com_layouter787_stykport_NativeCore_abi(JNIEnv* env, jobject /*thiz*/) {
   return env->NewStringUTF(styk::core_abi());
 }
 
-// Decodes a .piv image and returns a text summary, or a line starting with
-// "ERROR:" / "UNSUPPORTED:". Temporary diagnostic entry point for phase 1.
+// Decodes a .styk/.stkz/.stykmov file image and returns a text summary, or a
+// line starting with "ERROR:" / "UNSUPPORTED:". Diagnostic entry point.
 JNIEXPORT jstring JNICALL
-Java_com_layouter787_stykport_NativeCore_probePiv(JNIEnv* env, jobject /*thiz*/, jbyteArray data) {
+Java_com_layouter787_stykport_NativeCore_probeNative(JNIEnv* env, jobject /*thiz*/, jbyteArray data) {
   if (data == nullptr) return env->NewStringUTF("ERROR: no data");
   const jsize length = env->GetArrayLength(data);
   jbyte* bytes = env->GetByteArrayElements(data, nullptr);
   if (bytes == nullptr) return env->NewStringUTF("ERROR: out of memory");
-  const styk::piv::Result result =
-      styk::piv::decode(reinterpret_cast<const uint8_t*>(bytes), static_cast<size_t>(length));
-  env->ReleaseByteArrayElements(data, bytes, JNI_ABORT);
+  const uint8_t* p = reinterpret_cast<const uint8_t*>(bytes);
+  const size_t n = static_cast<size_t>(length);
   std::string text;
-  if (result.ok) {
-    text = styk::piv::summarize(result.doc);
+  styk::native::Kind kind;
+  if (!styk::native::detect_kind(p, n, kind)) {
+    text = "ERROR: not a StykAnimate project (.styk, .stkz or .stykmov)";
   } else {
-    text = (result.unsupported ? "UNSUPPORTED: " : "ERROR: ") + result.error;
+    const styk::native::DecodeResult result = styk::native::decode(p, n, kind);
+    if (result.ok) {
+      text = styk::native::summarize(result);
+    } else {
+      text = (result.code == "codec_unavailable" ? "UNSUPPORTED: " : "ERROR: ") + result.error;
+    }
   }
+  env->ReleaseByteArrayElements(data, bytes, JNI_ABORT);
   return env->NewStringUTF(text.c_str());
 }
 

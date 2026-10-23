@@ -53,7 +53,7 @@ fun ProbeScreen() {
                     val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: ByteArray(0)
                     val start = System.nanoTime()
-                    val summary = NativeCore.probePiv(bytes)
+                    val summary = NativeCore.probeNative(bytes)
                     val ms = (System.nanoTime() - start) / 1_000_000
                     "Arquivo: ${bytes.size} bytes\n$summary\nDecodificado em $ms ms"
                 } catch (e: Throwable) {
@@ -72,10 +72,10 @@ fun ProbeScreen() {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("StykPort", style = MaterialTheme.typography.headlineMedium)
-        Text("Fase 1a: decodificador PIV v5")
+        Text("Fase 1: contêiner nativo (.styk / .stkz)")
         Text("Core: ${NativeCore.version()}  |  ABI: ${NativeCore.abi()}")
         Button(onClick = { picker.launch(arrayOf("*/*")) }, enabled = !busy) {
-            Text("Abrir arquivo .piv")
+            Text("Abrir projeto StykAnimate")
         }
         Text(report, fontFamily = FontFamily.Monospace)
     }

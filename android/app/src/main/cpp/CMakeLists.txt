@@ -9,7 +9,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Host-side tests for these files live in android/core-tests/.
 set(STYK_CORE_SOURCES
     core/styk_core.cpp
-    core/piv.cpp
+    core/sha256.cpp
+    core/base64.cpp
+    core/json.cpp
+    core/native_container.cpp
 )
 
 add_library(stykcore SHARED jni_bridge.cpp ${STYK_CORE_SOURCES})
