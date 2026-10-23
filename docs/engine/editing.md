@@ -963,6 +963,31 @@ differed for 0.8 % of sines and 0.7 % of cosines, in fdlibm's cosine kernel, and
 n·π/2 up to 64 and its neighbours, special values) it returned V8's bits every time.
 `engine/tools/math-fixtures.mjs` records the regression set its tests use.
 
+## Connected-figure selection in the Rust command API (2026-10-23)
+
+`Editor::call` and `Session::call` accept `selectConnected(uid, {add, candidates})`.
+Omitting `uid` uses the active selection; an explicit null or unknown UID leaves
+selection unchanged. The command walks joins in both directions with a visited
+set, then filters candidates, so an excluded intermediate figure does not break
+connectivity. `add` preserves existing selection order before appending eligible
+component members in document-slot order. The requested UID remains active when
+selected, otherwise the last selected UID becomes active. Repeating an unchanged
+selection emits no event; selecting a component clears joint/branch selection.
+No document records or history entries are changed.
+
+The port is available to native and WebAssembly Session callers after rebuilding;
+the app's existing JavaScript selection routing and layer-focus handling remain
+unchanged. Documents excluded by the existing document gates remain excluded.
+Non-array candidate transport refuses atomically so the caller can use its
+existing fallback. This addition does not open any app ownership gate.
+
+`engine/tools/edit-scenarios-connected-selection.mjs` generates three scenarios,
+registered by `edit-scenarios.mjs`. Their 81 steps cover native, sheet and auto-key
+sheet selection, add/filter ordering, empty/missing targets, no-ops, branch/joint
+reset and undo/redo. `tests/connected_selection.rs` in `styk-edit` checks those
+recordings through direct commands and the Session API, plus cyclic/dangling or
+invalid join targets and atomic refusal. Geometry/hit testing is not required.
+
 ## Phase 2: queries from the engine
 
 Handle positions, picking, snapping, bounds, motion paths and inspector values

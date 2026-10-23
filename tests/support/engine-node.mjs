@@ -3,7 +3,6 @@
 import {existsSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {loadEngine} from '../../src/engine/engine.mjs';
 import {EngineMirror} from '../../src/engine/engine-mirror.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -14,6 +13,8 @@ let shared = null;
 /** The engine and a mirror, once per test process. */
 export async function nodeEngine() {
   if (!shared) {
+    // Let tests inspect engineBuilt before loading the generated WebAssembly glue.
+    const {loadEngine} = await import('../../src/engine/engine.mjs');
     const engine = await loadEngine({workers: 0});
     shared = {engine, mirror: new EngineMirror(engine)};
   }

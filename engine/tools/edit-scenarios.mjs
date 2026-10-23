@@ -5,6 +5,7 @@ import {documentOf, limb, open, joint, nextKey, prune, Editor} from './fixture-k
 import {createVfxClip} from '../../src/vfx-clips.mjs';
 import {createVfx} from '../../src/vfx.mjs';
 import {createCameraMotion} from '../../src/camera-motion.mjs';
+await import('./edit-scenarios-connected-selection.mjs');
 await import('./edit-scenarios-movieclips-joins.mjs');
 await import('./edit-scenarios-movieclips-presence.mjs');
 await import('./edit-scenarios-movieclips-membership.mjs');

@@ -4,6 +4,7 @@
 use std::path::Path;
 
 const PORTED: &[&str] = &[
+    "connected-selection-native", "connected-selection-sheet", "connected-selection-autokey-sheet",
     "ik-movieclip-parent-sheet",
     "segment-clipboard-native", "segment-clipboard-sheet",
     // Origin motion sheet gestures; @motionFrame is a worker/native-only replay view.

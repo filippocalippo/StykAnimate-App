@@ -24,6 +24,11 @@ Commands: `npm run engine:build`, `npm run engine:test` (seconds once built),
 (one benchmark run; `scripts/engine-bench-matrix.sh` for rounds) and
 `npm run engine:bench:summary <label>`.
 
+Node tests using `tests/support/engine-node.mjs` check `engineBuilt` before requesting
+the engine: an unbuilt checkout can run ordinary JavaScript assertions and skip the
+WebAssembly-dependent cases. Loading the engine still reports missing or broken build
+output; build it with `npm run engine:build` to run those cases.
+
 For `figures`, `movieclips` and `channels`, default editing requires exact behavior,
 a matching checkpoint and actual core adoption. Full paired cost may be at most 5%
 higher, or average excess may be at most 0.1 ms using the smaller complete timed call
