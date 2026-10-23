@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GLB to Styk</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --paper: #eef1f3; --card: #ffffff; --ink: #17242d; --muted: #566772; --line: #c9d3da;
+  --accent: #284255; --accent-ink: #ffffff; --signal: #e8a317;
+  --danger: #a82f1d; --danger-bg: #fbe9e5; --warn: #6b4a00; --warn-bg: #fbf1d6;
+  --font: "Avenir Next", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #111a20; --card: #1a252d; --ink: #e6edf1; --muted: #98a8b2; --line: #2c3b45;
+    --accent: #8fb3ca; --accent-ink: #0e1a22; --signal: #f0b429;
+    --danger: #ff9783; --danger-bg: #3a1d18; --warn: #f1d58a; --warn-bg: #352c10;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 var(--font); }
+main { max-width: 640px; margin: 0 auto; padding: 48px 20px 80px; }
+h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 6px; letter-spacing: -0.01em; }
+.lede { margin: 0 0 28px; color: var(--muted); }
+
+.drop { display: flex; gap: 20px; align-items: center; padding: 22px; background: var(--card); border: 2px dashed var(--line); border-radius: 10px; cursor: pointer; transition: border-color .15s, background-color .15s; }
+.drop:hover, .drop.over, .drop:focus-within { border-color: var(--accent); }
+.drop.over { background: color-mix(in srgb, var(--signal) 14%, var(--card)); }
+.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.drop:focus-within { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+.drop svg { flex: none; width: 64px; height: 96px; }
+.drop .bone { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; fill: none; }
+.drop .joint { fill: var(--card); stroke: var(--accent); stroke-width: 2.5; }
+.drop.over .joint, .drop.has-file .joint { fill: var(--signal); }
+.drop strong { display: block; font-size: 1.05rem; }
+.drop span { color: var(--muted); font-size: .92rem; overflow-wrap: anywhere; }
+.busy .joint { animation: pulse 1s ease-in-out infinite; }
+.busy .joint:nth-of-type(2n) { animation-delay: .25s; }
+.busy .joint:nth-of-type(3n) { animation-delay: .5s; }
+@keyframes pulse { 50% { fill: var(--signal); } }
+@media (prefers-reduced-motion: reduce) { .busy .joint { animation: none; fill: var(--signal); } .drop { transition: none; } }
+
+fieldset { margin: 28px 0 0; padding: 0; border: 0; }
+legend { padding: 0; margin-bottom: 12px; font-weight: 650; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px 20px; }
+.field label, .check label { font-weight: 550; }
+.field small, .check small { display: block; color: var(--muted); font-size: .85rem; line-height: 1.35; }
+input[type=number], input[type=text], select { width: 100%; margin: 4px 0 4px; padding: 9px 10px; font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 6px; }
+input:focus-visible, select:focus-visible, summary:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+.check { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin-top: 16px; align-items: start; }
+.check input { margin-top: 5px; }
+.check small { grid-column: 2; }
+details { margin-top: 20px; }
+summary { cursor: pointer; font-weight: 550; }
+details .grid { margin-top: 14px; }
+input[type=file].plain { width: 100%; margin-top: 4px; font: inherit; color: var(--muted); }
+
+.actions { margin-top: 28px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.btn { appearance: none; border: 0; border-radius: 8px; padding: 12px 22px; font: inherit; font-weight: 650; color: var(--accent-ink); background: var(--accent); cursor: pointer; text-decoration: none; display: inline-block; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+#status { color: var(--muted); }
+
+.notice { margin-top: 24px; padding: 14px 16px; border-radius: 8px; }
+.notice.error { background: var(--danger-bg); color: var(--danger); }
+.notice.warn { background: var(--warn-bg); color: var(--warn); }
+.notice ul { margin: 6px 0 0; padding-left: 20px; }
+.notice p { margin: 0; }
+
+.result { margin-top: 32px; padding: 22px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.result h2 { margin: 0 0 14px; font-size: 1.2rem; overflow-wrap: anywhere; }
+dl { margin: 0 0 18px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 24px; }
+dt { color: var(--muted); }
+dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.result .notice { margin: 0 0 18px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>GLB to Styk</h1>
+  <p class="lede">Convert a rigged .glb model into a StykAnimate project.</p>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept=".glb">
+    <svg viewBox="0 0 64 96" aria-hidden="true">
+      <path class="bone" d="M32 22V54M32 28L14 44M32 28L50 44M32 54L20 90M32 54L44 90"/>
+      <circle class="joint" cx="32" cy="12" r="9"/>
+      <circle class="joint" cx="32" cy="28" r="4"/>
+      <circle class="joint" cx="14" cy="44" r="4"/>
+      <circle class="joint" cx="50" cy="44" r="4"/>
+      <circle class="joint" cx="32" cy="54" r="4"/>
+      <circle class="joint" cx="20" cy="90" r="4"/>
+      <circle class="joint" cx="44" cy="90" r="4"/>
+    </svg>
+    <div>
+      <strong id="dropTitle">Drop a .glb file here, or choose one</strong>
+      <span id="dropNote">The model needs an armature with skinning. .gltf files with separate buffers are not supported; export as .glb.</span>
+    </div>
+  </label>
+
+  <fieldset>
+    <legend>Options</legend>
+    <div class="grid">
+      <div class="field">
+        <label for="height">Height</label>
+        <input type="number" id="height" value="240" min="1" step="any">
+        <small>Figure height on the canvas.</small>
+      </div>
+      <div class="field">
+        <label for="origin">Pivot point</label>
+        <select id="origin">
+          <option value="root">Root bone</option>
+          <option value="feet">Feet</option>
+          <option value="center">Centre of the model</option>
+        </select>
+        <small>Where the figure turns and is placed.</small>
+      </div>
+      <div class="field">
+        <label for="name">Project name</label>
+        <input type="text" id="name" placeholder="Same as the file name">
+      </div>
+      <div class="field">
+        <label for="turn">Turn</label>
+        <input type="number" id="turn" value="0" step="any">
+        <small>Degrees to rotate the model around its vertical axis.</small>
+      </div>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="unskinned"><label for="unskinned">Include unskinned meshes</label>
+      <small>Attach loose meshes to the root bone instead of leaving them out.</small>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="unweighted"><label for="unweighted">Keep bones without skin weights</label>
+      <small>Control and IK bones are removed by default.</small>
+    </div>
+    <details>
+      <summary>Rig and finger files</summary>
+      <div class="grid">
+        <div class="field">
+          <label for="rig">Rig file (.json)</label>
+          <input type="file" class="plain" id="rig" accept=".json,application/json">
+          <small>For models made of rigid parts with no skin.</small>
+        </div>
+        <div class="field">
+          <label for="extra">Finger chains (.json)</label>
+          <input type="file" class="plain" id="extra" accept=".json,application/json">
+          <small>Adds extra bone chains, such as fingers.</small>
+        </div>
+      </div>
+    </details>
+  </fieldset>
+
+  <div class="actions">
+    <button class="btn" id="go" type="button" disabled>Convert to .styk</button>
+    <span id="status" role="status" aria-live="polite"></span>
+  </div>
+
+  <div class="notice error" id="error" role="alert" hidden></div>
+
+  <section class="result" id="result" hidden>
+    <h2 id="resultName"></h2>
+    <div class="notice warn" id="warnings" hidden>
+      <p><strong>Check these</strong></p>
+      <ul id="warningList"></ul>
+    </div>
+    <dl id="stats"></dl>
+    <a class="btn" id="download" href="#">Download .styk</a>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const drop = $('drop'), fileInput = $('file'), go = $('go'), statusEl = $('status'), errorEl = $('error'), resultEl = $('result');
+let model = null, downloadUrl = null;
+
+const sizeText = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+const toBase64 = blob => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(blob);
+});
+const readText = async input => input.files[0] ? await input.files[0].text() : null;
+
+function showError(message) { errorEl.textContent = message; errorEl.hidden = false; }
+function clearOutput() {
+  errorEl.hidden = true; resultEl.hidden = true; statusEl.textContent = '';
+  if (downloadUrl) { URL.revokeObjectURL(downloadUrl); downloadUrl = null; }
+}
+
+function pick(file) {
+  if (!file) return;
+  clearOutput();
+  if (!/\.glb$/i.test(file.name)) {
+    showError('Choose a .glb file. In Blender, export with Format set to glTF Binary (.glb).');
+    return;
+  }
+  model = file;
+  drop.classList.add('has-file');
+  $('dropTitle').textContent = file.name;
+  $('dropNote').textContent = sizeText(file.size) + '. Drop another file to replace it.';
+  go.disabled = false;
+}
+
+fileInput.addEventListener('change', () => pick(fileInput.files[0]));
+for (const type of ['dragenter', 'dragover']) drop.addEventListener(type, e => { e.preventDefault(); drop.classList.add('over'); });
+for (const type of ['dragleave', 'drop']) drop.addEventListener(type, e => { e.preventDefault(); drop.classList.remove('over'); });
+drop.addEventListener('drop', e => pick(e.dataTransfer.files[0]));
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => e.preventDefault());
+
+function show(data) {
+  const s = data.summary;
+  $('resultName').textContent = data.filename;
+  const rows = [
+    ['Bones', s.joints], ['Segments', s.segments], ['Vertices', s.vertices.toLocaleString()],
+    ['Triangles', s.triangles.toLocaleString()], ['Colours', s.colors],
+    ['Scale', s.scale.toPrecision(4) + '\u00d7'], ['File size', sizeText(data.bytes)],
+  ];
+  if (s.groups && s.groups.length) rows.push(['Parts', s.groups.join(', ')]);
+  const dl = $('stats'); dl.textContent = '';
+  for (const [k, v] of rows) {
+    const dt = document.createElement('dt'), dd = document.createElement('dd');
+    dt.textContent = k; dd.textContent = v; dl.append(dt, dd);
+  }
+  const list = $('warningList'); list.textContent = '';
+  for (const w of s.warnings || []) { const li = document.createElement('li'); li.textContent = w; list.append(li); }
+  $('warnings').hidden = !(s.warnings && s.warnings.length);
+  fetch('data:application/octet-stream;base64,' + data.data).then(r => r.blob()).then(blob => {
+    downloadUrl = URL.createObjectURL(blob);
+    const link = $('download'); link.href = downloadUrl; link.download = data.filename;
+    resultEl.hidden = false;
+    link.focus();
+  });
+}
+
+go.addEventListener('click', async () => {
+  if (!model) return;
+  clearOutput();
+  go.disabled = true; drop.classList.add('busy'); statusEl.textContent = 'Converting\u2026';
+  try {
+    const body = JSON.stringify({
+      filename: model.name,
+      glb: await toBase64(model),
+      rig: await readText($('rig')),
+      extra: await readText($('extra')),
+      options: {
+        height: Number($('height').value), origin: $('origin').value, name: $('name').value.trim() || undefined,
+        turn: Number($('turn').value || 0), includeUnskinned: $('unskinned').checked, keepUnweighted: $('unweighted').checked,
+      },
+    });
+    const res = await fetch('/api/convert', {method: 'POST', headers: {'content-type': 'application/json'}, body});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'The conversion failed.');
+    statusEl.textContent = 'Done.';
+    show(data);
+  } catch (error) {
+    statusEl.textContent = '';
+    showError(error instanceof TypeError ? 'Could not reach the converter. Check that the server is still running in your terminal.' : error.message);
+  } finally {
+    go.disabled = false; drop.classList.remove('busy');
+  }
+});
+</script>
+</body>
+</html>
