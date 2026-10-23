@@ -2,7 +2,7 @@
 
 namespace styk {
 
-const char* core_version() { return "0.0.1 (phase 0)"; }
+const char* core_version() { return "0.1.0 (phase 1a: PIV v5)"; }
 
 const char* core_abi() {
 #if defined(__aarch64__)

@@ -3,8 +3,8 @@ package com.layouter787.stykport
 /**
  * Kotlin side of the JNI bridge to the C++ core (libstykcore.so).
  *
- * Phase 0 only exposes diagnostics. Later phases add document decoding,
- * evaluation and rendering entry points here.
+ * Phase 1 exposes diagnostics and a PIV probe. Later phases add document
+ * handles, evaluation and rendering entry points here.
  */
 object NativeCore {
     init {
@@ -14,4 +14,7 @@ object NativeCore {
     external fun version(): String
 
     external fun abi(): String
+
+    /** Decodes a .piv file image and returns a text summary or an error line. */
+    external fun probePiv(data: ByteArray): String
 }

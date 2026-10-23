@@ -12,8 +12,8 @@ android {
         applicationId = "com.layouter787.stykport"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.0.1-phase0"
+        versionCode = 2
+        versionName = "0.1.0-phase1a"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -47,6 +47,18 @@ android {
             version = "3.22.1"
         }
     }
+}
+
+// Runs the C++ core unit tests (android/core-tests) on the build machine.
+// Only active on CI; skipped when no host g++/zlib is available.
+val hostCoreTests by tasks.registering(Exec::class) {
+    description = "Builds and runs the C++ core unit tests on the host (CI only)."
+    commandLine("sh", "${rootDir}/core-tests/run.sh")
+    onlyIf { System.getenv("CI") == "true" }
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(hostCoreTests)
 }
 
 dependencies {
