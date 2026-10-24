@@ -78,6 +78,7 @@ Browser tests (`tests/*.browser.mjs`) run against `npm run serve` with Chrome or
 | `src/document-export*.mjs`, `src/image-*.mjs`, `src/video-export.mjs` | Saving, recovery and image/video export |
 | `src/app.mjs`, `src/shell/`, `src/ui/`, `src/styles/` | Interface, workspaces, timelines and styles |
 | `src/locales/`, `src/localization*.mjs` | Translations |
+| `mcp/` | Optional local MCP server that builds animations and exports video through the headless app ([mcp/README.md](mcp/README.md)) |
 | `desktop/` | Electron main process, preload bridge, file access, updates |
 | `web/` | Browser build: service worker and Cloudflare configuration |
 | `tests/`, `scripts/` | Tests, smoke tests, benchmarks, build and release scripts |
