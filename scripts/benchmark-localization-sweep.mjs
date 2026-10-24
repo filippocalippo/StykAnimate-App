@@ -59,7 +59,7 @@ async function graph(entry) {
 }
 
 const graphEntries = ['src/app.mjs', 'src/localization.mjs', 'src/localized-error.mjs',
-  'src/playback-worker.mjs', 'src/document-export-worker.mjs', 'src/thumbnail-worker.mjs',
+  'src/document-export-worker.mjs',
   'src/preview-image-worker.mjs', 'src/media-image-worker.mjs', 'src/import-worker.mjs',
   'src/clipboard-worker.mjs', 'src/audio-worker.mjs'];
 const graphs = [];

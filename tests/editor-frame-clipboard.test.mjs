@@ -111,7 +111,7 @@ test('cross-document copied layers retain hidden assets, visibility, order and l
 });
 
 test('authored source clipboard samples composed row-start figures, camera and scene colors, preserving native source and stripping caches', () => {
-  const report = sourceDocument(), editor = editorFor(report);
+  const editor = editorFor(sourceDocument()), report = editor.report;
   editor.addAnimationKeys([{target: {kind: 'figure', uid: 12}, property: 'x', tick: 0, value: 83},
     {target: {kind: 'figure', uid: 12}, property: 'x', tick: 2, value: 193},
     {target: {kind: 'camera'}, property: 'x', tick: 0, value: 50},

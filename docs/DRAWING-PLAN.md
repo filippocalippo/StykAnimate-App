@@ -32,12 +32,12 @@ Inspect these contracts and their current callers before editing. Proposed new m
 | Timeline UI and shortcuts | `src/layer-timeline.mjs`, `src/timeline-hotkeys.mjs`, `src/hotkeys.mjs`, `docs/TIMELINE.md`, `docs/animation-modes.md` |
 | Sprite representation | `src/media-authoring.mjs`, especially `createImageFigure` |
 | Image decoding | `src/media-image-worker.mjs` |
-| Rendering and ordering | `src/renderer.mjs`, `src/scene-order.mjs`, `docs/renderer.md` |
+| Rendering and ordering | `src/engine/engine-stage.mjs`, `src/scene-order.mjs`, `docs/engine/rendering.md` |
 | Onion skin | `src/onion-controller.mjs`, `src/onion-skin.mjs`, `src/onion-range.mjs` |
-| Worker synchronization | `src/playback-patch.mjs`, `src/playback.mjs`, `src/thumbnail-renderer.mjs` |
+| Worker synchronization | `src/playback-patch.mjs` |
 | Memory and prepared playback | `src/playback-budget.mjs`, `src/playback-resources.mjs`, `docs/ADAPTIVE-PREVIEW.md` |
 | Persistence and recovery | `src/document-export.mjs`, `src/document-export-worker.mjs`, `src/browser-recovery.mjs`, `docs/document-exports.md`, `docs/native-file-format.md` |
-| Rendered and native export | `src/export-frame-renderer.mjs`, `src/export-frame-worker.mjs`, `src/pivot-export-materialize.mjs`, `src/svg-export.mjs` |
+| Rendered and native export | `src/engine/engine-export.mjs`, `src/engine/engine-export-worker.mjs`, `src/pivot-export-materialize.mjs`, `engine/crates/styk-export` |
 
 Observed constraints to preserve:
 

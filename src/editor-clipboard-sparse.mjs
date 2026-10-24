@@ -5,7 +5,7 @@ import {validateSceneSteps} from './pivot/model.mjs';
 import {validateLayerStateSteps,layerIdForUid,FIXED_LAYER_IDS} from './layers.mjs';
 import {nativeTimeline} from './pivot/geometry.mjs';
 import {invalidateFrameIndex} from './frame-ids.mjs';
-import {yieldLoadTask} from './editor-load.mjs';
+import {yieldLoadTask} from './yield-task.mjs';
 import {MAX_ALLOCATED_UID} from './object-identity.mjs';
 
 const preparedStates=new WeakMap(),commandCopies=new WeakMap();

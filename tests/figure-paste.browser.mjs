@@ -8,8 +8,8 @@ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(30000);
 const settle=async()=>{
   await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&styk.state.renderer.last?.report===styk.editor.report);
-  await page.evaluate(()=>styk.state.renderer.device?.queue.onSubmittedWorkDone());
+  await page.waitForFunction(()=>styk.state.renderer.engineSide?.frameReport===styk.editor.report);
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 };
 try {
   await page.goto(process.env.STYK_URL??'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
@@ -32,7 +32,7 @@ try {
       const {buildGeometry}=await import('/src/pivot/geometry.mjs'),e=styk.editor;
       const signature=g=>g.drawables.map(({obj,fig,...shape})=>({...shape,obj:obj.unique_id,fig:fig.figure_type_id}));
       return {independent:e.selectedObjects.every(o=>o.figure_type_id!==1),count:e.selectedObjects.length,total:e.evaluatedFrame.objects.length,history:e._undo.length,undoLabel:e.undoLabel,
-        geometry:JSON.stringify(signature(styk.state.renderer.lastGeometry))===JSON.stringify(signature(buildGeometry(e.report,e.evaluatedFrame))),
+        geometry:JSON.stringify(signature(styk.editor.geometry))===JSON.stringify(signature(buildGeometry(e.report,e.evaluatedFrame))),
         report:JSON.stringify(e.serialize())};
     });
     assert.ok(result.independent);assert.equal(result.count,2);assert.equal(result.total,5);assert.equal(result.history,before.history+1);

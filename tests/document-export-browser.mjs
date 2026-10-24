@@ -3,12 +3,11 @@ import {chromium} from './support/playwright.mjs';
 import {createRequire} from 'node:module';
 import {readFile, writeFile, mkdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-import {once} from 'node:events';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const require = createRequire(import.meta.url);
-const {startBackend} = require('../desktop/backend.cjs');
+const {startDesktopHost} = require('../desktop/web-host.cjs');
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixturePaths = process.argv.slice(2);
 if (!fixturePaths.length) fixturePaths.push('Pivot Animator v5/Animations/tween_camera.piv',
@@ -21,12 +20,13 @@ const fixtures = await Promise.all(fixturePaths.map(async relative => {
   return {filename, name: path.basename(filename), format: path.extname(filename).slice(1),
     bytes: source.length, sha256: createHash('sha256').update(source).digest('hex')};
 }));
-let backend = await startBackend({appRoot}), browser;
+const backend = await startDesktopHost({appRoot});
+let browser;
 try {
   try { browser = await chromium.launch({headless: true}); }
   catch { browser = await chromium.launch({channel: 'chrome', headless: true}); }
   const page = await browser.newPage();
-  await page.goto(`${backend.origin}/api/health`);
+  await page.goto(`${backend.origin}/tests/fixtures/blank.html`);
   await page.setContent('<input type="file" id="fixture">');
   await page.evaluate(async () => {
     const {DocumentExporter} = await import('/src/document-export.mjs');
@@ -123,8 +123,8 @@ try {
     return {preAborted: before, midSnapshotAborted: during, changedRevisionAborted: revision,
       reusedAfterCancellation: true, expiredSourceErrorPreserved: expired};
   });
-  const port = backend.port, stopped = once(backend.child, 'exit'); backend.stop(); await stopped;
-  backend = await startBackend({appRoot, port});
+  // Restart the codec: its worker and everything it cached are gone, as when the codec service restarted.
+  await page.evaluate(async () => (await import('/src/codec-web-host.mjs')).browserCodecHost().dispose());
   const restored = await page.evaluate(async () => {
     const results = [];
     for (const {original, blob} of nativeFiles) {
@@ -144,7 +144,7 @@ try {
     exporter.dispose(); importer.dispose();
     return {results, unknownMetadataPreserved: true, editedNativeRestartPreserved: true};
   });
-  const report = {checks, behavior, restored, backendRestarted: true, checkedAt: new Date().toISOString()};
+  const report = {checks, behavior, restored, codecRestarted: true, checkedAt: new Date().toISOString()};
   const output = path.resolve(process.env.STYK_BENCH_OUT || path.join(appRoot, 'artifacts'));
   await mkdir(output, {recursive: true});
   const tag = fixturePaths.some(value => /Akane/i.test(value)) ? '-akane' : '';

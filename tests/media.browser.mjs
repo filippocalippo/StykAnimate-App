@@ -5,15 +5,15 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const require = createRequire(import.meta.url), appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const {startBackend} = require('../desktop/backend.cjs');
-const backend = await startBackend({appRoot});
+const {startDesktopHost} = require('../desktop/web-host.cjs');
+const backend = await startDesktopHost({appRoot});
 let browser;
 try {
   try { browser = await chromium.launch({headless: true}); }
   catch { browser = await chromium.launch({channel: 'chrome', headless: true}); }
   const page = await browser.newPage(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`${backend.origin}/api/health`);
+  await page.goto(`${backend.origin}/tests/fixtures/blank.html`);
   const result = await page.evaluate(async () => {
     const {imageFileToFigure, imageFileToBackground} = await import('/src/media-authoring.mjs');
     const {Editor} = await import('/src/editor.mjs');
@@ -40,11 +40,11 @@ try {
     editor.report.backgrounds = [background]; editor.frame.background_id = 1;
     const serialized = editor.serialize();
     const exportFile = async format => {
-      const response = await fetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      const response = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({document: serialized, sourceId: null, format, figureTypeId: editor.object.figure_type_id})});
       assert(response.ok, `${format} export failed: ${await response.clone().text()}`);
       const bytes = await response.arrayBuffer();
-      const imported = await fetch(`/api/import?filename=media.${format}`, {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: bytes});
+      const imported = await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=media.${format}`, {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: bytes});
       assert(imported.ok, `${format} decoder rejected newly authored media: ${await imported.clone().text()}`);
       return {bytes: bytes.byteLength, result: await imported.json()};
     };

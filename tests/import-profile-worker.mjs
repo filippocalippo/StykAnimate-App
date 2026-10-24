@@ -30,7 +30,7 @@ function audit(report) {
 self.onmessage = async ({ data }) => {
   if (data.type === 'ack') { chunkAcks.get(data.index)?.(); chunkAcks.delete(data.index); }
   else if (data.type === 'load') {
-    const response = await fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: data.path }) });
+    const response = await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=${encodeURIComponent(data.name)}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', Accept: 'application/json' }, body: Uint8Array.fromBase64(data.base64) });
     if (!response.ok) throw new Error(await response.text());
     const text = await response.text(), parseStart = performance.now(); const result = JSON.parse(text);
     document = result.document; const parseMs = performance.now() - parseStart;

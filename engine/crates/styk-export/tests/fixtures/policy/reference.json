@@ -1,0 +1,1477 @@
+[
+  {
+    "name": "plain-vector",
+    "tick": 0,
+    "composited": false,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "plain-drawing",
+    "tick": 0,
+    "composited": false,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "image",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "alternating-drawing",
+    "tick": 0,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "image",
+        "hasVfx": true,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "alternating-drawing",
+    "tick": 2,
+    "composited": false,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "image",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "alternating-drawing",
+    "tick": 0,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "image",
+        "hasVfx": true,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "figure-filter",
+    "tick": 0,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "disabled-filter",
+    "tick": 0,
+    "composited": false,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "neutral-filter",
+    "tick": 0,
+    "composited": false,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "wildcard-unused-filter",
+    "tick": 0,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "foreign-unused-filter",
+    "tick": 0,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "handle-unused-filter",
+    "tick": 0,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "scene-filter",
+    "tick": 0,
+    "composited": true,
+    "scene": true,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "hidden-filter",
+    "tick": 0,
+    "composited": false,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": []
+  },
+  {
+    "name": "timeline-figure-filter",
+    "tick": 1,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "timeline-wildcard-filter",
+    "tick": 1,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "generator-active",
+    "tick": 1,
+    "composited": true,
+    "scene": false,
+    "generated": true,
+    "particles": 17,
+    "liveParticles": 4,
+    "drawBlends": [
+      0
+    ],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "generator-zero-rate",
+    "tick": 1,
+    "composited": true,
+    "scene": false,
+    "generated": true,
+    "particles": 3,
+    "liveParticles": 0,
+    "drawBlends": [
+      0
+    ],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "generator-before-start",
+    "tick": 0,
+    "composited": false,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "mesh",
+    "tick": 0,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "mesh",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "depth-surface",
+    "tick": 0,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "poly",
+        "hasVfx": false,
+        "depth": true
+      },
+      {
+        "uid": 1,
+        "type": "poly",
+        "hasVfx": false,
+        "depth": true
+      },
+      {
+        "uid": 1,
+        "type": "poly",
+        "hasVfx": false,
+        "depth": true
+      },
+      {
+        "uid": 1,
+        "type": "poly",
+        "hasVfx": false,
+        "depth": true
+      },
+      {
+        "uid": 1,
+        "type": "poly",
+        "hasVfx": false,
+        "depth": true
+      },
+      {
+        "uid": 1,
+        "type": "poly",
+        "hasVfx": false,
+        "depth": true
+      },
+      {
+        "uid": 1,
+        "type": "poly",
+        "hasVfx": false,
+        "depth": true
+      },
+      {
+        "uid": 1,
+        "type": "poly",
+        "hasVfx": false,
+        "depth": true
+      },
+      {
+        "uid": 1,
+        "type": "poly",
+        "hasVfx": false,
+        "depth": true
+      },
+      {
+        "uid": 1,
+        "type": "poly",
+        "hasVfx": false,
+        "depth": true
+      }
+    ]
+  },
+  {
+    "name": "nested-filter",
+    "tick": 0,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "circle",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "nested-unused-filter",
+    "tick": 0,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "circle",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "container-unused-filter",
+    "tick": 0,
+    "composited": false,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "circle",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "nested-scene-filter",
+    "tick": 0,
+    "composited": true,
+    "scene": false,
+    "generated": false,
+    "particles": 0,
+    "liveParticles": 0,
+    "drawBlends": [],
+    "drawables": [
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "circle",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      },
+      {
+        "uid": 2,
+        "type": "line",
+        "hasVfx": true,
+        "depth": false
+      }
+    ]
+  },
+  {
+    "name": "generator-additive",
+    "tick": 1,
+    "composited": true,
+    "scene": false,
+    "generated": true,
+    "particles": 17,
+    "liveParticles": 4,
+    "drawBlends": [
+      1
+    ],
+    "drawables": [
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "circle",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      },
+      {
+        "uid": 1,
+        "type": "line",
+        "hasVfx": false,
+        "depth": false
+      }
+    ]
+  }
+]

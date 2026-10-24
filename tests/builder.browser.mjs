@@ -35,7 +35,7 @@ const segmentCount = () => value(() => styk.editor.figure.segments.length);
 async function selectJoint(index) {
   await page.locator('[data-tool="rig"]').click();
   const point = await page.evaluate(async (index) => {
-    const { worldToScreen } = await import("/src/renderer.mjs");
+    const { worldToScreen } = await import("/src/renderer-geometry.mjs");
     const { editor, state } = styk,
       r = document.querySelector("#viewport").getBoundingClientRect();
     const p = worldToScreen(
@@ -251,7 +251,7 @@ try {
     .locator('[data-action="duplicate-segment"]')
     .click({ modifiers: ["Shift"] });
   const parentJoint = await value(async () => {
-    const { worldToScreen } = await import("/src/renderer.mjs");
+    const { worldToScreen } = await import("/src/renderer-geometry.mjs");
     const { editor, state } = styk,
       r = document.querySelector("#viewport").getBoundingClientRect(),
       p = worldToScreen(

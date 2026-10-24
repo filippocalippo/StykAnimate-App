@@ -47,12 +47,12 @@ try {
   assert.equal(roundtrip.same,true,JSON.stringify(roundtrip));assert.equal(roundtrip.exact,true,JSON.stringify(roundtrip));assert.equal(roundtrip.sequences,1);
   console.log('PASS native binary save/reopen, shared sequences, retiming and exact evaluated joins',roundtrip);
   await page.evaluate(()=>{styk.settingsUI.commit({timelineMode:'advanced'});styk.editor.load(architectureReport);styk.editor.markSaved();styk.fit();});
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&styk.state.renderer.last?.report===styk.editor.report);
+  await page.waitForFunction(()=>styk.state.renderer.engineSide?.frameReport===styk.editor.report);
   await page.evaluate(()=>{styk.editor.selectFrame(20);styk.editor.selectFrame(50);styk.editor.selectFrame(2);});
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&styk.performance().editingPresentation?.tick===styk.editor.tick);
+  await page.waitForFunction(()=>styk.performance().editingPresentation?.tick===styk.editor.tick);
   const seek=await page.evaluate(async()=>{
     const {buildGeometry}=await import('/src/pivot/geometry.mjs'),e=styk.editor,r=styk.state.renderer;
-    const before=r.lastGeometry.drawables.map(({obj,fig,...item})=>({...item,obj:obj.unique_id,fig:fig.figure_type_id}));
+    const before=e.geometry.drawables.map(({obj,fig,...item})=>({...item,obj:obj.unique_id,fig:fig.figure_type_id}));
     const expected=buildGeometry(e.report,e.evaluatedFrame).drawables.map(({obj,fig,...item})=>({...item,obj:obj.unique_id,fig:fig.figure_type_id}));
     return {frame:e.frameIndex,exact:JSON.stringify(before)===JSON.stringify(expected),leases:r.rasterCache.leasedBytes??0};
   });
@@ -60,7 +60,7 @@ try {
   await page.evaluate(()=>document.querySelector('#play-button').click());
   await page.waitForFunction(()=>styk.state.playing&&styk.state.playbackPacket);
   await page.evaluate(()=>document.querySelector('#play-button').click());
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&!styk.state.playing);
+  await page.waitForFunction(()=>!styk.state.playing);
   await page.evaluate(()=>{
     const e=styk.editor;e.select(1);e.beginTranslationDrag();e.moveSelection(2,1);e.commitDrag();
   });
@@ -70,7 +70,7 @@ try {
   await page.evaluate(()=>styk.editor.markSaved());
   await page.evaluate(()=>styk.settingsUI.commit({timelineMode:'simple'}));
   await page.evaluate(()=>{styk.editor.selectFrame(15);styk.editor.selectFrame(3);});
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&styk.performance().editingPresentation?.tick===styk.editor.tick);
+  await page.waitForFunction(()=>styk.performance().editingPresentation?.tick===styk.editor.tick);
   const simple=await page.evaluate(()=>({frame:styk.editor.frameIndex,preparation:styk.performance().editablePreparation}));
   assert.equal(simple.frame,3);assert.equal(simple.preparation.completed,true);assert.notEqual(simple.preparation.cancelled,true);
   console.log('PASS Simple working-frame notifications retain cooperative preparation');

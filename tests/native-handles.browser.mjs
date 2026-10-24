@@ -24,7 +24,7 @@ async function setup() {
       createObject(figure,3,640,420,{scale:.6})]),createFrame([createObject(figure,1,300,220)])];
     styk.editor.load(report,'Native handle pointer test'); styk.editor.select(2,0); styk.state.handles=true;
     styk.state.settings.showUnselectedHandles=true;styk.state.settings.handleSize=5;styk.fit();
-    const {worldToScreen}=await import('/src/renderer.mjs');
+    const {worldToScreen}=await import('/src/renderer-geometry.mjs');
     window.__screen=point=>{const r=document.querySelector('#viewport').getBoundingClientRect();
       const p=worldToScreen(point,{report:styk.editor.report,frame:styk.editor.evaluatedFrame,view:styk.state.view});return{x:r.x+p.x,y:r.y+p.y};};
     window.__points=()=>[...styk.editor.geometry.objects].flatMap(([slot,g])=>[...g.joints].map(([id,p])=>({slot,uid:g.obj.unique_id,id,...p})));

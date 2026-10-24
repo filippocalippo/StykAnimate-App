@@ -5,7 +5,7 @@ import {rigExampleDocument} from '../src/rig-examples.mjs';
 import {SOLID_RIG_EXAMPLES} from '../src/rig-solids.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 const area=points=>Math.abs(points.reduce((a,p,i)=>{const q=points[(i+1)%points.length];return a+p.x*q.y-p.y*q.x;},0)/2);
 function hull(points){
   const sorted=[...points].sort((a,b)=>a.x-b.x||a.y-b.y),cross=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x),half=list=>{const h=[];for(const p of list){while(h.length>1&&cross(h.at(-2),h.at(-1),p)<=1e-8)h.pop();h.push(p);}return h.slice(0,-1);};

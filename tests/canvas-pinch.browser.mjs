@@ -72,7 +72,7 @@ try {
   await page.evaluate(() => window.styk.fit());
   await page.waitForTimeout(200);
   const figure = await page.evaluate(async () => {
-    const { worldToScreen } = await import('/src/renderer.mjs');
+    const { worldToScreen } = await import('/src/renderer-geometry.mjs');
     const { editor, state } = window.styk, rect = document.getElementById('overlay').getBoundingClientRect();
     editor.select(editor.frame.objects[0].unique_id, -1);
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -101,7 +101,7 @@ try {
   await page.evaluate(() => window.styk.fit());
   await page.waitForTimeout(200);
   const again = await page.evaluate(async () => {
-    const { worldToScreen } = await import('/src/renderer.mjs');
+    const { worldToScreen } = await import('/src/renderer-geometry.mjs');
     const { editor, state } = window.styk, rect = document.getElementById('overlay').getBoundingClientRect();
     const point = worldToScreen(editor.geometry.objects.get(editor.selectedSlot).root, { report: editor.report, frame: editor.frame, view: state.view, cameraEnabled: false });
     return { x: rect.left + point.x, y: rect.top + point.y };

@@ -1,14 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
-import backend from '../desktop/backend.cjs';
 import {Editor} from '../src/editor.mjs';
 import {cameraValues} from '../src/editor-camera.mjs';
 import {buildGeometry, evaluatedFrame} from '../src/pivot/geometry.mjs';
 import {cameraMatrix} from '../src/renderer-geometry.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 import {emptyDocument} from '../src/demo.mjs';
+import {roundTrip} from './support/codec.mjs';
 
 const clone = value => structuredClone(value);
 const near = (a, b, epsilon = 0.001) => assert.ok(Math.abs(a - b) <= epsilon, `${a} != ${b}`);
@@ -230,22 +228,10 @@ test('authored camera baking preserves native poses and can be undone', () => {
   editor.undo(); assert.deepEqual(editor.serialize(), before);
 });
 
-test('camera edits and baked joined poses roundtrip through the actual native PIV writer', () => {
+test('camera edits and baked joined poses roundtrip through the actual native PIV writer', async () => {
   const {editor} = fixture(); editor.setCameraValues({x: 135, angle_rad: 0.6}, [0, 1]); editor.applyCameraToFigures([1]);
   const document = editor.serialize();
-  const script = String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-store=server.ProjectStore(server.WORKSPACE)
-data,name=store.export({'document':json.load(sys.stdin),'format':'piv'})
-print(json.dumps(store.import_bytes(data,name)['document']))
-`;
-  const python = backend.pythonCandidates()[0], result = spawnSync(python.command, [...python.args, '-c', script], {
-    cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify(document), encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024});
-  assert.equal(result.status, 0, result.error?.message || result.stderr);
-  const imported = JSON.parse(result.stdout);
+  const imported = await roundTrip({document, format: 'piv'});
   for (const index of [0, 1, 2]) {
     const a = cameraValues(document.keyframes[index].camera), b = cameraValues(imported.keyframes[index].camera);
     for (const field of ['x', 'y', 'scale', 'angle_rad']) near(a[field], b[field]);

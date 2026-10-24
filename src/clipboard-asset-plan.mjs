@@ -1,6 +1,6 @@
 import {messageError} from './localized-error.mjs';
 /** Exact clipboard asset matching, without serializing unrelated libraries. */
-import {yieldLoadTask} from './editor-load.mjs';
+import {yieldLoadTask} from './yield-task.mjs';
 
 const own=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
 const LOCATORS=new Set(['record_offset','record_end','records_start','records_end','source_start','source_end','source_offset','source_size','image_start']);

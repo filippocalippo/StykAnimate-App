@@ -9,7 +9,7 @@ const fixture=builderFixture(6);
 fixture.figure_types[0].segments.forEach((s,i)=>{s.parent_id=i%2?i:0;s.angle_rad=Math.floor(i/2)*2;s.length=i%2?40:60;s.thickness=8;});
 fixture.keyframes[0].objects[0].angles=fixture.figure_types[0].segments.map(s=>s.angle_rad);
 const point=index=>page.evaluate(async index=>{
- const {worldToScreen}=await import('/src/renderer.mjs'),{editor,state}=styk;
+ const {worldToScreen}=await import('/src/renderer-geometry.mjs'),{editor,state}=styk;
  const world=index<0?editor.geometry.objects.get(editor.selectedSlot).root:editor.geometry.objects.get(editor.selectedSlot).segments[index].end;
  const p=worldToScreen(world,{report:editor.report,frame:editor.frame,view:state.view});const r=document.querySelector('#viewport').getBoundingClientRect();return {x:r.x+p.x,y:r.y+p.y};
 },index);

@@ -2,9 +2,9 @@
 import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
 import {chromium} from './support/playwright.mjs';
-import backendTools from '../desktop/backend.cjs';
+import backendTools from '../desktop/web-host.cjs';
 
-const backend = await backendTools.startBackend({appRoot: process.cwd()});
+const backend = await backendTools.startDesktopHost({appRoot: process.cwd()});
 const out = 'artifacts/inspector-order';
 await mkdir(out, {recursive: true});
 let browser, page;

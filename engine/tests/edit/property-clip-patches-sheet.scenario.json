@@ -1,0 +1,85 @@
+{
+ "name": "property-clip-patches-sheet",
+ "document": "sheet-movieclip.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 4
+     },
+     "property": "opacity",
+     "tick": 0,
+     "value": 0.5
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "scale",
+     "tick": 0,
+     "value": 1.3
+    }
+   ]
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 4
+   },
+   "scale"
+  ],
+  [
+   "previewAnimationEdit",
+   1.4
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 4
+     },
+     "property": "rotation",
+     "tick": 6,
+     "value": 0.3
+    }
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

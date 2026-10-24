@@ -1,0 +1,51 @@
+{
+ "name": "polygon-opacity-sheet",
+ "document": "polygons.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "updatePolygon",
+   0,
+   {
+    "opacity": 0.5
+   }
+  ],
+  [
+   "@seek",
+   2
+  ],
+  [
+   "updatePolygon",
+   1,
+   {
+    "opacity": 0.25
+   }
+  ],
+  [
+   "updatePolygon",
+   0,
+   {}
+  ],
+  [
+   "updatePolygon",
+   0,
+   {
+    "opacity": 3
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

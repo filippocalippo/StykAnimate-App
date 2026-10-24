@@ -8,13 +8,13 @@ import {TelemetryAccumulator} from '../src/telemetry-core.mjs';
 import {TelemetryService} from '../desktop/telemetry.cjs';
 
 test('worker diagnostics retain cause, stage and safe source frames through wrapping',()=>{
-  const error=Object.assign(new RangeError('SECRET PROJECT'),{code:'export_memory_limit',stack:'RangeError: SECRET PROJECT\n at f (C:\\PRIVATE\\src\\export-memory.mjs:42:2)\n at f (https://private.example/src/export-frame-worker.mjs:100:2)'});
+  const error=Object.assign(new RangeError('SECRET PROJECT'),{code:'export_memory_limit',stack:'RangeError: SECRET PROJECT\n at f (C:\\PRIVATE\\src\\export-memory.mjs:42:2)\n at f (https://private.example/src/engine/engine-export-worker.mjs:100:2)'});
   const details=diagnosticDetails(error,'prepare','worker_failed');
   assert.ok(!/SECRET|PRIVATE|private.example/.test(JSON.stringify(details)));
   const wrapped=Object.assign(new Error('Worker failed'),details);
   const entry=sanitizeError(wrapped,'export');
   assert.equal(entry.type,'RangeError');assert.equal(entry.code,'out_of_memory');assert.equal(entry.stage,'prepare');
-  assert.deepEqual(entry.frames,[{module:'export-memory.mjs',line:42},{module:'export-frame-worker.mjs',line:100}]);
+  assert.deepEqual(entry.frames,[{module:'export-memory.mjs',line:42},{module:'engine-export-worker.mjs',line:100}]);
   assert.equal(sanitizeError({code:'export_canvas_lost'}).code,'device_lost');
   assert.equal(sanitizeError({code:'ENOSPC'}).code,'disk_full');
   assert.deepEqual(sanitizeError({telemetryFrames:[{module:'camera-monitor.mjs',line:20,secret:'private'},{module:'secret.mjs',line:2},{module:'app.mjs',line:-1}]}).frames,[{module:'camera-monitor.mjs',line:20}]);

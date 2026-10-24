@@ -1,6 +1,6 @@
 // The installed web build with no network, end to end in a real browser:
 //
-//   1. a first visit stores the editor and the Pivot runtime through the service worker;
+//   1. a first visit stores the editor and the Pivot codec through the service worker;
 //   2. with the server stopped, the app still starts and does real work, Pivot files included;
 //   3. a new build installs in the background, downloading only what changed, and is used
 //      only after the old version's window is closed.
@@ -68,14 +68,14 @@ try {
   await page.waitForFunction(() => window.styk?.ready === true, undefined, { timeout: 60000 });
   const manifest = await page.evaluate(() => fetch(document.querySelector('link[rel="manifest"]').href).then((response) => response.json()));
   check('The page links an install manifest with an app window and icons', manifest.display === 'standalone' && manifest.icons.length >= 3 && manifest.start_url === './');
-  const stored = await until('the worker to store the editor and the Pivot runtime', async () => {
+  const stored = await until('the worker to store the editor and the Pivot codec', async () => {
     const state = await workerStatus(page).catch(() => null);
     return state?.core && state?.codec ? state : null;
   });
   const info = JSON.parse(await readFile(path.join(first, 'build-info.json'), 'utf8'));
-  check('The worker stores the whole editor and the Pivot runtime under this build\'s version', stored.version === info.offline);
+  check('The worker stores the whole editor and the Pivot codec under this build\'s version', stored.version === info.offline);
   check('One cache holds this version', JSON.stringify(await page.evaluate(() => caches.keys())) === JSON.stringify([`styk-app-${info.offline}`]));
-  check('Storing it did not change what the app shows', await page.evaluate(() => ['WebGPU', 'Canvas 2D fallback'].includes(window.styk.state.renderer.stats.backend)));
+  check('Storing it did not change what the app shows', await page.evaluate(() => ['WebGPU', 'WebGL2'].includes(window.styk.state.renderer.stats.backend)));
 
   // --- 2. No network: the server is gone.
   await server.close();
@@ -85,7 +85,7 @@ try {
   page.on('requestfailed', (request) => failed.push(new URL(request.url()).pathname));
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => window.styk?.ready === true, undefined, { timeout: 60000 });
-  check('The app starts with no network', await page.evaluate(() => !navigator.onLine && ['WebGPU', 'Canvas 2D fallback'].includes(window.styk.state.renderer.stats.backend)));
+  check('The app starts with no network', await page.evaluate(() => !navigator.onLine && ['WebGPU', 'WebGL2'].includes(window.styk.state.renderer.stats.backend)));
   check('Every request was answered from the cache', failed.length === 0 && workerRequests.length === 0);
 
   const download = async (action, name) => {
@@ -98,7 +98,7 @@ try {
   const project = await download('save', 'offline.styk');
   check('A native project saves offline', (await stat(project)).size > 100);
   const piv = await download('export-piv', 'offline.piv');
-  check('A Pivot file exports offline (the runtime comes from the cache)', (await stat(piv)).size > 100);
+  check('A Pivot file exports offline (the codec comes from the cache)', (await stat(piv)).size > 100);
   await page.locator('#file-input').setInputFiles(piv);
   await page.waitForFunction(() => window.styk.editor.name === 'offline', undefined, { timeout: 120000 });
   check('The Pivot file reopens offline', await page.evaluate(() => window.styk.editor.frame.objects.length >= 1));
@@ -116,6 +116,9 @@ try {
   check('A changed file gives the new build a new version', next.version !== info.offline);
   server = await startWebServer({ root: second, port });
   workerRequests.length = 0;
+  // Notices queue one after another: let the ones from the exports above close first, so the update notice
+  // is not still waiting its turn when it is looked for. (Faster exports leave more of them queued here.)
+  await until('earlier notices to close', () => page.evaluate(() => !document.querySelector('.ui-toast')), 60000);
   await page.evaluate(() => navigator.serviceWorker.getRegistration().then((registration) => registration.update()));
   await until('the new version to install', () => page.evaluate(() => navigator.serviceWorker.getRegistration().then((registration) => registration.waiting?.state === 'installed')));
   check('The new version downloads only the file that changed', JSON.stringify(workerRequests.filter((name) => name !== '/sw.js')) === JSON.stringify(['/src/theme-bootstrap.js']));
@@ -132,7 +135,7 @@ try {
   await reopened.waitForFunction(() => window.styk?.ready === true, undefined, { timeout: 60000 });
   check('After the window is closed, the new version is the one that runs', await reopened.evaluate(() => fetch('./src/theme-bootstrap.js').then((response) => response.text()).then((text) => text.includes('second version'))));
   check('Only the new version remains stored', JSON.stringify(await reopened.evaluate(() => caches.keys())) === JSON.stringify([`styk-app-${next.version}`]));
-  check('The Pivot runtime was carried over without downloading it again', !workerRequests.some((name) => name.startsWith('/vendor/pyodide/')));
+  check('The Pivot codec was carried over without downloading it again', !workerRequests.some((name) => name.startsWith('/src/engine/pkg/styk_codec')));
   check('No console errors, page errors or CSP violations', problems.length === 0 || (console.error(problems), false));
   await context.close();
   console.log(`\n${checks.length} checks passed`);

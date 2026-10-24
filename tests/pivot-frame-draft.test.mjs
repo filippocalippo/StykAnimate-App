@@ -1,12 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
 import {materializeSimpleFrameDraftForPivot} from '../src/pivot-frame-draft.mjs';
-import backend from '../desktop/backend.cjs';
+import {roundTrip} from './support/codec.mjs';
 
 function fixture(mode = 'add') {
   const report = emptyDocument(); report.keyframes = [100, 200, 300].map(x => createFrame([createObject(report.figure_types[0], 1, x, 250)], 5));
@@ -34,21 +32,9 @@ test('draft identity validation rejects a bad checkpoint without changing the so
   const report = fixture(); report._styk.simpleFrameDraft.baseline._styk.frameId = 'wrong'; const before = structuredClone(report);
   assert.throws(() => materializePivotDocument(report), /identity/); assert.deepEqual(report, before);
 });
-test('actual PIV writer preserves stored frame count and excludes Add working geometry', () => {
-  const report = materializePivotDocument(fixture()), python = String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-doc=json.load(sys.stdin)
-store=server.ProjectStore(server.WORKSPACE)
-raw,name=store.export({'document':doc,'format':'piv'})
-print(json.dumps(store.import_bytes(raw,name)['document']))
-`;
-  const candidate = backend.pythonCandidates()[0], result = spawnSync(candidate.command, [...candidate.args, '-c', python], {
-    cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify(report), encoding: 'utf8', windowsHide: true, maxBuffer: 4 * 1024 * 1024});
-  assert.equal(result.status, 0, result.error?.message || result.stderr);
-  const reopened = JSON.parse(result.stdout); assert.equal(reopened.keyframes.length, 3);
+test('actual PIV writer preserves stored frame count and excludes Add working geometry', async () => {
+  const report = materializePivotDocument(fixture());
+  const reopened = await roundTrip({document: report, format: 'piv'}); assert.equal(reopened.keyframes.length, 3);
   assert.deepEqual(reopened.keyframes.map(f => f.objects[0].root_x), [100, 200, 300]);
   assert.deepEqual(reopened.keyframes.map(f => f.duration_raw), [5, 5, 5]);
   assert.equal(reopened._styk?.simpleFrameDraft, undefined);

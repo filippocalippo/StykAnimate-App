@@ -1,0 +1,63 @@
+{
+ "name": "pose-presets-sheet",
+ "document": "pose-presets.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setPoseChoice",
+   "Expression",
+   2
+  ],
+  [
+   "setPoseChoice",
+   "Expression",
+   2
+  ],
+  [
+   "setPoseChoice",
+   "Expression",
+   1
+  ],
+  [
+   "setPoseChoice",
+   "Expression",
+   0
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "rotateJoint",
+   0.1
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setPoseChoice",
+   "Expression",
+   2
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

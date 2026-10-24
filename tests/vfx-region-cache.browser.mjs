@@ -1,13 +1,13 @@
 import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
-import backend from '../desktop/backend.cjs';
-const service = await backend.startBackend({appRoot: process.cwd()});
+import backend from '../desktop/web-host.cjs';
+const service = await backend.startDesktopHost({appRoot: process.cwd()});
 let browser;
 try {
   browser = await chromium.launch({channel: 'chrome', headless: true});
   const page = await browser.newPage(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(service.origin + '/api/health');
+  await page.goto(service.origin + '/tests/fixtures/blank.html');
   const result = await page.evaluate(async () => {
     const {withVfx} = await import('/src/vfx-canvas.mjs');
     const {createVfx} = await import('/src/vfx.mjs');

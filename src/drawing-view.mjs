@@ -5,7 +5,7 @@ import {t as interfaceText} from './localization.mjs';
 
 import {icon} from './icons.mjs';
 import {drawingMetadata,isDrawingLayer} from './drawing-model.mjs';
-import {DrawingStroke} from './drawing-pixels.mjs';
+import {paintStroke} from './engine/engine-drawing.mjs';
 import {TileStore} from './drawing-tiles.mjs';
 import {SLIDERS,sliderMarkup} from './drawing-sliders.mjs';
 import {paletteFor,projectColors} from './color-palette.mjs';
@@ -55,9 +55,9 @@ export function presetThumbnail(p){
   try{
     // Lengths scale with the thumbnail's capped tip size.
     const scale=size/Math.max(.5,p.size??BRUSH_DEFAULTS.size),tip={...BRUSH_DEFAULTS,...p};for(const k of BRUSH_LENGTHS)tip[k]*=scale;
-    const stroke=new DrawingStroke(store,{...tip,color:[42,42,48],seed:11,pixelsPerUnit:scale});
-    for(let i=0;i<=28;i++){const t=i/28;stroke.sample({x:10+t*(W-20),y:H/2+Math.sin(t*Math.PI*2)*H*.2,pressure:.25+.75*Math.sin(Math.PI*t),time:i*16});}
-    stroke.finish();
+    const samples=[];
+    for(let i=0;i<=28;i++){const t=i/28;samples.push({x:10+t*(W-20),y:H/2+Math.sin(t*Math.PI*2)*H*.2,pressure:.25+.75*Math.sin(Math.PI*t),time:i*16});}
+    if(!paintStroke(store,{...tip,color:[42,42,48],seed:11,pixelsPerUnit:scale},samples))return '';
     const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;canvas.getContext('2d').putImageData(new ImageData(store.readRect(0,0,W,H),W,H),0,0);
     const url=canvas.toDataURL('image/png');canvas.width=canvas.height=1;
     if(thumbnails.size>=96)thumbnails.delete(thumbnails.keys().next().value);thumbnails.set(key,url);return url;

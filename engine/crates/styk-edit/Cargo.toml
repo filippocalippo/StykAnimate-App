@@ -1,0 +1,16 @@
+[package]
+name = "styk-edit"
+description = "Editing commands on the StykAnimate document store, reproducing the JavaScript editor record for record (docs/engine/editing.md)."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+styk-doc = { path = "../styk-doc" }
+styk-eval = { path = "../styk-eval" }
+styk-math = { path = "../styk-math" }
+thiserror = "2"
+
+[dev-dependencies]
+sha2 = "0.10"

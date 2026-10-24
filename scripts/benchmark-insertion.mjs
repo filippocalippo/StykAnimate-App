@@ -90,7 +90,7 @@ try {
   await page.evaluate(async()=>{const {librarySnapshot}=await import('/src/library-files.mjs');__insert.clipAsset=librarySnapshot(styk.editor);});
   await phase('clip-drop','styk.editor.importFigure(__insert.clipAsset,{position:{x:500,y:350}}).unique_id');
   const target=await page.evaluate(async()=>{
-    const {worldToScreen}=await import('/src/renderer.mjs');
+    const {worldToScreen}=await import('/src/renderer-geometry.mjs');
     const e=styk.editor,s=styk.state,r=document.querySelector('#viewport').getBoundingClientRect(),root=e.geometry.objects.get(e.selectedSlot).root;
     const point=worldToScreen(root,{report:e.report,frame:e.frame,view:s.view,cameraEnabled:false});
     s.view.x+=r.width/2-point.x;s.view.y+=r.height/2-point.y;s.dirtyRender=true;window.dispatchEvent(new Event('resize'));

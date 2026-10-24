@@ -21,6 +21,8 @@ export function applyDrawingCommand(editor,command,direction,prepared) {
   editor._emit('history',{label:command.label,definition:true,drawing:true,figureIndices:[editor.report.figure_types.indexOf(figure)]});return true;
 }
 export const editorDrawingMethods={
+  /** A cel's encoded tiles were attached to its definition in place: a derived publication, not an edit. The engine owner writes the definition into its session. */
+  _drawingPublished(figure) {},
   addDrawingFrame(id=this.activeLayerId,tick=this.tick) {
     assertDrawingTargets(this,[id]);
     const track=this.report._styk.layerSheet.tracks[id],onKey=track.keys.some(key=>key.tick===tick);

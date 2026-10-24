@@ -96,7 +96,7 @@ try {
     await selectCanvas(b.page);await b.page.keyboard.press('Control+v');await flush(b.page);
     assert.deepEqual(await colors(b.page),expected);
     await b.page.evaluate(()=>styk.fit());
-    await b.page.waitForFunction(()=>!styk.state.editablePreparing&&styk.state.renderer.last?.report===styk.editor.report);
+    await b.page.waitForFunction(()=>styk.state.renderer.engineSide?.frameReport===styk.editor.report);
     await b.page.screenshot({path:path.join(run,`colors-${sourceVersion}-to-${targetVersion}.png`)});
     checks.push(`Rendered figure colors preserved through real OS clipboard (${sourceVersion} to ${targetVersion})`);
   }

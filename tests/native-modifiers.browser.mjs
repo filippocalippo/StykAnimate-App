@@ -10,7 +10,7 @@ const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('
 async function setup() {
   await page.evaluate(async()=>{
     const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');
-    const {worldToScreen}=await import('/src/renderer.mjs');
+    const {worldToScreen}=await import('/src/renderer-geometry.mjs');
     const report=emptyDocument(),figure=report.figure_types[0];report.keyframes=[createFrame([createObject(figure,1,400,300)])];
     styk.editor.load(report,'Native modifiers');styk.editor.select(1,0);styk.fit();
     window.__screen=point=>{const r=document.querySelector('#viewport').getBoundingClientRect(),p=worldToScreen(point,{report:styk.editor.report,frame:styk.editor.evaluatedFrame,view:styk.state.view});return{x:r.x+p.x,y:r.y+p.y};};

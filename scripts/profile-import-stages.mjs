@@ -3,12 +3,13 @@ import { createRequire } from 'node:module';
 import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { exposeWorkspaceSamples } from '../tests/support/workspace-samples.mjs';
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url);
-const { startBackend } = require('../desktop/backend.cjs');
-const backend = await startBackend({ appRoot }); let browser;
+const { startDesktopHost } = require('../desktop/web-host.cjs');
+const backend = await startDesktopHost({ appRoot }); let browser;
 try {
   try { browser = await chromium.launch({ headless: true }); } catch { browser = await chromium.launch({ channel: 'chrome', headless: true }); }
-  const page = await browser.newPage(); await page.goto(`${backend.origin}/api/health`);
+  const page = await browser.newPage(); await exposeWorkspaceSamples(page); await page.goto(`${backend.origin}/tests/fixtures/blank.html`);
   const result = await page.evaluate(async () => {
     const { Editor } = await import('/src/editor.mjs');
     const { validateScene } = await import('/src/pivot/model.mjs');
@@ -20,7 +21,9 @@ try {
       worker.onmessage = ({ data }) => pending.get(data.type)?.({ ...data, receivedEpoch: epoch() });
       worker.onerror = error => { throw error; };
       const next = type => new Promise(resolve => pending.set(type, resolve));
-      const ready = next('ready'); worker.postMessage({ type: 'load', path }); const metrics = (await ready).metrics;
+      // The sample's bytes, read as the desktop reads a sample, are imported in the worker.
+      const sample = await window.stykTestReadSample(path); if (!sample.ok) throw new Error(sample.error);
+      const ready = next('ready'); worker.postMessage({ type: 'load', name: sample.name, base64: sample.base64 }); const metrics = (await ready).metrics;
       const variants = [];
       for (const compact of [false, true]) {
         const longTasks = []; let phase = 'receive';

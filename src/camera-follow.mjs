@@ -1,5 +1,5 @@
 import {messageError} from './localized-error.mjs';
-import {evaluatedFrame, buildGeometry, timeline, evaluationGeneration} from './pivot/geometry.mjs';
+import {evaluatedFrame, buildGeometry, timeline, evaluationGeneration, evaluationGeometryGeneration} from './pivot/geometry.mjs';
 import {layerIdForUid} from './layers.mjs';
 
 /**
@@ -81,7 +81,7 @@ function dependencies(report, uids) {
   // Definitions are edited in place, so their pose-relevant parts are compared by value.
   const definitions = JSON.stringify(report.figure_types.filter(figure => types.has(figure.figure_type_id)).map(figure => [figure.figure_type_id, figure.segments]));
   return {sheet: Boolean(sheet), layers, tracks: layers.map(id => sheet?.tracks[id]), sources: s.frameSources, definitions,
-    fixed: [sheet ? null : report.keyframes, sheet?.legacyAnimation, s.animation, report.fps, report.canvas_width, report.canvas_height, sheet?.duration]};
+    fixed: [sheet ? null : report.keyframes, sheet ? null : evaluationGeometryGeneration(report), sheet?.legacyAnimation, s.animation, report.fps, report.canvas_width, report.canvas_height, sheet?.duration]};
 }
 const keySource = (sources, key) => key.value?.frameId ? sources?.[key.value.frameId] : key.value;
 /** The earliest frame whose samples may differ: Infinity when nothing relevant changed, 0 for everything. */

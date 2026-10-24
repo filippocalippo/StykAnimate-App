@@ -5,7 +5,6 @@ import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 import {composeAnimationChannels, validateAnimationDocument} from '../src/animation-channels.mjs';
 import {evaluatedFrame, timeline} from '../src/pivot/geometry.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
-import {compilePlaybackPacket} from '../src/playback-worker.mjs';
 import {animationPropertyState} from '../src/animation-property-state.mjs';
 
 const target = {kind: 'figure', uid: 1};
@@ -89,14 +88,12 @@ test('existing order commands cross numeric depths, with one undoable change and
   }
 });
 
-test('depth is identical in worker playback and materialized Pivot output', async () => {
+test('depth is identical in materialized Pivot output', () => {
   const e = fixture(); e.addAnimationKey(target, 'zIndex', 0, 2); e.addAnimationKey(target, 'zIndex', 10, -2);
   const exported = materializePivotDocument(e.serialize());
   for (const tick of [0, 5, 9, 10, 20]) {
     const expected = order(sample(e.report, tick));
     assert.deepEqual(order(sample(exported, tick)), expected);
-    const packet = await compilePlaybackPacket(e.report, tick);
-    assert.deepEqual(packet.groups.map(group => e.report.keyframes[0].objects[group.slot].unique_id), expected);
   }
   assert.ok(exported.keyframes.every(frame => frame.objects.every(object => object._stykZIndex === undefined)));
 });

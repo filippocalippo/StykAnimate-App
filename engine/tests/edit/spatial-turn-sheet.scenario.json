@@ -1,0 +1,92 @@
+{
+ "name": "spatial-turn-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/spatial/mesh-perspective.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "rotateJoint",
+   0.2
+  ],
+  [
+   "rotateJoint",
+   -0.1,
+   {
+    "isolate": true
+   }
+  ],
+  [
+   "setSpatialPose",
+   {
+    "turn": 0.3
+   }
+  ],
+  [
+   "setSpatialPose",
+   {
+    "pitch": -0.2,
+    "bend": 0.1
+   }
+  ],
+  [
+   "@select",
+   1,
+   8
+  ],
+  [
+   "rotateJoint",
+   0.4
+  ],
+  [
+   "setSpatialPose",
+   {
+    "bend": 0.5
+   },
+   {
+    "wholeFigure": true
+   }
+  ],
+  [
+   "setSpatialPose",
+   {
+    "roll": 1
+   }
+  ],
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "setSpatialPose",
+   {
+    "turn": 0.1
+   },
+   {
+    "wholeFigure": true
+   }
+  ],
+  [
+   "setSpatialPose",
+   {
+    "turn": 0.1
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

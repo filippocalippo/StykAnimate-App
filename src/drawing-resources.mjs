@@ -15,6 +15,16 @@ import {prepareDrawingChanges,needsDrawingPreparation,validateDrawingChanges,ado
 const owners=new WeakMap(),clipboardPixels=new WeakMap();
 export const drawingClipboardPixels=clipboard=>clipboardPixels.get(clipboard);
 export const drawingResourcesFor=report=>owners.get(report);
+/** Whether a cel's pixels differ from the published ones (or are being loaded): the engine
+ * draws it from the live tiles (engine/engine-live-cels.mjs) until they are published. */
+export const entryUnpublished=entry=>Boolean(entry.store||entry.deferred?.length)&&entry.published?.revision!==entry.revision;
+/** Whether any drawing cel of `report` has pixels that are not published yet. */
+export function drawingUnpublished(report){
+  const resources=owners.get(report);
+  if(!resources)return false;
+  for(const entry of resources.entries.values())if(!entry.transient&&entryUnpublished(entry))return true;
+  return false;
+}
 export async function drawingBarrier(report,options={}) {
   await owners.get(report)?.flush(options);
   const seen=options.seen??new Set();if(seen.has(report))return;seen.add(report);
@@ -44,13 +54,12 @@ const PUBLICATION_BATCH_BYTES=1024*1024;
  * the per-tile PNG blob on image_assets[0].styk_tiles plus a bounds-sized
  * preview PNG on data_url keep legacy asset consumers working. */
 export class DrawingResources {
-  constructor(report,{tileBytes=defaultTileBudget(),levelBytes=Math.round(tileBytes/3),scratchBytes=64*1024*1024,hardBytes,onChange=()=>{},onError=()=>{},worker,strokeWorker,history}={}) {
+  constructor(report,{tileBytes=defaultTileBudget(),levelBytes=Math.round(tileBytes/3),scratchBytes=64*1024*1024,hardBytes,onChange=()=>{},onPublished=()=>{},onError=()=>{},worker,strokeWorker,history}={}) {
     // tileBudget is the retention target; hardBudget is the only point a
     // required working set is refused (at least 768 MiB). Between them, required dirty/pinned
     // tiles stay resident while publication frees them in the background.
-    Object.assign(this,{report,tileBudget:tileBytes,hardBudget:hardBytes??tileBytes*4,levelBudget:levelBytes,scratchBudget:scratchBytes,onChange,onError,entries:new Map(),transients:new Set(),worker:worker??new DrawingWorker(),decodeWorker:worker??new DrawingWorker(),strokeWorker:strokeWorker??new StrokeWorker(),generation:1,surfaceVersion:0,decodeQueue:[],thumbnailQueue:new Map(),thumbnailCache:new Map(),thumbnailWorker:worker??new DrawingWorker(),decodes:0,lastEncode:null,injectedWorker:Boolean(worker)});owners.set(report,this);
+    Object.assign(this,{report,tileBudget:tileBytes,hardBudget:hardBytes??tileBytes*4,levelBudget:levelBytes,scratchBudget:scratchBytes,onChange,onPublished,onError,entries:new Map(),transients:new Set(),worker:worker??new DrawingWorker(),decodeWorker:worker??new DrawingWorker(),strokeWorker:strokeWorker??new StrokeWorker(),generation:1,surfaceVersion:0,decodeQueue:[],thumbnailQueue:new Map(),thumbnailCache:new Map(),thumbnailWorker:worker??new DrawingWorker(),decodes:0,lastEncode:null,injectedWorker:Boolean(worker)});owners.set(report,this);
     this.pixelMemory=new DrawingTileMemory();
-    this.compositeWorker=worker??new DrawingWorker(new URL('./drawing-composite-worker.mjs',import.meta.url));
     if(typeof Worker!=='undefined')this.previews=new DrawingPreviewCache(new DrawingWorker(),{budgetBytes:scratchBytes,onReady:()=>this.onChange(),onError,reserve:bytes=>this.scratchReserved(null,bytes),hold:(job,bytes)=>this.hold(job,bytes,job.entry)});
     this.history=history===false?null:history??(typeof Worker!=='undefined'&&typeof indexedDB!=='undefined'?new DrawingHistory({reserve:bytes=>this.reserve(bytes),hold:bytes=>this.hold(this.history,bytes),onWarning:error=>this.onError(error)}):null);
   }
@@ -80,11 +89,13 @@ export class DrawingResources {
   restorePublication(entry,figure){
     const published=entry.published,d=drawingMetadata(figure);
     if(entry.external||d?.version!==2||published?.revision!==entry.revision)return;
-    const asset=figure.image_assets[0];
+    const asset=figure.image_assets[0],bounds=Object.hasOwn(published,'bounds')?published.bounds:d.bounds;
+    if(asset.styk_tiles===(published.url||undefined)&&asset.data_url===EMPTY_PNG&&asset.width===1&&asset.height===1&&asset.display_width===1&&asset.display_height===1&&d.revision===entry.revision&&JSON.stringify(d.bounds??null)===JSON.stringify(bounds??null))return;
     if(published.url)asset.styk_tiles=published.url;else delete asset.styk_tiles;
     asset.data_url=EMPTY_PNG;asset.width=asset.height=asset.display_width=asset.display_height=1;
-    d.revision=entry.revision;
-    const bounds=Object.hasOwn(published,'bounds')?published.bounds:d.bounds;d.bounds=bounds?{...bounds}:null;
+    d.revision=entry.revision;d.bounds=bounds?{...bounds}:null;
+    // The definition changed in place: whoever holds a copy of the document (the engine's session) is told.
+    this.onPublished(figure);
   }
   /** Resident tile bytes dedupe by pixel buffer: copy-on-write forks share
    * tiles, so shared tiles count once, not once per entry. */
@@ -121,7 +132,7 @@ export class DrawingResources {
     for(const e of this.surfaces())if(e!==except){e.levels=null;e.levelKnown=null;}
     for(const e of this.evictionOrder()){
       if(resident()+bytes<=target)break;
-      if(e===except||e.pinned||e.preparing||!e.store||e.published?.revision!==e.revision)continue;this.onEvictStore?.(e,e.store);e.store=null;e.levels=null;e.levelKnown=null;this.surfaceVersion++;
+      if(e===except||e.pinned||e.preparing||!e.store||e.published?.revision!==e.revision)continue;e.store=null;e.levels=null;e.levelKnown=null;this.surfaceVersion++;
     }
     if(resident()+bytes<=target)return;
     // Everything left is dirty or pinned work that must not be lost. Kick the
@@ -166,7 +177,7 @@ export class DrawingResources {
     for(const e of stores){
       if(bytes<=this.tileBudget)break;
       if(e===current||e.pinned||e.preparing||e.published?.revision!==e.revision)continue;
-      this.onEvictStore?.(e,e.store);e.store=null;e.levels=null;e.levelKnown=null;this.dropScratch(e);this.surfaceVersion++;bytes=this.stats.bytes;evicted=true;
+      e.store=null;e.levels=null;e.levelKnown=null;this.dropScratch(e);this.surfaceVersion++;bytes=this.stats.bytes;evicted=true;
     }
     if(evicted)this.onChange();
   }
@@ -194,14 +205,10 @@ export class DrawingResources {
       // asset-only undo/redo restored an older definition snapshot.
       const live=this.report.figure_types.find(f=>drawingMetadata(f)?.celId===d.celId)??figure,asset=live.image_assets[0];
       const url=e.published?e.published.url:asset.styk_tiles;
-      // A GPU-resident copy of the published base restores without decoding.
-      const result=await this.decode(e,()=>(d.version===2&&this.restoreStore?.(e,base))||(d.version===1?this.decodeWorker.request('decode-legacy',{url:asset.data_url,crop:d.crop}):url?this.decodeTiles(url):Promise.resolve({tiles:[]})),priority);
+      const result=await this.decode(e,()=>(d.version===1?this.decodeWorker.request('decode-legacy',{url:asset.data_url,crop:d.crop}):url?this.decodeTiles(url):Promise.resolve({tiles:[]})),priority);
       if(this.disposed||e.disposed||generation!==this.generation)throw messageError(new DOMException('', 'AbortError'), "errors.drawingResources.drawingChanged", {});
       const store=tileStoreFromList(result.tiles);
       const exact=!e.deferred.length;
-      // Intact GPU slots of this published base stay valid for its tiles;
-      // deferred history below then replaces the tiles it changes.
-      this.onStoreRestored?.(e,store,base);
       for(const step of e.deferred)applyTileChanges(store,step.changes,step.direction);
       e.deferred=[];this.reserve(store.bytes,e);e.store=store;e.stamp++;e.decodeError=null;e.levels=null;e.levelKnown=null;this.dropScratch(e);this.surfaceVersion++;
       if(exact&&result.levels?.length){e.levels=result.levels.map(list=>tileStoreFromList(list));this.levelsReserved(e);}
@@ -277,6 +284,9 @@ export class DrawingResources {
     if(!e.store&&!e.loading)this.schedule();
     return e;
   }
+  /** The cel the drawing workspace works on: the engine holds it live (engine/engine-live-cels.mjs)
+   * so its first stroke finds it ready. `null` once nothing is watched. */
+  watch(entry){if(this.watching===entry)return;this.watching=entry??null;this.onChange();}
   present(e,dirty) {
     const rect=dirty?{x:dirty.x,y:dirty.y,width:(dirty.right??dirty.x+dirty.width)-dirty.x,height:(dirty.bottom??dirty.y+dirty.height)-dirty.y}:null;
     e.pixelStamp=(e.pixelStamp??0)+1;invalidateLevels(e,rect);
@@ -374,6 +384,10 @@ export class DrawingResources {
       checkAbort();if(!active())return;
       const store=e.store,storeRevision=store.revision,tiles=[...store].filter(t=>!tileTransparent(t));
       const current=()=>active()&&e.store===store&&store.revision===storeRevision;
+      // An undo or redo being prepared replaces this revision when it applies: wait for it
+      // rather than finish a cel about to change. Finishing costs the blob's assembly in the
+      // worker and the figure update that follows it here; inside a replay both would delay it.
+      const replays=async()=>{for(let wait;(wait=this.history?.replaying());)await wait;};
       store.freeze();
       // Tiles keep their worker-encoded PNG until a mutation clears it, so a
       // re-publish ships pixels only for changed tiles; the worker reassembles
@@ -384,7 +398,7 @@ export class DrawingResources {
       const send=async pending=>{
         let index=0,result;
         do{
-          checkAbort();if(!current())return null;
+          await replays();checkAbort();if(!current())return null;
           const first=index===0,batch=[];let bytes=0;
           while(index<pending.length){
             const tile=pending[index];
@@ -409,6 +423,7 @@ export class DrawingResources {
             fresh=[...fresh.filter(t=>t.png),...pngs];
           }
           const partial=index<pending.length;
+          if(!partial){await replays();checkAbort();if(!current())return null;}
           result=await this.worker.request('encode-tiles',{celId:e.id,partial,...(first||!partial?{keep}:{}),tiles:fresh},{signal,transfer:fresh.map(t=>t.pixels??t.png)});
           checkAbort();if(!current())return null;
           encoded+=result.encoded??0;
@@ -425,7 +440,7 @@ export class DrawingResources {
         if(!result)return;
         if(result.missing?.length)throw messageError(new Error(''), "errors.drawingResources.theDrawingEncoderLostItsTileCacheTry", {});
       }
-      if(!current())return;
+      await replays();if(!current())return;
       // Tiles replaced since the snapshot carry stale bytes; publish again.
       if(tiles.some(t=>e.store.get(t.tx,t.ty)!==t))return;
       this.lastEncode={encoded,reused:tiles.length-encoded};
@@ -450,5 +465,5 @@ export class DrawingResources {
     for(const [id,e] of this.entries)if(!reachable.has(id)&&!retained.has(id)&&!e.pinned){e.disposed=true;this.dropScratch(e);e.store=null;e.levels=null;e.levelKnown=null;this.entries.delete(id);}
     this.residentMemory();
   }
-  dispose(){if(this.disposed)return this.disposal;this.disposed=true;this.disposal=this.history?.dispose().catch(()=>{})??Promise.resolve();this.previews?.dispose();this.generation++;clearTimeout(this.timer);this.worker.dispose();for(const w of this._encoders??[])if(w!==this.worker)w.dispose();this.decodeWorker.dispose();this.thumbnailWorker.dispose();this.compositeWorker.dispose();if(this.strokeWorker.close)this.strokeWorker.close();else this.strokeWorker.dispose();this.thumbnailQueue.clear();for(const t of this.thumbnailCache.values())t.canvas.width=t.canvas.height=1;this.thumbnailCache.clear();for(const job of this.decodeQueue)job.reject(messageError(new DOMException('', 'AbortError'), "errors.drawingResources.drawingDocumentClosed", {}));this.decodeQueue=[];for(const e of this.surfaces()){this.dropScratch(e);e.disposed=true;e.store=null;e.levels=null;e.levelKnown=null;}this.transients.clear();this.entries.clear();this.pixelMemory.dispose();this.working?.clear();owners.delete(this.report);return this.disposal;}
+  dispose(){if(this.disposed)return this.disposal;this.disposed=true;this.disposal=this.history?.dispose().catch(()=>{})??Promise.resolve();this.previews?.dispose();this.generation++;clearTimeout(this.timer);this.worker.dispose();for(const w of this._encoders??[])if(w!==this.worker)w.dispose();this.decodeWorker.dispose();this.thumbnailWorker.dispose();if(this.strokeWorker.close)this.strokeWorker.close();else this.strokeWorker.dispose();this.thumbnailQueue.clear();for(const t of this.thumbnailCache.values())t.canvas.width=t.canvas.height=1;this.thumbnailCache.clear();for(const job of this.decodeQueue)job.reject(messageError(new DOMException('', 'AbortError'), "errors.drawingResources.drawingDocumentClosed", {}));this.decodeQueue=[];for(const e of this.surfaces()){this.dropScratch(e);e.disposed=true;e.store=null;e.levels=null;e.levelKnown=null;}this.transients.clear();this.entries.clear();this.pixelMemory.dispose();this.working?.clear();owners.delete(this.report);return this.disposal;}
 }

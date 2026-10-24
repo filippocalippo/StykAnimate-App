@@ -6,8 +6,8 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const appRoot = fileURLToPath(new URL('..', import.meta.url)), out = path.join(appRoot, 'artifacts');
-const {startBackend} = createRequire(import.meta.url)('../desktop/backend.cjs');
-await mkdir(out, {recursive: true}); const backend = await startBackend({appRoot});
+const {startDesktopHost} = createRequire(import.meta.url)('../desktop/web-host.cjs');
+await mkdir(out, {recursive: true}); const backend = await startDesktopHost({appRoot});
 const checks = [], errors = []; let browser, page;
 const near = (a,b) => assert.ok(Math.abs(a-b) < .001, `${a} != ${b}`);
 try {

@@ -1,0 +1,155 @@
+{
+ "name": "channels-scalar-fixed",
+ "document": "channels-scalar-fixed.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "sheetApplyChannels",
+   [
+    {
+     "id": "figure:1:opacity",
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "opacity",
+     "keys": [
+      {
+       "id": "hidden",
+       "tick": -1,
+       "hidden": true,
+       "interpolation": "linear",
+       "value": 0.3
+      },
+      {
+       "id": "first",
+       "tick": 2,
+       "interpolation": "linear",
+       "value": 0.3
+      },
+      {
+       "id": "last",
+       "tick": 5,
+       "interpolation": "linear",
+       "value": 0.8
+      }
+     ]
+    },
+    {
+     "id": "figure:1:x",
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "x",
+     "keys": [
+      {
+       "id": "hidden",
+       "tick": -1,
+       "hidden": true,
+       "interpolation": "linear",
+       "value": 220.25
+      },
+      {
+       "id": "first",
+       "tick": 2,
+       "interpolation": "linear",
+       "value": 220.25
+      },
+      {
+       "id": "last",
+       "tick": 5,
+       "interpolation": "linear",
+       "value": 250.75
+      }
+     ]
+    },
+    {
+     "id": "camera::scale",
+     "target": {
+      "kind": "camera"
+     },
+     "property": "scale",
+     "keys": [
+      {
+       "id": "hidden",
+       "tick": -1,
+       "hidden": true,
+       "interpolation": "linear",
+       "value": 1.1
+      },
+      {
+       "id": "first",
+       "tick": 2,
+       "interpolation": "linear",
+       "value": 1.1
+      },
+      {
+       "id": "last",
+       "tick": 5,
+       "interpolation": "linear",
+       "value": 1.4
+      }
+     ]
+    },
+    {
+     "id": "scene::color",
+     "target": {
+      "kind": "scene"
+     },
+     "property": "color",
+     "keys": [
+      {
+       "id": "hidden",
+       "tick": -1,
+       "hidden": true,
+       "interpolation": "linear",
+       "value": 1122867
+      },
+      {
+       "id": "first",
+       "tick": 2,
+       "interpolation": "linear",
+       "value": 1122867
+      },
+      {
+       "id": "last",
+       "tick": 5,
+       "interpolation": "linear",
+       "value": 7833753
+      }
+     ]
+    }
+   ],
+   "Set movieclip timing"
+  ],
+  [
+   "@seek",
+   4.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

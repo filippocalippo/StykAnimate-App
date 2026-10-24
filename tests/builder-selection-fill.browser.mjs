@@ -6,7 +6,7 @@ const browser=await chromium.launch({channel:'chrome',headless:true});
 const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 page.on('pageerror',e=>errors.push(e.message));
 const settle=()=>page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
-const screen=point=>page.evaluate(async point=>{const {worldToScreen}=await import('/src/renderer.mjs'),{editor,state}=styk;const p=worldToScreen(point,{report:editor.report,frame:editor.frame,view:state.view}),r=document.querySelector('#viewport').getBoundingClientRect();return {x:r.x+p.x,y:r.y+p.y};},point);
+const screen=point=>page.evaluate(async point=>{const {worldToScreen}=await import('/src/renderer-geometry.mjs'),{editor,state}=styk;const p=worldToScreen(point,{report:editor.report,frame:editor.frame,view:state.view}),r=document.querySelector('#viewport').getBoundingClientRect();return {x:r.x+p.x,y:r.y+p.y};},point);
 const fixture=builderFixture(6);
 fixture.figure_types[0].segments.forEach((s,i)=>{s.parent_id=i<4?i:0;s.angle_rad=i<4?i*Math.PI/2:4.2+(i-4)*.7;s.length=i<4?80:45;s.thickness=4;});
 fixture.keyframes[0].objects[0].angles=fixture.figure_types[0].segments.map(s=>s.angle_rad);

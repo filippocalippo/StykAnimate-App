@@ -1,0 +1,465 @@
+{
+ "name": "handle-commands-sheet",
+ "document": "joined-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   6
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "nudgeHandle",
+   5,
+   -3
+  ],
+  [
+   "nudgeHandle",
+   2,
+   0,
+   {
+    "bend": true
+   }
+  ],
+  [
+   "nudgeHandle",
+   0,
+   4,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "nudgeHandle",
+   3,
+   3,
+   {
+    "view": {
+     "scale": 2
+    }
+   }
+  ],
+  [
+   "nudgeHandle",
+   -4,
+   2,
+   {
+    "view": {
+     "scale": 1.5,
+     "rotation": 0.3,
+     "flip": true
+    }
+   }
+  ],
+  [
+   "nudgeHandle",
+   2,
+   2,
+   {
+    "editMode": true
+   }
+  ],
+  [
+   "nudgeHandle",
+   1,
+   -2,
+   {
+    "wholeFigure": true
+   }
+  ],
+  [
+   "nudgeHandle",
+   0,
+   0
+  ],
+  [
+   "nudgeHandle",
+   3,
+   1,
+   {
+    "uid": 2,
+    "jointIndex": 2
+   }
+  ],
+  [
+   "nudgeHandle",
+   3,
+   1,
+   {
+    "uid": 3,
+    "handleId": 22
+   }
+  ],
+  [
+   "nudgeHandle",
+   5,
+   5,
+   {
+    "uid": 1,
+    "handleId": 0
+   }
+  ],
+  [
+   "nudgeHandle",
+   5,
+   5,
+   {
+    "uid": 1,
+    "handleId": 0,
+    "editMode": true
+   }
+  ],
+  [
+   "nudgeHandle",
+   1,
+   1,
+   {
+    "uid": 99
+   }
+  ],
+  [
+   "nudgeHandle",
+   1,
+   1,
+   {
+    "uid": 1,
+    "handleId": 77
+   }
+  ],
+  [
+   "nudgeHandle",
+   1,
+   1,
+   {
+    "view": {
+     "scale": 0
+    }
+   }
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "alignHandle",
+   1,
+   0
+  ],
+  [
+   "alignHandle",
+   0,
+   -1,
+   {
+    "wholeFigure": true
+   }
+  ],
+  [
+   "alignHandle",
+   1,
+   1,
+   {
+    "bend": true
+   }
+  ],
+  [
+   "alignHandle",
+   -1,
+   0,
+   {
+    "editMode": true
+   }
+  ],
+  [
+   "alignHandle",
+   0,
+   0
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "alignHandle",
+   1,
+   0
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "segmentValues"
+  ],
+  [
+   "segmentValues",
+   {
+    "relative": true
+   }
+  ],
+  [
+   "setSegmentValues",
+   {
+    "angle": 45
+   }
+  ],
+  [
+   "setSegmentValues",
+   {
+    "bend": 20,
+    "length": 80
+   }
+  ],
+  [
+   "setSegmentValues",
+   {
+    "angle": 10
+   },
+   {
+    "relative": true
+   }
+  ],
+  [
+   "setSegmentValues",
+   {
+    "length": 0
+   }
+  ],
+  [
+   "setSegmentValues",
+   {
+    "foo": 1
+   }
+  ],
+  [
+   "setSegmentValues",
+   {
+    "angle": 10
+   },
+   {
+    "relative": true
+   }
+  ],
+  [
+   "beginSegmentValueEdit",
+   {
+    "editMode": true
+   }
+  ],
+  [
+   "setSegmentValues",
+   {
+    "angle": 30,
+    "length": 60
+   }
+  ],
+  [
+   "setSegmentValues",
+   {
+    "bend": 15
+   }
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "beginSegmentValueEdit",
+   {
+    "isolate": true
+   }
+  ],
+  [
+   "setSegmentValues",
+   {
+    "angle": -20
+   }
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "@select",
+   3,
+   2
+  ],
+  [
+   "setSegmentValues",
+   {
+    "length": 50
+   }
+  ],
+  [
+   "copySegmentValues"
+  ],
+  [
+   "@select",
+   3,
+   1
+  ],
+  [
+   "pasteSegmentValues"
+  ],
+  [
+   "pasteSegmentValues",
+   "12,5:abc:3:70"
+  ],
+  [
+   "pasteSegmentValues",
+   "1:2:-3"
+  ],
+  [
+   "pasteSegmentValues",
+   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "locateEditedHandle",
+   -1
+  ],
+  [
+   "locateEditedHandle",
+   1
+  ],
+  [
+   "locateEditedHandle",
+   2
+  ],
+  [
+   "locateEditedHandle",
+   -1,
+   {
+    "handleId": 0
+   }
+  ],
+  [
+   "locateEditedHandle",
+   1,
+   {
+    "uid": 2,
+    "jointIndex": 1
+   }
+  ],
+  [
+   "@select",
+   3,
+   0
+  ],
+  [
+   "segmentValues",
+   {
+    "relative": true
+   }
+  ],
+  [
+   "setSegmentValues",
+   {
+    "angle": 25
+   },
+   {
+    "relative": true
+   }
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   330,
+   330
+  ],
+  [
+   "locateEditedHandle",
+   -1
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    3
+   ]
+  ],
+  [
+   "nudgeHandle",
+   2,
+   2,
+   {
+    "uid": 1,
+    "handleId": 0
+   }
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   300,
+   330
+  ],
+  [
+   "locateEditedHandle",
+   1
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   2,
+   2
+  ],
+  [
+   "nudgeHandle",
+   4,
+   4
+  ],
+  [
+   "setSegmentValues",
+   {
+    "angle": 90,
+    "bend": 5
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

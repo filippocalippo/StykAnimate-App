@@ -1,4 +1,5 @@
 import {activeVfx,vfxStack,vfxPadding} from './vfx.mjs';
+import {drawableVfxPadding,hasDrawableVfx} from './vfx-drawable.mjs';
 import {filterVfxCanvas,vfxSurfaceDimension,vfxSourcePadding,releaseVfxWorkerSource,prepareVfxWorkerSource,vfxWorkerPixelsOwned} from './vfx-gpu.mjs';
 import {fitsVfxSurface,vfxSurfaceTiles,vfxSurfaceError,VFX_MAX_PIXELS} from './vfx-surface.mjs';
 import {sceneVfxPlan} from './vfx-scene.mjs';
@@ -6,7 +7,6 @@ import {VfxCPU} from './vfx-cpu.mjs';
 const surfaces=new WeakMap();
 const sceneSurfaces=new WeakMap();
 const sceneInputs=new WeakMap();
-const empty=Object.freeze([]);
 /** Capability bounds beyond the GPU executor surface:
  *  a painted 2D source canvas (8192 px / 64 MP) and one assembled software
  *  buffer (128 MP). The software executor has no texture limit; these bounds
@@ -136,14 +136,6 @@ function paintSourceRect(paintAt,src){
  }
  return data;
 }
-export function segmentVfx(item){if(!item.obj?._stykVfx||item.type==='poly'||!item.seg)return empty;return vfxStack(item.obj,{kind:'segment',figureTypeId:item.fig?.figure_type_id,handleId:item.seg.segment_id});}
-export function drawableVfxPadding(item){
- if(!item.obj?._stykVfx&&!item._movieclipOwner&&!item._movieclipInner)return 0;
- let padding=vfxPadding(vfxStack(item.obj),Math.abs(item.obj?.scale??1))+vfxPadding(segmentVfx(item),Math.abs(item.obj?.scale??1));
- if(item._movieclipOwner)padding+=vfxPadding(item._movieclipOwner.effects,Math.abs(item._movieclipOwner.scale??1));
- for(let inner=item._movieclipInner;inner;inner=inner.inner)padding+=vfxPadding(inner.owner.effects,Math.abs(inner.owner.scale??1));return padding;
-}
-export function hasDrawableVfx(item){if(item.obj?._stykVfx&&Object.values(item.obj._stykVfx).some(stack=>activeVfx(stack).length))return true;if(activeVfx(item._movieclipOwner?.effects).length)return true;for(let inner=item._movieclipInner;inner;inner=inner.inner)if(activeVfx(inner.owner.effects).length)return true;return false;}
 /** Preview raster budgets must include nested effect halos, not only artwork.
  * Called on cache misses; the document and requested export scale are untouched. */
 export function vfxRasterScale(items,bounds,requested,limit){

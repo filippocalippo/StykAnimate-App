@@ -40,7 +40,7 @@ Simple thumbnails represent stored native frame rows. Advanced can also place in
 With the development server running:
 
 ```sh
-node --test tests/animation-mode-sync.test.mjs tests/editor-frame-draft.test.mjs tests/pivot-frame-draft.test.mjs tests/stored-frame-playback.test.mjs tests/frame-clipboard-authored.test.mjs
+node --test tests/animation-mode-sync.test.mjs tests/editor-frame-draft.test.mjs tests/pivot-frame-draft.test.mjs tests/frame-clipboard-authored.test.mjs
 node tests/animation-mode-sync.browser.mjs
 node tests/simple-timeline.component.browser.mjs
 node scripts/check.mjs

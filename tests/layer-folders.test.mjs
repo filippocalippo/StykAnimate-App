@@ -6,9 +6,7 @@ import {layerFolderRows} from '../src/layer-folders.mjs';
 import {organizeTimelineRows} from '../src/timeline-organization.mjs';
 import {sheetRowLayout} from '../src/timeline-rows.mjs';
 import {runTimelineHotkey} from '../src/timeline-hotkeys.mjs';
-import {spawnSync} from 'node:child_process';
-import {createRequire} from 'node:module';
-const backend=createRequire(import.meta.url)('../desktop/backend.cjs');
+import {roundTrip} from './support/codec.mjs';
 
 function editor() { const e = new Editor({demo:false,layerTimeline:true}).load(emptyDocument()); for(const name of ['Floor','Drawing','Scene 2'])e.createLayer(name); return e; }
 test('keyboard layer navigation skips folder headers and never selects folder cells', () => {
@@ -86,13 +84,9 @@ test('bad folder references reject loading atomically and invalid operations lea
   e.moveLayersToFolder(['layer-1','layer-2'],f.id);const grouped=e.serialize(),scattered=e.serialize();
   scattered._styk.layers.order=['layer-1','layer-3','layer-2','layer-4'];assert.throws(()=>e.load(scattered));assert.deepEqual(e.serialize(),grouped);
 });
-test('native STYK export and import retain folder membership and layer order', () => {
+test('native STYK export and import retain folder membership and layer order', async () => {
   const e=editor(), folder=e.createLayerFolder('Shot',['layer-1','layer-2']), document=e.serialize();
-  const candidate=backend.pythonCandidates()[0];
-  const script=`import json,sys\nfrom pathlib import Path\nsys.path.insert(0,str(Path('backend').resolve()))\nimport server\nstore=server.ProjectStore(server.WORKSPACE)\nraw,name=store.export({'document':json.load(sys.stdin),'format':'styk'})\nprint(json.dumps(store.import_bytes(raw,name)['document']))`;
-  const result=spawnSync(candidate.command,[...candidate.args,'-c',script],{input:JSON.stringify(document),encoding:'utf8',windowsHide:true,maxBuffer:8*1024*1024});
-  assert.equal(result.status,0,result.error?.message||result.stderr);
-  const restored=new Editor({demo:false,layerTimeline:true}).load(JSON.parse(result.stdout));
+  const restored=new Editor({demo:false,layerTimeline:true}).load(await roundTrip({document,format:'styk'}));
   assert.deepEqual(restored.report._styk.layers,document._styk.layers);
   assert.equal(restored.getLayer('layer-1').folderId,folder.id);
 });

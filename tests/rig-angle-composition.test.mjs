@@ -4,7 +4,7 @@ import {construction} from '../src/rig-examples-3d.mjs';
 import {Editor} from '../src/editor.mjs';
 import {createObject,createFrame,emptyDocument,defaultFigure} from '../src/demo.mjs';
 import {rigConstraintPlan,remapRigReferences} from '../src/rig-constraints.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {rigSections,rigControlChange} from '../src/rig-controls.mjs';
 import {renderInspector} from '../src/inspector-kit.mjs';
 const rigView=e=>renderInspector({kind:'joint',sections:rigSections(e)});

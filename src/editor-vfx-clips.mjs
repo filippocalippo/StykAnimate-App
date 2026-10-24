@@ -6,7 +6,8 @@ import {isGeneratorType} from './vfx-registry.mjs';
 import {normalizeAnimationTarget} from './animation-channels.mjs';
 import {connectedVfxConflict} from './vfx-connected.mjs';
 import {clipFromPreset} from './vfx-user-presets.mjs';
-const id=()=>crypto.randomUUID(),bytes=new WeakMap();
+import {editorDraws} from './editor-draws.mjs';
+const id=()=>editorDraws.uuid(),bytes=new WeakMap();
 function size(c){let n=bytes.get(c);if(n===undefined){n=JSON.stringify(c).length*2;bytes.set(c,n);}return n;}
 function unlocked(editor,target){const layer=editor.getLayer(target.kind==='scene'?'scene':editor.layerForUid(target.uid));if(layer?.locked)throw messageError(new Error(''), "errors.editorVfxClips.unlockBeforeEditingEffects", {name: layer.name});}
 function publish(editor,clips,label){
@@ -28,7 +29,7 @@ function generatorTiming(editor,effects,duration,options){
  if(!effects.some(e=>isGeneratorType(e.type))||'start' in options||'duration' in options)return options;
  return duration===null?{...options,start:0,duration:null}:{...options,start:Math.max(0,Math.floor(editor.tick)),duration};
 }
-const seeded=effect=>isGeneratorType(effect.type)&&effect.params.seed===1?{...effect,params:{...effect.params,seed:1+Math.floor(Math.random()*65534)}}:effect;
+const seeded=effect=>isGeneratorType(effect.type)&&effect.params.seed===1?{...effect,params:{...effect.params,seed:1+Math.floor(editorDraws.random()*65534)}}:effect;
 function find(editor,id){const c=vfxClips(editor.report).find(c=>c.id===id);if(!c)throw messageError(new Error(''), "errors.editorVfxClips.selectAnEffectClip", {});return c;}
 function checkScope(editor,clip){if(clip.includeAttached&&clip.target.kind==='figure'){const conflict=connectedVfxConflict(editor.evaluatedFrame,clip.target.uid);if(conflict)throw new Error(conflict);}}
 export const editorVfxClipMethods={
@@ -76,7 +77,7 @@ export const editorVfxClipMethods={
   return added.length?publish(this,[...vfxClips(this.report),...added],'Paste figure effects'):false;
  },
  duplicateVfxClip(id){this.copyVfxClip(id);const c=find(this,id);return this.pasteVfxClip(c.target,{start:c.duration===null?0:c.start+c.duration});},
- addVfxGroupEffect(id,type){const c=find(this,id),effect=seeded(createVfx(type,crypto.randomUUID()));this.setVfxClip(id,{effects:[...c.effects,effect]});return effect.id;},
+ addVfxGroupEffect(id,type){const c=find(this,id),effect=seeded(createVfx(type,editorDraws.uuid()));this.setVfxClip(id,{effects:[...c.effects,effect]});return effect.id;},
  reorderVfxGroupEffect(id,effectId,index){const c=find(this,id),from=c.effects.findIndex(e=>e.id===effectId);if(from<0||!Number.isInteger(index)||index<0||index>=c.effects.length)throw messageError(new Error(''), "errors.editorVfxClips.chooseAnEffectOrder", {});if(from===index)return false;const effects=[...c.effects];effects.splice(index,0,effects.splice(from,1)[0]);return this.setVfxClip(id,{effects});},
  setVfxClipParameter(id,effectId,param,value,options){return this.setVfxClipParameters(id,effectId,{[param]:value},options);},
  // Spatial handles can edit several values. Validate and publish one record,

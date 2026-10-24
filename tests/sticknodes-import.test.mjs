@@ -9,7 +9,6 @@ import {movieclipTime,movieclipAsset} from '../src/movieclips.mjs';
 import {sticknodesDrawables,sticknodesSpriteAsset} from '../src/sticknodes/geometry.mjs';
 import {synchronizeExistingDerived} from '../src/document-normalize.mjs';
 import {documentChunks,applyDocumentChunk} from '../src/document-transport.mjs';
-import {exportSVG} from '../src/svg-export.mjs';
 import {ImportClient} from '../src/import-client.mjs';
 import {openDocument} from '../src/sticknodes/decoder/project.mjs';
 import {gzipSync} from 'node:zlib';
@@ -56,8 +55,8 @@ test('source shape primitives use shared geometry and preserve transparent circl
  s.seg._sticknodes={kind:'circle',use_circle_outline:true,circle_is_hollow:true,outline:[1,2,3]};const ring=sticknodesDrawables(s)[0];assert.equal(ring.seg.segment_kind,'circleClear');assert.equal(ring.length,100);assert.equal(ring.thickness,20);
  const a=sticknodesSpriteAsset({width:40,height:20},{_sticknodesSprite:{ratio:3,pivotX:.25,pivotY:.75}});assert.equal(a.display_height,60);assert.deepEqual(a.anchor_start,{x:10,y:15});
 });
-test('imported figure SVG and normalization preserve its artwork',async()=>{
- const {document:doc}=await importStickNodes(syntheticNodes(),{filename:'rig.nodes'});const before=await (await exportSVG({report:doc})).text();synchronizeExistingDerived(doc);assert.equal(await (await exportSVG({report:doc})).text(),before);assert.ok(before.includes('<svg'));
+test('imported figure normalization preserves its artwork',async()=>{
+ const {document:doc}=await importStickNodes(syntheticNodes(),{filename:'rig.nodes'});const artwork=()=>JSON.stringify(buildGeometry(doc,doc.keyframes[0]).drawables.map(d=>[d.type,d.start,d.end,d.points]));const before=artwork();synchronizeExistingDerived(doc);assert.equal(artwork(),before);assert.ok(JSON.parse(before).length>0);
 });
 test('native clip engine retains source FPS, loop, single and hold semantics',()=>{
  const asset={duration:20,document:{fps:10}},settings={start:5,offset:2,speed:1,mode:'loop'};

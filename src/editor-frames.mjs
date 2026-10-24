@@ -24,6 +24,12 @@ function references(channel, retained, candidates, visited) {
   } else for (const id of entry.ids) if (candidates.has(id)) retained.add(id);
 }
 
+function sheetReferences(sheet, retained, candidates, visited) {
+  const keep = channel => references(channel, retained, candidates, visited);
+  for(const track of Object.values(sheet?.tracks??{})){keep({property:'pose',keys:track.keys});for(const key of track.keys)for(const patch of key.movieclipPatches??[])retained.add(patch.frameId);}
+  for(const channel of sheet?.legacyAnimation?.channels??[])keep(channel);
+}
+
 /** Validate persisted references before replacing the currently open document. */
 export function validateFrameIdentities(report) {
   const iterator=validateFrameIdentitySteps(report);
@@ -120,16 +126,22 @@ export const editorFrameMethods = {
     }
     if (direction === 'before' && !command.hadFrameSourceTable && !Object.keys(sources).length) delete this.report._styk.frameSources;
   },
+  /** The current references read by the source collector, without history or disposal. */
+  _currentFrameSourceIds(retained = new Set(), visited = new Set()) {
+    const keep = channel => references(channel, retained, this._generatedFrameSources, visited);
+    for (const channel of this.animationChannels) keep(channel);
+    sheetReferences(this.report._styk.layerSheet, retained, this._generatedFrameSources, visited);
+    for (const channel of this.report._styk.simpleFrameDraft?.animationBaseline?.channels ?? []) keep(channel);
+    return retained;
+  },
   /** Imported assets are retained; only this session's unreferenced pose captures
    * can be collected, after the undo/redo entries that needed them disappear. */
   _pruneFrameSources() {
     if (!this._generatedFrameSources?.size) return;
     const retained = new Set();
     const visited = new Set(), keep = channel => references(channel, retained, this._generatedFrameSources, visited);
-    for (const channel of this.animationChannels) keep(channel);
-    const keepSheet=sheet=>{for(const track of Object.values(sheet?.tracks??{})){keep({property:'pose',keys:track.keys});for(const key of track.keys)for(const patch of key.movieclipPatches??[])retained.add(patch.frameId);}for(const channel of sheet?.legacyAnimation?.channels??[])keep(channel);};
-    keepSheet(this.report._styk.layerSheet);
-    for (const channel of this.report._styk.simpleFrameDraft?.animationBaseline?.channels ?? []) keep(channel);
+    const keepSheet = sheet => sheetReferences(sheet, retained, this._generatedFrameSources, visited);
+    this._currentFrameSourceIds(retained, visited);
     // The usual retime still references every captured source. History cannot
     // make any of those collectible, so avoid traversing the undo window.
     if(retained.size===this._generatedFrameSources.size)return;

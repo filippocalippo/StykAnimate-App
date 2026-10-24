@@ -1,8 +1,7 @@
 /** Local regression evidence for the supplied hands pack; runs outside the UI. */
 import assert from 'node:assert/strict';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
-import {spawnSync} from 'node:child_process';
-import backend from '../desktop/backend.cjs';
+import {nodeCodec, exportDocument, importBytes} from '../tests/support/codec.mjs';
 import {Editor} from '../src/editor.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
 import {synchronizeExistingDerived} from '../src/document-normalize.mjs';
@@ -22,23 +21,14 @@ const historyBytes=e._undo.reduce((sum,command)=>sum+Buffer.byteLength(JSON.stri
 const saved=measure('serializeMs',()=>e.serialize());await writeFile(`${directory}/hands-edited.json`,JSON.stringify(saved));
 const materialized=measure('materializeMs',()=>materializePivotDocument(saved));synchronizeExistingDerived(materialized);
 await writeFile(`${directory}/hands-pivot.json`,JSON.stringify(materialized));
-const script=String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,'backend')
-import server
-out=Path('artifacts/figure-palette')
-for format_name,stem in [('styk','hands-edited'),('piv','hands-pivot')]:
- store=server.ProjectStore(server.WORKSPACE)
- document=json.loads((out/(stem+'.json')).read_text(encoding='utf8'))
- data,name=store.export({'document':document,'format':format_name,'filename':stem+'.'+format_name})
- (out/(stem+'.'+format_name)).write_bytes(data)
- reopened=store.import_bytes(data,name)['document']
- (out/(stem+'-reopened.json')).write_text(json.dumps(reopened),encoding='utf8')
- print(format_name,len(data),'bytes',len(reopened['keyframes']),'keys')
-`;
-const python=backend.pythonCandidates()[0],conversion=spawnSync(python.command,[...python.args,'-c',script],{encoding:'utf8',windowsHide:true,maxBuffer:1024*1024});
-assert.equal(conversion.status,0,conversion.error?.message||conversion.stderr);console.log(conversion.stdout.trim());
+// Export each through the codec the app runs and reopen it, as a save and a later open would.
+for(const [format,stem,document] of [['styk','hands-edited',saved],['piv','hands-pivot',materialized]]){
+  const codec=nodeCodec(),{bytes,name}=await exportDocument({document:JSON.parse(JSON.stringify(document)),format,filename:`${stem}.${format}`},{codec});
+  await writeFile(`${directory}/${stem}.${format}`,bytes);
+  const reopenedDocument=(await importBytes(bytes,name,{codec})).document;
+  await writeFile(`${directory}/${stem}-reopened.json`,JSON.stringify(reopenedDocument));
+  console.log(format,bytes.length,'bytes',reopenedDocument.keyframes.length,'keys');
+}
 const reopened=JSON.parse(await readFile(`${directory}/hands-edited-reopened.json`,'utf8'));
 const native=JSON.parse(await readFile(`${directory}/hands-pivot-reopened.json`,'utf8'));
 const digest=(report,frame)=>{

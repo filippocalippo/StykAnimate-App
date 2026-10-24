@@ -7,7 +7,6 @@ import {vfxStack,vfxProperty,documentHasVfx} from '../src/vfx.mjs';
 import {validateVfxClips,sampleVfxClip,clipContains,vfxRenderFrame} from '../src/vfx-clips.mjs';
 import {connectedVfxGeometry} from '../src/vfx-connected.mjs';
 import {snapshotPoseFrame} from '../src/pose-snapshot.mjs';
-import {vfxPreviewFrame,vfxPreviewGeometry} from '../src/vfx-preview.mjs';
 import {appendVfxRows,visibleVfxKeys} from '../src/vfx-clip-timeline.mjs';
 import {filterVfxClips} from '../src/vfx-clip-inspector.mjs';
 const target={kind:'figure',uid:1};
@@ -53,7 +52,7 @@ test('group reordering preserves parameter tables and supports undo, redo and lo
  e.undo();assert.equal(e.report._styk.vfxClips,before);e.redo();e.setLayerLocked(e.layerForUid(1),true);const locked=e.report._styk.vfxClips;assert.throws(()=>e.reorderVfxGroupEffect(id,glow,0),/Unlock/);assert.equal(e.report._styk.vfxClips,locked);
 });
 test('scope composes all connected parts without copying effects onto them',()=>{const e=fixture();for(const frame of e.report.keyframes)frame.objects[1].join={target_object_slot:0,target_handle_id:1,target_unique_id:1};e._invalidate({timing:true});const id=e.addVfxClip(target,'outline');e.setVfxClip(id,{includeAttached:true});const view=connectedVfxGeometry(e.geometry,e.evaluatedFrame,e.report);assert.equal(view.orderedObjects.length,1);assert.equal(view.drawables[0]._movieclipOwner.effects.length,1);assert.equal(e.evaluatedFrame.objects[1]._stykVfx,undefined);});
-test('scene evaluation bypass and snapshots exclude runtime effects',()=>{const e=fixture();e.addVfxClip({kind:'scene'},'tint');const frame=e.evaluatedFrame;assert.equal(vfxStack(frame).length,1);assert.equal(vfxStack(vfxPreviewFrame(frame)).length,0);const saved=snapshotPoseFrame(frame);assert.equal(saved._vfxTimelineScene,undefined);assert.equal(saved._vfxTimelineTick,undefined);assert.equal(saved._stykVfx,undefined);});
+test('scene snapshots exclude runtime effects',()=>{const e=fixture();e.addVfxClip({kind:'scene'},'tint');const frame=e.evaluatedFrame;assert.equal(vfxStack(frame).length,1);const saved=snapshotPoseFrame(frame);assert.equal(saved._vfxTimelineScene,undefined);assert.equal(saved._vfxTimelineTick,undefined);assert.equal(saved._stykVfx,undefined);});
 test('twenty timed effects share one compact lane and order is independent of time',()=>{const e=fixture();for(let i=0;i<20;i++)e.addVfxClip(target,'glow',{start:i*10,duration:8});e._vfxTimelineVisible=true;const layer=e.getLayer(e.layerForUid(1)),rows=appendVfxRows([layer],e);assert.equal(rows.length,2);const first=e.getVfxClips()[0];e.setVfxClip(first.id,{start:250});assert.equal(e.getVfxClips()[0].id,first.id);e.moveVfxClipOrder(first.id,1);assert.equal(e.getVfxClips()[1].id,first.id);});
 test('invalid state and locked edits fail atomically',()=>{const e=fixture(),id=e.addVfxClip(target,'glow'),before=e.report._styk.vfxClips;assert.throws(()=>e.setVfxClip(id,{duration:-1}));assert.equal(e.report._styk.vfxClips,before);const bad=structuredClone(before);bad.clips[0].target.uid=-1;assert.throws(()=>validateVfxClips(bad));e.setLayerLocked(e.layerForUid(1),true);assert.throws(()=>e.setVfxClip(id,{name:'Locked'}));assert.equal(e.report._styk.vfxClips,before);});
 
@@ -105,6 +104,5 @@ test('local effects stay local when another clip covers attached parts',()=>{
  assert.deepEqual(items[0]._movieclipOwner.effects.map(f=>f.type),['outline']);
  assert.deepEqual(vfxStack(items.find(i=>i.obj.unique_id===1).obj).map(f=>f.type),['tint']);
  assert.equal(vfxStack(items.find(i=>i.obj.unique_id===2).obj).length,0);
- const bypass=connectedVfxGeometry(vfxPreviewGeometry(view),vfxPreviewFrame(e.evaluatedFrame),e.report);assert.equal(bypass.orderedObjects.length,2);assert.ok(bypass.drawables.every(i=>!i._movieclipOwner?.effects?.length&&!vfxStack(i.obj).length));
  e.setVfxClip(assembly,{enabled:false});assert.equal(e.getVfxClips()[0].id,local);assert.equal(connectedVfxGeometry(e.geometry,e.evaluatedFrame,e.report).orderedObjects.length,2);
 });

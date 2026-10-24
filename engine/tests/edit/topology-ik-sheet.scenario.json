@@ -1,0 +1,68 @@
+{
+ "name": "topology-ik-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "splitSegment",
+   0.5
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "addSegment",
+   {
+    "length": 15,
+    "angle": 0.2
+   }
+  ],
+  [
+   "@select",
+   1,
+   6
+  ],
+  [
+   "deleteSingleSegment"
+  ],
+  [
+   "@select",
+   1,
+   8
+  ],
+  [
+   "unsplitSegment"
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "duplicateSegmentBranch",
+   {}
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

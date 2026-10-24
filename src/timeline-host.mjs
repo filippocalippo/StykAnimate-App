@@ -166,7 +166,7 @@ export function createTimelineHost(ctx) {
       beforeCommand: () => ctx.drawing()?.settle({selection:true}),
       // Wait for both preparation and its canvas submission before another seek.
       // The timeline retains only the latest pointer target during this interval.
-      canScrub: () => !state.editablePreparing && !state.dirtyRender,
+      canScrub: () => !state.dirtyRender,
       onScrubStart: () => {
         ctx.pause();
         ctx.interruptRecovery();

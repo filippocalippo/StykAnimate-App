@@ -1,0 +1,73 @@
+{
+ "name": "handle-edit-sticknodes-sheet",
+ "document": "sticknodes.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "editHandlePosition",
+   330,
+   230
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "editHandlePosition",
+   300,
+   300,
+   {
+    "bend": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "editHandlePosition",
+   280,
+   330
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "bendJoint",
+   320,
+   240
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "editHandlePosition",
+   285,
+   325
+  ]
+ ]
+}

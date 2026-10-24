@@ -5,7 +5,7 @@ import {audioState, validateAudioState, audibleClips, rippleAudio, clipGainAt} f
 import {inspectWave, pcmWave, wavePeaks, mixAudio} from '../src/audio-pcm.mjs';
 import {playbackProperties} from '../src/playback-patch.mjs';
 import {documentChunks, applyDocumentChunk} from '../src/document-transport.mjs';
-import {buildContainerV2, decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2, decodeDocument} from './support/native-files.mjs';
 
 const asset = (duration = 2) => ({id:'sound-test', name:'Voice.wav', size:3, duration, chunks:[{data_base64:'AQID'}], peaks:[0,.5,1,.5]});
 const editorWithAudio = () => { const editor = new Editor({layerTimeline:true}); editor.importAudio(asset(),{start:0}); return editor; };

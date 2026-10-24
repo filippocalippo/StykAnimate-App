@@ -43,7 +43,7 @@ const settle = () => page.evaluate(() => new Promise(resolve => requestAnimation
 async function open(width, height) {
   await page?.context().close();
   const context = await browser.newContext({viewport: {width, height}, deviceScaleFactor: 1});
-  await context.addInitScript(() => localStorage.setItem('stykanimate.editor.settings.v1', JSON.stringify({rendererMode: 'canvas', locale: 'en'})));
+  await context.addInitScript(() => localStorage.setItem('stykanimate.editor.settings.v1', JSON.stringify({locale: 'en'})));
   page = await context.newPage();
   page.setDefaultTimeout(10000);
   page.on('pageerror', error => errors.push(error.message));

@@ -8,7 +8,6 @@ import {validateAnimationDocument,validateAnimationValue} from '../src/animation
 import {beginNativePropertyEdit,previewNativePropertyEdit,commitNativePropertyEdit,cancelNativePropertyEdit,getNativePropertyValue} from '../src/native-property-edit.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
 import {buildGeometry,evaluatedFrame,timeline} from '../src/pivot/geometry.mjs';
-import {compilePlaybackPacket} from '../src/playback-worker.mjs';
 
 function fixture(layerTimeline) {
   const report=emptyDocument(),figure=report.figure_types[0];
@@ -55,7 +54,7 @@ for(const layerTimeline of [false,true]) {
     token=beginNativePropertyEdit(e,'segment_z_order');
     assert.throws(()=>previewNativePropertyEdit(token,1.5));cancelNativePropertyEdit(token);assert.deepEqual(current(e),base);
   });
-  test(`rendering and Pivot materialization preserve internal order (layerTimeline=${layerTimeline})`,async()=>{
+  test(`rendering and Pivot materialization preserve internal order (layerTimeline=${layerTimeline})`,()=>{
     const e=fixture(layerTimeline);e.moveBuilderOrder({kind:'segment',index:0},'front');
     e.seek(10);e.moveBuilderOrder({kind:'polygon',index:0},'front');
     const exported=materializePivotDocument(e.serialize());
@@ -65,8 +64,6 @@ for(const layerTimeline of [false,true]) {
       const geometry=buildGeometry(e.report,frame).objects.get(0);
       const rendered=[...geometry.polys.map(p=>({id:`polygon:${p.index}`,z:p.z})),...geometry.segments.map((s,index)=>({id:`segment:${index}`,z:s.z}))].sort((a,b)=>a.z-b.z).map(s=>s.id);
       assert.deepEqual(rendered,expected);
-      const packet=await compilePlaybackPacket(e.report,tick),nativePacket=await compilePlaybackPacket(exported,tick);
-      assert.ok(packet.shapeCount>0);assert.deepEqual(packet.shapes,nativePacket.shapes);
     }
   });
   test(`numeric order ranges update only selected frames (layerTimeline=${layerTimeline})`,()=>{

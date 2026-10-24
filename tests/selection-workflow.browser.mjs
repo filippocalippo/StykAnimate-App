@@ -14,7 +14,7 @@ const selected=()=>page.evaluate(()=>[...styk.editor.selectedUids].sort((a,b)=>a
 async function setup({joined=false}={}) {
   await page.evaluate(async joined=>{
     const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');
-    const {worldToScreen}=await import('/src/renderer.mjs');
+    const {worldToScreen}=await import('/src/renderer-geometry.mjs');
     const report=emptyDocument(),f=report.figure_types[0],base=f.segments[0];
     f.segments=[{...base,segment_id:1,parent_id:0,length:260,angle_rad:Math.PI/4}];f.segment_count=1;
     report.keyframes=[0,1,2,3].map(i=>createFrame([

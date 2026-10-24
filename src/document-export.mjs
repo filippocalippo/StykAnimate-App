@@ -3,7 +3,8 @@ import {restoreMessageError, messageError} from './localized-error.mjs';
 import {documentChunks} from './document-transport.mjs';
 import {drawingBarrier} from './drawing-resources.mjs';
 import {codecJob} from './codec-job.mjs';
-import {createContainerCompressionCache} from './native-container.mjs';
+import {browserCodecHost} from './codec-web-host.mjs';
+import {createContainerCompressionCache} from './container-cache.mjs';
 
 function abortError(message = 'Document export cancelled.') { return new DOMException(message, 'AbortError'); }
 async function yieldToInput() {
@@ -11,19 +12,18 @@ async function yieldToInput() {
   else await new Promise(resolve => setTimeout(resolve, 0));
 }
 
-/** Asynchronous, bounded snapshots + worker serialization and HTTP uploads.
+/** Asynchronous, bounded snapshots + worker serialization and codec requests.
  * Callers must abort on every document mutation, including uncommitted gestures.
  * getRevision catches committed edits between chunks and before returning data.
+ * The Pivot codec runs in a worker of this page (`codecHost`, codec-web-host.mjs).
  */
 export class DocumentExporter {
-  constructor({baseURL = globalThis.location?.origin, token = globalThis.stykDesktop?.apiToken || '', targetRecords = 2000,
+  constructor({codecHost = null, targetRecords = 2000,
     targetBytes = 1024 * 1024, timeoutMs = 300000, idleMs = 30000, maxQueued = 4, workerByteBudget = 8 * 1024 * 1024} = {}) {
-    if (!baseURL) throw messageError(new Error(''), "errors.documentExport.documentExportRequiresTheLocalFileServiceUrl", {});
     if (!Number.isFinite(idleMs) || idleMs < 0 || !Number.isInteger(maxQueued) || maxQueued < 0 || maxQueued > 16 ||
       !Number.isSafeInteger(workerByteBudget) || workerByteBudget <= 0)
       throw new RangeError('Invalid document export worker capacity.');
-    this.baseURL = new URL(baseURL, globalThis.location?.href).origin;
-    this.token = token;
+    this.codecHost = codecHost;
     this.targetRecords = targetRecords;
     this.targetBytes = targetBytes;
     this.timeoutMs = timeoutMs;
@@ -129,7 +129,7 @@ export class DocumentExporter {
       worker.addEventListener('error', idleFailure);
       worker.addEventListener('messageerror', idleFailure);
     }
-    const backendJob = codecJob(this.baseURL, this.token);
+    const backendJob = codecJob({host: this.codecHost ?? browserCodecHost()});
     let pending, failure, completed = false, count = 0, prepMax = 0, postMax = 0, mainWork = 0;
     const fail = error => { failure ??= error; backendJob.cancel(); pending?.reject(failure); pending = null; this._terminateWorker(); };
     const onError = event => { event.preventDefault(); fail(Object.assign((event.message ? new Error(event.message) : messageError(new Error(''), "errors.documentExport.theDocumentExportWorkerStopped")), { telemetryCode: 'worker_failed', telemetryStage: 'serialize' })); };
@@ -171,7 +171,10 @@ export class DocumentExporter {
     const timer = this.timeoutMs > 0 ? setTimeout(() => fail(Object.assign(messageError(new Error(''), "errors.documentExport.documentExportTimedOut", {}), { telemetryCode: 'timeout', telemetryStage: 'serialize' })), this.timeoutMs) : null;
     try {
       const link = backendJob.link();
-      await request('start', {options: {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, baseURL: this.baseURL, token: this.token, jobId: backendJob.id, ...link.fields}, cacheEntries: this.compressionCache.snapshot()}, link.transfer);
+      // The cached blocks move to the worker for this export and come back with its result.
+      const cacheEntries = this.compressionCache.take();
+      await request('start', {options: {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, jobId: backendJob.id, ...link.fields}, cacheEntries},
+        [...link.transfer, ...cacheEntries.map(entry => entry.bytes.buffer)]);
       const snapshotStarted = performance.now();
       const chunks = documentChunks(report, {maxRecords: this.targetRecords, maxBytes: this.targetBytes,
         timeBudgetMs: 3, omitRuntimeSegments: true});

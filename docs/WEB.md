@@ -1,10 +1,11 @@
 # Web build (Cloudflare)
 
-The editor also runs as a static website. It is the same code as the desktop app
-plus an in-browser Pivot codec; nothing about a project is sent to a server.
+The editor also runs as a static website. It is the same code as the desktop app,
+Pivot codec included; nothing about a project is sent to a server.
 
 ```bash
 npm ci
+node scripts/engine-build.mjs   # the engine and the Pivot codec, into src/engine/pkg/
 npm run web:build       # build/web; prints the current file count and size
 npm run web:verify      # checks the build before it is deployed
 npm run web:preview     # build, then serve build/web on http://127.0.0.1:47850
@@ -49,12 +50,13 @@ and run the live checks after an authorized deployment.
 
 There is no bundler. The site is the desktop app's web resources (the file set
 comes from the `web` filter in `package.json`, so the two builds cannot drift),
-the Pyodide runtime in `vendor/pyodide/`, and the codec's Python sources as one
-JSON file in `python/`. `index.html` is marked `<meta name="styk-codec"
-content="browser">`, which is what selects the in-browser codec.
+which include the WebAssembly modules of the engine and of the Pivot codec in
+`src/engine/pkg/` (built by `node scripts/engine-build.mjs`; the web build stops when
+the codec is missing). `index.html` is marked `<meta name="styk-codec"
+content="browser">`, which selects the codec's web profile (see below).
 
 Modules are not content-hashed, so `_headers` tells browsers to revalidate them;
-Cloudflare answers with `304` and an ETag, and the large runtime is not
+Cloudflare answers with `304` and an ETag, and the codec module is not
 downloaded again. Once the app is installed, the service worker answers instead
 (see [Install and offline](#install-and-offline)).
 
@@ -65,15 +67,17 @@ localhost and 5.9 s at 50 ms latency and 20 Mbps. Over a local HTTP/2 server at
 20 ms and 20 Mbps it took 3.25 s, and declaring the whole module graph up front
 with `modulepreload` did not change that (3.21 s): loading is transfer-bound, not
 waterfall-bound, so the page carries no preload list. Brotli level 5 estimates
-what Cloudflare sends: 5.5 MiB for the editor and assets on first load, and,
-only when a Pivot file is first opened, 5.8 MiB for the runtime plus 0.1 MiB for
-the codec sources (25.4 MiB raw in total). If cold load ever matters more than
+what Cloudflare sends: 5.5 MiB for the editor and assets on first load (measured
+before the engine's own module joined the site), and, only when a Pivot file is first
+opened, 0.43 MiB for the codec module (1.47 MiB raw). Before the Rust codec, that first
+Pivot file cost 5.9 MiB of Python runtime and codec sources (13.3 MiB raw). If cold load ever matters more than
 simplicity, content-hashed bundles are a build-only change.
 
 `web:verify` fails the build for: a module the app imports that was not shipped, a
 file over Cloudflare's 25 MiB limit or more than 20,000 files, a `_headers` file
 Cloudflare would reject or without a script policy, a page that does not select the
-in-browser codec, and any private file (`desktop/`, `backend/`, `.env`, keys). It
+in-browser codec, a missing codec module, and any private file (`desktop/`, `backend/`,
+`codecs/`, `.env`, keys). It
 also checks the install manifest and service worker described below.
 
 ## Install and offline
@@ -92,13 +96,13 @@ the web page by `build-web.mjs` and never reach the desktop app's page:
   the cache.
 - Each version has one cache. Installing stores the editor (12 MiB) and every
   request is then answered from it, so the app always runs one consistent version.
-  The Pivot runtime (13 MiB) is stored right after, unless the browser asks to save
-  data, and is kept the first time it is used either way.
+  The Pivot codec module (1.5 MiB) is stored right after, unless the browser asks to
+  save data, and is kept the first time it is used either way.
 - A new build installs in the background and takes over when every window of the
   old one has been closed, so an open project is never swapped under its owner;
   the open app shows a short notice. Files whose hash did not change are copied
   from the previous cache instead of downloaded, so an update costs what changed
-  (the Pivot runtime is never fetched again). The old cache is deleted when the new
+  (the Pivot codec is not fetched again unless it changed). The old cache is deleted when the new
   version takes over.
 - `_headers` serves `/sw.js` and the manifest with `no-cache`, which is how an
   installed app finds out about a new version. An installed app also asks the
@@ -211,59 +215,61 @@ compiles; `eval` does not), `worker-src 'self' blob:`, `object-src 'none'`,
 `frame-ancestors 'none'`, `nosniff`, `no-referrer`, and a Permissions-Policy with
 camera, microphone, geolocation and payment off. The browser build sends no
 telemetry and has no feedback channel, update check or server codec.
-Never deploy `backend/server.py` publicly: it can read the folder it runs in.
+Never deploy `backend/server.py` (the Python codec, kept as a development test oracle)
+publicly: it can read the folder it runs in.
 
-## The in-browser Pivot codec
+## The Pivot codec in the browser
 
-Pivot (`.piv`, `.stk`) files use a binary format whose reader and writer are the
-Python codec in `codecs/` and `backend/`. In the browser that same code runs in
-[Pyodide](https://pyodide.org) (CPython on WebAssembly) in a worker:
+Pivot (`.piv`, `.stk`) files use a binary format whose reader and writer are the Rust
+codec `engine/crates/styk-piv`, compiled to WebAssembly (`src/engine/pkg/styk_codec*`).
+The desktop app runs the same module the same way; see
+[Pivot files and the codec service](engine/formats-piv.md).
 
 - `src/codec-request.mjs`: the import and export workers ask for `/api/import`,
-  `/api/export` and `/api/source` through one function. Over HTTP it is `fetch`;
-  in the browser it is a `MessagePort` to the codec worker. Either way the caller
-  gets a `Response`, so import and export logic is identical on both.
-- `src/codec-web-host.mjs` (page) and `src/codec-web-worker.mjs` (worker) own the
-  worker, its queue and cancellation; `src/codec-web-engine.mjs` boots Pyodide.
-- `backend/browser_service.py` serves the same routes without HTTP, over the same
-  `ProjectStore`, size rules and error mapping as `server.py` (which now exports
-  those pieces). Parity tests send identical requests through the real HTTP
-  server and through it, and check that WebAssembly and native CPython return the
-  same document.
+  `/api/export` and `/api/source` through one function, over a `MessagePort` to the codec
+  worker, and get a standard `Response`.
+- `src/codec-web-host.mjs` (page) and `src/codec-web-worker.mjs` (worker) own the worker,
+  its queue (`src/codec-web-shell.mjs`) and cancellation; `src/codec-engine.mjs` loads the
+  module and answers one request.
+- The Python codec (`codecs/`, `backend/`) is the development test oracle only: the
+  parity replay checks that the Rust codec answers what it answered.
 
-The runtime (about 13 MiB) loads on the first Pivot import or export, never at
-startup, and is then cached by the browser. Native projects (`.styk`, `.stkz`,
-`.stykmov`), Stick Nodes files and every image, GIF and WebM export do not need it.
+The module (0.43 MiB at Brotli 5) loads on the first Pivot import or export, never at
+startup, and is then cached. Native projects (`.styk`, `.stkz`, `.stykmov`), Stick Nodes
+files and every image, GIF and WebM export do not need it.
 
-Differences from the desktop codec, all deliberate:
+The web build's page selects the codec's web profile, which differs from the desktop's on
+purpose:
 
-- Limits are lower because WebAssembly memory is shared and 32-bit: 96 MiB for a
-  Pivot source, 128 MiB for a native document, a 160 MiB cache (the desktop
-  allows 128, 256 and 384 MiB).
-- One request runs at a time. Python cannot be interrupted, so cancelling the
-  running import stops the interpreter and the next request starts a fresh one,
-  which drops the imported-source cache exactly as restarting the desktop codec
-  does; exporting a Pivot file imported before that asks to reopen it. If other
-  jobs are waiting on the interpreter, the cancelled job is skipped instead, so
-  nobody else's request is lost.
+- Limits are lower because WebAssembly memory is 32-bit and shares the tab: 96 MiB for a
+  Pivot source, 128 MiB for a native document, a 160 MiB cache (the desktop allows 128,
+  256 and 384 MiB).
+- A Pivot import carries its verified original in its document instead of a lease in the
+  codec, so nothing depends on the codec worker outliving the import.
+- The first Pivot import or export says that the converter is loading.
 - There is no workspace: no sample listing and no opening by path.
-- No native scanner or `orjson`; the standard-library paths the desktop also has
-  as fallbacks are used.
+
+One request runs at a time. The site is cross-origin isolated, so cancelling the running
+import sets a flag in shared memory and the codec stops at its next checkpoint, keeping the
+worker and its cache. A browser that is not isolated cannot share that flag: there,
+cancelling the running import stops the codec worker and the next request starts a fresh
+one; if other jobs are waiting on it, the cancelled job is skipped instead, so nobody
+else's request is lost.
 
 ## What works in the browser
 
 | | Web |
 | --- | --- |
 | Editing, animating, drawing, timeline, undo, IK, effects | Same code as the desktop app |
-| Rendering | WebGPU, or the Canvas 2D compatibility renderer |
+| Rendering | WebGPU, or WebGL2 |
 | `.styk` / `.stkz` / `.stykmov` save and open | Yes (a download on save, the file dialog on open) |
-| Pivot `.piv` / `.stk` import and export | Yes, in-browser codec; an unchanged import re-exports byte for byte |
+| Pivot `.piv` / `.stk` import and export | Yes, the WebAssembly codec; an unchanged import re-exports byte for byte |
 | Stick Nodes import | Yes |
 | PNG, SVG, GIF, APNG, PNG/JPEG/GIF/SVG sequences | Yes |
 | WebM video | Yes, WebCodecs VP8/VP9 with Opus sound (opaque background) |
 | MP4 video | Yes, WebCodecs H.264 with AAC sound, where the browser can encode them (opaque background) |
 | AVI, WMV, installed Windows codecs | Desktop only, offered with a reason |
-| Install as an app, start with no network | Yes, a service worker stores the editor and the Pivot runtime |
+| Install as an app, start with no network | Yes, a service worker stores the editor and the Pivot codec |
 | Autosave and crash recovery | Yes, IndexedDB (see [below](#autosave-and-the-libraries-in-the-browser)) |
 | My library | Yes, in the browser's own storage (IndexedDB) |
 | Community library | Yes, through the editor's own origin |

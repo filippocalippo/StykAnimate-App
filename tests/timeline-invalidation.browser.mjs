@@ -2,9 +2,9 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {chromium} from './support/playwright.mjs';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 
-const service=await backend.startBackend({appRoot:process.cwd()});
+const service=await backend.startDesktopHost({appRoot:process.cwd()});
 let browser;
 try{
   browser=await chromium.launch({channel:'chrome',headless:true});

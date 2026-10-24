@@ -27,6 +27,9 @@ function filteredFrame(frame,selected){
     return next;
   });
   const result={...frame,objects,camera:{is_default:true,x:0,y:0,angle_rad:0,scale:1},background_id:0,background_id_b:0,background_mix:0};
+  // Normalize against the filtered list: its slots may differ from the source.
+  const slots=new Map(objects.map((object,slot)=>[object.unique_id,slot]));
+  for(const object of objects)if(object.join)object.join.target_object_slot=slots.get(object.join.target_unique_id);
   delete result._stykBackgroundColor;delete result.background_color;delete result._stykVfx;
   result._styk={...frame._styk};setContinuations(result,continuations(frame).filter(step=>selected.has(step.uid)));setOrder(result,frameOrder(frame).filter(uid=>selected.has(uid)));normalizeFrame(result);return result;
 }
@@ -210,6 +213,9 @@ export const editorMovieclipMethods={
       this._insertingMovieclip=true;
       try{return operation();}finally{this._insertingMovieclip=false;}
     }
+    // A fractional native clip end is invalid; reject before poses or sources publish.
+    if(!this.animationChannels.length&&!this.report._styk?.movieclipSource&&!Number.isInteger(this.tick))
+      throw messageError(new Error(''), "errors.animationChannels.invalidMovieclipEnd", {});
     return this.movieclipBatch('Insert movieclip',()=>{
       if(this.report._styk?.layerSheet)this._prepareSheetMovieclips();
       this._insertingMovieclip=true;

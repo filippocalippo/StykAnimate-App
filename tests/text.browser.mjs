@@ -17,8 +17,8 @@ page.on('pageerror', error => errors.push(error.stack));
 page.on('request', request => { if (/\/vendor\/text\/.*\.ttf/.test(request.url())) fontRequests.push(request.url()); });
 let result, portable;
 try {
-  const health = await page.goto(`${origin}/api/health`);
-  assert.ok(health.ok(), 'Running codec backend must pass /api/health.');
+  const health = await page.goto(`${origin}/tests/fixtures/blank.html`);
+  assert.ok(health.ok(), 'The development server must be running.');
   result = await page.evaluate(async () => {
     const {createTextFigure} = await import('/src/text-authoring.mjs');
     const {Editor} = await import('/src/editor.mjs');
@@ -120,11 +120,11 @@ try {
           .every(key => near(before.bounds[key], after.bounds[key])));
     };
     const exportFile = async (format, figureTypeId) => {
-      const response = await fetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      const response = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({document, format, sourceId: null, figureTypeId})});
       if (!response.ok) throw new Error(`${format} export failed: ${await response.text()}`);
       const bytes = await response.arrayBuffer();
-      const imported = await fetch(`/api/import?filename=text-authoring.${format}`, {method: 'POST',
+      const imported = await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=text-authoring.${format}`, {method: 'POST',
         headers: {'Content-Type': 'application/octet-stream'}, body: bytes});
       if (!imported.ok) throw new Error(`${format} decoder failed: ${await imported.text()}`);
       return {bytes: [...new Uint8Array(bytes)], document: (await imported.json()).document};
@@ -184,7 +184,7 @@ try {
   });
   const isolatedPage = await isolated.newPage();
   isolatedPage.on('pageerror', error => errors.push(error.stack));
-  await isolatedPage.goto(`${origin}/api/health`);
+  await isolatedPage.goto(`${origin}/tests/fixtures/blank.html`);
   portable = await isolatedPage.evaluate(async document => {
     const {buildGeometry, drawGeometry} = await import('/src/pivot/geometry.mjs');
     const rejectFont = () => { throw new Error('Reopened text used an installed font instead of its embedded outlines.'); };

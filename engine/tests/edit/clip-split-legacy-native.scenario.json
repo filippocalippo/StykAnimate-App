@@ -1,0 +1,55 @@
+{
+ "name": "clip-split-legacy-native",
+ "document": "clip-split-legacy-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   3.25
+  ],
+  [
+   "splitMovieclip"
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "splitMovieclip",
+   null
+  ],
+  [
+   "splitMovieclip",
+   "4"
+  ],
+  [
+   "splitMovieclip",
+   4
+  ],
+  [
+   "@seek",
+   5.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "createEmptyMovieclip",
+   "Branch"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

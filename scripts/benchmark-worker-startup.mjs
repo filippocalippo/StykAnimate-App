@@ -22,7 +22,7 @@ const snapshotRoot = path.resolve('artifacts/performance-improvements/control-wo
 const production = path.join(snapshotRoot, 'production'), control = path.join(snapshotRoot, 'control');
 const frozenOwners = ['src/keyframe-easing.mjs', 'src/export-sampling.mjs', 'src/movieclip-drawings.mjs'];
 const benchmarkFile = 'scripts/benchmark-worker-startup.mjs';
-const roots = ['playback-worker.mjs', 'export-frame-worker.mjs', 'thumbnail-worker.mjs', 'document-export-worker.mjs'];
+const roots = ['document-export-worker.mjs'];
 async function treeHashes(directory) {
   const result = {};
   async function visit(relative) {

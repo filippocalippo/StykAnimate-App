@@ -3,11 +3,11 @@ import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 import {runtimeFingerprint} from './helpers/runtime-fingerprint.mjs';
 const runtimeBefore=runtimeFingerprint();
 const output=path.resolve('artifacts/clipboard-legacy-app');await mkdir(output,{recursive:true});
-const service=await backend.startBackend({appRoot:process.cwd()});
+const service=await backend.startDesktopHost({appRoot:process.cwd()});
 const checks=[],errors=[];let browser,page;
 const check=(name,condition)=>{assert.ok(condition,name);checks.push(name);console.log('PASS',name);};
 async function frameMode() {

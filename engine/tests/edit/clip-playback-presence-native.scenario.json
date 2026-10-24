@@ -1,0 +1,68 @@
+{
+ "name": "clip-playback-presence-native",
+ "document": "clip-playback-presence-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   2.5
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 1.25,
+    "mode": "once"
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "restartMovieclip"
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "start": 2
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "removeMovieclipRestart"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 0.5
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

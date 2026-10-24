@@ -6,9 +6,6 @@ import {easedProgress, cubicBezierProgress, keyEasing} from '../src/keyframe-eas
 import {sampleAnimationChannel, validateAnimationDocument} from '../src/animation-channels.mjs';
 import {evaluatedNativeFrame, evaluatedFrame, timeline} from '../src/pivot/geometry.mjs';
 import {materializePivotDocument, needsPivotMaterialization} from '../src/pivot-export-materialize.mjs';
-import {compilePlaybackPacket} from '../src/playback-worker.mjs';
-import {PlaybackCache} from '../src/playback.mjs';
-import {Worker} from 'node:worker_threads';
 
 const near = (actual, expected, epsilon = 1e-7) => assert.ok(Math.abs(actual - expected) < epsilon, `${actual} ≠ ${expected}`);
 const modes = ['auto', 'bezier', 'ease-in', 'ease-out', 'linear', 'constant'];
@@ -39,7 +36,7 @@ test('Bezier inverts time, presets are distinct, constant switches only at the n
   assert.deepEqual(keyEasing({interpolation:'hold'}), {interpolation:'constant'});
 });
 
-for (const interpolation of modes) test(`${interpolation}: scalar, native pose, camera, playback packet and Pivot export agree`, async () => {
+for (const interpolation of modes) test(`${interpolation}: scalar, native pose, camera and Pivot export agree`, () => {
   const editor = fixture(true), easing = {interpolation, ...(interpolation === 'bezier' ? {bezier:[0,1,0,1]} : {})};
   const pose = editor.nativePoseChannel({kind:'figure',uid:1});
   editor.setAnimationKeysEasing([{channelId:pose.id,keyIds:[pose.keys[0].id]}], easing);
@@ -57,9 +54,6 @@ for (const interpolation of modes) test(`${interpolation}: scalar, native pose, 
   assert.equal(output.auto_easing, false);
   for (let tick = 0; tick < 10; tick++) {
     near(sample(output,tick).objects.find(object => object.unique_id === 1).root_x, 100 * easedProgress(easing,tick/10));
-    const packet = await compilePlaybackPacket(editor.report,tick);
-    const group = packet.groups.find(group => group.slot === sample(editor.report,tick).objects.findIndex(object => object.unique_id === 1));
-    near(packet.transforms[group.transformIndex * 4], 100 * easedProgress(easing,tick/10), 1e-5);
   }
 });
 
@@ -128,37 +122,6 @@ test('nonlinear scalar spans retain every unedited tick when pasting frames or b
   }
 });
 
-test('worker frame and channel patches invalidate cached easing without reloading the document', async () => {
-  const editor=fixture(), workerFactory=()=>{
-    const worker=new Worker(new URL('./playback-node-worker.mjs',import.meta.url));
-    return {postMessage:(...args)=>worker.postMessage(...args),terminate:()=>worker.terminate(),
-      addEventListener:(name,callback)=>worker.on(name,value=>callback(name==='message'?{data:value}:value))};
-  };
-  const cache=new PlaybackCache({workerFactory});
-  const packetX=(packet,uid)=>{
-    const slot=sample(editor.report,5).objects.findIndex(o=>o.unique_id===uid), group=packet.groups.find(g=>g.slot===slot);
-    return packet.transforms[group.transformIndex*4];
-  };
-  try {
-    cache.load(editor.report); await cache.prepareRange([5]); near(packetX(cache.get(5),1),50);
-    const loads=cache.stats.documentLoads;
-    editor.setFramesEasing([0],{interpolation:'ease-in'});
-    cache.updateDocument({frameIndices:[0],revision:1}); await cache.prepareRange([5]);
-    near(packetX(cache.get(5),1),31.535681257,1e-5);
-    const channel=editor.nativePoseChannel({kind:'figure',uid:2});
-    editor.setAnimationKeysEasing([{channelId:channel.id,keyIds:[channel.keys[0].id]}],{interpolation:'constant'});
-    cache.updateDocument({revision:2}); await cache.prepareRange([5]);
-    near(packetX(cache.get(5),2),200); near(packetX(cache.get(5),1),31.535681257,1e-5);
-    editor.setFramesEasing([0,1],{interpolation:'auto'});
-    cache.updateDocument({frameIndices:[0,1],revision:3});await cache.prepareRange([5]);
-    near(packetX(cache.get(5),1),50);
-    editor.report.keyframes[2].objects.find(o=>o.unique_id===1).root_x=160;
-    cache.updateDocument({frameIndices:[2],revision:4});await cache.prepareRange([5]);
-    near(packetX(cache.get(5),1),40.625);
-    assert.equal(cache.stats.documentLoads,loads);
-  } finally {cache.dispose();}
-});
-
 test('discrete background identities cannot advertise a continuous easing curve', () => {
   const editor=fixture(), target={kind:'scene'}, key=editor.addAnimationKey(target,'backgroundId',0,0);
   editor.addAnimationKey(target,'backgroundId',10,1);
@@ -195,7 +158,7 @@ test('Auto shares velocity at unevenly spaced keys, stops at extrema and never o
   near(at(10),12); assert.equal(at(17),undefined);
 });
 
-test('Auto pose and scalar curves agree across a run and update neighbours after edits and history', async () => {
+test('Auto pose and scalar curves agree across a run and update neighbours after edits and history', () => {
   const editor = fixture(), target={kind:'figure',uid:1};
   editor.report.keyframes[2].objects[0].root_x=160;
   editor.setFramesDuration([0],4);editor.setFramesDuration([1],13);
@@ -212,8 +175,6 @@ test('Auto pose and scalar curves agree across a run and update neighbours after
   for(let tick=0;tick<=17;tick++) {
     const expected=sampleAnimationChannel(scalar,tick);
     near(sample(output,tick).objects.find(o=>o.unique_id===1).root_x,expected);
-    const packet=await compilePlaybackPacket(saved,tick),slot=sample(saved,tick).objects.findIndex(o=>o.unique_id===1),group=packet.groups.find(g=>g.slot===slot);
-    near(packet.transforms[group.transformIndex*4],expected,1e-5);
   }
 });
 

@@ -9,7 +9,6 @@ import {motionRowSize,motionLaneBox,sheetRowLayout} from '../src/timeline-rows.m
 import {parallaxResolver} from '../src/layer-parallax.mjs';
 import {evaluatedFrame,buildGeometry} from '../src/pivot/geometry.mjs';
 import {cameraMatrix} from '../src/renderer-geometry.mjs';
-import {compilePlaybackPacket} from '../src/playback-worker.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
 import {validateAnimationDocument} from '../src/animation-channels.mjs';
 import {snapshotPoseFrame} from '../src/pose-snapshot.mjs';
@@ -57,12 +56,6 @@ test('parallax reference holds composition, disabled camera bypasses depth, and 
   const synthetic={camera:{x:150},objects:[{unique_id:uid},{unique_id:999,join:{target_object_slot:0}}]};
   const report={...e.report,_styk:{...e.report._styk,layers:{...e.report._styk.layers,assignments:{...e.report._styk.layers.assignments,999:'other'},byId:{...e.report._styk.layers.byId,other:{parallax:{enabled:true,x:2,y:2,reference:{x:0,y:0}}}},order:[...e.report._styk.layers.order,'other']}}};
   assert.deepEqual(parallaxResolver(report,synthetic)(999),parallaxResolver(report,synthetic)(uid));
-});
-test('worker packets reuse original vectors while moving roots for parallax',async()=>{
-  const e=fixture(),uid=e.selectedUid;e.setLayerParallax(e.activeLayerId,{enabled:true,x:.2});e.setCameraValues({x:100});e.addCameraMotion('impact',{start:0,duration:12});
-  const frame=at(e,0),g=buildGeometry(e.report,frame),packet=await compilePlaybackPacket(e.report,0),i=[...packet.uids].indexOf(uid);
-  near(packet.transforms[i*4],g.objects.get(0).root.x+80);assert.deepEqual(packet.frame.camera,cameraAtTime(e.report,frame));
-  const edit=await compilePlaybackPacket(e.report,0,{cameraEnabled:false});near(edit.transforms[i*4],g.objects.get(0).root.x);
 });
 test('Pivot materialization bakes motion and parallax once without changing editable project',()=>{
   const e=fixture();e.setLayerParallax(e.activeLayerId,{enabled:true,x:.5});e.setCameraValues({x:60});e.addCameraMotion('impact',{start:0,duration:12});

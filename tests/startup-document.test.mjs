@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
 import {createStartupDocument} from '../src/startup-document.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {ikChain} from '../src/ik.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
 

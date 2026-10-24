@@ -1,0 +1,290 @@
+{
+ "name": "property-keys-sheet",
+ "document": "property-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "scale",
+     "tick": 0,
+     "value": 1.2
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "scale",
+     "tick": 4,
+     "value": 0.9
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 3
+     },
+     "property": "opacity",
+     "tick": 4,
+     "value": 0.35
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 2
+     },
+     "property": "opacity"
+    }
+   ]
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 3
+     },
+     "property": "opacity"
+    }
+   ]
+  ],
+  [
+   "@seek",
+   0
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 3
+     },
+     "property": "x"
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 3
+     },
+     "property": "y"
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 2
+     },
+     "property": "rotation"
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "camera"
+     },
+     "property": "scale",
+     "tick": 2,
+     "value": 1.5,
+     "interpolation": "ease-in"
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "camera"
+     },
+     "property": "y",
+     "tick": 5,
+     "value": 10,
+     "interpolation": "bezier",
+     "bezier": [
+      0.1,
+      0.2,
+      0.3,
+      0.4
+     ]
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "scene"
+     },
+     "property": "backgroundId",
+     "tick": 1,
+     "value": 1
+    },
+    {
+     "target": {
+      "kind": "scene"
+     },
+     "property": "color",
+     "tick": 1,
+     "value": null
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "layer",
+      "id": "layer-2"
+     },
+     "property": "pose",
+     "tick": 2
+    },
+    {
+     "target": {
+      "kind": "layer",
+      "id": "layer-2"
+     },
+     "property": "pose",
+     "tick": 5,
+     "value": {
+      "frameId": "frame-3"
+     }
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   []
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "scale",
+     "tick": 2,
+     "value": -1
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "thickness",
+     "tick": 2,
+     "value": 3
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "scale",
+     "tick": 2.5,
+     "value": 1
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "scale",
+     "tick": 2,
+     "value": 1,
+     "interpolation": "wobbly"
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "segment",
+      "uid": 1,
+      "handleId": 22
+     },
+     "property": "color",
+     "tick": 2,
+     "value": 33488896
+    }
+   ]
+  ],
+  [
+   "addAnimationKey",
+   {
+    "kind": "figure",
+    "uid": 2
+   },
+   "scale",
+   6,
+   1.4
+  ],
+  [
+   "addAnimationKey",
+   {
+    "kind": "segment",
+    "uid": 2,
+    "handleId": 11
+   },
+   "color",
+   null,
+   16711680
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

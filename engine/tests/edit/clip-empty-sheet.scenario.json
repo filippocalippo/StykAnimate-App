@@ -1,0 +1,29 @@
+{
+ "name": "clip-empty-sheet",
+ "document": "clip-empty-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "createEmptyMovieclip"
+  ],
+  [
+   "createEmptyMovieclip",
+   "Custom clip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

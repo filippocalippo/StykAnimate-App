@@ -30,9 +30,9 @@ test('paste in place preserves coordinates and undo without advancing the normal
     .filter(o => result.insertedUids.includes(o.unique_id)).map(o => [o.root_x, o.root_y]), positions);
 });
 test('appearance range follows native identity through arbitrary slots and absent figures with one sparse undo', () => {
-  const editor = fixture(), report = editor.report; report.keyframes[1].objects.reverse();
+  const editor = fixture(); let report = editor.report; report.keyframes[1].objects.reverse();
   report.keyframes[1].objects.forEach((object, slot) => object.object_slot = slot);
-  report.keyframes[2] = createFrame([report.keyframes[2].objects[1]], 1); editor.load(report);
+  report.keyframes[2] = createFrame([report.keyframes[2].objects[1]], 1); editor.load(report); report = editor.report;
   editor.select(1); const before = clone(report), unchanged = report.keyframes[0].objects[1];
   const result = editor.updateFiguresInFrames({color_override_raw: 0xff224466, field28: 80}, [0, 1, 2]);
   assert.equal(result.changedFrames, 2); assert.equal(editor._undo.length, 1); assert.equal(report.keyframes[0].objects[1], unchanged);

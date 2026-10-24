@@ -1,0 +1,142 @@
+{
+ "name": "replace-definition-joined-native",
+ "document": "joined-chain.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "replaceFigureDefinition",
+   1,
+   {
+    "figure_type_id": 1,
+    "name": "Figure 1",
+    "segment_count": 6,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 44,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 2.1,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 55,
+      "parent_id": 44,
+      "length": 90,
+      "angle_rad": 1.2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 66,
+      "parent_id": 55,
+      "length": 35,
+      "angle_rad": 3.141592653589793,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

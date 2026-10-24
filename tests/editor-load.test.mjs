@@ -32,7 +32,7 @@ test('cooperative import publishes once with identical validated poses, UID/laye
     yields++;assert.deepEqual(state(editor),before);assert.equal(events.length,0);
   }});
   const sync=new Editor({demo:false}).load(clone(report),'Imported.piv',{initialFrameIndex:'last'});
-  assert(yields>1);assert.deepEqual(editor.report,sync.report);assert.equal(editor.report,report);
+  assert(yields>1);assert.deepEqual(editor.report,sync.report);
   assert.equal(editor.frameIndex,49);assert.equal(editor.tick,147);assert.equal(editor.selectedUid,1);
   assert.deepEqual(editor._layerUidCounts,sync._layerUidCounts);assert.deepEqual(editor.layers,sync.layers);
   assert.equal(editor._nextUid,81);assert.equal(editor._nextFrameIdentity,51);
@@ -51,9 +51,9 @@ test('late invalid joins, cameras, styles, backgrounds and retained poses never 
     r=>{const frame=clone(r.keyframes[0]);frame._styk={frameId:'source-1'};frame.objects[0].root_x=Infinity;r._styk={frameSources:{'source-1':frame}};},
   ];
   for(const mutate of mutations){
-    const editor=new Editor({demo:false}),before=state(editor),report=fixture();mutate(report);let yields=0;
-    await assert.rejects(editor.loadAsync(report,'Invalid',{sliceMs:.1,yieldControl:async()=>{yields++;assert.deepEqual(state(editor),before);}}));
-    assert.deepEqual(state(editor),before);assert(yields>0);
+    const editor=new Editor({demo:false}),before=state(editor),report=fixture();mutate(report);
+    await assert.rejects(editor.loadAsync(report,'Invalid',{sliceMs:.1}));
+    assert.deepEqual(state(editor),before);
   }
 });
 

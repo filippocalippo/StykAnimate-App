@@ -19,7 +19,7 @@ const errors = [];
 page.on('pageerror', error => errors.push(error.stack));
 let result;
 try {
-  const health = await page.goto(`${origin}/api/health`);
+  const health = await page.goto(`${origin}/tests/fixtures/blank.html`);
   assert.ok(health.ok(), 'The actual codec backend is running.');
   result = await page.evaluate(async figures => {
     const {compileEmbeddedTextFigure, replaceTextAssetFigure, readTextFigureOptions} = await import('/src/native-text-authoring.mjs');
@@ -65,11 +65,11 @@ try {
     const source = render(document);
     check('Real native Arial, Comic Sans, Webdings and Segoe Print paths render without platform fonts', source.coverage > 10000);
     const exportImport = async (format, figureTypeId) => {
-      const exported = await fetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      const exported = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({document, format, sourceId: null, figureTypeId})});
       if (!exported.ok) throw new Error(`${format} export: ${await exported.text()}`);
       const bytes = await exported.arrayBuffer();
-      const imported = await fetch(`/api/import?filename=native-text-edited.${format}`, {method: 'POST',
+      const imported = await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=native-text-edited.${format}`, {method: 'POST',
         headers: {'Content-Type': 'application/octet-stream'}, body: bytes});
       if (!imported.ok) throw new Error(`${format} import: ${await imported.text()}`);
       return {bytes: [...new Uint8Array(bytes)], document: (await imported.json()).document};
@@ -126,7 +126,7 @@ try {
     fontRequests.push(route.request().url()); return route.abort();
   });
   const portablePage = await isolated.newPage();
-  await portablePage.goto(`${origin}/api/health`);
+  await portablePage.goto(`${origin}/tests/fixtures/blank.html`);
   const portablePreview = await portablePage.evaluate(async scene => {
     const {drawGeometry, buildGeometry} = await import('/src/pivot/geometry.mjs');
     const reject = () => { throw new Error('Reopened native text used a platform font.'); };

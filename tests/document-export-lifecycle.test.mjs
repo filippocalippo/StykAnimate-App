@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {DocumentExporter} from '../src/document-export.mjs';
 import {createDemo} from '../src/demo.mjs';
+import {FakeCodecHost} from './support/codec-host.mjs';
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
 async function until(predicate, nextTurn = turn) {
@@ -10,8 +11,8 @@ async function until(predicate, nextTurn = turn) {
 }
 
 function environment(t, options = {}) {
-  const workers = [], cancellations = [];
-  t.mock.method(globalThis, 'fetch', async url => { cancellations.push(new URL(url)); return new Response(null, {status: 204}); });
+  // Cancelled codec jobs, in order (the codec runs in a worker of the page).
+  const workers = [], host = new FakeCodecHost(), cancellations = host.cancellations;
   class Worker extends EventTarget {
     constructor() { super(); workers.push(this); this.messages = []; }
     postMessage(message) {
@@ -25,9 +26,9 @@ function environment(t, options = {}) {
   }
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
   Object.defineProperty(globalThis, 'Worker', {value: Worker, configurable: true});
-  const exporter = new DocumentExporter({baseURL: 'http://localhost', timeoutMs: 0, ...options});
+  const exporter = new DocumentExporter({codecHost: host, timeoutMs: 0, ...options});
   t.after(() => {
-    exporter.dispose();
+    exporter.dispose(); host.close();
     if (descriptor) Object.defineProperty(globalThis, 'Worker', descriptor); else delete globalThis.Worker;
   });
   return {workers, exporter, cancellations};
@@ -122,23 +123,23 @@ test('an idle worker failure is discarded before another export', async t => {
 test('invalid capacities and revision callbacks cannot leak exporter jobs', async t => {
   const {workers, exporter} = environment(t);
   for (const options of [{maxQueued: Infinity}, {maxQueued: 17}, {maxQueued: -1}, {idleMs: NaN}, {workerByteBudget: 0}, {workerByteBudget: Infinity}])
-    assert.throws(() => new DocumentExporter({baseURL: 'http://localhost', ...options}), RangeError);
+    assert.throws(() => new DocumentExporter(options), RangeError);
   await assert.rejects(exporter.export(createDemo(), {getRevision: () => {throw new Error('Revision unavailable');}}), /Revision unavailable/);
   assert.equal(exporter.jobs.size, 0); assert.equal(workers.length, 0);
 });
 
 test('retirement retains only bounded immutable compression entries and idle expiry clears them', async t => {
   const {workers, exporter} = environment(t, {workerByteBudget: 10, idleMs: 30});
-  const report = createDemo(), key = '2:3:8:' + 'a'.repeat(64), blob = new Blob(['packed']);
+  const report = createDemo(), key = '2:3:8:' + 'a'.repeat(64), bytes = new Uint8Array([1, 2, 3, 4, 5, 6]);
   const first = exporter.export(report);
   await until(() => workers[0]?.messages.at(-1)?.operation === 'export');
-  workers[0].finish({timings: {container_raw_bytes: 10}, cacheEntries: [{key, blob}]}); await first;
+  workers[0].finish({timings: {container_raw_bytes: 10}, cacheEntries: [{key, bytes}]}); await first;
   assert.equal(workers[0].terminated, true); assert.equal(exporter.worker, null);
   assert.equal(exporter.compressionCache.size, 1);
   const next = exporter.export(report);
   await until(() => workers[1]?.messages.at(-1)?.operation === 'export');
-  assert.deepEqual(workers[1].messages[0].cacheEntries, [{key, blob}]);
-  workers[1].finish({timings: {container_raw_bytes: 10}, cacheEntries: [{key, blob}]}); await next;
+  assert.deepEqual(workers[1].messages[0].cacheEntries, [{key, bytes}]);
+  workers[1].finish({timings: {container_raw_bytes: 10}, cacheEntries: [{key, bytes}]}); await next;
   assert.equal(exporter.lastTimings.reused_worker, false);
   await until(() => exporter.compressionCache.size === 0);
   assert.equal(exporter.worker, null);
@@ -148,7 +149,7 @@ test('failed exports discard the compressed pool from previous successful saves'
   const {workers, exporter} = environment(t, {workerByteBudget: 1});
   const first = exporter.export(createDemo()), key = '2:3:8:' + 'a'.repeat(64);
   await until(() => workers[0]?.messages.at(-1)?.operation === 'export');
-  workers[0].finish({timings: {container_raw_bytes: 1}, cacheEntries: [{key, blob: new Blob(['packed'])}]}); await first;
+  workers[0].finish({timings: {container_raw_bytes: 1}, cacheEntries: [{key, bytes: new Uint8Array([1, 2, 3, 4, 5, 6])}]}); await first;
   assert.equal(exporter.compressionCache.size, 1);
   const abort = new AbortController(), failed = exporter.export(createDemo(), {signal: abort.signal});
   const rejected = assert.rejects(failed, {name: 'AbortError'});

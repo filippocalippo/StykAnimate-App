@@ -2,22 +2,20 @@ import {restoreMessageError, messageError} from './localized-error.mjs';
 
 /** One request to the Pivot codec, from a worker.
  *
- * The desktop app and the development server run the codec behind HTTP. The
- * browser build has no server: a job carries a MessagePort to the in-browser
- * codec worker (codec-web-host.mjs) and requests travel over it. Either way the
- * caller gets a standard Response, so status, headers and bodies are read
- * identically and neither transport leaks into import or export logic.
+ * The codec runs in a worker of the page (codec-web-host.mjs). A job carries a
+ * MessagePort to it and requests travel over that port as they would over HTTP:
+ * method, path, headers and body. The caller gets a standard Response, so status,
+ * headers and bodies are read as they always were and the transport does not leak
+ * into import or export logic.
  *
- * Over a port, an ArrayBuffer or typed-array body is transferred, not copied:
- * the codec consumes the upload and the caller must not reuse it afterwards.
- * (fetch copies it, so callers that reuse a body would work on one transport
- * only; none do.)
+ * An ArrayBuffer or typed-array body is transferred, not copied: the codec consumes
+ * the upload and the caller must not reuse it afterwards.
  */
 const NO_BODY = new Set([101, 204, 205, 304]);
 const conversations = new WeakMap();
 
 export function codecRequest(config, path, init = {}) {
-  if (!config?.codecPort) return fetch(new URL(path, config.baseURL), init);
+  if (!config?.codecPort) return Promise.reject(Object.assign(messageError(new TypeError(''), "errors.codecRequest.theCodecIsNotConnected", {}), {name: 'TypeError'}));
   return requestOverPort(config.codecPort, path, init);
 }
 

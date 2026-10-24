@@ -3,11 +3,11 @@ import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 import {openEncoding} from './helpers/export-dialog.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),output=path.join(root,'artifacts','export-bitrate');
 await mkdir(output,{recursive:true});
-const service=await backend.startBackend({appRoot:root});
+const service=await backend.startDesktopHost({appRoot:root});
 const browser=await chromium.launch({channel:'chrome',headless:true});
 try{
   const page=await browser.newPage({viewport:{width:1360,height:900},acceptDownloads:true}),errors=[];page.on('pageerror',error=>errors.push(error.message));

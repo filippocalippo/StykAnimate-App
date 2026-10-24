@@ -1,4 +1,5 @@
-import {SHAPE_FLOATS} from './renderer-geometry.mjs';
+/** Floats in one GPU shape record: six aligned vec4s. */
+const SHAPE_FLOATS = 24;
 
 /** Immutable per-pose vector packets. Weak geometry lookup avoids retaining
  * scene graphs; the bounded LRU owns only arrays and small cache records. */

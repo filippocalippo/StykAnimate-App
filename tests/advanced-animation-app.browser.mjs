@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 import {chooseExport, exportDialogClosed} from './helpers/export-dialog.mjs';
-const require = createRequire(import.meta.url), {startBackend} = require('../desktop/backend.cjs');
+const require = createRequire(import.meta.url), {startDesktopHost} = require('../desktop/web-host.cjs');
 const appRoot = fileURLToPath(new URL('..', import.meta.url)), out = path.join(appRoot, 'artifacts');
 await mkdir(out, {recursive: true});
 const report = emptyDocument(); report.canvas_width = 640; report.canvas_height = 400;
@@ -21,7 +21,7 @@ report.keyframes = [120, 300, 160].map((x, index) => ({...createFrame([
 const fixture = new Editor({demo: false}).load(report), second = fixture.createLayer('Other figure');
 fixture.assignFiguresToLayer([2], second.id); fixture.report._styk.name = 'Timeline integration';
 const sourcePath = path.join(out, 'advanced-track-source.styk'); await writeFile(sourcePath, JSON.stringify(fixture.serialize()));
-const backend = await startBackend({appRoot}); let browser;
+const backend = await startDesktopHost({appRoot}); let browser;
 const checks = [], errors = [], findings = [], check = (name, value = true) => { assert.ok(value, name); checks.push(name); console.log('PASS', name); };
 try {
   browser = await chromium.launch({channel: 'chrome', headless: true});

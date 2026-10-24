@@ -1,5 +1,6 @@
 import {messageError} from './localized-error.mjs';
-import {prepareEditorLoadAsync,yieldLoadTask} from './editor-load.mjs';
+import {prepareEditorLoadAsync} from './editor-load.mjs';
+import {yieldLoadTask} from './yield-task.mjs';
 import {validateSceneSteps} from './pivot/model.mjs';
 import {validateLayerStateSteps,ensureLayerState} from './layers.mjs';
 import {invalidateFrameIndex} from './frame-ids.mjs';

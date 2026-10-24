@@ -6,7 +6,6 @@ import {buildGeometry} from '../src/pivot/geometry.mjs';
 import {connectedVfxGeometry,connectedVfxConflict} from '../src/vfx-connected.mjs';
 import {createVfx,vfxStack,validateVfxOwner,vfxProperty} from '../src/vfx.mjs';
 import {initializeLayerSheet} from '../src/editor-layer-sheet.mjs';
-import {vfxPreviewGeometry} from '../src/vfx-preview.mjs';
 import {movieclipFigure} from '../src/movieclips.mjs';
 function fixture(){
  const report=emptyDocument(),fig=report.figure_types[0];
@@ -26,7 +25,6 @@ test('connected VFX isolate descendants once while retaining editable geometry a
  assert.ok(items.filter(i=>i.obj.unique_id===2).every(i=>vfxStack(i.obj)[0].id==='inner'));
  assert.equal(view.objects.get(0).joints,raw.objects.get(0).joints);assert.equal(view.objects.get(1),raw.objects.get(1));
  assert.equal(connectedVfxGeometry(raw,frame,report),view);assert.deepEqual(report,before);
- assert.ok(vfxPreviewGeometry(view).drawables.every(i=>!i._movieclipOwner?.effects.length&&!i.obj._stykVfx));
 });
 test('nested groups retain inner stacks and hidden descendants are excluded before filtering',()=>{
  const report=fixture(),frame=report.keyframes[0];

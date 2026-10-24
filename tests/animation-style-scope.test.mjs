@@ -1,7 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {emptyDocument, defaultFigure, createObject, createFrame} from '../src/demo.mjs';
 import {animationChannelId, normalizeAnimationTarget, findAnimationChannel, composeAnimationChannels,
@@ -9,7 +7,7 @@ import {animationChannelId, normalizeAnimationTarget, findAnimationChannel, comp
 import {animationStyleValue, setAnimationStyle, resolveInstanceFigure} from '../src/animation-style.mjs';
 import {evaluatedFrame, timeline} from '../src/pivot/geometry.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
-import backend from '../desktop/backend.cjs';
+import {roundTrip} from './support/codec.mjs';
 
 const globalTarget = {kind:'segment',uid:7,handleId:1};
 const targetA = {...globalTarget,figureTypeId:1}, targetB = {...globalTarget,figureTypeId:2};
@@ -71,7 +69,8 @@ test('malformed, non-segment and missing figure scopes reject before replacing a
   const editor=new Editor({demo:false}).load(fixture()), original=editor.report;
   const missing=setChannels(fixture(),[channel({...globalTarget,figureTypeId:3},'opacity',[])]);
   assert.throws(()=>validateAnimationDocument(missing),/missing figure definition 3/);
-  assert.throws(()=>editor.load(missing),/missing figure definition 3/); assert.equal(editor.report,original);
+  // The engine refuses the document with the editor's message key (its parameters are not carried).
+  assert.throws(()=>editor.load(missing),error=>error.messageKey==='errors.animationChannels.animationSegmentScopeReferencesMissingFigureDefinition'); assert.equal(editor.report,original);
 });
 
 test('native poses sharing a UID use independent continuous primary and gradient scope curves', () => {
@@ -133,20 +132,9 @@ test('direct style reads, writes and dormant composition never touch a mismatche
   assert.equal(composeAnimationChannels(report,frame,6),frame);
 });
 
-test('scoped curves materialize into actual PIV primary and gradient alpha without cross-definition leakage', () => {
+test('scoped curves materialize into actual PIV primary and gradient alpha without cross-definition leakage', async () => {
   const report=setChannels(fixture(),curves()), original=structuredClone(report), output=materializePivotDocument(report);
-  const python=String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-store=server.ProjectStore(server.WORKSPACE)
-raw,name=store.export({'document':json.load(sys.stdin),'format':'piv'})
-print(json.dumps(store.import_bytes(raw,name)['document']))
-`;
-  const candidate=backend.pythonCandidates()[0], result=spawnSync(candidate.command,[...candidate.args,'-c',python],{
-    cwd:fileURLToPath(new URL('..',import.meta.url)),input:JSON.stringify(output),encoding:'utf8',windowsHide:true,maxBuffer:8*1024*1024});
-  assert.equal(result.status,0,result.error?.message||result.stderr); const native=JSON.parse(result.stdout);
+  const native=await roundTrip({document:output,format:'piv'});
   assert.equal(output._styk.animation,undefined);
   for(let tick=0;tick<11;tick++) assert.deepEqual(styleBytes(native,sample(native,tick)),styleBytes(report,sample(report,tick)),`Frame ${tick}`);
   assert.deepEqual(report,original);

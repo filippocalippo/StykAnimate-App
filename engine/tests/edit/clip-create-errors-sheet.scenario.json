@@ -1,0 +1,49 @@
+{
+ "name": "clip-create-errors-sheet",
+ "document": "clip-create-errors-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "createMovieclip",
+   {
+    "start": -1,
+    "end": 2
+   }
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 1,
+    "end": 10
+   }
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 1,
+    "end": 4,
+    "uids": [
+     1,
+     3
+    ]
+   }
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 0,
+    "end": 1,
+    "uids": []
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

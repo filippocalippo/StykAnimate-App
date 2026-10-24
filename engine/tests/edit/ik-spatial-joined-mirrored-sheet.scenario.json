@@ -1,0 +1,173 @@
+{
+ "name": "ik-spatial-joined-mirrored-sheet",
+ "document": "ik-spatial-joined-mirrored-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   219.5682373046875,
+   261.3611755371094
+  ],
+  [
+   "poseJoint",
+   229.5682373046875,
+   271.3611755371094
+  ],
+  [
+   "poseJoint",
+   211.5682373046875,
+   267.3611755371094
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   199.5682373046875,
+   276.3611755371094
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "poseJoint",
+   216.5682373046875,
+   270.3611755371094
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "setSpatialFeetPinned",
+   false
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   226.5682373046875,
+   257.3611755371094
+  ],
+  [
+   "poseJoint",
+   233.5682373046875,
+   268.3611755371094
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "setSpatialFeetPinned",
+   true
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "setSpatialFeetPinned",
+   true
+  ],
+  [
+   "setSpatialFeetPinned",
+   "invalid"
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "setSpatialFeetPinned",
+   false
+  ],
+  [
+   "setSpatialFeetPinned",
+   true
+  ],
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "poseJoint",
+   null,
+   3
+  ],
+  [
+   "poseJoint",
+   1,
+   2,
+   {
+    "snapTolerance": -1
+   }
+  ],
+  [
+   "updateObject",
+   {
+    "_stykSpatial": {
+     "camera": {
+      "strength": 0.8,
+      "distance": 400
+     }
+    }
+   }
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "setSpatialFeetPinned",
+   false
+  ],
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   231.5682373046875,
+   252.36117553710938
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

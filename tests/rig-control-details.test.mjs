@@ -6,7 +6,7 @@ import {createObject,createFrame,emptyDocument} from '../src/demo.mjs';
 import {getPivotHandles,pickCanvasHandle} from '../src/canvas-interactions.mjs';
 import {rigDetailsShown,setRigDetailsShown,validateControlMetadata} from '../src/rig-control-details.mjs';
 import {spatialSections,installSpatialControls} from '../src/spatial-controls.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 
 function fixture() {

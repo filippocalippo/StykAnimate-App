@@ -1,0 +1,130 @@
+{
+ "name": "segment-clipboard-sheet",
+ "document": "joined-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "pasteSegmentValues",
+   null
+  ],
+  [
+   "@select",
+   3,
+   2
+  ],
+  [
+   "copySegmentValues"
+  ],
+  [
+   "@select",
+   3,
+   1
+  ],
+  [
+   "pasteSegmentValues",
+   null
+  ],
+  [
+   "segmentValues"
+  ],
+  [
+   "pasteSegmentValues"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "pasteSegmentValues",
+   null,
+   {
+    "relative": true
+   }
+  ],
+  [
+   "beginSegmentValueEdit"
+  ],
+  [
+   "setSegmentValues",
+   {
+    "angle": 27,
+    "bend": 9,
+    "length": 62
+   }
+  ],
+  [
+   "pasteSegmentValues",
+   null
+  ],
+  [
+   "segmentValues"
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "beginSegmentValueEdit"
+  ],
+  [
+   "setSegmentValues",
+   {
+    "angle": -13,
+    "bend": -6,
+    "length": 47
+   }
+  ],
+  [
+   "pasteSegmentValues",
+   null
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "pasteSegmentValues",
+   false
+  ],
+  [
+   "pasteSegmentValues",
+   0
+  ],
+  [
+   "pasteSegmentValues",
+   {}
+  ],
+  [
+   "pasteSegmentValues",
+   ""
+  ],
+  [
+   "pasteSegmentValues",
+   "12.5:0:58"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "pasteSegmentValues"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

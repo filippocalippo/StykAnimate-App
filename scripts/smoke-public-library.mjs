@@ -13,7 +13,7 @@ import {createServer} from 'node:http';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {RIG_EXAMPLES, rigExampleDocument} from '../src/rig-examples.mjs';
-import {buildContainerV2} from '../src/native-container.mjs';
+import {buildContainerV2} from '../tests/support/native-files.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 
 const root = process.cwd();

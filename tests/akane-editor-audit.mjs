@@ -6,8 +6,9 @@ import {isStatic} from '../src/pivot/geometry.mjs';
 import {validateScene, validateObjectChanges} from '../src/pivot/model.mjs';
 
 import {corpusPath} from './support/corpus.mjs';
+import {nodeCodec} from './support/codec.mjs';
 const filename = process.argv[2] ?? corpusPath('Downloads/16 Akane vs Akato Segundo round (3).piv');
-const response = await fetch('http://127.0.0.1:47831/api/import?filename=' + encodeURIComponent(filename.split('/').at(-1)),
+const response = await nodeCodec().fetch('/api/import?filename=' + encodeURIComponent(filename.split('/').at(-1)),
   {method: 'POST', headers: {'content-type': 'application/octet-stream'}, body: await fs.readFile(filename)});
 assert.equal(response.status, 200); const imported = await response.json(), report = imported.document;
 const types = new Map(report.figure_types.map(f => [f.figure_type_id, f]));

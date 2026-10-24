@@ -8,8 +8,6 @@ import {createObject,createFrame} from '../src/demo.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
 import {storedFrameReport} from '../src/pivot-frame-draft.mjs';
 import {nativeFigureDocument} from '../src/native-figure.mjs';
-import {exportSVG} from '../src/svg-export.mjs';
-import {requiresCompatibilityTexture} from '../src/renderer-geometry.mjs';
 
 const sample=(report,tick)=>{const rows=timeline(report);let i=0;while(i+1<rows.length&&rows[i+1].start<=tick)i++;return buildGeometry(report,evaluatedFrame(report,i,rows[i].count?(tick-rows[i].start)/rows[i].count:0,tick));};
 const scene=geometry=>geometry.drawables.map(s=>({type:s.type,points:s.points.map(p=>[p.x,p.y]),rgb:s.rgb,alpha:s.alpha}));
@@ -123,13 +121,6 @@ test('portable movieclip imports restart and shared editing recovery retains the
   const parent=editor.report;editor.enterMovieclip(f.figure_type_id);editor.select(1);editor.moveSelection(7,0);
   const recovered=editor.movieclipProjectReport();assert.equal(recovered.keyframes.length,parent.keyframes.length);assert.equal(recovered.figure_types.at(-1)._styk.movieclip.document,editor.report);
   const reopened=new Editor();reopened.load(structuredClone(recovered));assert.equal(reopened.totalTicks,timeline(parent).at(-1).start+timeline(parent).at(-1).count);
-});
-
-test('SVG and GPU fallback preserve movieclip group opacity',async()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);editor.createMovieclip({start:0,end:8});editor._objectEdit('Fade movieclip',o=>{o.field28=128;});
-  assert.equal(requiresCompatibilityTexture(editor.geometry.drawables),true);
-  const svg=await exportSVG({report:editor.report,frame:editor.evaluatedFrame,geometry:editor.geometry,width:960,height:540});
-  assert.match(await svg.text(),/data-movieclip-id="\d+" opacity="0.4980392"/);
 });
 
 test('nested conversion preserves the enclosing clip and shared edits update all instances',()=>{

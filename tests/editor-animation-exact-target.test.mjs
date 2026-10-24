@@ -49,3 +49,19 @@ test('explicit global inspector reads, previews, navigation and commit preserve 
   editor.beginAnimationEdit(global,'opacity',options);editor.previewAnimationEdit(.22);editor.cancelAnimationEdit();
   assert.deepEqual(editor.report._styk.animation,before);
 });
+
+test('fractional inspector reads sample the requested scope without admitting fractional keys',()=>{
+  const editor=fixture(),options={exactTarget:true};editor.seek(4.5);
+  const before=structuredClone(editor.report),history=editor._undo.length,revision=editor.revision,edit=editor._animationEdit;
+  let events=0;editor.addEventListener('change',()=>events++);
+  assert.equal(editor.animationValue(global,'opacity',4.5,options),.45);
+  assert.equal(editor.animationValue(global,'opacity'),.3);
+  assert.equal(editor.animationValue(a,'opacity',4.5,options),.3);
+  assert.equal(editor.animationValue(b,'opacity',4.5,options),undefined);
+  assert.throws(()=>editor.beginAnimationEdit(global,'opacity',options),/integer/);
+  assert.throws(()=>editor.addAnimationKey(global,'opacity',4.5,.6,options),/integer/);
+  for(const tick of [NaN,Infinity,-.5,10000000.5,'4.5'])assert.throws(()=>editor.animationValue(global,'opacity',tick,options));
+  assert.equal(editor._animationEdit,edit);
+  assert.deepEqual(editor.report,before);assert.equal(editor._undo.length,history);
+  assert.equal(editor.revision,revision);assert.equal(events,0);
+});

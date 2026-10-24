@@ -7,7 +7,8 @@ import {CAMERA_MOTION_TYPES,MOTION_PARAMETERS,isWholeMotionParameter,validateCam
 import {followFramingOffset} from './camera-follow.mjs';
 import {motionTypeMessages,motionParameterMessages,motionDescriptionMessages} from './camera-motion-localization.mjs';
 import {CameraMotionGraph,motionGraphView} from './camera-motion-graph.mjs';
-import {drawCameraMonitor,cameraMonitorVisible} from './camera-monitor.mjs';
+import {cameraMonitorVisible} from './camera-monitor.mjs';
+import {placement} from './engine/engine-pictures.mjs';
 import {validateParallax} from './layer-parallax.mjs';
 import {icon} from './icons.mjs';
 const esc=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -90,8 +91,9 @@ export function parallaxView(editor,id){
   return `<details class="parallax-panel inspector-section" data-section="parallax" data-parallax-layer="${esc(id)}" ${p.enabled?'open':''}><summary class="parallax-heading">${icon('chevron-right')}<strong data-i18n="cameraMotionUi.parallax2">Parallax</strong><label class="motion-switch" title="Enable parallax" data-i18n-title="cameraMotionUi.enableParallax"><input data-parallax-field="enabled" type="checkbox" aria-label="Enable parallax" ${p.enabled?'checked':''} ${layer.locked?'disabled':''} data-i18n-aria-label="cameraMotionUi.enableParallax"><span></span></label></summary><fieldset ${layer.locked?'disabled':''}><div class="parallax-preset"><select class="inline-select" data-parallax-field="preset" aria-label="Parallax preset" data-i18n-aria-label="cameraMotionUi.parallaxPreset">${custom?`<option value="custom" data-i18n="cameraMotionUi.custom">Custom</option>`:''}${presets.map((_tuple) => {const [v,label] = _tuple; const _messages = tupleMessages(_tuple); return `<option value="${v}" ${!custom&&p.x===v?'selected':''}${_messages[1] ? ' ' + messageAttributes(_messages[1].key, _messages[1].params) : ''}>${label}</option>`;}).join('')}</select><button class="icon-button" data-parallax-reference title="Set reference from current frame" aria-label="Set reference from current frame" data-i18n-title="cameraMotionUi.setReferenceFromCurrentFrame" data-i18n-aria-label="cameraMotionUi.setReferenceFromCurrentFrame">${icon('center')}</button></div><input data-parallax-field="movement" class="motion-slider" type="range" min="0" max="400" value="${p.x*100}" aria-label="Parallax movement" data-i18n-aria-label="cameraMotionUi.parallaxMovement"><div class="parallax-axes">${['x','y'].map((axis,i)=>`${i?`<label class="parallax-link ${p.linked?'linked':''}" title="Link axes" data-i18n-title="cameraMotionUi.linkAxes"><input data-parallax-field="linked" type="checkbox" ${p.linked?'checked':''} aria-label="Link axes" data-i18n-aria-label="cameraMotionUi.linkAxes">${icon('link')}</label>`:''}${parallaxAxis(axis,p[axis],layer.locked)}`).join('')}</div></fieldset><details class="parallax-preview" data-section="parallax-preview"><summary>${icon('chevron-right')}${messageHTML("cameraMotionUi.preview", {})}</summary><canvas class="parallax-monitor" data-parallax-monitor aria-label="Parallax camera preview" data-i18n-aria-label="cameraMotionUi.parallaxCameraPreview"></canvas><div class="parallax-pan"><span data-i18n="cameraMotionUi.pan">Pan</span><input data-parallax-preview class="motion-slider" type="range" min="-100" max="100" value="0" aria-label="Preview camera pan" data-i18n-aria-label="cameraMotionUi.previewCameraPan"></div></details></details>`;
 }
 export class CameraMotionControls {
-  constructor(root,editor,{onError,onRender,onPreview,getResources,beforeEdit}={}){
-    this.root=root;this.editor=editor;this.beforeEdit=beforeEdit;this.onRender=onRender;this.onError=onError;this.onPreview=onPreview;this.getResources=getResources;
+  /** `posePicture(pose, {width, height, placement, signal})` draws a pose of the open document (EnginePoses, engine-pictures.mjs). */
+  constructor(root,editor,{onError,onRender,onPreview,posePicture,beforeEdit}={}){
+    this.root=root;this.editor=editor;this.beforeEdit=beforeEdit;this.onRender=onRender;this.onError=onError;this.onPreview=onPreview;this.posePicture=posePicture;
     this.graph=new CameraMotionGraph(root,editor);
     root.addEventListener('click',event=>{const button=event.target.closest('[data-motion-action],[data-motion-select],[data-motion-toggle],[data-motion-add],[data-motion-axes],[data-follow-remove],[data-parallax-reference],[data-camera-tab]');if(!button)return;event.stopPropagation();this.run(()=>{
       if(button.dataset.motionAdd){this.beforeEdit?.();editor._cameraInspectorTab='motion';editor._cameraMotionAdding=false;editor._selectedCameraMotion=editor.addCameraMotion(button.dataset.motionAdd);this.onRender?.();return;}
@@ -194,6 +196,21 @@ export class CameraMotionControls {
     if(p)for(const input of panel.querySelectorAll('input:is([type="number"],[type="range"])[data-parallax-field]'))if(input!==this.active?.input){const value=p[input.dataset.parallaxField==='movement'?'x':input.dataset.parallaxField]*100;input.value=String(value);input.dataset.propertyValue=String(value);}
     const canvas=this.root.querySelector('[data-parallax-monitor]');if(!cameraMonitorVisible(canvas))return;
     const editor=this.editor,frame=editor.evaluatedFrame,c=frame.camera??{};
-    drawCameraMonitor(canvas,{report:editor.report,frame:{...frame,camera:{...c,is_default:false,x:(c.x??0)+pan*editor.report.canvas_width/200}},geometry:editor.geometry,resources:this.getResources?.(),onError:this.onError});
+    void this.drawParallax(canvas,{...frame,camera:{...c,is_default:false,x:(c.x??0)+pan*editor.report.canvas_width/200}});
+  }
+  /** The parallax monitor: the pose seen through a camera moved sideways, drawn by the engine; the latest request wins and the last picture stays until the next arrives. */
+  async drawParallax(canvas,pose){
+    const report=this.editor.report,width=canvas.clientWidth,height=canvas.clientHeight,dpr=Math.min(globalThis.devicePixelRatio||1,2),
+      scale=Math.min(width/report.canvas_width,height/report.canvas_height),
+      x=(width-report.canvas_width*scale)/2,y=(height-report.canvas_height*scale)/2;
+    this.parallaxRequest?.abort();
+    const request=this.parallaxRequest=new AbortController();
+    try{
+      const bitmap=await this.posePicture?.(pose,{width:Math.round(width*dpr),height:Math.round(height*dpr),placement:placement.camera(scale*dpr,x*dpr,y*dpr),signal:request.signal});
+      if(request.signal.aborted||!canvas.isConnected){bitmap?.close();return;}
+      if(!bitmap)return;
+      canvas.width=bitmap.width;canvas.height=bitmap.height;
+      canvas.getContext('2d').drawImage(bitmap,0,0);bitmap.close();
+    }catch(error){if(error?.name!=='AbortError')this.onError?.(error);}
   }
 }

@@ -1,31 +1,25 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {readFileSync} from 'node:fs';
+import path from 'node:path';
 import {Editor} from '../src/editor.mjs';
 import {buildGeometry,timeline,evaluatedFrame} from '../src/pivot/geometry.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
-import backend from '../desktop/backend.cjs';
 import {missingFixture} from './helpers/local-fixtures.mjs';
+import {exportDocument, importBytes, nodeCodec} from './support/codec.mjs';
 
-function api(request) {
-  const script=String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-r=json.load(sys.stdin);store=server.ProjectStore(server.WORKSPACE)
-if 'path' in r:
- p=server.WORKSPACE/r['path']; imported=store.import_bytes(p.read_bytes(),p.name)
- raw,_=store.export({'document':imported['document'],'sourceId':imported['sourceId'],'format':'styk'})
- print(json.dumps(store.import_bytes(raw,'roundtrip.styk')['document']))
-else:
- raw,name=store.export(r); imported=store.import_bytes(raw,name)
- print(json.dumps(imported['document']))
-`;
-  const python=backend.pythonCandidates()[0],result=spawnSync(python.command,[...python.args,'-c',script],{
-    cwd:fileURLToPath(new URL('..',import.meta.url)),input:JSON.stringify(request),encoding:'utf8',windowsHide:true,maxBuffer:20*1024*1024});
-  assert.equal(result.status,0,result.error?.message||result.stderr);return JSON.parse(result.stdout);
+// A corpus file (beside the repository) through import and a .styk save; otherwise an export and its reimport.
+async function api(request) {
+  const codec=nodeCodec();
+  if (request.path) {
+    const file=fileURLToPath(new URL(`../../${request.path}`,import.meta.url));
+    const imported=await importBytes(readFileSync(file),path.basename(file),{codec});
+    const {bytes}=await exportDocument({document:imported.document,sourceId:imported.sourceId,format:'styk'},{codec});
+    return (await importBytes(bytes,'roundtrip.styk',{codec})).document;
+  }
+  const {bytes,name}=await exportDocument(request,{codec});
+  return (await importBytes(bytes,name,{codec})).document;
 }
 function geometry(report,tick) {
   const rows=timeline(report);let index=0;
@@ -44,16 +38,16 @@ function compare(actual,expected,label) {
   assert.deepEqual(actual.drawables.map(x=>x.rgb),expected.drawables.map(x=>x.rgb),label);
 }
 const skip=missingFixture(...['text_bike.piv','Legacy/walking.piv','Legacy/cursor.piv','Legacy/sprite_demo.piv'].map(file=>`../Pivot Animator v5/Animations/${file}`));
-const modern=skip?null:api({path:'Pivot Animator v5/Animations/text_bike.piv'});
-for(const [version,file]of [[2,'walking.piv'],[3,'cursor.piv'],[4,'sprite_demo.piv']])test(`real V${version} destination and native text clipboard preserve all old ticks through PIV/STYK/restart`,{skip},()=>{
-  const legacy=api({path:`Pivot Animator v5/Animations/Legacy/${file}`});assert.equal(legacy.version,version);
+const modern=skip?null:await api({path:'Pivot Animator v5/Animations/text_bike.piv'});
+for(const [version,file]of [[2,'walking.piv'],[3,'cursor.piv'],[4,'sprite_demo.piv']])test(`real V${version} destination and native text clipboard preserve all old ticks through PIV/STYK/restart`,{skip},async()=>{
+  const legacy=await api({path:`Pivot Animator v5/Animations/Legacy/${file}`});assert.equal(legacy.version,version);
   const e=new Editor({demo:false}).load(structuredClone(modern));e.copyFrames([0]);e.load(legacy);
   const before=structuredClone(e.report),oldTicks=e.totalTicks,history=e._undo.length;
   e.appendClipboardFrames();assert.equal(e.report.version,5);assert.equal(e._undo.length,history+1);
   assert.equal(e.report._stykSource.sha256,before._stykSource.sha256);
   assert.equal(e.report._stykSource.source_base64,before._stykSource.source_base64);
-  const current=materializePivotDocument(e.report),piv=api({document:current,format:'piv'}),styk=api({document:e.report,format:'styk'});
-  const afterRestart=api({document:materializePivotDocument(styk),format:'piv'});
+  const current=materializePivotDocument(e.report),piv=await api({document:current,format:'piv'}),styk=await api({document:e.report,format:'styk'});
+  const afterRestart=await api({document:materializePivotDocument(styk),format:'piv'});
   assert.ok(piv.figure_types.some(f=>f.text_assets?.length),'Pasted native text remains embedded');
   if(version===4)assert.ok(piv.figure_types.some(f=>f.image_assets?.length),'Legacy sprite remains embedded');
   for(let tick=0;tick<oldTicks;tick++) {

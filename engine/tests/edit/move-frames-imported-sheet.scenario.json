@@ -1,0 +1,37 @@
+{
+ "name": "move-frames-imported-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "sheetMoveFrames",
+   [
+    "layer-1"
+   ],
+   0,
+   0,
+   3
+  ],
+  [
+   "sheetMoveFrames",
+   [
+    "layer-1"
+   ],
+   3,
+   8,
+   2,
+   {
+    "copy": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

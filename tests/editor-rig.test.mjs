@@ -1,12 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {editorRigMethods} from '../src/editor-rig.mjs';
 import {createFrame, createObject, emptyDocument} from '../src/demo.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
-import backend from '../desktop/backend.cjs';
+import {roundTrip} from './support/codec.mjs';
 
 Object.assign(Editor.prototype, editorRigMethods);
 const near = (a, b, tolerance = 2e-4) => assert.ok(Math.abs(a - b) <= tolerance, `${a} != ${b}`);
@@ -99,24 +97,14 @@ test('nested attachments retain canonical root coordinates, identities and undo 
   editor.undo(); assert.deepEqual(editor.serialize(), before);
 });
 
-test('rig position and reusable definition survive real native PIV and STK exports', () => {
+test('rig position and reusable definition survive real native PIV and STK exports', async () => {
   const editor = fixture(); editor.editRigJoint(225, 115); const figure = editor.figure;
-  const python = String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-document=json.load(sys.stdin); store=server.ProjectStore(server.WORKSPACE); result={}
-for kind in ('piv','stk'):
- raw,name=store.export({'document':document,'format':kind,'figureTypeId':1})
- reopened=store.import_bytes(raw,name)['document']
- f=next(f for f in reopened['figure_types'] if len(f.get('segments',[]))==4)
- result[kind]={'figure':f,'document':reopened}
-print(json.dumps(result))
-`;
-  const candidate = backend.pythonCandidates()[0], result = spawnSync(candidate.command, [...candidate.args, '-c', python], {cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify(editor.serialize()), encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024});
-  assert.equal(result.status, 0, result.error?.message || result.stderr);
-  const output = JSON.parse(result.stdout);
+  const serialized = editor.serialize(), output = {};
+  for (const kind of ['piv', 'stk']) {
+    const reopened = await roundTrip({document: serialized, format: kind, figureTypeId: 1});
+    const saved = reopened.figure_types.find(f => (f.segments ?? []).length === 4); assert.ok(saved);
+    output[kind] = {figure: saved, document: reopened};
+  }
   for (const kind of ['piv', 'stk']) for (let i = 0; i < 4; i++) {
     near(output[kind].figure.segments[i].angle_rad, figure.segments[i].angle_rad);
     near(output[kind].figure.segments[i].length, figure.segments[i].length);

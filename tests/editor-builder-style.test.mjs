@@ -1,14 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {editorBuilderMethods} from '../src/editor-builder.mjs';
 import {builderDrawables,builderStyleTargets,reorderBuilderDrawables} from '../src/editor-builder-style.mjs';
 import {beginNativePropertyEdit,previewNativePropertyEdit,commitNativePropertyEdit,cancelNativePropertyEdit,getNativePropertyValue} from '../src/native-property-edit.mjs';
 import {defaultFigure,createObject} from '../src/demo.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
-import backend from '../desktop/backend.cjs';
+import {roundTrip} from './support/codec.mjs';
 Object.assign(Editor.prototype,editorBuilderMethods);
 function fixture(){
   const editor=new Editor({demo:false}),figure=defaultFigure(201);
@@ -82,23 +80,12 @@ test('document validation rejects malformed order and polygon alpha before rende
   }
   assert.doesNotThrow(()=>validateScene(e.report));
 });
-test('actual PIV and STK encoders retain mixed order and polygon alpha',()=>{
+test('actual PIV and STK encoders retain mixed order and polygon alpha',async()=>{
   const e=fixture();e.figure.image_assets=[];e.moveBuilderOrder({kind:'segment',index:1},'back',{branch:true});e.setPolygonOpacity(0,.4);
-  const expected=order(e),python=String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-document=json.load(sys.stdin)
-store=server.ProjectStore(server.WORKSPACE)
-result={}
-for kind in ('piv','stk'):
- raw,name=store.export({'document':document,'format':kind,'figureTypeId':document['figure_types'][-1]['figure_type_id']})
- reopened=store.import_bytes(raw,name)['document']
- result[kind]=next(f for f in reopened['figure_types'] if len(f.get('polyfills',[]))==2)
-print(json.dumps(result))
-`;
-  const candidate=backend.pythonCandidates()[0],r=spawnSync(candidate.command,[...candidate.args,'-c',python],{cwd:fileURLToPath(new URL('..',import.meta.url)),input:JSON.stringify(e.serialize()),encoding:'utf8',windowsHide:true,maxBuffer:4*1024*1024});
-  assert.equal(r.status,0,r.error?.message||r.stderr);const reopened=JSON.parse(r.stdout);
+  const expected=order(e),document=e.serialize(),reopened={};
+  for(const kind of ['piv','stk']){
+    const figures=(await roundTrip({document,format:kind,figureTypeId:document.figure_types.at(-1).figure_type_id})).figure_types;
+    reopened[kind]=figures.find(f=>(f.polyfills??[]).length===2);assert.ok(reopened[kind],`${kind} keeps the two-polygon figure`);
+  }
   for(const figure of Object.values(reopened)){assert.deepEqual(builderDrawables(figure).map(entry=>`${entry.kind==='segment'?'s':'p'}${entry.index}`),expected);assert.equal(figure.polyfills[0].alpha_raw,153);}
 });

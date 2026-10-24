@@ -115,9 +115,8 @@ Prepared GPU textures containing connected members reject changed hidden-member
 visibility and fall back to live rendering. Incremental native geometry remains
 available; affected groups rebuild their combined artwork.
 
-Regression coverage: `tests/vfx-connected.test.mjs`,
-`tests/vfx-connected.browser.mjs`, `tests/vfx.test.mjs`,
-`tests/vfx.browser.mjs` and `tests/vfx-rendering.browser.mjs`.
+Regression coverage: `tests/vfx-connected.test.mjs`, `tests/vfx.test.mjs`
+and `tests/vfx.browser.mjs`.
 
 
 Persistent records live in `_styk.vfxClips` as immutable, sparse clips. Editor
@@ -145,9 +144,5 @@ caches. Subpixel strokes, nested effects and unsupported artwork retain the
 existing compatibility renderer. This fast path does not change export quality.
 
 Additional checks: `tests/vfx-clips.test.mjs`, `tests/vfx-clips.browser.mjs`,
-`tests/vfx-key-channels.test.mjs`, `tests/vfx-key-channels.browser.mjs`,
-`tests/vfx-interactions.browser.mjs`,
-`tests/vfx-clips-rendering.browser.mjs`, `scripts/benchmark-vfx-vector.mjs`, and
-`scripts/benchmark-vfx-timeline.mjs` (20 effects with one million parameter keys).
-The benchmark compares both paths on the same 105-figure, 10,500-segment assembly;
-it measures submitted rendering plus GPU completion after warmup, not FPS.
+`tests/vfx-key-channels.test.mjs`, `tests/vfx-key-channels.browser.mjs`
+and `tests/vfx-interactions.browser.mjs`.

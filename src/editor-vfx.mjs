@@ -4,6 +4,7 @@ import {normalizeAnimationTarget} from './animation-channels.mjs';
 import {VFX_PRESETS} from './vfx-presets.mjs';
 import {effectAvailable} from './vfx-registry.mjs';
 import {connectedVfxConflict} from './vfx-connected.mjs';
+import {editorDraws} from './editor-draws.mjs';
 const copy=value=>structuredClone(value);
 function targetFor(editor,target){
   target=normalizeAnimationTarget(target);if(!['scene','figure','segment'].includes(target.kind))throw messageError(new Error(''), "errors.editorVfx.selectAFigureNodeMovieclipOrScene", {});
@@ -11,7 +12,7 @@ function targetFor(editor,target){
   if(editor.animationValue(target,'vfxStack')===undefined)throw messageError(new Error(''), "errors.editorVfx.thisTargetIsNotPresentAtThisFrame", {});return target;
 }
 function owner(editor,target){return target.kind==='scene'?editor.evaluatedFrame:editor.evaluatedFrame.objects.find(o=>o.unique_id===target.uid);}
-const freshId=()=>`fx-${globalThis.crypto.randomUUID().replaceAll('-','')}`;
+const freshId=()=>`fx-${editorDraws.uuid().replaceAll('-','')}`;
 export const editorVfxMethods={
   setVfxScope(target,includeAttached){
     target=targetFor(this,target);if(target.kind!=='figure')throw messageError(new Error(''), "errors.editorVfx.selectAWholeFigureToIncludeAttachedParts", {});

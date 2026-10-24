@@ -2,13 +2,13 @@ import {chromium} from './support/playwright.mjs';
 import {createRequire} from 'node:module';
 import {mkdir, writeFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
-const {startBackend} = createRequire(import.meta.url)('../desktop/backend.cjs');
-const backend = await startBackend({appRoot:process.cwd()}); let browser;
+const {startDesktopHost} = createRequire(import.meta.url)('../desktop/web-host.cjs');
+const backend = await startDesktopHost({appRoot:process.cwd()}); let browser;
 try {
   browser = await chromium.launch({channel:'chrome', headless:true});
   const page = await browser.newPage(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`${backend.origin}/api/health`);
+  await page.goto(`${backend.origin}/tests/fixtures/blank.html`);
   const result = await page.evaluate(async () => {
     const {drawGeometry} = await import('/src/pivot/geometry.mjs');
     const {imageBlob} = await import('/src/preview-image.mjs');

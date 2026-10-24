@@ -180,7 +180,10 @@ function authoredDraft(editor, entries, sources = {}) {
     if (key) { key.value = value; delete key.passthrough; }
     else {
       const used = new Set(channel.keys.map(key => key.id)); let keyId;
-      do { keyId = `key-${after.nextKeyId++}`; } while (used.has(keyId));
+      do {
+        if (!Number.isSafeInteger(after.nextKeyId) || after.nextKeyId < 1) throw messageError(new Error(''), "errors.animationChannels.invalidAnimationKeyIdentityCounter", {});
+        keyId = `key-${after.nextKeyId++}`;
+      } while (used.has(keyId));
       key = {id: keyId, tick: entry.tick, value, ...inheritedKeyEasing(channel.keys, entry.tick, {property: entry.property, autoEasing: entry.property === 'pose' && editor.report.auto_easing})}; channel.keys.push(key);
     }
   }

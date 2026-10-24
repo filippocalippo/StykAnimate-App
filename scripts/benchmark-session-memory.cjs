@@ -19,8 +19,8 @@ function install(forcedGC){
     }
   };
   p.settle=async()=>{
-    await p.wait(()=>!styk.state.importing&&!styk.state.editablePreparing&&!styk.state.dirtyRender);
-    await styk.state.renderer.device?.queue.onSubmittedWorkDone();
+    await p.wait(()=>!styk.state.importing&&!styk.state.dirtyRender);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     await new Promise(resolve=>setTimeout(resolve,0));
   };
   p.capture=label=>{

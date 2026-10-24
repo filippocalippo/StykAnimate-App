@@ -136,7 +136,7 @@ Revision 4's "nothing further than today" held only at 1440×900. Revision 4.1 m
    - Each commit is coherent, passes `npm run check` and `npm test`, and includes its tests and docs.
    - **Release freeze.** Between M0 and M9 the UI on `main` is a mix of legacy and new surfaces. M0 commit 1 adds the marker `artifacts/ui-redesign/IN_PROGRESS` and a check in `scripts/release-prepare` (the `release:prepare` script) that refuses to run while the marker exists; M9 removes it. M0 commits 1–4 landed before the freeze was confirmed; the marker and its check now land before M0 commit 5 (the first change of colours), and the owner confirms the freeze before that commit (§6). User-facing changelog entries are drafted in `docs/design/CHANGELOG-DRAFT.md` and move into `CHANGELOG.md` `Unreleased` only in M9.
 7. **Dev servers.** Each track runs its own server:
-   - start: `STYK_PYTHON=py node scripts/serve.mjs --port <port>` (background)
+   - start: `node scripts/serve.mjs --port <port>` (background)
    - run tests with: `STYK_URL=http://127.0.0.1:<port> node tests/<name>.browser.mjs`
 
    | Milestone | Port |
@@ -158,7 +158,7 @@ Revision 4's "nothing further than today" held only at 1440×900. Revision 4.1 m
    - `theme.browser`
    - `audio-ux.browser`
    - `vfx-expansion` and `vfx-strength` (run with `--render-only`)
-   - the load-sensitive `backend-session` unit test (rerun it alone)
+   - the load-sensitive `backend-session` unit test (rerun it alone; removed with the Python codec service in the Rust engine port)
 
    M0.1 records the full baseline in `artifacts/ui-redesign/baseline.json` before anything changes.
 
@@ -1153,7 +1153,7 @@ x = inset.left + (rect.width - inset.left - inset.right - w * s) / 2;   // y lik
   - `build.files` (the asar: `desktop/**`, `package.json`) needs only the `main.cjs` colour literal
   - `desktop/web-host.cjs` serves only the `src`, `vendor` and `assets` segments and root `.html`, `.css`, `.svg`, `.png` and `.ico`, with a `.woff2` MIME type
   - `scripts/verify-package.mjs` hashes `src/`, `vendor/` and `assets/`
-- **Never add a root-level JS, font or other file.** The dev server (`backend/server.py`) is more permissive, so a misplaced file passes browser tests and then gets a 403 in Electron.
+- **Never add a root-level JS, font or other file.** The desktop host (`desktop/web-host.cjs`, which `npm run serve` also uses) serves only `src/`, `vendor/`, `assets/` and root `.html`/`.css`/`.svg`/`.png`/`.ico` files, and a packaged app also leaves out `tests/` and `artifacts/`: a misplaced file gets a 403.
 - **Proof.** In M0 and M8: `npm run pack && npm run verify:package && env -u ELECTRON_RUN_AS_NODE npm run test:desktop:packaged`. Also check the packaged renderer console for 403s on `assets/fonts/*` and `src/styles/**`.
 
 ### 3.19 `window.styk` additions

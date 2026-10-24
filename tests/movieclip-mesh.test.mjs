@@ -6,7 +6,7 @@ import {emptyDocument,createObject,createFrame} from '../src/demo.mjs';
 import {buildGeometry,evaluatedFrame} from '../src/pivot/geometry.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 import {Editor} from '../src/editor.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {createMovieclipMaterializer} from '../src/movieclip-materialize.mjs';
 import {documentHasSurfaces} from '../src/pivot/surfaces.mjs';
 const rad=d=>d*Math.PI/180;

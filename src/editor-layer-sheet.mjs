@@ -137,7 +137,7 @@ function publish(editor,plan,label,{selection=editor._selectionState(),assets,se
   const before=editor.report._styk.layerSheet,beforeLayers=editor.report._styk.layers;
   // Freeze only endpoints of edited spans. Unchanged imported spans continue
   // using their exact original easing; one key edit never copies the movie.
-  for(const [id,track] of Object.entries(plan.state.tracks))if(track!==before.tracks[id]){
+  if(plan.materialize)for(const [id,track] of Object.entries(plan.state.tracks))if(track!==before.tracks[id]){
     const previous=(before.tracks[id]?.keys??[]).filter(key=>!key.patchOnly),byId=new Map(previous.map((k,i)=>[k.id,{key:k,next:previous[i+1]}])),current=track.keys.filter(key=>!key.patchOnly);
     current.forEach((key,i)=>{const old=byId.get(key.id),next=current[i+1];
       if(old&&(key.tick!==old.key.tick||key.interpolation!==old.key.interpolation||JSON.stringify(key.bezier)!==JSON.stringify(old.key.bezier)||next?.id!==old.next?.id||next?.tick!==old.next?.tick)){
@@ -167,8 +167,22 @@ function publish(editor,plan,label,{selection=editor._selectionState(),assets,se
   editor._record({kind:'layer-sheet',label,before,after:plan.state,beforeLayers:clone(beforeLayers),afterLayers:clone(plan.layers),
     frameSourceChanges:plan.sources,assets,beforeSelection:selection,afterSelection:editor._selectionState(),structural:true,timing:true,retainGeometry,
     precomputedBytes:JSON.stringify({tracks:Object.keys(plan.state.tracks).filter(id=>before.tracks[id]!==plan.state.tracks[id]).map(id=>[before.tracks[id],plan.state.tracks[id]]),beforeLayers,afterLayers:plan.layers,sources:plan.sources,assets}).length*2});
-  editor._layerChanged({reindex:true});editor._emit('edit',{label,structural:true,timing:true,layerSheet:true,
+  // Recording and source collection already maintain membership. A compact
+  // adoption retaining the exact layers needs only the revision/event change.
+  editor._layerChanged({reindex:plan.layers!==beforeLayers});editor._emit('edit',{label,structural:true,timing:true,layerSheet:true,
     definition:Boolean(assets?.figure_types),frameIndices:[],sourceIds:plan.sources.map(source=>source.id)});return true;
+}
+/** Publishes a layer sheet the engine's planner computed (src/engine/engine-planning.mjs): the same bookkeeping, events
+ * and history as a plan made here. `sheet.tracks` holds the tracks the call replaced and
+ * `trackOrder` names every track; the others stay the editor's own objects. Every source
+ * it names is new and its edited imported endpoints are already materialized. */
+export function adoptLayerSheet(editor,{sheet,trackOrder,layers,sources,nextFrame,definitions},label,{selection,retainGeometry=false}={}){
+  const before=editor.report._styk.layerSheet;
+  const state={...sheet,tracks:Object.fromEntries(trackOrder.map(id=>[id,Object.hasOwn(sheet.tracks,id)?sheet.tracks[id]:before.tracks[id]]))};
+  const plan={state,layers,nextFrame,sources:Object.entries(sources??{}).map(([id,value])=>({id,before:{exists:false},after:{exists:true,value}}))};
+  // Definitions the call added (a paste's copies) are published with the sheet, as assets.
+  const assets=definitions?.length?{figure_types:{added:definitions}}:undefined;
+  return publish(editor,plan,label,{selection,retainGeometry,assets});
 }
 function replaceAt(editor,plan,id,tick,uid,frame,options={},end=tick+1){
   checkedTick(tick);const track=plan.get(id);

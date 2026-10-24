@@ -1,14 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {createImageFigure} from '../src/media-authoring.mjs';
 import {createObject, createFrame, emptyDocument} from '../src/demo.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 import {builderDrawables} from '../src/editor-builder-style.mjs';
-import backend from '../desktop/backend.cjs';
+import {exportDocument, importBytes, nodeCodec} from './support/codec.mjs';
 
 const clone = structuredClone;
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aHk8AAAAASUVORK5CYII=';
@@ -181,7 +179,7 @@ test('signed 32-bit anchor extremes are accepted when distinct and stay finite',
   assert.ok(Number.isFinite(editor.figure.segments.at(-1).length)); assert.doesNotThrow(() => validateScene(editor.report));
 });
 
-test('attached sprites round-trip through actual native PIV and STK writers with integer anchors and PNG bytes', () => {
+test('attached sprites round-trip through actual native PIV and STK writers with integer anchors and PNG bytes', async () => {
   const editor = fixture({frames: 2});
   // Sparse native draw orders near the uint16 limit must leave room for another image.
   editor.figure.segments.forEach((segment,index)=>segment.z_order=65526+index);
@@ -191,25 +189,11 @@ test('attached sprites round-trip through actual native PIV and STK writers with
   assert.equal(editor.figure.segments.at(-1).z_order,11);editor.undo();assert.deepEqual(editor.serialize(),before);editor.redo();
   editor.select(1, 1);
   editor.addSpriteSegment(sprite({x: 12, y: -19}, {x: 22, y: -19}));
-  const python = String.raw`
-import json, sys
-from pathlib import Path
-sys.path.insert(0, str(Path('backend').resolve()))
-import server
-document=json.load(sys.stdin)
-store=server.ProjectStore(server.WORKSPACE)
-result={}
-for kind in ('piv','stk'):
-    raw,name=store.export({'document':document,'format':kind,'figureTypeId':document['figure_types'][0]['figure_type_id']})
-    reopened=store.import_bytes(raw,name)
-    result[kind]={'bytes':len(raw),'document':reopened['document']}
-print(json.dumps(result))
-`;
-  const candidate = backend.pythonCandidates()[0];
-  const result = spawnSync(candidate.command, [...candidate.args, '-c', python], {cwd: fileURLToPath(new URL('..', import.meta.url)),
-    input: JSON.stringify(editor.serialize()), encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024});
-  assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout);
-  const outputs = JSON.parse(result.stdout);
+  const serialized = editor.serialize(), outputs = {};
+  for (const kind of ['piv', 'stk']) {
+    const codec = nodeCodec(), {bytes, name} = await exportDocument({document: serialized, format: kind, figureTypeId: serialized.figure_types[0].figure_type_id}, {codec});
+    outputs[kind] = {bytes: bytes.length, document: (await importBytes(bytes, name, {codec})).document};
+  }
   for (const kind of ['piv', 'stk']) {
     const {bytes, document} = outputs[kind]; assert.ok(bytes > 100);
     const figure = document.figure_types.find(figure => figure.image_assets?.length === 2);

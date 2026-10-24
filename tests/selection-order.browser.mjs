@@ -7,12 +7,12 @@ import {mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from './support/playwright.mjs';
-import backendTools from '../desktop/backend.cjs';
+import backendTools from '../desktop/web-host.cjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const external = process.argv[2], output = path.join(appRoot, 'artifacts/selection-order', external ? 'reported' : 'synthetic');
 await mkdir(output, {recursive: true});
-const backend = await backendTools.startBackend({appRoot});
+const backend = await backendTools.startDesktopHost({appRoot});
 let browser, page;
 const checks = [], errors = [];
 const toolbar = action => page.locator(`.canvas-toolbar [data-action="${action}"]`);

@@ -1,0 +1,727 @@
+{
+ "document": "origin-reroot-support-native.document.json",
+ "cases": [
+  {
+   "name": "vertex-large",
+   "path": [
+    "support",
+    "vertices",
+    "0"
+   ],
+   "value": 100001,
+   "refused": true
+  },
+  {
+   "name": "parent-large",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "parent"
+   ],
+   "value": 100001,
+   "refused": true
+  },
+  {
+   "name": "rotation-large",
+   "path": [
+    "support",
+    "rotation"
+   ],
+   "value": 100001,
+   "refused": true
+  },
+  {
+   "name": "path-bone-large",
+   "path": [
+    "support",
+    "path",
+    0,
+    "bone"
+   ],
+   "value": 100001,
+   "refused": true
+  },
+  {
+   "name": "vertex-negative",
+   "path": [
+    "support",
+    "vertices",
+    "0"
+   ],
+   "value": -2,
+   "refused": true
+  },
+  {
+   "name": "parent-negative",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "parent"
+   ],
+   "value": -2,
+   "refused": true
+  },
+  {
+   "name": "rotation-negative",
+   "path": [
+    "support",
+    "rotation"
+   ],
+   "value": -2,
+   "refused": true
+  },
+  {
+   "name": "path-bone-negative",
+   "path": [
+    "support",
+    "path",
+    0,
+    "bone"
+   ],
+   "value": -2,
+   "refused": true
+  },
+  {
+   "name": "vertex-fractional",
+   "path": [
+    "support",
+    "vertices",
+    "0"
+   ],
+   "value": 0.5,
+   "refused": true
+  },
+  {
+   "name": "parent-fractional",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "parent"
+   ],
+   "value": 0.5,
+   "refused": true
+  },
+  {
+   "name": "rotation-fractional",
+   "path": [
+    "support",
+    "rotation"
+   ],
+   "value": 0.5,
+   "refused": true
+  },
+  {
+   "name": "path-bone-fractional",
+   "path": [
+    "support",
+    "path",
+    0,
+    "bone"
+   ],
+   "value": 0.5,
+   "refused": true
+  },
+  {
+   "name": "vertex-string",
+   "path": [
+    "support",
+    "vertices",
+    "0"
+   ],
+   "value": "0",
+   "refused": true
+  },
+  {
+   "name": "parent-string",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "parent"
+   ],
+   "value": "0",
+   "refused": true
+  },
+  {
+   "name": "rotation-string",
+   "path": [
+    "support",
+    "rotation"
+   ],
+   "value": "0",
+   "refused": true
+  },
+  {
+   "name": "path-bone-string",
+   "path": [
+    "support",
+    "path",
+    0,
+    "bone"
+   ],
+   "value": "0",
+   "refused": true
+  },
+  {
+   "name": "vertex-null",
+   "path": [
+    "support",
+    "vertices",
+    "0"
+   ],
+   "value": null,
+   "refused": true
+  },
+  {
+   "name": "parent-null",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "parent"
+   ],
+   "value": null,
+   "refused": true
+  },
+  {
+   "name": "rotation-null",
+   "path": [
+    "support",
+    "rotation"
+   ],
+   "value": null,
+   "refused": true
+  },
+  {
+   "name": "path-bone-null",
+   "path": [
+    "support",
+    "path",
+    0,
+    "bone"
+   ],
+   "value": null,
+   "refused": true
+  },
+  {
+   "name": "vertex-nan",
+   "path": [
+    "support",
+    "vertices",
+    "0"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true
+  },
+  {
+   "name": "parent-nan",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "parent"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true
+  },
+  {
+   "name": "rotation-nan",
+   "path": [
+    "support",
+    "rotation"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true
+  },
+  {
+   "name": "path-bone-nan",
+   "path": [
+    "support",
+    "path",
+    0,
+    "bone"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true
+  },
+  {
+   "name": "vertex-infinite",
+   "path": [
+    "support",
+    "vertices",
+    "0"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true
+  },
+  {
+   "name": "parent-infinite",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "parent"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true
+  },
+  {
+   "name": "rotation-infinite",
+   "path": [
+    "support",
+    "rotation"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true
+  },
+  {
+   "name": "path-bone-infinite",
+   "path": [
+    "support",
+    "path",
+    0,
+    "bone"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true
+  },
+  {
+   "name": "vertex-negative-infinite",
+   "path": [
+    "support",
+    "vertices",
+    "0"
+   ],
+   "value": {
+    "specialNumber": "-Infinity"
+   },
+   "refused": true
+  },
+  {
+   "name": "parent-negative-infinite",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "parent"
+   ],
+   "value": {
+    "specialNumber": "-Infinity"
+   },
+   "refused": true
+  },
+  {
+   "name": "rotation-negative-infinite",
+   "path": [
+    "support",
+    "rotation"
+   ],
+   "value": {
+    "specialNumber": "-Infinity"
+   },
+   "refused": true
+  },
+  {
+   "name": "path-bone-negative-infinite",
+   "path": [
+    "support",
+    "path",
+    0,
+    "bone"
+   ],
+   "value": {
+    "specialNumber": "-Infinity"
+   },
+   "refused": true
+  },
+  {
+   "name": "vertex-missing",
+   "path": [
+    "support",
+    "vertices",
+    "0"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true
+  },
+  {
+   "name": "vertex-invalid-handle",
+   "path": [
+    "support",
+    "vertices",
+    "bad"
+   ],
+   "value": -1,
+   "refused": true
+  },
+  {
+   "name": "vertex-noncanonical-handle",
+   "path": [
+    "support",
+    "vertices",
+    "022"
+   ],
+   "value": 6,
+   "refused": true
+  },
+  {
+   "name": "vertex-duplicate-node",
+   "path": [
+    "support",
+    "vertices",
+    "0"
+   ],
+   "value": 2,
+   "refused": true
+  },
+  {
+   "name": "vertices-array",
+   "path": [
+    "support",
+    "vertices"
+   ],
+   "value": [],
+   "refused": true
+  },
+  {
+   "name": "vertices-null",
+   "path": [
+    "support",
+    "vertices"
+   ],
+   "value": null,
+   "refused": true
+  },
+  {
+   "name": "parent-self",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "parent"
+   ],
+   "value": 0,
+   "refused": true
+  },
+  {
+   "name": "path-negative-one",
+   "path": [
+    "support",
+    "path",
+    0,
+    "bone"
+   ],
+   "value": -1,
+   "refused": true
+  },
+  {
+   "name": "rotation-negative-one",
+   "path": [
+    "support",
+    "rotation"
+   ],
+   "value": -1,
+   "refused": true
+  },
+  {
+   "name": "parent-missing",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "parent"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true
+  },
+  {
+   "name": "binding-missing",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "handleId"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true
+  },
+  {
+   "name": "binding-negative",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "handleId"
+   ],
+   "value": -1,
+   "refused": true
+  },
+  {
+   "name": "binding-fractional",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "handleId"
+   ],
+   "value": 22.5,
+   "refused": true
+  },
+  {
+   "name": "binding-string",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "handleId"
+   ],
+   "value": "22",
+   "refused": true
+  },
+  {
+   "name": "binding-duplicate",
+   "path": [
+    "support",
+    "bones",
+    2,
+    "handleId"
+   ],
+   "value": 44,
+   "refused": true
+  },
+  {
+   "name": "binding-nan",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "handleId"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true
+  },
+  {
+   "name": "reversed-string",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "reversed"
+   ],
+   "value": "true",
+   "refused": true
+  },
+  {
+   "name": "bone-pose-missing",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "angle_rad"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true
+  },
+  {
+   "name": "bone-pose-string",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "angle_rad"
+   ],
+   "value": "0",
+   "refused": true
+  },
+  {
+   "name": "bone-pose-nan",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "angle_rad"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true
+  },
+  {
+   "name": "bone-length-overflow",
+   "path": [
+    "support",
+    "bones",
+    0,
+    "length"
+   ],
+   "value": 1e+100,
+   "refused": true
+  },
+  {
+   "name": "path-sign-zero",
+   "path": [
+    "support",
+    "path",
+    0,
+    "sign"
+   ],
+   "value": 0,
+   "refused": true
+  },
+  {
+   "name": "path-sign-large",
+   "path": [
+    "support",
+    "path",
+    0,
+    "sign"
+   ],
+   "value": 2,
+   "refused": true
+  },
+  {
+   "name": "path-sign-string",
+   "path": [
+    "support",
+    "path",
+    0,
+    "sign"
+   ],
+   "value": "-1",
+   "refused": true
+  },
+  {
+   "name": "path-sign-infinite",
+   "path": [
+    "support",
+    "path",
+    0,
+    "sign"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true
+  },
+  {
+   "name": "path-record",
+   "path": [
+    "support",
+    "path"
+   ],
+   "value": {},
+   "refused": true
+  },
+  {
+   "name": "path-null",
+   "path": [
+    "support",
+    "path"
+   ],
+   "value": null,
+   "refused": true
+  },
+  {
+   "name": "bones-null",
+   "path": [
+    "support",
+    "bones"
+   ],
+   "value": null,
+   "refused": true
+  },
+  {
+   "name": "bones-empty",
+   "path": [
+    "support",
+    "bones"
+   ],
+   "value": [],
+   "refused": true
+  },
+  {
+   "name": "bone-null",
+   "path": [
+    "support",
+    "bones",
+    0
+   ],
+   "value": null,
+   "refused": true
+  },
+  {
+   "name": "support-boolean",
+   "path": [
+    "support"
+   ],
+   "value": true,
+   "refused": true
+  },
+  {
+   "name": "support-null",
+   "path": [
+    "support"
+   ],
+   "value": null,
+   "refused": true
+  },
+  {
+   "name": "support-version",
+   "path": [
+    "support",
+    "version"
+   ],
+   "value": 2,
+   "refused": true
+  },
+  {
+   "name": "rotation-handle-mismatch",
+   "path": [
+    "rotationHandleId"
+   ],
+   "value": 22,
+   "refused": true
+  },
+  {
+   "name": "origin-pivot-mismatch",
+   "path": [
+    "handleId"
+   ],
+   "value": 33,
+   "refused": true
+  },
+  {
+   "name": "origin-reversed-string",
+   "path": [
+    "reversed"
+   ],
+   "value": "true",
+   "refused": true
+  }
+ ]
+}

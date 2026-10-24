@@ -5,7 +5,7 @@ import {rigExampleDocument} from '../src/rig-examples.mjs';
 import {MECHANISM_RIG_EXAMPLES} from '../src/rig-mechanism-examples.mjs';
 import {rigAssetControls,rigAssetControlChange,rigAssetControlValues} from './helpers/example-controls.mjs';
 import {buildGeometry,buildGeometryAsync} from '../src/pivot/geometry.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-4,`${a} != ${b}`),wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
 const scene=e=>e.geometry.objects.get(0),shape=(e,id)=>scene(e).segments.find(s=>s.seg.segment_id===id);
 const editorFor=id=>{const e=new Editor({demo:false});e.load(rigExampleDocument(id));e.select(1,0);return e;};

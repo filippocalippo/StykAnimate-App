@@ -300,20 +300,6 @@ export function spatialMeshDrawables(mesh,owner,others){
   return result;
 }
 
-const FIGURE_ROOT_INDICES=g=>({x:[0,6,9,11,13].map(i=>g+i),y:[1,7,10,12,14].map(i=>g+i)});
-/** Exact object-local identity of an evaluated mesh: its pose inputs relative
- * to the figure root plus the evaluated colours. The definition is identified
- * separately by the caller. Translation alone therefore reuses artwork. */
-export function spatialMeshSignature(mesh,root){
-  const key=mesh.key,g=key.length-18,result=new Float64Array(key.length+mesh.colors.length*3+1),roots=mesh.rootIndices??FIGURE_ROOT_INDICES(g);
-  result.set(key);
-  for(const i of roots.x)result[i]-=root.x;
-  for(const i of roots.y)result[i]-=root.y;
-  let at=key.length;for(const c of mesh.colors){result[at++]=c[0];result[at++]=c[1];result[at++]=c[2];}
-  result[at]=mesh.count;
-  return result;
-}
-
 /** Axis-aligned bounds of the visible faces, or null. */
 export const spatialMeshBounds=mesh=>mesh?.bounds??null;
 

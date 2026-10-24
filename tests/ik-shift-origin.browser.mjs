@@ -12,7 +12,7 @@ async function setup(paths = false) {
   await page.evaluate(async paths => {
     const {Editor} = await import('/src/editor.mjs');
     const {emptyDocument,createObject,createFrame} = await import('/src/demo.mjs');
-    const {worldToScreen} = await import('/src/renderer.mjs');
+    const {worldToScreen} = await import('/src/renderer-geometry.mjs');
     const {buildGeometry} = await import('/src/pivot/geometry.mjs');
     const report=emptyDocument(), f=report.figure_types[0], base=f.segments[0];
     f.segments=[{...base,segment_id:11,parent_id:0,length:90,angle_rad:.8,is_static:false,aux_code:0},

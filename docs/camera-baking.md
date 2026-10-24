@@ -26,7 +26,6 @@ Native documents retain the existing native-frame conversion path. Authored `.st
 
 ```powershell
 node --test tests/camera-bake-authored.test.mjs tests/editor-camera.test.mjs tests/pivot-export-materialize.test.mjs
-node tests/camera-bake-export.browser.mjs
 ```
 
 The model suite covers independently retimed layers, mixed linear/hold/late-start/passthrough scalar channels, an arbitrarily ordered three-level joined rig, nonlinear native easing, disappearing figures, zero-scale figures, adjacent and repeated conversions, duration boundaries, invalid atomic batches, and one-step undo/redo. It compares all 24 display frames, including unselected numeric samples at a `1e-9` tolerance. Existing native camera and native Pivot materialization regressions also run.

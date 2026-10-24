@@ -7,7 +7,7 @@ const a=await browser.newPage({viewport:{width:1440,height:1000}}),b=await brows
 for(const page of [a,b])page.on('pageerror',error=>errors.push(error.message));
 const settle=async page=>{
   await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&styk.state.renderer.last?.report===styk.editor.report);
+  await page.waitForFunction(()=>styk.state.renderer.engineSide?.frameReport===styk.editor.report);
 };
 try{
   for(const page of [a,b]){await page.goto(process.env.STYK_URL??'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);}
@@ -31,7 +31,7 @@ try{
       await restoreClipboard(styk.editor,decoder.finish());decoder.dispose();styk.editor.pasteSelection();styk.fit();
     },{to,packet});
     await settle(a);await settle(b);
-    const colors=page=>page.evaluate(()=>styk.state.renderer.lastGeometry.drawables.map(s=>[s.rgb,s.alpha]));
+    const colors=page=>page.evaluate(()=>styk.editor.geometry.drawables.map(s=>[s.rgb,s.alpha]));
     assert.deepEqual(await colors(b),await colors(a));
     await b.screenshot({path:`artifacts/clipboard-colors/${from}-to-${to}.png`});
     console.log(`PASS ${from} to ${to}: wire transfer and rendered colors`);

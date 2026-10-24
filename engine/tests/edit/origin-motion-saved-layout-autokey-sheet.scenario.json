@@ -1,0 +1,740 @@
+{
+ "name": "origin-motion-saved-layout-autokey-sheet",
+ "document": "origin-motion-saved-layout-autokey-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true,
+  "autoKey": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 44,
+    "joint": 3
+   },
+   -1
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 44,
+    "joint": 3
+   },
+   3.5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 44,
+    "joint": 3
+   },
+   15
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 44,
+    "joint": 3
+   },
+   0,
+   {
+    "label": "Origin remote return"
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 227.81385803222656,
+    "y": 239.5638427734375
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 214.56385803222656,
+    "y": 247.6888427734375
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 44,
+    "joint": 3
+   },
+   3,
+   {
+    "label": "Origin remote joint"
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 209.37841796875,
+    "y": 177.46139526367188
+   },
+   {
+    "isolate": true
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 215.00341796875,
+    "y": 192.83639526367188
+   },
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "@seek",
+   0
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "@seek",
+   8
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "@seek",
+   5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 2,
+    "handleId": 0,
+    "joint": -1
+   },
+   5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 194.79547119140625,
+    "y": 56.746192932128906
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   4
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 160.81703499302083,
+    "y": 240.85896771932198
+   },
+   {
+    "movePins": false
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 152.69203499302083,
+    "y": 244.10896771932198
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   4
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 146.94203499302083,
+    "y": 251.23396771932198
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 44,
+    "joint": 3
+   },
+   4,
+   {
+    "falloff": {
+     "radius": 3,
+     "shape": "smooth"
+    }
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 218.4574432373047,
+    "y": 167.88885498046875
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "setMotionPathFalloff",
+   {
+    "radius": 2,
+    "shape": "linear"
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "setMotionPathFalloff",
+   {
+    "radius": 2,
+    "shape": "sharp"
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "setMotionPathFalloff",
+   {
+    "radius": 2,
+    "shape": "flat"
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "setMotionPathFalloff",
+   null
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 44,
+    "joint": 3
+   },
+   4,
+   {
+    "falloff": {
+     "radius": 3,
+     "shape": "sharp"
+    }
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 195.9574432373047,
+    "y": 171.13885498046875
+   },
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "@seek",
+   0
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "@seek",
+   8
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 44,
+    "joint": 3
+   },
+   4
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 199.2074432373047,
+    "y": 169.01385498046875
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": "invalid",
+    "y": 171.13885498046875
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@motionFrame"
+  ]
+ ]
+}

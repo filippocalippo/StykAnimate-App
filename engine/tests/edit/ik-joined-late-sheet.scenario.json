@@ -1,0 +1,47 @@
+{
+ "name": "ik-joined-late-sheet",
+ "document": "ik-joined-late.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "rotateJoint",
+   -0.1
+  ],
+  [
+   "@select",
+   3,
+   0
+  ],
+  [
+   "rotateJoint",
+   0.2
+  ],
+  [
+   "@select",
+   2,
+   0
+  ],
+  [
+   "poseJoint",
+   340,
+   290
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

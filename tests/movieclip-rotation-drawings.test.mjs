@@ -7,7 +7,7 @@ import {construction} from '../src/rig-examples-3d.mjs';
 import {emptyDocument,defaultFigure,createObject,createFrame} from '../src/demo.mjs';
 import {buildGeometry,evaluatedFrame} from '../src/pivot/geometry.mjs';
 import {Editor} from '../src/editor.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 const rad=d=>d*Math.PI/180;
 const sets=Array.from({length:2},(_,g)=>({name:'Form '+g,views:Array.from({length:24},(_,i)=>({name:'View '+i,frame:g*24+i}))}));
 const asset={drawingSets:sets,drawingRotation:{steps:8,tiltThreshold:rad(20)},duration:48};

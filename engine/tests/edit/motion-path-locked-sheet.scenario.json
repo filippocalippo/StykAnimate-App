@@ -1,0 +1,65 @@
+{
+ "name": "motion-path-locked-sheet",
+ "document": "sheet-locked.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   3
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 3,
+    "handleId": 22,
+    "joint": 1
+   },
+   3
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 2,
+    "handleId": 0,
+    "joint": -1
+   },
+   3,
+   {
+    "falloff": {
+     "radius": 3
+    }
+   }
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "camera"
+   },
+   3
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 420,
+    "y": 300
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

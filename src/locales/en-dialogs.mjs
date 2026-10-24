@@ -59,9 +59,6 @@ const TEXT = Object.freeze({
   'settings.highlightSegment': 'Highlight segment',
   'settings.construction': 'Construction background',
   'settings.constructionColor': 'Construction background color',
-  'settings.graphics': 'Graphics',
-  'settings.graphicsMode': 'Graphics mode',
-  'settings.graphicsAuto': 'Automatic',
   'settings.keyframes': 'Keyframes',
   'settings.replaceOnDrop': 'Replace keyframes on drop',
   'settings.replaceOnDropNote': 'Dragging or Alt-dragging selected keys onto existing keys on the same layer replaces them. Turn off to block occupied destinations.',
@@ -123,7 +120,7 @@ const TEXT = Object.freeze({
   'about.tagline': 'Stick figure animation, made simple.',
   'about.whatsNew': 'What’s new',
   'about.website': 'StykAnimate website',
-  'about.support': 'Support development',
+  'about.support': 'Support development'
 });
 
 export default TEXT;

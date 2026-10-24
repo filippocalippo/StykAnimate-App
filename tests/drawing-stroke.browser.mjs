@@ -11,20 +11,19 @@ const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('
 try{
   await page.goto(url);await page.waitForFunction(()=>window.styk?.ready);
   await page.evaluate(()=>{styk.state.settings.autosaveSeconds=0;window.__longtasks=[];new PerformanceObserver(list=>{for(const e of list.getEntries())window.__longtasks.push(e.duration)}).observe({entryTypes:['longtask']});});
-  await page.locator('[data-workspace-mode="draw"]').click();await page.evaluate(()=>styk.state.renderer.gpuDrawingReady);
+  await page.locator('[data-workspace-mode="draw"]').click();
   await page.locator('[data-draw-action="new"]').first().click();
   const rect=await page.locator('#viewport').boundingBox();
   const start={x:rect.x+rect.width*.2,y:rect.y+rect.height*.3},end={x:start.x+560,y:start.y+240};
   await page.mouse.move(start.x,start.y);await page.mouse.down();await page.waitForFunction(()=>Boolean(styk.drawing.gesture));
-  await page.evaluate(()=>{window.__longtasks.length=0;window.__gpuDispatches=styk.state.renderer.stats.drawingGpu?.strokeDispatches??0;});
+  await page.evaluate(()=>{window.__longtasks.length=0;});
   const strokeStart=Date.now();
   await page.mouse.move(end.x,end.y,{steps:400});await page.mouse.up();
   await page.waitForFunction(()=>!styk.drawing.gesture);
   const wallMs=Date.now()-strokeStart;
   check('fast 400-sample stroke commits as one undo command',await page.evaluate(()=>styk.editor.undoLabel==='Brush stroke'));
-  const stats=await page.evaluate(()=>({...styk.drawing.strokeStats,gpuDispatches:(styk.state.renderer.stats.drawingGpu?.strokeDispatches??0)-window.__gpuDispatches}));
-  // WebGPU rasterizes on the GPU per frame; other renderers use the stroke worker.
-  check('rasterization ran off-thread in multiple paced batches',stats.batches>1||stats.gpuDispatches>1);
+  const stats=await page.evaluate(()=>({...styk.drawing.strokeStats}));
+  check('rasterization ran off-thread in multiple paced batches',stats.batches>1);
   check('the main thread never exceeded a 50 ms long task while drawing',await page.evaluate(()=>window.__longtasks.length===0));
   const continuous=await page.evaluate(({sx,sy,ex,ey})=>{
     const d=styk.drawing,t=styk.editor.drawingTarget(),store=d.owner.entry(t.figure).store;
@@ -43,23 +42,22 @@ try{
     if(label.startsWith('after'))await page.evaluate(()=>styk.drawing.action('next-blank'));
     const x0=rect.x+rect.width*.25;await page.mouse.move(x0,y);await page.mouse.down();
     for(let i=1;i<=24;i++)await page.mouse.move(x0+i*10,y);
-    await page.waitForFunction(()=>styk.drawing.strokeStats.batches>0||styk.drawing.gesture?.session?.gpu?.tiles.size>0);await page.waitForTimeout(120);
+    await page.waitForFunction(()=>styk.drawing.strokeStats.batches>0);await page.waitForTimeout(120);
     const live=await inkOnScreen(x0,x0+240,y);await page.mouse.up();await page.waitForFunction(()=>!styk.drawing.gesture);
     check(`the stroke is visible on screen while drawing ${label}`,live>1000);
   }
   await page.evaluate(()=>{styk.editor.undo();styk.editor.undo();styk.editor.undo();});
   // Wet ink: the unrasterized part of a worker stroke is drawn on every pointer
   // move (before any worker round trip) and fully retired once the stroke
-  // lands. GPU strokes paint in the frame itself and need no wet ink.
+  // lands.
   {
-    await page.evaluate(()=>{styk.drawing.gpuBrushDisabled=true;});
     const y=rect.y+rect.height*.45,x0=rect.x+rect.width*.3,wet=[];
     await page.mouse.move(x0,y);await page.mouse.down();
     for(let i=1;i<=16;i++){await page.mouse.move(x0+i*10,y+(i%2)*6);wet.push(await page.evaluate(()=>Boolean(styk.drawing.wet?.box)));}
     await page.mouse.up();await page.waitForFunction(()=>!styk.drawing.gesture&&!styk.drawing.wetSession);
     check('wet ink shows the stroke on every pointer move',wet.every(Boolean));
     check('wet ink is retired once the stroke is presented',await page.evaluate(()=>!styk.drawing.wet.box));
-    await page.evaluate(()=>{styk.editor.undo();styk.drawing.gpuBrushDisabled=false;});
+    await page.evaluate(()=>{styk.editor.undo();});
   }
   // An interrupted pointer (lost capture from a notification, the pen leaving
   // range, a window switch) keeps the ink instead of discarding the stroke.
@@ -82,16 +80,9 @@ try{
   await page.mouse.move(5,5);await page.waitForTimeout(600);
   const idle=await page.evaluate(async()=>{const r=styk.state.renderer,g0=r.generation,render=r.render;let n=0;r.render=function(...a){n++;return render.apply(this,a);};await new Promise(res=>setTimeout(res,1200));r.render=render;return {renders:n,bumps:r.generation-g0};});
   check('an idle document with drawings stops rendering and keeps its prepared scene',idle.renders<=1&&idle.bumps===0);
-  // The stroke worker remains the Canvas 2D and GPU-failure brush.
-  await page.evaluate(()=>{styk.drawing.gpuBrushDisabled=true;styk.drawing.strokeStats.batches=0;});
-  await page.mouse.move(start.x,start.y+120);await page.mouse.down();await page.mouse.move(end.x,end.y+120,{steps:200});await page.mouse.up();
-  await page.waitForFunction(()=>!styk.drawing.gesture);
-  const cpuStroke=await page.evaluate(()=>({undo:styk.editor.undoLabel,batches:styk.drawing.strokeStats.batches}));
-  check('the stroke worker still rasterizes in paced batches when the GPU brush is unavailable',cpuStroke.undo==='Brush stroke'&&cpuStroke.batches>1);
-  await page.evaluate(()=>{styk.drawing.gpuBrushDisabled=false;});
   // Stroke quality regressions, run against the same in-page stroke engine.
   const quality=await page.evaluate(async()=>{
-    const {DrawingStroke}=await import('/src/drawing-pixels.mjs'),{TileStore}=await import('/src/drawing-tiles.mjs');
+    const {DrawingStroke}=await import('/tests/support/sketch-stroke.mjs'),{TileStore}=await import('/src/drawing-tiles.mjs');
     const near=(store,x,y,r)=>{for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++)if(store.pixel(Math.round(x)+dx,Math.round(y)+dy)[3]>100)return true;return false;};
     // Jittery input at stabilization 0 plus a 90° corner: no ink gaps.
     const jit=[{x:20,y:20}];let x=20,y=20;

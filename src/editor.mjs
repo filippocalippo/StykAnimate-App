@@ -48,7 +48,8 @@ import {editorHandleCommandMethods} from './editor-handle-commands.mjs';
 import {editorInbetweenMethods} from './editor-inbetween.mjs';
 import {editorFrameDraftMethods, validateSimpleFrameDraft, installFrameDraftPreflights} from './editor-frame-draft.mjs';
 import {repairTopologyStyles, topologyAnimationPatch, reverseGradientEndpoints} from './editor-style-topology.mjs';
-import {prepareEditorLoad, prepareEditorLoadAsync} from './editor-load.mjs';
+import {prepareEditorLoad} from './editor-load.mjs';
+import {prepareLoad, prepareLoadNow} from './engine/engine-open.mjs';
 import {editorInbetweenAsyncMethods} from './editor-inbetween-async.mjs';
 import {editorOriginMutationMethods,originGeometryChanged} from './editor-origin-mutations.mjs';
 import {invalidateAnimationOriginLayout,animationOriginOffset,animationRotation,reflectAnimationOriginOffset} from './animation-origin.mjs';
@@ -58,7 +59,7 @@ import {applySparseClipboardFrames} from './editor-clipboard-sparse.mjs';
 import {animationHistoryBytes} from './animation-history.mjs';
 import {editorIKMethods} from './editor-ik.mjs';
 import {editorMovieclipMethods, applyMovieclipCommand} from './editor-movieclips.mjs';
-import {editorLayerSheetMethods, initializeLayerSheet, applyLayerSheetCommand} from './editor-layer-sheet.mjs';
+import {editorLayerSheetMethods, applyLayerSheetCommand} from './editor-layer-sheet.mjs';
 import {validateLayerSheet} from './layer-sheet.mjs';
 import {isMovieclip, invalidateMovieclipTypes,movieclipSourceFrames,snapshotFigureDefinition} from './movieclips.mjs';
 import {hasPinnedIK, translateIKTargets, remapIKFollowers, ikChain} from './ik.mjs';
@@ -198,7 +199,7 @@ export class Editor extends EventTarget {
   }
   get dragging() { return Boolean(this._drag); }
   get historySize() { return this._historySize; }
-  get drawingResources() { return drawingResourcesFor(this.report) ?? new DrawingResources(this.report); }
+  get drawingResources() { return drawingResourcesFor(this.report) ?? new DrawingResources(this.report, {onPublished: figure => this._drawingPublished(figure)}); }
   get revision() { return this._revision; }
   get definitionRevision() { return this._definitionRevision ?? 0; }
   get layers() { return this.getLayers(); }
@@ -231,7 +232,7 @@ export class Editor extends EventTarget {
       this._propertyChannelCache.frames.clear();this._propertyChannelCache.values.clear();this._propertyChannelCache.dependencies.clear();
       this._propertyChannelCache.indices=new WeakMap();this._propertyChannelCache.coordinates=new WeakMap();
     } else if (!viewOnly) this._propertyChannelCache = null;
-    if (!viewOnly) {invalidateEvaluationCaches(this.report);if(!retainGeometry)this._seekGeometry?.clear();}
+    if (!viewOnly) {invalidateEvaluationCaches(this.report,{retainGeometry});if(!retainGeometry)this._seekGeometry?.clear();}
     const preview = this._authoredCommitPreview;
     this._geometry = preview?.geometry ?? null; this._evaluated = preview?.frame ?? null; this._incremental = preview?.incremental ?? null;
     if (timing) this._timeline = null;
@@ -254,6 +255,10 @@ export class Editor extends EventTarget {
     this._invalidate();
     if (previous) this._incremental = {previous, dirtySlots, renderSources, poseSlots};
   }
+  /** Both locally computed and adopted live poses use the same rigid-move eligibility. */
+  _invalidatePoseObjects(uids, {translation = false} = {}) {
+    this._invalidateObjects(uids, null, {pose: true, translation: translation && !this.animationChannels.length && !this._drag?.before.some(o => o.runtime_segments || o._stykSpatial?.camera?.strength || hasPinnedIK(o))});
+  }
   /** Definition edits invalidate every instance and joined dependent, retaining unrelated artwork. */
   _invalidateFigure(typeId, retained = null) {
     if (this.report._styk?.movieclipSource || this.report.figure_types.some(isMovieclip) || this.frame.objects.some(object => object._stykIK)) return this._invalidate();
@@ -264,8 +269,9 @@ export class Editor extends EventTarget {
   }
   _selectionState() { return {frameIndex: this.frameIndex, tick: this.tick, uid: this.selectedUid, uids: [...this.selectedUids], joint: this.selectedJoint, activeLayerId: this.activeLayerId, sheetSelection:this._sheetSelection?{...this._sheetSelection}:null, ...(this.selectedPolygonIndex >= 0 ? {polygonSelection:{...this._polygonSelection}} : {}), ...(this._segmentSelection && this.selectedSegmentIds.size > 1 ? {segmentIds:[...this.selectedSegmentIds]} : {}), ...(this.branchSelected ? {branch: {...this._branchSelection}} : {})}; }
   _restoreSelection(state) {
-    this.frameIndex = clamp(state.frameIndex, 0, this.report.keyframes.length - 1);
-    this.tick = clamp(state.tick, 0, Math.max(0, this.totalTicks - 1));
+    const frameIndex = clamp(state.frameIndex, 0, this.report.keyframes.length - 1), tick = clamp(state.tick, 0, Math.max(0, this.totalTicks - 1));
+    // The frame on show is cached for the playhead: moving the playhead must not read the old one.
+    if (frameIndex !== this.frameIndex || tick !== this.tick) { this.frameIndex = frameIndex; this.tick = tick; this._invalidate({viewOnly: true}); }
     const existing = new Set((this.selectionFrame?.objects ?? []).filter(o=>!this.isFigureFocusLocked(o.unique_id)).map(o => o.unique_id));
     this.selectedUid = existing.has(state.uid) ? state.uid : null;
     this.selectedUids = new Set((state.uids ?? [state.uid]).filter(uid => existing.has(uid)));
@@ -475,14 +481,13 @@ export class Editor extends EventTarget {
   }
   load(document, name, options = {}) {
     this._loadRequestId = (this._loadRequestId ?? 0) + 1;
-    return this._publishLoadedReport(prepareEditorLoad(document), name, options);
+    return this._publishLoadedReport(prepareLoadNow(document, {layerTimeline: this.layerTimeline}), name, options);
   }
   async loadAsync(document, name, options = {}) {
     const report = document?.document ?? document?.report ?? document;
     if (report === this.report) throw messageError(new Error(''), "errors.editor.asynchronousImportRequiresASeparateIncomingDocument", {});
     const request = this._loadRequestId = (this._loadRequestId ?? 0) + 1;
     if(name!==undefined&&name!==null&&typeof name!=='string')throw messageError(new Error(''), "errors.editor.theDocumentNameMustBeText", {});
-    if(options.prepareScene!==undefined&&typeof options.prepareScene!=='function')throw messageError(new Error(''), "errors.editor.provideAnInitialScenePreparationFunction", {});
     const token = this._documentToken, revision = this.revision, drag = this._drag, animationEdit = this._animationEdit,
       draftRevision=this.frameDraftRevision,draftEnabled=this._frameDraftEnabled;
     const checkCurrent = () => {
@@ -492,25 +497,14 @@ export class Editor extends EventTarget {
           draftRevision!==this.frameDraftRevision || draftEnabled!==this._frameDraftEnabled)
         throw messageError(new DOMException('', 'AbortError'), "errors.editor.theDocumentChangedWhileImporting", {});
     };
-    const prepared = await prepareEditorLoadAsync(document,{...options,checkCurrent});
+    const prepared = await prepareLoad(document,{...options,layerTimeline:this.layerTimeline,checkCurrent});
     checkCurrent();
-    if(options.prepareScene){
-      const started=performance.now(),initial=initialLoadState(prepared.report,options,draftEnabled),row=initial.timeline[initial.frameIndex];
-      const t=row?.count>1?clamp((initial.tick-row.start)/row.count,0,1):0;
-      const frame=evaluatedFrame(prepared.report,initial.frameIndex,t,initial.tick);
-      checkCurrent();
-      const scene=await options.prepareScene({report:prepared.report,frameIndex:initial.frameIndex,tick:initial.tick,frame,signal:options.signal,checkCurrent});
-      checkCurrent();
-      if(!scene||!(scene.geometry?.objects instanceof Map)||scene.frame!==undefined&&scene.frame!==frame)
-        throw messageError(new Error(''), "errors.editor.preparedGeometryMustBelongToTheExactInitial", {});
-      prepared.scene={...initial,frame,geometry:scene.geometry};prepared.timings.sceneMs=performance.now()-started;
-    }
     return this._publishLoadedReport(prepared, name, options);
   }
   _publishLoadedReport(prepared, name, {initialFrameIndex=0, initialTick, preserveDrawingResources=false, onDetach} = {}) {
     const {report} = prepared;
     if (name !== undefined && name !== null && typeof name !== 'string') throw messageError(new Error(''), "errors.editor.theDocumentNameMustBeText", {});
-    const initial=prepared.scene??initialLoadState(report,{initialFrameIndex,initialTick},this._frameDraftEnabled),index=initial.frameIndex;
+    const initial=initialLoadState(report,{initialFrameIndex,initialTick},this._frameDraftEnabled),index=initial.frameIndex;
     const started = performance.now();
     // The open document stays open beside the loaded one (editor-sessions.mjs): its owner receives it whole.
     if(onDetach)this.handOverDocument(onDetach);
@@ -518,7 +512,8 @@ export class Editor extends EventTarget {
     this._vfxClipEdit=null;this._selectedVfxClip=null;this._selectedVfxKey=null;
     this._movieclipScopes=[];
     this._sheetSelection=null;this._sheetPropertyPreview=null;
-    if(this.layerTimeline)initializeLayerSheet(report);
+    // The engine opened the document: its layer sheet is in it, and the session that edits it is started from the opening.
+    this._opening?.dispose();this._opening=prepared.opening??null;
     this.report = report; this.name = name?.replace(/\.(piv|stk|styk)$/i, '') || report._styk?.name || 'Untitled animation';
     this._documentToken = {};
     this.frameIndex = index; this.tick = 0; this.selectedUid = report.keyframes[index].objects[0]?.unique_id ?? null; this.selectedJoint = -1;
@@ -534,9 +529,8 @@ export class Editor extends EventTarget {
     this._invalidate({timing: true}); invalidateFrameIndex(report);
     this.tick=initial.tick;this._timeline=initial.timeline;this._timelineDraftIndex=initial.draftIndex;this._timelineDraftDuration=initial.draftDuration;this._timelineDraftAnimation=initial.draftAnimation;
     this._timelineDraftEndTick=animationEndTick({_styk:{animation:initial.draftAnimation}});
-    if(prepared.scene){this._evaluated=prepared.scene.frame;this._geometry=prepared.scene.geometry;this.selectedUid=prepared.scene.frame.objects[0]?.unique_id??null;}
     const published = performance.now();
-    this._emit('document', {structural: true, timing: true, prepared: true,scenePrepared:Boolean(prepared.scene)});
+    this._emit('document', {structural: true, timing: true, prepared: true});
     this.lastLoadTimings = {...prepared.timings, publishMs:published-started, listenersMs:performance.now()-published, commitMs:performance.now()-started};
     return this;
   }
@@ -632,7 +626,7 @@ export class Editor extends EventTarget {
     if(this._drag)this._synchronizeAnimationOrigins(this.frame,this._drag.before);
     if (this._drag) this._drag.changed = true;
     else this._revision = ++this._revisionSerial;
-    this._invalidateObjects(this._drag?.before.map(o => o.unique_id) ?? [this.selectedUid],null,{pose:true,translation:translation && !this.animationChannels.length && !this._drag?.before.some(o=>o.runtime_segments || o._stykSpatial?.camera?.strength || hasPinnedIK(o))});
+    this._invalidatePoseObjects(this._drag?.before.map(o => o.unique_id) ?? [this.selectedUid], {translation});
     this._rememberIKBends();
     this._emit('edit', {live: Boolean(this._drag),
       changedUids: this._drag?.before.map(o => o.unique_id) ?? [this.selectedUid]});
@@ -1396,6 +1390,12 @@ export class Editor extends EventTarget {
       for (const entry of before.frames) this._replaceObjects(entry.index, entry.objects, entry.sourceId, entry.draft,entry.sourceDepth);
       this._restoreSelection(beforeSelection); this._invalidate(); throw error;
     }
+    return this._finishTopologyEdit(label, {figure, index, typeId, before, beforeSelection, beforeAnimation,
+      sparse, segmentIndices, appendOnly, retainedGeometry});
+  }
+  /** The same history/publication owner for computed and adopted topology edits. */
+  _finishTopologyEdit(label, {figure, index, typeId, before, beforeSelection, beforeAnimation,
+    sparse = false, segmentIndices, appendOnly = false, retainedGeometry}) {
     figure.segment_count = figure.segments.length;
     // Native compressed ordering arrays no longer describe an edited topology.
     delete figure.segment_z_raw; delete figure.poly_z_raw;
@@ -1572,7 +1572,7 @@ export class Editor extends EventTarget {
       const typeId = Math.max(0, ...this.report.figure_types.map(f => f.figure_type_id)) + 1;
       const segments = prepared.map((item,i) => make(item,i+1,item.parentId ?? (i ? i : 0),[106,77,234],i+1));
       const figure = {figure_type_id:typeId,name:specs.length>1?'Chain':([1,3,4].includes(code)?'Circle':'Line'),segment_count:segments.length,segments,polyfills:[],image_assets:[],text_assets:[]};
-      this.report.figure_types.push(figure); const uid = this._identity(), order = frameOrder(this.frame);
+      const uid = this._identity(), order = frameOrder(this.frame); this.report.figure_types.push(figure);
       this.frame.objects.push(createObject(figure, uid, x, y)); setOrder(this.frame, [...order, uid]); normalizeFrame(this.frame);
       this.selectedUid = uid; this.selectedJoint = segments.length - 1;
       this._record({kind: this._authoredPoseEdit?.transaction ? 'import' : 'figure-splice', label: 'Draw figure', index: this.frameIndex, figureIndex, before,
@@ -1718,23 +1718,27 @@ export class Editor extends EventTarget {
   importFigure(document, {position} = {}) {
     if (position && (!Number.isFinite(position.x) || !Number.isFinite(position.y))) throw messageError(new Error(''), "errors.editorRangeCommands.chooseAValidCanvasPosition", {});
     const incoming=document?.document??document?.report??document;
-    if(!this._insertingMovieclip&&incoming?.figure_types?.some(isMovieclip))return this._insertMovieclip(()=>this.importFigure(document, {position}));
+    const movieclipInsertion=!this._insertingMovieclip&&incoming?.figure_types?.some(isMovieclip);
     const source = document?.document ?? document?.report ?? document;
     const figures = source.figure_types ?? (source.segments ? [source] : []);
     if (!figures.length) throw messageError(new Error(''), "errors.editor.theImportedFileContainsNoFigureDefinitions", {});
     if(figures.some(isMovieclip))prepareEditorLoad(source);
-    const sourceFrame = source.keyframes?.[0], sources = sourceFrame?.objects?.length ? sourceFrame.objects : [createObject(figures[0], 1, 0, 0)];
-    const bySlot = new Map(sources.map((object, index) => [object.object_slot ?? index, object.unique_id]));
-    const objects = sources.map(object => ({...object, join: object.join && bySlot.has(object.join.target_object_slot)
-      ? {...object.join, target_unique_id: bySlot.get(object.join.target_object_slot)} : null}));
-    // Imported files and clipboard pastes use the same atomic planner. History
-    // owns only new definitions and affected poses, independent of library size.
-    const result = this.applyFigureRange({kind:'paste', importing:true, newIdentities:true,
-      position:position ?? {x:this.report.canvas_width/2,y:this.report.canvas_height/2},
-      clipboard:{objects,figures,order:sourceFrame?.objects?.length ? frameOrder(sourceFrame) : objects.map(object=>object.unique_id)}},
-      {atPlayhead:true,label:'Import figure'});
-    this._selectedUid = result.insertedUids[0] ?? null;
-    return this.object;
+    // Validate imported movieclips once before their placement checks.
+    const insert = () => {
+      const sourceFrame = source.keyframes?.[0], sources = sourceFrame?.objects?.length ? sourceFrame.objects : [createObject(figures[0], 1, 0, 0)];
+      const bySlot = new Map(sources.map((object, index) => [object.object_slot ?? index, object.unique_id]));
+      const objects = sources.map(object => ({...object, join: object.join && bySlot.has(object.join.target_object_slot)
+        ? {...object.join, target_unique_id: bySlot.get(object.join.target_object_slot)} : null}));
+      // Imported files and clipboard pastes use the same atomic planner. History
+      // owns only new definitions and affected poses, independent of library size.
+      const result = this.applyFigureRange({kind:'paste', importing:true, newIdentities:true,
+        position:position ?? {x:this.report.canvas_width/2,y:this.report.canvas_height/2},
+        clipboard:{objects,figures,order:sourceFrame?.objects?.length ? frameOrder(sourceFrame) : objects.map(object=>object.unique_id)}},
+        {atPlayhead:true,label:'Import figure'});
+      this._selectedUid = result.insertedUids[0] ?? null;
+      return this.object;
+    };
+    return movieclipInsertion ? this._insertMovieclip(insert) : insert();
   }
   serialize() {
     const document = clone(this.report); document._styk = {...document._styk, format: 'StykAnimate', format_version: 1, name: this.name};

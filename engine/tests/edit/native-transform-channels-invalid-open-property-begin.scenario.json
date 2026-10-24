@@ -1,0 +1,62 @@
+{
+ "name": "native-transform-channels-invalid-open-property-begin",
+ "document": "native-transform-channels-plain-new.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "x"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "previewAnimationEdit",
+   330.125
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 999
+   },
+   "x"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "cancelAnimationEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ]
+ ]
+}

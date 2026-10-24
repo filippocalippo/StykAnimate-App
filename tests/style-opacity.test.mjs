@@ -1,10 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { Editor } from "../src/editor.mjs";
 import { inspectorView } from "../src/inspector-view.mjs";
-import backend from "../desktop/backend.cjs";
+import { roundTrip } from "./support/codec.mjs";
 import {
   canEditNativeProperty,
   getNativePropertyValue,
@@ -173,41 +171,21 @@ test("inspector shows secondary color only on circles and omits figure outline c
   assert.doesNotMatch(inspectorView({editor}), /id="segment-gradient-color"/);
 });
 
-test("edited native alpha bytes and untouched RGB values round-trip through real PIV and STK writers", () => {
+test("edited native alpha bytes and untouched RGB values round-trip through real PIV and STK writers", async () => {
   const editor = fixture();
   set(editor, "outline_opacity", 25);
   set(editor, "segment_opacity", 40);
   set(editor, "segment_gradient_opacity", 75);
-  const python = String.raw`
-import json, sys
-from pathlib import Path
-sys.path.insert(0, str(Path('backend').resolve()))
-import server
-document=json.load(sys.stdin)
-store=server.ProjectStore(server.WORKSPACE)
-result={}
-for kind in ('piv','stk'):
-    figure=next(f for f in document['figure_types'] if f['name']=='Opacity fixture')
-    raw,name=store.export({'document':document,'format':kind,'figureTypeId':figure['figure_type_id']})
-    reopened=store.import_bytes(raw,name)
-    figure=next(f for f in reopened['document']['figure_types'] if f.get('segment_decode',{}).get('global_style',{}).get('u30')==191)
-    result[kind]={'style':figure['segment_decode']['global_style'],'segment':figure['segments'][0]}
-print(json.dumps(result))
-`;
-  const candidate = backend.pythonCandidates()[0];
-  const result = spawnSync(
-    candidate.command,
-    [...candidate.args, "-c", python],
-    {
-      cwd: fileURLToPath(new URL("..", import.meta.url)),
-      input: JSON.stringify(editor.serialize()),
-      encoding: "utf8",
-      windowsHide: true,
-      maxBuffer: 1024 * 1024,
-    },
-  );
-  assert.equal(result.status, 0, result.error?.message || result.stderr);
-  for (const value of Object.values(JSON.parse(result.stdout))) {
+  const document = editor.serialize(), result = {};
+  for (const kind of ["piv", "stk"]) {
+    const source = document.figure_types.find((f) => f.name === "Opacity fixture");
+    assert.ok(source);
+    const reopened = await roundTrip({ document, format: kind, figureTypeId: source.figure_type_id });
+    const figure = reopened.figure_types.find((f) => f.segment_decode?.global_style?.u30 === 191);
+    assert.ok(figure, `${kind} keeps the edited outline alpha`);
+    result[kind] = { style: figure.segment_decode.global_style, segment: figure.segments[0] };
+  }
+  for (const value of Object.values(result)) {
     assert.equal(value.style.u30, 191);
     assert.deepEqual(value.style.rgb, [13, 153, 255]);
     assert.equal(value.style.outline_thickness, 3.25);

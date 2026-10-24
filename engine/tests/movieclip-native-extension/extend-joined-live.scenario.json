@@ -1,0 +1,49 @@
+{
+ "name": "extend-joined-live",
+ "document": "extend-joined-live.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginTranslationDrag",
+   "Joined error drag"
+  ],
+  [
+   "moveSelection",
+   4.5,
+   -2.25
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   1
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   2,
+   1
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

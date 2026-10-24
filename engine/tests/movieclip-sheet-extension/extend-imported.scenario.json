@@ -1,0 +1,61 @@
+{
+ "name": "extend-imported",
+ "document": "extend-imported.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   3
+  ],
+  [
+   "@seek",
+   5.75
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   9
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-1"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

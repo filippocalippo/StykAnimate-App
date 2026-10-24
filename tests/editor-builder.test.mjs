@@ -1,13 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {editorBuilderMethods, segmentBranchIndices} from '../src/editor-builder.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
-import backend from '../desktop/backend.cjs';
 import {createImageFigure} from '../src/media-authoring.mjs';
+import {exportDocument, importBytes, nodeCodec} from './support/codec.mjs';
 
 Object.assign(Editor.prototype, editorBuilderMethods);
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-5, `${a} != ${b}`);
@@ -150,31 +148,18 @@ test('branch duplication supports the full native 30,000-segment figure capacity
   editor.redo(); assert.equal(editor.figure.segments.length, 30000);
 });
 
-test('new polygons and authored segment styles roundtrip through the actual PIV and STK writers', () => {
+test('new polygons and authored segment styles roundtrip through the actual PIV and STK writers', async () => {
   const editor = blank(); sparse(editor); editor.select(editor.selectedUid, 6);
   editor.addPolygon([0, 77, 88], {color: '#0d99ff', opacity: 0.4});
   editor.updateFigureStyle({name: 'Builder export', outlineWidth: 1.25, outlineColor: '#ff8000', outlineOpacity: 0.8});
   editor.updateSegmentStyle({shape: 'squareLine', static: true, gradient: {color: '#0000ff', opacity: 0.6}});
   editor.duplicateSegmentBranch({angleOffset: 0.2});
-  const python = String.raw`
-import json, sys
-from pathlib import Path
-sys.path.insert(0, str(Path('backend').resolve()))
-import server
-document=json.load(sys.stdin)
-store=server.ProjectStore(server.WORKSPACE)
-result={}
-for kind in ('piv','stk'):
-    raw,name=store.export({'document':document,'format':kind,'figureTypeId':document['figure_types'][0]['figure_type_id']})
-    reopened=store.import_bytes(raw,name)
-    figure=next(f for f in reopened['document']['figure_types'] if len(f.get('polyfills',[]))==2)
-    result[kind]={'bytes':len(raw),'figure':figure}
-print(json.dumps(result))
-`;
-  const candidate = backend.pythonCandidates()[0];
-  const result = spawnSync(candidate.command, [...candidate.args, '-c', python], {cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify(editor.serialize()), encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024});
-  assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout);
-  const outputs = JSON.parse(result.stdout);
+  const document = editor.serialize(), outputs = {};
+  for (const kind of ['piv', 'stk']) {
+    const codec = nodeCodec(), {bytes, name} = await exportDocument({document, format: kind, figureTypeId: document.figure_types[0].figure_type_id}, {codec});
+    const figure = (await importBytes(bytes, name, {codec})).document.figure_types.find(f => (f.polyfills ?? []).length === 2);
+    assert.ok(figure, `${kind} keeps the two-polygon figure`); outputs[kind] = {bytes: bytes.length, figure};
+  }
   for (const kind of ['piv', 'stk']) {
     const {figure, bytes} = outputs[kind]; assert.ok(bytes > 100);
     assert.equal(figure.segments.length, 12); assert.equal(figure.polyfills.length, 2);

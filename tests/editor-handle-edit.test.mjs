@@ -1,12 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {editorHandleEditMethods} from '../src/editor-handle-edit.mjs';
 import {createFrame, createObject, emptyDocument} from '../src/demo.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
-import backend from '../desktop/backend.cjs';
+import {roundTrip} from './support/codec.mjs';
 
 Object.assign(Editor.prototype, editorHandleEditMethods);
 const near = (a, b, tolerance = 2e-4) => assert.ok(Math.abs(a - b) <= tolerance, `${a} != ${b}`);
@@ -117,26 +115,13 @@ test('composed authored pose edits create one key while all imported native fram
   editor.redo(); pointNear(editor.geometry.objects.get(0).joints.get(11), {x: before.x + 15, y: before.y - 8});
 });
 
-test('pose-only lengths and bends survive native PIV export while STK defaults remain unchanged', () => {
+test('pose-only lengths and bends survive native PIV export while STK defaults remain unchanged', async () => {
   const editor = fixture({curved: true, joined: true}), definitions = structuredClone(editor.report.figure_types);
   const point = editor.geometry.objects.get(0).joints.get(11), target = {x: point.x + 12, y: point.y - 7};
   editor.editHandlePosition(target.x, target.y, {bend: true});
-  const python = String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-document=json.load(sys.stdin); store=server.ProjectStore(server.WORKSPACE); result={}
-for kind in ('piv','stk'):
- raw,name=store.export({'document':document,'format':kind,'figureTypeId':1})
- result[kind]=store.import_bytes(raw,name)['document']
-print(json.dumps(result))
-`;
-  const candidate = backend.pythonCandidates()[0];
-  const exported = spawnSync(candidate.command, [...candidate.args, '-c', python], {cwd: fileURLToPath(new URL('..', import.meta.url)),
-    input: JSON.stringify(editor.serialize()), encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024});
-  assert.equal(exported.status, 0, exported.error?.message || exported.stderr);
-  const output = JSON.parse(exported.stdout), geometry = buildGeometry(output.piv, output.piv.keyframes[0]);
+  const document = editor.serialize(), output = {};
+  for (const kind of ['piv', 'stk']) output[kind] = await roundTrip({document, format: kind, figureTypeId: 1});
+  const geometry = buildGeometry(output.piv, output.piv.keyframes[0]);
   pointNear(geometry.objects.get(0).segments[0].end, target);
   for (const kind of ['piv','stk']) {
     const figure = output[kind].figure_types.find(value => value.segments.length === 4);

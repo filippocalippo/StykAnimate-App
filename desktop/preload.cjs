@@ -39,11 +39,6 @@ function systemMemoryBytes() {
   try { return ipcRenderer.sendSync('styk:memory-bytes') || 0; } catch { return 0; }
 }
 
-// The loopback codec rejects /api/* requests without this per-launch token.
-function apiToken() {
-  try { return ipcRenderer.sendSync('styk:api-token') || ''; } catch { return ''; }
-}
-
 // Where this window starts ('home' or 'editor'), when the launch decides it (main.cjs startupView); else null.
 function startupView() {
   const value = (process.argv ?? []).find(argument => argument.startsWith('--styk-startup-view='))?.slice('--styk-startup-view='.length);
@@ -54,7 +49,6 @@ function startupView() {
 // Node.js, Electron object, or arbitrary IPC channel crosses this boundary.
 contextBridge.exposeInMainWorld('stykDesktop', Object.freeze({
   isDesktop: true,
-  apiToken: apiToken(),
   startupView: startupView(),
   // Page zoom keeps CSS layout, pointer coordinates and devicePixelRatio aligned.
   setUIScale: percent => {
@@ -197,5 +191,7 @@ contextBridge.exposeInMainWorld('stykDesktop', Object.freeze({
   onMenuAction: (callback) => subscribe('styk:menu-action', callback),
   onOpenFile: (callback) => subscribe('styk:file-opened', callback),
   onWindowState: (callback) => subscribe('styk:window-state', callback),
-  onBackendError: (callback) => subscribe('styk:backend-error', callback),
+  // The sample list ({ok, samples}) and one sample's bytes ({ok, name, bytes} or {ok: false, status, code, error}).
+  listSamples: () => ipcRenderer.invoke('styk:samples-list'),
+  readSample: (relative) => ipcRenderer.invoke('styk:sample-read', typeof relative === 'string' ? relative : null),
 }));

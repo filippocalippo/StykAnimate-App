@@ -5,9 +5,7 @@ import {editorInbetweenMethods, planInsertInbetweens} from '../src/editor-inbetw
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 import {buildGeometry, evaluatedFrame, evaluatedNativeFrame, nativeTimeline} from '../src/pivot/geometry.mjs';
 import {validateAnimationDocument} from '../src/animation-channels.mjs';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
-import backend from '../desktop/backend.cjs';
+import {roundTrip} from './support/codec.mjs';
 
 Object.assign(Editor.prototype, editorInbetweenMethods);
 const clone = value => structuredClone(value);
@@ -184,29 +182,16 @@ test('legacy repeat fields remain unchanged while a manually chosen pose is inte
 });
 
 function nativeRoundtrip(document, format) {
-  const script = String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-request=json.load(sys.stdin)
-store=server.ProjectStore(server.WORKSPACE)
-data,name=store.export(request)
-print(json.dumps(store.import_bytes(data,name)['document']))
-`;
-  const python=backend.pythonCandidates()[0], result=spawnSync(python.command,[...python.args,'-c',script],{
-    cwd:fileURLToPath(new URL('..',import.meta.url)),input:JSON.stringify({document,format}),encoding:'utf8',windowsHide:true,maxBuffer:16*1024*1024,
-  });
-  assert.equal(result.status,0,result.error?.message||result.stderr);return JSON.parse(result.stdout);
+  return roundTrip({document,format});
 }
 
-test('chosen native poses roundtrip through the actual PIV codec with exposures, joins and scene/camera intact', () => {
+test('chosen native poses roundtrip through the actual PIV codec with exposures, joins and scene/camera intact', async () => {
   const editor=fixture({easing:true}),report=editor.report;
   // The fixture's fake unreferenced media payloads exercise sharing above; only
   // valid native asset tables are passed through the actual binary writer.
   report.figure_types[0].image_assets=[];report.figure_types[0].text_assets=[];
   const result=editor.insertInbetweenFrames(.375,[1,3]),expected=result.indices.map(index=>buildGeometry(report,report.keyframes[index]));
-  const saved=nativeRoundtrip(editor.serialize(),'piv');
+  const saved=await nativeRoundtrip(editor.serialize(),'piv');
   assert.deepEqual(saved.keyframes.map(frame=>frame.duration_raw),report.keyframes.map(frame=>frame.duration_raw));
   assert.equal(saved.auto_easing,true);
   const near=(actual,value)=>assert.ok(Math.abs(actual-value)<.001,`${actual} != ${value}`);
@@ -223,12 +208,12 @@ test('chosen native poses roundtrip through the actual PIV codec with exposures,
   });
 });
 
-test('authored insertion roundtrips through the STYK codec with hidden source IDs and sparse channels', () => {
+test('authored insertion roundtrips through the STYK codec with hidden source IDs and sparse channels', async () => {
   const editor=fixture();editor.adoptNativePoseTrack({kind:'layer',id:'layer-1'});
   editor.addAnimationKeys([{target:{kind:'figure',uid:12},property:'rotation',tick:0,value:.2},
     {target:{kind:'figure',uid:12},property:'rotation',tick:12,value:1}]);
   const result=editor.insertInbetweenFrames(.375,[1,3]),document=editor.serialize();
-  const saved=nativeRoundtrip(document,'styk');
+  const saved=await nativeRoundtrip(document,'styk');
   assert.deepEqual(saved._styk,document._styk);assert.deepEqual(saved.keyframes.map(frame=>frame._styk),document.keyframes.map(frame=>frame._styk));
   const reopened=new Editor({demo:false}).load(saved);
   for(const tick of result.ticks){editor.seek(tick);reopened.seek(tick);assert.deepEqual(pose(reopened.report,reopened.evaluatedFrame),pose(editor.report,editor.evaluatedFrame));}

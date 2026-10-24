@@ -1,0 +1,206 @@
+{
+ "name": "motion-path-joined-followers-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/joined.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   3,
+   0
+  ],
+  [
+   "@seek",
+   5
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 3,
+    "handleId": 33,
+    "joint": 0
+   },
+   2
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 399.7046588912062,
+    "y": 269.5371784998386
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 399.748291015625,
+    "y": 260.81005859375
+   }
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 3,
+    "handleId": 33,
+    "joint": 0
+   },
+   2
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 399.7046588912062,
+    "y": 269.5371784998386
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 399.0783181197278,
+    "y": 272.97919617662114
+   },
+   {
+    "isolate": true
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 3,
+    "handleId": 33,
+    "joint": 0
+   },
+   4,
+   {
+    "falloff": {
+     "radius": 3,
+     "shape": "smooth"
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 395.37365542596086,
+    "y": 247.60918651818227
+   }
+  ],
+  [
+   "setMotionPathFalloff",
+   {
+    "radius": 2,
+    "shape": "linear"
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 396.95809799170814,
+    "y": 250.72837394524527
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 2,
+    "handleId": 22,
+    "joint": 0
+   },
+   3
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 355,
+    "y": 280
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 3,
+    "handleId": 33,
+    "joint": 0
+   },
+   5
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 397.50325916621586,
+    "y": 277.98219862227415
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 3,
+    "handleId": 34,
+    "joint": 1
+   },
+   2
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 99,
+    "handleId": 33,
+    "joint": 0
+   },
+   2
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "cancelMotionPathEdit"
+  ]
+ ]
+}

@@ -1,0 +1,29 @@
+{
+ "name": "branch-thickness-origin-sheet",
+ "document": "branch-thickness-origin-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "changeBranchThickness",
+   0.15
+  ],
+  [
+   "changeBranchThickness",
+   -0.15
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

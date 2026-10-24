@@ -1,0 +1,269 @@
+{
+ "name": "vfx-clip-add-sheet",
+ "document": "vfx-clips.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "pasteVfxClip",
+   {
+    "kind": "figure",
+    "uid": 1
+   }
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "glow"
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "particles"
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "scene"
+   },
+   "smoke",
+   {
+    "start": 1,
+    "duration": 10
+   }
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "segment",
+    "uid": 1,
+    "handleId": 22
+   },
+   "aura",
+   {
+    "duration": 12
+   }
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "explosion",
+   {
+    "includeAttached": false
+   }
+  ],
+  [
+   "@seek",
+   7.5
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "scene"
+   },
+   "beam"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "scene"
+   },
+   "tint",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "bogus"
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "tint",
+   {
+    "start": 2
+   }
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "camera"
+   },
+   "tint"
+  ],
+  [
+   "copyVfxClip",
+   "clip-glow"
+  ],
+  [
+   "pasteVfxClip",
+   {
+    "kind": "figure",
+    "uid": 1
+   }
+  ],
+  [
+   "pasteVfxClip",
+   {
+    "kind": "scene"
+   },
+   {
+    "animation": false,
+    "start": 5
+   }
+  ],
+  [
+   "copyVfxClip",
+   "nope"
+  ],
+  [
+   "duplicateVfxClip",
+   "clip-glow"
+  ],
+  [
+   "duplicateVfxClip",
+   "clip-tint"
+  ],
+  [
+   "duplicateVfxClip",
+   "nope"
+  ],
+  [
+   "@seek",
+   2
+  ],
+  [
+   "setVfxClipParameters",
+   "clip-tint",
+   "fx-tint",
+   {
+    "color": 255
+   },
+   {
+    "key": true
+   }
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "setVfxClipParameters",
+   "clip-tint",
+   "fx-tint",
+   {
+    "color": 65280,
+    "mix": 0.4
+   },
+   {
+    "key": true
+   }
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "copyVfxClip",
+   "clip-tint"
+  ],
+  [
+   "pasteVfxClip",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   {
+    "animation": false
+   }
+  ],
+  [
+   "pasteVfxClip",
+   {
+    "kind": "segment",
+    "uid": 1,
+    "handleId": 22
+   },
+   {
+    "start": 9
+   }
+  ],
+  [
+   "addVfxGroupEffect",
+   "clip-group",
+   "beam"
+  ],
+  [
+   "addVfxGroupEffect",
+   "clip-group",
+   "tint"
+  ],
+  [
+   "addVfxGroupEffect",
+   "clip-group",
+   "bogus"
+  ],
+  [
+   "addVfxGroupEffect",
+   "nope",
+   "tint"
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   true
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "tint"
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

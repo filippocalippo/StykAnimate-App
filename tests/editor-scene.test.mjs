@@ -1,12 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
-import backend from '../desktop/backend.cjs';
 import {Editor} from '../src/editor.mjs';
 import {sceneValuesAt} from '../src/editor-scene.mjs';
 import {evaluatedFrame} from '../src/pivot/geometry.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
+import {roundTrip} from './support/codec.mjs';
 
 const clone = value => structuredClone(value);
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1kAAAAASUVORK5CYII=';
@@ -142,22 +140,11 @@ test('Scene source history survives pruning earlier commands and undo to the pre
   editor.undo(); assert.equal(colorOf(editor, at(editor, 5)), 0xff113355);
 });
 
-test('authored Scene colors and imported PNG backgrounds survive real native PIV export/reimport', () => {
+test('authored Scene colors and imported PNG backgrounds survive real native PIV export/reimport', async () => {
   const {editor} = fixture({pose: true}); editor.seek(5); editor.setSceneColor(0x804466aa);
   editor.seek(12); editor.importSceneBackground({kind: 1, name: 'Pixel', data_url: png, mime_type: 'image/png'});
   const document = materializePivotDocument(editor.serialize());
-  const script = String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-store=server.ProjectStore(server.WORKSPACE)
-raw,name=store.export({'document':json.load(sys.stdin),'format':'piv'})
-print(json.dumps(store.import_bytes(raw,name)['document']))
-`;
-  const python = backend.pythonCandidates()[0], result = spawnSync(python.command, [...python.args, '-c', script], {
-    cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify(document), encoding: 'utf8', windowsHide: true, maxBuffer: 12 * 1024 * 1024});
-  assert.equal(result.status, 0, result.error?.message || result.stderr); const imported = JSON.parse(result.stdout);
+  const imported = await roundTrip({document, format: 'piv'});
   assert.equal(imported.keyframes.length, document.keyframes.length);
   const background = (report, tick) => report.backgrounds.find(asset => asset.background_id === report.keyframes[tick].background_id);
   assert.equal(background(imported, 5).color, 0x804466aa);

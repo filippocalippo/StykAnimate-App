@@ -1,14 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 import {evaluatedFrame, timeline, buildGeometry} from '../src/pivot/geometry.mjs';
 import {animationRotation, animationOriginOffset, synchronizeAnimationOrigin} from '../src/animation-origin.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
-import backend from '../desktop/backend.cjs';
+import {roundTrip} from './support/codec.mjs';
 const clone = structuredClone;
 function fixture({authored = true, easing = false} = {}) {
   const report = emptyDocument(), figure = report.figure_types[0], base = figure.segments[0];
@@ -138,14 +136,12 @@ test('independently retimed joined descendants and retained sources follow nativ
   equalGeometry(visible, {frame: editor.selectionFrame, geometry: editor.geometry});
 });
 function roundtrip(document, format) {
-  const script = "import json,sys\nfrom pathlib import Path\nsys.path.insert(0,str(Path('backend').resolve()))\nimport server\nr=json.loads(sys.stdin.buffer.read().decode('utf-8'));s=server.ProjectStore(server.WORKSPACE);raw,name=s.export(r)\nprint(json.dumps(s.import_bytes(raw,name)['document']))";
-  const python = backend.pythonCandidates()[0], result = spawnSync(python.command, [...python.args, '-c', script], {cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify({document, format}), encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024});
-  assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout);
+  return roundTrip({document, format});
 }
-test('native PIV materializes support poses while STYK preserves editable support and exact undo', () => {
+test('native PIV materializes support poses while STYK preserves editable support and exact undo', async () => {
   const editor = fixture(), reference = editor.figure._styk.animationOrigin.rotationHandleId;
   editor.select(1, editor.figure.segments.findIndex(segment => segment.segment_id === reference)); editor.deleteSingleSegment();
-  const before = editor.serialize(), styk = roundtrip(before, 'styk'), native = roundtrip(materializePivotDocument(before), 'piv');
+  const before = editor.serialize(), styk = await roundtrip(before, 'styk'), native = await roundtrip(materializePivotDocument(before), 'piv');
   assert.deepEqual(styk.figure_types[0]._styk.animationOrigin, before.figure_types[0]._styk.animationOrigin);
   assert.ok(native.figure_types.every(figure => !figure._styk?.animationOrigin));
   for (let tick = 0; tick <= 20; tick++) {equalGeometry(pose(before, tick), pose(styk, tick)); equalGeometry(pose(before, tick), pose(native, tick), .0005);}

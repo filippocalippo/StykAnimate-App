@@ -1,0 +1,97 @@
+{
+ "name": "transform-native",
+ "document": "two-limbs.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "scaleSelection",
+   1.5
+  ],
+  [
+   "mirrorSelection",
+   "vertical"
+  ],
+  [
+   "mirrorSelection",
+   "horizontal",
+   {
+    "center": {
+     "x": 300,
+     "y": 200
+    }
+   }
+  ],
+  [
+   "rotateFigure",
+   0.3
+  ],
+  [
+   "centerFigure"
+  ],
+  [
+   "resetPose"
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    2
+   ]
+  ],
+  [
+   "rotateSelection",
+   0.2
+  ],
+  [
+   "scaleSelected",
+   0.5
+  ],
+  [
+   "scaleSelection",
+   1.25,
+   {
+    "selectedOnly": true
+   }
+  ],
+  [
+   "rotateFigure",
+   -0.2
+  ],
+  [
+   "centerFigure"
+  ],
+  [
+   "scaleSelection",
+   -1
+  ],
+  [
+   "mirrorSelection",
+   "diagonal"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "mirrorSelection"
+  ]
+ ]
+}

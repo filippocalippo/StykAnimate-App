@@ -3,13 +3,13 @@ import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 import {readNativeDocument} from '../scripts/read-native-document.mjs';
 import {chooseExport} from './helpers/export-dialog.mjs';
 
 const appRoot = path.resolve('.'), out = path.join(appRoot, 'artifacts', 'native-files');
 await mkdir(out, {recursive: true});
-const service = await backend.startBackend({appRoot});
+const service = await backend.startDesktopHost({appRoot});
 const browser = await chromium.launch({channel: 'chrome', headless: true});
 const page = await browser.newPage({viewport: {width: 1440, height: 1000}, acceptDownloads: true});
 const errors = [];

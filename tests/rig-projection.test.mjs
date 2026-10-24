@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
 import {construction} from '../src/rig-examples-3d.mjs';
 import {createFrame,createObject} from '../src/demo.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {buildGeometryAsync} from '../src/pivot/geometry.mjs';
 import {rigSections,rigControlChange} from '../src/rig-controls.mjs';
 import {renderInspector} from '../src/inspector-kit.mjs';

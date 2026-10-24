@@ -1,0 +1,43 @@
+{
+ "name": "insert-native-triple",
+ "document": "insert-native-triple.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@seek",
+   2
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "@seek",
+   5
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

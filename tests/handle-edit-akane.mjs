@@ -6,10 +6,11 @@ import {Editor} from '../src/editor.mjs';
 import {editorHandleEditMethods} from '../src/editor-handle-edit.mjs';
 import {editorFigureTransformMethods} from '../src/editor-figure-transform.mjs';
 import {corpusPath} from './support/corpus.mjs';
+import {nodeCodec} from './support/codec.mjs';
 Object.assign(Editor.prototype, editorHandleEditMethods);
 Object.assign(Editor.prototype, editorFigureTransformMethods);
 const filename = process.argv[2] || corpusPath('Downloads/16 Akane vs Akato Segundo round (3).piv');
-const response = await fetch('http://127.0.0.1:47831/api/import?filename=' + encodeURIComponent(filename.split('/').at(-1)), {
+const response = await nodeCodec().fetch('/api/import?filename=' + encodeURIComponent(filename.split('/').at(-1)), {
   method: 'POST', headers: {'content-type': 'application/octet-stream'}, body: await fs.readFile(filename),
 });
 assert.equal(response.status, 200);

@@ -6,11 +6,7 @@ import {packPoseSequences,expandPoseSequencesSteps} from '../src/pose-sequence-s
 import {snapshotPoseFrame} from '../src/pose-snapshot.mjs';
 import {buildGeometry,buildGeometrySteps,evaluatedFrame,evaluatedNativeFrame} from '../src/pivot/geometry.mjs';
 import {projectNativePropertyChannel} from '../src/native-property-projection.mjs';
-import {ArtworkRegistry} from '../src/render-artwork.mjs';
-import {compileVectorObject,compileVectorObjectSteps} from '../src/renderer-geometry.mjs';
-import {PlaybackCache} from '../src/playback.mjs';
 import {buildChannelTimelineTracks} from './helpers/legacy-timeline-projection.mjs';
-import {ThumbnailRenderer} from '../src/thumbnail-renderer.mjs';
 
 function fixture(frames=12,parts=8) {
   const report=emptyDocument(),figure=report.figure_types[0];
@@ -88,7 +84,7 @@ test('attached coordinate projection shares X/Y history evaluations and invalida
   assert.notEqual(changed.keys[0].value,x.keys[0].value);assert.ok(calls>200);
 });
 
-test('dense single figures yield inside geometry, artwork signatures and GPU vector compilation without changing output',()=>{
+test('dense single figures yield inside geometry without changing output',()=>{
   const e=fixture(1,1),figure=e.report.figure_types[0],template=figure.segments[0];
   figure.segments=Array.from({length:1024},(_,i)=>({...template,segment_id:i+1,parent_id:0,z_order:i}));
   figure.segment_count=figure.segments.length;e.frame.objects[0].angles=figure.segments.map(s=>s.angle_rad);
@@ -96,32 +92,13 @@ test('dense single figures yield inside geometry, artwork signatures and GPU vec
   do{result=steps.next();if(!result.done)progress.push(result.value);}while(!result.done);
   const geometry=result.value,full=buildGeometry(e.report,e.frame);assert.deepEqual(geometry,full);
   assert.ok(progress.length>5);
-  const g=geometry.objects.get(0),items=g.drawables??g.segments,registry=new ArtworkRegistry();
-  const signature=registry.getSteps(g,items);let yields=0;
-  do{result=signature.next();if(!result.done)yields++;}while(!result.done);
-  assert.ok(yields>=7);assert.equal(registry.get(g,items),result.value);
-  const vectors=compileVectorObjectSteps(items,g.root);yields=0;
-  do{result=vectors.next();if(!result.done)yields++;}while(!result.done);
-  assert.ok(yields>=8);assert.deepEqual(result.value,compileVectorObject(items,g.root));
-  let reads=0;Object.defineProperty(figure,'revisionProbe',{enumerable:true,get(){reads++;return true;}});
-  registry.begin(1);registry.definition(figure);registry.begin(1);registry.definition(figure);assert.equal(reads,1);
-  registry.begin(2);registry.definition(figure);assert.equal(reads,2);
 });
 
-test('playback document transfer yields to an active gesture and resumes every waiting sender',async()=>{
-  const cache=Object.assign(Object.create(PlaybackCache.prototype),{pending:new Map(),worker:{postMessage(){}},workers:[{worker:{postMessage(){}},index:0,loadAck:null}]});cache.setInteractionActive(true);
-  let completed=0;const tasks=[cache._yieldLoad().then(()=>completed++),cache._yieldLoad().then(()=>completed++)];
-  await new Promise(resolve=>setTimeout(resolve,20));assert.equal(completed,0);
-  cache.setInteractionActive(false);await Promise.all(tasks);assert.equal(completed,2);
-});
-
-test('Simple pose undo identifies its changed native frame and retains thumbnail patches',()=>{
+test('Simple pose undo identifies its changed native frame',()=>{
   const e=new Editor({demo:false}).load(fixture().report);e.enableFrameDrafts({mode:'update'});e.select(1);
-  const thumbnails=new ThumbnailRenderer(e);thumbnails.fullSnapshot=false;thumbnails.loadedVersion=1;
   const events=[];e.addEventListener('change',event=>{if(event.detail.kind==='history')events.push(event.detail);});
   e.beginDrag();e.moveSelection(10,2);e.commitDrag();e.undo();
-  assert.deepEqual(events.at(-1).frameIndices,[0]);assert.equal(thumbnails.fullSnapshot,false);
-  assert.deepEqual([...thumbnails.changedFrames],[0]);thumbnails.destroy();
+  assert.deepEqual(events.at(-1).frameIndices,[0]);
 });
 
 

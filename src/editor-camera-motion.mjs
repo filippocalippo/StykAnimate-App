@@ -1,4 +1,5 @@
 import {messageError} from './localized-error.mjs';
+import {editorDraws} from './editor-draws.mjs';
 import {prepareCameraBake} from './camera-motion-bake-client.mjs';
 import {createCameraMotion,validateCameraMotion} from './camera-motion.mjs';
 import {FOLLOW_FRAME_LIMIT} from './camera-follow.mjs';
@@ -31,7 +32,7 @@ function publish(editor,next,label){
 export const editorCameraMotionMethods={
   getCameraMotions(){return this.report._styk.cameraMotion?.clips??empty.clips;},
   copyCameraMotion(id){const clip=this.getCameraMotions().find(c=>c.id===id);if(!clip)return false;this._cameraMotionClipboard=structuredClone(clip);return true;},
-  pasteCameraMotion(start=Math.floor(this.tick)){const clip=this._cameraMotionClipboard;if(!clip)throw messageError(new Error(''), "errors.editorCameraMotion.copyACameraMotionClipFirst", {});const next={...clip,id:`motion-${crypto.randomUUID()}`,start,...shiftedRanges(clip,start)};publish(this,{version:1,clips:[...this.getCameraMotions(),next]},'Paste camera motion');this._selectedCameraMotion=next.id;return next.id;},
+  pasteCameraMotion(start=Math.floor(this.tick)){const clip=this._cameraMotionClipboard;if(!clip)throw messageError(new Error(''), "errors.editorCameraMotion.copyACameraMotionClipFirst", {});const next={...clip,id:`motion-${editorDraws.uuid()}`,start,...shiftedRanges(clip,start)};publish(this,{version:1,clips:[...this.getCameraMotions(),next]},'Paste camera motion');this._selectedCameraMotion=next.id;return next.id;},
   /** Follow defaults to the selected figures from the playhead to the end of the animation. */
   addCameraMotion(type,{start=Math.floor(this.tick),duration,targets}={}){
     if(type==='follow'){
@@ -40,7 +41,7 @@ export const editorCameraMotionMethods={
       duration??=Math.min(FOLLOW_FRAME_LIMIT,Math.max(24,this.totalTicks-start));
     }
     duration??=type==='impact'?12:24;
-    const id=`motion-${crypto.randomUUID()}`,clip=createCameraMotion(type,id,start,duration,{targets});
+    const id=`motion-${editorDraws.uuid()}`,clip=createCameraMotion(type,id,start,duration,{targets});
     publish(this,{version:1,clips:[...this.getCameraMotions(),clip]},'Add camera motion');return id;
   },
   setCameraMotion(id,patch){
@@ -49,8 +50,8 @@ export const editorCameraMotionMethods={
     return publish(this,{version:1,clips:clips.map(c=>c!==old?c:{...c,...patch,...shiftedRanges(c,patch.start??c.start,patch.duration??c.duration),params:{...c.params,...patch.params}})},'Edit camera motion');
   },
   deleteCameraMotion(id){return publish(this,{version:1,clips:this.getCameraMotions().filter(c=>c.id!==id)},'Delete camera motion');},
-  duplicateCameraMotion(id,start){const source=this.getCameraMotions().find(c=>c.id===id);if(!source)throw messageError(new Error(''), "errors.editorCameraMotion.selectACameraMotionClip", {});start??=source.start+source.duration;const next={...source,id:`motion-${crypto.randomUUID()}`,start,...shiftedRanges(source,start)};publish(this,{version:1,clips:[...this.getCameraMotions(),next]},'Duplicate camera motion');return next.id;},
-  randomizeCameraMotion(id){return this.setCameraMotion(id,{params:{seed:crypto.getRandomValues(new Uint32Array(1))[0]&0x7fffffff}});},
+  duplicateCameraMotion(id,start){const source=this.getCameraMotions().find(c=>c.id===id);if(!source)throw messageError(new Error(''), "errors.editorCameraMotion.selectACameraMotionClip", {});start??=source.start+source.duration;const next={...source,id:`motion-${editorDraws.uuid()}`,start,...shiftedRanges(source,start)};publish(this,{version:1,clips:[...this.getCameraMotions(),next]},'Duplicate camera motion');return next.id;},
+  randomizeCameraMotion(id){return this.setCameraMotion(id,{params:{seed:editorDraws.seed()&0x7fffffff}});},
   setLayerParallax(id,patch){
     const layer=this.getLayer(id);if(layer?.kind!=='layer')throw messageError(new Error(''), "errors.editorCameraMotion.selectAFigureLayerForParallax", {});if(layer.locked)throw messageError(new Error(''), "errors.editorCameraMotion.unlockBeforeEditingParallax", {name: layer.name});
     if(Object.keys(patch).some(k=>!['enabled','linked','x','y','reference'].includes(k)))throw messageError(new Error(''), "errors.editorCameraMotion.unsupportedParallaxProperty", {});

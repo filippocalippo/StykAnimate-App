@@ -7,7 +7,7 @@ import {buildGeometry,buildGeometryAsync,evaluatedFrame} from '../src/pivot/geom
 import {validateScene} from '../src/pivot/model.mjs';
 import {getPivotHandles} from '../src/canvas-interactions.mjs';
 import {nativeFigureDocument} from '../src/native-figure.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
 import {rigSections,rigControlChange} from '../src/rig-controls.mjs';
 import {renderInspector} from '../src/inspector-kit.mjs';

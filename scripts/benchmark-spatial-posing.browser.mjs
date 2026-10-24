@@ -6,7 +6,7 @@ if (!fixture || !joint) throw new Error('Provide a served JSON document path and
 const browser = await chromium.launch({channel:'chrome', headless:true});
 try {
   const page = await browser.newPage();
-  await page.goto(`${process.env.STYK_URL ?? 'http://127.0.0.1:47861'}/api/health`);
+  await page.goto(`${process.env.STYK_URL ?? 'http://127.0.0.1:47861'}/tests/fixtures/blank.html`);
   const result = await page.evaluate(async ({fixture, joint}) => {
     const {Editor} = await import('/src/editor.mjs');
     const {drawGeometry, buildGeometry} = await import('/src/pivot/geometry.mjs');

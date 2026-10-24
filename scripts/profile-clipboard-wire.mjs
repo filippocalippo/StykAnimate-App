@@ -2,11 +2,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {Editor} from '../src/editor.mjs';
 import {emptyDocument} from '../src/demo.mjs';
-import backend from '../desktop/backend.cjs';
+import {importBytes} from '../tests/support/codec.mjs';
 import {nodeClipboardClient} from '../tests/helpers/clipboard-node-client.mjs';
 
 import {corpusPath} from '../tests/support/corpus.mjs';
@@ -15,16 +14,7 @@ const output = path.resolve(process.argv[3] ?? 'artifacts/clipboard-akane-wire-c
 const hashes = () => Object.fromEntries(fs.readdirSync('src', {recursive: true}).filter(name => name.endsWith('.mjs')).sort()
   .map(name => [name, createHash('sha256').update(fs.readFileSync(path.join('src', name))).digest('hex')]));
 const runtimeBefore = hashes();
-const python = backend.pythonCandidates()[0];
-let imported = spawnSync(python.command, [...python.args, '-c', String.raw`
-import sys,json
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-p=Path(sys.argv[1]);print(json.dumps(server.ProjectStore(server.WORKSPACE).import_bytes(p.read_bytes(),p.name)['document']))
-`, source], {encoding: 'utf8', windowsHide: true, maxBuffer: 512 * 1024 * 1024});
-if (imported.status !== 0) throw new Error(imported.error?.message ?? imported.stderr);
-const document = JSON.parse(imported.stdout); imported = null;
+const document = (await importBytes(fs.readFileSync(source), path.basename(source))).document;
 const editor = new Editor({demo: false, historyBytes: Infinity}).load(document), worker = nodeClipboardClient();
 const originalRun = worker.run.bind(worker); let lastRoute = null;
 worker.run = async (...args) => {

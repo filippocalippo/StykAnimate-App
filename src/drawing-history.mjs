@@ -46,7 +46,7 @@ export class DrawingHistoryDisk {
  * this tier. Failed writes restore their full chronological history weight. */
 export class DrawingHistory {
   constructor({disk=new DrawingHistoryDisk(),hotBytes=16*1024*1024,minRecordBytes=64*1024,reserve=()=>{},hold=()=>{},onWarning=()=>{}}={}){
-    Object.assign(this,{disk,hotBytes,minRecordBytes,reserve,hold,onWarning,records:new Map(),commands:new WeakMap(),payloads:new WeakMap(),queue:[],residentBytes:0,diskBytes:0,next:0,clock:0,enabled:true});
+    Object.assign(this,{disk,hotBytes,minRecordBytes,reserve,hold,onWarning,records:new Map(),commands:new WeakMap(),payloads:new WeakMap(),queue:[],replays:new Map(),residentBytes:0,diskBytes:0,next:0,clock:0,enabled:true});
   }
   track(root,onSizeChange=()=>{}){
     if(this.disposed)return;
@@ -98,6 +98,8 @@ export class DrawingHistory {
   prepare(root,{signal}={}){
     const records=[...pixelCommands(root)].map(c=>this.commands.get(c)).filter(r=>r&&!r.disposed);
     for(const record of records){record.pins++;record.used=++this.clock;}
+    // The undo or redo replays `root` until release(root); see replaying().
+    if(records.length)this.replays.set(root,(this.replays.get(root)??0)+1);
     const cold=records.filter(r=>!r.command.tiles);if(!cold.length)return null;
     return (async()=>{
       for(const record of cold){
@@ -125,7 +127,18 @@ export class DrawingHistory {
     }finally{if(reserved&&!installed)this.residentBytes=Math.max(0,this.residentBytes-record.bytes);this.endScratch();}
   }
   releaseRetired(record){if(record.retiredBytes&&!record.writing&&!record.loading&&!record.pins){this.residentBytes=Math.max(0,this.residentBytes-record.retiredBytes);delete record.retiredBytes;}}
-  release(root){for(const command of pixelCommands(root)){const record=this.commands.get(command);if(record){record.pins=Math.max(0,record.pins-1);this.releaseRetired(record);}}this.trim();}
+  release(root){
+    for(const command of pixelCommands(root)){const record=this.commands.get(command);if(record){record.pins=Math.max(0,record.pins-1);this.releaseRetired(record);}}this.trim();
+    const replays=this.replays.get(root);if(replays>1)this.replays.set(root,replays-1);else if(replays){this.replays.delete(root);if(!this.replays.size)this.replayed?.();}
+  }
+  /** While an undo or redo of pixel commands is between prepare() and release() (loading
+   * its records, preparing its tiles, applying them), a promise that settles once none is;
+   * otherwise null. Publication waits on it: the replay is about to replace the revision
+   * being published. */
+  replaying(){
+    if(!this.replays.size||this.disposed)return null;
+    return this.replayWait??=new Promise(resolve=>{this.replayed=()=>{this.replayWait=this.replayed=null;resolve();};});
+  }
   retain(roots){
     const keep=new Set(roots.flatMap(root=>[...pixelCommands(root)]));
     for(const [id,record] of this.records)if(!keep.has(record.command)){
@@ -141,6 +154,6 @@ export class DrawingHistory {
   dispose(){
     if(this.closing)return this.closing;
     this.disposed=true;this.queue=[];for(const record of this.records.values())record.disposed=true;
-    this.records.clear();this.residentBytes=0;this.hold(0);return this.closing=this.disk.close();
+    this.records.clear();this.replays.clear();this.replayed?.();this.residentBytes=0;this.hold(0);return this.closing=this.disk.close();
   }
 }

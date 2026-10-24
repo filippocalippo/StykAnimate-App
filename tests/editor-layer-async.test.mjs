@@ -1,8 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Worker} from 'node:worker_threads';
 import {Editor} from '../src/editor.mjs';
-import {PlaybackCache} from '../src/playback.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 import {planLayerMembershipMigration, planLayerMembershipMigrationSteps, LAYER_MIGRATION_LIMITS} from '../src/editor-layer-migration.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
@@ -80,22 +78,4 @@ test('generator keeps only destination actors and their ancestor closure, with c
   assert.deepEqual(editor.report, unchanged); assert.equal(editor._nextFrameIdentity, identity); assert.equal(before.keyframes.length, editor.report.keyframes.length);
   const bounded = planLayerMembershipMigrationSteps(editor, [2], 'layer-2', {worker: true, maxSourceBytes: 1});
   assert.throws(() => bounded.next(), /source memory budget/); assert.deepEqual(editor.report, unchanged);
-});
-
-test('the real playback worker stages and commits a joined migration without resending its retained document', async () => {
-  const editor = fixture(), expected = points(editor), before = clone(editor.serialize());
-  const cache = new PlaybackCache({workerFactory: () => {
-    const worker = new Worker(new URL('./playback-node-worker.mjs', import.meta.url));
-    return {postMessage: (message, transfer) => worker.postMessage(message, transfer), terminate: () => worker.terminate(),
-      addEventListener(name, callback) {worker.on(name, value => callback(name === 'message' ? {data: value} : value));}};
-  }});
-  try {
-    cache.load(editor.report, {revision: editor.revision}); await cache.prepareRange([0]); const loadChunks = cache.stats.loadChunks;
-    editor.setLayerMigrationPlanner((params, options) => cache.planLayerMigration(params, options));
-    const progress = []; await editor.assignFiguresToLayerAsync([2], 'layer-2', {onProgress: value => progress.push(value)});
-    assert.deepEqual(points(editor), expected); assert.equal(cache.stats.loadChunks, loadChunks);
-    assert.ok(progress.some(item => item.phase === 'sampling')); assert.ok(progress.some(item => item.phase === 'staging'));
-    editor.undo(); assert.deepEqual(editor.serialize(), before); editor.redo(); assert.deepEqual(points(editor), expected);
-    await cache.prepareRange([1]); assert.ok(cache.has(1), 'Read-only planning keeps the prior worker mirror usable until the normal edit patch');
-  } finally {cache.dispose();}
 });

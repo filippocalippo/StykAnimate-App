@@ -43,10 +43,7 @@ corrected poses in the export worker, then removes the pivot metadata. Native
 reimport therefore needs no second composition step. Unedited native documents
 continue through the original byte-preserving export path.
 
-Verification lives in `tests/editor-animation-origin.test.mjs` and
-`tests/animation-origin.browser.mjs`: dense curved poses with native easing,
-independent transform curves, repeated roots, retained sources and separately
-retimed joined layers; actual STYK/PIV reopen; and WebGPU pixel comparisons.
+Verification lives in `tests/editor-animation-origin.test.mjs`.
 
 ## Deleting a retained reference
 

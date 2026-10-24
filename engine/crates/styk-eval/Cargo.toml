@@ -1,0 +1,25 @@
+[package]
+name = "styk-eval"
+description = "StykAnimate document model, file formats, evaluation and draw-list building. No UI, no GPU."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+styk-alloc = { path = "../styk-alloc" }
+styk-piv = { path = "../styk-piv" }
+styk-draw = { path = "../styk-draw" }
+styk-drawing = { path = "../styk-drawing" }
+styk-doc = { path = "../styk-doc" }
+styk-math = { path = "../styk-math" }
+styk-formats = { path = "../styk-formats" }
+base64 = "0.22"
+flate2 = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif"] }
+lyon_tessellation = "1"
+lyon_path = "1"
+thiserror = "2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = "1"

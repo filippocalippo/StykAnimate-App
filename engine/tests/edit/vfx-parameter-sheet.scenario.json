@@ -1,0 +1,181 @@
+{
+ "name": "vfx-parameter-sheet",
+ "document": "property-vfx.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001",
+   "radius",
+   6
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001",
+   "enabled",
+   0
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-none",
+   "radius",
+   6
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001",
+   "bogus",
+   6
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001",
+   "radius",
+   9999
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "segment",
+    "uid": 1,
+    "handleId": 22
+   },
+   "fx-00000000000040008000000000000002",
+   "intensity",
+   2
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "scene"
+   },
+   "fx-00000000000040008000000000000003",
+   "contrast",
+   1.5
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "camera"
+   },
+   "fx-00000000000040008000000000000003",
+   "contrast",
+   1.5
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 99
+   },
+   "fx-00000000000040008000000000000001",
+   "radius",
+   1
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "vfx1:blur:fx-00000000000040008000000000000001:radius",
+   {
+    "exactTarget": true
+   }
+  ],
+  [
+   "previewAnimationEdit",
+   12
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "vfxScope",
+   {
+    "exactTarget": true
+   }
+  ],
+  [
+   "previewAnimationEdit",
+   1
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "vfxStack",
+   {
+    "exactTarget": true
+   }
+  ],
+  [
+   "previewAnimationEdit",
+   [
+    {
+     "version": 2,
+     "id": "fx-00000000000040008000000000000001",
+     "type": "blur",
+     "enabled": true,
+     "params": {
+      "radius": 4
+     }
+    }
+   ]
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

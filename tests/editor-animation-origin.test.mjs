@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {readFileSync} from 'node:fs';
 import {Editor} from '../src/editor.mjs';
 import {emptyDocument,createFrame,createObject} from '../src/demo.mjs';
 import {evaluatedFrame,timeline,buildGeometry} from '../src/pivot/geometry.mjs';
@@ -10,7 +10,7 @@ import {validateScene} from '../src/pivot/model.mjs';
 import {materializePivotDocument,needsPivotMaterialization} from '../src/pivot-export-materialize.mjs';
 import {animationOriginOffset,animationRotation} from '../src/animation-origin.mjs';
 import {missingFixture} from './helpers/local-fixtures.mjs';
-import backend from '../desktop/backend.cjs';
+import {roundTrip, exportDocument, importBytes, nodeCodec} from './support/codec.mjs';
 const clone=structuredClone;
 function fixture({authored=true,easing=false,joined=true}={}){
   const report=emptyDocument(),figure=report.figure_types[0],base=figure.segments[0];
@@ -66,12 +66,10 @@ test('native-only reroot preserves nonlinear inbetweens without adding authored 
   for(let i=0;i<=100;i++)equalWorld(shape(before,i/5),shape(editor.report,i/5));
 });
 function roundtrip(document,format){
-  const script="import json,sys\nfrom pathlib import Path\nsys.path.insert(0,str(Path('backend').resolve()))\nimport server\nrequest=json.loads(sys.stdin.buffer.read().decode('utf-8'));store=server.ProjectStore(server.WORKSPACE)\nraw,name=store.export(request)\nprint(json.dumps(store.import_bytes(raw,name)['document']))";
-  const python=backend.pythonCandidates()[0],result=spawnSync(python.command,[...python.args,'-c',script],{cwd:fileURLToPath(new URL('..',import.meta.url)),input:JSON.stringify({document,format}),encoding:'utf8',windowsHide:true,maxBuffer:16*1024*1024});
-  assert.equal(result.status,0,result.stderr||result.error?.message);return JSON.parse(result.stdout);
+  return roundTrip({document,format});
 }
-test('STYK retains editable pivots while native PIV bakes every displayed pose and cannot double-compose',()=>{
-  const editor=fixture(),before=editor.serialize();editor.setOrigin(99);const source=editor.serialize(),styk=roundtrip(source,'styk'),native=roundtrip(materializePivotDocument(source),'piv');
+test('STYK retains editable pivots while native PIV bakes every displayed pose and cannot double-compose',async ()=>{
+  const editor=fixture(),before=editor.serialize();editor.setOrigin(99);const source=editor.serialize(),styk=await roundtrip(source,'styk'),native=await roundtrip(materializePivotDocument(source),'piv');
   assert.deepEqual(styk.figure_types[0]._styk.animationOrigin,source.figure_types[0]._styk.animationOrigin);assert.deepEqual(styk._styk.animation,source._styk.animation);
   assert.equal(native.keyframes.length,21);assert.equal(needsPivotMaterialization(native),false);
   for(let tick=0;tick<=20;tick++){equalWorld(shape(before,tick),shape(styk,tick));equalWorld(shape(before,tick),shape(native,tick),.00035);}
@@ -108,12 +106,12 @@ test('new instances initialize their virtual pivot and a split retains the physi
   assert.notEqual(editor.figure._styk.animationOrigin.rotationHandleId,reference);
   assert.ok(Math.abs(animationRotation(editor.figure,editor.object)-before)<1e-10);
 });
-test('native PIV retains tied segment and polygon paint order through required topology reordering',()=>{
+test('native PIV retains tied segment and polygon paint order through required topology reordering',async ()=>{
   const editor=fixture({authored:false}),figure=editor.figure;
   figure.segments.forEach((segment,i)=>{segment.z_order=1;segment.color_rgb=[30+i*70,50,190];});
   figure.polyfills=[{polyfill_id:1,segment_ids:[0,7,99],color_rgb:[240,10,80],alpha_raw:0,z_order:1}];
   editor._invalidate();const expected=shape(editor.report,0).geometry.objects.get(0).drawables.map(item=>item.rgb);
-  editor.setOrigin(99);const native=roundtrip(materializePivotDocument(editor.report),'piv');
+  editor.setOrigin(99);const native=await roundtrip(materializePivotDocument(editor.report),'piv');
   assert.deepEqual(shape(native,0).geometry.objects.get(0).drawables.map(item=>item.rgb),expected);
 });
 for(const authored of [false,true])test(`subsequent translated poses retain the preview and style edits retain their pivot (authored=${authored})`,()=>{
@@ -134,19 +132,19 @@ for(const authored of [false,true])test(`rig joint preview survives commit after
   const expected={frame:clone(editor.selectionFrame),geometry:editor.geometry};editor.commitRigDrag();
   equalWorld(expected,{frame:editor.selectionFrame,geometry:editor.geometry});editor.undo();assert.deepEqual(editor.serialize(),before);
 });
-test('local pivot offsets survive another reroot, dense interpolation, undo and native export',()=>{
+test('local pivot offsets survive another reroot, dense interpolation, undo and native export',async ()=>{
   const editor=fixture();editor.setOrigin(99);editor.seek(7);editor.select(1,0);
   const point=editor.geometry.objects.get(0).segments[0].end;editor.beginRigDrag();editor.editRigJoint(point.x+6,point.y-4);editor.commitRigDrag();
   const before=editor.serialize(),expected=Array.from({length:101},(_,i)=>shape(before,i/5));
   assert.ok(Math.abs(editor.report.keyframes[0].objects[0]._stykAnimationOrigin.offsetX)>1e-5);
   editor.select(1);editor.setOrigin(301);const after=editor.serialize();
   for(let i=0;i<expected.length;i++)equalWorld(expected[i],shape(after,i/5));
-  const styk=roundtrip(after,'styk'),native=roundtrip(materializePivotDocument(after),'piv');
+  const styk=await roundtrip(after,'styk'),native=await roundtrip(materializePivotDocument(after),'piv');
   for(let tick=0;tick<=20;tick++){equalWorld(shape(before,tick),shape(styk,tick));equalWorld(shape(before,tick),shape(native,tick),.00035);}
   editor.undo();assert.deepEqual(editor.serialize(),before);editor.redo();assert.deepEqual(editor.serialize(),after);
 });
-test('native writer changes keep untouched source PIV bytes identical',{skip:missingFixture('../Pivot Animator v5/Animations/tween_camera.piv')},()=>{
-  const script="import sys\nfrom pathlib import Path\nsys.path.insert(0,str(Path('backend').resolve()))\nimport server\nstore=server.ProjectStore(server.WORKSPACE)\npath=server.WORKSPACE/'Pivot Animator v5/Animations/tween_camera.piv'\nsource=path.read_bytes();imported=store.import_bytes(source,path.name)\noutput,_=store.export({**imported,'format':'piv'})\nassert output==source\nprint(len(output))";
-  const python=backend.pythonCandidates()[0],result=spawnSync(python.command,[...python.args,'-c',script],{cwd:fileURLToPath(new URL('..',import.meta.url)),encoding:'utf8',windowsHide:true});
-  assert.equal(result.status,0,result.stderr||result.error?.message);assert.ok(Number(result.stdout)>0);
+test('native writer changes keep untouched source PIV bytes identical',{skip:missingFixture('../Pivot Animator v5/Animations/tween_camera.piv')},async()=>{
+  const codec=nodeCodec(),source=readFileSync(fileURLToPath(new URL('../../Pivot Animator v5/Animations/tween_camera.piv',import.meta.url)));
+  const imported=await importBytes(source,'tween_camera.piv',{codec}),{bytes:output}=await exportDocument({...imported,format:'piv'},{codec});
+  assert.ok(output.length>0);assert.ok(Buffer.from(output).equals(source));
 });

@@ -252,7 +252,9 @@ export const editorAnimationMethods = {
   },
   animationChannel(target, property, {exactTarget=false}={}) { return findAnimationChannel(this.report, exactTarget?normalizeAnimationTarget(target):this.resolveAnimationTarget(target,property), property); },
   animationValue(target, property, tick = this.tick, {exactTarget=false}={}) {
-    checkTick(tick); const {frame} = frameAtTick(this, tick);
+    // Inspector reads use the continuous playhead; stored key times stay whole.
+    if (!Number.isFinite(tick) || tick < 0 || tick > MAX_TICK) checkTick(tick);
+    const {frame} = frameAtTick(this, tick);
     target=exactTarget?normalizeAnimationTarget(target):this.resolveAnimationTarget(target,property,tick);
     const visible=animationPropertyValue(this.report,frame,target,property,context(this));
     return exactTarget&&property!=='pose'&&visible!==undefined?(sampleAnimationChannel(findAnimationChannel(this.report,target,property),tick)??visible):visible;
@@ -315,7 +317,7 @@ export const editorAnimationMethods = {
   addAnimationKey(target, property, tick = this.tick, value, {exactTarget=false}={}) { return this.addAnimationKeys([{target, property, tick, value,exactTarget}])[0]; },
   addAnimationKeys(entries) {
     if (!Array.isArray(entries) || !entries.length) return [];
-    if(this.report._styk?.layerSheet)return this._sheetPropertyEntries(entries.map(entry=>({...entry,value:entry.value===undefined&&entry.property!=='pose'?this.animationValue(entry.target,entry.property,entry.tick??this.tick):entry.value})));
+    if(this.report._styk?.layerSheet)return this._sheetPropertyEntries(entries.map(entry=>({...entry,value:entry.value===undefined&&entry.property!=='pose'?this.animationValue(entry.target,entry.property,checkTick(entry.tick??this.tick)):entry.value})));
     return mutateAnimation(this, 'Add animation keys', draft => {
       const shared=new Map(), occurrences=new Map();
       for(const entry of entries){const id=animationChannelId(entry.target,entry.property);occurrences.set(id,(occurrences.get(id)??0)+1);}
@@ -448,6 +450,7 @@ export const editorAnimationMethods = {
     if (this.dragging) this.commitDrag();
     target = exactTarget?normalizeAnimationTarget(target):this.resolveAnimationTarget(target,property); animationChannelId(target, property);
     if (property === 'pose') throw messageError(new Error(''), "errors.editorAnimation.usePoseKeysToEditALayerPose", {});
+    checkTick(this.tick);
     const initialValue=this.animationValue(target,property,this.tick,{exactTarget});
     if(initialValue===undefined)throw messageError(new Error(''), "errors.editorAnimation.theSelectedFigureIsNotPresentAtThis", {});
     if(this.report._styk?.layerSheet){this._animationEdit={sheet:true,target,property,exactTarget,tick:this.tick,initialValue,value:initialValue,frame:this.evaluatedFrame,selection:this._selectionState(),changed:false};return this._animationEdit;}

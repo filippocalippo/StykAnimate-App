@@ -9,7 +9,8 @@ import { cameraMatrix, objectBounds } from "./renderer-geometry.mjs";
 import { layerVisible } from "./layers.mjs";
 import {checkExportContext} from './export-canvas.mjs';
 import {downsampleExportPixels} from './export-sampling.mjs';
-import {prepareSceneVfx, hasDrawableVfx} from './vfx-canvas.mjs';
+import {prepareSceneVfx} from './vfx-canvas.mjs';
+import {hasDrawableVfx} from './vfx-drawable.mjs';
 import {sceneVfxBounds} from './vfx-scene.mjs';
 
 /** Share one scheduling deadline across objects and tiles. A timer per object

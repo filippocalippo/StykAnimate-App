@@ -4,7 +4,7 @@ import {Editor} from '../src/editor.mjs';
 import {createFrame,createObject} from '../src/demo.mjs';
 import {buildGeometry,buildGeometryAsync} from '../src/pivot/geometry.mjs';
 import {rigConstraintPlan} from '../src/rig-constraints.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-4,`${a} != ${b}`);
 const at=(e,id)=>{e.select(1,e.figure.segments.findIndex(s=>s.segment_id===id));return e;};

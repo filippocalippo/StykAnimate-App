@@ -3,9 +3,9 @@ import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 const output=path.resolve('artifacts/polygon-construction');await mkdir(output,{recursive:true});
-const service=await backend.startBackend({appRoot:process.cwd()});let browser,page;
+const service=await backend.startDesktopHost({appRoot:process.cwd()});let browser,page;
 const checks=[],errors=[],check=(name,ok)=>{assert.ok(ok,name);checks.push(name);console.log('PASS',name);};
 try{
  browser=await chromium.launch({channel:'chrome',headless:true});
@@ -33,7 +33,7 @@ try{
  const stable=()=>page.evaluate(()=>{const e=styk.editor,b=window.polygonBaseline;return e._undo.length===b.undo&&e._redo.length===b.redo&&JSON.stringify(e.report)===b.report&&e.revision===b.revision;});
  const handles=()=>page.evaluate(()=>styk.state.polygon?.handles??null);
  const click=async(id,ctrl=false)=>{
-  const p=await page.evaluate(async id=>{const {worldToScreen}=await import('/src/renderer.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot),r=document.querySelector('#viewport').getBoundingClientRect(),p=worldToScreen(g.joints.get(id),{report:e.report,frame:e.frame,view:styk.state.view});return{x:r.x+p.x,y:r.y+p.y};},id);
+  const p=await page.evaluate(async id=>{const {worldToScreen}=await import('/src/renderer-geometry.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot),r=document.querySelector('#viewport').getBoundingClientRect(),p=worldToScreen(g.joints.get(id),{report:e.report,frame:e.frame,view:styk.state.view});return{x:r.x+p.x,y:r.y+p.y};},id);
   if(ctrl)await page.keyboard.down('Control');try{await page.mouse.click(p.x,p.y);}finally{if(ctrl)await page.keyboard.up('Control');}
  };
  const start=()=>page.locator('[data-tool="polygon"]').click();
@@ -50,9 +50,9 @@ try{
  await page.keyboard.press('Control+y');await page.keyboard.press('Control+Shift+z');
  check('both redo shortcuts restore the grouped draft',JSON.stringify(await handles())==='[0,1,2,3]'&&await stable());
  await page.waitForFunction(()=>window.polygonPaths.some(p=>p.length>10));
- const preview=await page.evaluate(async()=>{const {polygonPreviewPoints}=await import('/src/polygon-preview.mjs'),{worldToScreen}=await import('/src/renderer.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot);const expected=polygonPreviewPoints(g,styk.state.polygon.handles).map(p=>worldToScreen(p,{report:e.report,frame:e.frame,view:styk.state.view}));const exact=window.polygonPaths.find(p=>JSON.stringify(p)===JSON.stringify(expected));window.curvedDraftPath=polygonPreviewPoints(g,styk.state.polygon.handles);return{exact:Boolean(exact),count:expected.length};});
+ const preview=await page.evaluate(async()=>{const {polygonPreviewPoints}=await import('/src/polygon-preview.mjs'),{worldToScreen}=await import('/src/renderer-geometry.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot);const expected=polygonPreviewPoints(g,styk.state.polygon.handles).map(p=>worldToScreen(p,{report:e.report,frame:e.frame,view:styk.state.view}));const exact=window.polygonPaths.find(p=>JSON.stringify(p)===JSON.stringify(expected));window.curvedDraftPath=polygonPreviewPoints(g,styk.state.polygon.handles);return{exact:Boolean(exact),count:expected.length};});
  check('actual overlay follows every evaluated bent edge sample',preview.exact&&preview.count>10);
- const markerPixels=await page.evaluate(async()=>{const {worldToScreen}=await import('/src/renderer.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot),canvas=document.querySelector('#overlay'),ctx=canvas.getContext('2d'),ratio=canvas.width/canvas.clientWidth;return[0,1].map(id=>{const p=worldToScreen(g.joints.get(id),{report:e.report,frame:e.frame,view:styk.state.view});return [...ctx.getImageData(Math.round(p.x*ratio),Math.round(p.y*ratio),1,1).data];});});
+ const markerPixels=await page.evaluate(async()=>{const {worldToScreen}=await import('/src/renderer-geometry.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot),canvas=document.querySelector('#overlay'),ctx=canvas.getContext('2d'),ratio=canvas.width/canvas.clientWidth;return[0,1].map(id=>{const p=worldToScreen(g.joints.get(id),{report:e.report,frame:e.frame,view:styk.state.view});return [...ctx.getImageData(Math.round(p.x*ratio),Math.round(p.y*ratio),1,1).data];});});
  check('construction uses a black start dot and Pivot-red selected joints',markerPixels[0].slice(0,3).every(n=>n===0)&&markerPixels[1][0]===255&&markerPixels[1][1]===0&&markerPixels[1][2]===0&&markerPixels.every(p=>p[3]===255));
  await page.screenshot({path:path.join(output,'curved-draft.png')});
  await click(0);
@@ -71,7 +71,7 @@ try{
  const exported={};for(const format of ['piv','stk'])exported[format]=await exportFile(format,`curved.${format}`);
  for(const format of ['piv','stk']){
   const bytes=[...await readFile(exported[format])];
-  const decoded=await page.evaluate(async({bytes,format})=>{const response=await fetch(`/api/import?filename=curved.${format}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:Uint8Array.from(bytes)});if(!response.ok)throw new Error(await response.text());const report=(await response.json()).document;const f=report.figure_types.find(f=>f.polyfills?.length);return{handles:f.polyfills[0].segment_ids,bend:f.segments.find(s=>s.segment_id===1).bend_rad,polyCount:f.polyfills.length};},{bytes,format});
+  const decoded=await page.evaluate(async({bytes,format})=>{const response=await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=curved.${format}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:Uint8Array.from(bytes)});if(!response.ok)throw new Error(await response.text());const report=(await response.json()).document;const f=report.figure_types.find(f=>f.polyfills?.length);return{handles:f.polyfills[0].segment_ids,bend:f.segments.find(s=>s.segment_id===1).bend_rad,polyCount:f.polyfills.length};},{bytes,format});
   check(`actual ${format.toUpperCase()} save/reopen retains connections and curved segment`,JSON.stringify(decoded.handles)==='[0,1,2,3]'&&decoded.polyCount===1&&Math.abs(decoded.bend-Math.PI/2)<1e-6);
  }
  await page.keyboard.press('Control+z');

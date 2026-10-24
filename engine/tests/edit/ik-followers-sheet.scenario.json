@@ -1,0 +1,103 @@
+{
+ "name": "ik-followers-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/followers.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   20,
+   -10
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "poseJoint",
+   350,
+   280
+  ],
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "rotateJoint",
+   0.3
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "rotateJoint",
+   -0.2
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "poseJoint",
+   380,
+   330,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "rotateJoint",
+   0.1
+  ],
+  [
+   "rotateJoint",
+   0.1
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "mirrorSelection",
+   "horizontal"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

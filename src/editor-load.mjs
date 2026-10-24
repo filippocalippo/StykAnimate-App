@@ -15,15 +15,9 @@ import {nativeTimeline,timeline} from './pivot/geometry.mjs';
 import {validateLayerSheet,legacySheetReport} from './layer-sheet.mjs';
 import {validateAudioState, validateAudioAssetSteps} from './audio-model.mjs';
 import {validateDrawings} from './drawing-model.mjs';
+import {yieldLoadTask} from './yield-task.mjs';
 
 const own = (value,key) => Object.prototype.hasOwnProperty.call(value,key);
-export const yieldLoadTask = globalThis.scheduler?.yield
-  ? () => globalThis.scheduler.yield()
-  : () => new Promise(resolve => {
-    const channel=new MessageChannel();
-    channel.port1.onmessage=()=>{channel.port1.close();channel.port2.close();resolve();};
-    channel.port2.postMessage(null);
-  });
 
 /** Incoming report ownership transfers to the editor on success. Its pose and
  * definition arrays are never cloned; no current-editor field is changed here. */

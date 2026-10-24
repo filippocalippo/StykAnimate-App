@@ -1,13 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
-import backend from '../desktop/backend.cjs';
 import {Editor} from '../src/editor.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
 import {frameOrder, setOrder} from '../src/pivot/structure.mjs';
+import {roundTrip} from './support/codec.mjs';
 
-test('nested joined movement and posing roundtrip through native PIV with canonical origins and sparse handles', () => {
+test('nested joined movement and posing roundtrip through native PIV with canonical origins and sparse handles', async () => {
   const editor = new Editor({demo: false}); editor.addFigure(); const root = editor.selectedUid;
   const child = editor.duplicateFigure().unique_id; editor.joinTo(root, 4);
   const grandchild = editor.duplicateFigure().unique_id; editor.joinTo(child, 2);
@@ -22,19 +20,7 @@ test('nested joined movement and posing roundtrip through native PIV with canoni
   } }); setOrder(frame, order);
   editor.load(document); editor.select(grandchild); editor.moveSelection(45, -26);
   editor.select(root, 2); editor.rotateJoint(0.35); const geometry = editor.geometry, output = editor.serialize();
-  const script = String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-store=server.ProjectStore(server.WORKSPACE)
-data,name=store.export({'document':json.load(sys.stdin),'format':'piv'})
-print(json.dumps(store.import_bytes(data,name)['document']))
-`;
-  const python = backend.pythonCandidates()[0], result = spawnSync(python.command, [...python.args, '-c', script], {
-    cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify(output), encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024});
-  assert.equal(result.status, 0, result.error?.message || result.stderr);
-  const imported = JSON.parse(result.stdout), native = buildGeometry(imported, imported.keyframes[0]);
+  const imported = await roundTrip({document: output, format: 'piv'}), native = buildGeometry(imported, imported.keyframes[0]);
   const byUid = new Map([...native.objects.values()].map(g => [g.obj.unique_id, g]));
   const near = (a, b) => assert.ok(Math.abs(a - b) < 0.0005, `${a} != ${b}`);
   for (const g of geometry.objects.values()) {

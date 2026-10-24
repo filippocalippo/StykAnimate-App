@@ -3,9 +3,9 @@ import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 const appRoot=fileURLToPath(new URL('..',import.meta.url)),out=new URL('../artifacts/mixed-rig-scope/',import.meta.url);
-await mkdir(out,{recursive:true});const server=await backend.startBackend({appRoot});let browser;
+await mkdir(out,{recursive:true});const server=await backend.startDesktopHost({appRoot});let browser;
 const checks=[],errors=[],check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('PASS',name);};
 try{
   browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage({viewport:{width:1560,height:1000}});

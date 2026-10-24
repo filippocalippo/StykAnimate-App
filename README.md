@@ -35,22 +35,23 @@ Everything (decoding, editing, saving and rendering) runs locally. Optional, con
 
 ## Build from source
 
-Requirements: Node.js 22+ (CI uses 24.11) and Python 3.11+ (CI uses 3.12). Windows and Linux are tested on every change; macOS has an untested build target.
+Requirements: Node.js 22+ (CI uses 24.11), the Rust toolchain below, and Python 3.11+ for tests and packaging (CI uses 3.12). Windows and Linux are tested on every change; macOS has an untested build target.
 
 ```sh
 npm ci
-python -m pip install -r backend/requirements-fast.txt
+npm run engine:build # the Rust engine and Pivot codec, into src/engine/pkg/
 npm start            # desktop app (Electron)
 npm run serve        # or the editor in your browser at http://127.0.0.1:47831
 ```
 
-Set `STYK_PYTHON` to choose a Python interpreter. Optional native helpers speed up large imports (`npm run build:frame-scan`); the Python fallbacks always work.
+`npm run engine:build` needs `rustup` with the pinned nightly and its source (`rustup toolchain install nightly-2026-09-15 --component rust-src --target wasm32-unknown-unknown`), stable Rust with the same target, `wasm-bindgen-cli` 0.2.129 (`cargo install wasm-bindgen-cli --version 0.2.129 --locked`) and clang for the WebAssembly target. Python runs only the codec's development test oracle (`backend/`, `codecs/`) and the packaging scripts; set `STYK_PYTHON` to choose an interpreter.
 
 Packaging, on the matching operating system:
 
 ```sh
 python -m pip install -r scripts/requirements-build.txt
-npm run build:sidecar
+npm run engine:build
+npm run build:video-encoder
 npm run pack && npm run verify:package
 npm run dist:win     # or dist:linux, dist:mac
 ```
@@ -65,16 +66,18 @@ npm test             # unit tests
 python -m unittest discover -s backend -p "test_*.py"
 ```
 
-Browser tests (`tests/*.browser.mjs`) run against `npm run serve` with Chrome or Playwright Chromium, for example `node tests/timeline.browser.mjs`. Some tests read a local corpus of Pivot projects that is not distributed; they skip and name the missing file. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) shows what runs on every pull request.
+Browser tests (`tests/*.browser.mjs`) run against `npm run serve` with Chrome or Playwright Chromium, for example `node tests/timeline.browser.mjs`. Some tests read a local corpus of Pivot projects that is not distributed; they skip and name the missing file. Desktop tests and scripts (`tests/*.desktop.mjs`, `scripts/smoke-*.mjs`) open the app in a window; set `STYK_BACKGROUND_WINDOW=1` to open it off-screen without taking focus (packaged builds too). [`.github/workflows/ci.yml`](.github/workflows/ci.yml) shows what runs on every pull request.
 
 ## How the code is organized
 
 | Location | Responsibility |
 | --- | --- |
 | `src/editor*.mjs`, `src/pivot/` | Document model, commands, undo/redo, rigs, native evaluation and validation |
-| `src/renderer*.mjs`, `src/prepared-frames.mjs` | WebGPU rendering, incremental edits, GPU playback packets |
-| `src/playback*.mjs`, `src/document-transport.mjs` | Worker evaluation, playback caches, bounded document snapshots |
-| `src/import-*.mjs`, `backend/`, `codecs/`, `native/` | Pivot and Stick Nodes decoding, the Python codec service, native helpers |
+| `src/engine/engine-stage.mjs`, `src/engine/engine-playback.mjs` | The scene canvas drawn by the engine, playback tickets |
+| `src/document-transport.mjs` | Bounded document snapshots |
+| `engine/` | The Rust engine: document store, Pivot and Stick Nodes codecs, evaluation, rendering, editing (`docs/RUST-ENGINE-PORT.md`) |
+| `src/engine/` | How the app reaches the engine (stage, playback, export, editing) |
+| `src/import-*.mjs`, `backend/`, `codecs/`, `native/` | Import into the editor, the Python codec kept as a test oracle, native helpers |
 | `src/document-export*.mjs`, `src/image-*.mjs`, `src/video-export.mjs` | Saving, recovery and image/video export |
 | `src/app.mjs`, `src/shell/`, `src/ui/`, `src/styles/` | Interface, workspaces, timelines and styles |
 | `src/locales/`, `src/localization*.mjs` | Translations |
@@ -83,7 +86,7 @@ Browser tests (`tests/*.browser.mjs`) run against `npm run serve` with Chrome or
 | `tests/`, `scripts/` | Tests, smoke tests, benchmarks, build and release scripts |
 | `docs/` | Feature contracts and architecture |
 
-Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Feature behavior is documented in `docs/`, for example [the timeline](docs/TIMELINE.md), [scene editing](docs/SCENE-EDITING.md) and [the renderer](docs/renderer.md).
+Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Feature behavior is documented in `docs/`, for example [the timeline](docs/TIMELINE.md), [scene editing](docs/SCENE-EDITING.md) and [the engine's rendering](docs/engine/rendering.md).
 
 ## Contributing
 

@@ -2,10 +2,10 @@ import {chromium} from './support/playwright.mjs';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import backendService from '../desktop/backend.cjs';
+import backendService from '../desktop/web-host.cjs';
 const root=path.resolve(import.meta.dirname,'..'),output=path.join(root,'artifacts','builder-order');
 await mkdir(output,{recursive:true});
-const backend=await backendService.startBackend({appRoot:root});let browser;
+const backend=await backendService.startDesktopHost({appRoot:root});let browser;
 const checks=[],check=(value,label)=>{assert.ok(value,label);checks.push(label);};
 try{
   browser=await chromium.launch({channel:'chrome',headless:true});
@@ -58,7 +58,7 @@ try{
     const download=await event,filename=path.join(output,`builder-order.${format}`);await download.saveAs(filename);
     const bytes=[...await readFile(filename)];
     const result=await page.evaluate(async({bytes,format})=>{
-      const response=await fetch(`/api/import?filename=builder-order.${format}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:new Uint8Array(bytes)});
+      const response=await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=builder-order.${format}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:new Uint8Array(bytes)});
       if(!response.ok)throw new Error(await response.text());const report=(await response.json()).document;
       const figure=report.figure_types.find(f=>f.polyfills?.length===2),{builderDrawables}=await import('/src/editor-builder-style.mjs');
       return {order:builderDrawables(figure).map(x=>`${x.kind==='segment'?'s':'p'}${x.index}`),alpha:figure.polyfills[0].alpha_raw};

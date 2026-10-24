@@ -4,13 +4,13 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import backendModule from '../desktop/backend.cjs';
+import backendModule from '../desktop/web-host.cjs';
 import fontModule from '../desktop/font-service.cjs';
 const appRoot=fileURLToPath(new URL('..',import.meta.url)),output=path.join(appRoot,'artifacts/text-symbols');
 await mkdir(output,{recursive:true});
 const service=new fontModule.FontService({directories:['C:/Windows/Fonts'],maxDepth:0});
 const rows=(await service.listFonts()).filter(row=>['MS Gothic','MS PGothic'].includes(row.family)&&row.style==='Regular');
-assert.equal(rows.length,2);const backend=await backendModule.startBackend({appRoot}),checks=[],errors=[];let browser;
+assert.equal(rows.length,2);const backend=await backendModule.startDesktopHost({appRoot}),checks=[],errors=[];let browser;
 try{
   browser=await chromium.launch({channel:'chrome',headless:true});
   const page=await browser.newPage({viewport:{width:1280,height:900}});page.on('pageerror',e=>errors.push(e.message));

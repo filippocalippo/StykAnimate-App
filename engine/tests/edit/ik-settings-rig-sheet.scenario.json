@@ -1,0 +1,44 @@
+{
+ "name": "ik-settings-rig-sheet",
+ "document": "rig.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": true
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "chainLength": 1
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

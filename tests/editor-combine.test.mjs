@@ -1,11 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {buildGeometry, mixColor} from '../src/pivot/geometry.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
-import backend from '../desktop/backend.cjs';
+import {roundTrip} from './support/codec.mjs';
 
 const near = (a, b, epsilon = 1e-4) => assert.ok(Math.abs(a - b) <= epsilon, `${a} != ${b}`);
 const blank = () => { const editor = new Editor({demo: false}); editor.addFigure(); editor.markSaved(); return editor; };
@@ -107,22 +105,10 @@ test('combined image assets retain anchors, bytes and effective reflection with 
   compareGeometry(baseline, editor.geometry); assert.doesNotThrow(() => validateScene(editor.serialize()));
 });
 
-test('combined joined vectors roundtrip through actual native PIV and STK writers', () => {
+test('combined joined vectors roundtrip through actual native PIV and STK writers', async () => {
   const {editor, root} = vectorGroup(); editor.combineJoinedFigure(root); const baseline = editor.geometry, document = editor.serialize();
-  const python = String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-doc=json.load(sys.stdin); store=server.ProjectStore(server.WORKSPACE); result={}
-for kind in ('piv','stk'):
-    raw,name=store.export({'document':doc,'format':kind,'figureTypeId':doc['keyframes'][0]['objects'][0]['figure_type_id']})
-    result[kind]=store.import_bytes(raw,name)['document']
-print(json.dumps(result))
-`;
-  const candidate = backend.pythonCandidates()[0], output = spawnSync(candidate.command, [...candidate.args, '-c', python], {
-    cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify(document), encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024});
-  assert.equal(output.status, 0, output.error?.message || output.stderr); const decoded = JSON.parse(output.stdout);
+  const decoded = {}, figureTypeId = document.keyframes[0].objects[0].figure_type_id;
+  for (const kind of ['piv', 'stk']) decoded[kind] = await roundTrip({document, format: kind, figureTypeId});
   compareGeometry(baseline, buildGeometry(decoded.piv, decoded.piv.keyframes[0]));
   const figure = decoded.stk.figure_types.find(f => f.segments.length === 20);
   assert.equal(figure.segments.length, 20); assert.equal(figure.polyfills.length, 2);

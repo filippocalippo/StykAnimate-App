@@ -5,7 +5,6 @@ import {emptyDocument,createObject,createFrame} from '../src/demo.mjs';
 import {createVfx,vfxStack,vfxProperty,validateVfxStack,validateVfxValue,interpolateVfx,resolvedVfx,VFX_REGISTRY} from '../src/vfx.mjs';
 import {VFX_PRESETS} from '../src/vfx-presets.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
-import {vfxPreviewGeometry} from '../src/vfx-preview.mjs';
 import {validateAnimationDocument,sampleAnimationChannel} from '../src/animation-channels.mjs';
 import {initializeLayerSheet} from '../src/editor-layer-sheet.mjs';
 import {remapVfxOwner} from '../src/vfx.mjs';
@@ -59,8 +58,3 @@ test('presets validate, reordering is one history entry, and paste updates match
  const e=fixture(true);for(const [name,preset] of Object.entries(VFX_PRESETS)){const clean=fixture(true);clean.applyVfxPreset(target,name);assert.equal(clean.vfxEffects(target).length,preset.effects.length);validateVfxStack(clean.vfxEffects(target));}
  e.applyVfxPreset(target,'Power up');const old=e.vfxEffects(target).map(e=>e.id),history=e._undo.length;e.reorderVfx(target,old[0],1);assert.equal(e._undo.length,history+1);assert.deepEqual(e.vfxEffects(target).map(e=>e.id),old.toReversed());e.undo();assert.deepEqual(e.vfxEffects(target).map(e=>e.id),old);e.pasteVfx(target,e.vfxEffects(target));assert.equal(new Set(e.vfxEffects(target).map(e=>e.id)).size,2);
 });
-test('preview bypass strips only render effects and never changes the editable document',()=>{
- const e=fixture(true);e.addVfx(target,'glow');const before=e.serialize(),geometry=buildGeometry(e.report,e.evaluatedFrame),clean=vfxPreviewGeometry(geometry);
- assert.equal(clean.drawables.some(d=>d.obj._stykVfx),false);assert.ok(geometry.drawables.some(d=>d.obj._stykVfx));assert.equal(vfxPreviewGeometry(geometry),clean);assert.deepEqual(e.serialize(),before);
-});
-

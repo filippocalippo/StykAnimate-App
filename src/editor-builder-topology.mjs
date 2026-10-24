@@ -187,6 +187,7 @@ export const editorBuilderTopologyMethods = {
         if (ancestor === segmentId) throw messageError(new Error(''), "errors.editorBuilderTopology.aJointCannotMoveInsideItsOwnBranch", {});
     }
     return this._topologyEdit('Move segment', next => {
+      const original = next.segments.slice();
       const [moved] = next.segments.splice(next.segments.findIndex(candidate => candidate.segment_id === segmentId), 1);
       moved.parent_id = nextParent;
       let at = beforeId === null || beforeId === undefined ? -1 : next.segments.findIndex(candidate => candidate.segment_id === beforeId);
@@ -197,6 +198,18 @@ export const editorBuilderTopologyMethods = {
         for (let i = next.segments.length - 1; i >= 0; i--) if (subtree.has(next.segments[i].segment_id)) {at = i + 1; break;}
       }
       next.segments.splice(at, 0, moved);
+      // Pose arrays follow the definition's order: repack every pose in the new order, so each
+      // segment keeps its own angle, length and bend.
+      const positions = new Map(original.map((segment, index) => [segment, index]));
+      const order = next.segments.map(segment => positions.get(segment));
+      if (order.every((index, position) => index === position)) return;
+      for (const frame of this._allSourceFrames()) for (const object of frame.objects) if (object.figure_type_id === next.figure_type_id) {
+        retainRuntimePose(object, original);
+        object.angles = order.map(index => object.angles[index]);
+        if (object.len_flag) object.lengths = order.map(index => object.lengths[index]);
+        if (object.bend_flag) object.bends = order.map(index => object.bends[index]);
+        delete object.runtime_segments;
+      }
     });
   },
 };

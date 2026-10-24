@@ -1,0 +1,49 @@
+{
+ "name": "clip-create-loose-sheet",
+ "document": "clip-create-loose-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 2,
+    "end": 6,
+    "name": "Motion"
+   }
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "moveSelection",
+   4.5,
+   -2
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   0
+  ],
+  [
+   "@seek",
+   6
+  ]
+ ]
+}

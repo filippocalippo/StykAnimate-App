@@ -5,6 +5,8 @@ import {MIN_TILE,MAX_TILE,TILE} from './drawing-tiles.mjs';
 
 export const DRAWING_TILE = 64;
 export const DRAWING_MAX_PIXELS = 16 * 1024 * 1024;
+/** The largest region a fill or the magic wand samples from the visible artwork ("sample all layers"). */
+export const FILL_SOURCE_MAX_PIXELS = 64 * 1024 * 1024;
 export const EMPTY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=';
 export const drawingMetadata = figure => figure?._styk?.drawing;
 export const isDrawingLayer = layer => layer?.drawing?.version === 1;

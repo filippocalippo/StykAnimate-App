@@ -13,7 +13,9 @@ import {nativeFigureDocument} from './native-figure.mjs';
 import {validateMovieclipGraph,isMovieclip} from './movieclips.mjs';
 import {packPoseSequences} from './pose-sequence-storage.mjs';
 import {documentHasVfx} from './vfx.mjs';
-import {liftDocument, encodeContainerV2Parts, createContainerCompressionCache, validateNativeFigure} from './native-container.mjs';
+import {liftDocument} from './document-lift.mjs';
+import {nativeFileCodec} from './native-file-codec.mjs';
+import {createContainerCompressionCache} from './container-cache.mjs';
 import {flattenDrawingFigures} from './drawing-flatten.mjs';
 import {codecRequest} from './codec-request.mjs';
 import {decodeSourceRecord} from './source-record.mjs';
@@ -21,13 +23,12 @@ import {decodeSourceRecord} from './source-record.mjs';
 let document, config, running = false;
 let timings = {};
 const compressionCache = createContainerCompressionCache({maxBytes: 64 * 1024 * 1024, maxEntries: 8});
-function reply(id, payload) { self.postMessage({id, ok: true, ...payload}); }
+function reply(id, payload, transfer = []) { self.postMessage({id, ok: true, ...payload}, transfer); }
 
 /** Fetch the retained original binary source for native-save provenance.
  * Returns {meta, bytes} or null when the cache holds no binary source. */
 async function fetchOriginalSource() {
   const headers = config.jobId ? {'X-Styk-Job-Id': config.jobId} : {};
-  if (config.token) headers.Authorization = `Bearer ${config.token}`;
   const response = await codecRequest(config, `/api/source?id=${encodeURIComponent(config.sourceId)}`, {headers});
   if (response.status === 422) return null;
   if (!response.ok) throw Object.assign(messageError(new Error(''), "errors.documentExportWorker.theOriginalSourceIsUnavailable", {status: response.status}), {status: response.status});
@@ -36,13 +37,12 @@ async function fetchOriginalSource() {
 }
 
 /** Build the native container in this worker: the editable document becomes a
- * compact skeleton plus binary sections instead of one large JSON payload. */
+ * compact skeleton plus binary sections instead of one large JSON payload, and the Rust
+ * container writer (native-file-codec.mjs) compresses and frames them. It also checks that a
+ * figure file holds a self-contained figure. */
 async function buildNativeContainer() {
   const portable = config.format === 'styk' ? document : {...document};
-  if (config.format !== 'styk') {
-    delete portable._stykSource;
-    validateNativeFigure(portable, config.format);
-  }
+  if (config.format !== 'styk') delete portable._stykSource;
   const output = packPoseSequences(portable);
   output._styk = {...output._styk, format: 'StykAnimate', format_version: 1};
   let preBlobs = [], sourceMeta = null;
@@ -53,9 +53,9 @@ async function buildNativeContainer() {
   if (sourceMeta) output._stykSource = {...sourceMeta, source_base64: preBlobs[0]};
   const lifted = liftDocument(output, {preBlobs});
   const stats = {};
-  const encoded = await encodeContainerV2Parts(lifted, config.format, {cache: compressionCache, stats});
+  const file = await nativeFileCodec.save(lifted, config.format, {cache: compressionCache, stats});
   Object.assign(timings, stats);
-  return encoded.parts;
+  return file;
 }
 
 self.addEventListener('message', async event => {
@@ -143,25 +143,14 @@ self.addEventListener('message', async event => {
         ? {...document, keyframes: [{objects: [], duration_raw: 0}]} : document);
       timings.normalize_ms = performance.now() - started;
       stage = 'serialize';
-      let blob = null;
+      let blob;
       if (['styk', 'stkz', 'stykmov'].includes(config.format)) {
         const building = performance.now();
-        try {
-          blob = new Blob(await buildNativeContainer());
-          timings.container_build_ms = +(performance.now() - building).toFixed(3);
-        } catch (error) {
-          // A capacity rejection also applies to the JSON service fallback.
-          // Preserve that actionable error instead of attempting an even larger
-          // string and replacing it with a V8 "Invalid string length" failure.
-          if (error?.code === 'document_too_large') throw error;
-          // The service path remains authoritative for unusual documents and
-          // produces the same user-facing errors on genuinely invalid input.
-          timings.local_build_error = error?.message || String(error);
-        }
-      }
-      if (!blob) {
+        blob = new Blob([await buildNativeContainer()]);
+        timings.container_build_ms = +(performance.now() - building).toFixed(3);
+      } else {
         const serializing = performance.now();
-        const body = JSON.stringify({document: ['styk', 'stkz', 'stykmov'].includes(config.format) ? packPoseSequences(document) : document, sourceId: config.sourceId, format: config.format,
+        const body = JSON.stringify({document, sourceId: config.sourceId, format: config.format,
           filename: config.name, figureTypeId: config.figureTypeId});
         timings.stringify_ms = performance.now() - serializing;
         timings.json_characters = body.length;
@@ -170,7 +159,6 @@ self.addEventListener('message', async event => {
         const sending = performance.now();
         const headers = {'Content-Type': 'application/json'};
         if (config.jobId) headers['X-Styk-Job-Id'] = config.jobId;
-        if (config.token) headers.Authorization = `Bearer ${config.token}`;
         stage = 'request';
         const response = await codecRequest(config, '/api/export', {method: 'POST', headers, body});
         if (!response.ok) {
@@ -196,7 +184,8 @@ self.addEventListener('message', async event => {
       timings.worker_ms = performance.now() - started;
       timings.output_bytes = blob.size;
       document = null;
-      reply(message.id, {blob, timings, cacheEntries: compressionCache.snapshot()});
+      const cacheEntries = compressionCache.take();
+      reply(message.id, {blob, timings, cacheEntries}, cacheEntries.map(entry => entry.bytes.buffer));
       config.codecPort?.close();
       config = null;
     } else throw messageError(new Error(''), "errors.documentExportWorker.unknownDocumentExportOperation", {});

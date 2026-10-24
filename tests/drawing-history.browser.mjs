@@ -84,11 +84,11 @@ try{
     finally{exporter.dispose();}
   });
   check('native save remains self-contained after the disk history session closes',saved);
-  await page.evaluate(()=>styk.fit());await page.waitForFunction(()=>!styk.state.editablePreparing&&!styk.state.dirtyRender&&styk.state.renderer.stats.drawingGpuBytes>0);
+  await page.evaluate(()=>styk.fit());await page.waitForFunction(()=>!styk.state.editablePreparing&&!styk.state.dirtyRender);
   check('the reopened cel appears on the canvas',await page.evaluate(()=>styk.editor.evaluatedFrame.objects.length>0));
   check('no uncaught browser errors',errors.length===0);await page.screenshot({path:out+'/workspace.png'});
   await writeFile(out+'/result.json',JSON.stringify({checks,storage,measured,errors,browser:await browser.version()},null,2));console.log(JSON.stringify(measured,null,2));
 }catch(error){
-  const state=await page.evaluate(()=>({errors:window.__errors,dirty:styk.state.dirtyRender,preparing:styk.state.editablePreparing,renderer:styk.state.renderer.stats,frame:styk.editor.evaluatedFrame.objects.map(o=>({id:o.unique_id,type:o.figure_type_id})),owner:styk.drawing.owner.stats,previews:{active:Boolean(styk.drawing.owner.previews.active),size:styk.drawing.owner.previews.cache.size}})).catch(()=>null);
+  const state=await page.evaluate(()=>({errors:window.__errors,dirty:styk.state.dirtyRender,renderer:styk.state.renderer.stats,frame:styk.editor.evaluatedFrame.objects.map(o=>({id:o.unique_id,type:o.figure_type_id})),owner:styk.drawing.owner.stats,previews:{active:Boolean(styk.drawing.owner.previews.active),size:styk.drawing.owner.previews.cache.size}})).catch(()=>null);
   console.error(JSON.stringify({message:error.message,errors,state},null,2));await page.screenshot({path:out+'/failure.png'});throw error;
 }finally{await browser.close();}

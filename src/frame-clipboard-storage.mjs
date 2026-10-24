@@ -8,7 +8,7 @@ import {readNativeClipboard, writeNativeBlob} from './native-files.mjs';
  * path. A newer copy always wins over startup restore or an older pending save. */
 export function installNativeFrameClipboard(editor, desktop, {onError = () => {}, onRestored = () => {}, baseURL} = {}) {
   let generation = 0, intentGeneration = 0, controller = null, pending = Promise.resolve(), disposed = false, error = null;
-  const exporter = new DocumentExporter({baseURL});
+  const exporter = new DocumentExporter();
   const fail = failure => { if (failure.name !== 'AbortError' && !disposed) { error = failure; onError(failure); } };
   const persist = () => {
     generation++; intentGeneration++; controller?.abort(); controller = new AbortController();

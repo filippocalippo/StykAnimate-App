@@ -574,7 +574,7 @@ try {
       drag: styk.state.drag?.kind,
       dragging: !!styk.editor.dragging,
     }));
-    await page.evaluate(() => styk.state.renderer.device.destroy());
+    await page.evaluate(() => styk.state.renderer.loseDevice());
     await page.locator("#retry-renderer").waitFor({ state: "visible" });
     const lost = await page.evaluate(() => ({
       drag: styk.state.drag?.kind,
@@ -620,7 +620,7 @@ try {
     }));
     await page.keyboard.down("ArrowRight");
     const held = await page.evaluate(() => !!styk.editor.dragging);
-    await page.evaluate(() => styk.state.renderer.device.destroy());
+    await page.evaluate(() => styk.state.renderer.loseDevice());
     await page.locator("#retry-renderer").waitFor({ state: "visible" });
     await page.keyboard.up("ArrowRight");
     await settle();
@@ -681,7 +681,7 @@ try {
     await page.mouse.down();
     await page.mouse.move(x + 18, y, { steps: 5 });
     const active = await page.evaluate(() => !!styk.properties.gesture);
-    await page.evaluate(() => styk.state.renderer.device.destroy());
+    await page.evaluate(() => styk.state.renderer.loseDevice());
     await page.locator("#retry-renderer").waitFor({ state: "visible" });
     await page.mouse.up();
     await settle();
@@ -711,7 +711,7 @@ try {
       () => styk.editor.report.keyframes.length,
     );
     await page.keyboard.down("Space");
-    await page.evaluate(() => styk.state.renderer.device.destroy());
+    await page.evaluate(() => styk.state.renderer.loseDevice());
     await page.locator("#retry-renderer").waitFor({ state: "visible" });
     await page.keyboard.up("Space");
     await settle();

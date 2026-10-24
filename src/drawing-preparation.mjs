@@ -1,24 +1,9 @@
 import {messageError} from './localized-error.mjs';
-import {TILE,TILE_BYTES,TileStore,tileTransparent,assertTileCoordinates} from './drawing-tiles.mjs';
+import {TILE,TILE_BYTES,assertTileCoordinates} from './drawing-tiles.mjs';
 
-export const DRAWING_PREPARATION_BYTES=1024*1024;
+const DRAWING_PREPARATION_BYTES=1024*1024;
 const BATCH_TILES=DRAWING_PREPARATION_BYTES/TILE_BYTES;
 const aborted=()=>messageError(new DOMException('', 'AbortError'), "errors.drawingPreparation.drawingPreparationCancelledOrSuperseded", {});
-
-/** Takes exclusive ownership of transferred input. Full tiles already have
- * their final allocation; only compact uniform colors need expansion. */
-export function materializeDrawingTiles(input){
-  if(!Array.isArray(input)||input.length>BATCH_TILES)throw messageError(new Error(''), "errors.drawingPreparation.drawingPreparationBatchIsTooLarge", {});
-  const store=new TileStore(),tiles=[];
-  for(const t of input){
-    if(t.pixels!=null&&(!(t.pixels instanceof ArrayBuffer)||t.pixels.byteLength!==4&&t.pixels.byteLength!==TILE_BYTES))throw messageError(new Error(''), "errors.drawingPreparation.invalidDrawingPreparationPixels", {});
-    if(t.pixels?.byteLength===TILE_BYTES)store.adopt(t.tx,t.ty,new Uint8ClampedArray(t.pixels));
-    else store.set(t.tx,t.ty,t.pixels==null?null:new Uint8ClampedArray(t.pixels));
-    const tile=store.get(t.tx,t.ty),visible=tile&&!tileTransparent(tile);
-    tiles.push({tx:t.tx,ty:t.ty,pixels:visible?tile.pixels.buffer:null,alphaBounds:visible?tile.alphaBounds:null});
-  }
-  return tiles;
-}
 
 export function* drawingPixelCommands(root,direction='after'){
   if(!root)return;if(root.kind==='drawing-pixels')yield root;

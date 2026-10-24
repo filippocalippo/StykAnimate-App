@@ -63,7 +63,7 @@ async function editor(size, { touch = true } = {}) {
     .filter((b) => b.getClientRects().length).map((b) => ({ name: b.getAttribute('aria-label') || b.textContent.trim(), r: b.getBoundingClientRect() }))
     .filter(({ r }) => r.width && (r.width < min - 0.5 || r.height < min - 0.5)).map(({ name, r }) => `${name} ${Math.round(r.width)}×${Math.round(r.height)}`), { min, selector });
   const figure = () => page.evaluate(async () => {
-    const { worldToScreen } = await import('/src/renderer.mjs');
+    const { worldToScreen } = await import('/src/renderer-geometry.mjs');
     const { editor, state } = window.styk, rect = document.getElementById('overlay').getBoundingClientRect();
     editor.select(editor.frame.objects[0].unique_id, -1);
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));

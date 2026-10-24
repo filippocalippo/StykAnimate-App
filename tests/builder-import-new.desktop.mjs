@@ -36,7 +36,7 @@ try {
   await page.screenshot({path:path.join(output,'edited-before-import.png')});
   await page.locator('#builder-done').click();
   await page.locator('#builder-exit-import-new').click();
-  await page.waitForFunction(()=>!styk.state.builderActive&&!styk.state.editablePreparing);
+  await page.waitForFunction(()=>!styk.state.builderActive);
   const result=await page.evaluate(()=>{
     const editor=styk.editor,uid=editor.selectedUid,created=captureFigure(uid),expected=editedFigure.keyframes[0].objects[0];
     const fields=['angles','lengths','bends','len_flag','bend_flag','scale','_stykStyle'];
@@ -49,11 +49,11 @@ try {
   checks.push('Actual builder exit preserves edited pose, paint and both original instances');
   await page.screenshot({path:path.join(output,'imported-result.png')});
   await page.evaluate(()=>{styk.editor.undo();styk.editor.redo();});
-  await page.waitForFunction(()=>!styk.state.editablePreparing);
+  await page.waitForFunction(()=>!styk.state.dirtyRender);
   assert.deepEqual(await page.evaluate(()=>[captureFigure(1),captureFigure(2)]),result.baseline);
   checks.push('Undo and redo retain original instances');
   await page.evaluate(document=>{styk.editor.load(document,'Saved builder result');},result.document);
-  await page.waitForFunction(()=>!styk.state.editablePreparing);
+  await page.waitForFunction(()=>!styk.state.dirtyRender);
   assert.deepEqual(await page.evaluate(()=>[captureFigure(1),captureFigure(2)]),result.baseline);
   const restored=await page.evaluate(uid=>captureFigure(uid),result.uid);
   for(const key of Object.keys(result.expected))assert.deepEqual(restored.keyframes[0].objects[0][key],result.expected[key]);

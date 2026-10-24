@@ -2,18 +2,18 @@
 import assert from 'node:assert/strict';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {chromium} from './support/playwright.mjs';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 
-const server = await backend.startBackend({appRoot: process.cwd()});
+const server = await backend.startDesktopHost({appRoot: process.cwd()});
 const browser = await chromium.launch({channel: 'chrome', headless: true});
 const out = 'artifacts/zoom-edit-stability', results = [];
 await mkdir(out, {recursive: true});
 try {
-  for (const rendererMode of ['gpu', 'canvas']) {
+  {
     const page = await browser.newPage({viewport: {width: 1440, height: 960}}), errors = [], samples = [];
     page.on('pageerror', e => errors.push(e.message)); page.on('crash', () => errors.push('Browser renderer crashed'));
-    await page.addInitScript(rendererMode => localStorage.setItem('stykanimate.editor.settings.v1',
-      JSON.stringify({rendererMode, locale: 'en', canvasZoomGesture: 'ctrl-scroll'})), rendererMode);
+    await page.addInitScript(() => localStorage.setItem('stykanimate.editor.settings.v1',
+      JSON.stringify({locale: 'en', canvasZoomGesture: 'ctrl-scroll'})));
     await page.goto(server.origin); await page.waitForFunction(() => window.styk?.ready);
     const initial = await page.evaluate(async () => {
       const {emptyDocument, createObject, createFrame} = await import('/src/demo.mjs');
@@ -26,13 +26,11 @@ try {
             angles: figure.segments.map((s, j) => s.angle_rad + (j > 1 ? Math.sin(tick * .4) * .05 : 0))})), 1));
       styk.editor.load(report); styk.editor.seek(0); styk.editor.select(1, 3);
       styk.state.onion = false; styk.state.handles = true; styk.fit();
-      window.zoomGpuErrors = [];
-      styk.state.renderer.device?.addEventListener('uncapturederror', e => zoomGpuErrors.push(e.error.message));
       return {backend: styk.state.renderer.stats.backend, adapter: styk.state.renderer.stats.adapter,
         frames: report.keyframes.length, figuresPerFrame: 400, segmentsPerFrame: 400 * figure.segments.length};
     });
-    assert.equal(initial.backend, rendererMode === 'gpu' ? 'WebGPU' : 'Canvas 2D fallback');
-    const settle = () => page.waitForFunction(() => !styk.state.dirtyRender && !styk.state.editablePreparing);
+    assert.ok(['WebGPU', 'WebGL2'].includes(initial.backend), initial.backend);
+    const settle = () => page.waitForFunction(() => !styk.state.dirtyRender );
     await settle();
     for (let cycle = 0; cycle < 3; cycle++) for (const scale of [.001, .1, 1, 4, 16, 100]) {
       const p = await page.evaluate(({scale, cycle}) => {
@@ -69,7 +67,7 @@ try {
       assert.ok(samples.at(-1).rasterBytes <= samples.at(-1).rasterBudget, 'Dense fixture must remain within its raster budget');
     }
     await page.evaluate(() => styk.fit()); await settle();
-    await page.screenshot({path: `${out}/${rendererMode}.png`});
+    await page.screenshot({path: `${out}/zoom.png`});
     const final = await page.evaluate(() => {
       // Copy the GPU surface in the same task as rendering, before presentation
       // clears its drawing buffer. The screenshot above checks the displayed UI.
@@ -78,11 +76,11 @@ try {
       const ctx = canvas.getContext('2d', {willReadFrequently: true}); ctx.drawImage(source, 0, 0);
       const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       let ink = 0; for (let i = 0; i < data.length; i += 4) if (data[i+3] > 100 && data[i] < 100 && data[i+1] < 100 && data[i+2] < 100) ink++;
-      return {ink, gpuErrors: zoomGpuErrors, history: styk.editor.historySize};
+      return {ink, history: styk.editor.historySize};
     });
     assert.ok(final.ink > 100, 'Artwork must remain visible after zooming and editing');
-    assert.deepEqual(errors, []); assert.deepEqual(final.gpuErrors, []);
-    results.push({rendererMode, ...initial, samples, final, errors});
+    assert.deepEqual(errors, []);
+    results.push({...initial, samples, final, errors});
     console.log(`PASS ${initial.backend}: 18 zoom cycles, 12 joint edits with undo/redo, visible artwork and bounded raster memory`);
     await page.close();
   }

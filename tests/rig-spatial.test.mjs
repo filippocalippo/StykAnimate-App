@@ -100,7 +100,7 @@ test('spatial pins survive reachable root movement and saving; negative scale st
  const{doc,a,b,skin}=spatialFixture(),e=new Editor({demo:false,layerTimeline:true});e.load(doc);e.select(1,a.id-1);e.setSpatialPose({turn:.7,pitch:.2,bend:.3});
  e.select(1,b.id-1);e.setNodeIK({enabled:true,chainLength:2,pinned:true});const before=e.geometry.objects.get(0).joints.get(b.id);
  e.select(1,-1);e.moveSelection(0,15);const p=e.geometry.objects.get(0).joints.get(b.id);near(p.x,before.x,.02);near(p.y,before.y,.02);
- const{buildContainerV2,decodeDocument}=await import('../src/native-container.mjs');const reopened=await decodeDocument(await buildContainerV2(e.serialize(),'styk'),'styk');
+ const{buildContainerV2,decodeDocument}=await import('./support/native-files.mjs');const reopened=await decodeDocument(await buildContainerV2(e.serialize(),'styk'),'styk');
  const second=new Editor({demo:false,layerTimeline:true});second.load(reopened.document);second.select(1,-1);
  near(second.geometry.objects.get(0).joints.get(skin).x,e.geometry.objects.get(0).joints.get(skin).x);
  const plain=spatialFixture();plain.object.scale=-2;assert.ok([...buildGeometry(plain.doc,plain.doc.keyframes[0]).objects.get(0).joints.values()].every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)));

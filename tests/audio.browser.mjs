@@ -52,7 +52,7 @@ try {
   // Native binary project save/reopen uses original embedded bytes, then a cold
   // worker reconstructs PCM without a link to the input file.
   const persistence=await page.evaluate(async()=>{
-    const {DocumentExporter}=await import('/src/document-export.mjs'),{decodeDocument}=await import('/src/native-container.mjs');
+    const {DocumentExporter}=await import('/src/document-export.mjs'),{decodeDocument}=await import('/tests/support/native-files.mjs');
     const exporter=new DocumentExporter(),blob=await exporter.export(styk.editor.report,{format:'styk',name:'Audio test'});
     const {document}=await decodeDocument(new Uint8Array(await blob.arrayBuffer()),'styk');exporter.dispose();
     const before=JSON.stringify(styk.editor.report._styk.audio);styk.editor.load(document);await styk.audioEngine.clear();await styk.audioEngine.prepare(styk.editor.report,{start:0,end:4});

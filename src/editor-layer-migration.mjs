@@ -120,3 +120,23 @@ export function planLayerMembershipMigration(editor, uids, targetLayerId, option
   const iterator = planLayerMembershipMigrationSteps(editor, uids, targetLayerId, options);
   let step; do { step = iterator.next(); } while (!step.done); return step.value;
 }
+
+function channelDelta(beforeAnimation, afterAnimation) {
+  const before = new Map((beforeAnimation?.channels || []).map(channel => [channel.id, channel]));
+  const after = new Map(afterAnimation.channels.map(channel => [channel.id, channel]));
+  const channelUpdates = [];
+  for (const channel of after.values()) if (before.get(channel.id) !== channel) channelUpdates.push({id: channel.id, channel});
+  for (const id of before.keys()) if (!after.has(id)) channelUpdates.push({id, channel: null});
+  return {channelUpdates, channelOrder: [...after.keys()], nextKeyId: afterAnimation.nextKeyId};
+}
+
+/** What a background planner sends the editor: preserve unchanged channel references and
+ * send each new source asset once. The engine's planner answers the same plan, byte for byte
+ * (engine/tools/layer-migration-fixtures.mjs records it). */
+export function migrationPlanPayload(plan) {
+  if (!plan) return {plan: null};
+  return {plan: {version: 1, ...channelDelta(plan.beforeAnimation, plan.afterAnimation),
+    frameSources: plan.frameSources, nextFrameIdentity: plan.nextFrameIdentity, sampledTicks: plan.sampledTicks,
+    affectedLayerIds: plan.affectedLayerIds, hadFrameSourceTable: plan.hadFrameSourceTable,
+    ...(plan.sourceBytes !== undefined ? {sourceBytes: plan.sourceBytes} : {})}};
+}

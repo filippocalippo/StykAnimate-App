@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 const browser=await chromium.launch({channel:'chrome',headless:true}),page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 page.on('pageerror',e=>errors.push(e.message));
 const settle=()=>page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
-const point=id=>page.evaluate(async id=>{const {worldToScreen}=await import('/src/renderer.mjs'),{editor:e,state}=styk,p=e.geometry.objects.get(e.selectedSlot).joints.get(id),q=worldToScreen(p,{report:e.report,frame:e.frame,view:state.view}),r=document.querySelector('#viewport').getBoundingClientRect();return {x:r.x+q.x,y:r.y+q.y};},id);
+const point=id=>page.evaluate(async id=>{const {worldToScreen}=await import('/src/renderer-geometry.mjs'),{editor:e,state}=styk,p=e.geometry.objects.get(e.selectedSlot).joints.get(id),q=worldToScreen(p,{report:e.report,frame:e.frame,view:state.view}),r=document.querySelector('#viewport').getBoundingClientRect();return {x:r.x+q.x,y:r.y+q.y};},id);
 const click=async id=>{const p=await point(id);await page.mouse.click(p.x,p.y);await settle();};
 try{
   await page.goto(process.env.STYK_URL??'http://127.0.0.1:47851');await page.waitForFunction(()=>window.styk?.ready);

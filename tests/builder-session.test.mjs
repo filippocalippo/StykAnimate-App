@@ -255,12 +255,17 @@ test('undo inside a session reduces changed work but never crosses the baseline'
 test('moveBuilderSegment reparents, reorders, rejects cycles, and undoes', () => {
   const editor = fixture();
   editor.select(1);
+  // Every pose's angle of each segment, by segment id.
+  const poses = () => editor.report.keyframes.map(frame => objectsOf(editor, 1, frame).map(object =>
+    Object.fromEntries(figure(editor, 1).segments.map((segment, index) => [segment.segment_id, object.angles[index]]))));
+  const before = poses();
   // Reparent segment 4 (child of 3) onto 6; pose arrays remap by segment id.
   editor.moveBuilderSegment(4, {parentId: 6});
   const moved = figure(editor, 1);
   assert.equal(moved.segments.find(s => s.segment_id === 4).parent_id, 6);
   const ids = moved.segments.map(s => s.segment_id);
   assert.ok(ids.indexOf(4) > ids.indexOf(6));
+  assert.deepEqual(poses(), before, 'every segment keeps its own angle in every pose');
   assert.doesNotThrow(() => validateScene({...editor.report, keyframes: editor._allSourceFrames()}));
   assert.throws(() => editor.moveBuilderSegment(1, {parentId: 4}), /own branch/);
   editor.undo();

@@ -5,6 +5,8 @@ import {validateScene, validateObjectChanges} from '../src/pivot/model.mjs';
 
 test('object validation reuses validated definitions without reading unrelated segment records', () => {
   const editor = new Editor(), report = editor.report, frame = editor.frame;
+  // The engine validated the document as it opened it: the editor's own checks have not seen it yet.
+  validateScene(report);
   let reads = 0;
   for (const figure of report.figure_types) for (const segment of figure.segments) {
     const length = segment.length;

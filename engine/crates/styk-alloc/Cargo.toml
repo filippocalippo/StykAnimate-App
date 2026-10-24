@@ -1,0 +1,10 @@
+[package]
+name = "styk-alloc"
+description = "The allocator of the engine's WebAssembly modules: standard allocation, with linear memory grown ahead in large steps."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"

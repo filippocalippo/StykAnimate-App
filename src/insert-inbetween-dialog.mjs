@@ -2,7 +2,6 @@ import {presentError} from './error-presentation.mjs';
 import {messageError} from './localized-error.mjs';
 import {messageHTML, appendLocalized, clearTranslation, localizedAttribute, localizedMarkup, localizedText} from './localization-bindings.mjs';
 
-import {ThumbnailRenderer} from './thumbnail-renderer.mjs';
 import {icon} from './icons.mjs';
 
 const STYLE = `
@@ -20,12 +19,11 @@ const modes = ['adjacent', 'settings', 'none'];
 const progressKeys = {sampling: 'insertInbetweenDialog.preparingPoses', 'sampling animation': 'insertInbetweenDialog.preparingAnimationPoses', animation: 'insertInbetweenDialog.preparingAnimationTracks', validation: 'insertInbetweenDialog.checkingFrames', staging: 'insertInbetweenDialog.preparingFrames'};
 const modeKeys = {adjacent: 'insertInbetweenDialog.onionSkinsBeforeAfter', settings: 'insertInbetweenDialog.onionSkinsSettings', none: 'insertInbetweenDialog.onionSkinsOff'};
 
-/** Read-only previews stay in the bounded thumbnail worker. Only Insert edits
+/** Read-only previews are drawn by the engine (`renderThumbnail`, engine-thumbnails.mjs). Only Insert edits
  * the model, after revision/identity checks, as one atomic range command. */
 export class InsertInbetweenDialog {
-  constructor({editor, dialog, renderThumbnail, getSettings = () => ({}), baseURL, token = '', onApply = () => {}, onClose = () => {}, onError = () => {}}) {
-    Object.assign(this, {editor, getSettings, baseURL, token, onApply, onClose, onError});
-    this.externalRenderer = renderThumbnail;
+  constructor({editor, dialog, renderThumbnail, getSettings = () => ({}), onApply = () => {}, onClose = () => {}, onError = () => {}}) {
+    Object.assign(this, {editor, getSettings, renderThumbnail, onApply, onClose, onError});
     this.ownsDialog = !dialog;
     this.dialog = dialog ?? document.createElement('dialog');
     if (this.ownsDialog) appendLocalized(document.body, this.dialog);
@@ -43,8 +41,6 @@ export class InsertInbetweenDialog {
       frameIds: indices.map(index => this.editor.getFrameId(index))};
     this.previewIndex = indices.includes(this.editor.frameIndex) ? this.editor.frameIndex : indices[0];
     this.events = new AbortController(); const {signal} = this.events;
-    this.renderer = this.externalRenderer ? null : new ThumbnailRenderer(this.editor, {baseURL: this.baseURL, token: this.token});
-    this.renderThumbnail = this.externalRenderer ?? this.renderer.renderThumbnail;
     this.dialog.classList.add('styk-inbetween-dialog'); localizedAttribute(this.dialog, 'aria-label', "insertInbetweenDialog.insertInbetween", {});
     localizedMarkup(this.dialog, `<div class="styk-inbetween-head"><h2 data-i18n="insertInbetweenDialog.insertInbetween">${messageHTML("insertInbetweenDialog.insertInbetween", {})}</h2><button type="button" class="styk-inbetween-close" aria-label="Close insert inbetween" data-i18n-aria-label="insertInbetweenDialog.closeInsertInbetween">${icon('close')}</button></div>
       <div class="styk-inbetween-body"><div class="styk-inbetween-summary"><span data-summary></span><select aria-label="Preview selected keyframe" data-i18n-aria-label="insertInbetweenDialog.previewSelectedKeyframe"></select></div>
@@ -220,7 +216,6 @@ export class InsertInbetweenDialog {
     this.applyJob?.controller.abort(); this.applyJob = null; this.applying = false;
     this.dialog.setAttribute('aria-busy', 'false');
     this.events.abort(); if (this.previewRaf) cancelAnimationFrame(this.previewRaf); this.previewRaf = null;
-    this.renderer?.destroy(); this.renderer = null;
     if (this.dialog.open) this.dialog.close(); this.dialog.classList.remove('styk-inbetween-dialog');
     this.onClose({applied, result});
   }

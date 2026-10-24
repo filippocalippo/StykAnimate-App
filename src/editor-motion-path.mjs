@@ -82,7 +82,8 @@ function applyRotation(session, report, targets, delta) {
   const figure = report.figure_types.find(f => f.figure_type_id === object.figure_type_id);
   const slots = componentSlots(working, slot);
   const graph = slots.length > 1 ? joinedIKGraph(report, working, slots) : null;
-  const source = graph?.object ?? object, layout = graph?.layout ?? ikLayout(figure);
+  const followerFigure = graph?.figure ?? figure;
+  const source = graph?.object ?? object, layout = graph?.layout ?? ikLayout(followerFigure);
   const selected = new Set(targets.map(([s, i]) => `${s}:${i}`));
   const entryAt = i => graph?.entries[i] ?? {slot, index: i, handle: figure.segments[i].segment_id, uid: working.objects[slot].unique_id};
   if (delta && session.baseline.some(hasPinnedIK)) for (const [id, c] of Object.entries(source._stykIK ?? {})) {
@@ -93,13 +94,14 @@ function applyRotation(session, report, targets, delta) {
     const ownerObject = working.objects[owner.slot], current = ownerObject._stykIK?.[owner.handle];
     if (!current) continue;
     let next;
-    const followers = ikFollowers(figure, source, id, c, layout);
-    for (const i of ikFollowerIndices(figure, id, layout)) {
+    // Follower indices and offsets belong to the same skeleton as the layout.
+    const followers = ikFollowers(followerFigure, source, id, c, layout);
+    for (const i of ikFollowerIndices(followerFigure, id, layout)) {
       const child = entryAt(i);
       if (child.slot === slot && child.index === target.joint) continue;
       if (!selected.has(`${child.slot}:${child.index}`)) continue;
       next ??= {...current, followers: {...current.followers}, joinedFollowers: {...current.joinedFollowers}};
-      const angle = (followers[child.handle] ?? followers[figure.segments[i]?.segment_id] ?? 0) + delta;
+      const angle = followers[followerFigure.segments[i].segment_id] + delta;
       if (child.slot === owner.slot) next.followers[child.handle] = angle;
       else next.joinedFollowers[child.uid] = {...next.joinedFollowers[child.uid], [child.handle]: angle};
     }
@@ -340,17 +342,17 @@ function refreshSession(editor, session) {
   refreshDisplay(editor, session);
 }
 
-/** The playhead's pose while the virtual report changes it. */
-function refreshDisplay(editor, session) {
-  session.display = null;
+/** The playhead's pose while the virtual report changes it, or null outside the ticks it changes. */
+function displayOf(editor, session) {
   const tick = editor.tick;
-  if (tick < session.range[0] || tick >= session.range[1]) return;
+  if (tick < session.range[0] || tick >= session.range[1]) return null;
   const rows = timeline(session.report), {index, t} = rowForTick(rows, tick);
   const frame = evaluatedFrame(session.report, index, t, tick);
   const dirty = previewDirtySlots(session, frame);
-  session.display = {frame,
-    geometry: dirty.size ? buildGeometry(session.report, frame, {previous: editor.geometry ?? {objects: new Map()}, dirtySlots: dirty}) : null};
+  return {frame, geometry: dirty.size ? buildGeometry(session.report, frame, {previous: editor.geometry ?? {objects: new Map()}, dirtySlots: dirty}) : null};
 }
+
+function refreshDisplay(editor, session) { session.display = displayOf(editor, session); }
 
 /** Write the working pose into animation channels at the session tick. Keys and
  * retained sources are rewritten in place across pointer moves, so one gesture
@@ -936,4 +938,8 @@ export const editorMotionPathMethods = {
 
   /** The live document for trail sampling while a session is open. */
   motionPathReport() { return this._drag?.motionPath ? this._drag.report : this.report; },
+
+  /** The playhead's pose under the report of a gesture the engine session holds, which the owner mirrors
+   * without building it (`display` is read from the mirror when the stage draws). */
+  _motionPathDisplay(session) { return displayOf(this, session); },
 };

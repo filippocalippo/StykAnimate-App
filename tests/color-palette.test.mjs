@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
-import {buildContainerV2, decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2, decodeDocument} from './support/native-files.mjs';
 import {projectColors, paletteColors, paletteView, setPaletteView, rememberColor, recentColors, setRecentColors, subscribePalette, PROJECT_PALETTE_LIMIT,
   createPersonalPalette, renamePersonalPalette, deletePersonalPalette, addPersonalColor, removePersonalColor, movePersonalColor, personalPalettes,
   currentPersonalPalette, selectPersonalPalette, suggestPaletteName, saveTarget, saveColor, bindProjectPalette, PERSONAL_PALETTE_LIMIT} from '../src/color-palette.mjs';

@@ -1,0 +1,22 @@
+{
+ "name": "native-ik-source",
+ "document": "native-ik-source.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   1
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -1,12 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {emptyDocument,createFrame,createObject} from '../src/demo.mjs';
 import {resolveInstanceFigure} from '../src/animation-style.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
-import backend from '../desktop/backend.cjs';
+import {roundTrip} from './support/codec.mjs';
 
 const clone=value=>structuredClone(value), target=handleId=>({kind:'segment',uid:1,handleId});
 function fixture() {
@@ -115,24 +113,12 @@ test('mixed-rig remapping retains more-specific curves when legacy and scoped pr
   }
 });
 
-test('retargeted and split style curves survive real native PIV and STYK export/reopen at every tick',()=>{
+test('retargeted and split style curves survive real native PIV and STYK export/reopen at every tick',async()=>{
   const editor=fixture();editor.setOrigin(600);editor.select(1,0);editor.splitSegment(.4);
   const before=editor.serialize(), expected=Array.from({length:editor.totalTicks},(_,tick)=>styledSegments(editor,tick));
-  const script=String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-payload=json.load(sys.stdin);store=server.ProjectStore(server.WORKSPACE);out={}
-for kind,doc in payload.items():
- raw,name=store.export({'document':doc,'format':kind})
- out[kind]=store.import_bytes(raw,name)['document']
-print(json.dumps(out))
-`;
-  const python=backend.pythonCandidates()[0], result=spawnSync(python.command,[...python.args,'-c',script],{
-    cwd:fileURLToPath(new URL('..',import.meta.url)),input:JSON.stringify({styk:before,piv:materializePivotDocument(before)}),encoding:'utf8',windowsHide:true,maxBuffer:8*1024*1024});
-  assert.equal(result.status,0,result.error?.message||result.stderr);
-  for(const [kind,report]of Object.entries(JSON.parse(result.stdout))){
+  const reopened={};
+  for(const [kind,doc]of Object.entries({styk:before,piv:materializePivotDocument(before)}))reopened[kind]=await roundTrip({document:doc,format:kind});
+  for(const [kind,report]of Object.entries(reopened)){
     const reopened=new Editor({demo:false}).load(report);assert.equal(reopened.totalTicks,expected.length);
     for(let tick=0;tick<expected.length;tick++){
       const actual=styledSegments(reopened,tick);assert.equal(actual.length,expected[tick].length);

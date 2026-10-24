@@ -582,9 +582,6 @@ rigs undergo repeated nonsequential poses, depth collapse and extreme slider pos
 `tests/rig-constraints.browser.mjs` exercises builder setup, actual normal/Ctrl
 mouse drags, gesture undo, absence of blue rig pixels in Animate, temporary test
 isolation, the gallery, file-input native imports, and compact/light/dark layouts.
-`tests/rig-render.browser.mjs` compares editable WebGPU with prepared playback and
-rasterized SVG. The six sampled poses produced identical editable/playback pixels;
-SVG differs slightly at antialiased edges. Evidence is in `artifacts/rig-constraints/`.
 
 `tests/rig-insertion.browser.mjs` adds all six examples through the Library UI,
 checks selection and Animate mode, transfers a tested rotation and sliding pose,

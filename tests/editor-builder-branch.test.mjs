@@ -1,8 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {editorBuilderBranchMethods, branchSegmentIndices, builderBranchStylePatch, builderBranchStyleBinding} from '../src/editor-builder-branch.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
@@ -13,7 +11,7 @@ import {builderDrawables} from '../src/editor-builder-style.mjs';
 import {createImageFigure} from '../src/media-authoring.mjs';
 import {compileTextFigure} from '../src/text-authoring.mjs';
 import {parse} from '../vendor/text/opentype.mjs';
-import backend from '../desktop/backend.cjs';
+import {roundTrip} from './support/codec.mjs';
 
 Object.assign(Editor.prototype, editorBuilderBranchMethods);
 const clone = structuredClone, kinds = ['line', 'circle', 'image', 'circleFill', 'circleClear', 'text', 'squareLine'];
@@ -219,10 +217,9 @@ test('native STK and PIV roundtrip retain split image/text references, primitive
   const assets = [editor.figure.image_assets[0],editor.figure.text_assets[0]];
   editor.splitBuilderSegments({branch:true}); assert.deepEqual(editor.figure.segments.map(s=>s.primitive_code),[2,2,5,5]);
   assert.equal(editor.figure.image_assets[0],assets[0]); assert.equal(editor.figure.text_assets[0],assets[1]);
-  const python = backend.pythonCandidates()[0], script = "import json,sys\nfrom pathlib import Path\nsys.path.insert(0,str(Path('backend').resolve()))\nimport server\nr=json.loads(sys.stdin.buffer.read().decode('utf-8'));s=server.ProjectStore(server.WORKSPACE);out={}\nfor kind in ('piv','stk'):\n raw,name=s.export({'document':r,'format':kind,'figureTypeId':1});out[kind]=s.import_bytes(raw,name)['document']\nprint(json.dumps(out))";
-  const result = spawnSync(python.command,[...python.args,'-c',script],{cwd:fileURLToPath(new URL('..',import.meta.url)),input:JSON.stringify(editor.serialize()),encoding:'utf8',windowsHide:true,maxBuffer:12*1024*1024});
-  assert.equal(result.status,0,result.error?.message || result.stderr);
-  for (const document of Object.values(JSON.parse(result.stdout))) {
+  const serialized = editor.serialize(), out = {};
+  for (const kind of ['piv','stk']) out[kind] = await roundTrip({document:serialized,format:kind,figureTypeId:1});
+  for (const document of Object.values(out)) {
     const saved = document.figure_types.find(f=>f.segments.length===4); assert.ok(saved);
     assert.deepEqual(saved.segments.map(s=>s.primitive_code),[2,2,5,5]);
     assert.equal(saved.image_assets.length,1); assert.equal(saved.text_assets.length,1); assert.equal(saved.text_assets[0].text,'Ab');

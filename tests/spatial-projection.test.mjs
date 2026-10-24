@@ -9,7 +9,7 @@ import {spatialPoint} from '../src/rig-spatial.mjs';
 import {depthSurface} from '../src/surface-raster.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 import {spatialControlsView} from '../src/spatial-controls.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 const near=(a,b,t=1e-3)=>assert.ok(Math.abs(a-b)<t,`${a} != ${b}`);
 function fixture(){
  const q=construction();q.add(0,0,0,'Figure');

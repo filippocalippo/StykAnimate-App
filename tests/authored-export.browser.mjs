@@ -4,14 +4,16 @@ import {createRequire} from 'node:module';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
-const require = createRequire(import.meta.url), {startBackend} = require('../desktop/backend.cjs');
+import {exposeWorkspaceSamples} from './support/workspace-samples.mjs';
+const require = createRequire(import.meta.url), {startDesktopHost} = require('../desktop/web-host.cjs');
 const appRoot = fileURLToPath(new URL('..', import.meta.url)), out = path.join(appRoot, 'artifacts');
-const backend = await startBackend({appRoot}); let browser;
+const backend = await startDesktopHost({appRoot}); let browser;
 try {
   browser = await chromium.launch({channel: 'chrome', headless: true});
   const page = await browser.newPage({viewport: {width: 1000, height: 720}}), errors = [];
+  await exposeWorkspaceSamples(page);
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`${backend.origin}/api/health`);
+  await page.goto(`${backend.origin}/tests/fixtures/blank.html`);
   await page.setContent('<style>body{margin:24px;background:#f5f5f5;font:14px system-ui}canvas{display:block;background:white;border:1px solid #ddd;margin:12px 0}h1{font-size:18px}</style><h1>Authored frame / Native Pivot reimport</h1><canvas id="before" width="480" height="300"></canvas><canvas id="after" width="480" height="300"></canvas>');
   const result = await page.evaluate(async () => {
     const [{Editor}, {emptyDocument, createFrame, createObject}, geometry, {drawBackground, backgroundBounds}, {cameraMatrix}, {DocumentExporter}, {ImportClient}] = await Promise.all([
@@ -37,7 +39,7 @@ try {
     editor.addAnimationKeys(entries);
     editor.seek(3); editor.addAnimationKey({kind: 'camera'}, 'pose', 3); // retained interpolated source asset
     const originalChannels = JSON.stringify(editor.report._styk.animation), originalSources = JSON.stringify(editor.report._styk.frameSources);
-    const originalFrames = JSON.stringify(editor.report.keyframes), exporter = new DocumentExporter(), importer = new ImportClient();
+    const originalFrames = JSON.stringify(editor.report.keyframes), exporter = new DocumentExporter(), importer = new ImportClient({readSample: (await import('/tests/support/page-samples.mjs')).sampleReader()});
     let active = true, previous = performance.now(), maxGap = 0; const tasks = [];
     const observer = new PerformanceObserver(list => tasks.push(...list.getEntries().map(entry => entry.duration))); observer.observe({type: 'longtask'});
     const beat = now => { maxGap = Math.max(maxGap, now - previous); previous = now; if (active) requestAnimationFrame(beat); }; requestAnimationFrame(beat);

@@ -1,0 +1,57 @@
+{
+ "name": "movieclip-rename-sheet",
+ "document": "sheet-movieclip.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "renameMovieclip",
+   "  Walk cycle  "
+  ],
+  [
+   "renameMovieclip",
+   "Walk cycle"
+  ],
+  [
+   "renameMovieclip",
+   "   "
+  ],
+  [
+   "renameMovieclip",
+   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ],
+  [
+   "renameMovieclip",
+   12
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "renameMovieclip",
+   "Nope"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

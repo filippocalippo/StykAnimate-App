@@ -7,7 +7,7 @@ import {rigConstraintPlan,remapRigReferences} from '../src/rig-constraints.mjs';
 import {sameSpatial,spatialPoint,remapSpatial} from '../src/rig-spatial.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 import {Editor} from '../src/editor.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {createSpatialGizmo,ringPoint,startRotationGizmo,rotateGizmo} from '../src/spatial-gizmo.mjs';
 
 const near=(a,b,t=1e-8)=>assert.ok(Math.abs(a-b)<t,`${a} != ${b}`);

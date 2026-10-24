@@ -5,7 +5,6 @@ import {restoreClipboard} from '../src/shared-clipboard.mjs';
 import {DrawingResources} from '../src/drawing-resources.mjs';
 import {createDrawingFigure} from '../src/drawing-model.mjs';
 import {TILE_BYTES,TileStore} from '../src/drawing-tiles.mjs';
-import {filterTiles,tileChanges} from '../src/drawing-pixels.mjs';
 
 function fixture(){
   const d=Object.create(DrawingController.prototype),holds=new Map();
@@ -116,10 +115,8 @@ test('point filters reserve only intersecting tile replacements beside a larger 
   const surface={store},budget=2*TILE_BYTES+mask.mask.byteLength;
   Object.assign(d.owner,{hardBudget:store.bytes+budget,stats:{bytes:store.bytes,historyBytes:0,deferredBytes:0,workingBytes:0},reserve:()=>{},discard:()=>{},worker:{request:async(kind,data)=>{
     assert.equal(kind,'filter');assert.equal(data.tiles.length,1);assert.equal(data.tiles[0].tx,-1);
-    const privateStore=new TileStore(),before=new Map();
-    for(const tile of data.tiles)privateStore.adopt(tile.tx,tile.ty,new Uint8ClampedArray(tile.pixels));
-    filterTiles(privateStore,{...data.options,bounds:data.bounds,before});
-    return {tiles:tileChanges(privateStore,before)};
+    // The engine's answer: the undo record of the one tile it was sent.
+    return {tiles:[{tx:-1,ty:0,before:new Uint8ClampedArray([20,40,60,255]),after:new Uint8ClampedArray([235,215,195,255])}]};
   }}});
   let committed;
   d.commitPixels=async(target,tiles,label,op)=>{op.check();committed=tiles;return true;};

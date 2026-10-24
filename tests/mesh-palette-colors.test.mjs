@@ -6,7 +6,7 @@ import {createObject,createFrame,emptyDocument} from '../src/demo.mjs';
 import {buildGeometry,buildGeometryAsync} from '../src/pivot/geometry.mjs';
 import {figurePalette,validateRecolor} from '../src/figure-colors.mjs';
 import {resolveInstanceFigure,validateAnimationStyle} from '../src/animation-style.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 
 function fixture(options={}) {

@@ -5,10 +5,9 @@ import {t as interfaceText} from './localization.mjs';
 
 import {Editor} from './editor.mjs';
 import {nativeFigureDocument} from './native-figure.mjs';
-import {buildGeometry, drawGeometry, releaseGeometryResources} from './pivot/geometry.mjs';
 import {RIG_EXAMPLES, rigExampleDocument} from './rig-examples.mjs';
 import {icon} from './icons.mjs';
-import {objectBounds} from './renderer-geometry.mjs';
+import {engineDocumentPicture, placement} from './engine/engine-pictures.mjs';
 const exampleNameKeys = Object.freeze({
   "counter-rotating-gears": "rigTestUi.examples.counterRotatingGears",
   "folding-fan": "rigTestUi.examples.foldingFan",
@@ -31,7 +30,8 @@ let disposeTest;
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /** A bounded, detached editor exercises the real commands/evaluator. Neither
- * construction definitions, authored sources nor undo in the live editor change. */
+ * construction definitions, authored sources nor undo in the live editor change.
+ * Its pictures are drawn by the engine (engine-pictures.mjs) from the test editor's pose. */
 export function openRigTest(host,document,{back,galleryPreview=false}={}) {
   disposeTest?.();host.finish?.();
   const source=document??nativeFigureDocument(host.editor.report,{figureUid:host.editor.selectedUid,tick:host.editor.tick,sourceFrame:host.editor.selectionFrame});
@@ -50,20 +50,40 @@ export function openRigTest(host,document,{back,galleryPreview=false}={}) {
     <div class="dialog-actions">${back?`<button class="button" id="rig-test-back" data-i18n="rigTestUi.back">${messageHTML("rigTestUi.back", {})}</button>`:`<button class="button" data-action="close-dialog" ${messageAttributes((host.builderActive?.() ? "rigTestUi.returnToBuilder" : "rigTestUi.close"), (host.builderActive?.() ? {} : {}))}>${host.builderActive?.()?interfaceText("rigTestUi.returnToBuilder"):interfaceText("rigTestUi.close")}</button>`}${example?`<button class="button primary" id="rig-test-add" data-i18n="rigTestUi.addToAnimate">${messageHTML("rigTestUi.addToAnimate", {})}</button>`:''}</div>`, {titleKey: example ? exampleNameKeys[figure._styk.rigExample.id] : undefined});
   const canvas=window.document.getElementById('rig-test-canvas'),dialog=canvas.closest('dialog'),ctx=canvas.getContext('2d'),events=new AbortController(),on={signal:events.signal};
   const jointInput=window.document.getElementById('rig-test-joint'),valueInput=window.document.getElementById('rig-test-value'),angleInput=window.document.getElementById('rig-test-angle'),label=window.document.getElementById('rig-test-value-label'),status=window.document.getElementById('rig-test-status');
-  let drag=false,view={scale:1,x:0,y:0}, scheduled=0,disposed=false;
+  let drag=false,view={scale:1,x:0,y:0}, scheduled=0,disposed=false,drawing=false,redraw=false;
   const error=e=>{status.hidden=false;presentError(status, e);};
   window.document.getElementById('rig-test-back')?.addEventListener('click',back,on);
   const guarded=fn=>e=>{try{status.hidden=true;status.textContent='';fn(e);}catch(err){error(err);}};
   function fit(){const g=test.geometry.objects.get(0),p=[...g.joints.values()],xs=p.map(p=>p.x),ys=p.map(p=>p.y),minX=Math.min(...xs)-45,maxX=Math.max(...xs)+45,minY=Math.min(...ys)-45,maxY=Math.max(...ys)+45;
     const scale=Math.min(canvas.clientWidth/Math.max(120,maxX-minX),canvas.clientHeight/Math.max(120,maxY-minY),2);
     view={scale,x:canvas.clientWidth/2-(minX+maxX)/2*scale,y:canvas.clientHeight/2-(minY+maxY)/2*scale};}
-  function render(){scheduled=0;if(disposed)return;const d=window.devicePixelRatio||1,w=Math.round(canvas.clientWidth*d),h=Math.round(canvas.clientHeight*d);if(canvas.width!==w)canvas.width=w;if(canvas.height!==h)canvas.height=h;
-    ctx.setTransform(d,0,0,d,0,0);ctx.clearRect(0,0,canvas.clientWidth,canvas.clientHeight);ctx.translate(view.x,view.y);ctx.scale(view.scale,view.scale);
-    const g=test.geometry;drawGeometry(ctx,g,host.resources??{});const selected=test.figure.segments[test.selectedJoint];
-    for(const s of g.objects.get(0).segments){if(s.seg.aux_code===1&&s.seg.segment_id!==selected.segment_id)continue;const p=s.handle??s.end;ctx.fillStyle=s.seg.segment_id===selected.segment_id?'#0d99ff':'#666';ctx.beginPath();ctx.arc(p.x,p.y,(s.seg.segment_id===selected.segment_id?6:4)/view.scale,0,Math.PI*2);ctx.fill();}
+  /** The readouts follow the test pose at once; its picture follows when the engine has drawn it (one at a time, the latest pose last). */
+  function render(){scheduled=0;if(disposed)return;
+    const g=test.geometry,selected=test.figure.segments[test.selectedJoint];
     jointInput.value=selected.segment_id;const o=test.object,v=o.len_flag?o.lengths[test.selectedJoint]:selected.length,c=selected._stykRig?.connector;
     valueInput.value=Math.round(v*(c?100:1)*1000)/1000;valueInput.min=0;valueInput.max=c?100:1e6;localizedText(label, (c ? "rigTestUi.slide" : "rigTestUi.length"), (c ? {} : {}));
     angleInput.disabled=Boolean(c||selected._stykRig?.angleLock);angleInput.value=Math.round((angleInput.disabled?g.objects.get(0).segments[test.selectedJoint].angle:o.angles[test.selectedJoint])*180/Math.PI*100)/100;
+    void paint();
+  }
+  async function paint(){
+    if(drawing){redraw=true;return;}
+    drawing=true;
+    try{
+      do{
+        redraw=false;
+        const d=window.devicePixelRatio||1,w=Math.round(canvas.clientWidth*d),h=Math.round(canvas.clientHeight*d),at=view;
+        if(w<1||h<1)break;
+        const picture=await engineDocumentPicture({...test.report,keyframes:[test.evaluatedFrame]},{width:w,height:h,placement:placement.matrix([at.scale*d,0,0,at.scale*d,at.x*d,at.y*d]),background:0});
+        if(disposed){picture?.bitmap.close();break;}
+        if(canvas.width!==w)canvas.width=w;if(canvas.height!==h)canvas.height=h;
+        ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,w,h);
+        if(picture){ctx.drawImage(picture.bitmap,0,0);picture.bitmap.close();}
+        ctx.setTransform(d,0,0,d,0,0);ctx.translate(at.x,at.y);ctx.scale(at.scale,at.scale);
+        const selected=test.figure.segments[test.selectedJoint];
+        for(const s of test.geometry.objects.get(0).segments){if(s.seg.aux_code===1&&s.seg.segment_id!==selected.segment_id)continue;const p=s.handle??s.end;ctx.fillStyle=s.seg.segment_id===selected.segment_id?'#0d99ff':'#666';ctx.beginPath();ctx.arc(p.x,p.y,(s.seg.segment_id===selected.segment_id?6:4)/at.scale,0,Math.PI*2);ctx.fill();}
+      }while(redraw&&!disposed);
+    }catch(error){if(!disposed)status.hidden=false,presentError(status,error);}
+    finally{drawing=false;}
   }
   const schedule=()=>{if(!scheduled)scheduled=requestAnimationFrame(render);};
   const point=e=>{const b=canvas.getBoundingClientRect();return {x:(e.clientX-b.left-view.x)/view.scale,y:(e.clientY-b.top-view.y)/view.scale};};
@@ -85,7 +105,7 @@ export function openRigTest(host,document,{back,galleryPreview=false}={}) {
   }),on);
   const resize=new ResizeObserver(()=>{fit();schedule();});resize.observe(canvas);
   const observer=new MutationObserver(()=>{if(!canvas.isConnected)dispose();});observer.observe(dialog,{childList:true,subtree:true});
-  function dispose(){if(disposed)return;disposed=true;events.abort();resize.disconnect();observer.disconnect();cancelAnimationFrame(scheduled);releaseGeometryResources(ctx);test._undo.length=0;test._redo.length=0;if(disposeTest===dispose)disposeTest=null;}
+  function dispose(){if(disposed)return;disposed=true;events.abort();resize.disconnect();observer.disconnect();cancelAnimationFrame(scheduled);test._undo.length=0;test._redo.length=0;if(disposeTest===dispose)disposeTest=null;}
   disposeTest=dispose;dialog.addEventListener('close',dispose,on);fit();render();
   return {editor:test,dispose};
 }
@@ -93,10 +113,14 @@ export function openRigExamples(host) {
   disposeTest?.();host.finish?.();host.showDialog(interfaceText("rigTestUi.rigExamples"),`<p id="rig-example-status" class="property-note" role="status" hidden></p><div class="rig-example-list">${RIG_EXAMPLES.map(r=>`<article class="rig-example-item"><button class="rig-example-preview" data-rig-preview="${r.id}" aria-label="Try ${esc(r.name)}" ${messageAttributes("rigTestUi.try", {name: {messageKey: exampleNameKeys[r.id]}}, "aria-label")}><canvas width="400" height="280" data-rig-thumbnail="${r.id}"></canvas></button><div class="rig-example-actions"><strong>${messageHTML(exampleNameKeys[r.id])}</strong><button class="button" data-rig-insert="${r.id}" aria-label="Add ${esc(r.name)} to Animate" ${messageAttributes("rigTestUi.addToAnimate2", {name: {messageKey: exampleNameKeys[r.id]}}, "aria-label")}>${icon('plus')}${messageHTML("rigTestUi.add", {})}</button></div></article>`).join('')}</div>`, {titleKey: 'rigTestUi.rigExamples'});
   const root=window.document.getElementById('dialog-content'),dialog=root.closest('dialog'),events=new AbortController(),on={signal:events.signal},queue=[];
   let scheduled=0,disposed=false;
-  function paint(){scheduled=0;if(disposed)return;const canvas=queue.shift();if(!canvas)return;
-    const report=rigExampleDocument(canvas.dataset.rigThumbnail),geometry=buildGeometry(report,report.keyframes[0]),ctx=canvas.getContext('2d'),bounds=objectBounds(geometry.drawables,host.resources??{}),scale=Math.min(canvas.width/(bounds.width+36),canvas.height/(bounds.height+36));
-    ctx.translate(canvas.width/2-(bounds.x+bounds.width/2)*scale,canvas.height/2-(bounds.y+bounds.height/2)*scale);ctx.scale(scale,scale);drawGeometry(ctx,geometry,host.resources??{});releaseGeometryResources(ctx);canvas.dataset.ready='true';
-    if(queue.length)scheduled=requestAnimationFrame(paint);
+  async function paint(){scheduled=0;if(disposed)return;const canvas=queue.shift();if(!canvas)return;
+    try{
+      const picture=await engineDocumentPicture(rigExampleDocument(canvas.dataset.rigThumbnail),{width:canvas.width,height:canvas.height,placement:placement.fit(28),background:0});
+      if(disposed||!canvas.isConnected){picture?.bitmap.close();return;}
+      if(picture){canvas.getContext('2d').drawImage(picture.bitmap,0,0);picture.bitmap.close();}
+      canvas.dataset.ready='true';
+    }catch(error){if(error?.name!=='AbortError'&&!disposed){const status=root.querySelector('#rig-example-status');status.hidden=false;presentError(status,error);}}
+    if(queue.length&&!disposed)scheduled=requestAnimationFrame(paint);
   }
   const visible=new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting){visible.unobserve(e.target);queue.push(e.target);}if(queue.length&&!scheduled)scheduled=requestAnimationFrame(paint);});
   root.querySelectorAll('[data-rig-thumbnail]').forEach(canvas=>visible.observe(canvas));

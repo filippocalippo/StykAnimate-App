@@ -4,7 +4,7 @@ import {planInsertInbetweenSteps,INBETWEEN_LIMITS} from './editor-inbetween.mjs'
 import {validateSceneSteps} from './pivot/model.mjs';
 import {validateAnimationDocumentSteps} from './animation-channels.mjs';
 import {nativeTimeline} from './pivot/geometry.mjs';
-import {yieldLoadTask} from './editor-load.mjs';
+import {yieldLoadTask} from './yield-task.mjs';
 
 const clone=value=>structuredClone(value);
 const abort=message=>new DOMException(message,'AbortError');

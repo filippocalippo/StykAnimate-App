@@ -4,8 +4,6 @@ import {localizedAttribute, appendLocalized, replaceLocalized} from './localizat
 import {restoreMessageError, messageError} from './localized-error.mjs';
 import {t as interfaceText} from './localization.mjs';
 
-import {FILL_SOURCE_MAX_PIXELS} from './drawing-fill.mjs';
-import {sendDrawingComposite} from './drawing-composite-transport.mjs';
 import {lassoBounds,lassoContains,selectionStores} from './drawing-lasso.mjs';
 import {BRUSH_PRESETS,quickBarMarkup,paletteMarkup} from './drawing-view.mjs';
 import {brushMessages} from './drawing-brush-labels.mjs';
@@ -13,9 +11,10 @@ import {recentColors,setRecentColors,rememberColor as rememberRecentColor,saveCo
 import {SLIDERS,installDrawingSliders,refreshSliders,formatSlider,displayValue} from './drawing-sliders.mjs';
 import {WetInk} from './drawing-wet-ink.mjs';
 import {installPressureCurve} from './drawing-pressure-curve.mjs';
-import {tileChanges,maskValue,lassoMask,tileAlignedRect,DrawingStroke,rectPoints,ellipsePoints,combineMasks,invertMask,rectMask,maskEdges,pointFilterWork} from './drawing-pixels.mjs';
-import {BrushStroke,normalizeBrush,dabRadius,BRUSH_DEFAULTS,BRUSH_KEYS,BRUSH_LENGTHS,LINEAR_PRESSURE} from './drawing-brush.mjs';
-import {drawingMetadata,migrateDrawingFigure,isDrawingLayer,drawingPixelMatrix,inversePoint,transformPoint,DRAWING_MAX_PIXELS} from './drawing-model.mjs';
+import {maskValue,lassoMask,rectPoints,ellipsePoints,combineMasks,invertMask,rectMask,maskEdges,pointFilterWork} from './drawing-pixels.mjs';
+import {normalizeBrush,dabRadius,BRUSH_DEFAULTS,BRUSH_KEYS,BRUSH_LENGTHS,LINEAR_PRESSURE} from './drawing-brush.mjs';
+import {createBrushStroke,loadDrawingEngine,paintStroke} from './engine/engine-drawing.mjs';
+import {drawingMetadata,migrateDrawingFigure,isDrawingLayer,drawingPixelMatrix,inversePoint,transformPoint,DRAWING_MAX_PIXELS,FILL_SOURCE_MAX_PIXELS} from './drawing-model.mjs';
 import {TILE,tileKey,parseTileKey,TileStore} from './drawing-tiles.mjs';
 import {drawingBarrier,drawingResourcesFor} from './drawing-resources.mjs';
 import {drawingCelPrefetch,drawingCelDistances} from './onion-skin.mjs';
@@ -25,7 +24,6 @@ import {createFrame} from './demo.mjs';
 import {screenToWorld,worldToScreen} from './renderer-geometry.mjs';
 import {TRANSFORM_BYTES,transformSupportBounds,tileIntersects,inverseMatrix,multiplyMatrix,indexedTileCoverage} from './drawing-transform.mjs';
 import {validatePixelClipboard} from './drawing-clipboard.mjs';
-import {createGpuStroke,gpuDrawingEligible,gpuBrushSupports} from './drawing-gpu.mjs';
 import {selectionMatrix,selectionTiles,selectionPresenter} from './drawing-selection.mjs';
 import {installCanvasPinch} from './canvas-pinch.mjs';
 
@@ -48,11 +46,14 @@ const PAINT_TOOLS=['brush','eraser','fill','shape'];
 const MAX_STROKE_SAMPLES=65536;
 const unionRects=(a,b)=>{if(!a)return b?{...b}:null;if(!b)return{...a};const x=Math.min(a.x,b.x),y=Math.min(a.y,b.y);return{x,y,width:Math.max(a.x+a.width,b.x+b.width)-x,height:Math.max(a.y+a.height,b.y+b.height)-y};};
 export class DrawingController {
-  constructor({editor,state,overlay,viewport,onRender,onOverlayRender=onRender,onView=()=>{},onUI,onError,onStatus,beforeEdit,getImageSource=()=>({}),getTimeline,getClipboard,sampleColor,fingerDrawing=()=>'never'}) {
+  constructor({editor,state,overlay,viewport,onRender,onOverlayRender=onRender,onView=()=>{},onUI,onError,onStatus,beforeEdit,artwork,getTimeline,getClipboard,sampleColor,fingerDrawing=()=>'never'}) {
     // Whether a finger draws (docs/TOUCH.md): 'auto' until a pen is used, 'always', or 'never' (a finger pans).
     // The app answers 'never' for Automatic outside the touch interface.
     this.fingerDrawing=fingerDrawing;this.penSeen=false;
-    Object.assign(this,{editor,state,overlay,viewport,onRender,onUI,onError,onStatus,beforeEdit,getImageSource,getTimeline,getClipboard,sampleColor,settings:{preset:'ink',...BRUSH_DEFAULTS,spacingRatio:.08,color:'#252525',filterRadius:4,hue:0,saturation:0,lightness:0,brightness:0,contrast:0,mirrorX:false,mirrorY:false,selectShape:'lasso',shapeKind:'rect',shapeFill:false,color2:'#ffffff',resolution:2,filter:'smooth',length:1,tolerance:16,expansion:1,gap:0,sampleAll:false},sequence:0,strokeId:0,sessions:new Map(),strokeStats:{batches:0,maxQueueDepth:0,lastRoundTripMs:0}});
+    // Dab shapes, the brush samples and the preset thumbnails come from the drawing raster
+    // engine; the interface that shows them is built again once it has loaded here.
+    loadDrawingEngine().then(()=>{this.previewCache=null;this.onUI();},error=>onError(error));
+    Object.assign(this,{editor,state,overlay,viewport,onRender,onUI,onError,onStatus,beforeEdit,artwork,getTimeline,getClipboard,sampleColor,settings:{preset:'ink',...BRUSH_DEFAULTS,spacingRatio:.08,color:'#252525',filterRadius:4,hue:0,saturation:0,lightness:0,brightness:0,contrast:0,mirrorX:false,mirrorY:false,selectShape:'lasso',shapeKind:'rect',shapeFill:false,color2:'#ffffff',resolution:2,filter:'smooth',length:1,tolerance:16,expansion:1,gap:0,sampleAll:false},sequence:0,strokeId:0,sessions:new Map(),strokeStats:{batches:0,maxQueueDepth:0,lastRoundTripMs:0}});
     // Recent colours are the shared palette's (color-palette.mjs), so every
     // picker offers what was painted; the property keeps Draw's old name and
     // stays out of the brush library's saved JSON.
@@ -134,10 +135,9 @@ export class DrawingController {
     // of them changes. Clearing every raster re-rasterized all figures and
     // onion skins whenever a neighbouring cel finished decoding.
     owner.onChange=()=>{if(this.selection?.presenter)this.selection.presenter.stamp++;if(this.surfaceVersion!==owner.surfaceVersion){this.surfaceVersion=owner.surfaceVersion;if(this.state.renderer)this.state.renderer.lastGeometry=null;}this.onRender();};owner.onError=this.onError;
-    // Evicted published cels restore from GPU-resident tiles when possible.
-    owner.onEvictStore=(entry,store)=>this.state.renderer?.drawingGpu?.remember(entry,store);
-    owner.restoreStore=(entry,revision)=>this.state.renderer?.drawingGpu?.restore(entry,revision)??null;
-    owner.onStoreRestored=(entry,store,revision)=>this.state.renderer?.drawingGpu?.adoptRestored(entry,store,revision);
+    // A floating selection is shown in two parts: the cel without the selected pixels, and the
+    // selected pixels through the selection's transform (engine/engine-live-cels.mjs).
+    owner.liveSource=entry=>{const s=this.selection;return s&&!s.committing&&drawingMetadata(s.target.figure)?.celId===entry.id?{base:s.remainder,float:{store:s.source,matrix:selectionMatrix(s)}}:null;};
     owner.strokeWorker.onmessage=data=>this.strokeMessage(data);owner.strokeWorker.onerror=error=>{owner.strokeWorker.dispose();this.cancel();this.onError(error);};
   }
   /** Decode the cel under the playhead plus its two unique neighbours each way
@@ -319,7 +319,7 @@ export class DrawingController {
   exit(){
     if(!this.active)return;
     const wait=this.settle({selection:true});if(wait)return this.run(()=>wait.then(()=>this.exit()));
-    this.closePalette();this.active=false;this.state.drawing=false;this.cursor=null;
+    this.closePalette();this.active=false;this.state.drawing=false;this.cursor=null;this.owner?.watch(null);
     Object.assign(this.state,{handles:this.prior.handles,tool:this.prior.tool});
     this.state.view.rotation=this.prior.rotation;this.state.view.flip=this.prior.flip;
     // Draw may have selected a cel automatically. Return to a usable figure
@@ -355,7 +355,7 @@ export class DrawingController {
   sync(){if(!this.active)return;try{const t=this.editor.drawingTarget();this.exposure={layerId:t.id,start:t.key.tick,end:t.end};this.lastLayer=t.id;}catch{this.exposure=null;}localizedAttribute(this.viewport, 'aria-label', 'drawingController.drawingCanvasBBrushEEraserGFillU', {});this.overlay.style.cursor=this.tool==='pan'?'grab':this.tool==='transform'?'move':'crosshair';}
   propertyValue(key){key=key.slice(5);if(key==='viewAngle')return (this.state.view.rotation??0)*180/Math.PI;if(key==='selectionScale')return (this.selection?.scale??1)*100;if(key==='selectionAngle')return this.selection?.angle??0;return this.settings[key]*(PERCENT_SETTINGS.includes(key)?100:1);}
   propertySet(key,value){key=key.slice(5);if(key==='viewAngle')this.state.view.rotation=value*Math.PI/180;else if(key==='selectionScale'||key==='selectionAngle'){if(this.selection){this.selection[key==='selectionScale'?'scale':'angle']=key==='selectionScale'?value/100:value;this.previewSelection();}}else{this.settings[key]=value/(PERCENT_SETTINGS.includes(key)?100:1);if(['size','opacity','flow','hardness','roundness','angle','scatter','spacingRatio','texture'].includes(key))this.settings.preset=null;}this.onRender();this.paintPreview(this.panel);}
-  async prepareVisible(){const owner=this.owner;if(!owner||!this.active||this.gesture)return;let target;try{target=this.editor.drawingTarget();}catch{return;}if(!target.figure)return;const revision=this.editor.revision;try{await owner.surface(target.figure);if(owner===this.owner&&revision===this.editor.revision){this.onRender();}}catch(error){if(error.name!=='AbortError')this.onError(error);}}
+  async prepareVisible(){const owner=this.owner;if(!owner||!this.active||this.gesture)return;let target;try{target=this.editor.drawingTarget();}catch{return;}if(!target.figure)return;const revision=this.editor.revision;try{const entry=await owner.surface(target.figure);if(owner===this.owner&&revision===this.editor.revision){owner.watch(entry);this.onRender();}}catch(error){if(error.name!=='AbortError')this.onError(error);}}
   get renderPreview(){
     const g=this.gesture??this.selection;if(!g?.target?.created&&!g?.target?.migratedFrom)return null;
     if(!g.preview){
@@ -414,6 +414,7 @@ export class DrawingController {
     try{
       surface=await (pending.done=owner.surface(target.figure,{priority:true}));
       if(!current()){owner.discard(target.figure);return;}
+      owner.watch(surface);
       // v1 cels migrate lazily on the first pixel edit; posing keeps them v1.
       const d=drawingMetadata(target.figure);
       if(d?.version===1&&['brush','eraser','fill','lasso','shape'].includes(this.tool)){
@@ -473,14 +474,10 @@ export class DrawingController {
       s.brush=normalizeBrush(settings);s.matrix=this.pixelMatrix(target);s.settings=settings;
       const report=this.editor.report,axisX=report.canvas_width/2,axisY=report.canvas_height/2,mirrors=s.mirrors=[p=>p];
       if(b.mirrorX)mirrors.push(p=>({x:2*axisX-p.x,y:p.y}));if(b.mirrorY)mirrors.push(p=>({x:p.x,y:2*axisY-p.y}));if(b.mirrorX&&b.mirrorY)mirrors.push(p=>({x:2*axisX-p.x,y:2*axisY-p.y}));
-      // The GPU brush paints in the frame that receives input. The stroke
-      // worker remains the Canvas 2D path and the GPU failure fallback.
-      const gpu=gpuBrushSupports(s.brush,settings.mask)?this.gpuBrush(target,surface):null;
-      if(gpu){s.samples=[];s.gpu=createGpuStroke(gpu,surface,s.brush,{mask:settings.mask,workingBytes:s.owner.hardBudget});}
-      else{s.queue=[];s.qi=0;this.owner.strokeWorker.post({kind:'begin',stroke:s.id,settings});}
+      s.queue=[];s.qi=0;this.owner.strokeWorker.post({kind:'begin',stroke:s.id,settings});
       this.strokePaths(s);
       // Wet ink previews worker brushes it can match closely; exact-only modes skip it.
-      const br=s.brush;s.inflight=[];s.wetStyle=!s.gpu&&!s.erase&&br.blend==='normal'&&br.tip==='round'&&!br.alphaLock&&!settings.mask&&br.flow>=.5&&br.hardness>=.5&&br.roundness>=.9&&br.scatter<=.2?{color:this.settings.color,opacity:br.opacity*(br.texture>.3?.85:1)}:null;
+      const br=s.brush;s.inflight=[];s.wetStyle=!s.erase&&br.blend==='normal'&&br.tip==='round'&&!br.alphaLock&&!settings.mask&&br.flow>=.5&&br.hardness>=.5&&br.roundness>=.9&&br.scatter<=.2?{color:this.settings.color,opacity:br.opacity*(br.texture>.3?.85:1)}:null;
       if(s.wetStyle){this.wet??=new WetInk(this.viewport,this.overlay);this.wetSession=s;}
       return s;
   }
@@ -492,26 +489,17 @@ export class DrawingController {
     for(const key of BRUSH_LENGTHS)settings[key]*=scale;
     return settings;
   }
-  /** One dab pipeline per mirror. Its final dab shapes go straight to the GPU
-   * stroke or queue for the worker's next batch; a taper-out's provisional
-   * tail is read by either when it paints. */
+  /** One dab pipeline per mirror. Its final dab shapes queue for the worker's next batch;
+   * a taper-out's provisional tail goes with it. */
   strokePaths(s){
-    s.paths=s.mirrors.map((map,index)=>({map,stroke:new BrushStroke(s.brush,shape=>{shape.pi=index;if(s.gpu)s.gpu.add(shape);else s.pending.push(shape);},{seed:s.brush.seed+index*7919})}));
+    s.paths=s.mirrors.map((map,index)=>({map,stroke:createBrushStroke(s.brush,shape=>{shape.pi=index;s.pending.push(shape);},{seed:s.brush.seed+index*7919})}));
     s.tailCache=null;
-    if(s.gpu&&s.brush.taperOut>0)s.gpu.tail=()=>this.strokeTail(s);
   }
   /** Every path's provisional tail, one array per change. */
   strokeTail(s){
     const version=s.paths.reduce((n,{stroke})=>n+stroke.tailVersion,0);
     if(s.tailCache?.version!==version){const [only]=s.paths;s.tailCache={version,shapes:s.paths.length===1?only.stroke.tailShapes():s.paths.flatMap(({stroke})=>stroke.tailShapes())};}
     return s.tailCache.shapes;
-  }
-  /** The renderer's GPU drawing state when it can paint and display this cel. */
-  gpuBrush(target,surface){
-    const gpu=this.state.renderer?.drawingGpu;
-    if(!gpu||gpu.destroyed||this.gpuBrushDisabled)return null;
-    let item;try{item=this.geometryItem(target);}catch{return null;}
-    return gpuDrawingEligible(surface,item)?gpu:null;
   }
   /** Map one input sample through the stroke's pose and mirrors into its paths. */
   feedStroke(s,{world,lean,pressure,time}){
@@ -561,8 +549,7 @@ export class DrawingController {
     for(let i=0;i<points.length;i++){const p=points[i],q=points[i+1];this.sampleStroke({world:p,timeStamp:time++,pointerType:'mouse'});if(!q)break;const n=Math.floor(Math.hypot(q.x-p.x,q.y-p.y)/1.5);for(let k=1;k<n;k++)this.sampleStroke({world:{x:p.x+(q.x-p.x)*k/n,y:p.y+(q.y-p.y)*k/n},timeStamp:time++,pointerType:'mouse'});}
     this.finish();
   }
-  /** Feed one input sample to the stroke. A GPU stroke paints its dabs in the
-   * next frame; a worker stroke queues the sample for its next batch. */
+  /** Feed one input sample to the stroke: it queues for the worker's next batch. */
   sampleStroke(event){
     const g=this.gesture,s=g?.session;
     if(g?.kind!=='stroke'||s.ended||s.cancelled)return;
@@ -571,17 +558,9 @@ export class DrawingController {
     // Pen tilt is a screen-space lean; map it through the view and cel pose
     // so tilt-driven tips point the same way on a rotated canvas.
     const lean=pen&&(event.tiltX||event.tiltY)&&!event.world?this.point({clientX:event.clientX+Math.sin(event.tiltX*Math.PI/180)*16,clientY:event.clientY+Math.sin(event.tiltY*Math.PI/180)*16}):null;
-    const sample={world,lean,pressure,time:event.timeStamp},queue=s.gpu?s.samples:s.queue;
-    if(queue.length>=MAX_STROKE_SAMPLES)throw messageError(new Error(''), "errors.drawingController.drawingInputExceededTheQueueLimit", {});
+    const sample={world,lean,pressure,time:event.timeStamp};
+    if(s.queue.length>=MAX_STROKE_SAMPLES)throw messageError(new Error(''), "errors.drawingController.drawingInputExceededTheQueueLimit", {});
     s.lastWorld=world;s.lastPressure=pressure;
-    if(s.gpu){
-      // Samples stay available so a failed GPU stroke can replay on the worker.
-      s.samples.push(sample);
-      if(s.gpu.failed){this.replayStroke(s,s.gpu.failed);return;}
-      this.feedStroke(s,sample);
-      if(s.gpu.pending.length||s.gpu.tail){s.surface.stamp++;this.onRender();}
-      return;
-    }
     // Samples become dabs only as batches leave, so a brush slower than the
     // pointer queues compact input samples instead of an unbounded dab list.
     s.queue.push(sample);
@@ -592,11 +571,9 @@ export class DrawingController {
   }
   /** Post pending dabs. One batch is in flight at a time: while the worker
    * is busy, samples accumulate and leave with its reply, so a brush slower
-   * than the pointer never builds a queue of stale work. A GPU stroke only
-   * needs this once it ends. */
+   * than the pointer never builds a queue of stale work. */
   flushStroke(s){try{
     if(this.sessions.get(s.id)!==s)return;
-    if(s.gpu){if(s.ended)this.finishGpuStroke(s).catch(error=>{this.cancel();this.onError(error);});return;}
     if(s.outstanding>0)return;
     // Turn queued samples into at most about one batch of dabs. A batch holds
     // 512 dabs, or more of a small tip, so fine brushes are not throttled by
@@ -692,48 +669,16 @@ export class DrawingController {
     }
     if(data.kind==='done'){this.sessions.delete(s.id);this.commitStroke(s,data.changes);}
   }
-  /** Drain the smoothing tail, read the stroke back and commit it through the
-   * same transaction as a worker stroke. A GPU failure replays the recorded
-   * samples on the stroke worker instead of losing the stroke. */
-  async finishGpuStroke(s){
-    if(s.gpuFinishing)return;s.gpuFinishing=true;
-    let result;
-    try{result=await s.gpu.finish();}
-    catch(error){if(s.cancelled||this.sessions.get(s.id)!==s)return;s.gpuFinishing=false;this.replayStroke(s,error);return;}
-    if(s.cancelled||this.sessions.get(s.id)!==s)return;
-    this.sessions.delete(s.id);
-    // The read-back already holds detached replacements and alpha bounds, so
-    // the commit adopts them without a worker preparation round trip.
-    let prepared=null;
-    if(result.changes.length){try{prepared=s.owner.adoptPrepared({kind:'drawing-pixels',celId:drawingMetadata(s.target.figure).celId,tiles:result.changes},'after',result.tiles);}catch{prepared=null;}}
-    this.commitStroke(s,result.changes,prepared);
-  }
-  /** Repaint a stroke whose GPU work failed (for example the device was lost
-   * or graphics memory ran out) on the stroke worker from its input samples. */
-  replayStroke(s,error){
-    this.strokeStats.gpuFallbacks=(this.strokeStats.gpuFallbacks??0)+1;this.strokeStats.lastGpuError=error?.message??String(error);
-    s.gpu.release();s.gpu=null;s.sentTail=null;s.surface.stamp++;
-    s.queue=s.samples;s.qi=0;s.samples=null;s.pending=[];s.drained=false;
-    this.strokePaths(s);
-    s.owner.strokeWorker.post({kind:'begin',stroke:s.id,settings:s.settings});
-    this.flushStroke(s);
-  }
   restoreStroke(s){
     const store=s.surface.store;if(!store||s.owner.disposed)return;
     let dirty=null;for(const [key,before] of s.before){const [tx,ty]=parseTileKey(key);before?store.set(tx,ty,before):store.delete(tx,ty);dirty=unionRects(dirty,{x:tx*TILE,y:ty*TILE,width:TILE,height:TILE});}if(dirty)s.owner.present(s.surface,dirty);
   }
-  commitStroke(s,changes,prepared=null){
+  commitStroke(s,changes){
     const g=this.gesture,valid=g?.session===s&&!s.cancelled&&s.owner===this.owner&&s.revision===this.editor.revision;
-    // Worker replies already installed their pixels, so a worker stroke
-    // records history without copying the raster again; a rejected commit
-    // restores the snapshots. A GPU stroke left the store untouched and
-    // commits its read-back tiles as an ordinary pixel edit.
-    const gpu=Boolean(s.gpu),preparing=gpu&&valid&&!prepared&&s.owner.needsPreparation({kind:'drawing-pixels',tiles:changes},'after');
-    // A closing gesture waiting on preparation keeps owning its live preview.
-    if(g?.session===s&&!preparing)this.gesture=null;
+    // Worker replies already installed their pixels, so the stroke records history without
+    // copying the raster again; a rejected commit restores the snapshots.
+    if(g?.session===s)this.gesture=null;
     const finish=()=>{
-      // Committed tiles take over the GPU overlay's slots in the same frame.
-      s.gpu?.release({committed:s.committed});
       if(this.gesture?.session===s)this.gesture=null;
       s.resolveDone?.();s.owner.hold?.(s,0);
       s.owner.busy=this.operation?.owner===s.owner;
@@ -744,17 +689,10 @@ export class DrawingController {
       this.resumeQueuedPointer();
     };
     const label=s.erase?'Erase stroke':'Brush stroke';
-    if(preparing){
-      const pending=this.pixelOperation({messageKey:'drawingController.finishingStroke'},async op=>{
-        try{op.received(changes);const committed=await this.commitPixels(s.target,changes,label,op);s.committed=true;return committed;}
-        catch(error){if(error.name!=='AbortError')this.onError(error);return false;}
-        finally{finish();}
-      });pending.catch(error=>this.onError(error));return pending;
-    }
     try{
-      if(valid){try{this.editor.commitDrawingPixels(s.target,changes,label,prepared??undefined,{resident:!gpu});s.committed=true;}catch(error){this.restoreStroke(s);this.onError(error);}}
+      if(valid){try{this.editor.commitDrawingPixels(s.target,changes,label,undefined,{resident:true});s.committed=true;}catch(error){this.restoreStroke(s);this.onError(error);}}
       else this.restoreStroke(s);
-    }finally{prepared?.release();finish();}
+    }finally{finish();}
   }
   move(event){this.cursor=pointerSample(event);if(this.loading?.id===event.pointerId){if(this.loading.samples.length>=65536)throw messageError(new Error(''), "errors.drawingController.drawingInputExceededTheQueueLimit", {});this.loading.samples.push(pointerSample(event));return;}const g=this.gesture;if(!g||g.id!==event.pointerId){this.onOverlayRender();return;}
     if(g.kind==='pan'){const rect=this.viewRect();this.state.view.x=g.view.x+(event.clientX-g.start.clientX)*rect.clientWidth/rect.width;this.state.view.y=g.view.y+(event.clientY-g.start.clientY)*rect.clientHeight/rect.height;g.last=pointerSample(event);this.onView();}
@@ -800,7 +738,6 @@ export class DrawingController {
     if(g.kind==='stroke'){
       const s=g.session;s.ended=true;cancelAnimationFrame(s.raf);s.raf=null;
       if(s.lastWorld)this.lastStroke={layerId:s.target.id,celId:drawingMetadata(s.target.figure).celId,world:s.lastWorld};
-      if(s.gpu)for(const {stroke} of s.paths)stroke.finish();
       this.flushStroke(s);
       if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);
       return; // the gesture stays closing until the worker's done arrives
@@ -809,7 +746,7 @@ export class DrawingController {
     if(g.kind==='pose')this.editor.commitDrag();
     else if(g.kind==='lasso')return this.run(()=>this.selectShape(g));
   }finally{g.surface.pinned=g.kind==='lasso'&&Boolean(this.operation)||Boolean(this.selection?.surface===g.surface);if(this.selection?.surface===g.surface)this.previewSelection();else{this.owner.present(g.surface);this.owner.discard(g.target.figure);}if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);this.sync();this.onUI();this.onRender();}}
-  cancel({navigation=true}={}){if(navigation)this.touchNavigation?.cancel();this.operation?.abort.abort();this.previewQueued=false;this.sequence++;const pending=this.loading;this.loading=null;if(pending&&this.overlay.hasPointerCapture(pending.id))this.overlay.releasePointerCapture(pending.id);const g=this.gesture;if(!g){this.fillAbort?.abort();this.onRender();return;}this.gesture=null;if(g.kind==='pan'){Object.assign(this.state.view,g.view);if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);this.onView();this.onRender();return;}if(g.kind==='pick'){this.pickAbort?.abort();if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);return;}if(g.kind==='shape'){g.surface.pinned=false;if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);this.onRender();return;}if(g.kind==='resize'){this.settings.size=g.size;if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);this.onUI();this.onRender();return;}if(g.kind==='stroke'){const s=g.session;s.cancelled=true;if(this.wetSession===s){this.wetSession=null;this.wet?.clear();}cancelAnimationFrame(s.raf);s.raf=null;this.sessions.delete(s.id);s.resolveDone?.();s.owner.hold?.(s,0);s.owner.busy=false;if(s.gpu){s.gpu.fail(messageError(new DOMException('', 'AbortError'), "errors.drawingController.strokeCancelled", {}));s.gpu.release();s.surface.stamp++;}else this.owner.strokeWorker.post({kind:'cancel',stroke:s.id});this.restoreStroke(s);}if(g.kind==='pose')this.editor.cancelDrag();if(g.kind==='selection-move')this.cancelSelection();if(g.kind==='selection-scale'||g.kind==='selection-rotate'){const s=this.selection;if(s){s.scale=g.scale;s.angle=g.angle;this.previewSelection();}}g.surface.pinned=false;this.owner.present(g.surface);this.owner.discard(g.target.figure);this.prepareVisible();if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);this.onRender();}
+  cancel({navigation=true}={}){if(navigation)this.touchNavigation?.cancel();this.operation?.abort.abort();this.previewQueued=false;this.sequence++;const pending=this.loading;this.loading=null;if(pending&&this.overlay.hasPointerCapture(pending.id))this.overlay.releasePointerCapture(pending.id);const g=this.gesture;if(!g){this.fillAbort?.abort();this.onRender();return;}this.gesture=null;if(g.kind==='pan'){Object.assign(this.state.view,g.view);if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);this.onView();this.onRender();return;}if(g.kind==='pick'){this.pickAbort?.abort();if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);return;}if(g.kind==='shape'){g.surface.pinned=false;if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);this.onRender();return;}if(g.kind==='resize'){this.settings.size=g.size;if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);this.onUI();this.onRender();return;}if(g.kind==='stroke'){const s=g.session;s.cancelled=true;if(this.wetSession===s){this.wetSession=null;this.wet?.clear();}cancelAnimationFrame(s.raf);s.raf=null;this.sessions.delete(s.id);s.resolveDone?.();s.owner.hold?.(s,0);s.owner.busy=false;this.owner.strokeWorker.post({kind:'cancel',stroke:s.id});this.restoreStroke(s);}if(g.kind==='pose')this.editor.cancelDrag();if(g.kind==='selection-move')this.cancelSelection();if(g.kind==='selection-scale'||g.kind==='selection-rotate'){const s=this.selection;if(s){s.scale=g.scale;s.angle=g.angle;this.previewSelection();}}g.surface.pinned=false;this.owner.present(g.surface);this.owner.discard(g.target.figure);this.prepareVisible();if(this.overlay.hasPointerCapture(g.id))this.overlay.releasePointerCapture(g.id);this.onRender();}
   async barrier(options){await this.settle({selection:true});if(this.loading)throw messageError(new Error(''), "errors.drawingController.waitForTheDrawingToFinishLoading", {});await drawingBarrier(this.editor.report,options);}
   /** Fill bounds follow the document, independent of display zoom. */
   fillBounds(target,store){
@@ -834,13 +771,7 @@ export class DrawingController {
         surface=await owner.surface(target.figure);op.check();surface.pinned=true;
         op.reserve(surface,owner.hardBudget);
         if(sourceBytes*2>op.maxBytes)throw messageError(new Error(''), "errors.drawingCompositeTransport.theFillExceedsTheDrawingWorkingMemoryLimit", {});
-        const worker=owner.compositeWorker;
-        try{
-          await sendDrawingComposite(worker,this.editor.geometry.drawables,{maxBytes:op.maxBytes-sourceBytes*2,signal:controller.signal,check:op.check,visible:i=>this.editor.getLayer(this.editor.layerForUid(i.obj.unique_id))?.visible!==false});
-          const matrix=inverseMatrix(this.pixelMatrix(target));
-          const result=await worker.request('composite',{bounds,matrix,maxBytes:op.maxBytes,...this.getImageSource?.()},{signal:controller.signal});
-          op.check();source=result.source;
-        }finally{worker.dispose();}
+        source=await this.sampleArtwork(target,bounds,controller.signal);op.check();
         op.copiedBytes=source.byteLength;
       }else{surface.pinned=true;op.reserve(surface,owner.hardBudget);}
       const tiles=await this.copyWorkerTiles(surface,op,t=>tileIntersects(t,bounds));
@@ -929,10 +860,10 @@ export class DrawingController {
   ensureFloating(){if(this.selection)return this.selection;if(!this.marquee)return null;return this.float().then(()=>this.selection);}
   float(){const m=this.marquee;return this.makeSelection({target:m.target,surface:m.surface,mask:m.mask,points:m.mask.points});}
   settleFloating(){const s=this.selection;if(!s)return;if(moved(s))return this.applySelection();this.endSelection(true);}
-  async compositeSource(target,bounds){
-    await this.barrierForComposite();const worker=this.owner.compositeWorker,controller=new AbortController();
-    try{await sendDrawingComposite(worker,this.editor.geometry.drawables,{maxBytes:this.owner.hardBudget-bounds.width*bounds.height*8,signal:controller.signal,visible:i=>this.editor.getLayer(this.editor.layerForUid(i.obj.unique_id))?.visible!==false});return (await worker.request('composite',{bounds,matrix:inverseMatrix(this.pixelMatrix(target)),maxBytes:this.owner.hardBudget,...this.getImageSource?.()},{signal:controller.signal})).source;}finally{worker.dispose();}
-  }
+  async compositeSource(target,bounds){await this.barrierForComposite();return this.sampleArtwork(target,bounds);}
+  /** The visible artwork of the frame, in the pixels of `target`'s cel: the engine draws it
+   * (engine/engine-composite.mjs) from the published drawings. */
+  sampleArtwork(target,bounds,signal){return this.artwork({bounds,matrix:inverseMatrix(this.pixelMatrix(target)),signal});}
   /** Pixel-space frame of the floating selection (or outline): corners, centre
    * and the rotate handle, placed a fixed screen distance above the top edge. */
   selectionFrame(target){
@@ -1063,10 +994,9 @@ export class DrawingController {
         const band={x:pad,y:Math.floor(mid-amp-px*.6),width:span,height:Math.max(1,Math.ceil(2*(amp+px*.6)))};
         for(const [tx,ty] of TileStore.tilesInRect(band.x,band.y,band.width,band.height))store.set(tx,ty,new Uint8ClampedArray([136,136,136,255]));
       }
-      const stroke=new DrawingStroke(store,{...this.brushSettings(ppu),color,blend:s.blend==='smudge'?'normal':s.blend,alphaLock:false,erase,seed:1,pixelsPerUnit:ppu});
-      const n=40;
-      for(let i=0;i<n;i++){const t=i/(n-1);stroke.sample({x:pad+span*t,y:mid+Math.sin(t*Math.PI*2)*amp,pressure:.15+.85*Math.sin(Math.PI*t),time:i});}
-      stroke.finish();
+      const n=40,samples=[];
+      for(let i=0;i<n;i++){const t=i/(n-1);samples.push({x:pad+span*t,y:mid+Math.sin(t*Math.PI*2)*amp,pressure:.15+.85*Math.sin(Math.PI*t),time:i});}
+      if(!paintStroke(store,{...this.brushSettings(ppu),color,blend:s.blend==='smudge'?'normal':s.blend,alphaLock:false,erase,seed:1,pixelsPerUnit:ppu},samples))return;
       const bounds=store.bounds,ctx=preview.getContext('2d'),image=bounds?new ImageData(store.readRect(bounds.x,bounds.y,bounds.width,bounds.height),bounds.width,bounds.height):null;
       ctx.clearRect(0,0,w,h);if(image)ctx.putImageData(image,bounds.x,bounds.y);
       this.previewCache={key,image,x:bounds?.x,y:bounds?.y};preview.dataset.previewKey=key;

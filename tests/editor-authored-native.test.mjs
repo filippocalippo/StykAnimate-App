@@ -1,13 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
-import backend from '../desktop/backend.cjs';
 import {Editor} from '../src/editor.mjs';
 import {emptyDocument, createObject, createFrame} from '../src/demo.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
 import {layerVisible} from '../src/layers.mjs';
+import {exportDocument, importBytes, nodeCodec} from './support/codec.mjs';
 
 const clone = value => structuredClone(value);
 function fixture() {
@@ -25,21 +23,10 @@ function fixture() {
   return editor.load(editor.serialize(), 'Authored persistence');
 }
 
-function nativeStykRoundtrip(document) {
-  const script = String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-store=server.ProjectStore(server.WORKSPACE)
-data,name=store.export({'document':json.load(sys.stdin),'format':'styk'})
-result=store.import_bytes(data,name)
-print(json.dumps({'name':name,'byteLength':len(data),'document':result['document']}))
-`;
-  const python = backend.pythonCandidates()[0], result = spawnSync(python.command, [...python.args, '-c', script], {
-    cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify(document), encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024,
-  });
-  assert.equal(result.status, 0, result.error?.message || result.stderr); return JSON.parse(result.stdout);
+async function nativeStykRoundtrip(document) {
+  const codec = nodeCodec(), {bytes, name} = await exportDocument({document, format: 'styk'}, {codec});
+  const result = await importBytes(bytes, name, {codec});
+  return {name, byteLength: bytes.length, document: result.document};
 }
 
 function samples(editor, ticks = [0, 1, 2, 5, 8, 9, 12]) {
@@ -52,7 +39,7 @@ function samples(editor, ticks = [0, 1, 2, 5, 8, 9, 12]) {
   });
 }
 
-test('the Python STYK exporter and importer preserve real layers, independent pose sources, scalar curves and playback', () => {
+test('the codec STYK exporter and importer preserve real layers, independent pose sources, scalar curves and playback', async () => {
   const editor = fixture(), originalIds = editor.report.keyframes.map((_, index) => editor.getFrameId(index));
   editor.renameLayer('layer-1', 'Backdrop');
   const actors = editor.createLayer('Actors').id, temporary = editor.createLayer('Temporary').id;
@@ -77,7 +64,7 @@ test('the Python STYK exporter and importer preserve real layers, independent po
   editor.selectFrame(1); editor.deleteFrame();
   assert.equal(editor.frameIndexForId(originalIds[1]), -1); assert.ok(editor.getFrameById(originalIds[1]));
   assert.equal(Object.keys(editor.report._styk.frameSources).length, 2);
-  const expected = samples(editor), output = editor.serialize(), result = nativeStykRoundtrip(output);
+  const expected = samples(editor), output = editor.serialize(), result = await nativeStykRoundtrip(output);
   assert.match(result.name, /\.styk$/i); assert.ok(result.byteLength > 0);
   assert.deepEqual(result.document._styk, output._styk);
   assert.deepEqual(result.document.keyframes.map(frame => frame._styk), output.keyframes.map(frame => frame._styk));
@@ -94,7 +81,7 @@ for (const [name, edit] of [
   ['add a segment', editor => editor.addSegment({parentId: editor.figure.segments[2].segment_id, length: 24, angle: .4, thickness: 3})],
   ['duplicate a segment branch', editor => editor.duplicateSegmentBranch({angleOffset: .2})],
   ['split a segment', editor => editor.splitSegment(.35)],
-]) test(`reusable topology edits ${name} in every retained pose source and undo exactly`, () => {
+]) test(`reusable topology edits ${name} in every retained pose source and undo exactly`, async () => {
   const editor = fixture(), first = editor.captureFrameSource(editor.report.keyframes[0]), second = editor.captureFrameSource(editor.report.keyframes[1]);
   editor.selectFrame(0); editor.select(1, 2);
   const before = editor.serialize(), originalCount = editor.figure.segments.length;
@@ -111,7 +98,7 @@ for (const [name, edit] of [
   assert.doesNotThrow(() => validateScene({...editor.report, keyframes: Object.values(editor.report._styk.frameSources)}));
   const after = editor.serialize(); editor.undo(); assert.deepEqual(editor.serialize(), before);
   editor.redo(); assert.deepEqual(editor.serialize(), after);
-  const result = nativeStykRoundtrip(after), reopened = new Editor({demo: false}).load(result.document);
+  const result = await nativeStykRoundtrip(after), reopened = new Editor({demo: false}).load(result.document);
   assert.deepEqual(reopened.report._styk.frameSources, after._styk.frameSources);
   assert.equal(reopened.getFrameById(first).objects[0].angles.length, count);
 });

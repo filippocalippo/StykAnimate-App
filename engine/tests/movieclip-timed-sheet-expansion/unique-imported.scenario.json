@@ -1,0 +1,60 @@
+{
+ "name": "unique-imported",
+ "document": "unique-imported.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "makeMovieclipUnique"
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 0.625
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "@seek",
+   4.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-1"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

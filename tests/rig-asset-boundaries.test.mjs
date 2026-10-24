@@ -5,7 +5,7 @@ import {RIG_EXAMPLES,rigExampleDocument} from '../src/rig-examples.mjs';
 import {SOLID_RIG_EXAMPLES} from '../src/rig-solids.mjs';
 import {inspectorView} from '../src/inspector-view.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 
 const visiblePose=document=>{
   const g=buildGeometry(document,document.keyframes[0]).objects.get(0);

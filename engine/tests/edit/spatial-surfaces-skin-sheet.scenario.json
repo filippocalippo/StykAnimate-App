@@ -1,0 +1,70 @@
+{
+ "name": "spatial-surfaces-skin-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/spatial/surfaces-skin.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   12,
+   -6
+  ],
+  [
+   "rotateSelection",
+   0.15
+  ],
+  [
+   "scaleSelection",
+   1.1
+  ],
+  [
+   "mirrorSelection",
+   "horizontal"
+  ],
+  [
+   "rotateFigure",
+   -0.1
+  ],
+  [
+   "centerFigure"
+  ],
+  [
+   "@seek",
+   2
+  ],
+  [
+   "sheetInsertKey",
+   [
+    "layer-1"
+   ],
+   2
+  ],
+  [
+   "moveSelection",
+   -5,
+   5
+  ],
+  [
+   "resetPose"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -1,13 +1,12 @@
 /** Isolated CPU comparison against a captured source tree; never saves the PIV. */
 import {readFile, writeFile, mkdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 import assert from 'node:assert/strict';
 import {buildGeometry, evaluatedFrame} from '../src/pivot/geometry.mjs';
-const {startBackend} = createRequire(import.meta.url)('../desktop/backend.cjs');
+import {nodeCodec} from '../tests/support/codec.mjs';
 const referenceRoot = process.argv[2];
 if (!referenceRoot) throw new Error('Provide the captured src directory to compare.');
 const reference = await import(pathToFileURL(path.resolve(referenceRoot, 'pivot/geometry.mjs')));
@@ -15,13 +14,13 @@ const source = process.argv[3] || path.join(os.homedir(), 'Desktop', 'testreally
 const output = path.resolve('artifacts', `geometry-definition-${Date.now()}`);
 await mkdir(output, {recursive: true});
 const bytes = await readFile(source), hash = data => createHash('sha256').update(data).digest('hex');
-const backend = await startBackend({appRoot: process.cwd()}); let report;
-try {
-  const response = await fetch(`${backend.origin}/api/import?filename=${encodeURIComponent(path.basename(source))}`,
+let report;
+{
+  const response = await nodeCodec().fetch(`/api/import?filename=${encodeURIComponent(path.basename(source))}`,
     {method: 'POST', headers: {'content-type': 'application/octet-stream'}, body: bytes});
   if (!response.ok) throw new Error(await response.text());
   report = (await response.json()).document;
-} finally {backend.stop();}
+}
 const result = {source: {path: source, sha256: hash(bytes)}, referenceRoot, cpu: os.cpus()[0].model, node: process.version, cases: []};
 // Hash complete per-instance geometry outside the timed region; retain segment,
 // polygon, asset, style and native coordinates, not merely the displayed bounds.

@@ -47,7 +47,7 @@ const recovery = (page) => page.evaluate(async () => {
 /** Moves the figure with the mouse, like a person, so the project becomes unsaved. */
 async function dragFigure(page, dx = 90) {
   const at = await page.evaluate(async () => {
-    const { worldToScreen } = await import('/src/renderer.mjs');
+    const { worldToScreen } = await import('/src/renderer-geometry.mjs');
     const { editor, state } = window.styk, rect = document.getElementById('overlay').getBoundingClientRect();
     editor.select(editor.frame.objects[0].unique_id, -1);
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));

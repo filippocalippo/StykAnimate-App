@@ -1,0 +1,101 @@
+{
+ "name": "update-object-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "updateObject",
+   {
+    "scale": 1.5
+   }
+  ],
+  [
+   "updateObject",
+   {
+    "field28": 128,
+    "name": "Hero"
+   }
+  ],
+  [
+   "updateObject",
+   {
+    "scale": -1
+   }
+  ],
+  [
+   "updateObject",
+   {
+    "scale": "x"
+   }
+  ],
+  [
+   "updateObject",
+   {
+    "field28": 300
+   }
+  ],
+  [
+   "updateObject",
+   {
+    "unique_id": 9
+   }
+  ],
+  [
+   "updateObject",
+   {
+    "color_override_raw": 4278190335
+   }
+  ],
+  [
+   "duplicateFigure"
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    2
+   ]
+  ],
+  [
+   "updateObject",
+   {
+    "image_text_flags": 1
+   }
+  ],
+  [
+   "updateSelection",
+   {
+    "root_x": 5
+   }
+  ],
+  [
+   "updateObject",
+   {
+    "root_x": 300
+   }
+  ],
+  [
+   "updateSelection",
+   {
+    "name": "Pair"
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

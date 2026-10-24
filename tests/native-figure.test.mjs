@@ -6,7 +6,8 @@ import {createDemo} from '../src/demo.mjs';
 import {Editor} from '../src/editor.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 import {buildGeometry, evaluatedFrame, timeline} from '../src/pivot/geometry.mjs';
-import {buildContainerV1, buildContainerV2, decodeDocument, validateNativeFigure} from '../src/native-container.mjs';
+import {buildContainerV2, decodeDocument} from './support/native-files.mjs';
+import {buildContainerV1} from './support/container-v1.mjs';
 import {packPoseSequences} from '../src/pose-sequence-storage.mjs';
 
 function documentRecords(document, seen = new Set(), result = []) {
@@ -91,11 +92,11 @@ test('authored channels are captured at the selected tick without retaining the 
   validateScene(output);
 });
 
-test('portable clips remove only recognized original-source archives, including nested baselines and figure sets', () => {
+test('portable clips remove only recognized original-source archives, including nested baselines and figure sets', async () => {
   const {editor, uid, source} = movieclipFixture({nested: true}), before = structuredClone(editor.report);
   for (const selection of [{figureUid: uid}, {figureUids: [uid, 3]}]) {
     const output = nativeFigureDocument(editor.report, {...selection, tick: 3});
-    validateScene(output); validateNativeFigure(output);
+    validateScene(output); await buildContainerV2(output, 'stkz');   // the writer accepts only a self-contained figure
     const original = {...output, figure_types: output.figure_types.map(figure => editor.report.figure_types.find(f => f.figure_type_id === figure.figure_type_id))};
     const expected = structuredClone(original);
     for (const document of documentRecords(expected)) delete document._stykSource;

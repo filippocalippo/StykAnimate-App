@@ -5,8 +5,9 @@ import { Editor } from '../src/editor.mjs';
 import { getPivotHandles, pickCanvasHandle } from '../src/canvas-interactions.mjs';
 
 import {corpusPath} from './support/corpus.mjs';
+import {nodeCodec} from './support/codec.mjs';
 const filename = process.argv[2] || corpusPath('Downloads/16 Akane vs Akato Segundo round (3).piv');
-const response = await fetch('http://127.0.0.1:47831/api/import?filename=' + encodeURIComponent(filename.split('/').at(-1)), {
+const response = await nodeCodec().fetch('/api/import?filename=' + encodeURIComponent(filename.split('/').at(-1)), {
   method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: await fs.readFile(filename),
 });
 assert.equal(response.status, 200);

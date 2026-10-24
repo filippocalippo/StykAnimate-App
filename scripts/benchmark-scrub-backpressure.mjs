@@ -19,7 +19,7 @@ const flush=Timeline.prototype._flushScrub;Timeline.prototype._flushScrub=functi
 styk.editor.addEventListener('change',event=>{if(bench.active&&event.detail.kind==='seek')bench.seeks++;});
 const renderer=styk.state.renderer,render=renderer.render;renderer.render=function(options){const value=render.call(this,options);if(bench.active&&styk.state.scrubbing)bench.presentations.push({tick:styk.editor.tick,at:performance.now(),target:activeTimeline?.pendingScrub??styk.editor.tick});return value;};
 },gated);
-await page.waitForFunction(()=>!styk.state.editablePreparing);await page.waitForTimeout(500);
+await page.waitForFunction(()=>!styk.state.dirtyRender);await page.waitForTimeout(500);
 const box=await page.locator('.sheet-scroll').boundingBox();
 await page.evaluate(()=>{bench.active=true;bench.started=performance.now();bench.observer=new PerformanceObserver(list=>bench.tasks.push(...list.getEntries().map(e=>e.duration)));bench.observer.observe({type:'longtask'});});
 const cdp=await page.context().newCDPSession(page);await cdp.send('Emulation.setCPUThrottlingRate',{rate:4});
@@ -30,7 +30,7 @@ await new Promise(r=>setTimeout(r,8));
 }await Promise.all(inputs);
 await page.screenshot({path:`${output}/${gated?'after':'before'}-drag.png`});
 const target=await page.evaluate(()=>activeTimeline.pendingScrub??styk.editor.tick);
-await page.mouse.up();await page.waitForFunction(()=>!styk.state.editablePreparing);
+await page.mouse.up();await page.waitForFunction(()=>!styk.state.dirtyRender);
 await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
 const result=await page.evaluate(()=>{bench.active=false;bench.observer.disconnect();return {...bench,observer:undefined,elapsedMs:performance.now()-bench.started,finalTick:styk.editor.tick,historyUnchanged:bench.history===styk.editor.historySize,revisionUnchanged:bench.revision===styk.editor.revision,backend:styk.state.renderer.stats.backend,preparation:styk.state.editablePreparationStats};});
 assert.equal(result.finalTick,target);assert.ok(result.historyUnchanged&&result.revisionUnchanged);assert.deepEqual(errors,[]);

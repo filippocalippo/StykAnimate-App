@@ -1,0 +1,145 @@
+{
+ "name": "motion-path-layers-sheet",
+ "document": "sheet-layers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 2,
+    "handleId": 22,
+    "joint": 1
+   },
+   3
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 420,
+    "y": 330
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 3,
+    "handleId": 0,
+    "joint": -1
+   },
+   2
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 520,
+    "y": 300
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   4,
+   {
+    "falloff": {
+     "radius": 3,
+     "shape": "linear"
+    }
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 230,
+    "y": 190
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 2,
+    "handleId": 11,
+    "joint": 0
+   },
+   1,
+   {
+    "falloff": {
+     "radius": 4,
+     "shape": "smooth"
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 380,
+    "y": 260
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 3,
+    "handleId": 22,
+    "joint": 1
+   },
+   5,
+   {
+    "falloff": {
+     "radius": 2
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 560,
+    "y": 320
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -5,7 +5,7 @@ import {createObject,createFrame,emptyDocument} from '../src/demo.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
 import {rigConstraintPlan,remapRigReferences} from '../src/rig-constraints.mjs';
 import {evaluateSpatial,spatialQuaternion,spatialPoint,remapSpatial,sameSpatial} from '../src/rig-spatial.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {Editor} from '../src/editor.mjs';
 const near=(a,b,t=1e-8)=>assert.ok(Math.abs(a-b)<t,`${a} != ${b}`);
 const views=[[10,25,4],[22,30,6],[-8,28,5],[-20,32,3]];

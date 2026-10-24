@@ -1,13 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {emptyDocument, createObject, createFrame, defaultFigure} from '../src/demo.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 import {createImageFigure} from '../src/media-authoring.mjs';
-import backend from '../desktop/backend.cjs';
+import {roundTrip} from './support/codec.mjs';
 
 const near = (actual, expected, tolerance = 8e-5) => assert.ok(Math.abs(actual - expected) < tolerance, `${actual} != ${expected}`);
 const nearPoint = (actual, expected) => {near(actual.x, expected.x); near(actual.y, expected.y);};
@@ -34,21 +32,10 @@ function fixture() {
   const editor = new Editor({demo: false}).load(report); editor.select(1, 3); editor.captureFrameSource(editor.report.keyframes[1]); return editor;
 }
 const geometry = (editor, frame) => buildGeometry(editor.report, frame);
-function roundtrip(editor) {
-  const python = String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-payload=json.load(sys.stdin); doc=payload['document']; store=server.ProjectStore(server.WORKSPACE); out={}
-for kind in ('piv','stk'):
- raw,name=store.export({'document':doc,'format':kind,'figureTypeId':payload['figureTypeId']})
- out[kind]=store.import_bytes(raw,name)['document']
-print(json.dumps(out))
-`;
-  const candidate = backend.pythonCandidates()[0], result = spawnSync(candidate.command, [...candidate.args, '-c', python], {
-    cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify({document: editor.serialize(), figureTypeId: editor.figure.figure_type_id}), encoding: 'utf8', windowsHide: true, maxBuffer: 6 * 1024 * 1024});
-  assert.equal(result.status, 0, result.error?.message || result.stderr); return JSON.parse(result.stdout);
+async function roundtrip(editor) {
+  const document = editor.serialize(), figureTypeId = editor.figure.figure_type_id, out = {};
+  for (const kind of ['piv', 'stk']) out[kind] = await roundTrip({document, format: kind, figureTypeId});
+  return out;
 }
 
 test('plain builder Delete removes only one sparse segment and reconnects every posed branch', () => {
@@ -66,7 +53,7 @@ test('plain builder Delete removes only one sparse segment and reconnects every 
   assert.doesNotThrow(() => validateScene({...editor.report, keyframes: editor._allSourceFrames()}));
   const after = editor.serialize(); editor.undo(); assert.deepEqual(editor.serialize(), before); editor.redo(); assert.deepEqual(editor.serialize(), after);
 });
-test('Unsplit preserves every surviving endpoint with curved posed lengths and retained sources', () => {
+test('Unsplit preserves every surviving endpoint with curved posed lengths and retained sources', async () => {
   const editor = fixture(), frames = editor._allSourceFrames(), before = frames.map(frame => geometry(editor, frame));
   editor.unsplitSegment();
   frames.forEach((frame, index) => {
@@ -75,7 +62,7 @@ test('Unsplit preserves every surviving endpoint with curved posed lengths and r
     for (const slot of [1, 2, 3]) nearPoint(after.objects.get(slot).root, before[index].objects.get(slot).root);
     assert.equal(frame.objects[0].len_flag, 1); assert.equal(frame.objects[0].angles.length, 3);
   });
-  const native = roundtrip(editor);
+  const native = await roundtrip(editor);
   for (const kind of ['piv', 'stk']) {const saved = native[kind].figure_types.find(f => f.polyfills?.length === 1); assert.equal(saved?.segments.length, 3, JSON.stringify(native[kind].figure_types.map(f => ({id:f.figure_type_id,segments:f.segments.length,polys:f.polyfills?.length}))));}
   const nativeHandle = new Map([[0, 0], ...editor.figure.segments.map(s => s.segment_id).sort((a,b) => a-b).map((id, i) => [id, i + 1])]);
   for (let i = 0; i < 2; i++) {
@@ -141,14 +128,14 @@ test('single-segment mirror moves descendants without rotating them; branch mirr
     assert.equal(editor.figure.segments[3].angle_rad, axis === 'horizontal' ? -Math.PI + .3 : .3);
   }
 });
-test('media mirror toggles only the native mirror byte and retains image assets through PIV/STK', () => {
+test('media mirror toggles only the native mirror byte and retains image assets through PIV/STK', async () => {
   const editor = new Editor({demo: false}), figure = createImageFigure({dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', width: 1, height: 1, name: 'Mirror image'});
   editor.importFigure(figure); editor.select(editor.selectedUid, 0);
   const asset = editor.figure.image_assets[0], reverse = editor.figure.segments[0].extra_u8_a, source = structuredClone(editor.serialize());
   editor.mirrorSegmentBranch(); assert.equal(editor.figure.image_assets[0], asset); assert.equal(editor.figure.segments[0].extra_u8_b, 1); assert.equal(editor.figure.segments[0].extra_u8_a, reverse);
   editor.undo(); assert.deepEqual(editor.serialize(), source); editor.redo();
   assert.throws(() => editor.deleteSingleSegment(), /at least one/);
-  const saved = roundtrip(editor);
+  const saved = await roundtrip(editor);
   for (const kind of ['piv', 'stk']) {const reopened = saved[kind].figure_types.find(f => f.image_assets?.length); assert.equal(reopened.segments[0].extra_u8_b, 1); assert.equal(reopened.image_assets.length, 1);}
 });
 test('30,000 reverse-ordered segments mirror as a branch without recursion or quadratic scans', () => {

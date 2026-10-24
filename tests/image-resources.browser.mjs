@@ -11,8 +11,8 @@ const root = path.resolve('.'), output = path.join(root, 'artifacts/image-resour
 await mkdir(output, {recursive: true});
 await writeFile(path.join(output, 'fixture.html'), '<!doctype html><title>Image resources</title>');
 const source = `data:image/png;base64,${(await previewPNG(32, 16)).toString('base64')}`;
-const {startBackend} = createRequire(import.meta.url)('../desktop/backend.cjs');
-const backend = await startBackend({appRoot: root}); let browser;
+const {startDesktopHost} = createRequire(import.meta.url)('../desktop/web-host.cjs');
+const backend = await startDesktopHost({appRoot: root}); let browser;
 try {
   browser = await chromium.launch({channel: 'chrome', headless: true});
   const context = await browser.newContext(), blocked = [];
@@ -71,38 +71,6 @@ try {
     for (let y = 0; y < height; y++) for (let x = 0; x < width; x++)
       assert.deepEqual(pixels.slice((y * width + x) * 4, (y * width + x + 1) * 4), x < width / 2 ? [230, 70, 90, 255] : [35, 180, 90, 255]);
   delete result.pixels; delete result.fullPixels;
-  // Exercise the actual application callback with a real decoder response.
-  // Temporarily hold viewport requests so they cannot supersede this fixture.
-  const appContext=await browser.newContext(),appPage=await appContext.newPage(),appErrors=[];
-  appPage.on('pageerror',error=>appErrors.push(error.message));
-  await appPage.goto(backend.origin);await appPage.waitForFunction(()=>window.styk?.ready);
-  result.appInvalidation=await appPage.evaluate(async source=>{
-    const {PreviewImages}=await import('/src/preview-images.mjs'),original=PreviewImages.prototype.prepare;
-    let owner;
-    PreviewImages.prototype.prepare=function(...args){owner=this;return original.apply(this,args);};
-    try{
-      styk.fit();
-      const deadline=performance.now()+10000;
-      while(!owner){if(performance.now()>deadline)throw new Error('Application image owner was not observed.');await new Promise(requestAnimationFrame);}
-    }finally{PreviewImages.prototype.prepare=original;}
-    const {editor,state}=styk,renderer=state.renderer,report=editor.report,revision=editor.revision,history=editor.historySize;
-    owner.prepare=()=>Promise.resolve();
-    try{
-      if(owner.current)await owner.current;
-      const item={type:'image',asset:{url:source}},generations=[renderer.generation];
-      await original.call(owner,[item],{maxDimension:8});generations.push(renderer.generation);
-      const retained=owner.get(source);
-      await original.call(owner,[item,item],{maxDimension:8});generations.push(renderer.generation);
-      if(owner.get(source)!==retained)throw new Error('Application lost unchanged image identity.');
-      await original.call(owner,[item],{maxDimension:32});generations.push(renderer.generation);
-      await original.call(owner,[]);generations.push(renderer.generation);
-      if(editor.report!==report||editor.revision!==revision||editor.historySize!==history)throw new Error('Image readiness changed the document/history.');
-      return {generations,backend:renderer.stats.backend,documentUnchanged:true};
-    }finally{delete owner.prepare;owner.clear();styk.fit();}
-  },source);
-  const g=result.appInvalidation.generations;
-  assert.deepEqual(g.slice(1).map((v,i)=>v-g[i]),[1,0,1,1],'only proven identical pixels avoid application invalidation');
-  assert.deepEqual(appErrors,[]);await appContext.close();
   await writeFile(path.join(output, 'report.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } finally {await browser?.close(); backend.stop();}

@@ -4,7 +4,6 @@ import {sceneVfxPlan,checkSceneVfxPlan,sceneVfxBounds} from '../src/vfx-scene.mj
 import {createVfx,vfxPadding} from '../src/vfx.mjs';
 import {backgroundBounds} from '../src/pivot/background.mjs';
 import {cameraMatrix} from '../src/renderer-geometry.mjs';
-import {playbackVisibleBounds} from '../src/playback-worker.mjs';
 
 const effect=(type,params)=>{const e=createVfx(type,type);Object.assign(e.params,params);return e;};
 test('camera and tile sampling includes exterior pixels without moving the effect domain',()=>{
@@ -30,14 +29,6 @@ test('small blur guards cover the actual minimum kernel at reduced resolution',(
   assert.ok(vfxPadding([e],.25)>=3,type);
   assert.ok(vfxPadding(Array(16).fill(e),.25)>=48,type);
  }
-});
-test('playback raster crops include camera effects at reduced density and in world view',()=>{
- const report={canvas_width:320,canvas_height:240},frame={camera:{x:500,y:0,scale:1,angle_rad:0},_stykVfx:{figure:[effect('blur',{radius:.1})]}};
- const camera=playbackVisibleBounds(report,frame,true,.25),world=playbackVisibleBounds(report,frame,false,.25);
- assert.ok(camera.x<=480&&camera.x+camera.width>=840);
- assert.ok(world.x<=-20&&world.x+world.width>=840);
- const plain=playbackVisibleBounds(report,{...frame,_stykVfx:undefined},true,.25);
- assert.deepEqual(plain,{x:500,y:0,width:320,height:240});
 });
 test('expanded background bounds contain all camera sampling corners after rotation and zoom',()=>{
  const report={canvas_width:320,canvas_height:240},frame={camera:{x:80,y:-20,scale:1.4,angle_rad:.7}};

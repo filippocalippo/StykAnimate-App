@@ -23,9 +23,9 @@ try{
   await page.locator('#play-button').click();
   await page.waitForFunction(()=>!styk.state.playing);
   const worked=await page.evaluate(async()=>{
-    const {ExportFrameRenderer}=await import('/src/export-frame-renderer.mjs'),{DocumentExporter}=await import('/src/document-export.mjs'),e=styk.editor;
+    const {pageExporter}=await import('/tests/support/page-export.mjs'),{DocumentExporter}=await import('/src/document-export.mjs'),e=styk.editor;
     e.seek(3);e.seek(7);e.seek(0);
-    const renderer=new ExportFrameRenderer({width:e.report.canvas_width,height:e.report.canvas_height,smoothing:'edges',getRevision:()=>e.revision});
+    const renderer=pageExporter({width:e.report.canvas_width,height:e.report.canvas_height,smoothing:'edges',getRevision:()=>e.revision});
     let rendered=false;
     try{await renderer.load(e.report);await renderer.renderTick(0);rendered=renderer.canvas.width>0;}finally{renderer.dispose();}
     const blob=await new DocumentExporter().export(e.report,{format:'styk',getRevision:()=>e.revision});
@@ -39,7 +39,7 @@ try{
   await page.locator('[data-draw-action="new"]').first().click();
   const built=await page.evaluate(async()=>{
     styk.drawing.settings.resolution=1;
-    const e=styk.editor,d=styk.drawing,{DrawingStroke}=await import('/src/drawing-pixels.mjs'),id=e.drawingTarget().id;
+    const e=styk.editor,d=styk.drawing,{DrawingStroke}=await import('/tests/support/sketch-stroke.mjs'),id=e.drawingTarget().id;
     for(let i=1;i<60;i++)e.nextDrawing([id],{blank:true,length:1});
     for(let i=0;i<60;i++){e.seek(i);const target=e.prepareDrawingCel({pixelsPerUnit:1,world:{x:32,y:32}}),surface=await d.owner.surface(target.figure);
       const s=new DrawingStroke(surface.store,{size:8,pressureSize:false});s.sample({x:10+(i%8)*8,y:10+i});e.commitDrawingPixels(target,s.finish());}
@@ -77,7 +77,7 @@ try{
   // Thumbnails: the pump waits out busy work and a big cel rasterizes from a
   // mip level, not the source tiles.
   const thumb=await page.evaluate(async()=>{
-    const e=styk.editor,owner=styk.drawing.owner,{DrawingStroke}=await import('/src/drawing-pixels.mjs');
+    const e=styk.editor,owner=styk.drawing.owner,{DrawingStroke}=await import('/tests/support/sketch-stroke.mjs');
     e.seek(30);const target=e.drawingTarget(),surface=await owner.surface(target.figure);
     const s=new DrawingStroke(surface.store,{size:16,pressureSize:false});
     for(let x=0;x<=600;x+=40)s.sample({x,y:10});

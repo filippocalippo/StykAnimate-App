@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
-import {planLayerMembershipMigration, LAYER_MIGRATION_LIMITS} from '../src/editor-layer-migration.mjs';
+import {planLayerMembershipMigration, migrationPlanPayload, LAYER_MIGRATION_LIMITS} from '../src/editor-layer-migration.mjs';
 import {validateAnimationDocument} from '../src/animation-channels.mjs';
 import {buildGeometry} from '../src/pivot/geometry.mjs';
 
@@ -161,4 +161,21 @@ test('public oversized migration rejection leaves assignments, sources, history 
   assert.throws(() => editor.assignFiguresToLayer([1], 'layer-2'), /10,000 sampled frames/);
   assert.throws(() => editor.deleteLayer('layer-1', {targetLayerId: 'layer-2'}), /10,000 sampled frames/);
   assert.deepEqual(editor.report, before); assert.equal(editor._undo.length, history); assert.equal(editor._nextFrameIdentity, identity);
+});
+
+function wirePlanFixture() {
+  const retained = {id: 'retained', keys: [{id: 'existing', value: 123}]}, changed = {id: 'changed', keys: []}, removed = {id: 'removed', keys: []};
+  const beforeAnimation = {version: 1, nextKeyId: 2, channels: [retained, changed, removed]};
+  const source = {_styk: {frameId: 'frame-2'}, objects: [{unique_id: 1, angles: Array.from({length: 12000}, (_, i) => i / 100)}]};
+  const afterAnimation = {...beforeAnimation, nextKeyId: 3, channels: [retained, {...changed, keys: [{id: 'key-2', value: {frameId: 'frame-2'}}]}]};
+  return {beforeAnimation, afterAnimation, frameSources: {'frame-2': source}, frameSourceChanges: [{id: 'frame-2', after: {exists: true, value: source}}],
+    nextFrameIdentity: 3, sampledTicks: 12, affectedLayerIds: ['layer-1', 'layer-2'], hadFrameSourceTable: false};
+}
+
+test('migration payload excludes unchanged channels and duplicate history source assets', () => {
+  const plan = wirePlanFixture(), payload = migrationPlanPayload(plan).plan;
+  assert.deepEqual(payload.channelUpdates.map(entry => [entry.id, entry.channel === null]), [['changed', false], ['removed', true]]);
+  assert.deepEqual(payload.channelOrder, ['retained', 'changed']);
+  assert.equal(payload.frameSources, plan.frameSources); assert.equal(payload.frameSourceChanges, undefined);
+  assert.equal(payload.beforeAnimation, undefined); assert.deepEqual(migrationPlanPayload(null), {plan: null});
 });

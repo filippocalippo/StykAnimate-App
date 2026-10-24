@@ -181,7 +181,7 @@ try {
   const pivPath = await saveDownload(() => exportEditable(page, 'piv'), 'creation-source-edited.piv');
   const exportedTicks=await value(()=>styk.editor.totalTicks);
   const reopened = await page.evaluate(async bytes => {
-    const response = await fetch('/api/import?filename=creation-source-edited.piv', {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: Uint8Array.from(bytes)});
+    const response = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/import?filename=creation-source-edited.piv', {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: Uint8Array.from(bytes)});
     if (!response.ok) throw new Error(await response.text()); return (await response.json()).document;
   }, [...await readFile(pivPath)]);
   check('Source-bearing PIV export preserves edited timeline and includes the newly authored text', reopened.total_output_frames === exportedTicks && reopened.figure_types.some(f => f.text_assets?.some(a => a.text === 'A new Pivot title')));

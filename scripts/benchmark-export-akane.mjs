@@ -19,7 +19,7 @@ const ticks = (process.env.STYK_BENCH_TICKS || '0,1,535,536,1824,1825,1826,1827,
 const cases = (process.env.STYK_BENCH_CASES || '1080-edges,2160-edges,2160-sprites').split(',');
 const ffmpeg = path.resolve('build/video-encoder/ffmpeg.exe');
 const sourceHashes = {};
-for (const file of ['src/export-frame-core.mjs','src/export-frame-worker.mjs','src/export-frame-renderer.mjs','src/native-video-export.mjs','desktop/video-export-service.cjs','src/pivot/geometry.mjs','src/playback-resources.mjs','src/export-memory.mjs','src/app.mjs']) sourceHashes[file] = await digest(file);
+for (const file of ['src/engine/engine-export.mjs','src/engine/engine-export-worker.mjs','src/native-video-export.mjs','desktop/video-export-service.cjs','src/pivot/geometry.mjs','src/playback-resources.mjs','src/export-memory.mjs','src/app.mjs']) sourceHashes[file] = await digest(file);
 const app = await electron.launch({args:[process.cwd()],cwd:process.cwd(),timeout:60000,
   env:{...process.env, STYK_USER_DATA_DIR:path.join(output,`profile-${Date.now()}`)}});
 const result = {label,date:new Date().toISOString(),source,sourceHash,sourceHashes,cpu:os.cpus()[0].model,ramBytes:os.totalmem(),node:process.version,ticks,runs:[],errors:[]};
@@ -54,10 +54,10 @@ try {
     const memory=[];let sampling=false;
     timer=setInterval(async()=>{if(sampling)return;sampling=true;try{memory.push({ms:Date.now(),phase,processes:await app.evaluate(({app})=>app.getAppMetrics().map(p=>({pid:p.pid,type:p.type,...p.memory}))) });}catch{}finally{sampling=false;}},500);
     const run=await page.evaluate(async({name,width,height,smoothing,ticks,sampleReferences})=>{
-      const {ExportFrameRenderer}=await import('/src/export-frame-renderer.mjs');
+      const {createExportFrameRenderer}=await import('/src/engine/engine-export.mjs');
       const {encodeNativeVideo}=await import('/src/native-video-export.mjs');
       const report=styk.editor.report,revision=styk.editor.revision;
-      const renderer=new ExportFrameRenderer({width,height,smoothing,baseURL:location.origin,getRevision:()=>styk.editor.revision});
+      const renderer=createExportFrameRenderer({width,height,smoothing,getRevision:()=>styk.editor.revision},{stage:styk.state.renderer,playback:styk.playback,revision,range:[Math.min(...ticks),Math.max(...ticks)]});
       const samples=[],started=performance.now();let loadMs;
       try{
         await benchmarkStage('prepare');

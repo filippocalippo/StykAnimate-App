@@ -1,10 +1,10 @@
 import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
-import backend from '../desktop/backend.cjs';
-const service=await backend.startBackend({appRoot:process.cwd()});let browser;
+import backend from '../desktop/web-host.cjs';
+const service=await backend.startDesktopHost({appRoot:process.cwd()});let browser;
 try{
   browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage(),errors=[];
-  page.on('pageerror',e=>errors.push(e.message));await page.goto(service.origin+'/api/health');
+  page.on('pageerror',e=>errors.push(e.message));await page.goto(service.origin+'/tests/fixtures/blank.html');
   const result=await page.evaluate(async()=>{
     const {drawGeometry}=await import('/src/pivot/geometry.mjs');
     const obj={scale:1,unique_id:1},fig={figure_type_id:1};

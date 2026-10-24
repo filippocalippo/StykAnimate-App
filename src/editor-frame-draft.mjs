@@ -50,14 +50,13 @@ function sync(editor) {
     ...(draft.baseline ? {baseline: draft.baseline} : {}),
     ...(own(draft, 'animationBaseline') ? {animationBaseline: draft.animationBaseline} : {})};
 }
-function restore(editor, {validateFrame = true, preservePreparedScene = false} = {}) {
+function restore(editor, {validateFrame = true} = {}) {
   validateSimpleFrameDraft(editor.report, {validateFrame});
   const state = editor.report._styk.simpleFrameDraft;
   if (!state) return false;
   const tick = editor.timeline[state.index]?.start ?? 0;
-  const samePreparedTarget = preservePreparedScene && editor.frameIndex === state.index && editor.tick === tick;
   editor.frameIndex = state.index; editor.tick = tick;
-  if (!samePreparedTarget) editor._invalidate({viewOnly: true});
+  editor._invalidate({viewOnly: true});
   const draft = fresh(editor, state.mode, Boolean(state.empty));
   if (own(state, 'animationBaseline')) draft.animationBaseline = state.animationBaseline;
   if (state.baseline) {
@@ -229,7 +228,7 @@ export const editorFrameDraftMethods = {
         const revision = this.frameDraftRevision;
         // Editor publishes prepared documents only after incremental validation
         // has covered this baseline too. Keep metadata checks on every restore.
-        if (kind === 'document') { if (!restore(this, {validateFrame: event.detail.prepared !== true, preservePreparedScene: event.detail.scenePrepared === true})) this._frameDraft = fresh(this, 'update'); }
+        if (kind === 'document') { if (!restore(this, {validateFrame: event.detail.prepared !== true})) this._frameDraft = fresh(this, 'update'); }
         else if (kind === 'seek' && !current(this)) this._frameDraft = fresh(this, 'update');
         if (['document', 'history', 'seek', 'edit'].includes(kind)) sync(this);
         if (this.frameDraftRevision !== revision && ['document', 'history', 'seek'].includes(kind)) this._emit('frame-draft');

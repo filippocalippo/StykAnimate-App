@@ -5,14 +5,19 @@ import {DrawingResources} from '../src/drawing-resources.mjs';
 import {DrawingHistory} from '../src/drawing-history.mjs';
 import {drawingMetadata,createDrawingFigure} from '../src/drawing-model.mjs';
 import {TILE_BYTES} from '../src/drawing-tiles.mjs';
-import {materializeDrawingTiles} from '../src/drawing-preparation.mjs';
+import {loadDrawingEngine} from '../src/engine/engine-drawing.mjs';
+import {drawingEngineOperation} from '../src/engine/engine-drawing-worker.mjs';
+
+// The pixel worker's `prepare-tiles`, answered by the drawing raster engine in this thread.
+await loadDrawingEngine();
+const materializeDrawingTiles=async tiles=>{let reply;await drawingEngineOperation({id:0,kind:'prepare-tiles',tiles},message=>{reply=message;});if(reply.error)throw new Error(reply.error);return reply.tiles;};
 
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve};};
 function workerFixture(){
   return{calls:[],async request(kind,payload,{transfer=[]}={}){
     assert.equal(kind,'prepare-tiles');const inputBytes=transfer.reduce((n,b)=>n+b.byteLength,0),data=structuredClone(payload,{transfer});
     this.calls.push({inputBytes,tiles:data.tiles.length});await this.before?.(this.calls.length);
-    const tiles=materializeDrawingTiles(data.tiles);this.outputBytes=Math.max(this.outputBytes??0,tiles.reduce((n,t)=>n+(t.pixels?.byteLength??0),0));
+    const tiles=await materializeDrawingTiles(data.tiles);this.outputBytes=Math.max(this.outputBytes??0,tiles.reduce((n,t)=>n+(t.pixels?.byteLength??0),0));
     return this.corrupt?.({tiles})??{tiles};
   },dispose(){}};
 }
@@ -24,11 +29,11 @@ async function fixture(options={}){
 const changes=(color=[127,5,249,1])=>Array.from({length:130},(_,tx)=>({tx,ty:-1,before:null,after:new Uint8ClampedArray(color)}));
 const command=(target,tiles)=>({kind:'drawing-pixels',celId:drawingMetadata(target.figure).celId,tiles});
 
-test('preparation reuses private full-tile allocations and expands only compact colors',()=>{
+test('preparation reuses private full-tile allocations and expands only compact colors',async()=>{
   const full=new Uint8ClampedArray(TILE_BYTES);for(let i=0;i<full.length;i+=4)full.set([127,5,249,0],i);
   full.set([31,63,95,1],(21*64+11)*4);
   const expected=full.slice(),uniform=new Uint8ClampedArray([17,23,41,255]),empty=new Uint8ClampedArray(TILE_BYTES);
-  const tiles=materializeDrawingTiles([{tx:-2,ty:3,pixels:full.buffer},{tx:1,ty:2,pixels:uniform.buffer},{tx:7,ty:8,pixels:empty.buffer},{tx:9,ty:10,pixels:null}]);
+  const tiles=await materializeDrawingTiles([{tx:-2,ty:3,pixels:full.buffer},{tx:1,ty:2,pixels:uniform.buffer},{tx:7,ty:8,pixels:empty.buffer},{tx:9,ty:10,pixels:null}]);
   assert.equal(tiles[0].pixels,full.buffer,'worker returns the existing private allocation');assert.deepEqual(new Uint8ClampedArray(tiles[0].pixels),expected);
   assert.deepEqual(tiles[0].alphaBounds,{x:11,y:21,width:1,height:1});
   assert.notEqual(tiles[1].pixels,uniform.buffer);assert.equal(tiles[1].pixels.byteLength,TILE_BYTES);assert.ok(new Uint8ClampedArray(tiles[1].pixels).every((v,i)=>v===uniform[i%4]));

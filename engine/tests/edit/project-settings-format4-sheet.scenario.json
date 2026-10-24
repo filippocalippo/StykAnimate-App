@@ -1,0 +1,29 @@
+{
+ "name": "project-settings-format4-sheet",
+ "document": "format4.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "setFPS",
+   25
+  ],
+  [
+   "updateProject",
+   {
+    "fps": 7
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

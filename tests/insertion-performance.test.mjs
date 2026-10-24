@@ -29,10 +29,12 @@ test('failed import preserves the document, IDs, clipboard and history',()=>{
 });
 
 test('copy retains immutable movie animation without reading it or building geometry',()=>{
-  const document=emptyDocument();document.keyframes=[createFrame([createObject(document.figure_types[0],1,50,60)])];
-  const clip=movieclipFigure(2,'Clip',document,{duration:1});
+  const source=emptyDocument();source.keyframes=[createFrame([createObject(source.figure_types[0],1,50,60)])];
+  const clip=movieclipFigure(2,'Clip',source,{duration:1});
   const e=new Editor({demo:false,layerTimeline:true}).load({...emptyDocument(),figure_types:[defaultFigure(),clip],
     keyframes:[createFrame([createObject(clip,7,100,100,{_stykMovieclip:presencePlayback()})])]});
+  // The engine opened the document: the movie's document is the one in the editor's report.
+  const document=e.report.figure_types[1]._styk.movieclip.document;
   e.select(7);e.evaluatedFrame;
   const frames=document.keyframes;let reads=0;
   Object.defineProperty(document,'keyframes',{enumerable:true,configurable:true,get(){reads++;return frames;}});

@@ -33,9 +33,11 @@ import {sticknodesShape,sticknodesCurve,sticknodesDrawables,sticknodesSpriteAsse
 const authoredTimelines = new WeakMap();
 const evaluationGenerations = new WeakMap();
 /** Changes whenever a document's evaluation caches are invalidated. */
-export const evaluationGeneration = report => evaluationGenerations.get(report) ?? 0;
-export function invalidateEvaluationCaches(report) {
-  evaluationGenerations.set(report, evaluationGeneration(report) + 1);
+export const evaluationGeneration = report => evaluationGenerations.get(report)?.evaluation ?? 0;
+/** Pose invalidations, distinguished from parameter edits that retain the geometry. */
+export const evaluationGeometryGeneration = report => evaluationGenerations.get(report)?.geometry ?? 0;
+export function invalidateEvaluationCaches(report, {retainGeometry = false} = {}) {
+  evaluationGenerations.set(report, {evaluation: evaluationGeneration(report) + 1, geometry: evaluationGeometryGeneration(report) + (retainGeometry ? 0 : 1)});
   invalidateMovieclipPresence(report);
   invalidateLayerSheet(report);
   authoredTimelines.delete(report);
@@ -43,7 +45,8 @@ export function invalidateEvaluationCaches(report) {
 }
 import {interpolateVfx, vfxStack, activeVfx} from '../vfx.mjs';
 
-import {withVfx,segmentVfx,releaseVfxSurface,hasDrawableVfx,configureVfxSoftwareResources} from '../vfx-canvas.mjs';
+import {withVfx,releaseVfxSurface,configureVfxSoftwareResources} from '../vfx-canvas.mjs';
+import {segmentVfx,hasDrawableVfx} from '../vfx-drawable.mjs';
 import {objectBounds} from '../renderer-geometry.mjs';
 export const TAU = Math.PI * 2;
 export const lerp = (a, b, t) => Number(a) + (Number(b) - Number(a)) * t;

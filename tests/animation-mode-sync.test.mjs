@@ -6,7 +6,6 @@ import {evaluatedFrame, timeline} from '../src/pivot/geometry.mjs';
 import {storedFrameReport} from '../src/pivot-frame-draft.mjs';
 import {validateAnimationDocument} from '../src/animation-channels.mjs';
 import {beginNativePropertyEdit, previewNativePropertyEdit, commitNativePropertyEdit} from '../src/native-property-edit.mjs';
-import {compilePlaybackPacket} from '../src/playback-worker.mjs';
 
 const target = {kind: 'figure', uid: 1};
 function fixture() {
@@ -39,7 +38,7 @@ test('Simple checkpoints authored poses and Discard restores both curves and nat
   editor.redo(); assert.equal(editor.evaluatedFrame.objects[0].root_x, 200); assert.equal(editor.frameDraft.dirty, false);
 });
 
-test('camera and Scene checkpoints discard together and stored worker playback uses the original curves', async () => {
+test('camera and Scene checkpoints discard together and stored playback uses the original curves', () => {
   const editor = fixture();
   editor.addAnimationKeys([{target: {kind:'camera'}, property:'x', tick:10, value:20},
     {target: {kind:'scene'}, property:'color', tick:10, value:0xff112233}]);
@@ -47,8 +46,6 @@ test('camera and Scene checkpoints discard together and stored worker playback u
   editor.setCameraValues({x:90}); editor.setSceneColor(0xff445566); edit(editor, 280);
   const stored = storedFrameReport(editor.report), frame = evaluatedFrame(stored, 2, 0, 10);
   assert.equal(frame.camera.x, 20); assert.equal(frame._stykBackgroundColor, 0xff112233);
-  const packet = await compilePlaybackPacket(editor.report, 10, {storedFrames:true});
-  assert.equal(packet.transforms[4], 200);
   editor.discardFrameDraft();
   assert.equal(editor.evaluatedFrame.camera.x, 20);
   assert.equal(editor.evaluatedFrame._stykBackgroundColor, 0xff112233);

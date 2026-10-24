@@ -1,0 +1,72 @@
+{
+ "name": "handle-edit-ik-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/stretch.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "editHandlePosition",
+   300,
+   230
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "editHandlePosition",
+   420,
+   300,
+   {
+    "bend": true
+   }
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "editHandlePosition",
+   690,
+   300
+  ],
+  [
+   "@seek",
+   1
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "beginHandleEditDrag",
+   {
+    "bend": true
+   }
+  ],
+  [
+   "editHandlePosition",
+   400,
+   280
+  ],
+  [
+   "commitHandleEditDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

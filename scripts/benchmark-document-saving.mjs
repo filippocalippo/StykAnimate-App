@@ -1,7 +1,7 @@
 /** Compare the production export worker with a committed control on identical
  * read-only projects. Excludes drawing publication, browser UI, IPC and disk. */
 import {readFile, writeFile, mkdir, readdir, mkdtemp} from 'node:fs/promises';
-import {execFileSync, spawn} from 'node:child_process';
+import {execFileSync, spawn, spawnSync} from 'node:child_process';
 import {Worker as NodeWorker, isMainThread, parentPort, workerData} from 'node:worker_threads';
 import {createHash} from 'node:crypto';
 import {fileURLToPath, pathToFileURL} from 'node:url';
@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const output = path.join(root, 'artifacts', 'document-saving-2026-10-01');
-const files = ['src/document-export.mjs', 'src/document-export-worker.mjs', 'src/native-container.mjs'];
+const files = ['src/document-export.mjs', 'src/document-export-worker.mjs'];
 const median = values => { const sorted = [...values].sort((a, b) => a - b), half = Math.floor(sorted.length / 2); return sorted.length % 2 ? sorted[half] : (sorted[half - 1] + sorted[half]) / 2; };
 
 if (!isMainThread) {
@@ -22,11 +22,11 @@ if (!isMainThread) {
   await import(workerData.target);
 } else if (process.argv.includes('--child')) {
   const args = JSON.parse(process.argv.at(-1));
-  const {decodeDocument, normalizeDecodedDocument} = await import(pathToFileURL(path.join(args.runtime, 'src/native-container.mjs')).href);
+  // The control commit's own container codec is in the runtime for its worker; the project is opened with this tree's.
+  const {openDocument} = await import(pathToFileURL(path.join(root, 'tests/support/native-files.mjs')).href);
   const {expandPoseSequencesSteps} = await import(pathToFileURL(path.join(args.runtime, 'src/pose-sequence-storage.mjs')).href);
   const {DocumentExporter} = await import(args.exporter);
-  const raw = await readFile(args.filename), decoded = await decodeDocument(raw, 'styk');
-  const report = normalizeDecodedDocument(decoded.document, 'styk'), seen = new Set();
+  const raw = await readFile(args.filename), report = await openDocument(raw, 'styk', {verifySource: false}), seen = new Set();
   function expand(document) {
     if (seen.has(document)) return; seen.add(document);
     for (const step of expandPoseSequencesSteps(document)) void step;
@@ -84,6 +84,8 @@ if (!isMainThread) {
     }
   }
   await capture('src'); await capture('vendor');
+  // A control from before the Rust container module brings its own JavaScript container codec.
+  if (spawnSync('git', ['cat-file', '-e', `${control}:src/native-container.mjs`], {cwd: root}).status === 0) files.push('src/native-container.mjs');
   const controlDir = path.join(runtime, 'control'); await mkdir(controlDir, {recursive: true});
   const controlHashes = {}, currentHashes = {}, adaptedControlHashes = {};
   for (const file of files) {

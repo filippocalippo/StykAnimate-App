@@ -24,7 +24,7 @@ try {
     window.pasteBench={heavy,group};
     return {frames:frames.length,heavy,parts:group.affectedSlots.length,definitions:e.report.figure_types.length};
   });
-  await page.waitForFunction(()=>!styk.state.editablePreparing);
+  await page.waitForFunction(()=>!styk.state.dirtyRender);
   const client=await page.context().newCDPSession(page);await client.send('Profiler.enable');await client.send('Profiler.start');
   const measured=await page.evaluate(async()=>{
     const e=styk.editor,calls=[],times={},tasks=[],raf=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
@@ -34,11 +34,11 @@ try {
     const observer=new PerformanceObserver(list=>tasks.push(...list.getEntries().map(x=>({start:x.startTime,ms:x.duration}))));observer.observe({type:'longtask'});
     const measure=(name,fn)=>{const start=performance.now(),result=fn();times[name]=performance.now()-start;return result;};
     const copied=measure('copy',()=>e.copySelection());
-    e.seek(Math.max(0,e.tick-1));await raf();while(styk.state.editablePreparing)await raf();
+    e.seek(Math.max(0,e.tick-1));await raf();
     const clean=()=>JSON.stringify(e.evaluatedFrame.objects.map(({runtime_segments,_movieclipSample,...o})=>o));
     const before=clean(),history=e._undo.length,start=performance.now();
     const pasted=measure('paste',()=>e.pasteSelection()).map(o=>o.unique_id);
-    await raf();while(styk.state.editablePreparing)await raf();await styk.state.renderer.device?.queue.onSubmittedWorkDone();
+    await raf();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     times.pasteToPresent=performance.now()-start;
     const after=clean(),commands=e._undo.length-history,bytes=e._undo.at(-1)?.bytes;
     measure('undo',()=>e.undo());const undo=clean()===before;await raf();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {normalizeMsaaCount, previewMsaaLevels, viewportBackingSize, updatePreviewQuality, normalizePlaybackQuality, playbackQualityIndex} from '../src/preview-quality.mjs';
+import {previewMsaaLevels, viewportBackingSize, updatePreviewQuality, normalizePlaybackQuality, playbackQualityIndex} from '../src/preview-quality.mjs';
 import {normalizeEditorSettings} from '../src/settings.mjs';
 
 test('saved playback quality defaults to normal and rejects unknown values', () => {
@@ -15,12 +15,8 @@ test('saved playback quality defaults to normal and rejects unknown values', () 
   assert.equal(normalizeEditorSettings().playbackQuality,'normal');
 });
 
-test('all preview and caller sample counts select a supported WebGPU mode', () => {
-  for (const count of [...previewMsaaLevels, -1, 0, 1, 2, 3, 4, 8, NaN, Infinity, undefined]) {
-    assert.ok([1, 4].includes(normalizeMsaaCount(count)));
-  }
-  assert.equal(normalizeMsaaCount(2), 1);
-  assert.equal(normalizeMsaaCount(), 4);
+test('every preview quality level selects one or four samples', () => {
+  for (const count of previewMsaaLevels) assert.ok([1, 4].includes(count));
 });
 
 test('large and high-DPI viewports fit the device without changing CSS geometry', () => {

@@ -94,19 +94,3 @@ export function paintBackground(p) {
   const raw=s=>((Math.round(s.opacity*255)<<24)|(s.color[0]<<16)|(s.color[1]<<8)|s.color[2])>>>0;
   return {kind:p.type==='solid'?2:p.type==='radial'?4:3,paint:normalizePaint(p),color:raw(p.stops[0]),color_a:raw(p.stops[0]),color_b:raw(p.stops.at(-1)),x1:0,y1:.5,x2:1,y2:.5};
 }
-
-/** Native SVG gradients where supported; seamless embedded paint for angular/diamond. */
-export async function svgPaintDefinition(p, start, end, id, mapColor = c => c, bounds) {
-  const g=paintGeometry(p,start,end), stops=p.stops.map(s=>`<stop offset="${s.offset}" stop-color="${hexColor(mapColor(s.color))}" stop-opacity="${s.opacity}"/>`).join('');
-  if(p.type==='linear')return `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}">${stops}</linearGradient>`;
-  if(p.type==='radial')return `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${g.cx}" cy="${g.cy}" r="${g.length/2}">${stops}</radialGradient>`;
-  bounds ??= {x:g.cx-g.length,y:g.cy-g.length,width:g.length*2,height:g.length*2};
-  const scale=Math.min(4,2048/Math.max(bounds.width,bounds.height)),width=Math.max(1,Math.ceil(bounds.width*scale)),height=Math.max(1,Math.ceil(bounds.height*scale));
-  const canvas=typeof OffscreenCanvas!=='undefined'?new OffscreenCanvas(width,height):Object.assign(document.createElement('canvas'),{width,height});
-  const ctx=canvas.getContext('2d');ctx.scale(width/bounds.width,height/bounds.height);ctx.translate(-bounds.x,-bounds.y);
-  ctx.fillStyle=canvasPaint(ctx,p,start,end,mapColor,bounds);ctx.fillRect(bounds.x,bounds.y,bounds.width,bounds.height);
-  const blob=canvas.convertToBlob?await canvas.convertToBlob({type:'image/png'}):await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
-  const bytes=new Uint8Array(await blob.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
-  const href='data:image/png;base64,'+btoa(binary);
-  return `<pattern id="${id}" patternUnits="userSpaceOnUse" x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" viewBox="0 0 ${bounds.width} ${bounds.height}"><image width="${bounds.width}" height="${bounds.height}" preserveAspectRatio="none" href="${href}"/></pattern>`;
-}

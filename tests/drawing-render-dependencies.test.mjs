@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createDrawingFigure} from '../src/drawing-model.mjs';
 import {drawingRasterInputs,publishedDrawingRasterInputs,drawingRasterKey,changedDrawingRaster,sameDrawingRaster} from '../src/drawing-render-dependencies.mjs';
-import {DrawingGpu} from '../src/drawing-gpu.mjs';
 
 test('camera drawing dependencies detect publication and resource lifetime changes without geometry changes',()=>{
   const fig=createDrawingFigure(),items=[{fig}],owner={surfaceVersion:1};
@@ -139,16 +138,4 @@ test('published dependency snapshots normalize an absent pixel stamp without inv
   assert.equal(changedDrawingRaster(snapshot),false);
   fixture.entry.revision=0;
   assert.equal(changedDrawingRaster(snapshot),true);
-});
-
-test('camera GPU revision follows refinement and provisional strokes and stays stable once complete',()=>{
-  const key=Object.getOwnPropertyDescriptor(DrawingGpu.prototype,'presentationKey').get;
-  const gpu={presentationOwner:1,stats:{uploads:3,reductions:2,strokeDispatches:0,evictions:0},sessions:new Set()};
-  const stable=key.call(gpu);assert.equal(key.call(gpu),stable);
-  gpu.stats.uploads++;assert.notEqual(key.call(gpu),stable);
-  const uploaded=key.call(gpu);gpu.stats.reductions++;assert.notEqual(key.call(gpu),uploaded);
-  const ready=key.call(gpu);gpu.sessions.add({});gpu.stats.strokeDispatches++;assert.notEqual(key.call(gpu),ready);
-  const painted=key.call(gpu);gpu.sessions.clear();gpu.stats.evictions++;gpu.sessions.add({});assert.notEqual(key.call(gpu),painted);
-  assert.equal(key.call(gpu),key.call(gpu));
-  gpu.presentationOwner++;assert.notEqual(key.call(gpu),ready);
 });

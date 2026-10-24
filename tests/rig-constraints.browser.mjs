@@ -36,7 +36,7 @@ try{
   await page.screenshot({path:`${output}/smart-stretch-setup.png`});
   await page.locator('#builder-done').click();await page.locator('#builder-exit-update').click();await settle();await page.locator('[data-tool="select"]').click();await page.evaluate(()=>{styk.fit();styk.editor.select(1,0);});await settle();
   assert.equal(await page.locator('[data-section="rig-controls"]').count(),0);
-  const screen=async(point)=>page.evaluate(async point=>{const {worldToScreen}=await import('/src/renderer.mjs'),{editor,state}=styk,q=worldToScreen(point,{report:editor.report,frame:editor.frame,view:state.view}),r=document.querySelector('#viewport').getBoundingClientRect();return {x:r.x+q.x,y:r.y+q.y};},point);
+  const screen=async(point)=>page.evaluate(async point=>{const {worldToScreen}=await import('/src/renderer-geometry.mjs'),{editor,state}=styk,q=worldToScreen(point,{report:editor.report,frame:editor.frame,view:state.view}),r=document.querySelector('#viewport').getBoundingClientRect();return {x:r.x+q.x,y:r.y+q.y};},point);
   const joint=()=>page.evaluate(()=>{const s=styk.editor.geometry.objects.get(0).segments[0];return {start:s.start,end:s.end,length:s.length};});
   const dragTo=async(target,ctrl=false)=>{const a=await screen((await joint()).end),b=await screen(target);await page.mouse.move(a.x,a.y);if(ctrl)await page.keyboard.down('Control');await page.mouse.down();await page.mouse.move(b.x,b.y,{steps:8});await page.mouse.up();if(ctrl)await page.keyboard.up('Control');await settle();};
   const first=await joint();await dragTo({x:first.start.x+260,y:first.start.y-100});assert.ok(Math.abs((await joint()).length-180)<.01);

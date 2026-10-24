@@ -16,7 +16,7 @@ try{
     window.pix=store=>{const b=store.bounds;return {bounds:b?{...b}:null,pixels:b?[...store.readRect(b.x,b.y,b.width,b.height)]:[]};};
     window.pixEq=(a,b)=>Boolean(a&&b&&a.bounds&&b.bounds&&a.bounds.x===b.bounds.x&&a.bounds.y===b.bounds.y&&a.bounds.width===b.bounds.width&&a.bounds.height===b.bounds.height&&a.pixels.length===b.pixels.length&&a.pixels.every((n,i)=>n===b.pixels[i]));
     window.celSnap=async figure=>{const {decodeTileBlob}=await import('/src/drawing-tile-codec.mjs'),{TileStore}=await import('/src/drawing-tiles.mjs'),store=new TileStore();for(const t of await decodeTileBlob(figure.image_assets[0].styk_tiles))store.set(t.tx,t.ty,t.pixels);return pix(store);};
-    window.brush=async(x,y)=>{const {DrawingStroke}=await import('/src/drawing-pixels.mjs'),e=styk.editor,target=e.prepareDrawingCel({pixelsPerUnit:1,world:{x:32,y:32}}),surface=await styk.drawing.owner.surface(target.figure);const s=new DrawingStroke(surface.store,{size:10,pressureSize:false});s.sample({x,y});s.sample({x:x+24,y:y+16});e.commitDrawingPixels(target,s.finish());return target.figure;};
+    window.brush=async(x,y)=>{const {DrawingStroke}=await import('/tests/support/sketch-stroke.mjs'),e=styk.editor,target=e.prepareDrawingCel({pixelsPerUnit:1,world:{x:32,y:32}}),surface=await styk.drawing.owner.surface(target.figure);const s=new DrawingStroke(surface.store,{size:10,pressureSize:false});s.sample({x,y});s.sample({x:x+24,y:y+16});e.commitDrawingPixels(target,s.finish());return target.figure;};
     // Migrated v1 cels leave their original v1 definition in figure_types; only
     // v2 figures carry tile blobs, so snapshots and comparisons are v2-scoped.
     window.snapAll=()=>{const out={};for(const f of styk.editor.report.figure_types.filter(f=>f._styk?.drawing?.version===2)){const e=styk.drawing.owner.entries.get(f._styk.drawing.celId);if(e?.store)out[f._styk.drawing.celId]={snap:pix(e.store),bounds:f._styk.drawing.bounds?{...f._styk.drawing.bounds}:null};}return out;};
@@ -40,7 +40,7 @@ try{
     const e=styk.editor,id=e.drawingTarget().id;
     e.extendDrawing([id],29);e.seek(10);e.drawingKey([id],10,{blank:true});
     window.figB=await brush(-120,-80);
-    const {createImageFigure}=await import('/src/media-authoring.mjs'),{encodeDrawingPNG}=await import('/src/drawing-png.mjs'),{createFrame,createObject}=await import('/src/demo.mjs'),{drawingSheetPlan,drawingSheetPublish}=await import('/src/editor-layer-sheet.mjs'),{migrateDrawingFigure}=await import('/src/drawing-model.mjs'),{DrawingStroke}=await import('/src/drawing-pixels.mjs');
+    const {createImageFigure}=await import('/src/media-authoring.mjs'),{encodeDrawingPNG}=await import('/src/drawing-png.mjs'),{createFrame,createObject}=await import('/src/demo.mjs'),{drawingSheetPlan,drawingSheetPublish}=await import('/src/editor-layer-sheet.mjs'),{migrateDrawingFigure}=await import('/src/drawing-model.mjs'),{DrawingStroke}=await import('/tests/support/sketch-stroke.mjs');
     const pixels=new Uint8ClampedArray(96*64*4);for(let y=0;y<64;y++)for(let x=0;x<96;x++)if((x*7+y*11)%13<3)pixels.set([x%256,y%256,(x+y)%256,255],(y*96+x)*4);
     const v1=createImageFigure({width:96,height:64,dataUrl:await encodeDrawingPNG(pixels,96,64),figureTypeId:1000,name:'Legacy'});
     v1.image_assets[0].display_width=96;v1.image_assets[0].display_height=64;

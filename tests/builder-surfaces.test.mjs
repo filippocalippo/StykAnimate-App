@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
 import {buildRotatingCube} from './helpers/rotating-cube.mjs';
 import {buildGeometry,buildGeometryAsync} from '../src/pivot/geometry.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
 import {pickFigureFill} from '../src/builder-fill.mjs';
