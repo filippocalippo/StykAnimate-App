@@ -91,10 +91,10 @@ Bug reports, ideas, translations and pull requests are welcome. Read [CONTRIBUTI
 
 ## License
 
-StykAnimate is free software: you can redistribute it and/or modify it under the terms of the [GNU General Public License](LICENSE), version 3 or (at your option) any later version. Bundled third-party components keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+StykAnimate is free software: you can redistribute it and/or modify it under the terms of the [CC0](LICENSE), version 3 or (at your option) any later version. Bundled third-party components keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Trademarks
 
-The StykAnimate name and logo identify the official project. The GPL lets you fork and redistribute the code, but please give modified versions a different name and icon so people can tell them apart from official releases.
+The StykAnimate name and logo identify the official project. The CC0 lets you fork and redistribute the code, but please give modified versions a different name and icon so people can tell them apart from official releases.
 
 StykAnimate is an independent project. It is not affiliated with or endorsed by Pivot Animator or Stick Nodes; those names are used only to describe file compatibility.
