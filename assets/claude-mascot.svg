@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <filter id="subtle-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.15" />
+    </filter>
+  </defs>
+
+  <!-- Claude Mascot Vector -->
+  <g id="claude-mascot" filter="url(#subtle-shadow)">
+    <!-- Left Arm -->
+    <rect x="70" y="235" width="45" height="32" rx="4" fill="#D97757" />
+
+    <!-- Right Arm -->
+    <rect x="397" y="235" width="45" height="32" rx="4" fill="#D97757" />
+
+    <!-- Main Torso / Head Block -->
+    <rect x="115" y="160" width="282" height="175" rx="6" fill="#D97757" />
+
+    <!-- Left Eye -->
+    <rect x="180" y="205" width="24" height="42" rx="3" fill="#FFFFFF" />
+
+    <!-- Right Eye -->
+    <rect x="308" y="205" width="24" height="42" rx="3" fill="#FFFFFF" />
+
+    <!-- Legs (Left pair) -->
+    <rect x="150" y="335" width="24" height="42" rx="3" fill="#D97757" />
+    <rect x="195" y="335" width="24" height="42" rx="3" fill="#D97757" />
+
+    <!-- Legs (Right pair) -->
+    <rect x="293" y="335" width="24" height="42" rx="3" fill="#D97757" />
+    <rect x="338" y="335" width="24" height="42" rx="3" fill="#D97757" />
+  </g>
+</svg>

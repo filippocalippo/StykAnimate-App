@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="icon-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2D2825" />
+      <stop offset="100%" stop-color="#191615" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- App Icon Background -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#icon-grad)" stroke="#4A3F39" stroke-width="4" />
+
+  <!-- Centered Mascot Emblem -->
+  <g transform="translate(86, 86)">
+    <!-- Mascot graphics -->
+    <rect x="35" y="150" width="30" height="22" rx="3" fill="#D97757" />
+    <rect x="275" y="150" width="30" height="22" rx="3" fill="#D97757" />
+    <rect x="65" y="100" width="210" height="120" rx="6" fill="#D97757" />
+    <rect x="110" y="130" width="18" height="30" rx="2" fill="#FFFFFF" />
+    <rect x="212" y="130" width="18" height="30" rx="2" fill="#FFFFFF" />
+    <rect x="90" y="220" width="18" height="30" rx="2" fill="#D97757" />
+    <rect x="122" y="220" width="18" height="30" rx="2" fill="#D97757" />
+    <rect x="200" y="220" width="18" height="30" rx="2" fill="#D97757" />
+    <rect x="232" y="220" width="18" height="30" rx="2" fill="#D97757" />
+  </g>
+</svg>

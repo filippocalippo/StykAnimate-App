@@ -1,0 +1,186 @@
+/**
+ * StykAnimate Claude Mascot Figure Definition
+ * Editable 2D character rig featuring block geometry,
+ * the signature terracotta palette (#D97757), dual arms,
+ * and 4 independent IK-ready legs.
+ */
+
+export function createClaudeFigureData() {
+  const terracotta = [217, 119, 87];
+  const white = [255, 255, 255];
+
+  const segments = [
+    // 1: Torso / Main Head-Body Block (parent 0 = root)
+    {
+      segment_id: 1,
+      parent_id: 0,
+      name: 'Torso',
+      length: 65,
+      angle_rad: -Math.PI / 2,
+      thickness: 72,
+      bend_rad: 0,
+      primitive_code: 0,
+      aux_code: 0,
+      flags: 0,
+      segment_type: 'line',
+      segment_kind: 'line',
+      color_rgb: [...terracotta],
+      transparency: 0,
+      visible: true,
+      z_order: 1
+    },
+    // 2: Left Arm
+    {
+      segment_id: 2,
+      parent_id: 1,
+      name: 'Left arm',
+      length: 42,
+      angle_rad: Math.PI,
+      thickness: 16,
+      bend_rad: 0,
+      primitive_code: 0,
+      aux_code: 0,
+      flags: 0,
+      segment_type: 'line',
+      segment_kind: 'line',
+      color_rgb: [...terracotta],
+      transparency: 0,
+      visible: true,
+      z_order: 2
+    },
+    // 3: Right Arm
+    {
+      segment_id: 3,
+      parent_id: 1,
+      name: 'Right arm',
+      length: 42,
+      angle_rad: 0,
+      thickness: 16,
+      bend_rad: 0,
+      primitive_code: 0,
+      aux_code: 0,
+      flags: 0,
+      segment_type: 'line',
+      segment_kind: 'line',
+      color_rgb: [...terracotta],
+      transparency: 0,
+      visible: true,
+      z_order: 3
+    },
+    // 4: Left Leg (Outer)
+    {
+      segment_id: 4,
+      parent_id: 0,
+      name: 'Left leg outer',
+      length: 36,
+      angle_rad: Math.PI / 2,
+      thickness: 14,
+      bend_rad: 0,
+      primitive_code: 0,
+      aux_code: 0,
+      flags: 0,
+      segment_type: 'line',
+      segment_kind: 'line',
+      color_rgb: [...terracotta],
+      transparency: 0,
+      visible: true,
+      z_order: 4
+    },
+    // 5: Left Leg (Inner)
+    {
+      segment_id: 5,
+      parent_id: 0,
+      name: 'Left leg inner',
+      length: 36,
+      angle_rad: Math.PI / 2,
+      thickness: 14,
+      bend_rad: 0,
+      primitive_code: 0,
+      aux_code: 0,
+      flags: 0,
+      segment_type: 'line',
+      segment_kind: 'line',
+      color_rgb: [...terracotta],
+      transparency: 0,
+      visible: true,
+      z_order: 5
+    },
+    // 6: Right Leg (Inner)
+    {
+      segment_id: 6,
+      parent_id: 0,
+      name: 'Right leg inner',
+      length: 36,
+      angle_rad: Math.PI / 2,
+      thickness: 14,
+      bend_rad: 0,
+      primitive_code: 0,
+      aux_code: 0,
+      flags: 0,
+      segment_type: 'line',
+      segment_kind: 'line',
+      color_rgb: [...terracotta],
+      transparency: 0,
+      visible: true,
+      z_order: 6
+    },
+    // 7: Right Leg (Outer)
+    {
+      segment_id: 7,
+      parent_id: 0,
+      name: 'Right leg outer',
+      length: 36,
+      angle_rad: Math.PI / 2,
+      thickness: 14,
+      bend_rad: 0,
+      primitive_code: 0,
+      aux_code: 0,
+      flags: 0,
+      segment_type: 'line',
+      segment_kind: 'line',
+      color_rgb: [...terracotta],
+      transparency: 0,
+      visible: true,
+      z_order: 7
+    }
+  ];
+
+  const figure = {
+    figure_type_id: 2,
+    name: 'Claude',
+    segment_count: segments.length,
+    segments,
+    polyfills: [],
+    image_assets: [],
+    text_assets: []
+  };
+
+  const object = {
+    object_slot: 0,
+    unique_id: 2,
+    figure_type_id: 2,
+    root_x: 480,
+    root_y: 320,
+    scale: 1,
+    color_override_raw: 0,
+    field28: 0,
+    angles: [-Math.PI / 2, Math.PI, 0, Math.PI / 2, Math.PI / 2, Math.PI / 2, Math.PI / 2],
+    len_flag: 0,
+    lengths: [],
+    bend_flag: 0,
+    bends: [],
+    join: null,
+    _stykIK: {
+      "4": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0 },
+      "5": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0 },
+      "6": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0 },
+      "7": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0 }
+    },
+    color_override_rgb: [0, 0, 0],
+    color_override_mix: 0,
+    transparency: 0,
+    opacity: 1
+  };
+
+  return { figure, object };
+}
