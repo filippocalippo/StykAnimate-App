@@ -1,1421 +1,1421 @@
 {
   "app.add": {
     "locations": [
-      "src/app.mjs:4425"
+      "src/app.mjs:4426"
     ],
     "context": "return showCommandMenu(addMenuItems({ draw: Boolean(drawingController?.active) }), anchor, { label: interfaceText(\"app.add\"), labelKey: \"app.add\", placement: \"r"
   },
   "app.addedToAnimate": {
     "locations": [
-      "src/app.mjs:4537"
+      "src/app.mjs:4538"
     ],
     "context": "toast(interfaceText(\"app.addedToAnimate\", {name: figure.name}), \"app.addedToAnimate\", {name: figure.name});"
   },
   "app.addOrUnlockAnotherFigureToJoinTo": {
     "locations": [
-      "src/app.mjs:4591"
+      "src/app.mjs:4592"
     ],
     "context": "if (!targets.size) {toast(interfaceText(\"app.addOrUnlockAnotherFigureToJoinTo\"), \"app.addOrUnlockAnotherFigureToJoinTo\", {}); return;}"
   },
   "app.addToLibrary": {
     "locations": [
-      "src/app.mjs:4633"
+      "src/app.mjs:4637"
     ],
     "context": "messageTuple([\"add-to-library\", \"plus\", interfaceText(\"app.addToLibrary\")], {2: {key: \"app.addToLibrary\", params: {}}}),"
   },
   "app.allInThisProject": {
     "locations": [
-      "src/app.mjs:4416"
+      "src/app.mjs:4417"
     ],
     "context": "{ label: figures.length > ADD_MENU_PROJECT_ROWS ? interfaceText('app.allLengthInThisProject', {length: figures.length}) : interfaceText(\"app.allInThisProject\"),"
   },
   "app.allLengthInThisProject": {
     "locations": [
-      "src/app.mjs:4416"
+      "src/app.mjs:4417"
     ],
     "context": "{ label: figures.length > ADD_MENU_PROJECT_ROWS ? interfaceText('app.allLengthInThisProject', {length: figures.length}) : interfaceText(\"app.allInThisProject\"),"
   },
   "app.animations": {
     "locations": [
-      "src/app.mjs:4419"
+      "src/app.mjs:4420"
     ],
     "context": "{ label: interfaceText(\"app.examples\"), labelKey: \"app.examples\", icon: \"layers\", submenu: [{ command: \"rig-examples\", icon: \"person\", label: interfaceText(\"app"
   },
   "app.appearanceCopied": {
     "locations": [
-      "src/app.mjs:4807"
+      "src/app.mjs:4811"
     ],
     "context": "if (state.builderAppearance) notify(interfaceText(\"app.appearanceCopied\"), \"app.appearanceCopied\", {});"
   },
   "app.appearancePasted": {
     "locations": [
-      "src/app.mjs:4811"
+      "src/app.mjs:4815"
     ],
     "context": "if (pasteBuilderAppearance(editor, state.builderAppearance, {branch:usesBuilderBranch(event)})) notify(interfaceText(\"app.appearancePasted\"), \"app.appearancePas"
   },
   "app.applyingLayerChanges": {
     "locations": [
-      "src/app.mjs:6201"
+      "src/app.mjs:6206"
     ],
     "context": "localizedText($(\"layer-progress-label\"), (latest.phase === \"staging\" ? \"app.applyingLayerChanges\" : \"app.preservingAnimation\"), (latest.phase === \"staging\" ? {}"
   },
   "app.audio": {
     "locations": [
-      "src/app.mjs:4266"
+      "src/app.mjs:4267"
     ],
     "context": "{ command: \"toggle-audio\", icon: \"music\", label: interfaceText(\"app.audio\"), labelKey: \"app.audio\", checked: audio?.getAttribute(\"aria-expanded\") === \"true\", hi"
   },
   "app.autoKeyOff": {
     "locations": [
-      "src/app.mjs:5026"
+      "src/app.mjs:5030"
     ],
     "context": "status(state.settings.autoKey ? {messageKey: \"app.autoKeyOnEditsAddKeyframesAtThe\", messageParams: {}} : {messageKey: \"app.autoKeyOff\", messageParams: {}});"
   },
   "app.autoKeyOnEditsAddKeyframesAtThe": {
     "locations": [
-      "src/app.mjs:5026"
+      "src/app.mjs:5030"
     ],
     "context": "status(state.settings.autoKey ? {messageKey: \"app.autoKeyOnEditsAddKeyframesAtThe\", messageParams: {}} : {messageKey: \"app.autoKeyOff\", messageParams: {}});"
   },
   "app.autoKeyWorksInTheAdvancedTimeline": {
     "locations": [
-      "src/app.mjs:5024"
+      "src/app.mjs:5028"
     ],
     "context": "if (state.settings.timelineMode === \"simple\") return toast(interfaceText(\"app.autoKeyWorksInTheAdvancedTimeline\"), \"app.autoKeyWorksInTheAdvancedTimeline\", {});"
   },
   "app.branchDuplicated": {
     "locations": [
-      "src/app.mjs:2633"
+      "src/app.mjs:2634"
     ],
     "context": "status(duplicate.branch ? {messageKey: \"app.branchDuplicated\", messageParams: {}} : {messageKey: \"app.segmentDuplicated\", messageParams: {}});"
   },
   "app.branchSelectedCopyOrEditTheCompleteBranch": {
     "locations": [
-      "src/app.mjs:3342"
+      "src/app.mjs:3343"
     ],
     "context": "notify(interfaceText(\"app.branchSelectedCopyOrEditTheCompleteBranch\"), \"app.branchSelectedCopyOrEditTheCompleteBranch\", {});"
   },
   "app.breakdown": {
     "locations": [
-      "src/app.mjs:578"
+      "src/app.mjs:579"
     ],
     "context": "const type = tweenerControls?.button?.getAttribute(\"aria-label\")?.replace(/ tweener$/, \"\") ?? interfaceText(\"app.breakdown\");"
   },
   "app.camera": {
     "locations": [
-      "src/app.mjs:2657"
+      "src/app.mjs:2658"
     ],
     "context": "label: interfaceText(\"app.camera\", {value: camera.kind === \"position\" ? {messageKey: \"app.move\"} : camera.kind === \"rotation\" ? {messageKey:\"app.rotate\"} : {mes"
   },
   "app.cancel": {
     "locations": [
-      "src/app.mjs:6220",
-      "src/app.mjs:6299"
+      "src/app.mjs:6225",
+      "src/app.mjs:6304"
     ],
     "context": "`<p id=\"layer-progress-label\" data-i18n=\"app.preservingAnimation\">${messageHTML(\"app.preservingAnimation\", {})}</p><progress id=\"layer-progress\" style=\"width:10"
   },
   "app.cancelChain": {
     "locations": [
-      "src/app.mjs:4471"
+      "src/app.mjs:4472"
     ],
     "context": "if(construction?.active) {showCommandMenu([messageTuple([\"chain-finish\",\"check\",interfaceText(\"app.finishChain\"),\"Enter\"], {2: {key: \"app.finishChain\", params: "
   },
   "app.cancelJoining": {
     "locations": [
-      "src/app.mjs:4564"
+      "src/app.mjs:4565"
     ],
     "context": "state.figureJoin ? interfaceText(\"app.cancelJoining\") : action?.kind === 'unjoin' ? interfaceText(\"app.unjoinFigure\") : interfaceText(\"app.joinFigure\"),"
   },
   "app.chooseAFigureJointToBeginAPolygon": {
     "locations": [
-      "src/app.mjs:2440"
+      "src/app.mjs:2441"
     ],
     "context": "toast(interfaceText(\"app.chooseAFigureJointToBeginAPolygon\"), \"app.chooseAFigureJointToBeginAPolygon\", {});"
   },
   "app.chooseAJointOnTheSourceFigure": {
     "locations": [
-      "src/app.mjs:2600",
-      "src/app.mjs:2602"
+      "src/app.mjs:2601",
+      "src/app.mjs:2603"
     ],
     "context": "? interfaceText(\"app.chooseAJointOnTheSourceFigure\")"
   },
   "app.chooseAJointOnThisFigureEscapeCancels": {
     "locations": [
-      "src/app.mjs:2711"
+      "src/app.mjs:2712"
     ],
     "context": "if(!target||target.g.obj.unique_id!==pending.uid){toast(interfaceText(\"app.chooseAJointOnThisFigureEscapeCancels\"), \"app.chooseAJointOnThisFigureEscapeCancels\","
   },
   "app.chooseAnAttachmentJoint": {
     "locations": [
-      "src/app.mjs:561"
+      "src/app.mjs:562"
     ],
     "context": "if (state.spritePlacement) return { key: \"sprite\", icon: \"image\", title: interfaceText(\"app.chooseAnAttachmentJoint\"), titleKey: \"app.chooseAnAttachmentJoint\", "
   },
   "app.chooseAnAttachmentJointEscToCancel": {
     "locations": [
-      "src/app.mjs:3789"
+      "src/app.mjs:3790"
     ],
     "context": "localizedText($(\"viewport-hint\"), \"app.chooseAnAttachmentJointEscToCancel\", {});"
   },
   "app.chooseAnUnlockedFigureJointToAttachThe": {
     "locations": [
-      "src/app.mjs:2601",
-      "src/app.mjs:2602"
+      "src/app.mjs:2602",
+      "src/app.mjs:2603"
     ],
     "context": ": interfaceText(\"app.chooseAnUnlockedFigureJointToAttachThe\"),"
   },
   "app.chooseAParentJoint": {
     "locations": [
-      "src/app.mjs:562"
+      "src/app.mjs:563"
     ],
     "context": "if (state.duplicatePlacement) return { key: \"duplicate\", icon: \"duplicate\", title: interfaceText(\"app.chooseAParentJoint\"), titleKey: \"app.chooseAParentJoint\", "
   },
   "app.chooseAParentJointForTheCopyEsc": {
     "locations": [
-      "src/app.mjs:3741"
+      "src/app.mjs:3742"
     ],
     "context": "localizedText($(\"viewport-hint\"), \"app.chooseAParentJointForTheCopyEsc\", {});"
   },
   "app.chooseAtLeastThreeDifferentJoints": {
     "locations": [
-      "src/app.mjs:2476"
+      "src/app.mjs:2477"
     ],
     "context": "toast(interfaceText(\"app.chooseAtLeastThreeDifferentJoints\"), \"app.chooseAtLeastThreeDifferentJoints\", {});"
   },
   "app.clickAJointOnTheParentFigure": {
     "locations": [
-      "src/app.mjs:2724"
+      "src/app.mjs:2725"
     ],
     "context": "toast(interfaceText(\"app.clickAJointOnTheParentFigure\"), \"app.clickAJointOnTheParentFigure\", {});"
   },
   "app.clickASmartStretchJoint": {
     "locations": [
-      "src/app.mjs:565"
+      "src/app.mjs:566"
     ],
     "context": "...(pick.key === \"driver\" ? { title: interfaceText(\"app.clickASmartStretchJoint\"), titleKey: \"app.clickASmartStretchJoint\", message: interfaceText(\"app.onThisFi"
   },
   "app.clickJointsToTrace": {
     "locations": [
-      "src/app.mjs:576"
+      "src/app.mjs:577"
     ],
     "context": "if (state.tool === \"polygon\") return { key: \"polygon\", icon: \"polygon\", title: interfaceText(\"app.clickJointsToTrace\"), titleKey: \"app.clickJointsToTrace\", mess"
   },
   "app.clickJointsToTraceShiftClickAnEnclosed": {
     "locations": [
-      "src/app.mjs:2363"
+      "src/app.mjs:2364"
     ],
     "context": "interfaceText(\"app.clickJointsToTraceShiftClickAnEnclosed\"),"
   },
   "app.clickTheJoint": {
     "locations": [
-      "src/app.mjs:568"
+      "src/app.mjs:569"
     ],
     "context": "if (state.tool === \"attach\" && state.figureJoin) return { key: \"join\", icon: \"join-figure\", title: interfaceText(\"app.clickTheJoint\"), titleKey: \"app.clickTheJo"
   },
   "app.clickTheNewAnchor": {
     "locations": [
-      "src/app.mjs:566"
+      "src/app.mjs:567"
     ],
     "context": ": pick.key ? { title: interfaceText(\"app.clickTheNewAnchor\"), titleKey: \"app.clickTheNewAnchor\", message: interfaceText(\"app.onThisFigure\"), messageKey: \"app.on"
   },
   "app.clickTheParentJointEscToCancel": {
     "locations": [
-      "src/app.mjs:2364"
+      "src/app.mjs:2365"
     ],
     "context": "attach: interfaceText(\"app.clickTheParentJointEscToCancel\"),"
   },
   "app.clickTheSecondJoint": {
     "locations": [
-      "src/app.mjs:566"
+      "src/app.mjs:567"
     ],
     "context": ": pick.key ? { title: interfaceText(\"app.clickTheNewAnchor\"), titleKey: \"app.clickTheNewAnchor\", message: interfaceText(\"app.onThisFigure\"), messageKey: \"app.on"
   },
   "app.clickToAddPoints": {
     "locations": [
-      "src/app.mjs:569"
+      "src/app.mjs:570"
     ],
     "context": "if (state.tool === \"chain\") return { key: \"chain\", icon: \"builder-chain\", title: interfaceText(\"app.clickToAddPoints\"), titleKey: \"app.clickToAddPoints\", messag"
   },
   "app.clickToExtendEnterToFinishBackspaceTo": {
     "locations": [
-      "src/app.mjs:2359"
+      "src/app.mjs:2360"
     ],
     "context": "chain: interfaceText(\"app.clickToExtendEnterToFinishBackspaceTo\"),"
   },
   "app.clipboardOperationCancelled": {
     "locations": [
-      "src/app.mjs:6320"
+      "src/app.mjs:6325"
     ],
     "context": "status({messageKey: \"app.clipboardOperationCancelled\", messageParams: {}});"
   },
   "app.closeAProjectToOpenAnother": {
     "locations": [
-      "src/app.mjs:3681"
+      "src/app.mjs:3682"
     ],
     "context": "if (reason === \"limit\") notify(interfaceText(\"app.closeAProjectToOpenAnother\", {count: projects.tabs.limit}), \"app.closeAProjectToOpenAnother\", {count: projects"
   },
   "app.compatibilityMode": {
     "locations": [
-      "src/app.mjs:2021",
-      "src/app.mjs:6805"
+      "src/app.mjs:2022",
+      "src/app.mjs:6810"
     ],
     "context": "if (state.renderer.stats?.backend === \"Canvas 2D fallback\") localizedText($(\"renderer-label\"), \"app.compatibilityMode\");"
   },
   "app.connectedFiguresSelected": {
     "locations": [
-      "src/app.mjs:3339"
+      "src/app.mjs:3340"
     ],
     "context": "status({messageKey: \"app.connectedFiguresSelected\", messageParams: {size: editor.selectedUids.size}});"
   },
   "app.connectorAddedDragItsMiddleJointToSlide": {
     "locations": [
-      "src/app.mjs:2715",
-      "src/app.mjs:4543"
+      "src/app.mjs:2716",
+      "src/app.mjs:4544"
     ],
     "context": "state.rigAnchorPick=null;syncModeMessage();toast(pending.key==='driver'?interfaceText(\"app.stretchDriverConnected\"):pending.key?interfaceText(\"app.connectorAnch"
   },
   "app.connectorAnchorUpdated": {
     "locations": [
-      "src/app.mjs:2715"
+      "src/app.mjs:2716"
     ],
     "context": "state.rigAnchorPick=null;syncModeMessage();toast(pending.key==='driver'?interfaceText(\"app.stretchDriverConnected\"):pending.key?interfaceText(\"app.connectorAnch"
   },
   "app.copyAnAppearanceFirst": {
     "locations": [
-      "src/app.mjs:5607"
+      "src/app.mjs:5611"
     ],
     "context": "appearance: () => Boolean(state.builderAppearance) || interfaceText(\"app.copyAnAppearanceFirst\"),"
   },
   "app.copyingFrames": {
     "locations": [
-      "src/app.mjs:6268",
-      "src/app.mjs:6300"
+      "src/app.mjs:6273",
+      "src/app.mjs:6305"
     ],
     "context": "copy: interfaceText(\"app.copyingFrames\"),"
   },
   "app.createText": {
     "locations": [
-      "src/app.mjs:4344"
+      "src/app.mjs:4345"
     ],
     "context": "messageTuple([\"add-text\", \"text\", interfaceText(\"app.createText\"), \"T\"], {2: {key: \"app.createText\", params: {}}}),"
   },
   "app.cuttingFrames": {
     "locations": [
-      "src/app.mjs:6269",
-      "src/app.mjs:6300"
+      "src/app.mjs:6274",
+      "src/app.mjs:6305"
     ],
     "context": "cut: interfaceText(\"app.cuttingFrames\"),"
   },
   "app.decodingPivotFile": {
     "locations": [
-      "src/app.mjs:3949"
+      "src/app.mjs:3950"
     ],
     "context": "status({messageKey: \"app.decodingPivotFile\", messageParams: {}}, false, true);"
   },
   "app.disconnectSegment": {
     "locations": [
-      "src/app.mjs:4509"
+      "src/app.mjs:4510"
     ],
     "context": "...(joint ? [messageTuple([\"disconnect-segment\", \"cut\", interfaceText(\"app.disconnectSegment\"), \"\", !canDisconnectSegment()], {2: {key: \"app.disconnectSegment\","
   },
   "app.downloadStartedTheProjectStaysEditedUntilA": {
     "locations": [
-      "src/app.mjs:4048"
+      "src/app.mjs:4049"
     ],
     "context": "} else status(downloaded ? {messageKey: \"app.downloadStartedTheProjectStaysEditedUntilA\", messageParams: {}} : {messageKey: \"app.saveCancelled\", messageParams: "
   },
   "app.drag": {
     "locations": [
-      "src/app.mjs:551"
+      "src/app.mjs:552"
     ],
     "context": "{ id: \"rig-mode\", kind: \"select\", label: interfaceText(\"app.drag\"), labelKey: \"app.drag\", showLabel: true, description: interfaceText(\"app.rigEditMode\"), descri"
   },
   "app.dragAcrossTheCanvas": {
     "locations": [
-      "src/app.mjs:579"
+      "src/app.mjs:580"
     ],
     "context": "return { key: \"tweener\", icon: \"tween\", title: interfaceText(\"app.dragAcrossTheCanvas\"), titleKey: \"app.dragAcrossTheCanvas\", message: interfaceText(\"app.toTwee"
   },
   "app.dragAnywhereToDrawStartOnAJoint": {
     "locations": [
-      "src/app.mjs:2360",
-      "src/app.mjs:2361"
+      "src/app.mjs:2361",
+      "src/app.mjs:2362"
     ],
     "context": "line: interfaceText(\"app.dragAnywhereToDrawStartOnAJoint\"),"
   },
   "app.dragFromAJoint": {
     "locations": [
-      "src/app.mjs:573",
-      "src/app.mjs:575"
+      "src/app.mjs:574",
+      "src/app.mjs:576"
     ],
     "context": "return { key: `build-line-${started}`, icon: \"line\", title: started ? interfaceText(\"app.dragFromAJoint\") : interfaceText(\"app.dragOnTheCanvas\"), titleKey: (sta"
   },
   "app.dragHorizontallyToTweenShiftForPrecisionEsc": {
     "locations": [
-      "src/app.mjs:2365"
+      "src/app.mjs:2366"
     ],
     "context": "tweener: interfaceText(\"app.dragHorizontallyToTweenShiftForPrecisionEsc\"),"
   },
   "app.dragOnTheCanvas": {
     "locations": [
-      "src/app.mjs:573",
-      "src/app.mjs:575"
+      "src/app.mjs:574",
+      "src/app.mjs:576"
     ],
     "context": "return { key: `build-line-${started}`, icon: \"line\", title: started ? interfaceText(\"app.dragFromAJoint\") : interfaceText(\"app.dragOnTheCanvas\"), titleKey: (sta"
   },
   "app.dragOrScrollToPanCtrlScrollTo": {
     "locations": [
-      "src/app.mjs:2358"
+      "src/app.mjs:2359"
     ],
     "context": ": interfaceText(\"app.dragOrScrollToPanCtrlScrollTo\"),"
   },
   "app.dragToPanScrollToZoom": {
     "locations": [
-      "src/app.mjs:2357"
+      "src/app.mjs:2358"
     ],
     "context": "? interfaceText(\"app.dragToPanScrollToZoom\")"
   },
   "app.dragToPoseCtrlDragToStretchShift": {
     "locations": [
-      "src/app.mjs:2354"
+      "src/app.mjs:2355"
     ],
     "context": "pose: interfaceText(\"app.dragToPoseCtrlDragToStretchShift\"),"
   },
   "app.dragToSelectCtrlShiftClickToToggle": {
     "locations": [
-      "src/app.mjs:2216",
-      "src/app.mjs:2353"
+      "src/app.mjs:2217",
+      "src/app.mjs:2354"
     ],
     "context": "localizedText($('viewport-hint'), editor.object?.join ? 'app.joinedDragHint' : 'app.dragToSelectCtrlShiftClickToToggle');"
   },
   "app.edited": {
     "locations": [
-      "src/app.mjs:2191",
+      "src/app.mjs:2192",
       "src/shell/project-switcher.mjs:49"
     ],
     "context": "if (dirty) return {key: 'app.edited'};"
   },
   "app.editFigureJointsChangesUpdateEveryInstance": {
     "locations": [
-      "src/app.mjs:2355"
+      "src/app.mjs:2356"
     ],
     "context": "rig: interfaceText(\"app.editFigureJointsChangesUpdateEveryInstance\"),"
   },
   "app.editInBuild": {
     "locations": [
-      "src/app.mjs:4515"
+      "src/app.mjs:4516"
     ],
     "context": "messageTuple([\"edit-in-build-mode\", \"nodes\", interfaceText(\"app.editInBuild\"), \"\", selection().size !== 1], {2: {key: \"app.editInBuild\", params: {}}}),"
   },
   "app.editorReadyFileServiceUnavailable": {
     "locations": [
-      "src/app.mjs:6702"
+      "src/app.mjs:6707"
     ],
     "context": "status({messageKey: \"app.editorReadyFileServiceUnavailable\", messageParams: {}}, true);"
   },
   "app.editText": {
     "locations": [
-      "src/app.mjs:4179"
+      "src/app.mjs:4180"
     ],
     "context": "label: interfaceText(\"app.editText\"), labelKey: \"app.editText\","
   },
   "app.editTogether": {
     "locations": [
-      "src/app.mjs:4267"
+      "src/app.mjs:4268"
     ],
     "context": "{ command: \"toggle-range-edit\", icon: \"frame\", label: interfaceText(\"app.editTogether\"), labelKey: \"app.editTogether\", checked: range?.getAttribute(\"aria-presse"
   },
   "app.ellipse": {
     "locations": [
-      "src/app.mjs:4430",
-      "src/app.mjs:4432"
+      "src/app.mjs:4431",
+      "src/app.mjs:4433"
     ],
     "context": "items: [messageTuple([\"lasso\", \"lasso\", interfaceText(\"app.lasso\")], {2: {key: \"app.lasso\", params: {}}}), messageTuple([\"rect\", \"sel-rect\", interfaceText(\"app."
   },
   "app.enterFinishesBackspaceRemovesTheLast": {
     "locations": [
-      "src/app.mjs:569"
+      "src/app.mjs:570"
     ],
     "context": "if (state.tool === \"chain\") return { key: \"chain\", icon: \"builder-chain\", title: interfaceText(\"app.clickToAddPoints\"), titleKey: \"app.clickToAddPoints\", messag"
   },
   "app.esc": {
     "locations": [
-      "src/app.mjs:4471"
+      "src/app.mjs:4472"
     ],
     "context": "if(construction?.active) {showCommandMenu([messageTuple([\"chain-finish\",\"check\",interfaceText(\"app.finishChain\"),\"Enter\"], {2: {key: \"app.finishChain\", params: "
   },
   "app.exactValues": {
     "locations": [
-      "src/app.mjs:4511"
+      "src/app.mjs:4512"
     ],
     "context": "...(joint ? [messageTuple([\"segment-values\", \"sliders\", interfaceText(\"app.exactValues\"), \"I\"], {2: {key: \"app.exactValues\", params: {}}})] : []),"
   },
   "app.examples": {
     "locations": [
-      "src/app.mjs:4419"
+      "src/app.mjs:4420"
     ],
     "context": "{ label: interfaceText(\"app.examples\"), labelKey: \"app.examples\", icon: \"layers\", submenu: [{ command: \"rig-examples\", icon: \"person\", label: interfaceText(\"app"
   },
   "app.figure": {
     "locations": [
-      "src/app.mjs:3450",
-      "src/app.mjs:4500"
+      "src/app.mjs:3451",
+      "src/app.mjs:4501"
     ],
     "context": "const importedName = result.filename || name || {messageKey: \"app.figure\"};"
   },
   "app.figuresAttached": {
     "locations": [
-      "src/app.mjs:2730"
+      "src/app.mjs:2731"
     ],
     "context": "status({messageKey: \"app.figuresAttached\", messageParams: {}});"
   },
   "app.figureUnjoined": {
     "locations": [
-      "src/app.mjs:4586"
+      "src/app.mjs:4587"
     ],
     "context": "status({messageKey: \"app.figureUnjoined\", messageParams: {}});"
   },
   "app.fillAdded": {
     "locations": [
-      "src/app.mjs:2428"
+      "src/app.mjs:2429"
     ],
     "context": "state.bucketPreview=null;status({messageKey: \"app.fillAdded\", messageParams: {}});return;"
   },
   "app.finishChain": {
     "locations": [
-      "src/app.mjs:4471"
+      "src/app.mjs:4472"
     ],
     "context": "if(construction?.active) {showCommandMenu([messageTuple([\"chain-finish\",\"check\",interfaceText(\"app.finishChain\"),\"Enter\"], {2: {key: \"app.finishChain\", params: "
   },
   "app.finishOrCancelTheExportBeforePlaying": {
     "locations": [
-      "src/app.mjs:2074"
+      "src/app.mjs:2075"
     ],
     "context": "if ([...exportJobs].some(job => job.raster)) return notify(interfaceText(\"app.finishOrCancelTheExportBeforePlaying\"), \"app.finishOrCancelTheExportBeforePlaying\""
   },
   "app.finishOrCancelThePolygonFirst": {
     "locations": [
-      "src/app.mjs:2297",
-      "src/app.mjs:5214",
-      "src/app.mjs:5635"
+      "src/app.mjs:2298",
+      "src/app.mjs:5218",
+      "src/app.mjs:5639"
     ],
     "context": "localizedAttribute(input, \"title\", \"app.finishOrCancelThePolygonFirst\", {});"
   },
   "app.finishTheFigureOrReturnToAnimateTo": {
     "locations": [
-      "src/app.mjs:855"
+      "src/app.mjs:856"
     ],
     "context": "toast(interfaceText(\"app.finishTheFigureOrReturnToAnimateTo\"), \"app.finishTheFigureOrReturnToAnimateTo\", {});"
   },
   "app.finishTheFigureOrReturnToAnimateTo2": {
     "locations": [
-      "src/app.mjs:4383",
-      "src/app.mjs:5247",
-      "src/app.mjs:6580",
-      "src/app.mjs:6596"
+      "src/app.mjs:4384",
+      "src/app.mjs:5251",
+      "src/app.mjs:6585",
+      "src/app.mjs:6601"
     ],
     "context": "if (builderMode?.active) return toast(interfaceText(\"app.finishTheFigureOrReturnToAnimateTo2\"), \"app.finishTheFigureOrReturnToAnimateTo2\", {});"
   },
   "app.finishTheFigureOrReturnToAnimateTo3": {
     "locations": [
-      "src/app.mjs:4403",
-      "src/app.mjs:5254"
+      "src/app.mjs:4404",
+      "src/app.mjs:5258"
     ],
     "context": "run: () => { if (builderMode?.active) return toast(interfaceText(\"app.finishTheFigureOrReturnToAnimateTo3\"), \"app.finishTheFigureOrReturnToAnimateTo3\", {}); ope"
   },
   "app.finishTheFigureOrReturnToAnimateTo4": {
     "locations": [
-      "src/app.mjs:4548"
+      "src/app.mjs:4549"
     ],
     "context": "if (builderMode?.active) return toast(interfaceText(\"app.finishTheFigureOrReturnToAnimateTo4\"), \"app.finishTheFigureOrReturnToAnimateTo4\", {});"
   },
   "app.finishTheFigureOrReturnToAnimateTo5": {
     "locations": [
-      "src/app.mjs:4601"
+      "src/app.mjs:4602"
     ],
     "context": "if (builderMode?.active) return toast(interfaceText(\"app.finishTheFigureOrReturnToAnimateTo5\"), \"app.finishTheFigureOrReturnToAnimateTo5\", {});"
   },
   "app.finishTheFigureOrReturnToAnimateTo6": {
     "locations": [
-      "src/app.mjs:4642"
+      "src/app.mjs:4646"
     ],
     "context": "if (builderMode?.active) return toast(interfaceText(\"app.finishTheFigureOrReturnToAnimateTo6\"), \"app.finishTheFigureOrReturnToAnimateTo6\", {});"
   },
   "app.finishTheFigureOrReturnToAnimateTo7": {
     "locations": [
-      "src/app.mjs:4749"
+      "src/app.mjs:4753"
     ],
     "context": "if (builderMode?.active) return toast(interfaceText(\"app.finishTheFigureOrReturnToAnimateTo7\"), \"app.finishTheFigureOrReturnToAnimateTo7\", {});"
   },
   "app.finishTheFigureOrReturnToAnimateTo8": {
     "locations": [
-      "src/app.mjs:4754"
+      "src/app.mjs:4758"
     ],
     "context": "if (builderMode?.active) return toast(interfaceText(\"app.finishTheFigureOrReturnToAnimateTo8\"), \"app.finishTheFigureOrReturnToAnimateTo8\", {});"
   },
   "app.fitCanvas": {
     "locations": [
-      "src/app.mjs:4451",
-      "src/app.mjs:4498"
+      "src/app.mjs:4452",
+      "src/app.mjs:4499"
     ],
     "context": "messageTuple([\"zoom-reset\", \"frame\", interfaceText(\"app.fitCanvas\"), \"Shift 1\"], {2: {key: \"app.fitCanvas\", params: {}}}),"
   },
   "app.fitSelection": {
     "locations": [
-      "src/app.mjs:4452",
-      "src/app.mjs:4634"
+      "src/app.mjs:4453",
+      "src/app.mjs:4638"
     ],
     "context": "messageTuple([\"zoom-selection\", \"center\", interfaceText(\"app.fitSelection\"), \"Shift 2\", !editor.object], {2: {key: \"app.fitSelection\", params: {}}}),"
   },
   "app.flipHorizontally": {
     "locations": [
-      "src/app.mjs:4506"
+      "src/app.mjs:4507"
     ],
     "context": "messageTuple([\"mirror\", \"flip\", interfaceText(\"app.flipHorizontally\"), \"Shift H\"], {2: {key: \"app.flipHorizontally\", params: {}}}),"
   },
   "app.flipVertically": {
     "locations": [
-      "src/app.mjs:4507"
+      "src/app.mjs:4508"
     ],
     "context": "messageTuple([\"mirror-vertical\", \"flip-vertical\", interfaceText(\"app.flipVertically\"), \"Shift V\"], {2: {key: \"app.flipVertically\", params: {}}}),"
   },
   "app.followWithCamera": {
     "locations": [
-      "src/app.mjs:4510"
+      "src/app.mjs:4511"
     ],
     "context": "messageTuple([\"camera-follow\", \"camera\", interfaceText(\"app.followWithCamera\"), \"\", Boolean(builderMode?.active)], {2: {key: \"app.followWithCamera\", params: {}}"
   },
   "app.forTheCopy": {
     "locations": [
-      "src/app.mjs:562"
+      "src/app.mjs:563"
     ],
     "context": "if (state.duplicatePlacement) return { key: \"duplicate\", icon: \"duplicate\", title: interfaceText(\"app.chooseAParentJoint\"), titleKey: \"app.chooseAParentJoint\", "
   },
   "app.forTheImage": {
     "locations": [
-      "src/app.mjs:561"
+      "src/app.mjs:562"
     ],
     "context": "if (state.spritePlacement) return { key: \"sprite\", icon: \"image\", title: interfaceText(\"app.chooseAnAttachmentJoint\"), titleKey: \"app.chooseAnAttachmentJoint\", "
   },
   "app.fps": {
     "locations": [
-      "src/app.mjs:2051",
-      "src/app.mjs:2095"
+      "src/app.mjs:2052",
+      "src/app.mjs:2096"
     ],
     "context": "localizedText(badge, (sample.fps === null ? 'app.fps' : 'app.valueFps'), (sample.fps === null ? {} : {value: sample.fps.toFixed(1)}));"
   },
   "app.frameCopied": {
     "locations": [
-      "src/app.mjs:6316"
+      "src/app.mjs:6321"
     ],
     "context": "notify(interfaceText(\"app.frameCopied\", {count}), \"app.frameCopied\", {count});"
   },
   "app.frameDragToReposeValue1RightDragToReshape": {
     "locations": [
-      "src/app.mjs:1304"
+      "src/app.mjs:1305"
     ],
     "context": "localizedAttribute(overlay, \"title\", (editor.motionPathFalloff() ? 'app.frameDragToReshapeMotionpathfalloffradiusFramesOfTheArc' : 'app.frameDragToReposeValue1R"
   },
   "app.frameDragToReshapeMotionpathfalloffradiusFramesOfTheArc": {
     "locations": [
-      "src/app.mjs:1304"
+      "src/app.mjs:1305"
     ],
     "context": "localizedAttribute(overlay, \"title\", (editor.motionPathFalloff() ? 'app.frameDragToReshapeMotionpathfalloffradiusFramesOfTheArc' : 'app.frameDragToReposeValue1R"
   },
   "app.image": {
     "locations": [
-      "src/app.mjs:4409"
+      "src/app.mjs:4410"
     ],
     "context": "{ command: \"import-sprite\", icon: \"image\", label: interfaceText(\"app.image\"), labelKey: \"app.image\", shortcut: \"\" },"
   },
   "app.importBackgroundImage": {
     "locations": [
-      "src/app.mjs:4343"
+      "src/app.mjs:4344"
     ],
     "context": "messageTuple([\"import-background\", \"frame\", interfaceText(\"app.importBackgroundImage\"), \"\"], {2: {key: \"app.importBackgroundImage\", params: {}}}),"
   },
   "app.imported": {
     "locations": [
-      "src/app.mjs:3451"
+      "src/app.mjs:3452"
     ],
     "context": "notify(interfaceText(\"app.imported\", {value: importedName}), \"app.imported\", {value: importedName});"
   },
   "app.imported2": {
     "locations": [
-      "src/app.mjs:3828"
+      "src/app.mjs:3829"
     ],
     "context": "notify(interfaceText(\"app.imported2\", {name: file.name}), \"app.imported2\", {name: file.name});"
   },
   "app.importFigures": {
     "locations": [
-      "src/app.mjs:4341",
-      "src/app.mjs:4410"
+      "src/app.mjs:4342",
+      "src/app.mjs:4411"
     ],
     "context": "messageTuple([\"import\", \"import\", interfaceText(\"app.importFigures\"), \"\"], {2: {key: \"app.importFigures\", params: {}}}),"
   },
   "app.importing": {
     "locations": [
-      "src/app.mjs:3869"
+      "src/app.mjs:3870"
     ],
     "context": "status({messageKey: \"app.importing\", messageParams: {}}, false, true);"
   },
   "app.importing2": {
     "locations": [
-      "src/app.mjs:3838"
+      "src/app.mjs:3839"
     ],
     "context": "const onProgress=p=>{if(isCurrent())status(`${p.phase || interfaceText(\"app.importing2\")}…`,false,true);};"
   },
   "app.importingImage": {
     "locations": [
-      "src/app.mjs:3813"
+      "src/app.mjs:3814"
     ],
     "context": "status({messageKey: \"app.importingImage\", messageParams: {}}, false, true);"
   },
   "app.importSpriteImage": {
     "locations": [
-      "src/app.mjs:4342"
+      "src/app.mjs:4343"
     ],
     "context": "messageTuple([\"import-sprite\", \"frame\", interfaceText(\"app.importSpriteImage\"), \"\"], {2: {key: \"app.importSpriteImage\", params: {}}}),"
   },
   "app.inThisProject": {
     "locations": [
-      "src/app.mjs:4415"
+      "src/app.mjs:4416"
     ],
     "context": "...(project.length ? [{ label: interfaceText(\"app.inThisProject\"), labelKey: \"app.inThisProject\" }, ...project] : []),"
   },
   "app.invertSelection": {
     "locations": [
-      "src/app.mjs:4626"
+      "src/app.mjs:4630"
     ],
     "context": "messageTuple([\"select-invert\", \"cursor\", interfaceText(\"app.invertSelection\")], {2: {key: \"app.invertSelection\", params: {}}}),"
   },
   "app.joinedDragHint": {
     "locations": [
-      "src/app.mjs:2216"
+      "src/app.mjs:2217"
     ],
     "context": "localizedText($('viewport-hint'), editor.object?.join ? 'app.joinedDragHint' : 'app.dragToSelectCtrlShiftClickToToggle');"
   },
   "app.joinFigure": {
     "locations": [
-      "src/app.mjs:4564"
+      "src/app.mjs:4565"
     ],
     "context": "state.figureJoin ? interfaceText(\"app.cancelJoining\") : action?.kind === 'unjoin' ? interfaceText(\"app.unjoinFigure\") : interfaceText(\"app.joinFigure\"),"
   },
   "app.joints": {
     "locations": [
-      "src/app.mjs:2415"
+      "src/app.mjs:2416"
     ],
     "context": "localizedText($(\"polygon-count\"), \"app.joints\", {length: state.polygon.handles.length});"
   },
   "app.keyboardShortcuts": {
     "locations": [
-      "src/app.mjs:4348"
+      "src/app.mjs:4349"
     ],
     "context": "messageTuple([\"help\", \"help\", interfaceText(\"app.keyboardShortcuts\"), \"?\"], {2: {key: \"app.keyboardShortcuts\", params: {}}}),"
   },
   "app.lasso": {
     "locations": [
-      "src/app.mjs:4430"
+      "src/app.mjs:4431"
     ],
     "context": "items: [messageTuple([\"lasso\", \"lasso\", interfaceText(\"app.lasso\")], {2: {key: \"app.lasso\", params: {}}}), messageTuple([\"rect\", \"sel-rect\", interfaceText(\"app."
   },
   "app.layerChangeCancelled": {
     "locations": [
-      "src/app.mjs:6238"
+      "src/app.mjs:6243"
     ],
     "context": "status({messageKey: \"app.layerChangeCancelled\", messageParams: {}});"
   },
   "app.library": {
     "locations": [
-      "src/app.mjs:4281"
+      "src/app.mjs:4282"
     ],
     "context": "row(\"library\", interfaceText(\"app.library\"), \"library\"), row(\"structure\", interfaceText(\"app.structure\"), \"structure\"), row(\"timeline\", interfaceText(\"app.timel"
   },
   "app.line": {
     "locations": [
-      "src/app.mjs:4432"
+      "src/app.mjs:4433"
     ],
     "context": "items: [messageTuple([\"line\", \"line\", interfaceText(\"app.line\")], {2: {key: \"app.line\", params: {}}}), messageTuple([\"rect\", \"shape-rect\", interfaceText(\"app.re"
   },
   "app.loadingThePivotConverterFirstUseOnly": {
     "locations": [
-      "src/app.mjs:6693"
+      "src/app.mjs:6698"
     ],
     "context": "if (state === \"loading\") status(stage === \"runtime\" ? {messageKey: \"app.loadingThePivotConverterFirstUseOnly\", messageParams: {}} : {messageKey: \"app.startingTh"
   },
   "app.manageCopies": {
     "locations": [
-      "src/app.mjs:6069"
+      "src/app.mjs:6073"
     ],
     "context": "...(browserRecovery || records.length > 1 ? [{ label: interfaceText(\"app.manageCopies\"), labelKey: \"app.manageCopies\", id: \"manage-recovery\", dismiss: false, ru"
   },
   "app.matchNextPose": {
     "locations": [
-      "src/app.mjs:4630"
+      "src/app.mjs:4634"
     ],
     "context": "messageTuple([\"locate-next\", \"match-next\", interfaceText(\"app.matchNextPose\"), \"Shift L\"], {2: {key: \"app.matchNextPose\", params: {}}}),"
   },
   "app.matchPreviousPose": {
     "locations": [
-      "src/app.mjs:4629"
+      "src/app.mjs:4633"
     ],
     "context": "messageTuple([\"locate-previous\", \"match-prev\", interfaceText(\"app.matchPreviousPose\"), \"L\"], {2: {key: \"app.matchPreviousPose\", params: {}}}),"
   },
   "app.moreFigureActions": {
     "locations": [
-      "src/app.mjs:4512"
+      "src/app.mjs:4513"
     ],
     "context": "messageTuple([\"selection-more\", \"more\", interfaceText(\"app.moreFigureActions\")], {2: {key: \"app.moreFigureActions\", params: {}}}),"
   },
   "app.moreFigureActions2": {
     "locations": [
-      "src/app.mjs:4635"
+      "src/app.mjs:4639"
     ],
     "context": "], lastMenuAnchor || viewport, { label: interfaceText(\"app.moreFigureActions2\"), labelKey: \"app.moreFigureActions2\" }),"
   },
   "app.motionPathsOff": {
     "locations": [
-      "src/app.mjs:5018"
+      "src/app.mjs:5022"
     ],
     "context": "status(state.motionPaths ? {messageKey: \"app.motionPathsOn\", messageParams: {}} : {messageKey: \"app.motionPathsOff\", messageParams: {}});"
   },
   "app.motionPathsOn": {
     "locations": [
-      "src/app.mjs:5018"
+      "src/app.mjs:5022"
     ],
     "context": "status(state.motionPaths ? {messageKey: \"app.motionPathsOn\", messageParams: {}} : {messageKey: \"app.motionPathsOff\", messageParams: {}});"
   },
   "app.move": {
     "locations": [
-      "src/app.mjs:2657"
+      "src/app.mjs:2658"
     ],
     "context": "label: interfaceText(\"app.camera\", {value: camera.kind === \"position\" ? {messageKey: \"app.move\"} : camera.kind === \"rotation\" ? {messageKey:\"app.rotate\"} : {mes"
   },
   "app.moveJoint": {
     "locations": [
-      "src/app.mjs:552"
+      "src/app.mjs:553"
     ],
     "context": "options: [{ value: \"move\", label: interfaceText(\"app.moveJoint\"), labelKey: \"app.moveJoint\" }, { value: \"rotate\", label: interfaceText(\"app.rotateBranch\"), labe"
   },
   "app.movieclip": {
     "locations": [
-      "src/app.mjs:4411"
+      "src/app.mjs:4412"
     ],
     "context": "messageTuple([\"movieclip-new\", \"frame\", interfaceText(\"app.movieclip\")], {2: {key: \"app.movieclip\", params: {}}}),"
   },
   "app.movieclipFromFrames": {
     "locations": [
-      "src/app.mjs:4413"
+      "src/app.mjs:4414"
     ],
     "context": "messageTuple([\"movieclip-range\", \"frame\", interfaceText(\"app.movieclipFromFrames\")], {2: {key: \"app.movieclipFromFrames\", params: {}}}),"
   },
   "app.movieclipFromSelection": {
     "locations": [
-      "src/app.mjs:4412"
+      "src/app.mjs:4413"
     ],
     "context": "messageTuple([\"movieclip-create\", \"frame\", interfaceText(\"app.movieclipFromSelection\"), \"\", !editor.object], {2: {key: \"app.movieclipFromSelection\", params: {}}"
   },
   "app.ms": {
     "locations": [
-      "src/app.mjs:2020"
+      "src/app.mjs:2021"
     ],
     "context": "localizedText($(\"render-time\"), \"app.ms\", {value:{format:'number',value:elapsed,options:{minimumFractionDigits:1,maximumFractionDigits:1}}});"
   },
   "app.newAnimation": {
     "locations": [
-      "src/app.mjs:4332"
+      "src/app.mjs:4333"
     ],
     "context": "messageTuple([\"new\", \"plus\", interfaceText(\"app.newAnimation\"), \"Ctrl N\"], {2: {key: \"app.newAnimation\", params: {}}}),"
   },
   "app.newDrawingLayer": {
     "locations": [
-      "src/app.mjs:4405"
+      "src/app.mjs:4406"
     ],
     "context": "...(draw ? [{ label: interfaceText(\"app.newDrawingLayer\"), labelKey: \"app.newDrawingLayer\", icon: \"brush\", run: () => drawingController?.run(() => drawingContro"
   },
   "app.noClosedRegionHereCloseTheOutlineAt": {
     "locations": [
-      "src/app.mjs:2424"
+      "src/app.mjs:2425"
     ],
     "context": "if(!region)return toast(interfaceText(\"app.noClosedRegionHereCloseTheOutlineAt\"), \"app.noClosedRegionHereCloseTheOutlineAt\", {});"
   },
   "app.notNow": {
     "locations": [
-      "src/app.mjs:6068"
+      "src/app.mjs:6072"
     ],
     "context": "{ label: interfaceText(\"app.notNow\"), labelKey: \"app.notNow\", id: \"dismiss-recovery\" },"
   },
   "app.nudgeCamera": {
     "locations": [
-      "src/app.mjs:5369"
+      "src/app.mjs:5373"
     ],
     "context": "editor.beginCameraDrag({ indices: rangeFrames(), label: interfaceText(\"app.nudgeCamera\"), labelKey: \"app.nudgeCamera\" });"
   },
   "app.onThisFigure": {
     "locations": [
-      "src/app.mjs:565",
-      "src/app.mjs:566"
+      "src/app.mjs:566",
+      "src/app.mjs:567"
     ],
     "context": "...(pick.key === \"driver\" ? { title: interfaceText(\"app.clickASmartStretchJoint\"), titleKey: \"app.clickASmartStretchJoint\", message: interfaceText(\"app.onThisFi"
   },
   "app.opened": {
     "locations": [
-      "src/app.mjs:3515"
+      "src/app.mjs:3516"
     ],
     "context": "{messageKey: \"app.opened\", messageParams: {value: result.filename || name || editor.name, value2: ms !== undefined ? result.timings?.cache_hit ? {messageKey:'ap"
   },
   "app.openedTimingCached": {
     "locations": [
-      "src/app.mjs:3515"
+      "src/app.mjs:3516"
     ],
     "context": "{messageKey: \"app.opened\", messageParams: {value: result.filename || name || editor.name, value2: ms !== undefined ? result.timings?.cache_hit ? {messageKey:'ap"
   },
   "app.openingFile": {
     "locations": [
-      "src/app.mjs:3907"
+      "src/app.mjs:3908"
     ],
     "context": "status({messageKey: \"app.openingFile\", messageParams: {}}, false, true);"
   },
   "app.openProject": {
     "locations": [
-      "src/app.mjs:4333"
+      "src/app.mjs:4334"
     ],
     "context": "messageTuple([\"open\", \"folder\", interfaceText(\"app.openProject\"), \"Ctrl O\"], {2: {key: \"app.openProject\", params: {}}}),"
   },
   "app.openRecent": {
     "locations": [
-      "src/app.mjs:4334"
+      "src/app.mjs:4335"
     ],
     "context": "messageTuple([\"open-recent\", \"clock\", interfaceText(\"app.openRecent\"), \"\", !desktop?.listRecentFiles], {2: {key: \"app.openRecent\", params: {}}}),"
   },
   "app.openStykanimatePivotOrStickNodesProjectsFigures": {
     "locations": [
-      "src/app.mjs:2244"
+      "src/app.mjs:2245"
     ],
     "context": ": `<p class=\"property-note\" style=\"padding:0 15px\" data-i18n=\"app.openStykanimatePivotOrStickNodesProjectsFigures\">${messageHTML(\"app.openStykanimatePivotOrStic"
   },
   "app.panels": {
     "locations": [
-      "src/app.mjs:4280"
+      "src/app.mjs:4281"
     ],
     "context": "return { label: interfaceText(\"app.panels\"), labelKey: \"app.panels\", icon: \"layout\", submenu: [row(\"properties\", interfaceText(\"app.properties\"), \"inspector\"), "
   },
   "app.pasteAs": {
     "locations": [
-      "src/app.mjs:4503"
+      "src/app.mjs:4504"
     ],
     "context": "{ label: interfaceText(\"app.pasteAs\"), labelKey: \"app.pasteAs\", icon: \"clipboard\", submenu: pasteKinds },"
   },
   "app.pasteInPlace": {
     "locations": [
-      "src/app.mjs:4485"
+      "src/app.mjs:4486"
     ],
     "context": "messageTuple([\"paste-in-place\", \"clipboard\", interfaceText(\"app.pasteInPlace\"), \"Ctrl Shift V\"], {2: {key: \"app.pasteInPlace\", params: {}}}),"
   },
   "app.pasteInstance": {
     "locations": [
-      "src/app.mjs:4486"
+      "src/app.mjs:4487"
     ],
     "context": "messageTuple([\"paste-instance\", \"clipboard\", interfaceText(\"app.pasteInstance\")], {2: {key: \"app.pasteInstance\", params: {}}}),"
   },
   "app.pasteUniqueCopy": {
     "locations": [
-      "src/app.mjs:4487"
+      "src/app.mjs:4488"
     ],
     "context": "messageTuple([\"paste-unique\", \"duplicate\", interfaceText(\"app.pasteUniqueCopy\")], {2: {key: \"app.pasteUniqueCopy\", params: {}}}),"
   },
   "app.pastingFrames": {
     "locations": [
-      "src/app.mjs:6270",
-      "src/app.mjs:6300"
+      "src/app.mjs:6275",
+      "src/app.mjs:6305"
     ],
     "context": "paste: interfaceText(\"app.pastingFrames\"),"
   },
   "app.performance": {
     "locations": [
-      "src/app.mjs:4349"
+      "src/app.mjs:4350"
     ],
     "context": "messageTuple([\"performance\", \"activity\", interfaceText(\"app.performance\"), \"\"], {2: {key: \"app.performance\", params: {}}}),"
   },
   "app.piv": {
     "locations": [
-      "src/app.mjs:2241"
+      "src/app.mjs:2242"
     ],
     "context": "`<button class=\"sample-item\" data-sample=\"${esc(s.path)}\">${icon(s.kind === \"stk\" ? \"person\" : \"file\")}<span>${esc(s.name)}</span><small>${esc(s.kind?.toUpperCa"
   },
   "app.playing": {
     "locations": [
-      "src/app.mjs:1858"
+      "src/app.mjs:1859"
     ],
     "context": "status({messageKey: \"app.playing\", messageParams: {}});"
   },
   "app.playing2": {
     "locations": [
-      "src/app.mjs:1859"
+      "src/app.mjs:1860"
     ],
     "context": "localizedText($(\"preview-badge\"), \"app.playing2\", {});"
   },
   "app.polygonAdded": {
     "locations": [
-      "src/app.mjs:2485"
+      "src/app.mjs:2486"
     ],
     "context": "status({messageKey: \"app.polygonAdded\", messageParams: {}});"
   },
   "app.polygonsAttachToJointsClickARedOrange": {
     "locations": [
-      "src/app.mjs:2457"
+      "src/app.mjs:2458"
     ],
     "context": "toast(interfaceText(\"app.polygonsAttachToJointsClickARedOrange\"), \"app.polygonsAttachToJointsClickARedOrange\", {});"
   },
   "app.pose": {
     "locations": [
-      "src/app.mjs:4628"
+      "src/app.mjs:4632"
     ],
     "context": "{ label: interfaceText(\"app.pose\"), labelKey: \"app.pose\" },"
   },
   "app.preparing": {
     "locations": [
-      "src/app.mjs:1866"
+      "src/app.mjs:1867"
     ],
     "context": "localizedText($(\"preview-badge\"), \"app.preparing\", {});"
   },
   "app.preparingCanvas": {
     "locations": [
-      "src/app.mjs:2171"
+      "src/app.mjs:2172"
     ],
     "context": "status(state.editablePreparing?{messageKey: \"app.preparingCanvas\", messageParams: {}}:{messageKey: \"app.ready\", messageParams: {}});"
   },
   "app.preparingCanvasAndEffects": {
     "locations": [
-      "src/app.mjs:6663"
+      "src/app.mjs:6668"
     ],
     "context": "status({messageKey: \"app.preparingCanvasAndEffects\", messageParams: {}}, false, true);"
   },
   "app.preservingAnimation": {
     "locations": [
-      "src/app.mjs:6201",
-      "src/app.mjs:6220"
+      "src/app.mjs:6206",
+      "src/app.mjs:6225"
     ],
     "context": "localizedText($(\"layer-progress-label\"), (latest.phase === \"staging\" ? \"app.applyingLayerChanges\" : \"app.preservingAnimation\"), (latest.phase === \"staging\" ? {}"
   },
   "app.preview": {
     "locations": [
-      "src/app.mjs:2179"
+      "src/app.mjs:2180"
     ],
     "context": "localizedText($(\"preview-badge\"), \"app.preview\", {});"
   },
   "app.projectSaved": {
     "locations": [
-      "src/app.mjs:4047"
+      "src/app.mjs:4048"
     ],
     "context": "else { status({messageKey: \"app.projectSaved\", messageParams: {}}); scheduleProjectPicture(0, 1); }"
   },
   "app.properties": {
     "locations": [
-      "src/app.mjs:4280"
+      "src/app.mjs:4281"
     ],
     "context": "return { label: interfaceText(\"app.panels\"), labelKey: \"app.panels\", icon: \"layout\", submenu: [row(\"properties\", interfaceText(\"app.properties\"), \"inspector\"), "
   },
   "app.ready": {
     "locations": [
-      "src/app.mjs:477",
-      "src/app.mjs:2171",
-      "src/app.mjs:3651",
-      "src/app.mjs:3910",
-      "src/app.mjs:6676",
-      "src/app.mjs:6811"
+      "src/app.mjs:478",
+      "src/app.mjs:2172",
+      "src/app.mjs:3652",
+      "src/app.mjs:3911",
+      "src/app.mjs:6681",
+      "src/app.mjs:6816"
     ],
     "context": "onReady(){state.editingPacket=null;status({messageKey: \"app.ready\", messageParams: {}});warmPlayback();},"
   },
   "app.reconnectCanvas": {
     "locations": [
-      "src/app.mjs:6837"
+      "src/app.mjs:6842"
     ],
     "context": "localizedMarkup($(\"renderer-error\"), `<p data-i18n=\"app.theGraphicsDeviceWasResetReconnectingYourCanvas\">${messageHTML(\"app.theGraphicsDeviceWasResetReconnectin"
   },
   "app.recoveryCopies": {
     "locations": [
-      "src/app.mjs:6061"
+      "src/app.mjs:6065"
     ],
     "context": "const messageKey = record ? \"app.recoveryOffer\" : \"app.recoveryCopies\";"
   },
   "app.recoveryCopyCouldNotBeWritten": {
     "locations": [
-      "src/app.mjs:225",
-      "src/app.mjs:4017",
-      "src/app.mjs:6037"
+      "src/app.mjs:226",
+      "src/app.mjs:4018",
+      "src/app.mjs:6041"
     ],
     "context": "checkpointFailed: (error) => status({messageKey: \"app.recoveryCopyCouldNotBeWritten\", messageParams: {message: error.message}}, true),"
   },
   "app.recoveryCouldNotBeRead": {
     "locations": [
-      "src/app.mjs:6055"
+      "src/app.mjs:6059"
     ],
     "context": "}).catch(error => status({messageKey: \"app.recoveryCouldNotBeRead\", messageParams: {message: error.message}}, true));"
   },
   "app.recoveryOffer": {
     "locations": [
-      "src/app.mjs:6061"
+      "src/app.mjs:6065"
     ],
     "context": "const messageKey = record ? \"app.recoveryOffer\" : \"app.recoveryCopies\";"
   },
   "app.rectangle": {
     "locations": [
-      "src/app.mjs:4430",
-      "src/app.mjs:4432"
+      "src/app.mjs:4431",
+      "src/app.mjs:4433"
     ],
     "context": "items: [messageTuple([\"lasso\", \"lasso\", interfaceText(\"app.lasso\")], {2: {key: \"app.lasso\", params: {}}}), messageTuple([\"rect\", \"sel-rect\", interfaceText(\"app."
   },
   "app.reshapingFrames": {
     "locations": [
-      "src/app.mjs:588"
+      "src/app.mjs:589"
     ],
     "context": "return { key: \"falloff\", icon: \"motion-path\", title: interfaceText(\"app.reshapingFrames\", {radius: falloff.radius}), titleKey: \"app.reshapingFrames\", titleParam"
   },
   "app.restore": {
     "locations": [
-      "src/app.mjs:6070"
+      "src/app.mjs:6074"
     ],
     "context": "{ label: interfaceText(\"app.restore\"), labelKey: \"app.restore\", id: \"restore-recovery\", variant: \"outline\", dismiss: false, run: guarded(() => restore()) },"
   },
   "app.restoreUnsavedWork": {
     "locations": [
-      "src/app.mjs:6064"
+      "src/app.mjs:6068"
     ],
     "context": "slot: \"recovery\", icon: \"clock\", title: interfaceText(\"app.restoreUnsavedWork\"), titleKey: \"app.restoreUnsavedWork\", key: \"recovery\","
   },
   "app.rigEditMode": {
     "locations": [
-      "src/app.mjs:551"
+      "src/app.mjs:552"
     ],
     "context": "{ id: \"rig-mode\", kind: \"select\", label: interfaceText(\"app.drag\"), labelKey: \"app.drag\", showLabel: true, description: interfaceText(\"app.rigEditMode\"), descri"
   },
   "app.rigExamples": {
     "locations": [
-      "src/app.mjs:2237"
+      "src/app.mjs:2238"
     ],
     "context": "setMarkup($(\"sample-list\"), `<button class=\"sample-item\" data-action=\"rig-examples\"><span data-i18n=\"app.rigExamples\">${messageHTML(\"app.rigExamples\", {})}</spa"
   },
   "app.rigExamples2": {
     "locations": [
-      "src/app.mjs:4419"
+      "src/app.mjs:4420"
     ],
     "context": "{ label: interfaceText(\"app.examples\"), labelKey: \"app.examples\", icon: \"layers\", submenu: [{ command: \"rig-examples\", icon: \"person\", label: interfaceText(\"app"
   },
   "app.rotate": {
     "locations": [
-      "src/app.mjs:2657"
+      "src/app.mjs:2658"
     ],
     "context": "label: interfaceText(\"app.camera\", {value: camera.kind === \"position\" ? {messageKey: \"app.move\"} : camera.kind === \"rotation\" ? {messageKey:\"app.rotate\"} : {mes"
   },
   "app.rotateBranch": {
     "locations": [
-      "src/app.mjs:552"
+      "src/app.mjs:553"
     ],
     "context": "options: [{ value: \"move\", label: interfaceText(\"app.moveJoint\"), labelKey: \"app.moveJoint\" }, { value: \"rotate\", label: interfaceText(\"app.rotateBranch\"), labe"
   },
   "app.saveCancelled": {
     "locations": [
-      "src/app.mjs:3978",
-      "src/app.mjs:4025",
-      "src/app.mjs:4048"
+      "src/app.mjs:3979",
+      "src/app.mjs:4026",
+      "src/app.mjs:4049"
     ],
     "context": "if (!desktop && !sink) { status({messageKey: \"app.saveCancelled\", messageParams: {}}); return false; }"
   },
   "app.saveCancelledTheProjectChanged": {
     "locations": [
-      "src/app.mjs:3979",
-      "src/app.mjs:3981",
-      "src/app.mjs:3986"
+      "src/app.mjs:3980",
+      "src/app.mjs:3982",
+      "src/app.mjs:3987"
     ],
     "context": "if (targetReport !== editor.report || targetToken !== state.documentToken) { status({messageKey: \"app.saveCancelledTheProjectChanged\", messageParams: {}}); retu"
   },
   "app.saved": {
     "locations": [
-      "src/app.mjs:2192",
+      "src/app.mjs:2193",
       "src/shell/project-switcher.mjs:50"
     ],
     "context": "return lastSave && lastSave.report === editor.report ? {key: 'app.savedAt', params: {time: {format: 'date', value: lastSave.time, options: {hour: 'numeric', min"
   },
   "app.savedACopyNewerChangesAreStillUnsaved": {
     "locations": [
-      "src/app.mjs:4046"
+      "src/app.mjs:4047"
     ],
     "context": "if (editor.dirty) notify(interfaceText(\"app.savedACopyNewerChangesAreStillUnsaved\"), \"app.savedACopyNewerChangesAreStillUnsaved\", {});"
   },
   "app.savedAt": {
     "locations": [
-      "src/app.mjs:2192"
+      "src/app.mjs:2193"
     ],
     "context": "return lastSave && lastSave.report === editor.report ? {key: 'app.savedAt', params: {time: {format: 'date', value: lastSave.time, options: {hour: 'numeric', min"
   },
   "app.saving": {
     "locations": [
-      "src/app.mjs:2190"
+      "src/app.mjs:2191"
     ],
     "context": "if (savingDocument) return {key: 'app.saving'};"
   },
   "app.savingProject": {
     "locations": [
-      "src/app.mjs:3992"
+      "src/app.mjs:3993"
     ],
     "context": "status({messageKey: \"app.savingProject\", messageParams: {}}, false, true);"
   },
   "app.scale": {
     "locations": [
-      "src/app.mjs:2657"
+      "src/app.mjs:2658"
     ],
     "context": "label: interfaceText(\"app.camera\", {value: camera.kind === \"position\" ? {messageKey: \"app.move\"} : camera.kind === \"rotation\" ? {messageKey:\"app.rotate\"} : {mes"
   },
   "app.sceneProperties": {
     "locations": [
-      "src/app.mjs:4497"
+      "src/app.mjs:4498"
     ],
     "context": "messageTuple([\"scene-settings\", \"scene\", interfaceText(\"app.sceneProperties\")], {2: {key: \"app.sceneProperties\", params: {}}}),"
   },
   "app.sceneTargetValueFps": {
     "locations": [
-      "src/app.mjs:2053"
+      "src/app.mjs:2054"
     ],
     "context": "setAttr(badge, \"title\", interfaceText('app.sceneTargetValueFps', {value: sample.targetFps.toFixed(1)}));"
   },
   "app.scrollToResizeEscCancels": {
     "locations": [
-      "src/app.mjs:588"
+      "src/app.mjs:589"
     ],
     "context": "return { key: \"falloff\", icon: \"motion-path\", title: interfaceText(\"app.reshapingFrames\", {radius: falloff.radius}), titleKey: \"app.reshapingFrames\", titleParam"
   },
   "app.segmentAdded": {
     "locations": [
-      "src/app.mjs:3237"
+      "src/app.mjs:3238"
     ],
     "context": "status({messageKey: \"app.segmentAdded\", messageParams: {}});"
   },
   "app.segmentDisconnected": {
     "locations": [
-      "src/app.mjs:4576"
+      "src/app.mjs:4577"
     ],
     "context": "status({messageKey: \"app.segmentDisconnected\", messageParams: {}});"
   },
   "app.segmentDuplicated": {
     "locations": [
-      "src/app.mjs:2633"
+      "src/app.mjs:2634"
     ],
     "context": "status(duplicate.branch ? {messageKey: \"app.branchDuplicated\", messageParams: {}} : {messageKey: \"app.segmentDuplicated\", messageParams: {}});"
   },
   "app.select": {
     "locations": [
-      "src/app.mjs:4624"
+      "src/app.mjs:4628"
     ],
     "context": "{ label: interfaceText(\"app.select\"), labelKey: \"app.select\" },"
   },
   "app.selectAJointFirst": {
     "locations": [
-      "src/app.mjs:4541"
+      "src/app.mjs:4542"
     ],
     "context": "const s=editor.figure?.segments[editor.selectedJoint];if(!editor.figure||(!s&&key))return toast(interfaceText(\"app.selectAJointFirst\"), \"app.selectAJointFirst\","
   },
   "app.selectAll": {
     "locations": [
-      "src/app.mjs:4495"
+      "src/app.mjs:4496"
     ],
     "context": "messageTuple([\"select-all\", \"cursor\", interfaceText(\"app.selectAll\"), \"Ctrl A\"], {2: {key: \"app.selectAll\", params: {}}}),"
   },
   "app.selectASegmentOrBranchToDelete": {
     "locations": [
-      "src/app.mjs:4847"
+      "src/app.mjs:4851"
     ],
     "context": "if (builderMode?.active) return toast(interfaceText(\"app.selectASegmentOrBranchToDelete\"), \"app.selectASegmentOrBranchToDelete\", {});"
   },
   "app.selectionShape": {
     "locations": [
-      "src/app.mjs:4429"
+      "src/app.mjs:4430"
     ],
     "context": "lasso: { tool: \"drawing-lasso\", setting: \"selectShape\", label: interfaceText(\"app.selectionShape\"), labelKey: \"app.selectionShape\","
   },
   "app.selectSameFigure": {
     "locations": [
-      "src/app.mjs:4625"
+      "src/app.mjs:4629"
     ],
     "context": "messageTuple([\"select-same\", \"person\", interfaceText(\"app.selectSameFigure\")], {2: {key: \"app.selectSameFigure\", params: {}}}),"
   },
   "app.selectTheFiguresTheCameraShouldFollow": {
     "locations": [
-      "src/app.mjs:4602"
+      "src/app.mjs:4603"
     ],
     "context": "if (!selection().size) return toast(interfaceText(\"app.selectTheFiguresTheCameraShouldFollow\"), \"app.selectTheFiguresTheCameraShouldFollow\", {});"
   },
   "app.sendFeedback": {
     "locations": [
-      "src/app.mjs:392"
+      "src/app.mjs:393"
     ],
     "context": "? { label: interfaceText(\"app.sendFeedback\"), labelKey: \"app.sendFeedback\", run: () => feedbackUI.open({ category: \"bug\" }) }"
   },
   "app.settings": {
     "locations": [
-      "src/app.mjs:4347"
+      "src/app.mjs:4348"
     ],
     "context": "messageTuple([\"settings\", \"settings\", interfaceText(\"app.settings\"), \"Ctrl ,\"], {2: {key: \"app.settings\", params: {}}}),"
   },
   "app.shape": {
     "locations": [
-      "src/app.mjs:4431"
+      "src/app.mjs:4432"
     ],
     "context": "shape: { tool: \"drawing-shape\", setting: \"shapeKind\", label: interfaceText(\"app.shape\"), labelKey: \"app.shape\","
   },
   "app.shiftClickAnAreaToFillEnterFinishes": {
     "locations": [
-      "src/app.mjs:576"
+      "src/app.mjs:577"
     ],
     "context": "if (state.tool === \"polygon\") return { key: \"polygon\", icon: \"polygon\", title: interfaceText(\"app.clickJointsToTrace\"), titleKey: \"app.clickJointsToTrace\", mess"
   },
   "app.spriteAttached": {
     "locations": [
-      "src/app.mjs:2641"
+      "src/app.mjs:2642"
     ],
     "context": "status({messageKey: \"app.spriteAttached\", messageParams: {}});"
   },
   "app.startingThePivotConverter": {
     "locations": [
-      "src/app.mjs:6693"
+      "src/app.mjs:6698"
     ],
     "context": "if (state === \"loading\") status(stage === \"runtime\" ? {messageKey: \"app.loadingThePivotConverterFirstUseOnly\", messageParams: {}} : {messageKey: \"app.startingTh"
   },
   "app.stickFigure": {
     "locations": [
-      "src/app.mjs:4406"
+      "src/app.mjs:4407"
     ],
     "context": "messageTuple([\"add-figure\", \"person\", interfaceText(\"app.stickFigure\")], {2: {key: \"app.stickFigure\", params: {}}}),"
   },
   "app.stretchDriverConnected": {
     "locations": [
-      "src/app.mjs:2715"
+      "src/app.mjs:2716"
     ],
     "context": "state.rigAnchorPick=null;syncModeMessage();toast(pending.key==='driver'?interfaceText(\"app.stretchDriverConnected\"):pending.key?interfaceText(\"app.connectorAnch"
   },
   "app.structure": {
     "locations": [
-      "src/app.mjs:4281"
+      "src/app.mjs:4282"
     ],
     "context": "row(\"library\", interfaceText(\"app.library\"), \"library\"), row(\"structure\", interfaceText(\"app.structure\"), \"structure\"), row(\"timeline\", interfaceText(\"app.timel"
   },
   "app.stykanimate": {
     "locations": [
-      "src/app.mjs:2201"
+      "src/app.mjs:2202"
     ],
     "context": "localizedText(document.querySelector(\"title\"), \"app.stykanimate\", {value: dirty ? \"• \" : \"\", name: name});"
   },
   "app.text": {
     "locations": [
-      "src/app.mjs:4408"
+      "src/app.mjs:4409"
     ],
     "context": "{ command: \"add-text\", icon: \"text\", label: interfaceText(\"app.text\"), labelKey: \"app.text\", shortcut: menuShortcut(\"add-text\", \"T\") },"
   },
   "app.textAdded": {
     "locations": [
-      "src/app.mjs:4182"
+      "src/app.mjs:4183"
     ],
     "context": "status(editExisting ? {messageKey: \"app.textUpdated\", messageParams: {}} : {messageKey: \"app.textAdded\", messageParams: {}});"
   },
   "app.textUpdated": {
     "locations": [
-      "src/app.mjs:4182"
+      "src/app.mjs:4183"
     ],
     "context": "status(editExisting ? {messageKey: \"app.textUpdated\", messageParams: {}} : {messageKey: \"app.textAdded\", messageParams: {}});"
   },
   "app.theCameraFollowsTheSelectedFigures": {
     "locations": [
-      "src/app.mjs:4608"
+      "src/app.mjs:4609"
     ],
     "context": "status(selection().size > 1 ? {messageKey: \"app.theCameraFollowsTheSelectedFigures\", messageParams: {}} : {messageKey: \"app.theCameraFollowsThisFigure\", message"
   },
   "app.theCameraFollowsThisFigure": {
     "locations": [
-      "src/app.mjs:4608"
+      "src/app.mjs:4609"
     ],
     "context": "status(selection().size > 1 ? {messageKey: \"app.theCameraFollowsTheSelectedFigures\", messageParams: {}} : {messageKey: \"app.theCameraFollowsThisFigure\", message"
   },
   "app.theCanvasCouldNotReconnectYourAnimationIs": {
     "locations": [
-      "src/app.mjs:6749"
+      "src/app.mjs:6754"
     ],
     "context": "localizedText($(\"renderer-error\").querySelector('p'), \"app.theCanvasCouldNotReconnectYourAnimationIs\", {});"
   },
   "app.theCanvasUsesCompatibilityRenderingWhichCanBe": {
     "locations": [
-      "src/app.mjs:6815"
+      "src/app.mjs:6820"
     ],
     "context": "toasts.show({ message: interfaceText(\"app.theCanvasUsesCompatibilityRenderingWhichCanBe\", {value:reason}), messageKey: \"app.theCanvasUsesCompatibilityRenderingW"
   },
   "app.theGraphicsDeviceWasResetReconnectingYourCanvas": {
     "locations": [
-      "src/app.mjs:6837"
+      "src/app.mjs:6842"
     ],
     "context": "localizedMarkup($(\"renderer-error\"), `<p data-i18n=\"app.theGraphicsDeviceWasResetReconnectingYourCanvas\">${messageHTML(\"app.theGraphicsDeviceWasResetReconnectin"
   },
   "app.thePreviousAntialiasingSettingWasRetainedAfterA": {
     "locations": [
-      "src/app.mjs:1389"
+      "src/app.mjs:1390"
     ],
     "context": "status({messageKey: \"app.thePreviousAntialiasingSettingWasRetainedAfterA\", messageParams: {}}, true);"
   },
   "app.timeline": {
     "locations": [
-      "src/app.mjs:4281"
+      "src/app.mjs:4282"
     ],
     "context": "row(\"library\", interfaceText(\"app.library\"), \"library\"), row(\"structure\", interfaceText(\"app.structure\"), \"structure\"), row(\"timeline\", interfaceText(\"app.timel"
   },
   "app.toAddACircle": {
     "locations": [
-      "src/app.mjs:575"
+      "src/app.mjs:576"
     ],
     "context": "return { key: `build-circle-${started}`, icon: \"circle\", title: started ? interfaceText(\"app.dragFromAJoint\") : interfaceText(\"app.dragOnTheCanvas\"), titleKey: "
   },
   "app.toAddALine": {
     "locations": [
-      "src/app.mjs:573"
+      "src/app.mjs:574"
     ],
     "context": "return { key: `build-line-${started}`, icon: \"line\", title: started ? interfaceText(\"app.dragFromAJoint\") : interfaceText(\"app.dragOnTheCanvas\"), titleKey: (sta"
   },
   "app.toConnectIt": {
     "locations": [
-      "src/app.mjs:566"
+      "src/app.mjs:567"
     ],
     "context": ": pick.key ? { title: interfaceText(\"app.clickTheNewAnchor\"), titleKey: \"app.clickTheNewAnchor\", message: interfaceText(\"app.onThisFigure\"), messageKey: \"app.on"
   },
   "app.toDrawTheFigureSFirstCircle": {
     "locations": [
-      "src/app.mjs:575"
+      "src/app.mjs:576"
     ],
     "context": "return { key: `build-circle-${started}`, icon: \"circle\", title: started ? interfaceText(\"app.dragFromAJoint\") : interfaceText(\"app.dragOnTheCanvas\"), titleKey: "
   },
   "app.toDrawTheFigureSFirstLine": {
     "locations": [
-      "src/app.mjs:573"
+      "src/app.mjs:574"
     ],
     "context": "return { key: `build-line-${started}`, icon: \"line\", title: started ? interfaceText(\"app.dragFromAJoint\") : interfaceText(\"app.dragOnTheCanvas\"), titleKey: (sta"
   },
   "app.toJoinTo": {
     "locations": [
-      "src/app.mjs:568"
+      "src/app.mjs:569"
     ],
     "context": "if (state.tool === \"attach\" && state.figureJoin) return { key: \"join\", icon: \"join-figure\", title: interfaceText(\"app.clickTheJoint\"), titleKey: \"app.clickTheJo"
   },
   "app.toolOptions": {
     "locations": [
-      "src/app.mjs:539"
+      "src/app.mjs:540"
     ],
     "context": "if (optionsKey !== shownToolOptions) { shownToolOptions = optionsKey; stageHead.setToolOptions(toolOptionDescriptors(), { tool: state.tool, label: interfaceText"
   },
   "app.toTweenShiftForPrecisionEscCancels": {
     "locations": [
-      "src/app.mjs:579"
+      "src/app.mjs:580"
     ],
     "context": "return { key: \"tweener\", icon: \"tween\", title: interfaceText(\"app.dragAcrossTheCanvas\"), titleKey: \"app.dragAcrossTheCanvas\", message: interfaceText(\"app.toTwee"
   },
   "app.unjoinFigure": {
     "locations": [
-      "src/app.mjs:4564"
+      "src/app.mjs:4565"
     ],
     "context": "state.figureJoin ? interfaceText(\"app.cancelJoining\") : action?.kind === 'unjoin' ? interfaceText(\"app.unjoinFigure\") : interfaceText(\"app.joinFigure\"),"
   },
@@ -1423,68 +1423,68 @@
     "locations": [
       "src/app-dialogs.mjs:91",
       "src/app-dialogs.mjs:322",
-      "src/app.mjs:4304"
+      "src/app.mjs:4305"
     ],
     "context": "const projectName = editor.name || {messageKey: \"app.untitled\"};"
   },
   "app.updatingFrames": {
     "locations": [
-      "src/app.mjs:6298",
-      "src/app.mjs:6300"
+      "src/app.mjs:6303",
+      "src/app.mjs:6305"
     ],
     "context": "labels[kind] || interfaceText(\"app.updatingFrames\"),"
   },
   "app.valueCanvasCompatibilityRenderingIsActive": {
     "locations": [
-      "src/app.mjs:6809"
+      "src/app.mjs:6814"
     ],
     "context": "if (compatibility) localizedAttribute($(\"renderer-label\"), 'title', 'app.valueCanvasCompatibilityRenderingIsActive', {value:reason});"
   },
   "app.valueFps": {
     "locations": [
-      "src/app.mjs:2051"
+      "src/app.mjs:2052"
     ],
     "context": "localizedText(badge, (sample.fps === null ? 'app.fps' : 'app.valueFps'), (sample.fps === null ? {} : {value: sample.fps.toFixed(1)}));"
   },
   "app.valueValue1Gradient": {
     "locations": [
-      "src/app.mjs:517"
+      "src/app.mjs:518"
     ],
     "context": "return { css: paintCSS(paint), label: paint.type === \"solid\" ? hexColor(paint.stops[0].color).toUpperCase() : interfaceText('app.valueValue1Gradient', {value: {"
   },
   "app.waitForTheSaveOrTheOpeningFileToFinish": {
     "locations": [
-      "src/app.mjs:3682"
+      "src/app.mjs:3683"
     ],
     "context": "else notify(interfaceText(\"app.waitForTheSaveOrTheOpeningFileToFinish\"), \"app.waitForTheSaveOrTheOpeningFileToFinish\", {});"
   },
   "app.wand": {
     "locations": [
-      "src/app.mjs:4430"
+      "src/app.mjs:4431"
     ],
     "context": "items: [messageTuple([\"lasso\", \"lasso\", interfaceText(\"app.lasso\")], {2: {key: \"app.lasso\", params: {}}}), messageTuple([\"rect\", \"sel-rect\", interfaceText(\"app."
   },
   "app.webgpuIsUnavailable": {
     "locations": [
-      "src/app.mjs:6808"
+      "src/app.mjs:6813"
     ],
     "context": "const reason = message.reasonKey ? {messageKey:message.reasonKey, messageParams:message.reasonParams} : message.reason || {messageKey:\"app.webgpuIsUnavailable\"}"
   },
   "app.withoutLeavingThisFrameDoubleClickToGo": {
     "locations": [
-      "src/app.mjs:1304"
+      "src/app.mjs:1305"
     ],
     "context": "localizedAttribute(overlay, \"title\", (editor.motionPathFalloff() ? 'app.frameDragToReshapeMotionpathfalloffradiusFramesOfTheArc' : 'app.frameDragToReposeValue1R"
   },
   "app.zoomIn": {
     "locations": [
-      "src/app.mjs:4448"
+      "src/app.mjs:4449"
     ],
     "context": "messageTuple([\"zoom-in\", \"plus\", interfaceText(\"app.zoomIn\"), \"+\"], {2: {key: \"app.zoomIn\", params: {}}}),"
   },
   "app.zoomOut": {
     "locations": [
-      "src/app.mjs:4449"
+      "src/app.mjs:4450"
     ],
     "context": "messageTuple([\"zoom-out\", \"minus\", interfaceText(\"app.zoomOut\"), \"−\"], {2: {key: \"app.zoomOut\", params: {}}}),"
   },
@@ -5912,7 +5912,7 @@
   },
   "commands.about": {
     "locations": [
-      "src/ui/command-catalog.mjs:325"
+      "src/ui/command-catalog.mjs:326"
     ],
     "context": "['about', english[\"commands.about\"], 'help', {labelKey: \"commands.about\"}],"
   },
@@ -6002,83 +6002,83 @@
   },
   "commands.cameraAlignView": {
     "locations": [
-      "src/ui/command-catalog.mjs:276"
+      "src/ui/command-catalog.mjs:277"
     ],
     "context": "['camera-align-view', english[\"commands.cameraAlignView\"], 'fit', {labelKey: \"commands.cameraAlignView\", keywords: ['align', 'match view']}],"
   },
   "commands.cameraApplyFigures": {
     "locations": [
-      "src/ui/command-catalog.mjs:280"
+      "src/ui/command-catalog.mjs:281"
     ],
     "context": "['camera-apply-figures', english[\"commands.cameraApplyFigures\"], 'person', {labelKey: \"commands.cameraApplyFigures\", keywords: ['bake']}],"
   },
   "commands.cameraCenter": {
     "locations": [
       "src/hotkey-labels.mjs:220",
-      "src/ui/command-catalog.mjs:273"
+      "src/ui/command-catalog.mjs:274"
     ],
     "context": "\"key\": \"commands.cameraCenter\""
   },
   "commands.cameraCenterX": {
     "locations": [
-      "src/ui/command-catalog.mjs:274"
+      "src/ui/command-catalog.mjs:275"
     ],
     "context": "['camera-center-x', english[\"commands.cameraCenterX\"], 'align-horizontal-center', {labelKey: \"commands.cameraCenterX\", requires: ['figure'], keywords: ['centre'"
   },
   "commands.cameraCenterY": {
     "locations": [
-      "src/ui/command-catalog.mjs:275"
+      "src/ui/command-catalog.mjs:276"
     ],
     "context": "['camera-center-y', english[\"commands.cameraCenterY\"], 'align-vertical-center', {labelKey: \"commands.cameraCenterY\", requires: ['figure'], keywords: ['centre']}"
   },
   "commands.cameraCopy": {
     "locations": [
       "src/hotkey-labels.mjs:226",
-      "src/ui/command-catalog.mjs:270"
+      "src/ui/command-catalog.mjs:271"
     ],
     "context": "\"key\": \"commands.cameraCopy\""
   },
   "commands.cameraDone": {
     "locations": [
-      "src/ui/command-catalog.mjs:269"
+      "src/ui/command-catalog.mjs:270"
     ],
     "context": "['camera-done', english[\"commands.cameraDone\"], 'check', {labelKey: \"commands.cameraDone\", requires: ['camera-session']}],"
   },
   "commands.cameraGuides": {
     "locations": [
-      "src/ui/command-catalog.mjs:281"
+      "src/ui/command-catalog.mjs:282"
     ],
     "context": "['camera-guides', english[\"commands.cameraGuides\"], 'grid', {labelKey: \"commands.cameraGuides\", toggle: true, keywords: ['safe area', 'thirds']}],"
   },
   "commands.cameraLevel": {
     "locations": [
-      "src/ui/command-catalog.mjs:277"
+      "src/ui/command-catalog.mjs:278"
     ],
     "context": "['camera-level', english[\"commands.cameraLevel\"], 'level', {labelKey: \"commands.cameraLevel\", keywords: ['straighten', 'angle']}],"
   },
   "commands.cameraLocateNext": {
     "locations": [
-      "src/ui/command-catalog.mjs:279"
+      "src/ui/command-catalog.mjs:280"
     ],
     "context": "['camera-locate-next', english[\"commands.cameraLocateNext\"], 'chevron-right', {labelKey: \"commands.cameraLocateNext\"}],"
   },
   "commands.cameraLocatePrevious": {
     "locations": [
-      "src/ui/command-catalog.mjs:278"
+      "src/ui/command-catalog.mjs:279"
     ],
     "context": "['camera-locate-previous', english[\"commands.cameraLocatePrevious\"], 'chevron-left', {labelKey: \"commands.cameraLocatePrevious\"}],"
   },
   "commands.cameraPaste": {
     "locations": [
       "src/hotkey-labels.mjs:229",
-      "src/ui/command-catalog.mjs:271"
+      "src/ui/command-catalog.mjs:272"
     ],
     "context": "\"key\": \"commands.cameraPaste\""
   },
   "commands.cameraReset": {
     "locations": [
       "src/hotkey-labels.mjs:217",
-      "src/ui/command-catalog.mjs:272"
+      "src/ui/command-catalog.mjs:273"
     ],
     "context": "\"key\": \"commands.cameraReset\""
   },
@@ -6115,7 +6115,7 @@
   },
   "commands.checkUpdates": {
     "locations": [
-      "src/ui/command-catalog.mjs:327"
+      "src/ui/command-catalog.mjs:328"
     ],
     "context": "['check-updates', english[\"commands.checkUpdates\"], 'import', {labelKey: \"commands.checkUpdates\", requires: ['desktop:updates']}],"
   },
@@ -6128,20 +6128,20 @@
   },
   "commands.close": {
     "locations": [
-      "src/ui/command-catalog.mjs:342"
+      "src/ui/command-catalog.mjs:343"
     ],
     "context": "['close', english[\"commands.close\"], 'close', {labelKey: \"commands.close\", requires: ['desktop'], keywords: ['exit', 'close window']}],"
   },
   "commands.closeDialog": {
     "locations": [
-      "src/ui/command-catalog.mjs:343"
+      "src/ui/command-catalog.mjs:344"
     ],
     "context": "['close-dialog', english[\"commands.closeDialog\"], 'close', {...internal, labelKey: \"commands.closeDialog\"}],"
   },
   "commands.closeProject": {
     "locations": [
-      "src/app.mjs:4313",
-      "src/app.mjs:4320",
+      "src/app.mjs:4314",
+      "src/app.mjs:4321",
       "src/application-menu.mjs:23",
       "src/hotkey-labels.mjs:16",
       "src/ui/command-catalog.mjs:69"
@@ -6150,7 +6150,7 @@
   },
   "commands.closeSavedProjects": {
     "locations": [
-      "src/app.mjs:4321",
+      "src/app.mjs:4322",
       "src/ui/command-catalog.mjs:70"
     ],
     "context": "messageTuple([\"close-saved-projects\", \"close\", interfaceText(\"commands.closeSavedProjects\"), \"\", projects.tabs.size < 2], {2: {key: \"commands.closeSavedProjects"
@@ -6190,7 +6190,7 @@
   "commands.depthHold": {
     "locations": [
       "src/hotkey-labels.mjs:106",
-      "src/ui/command-catalog.mjs:293"
+      "src/ui/command-catalog.mjs:294"
     ],
     "context": "\"key\": \"commands.depthHold\""
   },
@@ -6208,123 +6208,123 @@
   },
   "commands.donate": {
     "locations": [
-      "src/ui/command-catalog.mjs:332"
+      "src/ui/command-catalog.mjs:333"
     ],
     "context": "['donate', english[\"commands.donate\"], 'heart', {labelKey: \"commands.donate\", requires: ['desktop:updates'], keywords: ['donate']}],"
   },
   "commands.drawingApply": {
     "locations": [
       "src/hotkey-labels.mjs:388",
-      "src/ui/command-catalog.mjs:306"
+      "src/ui/command-catalog.mjs:307"
     ],
     "context": "\"key\": \"commands.drawingApply\""
   },
   "commands.drawingBrush": {
     "locations": [
       "src/hotkey-labels.mjs:301",
-      "src/ui/command-catalog.mjs:296"
+      "src/ui/command-catalog.mjs:297"
     ],
     "context": "\"key\": \"commands.drawingBrush\""
   },
   "commands.drawingDeselect": {
     "locations": [
       "src/hotkey-labels.mjs:394",
-      "src/ui/command-catalog.mjs:308"
+      "src/ui/command-catalog.mjs:309"
     ],
     "context": "\"key\": \"commands.drawingDeselect\""
   },
   "commands.drawingEraser": {
     "locations": [
       "src/hotkey-labels.mjs:304",
-      "src/ui/command-catalog.mjs:297"
+      "src/ui/command-catalog.mjs:298"
     ],
     "context": "\"key\": \"commands.drawingEraser\""
   },
   "commands.drawingFill": {
     "locations": [
       "src/hotkey-labels.mjs:307",
-      "src/ui/command-catalog.mjs:298"
+      "src/ui/command-catalog.mjs:299"
     ],
     "context": "\"key\": \"commands.drawingFill\""
   },
   "commands.drawingFillSelection": {
     "locations": [
       "src/hotkey-labels.mjs:400",
-      "src/ui/command-catalog.mjs:310"
+      "src/ui/command-catalog.mjs:311"
     ],
     "context": "\"key\": \"commands.drawingFillSelection\""
   },
   "commands.drawingFlipView": {
     "locations": [
-      "src/ui/command-catalog.mjs:313"
+      "src/ui/command-catalog.mjs:314"
     ],
     "context": "['drawing-flip-view', english[\"commands.drawingFlipView\"], 'flip', {labelKey: \"commands.drawingFlipView\", ...draw, toggle: true, keywords: ['mirror canvas']}],"
   },
   "commands.drawingHarder": {
     "locations": [
       "src/hotkey-labels.mjs:325",
-      "src/ui/command-catalog.mjs:304"
+      "src/ui/command-catalog.mjs:305"
     ],
     "context": "\"key\": \"commands.drawingHarder\""
   },
   "commands.drawingInvertSelection": {
     "locations": [
       "src/hotkey-labels.mjs:397",
-      "src/ui/command-catalog.mjs:309"
+      "src/ui/command-catalog.mjs:310"
     ],
     "context": "\"key\": \"commands.drawingInvertSelection\""
   },
   "commands.drawingLarger": {
     "locations": [
       "src/hotkey-labels.mjs:319",
-      "src/ui/command-catalog.mjs:302"
+      "src/ui/command-catalog.mjs:303"
     ],
     "context": "\"key\": \"commands.drawingLarger\""
   },
   "commands.drawingLasso": {
     "locations": [
       "src/hotkey-labels.mjs:310",
-      "src/ui/command-catalog.mjs:299"
+      "src/ui/command-catalog.mjs:300"
     ],
     "context": "\"key\": \"commands.drawingLasso\""
   },
   "commands.drawingMirror": {
     "locations": [
-      "src/ui/command-catalog.mjs:311"
+      "src/ui/command-catalog.mjs:312"
     ],
     "context": "['drawing-mirror', english[\"commands.drawingMirror\"], 'flip', {labelKey: \"commands.drawingMirror\", ...draw, toggle: true, keywords: ['symmetry']}],"
   },
   "commands.drawingSelectAll": {
     "locations": [
       "src/hotkey-labels.mjs:391",
-      "src/ui/command-catalog.mjs:307"
+      "src/ui/command-catalog.mjs:308"
     ],
     "context": "\"key\": \"commands.drawingSelectAll\""
   },
   "commands.drawingShape": {
     "locations": [
       "src/hotkey-labels.mjs:313",
-      "src/ui/command-catalog.mjs:300"
+      "src/ui/command-catalog.mjs:301"
     ],
     "context": "\"key\": \"commands.drawingShape\""
   },
   "commands.drawingSmaller": {
     "locations": [
       "src/hotkey-labels.mjs:316",
-      "src/ui/command-catalog.mjs:301"
+      "src/ui/command-catalog.mjs:302"
     ],
     "context": "\"key\": \"commands.drawingSmaller\""
   },
   "commands.drawingSofter": {
     "locations": [
       "src/hotkey-labels.mjs:322",
-      "src/ui/command-catalog.mjs:303"
+      "src/ui/command-catalog.mjs:304"
     ],
     "context": "\"key\": \"commands.drawingSofter\""
   },
   "commands.drawingSwapColors": {
     "locations": [
-      "src/ui/command-catalog.mjs:312"
+      "src/ui/command-catalog.mjs:313"
     ],
     "context": "['drawing-swap-colors', english[\"commands.drawingSwapColors\"], 'reset', {labelKey: \"commands.drawingSwapColors\", ...draw, keywords: ['colours', 'foreground', 'b"
   },
@@ -6462,7 +6462,7 @@
   },
   "commands.feedback": {
     "locations": [
-      "src/ui/command-catalog.mjs:329"
+      "src/ui/command-catalog.mjs:330"
     ],
     "context": "['feedback', english[\"commands.feedback\"], 'message', {labelKey: \"commands.feedback\", requires: ['desktop:feedback'], keywords: ['feedback', 'support', 'bug']}]"
   },
@@ -6497,7 +6497,7 @@
   "commands.handleEditHold": {
     "locations": [
       "src/hotkey-labels.mjs:100",
-      "src/ui/command-catalog.mjs:291"
+      "src/ui/command-catalog.mjs:292"
     ],
     "context": "\"key\": \"commands.handleEditHold\""
   },
@@ -6523,7 +6523,7 @@
   "commands.isolateHold": {
     "locations": [
       "src/hotkey-labels.mjs:103",
-      "src/ui/command-catalog.mjs:292"
+      "src/ui/command-catalog.mjs:293"
     ],
     "context": "\"key\": \"commands.isolateHold\""
   },
@@ -6597,14 +6597,14 @@
   },
   "commands.libraryOpen": {
     "locations": [
-      "src/ui/command-catalog.mjs:318"
+      "src/ui/command-catalog.mjs:319"
     ],
     "context": "['library-open', english[\"commands.libraryOpen\"], 'import', {...internal, labelKey: \"commands.libraryOpen\"}],"
   },
   "commands.libraryRename": {
     "locations": [
       "src/hotkey-labels.mjs:415",
-      "src/ui/command-catalog.mjs:319"
+      "src/ui/command-catalog.mjs:320"
     ],
     "context": "\"key\": \"commands.libraryRename\""
   },
@@ -6622,19 +6622,19 @@
   },
   "commands.maximize": {
     "locations": [
-      "src/ui/command-catalog.mjs:341"
+      "src/ui/command-catalog.mjs:342"
     ],
     "context": "['maximize', english[\"commands.maximize\"], 'maximize', {labelKey: \"commands.maximize\", requires: ['desktop']}],"
   },
   "commands.menu": {
     "locations": [
-      "src/ui/command-catalog.mjs:336"
+      "src/ui/command-catalog.mjs:337"
     ],
     "context": "['menu', english[\"commands.menu\"], 'more', {...internal, labelKey: \"commands.menu\"}],"
   },
   "commands.minimize": {
     "locations": [
-      "src/ui/command-catalog.mjs:340"
+      "src/ui/command-catalog.mjs:341"
     ],
     "context": "['minimize', english[\"commands.minimize\"], 'minimize', {labelKey: \"commands.minimize\", requires: ['desktop']}],"
   },
@@ -6934,7 +6934,7 @@
   },
   "commands.privacy": {
     "locations": [
-      "src/ui/command-catalog.mjs:331"
+      "src/ui/command-catalog.mjs:332"
     ],
     "context": "['privacy', english[\"commands.privacy\"], 'lock', {labelKey: \"commands.privacy\", requires: ['desktop:telemetry'], keywords: ['telemetry']}],"
   },
@@ -6947,7 +6947,7 @@
   },
   "commands.releaseNotes": {
     "locations": [
-      "src/ui/command-catalog.mjs:326"
+      "src/ui/command-catalog.mjs:327"
     ],
     "context": "['release-notes', english[\"commands.releaseNotes\"], 'file', {labelKey: \"commands.releaseNotes\", requires: ['desktop:updates'], keywords: ['release notes', 'chan"
   },
@@ -6960,7 +6960,7 @@
   },
   "commands.rename": {
     "locations": [
-      "src/app.mjs:4318",
+      "src/app.mjs:4319",
       "src/ui/command-catalog.mjs:68"
     ],
     "context": "messageTuple([\"rename\", \"file\", interfaceText(\"commands.rename\")], {2: {key: \"commands.rename\", params: {}}}),"
@@ -6979,55 +6979,55 @@
   },
   "commands.restartUpdate": {
     "locations": [
-      "src/ui/command-catalog.mjs:328"
+      "src/ui/command-catalog.mjs:329"
     ],
     "context": "['restart-update', english[\"commands.restartUpdate\"], 'import', {labelKey: \"commands.restartUpdate\", requires: ['update-ready']}],"
   },
   "commands.rigBindBranch": {
     "locations": [
-      "src/ui/command-catalog.mjs:264"
+      "src/ui/command-catalog.mjs:265"
     ],
     "context": "['rig-bind-branch', english[\"commands.rigBindBranch\"], 'stretch-horizontal', {labelKey: \"commands.rigBindBranch\", ...build, requires: ['joint'], keywords: ['rig"
   },
   "commands.rigConnect": {
     "locations": [
-      "src/ui/command-catalog.mjs:259"
+      "src/ui/command-catalog.mjs:260"
     ],
     "context": "['rig-connect', english[\"commands.rigConnect\"], 'link', {labelKey: \"commands.rigConnect\", ...build, requires: ['figure'], keywords: ['rig', 'anchor']}],"
   },
   "commands.rigExamples": {
     "locations": [
-      "src/ui/command-catalog.mjs:266"
+      "src/ui/command-catalog.mjs:267"
     ],
     "context": "['rig-examples', english[\"commands.rigExamples\"], 'layers', {labelKey: \"commands.rigExamples\", keywords: ['samples', 'library']}],"
   },
   "commands.rigPickDriver": {
     "locations": [
-      "src/ui/command-catalog.mjs:263"
+      "src/ui/command-catalog.mjs:264"
     ],
     "context": "['rig-pick-driver', english[\"commands.rigPickDriver\"], 'cursor', {labelKey: \"commands.rigPickDriver\", ...build, palette: false}],"
   },
   "commands.rigPickEnd": {
     "locations": [
-      "src/ui/command-catalog.mjs:262"
+      "src/ui/command-catalog.mjs:263"
     ],
     "context": "['rig-pick-end', english[\"commands.rigPickEnd\"], 'cursor', {labelKey: \"commands.rigPickEnd\", ...build, palette: false}],"
   },
   "commands.rigPickStart": {
     "locations": [
-      "src/ui/command-catalog.mjs:261"
+      "src/ui/command-catalog.mjs:262"
     ],
     "context": "['rig-pick-start', english[\"commands.rigPickStart\"], 'cursor', {labelKey: \"commands.rigPickStart\", ...build, palette: false}],"
   },
   "commands.rigTest": {
     "locations": [
-      "src/ui/command-catalog.mjs:265"
+      "src/ui/command-catalog.mjs:266"
     ],
     "context": "['rig-test', english[\"commands.rigTest\"], 'play', {labelKey: \"commands.rigTest\", ...build, keywords: ['preview', 'rig']}],"
   },
   "commands.rigWeighted": {
     "locations": [
-      "src/ui/command-catalog.mjs:260"
+      "src/ui/command-catalog.mjs:261"
     ],
     "context": "['rig-weighted', english[\"commands.rigWeighted\"], 'nodes', {labelKey: \"commands.rigWeighted\", ...build, requires: ['joint'], keywords: ['rig']}],"
   },
@@ -7224,58 +7224,58 @@
   },
   "commands.toolCircle": {
     "locations": [
-      "src/ui/command-catalog.mjs:288"
+      "src/ui/command-catalog.mjs:289"
     ],
     "context": "['tool-circle', english[\"commands.toolCircle\"], 'circle', {labelKey: \"commands.toolCircle\", ...build}],"
   },
   "commands.toolHand": {
     "locations": [
-      "src/ui/command-catalog.mjs:286"
+      "src/ui/command-catalog.mjs:287"
     ],
     "context": "['tool-hand', english[\"commands.toolHand\"], 'hand', {labelKey: \"commands.toolHand\", keywords: ['hand', 'scroll']}],"
   },
   "commands.toolLine": {
     "locations": [
-      "src/ui/command-catalog.mjs:287"
+      "src/ui/command-catalog.mjs:288"
     ],
     "context": "['tool-line', english[\"commands.toolLine\"], 'line', {labelKey: \"commands.toolLine\", ...build}],"
   },
   "commands.toolPolygon": {
     "locations": [
-      "src/ui/command-catalog.mjs:289"
+      "src/ui/command-catalog.mjs:290"
     ],
     "context": "['tool-polygon', english[\"commands.toolPolygon\"], 'polygon', {labelKey: \"commands.toolPolygon\", ...build, keywords: ['fill', 'shape']}],"
   },
   "commands.toolPose": {
     "locations": [
       "src/hotkey-labels.mjs:79",
-      "src/ui/command-catalog.mjs:285"
+      "src/ui/command-catalog.mjs:286"
     ],
     "context": "\"key\": \"commands.toolPose\""
   },
   "commands.toolRig": {
     "locations": [
       "src/hotkey-labels.mjs:91",
-      "src/ui/command-catalog.mjs:290"
+      "src/ui/command-catalog.mjs:291"
     ],
     "context": "\"key\": \"commands.toolRig\""
   },
   "commands.toolSelect": {
     "locations": [
-      "src/ui/command-catalog.mjs:284"
+      "src/ui/command-catalog.mjs:285"
     ],
     "context": "['tool-select', english[\"commands.toolSelect\"], 'cursor', {labelKey: \"commands.toolSelect\", keywords: ['select tool', 'pose']}],"
   },
   "commands.tutorialLeave": {
     "locations": [
-      "src/ui/command-catalog.mjs:324"
+      "src/ui/command-catalog.mjs:325"
     ],
     "context": "['tutorial-leave', english[\"commands.tutorialLeave\"], 'close', {labelKey: \"commands.tutorialLeave\", ...internal}],"
   },
   "commands.tutorials": {
     "locations": [
       "src/application-menu.mjs:93",
-      "src/ui/command-catalog.mjs:323"
+      "src/ui/command-catalog.mjs:324"
     ],
     "context": "help: [messageTuple(['help', 'help', interfaceText(\"applicationMenu.keyboardShortcuts\"), '?'], {2: {key: \"applicationMenu.keyboardShortcuts\", params: {}}}), mes"
   },
@@ -7287,7 +7287,7 @@
   },
   "commands.website": {
     "locations": [
-      "src/ui/command-catalog.mjs:333"
+      "src/ui/command-catalog.mjs:334"
     ],
     "context": "['website', english[\"commands.website\"], 'link', {labelKey: \"commands.website\", requires: ['desktop:telemetry']}],"
   },
@@ -7337,8 +7337,8 @@
       "src/app-dialogs.mjs:98",
       "src/app-dialogs.mjs:147",
       "src/app-dialogs.mjs:328",
-      "src/app.mjs:6220",
-      "src/app.mjs:6299",
+      "src/app.mjs:6225",
+      "src/app.mjs:6304",
       "src/builder-surface-ui.mjs:23",
       "src/color-picker.mjs:155",
       "src/color-picker.mjs:157",
@@ -7375,7 +7375,7 @@
   "common.copy": {
     "locations": [
       "desktop/main.cjs:175",
-      "src/app.mjs:4501",
+      "src/app.mjs:4502",
       "src/application-menu.mjs:35",
       "src/localization-bindings.mjs:218",
       "src/touch/timeline-scrubber.mjs:52",
@@ -7427,7 +7427,7 @@
   "common.duplicate": {
     "locations": [
       "desktop/main.cjs:176",
-      "src/app.mjs:4504",
+      "src/app.mjs:4505",
       "src/application-menu.mjs:59",
       "src/localization-bindings.mjs:219",
       "src/studio-shell.mjs:107",
@@ -7441,7 +7441,7 @@
   "common.export": {
     "locations": [
       "desktop/main.cjs:168",
-      "src/app.mjs:4345",
+      "src/app.mjs:4346",
       "src/application-menu.mjs:31",
       "src/localization-bindings.mjs:217",
       "src/ui/command-catalog.mjs:81"
@@ -7486,9 +7486,9 @@
   "common.paste": {
     "locations": [
       "desktop/main.cjs:175",
-      "src/app.mjs:4491",
       "src/app.mjs:4492",
-      "src/app.mjs:4502",
+      "src/app.mjs:4493",
+      "src/app.mjs:4503",
       "src/application-menu.mjs:35",
       "src/localization-bindings.mjs:219",
       "src/touch/timeline-scrubber.mjs:54",
@@ -7500,7 +7500,7 @@
   "common.redo": {
     "locations": [
       "desktop/main.cjs:173",
-      "src/app.mjs:4339",
+      "src/app.mjs:4340",
       "src/application-menu.mjs:34",
       "src/hotkey-labels.mjs:49",
       "src/localization-bindings.mjs:214",
@@ -7542,8 +7542,8 @@
       "desktop/main.cjs:165",
       "desktop/main.cjs:260",
       "src/app-dialogs.mjs:99",
-      "src/app.mjs:4316",
-      "src/app.mjs:4335",
+      "src/app.mjs:4317",
+      "src/app.mjs:4336",
       "src/application-menu.mjs:20",
       "src/localization-bindings.mjs:190",
       "src/localization-bindings.mjs:214",
@@ -7555,8 +7555,8 @@
     "locations": [
       "desktop/main.cjs:166",
       "desktop/main.cjs:543",
-      "src/app.mjs:4317",
-      "src/app.mjs:4336",
+      "src/app.mjs:4318",
+      "src/app.mjs:4337",
       "src/application-menu.mjs:21",
       "src/localization-bindings.mjs:214",
       "src/ui/command-catalog.mjs:66"
@@ -7579,7 +7579,7 @@
   "common.undo": {
     "locations": [
       "desktop/main.cjs:173",
-      "src/app.mjs:4338",
+      "src/app.mjs:4339",
       "src/application-menu.mjs:34",
       "src/hotkey-labels.mjs:46",
       "src/localization-bindings.mjs:214",
@@ -7608,8 +7608,8 @@
   },
   "counts.figures": {
     "locations": [
-      "src/app.mjs:2224",
-      "src/app.mjs:4500",
+      "src/app.mjs:2225",
+      "src/app.mjs:4501",
       "src/asset-library.mjs:224",
       "src/studio-shell.mjs:145",
       "src/vfx-inspector.mjs:114"
@@ -12051,111 +12051,111 @@
   },
   "errors.app.canvasIsNotReadyTryAgain": {
     "locations": [
-      "src/app.mjs:1195"
+      "src/app.mjs:1196"
     ],
     "context": "const timeout=setTimeout(()=>finish(messageError(new Error(''), \"errors.app.canvasIsNotReadyTryAgain\", {})),2000);"
   },
   "errors.app.chooseAVisibleDestinationLayerBeforeAddingAn": {
     "locations": [
-      "src/app.mjs:4529"
+      "src/app.mjs:4530"
     ],
     "context": "if(layer?.visible===false)throw messageError(new Error(''), \"errors.app.chooseAVisibleDestinationLayerBeforeAddingAn\", {});"
   },
   "errors.app.colorSamplingCancelled": {
     "locations": [
-      "src/app.mjs:1186",
-      "src/app.mjs:1194"
+      "src/app.mjs:1187",
+      "src/app.mjs:1195"
     ],
     "context": "if(signal.aborted)return Promise.reject(messageError(new Error(''), \"errors.app.colorSamplingCancelled\", {}));"
   },
   "errors.app.colorSamplingSuperseded": {
     "locations": [
-      "src/app.mjs:1187"
+      "src/app.mjs:1188"
     ],
     "context": "pendingColorSample?.finish(messageError(new Error(''), \"errors.app.colorSamplingSuperseded\", {}));"
   },
   "errors.app.saveCancelled": {
     "locations": [
-      "src/app.mjs:4018"
+      "src/app.mjs:4019"
     ],
     "context": "if (signal.aborted) throw messageError(new DOMException('', \"AbortError\"), \"errors.app.saveCancelled\", {});"
   },
   "errors.app.segmentAuthoringIsUnavailable": {
     "locations": [
-      "src/app.mjs:3231"
+      "src/app.mjs:3232"
     ],
     "context": "throw messageError(new Error(''), \"errors.app.segmentAuthoringIsUnavailable\", {});"
   },
   "errors.app.selectFiguresInOneConnectedGroup": {
     "locations": [
-      "src/app.mjs:4764"
+      "src/app.mjs:4768"
     ],
     "context": "throw messageError(new Error(''), \"errors.app.selectFiguresInOneConnectedGroup\", {});"
   },
   "errors.app.selectionChangedReopenTheColorPicker": {
     "locations": [
-      "src/app.mjs:6868",
-      "src/app.mjs:6875"
+      "src/app.mjs:6873",
+      "src/app.mjs:6880"
     ],
     "context": "if(editor.report!==report||editor.tick!==tick||[...editor.selectedUids].join(',')!==uids)throw messageError(new Error(''), \"errors.app.selectionChangedReopenThe"
   },
   "errors.app.selectionChangedReopenThePalette": {
     "locations": [
-      "src/app.mjs:6861"
+      "src/app.mjs:6866"
     ],
     "context": "if(editor.report!==report||editor.selectedUid!==uid||editor.figure!==figure||editor.tick!==tick)throw messageError(new Error(''), \"errors.app.selectionChangedRe"
   },
   "errors.app.theDocumentChangedOpenBackgroundSettingsAgain": {
     "locations": [
-      "src/app.mjs:4201"
+      "src/app.mjs:4202"
     ],
     "context": "throw messageError(new Error(''), \"errors.app.theDocumentChangedOpenBackgroundSettingsAgain\", {});"
   },
   "errors.app.theDocumentChangedOpenTheTextEditorAgain": {
     "locations": [
-      "src/app.mjs:4176"
+      "src/app.mjs:4177"
     ],
     "context": "throw messageError(new Error(''), \"errors.app.theDocumentChangedOpenTheTextEditorAgain\", {});"
   },
   "errors.app.theDrawingChangedDuringExport": {
     "locations": [
-      "src/app.mjs:251"
+      "src/app.mjs:252"
     ],
     "context": "const drawingRevision=editor.revision;await drawingBarrier(editor.report,{signal:controller.signal});if(drawingRevision!==editor.revision)throw messageError(new"
   },
   "errors.app.theGraphicsDeviceChangedWhileImporting": {
     "locations": [
-      "src/app.mjs:3480"
+      "src/app.mjs:3481"
     ],
     "context": "throw messageError(new DOMException('', \"AbortError\"), \"errors.app.theGraphicsDeviceChangedWhileImporting\", {});"
   },
   "errors.app.theGraphicsDeviceWasLost": {
     "locations": [
-      "src/app.mjs:6820"
+      "src/app.mjs:6825"
     ],
     "context": "telemetry.error(Object.assign(messageError(new Error(''), \"errors.app.theGraphicsDeviceWasLost\", {}), { name: 'GPUError', telemetryCode: 'device_lost' }), 'gpu'"
   },
   "errors.app.theRecoveryCopyChangedReopenStykanimateToSee": {
     "locations": [
-      "src/app.mjs:6092"
+      "src/app.mjs:6096"
     ],
     "context": "if (!copy || copy.savedAt !== chosen.savedAt || copy.token !== chosen.token) throw messageError(new Error(''), \"errors.app.theRecoveryCopyChangedReopenStykanima"
   },
   "errors.app.theRecoveryFileIsNoLongerAvailable": {
     "locations": [
-      "src/app.mjs:6089"
+      "src/app.mjs:6093"
     ],
     "context": "if (!copy) throw messageError(new Error(''), \"errors.app.theRecoveryFileIsNoLongerAvailable\", {});"
   },
   "errors.app.thisRecoveryCopyIsOpenInAnotherTab": {
     "locations": [
-      "src/app.mjs:6083"
+      "src/app.mjs:6087"
     ],
     "context": "if (browserRecovery && !reservation) throw messageError(new Error(''), \"errors.app.thisRecoveryCopyIsOpenInAnotherTab\", {});"
   },
   "errors.app.unlockTheDestinationLayerBeforeAddingAnAsset": {
     "locations": [
-      "src/app.mjs:4528"
+      "src/app.mjs:4529"
     ],
     "context": "if(layer?.locked)throw messageError(new Error(''), \"errors.app.unlockTheDestinationLayerBeforeAddingAnAsset\", {});"
   },
@@ -15711,7 +15711,7 @@
   },
   "errors.editorDisconnect.unlockTheFigureBeforeDisconnectingASegment": {
     "locations": [
-      "src/app.mjs:4573",
+      "src/app.mjs:4574",
       "src/editor-disconnect.mjs:88"
     ],
     "context": "if (isLocked(editor.selectedUid)) throw messageError(new Error(''), \"errors.editorDisconnect.unlockTheFigureBeforeDisconnectingASegment\", {});"
@@ -20498,6 +20498,46 @@
     ],
     "context": "if (!validId(from) || !validId(to)) throw messageError(new TypeError(''), \"errors.polygonDraft.polygonHandleIdsMustBeNonnegativeIntegers\", {});"
   },
+  "errors.poseEstimationWorker.inferenceFailed": {
+    "locations": [
+      "src/pose-estimation-client.mjs:64",
+      "src/pose-estimation-client.mjs:101",
+      "src/pose-estimation-client.mjs:107",
+      "src/pose-estimation-client.mjs:160",
+      "src/pose-estimation-client.mjs:221",
+      "src/pose-estimation-client.mjs:236",
+      "src/pose-estimation-client.mjs:249",
+      "src/pose-estimation-client.mjs:261",
+      "src/workers/pose-estimation-worker.mjs:61",
+      "src/workers/pose-estimation-worker.mjs:479"
+    ],
+    "context": "throw messageError(new Error('PoseEstimationClient has been disposed'), 'errors.poseEstimationWorker.inferenceFailed');"
+  },
+  "errors.poseEstimationWorker.invalidImageFormat": {
+    "locations": [
+      "src/pose-estimation-client.mjs:201",
+      "src/pose-estimation-client.mjs:206",
+      "src/ui/auto-rig-dialog.mjs:422",
+      "src/workers/pose-estimation-worker.mjs:48",
+      "src/workers/pose-estimation-worker.mjs:70",
+      "src/workers/pose-estimation-worker.mjs:79",
+      "src/workers/pose-estimation-worker.mjs:143",
+      "src/workers/pose-estimation-worker.mjs:152",
+      "src/workers/pose-estimation-worker.mjs:159",
+      "src/workers/pose-estimation-worker.mjs:403"
+    ],
+    "context": "throw messageError(new Error('Invalid image buffer'), 'errors.poseEstimationWorker.invalidImageFormat');"
+  },
+  "errors.poseEstimationWorker.noPoseDetected": {
+    "locations": [
+      "src/ui/auto-rig-dialog.mjs:430",
+      "src/workers/pose-estimation-worker.mjs:186",
+      "src/workers/pose-estimation-worker.mjs:249",
+      "src/workers/pose-estimation-worker.mjs:256",
+      "src/workers/pose-estimation-worker.mjs:424"
+    ],
+    "context": "throw messageError(new Error('No pose detected in image'), 'errors.poseEstimationWorker.noPoseDetected');"
+  },
   "errors.poseSequenceStorage.invalidStoredPoseSequenceCapacity": {
     "locations": [
       "src/pose-sequence-storage.mjs:38"
@@ -21133,9 +21173,9 @@
   },
   "errors.rigExamples.unknownRigExample": {
     "locations": [
-      "src/rig-examples.mjs:46"
+      "src/rig-examples.mjs:64"
     ],
-    "context": "const example=RIG_EXAMPLES.find(r=>r.id===id)??CONSTRAINT_TEST_RIGS.find(r=>r.id===id);if(!example)throw messageError(new Error(''), \"errors.rigExamples.unknown"
+    "context": "const example=RIG_EXAMPLES.find(r=>r.id===id||r.aliases?.includes(id))??CONSTRAINT_TEST_RIGS.find(r=>r.id===id||r.aliases?.includes(id));if(!example)throw messa"
   },
   "errors.rigPoseChoices.aPoseChoiceNeedsASpatialBoneNames": {
     "locations": [
@@ -24736,7 +24776,7 @@
   },
   "exportSheet.currentFrame": {
     "locations": [
-      "src/app.mjs:1303",
+      "src/app.mjs:1304",
       "src/export-sheet.mjs:386"
     ],
     "context": "const frame = {messageKey:hover.tick===editor.tick?'exportSheet.currentFrame':'filmstrip.card',messageParams:{frame:hover.tick+1}};"
@@ -25145,7 +25185,7 @@
   },
   "filmstrip.card": {
     "locations": [
-      "src/app.mjs:1303",
+      "src/app.mjs:1304",
       "src/export-sheet.mjs:494",
       "src/inspector-view.mjs:282",
       "src/layer-timeline.mjs:777",
@@ -28307,7 +28347,7 @@
   },
   "layers.camera": {
     "locations": [
-      "src/app.mjs:527"
+      "src/app.mjs:528"
     ],
     "context": ": session === \"camera\" ? { done: \"camera-done\", nameKey: \"layers.camera\" } : null,"
   },
@@ -29167,14 +29207,14 @@
   "menu.performance": {
     "locations": [
       "src/localization-bindings.mjs:218",
-      "src/ui/command-catalog.mjs:330"
+      "src/ui/command-catalog.mjs:331"
     ],
     "context": "performance: 'menu.performance', copy: 'common.copy', cut: 'common.cut',"
   },
   "menu.settings": {
     "locations": [
       "src/localization-bindings.mjs:217",
-      "src/ui/command-catalog.mjs:339"
+      "src/ui/command-catalog.mjs:340"
     ],
     "context": "export: 'common.export', settings: 'menu.settings', help: 'menu.shortcuts',"
   },
@@ -29184,7 +29224,7 @@
       "src/hotkey-labels.mjs:40",
       "src/localization-bindings.mjs:201",
       "src/localization-bindings.mjs:217",
-      "src/ui/command-catalog.mjs:322"
+      "src/ui/command-catalog.mjs:323"
     ],
     "context": "{ label: t('desktop.main.help'), submenu: [item(t('menu.shortcuts'), 'help'), item(t('desktop.main.checkForUpdates'), 'check-updates'), item(t('desktop.main.wha"
   },
@@ -30338,7 +30378,7 @@
   },
   "overlays.palette.figureIn": {
     "locations": [
-      "src/app.mjs:5667"
+      "src/app.mjs:5671"
     ],
     "context": "meta: kitText(kitT, isMovieclip(figure) ? \"overlays.palette.movieclipIn\" : \"overlays.palette.figureIn\", { layer }), metaKey: isMovieclip(figure) ? \"overlays.pal"
   },
@@ -30363,20 +30403,20 @@
   },
   "overlays.palette.layer": {
     "locations": [
-      "src/app.mjs:5656"
+      "src/app.mjs:5660"
     ],
     "context": "if (match) rows.push({ id: `layer:${layer.id}`, label: layer.name, icon: \"layers\", meta: kitText(kitT, \"overlays.palette.layer\"), metaKey: \"overlays.palette.lay"
   },
   "overlays.palette.movieclipIn": {
     "locations": [
-      "src/app.mjs:5667"
+      "src/app.mjs:5671"
     ],
     "context": "meta: kitText(kitT, isMovieclip(figure) ? \"overlays.palette.movieclipIn\" : \"overlays.palette.figureIn\", { layer }), metaKey: isMovieclip(figure) ? \"overlays.pal"
   },
   "overlays.palette.open": {
     "locations": [
-      "src/app.mjs:4329",
-      "src/ui/command-catalog.mjs:338"
+      "src/app.mjs:4330",
+      "src/ui/command-catalog.mjs:339"
     ],
     "context": "{ command: \"command-palette\", icon: \"search\", label: commands.label(\"command-palette\"), labelKey: \"overlays.palette.open\","
   },
@@ -30389,7 +30429,7 @@
   },
   "overlays.palette.project": {
     "locations": [
-      "src/app.mjs:5650"
+      "src/app.mjs:5654"
     ],
     "context": "get label() { return kitText(kitT, \"overlays.palette.project\"); },"
   },
@@ -30401,13 +30441,13 @@
   },
   "overlays.palette.settingIn": {
     "locations": [
-      "src/app.mjs:5684"
+      "src/app.mjs:5688"
     ],
     "context": ".map(({ entry, match }) => ({ id: entry.setting, label: entry.label, icon: \"settings\", meta: kitText(kitT, \"overlays.palette.settingIn\", { tab: entry.tabLabel }"
   },
   "overlays.palette.settings": {
     "locations": [
-      "src/app.mjs:5678"
+      "src/app.mjs:5682"
     ],
     "context": "get label() { return kitText(kitT, \"overlays.palette.settings\"); },"
   },
@@ -30792,8 +30832,8 @@
   },
   "projectTabs.openProjects": {
     "locations": [
-      "src/app.mjs:4303",
-      "src/app.mjs:5139",
+      "src/app.mjs:4304",
+      "src/app.mjs:5143",
       "src/shell/project-switcher.mjs:59",
       "src/shell/project-switcher.mjs:64"
     ],
@@ -30807,7 +30847,7 @@
   },
   "projectTabs.switchToThisProject": {
     "locations": [
-      "src/app.mjs:4312"
+      "src/app.mjs:4313"
     ],
     "context": "{ label: interfaceText(\"projectTabs.switchToThisProject\"), labelKey: \"projectTabs.switchToThisProject\", icon: \"layers\", run: guarded(() => projects.activate(id)"
   },
@@ -30844,19 +30884,19 @@
   },
   "quick.center": {
     "locations": [
-      "src/ui/quick-actions.mjs:119"
+      "src/ui/quick-actions.mjs:120"
     ],
     "context": "entry('camera-center', {context: 'camera', group: 'frame', word: interfaceText(\"quickActions.center\"), wordKey: 'quick.center'}),"
   },
   "quick.connect": {
     "locations": [
-      "src/ui/quick-actions.mjs:115"
+      "src/ui/quick-actions.mjs:116"
     ],
     "context": "entry('rig-connect', {context: 'build', group: 'rig', word: interfaceText(\"quickActions.connect\"), wordKey: 'quick.connect'}),"
   },
   "quick.copyFrames": {
     "locations": [
-      "src/ui/quick-actions.mjs:121"
+      "src/ui/quick-actions.mjs:122"
     ],
     "context": "entry('copy', {context: 'range', group: 'clipboard', label: interfaceText(\"quickActions.copyFrames\"), labelKey: 'quick.copyFrames'}),"
   },
@@ -30874,7 +30914,7 @@
   },
   "quick.examples": {
     "locations": [
-      "src/ui/quick-actions.mjs:116"
+      "src/ui/quick-actions.mjs:117"
     ],
     "context": "entry('rig-examples', {context: 'build', group: 'add', word: interfaceText(\"quickActions.examples\"), wordKey: 'quick.examples'}),"
   },
@@ -30887,7 +30927,7 @@
   },
   "quick.fit": {
     "locations": [
-      "src/ui/quick-actions.mjs:117"
+      "src/ui/quick-actions.mjs:118"
     ],
     "context": "entry('zoom-selection', {context: 'build', group: 'view', word: interfaceText(\"quickActions.fit\"), wordKey: 'quick.fit'}),"
   },
@@ -30924,7 +30964,7 @@
   },
   "quick.level": {
     "locations": [
-      "src/ui/quick-actions.mjs:118"
+      "src/ui/quick-actions.mjs:119"
     ],
     "context": "entry('camera-level', {context: 'camera', group: 'frame', word: interfaceText(\"quickActions.level\"), wordKey: 'quick.level'}),"
   },
@@ -30957,7 +30997,7 @@
   },
   "quick.pasteFrames": {
     "locations": [
-      "src/ui/quick-actions.mjs:122"
+      "src/ui/quick-actions.mjs:123"
     ],
     "context": "entry('paste', {context: 'range', group: 'clipboard', label: interfaceText(\"quickActions.pasteFrames\"), labelKey: 'quick.pasteFrames'}),"
   },
@@ -30969,13 +31009,13 @@
   },
   "quick.removeKeys": {
     "locations": [
-      "src/ui/quick-actions.mjs:124"
+      "src/ui/quick-actions.mjs:125"
     ],
     "context": "entry('clear-keys', {context: 'range', group: 'remove', word: interfaceText(\"quickActions.removeKeys\"), wordKey: 'quick.removeKeys'}),"
   },
   "quick.shift": {
     "locations": [
-      "src/ui/quick-actions.mjs:370"
+      "src/ui/quick-actions.mjs:371"
     ],
     "context": "setAttribute(control, 'data-shift-hint', item.shift ? quickText(t, 'quick.shift', null, {action: item.shiftHint}) : null);"
   },
@@ -31002,14 +31042,14 @@
   },
   "quick.unavailable": {
     "locations": [
-      "src/ui/quick-actions.mjs:376",
-      "src/ui/quick-actions.mjs:379"
+      "src/ui/quick-actions.mjs:377",
+      "src/ui/quick-actions.mjs:380"
     ],
     "context": "const tip = disabled && item.reason ? quickText(t, 'quick.unavailable', null, {label: item.label, reason: item.reason})"
   },
   "quickActions.actions": {
     "locations": [
-      "src/ui/quick-actions.mjs:236"
+      "src/ui/quick-actions.mjs:237"
     ],
     "context": "return meta ? quickText(t, meta.labelKey, meta.label) : quickText(t, null, interfaceText(\"quickActions.actions\"));"
   },
@@ -31022,13 +31062,13 @@
   },
   "quickActions.center": {
     "locations": [
-      "src/ui/quick-actions.mjs:119"
+      "src/ui/quick-actions.mjs:120"
     ],
     "context": "entry('camera-center', {context: 'camera', group: 'frame', word: interfaceText(\"quickActions.center\"), wordKey: 'quick.center'}),"
   },
   "quickActions.connect": {
     "locations": [
-      "src/ui/quick-actions.mjs:115"
+      "src/ui/quick-actions.mjs:116"
     ],
     "context": "entry('rig-connect', {context: 'build', group: 'rig', word: interfaceText(\"quickActions.connect\"), wordKey: 'quick.connect'}),"
   },
@@ -31040,7 +31080,7 @@
   },
   "quickActions.copyFrames": {
     "locations": [
-      "src/ui/quick-actions.mjs:121"
+      "src/ui/quick-actions.mjs:122"
     ],
     "context": "entry('copy', {context: 'range', group: 'clipboard', label: interfaceText(\"quickActions.copyFrames\"), labelKey: 'quick.copyFrames'}),"
   },
@@ -31059,13 +31099,13 @@
   },
   "quickActions.examples": {
     "locations": [
-      "src/ui/quick-actions.mjs:116"
+      "src/ui/quick-actions.mjs:117"
     ],
     "context": "entry('rig-examples', {context: 'build', group: 'add', word: interfaceText(\"quickActions.examples\"), wordKey: 'quick.examples'}),"
   },
   "quickActions.fit": {
     "locations": [
-      "src/ui/quick-actions.mjs:117"
+      "src/ui/quick-actions.mjs:118"
     ],
     "context": "entry('zoom-selection', {context: 'build', group: 'view', word: interfaceText(\"quickActions.fit\"), wordKey: 'quick.fit'}),"
   },
@@ -31111,7 +31151,7 @@
   },
   "quickActions.level": {
     "locations": [
-      "src/ui/quick-actions.mjs:118"
+      "src/ui/quick-actions.mjs:119"
     ],
     "context": "entry('camera-level', {context: 'camera', group: 'frame', word: interfaceText(\"quickActions.level\"), wordKey: 'quick.level'}),"
   },
@@ -31129,13 +31169,13 @@
   },
   "quickActions.pasteFrames": {
     "locations": [
-      "src/ui/quick-actions.mjs:122"
+      "src/ui/quick-actions.mjs:123"
     ],
     "context": "entry('paste', {context: 'range', group: 'clipboard', label: interfaceText(\"quickActions.pasteFrames\"), labelKey: 'quick.pasteFrames'}),"
   },
   "quickActions.removeKeys": {
     "locations": [
-      "src/ui/quick-actions.mjs:124"
+      "src/ui/quick-actions.mjs:125"
     ],
     "context": "entry('clear-keys', {context: 'range', group: 'remove', word: interfaceText(\"quickActions.removeKeys\"), wordKey: 'quick.removeKeys'}),"
   },
@@ -31221,8 +31261,8 @@
   },
   "rendererStatus.deviceLost": {
     "locations": [
-      "src/app.mjs:2022",
-      "src/app.mjs:6806"
+      "src/app.mjs:2023",
+      "src/app.mjs:6811"
     ],
     "context": "else if (state.renderer.stats?.backend === \"WebGPU device lost\") localizedText($(\"renderer-label\"), \"rendererStatus.deviceLost\");"
   },
@@ -31240,7 +31280,7 @@
   },
   "rendererStatus.reconnectionFailed": {
     "locations": [
-      "src/app.mjs:6780"
+      "src/app.mjs:6785"
     ],
     "context": "fallbackReason: `Graphics reconnection failed: ${error.message}`, fallbackReasonKey:'rendererStatus.reconnectionFailed',"
   },

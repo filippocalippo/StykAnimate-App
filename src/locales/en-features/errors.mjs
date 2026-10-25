@@ -1760,5 +1760,8 @@ export default Object.freeze({
   "errors.importWorker.serviceFailed": "The file service failed ({status}).",
   "errors.importWorker.importFailed": "Import failed ({status}).",
   "errors.documentExportWorker.busy": "The document export worker is busy.",
-  "errors.playbackPlanning.invalidResultBudget": "Invalid background planning result budget."
+  "errors.playbackPlanning.invalidResultBudget": "Invalid background planning result budget.",
+  "errors.poseEstimationWorker.noPoseDetected": "No recognizable pose or figure was detected in this image.",
+  "errors.poseEstimationWorker.invalidImageFormat": "Choose a valid PNG, JPEG, WebP, or SVG file.",
+  "errors.poseEstimationWorker.inferenceFailed": "Pose estimation could not be completed."
 });

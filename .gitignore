@@ -38,6 +38,7 @@ native/bin/darwin-*/
 /cloud/
 /design/
 /artifacts/
+/.agents/
 
 # MSVC linker byproducts; only the DLL is used.
 native/bin/**/*.exp
