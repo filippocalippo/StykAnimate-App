@@ -234,6 +234,33 @@ void test_fixtures() {
     CHECK(r.ok && same(r.document, expected_a));
     CHECK(!styk::native::decode(kFixture_v2_stkz, kFixture_v2_stkz_size, Kind::Styk).ok);
   }
+#ifdef STYK_HAVE_ZSTD_FIXTURES
+  {  // v2 containers whose skeleton and sections use zstd (what the web client writes)
+    auto r = styk::native::decode(kFixture_v2_zstd, kFixture_v2_zstd_size, Kind::Styk);
+    if (!r.ok) std::printf("v2 zstd: %s\n", r.error.c_str());
+    CHECK(r.ok && r.container_version == 2 && r.section_count == 2);
+    if (r.ok) {
+      Value doc = r.document;
+      const Value* images = doc.find("images");
+      CHECK(images && images->array.size() == 3 &&
+            images->array[0].find("data_base64")->blob->bytes == blob(60000, 3));
+      without_key(doc, "images");
+      CHECK(same(doc, expected_b));
+    }
+    auto k = styk::native::decode(kFixture_v2_stkz_zstd, kFixture_v2_stkz_zstd_size, Kind::Stkz);
+    CHECK(k.ok && same(k.document, expected_a));
+    // Damaged zstd data is rejected cleanly.
+    for (size_t n = 0; n < kFixture_v2_zstd_size; n += 7) {
+      CHECK(!styk::native::decode(kFixture_v2_zstd, n, Kind::Styk).ok);
+    }
+    for (size_t i = 0; i < kFixture_v2_zstd_size; i += 3) {
+      std::vector<uint8_t> flipped(kFixture_v2_zstd, kFixture_v2_zstd + kFixture_v2_zstd_size);
+      flipped[i] ^= 0x41;
+      const auto fr = styk::native::decode(flipped.data(), flipped.size(), Kind::Styk);
+      if (fr.ok) CHECK(same(fr.document, r.document));
+    }
+  }
+#endif
   {  // plain JSON with BOM
     auto r = styk::native::decode(kFixture_plain, kFixture_plain_size, Kind::Styk);
     CHECK(r.ok && r.container_version == 0 && same(r.document, expected_a));
@@ -291,11 +318,11 @@ void test_corruption() {
     }
     CHECK(equivalent * 50 < c.size);  // only a handful of bytes are free to change
   }
-  {  // zstd is reported as unavailable, not as corruption
+  {  // a zlib payload declared as zstd is damaged data, not a crash
     std::vector<uint8_t> f(kFixture_v2, kFixture_v2 + kFixture_v2_size);
     f[5] = 2;
     const auto r = styk::native::decode(f.data(), f.size(), Kind::Styk);
-    CHECK(!r.ok && r.code == "codec_unavailable");
+    CHECK(!r.ok);
   }
   {  // v1 files carry the text verbatim; a non-object document is rejected
     const std::string doc = "[\"S2S:0:0:1\"]";
