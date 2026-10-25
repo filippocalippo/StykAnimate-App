@@ -17,14 +17,14 @@ test('motion path falloff has no shortcuts, including persisted former bindings'
 });
 
 test('Ctrl V pastes normally and Ctrl Shift V pastes in place', () => {
-  const manager = new HotkeyManager();
+  const manager = new HotkeyManager({mac: false});
   assert.equal(manager.resolve(key('KeyV', {ctrlKey: true}))?.id, 'paste');
   assert.equal(manager.resolve(key('KeyV', {ctrlKey: true, shiftKey: true}))?.id, 'paste-in-place');
   assert.deepEqual(normalizeHotkeys({})['paste-in-place'], ['Mod+Shift+KeyV']);
 });
 
 test('builder split supports extra Shift without treating a remapped binding Shift as scope', () => {
-  const calls = [], manager = new HotkeyManager({run: (id, event, modifiers) => calls.push([id, modifiers.shift])});
+  const calls = [], manager = new HotkeyManager({mac: false, run: (id, event, modifiers) => calls.push([id, modifiers.shift])});
   assert.equal(manager.resolve(key('KeyS')), null);
   manager.keydown(key('KeyS'), ['builder']);
   manager.keydown(key('KeyS', {shiftKey: true}), ['builder']);
@@ -85,7 +85,7 @@ test('a custom binding replaces its previous default immediately', () => {
   assert.deepEqual(calls, ['add-frame']);
 });
 test('exact modifier matching avoids destructive plain-key fallthrough', () => {
-  const manager = new HotkeyManager();
+  const manager = new HotkeyManager({mac: false});
   assert.equal(manager.resolve(key('KeyA', {ctrlKey:true}))?.id, 'select-all');
   assert.equal(manager.resolve(key('KeyA', {altKey:true})), null);
   assert.equal(manager.resolve(key('KeyA', {shiftKey:true}))?.id, 'extend-keyframe');
@@ -120,7 +120,7 @@ test('non-repeat commands execute once, navigation repeats, blocked commands are
   assert.deepEqual(calls, ['add-frame','next-frame','next-frame']);
 });
 test('remapped held keys release by physical code after modifiers and focus change', () => {
-  const calls = [], manager = new HotkeyManager({bindings:{'handle-edit-hold':['Mod+KeyQ']}, run:id=>calls.push(['down',id]), release:(id,event)=>calls.push(['up',id,Boolean(event.cancelled)])});
+  const calls = [], manager = new HotkeyManager({mac: false, bindings:{'handle-edit-hold':['Mod+KeyQ']}, run:id=>calls.push(['down',id]), release:(id,event)=>calls.push(['up',id,Boolean(event.cancelled)])});
   manager.keydown(key('KeyQ', {ctrlKey:true}));
   manager.keyup(key('ControlLeft')); assert.equal(manager.held.size,1);
   manager.keyup(key('KeyQ', {target:{}}));
@@ -145,6 +145,8 @@ test('Ctrl / Command are portable while secondary platform modifiers remain dist
   const manager=new HotkeyManager({mac:true});
   assert.equal(manager.resolve(key('KeyS',{metaKey:true}))?.id,'save');
   assert.equal(manager.resolve(key('KeyS',{ctrlKey:true})),null);
+  assert.equal(manager.label('save'), 'Cmd+S');
+  assert.equal(new HotkeyManager({mac:false}).label('save'), 'Ctrl+S');
   const customized = new HotkeyManager({mac:true,bindings:{save:['Meta+KeyZ']}});
   assert.deepEqual(customized.bindings.undo,[]);
   assert.equal(customized.resolve(key('KeyZ',{metaKey:true}))?.id,'save');
@@ -156,7 +158,7 @@ test('hints show alternatives and cleared shortcuts without reverting to default
   assert.equal(isHotkeyInput(null),false);
 });
 test('Shift inside a custom binding does not accidentally extend or align the action', () => {
-  const gestures=[],manager=new HotkeyManager({bindings:{'timeline-layer-down':['Mod+Shift+KeyB'],'handle-right':['KeyQ']},run:(id,event,modifiers)=>gestures.push([id,modifiers.shift])});
+  const gestures=[],manager=new HotkeyManager({mac: false, bindings:{'timeline-layer-down':['Mod+Shift+KeyB'],'handle-right':['KeyQ']},run:(id,event,modifiers)=>gestures.push([id,modifiers.shift])});
   manager.keydown(key('KeyB',{ctrlKey:true,shiftKey:true}), ['timeline']);
   manager.keydown(key('KeyQ'),['canvas']);
   manager.keydown(key('KeyQ',{shiftKey:true,repeat:true}),['canvas']);
@@ -194,7 +196,7 @@ test('origin selection settings normalize safely and selection commands can be r
   assert.equal(normalizeEditorSettings({marqueeSelection:'origins'}).marqueeSelection, 'origins');
   assert.equal(normalizeEditorSettings({marqueeSelection:'unknown'}).marqueeSelection, 'origins');
   assert.equal(normalizeEditorSettings({marqueeSelection:'bounds'}).marqueeSelection, 'bounds');
-  const manager = new HotkeyManager({bindings: {'toggle-selection-origins': ['Mod+Shift+KeyB'], 'toggle-range-edit': ['Mod+Shift+KeyR']}});
+  const manager = new HotkeyManager({mac: false, bindings: {'toggle-selection-origins': ['Mod+Shift+KeyB'], 'toggle-range-edit': ['Mod+Shift+KeyR']}});
   manager.setBindings({'toggle-selection-origins': ['Mod+Shift+KeyB'], 'toggle-range-edit': ['Mod+Shift+KeyR']});
   assert.equal(manager.resolve(key('KeyB', {ctrlKey:true,shiftKey:true}))?.id, 'toggle-selection-origins');
   assert.equal(manager.resolve(key('KeyR', {ctrlKey:true,shiftKey:true}))?.id, 'toggle-range-edit');

@@ -47,9 +47,12 @@ test('hidden items, empty submenus, stray separators and empty group labels are 
 });
 
 test('registry items render through normalizeMenu unchanged', () => {
-  const registry = new CommandRegistry({actions: {undo() {}, redo() {}}, requirements: {}, context: () => ({mode: 'animate'})});
-  const entries = normalizeMenu(registry.items(['undo', 'redo', null, 'split-segment']), {resolve: id => registry.get(id)});
-  assert.deepEqual(entries.map(entry => [entry.command, entry.label, entry.shortcut, entry.disabled]), [['undo', 'Undo', 'Ctrl+Z', false], ['redo', 'Redo', 'Ctrl+Shift+Z', false]]);
+  for (const mac of [false, true]) {
+    const registry = new CommandRegistry({actions: {undo() {}, redo() {}}, hotkeys: {mac}, requirements: {}, context: () => ({mode: 'animate'})});
+    const entries = normalizeMenu(registry.items(['undo', 'redo', null, 'split-segment']), {resolve: id => registry.get(id)});
+    const modifier = mac ? 'Cmd' : 'Ctrl';
+    assert.deepEqual(entries.map(entry => [entry.command, entry.label, entry.shortcut, entry.disabled]), [['undo', 'Undo', `${modifier}+Z`, false], ['redo', 'Redo', `${modifier}+Shift+Z`, false]]);
+  }
 });
 
 test('typeahead: keys typed within 700 ms build one query', () => {

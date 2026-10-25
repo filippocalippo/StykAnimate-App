@@ -127,7 +127,7 @@ export class CommandRegistry extends EventTarget {
    */
   constructor({actions = {}, dispatch = null, runHotkey = null, hotkeys = null, localization = null, catalog = COMMAND_CATALOG,
     hotkeyCommands = HOTKEY_COMMANDS, context = () => ({}), requirements = {}, availability = null, checked = null,
-    formatBinding: format = binding => formatBinding(binding), maxRecent = 8, onError = error => globalThis.reportError?.(error)} = {}) {
+    formatBinding: format = binding => formatBinding(binding, hotkeys?.mac ?? isMacPlatform()), maxRecent = 8, onError = error => globalThis.reportError?.(error)} = {}) {
     super();
     Object.assign(this, {actions, dispatch, runHotkey, hotkeys, localization, context, requirements, availability, checkedState: checked,
       format, maxRecent, onError});

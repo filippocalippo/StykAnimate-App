@@ -33,7 +33,7 @@ module.exports = async function beforePack(context) {
       scanner.source?.sha256 !== hash(await fs.readFile(path.join(appRoot,'native','piv-frame-scan.cpp'))))
     throw new Error('Build and freeze the current native PIV scanner before packaging.');
   const scannerName=context.electronPlatformName==='win32'?'styk-piv-frame-scan.dll':context.electronPlatformName==='darwin'?'libstyk-piv-frame-scan.dylib':'libstyk-piv-frame-scan.so';
-  if(scanner.library?.sha256!==hash(await fs.readFile(path.join(appRoot,'build','sidecar','styk-codec','_internal','native',scannerName))))
+  if((scanner.frozenLibrary?.sha256 ?? scanner.library?.sha256)!==hash(await fs.readFile(path.join(appRoot,'build','sidecar','styk-codec','_internal','native',scannerName))))
     throw new Error('The frozen native PIV scanner differs from its verified build.');
   let video;
   try { video = JSON.parse(await fs.readFile(path.join(context.packager.info.appDir, 'build', 'video-encoder', 'build-info.json'), 'utf8')); }
