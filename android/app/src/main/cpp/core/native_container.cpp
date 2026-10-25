@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include "sha256.h"
+#include "zstd.h"
 
 namespace styk::native {
 namespace {
@@ -76,7 +77,12 @@ std::vector<uint8_t> unpack(int codec, const uint8_t* data, size_t stored, size_
   }
   if (codec == 1) return inflate_exact(data, stored, raw_length);
   if (codec == 2) {
-    fail("This project uses zstd compression this build cannot decode yet.", "codec_unavailable");
+    std::vector<uint8_t> out;
+    std::string error;
+    if (!zstd::decompress(data, stored, raw_length, out, error)) {
+      fail("The StykAnimate file is damaged (invalid zstd data: " + error + ").");
+    }
+    return out;
   }
   fail("Unsupported StykAnimate file version. Update the app to open this file.");
 }
