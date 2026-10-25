@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A free, open-source stick figure animation app for Windows, Linux and the browser.<br>
+  A free, open-source stick figure animation app for Windows, Linux, Apple Silicon Macs and the browser.<br>
   Opens Pivot (<code>.piv</code>, <code>.stk</code>) and Stick Nodes projects, and keeps your work on your device.
 </p>
 
@@ -32,10 +32,11 @@ Everything (decoding, editing, saving and rendering) runs locally. Optional, con
 
 - **Windows and Linux:** download Setup, Portable or the AppImage from the [releases page](https://github.com/filippocalippo/styk-animate-releases/releases/latest). Installed apps update themselves.
 - **Browser:** open [app.stykanimate.com](https://app.stykanimate.com). It works offline once loaded.
+- **Apple Silicon Mac:** build the self-contained app locally; see [macOS](docs/MACOS.md). Public Mac downloads and automatic updates are not available yet.
 
 ## Build from source
 
-Requirements: Node.js 22+ (CI uses 24.11) and Python 3.11+ (CI uses 3.12). Windows and Linux are tested on every change; macOS has an untested build target.
+Requirements: Node.js 22+ (CI uses 24.11) and Python 3.11+ (CI uses 3.12). Windows and Linux are tested on every change. Apple Silicon has a local build and packaged smoke checks; see [macOS](docs/MACOS.md).
 
 ```sh
 npm ci

@@ -91,7 +91,8 @@
     "release:prepare": "node scripts/prepare-release.mjs",
     "changelog:check": "node scripts/check-changelog.mjs",
     "release:verify": "node scripts/release-assets.mjs",
-    "release:publish": "node scripts/publish-release.mjs"
+    "release:publish": "node scripts/publish-release.mjs",
+    "build:mac:arm64": "bash scripts/build-macos.sh"
   },
   "dependencies": {
     "electron-updater": "6.6.2"
@@ -262,7 +263,11 @@
         "zip"
       ],
       "category": "public.app-category.graphics-design",
-      "hardenedRuntime": true
+      "hardenedRuntime": true,
+      "signIgnore": [
+        "Contents/Resources/sidecar/",
+        "Contents/Resources/video-encoder/"
+      ]
     },
     "linux": {
       "icon": "desktop/assets/stykanimate.png",

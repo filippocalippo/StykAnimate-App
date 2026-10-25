@@ -77,6 +77,12 @@ def main() -> int:
     result = subprocess.run(command, cwd=app_root, env=build_env, check=False)
     if result.returncode == 0:
         output = app_root / "build" / "sidecar"
+        # PyInstaller rewrites and ad-hoc signs Mach-O libraries on macOS.
+        # Keep the original build identity and record the actual frozen bytes
+        # separately, so packaging checks the library that will be shipped.
+        frozen_scanner = output / "styk-codec" / "_internal" / "native" / native_scan.library_name()
+        scanner["frozenLibrary"] = {"path": frozen_scanner.relative_to(output).as_posix(),
+                                    "sha256": digest(frozen_scanner), "bytes": frozen_scanner.stat().st_size}
         distribution = importlib.metadata.distribution("orjson")
         license_output = output / "THIRD_PARTY" / "orjson"
         license_output.mkdir(parents=True, exist_ok=True)
