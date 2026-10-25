@@ -42,7 +42,8 @@ try {
   app = await electron.launch({ executablePath, args: packaged ? [] : [appRoot], cwd: appRoot, timeout: 60000, env: { ...process.env, STYK_USER_DATA_DIR: work } });
   const page = await app.firstWindow({ timeout: 60000 });
   await page.waitForFunction(() => window.styk?.ready === true, undefined, { timeout: 60000 });
-  if (packaged) await page.getByRole('button', { name: 'Close welcome screen', exact: true }).click();
+  // Fresh source and packaged profiles both show the welcome screen.
+  await page.getByRole('button', { name: 'Close welcome screen', exact: true }).click();
   for (const [action, extension] of EXPORTS) {
     const target = path.join(output, `clip.${extension}`);
     await rm(target, { force: true });

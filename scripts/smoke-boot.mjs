@@ -70,7 +70,8 @@ try {
   expect('The page raised no errors', errors.length === 0, errors[0]);
   // Exercise the real native save bridge and frozen importer without private fixtures.
   await page.waitForFunction(() => window.styk.state.documentToken, undefined, { timeout: 30000 });
-  if (packaged) await page.getByRole('button', { name: 'Close welcome screen', exact: true }).click();
+  // Fresh source and packaged profiles both show the welcome screen.
+  await page.getByRole('button', { name: 'Close welcome screen', exact: true }).click();
   await page.bringToFront();
   await page.screenshot({ path: path.join(output, 'editor.png') });
   const target = path.join(output, 'roundtrip.styk');

@@ -19,7 +19,9 @@ test('intentional fallback reports missing messages and language-specific plural
   const report = validateCatalog({locale, messages: {'timeline.selectedFrames': {other: '{count} frames'}}}, english);
   assert.deepEqual(report.errors, []);
   assert.ok(report.missing.includes('common.save'));
-  assert.deepEqual(report.incompletePlurals, [{key:'timeline.selectedFrames', forms:['zero','one','two','few','many']}]);
+  assert.equal(report.incompletePlurals.length, 1);
+  assert.equal(report.incompletePlurals[0].key, 'timeline.selectedFrames');
+  assert.deepEqual(new Set(report.incompletePlurals[0].forms), new Set(['zero','one','two','few','many']));
 });
 test('fallback lookup and coverage stay accurate for incomplete and complete catalogs', async () => {
   // Exercise the real service with a deliberately partial registry, independently
