@@ -1,3 +1,5 @@
+import { createFrame } from './demo.mjs';
+
 /**
  * StykAnimate Claude Mascot Figure Definition
  * Editable 2D character rig featuring block geometry,
@@ -5,7 +7,7 @@
  * and 4 independent IK-ready legs.
  */
 
-export function createClaudeFigureData() {
+export function createClaudeFigureData({ root_x = 480, root_y = 320 } = {}) {
   const terracotta = [217, 119, 87];
   const white = [255, 255, 255];
 
@@ -159,8 +161,8 @@ export function createClaudeFigureData() {
     object_slot: 0,
     unique_id: 2,
     figure_type_id: 2,
-    root_x: 480,
-    root_y: 320,
+    root_x,
+    root_y,
     scale: 1,
     color_override_raw: 0,
     field28: 0,
@@ -171,10 +173,10 @@ export function createClaudeFigureData() {
     bends: [],
     join: null,
     _stykIK: {
-      "4": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0 },
-      "5": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0 },
-      "6": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0 },
-      "7": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0 }
+      "4": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0, target: { x: root_x, y: root_y + 36, rotation: 0 }, followers: {} },
+      "5": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0, target: { x: root_x, y: root_y + 36, rotation: 0 }, followers: {} },
+      "6": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0, target: { x: root_x, y: root_y + 36, rotation: 0 }, followers: {} },
+      "7": { enabled: true, pinned: false, allowStretch: false, chainLength: 1, bendDirection: 0, target: { x: root_x, y: root_y + 36, rotation: 0 }, followers: {} }
     },
     color_override_rgb: [0, 0, 0],
     color_override_mix: 0,
@@ -184,3 +186,22 @@ export function createClaudeFigureData() {
 
   return { figure, object };
 }
+
+export function createClaudeFigureDocument(options = {}) {
+  const { figure, object } = createClaudeFigureData(options);
+  const figureName = options.name || figure.name;
+  const namedFigure = { ...figure, name: figureName };
+  return {
+    version: 5,
+    canvas_width: 960,
+    canvas_height: 540,
+    fps: 24,
+    auto_easing: false,
+    auto_easing_disabled_raw: 1,
+    figure_types: [namedFigure],
+    backgrounds: [],
+    keyframes: [createFrame([object], 1)],
+    _styk: { format: 'StykAnimate', format_version: 1, name: figureName }
+  };
+}
+
