@@ -5,6 +5,7 @@ import {createFrame, createObject} from './demo.mjs';
 import {CONNECTOR_3D_EXAMPLES} from './rig-examples-3d.mjs';
 import {SOLID_RIG_EXAMPLES} from './rig-solids.mjs';
 import {MECHANISM_RIG_EXAMPLES} from './rig-mechanism-examples.mjs';
+import {createClaudeFigureData} from './claude-figure-data.mjs';
 
 const line=(id,parent,length,angle=0,width=6,name='',rig)=>({segment_id:id,parent_id:parent,length,angle_rad:angle,
   thickness:width,bend_rad:0,primitive_code:0,aux_code:0,flags:0,segment_type:'line',segment_kind:'line',
@@ -40,16 +41,36 @@ export const CONSTRAINT_TEST_RIGS = [
       connector(6,4,5,120,0,5,'Nested connector'),line(7,6,12,-Math.PI/2,18,'Attached marker')]},
 ];
 
-export const RIG_EXAMPLES=[...MECHANISM_RIG_EXAMPLES,...SOLID_RIG_EXAMPLES,...CONNECTOR_3D_EXAMPLES];
+export const CLAUDE_RIG_EXAMPLE = {
+  id: 'claude-mascot',
+  name: 'Claude',
+  description: 'Anthropic Claude mascot figure featuring block head and torso in signature terracotta (#D97757) with dual arms and 4 IK-controlled legs.',
+  control: 1,
+  aliases: ['claude'],
+  build() {
+    const { figure, object } = createClaudeFigureData({ root_x: 320, root_y: 230 });
+    return {
+      segments: figure.segments,
+      polyfills: figure.polyfills,
+      object,
+      figure
+    };
+  }
+};
+
+export const RIG_EXAMPLES=[...MECHANISM_RIG_EXAMPLES,...SOLID_RIG_EXAMPLES,...CONNECTOR_3D_EXAMPLES,CLAUDE_RIG_EXAMPLE];
 
 export function rigExampleDocument(id) {
-  const example=RIG_EXAMPLES.find(r=>r.id===id)??CONSTRAINT_TEST_RIGS.find(r=>r.id===id);if(!example)throw messageError(new Error(''), "errors.rigExamples.unknownRigExample", {});
+  const example=RIG_EXAMPLES.find(r=>r.id===id||r.aliases?.includes(id))??CONSTRAINT_TEST_RIGS.find(r=>r.id===id||r.aliases?.includes(id));if(!example)throw messageError(new Error(''), "errors.rigExamples.unknownRigExample", {});
   const built=example.build?.(),segments=built?.segments??example.segments();
   const palette=[[13,153,255],[81,111,135],[118,172,208],[232,154,56]];
   if(!built)segments.forEach((s,i)=>{s.color_rgb=palette[i%palette.length].slice();});
   const figure={figure_type_id:1,name:example.name,segments,segment_count:segments.length,
-    polyfills:built?.polyfills??[],image_assets:[],text_assets:[],_styk:{colorMode:'segments',rigExample:{id,description:example.description,control:example.control,...(built?.projection?{projection:built.projection}:{}),...(built?.sliders?{sliders:built.sliders}:{})}}};
-  const object=createObject(figure,1,320,230);
+    polyfills:built?.polyfills??[],image_assets:[],text_assets:[],_styk:{colorMode:'segments',rigExample:{id:example.id,description:example.description,control:example.control,...(built?.projection?{projection:built.projection}:{}),...(built?.sliders?{sliders:built.sliders}:{})}}};
+  const extra={};
+  if(built?.object?._stykIK)extra._stykIK=structuredClone(built.object._stykIK);
+  if(built?.object?.angles)extra.angles=built.object.angles.slice();
+  const object=createObject(figure,1,320,230,extra);
   return {version:5,canvas_width:640,canvas_height:460,fps:24,auto_easing:false,auto_easing_disabled_raw:1,
     figure_types:[figure],backgrounds:[],keyframes:[createFrame([object],1)],_styk:{format:'StykAnimate',format_version:1,name:example.name}};
 }

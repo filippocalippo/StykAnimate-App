@@ -14,6 +14,7 @@ import {drawRigGuides, drawConnectorGuides} from './rig-controls.mjs';
 import {displayedSegmentPaint,displayedColor} from './figure-colors.mjs';
 import {openSurfaceReference} from './builder-surface-ui.mjs';
 import {openRigTest, openRigExamples} from './rig-test-ui.mjs';
+import {showAutoRigDialog} from './ui/auto-rig-dialog.mjs';
 import {bucketRegion, pickFigureFill, drawFillHighlight} from './builder-fill.mjs';
 import {pickCanvasArtwork} from './canvas-artwork-pick.mjs';
 import {figureJoinAction, joinTargetUids} from './figure-join-action.mjs';
@@ -4616,6 +4617,9 @@ const actions = {
   'rig-bind-branch':()=>editor.bindStretchParts(editor.figure.segments[editor.selectedJoint].segment_id,{branch:true}),
   'rig-test':()=>openRigTest(rigHost()),
   'rig-examples':()=>openRigExamples(rigHost()),
+  'auto-rig-image': function() {
+    return showAutoRigDialog(this?.editor ?? editor, this?.builderSession ?? builderMode?.session);
+  },
   "edit-in-build-mode": () => {
     if (editor.object && selection().size === 1 && !editor.figure?._styk?.movieclip)
       studioShell?.changeMode('rig');
@@ -6150,6 +6154,7 @@ window.styk = {
   recovery: browserRecovery,
   audioEngine,
   editor,
+  get builderSession() { return builderMode?.session; },
   projects,
   projectSwitcher,
   home,

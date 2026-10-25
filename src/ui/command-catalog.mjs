@@ -256,6 +256,7 @@ group('build', [
   ['paste-builder-appearance', english["commands.pasteBuilderAppearance"], 'clipboard', {labelKey: "commands.pasteBuilderAppearance", ...build, requires: ['joint', 'appearance'], keywords: ['style', 'color', 'colour']}],
   ['toggle-builder-branch', english["commands.toggleBuilderBranch"], 'builder-branch', {labelKey: "commands.toggleBuilderBranch", ...build, toggle: true}],
   ['add-sprite-segment', english["commands.addSpriteSegment"], 'image', {labelKey: "commands.addSpriteSegment", ...build, keywords: ['sprite', 'picture']}],
+  ['auto-rig-image', english["commands.autoRigImage"] ?? 'Auto-Rig from Image…', 'nodes', {...build, keywords: ['ai', 'pose', 'auto rig', 'skeleton', 'mediapipe']}],
   ['rig-connect', english["commands.rigConnect"], 'link', {labelKey: "commands.rigConnect", ...build, requires: ['figure'], keywords: ['rig', 'anchor']}],
   ['rig-weighted', english["commands.rigWeighted"], 'nodes', {labelKey: "commands.rigWeighted", ...build, requires: ['joint'], keywords: ['rig']}],
   ['rig-pick-start', english["commands.rigPickStart"], 'cursor', {labelKey: "commands.rigPickStart", ...build, palette: false}],

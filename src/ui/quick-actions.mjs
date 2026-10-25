@@ -112,6 +112,7 @@ export const QUICK_ACTIONS = Object.freeze([
   entry('mirror-segment-vertical', {context: 'part', group: 'flip', shift: 'mirror-branch-vertical', shiftHint: 'the branch', shiftHintKey: 'quick.theBranch'}),
   entry('delete-single-segment', {context: 'part', group: 'delete', shift: 'delete-segment', shiftHint: 'the branch', shiftHintKey: 'quick.theBranch'}),
   entry('add-sprite-segment', {context: 'build', group: 'add', word: interfaceText("quickActions.image"), wordKey: 'quick.imagePart'}),
+  entry('auto-rig-image', {context: 'build', group: 'add', word: 'Auto-Rig'}),
   entry('rig-connect', {context: 'build', group: 'rig', word: interfaceText("quickActions.connect"), wordKey: 'quick.connect'}),
   entry('rig-examples', {context: 'build', group: 'add', word: interfaceText("quickActions.examples"), wordKey: 'quick.examples'}),
   entry('zoom-selection', {context: 'build', group: 'view', word: interfaceText("quickActions.fit"), wordKey: 'quick.fit'}),
