@@ -12,6 +12,13 @@ use crate::{EditError, Editor};
 #[path = "selection_metadata_tests.rs"]
 mod tests;
 
+/// A host-owned, monotonic selection deny mask, outside document and undo state.
+#[derive(Clone, Debug)]
+pub(crate) struct SelectionLocks {
+    generation: u32,
+    denied: std::collections::HashSet<u32>,
+}
+
 /// The selected figures and joint.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Selection {
@@ -272,6 +279,105 @@ impl Editor {
         self.select_ids(selected);
         self.emit("selection", vec![]);
         Ok(Value::array(frame.into_iter().filter(|o| uid(o).is_some_and(|u| self.selection.uids.contains(&u))).collect()))
+    }
+
+    /// Install a connected-selection deny mask from the collaboration owner.
+    /// Newer generations replace the mask; identical retries are idempotent.
+    /// Command candidates and Session views cannot overwrite this policy.
+    pub fn set_selection_locks(&mut self, generation: u32, denied: &[u32]) -> Result<bool, String> {
+        let denied: std::collections::HashSet<u32> = denied.iter().copied().collect();
+        if let Some(current) = &self.selection_locks {
+            if generation == current.generation && denied == current.denied {
+                self.enforce_connected_selection_locks();
+                return Ok(false)
+            }
+            if generation <= current.generation { return Err("selection lock generation must increase".into()) }
+        }
+        self.selection_locks = Some(std::sync::Arc::new(SelectionLocks { generation, denied }));
+        self.enforce_connected_selection_locks();
+        Ok(true)
+    }
+
+    /// Purge newly denied state before snapshotting a connected-selection call.
+    /// Policy enforcement survives a command refusal; document/history stay intact.
+    pub(crate) fn enforce_connected_selection_locks(&mut self) {
+        let Some(policy) = &self.selection_locks else { return };
+        if !self.selection.uids.iter().any(|id| policy.denied.contains(id))
+            && !self.selection.uid.is_some_and(|id| policy.denied.contains(&id)) { return }
+        self.selection.uids.retain(|id| !policy.denied.contains(id));
+        self.selection.uid = self.selection.uid.filter(|id| self.selection.uids.contains(id))
+            .or_else(|| self.selection.uids.last().copied());
+        self.selection.joint = -1;
+        self.selection_metadata = SelectionMetadata::default();
+        self.emit("selection", vec![]);
+    }
+
+    /// `selectConnected(uid = selectedUid, {add, candidates})`: traverse joins in
+    /// both directions, then filter eligible UIDs. Excluded intermediates must
+    /// not disconnect the component. Selection order follows document slots,
+    /// after any existing selection retained by `add`.
+    pub(crate) fn select_connected(&mut self, args: &[Value]) -> Result<Value, EditError> {
+        // Internal batch dispatch can bypass the public call wrapper.
+        self.enforce_connected_selection_locks();
+        let number_uid = |value: &Value| value.as_f64()
+            .filter(|n| n.is_finite() && n.fract() == 0.0 && *n >= 0.0 && *n <= u32::MAX as f64)
+            .map(|n| n as u32);
+        let selected = args.first().map_or(self.selection.uid, number_uid);
+        let options = args.get(1);
+        if options.is_some_and(|value| value.is_null()) {
+            return Err(EditError::Unported("selectConnected with null options".into()));
+        }
+        let candidates = options.and_then(|value| value.get("candidates"));
+        let eligible: Option<std::collections::HashSet<u32>> = match candidates {
+            None => None,
+            Some(value) => Some(value.elements()
+                .ok_or_else(|| EditError::Unported("selectConnected with non-array candidates".into()))?
+                .iter().filter_map(|value| number_uid(&value)).collect()),
+        };
+        let objects = self.selection_frame()?;
+        let result = |ids: &std::collections::HashSet<u32>| Value::array(objects.iter()
+            .filter(|object| uid(object).is_some_and(|id| ids.contains(&id))).cloned().collect());
+        let Some(start) = selected.and_then(|selected| objects.iter().position(|object| uid(object) == Some(selected))) else {
+            return Ok(result(&self.selection.uids.iter().copied().collect()));
+        };
+        let mut neighbors = vec![Vec::new(); objects.len()];
+        for (slot, object) in objects.iter().enumerate() {
+            if let Some(target) = object.path(&["join", "target_object_slot"]).and_then(Value::as_f64)
+                .filter(|target| target.is_finite() && target.fract() == 0.0 && *target >= 0.0 && *target < objects.len() as f64)
+                .map(|target| target as usize)
+            {
+                neighbors[slot].push(target);
+                neighbors[target].push(slot);
+            }
+        }
+        let mut visited = vec![false; objects.len()];
+        visited[start] = true;
+        let mut queue = vec![start];
+        let mut cursor = 0;
+        while cursor < queue.len() {
+            for &slot in &neighbors[queue[cursor]] {
+                if !visited[slot] { visited[slot] = true; queue.push(slot); }
+            }
+            cursor += 1;
+        }
+        let add = options.and_then(|value| value.get("add")).is_some_and(Value::truthy);
+        let mut ids = if add { self.selection.uids.clone() } else { Vec::new() };
+        let mut chosen: std::collections::HashSet<u32> = ids.iter().copied().collect();
+        for (slot, object) in objects.iter().enumerate() {
+            if visited[slot] && let Some(id) = uid(object)
+                && self.selection_locks.as_ref().is_none_or(|policy| !policy.denied.contains(&id))
+                && eligible.as_ref().is_none_or(|eligible| eligible.contains(&id)) && chosen.insert(id)
+            { ids.push(id); }
+        }
+        let active = selected.filter(|id| chosen.contains(id)).or_else(|| ids.last().copied());
+        // The editor emits only for membership, active-figure or joint changes;
+        // reordering the same selection alone does not emit an event.
+        let changed = self.selection.joint != -1 || self.selection.uid != active
+            || self.selection.uids.len() != ids.len() || self.selection.uids.iter().any(|id| !chosen.contains(id));
+        self.selection_metadata.branch = None;
+        self.selection = Selection { uid: active, uids: ids, joint: -1 };
+        if changed { self.emit("selection", vec![]); }
+        Ok(result(&chosen))
     }
 
     pub(crate) fn seek(&mut self, tick: f64) -> Result<Value, EditError> { self.seek_checked(tick,&mut || Ok(())) }

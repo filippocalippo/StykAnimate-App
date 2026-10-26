@@ -149,6 +149,22 @@ impl EditSession {
         self.revision
     }
 
+    /// Install the collaboration owner's versioned connected-selection deny mask.
+    /// IDs are a JSON array. Invalid updates fail before changing the policy/state.
+    pub fn set_selection_locks(&mut self, generation: f64, denied: &str) -> Result<String, JsError> {
+        if !generation.is_finite() || generation.fract() != 0.0 || generation < 0.0 || generation > u32::MAX as f64 {
+            return Err(js_error("selection lock generation must be a u32"));
+        }
+        let value = styk_doc::json::parse(denied.as_bytes()).map_err(js_error)?;
+        let items = value.elements().ok_or_else(|| js_error("selection locks must be a UID array"))?;
+        let ids: Vec<u32> = items.iter().map(|value| value.as_f64()
+            .filter(|id| id.is_finite() && id.fract() == 0.0 && *id >= 0.0 && *id <= u32::MAX as f64)
+            .map(|id| id as u32).ok_or_else(|| js_error("selection lock UID must be a u32")))
+            .collect::<Result<_, _>>()?;
+        self.session.as_mut().expect("a session is open until it is dropped")
+            .set_selection_locks(generation as u32, &ids).map_err(js_error)
+    }
+
     pub fn can_undo(&self) -> bool {
         self.session().can_undo()
     }

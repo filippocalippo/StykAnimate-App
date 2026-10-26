@@ -3,7 +3,6 @@
 import {existsSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {loadEngine} from '../../src/engine/engine.mjs';
 import {registeredEngine, useEngine} from '../../src/engine/engine-open.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -12,7 +11,11 @@ export const engineBuilt = existsSync(path.join(root, 'src/engine/pkg/styk_engin
 
 /** The engine, once per test process: the one `npm test` registers, else loaded here. */
 export async function nodeEngine() {
-  if (!registeredEngine()) useEngine(await loadEngine({workers: 0}));
+  if (!registeredEngine()) {
+    // Let tests inspect engineBuilt before loading the generated WebAssembly glue.
+    const {loadEngine} = await import('../../src/engine/engine.mjs');
+    useEngine(await loadEngine({workers: 0}));
+  }
   return {engine: registeredEngine()};
 }
 

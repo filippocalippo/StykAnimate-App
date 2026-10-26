@@ -295,6 +295,8 @@ pub struct Editor {
     pub(crate) audio_rippling: bool,
     /// The layers Focus and lock holds (`editor.getLayerFocus()` with a lock), as the view of the call in progress has them.
     pub(crate) focus_lock: Option<FocusLock>,
+    /// Host-installed connected-selection policy; never supplied by command args/view or restored by history.
+    pub(crate) selection_locks: Option<std::sync::Arc<crate::select::SelectionLocks>>,
     /// `editor._audioClipboard`: the last copied audio clip and its recording.
     pub(crate) audio_clipboard: Option<(Value, Value)>,
     /// `editor._cameraMotionClipboard`: the last copied camera motion clip.
@@ -444,6 +446,7 @@ impl Editor {
             audio_ripple: false,
             audio_rippling: false,
             focus_lock: None,
+            selection_locks: None,
             camera_motion_clipboard: None,
             vfx_clip_clipboard: None,
             draws: Default::default(),
@@ -717,6 +720,9 @@ impl Editor {
         publication: Option<&mut Option<Value>>,
         duplicate_pastes: Option<&mut Option<Value>>,
     ) -> Result<Value, EditError> {
+        // Policy correction precedes the command snapshot: a refused call must not
+        // restore remotely denied IDs imported by a stale Session view.
+        if method == "selectConnected" { self.enforce_connected_selection_locks(); }
         let snapshot = self.snapshot();
         let result = check().and_then(|()| self.dispatch_layer_publication(method, args, worker, check, publication, duplicate_pastes));
         let result = result.and_then(|value| check().map(|()| value));
@@ -874,6 +880,7 @@ impl Editor {
                 let flag = |key| options.get(key).is_some_and(Value::truthy);
                 self.select(arg(0).as_f64().filter(|v| v.fract() == 0.0 && *v >= 0.0).map(|v| v as u32), joint, flag("toggle"), flag("add"))
             }
+            "selectConnected" => self.select_connected(args),
             "selectMany" => self.select_many(&arg(0).numbers().unwrap_or_default().into_iter().map(|v| v as u32).collect::<Vec<_>>()),
             "selectPolygon" => self.select_polygon(select::index(args.first()).and_then(|id| u32::try_from(id).ok()), select::index(args.get(1))).map(Value::Bool),
             "toggleSegment" => self.toggle_segment(select::index(args.first()).and_then(|id| u32::try_from(id).ok()), select::index(args.get(1))).map(Value::Bool),

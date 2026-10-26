@@ -71,6 +71,7 @@ struct Guard {
     counters: [u64; 6],
     selection: select::SelectionState,
     selection_metadata: select::SelectionMetadata,
+    selection_locks: Option<std::sync::Arc<select::SelectionLocks>>,
     options: Options,
     size: u64,
     lengths: [usize; 2],
@@ -100,6 +101,7 @@ impl Guard {
             ],
             selection: editor.selection_state(),
             selection_metadata: editor.selection_metadata.clone(),
+            selection_locks: editor.selection_locks.clone(),
             options: editor.options,
             size: editor.history_size.to_bits(),
             lengths: [editor.undo.len(), editor.redo.len()],
@@ -134,6 +136,11 @@ impl Guard {
                 ]
             && self.selection == editor.selection_state()
             && self.selection_metadata == editor.selection_metadata
+            && match (&self.selection_locks, &editor.selection_locks) {
+                (None, None) => true,
+                (Some(before), Some(current)) => std::sync::Arc::ptr_eq(before, current),
+                _ => false,
+            }
             && self.options.property_channels == editor.options.property_channels
             && self.options.layer_timeline == editor.options.layer_timeline
             && self.options.auto_key == editor.options.auto_key

@@ -377,6 +377,13 @@ impl Session {
         Ok(Session { editor })
     }
 
+    /// Host-only selection policy update, independent of call arguments/view.
+    /// Returns corrected selection state so the host can synchronize its read view.
+    pub fn set_selection_locks(&mut self, generation: u32, denied: &[u32]) -> Result<String, String> {
+        self.editor.set_selection_locks(generation, denied)?;
+        Ok(styk_doc::json::to_string(&self.editor.state_value()))
+    }
+
     /// Whether the session's own history can undo (it only knows the commands it ran).
     pub fn can_undo(&self) -> bool {
         self.editor.state().can_undo
@@ -659,7 +666,9 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     if changes_only {
         answer.push(("changesOnly", Value::Bool(true)));
     }
-    if let Err(error) = apply_view(editor, view) {
+    let view_result = apply_view(editor, view);
+    if method == "selectConnected" { editor.enforce_connected_selection_locks(); }
+    if let Err(error) = view_result {
         answer.push(("status", Value::str("unported")));
         answer.push(("reason", Value::str(&format!("{error:?}"))));
         return Ok(response_value(answer));

@@ -571,6 +571,31 @@ every JavaScript test that loads the editor imports `engine/tools/v8-pin.mjs` fi
 V8's own (`--no-use-std-math-pow`) and fails if Node does not run it. It must come before anything
 else, and so must it in a child process the test starts.
 
+## Connected-figure selection in the Rust command API (2026-10-23)
+
+`Editor::call` and `Session::call` accept `selectConnected(uid, {add, candidates})`.
+Omitting `uid` uses the active selection; an explicit null or unknown UID leaves
+selection unchanged. The command walks joins in both directions with a visited
+set, then filters candidates, so an excluded intermediate figure does not break
+connectivity. `add` preserves existing selection order before appending eligible
+component members in document-slot order. The requested UID remains active when
+selected, otherwise the last selected UID becomes active. Repeating an unchanged
+selection emits no event; selecting a component clears joint/branch selection.
+No document records or history entries are changed.
+
+The port is available to native and WebAssembly Session callers after rebuilding;
+the app's existing JavaScript selection routing and layer-focus handling remain
+unchanged.
+Non-array candidate transport refuses atomically so the caller can use its
+existing fallback. This addition does not open any app ownership gate.
+
+The three connected-selection scenarios and their references are frozen inputs
+recorded before the JavaScript fixture tools were retired. Their 81 steps cover native, sheet and auto-key
+sheet selection, add/filter ordering, empty/missing targets, no-ops, branch/joint
+reset and undo/redo. `tests/connected_selection.rs` in `styk-edit` checks those
+recordings through direct commands and the Session API, plus cyclic/dangling or
+invalid join targets and atomic refusal. Geometry/hit testing is not required.
+
 ## Phase 2: queries from the engine
 
 The frame on show, its geometry and the timeline come from the engine's session
@@ -949,3 +974,48 @@ The default context route remains full, as do one-shot and pinned calls. Needed 
 figures and ancestors retain the shape owner’s full-output fallback, and joined graph
 callbacks keep their separate complete scene. This private route changes no public
 API, command admission, cache, stored arithmetic or response field.
+
+
+### Connected selection and external ownership
+
+The collaboration owner can install a persistent deny mask before admitting calls:
+
+- Rust `Editor::set_selection_locks(generation, denied_uids)` returns whether the
+  policy changed. `Session::set_selection_locks` and `WorkerSession::set_selection_locks`
+  return corrected selection state as JSON.
+- WebAssembly `EditSession.set_selection_locks(generation, deniedJson)` accepts a
+  nonnegative u32 generation and a JSON array of u32 UIDs; malformed updates fail
+  before changing state. For example, `session.set_selection_locks(1, '[2]')` denies UID 2.
+
+Policy generations must increase; an identical same-generation retry is idempotent,
+and an older or conflicting same-generation update is rejected. A newer empty mask
+explicitly releases all denied UIDs. The policy stays with the runtime owner across
+worker handoff; it is outside document JSON and undo history. Prepared publications
+are invalidated when policy changes, even without a document/selection revision.
+Worker operations also advance their operation epoch on a changed policy.
+
+`selectConnected` checks the installed deny mask when accepting component members.
+An excluded starting node or bridge is still traversed with the visited set, so
+eligible nodes beyond it remain reachable even in a cycle. Policy updates immediately
+purge denied selections, repair the active UID and clear joint/optional selection
+metadata when purging. Imported stale Session views are revalidated before command
+snapshotting. `add: true` retains only selections allowed by the installed policy;
+stale or unfiltered `candidates` cannot override the deny mask. Non-array candidates
+still refuse, preserving the policy-corrected selection and unchanged document/history.
+Command arguments and view fields cannot replace this separately installed policy.
+
+`candidates` remains an operation's eligible-addition domain, not the lock mask.
+Without a policy, the existing recorded behavior is unchanged; with a policy, existing
+unlocked selections outside candidates are still retained by `add: true`.
+
+The trusted collaboration owner must control access to the policy setter and supply
+its authoritative, session-scoped UID/generation mapping. Remote presence/highlights
+are not inherently exclusive locks, and arbitrary document ownership tags are not
+interpreted. This opt-in policy guards connected selection; it is not a network
+protocol, authentication mechanism or authorization policy for other editing commands.
+No multiplayer UI or default app routing is enabled by this addition.
+
+Native integration tests cover stale views/candidates with `add: true`, invalid
+candidate transport, cyclic bridges, monotonic policy updates, no-op events,
+unchanged document/revision/history and stale worker/publication rejection. Real
+WebAssembly tests exercise the same boundary and strict policy-input validation.

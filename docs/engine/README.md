@@ -25,6 +25,11 @@ Commands: `npm run engine:build`, `npm run engine:test` (seconds once built),
 (one benchmark run; `scripts/engine-bench-matrix.sh` for rounds) and
 `npm run engine:bench:summary <label>`.
 
+Node tests using `tests/support/engine-node.mjs` check `engineBuilt` before requesting
+the engine: an unbuilt checkout can run ordinary JavaScript assertions and skip the
+WebAssembly-dependent cases. Loading the engine still reports missing or broken build
+output; build it with `npm run engine:build` to run those cases.
+
 ## Fixtures
 
 The JavaScript engine is no longer the oracle. What it produced while it was is kept as **frozen

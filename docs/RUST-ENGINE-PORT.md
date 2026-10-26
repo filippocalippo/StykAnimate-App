@@ -673,6 +673,8 @@ layer-sheet movieclip replacements.
 
 ## 7. Parity results
 
+2026-10-23 local addition: `selectConnected` is available through the Rust Editor/Session command APIs. Three JavaScript-recorded scenarios match all 81 steps in native and Session checks; no app ownership gate changes. Browser/WebAssembly verification remains pending a local engine build; see `docs/engine/editing.md`, Connected-figure selection.
+
 Figure clipboard publication passes 238 Rust tests, three recorded replays /
 106 exact calls, 263 JS tests and final Main check in 47.783 s. The scoped warmed
 default proof completes in 22.837 s with 13 owned / 17 compared / 33 attempted calls,
@@ -1365,5 +1367,30 @@ are review inputs, not completed milestones or class ownership evidence.
 | 2026-10-05 20:00 UTC | Preserve clipboard paste counters | Paste and duplicate publish certified counters through original events and clipboard restoration; additive opt-in Session JSON, Rust signatures/math unchanged. **Counters:** inventory unchanged 175/123/34/23/1; classes 5→5; deleted JS 2→2; command rows 7→8; full cost rows 43 and engine-1 0/28 unchanged. | 238 Rust / 106 recorded calls / 263 JS and Main check pass. All 34 paired boundaries and full undo match; aggregate paste 24.860/20.630 ms is diagnostic only. |
 | 2026-10-11 | Adopt layer metadata, project settings and movieclip rename | The leftover diff from the stopped agent, finished: the eight layer metadata commands, `setFPS`/`setCanvasSize`/`updateProject` and sheet `renameMovieclip` adopt the engine's answer in the default classes mode. New `scripts/engine-app-tape.mjs` replays recorded tapes in the app. Worktrees archived and removed. **Counters:** inventory 175/123/34/23/1 unchanged; OWNED_CLASSES 5; app-owned commands 98→110; deleted JS 2. | styk-edit tests and 126 adoption tests pass; check passes. In the app, seven tapes (101 steps, 43 owned calls) match the editor alone at every step and after full undo. |
 | 2026-10-11 | D19: the engine owns the document | Generic document patches (`styk_edit::patch`, checked on every native replay step); the owner (`engine-owner.mjs`): persistent session per document, patches applied copy-on-write to the read view, session history with external entries for editor-run calls (`external.rs`), gestures mirrored, sessions per tab, start from the mirror with `@shape`, legacy Pivot pose caches materialized like the editor. Tools: `tests/engine-owner.test.mjs`, `scripts/engine-app-tape.mjs --owner`, `scripts/engine-owner-cost.mjs [--app]`. **Counters:** inventory unchanged; OWNED_CLASSES 5; deleted JS 2. | 325 tapes / 8,308 steps match in Node from the document and from the mirror (with legacy caches); 28 app tapes match. Cost in the app: Jay C 91.4 / J 89.5 ms (pass), URIEL 3 C 145.9 / J 54.4 ms (fail). Patch key-order fix: native heavy calls 6.3 → 2 ms. |
+| 2026-10-23 | Add connected selection to the Rust command API | `styk-edit` Editor/Session accepts `selectConnected`, preserving candidate/add ordering, active selection, no-op events and history. Iterative traversal handles cycles and invalid/missing join slots. App routing and ownership gates unchanged; inventory classifications stay 175/123/34/23/1. | Five feature tests, 81 recorded steps in both direct and Session routes; all 120 selected Rust tests pass, plus 33 JS tests (one build-dependent skip). Seven fixture files regenerate byte-identically; npm run check passes. Native macOS evidence only; browser/WebAssembly and performance unverified. |
 | 2026-10-23 | S7 Windows; S5 owner gestures; S1 native files | The tools and tests run on Windows paths; effect-clip and property edits and native movieclip commands run in the session; `.styk`/`.stkz`/`.stykmov` open and save through `styk-formats` in the codec module, the JavaScript container codec and vendored zstd deleted. **Counters:** owner editor calls 1,389 → 849; inventory 175/123/34/23/1 → 173/126/33/23/2; deleted JS modules +2 (native-container, vendored zstd). | Owner tapes 0 failing in both variants; `npm test` on Windows 4,121, 0 fail; old and new container codecs equal on 259 native files and two large documents (documents, saves, cache) before deletion. |
 | 2026-10-24 | D16 pow; S5 motion paths | `styk_math::pow` is V8's legacy fdlibm pow and every fixture tool pins Node to it (`engine/tools/v8-pin.mjs`); motion-path edits run in the session (redo under an open edit hands it to the editor). **Counters:** engine pow call sites on platform pow 9 → 0; owner editor calls 849 → 549. | pow: 0 mismatches on 6.17 M recorded and 2 M fresh inputs; regeneration byte-stable on Windows and Linux; four crates 455 tests pass; owner tapes 0 failing. |
+| 2026-10-26 | Refresh connected selection after the engine cutover | Preserve upstream selection metadata handling, retire obsolete JavaScript recorders and retain the seven frozen fixtures. Document caller-owned external eligibility via candidates, including add retaining prior selections. | Six connected-selection tests cover 81 frozen recorded steps through Editor/Session, plus excluded bridge/start nodes in a cyclic graph, no-op events and unchanged document/history; four loader regression tests pass. No remote ownership registry or multiplayer lock guarantee is introduced. |
+
+
+### Connected-selection lock boundary (2026-10-26)
+
+The optional host-owned `set_selection_locks` policy is installed separately from
+command candidates and view state on Editor, Session, WorkerSession and WebAssembly
+EditSession. Monotonic generations prevent stale updates clearing a deny mask;
+identical retries are idempotent. Accepted updates immediately prune denied IDs,
+while connected traversal still reaches allowed figures past denied bridges.
+Stale imported views and add selections are revalidated before command snapshotting.
+Publication guards retain immutable policy identity, and worker updates retire old
+operation epochs without modifying document revisions or undo history.
+Without a policy the original 81-step selection contract remains unchanged. This
+is a connected-selection policy boundary, not multiplayer authentication, an edit
+authorization system, or a default app-routing change. See the editing contract
+for native and WebAssembly API/input and refusal semantics.
+
+Verification of the lock-boundary update: 242 affected Rust tests and 31 focused
+JavaScript tests pass with no skips, including real WebAssembly policy/input checks
+and document-patch reconstruction of 329 tapes / 8,433 steps. Repository syntax,
+CSS and localization checks pass. Development native/WebAssembly profiles used
+opt-level=0/debug=0. Full workspace/Node, interactive UI and performance checks were
+not rerun for this update; no deployment/performance claim is made.

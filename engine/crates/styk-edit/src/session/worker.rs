@@ -79,6 +79,14 @@ impl WorkerSession {
     pub fn revision(&self) -> u64 { self.session.revision() }
     pub fn history_checkpoint_worker(&self) -> Option<f64> { self.session.history_checkpoint_worker() }
     pub fn operation_epoch(&self) -> u64 { self.epoch }
+    /// Install policy on the owning actor and retire publications prepared under
+    /// older lock state, even though selection does not change document revision.
+    pub fn set_selection_locks(&mut self, generation: u32, denied: &[u32]) -> Result<String, String> {
+        if self.epoch == u64::MAX { return Err("the Session operation epoch is exhausted".into()) }
+        if self.session.editor.set_selection_locks(generation, denied)? { self.epoch += 1; }
+        Ok(styk_doc::json::to_string(&self.session.editor.state_value()))
+    }
+
     // Offline replay observes the exact moved owner's initial heads before
     // dispatch. Reuse the same serializers and worker display preparation;
     // this exposes no UI capability and publishes no operation or report.
