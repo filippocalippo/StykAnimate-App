@@ -13,7 +13,7 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `styk-doc` | 2 | 20 KiB | 1 | 1 | 0 | 0 | 0 | 0 % | 14 % | 0 % |
 | `styk-drawing` | 36 | 163 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
-| `styk-edit` | 92 | 599 KiB | 22 | 11 | 1 | 4 | 54 | 67 % | 9 % | 63 % |
+| `styk-edit` | 92 | 598 KiB | 22 | 11 | 1 | 4 | 54 | 67 % | 9 % | 63 % |
 | `styk-engine` | 24 | 31 KiB | 6 | 0 | 0 | 0 | 18 | 56 % | 0 % | 56 % |
 | `styk-eval` | 80 | 303 KiB | 10 | 32 | 2 | 2 | 34 | 32 % | 55 % | 19 % |
 | `styk-export` | 14 | 59 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
@@ -118,7 +118,7 @@ Engine logic: ported to Rust.
 | `src/editor-rig-constraints.mjs` | `styk-edit` | removed | deleted: the rig relationship commands are session commands (styk-edit/src/rig_behavior.rs, pose.rs) |
 | `src/editor-rig.mjs` | `styk-edit` | removed | deleted: the rig drag is a session command (styk-edit/src/rig_drag.rs) |
 | `src/editor-scene.mjs` | `styk-edit` | removed | deleted: Scene edits are the engine session's (styk-edit property_edit.rs, scene_backgrounds.rs) (14802 bytes) |
-| `src/editor-selection.mjs` | `styk-edit` | partial | Rust: selection order and metadata, branch copy, order and alignment commands (styk-edit). Left in JavaScript: the view calls (select, toggle, marquee, branch) and two stored reads (canDisconnectSegment, figurePalette) |
+| `src/editor-selection.mjs` | `styk-edit` | partial | Rust: selection order and metadata, branch copy, order and alignment commands (styk-edit); selectSameDefinition, invertSelection and selectMarquee are additional native/WebAssembly Session APIs (150 frozen recorded steps; app routing unchanged). Left in JavaScript: the view calls (select, toggle, marquee, branch) and two stored reads (canDisconnectSegment, figurePalette) |
 | `src/editor-sessions.mjs` | `styk-edit` | js | commands and history |
 | `src/editor-spatial-shape.mjs` | `styk-edit` | removed | deleted: setSpatialCamera and setSpatialProportions are session commands (styk-edit/src/spatial_shape.rs); the two reads moved to editor-spatial.mjs |
 | `src/editor-spatial.mjs` | `styk-edit` | partial | Rust: every spatial command (styk-edit/src/spatial.rs, spatial_ik.rs, spatial_shape.rs, pose_choice.rs) and the reads getSpatialPose and getSpatialMotion. Left in JavaScript: the stored-data reads getSpatialCamera and getSpatialProportions, and the posing helpers poseJoint, bendJoint and rotateJoint of editor.mjs still call (poseSpatialJoint, twistSpatialJoint, poseSpatialIKDepth, setSpatialPose and what they use) |

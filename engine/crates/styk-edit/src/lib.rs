@@ -874,6 +874,7 @@ impl Editor {
                 let flag = |key| options.get(key).is_some_and(Value::truthy);
                 self.select(arg(0).as_f64().filter(|v| v.fract() == 0.0 && *v >= 0.0).map(|v| v as u32), joint, flag("toggle"), flag("add"))
             }
+            "selectSameDefinition" | "invertSelection" | "selectMarquee" => self.selection_set_call(method, args),
             "selectMany" => self.select_many(&arg(0).numbers().unwrap_or_default().into_iter().map(|v| v as u32).collect::<Vec<_>>()),
             "selectPolygon" => self.select_polygon(select::index(args.first()).and_then(|id| u32::try_from(id).ok()), select::index(args.get(1))).map(Value::Bool),
             "toggleSegment" => self.toggle_segment(select::index(args.first()).and_then(|id| u32::try_from(id).ok()), select::index(args.get(1))).map(Value::Bool),

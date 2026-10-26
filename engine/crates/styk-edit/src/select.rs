@@ -2,6 +2,8 @@
 //! `_restoreSelection`), and the timeline's layer selection (`selectSheetLayer`,
 //! `_followSheetSelection`, `keepSelectionOnSeek`, `setActiveLayer`).
 
+use std::collections::HashSet;
+
 use styk_doc::Value;
 
 use crate::record::{join_target, uid};
@@ -274,6 +276,86 @@ impl Editor {
         Ok(Value::array(frame.into_iter().filter(|o| uid(o).is_some_and(|u| self.selection.uids.contains(&u))).collect()))
     }
 
+    /// Set-based selection changes UI state only. Frame-slot order governs the
+    /// returned figures; the ordered UID list governs the active selection.
+    pub(crate) fn selection_set_call(&mut self, method: &str, args: &[Value]) -> Result<Value, EditError> {
+        let options = match method { "selectSameDefinition" => args.first(), "selectMarquee" => args.get(1), _ => None };
+        if options.is_some_and(Value::is_null) {
+            return Err(EditError::Unported(format!("{method} with null options")));
+        }
+        let mode = options.and_then(|options| options.get("mode"));
+        let mode = mode.map_or(Some("replace"), Value::as_str);
+        if method == "selectMarquee" && !matches!(mode, Some("replace" | "add" | "toggle" | "subtract")) {
+            return Err(EditError::Invalid("errors.editorSelection.chooseAValidMarqueeSelectionMode".into()));
+        }
+        let frame = self.selection_frame()?;
+        let all: Vec<u32> = frame.iter().filter_map(uid).collect();
+        let existing: HashSet<u32> = all.iter().copied().collect();
+        let current: Vec<u32> = self.selection.uids.iter().copied().filter(|id| existing.contains(id)).collect();
+        let ids = |value: &Value| -> Result<Vec<u32>, EditError> {
+            let items = value.elements().ok_or_else(|| EditError::Unported(format!("{method} with non-array selection IDs")))?;
+            let mut seen = HashSet::new();
+            Ok(items.iter().filter_map(|value| value.as_f64())
+                .filter(|value| value.is_finite() && value.fract() == 0.0 && *value >= 0.0 && *value <= u32::MAX as f64)
+                .map(|value| value as u32).filter(|id| existing.contains(id) && seen.insert(*id)).collect())
+        };
+        let next = match method {
+            "selectSameDefinition" => {
+                // Valid reports use numeric definition IDs. Refuse malformed data
+                // rather than accidentally treating two different definitions alike.
+                let definition = |object: &Value| object.get("figure_type_id").and_then(Value::as_f64)
+                    .filter(|value| value.is_finite()).map(|value| if value == 0.0 { 0 } else { value.to_bits() })
+                    .ok_or_else(|| EditError::Unported("selectSameDefinition with a nonnumeric definition ID".into()));
+                let selected: HashSet<u32> = current.iter().copied().collect();
+                let definitions: HashSet<u64> = frame.iter().filter(|object| uid(object).is_some_and(|id| selected.contains(&id)))
+                    .map(definition).collect::<Result<_, _>>()?;
+                // The editor does not even inspect candidates when nothing is selected.
+                if definitions.is_empty() { return Ok(selection_result(&frame, &selected)); }
+                let candidates = options.and_then(|options| options.get("candidates"));
+                let eligible: HashSet<u32> = candidates.map_or_else(|| Ok(all.clone()), ids)?.into_iter().collect();
+                let mut next = if options.and_then(|options| options.get("add")).is_some_and(Value::truthy) { current } else { Vec::new() };
+                let mut chosen: HashSet<u32> = next.iter().copied().collect();
+                for object in &frame {
+                    if let Some(id) = uid(object) && eligible.contains(&id) && definitions.contains(&definition(object)?) && chosen.insert(id) {
+                        next.push(id);
+                    }
+                }
+                next
+            }
+            "invertSelection" => {
+                let eligible = args.first().map_or_else(|| Ok(all.clone()), ids)?;
+                let mut next = current;
+                let mut chosen: HashSet<u32> = next.iter().copied().collect();
+                for id in eligible { if !chosen.remove(&id) { chosen.insert(id); next.push(id); } }
+                next.retain(|id| chosen.contains(id));
+                next
+            }
+            "selectMarquee" => {
+                let hits = ids(args.first().unwrap_or(&Value::Null))?;
+                let mut next = if mode == Some("replace") { Vec::new() }
+                    else { options.and_then(|options| options.get("initial")).map_or(Ok(current), ids)? };
+                let mut chosen: HashSet<u32> = next.iter().copied().collect();
+                for id in hits {
+                    if mode == Some("subtract") || (mode == Some("toggle") && chosen.contains(&id)) { chosen.remove(&id); }
+                    else if chosen.insert(id) { next.push(id); }
+                }
+                next.retain(|id| chosen.contains(id));
+                next
+            }
+            _ => return Err(EditError::Unported(method.into())),
+        };
+        let chosen: HashSet<u32> = next.iter().copied().collect();
+        let active = self.selection.uid.filter(|id| chosen.contains(id)).or_else(|| next.last().copied());
+        // Insertion order can change silently when membership and the active UID
+        // stay the same. Optional polygon/segment metadata remains with its owner.
+        let changed = self.selection.joint != -1 || self.selection.uid != active || self.selection.uids.len() != next.len()
+            || self.selection.uids.iter().any(|id| !chosen.contains(id));
+        self.selection_metadata.branch = None;
+        self.selection = Selection { uid: active, uids: next, joint: -1 };
+        if changed { self.emit("selection", vec![]); }
+        Ok(selection_result(&frame, &chosen))
+    }
+
     pub(crate) fn seek(&mut self, tick: f64) -> Result<Value, EditError> { self.seek_checked(tick,&mut || Ok(())) }
     pub(crate) fn seek_checked(&mut self, tick: f64, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<Value, EditError> {
         check()?;
@@ -482,4 +564,9 @@ pub(crate) fn resolve_join_selection(objects: &[Value], uids: &[u32], ancestors:
     }
     affected.sort_unstable();
     Ok(affected)
+}
+
+/// Selected objects are returned in document-slot order, not UID insertion order.
+fn selection_result(frame: &[Value], selected: &HashSet<u32>) -> Value {
+    Value::array(frame.iter().filter(|object| uid(object).is_some_and(|id| selected.contains(&id))).cloned().collect())
 }

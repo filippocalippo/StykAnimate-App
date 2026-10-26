@@ -335,6 +335,7 @@ harness; the app's history stays in JavaScript in this phase). `styk edit-replay
 | Call | Ported | Recorded in |
 | --- | --- | --- |
 | `select(uid, joint, {toggle, add})`, `selectMany(uids)` | yes | selection-native, every sheet scenario |
+| `selectSameDefinition({add, candidates})`, `invertSelection(candidates)`, `selectMarquee(uids, {mode, initial})`: ordered UID sets, active selection, membership-only events, branch/joint reset and no document/history changes | yes, command/Session API; app routing unchanged | selection-sets-native/sheet/autokey-sheet |
 | `seek(tick)` (its return value, the evaluated frame, is read by the facade from its own copy) | yes | selection-native, move-joined, gestures-sheet |
 | `beginDrag(label, {scope})`, `beginTranslationDrag`, `commitDrag`, `cancelDrag` | yes | move-native, drag-cancel, gestures-sheet |
 | `moveSelection(dx, dy, {fromStart, detachExternal})`, joined roots refreshed from the engine's geometry | yes | move-native, move-joined, drag-cancel, move-sheet |
@@ -949,3 +950,38 @@ The default context route remains full, as do one-shot and pinned calls. Needed 
 figures and ancestors retain the shape owner’s full-output fallback, and joined graph
 callbacks keep their separate complete scene. This private route changes no public
 API, command admission, cache, stored arithmetic or response field.
+
+
+## Set-based selection commands (2026-10-25)
+
+`styk-edit` and its WebAssembly Session accept `selectSameDefinition`, `invertSelection`
+and `selectMarquee`. Same-definition selection matches every currently selected definition;
+its optional candidates limit new members, and `add` preserves existing selection order.
+Inversion toggles only eligible candidates and keeps selected figures outside that domain.
+Marquee selection accepts `replace`, `add`, `toggle` and `subtract`; an explicit `initial`
+UID array fixes the starting selection for every update of a drag. Geometry/hit testing
+remains the caller's responsibility.
+
+UID arrays are filtered against the frame, deduplicated in insertion order, and never
+coerce strings or fractional/out-of-range numbers into IDs. Returned figure records remain
+in document-slot order. The current active UID is retained when selected, otherwise the
+last selected UID becomes active. Selection resets the joint/branch; changing insertion
+order alone emits no selection event. The commands preserve document identity, revision,
+undo/redo and dirty state. Invalid marquee modes use the editor's existing error key;
+unsupported non-array ID transport refuses atomically. Same-definition selection with no
+selected definitions returns unchanged before inspecting candidates, and replace-mode
+marquee ignores `initial`, as the JavaScript owner does.
+
+These are additive command APIs. App selection still follows its existing JavaScript
+route, including layer-focus filtering. Clients must preserve their existing
+eligibility filtering when selecting through this boundary.
+
+The three `selection-sets-*.reference.json` tapes preserve 150 steps recorded before
+the JavaScript fixture tools were retired. They are frozen inputs, following the
+[fixture contract](README.md#fixtures); no tool regenerates them.
+`engine/crates/styk-edit/tests/selection_sets.rs` compares exact return values, documents,
+state, errors, events and undo/redo, and separately checks atomic refusal and readonly
+revision/history semantics. `tests/engine-selection-sets.test.mjs` runs the same tapes
+through the real WebAssembly binding, including revision and returned-UID checks. Native
+and development-WebAssembly verification passed on macOS; no app-routing, packaged-build
+or performance claim is made.
