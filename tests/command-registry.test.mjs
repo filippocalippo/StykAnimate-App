@@ -211,12 +211,13 @@ test('list() ranks palette rows: matches first, recents early, internal and alia
   assert.equal(registry.list({query: 'e'}).length > 10, true);
 });
 
-test('items() turns a menu model into resolved menu items', () => {
-  const registry = new CommandRegistry({actions: actions(), context: () => ({mode: 'animate'}), checked: () => true});
+for (const mac of [false, true]) test(`items() turns a menu model into resolved menu items (mac=${mac})`, () => {
+  const registry = new CommandRegistry({actions: actions(), context: () => ({mode: 'animate'}), checked: () => true,
+    hotkeys: {mac}, formatBinding: binding => formatBinding(binding, mac)});
   const items = registry.items(['undo', null, {label: 'Canvas'}, 'toggle-handles', 'delete-single-segment', {command: 'save', label: 'Save now'},
     {label: 'More', submenu: ['redo']}]);
   assert.equal(items.length, 6, 'the Build-only command is left out');
-  assert.deepEqual(items[0], {command: 'undo', label: 'Undo', icon: 'undo', shortcut: 'Ctrl+Z', keyshortcuts: 'Control+Z', danger: false, disabled: false, reason: ''});
+  assert.deepEqual(items[0], {command: 'undo', label: 'Undo', icon: 'undo', shortcut: mac ? 'Cmd+Z' : 'Ctrl+Z', keyshortcuts: mac ? 'Meta+Z' : 'Control+Z', danger: false, disabled: false, reason: ''});
   assert.equal(items[1], null);
   assert.deepEqual(items[2], {label: 'Canvas'});
   assert.equal(items[3].checked, true);

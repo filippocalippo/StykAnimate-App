@@ -26,6 +26,7 @@ What's new in each version of StykAnimate.
 
 ### Fixed
 
+- Shortcut hints consistently show Ctrl or Command for the configured platform.
 - Moving a figure shows its new position immediately.
 - Repeated pastes keep the expected spacing between copied figures.
 - Pasting segment settings no longer fails after changing the selected segment.
