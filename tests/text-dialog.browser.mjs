@@ -50,8 +50,9 @@ try {
   await page.goto(process.env.STYK_URL || "http://127.0.0.1:47831");
   await page.evaluate(async () => {
     const { TextDialog } = await import("/src/text-dialog.mjs");
-    const { Editor } = await import("/src/editor.mjs");
-    window.editor = new Editor({ demo: false });
+    const { pageEditor, registerPageEngine } = await import("/tests/support/page-editor.mjs");
+    await registerPageEngine();
+    window.editor = pageEditor();
     window.applied = 0;
     window.lastFigure = null;
     window.dialogModule = new TextDialog({
@@ -103,7 +104,6 @@ try {
   await page.locator("#text-bold").check();
   await page.locator("#text-italic").check();
   await page.locator("#text-alignment").selectOption("center");
-  await page.locator("#text-gradient-enabled").check();
   await page.locator("#text-outline-width").fill("1.5");
   await ready();
   check(

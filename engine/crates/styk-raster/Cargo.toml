@@ -1,0 +1,19 @@
+[package]
+name = "styk-raster"
+description = "CPU rasterizer for StykAnimate draw lists: styk-render's pipeline on the CPU, for devices without a GPU, thumbnails, previews, exports and tools."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+styk-alloc = { path = "../styk-alloc" }
+styk-draw = { path = "../styk-draw" }
+styk-eval = { path = "../styk-eval" }
+# The view, the layer plan and effect recipes both renderers follow; not the GPU renderer.
+styk-render = { path = "../styk-render", default-features = false }
+
+[dev-dependencies]
+# The GPU renderer, for comparisons where an adapter exists.
+styk-render = { path = "../styk-render" }
+pollster = "0.4"

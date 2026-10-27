@@ -1,0 +1,36 @@
+{
+ "name": "channels-outline-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/channels/channels-outline.sheet.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "moveSelection",
+   9,
+   3
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "outlineWidth": 4
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

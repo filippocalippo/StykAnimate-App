@@ -1,0 +1,115 @@
+{
+ "name": "camera-bake-sheet",
+ "document": "camera-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "applyCameraToFigures"
+  ],
+  [
+   "applyCameraToFigures"
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "applyCameraToFigures",
+   [
+    0,
+    1
+   ]
+  ],
+  [
+   "setCameraValues",
+   {
+    "x": 25,
+    "angle_rad": -0.2,
+    "scale": 0.9
+   },
+   [
+    0,
+    1
+   ]
+  ],
+  [
+   "applyCameraToFigures",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     2,
+     4
+    ]
+   }
+  ],
+  [
+   "applyCameraToFigures",
+   [
+    5
+   ]
+  ],
+  [
+   "applyCameraToFigures",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     1.5
+    ]
+   }
+  ],
+  [
+   "applyCameraToFigures",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     99
+    ]
+   }
+  ],
+  [
+   "applyCameraToFigures",
+   [
+    7
+   ],
+   {
+    "ticks": [
+     2
+    ]
+   }
+  ],
+  [
+   "setLayerVisible",
+   "camera",
+   false
+  ],
+  [
+   "applyCameraToFigures"
+  ],
+  [
+   "setLayerVisible",
+   "camera",
+   true
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

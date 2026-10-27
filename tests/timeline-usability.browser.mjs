@@ -4,7 +4,7 @@ import {mkdir, writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {chromium} from './support/playwright.mjs';
-import {Editor} from '../src/editor.mjs';
+import {nodeEditor} from './support/node-editor.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url)), out = path.join(root, 'artifacts');
@@ -14,7 +14,7 @@ report.keyframes = Array.from({length: 6}, (_, index) => ({...createFrame([
   createObject(report.figure_types[0], 1, 180 + index * 40, 270),
   createObject(report.figure_types[0], 2, 420, 260),
 ], 8)}));
-const fixture = new Editor({demo: false}).load(report);
+const fixture = nodeEditor(report);
 const sourcePath = path.join(out, 'timeline-usability-source.styk');
 await writeFile(sourcePath, JSON.stringify(fixture.serialize()));
 
@@ -41,10 +41,10 @@ try {
   await page.locator('#file-input').setInputFiles(sourcePath);
   await page.waitForFunction(() => styk.editor.report !== globalThis.__previousOpenDocument);
   await mode('simple'); await idle();
-  const baseline = await page.evaluate(() => ({renders:styk.thumbnails.stats.renders, snapshots:styk.thumbnails.stats.snapshots, version:styk.thumbnails.version}));
+  const baseline = await page.evaluate(() => ({renders:styk.thumbnails.stats.engine.renders, version:styk.thumbnails.version}));
   for (const index of [0,1,2,1,0,2,0]) await page.locator(`#timeline [data-frame="${index}"] .sheet-preview`).click();
   await idle();
-  check('Repeated frame navigation renders zero additional thumbnails', await page.evaluate(renders => styk.thumbnails.stats.renders === renders, baseline.renders));
+  check('Repeated frame navigation renders zero additional thumbnails', await page.evaluate(renders => styk.thumbnails.stats.engine.renders === renders, baseline.renders));
   check('Clean seeks do not invalidate the thumbnail worker document', await page.evaluate(version => styk.thumbnails.version === version, baseline.version));
 
   const ids = await page.evaluate(() => ({
@@ -59,26 +59,17 @@ try {
   check('Dragging the inbetweens slider retimes the span without losing any key', await page.evaluate(before =>
     JSON.stringify(Object.values(styk.editor.report._styk.layerSheet.tracks).flatMap(track => track.keys.map(key => key.id)).sort()) === JSON.stringify(before.ids)
       && styk.editor.totalTicks !== before.total, ids));
-  check('A timing change resends the document at most once for all thumbnails', await page.evaluate(before =>
-    styk.thumbnails.stats.snapshots - before.snapshots <= 1, baseline));
   await slider.press('ArrowLeft'); await idle();
   check('Slider keyboard edits remain inside the control', await page.evaluate(() => styk.editor.frameIndex === 0));
-  const beforePatch = await page.evaluate(() => ({...styk.thumbnails.stats}));
-  await page.evaluate(() => { const t = styk.timeline; t.previews.delete(t.selectedIndex); t.render(); });
-  await idle();
-  check('A thumbnail refresh without document changes resends nothing', await page.evaluate(before =>
-    styk.thumbnails.stats.snapshots === before.snapshots && styk.thumbnails.stats.patches === before.patches &&
-    styk.thumbnails.stats.renders > before.renders, beforePatch));
 
   const local = await page.evaluate(() => {
-    const before = {...styk.thumbnails.stats};
+    const before = styk.thumbnails.stats.engine.renders;
     styk.editor.select(styk.editor.frame.objects[0].unique_id); styk.editor.moveSelection(12,0); styk.editor.commitDrag();
     return before;
   });
   await idle();
-  check('Editing a pose refreshes the filmstrip thumbnails through a patch', await page.evaluate(before =>
-    styk.thumbnails.stats.renders > before.renders && styk.thumbnails.stats.patches > before.patches &&
-    styk.thumbnails.stats.snapshots === before.snapshots, local));
+  check('Editing a pose refreshes the filmstrip thumbnails', await page.evaluate(before =>
+    styk.thumbnails.stats.engine.renders > before, local));
   await page.evaluate(() => styk.timeline.selectFrame(3)); await idle();
   check('Direct filmstrip navigation selects the requested keyframe', await page.evaluate(() => styk.timeline.selectedIndex === 3));
   await idle(); await page.screenshot({path:'artifacts/timeline-simple-redesign.png'});
@@ -86,12 +77,13 @@ try {
   await mode('advanced');
   const grid = page.locator('#timeline .sheet-scroll');
   await grid.focus();
-  await page.keyboard.press('Home'); await page.keyboard.press('ArrowRight');
-  check('ArrowRight advances exactly one output frame', await page.evaluate(() => styk.editor.tick === 1));
-  await page.keyboard.press('ArrowLeft');
-  check('ArrowLeft moves back exactly one output frame', await page.evaluate(() => styk.editor.tick === 0));
-  await page.getByLabel('Go to frame', {exact:true}).fill('17');
-  await page.getByLabel('Go to frame', {exact:true}).press('Enter'); await settle();
+  await page.keyboard.press('Home'); await page.keyboard.press('Period');
+  check('The next-frame key advances exactly one output frame', await page.evaluate(() => styk.editor.tick === 1));
+  await page.keyboard.press('Comma');
+  check('The previous-frame key moves back exactly one output frame', await page.evaluate(() => styk.editor.tick === 0));
+  await page.locator('.tl-readout').click();
+  await page.getByRole('spinbutton', {name: 'Go to frame'}).fill('17');
+  await page.keyboard.press('Enter'); await settle();
   check('Go to frame uses one-based frame numbers', await page.evaluate(() => styk.editor.tick === 16));
   await page.evaluate(() => { const t = styk.timeline; styk.editor.select(styk.editor.frame.objects[0].unique_id);
     const row = t.tracks.findIndex(track => track.id === t.selectedTrackId); t._selectCell({row, tick:0}); t._selectCell({row, tick:10}, {extend:true}); });
@@ -101,7 +93,7 @@ try {
   await page.mouse.move(ruler.x+200, ruler.y+14,{steps:15}); await page.mouse.up(); await settle();
   check('Scrubbing the ruler moves the playhead without altering authored keys', await page.evaluate(before =>
     styk.editor.tick !== 0 && JSON.stringify(styk.editor.report._styk.layerSheet) === before, sheetBefore));
-  await page.locator('#timeline .sheet-zoom').fill('6'); await settle();
+  await page.locator('#timeline-zoom').fill('6'); await page.locator('#timeline-zoom').dispatchEvent('input'); await settle();
   check('The zoom slider rescales the sheet', await page.evaluate(() => styk.timeline.pxPerTick === 6));
   check('The view switch is removed', await page.locator('#timeline button[aria-label="Frames"]').count() === 0);
   await page.evaluate(()=>{styk.editor.select(styk.editor.frame.objects[0].unique_id);});
@@ -118,23 +110,24 @@ try {
   check('Onion skin is enabled by default',await page.locator('#onion-button').getAttribute('aria-pressed')==='true');
   await page.locator('#onion-settings-button').click();
   const onion=page.getByRole('dialog',{name:'Onion skin settings',exact:true});
-  await onion.locator('[data-onion=onionBefore]').fill('3');
-  await onion.locator('[data-onion=onionAfter]').fill('2');
+  await onion.locator('.onion-frame-field[data-direction=before] .ui-stepper-input').fill('24');
+  await onion.locator('.onion-frame-field[data-direction=before] .ui-stepper-input').press('Enter');
+  await onion.locator('.onion-frame-field[data-direction=after] .ui-stepper-input').fill('16');
+  await onion.locator('.onion-frame-field[data-direction=after] .ui-stepper-input').press('Enter');
   await settle();
   check('Onion controls live in the timeline toolbar',await page.locator('.timeline-toolbar #onion-button').count()===1);
-  check('Onion directions have independent counts',await page.evaluate(()=>styk.state.settings.onionBefore===3&&styk.state.settings.onionAfter===2));
+  check('Onion directions have independent counts',await page.evaluate(()=>styk.state.settings.onionRangeBefore===24&&styk.state.settings.onionRangeAfter===16));
   await page.evaluate(()=>styk.editor.seek(24));await settle();
-  const onionBuilds=await page.evaluate(()=>styk.onionCache.stats.builds);
-  await onion.locator('[data-onion=onionOpacity]').fill('48');await settle();
-  check('Changing onion opacity reuses sampled geometry',await page.evaluate(builds=>styk.onionCache.stats.builds===builds,onionBuilds));
-  check('Enabled onion skins contain tinted geometry',await page.evaluate(()=>styk.onionCache.last.frames.length===5&&styk.onionCache.last.frames.some(s=>s.geometry.drawables.some(d=>d.rgb[0]>d.rgb[2]))));
+  await onion.locator('input[type=number][data-onion=onionOpacity]').fill('48');await settle();
+  check('Changing onion opacity changes how the skins are drawn, not which',await page.evaluate(()=>styk.onionSkins().ghosts.length===5&&styk.onionSkins().ghosts.every(ghost=>ghost.opacity<=.48)));
+  check('Enabled onion skins are tinted',await page.evaluate(()=>styk.onionSkins().ghosts.some(ghost=>ghost.tint&&ghost.tint[0]>ghost.tint[2])));
+  await onion.locator('summary').click();await settle();
   await onion.getByLabel('Show on top',{exact:true}).check();await settle();
-  check('Show on top updates onion composition without rebuilding geometry',await page.evaluate(builds=>styk.state.settings.onionShowOnTop&&styk.onionCache.last.frames.every(s=>s.showOnTop)&&styk.onionCache.stats.builds===builds,onionBuilds));
+  check('Show on top updates onion composition',await page.evaluate(()=>styk.state.settings.onionShowOnTop&&styk.onionSkins().ghosts.every(ghost=>ghost.showOnTop)));
   await page.screenshot({path:'artifacts/onion-show-on-top.png'});
   await onion.getByLabel('Show on top',{exact:true}).uncheck();await settle();
-  check('Disabling Show on top restores behind-scene composition',await page.evaluate(()=>styk.onionCache.last.frames.every(s=>!s.showOnTop)));
+  check('Disabling Show on top restores behind-scene composition',await page.evaluate(()=>styk.onionSkins().ghosts.every(ghost=>!ghost.showOnTop)));
   await onion.getByLabel('Show on top',{exact:true}).check();await settle();
-  await onion.locator('summary').click();await settle();
   await onion.locator('[data-onion-scope=selected]').click();await settle();
   check('Onion scope applies immediately',await page.evaluate(()=>styk.state.settings.onionScope==='selected'));
   await page.screenshot({path:'artifacts/onion-skin-redesign.png'});
@@ -145,9 +138,10 @@ try {
   await page.getByRole('button',{name:'Close settings',exact:true}).click();
   await page.locator('#onion-button').click();
   const beforeEase = await page.evaluate(() => JSON.stringify(styk.editor.report._styk.layerSheet));
-  const targetEasing = await page.evaluate(() => styk.timeline.easing.value === 'linear' ? 'ease-in' : 'linear');
-  await page.selectOption('#timeline .sheet-frame-tools .inline-select', targetEasing); await settle();
-  check('The interpolation select retimes the selected span', await page.evaluate(before => JSON.stringify(styk.editor.report._styk.layerSheet) !== before, beforeEase));
+  await page.evaluate(() => styk.timeline.showEasingPopover());
+  await page.getByRole('dialog', {name: 'Keyframe easing'}).waitFor();
+  await page.getByRole('radio', {name: 'Ease in', exact: true}).click(); await settle();
+  check('The easing popover retimes the selected span', await page.evaluate(before => JSON.stringify(styk.editor.report._styk.layerSheet) !== before, beforeEase));
   await page.evaluate(()=>styk.editor.undo());
   const heads = await page.evaluate(async () => {
     const t = styk.timeline;
@@ -165,7 +159,7 @@ try {
     await page.screenshot({path:`artifacts/timeline-advanced-${width}.png`});
   }
   await page.evaluate(()=>styk.settingsUI.flush());await page.reload();await page.waitForFunction(()=>window.styk?.ready);
-  check('Onion customization persists after reloading',await page.evaluate(()=>styk.state.settings.onionBefore===3&&styk.state.settings.onionAfter===2&&styk.state.settings.onionOpacity===.48&&styk.state.settings.onionScope==='selected'));
+  check('Onion customization persists after reloading',await page.evaluate(()=>styk.state.settings.onionRangeBefore===24&&styk.state.settings.onionRangeAfter===16&&styk.state.settings.onionOpacity===.48&&styk.state.settings.onionScope==='selected'));
   check('Show on top persists after reloading',await page.evaluate(()=>styk.state.settings.onionShowOnTop===true));
   check('No browser errors', errors.length === 0);
   await writeFile('artifacts/timeline-usability-verification.json',JSON.stringify({checks,errors,baseline},null,2));

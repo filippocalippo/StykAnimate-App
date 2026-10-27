@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
 import {ProjectTabs, MAX_OPEN_PROJECTS} from '../src/project-tabs.mjs';
 import {createProjectTabsHost} from '../src/project-tabs-host.mjs';
 import {sessionProject, sessionUnsaved} from '../src/editor-sessions.mjs';
@@ -48,7 +48,7 @@ test('the list is bounded', () => {
 
 /** The application around the host, reduced to what the host asks of it. */
 function application({limit} = {}) {
-  const editor = new Editor({demo: false, propertyChannels: true, layerTimeline: true}).newDocument();
+  const editor = newOwnedEditor({demo: false, propertyChannels: true, layerTimeline: true}).newDocument();
   const app = {view: 1, token: 'token-1', tokens: 1, released: [], shown: [], refused: [], settles: 0, canSettle: true, answer: true, busy: false, idle: true,
     checkpoints: [], checkpoint: async () => true, recoveryCurrent: false};
   const host = createProjectTabsHost({editor, tabs: new ProjectTabs(limit ? {limit} : {}), hooks: {

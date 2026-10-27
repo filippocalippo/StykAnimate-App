@@ -62,8 +62,6 @@ function cached(figure) {
   return entry.metadata;
 }
 
-export function invalidateOriginSupportValidation(figure) {validated.delete(figure);}
-
 /** Full validation always scans the descriptor, including in-place edits. The
  * cache is published only after completion; object validation reuses it until
  * a descriptor/container changes or the topology owner invalidates it. */

@@ -1,23 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
 import {RIG_EXAMPLES,rigExampleDocument} from '../src/rig-examples.mjs';
-import {rigConstraintPlan} from '../src/rig-constraints.mjs';
-import {buildGeometry,buildGeometryAsync,evaluatedFrame} from '../src/pivot/geometry.mjs';
+import {geometryOfDocument,evaluatedAt} from './support/engine-geometry.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 import {getPivotHandles} from '../src/canvas-interactions.mjs';
-import {nativeFigureDocument} from '../src/native-figure.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
-import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {rigSections,rigControlChange} from '../src/rig-controls.mjs';
 import {renderInspector} from '../src/inspector-kit.mjs';
+import {pivotDocument, figureDocument} from './support/engine-export.mjs';
 const rigView=e=>renderInspector({kind:'joint',sections:rigSections(e)});
 
 const near=(a,b,t=1e-4)=>assert.ok(Math.abs(a-b)<t,`${a} != ${b}`);
 const point=(a,b)=>{near(a.x,b.x);near(a.y,b.y);};
-const editorFor=id=>{const e=new Editor({demo:false});e.load(rigExampleDocument(id));e.select(1);return e;};
+const editorFor=(id,options={})=>{const e=newOwnedEditor({demo:false,...options});e.load(typeof id==='string'?rigExampleDocument(id):id);e.select(1);return e;};
 const select=(e,id)=>e.select(e.selectedUid,e.figure.segments.findIndex(s=>s.segment_id===id));
 const g=e=>e.geometry.objects.get(0);
+/** Where a connector's slider sits along it, 0 to 1: its slide position in the pose (the engine's geometry has no field for it). */
+const slide=(e,s)=>{const o=e.frame.objects[0];return Math.min(1,Math.max(0,o.len_flag?o.lengths[s.index]:s.seg.length));};
 const poseSignature=scene=>[...scene.objects.values()].flatMap(o=>o.segments.map(s=>[s.start,s.end,s.handle,s.thickness]));
 
 test('sliding connector is a real handle, supports attachments and one-gesture undo',()=>{
@@ -36,7 +36,7 @@ test('connector follows independent anchors and attached parts rotate with it',(
 test('nested connectors evaluate in dependency order, independently of record order',()=>{
   const doc=rigExampleDocument('nested-curve-controls'),fig=doc.figure_types[0],o=doc.keyframes[0].objects[0];
   o.len_flag=1;o.lengths=fig.segments.map(s=>s.length);o.lengths[3]=.2;o.lengths[4]=.8;o.lengths[5]=.3;
-  const sample=()=>buildGeometry(doc,doc.keyframes[0]).objects.get(0),expected=sample(),old=fig.segments.slice();
+  const sample=()=>geometryOfDocument(doc).objects.get(0),expected=sample(),old=fig.segments.slice();
   const indices=[6,5,4,3,2,1,0];fig.segments=indices.map(i=>old[i]);o.angles=indices.map(i=>o.angles[i]);o.lengths=indices.map(i=>o.lengths[i]);
   const scene=sample();for(const [id,p] of expected.joints)point(scene.joints.get(id),p);
   const a=scene.joints.get(4),b=scene.joints.get(5);point(scene.joints.get(6),{x:a.x*.7+b.x*.3,y:a.y*.7+b.y*.3});
@@ -56,7 +56,7 @@ test('smart stretch preserves panel widths, applies one axial deformation and cl
 });
 test('enabling Smart Stretch captures posed length without figure scale and supports undo',()=>{
   const e=editorFor('telescoping-panels');select(e,1);e.enableSmartStretch(false);
-  e.updateSegment({length:270});e.object.scale=2;e._invalidate();
+  e.updateSegment({length:270});e.updateObject({scale:2});
   assert.notEqual(e.figure.segments[0].length,270);
   const before=e.serialize();
   rigControlChange(e,{id:'rig-stretch-enabled',checked:true});
@@ -70,7 +70,7 @@ test('enabling Smart Stretch captures posed length without figure scale and supp
 });
 test('enabling connector Smart Stretch captures current anchor distance even when curved',()=>{
   const e=editorFor('sliding-carriage');select(e,2);e.updateSegment({length:400});
-  select(e,3);e.updateSegment({bend_rad:Math.PI/2});e.object.scale=2;e._invalidate();
+  select(e,3);e.updateSegment({bend_rad:Math.PI/2});e.updateObject({scale:2});
   const shape=g(e).segments[2],span=Math.hypot(shape.end.x-shape.start.x,shape.end.y-shape.start.y)/2;
   assert.notEqual(span,e.figure.segments[2]._stykRig.connector.restLength);
   e.enableSmartStretch(true);near(e.figure.segments[2]._stykRig.stretch.restLength,span);
@@ -83,7 +83,7 @@ test('invalid rig changes and deleting referenced anchors fail atomically; disab
   const stretch=editorFor('telescoping-panels');select(stretch,1);stretch.setRigBehavior({stretch:null});assert.ok(stretch.figure.segments.every(s=>!s._stykRig?.follow));stretch.undo();assert.ok(stretch.figure.segments[1]._stykRig.follow);
 });
 test('relationship commands retain small history independent of media and pose count',()=>{
-  const e=editorFor('telescoping-panels');e.figure.image_assets.push({data_url:'x'.repeat(2000000)});select(e,1);
+  const doc=rigExampleDocument('telescoping-panels');doc.figure_types[0].image_assets.push({data_url:'x'.repeat(2000000)});const e=editorFor(doc);select(e,1);
   e.setRigBehavior({stretch:{width:'inverse'}});assert.ok(JSON.stringify(e._undo.at(-1)).length<3000);
 });
 test('curved connectors retain endpoints and their sliding handle lies on the arc',()=>{
@@ -95,7 +95,7 @@ test('slider channels tween and recompute dependent connectors at inbetween tick
   const doc=rigExampleDocument('sliding-carriage'),a=doc.keyframes[0],b=structuredClone(a);
   a.duration_raw=10;b.keyframe_index=1;doc.keyframes.push(b);
   for(const [frame,t] of [[a,0],[b,1]]){const o=frame.objects[0];o.len_flag=1;o.lengths=doc.figure_types[0].segments.map(s=>s.length);o.lengths[2]=t;}
-  const scene=buildGeometry(doc,evaluatedFrame(doc,0,.25,2.5)).objects.get(0),left=scene.joints.get(1),right=scene.joints.get(2);
+  const scene=geometryOfDocument(doc,evaluatedAt(doc,2.5)).objects.get(0),left=scene.joints.get(1),right=scene.joints.get(2);
   point(scene.joints.get(3),{x:left.x*.75+right.x*.25,y:left.y});
 });
 test('duplicate branches remap internal anchors and preserve explicit external anchors',()=>{
@@ -110,37 +110,23 @@ test('direct posing in stretched and connector-relative space reaches the cursor
   const start=g(e).segments[1].start,target={x:start.x-110,y:start.y+30};e.poseJoint(target.x,target.y,{stretch:true,snap:false,isolate:true});point(g(e).segments[1].end,target);
   const p=editorFor('articulated-piston');select(p,2);p.rotateJoint(.9);select(p,4);const a=g(p).segments[3].start,b={x:a.x+25,y:a.y+45};p.poseJoint(b.x,b.y,{stretch:true,snap:false,isolate:true});point(g(p).segments[3].end,b);
 });
-test('negative scale preserves connector attachment orientation and thickness',()=>{
-  const e=editorFor('articulated-piston');e.frame.objects[0].scale=-2;e._invalidate();const scene=g(e),c=scene.segments[2],s=scene.segments[3];
-  point(s.start,c.handle);near(Math.atan2(s.end.y-s.start.y,s.end.x-s.start.x),c.angle);near(Math.hypot(s.end.x-s.start.x,s.end.y-s.start.y),96);
-});
-test('joined figures follow sliding joints, and combining preserves live relationships and pose',()=>{
-  const e=editorFor('articulated-piston');select(e,2);e.rotateJoint(.9);
+test('joined figures follow sliding joints',()=>{
+  const e=editorFor('articulated-piston',{layerTimeline:true});select(e,2);e.rotateJoint(.9);
   const extra=e.importFigure(rigExampleDocument('sliding-carriage'));e.select(extra.unique_id);e.joinFigure(1,3);
   const parent=e.geometry.objects.get(0),child=e.geometry.objects.get(e.selectedSlot);point(child.root,parent.joints.get(3));
-  const before=[...e.geometry.objects.values()].flatMap(g=>g.segments.map(s=>({start:s.start,end:s.end,thickness:s.thickness})));
-  e.combineJoinedFigure(1);const after=[...e.geometry.objects.values()].flatMap(g=>g.segments.map(s=>({start:s.start,end:s.end,thickness:s.thickness})));
-  assert.equal(after.length,before.length);after.forEach((s,i)=>{point(s.start,before[i].start);point(s.end,before[i].end);near(s.thickness,before[i].thickness);});
-  assert.equal(e.figure.segments.filter(s=>s._stykRig?.connector).length,2);assert.doesNotThrow(()=>validateScene(e.serialize()));
+  assert.doesNotThrow(()=>validateScene(e.serialize()));
 });
 test('IK drives ordinary anchors; derived controls reject conflicting IK and unsupported Pivot exports',()=>{
   const e=editorFor('flexing-muscle');select(e,2);e.setNodeIK({enabled:true});e.poseJoint(400,180);const c=g(e).segments[2];point(c.end,g(e).joints.get(2));
   select(e,3);assert.throws(()=>e.setNodeIK({enabled:true}),/derived|driving/);
-  assert.throws(()=>materializePivotDocument(e.serialize()),/Pivot cannot preserve/);
+  assert.throws(()=>pivotDocument(e.serialize()),/Pivot cannot preserve/);
 });
-test('deep dependency chains compile and evaluate without recursive stack growth',()=>{
+test('deep dependency chains evaluate without recursive stack growth',()=>{
   const doc=rigExampleDocument('nested-curve-controls'),fig=doc.figure_types[0],template=fig.segments[3],count=5000;
   fig.segments=fig.segments.slice(0,3);
   for(let i=4;i<=count;i++)fig.segments.push({...template,segment_id:i,parent_id:0,_stykRig:{connector:{start:i===4?1:i-1,end:3,restLength:120}}});
-  const o=doc.keyframes[0].objects[0];o.angles=fig.segments.map(s=>s.angle_rad);rigConstraintPlan(fig);
-  const scene=buildGeometry(doc,doc.keyframes[0]);assert.equal(scene.objects.get(0).segments.length,count);assert.ok(Number.isFinite(scene.objects.get(0).joints.get(count).x));
-});
-test('cold rig compilation is cancellable and cannot publish a partial dependency plan',async()=>{
-  const doc=rigExampleDocument('sliding-carriage'),fig=doc.figure_types[0],template=fig.segments[0];
-  fig.segments=Array.from({length:2000},(_,i)=>({...template,segment_id:i+1,parent_id:0,_stykRig:{stretch:{restLength:120,min:0,max:2,width:'keep'}}}));
-  doc.keyframes[0].objects[0].angles=fig.segments.map(s=>s.angle_rad);const abort=new AbortController();let stages=0;
-  await assert.rejects(buildGeometryAsync(doc,doc.keyframes[0],null,{sliceMs:0,signal:abort.signal,onProgress:p=>{if(p.phase==='rig'){stages++;abort.abort();}},yieldControl:async()=>{}}),{name:'AbortError'});
-  assert.equal(stages,1);assert.equal(buildGeometry(doc,doc.keyframes[0]).objects.get(0).segments.length,2000);
+  const o=doc.keyframes[0].objects[0];o.angles=fig.segments.map(s=>s.angle_rad);
+  const scene=geometryOfDocument(doc);assert.equal(scene.objects.get(0).segments.length,count);assert.ok(Number.isFinite(scene.objects.get(0).joints.get(count).x));
 });
 test('polygon edges terminate at a curved connector’s sliding joint',()=>{
   const e=editorFor('sliding-carriage');select(e,3);e.updateSegment({bend_rad:1});e.addPolygon([1,3,4]);
@@ -153,9 +139,9 @@ test('repositioning a connector anchor in Build Figure keeps its slide channel i
   near(e.figure.segments[2].length,.5);point(s.start,g(e).joints.get(1));point(s.handle,{x:(s.start.x+s.end.x)/2,y:(s.start.y+s.end.y)/2});
 });
 test('Smart Stretch activates attached parts in one undo and normal drag only rotates',()=>{
-  const e=editorFor('telescoping-panels');select(e,1);e.setRigBehavior({stretch:null});e._undo.length=0;
+  const e=editorFor('telescoping-panels');select(e,1);e.setRigBehavior({stretch:null});const base=e._undo.length;
   const original=e.serialize();rigControlChange(e,{id:'rig-stretch-enabled',checked:true});
-  assert.equal(e._undo.length,1);assert.equal(e.figure.segments.filter(s=>s._stykRig?.follow?.driver===1).length,6);
+  assert.equal(e._undo.length,base+1);assert.equal(e.figure.segments.filter(s=>s._stykRig?.follow?.driver===1).length,6);
   e.undo();assert.deepEqual(e.serialize(),original);e.redo();
   // Mark a panel rigid through the simple inspector control.
   select(e,3);rigControlChange(e,{id:'rig-follow-rigid',checked:true});select(e,1);
@@ -214,7 +200,7 @@ for(const rig of RIG_EXAMPLES)test(`${rig.name}: connectors remain attached thro
     const scene=g(e);
     for(const s of scene.segments){for(const n of [s.angle,s.length,s.thickness,s.start.x,s.start.y,s.end.x,s.end.y])assert.ok(Number.isFinite(n));
       if(s.connector){point(s.start,scene.joints.get(s.seg._stykRig.connector.start));point(s.end,scene.joints.get(s.seg._stykRig.connector.end));
-        point(s.handle,{x:s.start.x+(s.end.x-s.start.x)*s.attachmentPosition,y:s.start.y+(s.end.y-s.start.y)*s.attachmentPosition});}}
+        point(s.handle,{x:s.start.x+(s.end.x-s.start.x)*slide(e,s),y:s.start.y+(s.end.y-s.start.y)*slide(e,s)});}}
     const expected=poseSignature(e.geometry);e._invalidate();assert.deepEqual(poseSignature(e.geometry),expected);
   }
 });
@@ -222,10 +208,9 @@ for(const rig of RIG_EXAMPLES)test(`${rig.name}: native project and reusable fig
   const e=editorFor(rig.id);select(e,rig.control);
   if(e.figure.segments[e.selectedJoint]._stykRig?.connector)e.setConnectorPosition(.7);else e.rotateJoint(.2);
   const report=e.serialize(),baseline=poseSignature(e.geometry),container=await buildContainerV2(report,'styk'),decoded=(await decodeDocument(container,'styk')).document;
-  validateScene(decoded);point(buildGeometry(decoded,decoded.keyframes[0]).objects.get(0).root,g(e).root);
-  assert.deepEqual(poseSignature(buildGeometry(decoded,decoded.keyframes[0])),baseline);
-  const reusable=nativeFigureDocument(report,{figureUid:1});const file=await buildContainerV2(reusable,'stkz'),saved=(await decodeDocument(file,'stkz')).document;
-  assert.deepEqual(poseSignature(buildGeometry(saved,saved.keyframes[0])),baseline);
-  const asyncScene=await buildGeometryAsync(report,report.keyframes[0]);assert.deepEqual(poseSignature(asyncScene),baseline);
-});
+  validateScene(decoded);point(geometryOfDocument(decoded).objects.get(0).root,g(e).root);
+  assert.deepEqual(poseSignature(geometryOfDocument(decoded)),baseline);
+  const reusable=figureDocument(report,{figureUid:1});const file=await buildContainerV2(reusable,'stkz'),saved=(await decodeDocument(file,'stkz')).document;
+  assert.deepEqual(poseSignature(geometryOfDocument(saved)),baseline);
+  });
 

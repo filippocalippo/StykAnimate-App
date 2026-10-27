@@ -17,6 +17,16 @@ test('Windows prefers the python on PATH, which is where a build machine install
   assert.equal(resolvePython({root: '/nowhere', env: {}, platform: 'win32', probe: both}).command, 'python');
 });
 
+test('a conda install in the home directory is only a last resort on Windows, behind PATH', async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'styk-home-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const conda = path.join(home, 'miniconda3', 'python.exe');
+  await mkdir(path.dirname(conda), {recursive: true});
+  await writeFile(conda, '');
+  assert.equal(resolvePython({root: '/nowhere', env: {}, platform: 'win32', home, probe: () => true}).command, 'python');
+  assert.equal(resolvePython({root: '/nowhere', env: {}, platform: 'win32', home, probe: command => command === conda}).command, conda);
+});
+
 test('Windows falls back to the py launcher when python is the Store stub or absent', () => {
   const found = resolvePython({root: '/nowhere', env: {}, platform: 'win32', probe: (command, args) => command === 'py' && args[0] === '-3'});
   assert.deepEqual(found, {command: 'py', args: ['-3']});

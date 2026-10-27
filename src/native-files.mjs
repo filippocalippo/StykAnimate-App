@@ -8,9 +8,9 @@ function checkAbort(signal) {
 /** Write a worker-produced Blob without whole-file ArrayBuffer/base64 conversion. */
 export async function writeNativeBlob(desktop, blob, options = {}) {
   if (!(blob instanceof Blob)) throw messageError(new TypeError(''), "errors.nativeFiles.aBlobIsRequiredForNativeFileWriting", {});
-  const { recovery = false, clipboard = false, signal, onProgress, onSaved, name, defaultPath, filters, documentToken, saveAs = false } = options;
+  const { recovery = false, signal, onProgress, onSaved, name, defaultPath, filters, documentToken, saveAs = false } = options;
   checkAbort(signal);
-  const start = clipboard ? desktop.beginClipboardWrite : recovery ? desktop.beginRecoveryWrite : documentToken ? desktop.beginProjectWrite : desktop.beginFileWrite;
+  const start = recovery ? desktop.beginRecoveryWrite : documentToken ? desktop.beginProjectWrite : desktop.beginFileWrite;
   if (typeof start !== 'function') throw messageError(new Error(''), "errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming", {});
   const started=options.onTiming?performance.now():0;
   const transfer = await start({ size: blob.size, name, defaultPath, filters, documentToken, saveAs });
@@ -42,11 +42,6 @@ export async function readNativeRecovery(desktop, { signal, onProgress, id } = {
   if (typeof desktop.beginRecoveryRead !== 'function') throw messageError(new Error(''), "errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming2", {});
   // `id` names one of the listed copies; without it the newest is read.
   return readNativeStoredFile(desktop, () => desktop.beginRecoveryRead(id), {signal, onProgress});
-}
-
-export async function readNativeClipboard(desktop, options = {}) {
-  if (typeof desktop.beginClipboardRead !== 'function') throw messageError(new Error(''), "errors.nativeFiles.restartTheLatestDesktopAppToEnableThe", {});
-  return readNativeStoredFile(desktop, desktop.beginClipboardRead, options);
 }
 
 async function readNativeStoredFile(desktop, beginRead, {signal, onProgress} = {}) {

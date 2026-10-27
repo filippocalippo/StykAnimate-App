@@ -1,8 +1,8 @@
 # Figure edits across keys
 
-`src/editor-range-commands.mjs` provides atomic range commands. Operations identify figures by native `unique_id`, so a missing figure in an individual frame is skipped. All targets are planned and validated before the first mutation. One Undo restores the complete operation.
+The range commands are commands of the engine session (`engine/crates/styk-edit/src/range.rs`, `range_plan.rs`) that `Editor` forwards to (`src/engine/engine-owner.mjs`); they are atomic. Operations identify figures by native `unique_id`, so a missing figure in an individual frame is skipped. All targets are planned and validated before the first mutation. One Undo restores the complete operation.
 
-This follows Pivot's eligible multi-frame figure controls and proportional group scaling. Numeric positions are handled separately by `native-property-edit.mjs`; per-segment values are not range controls. References: [Figure controls](https://pivotanimator.net/help5-2/figure_controls.htm), [Value input](https://pivotanimator.net/help5-2/value_input.htm).
+This follows Pivot's eligible multi-frame figure controls and proportional group scaling. Numeric positions are handled separately by `native-property-edit.mjs`, which applies a pose value to one frame; at one value across several frames it is refused (the relative range commands above exist). Per-segment values are not range controls. References: [Figure controls](https://pivotanimator.net/help5-2/figure_controls.htm), [Value input](https://pivotanimator.net/help5-2/value_input.htm).
 
 ## Public API
 
@@ -11,7 +11,7 @@ All methods return `{changedFrames, changedTicks, insertedUids}`. `indices` is a
 | Method | Behavior |
 | --- | --- |
 | `addFigureInFrames(typeId, indices, {x, y, ...options})` | Adds one stable fresh UID in every target. |
-| `pasteFiguresInFrames(indices, {offset = 0, ...options})` | Pastes the figure clipboard, merges necessary definitions once, retains internal joins, and uses stable fresh UIDs throughout the range. |
+| `pasteFiguresInFrames(indices, {offset = 0, ...options})` | A command of the engine session on layer-sheet documents (`styk-edit/src/figure_clipboard.rs`). Pastes the figure clipboard, merges necessary definitions once, retains internal joins, and uses stable fresh UIDs throughout the range. |
 | `duplicateInFrames(indices, {offset = 24, ...options})` | Duplicates each target frame's own selected poses with a consistent fresh UID map, preserves internal joins and source layers, and leaves the clipboard untouched. `duplicateFiguresInFrames` is an alias. |
 | `deleteFiguresInFrames(indices, options)` | Deletes matching UIDs; surviving attached figures detach at their visible world positions. |
 | `updateFiguresInFrames(patch, indices, options)` | Sets `color_override_raw`, `field28` (native transparency byte), or `opacity` (0–1). |

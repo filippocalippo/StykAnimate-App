@@ -101,14 +101,13 @@ test('unsupported body types are rejected before anything is sent', async t => {
   await assert.rejects(() => codecRequest({codecPort: port}, '/x', {method: 'POST', body: new Blob(['x'])}), TypeError);
 });
 
-test('without a port the request is a plain fetch to the configured origin', async () => {
+test('without a port the request fails like a network error and nothing goes over HTTP', async () => {
   const original = globalThis.fetch;
-  let seen;
-  globalThis.fetch = async (url, init) => { seen = {url: String(url), init}; return new Response('ok'); };
+  let fetched = false;
+  globalThis.fetch = async () => { fetched = true; return new Response('ok'); };
   try {
-    const response = await codecRequest({baseURL: 'http://127.0.0.1:47831'}, '/api/export', {method: 'POST', body: 'x'});
-    assert.equal(await response.text(), 'ok');
-    assert.equal(seen.url, 'http://127.0.0.1:47831/api/export');
-    assert.equal(seen.init.method, 'POST');
+    await assert.rejects(codecRequest({baseURL: 'http://127.0.0.1:47831'}, '/api/export', {method: 'POST', body: 'x'}),
+      {name: 'TypeError', message: 'The Pivot codec is not connected.'});
+    assert.equal(fetched, false);
   } finally { globalThis.fetch = original; }
 });

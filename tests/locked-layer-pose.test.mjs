@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
+import {engineEditor} from './support/owned-editor.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 
 function fixture() {
@@ -10,7 +11,7 @@ function fixture() {
     join: {target_object_slot: 0, target_unique_id: 1, target_handle_id: 1},
   });
   report.keyframes = [createFrame([parent, child], 10)];
-  const native = new Editor({demo: false}).load(report);
+  const native = engineEditor({demo: false}, report);
   native.select(1, 7);
   native.setNodeIK({enabled: true, pinned: true, bendDirection: 0});
   const endpoint = native.geometry.objects.get(native.selectedSlot).joints.get(8);
@@ -21,7 +22,7 @@ function fixture() {
   next.objects[0]._stykIK[8].target.x += 20;
   next.objects[1].angles[0] += .4;
   document.keyframes.push(next);
-  const editor = new Editor({demo: false, layerTimeline: true}).load(document);
+  const editor = engineEditor({demo: false, layerTimeline: true}, document);
   const layer = editor.createLayer('Attachment');
   editor.assignFiguresToLayer([2], layer.id);
   editor.sheetSetEasing([layer.id], 0, 10, {interpolation: 'auto'});
@@ -47,7 +48,7 @@ test('posing an eased attachment leaves its locked IK ancestor and keys unchange
   const after = editor.serialize();
   editor.undo(); assert.deepEqual(editor.serialize(), before);
   editor.redo(); assert.deepEqual(editor.serialize(), after);
-  const reopened = new Editor({demo: false, layerTimeline: true}).load(after);
+  const reopened = engineEditor({demo: false, layerTimeline: true}, after);
   reopened.seek(5);
   assert.deepEqual(reopened.evaluatedFrame, editor.evaluatedFrame);
 });

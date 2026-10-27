@@ -39,13 +39,13 @@ try {
     globalThis.Worker = class extends NativeWorker {
       constructor(url, options) {
         super(url, options);
-        if (String(url).includes('export-frame-worker.mjs')) {
+        if (String(url).includes('engine-export-worker.mjs')) {
           this.record = { options: null, ticks: [], terminated: false };
           globalThis.__sceneExportWorkers.push(this.record);
         }
       }
       postMessage(data, ...rest) {
-        if (this.record && data.operation === 'start') this.record.options = { ...data.options, token: undefined };
+        if (this.record && data.operation === 'start') this.record.options = { smoothing: data.smoothing };
         if (this.record && data.operation === 'render') this.record.ticks.push(data.tick);
         return super.postMessage(data, ...rest);
       }
@@ -115,7 +115,8 @@ try {
     await exportDialogClosed(page);
     assert.equal(await app.evaluate(() => globalThis.__workerVideoSaves.length), before);
     const canceled = await page.evaluate(() => globalThis.__sceneExportWorkers.at(-1));
-    assert.equal(canceled.terminated, true); assert.ok(canceled.ticks.length >= 2 && canceled.ticks.length < 1000);
+    await page.waitForFunction(() => globalThis.__sceneExportWorkers.at(-1).terminated);
+    assert.ok(canceled.ticks.length >= 2 && canceled.ticks.length < 1000);
     checks.push(`${format}: real Cancel stops the render worker after encoding begins and opens no Save dialog`);
 
     await load(6);
@@ -127,6 +128,7 @@ try {
     await submit().click();
     await exportDialogClosed(page);
     assert.ok((await readFile(filename)).length > 256);
+    await page.waitForFunction(() => globalThis.__sceneExportWorkers.at(-1).terminated);
     const successful = await page.evaluate(() => globalThis.__sceneExportWorkers.at(-1));
     assert.equal(successful.options.smoothing, smoothing);
     assert.deepEqual(successful.ticks, [0, 1, 2, 3, 4, 5]);

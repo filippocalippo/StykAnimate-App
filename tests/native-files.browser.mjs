@@ -3,13 +3,13 @@ import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 import {readNativeDocument} from '../scripts/read-native-document.mjs';
 import {chooseExport} from './helpers/export-dialog.mjs';
 
 const appRoot = path.resolve('.'), out = path.join(appRoot, 'artifacts', 'native-files');
 await mkdir(out, {recursive: true});
-const service = await backend.startBackend({appRoot});
+const service = await backend.startDesktopHost({appRoot});
 const browser = await chromium.launch({channel: 'chrome', headless: true});
 const page = await browser.newPage({viewport: {width: 1440, height: 1000}, acceptDownloads: true});
 const errors = [];
@@ -80,9 +80,11 @@ try {
     canvas.getContext('2d').fillRect(0, 0, 2, 2);
     const dataUrl = canvas.toDataURL(), figure = createImageFigure({dataUrl, width: 2, height: 2});
     const report = emptyDocument(); report.figure_types = [figure]; report.keyframes = [createFrame([createObject(figure, 1, 10, 20)])];
+    // The project on show is the engine's: a figure file is made from it.
+    styk.editor.load(report);
     const exporter = new DocumentExporter(), importer = new ImportClient();
     try {
-      const blob = await exporter.export(report, {format: 'stkz', figureUid: 1});
+      const blob = await exporter.export(styk.editor.report, {format: 'stkz', figureUid: 1, revision: styk.editor.revision});
       const reopened = await importer.importFile(new File([blob], 'sprite.stkz'));
       return reopened.kind === 'stkz' && reopened.document.figure_types[0].image_assets[0].data_url === dataUrl;
     } finally { exporter.dispose(); importer.dispose(); }

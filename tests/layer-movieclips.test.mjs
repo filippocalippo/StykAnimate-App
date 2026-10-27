@@ -1,28 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor as BaseEditor} from '../src/editor.mjs';
-class Editor extends BaseEditor { constructor(options={}) { super({...options,layerTimeline:true}); } }
+import {readFileSync} from 'node:fs';
+import {engineEditor} from './support/owned-editor.mjs';
+/** The editor the engine owns, on a layer sheet. */
+const layerEditor=(options={},document)=>engineEditor({...options,layerTimeline:true},document);
 import {movieclipAsset,movieclipTime,playbackSettings,validateMovieclipGraph} from '../src/movieclips.mjs';
-import {movieclipCacheStats} from '../src/movieclip-geometry.mjs';
-import {buildGeometry,evaluatedFrame,timeline} from '../src/pivot/geometry.mjs';
-import {createObject,createFrame} from '../src/demo.mjs';
-import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
-import {storedFrameReport} from '../src/pivot-frame-draft.mjs';
-import {nativeFigureDocument} from '../src/native-figure.mjs';
-import {exportSVG} from '../src/svg-export.mjs';
-import {requiresCompatibilityTexture} from '../src/renderer-geometry.mjs';
+import {timeline} from '../src/pivot/read-view.mjs';
+import {pivotDocument, figureDocument} from './support/engine-export.mjs';
+import {sceneAt} from './support/engine-geometry.mjs';
 
-// Saved placement-based documents remain readable with their original clocks.
-// Legacy authoring is exercised only to construct those compatibility fixtures.
-function legacyClip(options){
-  const source=new BaseEditor({propertyChannels:true});source.select(1);source.createMovieclip(options);
-  const uid=source.selectedUid,e=new Editor({propertyChannels:true});e.load(structuredClone(source.report));e.seek(options.start);e.select(uid);return e;
-}
+const near=(a,b,tolerance=1e-9)=>assert.ok(Math.abs(a-b)<=tolerance,`${a} != ${b}`);
 
-const sample=(report,tick)=>{const rows=timeline(report);let i=0;while(i+1<rows.length&&rows[i+1].start<=tick)i++;return buildGeometry(report,evaluatedFrame(report,i,rows[i].count?(tick-rows[i].start)/rows[i].count:0,tick));};
+// The scene the engine draws at a tick, movieclip contents included (a clip's own geometry is its handle: engine-geometry.mjs).
+const sample=sceneAt;
 const scene=geometry=>geometry.drawables.map(s=>({type:s.type,points:s.points.map(p=>[p.x,p.y]),rgb:s.rgb,alpha:s.alpha}));
-function coordinates(geometry,uid){return geometry.drawables.filter(s=>s.obj.unique_id===uid).map(s=>({type:s.type,points:s.points.map(p=>[p.x,p.y]),rgb:s.rgb,alpha:s.alpha}));}
 function close(actual,expected){assert.equal(actual.length,expected.length);for(let i=0;i<actual.length;i++){assert.equal(actual[i].type,expected[i].type);assert.deepEqual(actual[i].rgb,expected[i].rgb);assert.equal(actual[i].points.length,expected[i].points.length);for(let j=0;j<actual[i].points.length;j++)for(let k=0;k<2;k++)assert.ok(Math.abs(actual[i].points[j][k]-expected[i].points[j][k])<.0001,`${i}/${j}/${k}: ${actual[i].points[j][k]} != ${expected[i].points[j][k]}`);}}
+/** The same scene at `tick` of two documents or editors. */
+const sameScene=(actual,expected,tick)=>close(scene(sample(actual,tick)),scene(sample(expected,tick)));
+/** How many shapes the figure `uid` draws on the stage at `tick` (an ordinary figure: a clip's contents are not in the interface's geometry). */
+const drawn=(editor,tick,uid)=>{const at=editor.tick;editor.seek(tick);const count=editor.geometry.drawables.filter(s=>s.obj.unique_id===uid).length;editor.seek(at);return count;};
+/** Whether the frame on show at `tick` holds the figure `uid`. */
+const present=(editor,tick,uid)=>{const at=editor.tick;editor.seek(tick);const has=editor.evaluatedFrame.objects.some(o=>o.unique_id===uid);editor.seek(at);return has;};
 
 test('movieclip sampling is deterministic at loop, once, hold, offset and FPS boundaries',()=>{
   const asset={duration:12,document:{fps:24}},base=playbackSettings(null,{start:12});
@@ -34,31 +32,23 @@ test('movieclip sampling is deterministic at loop, once, hold, offset and FPS bo
   assert.equal(movieclipTime(asset,base,14,48),1);
 });
 test('range conversion preserves all sampled poses and leaves unrelated figures intact',()=>{
-  const editor=new Editor({propertyChannels:true}),source=structuredClone(editor.report);
-  editor.select(1);const figure=editor.createMovieclip({start:3,end:24}),uid=editor.selectedUid;
-  for(let tick=3;tick<24;tick++){const actual=sample(editor.report,tick),expected=sample(source,tick);close(coordinates(actual,uid),coordinates(expected,1));close(coordinates(actual,3),coordinates(expected,3));}
+  const editor=layerEditor({propertyChannels:true}),source=structuredClone(editor.report);
+  editor.select(1);const figure=editor.createMovieclip({start:3,end:24});
+  for(let tick=3;tick<24;tick++)sameScene(editor,source,tick);
   assert.equal(movieclipAsset(figure).duration,21);
-  editor.undo();assert.equal(editor.report.figure_types.length,3);close(coordinates(sample(editor.report,10),1),coordinates(sample(source,10),1));
-  editor.redo();close(coordinates(sample(editor.report,10),uid),coordinates(sample(source,10),1));
+  editor.undo();assert.equal(editor.report.figure_types.length,3);sameScene(editor,source,10);
+  editor.redo();sameScene(editor,source,10);
 });
 
-test('nested editing restores parent history, saves shared asset and supports cancel',()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);const figure=editor.createMovieclip({start:0,end:12});
-  const parent=editor.report,old=movieclipAsset(figure);editor.enterMovieclip(figure.figure_type_id);
-  assert.equal(editor.totalTicks,12);editor.select(1);editor.moveSelection(20,0);editor.leaveMovieclip();
-  assert.equal(editor.report,parent);assert.notEqual(movieclipAsset(editor.report.figure_types.at(-1)),old);
-  editor.undo();assert.equal(movieclipAsset(editor.report.figure_types.at(-1)),old);
-  editor.enterMovieclip(figure.figure_type_id);editor.leaveMovieclip({save:false});assert.equal(editor.report,parent);
-});
 test('native document round trip retains source baselines and rejects cyclic clips',()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);editor.createMovieclip({start:2,end:19});
-  const reopened=new Editor();reopened.load(JSON.parse(JSON.stringify(editor.report)));assert.equal(sample(reopened.report,8).drawables.length,12);
+  const editor=layerEditor({propertyChannels:true});editor.select(1);editor.createMovieclip({start:2,end:19});
+  const saved=JSON.parse(JSON.stringify(editor.report)),reopened=layerEditor({},saved);assert.equal(sample(saved,8).drawables.length,12);
   const figure=reopened.report.figure_types.at(-1);movieclipAsset(figure).document.figure_types.push(figure);
   assert.throws(()=>validateMovieclipGraph(reopened.report),/cycle|nested/);
 });
 
 test('global playback settings and frame-local Make unique retain sources with undo',()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);editor.createMovieclip({start:3,end:24});const uid=editor.selectedUid;
+  const editor=layerEditor({propertyChannels:true});editor.select(1);editor.createMovieclip({start:3,end:24});const uid=editor.selectedUid;
   editor.setMovieclipPlayback({speed:2,offset:2},{allFrames:true});
   for(const tick of [3,4,10,20]){editor.seek(tick);editor.select(uid);assert.equal(editor.object._stykMovieclip.speed,2);assert.equal(editor.object._movieclipSample,(2+(tick-3)*2)%21);}
   const original=editor.figure.figure_type_id;editor.makeMovieclipUnique();const unique=editor.figure.figure_type_id,uniqueUid=editor.selectedUid;assert.notEqual(unique,original);assert.notEqual(uniqueUid,uid);
@@ -66,192 +56,121 @@ test('global playback settings and frame-local Make unique retain sources with u
   editor.undo();editor.seek(3);editor.select(uid);assert.equal(editor.figure.figure_type_id,original);editor.undo();assert.equal(editor.object._stykMovieclip.speed,1);
 });
 
-test('legacy saved clips support independent colliding paste, frame-only deletion and Make unique',()=>{
-  const e=legacyClip({start:3,end:24}),uid=e.selectedUid;e.seek(10);e.select(uid);e.copySelection();e.pasteSelection();
-  assert.notEqual(e.selectedUid,uid);assert.equal(e.object._movieclipSample,7);assert.ok(e.evaluatedFrame.objects.some(o=>o.unique_id===uid));e.undo();e.select(uid);const before=structuredClone(e.report);
-  e.deleteSelection();assert.ok(!e.evaluatedFrame.objects.some(o=>o.unique_id===uid));
-  for(const t of [3,9,11,20])close(scene(sample(e.report,t)),scene(sample(before,t)));
-  e.undo();e.seek(10);e.select(uid);e.makeMovieclipUnique();assert.notEqual(e.selectedUid,uid);assert.equal(e.object._movieclipSample,7);
-  for(const t of [3,9,10,11,20])close(scene(sample(e.report,t)),scene(sample(before,t)));
-});
-
-test('legacy: moving and trimming placements retain poses and affect no unrelated object',()=>{
-  const editor=legacyClip({start:3,end:20});const uid=editor.selectedUid,before=structuredClone(editor.report);
-  editor.placeMovieclip({start:8,end:25},{move:true});
-  for(let tick=8;tick<25;tick++){close(coordinates(sample(editor.report,tick),uid),coordinates(sample(before,tick-5),uid));close(coordinates(sample(editor.report,tick),3),coordinates(sample(before,tick),3));}
-  assert.equal(coordinates(sample(editor.report,7),uid).length,0);editor.undo();close(coordinates(sample(editor.report,8),uid),coordinates(sample(before,8),uid));
-  editor.placeMovieclip({end:30});assert.ok(coordinates(sample(editor.report,25),uid).length);assert.equal(coordinates(sample(editor.report,30),uid).length,0);
-});
-
-test('legacy: split plays continuously and preserves scene geometry at the cut',()=>{
-  const editor=legacyClip({start:0,end:20});const uid=editor.selectedUid;
-  editor.seek(15);editor.moveSelection(90,30);editor.sheetSetEasing([editor.layerForUid(uid)],0,19,{interpolation:'linear'});
-  const before=structuredClone(editor.report);
-  editor.seek(9);editor.select(uid);editor.splitMovieclip();const second=editor.selectedUid;
-  for(let tick=0;tick<20;tick++)close(coordinates(sample(editor.report,tick),tick<9?uid:second),coordinates(sample(before,tick),uid));
-  editor.undo();for(let tick=0;tick<20;tick++)close(coordinates(sample(editor.report,tick),uid),coordinates(sample(before,tick),uid));
-});
-
-
-
-test('legacy materialization matches clip geometry at every output tick',()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);editor.createMovieclip({start:2,end:21});const uid=editor.selectedUid;
-  editor._objectEdit('Scale movieclip',object=>{object.scale=1.4;object.angles[0]=.4;});const flat=materializePivotDocument(editor.report);
-  assert.ok(flat.figure_types.every(f=>!f._styk?.movieclip));
-  for(let tick=2;tick<21;tick++){
-    const expected=sample(editor.report,tick).drawables,actual=sample(flat,tick).drawables;
-    close(actual.map(s=>({type:s.type,points:s.points.map(p=>[p.x,p.y]),rgb:s.rgb})),expected.map(s=>({type:s.type,points:s.points.map(p=>[p.x,p.y]),rgb:s.rgb})));
-  }
-});
-
 test('Bake animation produces ordinary editable poses and one reversible command',async()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);editor.createMovieclip({start:2,end:17});const uid=editor.selectedUid,before=structuredClone(editor.report),count=editor._undo.length;
+  const editor=layerEditor({propertyChannels:true});editor.select(1);editor.createMovieclip({start:2,end:17});const uid=editor.selectedUid,before=structuredClone(editor.report),count=editor._undo.length;
   const children=await editor.bakeMovieclip();assert.ok(children.length);assert.equal(editor._undo.length,count+1);
-  for(let tick=2;tick<17;tick++){const actual=sample(editor.report,tick);close(coordinates(actual,children[0]),coordinates(sample(before,tick),uid));assert.equal(coordinates(actual,uid).length,0);}
-  editor.undo();close(coordinates(sample(editor.report,8),uid),coordinates(sample(before,8),uid));
-  editor.redo();assert.ok(coordinates(sample(editor.report,8),children[0]).length);
+  for(let tick=2;tick<17;tick++){sameScene(editor,before,tick);assert.equal(present(editor,tick,uid),false);}
+  editor.undo();sameScene(editor,before,8);assert.equal(present(editor,8,uid),true);
+  editor.redo();assert.ok(drawn(editor,8,children[0])>0);
 });
 
 test('mirrored movieclips and their legacy export agree',()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);editor.createMovieclip({start:0,end:8});const uid=editor.selectedUid,old=sample(editor.report,0),root=editor.geometry.objects.get(editor.selectedSlot).root;
-  editor.mirrorFigure();const mirrored=coordinates(sample(editor.report,0),uid),expected=coordinates(old,uid).map(s=>({...s,points:s.points.map(([x,y])=>[2*root.x-x,y])}));close(mirrored,expected);
-  const flat=materializePivotDocument(editor.report);assert.equal(sample(flat,0).drawables.length,old.drawables.length);
+  const editor=layerEditor({propertyChannels:true});editor.select(1);editor.createMovieclip({start:0,end:8});
+  const unrelated=new Set(editor.evaluatedFrame.objects.map(o=>o.unique_id).filter(uid=>uid!==editor.selectedUid));
+  const old=sample(editor,0),root=editor.geometry.objects.get(editor.selectedSlot).root;
+  const before=scene(old);
+  editor.mirrorFigure();
+  // The clip's shapes mirror about its root; the figures beside it stay where they were.
+  const expected=before.map((shape,i)=>unrelated.has(old.drawables[i].obj.unique_id)?shape:{...shape,points:shape.points.map(([x,y])=>[2*root.x-x,y])});
+  close(scene(sample(editor,0)),expected);
+  const flat=pivotDocument(editor.report);assert.equal(sample(flat,0).drawables.length,before.length);
 });
 
 test('portable movieclip imports restart and shared editing recovery retains the root project',()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);const f=editor.createMovieclip({start:5,end:17});
-  const portable=nativeFigureDocument(editor.report,{figureUid:editor.selectedUid,tick:5}),other=new Editor();other.seek(10);other.importFigure(portable);
+  const editor=layerEditor({propertyChannels:true});editor.select(1);const f=editor.createMovieclip({start:5,end:17});
+  const portable=figureDocument(editor.report,{figureUid:editor.selectedUid,tick:5}),other=layerEditor();other.seek(10);other.importFigure(portable);
   assert.equal(other.object._stykMovieclip.clock,'presence');assert.equal(other.object._movieclipSample,0);assert.equal(other.figure._styk.movieclip.duration,12);
   const parent=editor.report;editor.enterMovieclip(f.figure_type_id);editor.select(1);editor.moveSelection(7,0);
   const recovered=editor.movieclipProjectReport();assert.equal(recovered.keyframes.length,parent.keyframes.length);assert.equal(recovered.figure_types.at(-1)._styk.movieclip.document,editor.report);
-  const reopened=new Editor();reopened.load(structuredClone(recovered));assert.equal(reopened.totalTicks,timeline(parent).at(-1).start+timeline(parent).at(-1).count);
-});
-
-test('SVG and GPU fallback preserve movieclip group opacity',async()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);editor.createMovieclip({start:0,end:8});editor._objectEdit('Fade movieclip',o=>{o.field28=128;});
-  assert.equal(requiresCompatibilityTexture(editor.geometry.drawables),true);
-  const svg=await exportSVG({report:editor.report,frame:editor.evaluatedFrame,geometry:editor.geometry,width:960,height:540});
-  assert.match(await svg.text(),/data-movieclip-id="\d+" opacity="0.4980392"/);
+  const reopened=layerEditor({},structuredClone(recovered));assert.equal(reopened.totalTicks,timeline(parent).at(-1).start+timeline(parent).at(-1).count);
 });
 
 test('nested conversion preserves the enclosing clip and shared edits update all instances',()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);const first=editor.createMovieclip({start:3,end:22}),uid=editor.selectedUid,before=structuredClone(editor.report);
+  const editor=layerEditor({propertyChannels:true});editor.select(1);const first=editor.createMovieclip({start:3,end:22}),uid=editor.selectedUid,before=structuredClone(editor.report);
   editor.enterMovieclip(first.figure_type_id);editor.select(1);editor.createMovieclip({start:0,end:19});editor.leaveMovieclip();
-  for(let tick=3;tick<22;tick++)close(coordinates(sample(editor.report,tick),uid),coordinates(sample(before,tick),uid));
+  for(let tick=3;tick<22;tick++)sameScene(editor,before,tick);
   editor.seek(3);editor.select(uid);const shared=editor.figure;editor.enterMovieclip();const nested=editor.report.figure_types.find(f=>f._styk?.movieclip);editor.enterMovieclip(nested.figure_type_id);editor.select(1);editor.moveSelection(10,0);editor.leaveMovieclip();editor.leaveMovieclip();
   assert.notEqual(editor.figure,shared);assert.equal(editor._movieclipScopes.length,0);
-  const saved=JSON.parse(JSON.stringify(editor.report)),reopened=new Editor();reopened.load(saved);close(coordinates(sample(reopened.report,3),uid),coordinates(sample(editor.report,3),uid));
+  const saved=JSON.parse(JSON.stringify(editor.report));sameScene(saved,editor,3);
 });
 
 test('rig topology inside a captured clip repairs retained source poses and is reversible',()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);editor.addAnimationKey({kind:'segment',uid:1,handleId:3},'opacity',4,.4);
+  const editor=layerEditor({propertyChannels:true});editor.select(1);editor.addAnimationKey({kind:'segment',uid:1,handleId:3},'opacity',4,.4);
   editor.createMovieclip({start:0,end:16});const type=editor.figure.figure_type_id;editor.enterMovieclip(type);editor.select(1,2);
   const count=editor.figure.segments.length;editor.splitSegment(.3);assert.equal(editor.figure.segments.length,count+1);
-  new Editor().load(JSON.parse(JSON.stringify(editor.report)));
-  editor.undo();assert.equal(editor.figure.segments.length,count);new Editor().load(JSON.parse(JSON.stringify(editor.report)));
-  editor.redo();editor.leaveMovieclip();new Editor().load(JSON.parse(JSON.stringify(editor.report)));assert.ok(sample(editor.report,7).drawables.length>0);
+  layerEditor({},JSON.parse(JSON.stringify(editor.report)));
+  editor.undo();assert.equal(editor.figure.segments.length,count);layerEditor({},JSON.parse(JSON.stringify(editor.report)));
+  editor.redo();editor.leaveMovieclip();layerEditor({},JSON.parse(JSON.stringify(editor.report)));assert.ok(sample(editor,7).drawables.length>0);
 });
 
 test('library insertion follows its current exposure and remains one undo action',()=>{
-  const editor=new Editor({propertyChannels:true});editor.select(1);const clip=editor.createMovieclip({start:0,end:12,replace:false});
-  editor.seek(6);const count=editor._undo.length;editor.addFigure(clip.figure_type_id);const uid=editor.selectedUid;
-  assert.equal(editor._undo.length,count+1);assert.equal(coordinates(sample(editor.report,5),uid).length,0);
+  const editor=layerEditor({propertyChannels:true});editor.select(1);const clip=editor.createMovieclip({start:0,end:12,replace:false}),before=structuredClone(editor.report);
+  // The inserted clip draws what the scene without it does not.
+  const added=tick=>sample(editor,tick).drawables.length-sample(before,tick).drawables.length;
+  editor.seek(6);const count=editor._undo.length;editor.addFigure(clip.figure_type_id);
+  assert.equal(editor._undo.length,count+1);assert.equal(added(5),0);
   assert.equal(editor.object._stykMovieclip.clock,'presence');assert.equal(editor.object._stykMovieclip.end,undefined);
-  for(const tick of [6,7])assert.ok(coordinates(sample(editor.report,tick),uid).length);
-  assert.equal(coordinates(sample(editor.report,8),uid).length,0);editor.undo();assert.equal(coordinates(sample(editor.report,6),uid).length,0);editor.redo();assert.ok(coordinates(sample(editor.report,7),uid).length);
+  for(const tick of [6,7])assert.ok(added(tick)>0);
+  assert.equal(added(8),0);editor.undo();assert.equal(added(6),0);editor.redo();assert.ok(added(7)>0);
 });
 
 test('conversion preserves the complete scene before, inside and after the range',()=>{
   for(const nested of [false,true]){
-    const e=new Editor({propertyChannels:true});e.select(1);
+    const e=layerEditor({propertyChannels:true});e.select(1);
     if(nested){e.createMovieclip({start:0,end:40});e.enterMovieclip();e.select(1);}
     const before=structuredClone(e.report);e.createMovieclip({start:3,end:24});
-    for(let t=0;t<40;t++)close(scene(sample(e.report,t)),scene(sample(before,t)));
+    for(let t=0;t<40;t++)sameScene(e,before,t);
   }
 });
 
-test('legacy: restart changes phase at the playhead without changing placement or earlier frames',()=>{
-  const e=legacyClip({start:3,end:24});const uid=e.selectedUid,before=structuredClone(e.report);
-  e.seek(10);e.select(uid);e.restartMovieclip();
-  assert.equal(e.object._stykMovieclip.start,3);assert.equal(e.object._stykMovieclip.end,24);
-  for(let t=0;t<10;t++)close(scene(sample(e.report,t)),scene(sample(before,t)));
-  for(let t=10;t<24;t++){e.seek(t);assert.equal(e.evaluatedFrame.objects.find(o=>o.unique_id===uid)._movieclipSample,t-10);}
-  const restarted=structuredClone(e.report);e.seek(10);e.select(uid);e.placeMovieclip({start:0,end:21},{move:true});
-  for(let t=0;t<21;t++)close(coordinates(sample(e.report,t),uid),coordinates(sample(restarted,t+3),uid));
-  e.placeMovieclip({start:7,end:28},{move:true});e.placeMovieclip({start:0,end:21},{move:true});
-  for(let t=0;t<35;t++){const g=sample(e.report,t);assert.equal(g.drawables.filter(d=>d.obj.unique_id===uid).length,t<21?10:0);}
-  e.undo();e.redo();new Editor().load(JSON.parse(JSON.stringify(e.report)));
-});
-
 test('breaking adjacent frames leaves one clip with gaps and exact ordinary poses',()=>{
-  const e=new Editor({propertyChannels:true});e.select(1);e.createMovieclip({start:0,end:5});const uid=e.selectedUid,before=structuredClone(e.report),undo=e._undo.length;
+  const e=layerEditor({propertyChannels:true});e.select(1);e.createMovieclip({start:0,end:5});const uid=e.selectedUid,before=structuredClone(e.report),undo=e._undo.length;
   const children=[];
   for(const tick of [0,1]){e.seek(tick);e.select(uid);children.push(e.breakApartMovieclip());}
   assert.equal(e._undo.length,undo+2);
   assert.deepEqual(children[0],children[1]);
   assert.equal(e.animationChannels.length,0);
   for(let t=0;t<30;t++){
-    const g=sample(e.report,t);close(scene(g),scene(sample(before,t)));
-    assert.equal(coordinates(g,uid).length,t>=2&&t<5?10:0);
-    assert.equal(coordinates(g,children[0][0]).length,t<2?10:0);
+    sameScene(e,before,t);
+    assert.equal(present(e,t,uid),t>=2&&t<5);
+    assert.equal(drawn(e,t,children[0][0]),t<2?10:0);
   }
-  const restored=new Editor();restored.load(JSON.parse(JSON.stringify(e.report)));
-  for(let t=0;t<6;t++)close(scene(sample(restored.report,t)),scene(sample(e.report,t)));
-  e.undo();assert.equal(coordinates(sample(e.report,1),uid).length,10);e.redo();assert.equal(coordinates(sample(e.report,1),uid).length,0);
-});
-
-test('legacy: split then move backward preserves the full transform curve and never doubles the cut',()=>{
-  const e=legacyClip({start:0,end:24});const uid=e.selectedUid;
-  e.seek(18);e.moveSelection(110,30);e.sheetSetEasing([e.layerForUid(uid)],0,23,{interpolation:'linear'});
-  e.seek(7);e.select(uid);e.restartMovieclip();const before=structuredClone(e.report);
-  e.seek(9);e.select(uid);e.splitMovieclip();const second=e.selectedUid;
-  for(let t=0;t<35;t++)close(scene(sample(e.report,t)),scene(sample(before,t)));
-  e.placeMovieclip({start:0,end:15},{move:true});
-  for(let t=0;t<15;t++)close(coordinates(sample(e.report,t),second),coordinates(sample(before,t+9),uid));
-  e.placeMovieclip({start:9,end:24},{move:true});
-  for(let t=0;t<35;t++)close(scene(sample(e.report,t)),scene(sample(before,t)));
-});
-
-test('legacy: baking a split clip with frame gaps preserves the entire scene and undo/redo',async()=>{
-  const e=legacyClip({start:2,end:23});const uid=e.selectedUid;
-  e.seek(6);e.select(uid);e.breakApartMovieclip();e.seek(9);e.select(uid);e.restartMovieclip();e.seek(12);e.splitMovieclip();
-  const before=structuredClone(e.report),second=e.selectedUid;
-  await e.bakeMovieclip();
-  for(let t=0;t<35;t++){close(scene(sample(e.report,t)),scene(sample(before,t)));assert.equal(coordinates(sample(e.report,t),second).length,0);}
-  e.undo();for(let t=0;t<35;t++)close(scene(sample(e.report,t)),scene(sample(before,t)));
-  e.redo();for(let t=0;t<35;t++)close(scene(sample(e.report,t)),scene(sample(before,t)));
-});
-
-
-
-
-
-test('legacy: trim after a restart then move to zero keeps the visible source phase',()=>{
-  const e=legacyClip({start:0,end:30});const uid=e.selectedUid;
-  e.seek(3);e.restartMovieclip();e.placeMovieclip({start:10,offset:10});const before=structuredClone(e.report);
-  e.placeMovieclip({start:0,end:20},{move:true});
-  for(let t=0;t<20;t++)close(coordinates(sample(e.report,t),uid),coordinates(sample(before,t+10),uid));
-});
-
-
-
-
-
-
-
-test('legacy: clips outside their placement or Once/hide duration leave no selectable ghost',()=>{
-  const e=legacyClip({start:3,end:8});const uid=e.selectedUid;
-  for(const tick of [0,2,8,30]){e.seek(tick);assert.ok(!e.evaluatedFrame.objects.some(o=>o.unique_id===uid));}
-  e.seek(3);e.select(uid);e.placeMovieclip({end:20});e.setMovieclipPlayback({mode:'once'},{allFrames:true});e.seek(8);
-  assert.ok(!e.evaluatedFrame.objects.some(o=>o.unique_id===uid));
+  const restored=JSON.parse(JSON.stringify(e.report));
+  for(let t=0;t<6;t++)sameScene(restored,e,t);
+  e.undo();assert.equal(present(e,1,uid),true);e.redo();assert.equal(present(e,1,uid),false);
 });
 
 test('conversion rejects interleaved stacking later in the range without a partial edit',()=>{
-  const e=new Editor({propertyChannels:true});
-  for(const frame of e.report.keyframes){frame.object_draw_order=[0,1,2];frame.object_draw_order_unique_ids=frame.objects.map(o=>o.unique_id);}
-  e.report.keyframes[1].object_draw_order=[0,2,1];e.report.keyframes[1].object_draw_order_unique_ids=[1,3,2];
-  e._invalidate({timing:true});e._selectIds([1,2]);const count=e._undo.length,definitions=e.report.figure_types.length;
+  const stacked=engineEditor({propertyChannels:true});
+  for(const frame of stacked.report.keyframes){frame.object_draw_order=[0,1,2];frame.object_draw_order_unique_ids=frame.objects.map(o=>o.unique_id);}
+  stacked.report.keyframes[1].object_draw_order=[0,2,1];stacked.report.keyframes[1].object_draw_order_unique_ids=[1,3,2];
+  const e=layerEditor({propertyChannels:true},stacked.serialize());e._selectIds([1,2]);const count=e._undo.length,definitions=e.report.figure_types.length;
   assert.throws(()=>e.createMovieclip({start:0,end:20}),/stacking order/);
   assert.equal(e._undo.length,count);assert.equal(e.report.figure_types.length,definitions);
 });
 
+
+test('a figure joined to a movieclip that is not shown stays where the clip had it',()=>{
+  // The clip's placement ends at tick 3; the figure joined to its root comes loose there and goes on following the clip's place
+  // in the timeline (it is never refused, and the clip's own geometry is gone from the frame).
+  const document=JSON.parse(readFileSync(new URL('../engine/tests/edit/clip-playback-all-native.document.json',import.meta.url),'utf8'));
+  const e=layerEditor({propertyChannels:true},document);
+  e.addFigure();e.select(2);e.joinFigure(1,0);e.select(1);e.setMovieclipPlayback({start:0,end:3,mode:'loop'},{allFrames:true});
+  const placed=tick=>{e.seek(tick,{allowBeyondEnd:true});return e.evaluatedFrame.objects.map(o=>[o.unique_id,o.join??null,o.root_x,o.root_y,o._movieclipSample??null]);};
+  const groups=tick=>{e.seek(tick,{allowBeyondEnd:true});const {objects,orderedObjects}=e.geometry;return {slots:[...objects.keys()],roots:orderedObjects.map(g=>[g.obj.unique_id,g.root.x,g.root.y])};};
+  // While the clip plays the figure stays joined to it, at its root.
+  const playing=placed(1);
+  assert.deepEqual(playing.map(o=>o[0]),[1,2,3]);
+  assert.equal(playing[1][1].target_object_slot,0);
+  // When the placement has ended the frame holds the two figures that remain, the joined one detached at the clip's last place.
+  assert.deepEqual(placed(3),[[2,null,196.25,146.375,null],[3,null,480,270,null]]);
+  const later=placed(5);
+  assert.deepEqual(later.map(o=>[o[0],o[1]]),[[2,null],[3,null]]);
+  near(later[0][2],180+32.5*5/6);near(later[0][3],150-7.25*5/6);
+  for(const tick of [3,5]){
+    const shown=groups(tick);
+    assert.deepEqual(shown.slots,[0,1]);
+    assert.deepEqual(shown.roots.map(r=>r[0]),[2,3]);
+    near(shown.roots[0][1],placed(tick)[0][2]);near(shown.roots[0][2],placed(tick)[0][3]);
+  }
+});

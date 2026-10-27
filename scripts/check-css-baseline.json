@@ -2,7 +2,6 @@
   "JS01": {
     "src/background-dialog.mjs": 1,
     "src/builder-outliner.mjs": 1,
-    "src/insert-inbetween-dialog.mjs": 1,
     "src/keyframe-easing-popover.mjs": 1,
     "src/movieclip-ui.mjs": 1,
     "src/privacy-ui.mjs": 1,
@@ -14,8 +13,6 @@
   "legacyImportant": [
     {"file":"src/background-dialog.mjs","line":32,"selector":".background-dialog [hidden]","property":"display"},
     {"file":"src/builder-outliner.mjs","line":14,"selector":".builder-tree.dragging,.builder-tree.dragging *","property":"cursor"},
-    {"file":"src/insert-inbetween-dialog.mjs","line":9,"selector":".styk-inbetween-onions","property":"font-size"},
-    {"file":"src/insert-inbetween-dialog.mjs","line":10,"selector":".styk-inbetween-dialog [hidden]","property":"display"},
     {"file":"src/keyframe-easing-popover.mjs","line":7,"selector":".styk-easing-popover [hidden]","property":"display"},
     {"file":"src/privacy-ui.mjs","line":3,"selector":".styk-privacy [hidden]","property":"display"},
     {"file":"src/privacy-ui.mjs","line":3,"selector":".styk-privacy *","property":"transition"},

@@ -2,7 +2,7 @@ import {effectMessages,effectNameMessage,easingMessageKeys} from './vfx-localiza
 
 import {t as interfaceText} from './localization.mjs';
 import {messageAttributes, messageHTML, localizedAttribute, appendLocalized} from './localization-bindings.mjs';
-import {vfxClipActiveAt,clipTime} from './vfx-clips.mjs';
+import {clipTime} from './vfx-clips.mjs';
 import {VFX_REGISTRY,VFX_LIMIT,vfxDescriptor} from './vfx.mjs';
 import {icon} from './icons.mjs';
 import {vfxIcon,vfxTile} from './vfx-icons.mjs';
@@ -10,7 +10,7 @@ import {vfxVisibleKeys,vfxSelectedChannels,vfxChannelLabel,setVfxVisibleChannels
 import {openVfxChannelMenu} from './vfx-key-channel-menu.mjs';
 import {clipNumber,clipStrength,editGroupEffect,openGroupMenu} from './vfx-clip-controls.mjs';
 import {showTimelineMenu} from './timeline-menu.mjs';
-import {generatorClipActiveAt} from './vfx-generators.mjs';
+import {clipsPlaying} from './vfx-clip-views.mjs';
 import {isGeneratorType} from './vfx-registry.mjs';
 import {savePresetFromClip} from './vfx-preset-ui.mjs';
 
@@ -18,16 +18,17 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const clipNameMessage=c=>c.name||{messageKey:effectMessages[c.effects[0]?.type]?.nameKey||'vfxClipInspector.effects'};
 export const clipName=c=>{const caption=clipNameMessage(c);return typeof caption==='string'?caption:interfaceText(caption.messageKey);};
 /** A clip's tile: its one effect's glyph in its category's tint, or the group glyph. */
-export const clipTile=c=>{const d=c.effects.length===1&&VFX_REGISTRY[c.effects[0].type];return d?vfxTile(d.icon,d.category):vfxTile('effects','Looks');};
+const clipTile=c=>{const d=c.effects.length===1&&VFX_REGISTRY[c.effects[0].type];return d?vfxTile(d.icon,d.category):vfxTile('effects','Looks');};
 const iconButton=(name,label,glyph,{disabled=false,on=false,className='',menu=false}={}, _messages = {})=>`<button type="button" class="ui-icon-button${className?` ${className}`:''}" data-size="xs" data-clip-action="${name}" aria-label="${esc(label)}"${on?' data-on="true"':''}${menu?' aria-haspopup="menu"':''} ${disabled?'disabled':''} ${_messages.label ? messageAttributes(_messages.label.key, _messages.label.params, 'aria-label') : ''}>${icon(glyph)}</button>`;
 const keyIndex=(clip,keys,tick)=>{let low=0,high=keys.length-1,time=clipTime(clip,tick);while(low<high){const mid=(low+high+1)>>>1;if(keys[mid].tick<=time)low=mid;else high=mid-1;}return low;};
 const currentKey=(clip,keys,tick)=>keys[keyIndex(clip,keys,tick)];
 const lockedClip=(e,c)=>e.getLayer(c.target.kind==='scene'?'scene':e.layerForUid(c.target.uid))?.locked;
 // Generated clips stay listed while their particles are still visible. A clip switched off with its eye stays
 // listed where it would play, so switching it off never hides the switch that brings it back.
-const playsAt=(c,tick)=>vfxClipActiveAt(c,tick)||generatorClipActiveAt(c,tick);
-export const filterVfxClips=(clips,{view='playhead',tick=0,selected=null,query=''}={})=>clips.filter(c=>
- (view==='all'||(view==='selected'?c.id===selected:playsAt(c.enabled?c:{...c,enabled:true},tick)))&&(!query||view!=='all'||clipName(c).toLowerCase().includes(query.toLowerCase())));
+export function filterVfxClips(editor,clips,{view='playhead',tick=0,selected=null,query=''}={}){
+ const plays=view==='playhead'?clipsPlaying(editor,clips,tick):null;
+ return clips.filter((c,i)=>(view==='all'||(view==='selected'?c.id===selected:plays[i]))&&(!query||view!=='all'||clipName(c).toLowerCase().includes(query.toLowerCase())));
+}
 
 /** A beam aims at a stage point or locks onto a node picked on the stage. */
 function aimLabel(editor,p){
@@ -87,7 +88,7 @@ function clipBody(host,c,locked){
  opens its settings directly under its row, so the settings always read as that effect's. */
 export function clipRowsHTML(host,targets){
  const e=host.editor,clips=targets.flatMap(t=>e.getVfxClips(t)),view=host.clipView??'playhead',query=(host.clipQuery??'').toLowerCase();
- const visible=filterVfxClips(clips,{view,tick:e.tick,selected:host.selectedClip,query});
+ const visible=filterVfxClips(e,clips,{view,tick:e.tick,selected:host.selectedClip,query});
  host.renderedVfxClip=visible.find(c=>c.id===host.selectedClip)??null;
  const html=visible.map(c=>{
   const locked=lockedClip(e,c),selected=c.id===host.selectedClip,range=c.duration===null?'':`<span class="vfx-row-meta" data-tooltip="Plays on frames ${c.start+1}–${c.start+c.duration}" ${messageAttributes("vfxClipInspector.playsOnFrames", {value: c.start+1, value2: c.start+c.duration}, "data-tooltip")}>${c.start+1}–${c.start+c.duration}</span>`;

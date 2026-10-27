@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createPoseInputQueue} from '../src/canvas-pose-input.mjs';
-import {Editor} from '../src/editor.mjs';
 import {createFrame, createObject, emptyDocument} from '../src/demo.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 
 function queueFixture() {
   const drag = {}, gesture = {}, delivered = [];
@@ -45,7 +45,7 @@ function editorFixture() {
     {...segment, segment_id: 2, parent_id: 1, angle_rad: .5, length: 40}];
   figure.segment_count = figure.segments.length;
   report.keyframes = [createFrame([createObject(figure, 1, 200, 200)], 3)];
-  const editor = new Editor({demo: false}).load(report); editor.select(1, 0);
+  const editor = ownedEditorFor({demo: false}, report); editor.select(1, 0);
   return editor;
 }
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`);

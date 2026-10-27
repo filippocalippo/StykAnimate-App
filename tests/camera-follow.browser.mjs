@@ -62,9 +62,9 @@ try {
   follow = await clip();
   check('Keep current framing sets an offset from the shot', follow.params.offsetX !== 0 || follow.params.offsetY !== 0);
   check('The live camera follows the figure', await page.evaluate(async () => {
-    const {cameraAtTime} = await import('/src/camera-motion.mjs'); const e = styk.editor, c = e.getCameraMotions().find(c => c.type === 'follow');
+    const e = styk.editor, c = e.getCameraMotions().find(c => c.type === 'follow');
     e.setCameraMotion(c.id, {params: {deadZone: 0, offsetX: 0, offsetY: 0, fadeIn: 0}});
-    const moved = [0, 10, 20, 30, 40].map(tick => { e.seek(tick); return (cameraAtTime(e.report, e.evaluatedFrame)?.x ?? 0) - (e.evaluatedFrame.camera?.x ?? 0); });
+    const moved = [0, 10, 20, 30, 40].map(tick => { e.seek(tick); return (e._shown.shot()?.x ?? 0) - (e.evaluatedFrame.camera?.x ?? 0); });
     e.undo(); return moved.some(dx => Math.abs(dx) > 1);
   }));
   await page.evaluate(() => styk.editor.undo()); await settle();

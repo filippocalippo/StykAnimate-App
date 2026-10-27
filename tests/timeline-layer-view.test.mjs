@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
 import {emptyDocument} from '../src/demo.mjs';
 import {TimelineLayerView} from '../src/timeline-layer-view.mjs';
 import {layerFolderRows} from '../src/layer-folders.mjs';
 
 const setup = () => {
-  const editor = new Editor({demo: false, layerTimeline: true}).load(emptyDocument());
+  const editor = newOwnedEditor({demo: false, layerTimeline: true}).load(emptyDocument());
   editor.createLayer('Hands'); editor.createLayer('Reference');
   const folder = editor.createLayerFolder('Character', ['layer-1', 'layer-2']);
   const view = new TimelineLayerView(editor);

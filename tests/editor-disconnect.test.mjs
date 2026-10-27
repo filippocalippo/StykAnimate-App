@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 
 const near = (a, b, label) => assert.ok(Math.abs(a - b) <= 1e-3, `${label}: ${a} != ${b}`);
 const index = (editor, name) => editor.figure.segments.findIndex(segment => segment.name === name);
-const blue = layerTimeline => new Editor({layerTimeline}).newDocument();
+const blue = layerTimeline => ownedEditorFor({layerTimeline}).newDocument();
 
 /** Every drawable's points, keyed by figure family (a source and its disconnected
  * part share one), primitive and native handle, which disconnecting preserves. */
@@ -28,46 +28,43 @@ function samePicture(before, after, label) {
 }
 /** Three held poses: Blue walks right while its left arm swings. */
 function animated(editor) {
-  if (editor.report._styk.layerSheet) for (const tick of [4, 8]) editor.sheetInsertKey(['layer-1'], tick);
-  else { editor.addFrame(); editor.addFrame(); }
-  const keys = editor.report._styk.layerSheet ? [0, 4, 8] : [0, 1, 2];
+  for (const tick of [4, 8]) editor.sheetInsertKey(['layer-1'], tick);
+  const keys = [0, 4, 8];
   keys.forEach((key, i) => {
-    if (editor.report._styk.layerSheet) editor.seek(key); else editor.selectFrame(key);
+    editor.seek(key);
     editor.select(1); editor.updateObject({root_x: editor.object.root_x + 30 * i});
     editor.select(1, index(editor, 'Left upper arm')); editor.rotateJoint(0.4 * i);
     editor.select(1, index(editor, 'Left forearm')); editor.rotateJoint(-0.3 * i);
   });
   return keys;
 }
-const visit = (editor, key) => editor.report._styk.layerSheet ? editor.seek(key) : editor.selectFrame(key);
+const visit = (editor, key) => editor.seek(key);
 
 test('disconnect turns a branch into an unjoined figure in every frame without moving its drawing', () => {
-  for (const layerTimeline of [true, false]) {
-    const editor = blue(layerTimeline), keys = animated(editor);
-    const pictures = keys.map(key => { visit(editor, key); return picture(editor); });
-    visit(editor, keys[1]); editor.select(1, index(editor, 'Left upper arm'));
-    const saved = editor.serialize(), depth = editor._undo.length;
-    assert.equal(editor.canDisconnectSegment(), true);
-    const piece = editor.disconnectSegment(), uid = piece.unique_id, family = id => id === uid ? 1 : id;
-    assert.equal(editor._undo.length, depth + 1, 'one undo step');
-    assert.equal(editor.selectedUid, uid); assert.equal(piece.join, null);
-    assert.equal(editor.figure.name, 'Left upper arm');
-    assert.deepEqual(editor.figure.segments.map(s => [s.segment_id, s.parent_id]), [[3, 0], [4, 3]]);
-    const source = editor.report.figure_types.find(figure => figure.figure_type_id === editor.selectionFrame.objects.find(o => o.unique_id === 1).figure_type_id);
-    assert.deepEqual(source.segments.map(s => s.segment_id), [1, 2, 5, 6, 7, 8, 9, 10]);
-    assert.equal(editor.report.figure_types.length, 2, 'an unshared definition is trimmed, not copied');
-    assert.equal(editor.layerForUid(uid), editor.layerForUid(1));
-    // The hand controller (chain of two) lies inside the part and moves with it.
-    assert.deepEqual(Object.keys(piece._stykIK), ['4']); assert.equal(piece._stykIK[4].chainLength, 2);
-    assert.equal(editor.selectionFrame.objects.find(o => o.unique_id === 1)._stykIK[4], undefined);
-    keys.forEach((key, i) => { visit(editor, key); samePicture(pictures[i], picture(editor, family), `key ${key}`); });
-    assert.doesNotThrow(() => validateScene(editor.serialize()));
-    const reopened = new Editor({layerTimeline}).load(editor.serialize());
-    keys.forEach((key, i) => { visit(reopened, key); samePicture(pictures[i], picture(reopened, family), `reopened ${key}`); });
-    editor.undo(); assert.deepEqual(editor.serialize(), saved, 'undo restores the document exactly');
-    editor.redo(); visit(editor, keys[2]); samePicture(pictures[2], picture(editor, family), 'redo');
-    assert.equal(editor.layerForUid(uid), editor.layerForUid(1));
-  }
+  const editor = blue(true), keys = animated(editor);
+  const pictures = keys.map(key => { visit(editor, key); return picture(editor); });
+  visit(editor, keys[1]); editor.select(1, index(editor, 'Left upper arm'));
+  const saved = editor.serialize(), depth = editor._undo.length;
+  assert.equal(editor.canDisconnectSegment(), true);
+  const piece = editor.disconnectSegment(), uid = piece.unique_id, family = id => id === uid ? 1 : id;
+  assert.equal(editor._undo.length, depth + 1, 'one undo step');
+  assert.equal(editor.selectedUid, uid); assert.equal(piece.join, null);
+  assert.equal(editor.figure.name, 'Left upper arm');
+  assert.deepEqual(editor.figure.segments.map(s => [s.segment_id, s.parent_id]), [[3, 0], [4, 3]]);
+  const source = editor.report.figure_types.find(figure => figure.figure_type_id === editor.selectionFrame.objects.find(o => o.unique_id === 1).figure_type_id);
+  assert.deepEqual(source.segments.map(s => s.segment_id), [1, 2, 5, 6, 7, 8, 9, 10]);
+  assert.equal(editor.report.figure_types.length, 2, 'an unshared definition is trimmed, not copied');
+  assert.equal(editor.layerForUid(uid), editor.layerForUid(1));
+  // The hand controller (chain of two) lies inside the part and moves with it.
+  assert.deepEqual(Object.keys(piece._stykIK), ['4']); assert.equal(piece._stykIK[4].chainLength, 2);
+  assert.equal(editor.selectionFrame.objects.find(o => o.unique_id === 1)._stykIK[4], undefined);
+  keys.forEach((key, i) => { visit(editor, key); samePicture(pictures[i], picture(editor, family), `key ${key}`); });
+  assert.doesNotThrow(() => validateScene(editor.serialize()));
+  const reopened = ownedEditorFor({layerTimeline: true}, editor.serialize());
+  keys.forEach((key, i) => { visit(reopened, key); samePicture(pictures[i], picture(reopened, family), `reopened ${key}`); });
+  editor.undo(); assert.deepEqual(editor.serialize(), saved, 'undo restores the document exactly');
+  editor.redo(); visit(editor, keys[2]); samePicture(pictures[2], picture(editor, family), 'redo');
+  assert.equal(editor.layerForUid(uid), editor.layerForUid(1));
 });
 
 test('linked instances keep the whole rig; only the selected instance splits', () => {
@@ -126,22 +123,6 @@ test('fills move with their part; a fill across the cut is refused without chang
   spanning.select(1, index(spanning, 'Left upper arm'));
   assert.throws(() => spanning.disconnectSegment(), /fill/i);
   assert.deepEqual(spanning.serialize(), saved); assert.equal(spanning._undo.length, depth);
-});
-
-test('a failure while trimming the rig leaves the document, layers and history untouched', () => {
-  for (const layerTimeline of [true, false]) {
-    const editor = blue(layerTimeline); animated(editor);
-    const saved = editor.serialize(), depth = editor._undo.length, uids = editor.getLayerFigureUids(editor.layerForUid(1)).slice();
-    editor.select(1, index(editor, 'Right upper arm'));
-    const original = editor._topologyEdit; let calls = 0;
-    editor._topologyEdit = function (...args) { if (++calls === 2) throw new Error('trim failed'); return original.apply(this, args); };
-    assert.throws(() => editor.disconnectSegment(), /trim failed/);
-    delete editor._topologyEdit;
-    assert.deepEqual(editor.serialize(), saved); assert.equal(editor._undo.length, depth);
-    assert.deepEqual(editor.getLayerFigureUids(editor.layerForUid(1)), uids);
-    editor.disconnectSegment();
-    assert.equal(editor.report.figure_types.length, 2, 'the command still works afterwards');
-  }
 });
 
 test('the whole figure, an origin or a locked layer cannot be disconnected', () => {

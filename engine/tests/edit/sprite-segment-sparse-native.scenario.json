@@ -1,0 +1,171 @@
+{
+ "name": "sprite-segment-sparse-native",
+ "document": "sprite-segment-sparse-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   3,
+   0
+  ],
+  [
+   "addSpriteSegment",
+   {
+    "figure_type_id": 1,
+    "name": "Placed sprite",
+    "segment_count": 1,
+    "segments": [
+     {
+      "segment_id": 1,
+      "parent_id": 0,
+      "length": 1,
+      "angle_rad": 0,
+      "thickness": 0,
+      "bend_rad": 0,
+      "primitive_code": 2,
+      "aux_code": 0,
+      "flags": 2,
+      "segment_type": "image",
+      "segment_kind": "image",
+      "color_rgb": [
+       0,
+       0,
+       0
+      ],
+      "transparency": 0,
+      "extra_u16": 42,
+      "extra_u8_a": 0,
+      "extra_u8_b": 0,
+      "extra": [
+       0,
+       0,
+       0
+      ],
+      "visible": true,
+      "z_order": 1
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [
+     {
+      "kind": "image",
+      "asset_index": 42,
+      "table_index": 42,
+      "mime_type": "image/png",
+      "width": 1,
+      "height": 1,
+      "data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aHk8AAAAASUVORK5CYII=",
+      "anchor_start": {
+       "x": -7,
+       "y": 5
+      },
+      "anchor_end": {
+       "x": 23,
+       "y": -35
+      },
+      "anchor_length": 1,
+      "anchor_angle_rad": 0,
+      "image_index": 42,
+      "sprite_index": 42,
+      "pivot": {
+       "x": -7,
+       "y": 5
+      },
+      "endpoint": {
+       "x": 23,
+       "y": -35
+      },
+      "record_offset": 111,
+      "source_size": 999,
+      "data_uri": "old-bitmap",
+      "data_base64": "old-encoded"
+     }
+    ],
+    "text_assets": [],
+    "_styk": {
+     "sourceName": "Placed sprite"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "addSpriteSegment",
+   {
+    "figure_type_id": 1,
+    "name": "Placed sprite",
+    "segment_count": 1,
+    "segments": [
+     {
+      "segment_id": 1,
+      "parent_id": 0,
+      "length": 1,
+      "angle_rad": 0,
+      "thickness": 0,
+      "bend_rad": 0,
+      "primitive_code": 2,
+      "aux_code": 0,
+      "flags": 2,
+      "segment_type": "image",
+      "segment_kind": "image",
+      "color_rgb": [
+       0,
+       0,
+       0
+      ],
+      "transparency": 0,
+      "extra_u16": 0,
+      "extra_u8_a": 0,
+      "extra_u8_b": 0,
+      "extra": [
+       0,
+       0,
+       0
+      ],
+      "visible": true,
+      "z_order": 1
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [
+     {
+      "kind": "image",
+      "asset_index": 0,
+      "table_index": 0,
+      "mime_type": "image/png",
+      "width": 1,
+      "height": 1,
+      "data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aHk8AAAAASUVORK5CYII=",
+      "anchor_start": {
+       "x": -7,
+       "y": 5
+      },
+      "anchor_end": {
+       "x": 23,
+       "y": -35
+      },
+      "anchor_length": 1,
+      "anchor_angle_rad": 0
+     }
+    ],
+    "text_assets": [],
+    "_styk": {
+     "sourceName": "Placed sprite"
+    }
+   },
+   {
+    "angle": 0
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

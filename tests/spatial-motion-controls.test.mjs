@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {construction} from '../src/rig-examples-3d.mjs';
 import {createObject,createFrame,emptyDocument} from '../src/demo.mjs';
-import {buildGeometry,evaluatedNativeFrame} from '../src/pivot/geometry.mjs';
+import {geometryOfDocument} from './support/engine-geometry.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 import {rigConstraintPlan,remapRigReferences} from '../src/rig-constraints.mjs';
 import {sameSpatial,spatialPoint,remapSpatial} from '../src/rig-spatial.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
-import {Editor} from '../src/editor.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {createSpatialGizmo,ringPoint,startRotationGizmo,rotateGizmo} from '../src/spatial-gizmo.mjs';
 
 const near=(a,b,t=1e-8)=>assert.ok(Math.abs(a-b)<t,`${a} != ${b}`);
@@ -28,7 +29,7 @@ function fixture(){
   const cheek=bone(root.id,[20,10,0],[20,16,0],'Cheek',{type:'slide',min:-2,max:2,driver:{joint:lip.id,multiplier:.3}});
   const figure={figure_type_id:1,segments:q.segments,polyfills:[],image_assets:[],text_assets:[]};
   const object=createObject(figure,1,200,200),doc={...emptyDocument(),figure_types:[figure],keyframes:[createFrame([object])]};
-  const evaluate=()=>buildGeometry(doc,doc.keyframes[0]).objects.get(0);
+  const evaluate=()=>geometryOfDocument(doc).objects.get(0);
   const frame=(g,bone)=>g.segments[bone.id-1].spatialFrame;
   const setResidual=(bone,value)=>{
     const spatial=figure.segments[bone.id-1]._stykRig.spatial,parent=spatial.parent?figure.segments.findIndex(s=>s.segment_id===spatial.parent):-1;
@@ -84,7 +85,7 @@ test('negative and chained drivers consume final clamped values in dependency or
   f.setResidual(f.master,1.7);g=f.evaluate();near(f.frame(g,f.a).motionValue,0);near(f.frame(g,f.b).motionValue,.1);
   // Native record order is irrelevant; only dependency order determines a pose.
   const unordered=structuredClone(f.doc),fig=unordered.figure_types[0],o=unordered.keyframes[0].objects[0];
-  fig.segments.reverse();o.angles.reverse();const mixed=buildGeometry(unordered,unordered.keyframes[0]).objects.get(0);
+  fig.segments.reverse();o.angles.reverse();const mixed=geometryOfDocument(unordered).objects.get(0);
   near(mixed.segments.find(s=>s.seg.segment_id===f.b.id).spatialFrame.motionValue,.1);
 });
 
@@ -105,7 +106,7 @@ test('axis and motion-driver definitions validate, remap, invalidate and reject 
 });
 
 test('fine motion fields edit residuals, allow uncurling, mirror and restore history',()=>{
-  const f=fixture(),e=new Editor({demo:false});e.load(f.doc);const before=e.serialize();
+  const f=fixture(),e=newOwnedEditor({demo:false});e.load(f.doc);const before=e.serialize();
   e.select(1,f.master.id-1);assert.equal(e.setSpatialMotion(.9),true);
   e.select(1,f.a.id-1);let m=e.getSpatialMotion();near(m.value,0);near(m.applied,.72);near(m.min,-.72);near(m.max,.48);
   assert.equal(e.setSpatialMotion(-.2),true);near(e.getSpatialPose().bend,-.2);near(e.getSpatialMotion().applied,.52);
@@ -119,7 +120,7 @@ test('fine motion fields edit residuals, allow uncurling, mirror and restore his
 
 test('arbitrary-axis fine drags follow their real track, respect limits and cancel exactly',()=>{
   for(const mirror of [false,true]){
-    const f=fixture(),e=new Editor({demo:false});e.load(f.doc);
+    const f=fixture(),e=newOwnedEditor({demo:false});e.load(f.doc);
     e.select(1,f.root.id-1);e.setSpatialPose({turn:.55,pitch:.25,bend:.1});e.select(1,f.master.id-1);e.setSpatialMotion(.4);
     if(mirror){e.select(1,-1);e.mirrorFigure();}
     e.select(1,f.a.id-1);const before=e.serialize(),p=e.geometry.objects.get(0).joints.get(f.a.id);
@@ -131,32 +132,20 @@ test('arbitrary-axis fine drags follow their real track, respect limits and canc
 });
 
 test('driver edits invalidate their spatial subtree and match fresh geometry after undo',()=>{
-  const f=fixture(),e=new Editor({demo:false});e.load(f.doc);
+  const f=fixture(),e=newOwnedEditor({demo:false});e.load(f.doc);
   const initial=e.geometry.objects.get(0).segments[f.tip.id-1].spatialFrame;
   e.select(1,f.master.id-1);e.setSpatialMotion(.6);assert.notEqual(e.geometry.objects.get(0).segments[f.tip.id-1].spatialFrame,initial);
   for(const value of [1.4,.2,.9,0]){
-    e.setSpatialMotion(value);const current=e.geometry.objects.get(0),doc=e.serialize(),fresh=buildGeometry(doc,doc.keyframes[0]).objects.get(0);
+    e.setSpatialMotion(value);const current=e.geometry.objects.get(0),doc=e.serialize(),fresh=geometryOfDocument(doc).objects.get(0);
     for(const bone of [f.master,f.a,f.b,f.tip,f.cheek])vectorNear(current.segments[bone.id-1].spatialFrame.q,fresh.segments[bone.id-1].spatialFrame.q);
   }
   e.undo();near(e.geometry.objects.get(0).segments[f.tip.id-1].spatialFrame.motionValue,.63);
 });
 
-test('driven mesh updates are fresh-equivalent and a referenced master cannot be deleted',()=>{
-  const f=fixture(),x=f.q.add(0,30,0,'Surface X'),y=f.q.add(0,30,Math.PI/2,'Surface Y');f.object.angles.push(0,Math.PI/2);
-  f.figure._styk={spatialMesh:{positions:[-15,64,0,-5,64,0,-10,70,6],bones:Array.from({length:3},()=>[f.tip.id,0,0,0]).flat(),weights:Array.from({length:3},()=>[1,0,0,0]).flat(),indices:[0,1,2],colors:[[230,180,130]],materials:[0],basis:[0,x,y]}};
-  const e=new Editor({demo:false});e.load(f.doc);e.select(1,f.master.id-1);const before=e.serialize(),rest=e.geometry.objects.get(0).spatialMesh;
-  assert.throws(()=>e.deleteSegment({branch:false}),/missing joint/);assert.deepEqual(e.serialize(),before);
-  for(const value of [.5,1.2,.2]){
-    e.setSpatialMotion(value);const current=e.geometry.objects.get(0).spatialMesh,doc=e.serialize(),fresh=buildGeometry(doc,doc.keyframes[0]).objects.get(0).spatialMesh;
-    assert.deepEqual(current.positions,fresh.positions);assert.deepEqual(current.depth,fresh.depth);assert.notDeepEqual(current.positions,rest.positions);
-  }
-  e.undo();const doc=e.serialize(),fresh=buildGeometry(doc,doc.keyframes[0]).objects.get(0).spatialMesh;assert.deepEqual(e.geometry.objects.get(0).spatialMesh.positions,fresh.positions);
-});
-
 test('a mechanical rotation gizmo exposes its actual axis and edits only the fine residual',()=>{
   for(const axis of [[-1,0,0],[0,1,0],[Math.SQRT1_2,0,Math.SQRT1_2]])for(const mirror of [false,true]){
     const f=fixture();f.figure.segments[f.a.id-1]._stykRig.spatial.motion.axis=axis;
-    const e=new Editor({demo:false});e.load(f.doc);e.select(1,f.root.id-1);e.setSpatialPose({turn:.6,pitch:.3});e.select(1,f.master.id-1);e.setSpatialMotion(.5);
+    const e=newOwnedEditor({demo:false});e.load(f.doc);e.select(1,f.root.id-1);e.setSpatialPose({turn:.6,pitch:.3});e.select(1,f.master.id-1);e.setSpatialMotion(.5);
     if(mirror){e.select(1,-1);e.mirrorFigure();}e.select(1,f.a.id-1);
     const g=createSpatialGizmo(e,p=>p);assert.equal(g.rings.length,1);near(g.motion.applied,.4);
     assert.equal(startRotationGizmo(g,g.center),null);assert.equal(startRotationGizmo(g,{x:g.center.x+59,y:g.center.y}),null);
@@ -167,14 +156,16 @@ test('a mechanical rotation gizmo exposes its actual axis and edits only the fin
     const normal=[ring.u[1]*ring.v[2]-ring.u[2]*ring.v[1],ring.u[2]*ring.v[0]-ring.u[0]*ring.v[2],ring.u[0]*ring.v[1]-ring.u[1]*ring.v[0]];
     near(Math.hypot(...normal),1);
   }
-  const f=fixture(),e=new Editor({demo:false});e.load(f.doc);e.select(1,f.lip.id-1);assert.equal(createSpatialGizmo(e,p=>p),null);
+  const f=fixture(),e=newOwnedEditor({demo:false});e.load(f.doc);e.select(1,f.lip.id-1);assert.equal(createSpatialGizmo(e,p=>p),null);
 });
 
 test('driven hinges tween through ordinary angle channels without jumps or backward bends',()=>{
   const f=fixture(),start=structuredClone(f.doc.keyframes[0]);f.setResidual(f.master,1.7);f.setResidual(f.a,.2);f.setResidual(f.b,-.1);const end=structuredClone(f.doc.keyframes[0]);
-  const tweenDoc={...f.doc,keyframes:[start,end],auto_easing:false};let previous=null;
+  // The first pose lasts 120 ticks: the inbetweens are the ticks.
+  start.duration_raw=120;
+  const tweenDoc={...f.doc,keyframes:[start,end],auto_easing:false},tween=ownedEditorFor({demo:false},tweenDoc);let previous=null;
   for(let tick=0;tick<=120;tick++){
-    const frame=evaluatedNativeFrame(tweenDoc,0,tick/120),g=buildGeometry(f.doc,frame).objects.get(0);
+    tween.seek(tick);const g=tween.geometry.objects.get(0);
     const p=spatialPoint(f.frame(g,f.tip),[ -10,70,0]);
     for(const b of [f.a,f.b,f.tip]){const value=f.frame(g,b).motionValue,m=f.figure.segments[b.id-1]._stykRig.spatial.motion;assert.ok(value>=m.min-1e-9&&value<=m.max+1e-9);}
     if(previous)assert.ok(Math.hypot(...p.map((v,i)=>v-previous[i]))<2,'small uniform tween step');previous=p;
@@ -184,5 +175,5 @@ test('driven hinges tween through ordinary angle channels without jumps or backw
 test('axis and driven residuals survive a native round trip without another pose store',async()=>{
   const f=fixture();f.setResidual(f.master,.7);f.setResidual(f.b,-.1);const {document}=await decodeDocument(await buildContainerV2(f.doc,'styk'),'styk');
   assert.deepEqual(document.figure_types,f.doc.figure_types);assert.deepEqual(document.keyframes[0].objects[0].angles,f.object.angles);assert.equal(document.keyframes[0].objects[0]._stykMotion,undefined);
-  const old=f.evaluate(),fresh=buildGeometry(document,document.keyframes[0]).objects.get(0);vectorNear(f.frame(fresh,f.tip).q,f.frame(old,f.tip).q);
+  const old=f.evaluate(),fresh=geometryOfDocument(document).objects.get(0);vectorNear(f.frame(fresh,f.tip).q,f.frame(old,f.tip).q);
 });

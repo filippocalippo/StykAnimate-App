@@ -72,9 +72,9 @@ same evaluated values regardless of which surface authored them.
 ## Architecture and performance
 
 `animation-properties.mjs` supplies the shared channel vocabulary.
-`pose-property-split.mjs` separates property changes from skeleton snapshots.
-`native-property-projection.mjs` owns native curve adoption and lazy timeline
-projection; `native-property-curve.mjs` preserves legacy curve behavior.
+The engine session
+authors the channels (`styk-edit`); the editor no longer projects or adopts native
+curves itself.
 The evaluator and style materializer compose the same per-instance values for
 editing, playback and export. Topology repair retargets style channels and
 preserves authored gradient orientation when a figure's origin changes.
@@ -97,18 +97,6 @@ are recorded in `artifacts/property-channels/performance-before.json` and
 latency guarantees. Large bulk Add operations still do more work than a scalar
 preview and are a useful candidate for future cooperative scheduling.
 
-Run the memory guard with:
-
-```sh
-node --expose-gc scripts/benchmark-animation-memory.mjs --property-channels
-```
-
-On the September 10, 2026 run (2,000 frames, 20 figures, 40,000 initial keys),
-200 position edits retained 12 history commands and 13 Pose sources. Retained heap
-grew 77,504 bytes between edits 100 and 200 after explicit garbage collection.
-Ordinary Pose edits target only affected figures; unrelated figures in the same
-layer do not receive property tracks.
-
 The updated browser measurements are in
 `artifacts/timeline-sync-properties/performance-after.json`. Median Pose commits
 were 14.6/5.4 ms (Advanced/Simple) for 10,000 frames, 6.5/3.3 ms for 500 figures,
@@ -118,15 +106,12 @@ bulk operation remains a candidate for cooperative scheduling.
 
 ## Verification and next steps
 
-`tests/property-channel-authoring.test.mjs` covers scalar ownership, mixed shape
-gestures, camera and scene edits, per-instance styles, gradient/polygon persistence,
-Simple drafts, ranges, imported curves and joined transforms.
 `tests/property-channel-authoring.browser.mjs` exercises the actual inspector and
-both timelines, including the no-selection Scene/Camera view.
-`tests/timeline-sync-properties.test.mjs` covers Pose transform ownership, range
-edits, native appearance timing, default-white color interpolation and save/reopen.
-Its browser companion checks actual inspector edits, repeated switches, Simple
-Add/Update and rendered scene pixels between color keys.
+both timelines, including the no-selection Scene/Camera view. Its companion
+`tests/timeline-sync-properties.browser.mjs` checks actual inspector edits, repeated
+switches, Simple Add/Update and rendered scene pixels between color keys. The
+channel authoring itself is stated by the session's recorded edit tapes and tests
+(`cargo test -p styk-edit`).
 
 A useful next step is collapsible Transform/Appearance groups and a curve editor
 for each scalar property. Per-joint angle/length/bend channels could follow as a

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {existsSync, readFileSync} from 'node:fs';
-import {Editor} from '../src/editor.mjs';
+import {engineEditor, ownedEditorWithDrawings} from './support/owned-editor.mjs';
 import english from '../src/locales/en.mjs';
 import inspectorStrings from '../src/locales/en-inspector.mjs';
 import {lintCss} from '../scripts/check-css.mjs';
@@ -28,8 +28,7 @@ const assertBudget = (descriptor, options = {}) => assert.deepEqual(inspectorBud
 // The inspector's own contexts are tested against today's markup in tests/inspector-descriptors.test.mjs.
 
 test('drawing layer inspector: name, visibility, lock and parallax keep their hooks', () => {
-  const editor = new Editor({layerTimeline: true, propertyChannels: true});
-  const layer = editor.createDrawingLayer();
+  const {editor, layers: [layer]} = ownedEditorWithDrawings({layerTimeline: true, propertyChannels: true});
   const descriptor = layerInspector(editor), today = legacyInspectorView({editor, context: 'layer'}), kit = kitHTML(descriptor);
   assertParity(today, kit, {id: 'inspector-layer-name'}, ['value', 'aria-label', 'maxlength', 'data-layer-id']);
   for (const id of ['inspector-layer-visible', 'inspector-layer-locked']) assertParity(today, kit, {id}, ['type', 'checked', 'data-layer-id']);
@@ -49,8 +48,7 @@ test('drawing layer inspector: name, visibility, lock and parallax keep their ho
 });
 
 test('drawing brush inspector: preview, recent colours, Blend and Lock alpha keep their hooks', () => {
-  const editor = new Editor({layerTimeline: true, propertyChannels: true});
-  editor.createDrawingLayer();
+  const {editor} = ownedEditorWithDrawings({layerTimeline: true, propertyChannels: true});
   const settings = {color: '#223344', color2: '#ffffff', blend: 'multiply', alphaLock: true, preset: 'ink', hardness: 0.5, roundness: 1, angle: 0, spacingRatio: 0.08,
     taperIn: 0, taperOut: 0, stabilizerMode: 'average', tip: 'round', angleMode: 'fixed', grain: 'noise', texture: 0, grainScale: 1, pressureSize: true,
     pressureOpacity: false, pressureFlow: false, sizeCurve: 1, opacityCurve: 1, sizeJitter: 0, opacityJitter: 0, angleJitter: 0, scatter: 0, mirrorY: false,
@@ -281,7 +279,7 @@ test('closing a section while its rule holds also forgets that the person had op
 });
 
 test('the sections are the inspector body; the head (scope slot, quick actions) and the foot render for their own hosts', () => {
-  const editor = new Editor();
+  const editor = engineEditor();
   editor.select(1);
   const descriptor = {...figureInspector(editor), scope: {label: 'Editing frames 22–28', stop: {command: 'toggle-range-edit', tip: 'Edit only this frame'}}};
   const body = kitHTML(descriptor, {ctx: {joined: false}, memory: new SectionMemory()});
@@ -360,7 +358,7 @@ test('buttons, fields and swatches use the one tooltip, never a native title (un
   assert.match(renderButton({action: 'add', icon: 'plus', label: 'Add', tip: 'Add a key'}, {icon}), /aria-label="Add" data-tooltip="Add a key">/);
   assert.match(renderButton({action: 'join-figure', icon: 'link', label: 'Join figure', legacyTitle: true}, {icon}), /aria-label="Join figure" title="Join figure">/);
   assert.match(renderRow({kind: 'swatches', label: 'Recent', items: [{value: '#ffffff', label: 'Use #FFFFFF', tip: '#FFFFFF'}]}), /aria-label="Use #FFFFFF" data-tooltip="#FFFFFF" tabindex="0"/);
-  const every = kitHTML(figureInspector((() => { const editor = new Editor(); editor.select(1); return editor; })()), {}, {head: true, foot: true}) +
+  const every = kitHTML(figureInspector((() => { const editor = engineEditor(); editor.select(1); return editor; })()), {}, {head: true, foot: true}) +
     renderSection(ikSection({enabled: true, pinned: false, allowStretch: true, bendDirection: 0, chainLength: 1, maxLength: 2, target: {rotation: 0}}), {icon});
   assertNoTitles(every, ['join-figure']);
 });

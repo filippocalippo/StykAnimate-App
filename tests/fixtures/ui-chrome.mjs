@@ -117,9 +117,9 @@ if (theme !== 'light' && theme !== 'dark') {
   };
   bar('brush-wide', brush(), '900px', 'Brush options', 'draw');
   bar('brush-medium', brush(), '560px', 'Brush options', 'draw');
-  bar('brush-narrow', brush(), '380px', 'Brush options', 'draw');
+  bar('brush-narrow', brush(), '400px', 'Brush options', 'draw');
   bar('edit-joints', editJoints, '640px', 'Edit joints options', 'rig');
-  bar('edit-joints-narrow', editJoints, '250px', 'Edit joints options', 'rig');
+  bar('edit-joints-narrow', editJoints, '260px', 'Edit joints options', 'rig');
   bar('select-pixels', selectPixels, '640px', 'Select pixels options', 'draw');
   bar('tweener', tweener, '760px', 'Tweener options');
 

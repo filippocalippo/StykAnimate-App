@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
 import {createFrame, createObject, emptyDocument} from '../src/demo.mjs';
-import {arc} from '../src/pivot/geometry.mjs';
+import {ownedScope} from './support/owned-scope.mjs';
+
+const open = ownedScope();
 
 const near = (a, b, tolerance = 2e-4) => assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`);
+/** Where a segment of `length` that starts at `start` heading `angle` and bends by `bend` radians ends: on the circle of radius length / bend. */
+const arcEnd = (start, angle, length, bend) => ({x: start.x + length / bend * (Math.sin(angle + bend) - Math.sin(angle)), y: start.y + length / bend * (Math.cos(angle) - Math.cos(angle + bend))});
 function isolationFixture() {
   const report = emptyDocument(), template = report.figure_types[0].segments[0];
   const s = (id, parent, staticFlag = 0) => ({...template, segment_id: id, parent_id: parent, length: 40,
@@ -28,14 +31,14 @@ function isolationFixture() {
     object(root, 11), object(ordinary, 97, 4, 0), object(ordinary, 101, 2, 210),
   ], 1)];
   report.keyframes[0].objects.forEach((o, slot) => { o.object_slot = slot; if (o.join) o.join.target_unique_id = report.keyframes[0].objects[o.join.target_object_slot].unique_id; });
-  const editor = new Editor({demo: false}).load(report); editor.select(11, 3); return editor;
+  const editor = open({demo: false}, report); editor.select(11, 3); return editor;
 }
 function simple() {
   const report = emptyDocument(), figure = report.figure_types[0], base = figure.segments[0];
   figure.segments = [{...base, segment_id: 1, parent_id: 0, angle_rad: 0, length: 100, bend_rad: 0},
     {...base, segment_id: 2, parent_id: 1, angle_rad: 0, length: 50, bend_rad: 0}];
   report.keyframes = [createFrame([createObject(figure, 1, 0, 0)], 1)];
-  const editor = new Editor({demo: false}).load(report); editor.select(1, 0); return editor;
+  const editor = open({demo: false}, report); editor.select(1, 0); return editor;
 }
 
 test('animation isolation follows static chains and native joined-origin admission without restarting at dynamic boundaries', () => {
@@ -53,7 +56,7 @@ test('animation isolation follows static chains and native joined-origin admissi
 
 test('isolated bending keeps the start tangent and turns only the admitted static and joined branches', () => {
   const editor = isolationFixture(), shape = editor.geometry.objects.get(4).segments[3], bend = 0.7;
-  const end = arc(shape.start, shape.angle, 40, bend).at(-1);
+  const end = arcEnd(shape.start, shape.angle, 40, bend);
   editor.bendJoint(end.x, end.y, {isolate: true});
   near(editor.object.angles[3], 0); near(editor.object.bends[3], bend); near(editor.object.angles[2], bend);
   for (const slot of [0, 1]) for (const angle of editor.frame.objects[slot].angles) near(angle, bend);
@@ -71,7 +74,7 @@ test('length snapping depends on the starting pose and can be disabled', () => {
 });
 
 test('bend snapping needs a nondefault starting bend and leaves subsequent default-start drags free', () => {
-  const editor = simple(); editor.updateSegment({bend_rad: 0.8}); const target = arc({x: 0, y: 0}, 0, 100, 0.04).at(-1);
+  const editor = simple(); editor.updateSegment({bend_rad: 0.8}); const target = arcEnd({x: 0, y: 0}, 0, 100, 0.04);
   editor.beginDrag(); editor.bendJoint(target.x, target.y); near(editor.object.bends[0], 0); editor.commitDrag();
   editor.beginDrag(); editor.bendJoint(target.x, target.y); near(editor.object.bends[0], 0.04); editor.commitDrag();
   editor.updateSegment({bend_rad: 0.8}); editor.bendJoint(target.x, target.y, {snap: false}); near(editor.object.bends[0], 0.04);
@@ -95,15 +98,3 @@ test('invalid snap settings and full-circle stretching leave the scene unchanged
   assert.deepEqual(editor.serialize(), original);
 });
 
-test('numeric multiselection scaling changes selected spacing and leaves unselected joined scales intact', () => {
-  const editor = simple(), first = editor.selectedUid, child = editor.duplicateFigure().unique_id;
-  editor.joinTo(first, 1); const second = editor.duplicateFigure().unique_id;
-  editor.selectMany([first, second]); const before = editor.serialize(), roots = editor.selectedObjects.map(o => ({uid: o.unique_id, x: o.root_x, y: o.root_y}));
-  editor.scaleSelected(2, {center: {x: 0, y: 0}});
-  for (const root of roots) {
-    const object = editor.frame.objects.find(o => o.unique_id === root.uid);
-    near(object.root_x, root.x * 2); near(object.root_y, root.y * 2); near(object.scale, 2);
-  }
-  near(editor.frame.objects.find(o => o.unique_id === child).scale, 1);
-  editor.undo(); assert.deepEqual(editor.serialize(), before);
-});

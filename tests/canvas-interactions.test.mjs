@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { figureIntersectsMarquee, getPivotHandles, getPivotHandleRadius, invalidatePivotHandleTopology, pickCanvasHandle, pickCanvasSegment, pivotHandleColor } from '../src/canvas-interactions.mjs';
-import { Editor } from '../src/editor.mjs';
 import { createDemo } from '../src/demo.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 
 const object = (uid, slot, root, end, options = {}) => ({
   slot, root, obj: { unique_id: uid, object_slot: slot, join: options.join },
@@ -218,7 +218,7 @@ test('a picked attached parent joint changes its branch, while its own origin st
   const report = createDemo(); report.keyframes.length = 1;
   const parent = report.keyframes[0].objects[0], child = report.keyframes[0].objects[1];
   child.join = { target_object_slot: 0, target_unique_id: parent.unique_id, target_handle_id: 1 };
-  const editor = new Editor({ demo: false }); editor.load(report);
+  const editor = ownedEditorFor({ demo: false }, report);
   const before = editor.geometry, attachment = before.objects.get(1).root;
   const hit = pickCanvasHandle(before, attachment, { radius: 2, selectedUid: child.unique_id });
   assert.equal(hit.g.obj.unique_id, parent.unique_id); assert.equal(hit.action, 'pose');

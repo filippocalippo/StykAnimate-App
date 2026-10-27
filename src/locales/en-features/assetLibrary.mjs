@@ -10,6 +10,5 @@ export default Object.freeze({
   "assetLibrary.figure": "Figure",
   "assetLibrary.previewUnavailable": "Preview unavailable",
   "assetLibrary.complexFigureAddToCanvasToView": "Complex figure · add to canvas to view",
-  "assetLibrary.largeImageFigureAddToCanvasToView": "Large image figure · add to canvas to view",
   "assetLibrary.emptyFigure": "Empty figure"
 });

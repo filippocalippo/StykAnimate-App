@@ -1,0 +1,70 @@
+{
+ "name": "ik-settings-pinned-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/startup-pinned.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "setNodeIK",
+   {
+    "allowStretch": true
+   }
+  ],
+  [
+   "poseJoint",
+   560,
+   330
+  ],
+  [
+   "setNodeIK",
+   {
+    "pinned": false
+   }
+  ],
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "setNodeIK",
+   {
+    "chainLength": 1
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "bendDirection": 0
+   }
+  ],
+  [
+   "rotateIKTarget",
+   0.5
+  ],
+  [
+   "@select",
+   1,
+   7
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": false
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

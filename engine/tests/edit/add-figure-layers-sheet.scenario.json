@@ -1,0 +1,55 @@
+{
+ "name": "add-figure-layers-sheet",
+ "document": "sheet-layers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   3,
+   -1
+  ],
+  [
+   "addFigure",
+   1
+  ],
+  [
+   "moveSelection",
+   20,
+   10
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "addFigure",
+   1
+  ],
+  [
+   "setLayerLocked",
+   "layer-2",
+   true
+  ],
+  [
+   "addFigure",
+   1
+  ],
+  [
+   "setLayerLocked",
+   "layer-2",
+   false
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

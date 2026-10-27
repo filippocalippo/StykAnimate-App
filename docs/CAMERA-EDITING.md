@@ -1,6 +1,7 @@
 # Camera and neighboring-pose commands
 
-`src/editor-camera.mjs` supplies the camera mixin installed on `Editor`. Camera
+The commands below are commands of the engine session (`engine/crates/styk-edit/src/camera_commands.rs`);
+`Editor` forwards each call to it (`src/engine/engine-owner.mjs`). Camera
 coordinates are offsets from the animation center; angles are radians and scale
 is the camera viewport size relative to the animation dimensions. A smaller
 camera scale zooms into the animation.
@@ -46,12 +47,10 @@ and rejects before mutation. Applying a native camera to figures preserves the
 played figure appearance, but cannot preserve a moved image/gradient background:
 native Pivot has the same limitation.
 
-Verification: `tests/editor-camera.test.mjs` and `tests/background-angle.test.mjs`
-(with the camera inspector's command availability in
-`tests/inspector-descriptors.test.mjs`) passed 21 checks, including joined curved poses,
-sparse/reordered handle IDs, hidden neighboring keys, authored inbetween editing,
-range semantics, undo/cancel, and the actual native PIV writer/reimport. These
-model and view-helper checks do not replace the final integrated UI walkthrough.
+Verification: the recorded edit tapes (`engine/tests/edit/camera-*.scenario.json`) and the
+session tests (`cargo test -p styk-edit`) state the commands; `tests/background-angle.test.mjs`
+and the camera inspector's command availability in `tests/inspector-descriptors.test.mjs`
+cover the view helpers. These checks do not replace the final integrated UI walkthrough.
 
 Native references: [virtual camera](https://pivotanimator.net/help5-2/virtual_camera.htm),
 [neighbor alignment](https://pivotanimator.net/help5-2/alignment_to_neighbouring_frames.htm),

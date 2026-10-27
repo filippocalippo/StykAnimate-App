@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {TILE_BYTES} from '../src/drawing-tiles.mjs';
-import {HISTORY_CHUNK_BYTES,historyChunks,encodeHistoryChunk,decodeHistoryChunk} from '../src/drawing-history-codec.mjs';
+import {HISTORY_CHUNK_BYTES,historyChunks} from '../src/drawing-history-codec.mjs';
+import {loadDrawingEngine,encodeHistoryChunk,decodeHistoryChunk} from '../src/engine/engine-drawing.mjs';
+
+// Undo chunks are encoded by the drawing raster engine.
+await loadDrawingEngine();
 
 test('history chunks round-trip exact null, uniform and full RGBA sides',()=>{
   const pixels=Uint8ClampedArray.from({length:TILE_BYTES},(_,i)=>(i*17)%256),tiles=[{tx:-12345,ty:90,before:null,after:new Uint8ClampedArray([127,5,249,1])},{tx:12345,ty:-90,before:pixels,after:null},{tx:0,ty:0,before:pixels,after:pixels.slice()}];

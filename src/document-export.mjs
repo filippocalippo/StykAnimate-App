@@ -3,27 +3,34 @@ import {restoreMessageError, messageError} from './localized-error.mjs';
 import {documentChunks} from './document-transport.mjs';
 import {drawingBarrier} from './drawing-resources.mjs';
 import {codecJob} from './codec-job.mjs';
-import {createContainerCompressionCache} from './native-container.mjs';
+import {browserCodecHost} from './codec-web-host.mjs';
+import {createContainerCompressionCache} from './container-cache.mjs';
+import {registeredEngine, holdsRevision} from './engine/engine-open.mjs';
 
 function abortError(message = 'Document export cancelled.') { return new DOMException(message, 'AbortError'); }
+/** The formats whose document the engine makes from the one it holds: they need it evaluated (docs/engine/document.md). */
+const ENGINE_FORMATS = new Set(['piv', 'stk', 'stkz', 'stykmov']);
+/** How long a worker that joined the engine has to give its thread back before it is ended. */
+const RELEASE_MS = 5000;
 async function yieldToInput() {
   if (globalThis.scheduler?.yield) await scheduler.yield();
   else await new Promise(resolve => setTimeout(resolve, 0));
 }
 
-/** Asynchronous, bounded snapshots + worker serialization and HTTP uploads.
+/** Asynchronous, bounded snapshots + worker serialization and codec requests.
  * Callers must abort on every document mutation, including uncommitted gestures.
  * getRevision catches committed edits between chunks and before returning data.
+ * The Pivot codec runs in a worker of this page (`codecHost`, codec-web-host.mjs).
+ * A `.styk` save sends the editable document in chunks. Pivot and figure files are made by the engine from the document it
+ * holds at `revision` (the editor's), on the export worker: nothing of the document crosses.
  */
 export class DocumentExporter {
-  constructor({baseURL = globalThis.location?.origin, token = globalThis.stykDesktop?.apiToken || '', targetRecords = 2000,
+  constructor({codecHost = null, engine = null, targetRecords = 2000,
     targetBytes = 1024 * 1024, timeoutMs = 300000, idleMs = 30000, maxQueued = 4, workerByteBudget = 8 * 1024 * 1024} = {}) {
-    if (!baseURL) throw messageError(new Error(''), "errors.documentExport.documentExportRequiresTheLocalFileServiceUrl", {});
     if (!Number.isFinite(idleMs) || idleMs < 0 || !Number.isInteger(maxQueued) || maxQueued < 0 || maxQueued > 16 ||
       !Number.isSafeInteger(workerByteBudget) || workerByteBudget <= 0)
       throw new RangeError('Invalid document export worker capacity.');
-    this.baseURL = new URL(baseURL, globalThis.location?.href).origin;
-    this.token = token;
+    this.codecHost = codecHost;
     this.targetRecords = targetRecords;
     this.targetBytes = targetBytes;
     this.timeoutMs = timeoutMs;
@@ -37,6 +44,8 @@ export class DocumentExporter {
     this.sequence = 0;
     this.workerByteBudget = workerByteBudget;
     this.workerBytes = 0;
+    this.engine = engine ?? registeredEngine();
+    this.joined = new WeakSet();
     // Only immutable, content-addressed compressed bytes survive retirement.
     // Editable snapshots and codec heaps stay inside each worker's lifetime.
     this.compressionCache = createContainerCompressionCache({maxBytes: 64 * 1024 * 1024, maxEntries: 8});
@@ -44,10 +53,22 @@ export class DocumentExporter {
 
   _terminateWorker({clearCache = true} = {}) {
     clearTimeout(this.idleTimer);
-    this.worker?.terminate();
+    const worker = this.worker;
+    if (worker) this._retire(worker);
     this.worker = null;
     this.workerBytes = 0;
     if (clearCache) this.compressionCache.clear();
+  }
+
+  /** Ends a worker. One that joined the engine is told to give its thread back first, and the engine work it is in the middle of
+   * to stop: a thread of the shared memory ended mid-call could hold the engine's allocator. */
+  _retire(worker) {
+    if (this.cancelFlag) Atomics.store(this.cancelFlag, 0, 1);
+    if (!this.joined.has(worker)) { worker.terminate(); return; }
+    const timer = setTimeout(() => worker.terminate(), RELEASE_MS);
+    timer.unref?.();
+    worker.addEventListener('message', ({data}) => { if (data?.released) { clearTimeout(timer); worker.terminate(); } });
+    try { worker.postMessage({operation: 'release'}); } catch { clearTimeout(timer); worker.terminate(); }
   }
 
   _acquire(signal) {
@@ -89,10 +110,11 @@ export class DocumentExporter {
   }
 
   /** @returns {Promise<Blob>} Native .styk/.stkz or Pivot .piv/.stk bytes. */
-  async export(report, {sourceId, format = 'styk', name, figureTypeId, figureUid, figureUids, tick, signal, getRevision} = {}) {
+  async export(report, {sourceId, format = 'styk', name, figureTypeId, figureUid, figureUids, tick, signal, getRevision, revision} = {}) {
     if (this.disposed) throw messageError(new Error(''), "errors.documentExport.theDocumentExporterHasBeenDisposed", {});
     if (!report || typeof report !== 'object') throw messageError(new TypeError(''), "errors.documentExport.exportRequiresAnEditableDocument", {});
     if (!['piv', 'stk', 'styk', 'stkz', 'stykmov'].includes(format)) throw messageError(new Error(''), "errors.documentExport.chooseAPivStkStykStkzOrStykmov", {});
+    if (ENGINE_FORMATS.has(format) && !Number.isSafeInteger(revision)) throw messageError(new TypeError(''), "errors.documentExport.exportRequiresTheEditorRevision", {});
     if (signal?.aborted) throw abortError();
     const controller = new AbortController();
     signal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
@@ -106,7 +128,7 @@ export class DocumentExporter {
       acquired = true;
       await drawingBarrier(report,{signal});
       if(signal.aborted||getRevision&&getRevision()!==originalRevision)throw abortError('The document changed while preparing drawing pixels.');
-      return await this._export(report, {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, signal, getRevision, originalRevision, started});
+      return await this._export(report, {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, signal, getRevision, originalRevision, started, revision});
     } catch (error) {
       if (acquired) this._terminateWorker();
       throw error;
@@ -116,7 +138,12 @@ export class DocumentExporter {
     }
   }
 
-  async _export(report, {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, signal, getRevision, originalRevision, started}) {
+  async _export(report, {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, signal, getRevision, originalRevision, started, revision}) {
+    // The engine makes the document of a Pivot or figure export on the worker: it joins the shared memory and is told, with
+    // the export, which engine and revision (and a flag, in that memory, that stops it). A page that is not cross-origin isolated
+    // cannot share the memory with a worker (nor make the flag), so it makes no such file.
+    const engine = ENGINE_FORMATS.has(format) ? this.engine : null;
+    if (ENGINE_FORMATS.has(format) && (!engine?.join || globalThis.crossOriginIsolated === false)) throw Object.assign(messageError(new Error(''), "errors.documentExport.theEngineCannotMakeThisFileHere", {}), {telemetryCode: 'engine_failed', telemetryStage: 'prepare'});
     const reusedWorker = Boolean(this.worker);
     const worker = this.worker ??= new Worker(new URL('./document-export-worker.mjs', import.meta.url), {type: 'module', name: 'StykAnimate document export'});
     if (!reusedWorker) {
@@ -129,7 +156,9 @@ export class DocumentExporter {
       worker.addEventListener('error', idleFailure);
       worker.addEventListener('messageerror', idleFailure);
     }
-    const backendJob = codecJob(this.baseURL, this.token);
+    const cancelFlag = engine ? new Int32Array(new SharedArrayBuffer(4)) : null;
+    this.cancelFlag = cancelFlag;
+    const backendJob = codecJob({host: this.codecHost ?? browserCodecHost()});
     let pending, failure, completed = false, count = 0, prepMax = 0, postMax = 0, mainWork = 0;
     const fail = error => { failure ??= error; backendJob.cancel(); pending?.reject(failure); pending = null; this._terminateWorker(); };
     const onError = event => { event.preventDefault(); fail(Object.assign((event.message ? new Error(event.message) : messageError(new Error(''), "errors.documentExport.theDocumentExportWorkerStopped")), { telemetryCode: 'worker_failed', telemetryStage: 'serialize' })); };
@@ -171,9 +200,13 @@ export class DocumentExporter {
     const timer = this.timeoutMs > 0 ? setTimeout(() => fail(Object.assign(messageError(new Error(''), "errors.documentExport.documentExportTimedOut", {}), { telemetryCode: 'timeout', telemetryStage: 'serialize' })), this.timeoutMs) : null;
     try {
       const link = backendJob.link();
-      await request('start', {options: {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, baseURL: this.baseURL, token: this.token, jobId: backendJob.id, ...link.fields}, cacheEntries: this.compressionCache.snapshot()}, link.transfer);
+      // The cached blocks move to the worker for this export and come back with its result.
+      const cacheEntries = this.compressionCache.take();
+      await request('start', {options: {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, jobId: backendJob.id, ...(engine ? {engine: {join: engine.join}} : {}), ...link.fields}, cacheEntries},
+        [...link.transfer, ...cacheEntries.map(entry => entry.bytes.buffer)]);
+      if (engine) this.joined.add(worker);
       const snapshotStarted = performance.now();
-      const chunks = documentChunks(report, {maxRecords: this.targetRecords, maxBytes: this.targetBytes,
+      const chunks = engine ? [][Symbol.iterator]() : documentChunks(report, {maxRecords: this.targetRecords, maxBytes: this.targetBytes,
         timeBudgetMs: 3, omitRuntimeSegments: true});
       for (;;) {
         check();
@@ -189,7 +222,13 @@ export class DocumentExporter {
       }
       check();
       const snapshotMs = performance.now() - snapshotStarted;
-      const result = await request('export');
+      // The session publishes every change at the editor's revision; one still on its way is waited for briefly.
+      if (engine) for (let waited = 0; !holdsRevision(engine, revision); waited += 16) {
+        if (waited > 2000) throw abortError('The document changed during export.');
+        check();
+        await new Promise(resolve => setTimeout(resolve, 16));
+      }
+      const result = await request('export', engine ? {engine: {address: engine.handle.address(), revision}, cancel: cancelFlag} : {});
       check();
       if (!(result.blob instanceof Blob)) throw messageError(new Error(''), "errors.documentExport.theFileServiceReturnedNoExportedDocument", {});
       this.lastTimings = {format, reused_worker: reusedWorker, chunks: count, snapshot_ms: snapshotMs, max_chunk_prepare_ms: prepMax,
@@ -203,6 +242,7 @@ export class DocumentExporter {
       return result.blob;
     } finally {
       clearTimeout(timer);
+      if (this.cancelFlag === cancelFlag) this.cancelFlag = null;
       signal?.removeEventListener('abort', abort);
       backendJob.cancel();
       worker.removeEventListener('error', onError);

@@ -1,14 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Font,Glyph,Path,parse} from '../vendor/text/opentype.mjs';
 import {parseTextFont,compileTextFigure} from '../src/text-authoring.mjs';
 import {compileEmbeddedTextFigure} from '../src/native-text-authoring.mjs';
 import {emptyDocument,createObject,createFrame} from '../src/demo.mjs';
-import backend from '../desktop/backend.cjs';
 import installedFonts from '../desktop/font-service.cjs';
+import {roundTrip} from './support/codec.mjs';
 
 function fontBytes({symbol=true,direct=false}={}){
   const path=new Path();path.moveTo(0,0);path.lineTo(450,0);path.lineTo(225,600);path.close();
@@ -53,26 +51,15 @@ test('Unicode private-use glyphs never imply symbol remapping and existing direc
   assert.equal(direct.charToGlyph('b').advanceWidth,650);
 });
 
-function roundtrip(figure){
+async function roundtrip(figure){
   const report=emptyDocument();report.figure_types=[figure];report.keyframes=[createFrame([createObject(figure,1,100,200)],1)];
-  const script=String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-report=json.loads(sys.stdin.buffer.read().decode('utf-8'));store=server.ProjectStore(server.WORKSPACE);results={}
-for kind in ('piv','stk'):
- raw,name=store.export({'document':report,'format':kind,'figureTypeId':1})
- results[kind]=store.import_bytes(raw,name)['document']
-print(json.dumps(results))
-`;
-  const python=backend.pythonCandidates()[0],result=spawnSync(python.command,[...python.args,'-c',script],{
-    cwd:fileURLToPath(new URL('..',import.meta.url)),input:JSON.stringify(report),encoding:'utf8',windowsHide:true,maxBuffer:4*1024*1024});
-  assert.equal(result.status,0,result.error?.message||result.stderr);return JSON.parse(result.stdout);
+  const results={};
+  for(const kind of ['piv','stk'])results[kind]=await roundTrip({document:report,format:kind,figureTypeId:1});
+  return results;
 }
 
-test('typed symbol glyphs survive real native PIV and STK writer/decoder without a font dependency',()=>{
-  const figure=compileTextFigure({text:'b b'},parseTextFont(fontBytes()).font),expected=figure.text_assets[0],results=roundtrip(figure);
+test('typed symbol glyphs survive real native PIV and STK writer/decoder without a font dependency',async ()=>{
+  const figure=compileTextFigure({text:'b b'},parseTextFont(fontBytes()).font),expected=figure.text_assets[0],results=await roundtrip(figure);
   for(const report of Object.values(results)){
     const actual=report.figure_types.find(f=>f.text_assets?.some(a=>a.font_name==='Test Symbols')).text_assets[0];
     assert.equal(actual.text,expected.text);assert.deepEqual(actual.glyphs.map(g=>g.utf16_code_unit),expected.glyphs.map(g=>g.utf16_code_unit));
@@ -99,7 +86,7 @@ test('installed TTC families are independently selectable and compile portable B
     assert.ok(figure.text_assets[0].glyphs.filter(g=>g.commands.length).length>=3);
     if(family==='MS Gothic'){
       const expected=figure.text_assets[0];
-      for(const report of Object.values(roundtrip(figure))){
+      for(const report of Object.values(await roundtrip(figure))){
         const actual=report.figure_types.find(f=>f.text_assets?.some(a=>a.font_name===family)).text_assets[0];
         assert.equal(actual.text,text);assert.deepEqual(actual.glyphs.map(g=>g.commands),expected.glyphs.map(g=>g.commands));
       }

@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import {createInvalidator, UI_REASONS} from '../src/ui/ui-invalidation.mjs';
 import {setAttr, setFlag, setHidden, setMarkup, setProp, setText, setVar} from '../src/ui/dom-write.mjs';
 
-function harness({playing = false, blocked = false} = {}) {
+function harness({playing = false} = {}) {
   const frames = [], timers = [], log = [];
-  const clock = {time: 0, playing, blocked, passes: 0};
+  const clock = {time: 0, playing, passes: 0};
   const ui = createInvalidator({
     schedule: callback => frames.push(callback), delay: (callback, ms) => timers.push({at: clock.time + ms, callback}),
-    now: () => clock.time, isPlaying: () => clock.playing, isBlocked: () => clock.blocked, afterPass: () => log.push('render'),
+    now: () => clock.time, isPlaying: () => clock.playing, afterPass: () => log.push('render'),
   });
   const frame = () => { const pending = frames.splice(0); clock.passes += pending.length; for (const callback of pending) callback(); };
   /** Moves the clock to `time`, firing the timers that come due on the way. */
@@ -118,23 +118,14 @@ test('hidden surfaces stay marked and update when shown', () => {
   assert.deepEqual(log, ['vfx'], 'nothing to do once clean');
 });
 
-test('a blocked pass keeps every mark, and a full refresh updates every surface', () => {
-  const {ui, log, clock, frame, surface} = harness({blocked: true});
+test('a full refresh updates every surface, quiet ones included', () => {
+  const {ui, log, clock, surface} = harness();
   surface('title', {on: ['document']});
   surface('inspector', {on: ['selection'], quiet: true});
-  ui.invalidate('all');
-  frame();
-  assert.equal(ui.flushAll(), false);
-  assert.deepEqual(log, []);
-  clock.blocked = false;
   clock.playing = true;
   assert.equal(ui.flushAll(), true);
   assert.deepEqual(log, ['title', 'inspector', 'render'], 'a full refresh ignores quiet');
   assert.deepEqual(ui.stats(), {title: 1, inspector: 1});
-  clock.blocked = true;
-  clock.playing = false;
-  assert.equal(ui.update('title'), true, 'a direct update keeps its own timing while passes are blocked');
-  assert.deepEqual(ui.stats(), {title: 2, inspector: 1});
 });
 
 test('surfaces are declared once with known reasons', () => {

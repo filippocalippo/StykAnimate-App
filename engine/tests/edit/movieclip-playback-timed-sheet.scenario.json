@@ -1,0 +1,93 @@
+{
+ "name": "movieclip-playback-timed-sheet",
+ "document": "sheet-movieclip-timed.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "start": -1
+   }
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "end": 1
+   }
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "start": 2,
+    "end": 2
+   }
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "restarts": [
+     {
+      "tick": 5,
+      "offset": 0
+     },
+     {
+      "tick": 2,
+      "offset": 0
+     }
+    ]
+   }
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "restarts": [
+     {
+      "tick": 2,
+      "offset": -1
+     }
+    ]
+   }
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "restarts": [
+     {
+      "tick": 2,
+      "offset": 1
+     },
+     {
+      "tick": 4,
+      "offset": 0
+     }
+    ]
+   }
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "start": 2,
+    "end": 6,
+    "speed": 1.5
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

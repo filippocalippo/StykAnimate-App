@@ -10,7 +10,7 @@ import {icon} from './icons.mjs';
 import {HotkeyManager} from './hotkeys.mjs';
 import {librarySnapshot, libraryPreview, pngThumbnail, saveLibraryFile, readLibraryFile} from './library-files.mjs';
 import {LibraryHoverPreview} from './library-hover-preview.mjs';
-import {libraryPreviewMatte, LIBRARY_MATTES} from './library-preview-core.mjs';
+import {libraryPreviewMatte, LIBRARY_MATTES} from './library-matte.mjs';
 import {canMoveLibraryItem} from './library-drag.mjs';
 import {openMenu} from './ui/ui-menu.mjs';
 import {setAttr, setFlag, setProp, setText} from './ui/dom-write.mjs';
@@ -360,7 +360,7 @@ export class UserLibrary {
         const generate = async () => {
           if (generation !== this.generation || !card.isConnected) return null;
           const file = await readLibraryFile(this.desktop,path), result = await this.importer.importFile(file), report = result.document ?? result.report ?? result;
-          const thumbnail = await libraryPreview(report), kind = report.keyframes[0].objects.length > 1 ? 'set' : item.kind;
+          const thumbnail = await libraryPreview(file), kind = report.keyframes[0].objects.length > 1 ? 'set' : item.kind;
           await this.desktop.cacheLibraryThumbnail({path, thumbnail, modified:item.modified, kind});
           if (generation === this.generation && card.isConnected) { item.kind = kind; localizedAttribute(card, 'aria-label', 'userLibrary.assetLabel', {name:item.name, kind:{messageKey:KIND_KEYS[item.kind]??'userLibrary.figure'}}); localizedText(card.querySelector('.library-kind'), KIND_KEYS[item.kind]??'userLibrary.figure'); }
           return thumbnail;
@@ -519,7 +519,9 @@ export class UserLibrary {
     try {
       const revision=this.editor.revision;await drawingBarrier(this.editor.report);if(revision!==this.editor.revision)throw messageError(new Error(''), "errors.userLibrary.theSelectionChangedBeforeSavingToTheLibrary", {});
       const report = librarySnapshot(this.editor), format = report._styk.libraryKind === 'movieclip' ? 'stykmov' : 'stkz';
-      const [thumbnail, blob] = await Promise.all([libraryPreview(report), this.exporter.export(report, {format, figureUids:report.keyframes[0].objects.map(o => o.unique_id)})]);
+      // The preview is drawn by the engine from the saved bytes (src/library-files.mjs).
+      const exported = this.exporter.export(this.editor.report, {format, figureUids:report.keyframes[0].objects.map(o => o.unique_id), tick:this.editor.tick, revision});
+      const [thumbnail, blob] = await Promise.all([libraryPreview(exported, format), exported]);
       let name = report._styk.name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'-').replace(/^\.+|[. ]+$/g,'').slice(0,110).trim() || interfaceText("userLibrary.untitledAsset");
       if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(name)) name = `Asset ${name}`;
       const result = await saveLibraryFile(this.desktop, blob, {folder, name, kind:report._styk.libraryKind, extension:`.${format}`, thumbnail});

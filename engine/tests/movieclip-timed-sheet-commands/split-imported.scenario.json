@@ -1,0 +1,62 @@
+{
+ "name": "split-imported",
+ "document": "split-imported.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "splitMovieclip",
+   3
+  ],
+  [
+   "@seek",
+   4.25
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 4,
+    "end": 9
+   },
+   {
+    "move": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-1"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

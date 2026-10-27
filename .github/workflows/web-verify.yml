@@ -33,6 +33,7 @@ jobs:
           npm ci --prefix web --no-audit --no-fund
           npx playwright install --with-deps chromium
           if [ "$RUNNER_OS" = Linux ]; then npx playwright install --with-deps firefox webkit; fi
+      - uses: ./.github/actions/engine-build
       - name: Build and verify the browser release
         run: |
           npm run web:build

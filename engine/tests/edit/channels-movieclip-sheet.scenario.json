@@ -1,0 +1,66 @@
+{
+ "name": "channels-movieclip-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/channels/channels-movieclip.sheet.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   8,
+   8
+  ],
+  [
+   "@seek",
+   5
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "moveSelection",
+   -12,
+   6
+  ],
+  [
+   "@seek",
+   12
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "rotateJoint",
+   0.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "sheetInsertKey",
+   [
+    "layer-1"
+   ],
+   6
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

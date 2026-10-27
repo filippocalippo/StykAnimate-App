@@ -1,8 +1,9 @@
 // Build's commands where the selection is (revision 5: no second toolbar row). A part's tiles in Properties
 // (Split, Duplicate, Flip H, Flip V, Delete; Shift reaches the branch), its ⋯ menu (Exact values, Set as origin,
 // Appearance, Arrange ▸, Branch ▸, Rig ▸, Attach image, Remove joint, Delete part), the Edit joints tool's Drag in
-// the stage header, Build's labelled view toggles (Handles, Highlight) and the rail's quick options (Whole branch,
-// Smart snapping, Isolate, Fit figure).
+// the stage header, Build's labelled view toggles (Handles, Highlight), the rail's quick actions (Whole branch, Split,
+// Duplicate branch, Flip branch, Delete part; 8200cf0f replaced its Smart snapping, Isolate and Fit figure toggles) and
+// Structure's strip (Smart snapping, Fit figure).
 import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
@@ -21,15 +22,19 @@ try {
  for(const selector of ['.titlebar [data-action="rig-test"]','#builder-done','.titlebar [data-action="export"]'])assert.equal(await page.locator(selector).isVisible(),true,selector);
  // The figure itself: its tiles add an image part, open the examples and fit it.
  assert.deepEqual(await page.locator('.ui-quick button').evaluateAll(list=>list.map(b=>b.dataset.action)),['add-sprite-segment','rig-examples','rig-connect','zoom-selection']);
- // The Edit joints tool's option: Drag. Whole branch, snapping, Isolate and Fit are the rail's quick options, under the tools.
+ // The Edit joints tool's option: Drag. Whole branch and the part commands are the rail's quick actions, under the tools.
  assert.equal(await page.locator('.stage-head #rig-mode').inputValue(),'move');
  assert.equal(await page.locator('.stage-head [data-action="toggle-builder-branch"]').count(),0);
  assert.deepEqual(await page.locator('.rail-quick button').evaluateAll(list=>list.map(b=>[b.dataset.action,b.getAttribute('aria-pressed')])),
-  [['toggle-builder-branch','false'],['toggle-builder-snap','true'],['toggle-isolate','false'],['zoom-selection',null]]);
- await page.locator('.rail-quick [data-action="toggle-builder-snap"]').click();await settle();
- assert.equal(await page.locator('.rail-quick [data-action="toggle-builder-snap"]').getAttribute('aria-pressed'),'false');
+  [['toggle-builder-branch','false'],['split-segment',null],['duplicate-branch',null],['mirror-branch',null],['mirror-branch-vertical',null],['delete-single-segment',null]]);
+ // Smart snapping is a one-click action in Structure's folded strip, which mirrors Structure's own Snap button.
+ const snap=page.locator('.shell-strip-action[aria-label="Smart snapping"]');
+ assert.equal(await snap.getAttribute('aria-pressed'),'true');
+ await snap.click();await settle();
+ assert.equal(await snap.getAttribute('aria-pressed'),'false');
  assert.equal(await page.locator('#builder-snap').getAttribute('aria-pressed'),'false','Structure\'s Snap shows the same state');
- await page.locator('.rail-quick [data-action="toggle-builder-snap"]').click();await settle();
+ await snap.click();await settle();
+ assert.equal(await snap.getAttribute('aria-pressed'),'true');
  // Build's view toggles have words.
  for(const [action,word] of [['builder-static-handles','Handles'],['builder-highlight','Highlight']])
   assert.equal((await page.locator(`.stage-head [data-action="${action}"]`).textContent()).trim(),word);
@@ -74,10 +79,10 @@ try {
  await page.setViewportSize({width:1000,height:760});await settle();await settle();
  assert.equal(await page.locator('.stage-head [data-action="builder-highlight"] .ui-label').isVisible(),false);
  assert.equal(await page.locator('.stage-head [data-action="builder-highlight"]').isVisible(),true);
- assert.equal(await page.locator('.rail-quick [data-action="toggle-isolate"]').isVisible(),true);
+ assert.equal(await page.locator('.rail-quick [data-action="delete-single-segment"]').isVisible(),true);
  await page.screenshot({path:`${out}/compact-1000.png`});
  await page.locator('#builder-done').click();await settle();
  assert.equal(await page.evaluate(()=>styk.builder.active),false);
  assert.deepEqual(errors,[]);
- console.log('PASS: no second row; the figure\'s and a part\'s tiles (Shift reaches the branch), the grouped ⋯ menu with submenus, Exact values, the Edit joints option, the rail\'s quick options, the branch scope line and Build\'s labelled view toggles, words folding in a narrow stage; no page errors.');
+ console.log('PASS: no second row; the figure\'s and a part\'s tiles (Shift reaches the branch), the grouped ⋯ menu with submenus, Exact values, the Edit joints option, the rail\'s quick actions, snapping from Structure\'s strip, the branch scope line and Build\'s labelled view toggles, words folding in a narrow stage; no page errors.');
 } finally {await browser.close();}

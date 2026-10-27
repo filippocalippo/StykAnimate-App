@@ -1,0 +1,17 @@
+[package]
+name = "styk-codec-wasm"
+description = "The Pivot codec (styk-piv) and StykAnimate's own file containers (styk-formats) as the WebAssembly module the app's workers run."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+styk-alloc = { path = "../styk-alloc" }
+styk-doc = { path = "../styk-doc" }
+styk-formats = { path = "../styk-formats" }
+styk-piv = { path = "../styk-piv" }
+wasm-bindgen = "0.2"

@@ -39,6 +39,8 @@ jobs:
           python-version: '3.12.9'
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
+      # Unit tests open Pivot files through the codec module (src/engine/pkg/styk_codec*).
+      - uses: ./.github/actions/engine-build
       # Tests that need the local Pivot corpus, generated inventories or built
       # encoders skip here and name the missing fixture; they run locally.
       - name: Syntax and changelog
@@ -49,6 +51,30 @@ jobs:
         run: npm test
       - name: Codec service tests
         run: python -m unittest discover -s backend -p "test_*.py"
+
+  engine:
+    # The Rust engine: its tests and its WebAssembly build, on both supported platforms.
+    name: Engine (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.11.0'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - uses: ./.github/actions/engine-build
+        with:
+          test: 'true'
 
   web:
     uses: ./.github/workflows/web-verify.yml
@@ -78,12 +104,9 @@ jobs:
           # Ubuntu 24.04 runners restrict unprivileged user namespaces, which
           # Chromium's sandbox needs; the app itself never disables the sandbox.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Build the native scanner, codec and video encoder
-        run: |
-          npm run build:frame-scan
-          npm run build:sidecar
-          npm run verify:sidecar
-          npm run build:video-encoder
+      - name: Stage the video encoder
+        run: npm run build:video-encoder
+      - uses: ./.github/actions/engine-build
       - name: Package the AppImage
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -108,7 +131,6 @@ jobs:
           path: |
             release/*.AppImage
             release/latest-linux.yml
-            artifacts/sidecar-smoke.json
             artifacts/updates/smoke.json
             artifacts/updates/appimage-smoke.json
           retention-days: 7

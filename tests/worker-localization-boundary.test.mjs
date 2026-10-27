@@ -28,7 +28,7 @@ async function dependencies(entry) {
   return found;
 }
 
-for (const entry of ['playback-worker', 'document-export-worker', 'export-frame-worker', 'image-export-worker', 'thumbnail-worker', 'import-worker', 'clipboard-worker']) {
+for (const entry of ['document-export-worker', 'image-export-worker', 'import-worker']) {
   test(`${entry} excludes interface localization and multilingual packs`, async () => {
     const found = await dependencies(new URL(`../src/${entry}.mjs`, import.meta.url));
     for (const module of ['localization.mjs', 'localization-bindings.mjs', 'locales/locale-packs.mjs', 'movieclip-drawings-view.mjs']) {

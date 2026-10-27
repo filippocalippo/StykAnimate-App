@@ -10,7 +10,7 @@ function indexFor(report) {
   }
   return index.byId;
 }
-export function frameIndexForId(report, id) {
+function frameIndexForId(report, id) {
   const position = indexFor(report).get(id);
   if (position === undefined) return -1;
   if (report.keyframes[position]?._styk?.frameId === id) return position;

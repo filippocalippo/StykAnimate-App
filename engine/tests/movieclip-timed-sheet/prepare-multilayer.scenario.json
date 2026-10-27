@@ -1,0 +1,39 @@
+{
+ "name": "prepare-multilayer",
+ "document": "prepare-multilayer.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    2,
+    3
+   ]
+  ],
+  [
+   "_prepareSheetMovieclips"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "_prepareSheetMovieclips"
+  ]
+ ]
+}

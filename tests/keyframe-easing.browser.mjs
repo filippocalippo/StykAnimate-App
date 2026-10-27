@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
-const {startBackend}=createRequire(import.meta.url)('../desktop/backend.cjs');
-const backend=await startBackend({appRoot:fileURLToPath(new URL('..',import.meta.url))});
+const {startDesktopHost}=createRequire(import.meta.url)('../desktop/web-host.cjs');
+const backend=await startDesktopHost({appRoot:fileURLToPath(new URL('..',import.meta.url))});
 const browser = await chromium.launch({channel:'chrome',headless:true});
 const page = await browser.newPage({viewport:{width:1500,height:950}}), errors=[];
 page.on('pageerror', error=>errors.push(error.message));
@@ -19,7 +19,9 @@ try {
     styk.editor.load(report);styk.editor.select(1);styk.timeline.setZoom(14);
   });
   await settle();
-  const easing=()=>page.locator('#timeline select[aria-label="Frame interpolation"]');
+  // The Advanced sheet authors easing in the Keyframe easing popover (its context menu's "Change easing…").
+  const openEasing=async()=>{await page.evaluate(()=>styk.timeline.showEasingPopover());await page.getByRole('dialog',{name:'Keyframe easing'}).waitFor();};
+  const chooseEasing=async label=>{await openEasing();await page.getByRole('radio',{name:label,exact:true}).click();if(label==='Bezier')await page.getByRole('button',{name:'Apply',exact:true}).click();await settle();};
   const selectCell=tick=>page.evaluate(tick=>{
     const t=styk.timeline,row=t.tracks.findIndex(track=>track.id==='layer-1');
     if(row<0)throw new Error('Missing layer row: '+JSON.stringify(t.tracks.map(x=>x.id)));
@@ -28,9 +30,9 @@ try {
   const keyAt=async tick=>page.evaluate(tick=>styk.editor.report._styk.layerSheet.tracks['layer-1'].keys.find(key=>key.tick===tick),tick);
   // The Advanced exposure sheet authors easing on the whole layer key.
   await selectCell(0);await settle();
-  check('The sheet interpolation control reflects the selected key',await easing().isEnabled());
+  await openEasing();check('The sheet easing popover opens for the selected key',true);await page.keyboard.press('Escape');await settle();
   async function check(label,value){assert.ok(value,label);console.log('PASS',label);}
-  await easing().selectOption('bezier');await settle();
+  await chooseEasing('Bezier');
   assert.equal((await keyAt(0)).interpolation,'bezier');
   let values=await page.evaluate(()=>{styk.editor.seek(5);return styk.editor.evaluatedFrame.objects.map(o=>[o.unique_id,o.root_x]);});
   assert.ok(values.find(([id])=>id===1)[1]>100&&values.find(([id])=>id===1)[1]<150);
@@ -40,10 +42,10 @@ try {
   assert.equal((await keyAt(0)).interpolation==='bezier',false);
   await page.evaluate(()=>styk.editor.redo());await settle();
   assert.equal((await keyAt(0)).interpolation,'bezier');
-  await easing().selectOption('constant');await settle();
+  await chooseEasing('Constant');
   assert.equal(await page.evaluate(()=>{styk.editor.seek(19);return styk.editor.evaluatedFrame.objects.find(o=>o.unique_id===1).root_x;}),100);
   assert.equal(await page.evaluate(()=>{styk.editor.seek(20);return styk.editor.evaluatedFrame.objects.find(o=>o.unique_id===1).root_x;}),300);
-  await selectCell(0);await easing().selectOption('linear');await settle();
+  await selectCell(0);await chooseEasing('Linear');
   assert.equal(await page.evaluate(()=>{styk.editor.seek(5);return styk.editor.evaluatedFrame.objects.find(o=>o.unique_id===1).root_x;}),150);
   // The Simple filmstrip keeps the nonmodal Keyframe easing popover.
   await page.evaluate(()=>styk.settingsUI.commit({timelineMode:'simple'}));await settle();
@@ -53,7 +55,7 @@ try {
   await page.getByRole('radio',{name:'Ease out',exact:true}).click();
   assert.equal((await keyAt(0)).interpolation,'ease-out');
   await page.locator('.sheet-preview').first().click({button:'right'});
-  await page.getByRole('menuitem',{name:'Frame easing…',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Change easing…',exact:true}).click();
   await page.getByRole('radio',{name:'Auto',exact:true}).click();
   assert.equal((await keyAt(0)).interpolation,'auto');
   await settle();

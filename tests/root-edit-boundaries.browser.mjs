@@ -18,7 +18,7 @@ const check = (name, value) => {
 };
 try {
   await page.goto(process.env.STYK_URL || "http://127.0.0.1:47831");
-  await page.waitForFunction(() => styk.ready);
+  await page.waitForFunction(() => window.styk?.ready);
   await page.evaluate(async () => {
     const { emptyDocument, createFrame, createObject } = await import(
       "/src/demo.mjs"
@@ -30,7 +30,6 @@ try {
     ];
     styk.editor.load(report, "Edit boundaries");
     styk.settingsUI.commit({ timelineMode: "simple" });
-    styk.editor.beginFrameDraft({ mode: "add", index: 1 });
     styk.editor.select(10);
     styk.fit();
     window.beforeBoundary = {
@@ -58,14 +57,11 @@ try {
     "Explicit export commits a held canvas translation into one journaled edit",
     await page.evaluate(({ scale }) => {
       const e = styk.editor,
-        b = beforeBoundary,
-        d = e.report._styk.simpleFrameDraft;
+        b = beforeBoundary;
       return (
         !styk.state.drag &&
         !e._drag &&
         e._undo.length === b.undo + 1 &&
-        d.mode === "add" &&
-        d.baseline.objects[0].root_x === b.x &&
         Math.abs(e.object.root_x - b.x - 38 / scale) < 1e-7
       );
     }, origin),
@@ -82,40 +78,13 @@ try {
     styk.editor.undo();
   });
   check(
-    "Undo restores the pre-gesture working pose and clean draft",
+    "Undo restores the pre-gesture pose",
     await page.evaluate(
-      () =>
-        styk.editor.object.root_x === beforeBoundary.x &&
-        !styk.editor.frameDraft.dirty,
+      () => styk.editor.object.root_x === beforeBoundary.x,
     ),
   );
-  await page.evaluate(() => {
-    window.realAssign = styk.editor.assignFiguresToLayerAsync;
-    styk.editor.assignFiguresToLayerAsync = (_uids, _layer, { signal }) =>
-      new Promise((resolve, reject) => {
-        signal.addEventListener(
-          "abort",
-          () => reject(new DOMException("Cancelled", "AbortError")),
-          { once: true },
-        );
-      });
-    window.migration = styk.layers.onAssignFigures([10], "layer-2");
-    styk.actions.export();
-  });
-  await page.waitForTimeout(220);
-  check(
-    "A delayed layer progress dialog cannot replace a newer export dialog",
-    await page.evaluate(
-      async () =>
-        (await migration) === false &&
-        !document.querySelector("#dialog").open &&
-        !!document.querySelector("#export-dialog[open] #export-submit") &&
-        !document.querySelector("#layer-progress"),
-    ),
-  );
-  await page.evaluate(
-    () => (styk.editor.assignFiguresToLayerAsync = realAssign),
-  );
+  await page.evaluate(() => styk.actions.export());
+  check("The export dialog opens after the edits", await page.evaluate(() => !!document.querySelector("#export-dialog[open] #export-submit")));
   check("No unhandled browser errors", errors.length === 0);
   await mkdir(out, { recursive: true });
   await page.screenshot({ path: `${out}/export-dialog.png` });

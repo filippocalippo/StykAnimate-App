@@ -136,7 +136,7 @@ Revision 4's "nothing further than today" held only at 1440×900. Revision 4.1 m
    - Each commit is coherent, passes `npm run check` and `npm test`, and includes its tests and docs.
    - **Release freeze.** Between M0 and M9 the UI on `main` is a mix of legacy and new surfaces. M0 commit 1 adds the marker `artifacts/ui-redesign/IN_PROGRESS` and a check in `scripts/release-prepare` (the `release:prepare` script) that refuses to run while the marker exists; M9 removes it. M0 commits 1–4 landed before the freeze was confirmed; the marker and its check now land before M0 commit 5 (the first change of colours), and the owner confirms the freeze before that commit (§6). User-facing changelog entries are drafted in `docs/design/CHANGELOG-DRAFT.md` and move into `CHANGELOG.md` `Unreleased` only in M9.
 7. **Dev servers.** Each track runs its own server:
-   - start: `STYK_PYTHON=py node scripts/serve.mjs --port <port>` (background)
+   - start: `node scripts/serve.mjs --port <port>` (background)
    - run tests with: `STYK_URL=http://127.0.0.1:<port> node tests/<name>.browser.mjs`
 
    | Milestone | Port |
@@ -155,10 +155,8 @@ Revision 4's "nothing further than today" held only at 1440×900. Revision 4.1 m
 8. **Other runners.** For Electron smoke tests, run `env -u ELECTRON_RUN_AS_NODE npm run test:<x>:desktop`. In PowerShell, use `npm.cmd` if `npm` reports a missing `npm-cli.js`.
 9. **Known baseline failures** are not regressions:
    - `timeline-usability.browser`
-   - `theme.browser`
-   - `audio-ux.browser`
    - `vfx-expansion` and `vfx-strength` (run with `--render-only`)
-   - the load-sensitive `backend-session` unit test (rerun it alone)
+   - the load-sensitive `backend-session` unit test (rerun it alone; removed with the Python codec service in the Rust engine port)
 
    M0.1 records the full baseline in `artifacts/ui-redesign/baseline.json` before anything changes.
 
@@ -1153,7 +1151,7 @@ x = inset.left + (rect.width - inset.left - inset.right - w * s) / 2;   // y lik
   - `build.files` (the asar: `desktop/**`, `package.json`) needs only the `main.cjs` colour literal
   - `desktop/web-host.cjs` serves only the `src`, `vendor` and `assets` segments and root `.html`, `.css`, `.svg`, `.png` and `.ico`, with a `.woff2` MIME type
   - `scripts/verify-package.mjs` hashes `src/`, `vendor/` and `assets/`
-- **Never add a root-level JS, font or other file.** The dev server (`backend/server.py`) is more permissive, so a misplaced file passes browser tests and then gets a 403 in Electron.
+- **Never add a root-level JS, font or other file.** The desktop host (`desktop/web-host.cjs`, which `npm run serve` also uses) serves only `src/`, `vendor/`, `assets/` and root `.html`/`.css`/`.svg`/`.png`/`.ico` files, and a packaged app also leaves out `tests/` and `artifacts/`: a misplaced file gets a 403.
 - **Proof.** In M0 and M8: `npm run pack && npm run verify:package && env -u ELECTRON_RUN_AS_NODE npm run test:desktop:packaged`. Also check the packaged renderer console for 403s on `assets/fonts/*` and `src/styles/**`.
 
 ### 3.19 `window.styk` additions
@@ -1282,18 +1280,21 @@ These change with test updates:
 | `workspace-clean.browser` (`selection-more`) | The figure inspector's `⋯` runs `selection-more` and opens the selection menu (today's "More figure actions…" items are in that one menu) | M4 |
 | `builder-*` tests that use today's builder context menu pages (Branch…, Arrange…, View) | The part menu lists those commands flat (Flip ▸, Arrange ▸, Isolate joint, the part deletes); `#builder-branch` stays the inspector switch they `check()`; F9, F10 and F12 are unchanged | M7a |
 | `animation-mode-sync.browser`, `settings.component.browser` (`[data-setting=timelineMode]`) | Kept: Settings › Interface › Timeline mirrors the timeline header's switch (experience §8 rule 5) | – (verify) |
-| `hotkeys-timeline.browser:91-93`, `polygon-construction.browser:89` | Focus `#fps` with a figure selected or while drawing; `#fps` now renders only in the Scene inspector, so they focus another text field of the inspector context they are in (the figure's X field, `[data-property=root_x]`; while drawing a polygon, the first field of the drawing section) for the same "typing in an input does not trigger hotkeys" check | M4 |
-| `audio-navigation.browser`, `audio-ux.browser`, `audio.browser` ("Audio" button, 6 uses) | *Audio* is a `menuitem` of *Timeline ⋯*: open the menu, then `getByRole('menuitem', { name: 'Audio' })` | M5 (with M7f for `audio-ux`) |
+| `hotkeys-timeline.browser:91-93`, `polygon-construction.browser:89` | Focus `#fps` with a figure selected or while drawing; `#fps` now renders only in the Scene inspector, so they focus another text field of the inspector context they are in (the figure's X field, `[data-property=root_x]`; while drawing a polygon in Build the inspector is the figure's, so `polygon-construction` uses its Opacity field, `[data-property=figure_opacity]`) for the same "typing in an input does not trigger hotkeys" check | M4 (`polygon-construction` done) |
+| `audio-navigation.browser`, `audio-ux.browser`, `audio.browser` ("Audio" button, 6 uses) | Done: *Audio* stays a labelled button in the timeline header (a `menuitem` of *Timeline ⋯* only at the minimal tier), so `getByRole('button', { name: 'Audio' })` still finds it | – |
 | `onion-timeline-range.browser`, `onion-controls.desktop`, `timeline-context.browser`, `timeline-usability.browser` ("Onion skin settings" button) | *Onion skin settings…* is a `menuitem` of *Timeline ⋯*: open the menu first; the dialog keeps its name | M5 |
 | `pistol-3d`, `scythe-asset`, `skateboard-asset`, `spatial-controls` (button "Pose") | Unchanged: Pose │ Rotate keeps `role=button` with `aria-pressed` (§4.3); verify only | M4 (verify) |
 | `figure-z-index.browser` | Unchanged: `data-property=figure_z_order` lives in the figure's Arrange core section (visible at rest, as today) | M4 |
 | `tests/shell-contract.test.mjs` (unit) | The ten relocated ids leave the static list for `ui-contract.json` in their moving commits (§4.1); `.titlebar [data-action=save]` is found inside `#doc-pop`; the static accessible names become "Undo", "Redo", "Play" once M5 renders the Timeline ⋯ menu (§4.7) | M3b, M4, M5, M7a |
 | `[data-inspector=]`: `app`, `authoring`, `ux-audit` | Stale | M4 |
-| `.styk-timeline-scroll`: `authoring`, `clipboard-legacy-app`, `insert-inbetween-app`, `recovery-interaction`, `scrub-selection`, `ux-audit`, `edit-freeze-profile`, `scripts/benchmark-dense-scene.mjs`; `.styk-simple-*`: `scripts/smoke-simple-boundaries.mjs`, `smoke-simple-native.mjs`; `mixed-rig-scope` (`.styk-timeline-label*`); removed timeline APIs: `clipboard-async-app`, `clipboard-legacy-app`, `insert-inbetween-app`, `insert-inbetween-dialog`, `mixed-rig-scope`, `scripts/benchmark-connected-editing.mjs` | Stale; triaged to current hooks, or deleted where the scenario no longer exists | M5 |
+| `.styk-timeline-scroll`: `authoring`, `clipboard-legacy-app`, `insert-inbetween-app`, `recovery-interaction`, `scrub-selection`, `ux-audit`, `edit-freeze-profile`, `scripts/benchmark-dense-scene.mjs`; `mixed-rig-scope` (`.styk-timeline-label*`); removed timeline APIs: `clipboard-async-app`, `clipboard-legacy-app`, `insert-inbetween-app`, `insert-inbetween-dialog`, `mixed-rig-scope`, `scripts/benchmark-connected-editing.mjs` | Stale; triaged to current hooks, or deleted where the scenario no longer exists | M5 |
 | `timeline-polish.browser:59` (menu text `Add FrameA`) | Menu item anatomy and sentence case | M5 |
 | `timeline-organization.browser` (`.timeline-footer`) | The footer moves into the hidden log | M5 |
 | `settings.component.browser` (computed colours), `settings-tabs.desktop` (`.hotkey-row` grid), `export-panel-layout.desktop` (3 columns), `export-experience.browser` | Restyle | M6 |
-| `user-library-ux.desktop:41` (thumbnail `rgb(52,59,71)`), `tweener.browser:22`, `audio-ux.browser:91`, `color-picker-eyedropper:63-67` | Restyle | M7c / M7g / M7f / M7g |
+| `user-library-ux.desktop:41` (thumbnail `rgb(52,59,71)`), `tweener.browser:22`, `color-picker-eyedropper:63-67` | Restyle | M7c / M7g / M7g |
+
+**Re-pointed at the current interface (2026-10-25).** These browser tests drifted with surfaces changed after this plan and now read what the app does:
+`audio-ux` (the audio rows start below the sticky Scene row and the section toolbar), `background-dialog` (Fill is edited in the paint picker; the dialog's own coordinate fields stay hidden), `builder-toolbar` (the rail's quick set is Whole branch and the part commands; Smart snapping is a strip button), `canvas-workspace` (the zoom menu returns focus to its button; Front and Back are the inspector's tiles), `inspector-header` (a joint's tiles are Front, Back and Flip limb; Isolate is in the ⋯ menu), `inspector-kit` (fields are 36px), `layer-timeline-modern` (settings toggles are `role="switch"`), `localization-foundation` (renderer status keys left with the JavaScript renderer), `overlays` (Auto key, Smart snapping and Follow with camera are in the command catalog), `release-ux`, `rig-smart-stretch` (a connector opens on its Slider; Smart stretch is under its Segment), `stage-chrome` (Isolate left the stage header), `theme` (helper text is `.styk-settings-hint`; the focus ring is on the tile), `ui-chrome` (options bars carry `data-options-for`; control rows are 32px and quick tiles are 52px words over glyphs), `workspace-drag` (Build's Structure starts in its strip), `onion-selection` (ghosts list the farthest skin first), `polygon-construction` (the draft's instruction covers the header's Cancel and Finish). `localization-packs` cannot pass until the language packs hold the 305 English messages added since they were completed.
 
 **Delete** (with the dead modules in M1, after porting their useful cases into the new unit tests):
 
@@ -1600,7 +1601,6 @@ The file list and verification below are the original plan; items marked landed 
 
 - `npm test`
 - Browser tests on 47913: `properties-app`, `property-controls`, `inspector-dom`, `add-frame`, `layer-timeline`, `sheet-filmstrip`, `export-experience`, three `#export-submit` tests, `recovery-interaction`, `playback-quiet`. `export-experience`, `export-auto-quality` and `export-bitrate` remove `showSaveFilePicker` (as `builder.browser` does), because headless Chrome's picker left them waiting for a download in the baseline; they now run the export flow end to end
-- `node scripts/benchmark-scrub-backpressure.mjs` (no regression)
 
 **Exit.** `app.mjs` shrinks. Playback mutations are ≥ 90% lower than the baseline (inspector and title quiet).
 
@@ -1745,7 +1745,6 @@ Commit 3 has landed as two: *"Put view controls and tool options in the stage he
 **Verify.** Browser tests on 47915:
 
 - `timeline-invalidation` (P5 and P6), `layer-timeline`, `layer-timeline-modern`, `timeline-organization`, `timeline-context`, `timeline-usability`, `onion-timeline-range`, `audio-navigation`, `audio` (header buttons unchanged), `ui-tasks` (timeline tasks), `timeline-polish`, `sheet-filmstrip`, `simple-timeline.component`, `onion-timeline-range`, `audio-navigation`, `hotkeys-timeline`, `animation-mode-sync`, `add-frame`, `playback-quiet` (filmstrip allowlist removed)
-- `node scripts/benchmark-scrub-backpressure.mjs`, `node scripts/benchmark-layer-scrub.mjs`, `npm run test:animation-performance:browser`
 - dense paint: 302 × 3,000 must stay at or below a median of 0.7 ms and p90 of 1.6 ms (the timeline study `timeline.md` §6, internal research, not in the repository)
 - `env -u ELECTRON_RUN_AS_NODE node tests/onion-controls.desktop.mjs`
 
@@ -1852,7 +1851,7 @@ Every track:
 - **Forced colours and reduced motion:** Playwright `emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' })` snapshots, and a check that `--surface` resolves to `Canvas` in the **light** theme (the theme blocks must not win over the forced-colours mapping) and that the canvas painters repaint with system colours.
 - **Locales:** snapshots for `el`, `de`, `pl`, `ru`, `ar` and `zh-Hans` (no clipping; the shell stays LTR).
 - **UI scale:** `node tests/settings-scale.desktop.mjs` at 75, 100, 150 and 200%; dialogs at 1000×680 and 200% in packaged Electron do not overlap the drag region.
-- **Performance** (same workloads as the baselines): `npm run benchmark:dense`, `npm run benchmark:animation-modes`, `npm run test:animation-performance:browser`, `node scripts/benchmark-scrub-backpressure.mjs`, `node scripts/benchmark-playback-interactions.mjs`, and `playback-quiet` with the final budgets (§3.2). Tradeoffs are reported explicitly.
+- **Performance** (same workloads as the baselines): `npm run benchmark:dense` and `playback-quiet` with the final budgets (§3.2). Tradeoffs are reported explicitly.
 - **Usability acceptance matrix** (`docs/audits/UI-UX-OVERHAUL-AUDIT-2026-09-09.md:211-230`), measured against the M0 baseline.
 - **Packaged:** `npm run pack && npm run verify:package && env -u ELECTRON_RUN_AS_NODE npm run test:desktop:packaged`, plus the other smoke suites: `test:hotkeys:desktop`, `test:preferences:desktop`, `test:library:desktop`, `test:support:desktop`, `test:recovery:desktop`, `test:drawing:desktop`.
 

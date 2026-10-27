@@ -1,0 +1,2 @@
+# The engine build output (npm run engine:build).
+/pkg/

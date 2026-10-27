@@ -6,7 +6,7 @@ const browser = await chromium.launch({channel: 'chrome', headless: true});
 const page = await browser.newPage({viewport: {width: 1440, height: 900}});
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
-await page.addInitScript(() => localStorage.setItem('stykanimate.editor.settings.v1', JSON.stringify({rendererMode: 'canvas', locale: 'en'})));
+await page.addInitScript(() => localStorage.setItem('stykanimate.editor.settings.v1', JSON.stringify({locale: 'en'})));
 const mode = async name => {
   await page.locator(`.workspace-switch [data-workspace-mode="${name}"]`).click();
   await page.waitForFunction(name => document.querySelector('.workspace').dataset.mode === name, name);

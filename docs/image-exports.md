@@ -58,11 +58,13 @@ supports 65,534 image frames plus its manifest; GIF/APNG support 100,000 frames.
 Requests outside these limits fail explicitly rather than truncate. `maxBytes`
 can lower the size limit.
 
-`src/svg-export.mjs` independently exports `exportSVG({report,frame,geometry,
-width,height,resources,cameraEnabled:true})`. It writes actual vector strokes,
-circles, curves, polygons, gradients, and glyph outlines; sprite and background
-pixels are embedded image resources. It preserves camera and layer transforms
-and grouped opacity. The function's API comments document additional defaults.
+SVG is the engine's output (`ExportRenderer::svg`, `styk_export::svg`): `renderSVGTick(tick)` and
+`renderSVGFrame(frame)` of the export renderer (`src/engine/engine-export.mjs`, created with `vector`)
+return the file as a Blob. It writes actual vector strokes, circles, arcs, polygons, gradients and
+text as filled outlines; sprite and background pixels are embedded image resources. It preserves camera
+and layer transforms and grouped opacity. A frame with filter or generated effects, 3D faces or drawing
+cels has no vector form and becomes one embedded picture of the frame ([engine
+rendering: SVG](engine/rendering.md#exports)).
 
 Validation:
 

@@ -1,0 +1,77 @@
+{
+ "name": "figure-style-sheet",
+ "document": "property-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "outlineWidth": 3
+   }
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "outlineColor": "#ff8000",
+    "outlineOpacity": 0.5
+   }
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "outlineWidth": 3
+   }
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "outlineColor": [
+     10,
+     20,
+     30
+    ]
+   }
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "outlineColor": "#zz0000"
+   }
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "bogus": 1
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "outlineOpacity": 0.2
+   }
+  ]
+ ]
+}

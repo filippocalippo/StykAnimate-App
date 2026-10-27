@@ -16,7 +16,6 @@ export default Object.freeze({
   "vfxPresetUi.delete": "Delete…",
   "vfxPresetUi.delete2": "Delete “{name}”?",
   "vfxPresetUi.effectsAlreadyAddedFromItStayAsThey": "Effects already added from it stay as they are.",
-  "vfxPresetUi.looks": "Looks",
   "vfxPresetUi.effect": "Effect",
   "vfxPresetUi.effects": "Effects",
   "vfxPresetUi.save": "Save",

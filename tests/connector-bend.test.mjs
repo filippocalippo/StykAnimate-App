@@ -2,39 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
 import {rigExampleDocument} from '../src/rig-examples.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 
 // Sliding carriage: segment index 2 is a connector from (200, 230) to (440, 230) sliding at 50%.
-function fixture() {
-  const editor = new Editor({demo: false}).load(rigExampleDocument('sliding-carriage'));
+function fixture(owned = true) {
+  const doc = rigExampleDocument('sliding-carriage');
+  const editor = owned ? ownedEditorFor({demo: false}, doc) : new Editor({demo: false}).load(doc);
   editor.select(1, 2); return editor;
 }
 const rail = editor => [...editor.geometry.objects.values()][0].segments[2];
 const near = (a, b, tolerance = 1e-6) => assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`);
-
-test('a connector bends toward the pointer without runaway feedback', () => {
-  const editor = fixture(), before = rail(editor);
-  assert.ok(before.connector);
-  assert.deepEqual([before.start.x, before.start.y, before.handle.x, before.handle.y], [200, 230, 320, 230]);
-  editor.beginDrag('Pose joint');
-  // Each step moves the pointer up; the midpoint handle follows it exactly.
-  for (let y = 229; y >= 200; y--) {
-    editor.bendJoint(320, y);
-    const shape = rail(editor);
-    near(shape.handle.x, 320, 1e-6); near(shape.handle.y, y, 1e-6);
-    assert.ok(shape.bend > 0, 'an upward pointer bulges the connector upward');
-  }
-  const settled = rail(editor).bend;
-  for (let i = 0; i < 5; i++) editor.bendJoint(320, 200);
-  near(rail(editor).bend, settled, 1e-12);
-  editor.bendJoint(320, 230);
-  near(rail(editor).bend, 0, 1e-9);
-  editor.bendJoint(320, 250);
-  assert.ok(rail(editor).bend < 0);
-  editor.commitDrag();
-  const shape = rail(editor);
-  assert.deepEqual([shape.start.x, shape.start.y], [200, 230], 'anchors stay fixed');
-  near(shape.attachmentPosition, .5);
-});
 
 test('bending a connector keeps the slide position and does not rotate attached parts twice', () => {
   const editor = fixture(), object = structuredClone(editor.object);

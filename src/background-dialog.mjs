@@ -4,10 +4,9 @@ import {t as interfaceText} from './localization.mjs';
 
 import {appendLocalized, localizedMarkup, messageHTML, messageAttributes, localizedAttribute, localizedText} from './localization-bindings.mjs';
 import {backgroundPaint, paintBackground, paintCSS} from './paint.mjs';
-import {
-  drawBackground,
-  gradientAngleFromBackground,
-} from "./pivot/background.mjs";
+import { gradientAngleFromBackground } from "./pivot/background.mjs";
+import { emptyDocument, createFrame } from "./demo.mjs";
+import { engineDocumentPicture, placement } from "./engine/engine-pictures.mjs";
 import { icon } from "./icons.mjs";
 
 const esc = (value) =>
@@ -29,8 +28,8 @@ const paintLabels={solid:'backgroundDialog.solidColor',linear:'backgroundDialog.
 
 /** A background draft never mutates an asset shared by other native frames. */
 export class BackgroundDialog {
-  constructor({ dialog, content, resources = {}, onError = () => {} }) {
-    Object.assign(this, { dialog, content, resources, onError });
+  constructor({ dialog, content, onError = () => {} }) {
+    Object.assign(this, { dialog, content, onError });
     if (!document.getElementById("background-dialog-style")) {
       const style = document.createElement("style");
       style.id = "background-dialog-style";
@@ -42,13 +41,12 @@ export class BackgroundDialog {
   open({ report, frame, onUse, onCreate, onRename }) {
     this.events?.abort();
     this.events = new AbortController();
-    this.loadingImages = new WeakSet();
     this.busy = false;
     const events = this.events;
     this.dialog.addEventListener(
       "close",
       () => {
-        if (!this.dialog.open) events.abort();
+        if (!this.dialog.open) { events.abort(); this.previewing?.abort(); }
       },
       { once: true, signal: events.signal },
     );
@@ -295,57 +293,31 @@ export class BackgroundDialog {
     }
     return result;
   }
+  /** The draft background on the scene's canvas, drawn by the engine; the latest draft wins. */
   preview() {
     const bg = this.draft(),
-      canvas = this.$("background-preview");
-    canvas.width = Math.max(
-      1,
-      Math.min(
-        400,
-        Math.round(
-          (110 * this.report.canvas_width) / this.report.canvas_height,
-        ),
-      ),
-    );
-    const context = canvas.getContext("2d");
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    const report = { backgrounds: [{ ...bg, background_id: 1 }] };
-    const resources = {
-      ...this.resources,
-      image: (url) => {
-        const image = this.resources.image?.(url);
-        if (image && !image.complete && !this.loadingImages.has(image)) {
-          this.loadingImages.add(image);
-          image.addEventListener(
-            "load",
-            () => {
-              if (canvas.isConnected && this.dialog.open) this.preview();
-            },
-            { once: true, signal: this.events.signal },
-          );
-          image.addEventListener(
-            "error",
-            () => {
-              if (canvas.isConnected && this.dialog.open)
-                this.error(
-                  messageError(new Error(''), "errors.backgroundDialog.theBackgroundImageCouldNotBeDecoded", {}),
-                );
-            },
-            { once: true, signal: this.events.signal },
-          );
-        }
-        return image;
-      },
-    };
-    drawBackground(
-      context,
-      report,
-      { background_id: 1 },
-      canvas.width,
-      canvas.height,
-      resources,
-    );
+      canvas = this.$("background-preview"),
+      width = Math.max(1, Math.min(400, Math.round((110 * this.report.canvas_width) / this.report.canvas_height))),
+      height = 110;
     this.$("background-error").hidden = true;
+    this.previewing?.abort();
+    const request = this.previewing = new AbortController();
+    const report = emptyDocument();
+    Object.assign(report, { canvas_width: this.report.canvas_width, canvas_height: this.report.canvas_height, backgrounds: [{ ...bg, background_id: 1 }] });
+    report.keyframes = [{ ...createFrame(), background_id: 1 }];
+    engineDocumentPicture(report, { width, height, placement: placement.card(), signal: request.signal }).then(
+      (picture) => {
+        if (request.signal.aborted || !canvas.isConnected || !this.dialog.open) return picture?.bitmap.close();
+        canvas.width = width;
+        canvas.height = height;
+        if (!picture) return;
+        canvas.getContext("2d").drawImage(picture.bitmap, 0, 0);
+        picture.bitmap.close();
+      },
+      (error) => {
+        if (error?.name !== "AbortError" && !request.signal.aborted) this.error(error);
+      },
+    );
   }
   error(error) {
     presentError(this.$("background-error"), error);

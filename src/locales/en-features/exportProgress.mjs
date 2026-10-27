@@ -17,9 +17,6 @@ export default Object.freeze({
   "exportProgress.allFramesRendered": "All frames rendered.",
   "exportProgress.processing": "Processing",
   "exportProgress.rendering": "Rendering",
-  "exportProgress.valueValue1ToExport": "{value} {value1} to export",
-  "exportProgress.valueFrameValue1OfValue2AnimationFrameValue3": "{value} frame {value1} of {value2} · Animation frame {value3}",
-  "exportProgress.passPassOf2": "Pass {pass} of 2",
   "exportProgress.frameProgress": "{stage} frame {frame} of {total} · Animation frame {sourceFrame}",
   "exportProgress.passProgress": "Pass {pass} of {total}"
 });

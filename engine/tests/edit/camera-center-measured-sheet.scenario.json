@@ -1,0 +1,238 @@
+{
+ "name": "camera-center-measured-sheet",
+ "document": "measured-bounds.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "selectMany",
+   [
+    2,
+    3
+   ]
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    0,
+    1
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "centerCamera",
+   "x",
+   {
+    "@array": [
+     0
+    ],
+    "sheetTicks": [
+     4,
+     1,
+     4
+    ]
+   },
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "beginCameraDrag"
+  ],
+  [
+   "updateCameraDrag",
+   {
+    "x": 9
+   }
+  ],
+  [
+   "centerCamera",
+   "y",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginDrag",
+   "Move figures"
+  ],
+  [
+   "moveSelection",
+   5,
+   -3
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "centerCamera",
+   "bogus",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    99
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "constant",
+     "value": null
+    }
+   }
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "constant",
+     "value": {
+      "x": 2,
+      "y": 3,
+      "width": 9,
+      "height": 10
+     }
+    }
+   }
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "constant",
+     "value": {
+      "minX": 9,
+      "minY": 3,
+      "maxX": 2,
+      "maxY": 7
+     }
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 3
+   },
+   "scale"
+  ],
+  [
+   "previewAnimationEdit",
+   1.2
+  ],
+  [
+   "centerCamera",
+   "x",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "selectMany",
+   []
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    99
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ]
+ ]
+}

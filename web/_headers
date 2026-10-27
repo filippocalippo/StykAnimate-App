@@ -12,6 +12,11 @@
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
   X-Frame-Options: DENY
+  # The engine's worker threads share one WebAssembly memory, which browsers only
+  # allow on a cross-origin isolated page. Everything the editor loads is its own.
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: same-origin
 
 # Modules and assets are not content-hashed, so browsers must revalidate them
 # (Cloudflare answers with 304 and an ETag). The runtime below is large; a 304
@@ -24,6 +29,4 @@
 /src/*
   Cache-Control: public, max-age=0, must-revalidate
 /vendor/*
-  Cache-Control: public, max-age=0, must-revalidate
-/python/*
   Cache-Control: public, max-age=0, must-revalidate

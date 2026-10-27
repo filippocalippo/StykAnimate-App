@@ -1,0 +1,84 @@
+{
+ "name": "drag-cancel",
+ "document": "joined-chain.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "beginTranslationDrag"
+  ],
+  [
+   "moveSelection",
+   10,
+   0,
+   {
+    "fromStart": true
+   }
+  ],
+  [
+   "moveSelection",
+   25,
+   -5,
+   {
+    "fromStart": true
+   }
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "moveSelection",
+   0,
+   0
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "beginDrag",
+   "Pose figure",
+   {
+    "scope": "translation"
+   }
+  ],
+  [
+   "moveSelection",
+   4,
+   4
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   3,
+   -1
+  ],
+  [
+   "beginDrag"
+  ],
+  [
+   "moveSelection",
+   5,
+   5
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -1,6 +1,6 @@
 import {installProjectSavePicker} from './support/project-save-picker.mjs';
 import {readNativeDocument} from '../scripts/read-native-document.mjs';
-import {sheetKeyTimes,sampleSheet} from './helpers/sheet-samples.mjs';
+import {sheetKeyTimes} from './helpers/sheet-samples.mjs';
 import {exportEditable} from './helpers/editable-export.mjs';
 /** Real editor UI regression for multi-selection, portable text, and persistence. */
 import {chromium} from './support/playwright.mjs';
@@ -63,7 +63,9 @@ async function addText(text, {style = false} = {}) {
 await installProjectSavePicker(page);
 try {
   await page.goto(url); await page.waitForFunction(() => window.styk?.ready);
-  await page.evaluate(async()=>{window.creationSamples=await import("/tests/helpers/sheet-samples.mjs");});
+  await page.evaluate(async()=>{window.creationSamples={...await import("/tests/helpers/sheet-samples.mjs"),
+    // The frame the engine evaluates at `tick` of the project on show (the playhead goes back to where it was).
+    sampleSheet:(report,tick)=>{const e=styk.editor,at=e.tick;e.seek(tick);const frame=e.evaluatedFrame;e.seek(at);return frame;}};});
   check('Creation UI initializes actual WebGPU renderer', await value(() => styk.state.renderer.stats.backend === 'WebGPU'));
   const uids = await value(() => {
     const e = styk.editor; e.newDocument(); e.updateProject({canvas_width: 800, canvas_height: 450});
@@ -120,8 +122,9 @@ try {
   const textBefore = await value(() => structuredClone(styk.editor.figure));
   check('T shortcut creates styled multilingual text through the actual dialog', textBefore.text_assets[0].text === 'Styk in motion\nΚαλημέρα • Привет' && textBefore.text_assets[0].font_style === 3 && !!textBefore.text_assets[0].normalized_svg_path);
   check('Text dialog applies multiline layout, gradient and outline', textBefore._styk.textAuthoring.alignment === 'center' && textBefore._styk.textAuthoring.lineHeight === 1.4 && !!textBefore.segments[0].secondary && textBefore.segment_decode.global_style.outline_thickness === 1);
-  await value(() => {styk.editor.updateObject({root_x: 170, root_y: 375}); styk.editor.sheetAppendFrame();});
+  await value(() => {styk.editor.updateObject({root_x: 170, root_y: 375}); styk.actions['add-frame']();});
   await page.locator('#inspector [data-action="edit-text"]').click();
+  await page.waitForFunction(text => document.querySelector('#text-content')?.value === text, textBefore.text_assets[0].text);
   check('Editing text reopens the authored content and styles', await page.locator('#text-content').inputValue() === textBefore.text_assets[0].text && await page.locator('#text-bold').isChecked() && await page.locator('#text-italic').isChecked());
   await page.locator('#text-content').fill('Move together\nCafé • Привет');
   await page.locator('#text-size').fill('44'); await page.locator('#create-text').click();
@@ -145,7 +148,7 @@ try {
   const nativePath = await saveDownload(() => page.locator('[data-action="save"]').first().click(), 'creation-authored.styk');
   const native = await readNativeDocument(nativePath), doc = native.document || native;
   check('Actual native save contains editable text options and embedded glyphs', doc.figure_types.some(f => f._styk?.textAuthoring?.text === 'Move together\nCafé • Привет' && f.text_assets[0].glyphs.length > 0));
-  check('Native save contains joined groups and both animation frames', sheetKeyTimes(doc).length === 2 && sampleSheet(doc,0).objects.filter(o => o.join).length === 2);
+  check('Native save contains joined groups and both animation frames', sheetKeyTimes(doc).length === 2 && Object.values(doc._styk.frameSources ?? {}).some(frame => frame.objects?.filter(o => o.join).length === 2));
   await page.locator('#file-input').setInputFiles(nativePath); await page.waitForFunction(() => styk.editor.name === 'creation-authored');
   check('Reopening the saved native file retains text editing metadata and group joins', await value(() => styk.editor.report.figure_types.some(f => f._styk?.textAuthoring?.text === 'Move together\nCafé • Привет') && creationSamples.sampleSheet(styk.editor.report,0).objects.filter(o => o.join).length === 2));
 
@@ -181,7 +184,7 @@ try {
   const pivPath = await saveDownload(() => exportEditable(page, 'piv'), 'creation-source-edited.piv');
   const exportedTicks=await value(()=>styk.editor.totalTicks);
   const reopened = await page.evaluate(async bytes => {
-    const response = await fetch('/api/import?filename=creation-source-edited.piv', {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: Uint8Array.from(bytes)});
+    const response = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/import?filename=creation-source-edited.piv', {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: Uint8Array.from(bytes)});
     if (!response.ok) throw new Error(await response.text()); return (await response.json()).document;
   }, [...await readFile(pivPath)]);
   check('Source-bearing PIV export preserves edited timeline and includes the newly authored text', reopened.total_output_frames === exportedTicks && reopened.figure_types.some(f => f.text_assets?.some(a => a.text === 'A new Pivot title')));

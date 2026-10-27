@@ -1,0 +1,59 @@
+{
+ "name": "clip-break-presence-live-native",
+ "document": "clip-break-presence-live-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   9,
+   -1
+  ],
+  [
+   "beginDrag",
+   "Outside"
+  ],
+  [
+   "moveSelection",
+   7,
+   -3
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "moveSelection",
+   2,
+   1
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "@select",
+   7,
+   -1
+  ],
+  [
+   "beginDrag",
+   "Clip move"
+  ],
+  [
+   "moveSelection",
+   5,
+   -2
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

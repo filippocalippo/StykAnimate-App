@@ -80,13 +80,12 @@ and checks exact single-frame boundaries, including frames without a content siz
 Writers enforce the same admission limits rather than emitting an unreopenable file.
 Ordinary writes bound each finite numeric value by 32 JSON bytes during the
 existing traversal. If that conservative total exceeds the materialization
-limit, the writer runs the exact marker preflight before deciding whether the
-document fits. This avoids decimal formatting for every pose number while
+limit, the writer measures the document exactly before deciding whether it fits. This avoids decimal formatting for every pose number while
 preserving acceptance of valid near-limit files and the separate allocation limit.
 
-Skeletons and sections prefer zstd (vendored WASM on the client, the optional
-`zstandard` package in Python); writers fall back to zlib when zstd is
-unavailable. Readers require the codec the file declares.
+Skeletons and sections are written with zstd level 3 (the C library compiled into the app's
+WebAssembly module, the optional `zstandard` package in Python, whose writer falls back to zlib
+when it is missing). Readers require the codec the file declares.
 
 ## Container version 1
 
@@ -114,11 +113,10 @@ before accepting the document.
 Encoding, compression and parsing stay off the UI thread; snapshots and
 desktop file transfers use bounded chunks. Save-side, the export worker builds
 `.styk` containers itself from the streamed snapshot, fetching the original
-source bytes through `GET /api/source` and falling back to the service when
-local encoding is unavailable. Open-side, the import worker decodes all three
-container kinds locally and only asks the service for files it cannot read
-(such as a missing zstd decoder). The service retains the same encode/decode
-rules so the fallback path and external tools produce identical bytes.
+source bytes through `GET /api/source`, and the Rust container writer in its own
+instance of the codec module compresses and frames them. Open-side, the import worker
+opens all three container kinds the same way; neither side asks the service. The service
+retains the same encode/decode rules for external tools, which produce identical bytes.
 
 The reader rejects unknown versions, wrong file kinds, invalid flags,
 truncation, trailing data, length mismatches and checksum failures before
@@ -151,8 +149,9 @@ remain intact. The live project and its `.styk` save retain every original archi
 - `node tests/document-export-browser.mjs`
 - `node scripts/smoke-app-save.mjs`
 
-The package build tracks `native_format.py` alongside the codec's other runtime
-sources, so an old sidecar must be rebuilt before packaging the new formats.
+The app reads and writes containers with `styk-formats` (`styk_formats::files`) in the codec module,
+through `src/native-file-codec.mjs` ([engine/formats.md](engine/formats.md)); `native_format.py` is
+the reader of the Python codec, kept as the development test oracle.
 
 ## Project colors
 

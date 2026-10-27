@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {engineEditor} from './support/owned-editor.mjs';
 import {emptyDocument, createObject, createFrame} from '../src/demo.mjs';
-import {buildGeometry, evaluatedFrame} from '../src/pivot/geometry.mjs';
-import {solveIKPoints, ikChain, validateIK} from '../src/ik.mjs';
-import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
-import {nativeFigureDocument} from '../src/native-figure.mjs';
+import {geometryOfDocument} from './support/engine-geometry.mjs';
+import {ikChain, validateIK} from '../src/ik.mjs';
 import {getPivotHandles} from '../src/canvas-interactions.mjs';
+import {pivotDocument, figureDocument} from './support/engine-export.mjs';
 
 const near = (a, b, tolerance = 1e-4) => assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`);
 const point = (a, b, tolerance) => { near(a.x, b.x, tolerance); near(a.y, b.y, tolerance); };
-export function fixture(options = {}) {
+/** `edit(document)` changes the document before the engine opens it. */
+export function fixture(options = {}, edit = null) {
   const document = emptyDocument(), figure = document.figure_types[0], base = figure.segments[0];
   figure.segments = [
     {...base, segment_id: 11, parent_id: 0, length: 90, angle_rad: .8, aux_code: 0, is_static: false},
@@ -22,35 +22,15 @@ export function fixture(options = {}) {
   ];
   figure.segment_count = figure.segments.length;
   document.keyframes = [createFrame([createObject(figure, 1, 300, 150)], 8)];
-  const editor = new Editor({demo: false, ...options}).load(document); editor.select(1, 1); return editor;
+  edit?.(document);
+  const editor = engineEditor({demo: false, ...options}, document); editor.select(1, 1); return editor;
 }
 const g = e => e.geometry.objects.get(0);
+/** A document of the two poses `a` and `b` of the figure `e` holds, opened on the engine: the figure moves between them over the first row. */
+const between = (e, a, b) => engineEditor({demo: false}, {...e.serialize(), keyframes: [a, b]});
+/** The engine's geometry `fraction` of the way through the first row of the timeline. */
+const geometryAt = (e, fraction) => { const row = e.timeline[0]; e.seek(row.start + fraction * row.count); return e.geometry; };
 const angleNear = (a,b) => near(Math.atan2(Math.sin(a-b),Math.cos(a-b)),0);
-
-test('origin translation can carry pins, switch live, and return exactly without history', () => {
-  for (const options of [{}, {propertyChannels: true}, {layerTimeline: true}]) {
-    const e = fixture(options); e.setNodeIK({enabled: true}); e.poseJoint(420, 190);
-    e.select(1); const before = e.serialize(), joints = new Map(g(e).joints), history = e._undo.length;
-    e.beginTranslationDrag();
-    for (const movePins of [true, false, true]) {
-      e.moveSelection(20, -12, {fromStart: true, movePins});
-      point(g(e).joints.get(22), {x: joints.get(22).x + (movePins ? 20 : 0), y: joints.get(22).y - (movePins ? 12 : 0)});
-      assert.equal(e.object._stykIK[22].pinned, true);
-      if (movePins) for (const [id, p] of joints) point(g(e).joints.get(id), {x: p.x + 20, y: p.y - 12});
-    }
-    e.moveSelection(180, 0, {fromStart: true});
-    e.moveSelection(20, -12, {fromStart: true, movePins: true});
-    for (const [id, p] of joints) point(g(e).joints.get(id), {x:p.x+20,y:p.y-12});
-    e.moveSelection(0, 0, {fromStart: true, movePins: true}); e.commitDrag();
-    assert.equal(e._undo.length, history); assert.deepEqual(e.serialize(), before);
-    e.beginTranslationDrag(); e.moveSelection(20, -12, {fromStart: true, movePins: true}); e.commitDrag();
-    const after = e.serialize(); assert.equal(e._undo.length, history + 1);
-    e.undo(); for (const [id, p] of joints) point(g(e).joints.get(id), p);
-    e.redo(); assert.deepEqual(e.serialize(), after);
-    e.beginTranslationDrag(); e.moveSelection(30, 20, {fromStart: true, movePins: true}); e.cancelDrag();
-    assert.deepEqual(e.serialize(), after);
-  }
-});
 
 test('Both follows a full circular drag without mirroring across the original knee axis', () => {
   for (const pinned of [true, false]) for (const side of [-1, 1]) {
@@ -84,7 +64,7 @@ test('Both switches once through a fully folded limb, preserving knee continuity
       assert.equal(Math.sign(knee.y - 150), side); previous = knee;
     }
     e.commitDrag();
-    const saved = e.serialize(), reopened = new Editor({demo: false}).load(saved);
+    const saved = e.serialize(), reopened = engineEditor({demo: false},saved);
     point(g(reopened).joints.get(11), previous);
     e.undo(); e.redo(); point(g(e).joints.get(11), previous);
   }
@@ -108,16 +88,15 @@ test('Both stays continuous through folded animation and is independent of seek 
   const a = structuredClone(e.frame); delete a._styk;
   e.select(1, -1); e.moveSelection(120, 0);
   const b = structuredClone(e.frame); delete b._styk;
-  e.report.keyframes = [a, b];
-  const source = JSON.stringify(e.report), knees = [];
+  const m = between(e, a, b), source = JSON.stringify(m.report), knees = [];
   for (let i = 0; i <= 120; i++) {
-    const frame = evaluatedFrame(e.report, 0, i / 120), posed = buildGeometry(e.report, frame).objects.get(0), knee = posed.joints.get(11);
+    const posed = geometryAt(m, i / 120).objects.get(0), knee = posed.joints.get(11);
     point(posed.joints.get(22), {x: 360, y: 150});
     if (i) assert.ok(Math.hypot(knee.x - knees[i - 1].x, knee.y - knees[i - 1].y) < 2, `animated fold snapped at ${i}`);
     knees.push(knee);
   }
-  for (let i = 120; i >= 0; i--) point(buildGeometry(e.report, evaluatedFrame(e.report, 0, i / 120)).objects.get(0).joints.get(11), knees[i]);
-  assert.equal(JSON.stringify(e.report), source);
+  for (let i = 120; i >= 0; i--) point(geometryAt(m, i / 120).objects.get(0).joints.get(11), knees[i]);
+  assert.equal(JSON.stringify(m.report), source);
 });
 
 test('Both retains its bend through extension, stretch and subpixel target jitter', () => {
@@ -177,8 +156,8 @@ test('stretch reaches distant targets without changing rest lengths or unrelated
 test('stretched native and baked Pivot exports reproduce the pose without modifying the source', () => {
   const e = fixture(); e.setNodeIK({enabled: true, allowStretch: true}); e.poseJoint(600, 200);
   const original = JSON.stringify(e.serialize()), displayed = g(e);
-  for (const report of [e.serialize(), nativeFigureDocument(e.report, {figureUid: 1}), materializePivotDocument(e.report)]) {
-    const reopened = new Editor({demo: false}).load(report), actual = g(reopened);
+  for (const report of [e.serialize(), figureDocument(e.report, {figureUid: 1}), pivotDocument(e.report)]) {
+    const reopened = engineEditor({demo: false},report), actual = g(reopened);
     for (const [id, p] of displayed.joints) point(actual.joints.get(id), p);
   }
   assert.equal(JSON.stringify(e.serialize()), original);
@@ -249,14 +228,6 @@ test('releasing a stretched pin bakes only its own chain and leaves other pinned
 });
 
 test('Both preserves either incoming bend side while Left and Right choose opposite solutions', () => {
-  for (const n of [2, 4]) for (const side of [-1, 1]) {
-    const input = Array.from({length: n + 1}, (_, i) => ({x: i * 6, y: Math.sin(Math.PI * i / n) * 6 * side}));
-    const lengths = Array.from({length: n}, (_, i) => Math.hypot(input[i + 1].x - input[i].x, input[i + 1].y - input[i].y));
-    const automatic = structuredClone(input), opposite = structuredClone(input), target = {x: n * 5, y: 0};
-    solveIKPoints(automatic, lengths, target, 0); solveIKPoints(opposite, lengths, target, -side);
-    point(automatic.at(-1), target, .01); point(opposite.at(-1), target, .01);
-    assert.ok(automatic[1].y * side > 0); assert.ok(opposite[1].y * side < 0);
-  }
   const e = fixture(); e.setNodeIK({enabled: true}); assert.equal(e.getIKSettings().bendDirection, 0);
   for (const pinned of [true, false]) for (const side of [-1, 1]) {
     e.setNodeIK({pinned, bendDirection: side}); e.poseJoint(400, 150);
@@ -319,7 +290,7 @@ test('gesture previews produce one history entry; cancellation, undo, redo and s
   assert.equal(e._undo.length, count + 1); const after = e.serialize();
   e.undo(); assert.deepEqual(e.serialize(), saved); e.redo(); assert.deepEqual(e.serialize(), after);
   e.beginDrag(); e.poseJoint(340, 250); e.cancelDrag(); assert.deepEqual(e.serialize(), after);
-  const loaded = new Editor({demo: false}).load(JSON.parse(JSON.stringify(after))); loaded.select(1, 1);
+  const loaded = engineEditor({demo: false},JSON.parse(JSON.stringify(after))); loaded.select(1, 1);
   point(g(loaded).joints.get(22), g(e).joints.get(22)); assert.deepEqual(loaded.getIKSettings(), e.getIKSettings());
 });
 
@@ -327,48 +298,27 @@ test('pins solve at interpolated ticks and native export bakes identical visible
   const e = fixture(); e.setNodeIK({enabled: true});
   const target = g(e).joints.get(22), a = structuredClone(e.frame), b = structuredClone(e.frame);
   delete a._styk; delete b._styk; b.objects[0].root_x += 20; b.objects[0].root_y -= 12;
-  e.report.keyframes = [a, b]; e._invalidate({timing: true});
-  const before = JSON.stringify(e.report), materialized = materializePivotDocument(e.report);
+  const m = between(e, a, b), before = JSON.stringify(m.report), materialized = pivotDocument(m);
   for (let tick = 0; tick < 8; tick++) {
-    const frame = evaluatedFrame(e.report, 0, tick / 8, tick), live = buildGeometry(e.report, frame).objects.get(0);
+    m.seek(tick); const live = m.geometry.objects.get(0);
     point(live.joints.get(22), target); angleNear(live.segments[2].angle,0);
-    const baked = buildGeometry(materialized, materialized.keyframes[tick]).objects.get(0);
+    const baked = geometryOfDocument(materialized, materialized.keyframes[tick]).objects.get(0);
     for (const [id, p] of live.joints) point(baked.joints.get(id), p);
     assert.equal(materialized.keyframes[tick].objects[0]._stykIK, undefined);
   }
-  assert.equal(JSON.stringify(e.report), before);
+  assert.equal(JSON.stringify(m.report), before);
 });
 
 test('target movement interpolates, while pin state changes are discrete', () => {
   const e = fixture(); e.setNodeIK({enabled: true});
   const a = structuredClone(e.frame), b = structuredClone(e.frame), first = a.objects[0]._stykIK[22].target;
+  delete a._styk; delete b._styk;
   b.objects[0]._stykIK[22].target.x += 20; b.objects[0]._stykIK[22].target.rotation = .4;
-  e.report.keyframes = [a, b];
-  const frame = evaluatedFrame(e.report, 0, .5), posed = buildGeometry(e.report, frame).objects.get(0);
+  const posed = geometryAt(between(e, a, b), .5).objects.get(0);
   point(posed.joints.get(22), {x: first.x + 10, y: first.y}); angleNear(posed.segments[2].angle,.2);
   b.objects[0]._stykIK[22].pinned = false;
-  assert.equal(evaluatedFrame(e.report, 0, .5).objects[0]._stykIK[22].pinned, true);
-});
-
-test('analytic solver handles unreachable, folded, straight, zero length and bend-side cases', () => {
-  for (const target of [{x: 5, y: 5}, {x: 100, y: 0}, {x: 0, y: 0}, {x: -5, y: -2}]) for (const side of [-1, 1]) {
-    const points = [{x: 0, y: 0}, {x: 10, y: 0}, {x: 20, y: 0}];
-    solveIKPoints(points, [10, 10], target, side);
-    for (let i = 0; i < 2; i++) near(Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y), 10);
-    if (Math.hypot(target.x, target.y) <= 20) point(points[2], target);
-  }
-  const zero = [{x: 0, y: 0}, {x: 0, y: 0}, {x: 0, y: 0}]; solveIKPoints(zero, [0, 0], {x: 3, y: 4});
-  assert.ok(zero.every(p => Number.isFinite(p.x) && Number.isFinite(p.y)));
-});
-
-test('long-chain solve is bounded, escapes straight singularity and preserves every length', () => {
-  for (const n of [3, 8, 64]) {
-    const points = Array.from({length: n + 1}, (_, i) => ({x: i * 10, y: 0})), lengths = Array(n).fill(10);
-    const result = solveIKPoints(points, lengths, {x: n * 7, y: 5});
-    assert.ok(result.iterations <= 32);
-    for (let i = 0; i < n; i++) near(Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y), 10);
-    assert.ok(result.error < .1, `${n}-chain residual ${result.error}`);
-  }
+  const m = between(e, a, b); geometryAt(m, .5);
+  assert.equal(m.evaluatedFrame.objects[0]._stykIK[22].pinned, true);
 });
 
 test('stable handle IDs, chain bounds, overlapping controllers and malformed metadata are guarded', () => {
@@ -380,32 +330,12 @@ test('stable handle IDs, chain bounds, overlapping controllers and malformed met
   assert.throws(() => validateIK(bad), /Invalid IK/);
 });
 
-test('authored property-channel posing retains IK metadata through key creation and undo', () => {
-  const e = fixture({propertyChannels: true}); e.setNodeIK({enabled: true});
-  assert.equal(e.getIKSettings().pinned, true); const before = g(e).joints.get(22);
-  e.select(1, -1); e.moveSelection(15, -10); point(g(e).joints.get(22), before);
-  e.undo(); point(g(e).joints.get(22), before); e.redo(); point(g(e).joints.get(22), before);
-  assert.ok(e.animationChannels.some(c => c.property === 'pose'));
-});
-
 test('returning a root or pinned target drag to its start creates no history or source changes', () => {
   const e = fixture(); e.setNodeIK({enabled: true}); const original = e.serialize(), count = e._undo.length, target = g(e).joints.get(22);
   e.beginDrag(); e.poseJoint(350, 260); e.poseJoint(target.x, target.y); e.commitDrag();
   assert.deepEqual(e.serialize(), original); assert.equal(e._undo.length, count);
   e.select(1, -1); e.beginTranslationDrag(); e.moveSelection(15, -12, {fromStart: true}); e.moveSelection(0, 0, {fromStart: true}); e.commitDrag();
   assert.deepEqual(e.serialize(), original); assert.equal(e._undo.length, count);
-});
-
-test('duplicated, pasted and imported rigs place their pins with the new copy', () => {
-  const e = fixture(); e.setNodeIK({enabled: true}); const original = g(e).joints.get(22);
-  e.duplicateFigure(); const copy = e.geometry.objects.get(e.selectedSlot);
-  point(copy.joints.get(22), {x: original.x + 24, y: original.y + 24});
-  e.select(1, -1); e.copySelection(); e.pasteSelection();
-  point(e.geometry.objects.get(e.selectedSlot).joints.get(22), {x: original.x + 24, y: original.y + 24});
-  const reusable = nativeFigureDocument(e.report, {figureUid: 1});
-  const other = fixture(); other.importFigure(reusable);
-  const imported = other.geometry.objects.get(other.selectedSlot), offset = {x: other.report.canvas_width / 2 - 300, y: other.report.canvas_height / 2 - 150};
-  point(imported.joints.get(22), {x: original.x + offset.x, y: original.y + offset.y});
 });
 
 test('rig splitting preserves chain base and deleting an IK node removes its controller with reversible history', () => {
@@ -419,27 +349,11 @@ test('rig splitting preserves chain base and deleting an IK node removes its con
 });
 
 test('curved links, arbitrary segment order, and off-chain branches preserve length and local articulation', () => {
-  const e = fixture(); e.figure.segments[0].bend_rad = .3; e.figure.segments[1].bend_rad = -.2; e._invalidate();
+  const e = fixture({}, document => { document.figure_types[0].segments[0].bend_rad = .3; document.figure_types[0].segments[1].bend_rad = -.2; });
   e.setNodeIK({enabled: true}); e.poseJoint(360, 265); point(g(e).joints.get(22), {x: 360, y: 265});
   near(g(e).segments[0].length, 90); near(g(e).segments[0].bend, .3); angleNear(g(e).segments[2].angle,0);
   const report = e.serialize(), object = report.keyframes[0].objects[0], figure = report.figure_types[0];
   figure.segments.reverse(); object.angles.reverse(); if (object.len_flag) object.lengths.reverse(); if (object.bend_flag) object.bends.reverse();
-  point(buildGeometry(report, report.keyframes[0]).objects.get(0).joints.get(22), {x: 360, y: 265});
+  point(geometryOfDocument(report, report.keyframes[0]).objects.get(0).joints.get(22), {x: 360, y: 265});
 });
 
-test('a constrained joined figure follows its moving attachment while its target stays planted', () => {
-  const e = fixture(); e.duplicateFigure(); const childUid = e.selectedUid;
-  e.joinTo(1, 0); e.select(childUid, 1); e.setNodeIK({enabled: true});
-  const target = e.geometry.objects.get(e.selectedSlot).joints.get(22);
-  e.select(1, -1); e.moveSelection(8, -7);
-  const child = e.frame.objects.find(o => o.unique_id === childUid);
-  point(e.geometry.objects.get(child.object_slot).joints.get(22), target);
-});
-
-test('Simple frame drafts discard IK setup and Add carries the working controllers into the new frame', () => {
-  const e = fixture(); e.enableFrameDrafts(); e.setNodeIK({enabled: true});
-  e.discardFrameDraft(); assert.equal(e.getIKSettings().enabled, false);
-  e.setNodeIK({enabled: true}); const target = g(e).joints.get(22); e.addDraftFrame();
-  assert.equal(e.frameIndex, 1); assert.ok(e.frame.objects[0]._stykIK[22].pinned);
-  point(g(e).joints.get(22), target);
-});

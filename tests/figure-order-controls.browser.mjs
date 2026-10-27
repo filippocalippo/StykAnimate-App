@@ -6,7 +6,7 @@ const browser = await chromium.launch({channel: 'chrome', headless: true});
 const page = await browser.newPage({viewport: {width: 1440, height: 1000}}), errors = [], checks = [];
 page.on('pageerror', error => errors.push(error.message));
 const out = 'artifacts/figure-order-controls';
-const toolbar = action => page.locator(`.canvas-toolbar [data-action="${action.replace(/^layer-/, 'selection-')}"]`);
+const toolbar = action => page.locator(['undo', 'redo'].includes(action) ? `.band-history [data-action="${action}"]` : `.ui-quick [data-action="${action}"]`);
 const order = () => page.evaluate(() => styk.editor.evaluatedFrame.object_draw_order_unique_ids);
 const check = (name, value) => { assert.ok(value, name); checks.push(name); console.log('PASS', name); };
 async function reset(selection = [1]) {
@@ -19,7 +19,6 @@ async function reset(selection = [1]) {
     }), 10));
     styk.state.inspectorTab = 'design'; styk.state.inspectorContext = 'figure';
     styk.editor.load(report);
-    for (const uid of [1, 2, 3, 4]) styk.editor.adoptNativePoseTrack({kind: 'figure', uid});
     styk.editor.seek(5); styk.editor.selectMany(selection); styk.fit();
   }, selection);
 }
@@ -56,8 +55,8 @@ try {
   await page.evaluate(() => styk.editor.seek(4));
   check('Order before the key is preserved', JSON.stringify(await order()) === '[1,2,3,4]');
   await page.evaluate(() => { styk.editor.seek(5); styk.editor.selectMany([]); });
-  await page.waitForFunction(() => [...document.querySelectorAll('[data-selection-order]')].every(button => button.disabled));
-  check('Both toolbar buttons disable for an empty selection', await toolbar('layer-front').isDisabled() && await toolbar('layer-back').isDisabled());
+  await page.waitForFunction(() => !document.querySelector('.ui-quick [data-action="layer-front"]'));
+  check('Both order tiles go for an empty selection', await toolbar('layer-front').count() === 0 && await toolbar('layer-back').count() === 0);
   await page.evaluate(() => styk.editor.select(1, -1));
   await page.locator('#inspector [data-property="figure_z_order"]').waitFor();
   check('Inspector stays free of explanatory paragraphs and pose markers',

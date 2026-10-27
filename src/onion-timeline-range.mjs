@@ -1,6 +1,7 @@
 import {appendLocalized, localizedAttribute} from './localization-bindings.mjs';
 /** Room kept between a marker and the playhead's tab, so the two never share a target. */
 const GAP=2;
+function setAttributeOnce(element,name,value){if(element.getAttribute(name)!==value)element.setAttribute(name,value);}
 
 /**
  * Onion range markers on the ruler: a bracket at each end of the range and a tinted band back to the playhead.
@@ -83,7 +84,8 @@ export class OnionTimelineRange {
       band.hidden=value.span===0;
       if(value.span){band.style.left=`${Math.min(outer,inner)}px`;band.style.width=`${Math.abs(inner-outer)}px`;}
       end.style.left=`${marker}px`;
-      end.setAttribute('aria-valuemin','0');end.setAttribute('aria-valuemax',String(value.max));end.setAttribute('aria-valuenow',String(value.span));
+      // Playback moves the markers every frame: write the slider's values only when they change.
+      setAttributeOnce(end,'aria-valuemin','0');setAttributeOnce(end,'aria-valuemax',String(value.max));setAttributeOnce(end,'aria-valuenow',String(value.span));
       // The slider name identifies its side; its value uses the locale's frame plural.
       localizedAttribute(end, 'aria-valuetext', 'counts.frames', {count:value.span});
       localizedAttribute(end, "title", "onionTimelineRange.dragToChange", {spanLabel:{messageKey:'counts.frames',params:{count:value.span}}});

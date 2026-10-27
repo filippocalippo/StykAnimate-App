@@ -3,27 +3,25 @@ import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
 import {codecJob} from '../src/codec-job.mjs';
 import {DocumentExporter} from '../src/document-export.mjs';
+import {FakeCodecHost} from './support/codec-host.mjs';
 
-function controls(t){
-  const calls=[];
-  t.mock.method(globalThis,'fetch',async(url,options)=>{calls.push({url:new URL(url),options});return new Response(null,{status:204});});
-  return calls;
-}
 async function until(check){const deadline=Date.now()+5000;while(!check()){if(Date.now()>deadline)throw new Error('Worker did not reach export');await delay(5);}}
 
-test('a codec job signals cancellation once with its private identity and independent timeout',t=>{
-  const calls=controls(t),job=codecJob('http://localhost:1234','local-test');
-  assert.match(job.id,/^[a-f0-9]{32}$/);job.cancel();job.cancel();job.finish();
-  assert.equal(calls.length,1);assert.equal(calls[0].url.pathname,'/api/cancel');
-  assert.equal(calls[0].url.searchParams.get('id'),job.id);
-  assert.equal(calls[0].options.body,'');assert.equal(calls[0].options.keepalive,true);
-  assert.equal(calls[0].options.headers.Authorization,'Bearer local-test');
-  assert.equal(calls[0].options.signal.aborted,false);
-  const completed=codecJob('http://localhost:1234');completed.finish();completed.cancel();assert.equal(calls.length,1);
+test('a codec job cancels once with its private identity, and a finished job never cancels',t=>{
+  const host=new FakeCodecHost();t.after(()=>host.close());
+  const job=codecJob({host});
+  assert.match(job.id,/^[a-f0-9]{32}$/);
+  assert.ok(job.link().fields.codecPort instanceof MessagePort);
+  job.cancel();job.cancel();job.finish();
+  assert.deepEqual(host.cancelled,[job.id]);
+  assert.deepEqual(host.events.filter(([type])=>type==='release'),[],'a cancelled job has nothing left to release');
+  const completed=codecJob({host});completed.finish();completed.cancel();
+  assert.deepEqual(host.cancelled,[job.id]);
+  assert.deepEqual(host.events.at(-1),['release',completed.id]);
 });
 
-function exporter(t,onExport){
-  const calls=controls(t),workers=[];
+function exporter(t,onExport,options={}){
+  const workers=[],host=new FakeCodecHost();
   class Worker extends EventTarget{
     constructor(){super();this.messages=[];workers.push(this);}
     postMessage(message){
@@ -39,30 +37,53 @@ function exporter(t,onExport){
   const descriptor=Object.getOwnPropertyDescriptor(globalThis,'Worker');
   Object.defineProperty(globalThis,'Worker',{value:Worker,configurable:true});
   t.after(()=>{if(descriptor)Object.defineProperty(globalThis,'Worker',descriptor);else delete globalThis.Worker;});
-  const owner=new DocumentExporter({baseURL:'http://localhost:1234',token:'local-test',timeoutMs:0});
-  t.after(()=>owner.dispose());return {owner,workers,calls};
+  const owner=new DocumentExporter({codecHost:host,timeoutMs:0,...options});
+  t.after(()=>{owner.dispose();host.close();});return {owner,workers,host};
 }
 
-test('terminating a busy document worker still cancels its backend job',async t=>{
-  const {owner,workers,calls}=exporter(t,()=>{}),controller=new AbortController();
-  const pending=owner.export({figure_types:[],keyframes:[]},{format:'piv',signal:controller.signal});
+test('terminating a busy document worker still cancels its codec job',async t=>{
+  const {owner,workers,host}=exporter(t,()=>{}),controller=new AbortController();
+  const pending=owner.export({figure_types:[],keyframes:[]},{format:'styk',signal:controller.signal});
   pending.catch(()=>{});
   await until(()=>workers[0]?.messages.some(message=>message.operation==='export'));
   controller.abort();await assert.rejects(pending,{name:'AbortError'});owner.dispose();
-  assert.equal(workers[0].terminated,true);assert.equal(calls.length,1);
-  assert.equal(calls[0].url.searchParams.get('id'),workers[0].messages[0].options.jobId);
+  assert.equal(workers[0].terminated,true);
+  assert.deepEqual(host.cancelled,[workers[0].messages[0].options.jobId]);
   assert.equal(owner.jobs.size,0);
+});
+
+test('a worker that joined the engine stops its work and gives its thread back before it ends',async t=>{
+  const engine={join:{},handle:{address:()=>1,try_document_identity:()=>[0,0,7]}};
+  const {owner,workers,host}=exporter(t,()=>{},{engine}),controller=new AbortController();
+  const pending=owner.export({figure_types:[],keyframes:[]},{format:'piv',revision:7,signal:controller.signal});
+  pending.catch(()=>{});
+  await until(()=>workers[0]?.messages.some(message=>message.operation==='export'));
+  const request=workers[0].messages.find(message=>message.operation==='export');
+  assert.deepEqual(request.engine,{address:1,revision:7});
+  assert.equal(Atomics.load(request.cancel,0),0);
+  controller.abort();await assert.rejects(pending,{name:'AbortError'});
+  assert.equal(Atomics.load(request.cancel,0),1,'the work in the engine is told to stop');
+  assert.ok(workers[0].messages.some(message=>message.operation==='release'));
+  assert.equal(workers[0].terminated,undefined,'a thread inside the engine is not ended mid-call');
+  workers[0].dispatchEvent(new MessageEvent('message',{data:{released:true}}));
+  assert.equal(workers[0].terminated,true);
+  assert.deepEqual(host.cancelled,[workers[0].messages[0].options.jobId]);
+});
+
+test('a Pivot or figure export names the revision of the document it exports',async t=>{
+  const {owner}=exporter(t,()=>{});
+  await assert.rejects(owner.export({figure_types:[],keyframes:[]},{format:'stkz'}),{messageKey:'errors.documentExport.exportRequiresTheEditorRevision'});
 });
 
 test('a completed document export does not cancel and a superseded result never publishes',async t=>{
   let revision=0,change=false;
-  const {owner,calls}=exporter(t,(worker,message)=>{
+  const {owner,host}=exporter(t,(worker,message)=>{
     if(change)revision++;
     worker.reply(message,{ok:true,blob:new Blob(['native bytes'])});
   });
   const report={figure_types:[],keyframes:[]};
   const result=await owner.export(report,{getRevision:()=>revision});assert.equal(await result.text(),'native bytes');
-  assert.equal(calls.length,0);
+  assert.equal(host.cancelled.length,0);
   change=true;await assert.rejects(owner.export(report,{getRevision:()=>revision}),{name:'AbortError'});
-  assert.equal(calls.length,1);assert.equal(owner.jobs.size,0);
+  assert.equal(host.cancelled.length,1);assert.equal(owner.jobs.size,0);
 });

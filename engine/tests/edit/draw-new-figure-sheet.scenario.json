@@ -1,0 +1,176 @@
+{
+ "name": "draw-new-figure-sheet",
+ "document": "draw-new-figure-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegments",
+   [
+    {
+     "type": "line",
+     "length": 31.5,
+     "angle": -0.19,
+     "thickness": 0,
+     "start": {
+      "x": -5.25,
+      "y": 11.75
+     }
+    },
+    {
+     "type": "squareLine",
+     "length": 20.1,
+     "angle": 0.07
+    },
+    {
+     "type": "circleClear",
+     "length": 0,
+     "thickness": 0
+    }
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegment",
+   {
+    "type": "circleFill",
+    "length": 17.25,
+    "angle": 0.23
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   7.75
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegment",
+   {
+    "type": 1,
+    "length": 3.5,
+    "thickness": 1.123456789,
+    "start": {
+     "x": 450.125,
+     "y": -30.25
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegments",
+   []
+  ],
+  [
+   "addSegments",
+   "invalid"
+  ],
+  [
+   "addSegment",
+   {
+    "parentId": 11
+   }
+  ],
+  [
+   "addSegment",
+   {
+    "type": "image"
+   }
+  ],
+  [
+   "addSegment",
+   {
+    "length": -1
+   }
+  ],
+  [
+   "addSegment",
+   {
+    "start": {
+     "x": "invalid",
+     "y": 0
+    }
+   }
+  ],
+  [
+   "addSegments",
+   [
+    {
+     "length": 2
+    },
+    {
+     "parentId": 1
+    }
+   ]
+  ],
+  [
+   "addSegments",
+   [
+    {
+     "length": 2,
+     "parentId": 0
+    },
+    {
+     "length": 7,
+     "parentId": 0
+    }
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegment",
+   {
+    "type": "circleClear",
+    "length": 0,
+    "thickness": 0
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -1,5 +1,6 @@
 /** Actual canvas Rig tool gestures and native exports. Requires local STYK_URL. */
 import {chromium} from './support/playwright.mjs';
+import {chooseExport, exportDialogClosed} from './helpers/export-dialog.mjs';
 import assert from 'node:assert/strict';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
@@ -37,11 +38,11 @@ async function drag(from, to, {control = false, cancel = false} = {}) {
 }
 async function undo() { await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('Control+z'); }
 async function saveExport(kind, filename) {
-  await page.locator('[data-action="export"]').first().click();
+  await page.locator('[data-action="export"]').first().click(); await chooseExport(page, `export-${kind}`);
   const pending = page.waitForEvent('download'); pending.catch(() => {});
-  await page.locator(`[data-action="export-${kind}"]`).click();
+  await page.locator('#export-dialog #export-submit').click();
   const download = await pending, target = path.join(out, filename); await download.saveAs(target);
-  await page.waitForFunction(() => !document.querySelector('#dialog').open); return target;
+  await exportDialogClosed(page); return target;
 }
 
 try {
@@ -64,9 +65,9 @@ try {
     document._styk.name = 'Rig canvas verification';
     styk.editor.load(document); styk.editor.select(1, 0); styk.fit();
   });
-  await page.locator('[data-tool="select"]').click(); await page.keyboard.press('r');
-  check('R opens Edit rig from the canvas keyboard shortcut', await page.evaluate(() => styk.state.tool === 'rig'));
-  await page.locator('[data-tool="rig"]').click();
+  // R is Hold to edit handles; Edit rig has no default key: it opens with the Rig workspace.
+  await page.locator('[data-workspace-mode="rig"]').click(); await page.locator('[data-tool="rig"]').click();
+  check('The Edit rig tool opens from the Rig workspace', await page.evaluate(() => styk.state.tool === 'rig'));
   check('Edit rig toolbar exposes Move joint as the default mode', await page.locator('#rig-mode').inputValue() === 'move');
   const initial = await snapshot(), target = {x: 410, y: 230};
   const preview = await drag(initial.joints[11], target), moved = await snapshot();
@@ -99,19 +100,22 @@ try {
   const stkPath = await saveExport('stk', 'rig-ui-edited.stk');
   check('STK export produces a real reusable native figure through the dialog', (await readFile(stkPath)).length > 16);
   // The file opens beside the edited project, in a tab of its own: nothing is replaced, so nothing asks.
+  // The rig edit lives in the Rig workspace (a build of the figure): finishing it keeps the changes.
+  await page.locator('#builder-done').click(); await page.locator('#builder-exit-update').click(); await page.waitForFunction(() => !document.querySelector('dialog[open]'));
   await page.locator('#file-input').setInputFiles(pivPath);
   await page.waitForFunction(() => styk.editor.name === 'rig-ui-edited');
   check('Reopened PIV preserves all keyframes and the edited static joint geometry', await page.evaluate(({x, y}) => {
-    const e = styk.editor, endpoint = e.geometry.objects.get(e.selectedSlot).segments[0].end;
+    // A reopened animation shows its last frame; the edit was made on the first.
+    const e = styk.editor; e.seek(0); const endpoint = e.geometry.objects.get(e.selectedSlot).segments[0].end;
     return e.report.keyframes.length === 2 && Math.hypot(endpoint.x - x, endpoint.y - y) < .2 && (e.figure.segments[0].aux_code & 1);
   }, authored.joints[11]));
-  const count = await page.evaluate(() => styk.editor.frame.objects.length);
-  await page.locator('#file-input').setInputFiles(stkPath); await page.waitForFunction(count => styk.editor.frame.objects.length === count + 1, count);
+  const count = await page.evaluate(() => styk.editor.evaluatedFrame.objects.length);
+  await page.locator('#file-input').setInputFiles(stkPath); await page.waitForFunction(count => styk.editor.evaluatedFrame.objects.length === count + 1, count);
   check('Reimported STK retains authored default lengths, angles and static flags', await page.evaluate(defaults => {
     const segments = styk.editor.figure.segments;
     return segments.length === 4 && (segments[0].aux_code & 1) && segments.every((s, i) => Math.abs(s.length - defaults[i].length) < .001 && Math.abs(s.angle_rad - defaults[i].angle) < 1e-7);
   }, authored.defaults));
-  await page.locator('[data-tool="rig"]').click(); await page.screenshot({path: path.join(out, 'rig-reimported.png')});
+  await page.locator('[data-workspace-mode="rig"]').click(); await page.locator('[data-tool="rig"]').click(); await page.screenshot({path: path.join(out, 'rig-reimported.png')});
   check('Rig gestures and native persistence emit no browser runtime errors', errors.length === 0);
   await writeFile(path.join(out, 'rig-ui-verification.json'), JSON.stringify({checks, errors, exports: [pivPath, stkPath]}, null, 2));
 } catch (error) {

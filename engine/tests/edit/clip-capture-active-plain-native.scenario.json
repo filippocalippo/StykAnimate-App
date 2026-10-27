@@ -1,0 +1,39 @@
+{
+ "name": "clip-capture-active-plain-native",
+ "document": "clip-capture-active-plain-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 2,
+    "end": 6
+   }
+  ],
+  [
+   "@seek",
+   3.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "createEmptyMovieclip",
+   "Branch"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

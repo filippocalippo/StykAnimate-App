@@ -139,7 +139,7 @@ and the target keeps its depth, so the lower bone keeps its lean too, and both
 keep their projected lengths. The knee stays on its side of the hip–target line
 on screen. A straight limb bends to the side its stored bend direction shows on
 screen, or else to the side the pointer first leaves the line by.
-`flatSpatialBend` in `src/ik-spatial.mjs` computes that knee, which is stored
+The engine (`styk-edit` `spatial_ik.rs`) computes that knee, which is stored
 only as the controller's pole for the existing analytic solver, so playback,
 planting, undo and saving are unchanged. A limb pointing straight into the
 screen keeps its stored pole.
@@ -463,7 +463,7 @@ culling; see `artifacts/rig-constraints/benchmark.json` for measured CPU times.
 
 ## Data and evaluation contract
 
-`src/rig-constraints.mjs` owns validation and evaluation. Segment `_stykRig`
+`src/rig-constraints.mjs` owns the validation of the stored rig; the engine evaluates it (`styk_eval::rig`). Segment `_stykRig`
 metadata is optional; unconfigured figures retain the ordinary evaluation path.
 
 ```js
@@ -515,7 +515,7 @@ between frames. Collapsed/reversed spans, arbitrary seeks and undo are determini
 Widths and stretch influence are bounded. A fully compressed detail cannot be
 directly inverse-posed until its driver expands.
 
-`editor-rig-constraints.mjs` owns commands and sparse relationship history. Changes
+The engine session (`styk-edit/src/pose.rs` and the rig modules beside it) owns the commands and sparse relationship history. Changes
 invalidate affected figure instances. Duplicate/combine remap internal references
 and retain external anchors as appropriate. Derived joints reject conflicting IK;
 ordinary skeleton anchors can still be driven by IK. Shared geometry supplies
@@ -582,9 +582,6 @@ rigs undergo repeated nonsequential poses, depth collapse and extreme slider pos
 `tests/rig-constraints.browser.mjs` exercises builder setup, actual normal/Ctrl
 mouse drags, gesture undo, absence of blue rig pixels in Animate, temporary test
 isolation, the gallery, file-input native imports, and compact/light/dark layouts.
-`tests/rig-render.browser.mjs` compares editable WebGPU with prepared playback and
-rasterized SVG. The six sampled poses produced identical editable/playback pixels;
-SVG differs slightly at antialiased edges. Evidence is in `artifacts/rig-constraints/`.
 
 `tests/rig-insertion.browser.mjs` adds all six examples through the Library UI,
 checks selection and Animate mode, transfers a tested rotation and sliding pose,
@@ -605,8 +602,7 @@ for 5,000 and 44.57 ms for 20,000. The six example rigs measured 0.11–0.84 ms
 median (0.22–1.68 ms p95). These are geometry timings, not end-to-end frame rates.
 20,000 constrained segments exceed a 60 FPS synchronous editing budget; prepared
 playback retains the existing worker and bounded-cache path. GC heap differences
-are reported as diagnostics, not a proof of leak absence. Reproduce with
-`node --expose-gc scripts/benchmark-rig-constraints.mjs`.
+are reported as diagnostics, not a proof of leak absence. (The script that measured them went with the JavaScript geometry evaluation it timed.)
 
 ## Reference behavior
 

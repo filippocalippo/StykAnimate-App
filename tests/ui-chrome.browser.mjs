@@ -53,8 +53,8 @@ try {
     for (const bar of Object.keys(await page.evaluate(() => fixture.bars))) assert.deepEqual(await clipped(page, bar), [], `${bar} shows every control whole`);
     assert.equal(await visible(page, 'brush-narrow', 'size'), true);
     assert.equal(await visible(page, 'brush-narrow', 'flow'), false);
-    assert.equal(await page.locator('[data-tool="brush-narrow"] .ui-optbar-more').isVisible(), true);
-    assert.equal(await page.locator('[data-tool="brush-medium"] .ui-optbar-more').isVisible(), false);
+    assert.equal(await page.locator('[data-options-for="brush-narrow"] .ui-optbar-more').isVisible(), true);
+    assert.equal(await page.locator('[data-options-for="brush-medium"] .ui-optbar-more').isVisible(), false);
   });
 
   await step('labels drop before anything folds and keep their accessible names', async () => {
@@ -62,16 +62,16 @@ try {
     assert.deepEqual(narrow.folded, [], 'the words go before Snapping would fold');
     assert.ok(narrow.dropped.includes('branch'), 'Whole branch shows its glyph first');
     if (narrow.dropped.includes('mode')) assert.ok(narrow.dropped.includes('snap'), '"Drag" goes after the toggles\' words');
-    const branch = page.locator('[data-tool="edit-joints-narrow"] #builder-branch');
+    const branch = page.locator('[data-options-for="edit-joints-narrow"] #builder-branch');
     assert.equal(await branch.getAttribute('aria-pressed'), 'true');
-    assert.equal(await page.locator('[data-tool="edit-joints-narrow"]').getByRole('button', {name: 'Whole branch', exact: true}).count(), 1,
+    assert.equal(await page.locator('[data-options-for="edit-joints-narrow"]').getByRole('button', {name: 'Whole branch', exact: true}).count(), 1,
       'the dropped word still names the button');
-    const width = await branch.evaluate(element => element.getBoundingClientRect().width);
-    assert.equal(width, 24, 'a labelled toggle without its word is a square glyph button');
+    const box = await branch.evaluate(element => { const {width, height} = element.getBoundingClientRect(); return {width, height}; });
+    assert.equal(box.width, box.height, 'a labelled toggle without its word is a square glyph button');
   });
 
   await step('the bar refolds when its width changes', async () => {
-    await page.evaluate(() => { fixture.bars['brush-wide'].element.closest('.stage-head').style.inlineSize = '380px'; });
+    await page.evaluate(() => { fixture.bars['brush-wide'].element.closest('.stage-head').style.inlineSize = '400px'; });
     await settle(page);
     assert.deepEqual(await page.evaluate(() => fixture.folds['brush-wide'].more), ['flow', 'smooth']);
     await page.evaluate(() => { fixture.bars['brush-wide'].element.closest('.stage-head').style.inlineSize = '900px'; });
@@ -94,7 +94,7 @@ try {
   });
 
   await step('More options shows the folded controls themselves, then puts them back', async () => {
-    const more = page.locator('[data-tool="brush-narrow"] .ui-optbar-more');
+    const more = page.locator('[data-options-for="brush-narrow"] .ui-optbar-more');
     await more.click();
     const popover = page.locator('.ui-optbar-popover');
     await popover.waitFor();
@@ -109,12 +109,12 @@ try {
     assert.equal(await more.getAttribute('aria-expanded'), 'false');
     assert.equal(await page.evaluate(() => document.activeElement.classList.contains('ui-optbar-more')), true, 'focus returns to More options');
     assert.equal(await visible(page, 'brush-narrow', 'flow'), false, 'back in the bar, still folded');
-    assert.equal(await page.locator('[data-tool="brush-narrow"] [data-option="flow"]').count(), 1);
+    assert.equal(await page.locator('[data-options-for="brush-narrow"] [data-option="flow"]').count(), 1);
   });
 
   await step('a scrub field in More options commits through the header\'s PropertyControls', async () => {
     await page.evaluate(() => { fixture.properties.length = 0; fixture.changes.length = 0; });
-    const more = page.locator('[data-tool="brush-narrow"] .ui-optbar-more');
+    const more = page.locator('[data-options-for="brush-narrow"] .ui-optbar-more');
     const popover = page.locator('.ui-optbar-popover');
     await more.click();
     await popover.waitFor();
@@ -143,7 +143,7 @@ try {
 
   await step('the bar is one tab stop; arrows move along it and a field is entered by typing', async () => {
     await page.evaluate(() => { fixture.properties.length = 0; });
-    const bar = page.locator('[data-tool="brush-wide"]');
+    const bar = page.locator('[data-options-for="brush-wide"]');
     assert.equal(await bar.locator('[tabindex="0"]').count(), 1, 'one control is in the tab order');
     await bar.locator('.ui-optbar-pair').focus();
     await page.keyboard.press('ArrowRight');
@@ -164,15 +164,15 @@ try {
     assert.match(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), /^Color #F5B400$/, 'End reaches the last control');
   });
 
-  await step('focus rings and field halos are drawn whole, and every bar keeps its 28px row', async () => {
-    await page.locator('[data-tool="edit-joints"] #rig-mode').focus();
+  await step('focus rings and field halos are drawn whole, and every bar keeps its one-control row', async () => {
+    await page.locator('[data-options-for="edit-joints"] #rig-mode').focus();
     await page.keyboard.press('ArrowRight');
     const ring = await page.evaluate(() => {
       const style = getComputedStyle(document.activeElement);
       return document.activeElement.id === 'builder-branch' && style.outlineStyle !== 'none' ? Number.parseFloat(style.outlineWidth) + Number.parseFloat(style.outlineOffset) : 0;
     });
     assert.ok(ring >= 4, `Whole branch, reached by keyboard, draws its ring ${ring}px outside its box`);
-    await page.locator('[data-tool="brush-wide"] [data-property="brushSize"]').focus();
+    await page.locator('[data-options-for="brush-wide"] [data-property="brushSize"]').focus();
     await page.evaluate(() => { for (const animation of document.activeElement.closest('.ui-field').getAnimations()) animation.finish(); });   // the halo's transition
     const halo = await page.evaluate(() => Math.max(0, ...getComputedStyle(document.activeElement.closest('.ui-field')).boxShadow.split(/,(?![^(]*\))/)
       .filter(shadow => !shadow.includes('inset')).map(shadow => Number.parseFloat([...shadow.matchAll(/(-?[\d.]+)px/g)][3]?.[1]) || 0)));
@@ -188,7 +188,8 @@ try {
       const problems = [];
       for (const [name, bar] of Object.entries(fixture.bars)) {
         const height = bar.element.getBoundingClientRect().height;
-        if (Math.abs(height - 28) > 0.5) problems.push(`${name}: the row is ${height}px tall`);
+        const row = Number.parseFloat(getComputedStyle(bar.element).getPropertyValue('--control-md'));   // the bar's row is one regular control tall
+        if (Math.abs(height - row) > 0.5) problems.push(`${name}: the row is ${height}px tall, not ${row}px`);
         const clips = [bar.element, bar.element.closest('.stage-head-start')].map(clipOf).filter(Boolean);
         const drawn = [...[...bar.element.querySelectorAll('.ui-field')].map(field => [field, halo]),
           ...[...bar.element.querySelectorAll('button, select')].map(control => [control, ring])];
@@ -206,7 +207,7 @@ try {
   });
 
   await step('a message over the start slot takes its own line while a tool option holds focus', async () => {
-    await page.locator('[data-tool="brush-wide"] [data-property="brushSize"]').focus();
+    await page.locator('[data-options-for="brush-wide"] [data-property="brushSize"]').focus();
     await page.keyboard.type('1');
     await page.evaluate(() => {
       const head = fixture.bars['brush-wide'].element.closest('.stage-head');
@@ -235,22 +236,22 @@ try {
 
   await step('controls with a command run through the app\'s delegation; the others report their value', async () => {
     await page.evaluate(() => { fixture.log.length = 0; fixture.changes.length = 0; });
-    await page.locator('[data-tool="edit-joints"] #builder-branch').click();
-    await page.locator('[data-tool="brush-wide"] [data-option-id="mirror-y"]').click();
-    await page.locator('[data-tool="brush-wide"] [data-option-id="mirror-x"]').click();
-    await page.locator('[data-tool="tweener"] [data-value="push"]').click();
-    await page.locator('[data-tool="tweener"] [data-option-step="1"]').click();
-    await page.locator('[data-tool="edit-joints"] #rig-mode').selectOption('branch');
-    await page.locator('[data-tool="brush-wide"] [data-value="#0d99ff"]').click();
+    await page.locator('[data-options-for="edit-joints"] #builder-branch').click();
+    await page.locator('[data-options-for="brush-wide"] [data-option-id="mirror-y"]').click();
+    await page.locator('[data-options-for="brush-wide"] [data-option-id="mirror-x"]').click();
+    await page.locator('[data-options-for="tweener"] [data-value="push"]').click();
+    await page.locator('[data-options-for="tweener"] [data-option-step="1"]').click();
+    await page.locator('[data-options-for="edit-joints"] #rig-mode').selectOption('branch');
+    await page.locator('[data-options-for="brush-wide"] [data-value="#0d99ff"]').click();
     assert.deepEqual(await page.evaluate(() => fixture.log), ['toggle-builder-branch', 'drawing-mirror']);
     assert.deepEqual(await page.evaluate(() => fixture.changes.map(({bar, id, value}) => [bar, id, value])), [
       ['brush-wide', 'mirror-y', true], ['tweener', 'blend', 'push'], ['tweener', 'steps', 4], ['edit-joints', 'mode', 'branch'], ['brush-wide', 'recent', '#0d99ff']]);
-    assert.equal(await page.locator('[data-tool="brush-wide"] [data-option-id="mirror-y"]').getAttribute('aria-pressed'), 'true');
-    assert.equal(await page.locator('[data-tool="tweener"] [data-value="push"]').getAttribute('aria-checked'), 'true');
+    assert.equal(await page.locator('[data-options-for="brush-wide"] [data-option-id="mirror-y"]').getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator('[data-options-for="tweener"] [data-value="push"]').getAttribute('aria-checked'), 'true');
   });
 
   await step('update() writes state in place and keeps focus and contract ids', async () => {
-    await page.locator('[data-tool="edit-joints"] #builder-snap').focus();
+    await page.locator('[data-options-for="edit-joints"] #builder-snap').focus();
     const same = await page.evaluate(() => {
       const bar = fixture.bars['edit-joints'], before = bar.element.querySelector('#builder-snap');
       const descriptors = [
@@ -265,8 +266,8 @@ try {
       return before === bar.element.querySelector('#builder-snap') && document.activeElement === before;
     });
     assert.equal(same, true);
-    assert.equal(await page.locator('[data-tool="edit-joints"] #builder-snap').getAttribute('aria-pressed'), 'false');
-    assert.equal(await page.locator('[data-tool="edit-joints"] #rig-mode').inputValue(), 'branch');
+    assert.equal(await page.locator('[data-options-for="edit-joints"] #builder-snap').getAttribute('aria-pressed'), 'false');
+    assert.equal(await page.locator('[data-options-for="edit-joints"] #rig-mode').inputValue(), 'branch');
   });
 
   await step('switching tools reports the new folds, also while the bar is hidden', async () => {
@@ -319,12 +320,12 @@ try {
     });
   });
 
-  await step('quick actions: words where glyphs are ambiguous, Shift variants, pins and one tab stop', async () => {
+  await step('quick actions: labelled tiles, Shift variants, pins and one tab stop', async () => {
     const row = page.getByRole('toolbar', {name: 'Figure actions'}).first();
     assert.deepEqual(await row.locator('button').evaluateAll(buttons => buttons.map(button => button.dataset.action)),
       ['mirror', 'layer-front', 'layer-back', 'duplicate', 'delete']);
     assert.deepEqual(await row.locator('button').evaluateAll(buttons => buttons.map(button => button.textContent.trim() || button.getAttribute('aria-label'))),
-      ['Flip horizontally', 'To front', 'To back', 'Duplicate', 'Delete']);
+      ['Flip', 'Front', 'Back', 'Duplicate', 'Delete']);
     assert.equal(await row.locator('[data-action="layer-front"]').getAttribute('data-shift-hint'), 'Shift: one step');
     assert.equal(await row.locator('[data-action="mirror"]').getAttribute('aria-keyshortcuts'), 'Shift+H');
     const tips = await page.evaluate(async () => {
@@ -349,7 +350,7 @@ try {
 
     const pinned = page.getByRole('toolbar', {name: 'Figure actions'}).nth(1);
     const buttons = await pinned.locator('button').evaluateAll(list => list.map(button => [button.dataset.action, button.classList.contains('ui-quick-word')]));
-    assert.deepEqual(buttons.slice(-2), [['reset-pose', false], ['rotate', true]], 'pins last; Rotate 15° draws like Reset pose, so it shows its word');
+    assert.deepEqual(buttons.slice(-2), [['reset-pose', true], ['rotate', true]], 'pins last; every quick action is a labelled tile');
     assert.deepEqual(buttons.slice(0, -2).map(([action]) => action), ['mirror', 'layer-front', 'layer-back', 'duplicate', 'delete'].slice(0, buttons.length - 2),
       'the last defaults give up their places (they stay in the menu)');
     const displaced = await page.evaluate(() => fixture.rows.pinned.resolved.displaced);
@@ -357,26 +358,27 @@ try {
     const joint = page.getByRole('toolbar', {name: 'Joint actions'});
     assert.deepEqual(await joint.locator('button').evaluateAll(buttons => buttons.map(button => button.dataset.action)),
       ['selection-front', 'selection-back', 'mirror']);
-    await joint.getByRole('button', {name: 'Bring to front', exact: true}).click();
-    await joint.getByRole('button', {name: 'Send to back', exact: true}).click();
-    await joint.getByRole('button', {name: 'Bring to front', exact: true}).click({modifiers: ['Shift']});
-    await joint.getByRole('button', {name: 'Send to back', exact: true}).click({modifiers: ['Shift']});
+    await joint.getByRole('button', {name: 'Front', exact: true}).click();
+    await joint.getByRole('button', {name: 'Back', exact: true}).click();
+    await joint.getByRole('button', {name: 'Front', exact: true}).click({modifiers: ['Shift']});
+    await joint.getByRole('button', {name: 'Back', exact: true}).click({modifiers: ['Shift']});
     assert.deepEqual(await page.evaluate(() => fixture.log.slice(-4)), ['selection-front', 'selection-back', 'selection-up', 'selection-down']);
   });
 
   await step('the rows never wrap, scroll or cut a button, and refit when the inspector widens', async () => {
+    // A labelled tile is a glyph over its word: 52px (quick.css).
     const rows = () => page.locator('.ui-quick').evaluateAll(list => list.map(row => [Math.round(row.getBoundingClientRect().height), row.scrollWidth <= row.clientWidth]));
-    for (const row of await rows()) assert.deepEqual(row, [28, true]);
+    for (const row of await rows()) assert.deepEqual(row, [52, true]);
     await page.evaluate(() => { document.getElementById('quick-rows').style.inlineSize = '400px'; });
     await settle(page);
     assert.deepEqual(await page.evaluate(() => fixture.rows.pinned.resolved.displaced), ['delete'], 'with room, only the second pin takes a default\'s place');
-    for (const row of await rows()) assert.deepEqual(row, [28, true]);
+    for (const row of await rows()) assert.deepEqual(row, [52, true]);
   });
 
   await step('quick actions: the frame range row, pins per context and a disabled button\'s reason', async () => {
     const range = page.getByRole('toolbar', {name: 'Frame actions'});
     assert.deepEqual(await range.locator('button').evaluateAll(buttons => buttons.map(button => button.textContent.trim() || button.getAttribute('aria-label'))),
-      ['Copy frames', 'Paste frames', 'Remove keys', 'Delete frames']);
+      ['Copy', 'Paste', 'Remove keys', 'Delete']);
     const moved = await page.evaluate(() => {
       const row = fixture.rows.pinned;
       row.update({context: 'joint'});
@@ -403,8 +405,8 @@ try {
   await step('the dark theme renders the same components without errors', async () => {
     assert.equal(await dark.evaluate(() => document.documentElement.dataset.theme), 'dark');
     for (const bar of Object.keys(await dark.evaluate(() => fixture.bars))) assert.deepEqual(await clipped(dark, bar), [], `${bar} in dark`);
-    const pressed = await dark.locator('[data-tool="brush-wide"] [data-option="pressure"]').evaluate(button => getComputedStyle(button).backgroundColor);
-    const quietOff = await dark.locator('[data-tool="brush-wide"] [data-option-id="mirror-x"]').evaluate(button => getComputedStyle(button).backgroundColor);
+    const pressed = await dark.locator('[data-options-for="brush-wide"] [data-option="pressure"]').evaluate(button => getComputedStyle(button).backgroundColor);
+    const quietOff = await dark.locator('[data-options-for="brush-wide"] [data-option-id="mirror-x"]').evaluate(button => getComputedStyle(button).backgroundColor);
     assert.notEqual(pressed, quietOff, 'a quiet toggle that is on is a soft tile');
   });
   await dark.close();

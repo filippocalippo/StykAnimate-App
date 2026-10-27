@@ -1,14 +1,17 @@
-import {messageError} from './localized-error.mjs';
-import {keyEasing, inheritedKeyEasing} from './keyframe-easing.mjs';
-import {isDiscreteAnimationProperty} from './animation-properties.mjs';
-/** A uniform scalar edit across one selected branch. Native definitions remain
- * shared unless an authored/captured style already owns an affected value. */
-import {animationChannels,animationChannelId,validateAnimationValue,composeAnimationChannels} from './animation-channels.mjs';
-import {buildGeometry} from './pivot/geometry.mjs';
-import {animationStyleValue, polygonIdentity, resolveInstanceFigure} from './animation-style.mjs';
-import {builderSelectionIndices} from './editor-builder-branch.mjs';
+/** The targets of a uniform scalar edit across one selected branch. Native definitions remain shared unless an authored/captured
+ * style already owns an affected value. The edit itself (begin, preview, commit, cancel) is the session's animation edit of several
+ * targets (`native-property-edit.mjs`, docs/BRANCH-STYLE.md). */
+import {animationChannels} from './animation-channels.mjs';
+import {polygonIdentity, resolveInstanceFigure} from './animation-style.mjs';
+import {segmentBranchIndices} from './pivot/structure.mjs';
 
 const properties={segment_opacity:'opacity',segment_gradient_opacity:'gradientOpacity',thickness:'thickness'};
+/** The selected segments (several picked ones, else the selected one, with the branch under it when `whole`). */
+function builderSelectionIndices(editor,whole=false) {
+  const ids=editor.selectedSegmentIds,segment=editor.figure?.segments[editor.selectedJoint];
+  return ids?.size>1?editor.figure.segments.flatMap((segment,index)=>ids.has(segment.segment_id)?[index]:[])
+    :whole?(segment?segmentBranchIndices(editor.figure.segments,segment.segment_id):[]):[editor.selectedJoint];
+}
 export function branchOpacityPlan(editor,key) {
   const property=properties[key],figure=editor.figure,object=editor.object;
   if(!property||!figure||!object||(property==='thickness'&&!editor.propertyChannels))return null;
@@ -26,96 +29,15 @@ export function branchOpacityPlan(editor,key) {
     const handleId=Number(segment.segment_id),captured=object._stykStyle?.segments?.[handleId]?.[property];
     authored ||= overridden.has(handleId)||Number.isFinite(captured);
     const target={kind:'segment',uid:object.unique_id,handleId,...(editor.propertyChannels||scoped.has(handleId)?{figureTypeId:figure.figure_type_id}:{})};
-    entries.push({target,index,initialValue:animationStyleValue(figure,object,target,property)});
+    entries.push({target,index});
   }
   if(editor.propertyChannels && property==='opacity' && editor.selectedSegmentIds?.size <= 1) {
     const handles=new Set(entries.map(entry=>entry.target.handleId));handles.add(figure.segments[editor.selectedJoint]?.parent_id);
     figure.polyfills?.forEach((polygon,index)=>{
       if(!polygon.segment_ids?.every(id=>handles.has(id)))return;
       const target={kind:'polygon',uid:object.unique_id,polygonId:polygonIdentity(polygon,index),figureTypeId:figure.figure_type_id};
-      entries.push({target,index,initialValue:animationStyleValue(figure,object,target,'opacity')});
+      entries.push({target,index});
     });
   }
   return entries.length?{property,entries,authored,uid:object.unique_id}:null;
-}
-
-function publish(editor,edit,animation,live,label) {
-  if(editor.report._styk?.layerSheet){
-    editor._sheetPropertyPreview=live&&edit.changed?composeAnimationChannels({...editor.report,_styk:{...editor.report._styk,animation}},edit.frame,edit.tick,{resolveGeometry:buildGeometry}):null;
-    editor._invalidate();editor._emit('edit',{label,live,changedUids:[edit.uid]});return;
-  }
-  editor.report._styk ??= {};
-  if(animation)editor.report._styk.animation=animation;else delete editor.report._styk.animation;
-  editor._invalidate({timing:true});
-  editor._emit('edit',{label,live,animation:true,changedUids:[edit.uid],changedChannels:edit.channelIds});
-}
-function current(editor) {
-  const edit=editor._animationEdit;
-  if(!edit?.branchStyle)throw messageError(new Error(''), "errors.editorBranchStyle.beginABranchOpacityEditFirst", {});
-  if(editor.report!==edit.report||editor.tick!==edit.tick){cancelBranchStyleAnimation(editor);throw messageError(new Error(''), "errors.editorBranchStyle.theBranchEditTargetChanged", {});}
-  return edit;
-}
-export function beginBranchStyleAnimation(editor,plan) {
-  if(!plan?.entries?.length)throw messageError(new Error(''), "errors.editorBranchStyle.chooseABranchWithEditableOpacity", {});
-  if(editor._animationEdit)editor.commitAnimationEdit();
-  if(editor.dragging)editor.commitDrag();
-  const before=editor.report._styk?.animation??null;
-  const after={...before,version:1,nextKeyId:before?.nextKeyId??1,channels:[...animationChannels(editor.report)]};
-  const indices=new Map(after.channels.map((channel,index)=>[channel.id,index])),entries=[],keys=[],channelIds=[];
-  for(const source of plan.entries){
-    const target={...source.target},property=plan.property,id=animationChannelId(target,property),index=indices.get(id),original=index===undefined?null:after.channels[index];
-    const baseline=original ?? (editor.propertyChannels ? editor.nativePropertyChannel(target,property) : null);
-    const channel=baseline?{...baseline,target:{...baseline.target},keys:baseline.keys.map(key=>({...key}))}:{id,target,property,keys:[]};
-    if(index===undefined){indices.set(id,after.channels.length);after.channels.push(channel);}else after.channels[index]=channel;
-    let key=channel.keys.find(key=>key.tick===editor.tick&&!key.hidden);
-    if(!key){
-      const ids=new Set(channel.keys.map(key=>key.id));let keyId;
-      do{if(!Number.isSafeInteger(after.nextKeyId)||after.nextKeyId<1)throw messageError(new Error(''), "errors.cameraBakeAuthored.animationKeyIdentityCapacityExceeded", {});keyId=`key-${after.nextKeyId++}`;}while(ids.has(keyId));
-      key={id:keyId,tick:editor.tick,value:source.initialValue,...inheritedKeyEasing(channel.keys,editor.tick,{property})};channel.keys.push(key);channel.keys.sort((a,b)=>a.tick-b.tick);
-    }
-    delete key.passthrough;
-    entries.push({target,property,tick:editor.tick,value:source.initialValue,exactTarget:true,...keyEasing(key)});keys.push(key);channelIds.push(id);
-  }
-  return editor._animationEdit={branchStyle:true,report:editor.report,frame:editor.evaluatedFrame,uid:plan.uid,tick:editor.tick,before,after,selection:editor._selectionState(),entries,keys,channelIds,initialValues:plan.entries.map(entry=>entry.initialValue),changed:false};
-}
-export function previewBranchStyleAnimation(editor,value) {
-  const edit=current(editor);
-  value=validateAnimationValue(edit.entries[0].target,edit.entries[0].property,value);
-  previewBranchStyleValues(editor,edit.entries.map(()=>value));return value;
-}
-/** Combined draw order changes assign a different held value to each drawable. */
-export function previewBranchStyleValues(editor,values) {
-  const edit=current(editor);
-  if(values.length!==edit.entries.length)throw messageError(new Error(''), "errors.editorBranchStyle.everyEditedDrawableNeedsAValue", {});
-  values=values.map((value,i)=>validateAnimationValue(edit.entries[i].target,edit.entries[i].property,value));
-  for(let i=0;i<edit.keys.length;i++){edit.keys[i].value=values[i];edit.entries[i].value=values[i];}
-  edit.changed=edit.initialValues.some((initial,i)=>initial!==values[i]);
-  publish(editor,edit,edit.changed?edit.after:edit.before,true,'Preview drawable properties');
-}
-export function cancelBranchStyleAnimation(editor) {
-  const edit=editor._animationEdit;if(!edit?.branchStyle)return false;
-  editor._animationEdit=null;
-  if(editor.report===edit.report)publish(editor,edit,edit.before,false,'Cancel branch opacity');
-  return true;
-}
-export function commitBranchStyleAnimation(editor) {
-  const edit=editor._animationEdit;if(!edit?.branchStyle)return false;
-  editor._animationEdit=null;
-  if(editor.report!==edit.report)return false;
-  editor._sheetPropertyPreview=null;
-  editor.report._styk ??= {};
-  if(edit.before)editor.report._styk.animation=edit.before;else delete editor.report._styk.animation;
-  editor._invalidate({timing:true});
-  if(!edit.changed){editor._emit('edit',{animation:true,label:'Cancel unchanged branch opacity'});return false;}
-  editor.addAnimationKeys(edit.entries);return true;
-}
-
-/** Numeric secondary opacity preserves each existing endpoint RGB. It does not
- * invent gradients on plain segments (unlike the native combined color chooser). */
-export function branchGradientOpacityBinding(editor,plan) {
-  const indices=plan.entries.map(entry=>entry.index);
-  return {paths:indices.map(index=>['segments',index,'secondary','a']),mutate(figure,{gradientOpacity}){
-    const value=validateAnimationValue(plan.entries[0].target,'gradientOpacity',gradientOpacity);
-    for(const index of indices)figure.segments[index].secondary.a=Math.round((1-value)*255);
-  }};
 }

@@ -1,0 +1,46 @@
+{
+ "name": "native-builder-token-locked",
+ "document": "native-builder-token-locked.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "@nativeBegin",
+   "thickness",
+   {
+    "branch": true
+   }
+  ],
+  [
+   "@nativePreview",
+   23.25
+  ],
+  [
+   "@nativeCommit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@nativeBegin",
+   "segment_opacity",
+   {
+    "branch": true
+   }
+  ],
+  [
+   "@nativePreview",
+   50
+  ],
+  [
+   "@nativeCancel"
+  ]
+ ]
+}

@@ -100,7 +100,6 @@ export default Object.freeze({
   "inspectorView.mergeTheConnectedFiguresIntoOne": "Merge the connected figures into one",
   "inspectorView.colours": "Colours",
   "inspectorView.figureColorPalette": "Figure color palette",
-  "inspectorView.replaceSegments": "Replace {value}, {length} segments{value2}",
   "inspectorView.colourPages": "Colour pages",
   "inspectorView.previousColors": "Previous colors",
   "inspectorView.nextColors": "Next colors",

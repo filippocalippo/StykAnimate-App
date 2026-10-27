@@ -1,6 +1,6 @@
 # Timeline interaction and verification
 
-Implementation: [timeline.mjs](../src/timeline.mjs). Reproduce the browser checks
+Implementation: [layer-timeline.mjs](../src/layer-timeline.mjs). Reproduce the browser checks
 with `node tests/timeline.browser.mjs` from the app directory. Current results are
 in [timeline-verification.json](../artifacts/timeline-verification.json).
 
@@ -61,7 +61,7 @@ and output-frame position.
 Native Scene, Camera, and layer pose descriptors are requested lazily only when
 their keys are needed. Merely displaying them does not author or bake animation.
 Summary diamonds refer to the exact underlying channel/key identities. A drag
-previews a snapped offset, then calls `moveAnimationKeys` once on release. First
+previews a snapped offset, then commits one key move (a session command) on release. First
 editing a native track adopts it within that same undo command. No global Pivot
 frame is moved when a single layer key is moved.
 
@@ -99,12 +99,11 @@ F7 announces which track kinds support it, without invoking a host shortcut.
 key selection and without editor mutations or selection callbacks. Pass
 `notify:true` for the same model selection behavior as clicking a row. Optional
 `onTrackSelect(descriptor)` and `onKeysChange([{channelId,keyIds}])` callbacks connect
-the host inspector. `selectedAnimationKeys` returns those exact grouped IDs.
+the host inspector with those exact grouped IDs.
 `setMode('frames')` switches to whole-document editing; `setMode('tracks')` returns
 to independent tracks. Destruction cancels pointer/paint RAFs and removes listeners.
 
-Run `node --test tests/timeline-channels.test.mjs` and
-`node tests/timeline-channels.browser.mjs`. The
+Run `node tests/timeline-channels.browser.mjs`. The
 [channel report](../artifacts/timeline-channels-verification.json) verifies native
 single-layer isolation, no mutations during drag, unchanged native frame data,
 one-command adoption undo/redo, scalar and range dragging, collision rejection,
@@ -202,8 +201,8 @@ continues to use `editor.seek(tick)`.
 
 Ctrl/Shift frame selection and comma/period navigation follow the supplied
 [Pivot frame-control conventions](https://pivotanimator.net/help5-2/animation_frame_controls.htm).
-Frame operations are undoable in this application. Zero-selection copy/delete
-are no-ops and preserve the clipboard. Sparse clipboard, reverse, timing and bake
+Frame operations are undoable in this application. Zero-selection delete
+is a no-op. Sparse reverse, timing and bake
 commands receive the exact sorted index set. Painting uses cached selection runs
 and set membership, so gaps remain visibly unselected. A playback range requires
 one continuous selection.
@@ -213,8 +212,7 @@ one continuous selection.
 The Timing dialog synchronizes exposure frames with inbetweens, handles mixed
 values, and applies the chosen duration to the selected keys in one history
 command. Duration zero hides a key. The model retains Pivot's terminal-frame rule.
-Blank insertion preserves the current camera/background. Duplication preserves
-the frame clipboard.
+Blank insertion preserves the current camera/background.
 
 Baking materializes output poses through the model's bounded range command.
 Hidden keys remain stored. Sparse baking selects only the resulting selected
@@ -249,7 +247,7 @@ RAF. Pointer release cancels any older pending move and flushes its exact tick.
 ## Recorded evidence and remaining acceptance
 
 The browser regression verifies toolbar actions, timing fields and presets,
-sparse selection/clipboard/reverse/baking, zero-selection behavior, hidden-key
+sparse selection/reverse/baking, zero-selection behavior, hidden-key
 navigation/restoration, loop callbacks, cancellation, resize, and undo. It also
 verifies zero eager evaluations across a 144-move burst, one seek per RAF, one
 deferred range notification, and exact final-tick handling.

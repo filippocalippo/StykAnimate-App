@@ -7,12 +7,11 @@ import {t as interfaceText} from './localization.mjs';
 
 import {clipRowsHTML,clipKeyControls,clipClick,clipChange,selectClip,openClipMenu} from './vfx-clip-inspector.mjs';
 import {focusClipBinding,groupDragStart,groupDragOver,groupDrop,groupDragEnd,groupKeydown} from './vfx-clip-controls.mjs';
-import {vfxClipActiveAt} from './vfx-clips.mjs';
+import {clipActive} from './vfx-clip-views.mjs';
 import {connectedVfxConflict} from './vfx-connected.mjs';
 import {VFX_REGISTRY, VFX_LIMIT, vfxProperty, resolvedVfx, vfxDescriptor} from './vfx.mjs';
 import {effectAvailable} from './vfx-registry.mjs';
 import {VFX_PRESETS,PRESET_CATEGORIES,presetAvailable} from './vfx-presets.mjs';
-import {prewarmAtlas} from './vfx-generator-atlas.mjs';
 import {vfxPresetStore} from './vfx-user-presets.mjs';
 import {MINE,myPresetsSection,openPresetMenu,presetSummaryMessage,usablePresets} from './vfx-preset-ui.mjs';
 import {hasEffectPreview,cachedEffectPreview,requestEffectPreview} from './vfx-preset-preview.mjs';
@@ -49,7 +48,7 @@ export class VfxInspector {
   listen('property-edit-end',this.sync);listen('contextmenu',this.contextmenu);
   editor.addEventListener('change',({detail})=>{
    if(detail?.kind==='vfx-channels')this.sync();
-   if(detail?.kind==='vfx-selection'){this.selectedClip=editor._selectedVfxClip;const clip=editor.getVfxClips().find(c=>c.id===this.selectedClip);if(clip){this.scope=clip.target.kind==='scene'?'scene':clip.target.kind==='figure'?(clip.includeAttached?'connected':'figure'):'selection';if(detail.source==='timeline'&&(this.clipView??'playhead')==='playhead'&&!vfxClipActiveAt(clip,editor.tick))this.clipView='selected';}this.sync();this.onChange();}
+   if(detail?.kind==='vfx-selection'){this.selectedClip=editor._selectedVfxClip;const clip=editor.getVfxClips().find(c=>c.id===this.selectedClip);if(clip){this.scope=clip.target.kind==='scene'?'scene':clip.target.kind==='figure'?(clip.includeAttached?'connected':'figure'):'selection';if(detail.source==='timeline'&&(this.clipView??'playhead')==='playhead'&&!clipActive(editor,clip))this.clipView='selected';}this.sync();this.onChange();}
    if(detail?.kind==='history'){this.finishForHistory();this.sync();}
    if(['document','selection'].includes(detail?.kind)){this.scope='selection';this.selected=null;this.selectedClip=null;editor._selectedVfxClip=null;editor._selectedVfxKey=null;if(detail.kind==='document')this.clipQuery='';this.closePopup();this.sync();this.onChange();}
   },{signal:this.abort.signal});
@@ -61,7 +60,7 @@ export class VfxInspector {
  readBinding(b){if(b.clipField)return (this.editor.getVfxClips().find(c=>c.id===b.clip)[b.clipField]+b.offset)*b.factor;const p=resolvedVfx(this.bindingEffects(b).find(e=>e.id===b.id)).params;return b.derived?(b.param==='angle'?Math.atan2(p.offsetY,p.offsetX)*180/Math.PI:Math.hypot(p.offsetX,p.offsetY)):p[b.param]*b.factor;}
  setVisible(visible){if(this.requestVisible)this.requestVisible(visible);else this.panelVisible(visible);}
  /** The shell showed or hid the VFX panel (panel registry onVisibility). */
- panelVisible(visible){this.commit();this.visible=visible;if(visible)prewarmAtlas();if(!visible)this.closePopup();this.sync();this.onChange();}
+ panelVisible(visible){this.commit();this.visible=visible;if(!visible)this.closePopup();this.sync();this.onChange();}
  get active(){return this.controls.active;}
  commit(){this.controls.commit();}
  cancel(){this.controls.cancel();}
@@ -73,7 +72,7 @@ export class VfxInspector {
  ownerNameMessage(target){if(target.kind==='scene')return {messageKey:'vfxInspector.scene'};const object=this.editor.evaluatedFrame.objects.find(o=>o.unique_id===target.uid),figure=this.editor.report.figure_types.find(f=>f.figure_type_id===object?.figure_type_id),name=figure?.name||{messageKey:'vfxInspector.figure'};return target.kind==='segment'?{messageKey:'vfxInspector.segmentOwner',messageParams:{name,joint:{messageKey:'builderSurfaceUi.jointNumber',messageParams:{id:target.handleId}}}}:name;}
  ownerName(target){const name=this.ownerNameMessage(target);return typeof name==='string'?name:interfaceText(name.messageKey,name.messageParams);}
  ownerNameHTML(target){const name=this.ownerNameMessage(target);return typeof name==='string'?esc(name):messageHTML(name.messageKey,name.messageParams);}
- selectedEffect(){if(!this.visible)return null;if(this.selectedClip){const clip=this.editor.getVfxClips().find(c=>c.id===this.selectedClip);if(!clip||!vfxClipActiveAt(clip,this.editor.tick))return null;const effects=this.editor.sampleVfxClip(clip.id),effect=effects.find(e=>e.id===this.selectedClipEffect)??effects[0];return effect?{target:clip.target,effect,clip:clip.id,includeAttached:clip.includeAttached}:null;}if(!this.selected)return null;const {target,id}=this.selected;if(!this.targets().some(t=>JSON.stringify(t)===JSON.stringify(target)))return null;const effect=this.editor.vfxEffects(target).find(e=>e.id===id);return effect?{target,effect:resolvedVfx(effect)}:null;}
+ selectedEffect(){if(!this.visible)return null;if(this.selectedClip){const clip=this.editor.getVfxClips().find(c=>c.id===this.selectedClip);if(!clip||!clipActive(this.editor,clip))return null;const effects=this.editor.sampleVfxClip(clip.id),effect=effects.find(e=>e.id===this.selectedClipEffect)??effects[0];return effect?{target:clip.target,effect,clip:clip.id,includeAttached:clip.includeAttached}:null;}if(!this.selected)return null;const {target,id}=this.selected;if(!this.targets().some(t=>JSON.stringify(t)===JSON.stringify(target)))return null;const effect=this.editor.vfxEffects(target).find(e=>e.id===id);return effect?{target,effect:resolvedVfx(effect)}:null;}
  select(target,id){this.selected={target,id};this.selectedClip=null;this.editor._selectedVfxClip=null;this.editor._selectedVfxKey=null;if(target.kind==='figure')this.scope=this.editor.animationValue(target,'vfxScope')?'connected':'figure';this.editor._emit('vfx-selection');this.sync();this.onChange();}
  isSelected(target,id){return Boolean(this.selected)&&identity(target,id)===identity(this.selected.target,this.selected.id);}
  lockedTarget(target){return this.editor.getLayer(target.kind==='scene'?'scene':this.editor.layerForUid(target.uid))?.locked;}

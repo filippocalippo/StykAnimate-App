@@ -4,7 +4,7 @@
  */
 import {readFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import {decodeDocument, buildContainerV2} from '../src/native-container.mjs';
+import {decodeDocument, buildContainerV2} from '../tests/support/native-files.mjs';
 import {validateScene, syncDerived} from '../src/pivot/model.mjs';
 import {convertDocumentSpatialMeshes} from '../src/spatial-mesh-legacy.mjs';
 

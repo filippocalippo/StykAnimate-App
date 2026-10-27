@@ -1,5 +1,9 @@
 import {onionRangeSnapshot,onionRangeSettings} from './onion-range.mjs';
 
+/** The settings the engine plans the onion skins from. */
+const PLANNED=['onionMode','onionStep','onionRangeBefore','onionRangeAfter','onionScope','onionJoined','onionOpacity','onionFade','onionTint',
+  'onionBeforeColor','onionAfterColor','onionShowOnTop'];
+
 /** One owner for transient onion preferences. Views never persist during drag. */
 export class OnionController {
   constructor({editor,getSettings,getEnabled,onCommit,onToggle,onRender,onError}){
@@ -12,6 +16,14 @@ export class OnionController {
   }
   get settings(){return {...onionRangeSettings(this.getSettings()),...this.session?.patch};}
   snapshot(tick){return onionRangeSnapshot(this.editor,this.settings,tick);}
+  /** What the engine plans the onion skins from (onion_skins.rs): the settings, the number of samples each side that the range
+   * reaches in this document, the figures the interface hides and, for the scope of the selected ones, which are. */
+  request({selected,hidden}){
+    const settings=this.settings,range=settings.onionRangeBefore!=null||settings.onionRangeAfter!=null?this.snapshot():null;
+    return {...Object.fromEntries(PLANNED.map(key=>[key,settings[key]??null])),
+      onionBefore:range?range.before.count:settings.onionBefore,onionAfter:range?range.after.count:settings.onionAfter,
+      hidden:[...hidden],selected:settings.onionScope==='selected'?[...selected]:[]};
+  }
   subscribe(listener){this.listeners.add(listener);return ()=>this.listeners.delete(listener);}
   sync(render=true){for(const listener of this.listeners)listener();if(render)this.onRender?.();}
   begin(owner){

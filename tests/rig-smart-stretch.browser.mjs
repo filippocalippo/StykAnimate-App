@@ -23,7 +23,7 @@ try{
   await page.locator('#rig-response').selectOption('stretch');await settle();
   await page.locator('#rig-angle-lock').selectOption('parent');await settle();await value('rig-lock-multiplier',-1);
   assert.equal(await page.evaluate(()=>styk.editor.figure.segments[1]._stykRig.angleLock.reference),1);
-  await page.locator('.rail-quick [data-action="zoom-selection"]').click();await settle();
+  await page.evaluate(()=>styk.actions['zoom-selection']());await settle();
   for(const [theme,width,height] of [['light',1440,1000],['dark',1100,760],['light',1100,760]]){
     await page.setViewportSize({width,height});await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);await settle();
     assert.equal(await page.locator('[data-section="rig-controls"] p').count(),0);
@@ -35,8 +35,10 @@ try{
   await page.locator('#rig-test-joint').selectOption('2');await settle();assert.equal(await page.locator('#rig-test-angle').isDisabled(),true);
   await page.screenshot({path:`${output}/test-rig.png`});
   await page.locator('#dialog [data-action="close-dialog"]').last().click();await settle();
-  await page.evaluate(()=>{const e=styk.editor;const c=e.addConnector(1,7);e.select(1,e.figure.segments.findIndex(s=>s===c));});await settle();
-  await page.locator('[data-connector-part="segment"]').click();await page.locator('#rig-stretch-enabled').check();await settle();await page.locator('#rig-source').selectOption('combined');await settle();
+  await page.evaluate(()=>{const e=styk.editor;const c=e.addConnector(1,7);e.select(1,e.figure.segments.findIndex(s=>s.segment_id===c.segment_id));});await settle();
+  // A connector opens on its Slider; Smart stretch belongs to its Segment.
+  await page.locator('[data-connector-part="segment"]').click();await settle();await openRig();
+  await page.locator('#rig-stretch-enabled').check();await settle();await page.locator('#rig-source').selectOption('combined');await settle();
   await value('rig-rest-position',50);
   assert.equal(await page.evaluate(()=>styk.editor.figure.segments[styk.editor.selectedJoint]._stykRig.stretch.source),'combined');
   await page.screenshot({path:`${output}/connector-source.png`});

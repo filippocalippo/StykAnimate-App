@@ -15,8 +15,8 @@ try {
   assert.deepEqual(await snapshot(),expected);
   const render=async name=>{
     const png=await page.evaluate(async()=>{
-      const {ExportFrameRenderer}=await import('/src/export-frame-renderer.mjs');
-      const r=new ExportFrameRenderer({width:960,height:540});
+      const {pageExporter}=await import('/tests/support/page-export.mjs');
+      const r=pageExporter({width:960,height:540});
       try{await r.load(styk.editor.report);return (await r.renderTick(0)).toDataURL().split(',')[1];}finally{r.dispose();}
     });await writeFile(path.join(out,`${name}.png`),Buffer.from(png,'base64'));
   };

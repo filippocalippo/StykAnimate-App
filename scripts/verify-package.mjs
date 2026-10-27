@@ -1,4 +1,5 @@
 import { readdir, readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -34,6 +35,9 @@ async function walk(relative) {
   }
 }
 for (const directory of ['src', 'vendor', 'assets']) await walk(directory);
+// The engine, the Pivot codec and the drawing raster engine are WebAssembly modules built into src/engine/pkg (node scripts/engine-build.mjs).
+if (!snapshot) for (const required of ['styk_engine_bg.wasm', 'styk_codec_bg.wasm', 'styk_codec.js', 'styk_drawing_bg.wasm', 'styk_drawing.js'].map((name) => path.join('src', 'engine', 'pkg', name)))
+  if (!files.includes(required)) throw new Error(`${required.replaceAll('\\', '/')} is missing; build it with node scripts/engine-build.mjs.`);
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const manifest = [];
 let synchronized = 0;
@@ -64,23 +68,9 @@ for (const filename of nativeFiles) {
   manifest.push({ path: `app.asar/desktop/${filename}`, sha256: hash(packaged), bytes: packaged.length });
 }
 if (!snapshot) {
-  const sidecarBinary = process.platform === 'win32' ? 'styk-codec.exe' : 'styk-codec';
-  for (const [relative, sourcePath] of [
-    ['backend/server.py', path.join(appRoot, 'backend', 'server.py')],
-    ...['fast_decode.py','import_wire.py','native_scan.py','native_format.py','jobs.py'].map(filename=>[`backend/${filename}`,path.join(appRoot,'backend',filename)]),
-    ['codec_bridge.py', path.join(appRoot, 'codecs', 'codec_bridge.py')],
-    ['sidecar/build-info.json', path.join(appRoot, 'build', 'sidecar', 'build-info.json')],
-    [`sidecar/styk-codec/${sidecarBinary}`, path.join(appRoot, 'build', 'sidecar', 'styk-codec', sidecarBinary)],
-  ]) {
-    const source = await readFile(sourcePath), packaged = await readFile(path.join(resources, relative));
-    if (hash(source) !== hash(packaged)) throw new Error(`Packaged runtime differs from the verified build: ${relative}`);
-    manifest.push({ path: relative, sha256: hash(packaged), bytes: packaged.length });
-  }
-  const scannerName=process.platform==='win32'?'styk-piv-frame-scan.dll':process.platform==='darwin'?'libstyk-piv-frame-scan.dylib':'libstyk-piv-frame-scan.so';
-  const scannerRelative=`sidecar/styk-codec/_internal/native/${scannerName}`;
-  const scannerSource=await readFile(path.join(appRoot,'build',scannerRelative)),scannerPackaged=await readFile(path.join(resources,scannerRelative));
-  if(hash(scannerSource)!==hash(scannerPackaged))throw new Error('Packaged PIV scanner differs from its verified sidecar.');
-  manifest.push({path:scannerRelative,sha256:hash(scannerPackaged),bytes:scannerPackaged.length});
+  // No Python codec ships: the Pivot codec is the WebAssembly module among the web assets above.
+  for (const leftover of ['backend', 'tools', 'sidecar', 'codec_bridge.py'])
+    if (existsSync(path.join(resources, leftover))) throw new Error(`The package still carries the retired Python codec: ${leftover}`);
   for (const filename of await readdir(path.join(appRoot, 'build', 'video-encoder'))) {
     const relative = `video-encoder/${filename}`;
     const source = await readFile(path.join(appRoot, 'build', relative)), packaged = await readFile(path.join(resources, relative));

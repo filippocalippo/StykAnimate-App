@@ -71,7 +71,8 @@ try{
   const before=calls;overlay.dispatchEvent(new PointerEvent('pointerup',{pointerId:1,clientX:x+12,clientY:y-8,isPrimary:true}));
   e.poseJoint=original;return{before,after:calls,dragging:e.dragging};
  },burstPoint);
- await page.mouse.up();assert.equal(burst.before,0);assert.equal(burst.after,1);assert.equal(burst.dragging,false);await page.evaluate(()=>styk.editor.undo());
+ await page.mouse.up();// The first move poses at once (it starts the gesture); the other 23 coalesce into the one pose the release flushes.
+ assert.equal(burst.before,1);assert.equal(burst.after,2);assert.equal(burst.dragging,false);await page.evaluate(()=>styk.editor.undo());
  await page.getByRole('button',{name:'Rotate figure',exact:true}).click();
  const figureBefore=await page.evaluate(()=>styk.editor.serialize());
  await page.getByRole('button',{name:'Turn and tilt',exact:true}).press('ArrowRight');

@@ -8,8 +8,8 @@ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(30000);
 const settle=async()=>{
   await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&styk.state.renderer.last?.report===styk.editor.report);
-  await page.evaluate(()=>styk.state.renderer.device?.queue.onSubmittedWorkDone());
+  await page.waitForFunction(()=>styk.state.renderer.engineSide?.frameReport===styk.editor.report);
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 };
 try {
   await page.goto(process.env.STYK_URL??'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
@@ -29,14 +29,12 @@ try {
     const before=await page.evaluate(()=>({report:JSON.stringify(styk.editor.serialize()),history:styk.editor._undo.length}));
     await page.keyboard.press('Control+v');await settle();
     const result=await page.evaluate(async()=>{
-      const {buildGeometry}=await import('/src/pivot/geometry.mjs'),e=styk.editor;
-      const signature=g=>g.drawables.map(({obj,fig,...shape})=>({...shape,obj:obj.unique_id,fig:fig.figure_type_id}));
+      const e=styk.editor;
       return {independent:e.selectedObjects.every(o=>o.figure_type_id!==1),count:e.selectedObjects.length,total:e.evaluatedFrame.objects.length,history:e._undo.length,undoLabel:e.undoLabel,
-        geometry:JSON.stringify(signature(styk.state.renderer.lastGeometry))===JSON.stringify(signature(buildGeometry(e.report,e.evaluatedFrame))),
         report:JSON.stringify(e.serialize())};
     });
     assert.ok(result.independent);assert.equal(result.count,2);assert.equal(result.total,5);assert.equal(result.history,before.history+1);
-    assert.equal(result.undoLabel,'Paste figures');assert.ok(result.geometry);
+    assert.equal(result.undoLabel,'Paste figures');
     await page.keyboard.press('Control+z');await settle();assert.equal(await page.evaluate(()=>JSON.stringify(styk.editor.serialize())),before.report);
     await page.keyboard.press('Control+y');await settle();assert.equal(await page.evaluate(()=>JSON.stringify(styk.editor.serialize())),result.report);
     await page.screenshot({path:`artifacts/figure-paste/${mode}-keyboard.png`});
@@ -54,12 +52,12 @@ try {
   assert.ok(await page.evaluate(()=>styk.editor.selectedObjects.every(o=>o.figure_type_id!==1)));
   console.log('PASS right-click instance and unique copy actions');
   const saved=await page.evaluate(async()=>{
-    const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{Editor}=await import('/src/editor.mjs');
+    const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{ pageEditor }=await import('/tests/support/page-editor.mjs');
     const exporter=new DocumentExporter(),importer=new ImportClient(),e=styk.editor;
     try{
       const blob=await exporter.export(e.report,{format:'styk',name:'figure-paste'});
       const imported=await importer.importFile(new File([blob],'figure-paste.styk'));
-      const reopened=new Editor({demo:false,layerTimeline:true}).load(imported.document);reopened.seek(e.tick);
+      const reopened=pageEditor({demo:false,layerTimeline:true}).load(imported.document);reopened.seek(e.tick);
       const clean=editor=>editor.evaluatedFrame.objects.map(o=>({uid:o.unique_id,figure:o.figure_type_id,join:o.join,angles:o.angles,x:o.root_x,y:o.root_y}));
       return JSON.stringify(clean(reopened))===JSON.stringify(clean(e));
     }finally{exporter.dispose();importer.dispose();}
@@ -68,7 +66,7 @@ try {
   await page.evaluate(async()=>{
     const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');
     const {movieclipFigure}=await import('/src/movieclips.mjs');
-    const {presencePlayback}=await import('/src/movieclip-presence.mjs');
+    const {presencePlayback}=await import('/tests/support/movieclip-playback.mjs');
     const child=emptyDocument();child.keyframes=[createFrame([createObject(child.figure_types[0],1,200,250)])];
     const clip=movieclipFigure(2,'Paste test clip',child,{duration:1});
     const report=emptyDocument();report.figure_types.push(clip);

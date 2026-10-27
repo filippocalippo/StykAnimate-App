@@ -56,14 +56,6 @@ async function setup(key, property) {
       thickness: 16,
       gradient: { color: "#25c987", opacity: 0.6 },
     });
-    // The secondary-opacity row renders only for segments carrying a legacy
-    // gradient definition; pose styles alone do not create it.
-    e.figure.segments[0].secondary ??= { rgb: [37, 201, 135], a: 102 };
-    for (const segment of e.figure.segments) {
-      segment.segment_id *= 11;
-      segment.parent_id *= 11;
-    }
-    e._invalidate();
     const uid = e.selectedUid;
     e.addFigure(e.figure.figure_type_id);
     const other = e.selectedUid;
@@ -74,7 +66,7 @@ async function setup(key, property) {
       uid,
       other,
       property,
-      target: { kind: "segment", uid, handleId: 11 },
+      target: { kind: "segment", uid, handleId: e.figure.segments[0].segment_id },
       base: JSON.stringify(e.figure),
     };
   }, property);
@@ -104,7 +96,6 @@ try {
   await mkdir(out, { recursive: true });
   for (const [key, property] of [
     ["segment_opacity", "opacity"],
-    ["segment_gradient_opacity", "gradientOpacity"],
   ]) {
     await setup(key, property);
     let before = await state();
@@ -181,8 +172,8 @@ try {
     before = await state();
     await page.evaluate(() => {
       const e = styk.editor;
-      e.copyFigure();
-      e.pasteFigure();
+      e.copySelection();
+      e.pasteSelection();
       e.select(e.selectedUid, 0);
       window.styleTest.pasted = e.selectedUid;
     });

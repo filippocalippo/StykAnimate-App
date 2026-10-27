@@ -134,13 +134,13 @@ try {
   const roundtrips = await page.evaluate(async () => {
     const {DocumentExporter} = await import('/src/document-export.mjs');
     const {ImportClient} = await import('/src/import-client.mjs');
-    const {Editor} = await import('/src/editor.mjs');
+    const { pageEditor } = await import('/tests/support/page-editor.mjs');
     const exporter = new DocumentExporter(), importer = new ImportClient(), results = [];
     try {
       for (const format of ['styk', 'stkz', 'piv']) {
-        const blob = await exporter.export(styk.editor.serialize(), {format, figureUid: 1, tick: styk.editor.tick});
+        const blob = await exporter.export(styk.editor.serialize(), {format, figureUid: 1, tick: styk.editor.tick, revision: styk.editor.revision});
         const imported = await importer.importFile(new File([blob], `ik.${format}`));
-        const reopened = new Editor({demo: false}).load(imported.document);
+        const reopened = pageEditor({demo: false}).load(imported.document);
         const g = reopened.geometry.objects.get(0);
         results.push({format, bytes: blob.size, point: format === 'piv' ? g.segments[1].end : g.joints.get(22), footAngle: g.segments[2].angle, hasControllers: Boolean(g.obj._stykIK)});
       }
@@ -217,12 +217,12 @@ try {
   check('Thickness editing and re-pinning preserve the child articulation');
   await page.screenshot({path:'artifacts/ik/joined-attachments.png'});
   const joinedRoundtrips=await page.evaluate(async()=>{
-    const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{Editor}=await import('/src/editor.mjs');
+    const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{ pageEditor }=await import('/tests/support/page-editor.mjs');
     const exporter=new DocumentExporter(),importer=new ImportClient(),results=[];
     const sample=e=>[...e.geometry.objects.values()].map(g=>({uid:g.obj.unique_id,segments:g.segments.map(s=>({end:s.end,angle:s.angle}))}));
     try{for(const format of ['styk','piv']){
-      const blob=await exporter.export(styk.editor.serialize(),{format}),loaded=await importer.importFile(new File([blob],`joined.${format}`));
-      results.push({format,expected:sample(styk.editor),actual:sample(new Editor({demo:false}).load(loaded.document))});
+      const blob=await exporter.export(styk.editor.serialize(),{format,revision:styk.editor.revision}),loaded=await importer.importFile(new File([blob],`joined.${format}`));
+      results.push({format,expected:sample(styk.editor),actual:sample(pageEditor({demo:false}).load(loaded.document))});
     }}finally{exporter.dispose();importer.dispose();}return results;
   });
   for(const result of joinedRoundtrips)for(const expected of result.expected){

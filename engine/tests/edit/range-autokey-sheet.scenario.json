@@ -1,0 +1,61 @@
+{
+ "name": "range-autokey-sheet",
+ "document": "sheet-layers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true,
+  "autoKey": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "mirrorFiguresInFrames",
+   "horizontal",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     2,
+     3
+    ]
+   }
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "field28": 50
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     4
+    ]
+   }
+  ],
+  [
+   "orderFiguresInFrames",
+   "back",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     1
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

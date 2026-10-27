@@ -24,9 +24,10 @@ previous fields. The disclosure remains open after a commit. These properties
 edit the reusable definition and therefore every instance of that definition.
 They do not add independent animation channels.
 
-`editor-builder-style.mjs` exposes `moveBuilderOrder`, `setBuilderOrder`, and
-`setPolygonOpacity`; `normalizeBuilderOrder` is shared with topology insertion.
-The existing numeric adapter handles `segment_z_order` and
+The engine session runs `moveBuilderOrder`, `setBuilderOrder` and
+`setPolygonOpacity` (`styk-edit/src/builder.rs`); `editor-builder-style.mjs`
+keeps the order model the inspector reads (`builderDrawables`,
+`builderStyleProperty`). The existing numeric adapter handles `segment_z_order` and
 `polygon_<index>_z_order` / `polygon_<index>_opacity`. History stores changed
 native fields and compressed-order metadata, without copying images, text assets,
 animation frames or retained pose sources. Model validation rejects non-finite
@@ -34,9 +35,10 @@ order and invalid polygon alpha.
 
 Verification:
 
-- Eight order/opacity model tests, including actual PIV and STK encoding/reopen.
-- Three preserved style/topology regressions and thirteen existing numeric
-  property regressions also pass: 24 tests in the combined run.
+- `tests/editor-builder-style.test.mjs` checks the order targets of a branch and
+  the validation of malformed order and polygon alpha; the recorded edit tapes
+  `builder-order-*` and `polygon-opacity-sheet` check the commands, and
+  `tests/builder-order-timeline.test.mjs` the numeric adapter.
 - [Thirteen actual application checks](../artifacts/builder-order/report.json)
   cover visible controls, branch offsets, undo, live opacity cancellation,
   persistent disclosure/branch choice, unchanged frame references, and real

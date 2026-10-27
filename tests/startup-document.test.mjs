@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
 import {createStartupDocument} from '../src/startup-document.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {ikChain} from '../src/ik.mjs';
-import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
+import {pivotDocument} from './support/engine-export.mjs';
 
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-3,`${a} != ${b}`);
 const named=(editor,name)=>editor.figure.segments.find(s=>s.name===name);
@@ -22,7 +22,7 @@ function assertHold(e){
 
 test('New creates a clean Blue scene with one ten-frame key on every layer',()=>{
   for(const layerTimeline of [false,true]){
-    const e=new Editor({layerTimeline}).newDocument();
+    const e=newOwnedEditor({layerTimeline}).newDocument();
     assert.equal(e.name,'Untitled animation');assertHold(e);
     assert.equal(e.frame.objects.length,1);assert.equal(e.report.figure_types.length,1);
     assert.equal(e.figure.name,'Blue');assert.equal(e.dirty,false);assert.equal(e.canUndo,false);
@@ -60,7 +60,7 @@ test('The default is an ordinary editable stick figure and owns independent data
 });
 
 test('Blue has balanced limbs and a slightly bent, accessible resting pose',()=>{
-  const e=new Editor({demo:false,layerTimeline:true}).newDocument();
+  const e=newOwnedEditor({demo:false,layerTimeline:true}).newDocument();
   for(const part of ['upper arm','forearm','thigh','lower leg']){
     const a=e.geometry.objects.get(0).joints.get(named(e,'Left '+part).segment_id);
     const b=e.geometry.objects.get(0).joints.get(named(e,'Right '+part).segment_id);
@@ -77,7 +77,7 @@ test('Blue has balanced limbs and a slightly bent, accessible resting pose',()=>
 
 test('All four 2D limbs pose without stretching or disturbing other branches, with undo and redo',()=>{
   for(const layerTimeline of [false,true])for(const name of ['Left forearm','Right forearm','Left lower leg','Right lower leg']){
-    const e=new Editor({demo:false,layerTimeline}).newDocument();select(e,name);
+    const e=newOwnedEditor({demo:false,layerTimeline}).newDocument();select(e,name);
     const id=named(e,name).segment_id,chain=ikChain(e.figure,id,2),before=e.serialize();
     const initial=e.geometry.objects.get(0),target={x:initial.joints.get(id).x,y:initial.joints.get(id).y-25};
     e.beginDrag();e.poseJoint(target.x,target.y);e.commitDrag();
@@ -93,7 +93,7 @@ test('All four 2D limbs pose without stretching or disturbing other branches, wi
 });
 
 test('Pinned 2D feet stay planted when the body moves',()=>{
-  const e=new Editor({demo:false,layerTimeline:true}).newDocument();
+  const e=newOwnedEditor({demo:false,layerTimeline:true}).newDocument();
   for(const name of ['Left lower leg','Right lower leg']){select(e,name);e.setNodeIK({pinned:true});}
   const positions=['Left lower leg','Right lower leg'].map(name=>[named(e,name).segment_id,e.geometry.objects.get(0).joints.get(named(e,name).segment_id)]);
   e.select(1);e.moveSelection(0,15);
@@ -101,10 +101,10 @@ test('Pinned 2D feet stay planted when the body moves',()=>{
 });
 
 test('Native saving and reopening preserve Blue and all three ten-frame holds',async()=>{
-  const e=new Editor({demo:false,layerTimeline:true}).newDocument();
+  const e=newOwnedEditor({demo:false,layerTimeline:true}).newDocument();
   const bytes=await buildContainerV2(e.serialize(),'styk');
   const saved=(await decodeDocument(bytes,'styk')).document;
-  const reopened=new Editor({demo:false,layerTimeline:true});reopened.load(saved);
+  const reopened=newOwnedEditor({demo:false,layerTimeline:true});reopened.load(saved);
   assertHold(reopened);assert.equal(reopened.figure.name,'Blue');
   assert.deepEqual(reopened.object._stykIK,e.object._stykIK);
   // Decode fills derived flag aliases; authored topology, style and pose stay intact.
@@ -115,17 +115,17 @@ test('Native saving and reopening preserve Blue and all three ten-frame holds',a
 });
 
 test('Pivot export keeps the 2D startup artwork and ten-frame timing',()=>{
-  const e=new Editor({demo:false,layerTimeline:true}).newDocument();
+  const e=newOwnedEditor({demo:false,layerTimeline:true}).newDocument();
   select(e,'Left forearm');e.poseJoint(515,265);
   const before=e.serialize(),joints=e.geometry.objects.get(0).joints;
-  const reopened=new Editor({demo:false}).load(materializePivotDocument(e.report));
+  const reopened=newOwnedEditor({demo:false}).load(pivotDocument(e.report));
   assert.equal(reopened.totalTicks,10);assert.equal(reopened.figure.segments.length,10);
   for(const [id,p]of joints){near(reopened.geometry.objects.get(0).joints.get(id).x,p.x);near(reopened.geometry.objects.get(0).joints.get(id).y,p.y);}
   assert.deepEqual(e.serialize(),before);
 });
 
 test('New preserves camera and layer clipboards and pastes into the ten-frame scene with undo',()=>{
-  const e=new Editor({demo:false,layerTimeline:true}).newDocument();
+  const e=newOwnedEditor({demo:false,layerTimeline:true}).newDocument();
   e.setCameraValues({x:40});e.copyCamera();e.sheetCopyFrames(['layer-1'],0,9);
   e.newDocument();const before=e.serialize();assertHold(e);
   e.pasteCamera([0]);assert.equal(e.evaluatedFrame.camera.x,40);

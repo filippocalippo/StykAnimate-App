@@ -1,0 +1,44 @@
+name: Build the Rust engine
+description: >
+  Builds the engine's WebAssembly module into src/engine/pkg with the pinned
+  toolchain (docs/engine/decisions/0006-pinned-nightly-wasm.md) and fails when
+  the output is missing, so no web or desktop artifact ships without it.
+inputs:
+  test:
+    description: Also run the engine's Rust tests (npm run engine:test).
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Rust toolchain (pinned nightly with its source, and stable)
+      shell: bash
+      run: |
+        rustup toolchain install nightly-2026-09-15 --profile minimal --component rust-src --target wasm32-unknown-unknown
+        rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+        rustc +nightly-2026-09-15 --version
+    - name: Cache cargo registry, tools and engine build
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin/wasm-bindgen*
+          engine/target
+        key: engine-${{ runner.os }}-${{ hashFiles('engine/Cargo.lock', 'scripts/engine-build.mjs') }}
+        restore-keys: engine-${{ runner.os }}-
+    - name: wasm-bindgen 0.2.129
+      shell: bash
+      run: |
+        if ! wasm-bindgen --version 2>/dev/null | grep -q '0.2.129'; then
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+        fi
+    - name: Build the engine
+      shell: bash
+      run: npm run engine:build
+    - name: Require the engine build output
+      shell: bash
+      run: node scripts/engine-verify-pkg.mjs
+    - name: Engine tests
+      if: inputs.test == 'true'
+      shell: bash
+      run: npm run engine:test

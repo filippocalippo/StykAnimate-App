@@ -1,0 +1,59 @@
+{
+ "name": "polygons-native",
+ "document": "two-limbs.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "addPolygon",
+   [
+    0,
+    11,
+    22
+   ]
+  ],
+  [
+   "addPolygon",
+   [
+    11,
+    22,
+    33
+   ],
+   {
+    "zOrder": 0.5
+   }
+  ],
+  [
+   "updatePolygon",
+   1,
+   {
+    "zOrder": 2
+   }
+  ],
+  [
+   "updatePolygon",
+   0,
+   {
+    "handleIds": [
+     0,
+     44,
+     55
+    ]
+   }
+  ],
+  [
+   "removePolygon",
+   1
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

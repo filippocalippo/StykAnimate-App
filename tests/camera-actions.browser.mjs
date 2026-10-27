@@ -22,7 +22,7 @@ const click = async (action) => {
 };
 try {
   await page.goto(process.env.STYK_URL || "http://127.0.0.1:47831");
-  await page.waitForFunction(() => styk?.ready);
+  await page.waitForFunction(() => window.styk?.ready);
   await page.evaluate(async () => {
     const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');
     const report=emptyDocument();report.keyframes=Array.from({length:3},()=>createFrame([createObject(report.figure_types[0],1,480,280)]));

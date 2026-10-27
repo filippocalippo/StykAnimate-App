@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {engineEditor} from './support/owned-editor.mjs';
 import {emptyDocument,defaultFigure,createObject,createFrame} from '../src/demo.mjs';
 import {movieclipFigure,validateMovieclipGraph} from '../src/movieclips.mjs';
 import {drawingSelection} from '../src/movieclip-drawings.mjs';
@@ -13,7 +13,7 @@ function fixture(){
  return{...emptyDocument(),figure_types:[f,head],keyframes:[createFrame([root,child])]};
 }
 for(const layerTimeline of [false,true])test(`drawing substitutions retain selection and undo with layer timeline ${layerTimeline}`,()=>{
- const e=new Editor({demo:false,layerTimeline});e.load(fixture());e.select(1,0);const before=e.serialize();
+ const e=engineEditor({demo:false,layerTimeline}, fixture());e.select(1,0);const before=e.serialize();
  e.setMovieclipDrawing(2,1,0);assert.equal(e.selectedUid,1);assert.equal(e.selectionFrame.objects[1]._stykMovieclip.offset,1);assert.equal(e.selectionFrame.objects[1]._stykMovieclip.mode,'single');
  assert.deepEqual(drawingSelection(e.report.figure_types[1]._styk.movieclip,e.selectionFrame.objects[1]),{group:1,view:0});
  assert.match(drawingSetsView(e.report.figure_types[1],e.selectionFrame.objects[1]),/Head &lt;drawings&gt;/);

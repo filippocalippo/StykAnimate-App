@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
-import {cameraValues} from '../src/editor-camera.mjs';
-const make=()=>{const e=new Editor({demo:false,layerTimeline:true,propertyChannels:true});e.addFigure();return e;};
+import {cameraValues} from '../src/pivot/model.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
+const make=()=>{const e=ownedEditorFor({demo:false,layerTimeline:true,propertyChannels:true});e.addFigure();return e;};
 
 test('default camera previews before commit, supports cancellation, and uses one undo',()=>{
  const e=make(),before=e.serialize(),n=e._undo.length;

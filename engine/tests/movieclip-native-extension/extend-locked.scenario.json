@@ -1,0 +1,31 @@
+{
+ "name": "extend-locked",
+ "document": "extend-locked.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   3
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   1
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

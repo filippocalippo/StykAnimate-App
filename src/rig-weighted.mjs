@@ -23,17 +23,3 @@ export function remapWeightedJoint(value,remap) {
   return {origin:remap.get(value.origin)??value.origin,anchors:value.anchors.map(a=>({...a,joint:remap.get(a.joint)??a.joint})),
     ...(value.depth?{depth:remapWeightedJoint(value.depth,remap)}:{})};
 }
-function position(value,joints,root){
-  const start=joints.get(value.origin)??root;let dx=0,dy=0;
-  for(const {joint,weight} of value.anchors){const p=joints.get(joint)??root;dx+=(p.x-start.x)*weight;dy+=(p.y-start.y)*weight;}
-  return {start,dx,dy};
-}
-export function weightedJoint(value,joints,root,inputAngle) {
-  const {start,dx,dy}=position(value,joints,root);
-  const angle=Math.hypot(dx,dy)<1e-8?inputAngle:Math.atan2(dy,dx);
-  const depth=value.depth?position(value.depth,joints,root):null;
-  return {start,angle,authoredAngle:angle,length:Math.hypot(dx,dy),bend:0,width:1,
-    handle:{x:start.x+dx,y:start.y+dy},rotation:angle-inputAngle,ratio:1,impulseAngle:angle,
-    ...(depth?{depthOffset:{x:depth.start.x+depth.dx-root.x,y:depth.start.y+depth.dy-root.y}}:{}),
-    space:{rotation:angle-inputAngle,locked:true}};
-}

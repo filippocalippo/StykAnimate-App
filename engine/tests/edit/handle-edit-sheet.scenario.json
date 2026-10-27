@@ -1,0 +1,95 @@
+{
+ "name": "handle-edit-sheet",
+ "document": "joined-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "editHandlePosition",
+   330,
+   300
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "beginHandleEditDrag",
+   {
+    "bend": true
+   }
+  ],
+  [
+   "editHandlePosition",
+   280,
+   240
+  ],
+  [
+   "editHandlePosition",
+   285,
+   250,
+   {
+    "bend": false
+   }
+  ],
+  [
+   "commitHandleEditDrag"
+  ],
+  [
+   "@select",
+   3,
+   0
+  ],
+  [
+   "beginHandleEditDrag"
+  ],
+  [
+   "editHandlePosition",
+   400,
+   330
+  ],
+  [
+   "editHandlePosition",
+   368.20440673828125,
+   527.3596801757812
+  ],
+  [
+   "commitHandleEditDrag"
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "editHandlePosition",
+   200,
+   150
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

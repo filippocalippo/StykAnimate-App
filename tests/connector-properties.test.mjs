@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
 import {rigExampleDocument} from '../src/rig-examples.mjs';
 import {inspectorView} from '../src/inspector-view.mjs';
 import {getPivotHandles} from '../src/canvas-interactions.mjs';
 import {drawConnectorGuides} from '../src/rig-controls.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 
 for(const builder of [false,true])test(`connector slider exposes position/static but no appearance (${builder?'Builder':'Animate'})`,()=>{
-  const e=new Editor({demo:false});e.load(rigExampleDocument('sliding-carriage'));e.select(1,2);
+  const e = ownedEditorFor({demo:false}, rigExampleDocument('sliding-carriage'));e.select(1,2);
   const before=e.serialize(),slider=inspectorView({editor:e,builder});
   assert.match(slider,/id="rig-position"/);assert.match(slider,/id="static-joint"/);
   assert.doesNotMatch(slider,/id="segment-color"|id="segment-shape"|data-field="(?:thickness|joint_angle|joint_bend)"|Appearance/);
@@ -20,7 +20,7 @@ for(const builder of [false,true])test(`connector slider exposes position/static
 });
 
 test('slider handles keep their configured size at both endpoints and guides connect A, slider, B',()=>{
-  const e=new Editor({demo:false});e.load(rigExampleDocument('sliding-carriage'));e.select(1,2);
+  const e = ownedEditorFor({demo:false}, rigExampleDocument('sliding-carriage'));e.select(1,2);
   for(const position of [0,.5,1]){
     e.setConnectorPosition(position);
     const h=getPivotHandles(e.geometry,{selectedUid:1,maxDiameter:12}).find(h=>h.id===3);

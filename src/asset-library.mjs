@@ -3,9 +3,8 @@ import {messageError} from './localized-error.mjs';
 import {t as interfaceText} from './localization.mjs';
 
 import { icon } from "./icons.mjs";
-import { createObject, createFrame } from "./demo.mjs";
-import { buildGeometry, drawGeometry } from "./pivot/geometry.mjs";
-import { objectBounds } from "./renderer-geometry.mjs";
+import { emptyDocument, createObject, createFrame } from "./demo.mjs";
+import { engineDocumentPicture, placement } from "./engine/engine-pictures.mjs";
 import {movieclipAssetFigures} from './movieclips.mjs';
 import {drawingMetadata} from './drawing-model.mjs';
 
@@ -21,16 +20,6 @@ const nameOf=figure=>String(figure.name||interfaceText('assetLibrary.figureNumbe
 // Canonical preview kinds never depend on the interface language.
 const kindOf=figure=>figure._styk?.movieclip?'Movieclip':figure.text_assets?.length?'Text':figure.image_assets?.length?'Image':'Figure';
 const kindMessage=kind=>({messageKey:{Movieclip:'assetLibrary.movieclip',Text:'inspectorView.text',Image:'assetLibrary.image',Figure:'assetLibrary.figure'}[kind]});
-const defaultUrl = (asset) =>
-  asset?.asset_url ||
-  asset?.data_url ||
-  asset?.url ||
-  (asset?.base64
-    ? `data:${asset.mime_type || "image/png"};base64,${asset.base64}`
-    : null) ||
-  asset?.asset_path_relative ||
-  asset?.asset_path ||
-  asset?.path;
 const escapeHTML = (value) =>
   String(value).replace(
     /[&<>"']/g,
@@ -41,17 +30,17 @@ const escapeHTML = (value) =>
   );
 const abortError = () => messageError(new DOMException('', "AbortError"), "errors.assetLibrary.previewCancelled", {});
 
-/** A bounded, idle-rendered figure library. Ordinary pose/selection updates are O(visible rows). */
+/** A bounded, idle-rendered figure library. Ordinary pose/selection updates are O(visible rows).
+ * Each figure's thumbnail is drawn by the engine (engine-pictures.mjs) from a document of that one figure. */
 export class AssetLibrary {
   constructor(
     container,
-    { onAdd, onError = () => {}, resources = {}, maxPreviews = 64 } = {},
+    { onAdd, onError = () => {}, maxPreviews = 64 } = {},
   ) {
     if (!container) throw messageError(new TypeError(''), "errors.assetLibrary.assetlibraryRequiresAContainer", {});
     this.container = container;
     this.onAdd = onAdd;
     this.onError = onError;
-    this.resources = resources;
     this.maxPreviews = Math.max(8, Math.min(128, maxPreviews));
     this.figures = null;
     this.records = [];
@@ -69,7 +58,7 @@ export class AssetLibrary {
     this.disposed = false;
     this.idle = null;
     this.busy = false;
-    this.imageCancels = new Set();
+    this.pictures = new AbortController();
     this.stats = {
       indexBuilds: 0,
       indexMs: 0,
@@ -157,7 +146,7 @@ export class AssetLibrary {
       const start = performance.now();
       if (figures !== this.figures) {
         this.generation++;
-        this.cancelImages();
+        this.cancelPictures();
         this.previews.clear();
         this.activeIndex = -1;
       }
@@ -189,7 +178,7 @@ export class AssetLibrary {
   invalidate(ids = null) {
     if (this.disposed) return;
     this.generation++;
-    this.cancelImages();
+    this.cancelPictures();
     if (ids == null) this.previews.clear();
     else for (const id of ids) this.previews.delete(String(id));
     this.indexDirty = true;
@@ -200,7 +189,7 @@ export class AssetLibrary {
     if (!this.visible) {
       this.queue.length = 0;
       this.cancelIdle();
-      this.cancelImages();
+      this.cancelPictures();
     } else this.render();
   }
 
@@ -374,9 +363,10 @@ export class AssetLibrary {
     this.idle = null;
   }
 
-  cancelImages() {
-    for (const cancel of this.imageCancels) cancel();
-    this.imageCancels.clear();
+  /** Pictures being drawn for the previous generation are given up. */
+  cancelPictures() {
+    this.pictures.abort();
+    this.pictures = new AbortController();
   }
 
   schedule() {
@@ -503,14 +493,11 @@ export class AssetLibrary {
     const nested=movieclipAssetFigures(figure);
     if(nested.reduce((n,f)=>n+(f.segments?.length??0),0)>MAX_SEGMENTS)complexity=true;
     const imageAssets = nested.flatMap(f=>f.image_assets??[]);
+    const imagePixels = asset => (asset.width || asset.pixel_width || 0) * (asset.height || asset.pixel_height || 0);
     if (
       imageAssets.length > 8 ||
-      imageAssets.some(
-        (asset) =>
-          (asset.width || asset.pixel_width || 0) *
-            (asset.height || asset.pixel_height || 0) >
-          MAX_IMAGE_PIXELS,
-      )
+      imageAssets.some((asset) => imagePixels(asset) > MAX_IMAGE_PIXELS) ||
+      imageAssets.reduce((sum, asset) => sum + imagePixels(asset), 0) > MAX_TOTAL_IMAGE_PIXELS
     )
       complexity = true;
     if (complexity)
@@ -522,103 +509,30 @@ export class AssetLibrary {
         bytes: 0,
         fallback: true,
       };
-    const loaded = new Map();
-    let pixels = 0;
-    // v2 drawing cels carry a 1×1 carrier; their pixels come from the tile
-    // store, so load those stores instead of decoding the placeholder.
-    const drawingFigures = nested.filter(f => drawingMetadata(f)?.version === 2);
-    if (drawingFigures.length && this.resources.drawingLoad)
-      await Promise.all(drawingFigures.map(f => this.resources.drawingLoad(f)));
-    for (const asset of imageAssets) {
-      if (asset.styk_tiles !== undefined || drawingFigures.some(f => f.image_assets?.includes(asset))) continue;
-      const url = this.resources.url?.(asset) || defaultUrl(asset);
-      if (!url || loaded.has(url)) continue;
-      const image = await this.loadImage(url, generation);
-      pixels += image.naturalWidth * image.naturalHeight;
-      if (pixels > MAX_TOTAL_IMAGE_PIXELS)
-        return {
-          element: this.fallback(
-            figure,
-            interfaceText("assetLibrary.largeImageFigureAddToCanvasToView"),
-          ),
-          bytes: 0,
-          fallback: true,
-        };
-      loaded.set(url, image);
-    }
-    if (generation !== this.generation || !this.visible || this.disposed)
-      throw abortError();
-    const resources = {
-      url: (asset) => this.resources.url?.(asset) || defaultUrl(asset),
-      image: (url) => loaded.get(url),
-      drawing: (fig) => this.resources.drawing?.(fig),
-    };
-    const object = createObject(figure, 1, 0, 0);
-    const geometry = buildGeometry(
-      { figure_types: [figure] },
-      createFrame([object]),
-    );
-    if (!geometry.drawables.length)
-      return {
-        element: this.fallback(figure, interfaceText("assetLibrary.emptyFigure")),
-        bytes: 0,
-        fallback: true,
-      };
-    const bounds = objectBounds(geometry.drawables, resources);
+    // A drawing's pixels live in the editor's tile stores, which the document of one figure does not carry.
+    if (nested.some(f => drawingMetadata(f)?.version === 2))
+      return { element: this.fallback(figure, interfaceText("assetLibrary.previewUnavailable")), bytes: 0, fallback: true };
+    const report = emptyDocument();
+    report.figure_types = [figure];
+    report.keyframes = [createFrame([createObject(figure, 1, 0, 0)])];
     const ratio = Math.min(2, globalThis.devicePixelRatio || 1),
       size = Math.ceil(THUMB_SIZE * ratio);
+    const picture = await engineDocumentPicture(report, { width: size, height: size, placement: placement.fit(4 * ratio), background: 0, signal: this.pictures.signal });
+    if (generation !== this.generation || !this.visible || this.disposed) {
+      picture?.bitmap.close();
+      throw abortError();
+    }
+    if (!picture)
+      return { element: this.fallback(figure, interfaceText("assetLibrary.previewUnavailable")), bytes: 0, fallback: true };
+    if (!picture.artwork) {
+      picture.bitmap.close();
+      return { element: this.fallback(figure, interfaceText("assetLibrary.emptyFigure")), bytes: 0, fallback: true };
+    }
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = size;
-    const context = canvas.getContext("2d");
-    const zoom = (size - 8 * ratio) / Math.max(bounds.width, bounds.height);
-    context.translate(size / 2, size / 2);
-    context.scale(zoom, zoom);
-    context.translate(
-      -bounds.x - bounds.width / 2,
-      -bounds.y - bounds.height / 2,
-    );
-    drawGeometry(context, geometry, resources);
+    canvas.getContext("2d").drawImage(picture.bitmap, 0, 0);
+    picture.bitmap.close();
     return { element: canvas, bytes: size * size * 4, fallback: false };
-  }
-
-  loadImage(source, generation) {
-    const url = new URL(source, document.baseURI);
-    if (
-      !["data:", "blob:"].includes(url.protocol) &&
-      url.origin !== location.origin
-    )
-      return Promise.reject(messageError(new Error(''), "errors.assetLibrary.previewMediaMustBeLocal", {}));
-    return new Promise((resolve, reject) => {
-      const image = new Image();
-      let done = false;
-      const finish = (error) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        this.imageCancels.delete(cancel);
-        image.onload = image.onerror = null;
-        if (error) {
-          image.src = "";
-          reject(error);
-        } else resolve(image);
-      };
-      const cancel = () => finish(abortError());
-      const timer = setTimeout(
-        () => finish(messageError(new Error(''), "errors.assetLibrary.previewImageTimedOut", {})),
-        5000,
-      );
-      this.imageCancels.add(cancel);
-      image.onload = () =>
-        finish(
-          generation !== this.generation || !this.visible
-            ? abortError()
-            : image.naturalWidth * image.naturalHeight > MAX_IMAGE_PIXELS
-              ? messageError(new Error(''), "errors.assetLibrary.previewImageIsTooLarge", {})
-              : null,
-        );
-      image.onerror = () => finish(messageError(new Error(''), "errors.assetLibrary.previewImageUnavailable", {}));
-      image.src = url.href;
-    });
   }
 
   destroy() {
@@ -627,7 +541,7 @@ export class AssetLibrary {
     this.generation++;
     this.events.abort();
     this.cancelIdle();
-    this.cancelImages();
+    this.cancelPictures();
     this.resizeObserver.disconnect();
     this.queue.length = 0;
     this.previews.clear();
@@ -640,6 +554,3 @@ export class AssetLibrary {
     this.updateStats();
   }
 }
-
-export const mountAssetLibrary = (container, options) =>
-  new AssetLibrary(container, options);

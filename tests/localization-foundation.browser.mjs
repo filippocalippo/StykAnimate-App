@@ -23,7 +23,7 @@ try {
   await page.evaluate(async()=>{
     const {createToasts}=await import('/src/ui/ui-toast.mjs');
     window.taskToasts=createToasts({document});
-    window.localizedTask=taskToasts.task({title:'Preparing canvas',titleKey:'app.preparingCanvas',meta:'Camera effects preview restored.',metaKey:'rendererStatus.effectsRestored',delay:0});
+    window.localizedTask=taskToasts.task({title:'Preparing canvas and effects…',titleKey:'app.preparingCanvasAndEffects',meta:'Graphics device lost',metaKey:'rendererStatus.deviceLost',delay:0});
   });
   await page.waitForSelector('.ui-toast-progress');
   await page.evaluate(()=>{window.retainedStatus=document.querySelector('#status');styk.localization.localization.setPseudo('long');});
@@ -474,9 +474,9 @@ try {
     &&vfwOption.textContent==='Artist codec (64-bit)'&&vfwOption.value==='vfw:x64:00000000'&&vfwOption.disabled));
   await page.evaluate(()=>{vfwProbe.dispose();vfwDialog.close();vfwDialog.remove();window.stykDesktop=vfwDesktopBefore;styk.localization.localization.setPseudo(null);});
   await page.evaluate(async()=>{
-    const {Editor}=await import('/src/editor.mjs');const {emptyDocument}=await import('/src/demo.mjs');const {vfxProperty}=await import('/src/vfx.mjs');
+    const { pageEditor }=await import('/tests/support/page-editor.mjs');const {emptyDocument}=await import('/src/demo.mjs');const {vfxProperty}=await import('/src/vfx.mjs');
     const {openVfxChannelMenu}=await import('/src/vfx-key-channel-menu.mjs');
-    window.effectEditor=new Editor({demo:false}).load(emptyDocument());const id=effectEditor.addVfxClip({kind:'scene'},'glow');const clip=effectEditor.getVfxClips()[0],effect=clip.effects[0];
+    window.effectEditor=pageEditor({demo:false}).load(emptyDocument());const id=effectEditor.addVfxClip({kind:'scene'},'glow');const clip=effectEditor.getVfxClips()[0],effect=clip.effects[0];
     for(const parameter of ['radius','intensity'])effectEditor.setVfxClipParameter(id,effect.id,parameter,1,{key:true,tick:0});
     window.effectBytes=JSON.stringify(effectEditor.report);window.effectUndo=effectEditor._undo.length;
     window.effectAnchor=document.createElement('button');effectAnchor.textContent='Effect keys';document.body.append(effectAnchor);window.closeEffects=openVfxChannelMenu(effectEditor,effectEditor.getVfxClips()[0],effectAnchor);
@@ -485,10 +485,10 @@ try {
   check('Effect-channel picker retains focus, key IDs and document history while captions change',await page.evaluate(()=>document.activeElement===effectInput&&effectInput.dataset.channelProperty===effectProperty&&effectInput.closest('label').textContent.includes('［')&&JSON.stringify(effectEditor.report)===effectBytes&&effectEditor._undo.length===effectUndo));
   await page.evaluate(()=>{closeEffects();effectAnchor.remove();styk.localization.localization.setPseudo(null);});
   await page.evaluate(async()=>{
-    const {Editor}=await import('/src/editor.mjs');const {createDemo}=await import('/src/demo.mjs');
+    const { pageEditor }=await import('/tests/support/page-editor.mjs');const {createDemo}=await import('/src/demo.mjs');
     const {rigSections}=await import('/src/rig-controls.mjs');const {renderInspector,renderRow}=await import('/src/inspector-kit.mjs');
     const {PropertyControls}=await import('/src/property-controls.mjs');const {appendLocalized,localizedMarkup}=await import('/src/localization-bindings.mjs');
-    window.rigCaptionEditor=new Editor({demo:false}).load(createDemo());rigCaptionEditor.select(1,2);
+    window.rigCaptionEditor=pageEditor({demo:false}).load(createDemo());rigCaptionEditor.select(1,2);
     const weighted=rigCaptionEditor.addWeightedJoint(0,[{joint:rigCaptionEditor.figure.segments[0].segment_id,weight:.5}]);
     rigCaptionEditor.select(1,rigCaptionEditor.figure.segments.findIndex(segment=>segment.segment_id===weighted.segment_id));
     window.rigCaptionProbe=document.createElement('div');rigCaptionProbe.style.cssText='position:fixed;top:40px;right:10px;width:400px;max-height:600px;overflow:auto;background:white;z-index:10';appendLocalized(document.body,rigCaptionProbe);
@@ -534,9 +534,9 @@ try {
   check('One-sided numeric bounds retain their original infinity value in translated validation',await page.evaluate(()=>validationInput.validationMessage===styk.localization.t('propertyControls.enterValueBetween',{min:-Infinity,max:10})&&validationInput.value==='12'));
   await page.evaluate(()=>{validationControls.destroy();rigCaptionProbe.remove();styk.localization.localization.setPseudo(null);});
   await page.evaluate(async()=>{
-    const {Editor}=await import('/src/editor.mjs');const {emptyDocument}=await import('/src/demo.mjs');const {Timeline}=await import('/src/timeline.mjs');
+    const { pageEditor }=await import('/tests/support/page-editor.mjs');const {emptyDocument}=await import('/src/demo.mjs');const {Timeline}=await import("/src/layer-timeline.mjs");
     const {appendLocalized}=await import('/src/localization-bindings.mjs');
-    window.organizationEditor=new Editor({demo:false,layerTimeline:true}).load(emptyDocument());const artist=organizationEditor.createLayer('Artist layer',{activate:false});
+    window.organizationEditor=pageEditor({demo:false,layerTimeline:true}).load(emptyDocument());const artist=organizationEditor.createLayer('Artist layer',{activate:false});
     window.organizationHost=document.createElement('div');organizationHost.className='workspace';organizationHost.dataset.mode='animate';organizationHost.style.cssText='position:fixed;top:40px;right:10px;width:760px;height:300px;background:white;z-index:10';appendLocalized(document.body,organizationHost);
     window.organizationTimeline=new Timeline(organizationHost,organizationEditor);organizationTimeline.selectedLayers=new Set([artist.id]);organizationTimeline.selectedTrackId=artist.id;organizationTimeline.focusSelectedLayers();organizationTimeline.setLayerFilter('Artist');
     window.organizationBytes=JSON.stringify(organizationEditor.report);window.organizationUndo=organizationEditor._undo.length;window.organizationButton=organizationTimeline.newLayerButton;window.organizationIcon=organizationButton.firstElementChild;
@@ -558,39 +558,7 @@ try {
   check('Draw workspace refresh retains the translated drawing-layer action in RTL',await page.evaluate(()=>organizationTimeline.newLayerButton.getAttribute('aria-label')===styk.localization.t('timeline.newDrawingLayer')&&organizationTimeline.newLayerButton.firstElementChild===organizationIcon));
   await page.evaluate(()=>{organizationTimeline.destroy();organizationHost.remove();styk.localization.localization.setPseudo(null);});
   await page.evaluate(async()=>{
-    const {Editor}=await import('/src/editor.mjs');const {createDemo}=await import('/src/demo.mjs');const {InsertInbetweenDialog}=await import('/src/insert-inbetween-dialog.mjs');
-    window.inbetweenCaptionEditor=new Editor({demo:false}).load(createDemo());window.inbetweenCaptionProbe=new InsertInbetweenDialog({editor:inbetweenCaptionEditor,renderThumbnail:async()=>true});inbetweenCaptionProbe.open([0,1]);
-    window.inbetweenCaptionBytes=JSON.stringify(inbetweenCaptionEditor.report);window.inbetweenCaptionUndo=inbetweenCaptionEditor._undo.length;
-  });
-  await page.waitForFunction(()=>!inbetweenCaptionProbe.applyButton.disabled);
-  await page.evaluate(()=>{
-    window.inbetweenDraft=inbetweenCaptionProbe.$('[type=number]');inbetweenDraft.focus();inbetweenDraft.value='37.5';
-    window.inbetweenCaptionNodes=[inbetweenCaptionProbe.applyButton,inbetweenCaptionProbe.statusCaption,inbetweenCaptionProbe.statusSuffix,inbetweenCaptionProbe.$('.styk-inbetween-onions span')];
-    styk.localization.localization.setPseudo('long');
-  });
-  check('Inbetween range insertion and onion captions translate in place while the ratio draft and source keyframes remain unchanged',await page.evaluate(()=>{
-    const probe=inbetweenCaptionProbe,t=(key,params)=>styk.localization.t(key,params);
-    return document.activeElement===inbetweenDraft&&inbetweenDraft.value==='37.5'&&probe.applyButton===inbetweenCaptionNodes[0]
-      &&probe.applyButton.textContent===t('insertInbetweenDialog.insertFrames',{count:2})
-      &&probe.$('.styk-inbetween-onions span').textContent===t('insertInbetweenDialog.onionSkinsBeforeAfter')
-      &&probe.$('.styk-inbetween-onions').getAttribute('aria-label')===t('insertInbetweenDialog.onionSkinsBeforeAfter')
-      &&JSON.stringify(inbetweenCaptionEditor.report)===inbetweenCaptionBytes&&inbetweenCaptionEditor._undo.length===inbetweenCaptionUndo;
-  }));
-  await page.evaluate(()=>{
-    const probe=inbetweenCaptionProbe;window.inbetweenCaptionJob={session:probe.session,controller:new AbortController()};probe.applyJob=inbetweenCaptionJob;probe.setApplying(true);
-    for(let index=0;index<1000;index++)probe.updateProgress(inbetweenCaptionJob,{phase:'sampling',completed:index,total:1000});
-    styk.localization.localization.setPseudo('rtl');
-  });
-  check('Inbetween progress reuses a bounded pair of nodes and translates its current phase without changing numeric progress',await page.evaluate(()=>{
-    const probe=inbetweenCaptionProbe;return probe.statusCaption===inbetweenCaptionNodes[1]&&probe.statusSuffix===inbetweenCaptionNodes[2]&&probe.$('[role=status]').childNodes.length===2
-      &&probe.statusCaption.textContent===styk.localization.t('insertInbetweenDialog.preparingPoses')&&probe.statusSuffix.nodeValue===' · 999 / 1000'
-      &&probe.applyButton.textContent===styk.localization.t('insertInbetweenDialog.preparing')&&probe.$('progress').value===999;
-  }));
-  await page.evaluate(()=>{inbetweenCaptionProbe.setApplying(false);inbetweenCaptionProbe.showError(new Error('External validation detail'));styk.localization.localization.setPseudo('long');});
-  check('Inbetween error clearing does not revive a stale progress phase or busy action after language switching',await page.evaluate(()=>inbetweenCaptionProbe.$('[role=status]').textContent===''&&inbetweenCaptionProbe.applyButton.textContent===styk.localization.t('insertInbetweenDialog.insertFrames',{count:2})&&JSON.stringify(inbetweenCaptionEditor.report)===inbetweenCaptionBytes));
-  await page.evaluate(()=>{inbetweenCaptionProbe.destroy();styk.localization.localization.setPseudo(null);});
-  await page.evaluate(async()=>{
-    const {Editor}=await import('/src/editor.mjs');const {createDemo}=await import('/src/demo.mjs');
+    const { pageEditor }=await import('/tests/support/page-editor.mjs');const {createDemo}=await import('/src/demo.mjs');
     const {vfxPresetStore}=await import('/src/vfx-user-presets.mjs');const {appendLocalized}=await import('/src/localization-bindings.mjs');
     await vfxPresetStore.load();window.vfxPresetsBefore=vfxPresetStore.presets;
     vfxPresetStore.presets=[{id:'localization-artist',name:'Artist preset',effects:[{id:'artist-glow',type:'glow',params:{}}],keys:{'artist-glow.radius':[]}}];
@@ -598,7 +566,7 @@ try {
     // Import under a different initial language: display captions must never
     // become the canonical category values used to sort the catalogue.
     const {VfxInspector}=await import('/src/vfx-inspector.mjs?initial-language-review');
-    window.vfxCaptionEditor=new Editor({demo:false}).load(createDemo());vfxCaptionEditor.select(1);vfxCaptionEditor.figure.name='Artist figure';
+    window.vfxCaptionEditor=pageEditor({demo:false}).load(createDemo());vfxCaptionEditor.select(1);vfxCaptionEditor.figure.name='Artist figure';
     window.vfxCaptionRoot=document.createElement('div');vfxCaptionRoot.style.cssText='position:fixed;top:40px;right:10px;width:400px;height:500px;background:white;z-index:10';appendLocalized(document.body,vfxCaptionRoot);
     window.vfxCaptionProbe=new VfxInspector({editor:vfxCaptionEditor,root:vfxCaptionRoot,beforeEdit(){},onChange(){},onError(error){throw error;}});
     vfxCaptionProbe.visible=true;vfxCaptionProbe.sync();
@@ -660,9 +628,9 @@ try {
     &&JSON.stringify(backgroundCaptionReport)===backgroundCaptionBytes));
   await page.evaluate(()=>{backgroundCaptionDialog.close();backgroundCaptionDialog.remove();styk.localization.localization.setPseudo(null);});
   await page.evaluate(async()=>{
-    const {Editor}=await import('/src/editor.mjs');const {createDemo}=await import('/src/demo.mjs');const {openRigTest}=await import('/src/rig-test-ui.mjs');
+    const { pageEditor }=await import('/tests/support/page-editor.mjs');const {createDemo}=await import('/src/demo.mjs');const {openRigTest}=await import('/src/rig-test-ui.mjs');
     const {appendLocalized,localizedMarkup}=await import('/src/localization-bindings.mjs');
-    window.rigOptionEditor=new Editor({demo:false}).load(createDemo());rigOptionEditor.select(1,0);
+    window.rigOptionEditor=pageEditor({demo:false}).load(createDemo());rigOptionEditor.select(1,0);
     rigOptionEditor.figure.segments[0].name='';rigOptionEditor.figure.segments[1].name='Artist control';
     window.rigOptionBytes=JSON.stringify(rigOptionEditor.report);window.rigOptionUndo=rigOptionEditor._undo.length;
     window.rigOptionDialog=document.createElement('dialog');appendLocalized(document.body,rigOptionDialog);
@@ -702,7 +670,7 @@ try {
   }));
   await page.evaluate(()=>{touchCaptionProbe.events.abort();touchCaptionRoot.remove();styk.localization.localization.setPseudo(null);});
   await page.evaluate(async()=>{
-    const {Editor}=await import('/src/editor.mjs');const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');
+    const { pageEditor }=await import('/tests/support/page-editor.mjs');const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');
     const {construction}=await import('/src/rig-examples-3d.mjs');
     const {spatialSections,installSpatialControls}=await import('/src/spatial-controls.mjs');const {renderInspector}=await import('/src/inspector-kit.mjs');
     const {appendLocalized,localizedMarkup}=await import('/src/localization-bindings.mjs');
@@ -710,7 +678,7 @@ try {
     const bone=(parent,origin,tip,name)=>{const turn=q.add(0,0,0,name+' turn'),pitch=q.add(0,0,0,name+' tilt'),v=tip.map((n,i)=>n-origin[i]);return q.add(parent,Math.hypot(...v),Math.atan2(v[1],v[0]),name,{control:true,rig:{spatial:{parent,origin,tip,turn,pitch}}});};
     const chest=bone(0,[0,0,0],[0,40,0],'Chest');bone(chest,[0,40,0],[10,60,0],'Artist hair');const unnamed=bone(chest,[0,40,0],[-10,60,0],'');
     const figure={figure_type_id:1,segments:q.segments,polyfills:[],image_assets:[],text_assets:[]};
-    window.spatialCaptionEditor=new Editor({demo:false}).load({...emptyDocument(),figure_types:[figure],keyframes:[createFrame([createObject(figure,1,200,100)])]});
+    window.spatialCaptionEditor=pageEditor({demo:false}).load({...emptyDocument(),figure_types:[figure],keyframes:[createFrame([createObject(figure,1,200,100)])]});
     spatialCaptionEditor.select(1,q.segments.findIndex(segment=>segment.segment_id===chest));
     window.spatialCaptionBytes=JSON.stringify(spatialCaptionEditor.report);window.spatialCaptionUndo=spatialCaptionEditor._undo.length;
     window.spatialCaptionRoot=document.createElement('div');spatialCaptionRoot.style.cssText='position:fixed;top:24px;right:24px;width:440px;height:640px;overflow:auto;background:white;z-index:10';appendLocalized(document.body,spatialCaptionRoot);

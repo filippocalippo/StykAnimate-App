@@ -1,0 +1,212 @@
+{
+ "name": "range-appearance-sheet",
+ "document": "sheet-layers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "addFigure",
+   2
+  ],
+  [
+   "moveSelection",
+   -260,
+   40
+  ],
+  [
+   "addFigure",
+   3
+  ],
+  [
+   "moveSelection",
+   220,
+   90
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    4
+   ]
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "field28": 100
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0,
+     3
+    ]
+   }
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "opacity": 0.25
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     2
+    ]
+   }
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "color_override_raw": 2164195328
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0
+    ]
+   }
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "field28": 100
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0
+    ]
+   }
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "opacity": 2
+   },
+   [
+    0
+   ]
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "bogus": 1
+   },
+   [
+    0
+   ]
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "opacity": 0.5,
+    "field28": 3
+   },
+   [
+    0
+   ]
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "field28": 7
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     2.5
+    ]
+   }
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "field28": 9
+   },
+   {
+    "@array": [
+     0
+    ],
+    "sheetTicks": [
+     1,
+     5,
+     3
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    3
+   ]
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "field28": 40
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0
+    ]
+   }
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "color_override_raw": 16711935
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     4
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -23,7 +23,7 @@ The welcome splash appears once each process launch (not every renderer reload).
 
 Do not overwrite published releases; increment the version for corrections. Published GitHub assets must remain accessible and retain their generated filenames.
 
-Builds use exact JavaScript/Python dependencies and this repository's `codecs/` sources. No sibling checkout is required. The uploader validates installer version, filename, size and hash before uploading, then checks GitHub's asset names and available digests before publishing. It uploads a fixed allowlist, never the source tree or build logs. Public tags are created in the releases repository, which contains no app source.
+Builds use exact JavaScript/Python dependencies and the Rust engine and Pivot codec built from this repository's `engine/` (`node scripts/engine-build.mjs`). No sibling checkout is required. The uploader validates installer version, filename, size and hash before uploading, then checks GitHub's asset names and available digests before publishing. It uploads a fixed allowlist, never the source tree or build logs. Public tags are created in the releases repository, which contains no app source.
 
 ## Build and publish locally
 
@@ -31,10 +31,8 @@ Builds use exact JavaScript/Python dependencies and this repository's `codecs/` 
 npm ci
 python -m pip install -r scripts/requirements-build.txt
 npm run release:prepare
-npm run build:frame-scan
+node scripts/engine-build.mjs
 npm run build:vfw
-npm run build:sidecar
-npm run verify:sidecar
 npm run build:video-encoder
 # Replace the version below with package.json's version.
 npm run dist:win -- --x64 --publish never --config.directories.output=release/0.5.0

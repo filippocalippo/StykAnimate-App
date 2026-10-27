@@ -1,10 +1,9 @@
 import {messageError} from './localized-error.mjs';
-import {remapSurface} from './pivot/surfaces.mjs';
-import {frameOrder, setOrder} from './pivot/structure.mjs';
-import {objectBounds} from './renderer-geometry.mjs';
-import {segmentBranchIndices} from './editor-builder.mjs';
-import {builderStyleTargets} from './editor-builder-style.mjs';
+import {segmentBranchIndices} from './pivot/structure.mjs';
 import {figureFocusLocked} from './editor-layer-focus.mjs';
+import {figurePalette, attachedFigurePalette} from './figure-colors.mjs';
+import {isMovieclip} from './movieclips.mjs';
+import {drawingMetadata} from './drawing-model.mjs';
 
 const validIds = (uids, existing) => new Set([...uids].filter(uid => existing.has(uid)));
 
@@ -21,62 +20,6 @@ function applySelection(editor, ids, preferred = editor.selectedUid) {
   editor.selectedJoint = -1;
   if (changed) editor._emit('selection');
   return editor.selectedObjects;
-}
-
-function partitionLayers(editor, front) {
-  if (editor.propertyChannels || editor.animationChannels.length || editor.selectionFrame.objects.some(object => object._stykZIndex !== undefined))
-    return editor.applyFigureRange({kind: 'order', direction: front ? 'front' : 'back'}, {ticks: [editor.tick]});
-  const before = frameOrder(editor.selectionFrame), groups = new Map();
-  for (const uid of before) { const id = editor.layerForUid(uid), group = groups.get(id) ?? {selected: [], others: [], cursor: 0};
-    (editor.selectedUids.has(uid) ? group.selected : group.others).push(uid); groups.set(id, group); }
-  for (const group of groups.values()) group.order = front ? [...group.others, ...group.selected] : [...group.selected, ...group.others];
-  const after = before.map(uid => { const group = groups.get(editor.layerForUid(uid)); return group.order[group.cursor++]; });
-  if (before.every((uid, index) => uid === after[index])) return false;
-  return editor.transaction(front ? 'Bring figures to front' : 'Send figures to back', frame => {
-    // Only the native paint-order slots change. Object slots remain join targets.
-    setOrder(frame, after);
-  }, {structural: true});
-}
-
-function selectedComponents(editor) {
-  const objects = editor.selectionFrame.objects, roots = new Map(), groups = new Map();
-  for (let selected = 0; selected < objects.length; selected++) {
-    if (!editor.selectedUids.has(objects[selected].unique_id)) continue;
-    let slot = selected;
-    const path = [], visiting = new Set();
-    while (!roots.has(slot) && objects[slot]?.join) {
-      if (visiting.has(slot)) throw messageError(new Error(''), "errors.editorSelection.figuresContainACyclicJoin", {});
-      visiting.add(slot); path.push(slot); slot = objects[slot].join.target_object_slot;
-      if (!objects[slot]) throw messageError(new Error(''), "errors.editorSelection.joinTargetIsMissing", {});
-    }
-    const root = roots.get(slot) ?? slot;
-    roots.set(slot, root);
-    for (const visited of path) roots.set(visited, root);
-    const group = groups.get(root);
-    if (group) group.push(selected); else groups.set(root, [selected]);
-  }
-  return groups;
-}
-
-function defaultBounds(geometry) {
-  if (geometry.fig?._styk?.movieclip && geometry.drawables?.length) return objectBounds(geometry.drawables);
-  return objectBounds([
-    ...geometry.segments.filter(segment => segment.seg.visible !== false).map(segment => ({
-      ...segment, type: segment.seg.segment_type || 'line',
-    })),
-    ...geometry.polys,
-    ...(geometry.meshDrawables ?? []),
-  ]);
-}
-
-function normalizedBounds(value) {
-  const bounds = value && ('minX' in value ? value : {
-    minX: value.x, minY: value.y, maxX: value.x + value.width, maxY: value.y + value.height,
-  });
-  if (!bounds || !['minX', 'minY', 'maxX', 'maxY'].every(key => Number.isFinite(bounds[key])) ||
-      bounds.maxX < bounds.minX || bounds.maxY < bounds.minY)
-    throw messageError(new Error(''), "errors.editorSelection.figureBoundsMustContainFiniteOrderedCoordinates", {});
-  return bounds;
 }
 
 export const editorSelectionMethods = {
@@ -148,49 +91,6 @@ export const editorSelectionMethods = {
     this._emit('selection'); return true;
   },
 
-  /** Extract a posed branch as an independent definition, retaining its media,
-   * internal polygons and attached figures. The source document is untouched. */
-  copyBranchSelection() {
-    const figure = this.figure, joint = this.selectedJoint;
-    if (!figure?.segments[joint]) return 0;
-    if (figure._styk?.spatialMesh) throw messageError(new Error(''), "errors.editorSelection.copyTheWholeFigureToIncludeIts3d", {});
-    const indices = segmentBranchIndices(figure.segments, figure.segments[joint].segment_id);
-    const handles = new Set(indices.map(i => figure.segments[i].segment_id));
-    const boundary = figure.segments[joint].parent_id, geometry = this.geometry.objects.get(this.selectedSlot);
-    const branch = structuredClone(figure);
-    branch.figure_type_id = Math.max(0, ...this.report.figure_types.map(f => f.figure_type_id)) + 1;
-    branch.name = `${figure.name || 'Figure'} branch`;
-    branch.segments = indices.map(i => {
-      const segment = structuredClone(figure.segments[i]), posed = geometry.segments[i];
-      if (segment.parent_id === boundary) segment.parent_id = 0;
-      segment.angle_rad = posed.angle; segment.bend_rad = posed.bend;
-      segment.length = geometry.obj.scale ? posed.length / geometry.obj.scale : segment.length;
-      return segment;
-    });
-    branch.segment_count = branch.segments.length;
-    delete branch.segment_z_raw; delete branch.poly_z_raw;
-    branch.polyfills = (branch.polyfills ?? []).filter(poly => poly.segment_ids.every(id => handles.has(id) || id === boundary)).map(poly => {
-      poly.segment_ids = poly.segment_ids.map(id => id === boundary ? 0 : id);
-      if(poly._stykSurface?.basis.some(id=>!handles.has(id)&&id!==boundary))throw messageError(new Error(''), "errors.editorSelection.copyTheWholeFigureToIncludeItsFace", {});
-      remapSurface(poly,id=>id===boundary?0:id);
-      poly.segment_ids_raw = [...poly.segment_ids]; return poly;
-    });
-    if (branch._styk) delete branch._styk.animationOrigin;
-    // Use the ordinary clipboard for joined objects, then replace only the
-    // selected instance with its extracted branch and a fresh definition.
-    const count = this.copySelection({wholeFigures: true}), clipboard = this._selectionClipboard;
-    const object = clipboard.objects.find(o => o.unique_id === this.selectedUid);
-    if(object._stykVfx){const next={};for(const [key,stack] of Object.entries(object._stykVfx)){if(key==='figure')next[key]=stack;else {const [scope,handle]=key.split('/');if(handles.has(Number(handle))&&(scope==='*'||Number(scope)===object.figure_type_id))next[`${branch.figure_type_id}/${handle}`]=stack;}}object._stykVfx=next;}
-    object.figure_type_id = branch.figure_type_id; object.join = null;
-    object.root_x = geometry.segments[joint].start.x; object.root_y = geometry.segments[joint].start.y;
-    object.angles = branch.segments.map(s => s.angle_rad);
-    object.len_flag = 0; object.lengths = []; object.bend_flag = 0; object.bends = [];
-    delete object._stykAnimationOrigin;
-    clipboard.figures.push(branch);
-    clipboard.figures = clipboard.figures.filter(f => clipboard.objects.some(o => o.figure_type_id === f.figure_type_id));
-    clipboard.freshTypes = new Set([branch.figure_type_id]);
-    return count;
-  },
   /** Match every selected definition; candidates restrict newly eligible figures. */
   selectSameDefinition({add = false, candidates} = {}) {
     const objects = this.selectionFrame.objects;
@@ -225,64 +125,13 @@ export const editorSelectionMethods = {
     return applySelection(this, ids);
   },
 
-  /** Attached figures form one scene-order selection. Only a partial selection
-   * inside a single figure uses its internal order; selecting the entire rig
-   * (including a single-segment figure) moves that instance in the scene. */
-  orderSelection(direction, {frameIndices} = {}) {
-    if (![1, -1, 'front', 'back'].includes(direction)) throw messageError(new Error(''), "errors.editorBuilderStyle.chooseAValidDrawOrderDirection", {});
-    const objects = this.selectedObjects;
-    if (!objects.length) return false;
-    if (objects.length === 1 && this.figure?.segments[this.selectedJoint]) {
-      const figure = this.figure, target = {kind: 'segment', index: this.selectedJoint};
-      const selected = builderStyleTargets(figure, target, {branch: this.branchSelected});
-      if (selected.length < figure.segments.length + (figure.polyfills?.length ?? 0))
-        return this.moveBuilderOrder(target, direction === 1 ? 'up' : direction === -1 ? 'down' : direction,
-          {branch: this.branchSelected});
-    }
-    if (this.report._styk?.layerSheet)
-      return this.applyFigureRange({kind: 'order', direction}, {ticks: frameIndices ? this.sheetEditTimes(frameIndices) : [this.tick]});
-    if (frameIndices) return this.orderFiguresInFrames(direction, frameIndices);
-    return direction === 'front' ? this.bringToFront() : direction === 'back' ? this.sendToBack() : this.moveSelectionLayer(direction);
+  /** Whether the selected segment and everything hanging from it are only part of one figure, so that they can become a figure of their own. */
+  canDisconnectSegment() {
+    const figure = this.figure, segment = figure?.segments[this.selectedJoint];
+    if (!segment || (this.selectedUids.size !== 1 && !this.branchSelected) || isMovieclip(figure) || drawingMetadata(figure)) return false;
+    return segmentBranchIndices(figure.segments, segment.segment_id).length < figure.segments.length;
   },
-  bringToFront() { return partitionLayers(this, true); },
-  sendToBack() { return partitionLayers(this, false); },
 
-  /** Align selected artwork while translating its complete joined component. */
-  alignSelection(axis, edge, {boundsOf = defaultBounds} = {}) {
-    if (!['x', 'y'].includes(axis)) throw messageError(new Error(''), "errors.editorSelection.alignmentAxisMustBeXOrY", {});
-    if (!['start', 'center', 'end'].includes(edge)) throw messageError(new Error(''), "errors.editorSelection.alignmentEdgeMustBeStartCenterOrEnd", {});
-    if (typeof boundsOf !== 'function') throw messageError(new Error(''), "errors.editorCamera.provideAFigureBoundsFunction", {});
-    if (this._drag) this.commitDrag();
-    const groups = selectedComponents(this);
-    if (groups.size < 2) return false;
-    let moved = false;
-    this._objectEdit('Align figures', () => {
-      this._expandTranslationDrag();
-      const geometry = this.geometry, extents = new Map();
-      const [lo, hi, position] = axis === 'x' ? ['minX', 'maxX', 'root_x'] : ['minY', 'maxY', 'root_y'];
-      let start = Infinity, end = -Infinity;
-      // Measure every selected member before changing any root. Unselected
-      // parents and siblings move with the group without affecting its target.
-      for (const [root, members] of groups) {
-        let min = Infinity, max = -Infinity;
-        for (const slot of members) {
-          const entry = geometry.objects.get(slot);
-          if (!entry) continue;
-          const bounds = normalizedBounds(boundsOf(entry));
-          min = Math.min(min, bounds[lo]); max = Math.max(max, bounds[hi]);
-        }
-        if (!Number.isFinite(min)) continue;
-        extents.set(root, {min, max}); start = Math.min(start, min); end = Math.max(end, max);
-      }
-      if (extents.size < 2) return;
-      const at = (min, max) => edge === 'start' ? min : edge === 'end' ? max : (min + max) / 2;
-      const target = at(start, end);
-      for (const [root, {min, max}] of extents) {
-        const delta = target - at(min, max);
-        if (!delta) continue;
-        this.frame.objects[root][position] += delta; moved = true;
-      }
-    });
-    return moved;
-  },
+  /** The colours of the selected figure, or of the figures attached to it when it is selected whole. */
+  figurePalette() { return this.figure && this.object ? (this.selectedJoint < 0 ? attachedFigurePalette(this.report, this.selectionFrame, this.selectedUid) : figurePalette(this.report, this.figure, this.object)) : []; },
 };

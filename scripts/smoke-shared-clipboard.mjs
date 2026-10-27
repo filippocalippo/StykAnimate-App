@@ -86,17 +86,14 @@ try {
       report.keyframes=[createFrame([0xffffffff,0x0033cc,0,0x80112233].map((raw,i)=>createObject(report.figure_types[0],i+1,100+i*200,300,{color_override_raw:raw})))];
       styk.editor.load(report);styk.editor.selectMany([1,2,3,4]);styk.fit();
     },sourceVersion);
-    const colors=page=>page.evaluate(async()=>{
-      const {buildGeometry}=await import('./src/pivot/geometry.mjs');
-      return buildGeometry(styk.editor.report,styk.editor.selectionFrame).drawables.map(s=>[s.rgb,s.alpha]);
-    });
+    const colors=page=>page.evaluate(()=>styk.editor.geometry.drawables.map(s=>[s.rgb,s.alpha]));
     const expected=await colors(a.page);
     await selectCanvas(a.page);await a.page.keyboard.press('Control+c');await flush(a.page);
     await empty(b.page);await b.page.evaluate(version=>{const report=styk.editor.serialize();report.version=version;report.frame_delay_ms=40;styk.editor.load(report);},targetVersion);
     await selectCanvas(b.page);await b.page.keyboard.press('Control+v');await flush(b.page);
     assert.deepEqual(await colors(b.page),expected);
     await b.page.evaluate(()=>styk.fit());
-    await b.page.waitForFunction(()=>!styk.state.editablePreparing&&styk.state.renderer.last?.report===styk.editor.report);
+    await b.page.waitForFunction(()=>styk.state.renderer.engineSide?.frameReport===styk.editor.report);
     await b.page.screenshot({path:path.join(run,`colors-${sourceVersion}-to-${targetVersion}.png`)});
     checks.push(`Rendered figure colors preserved through real OS clipboard (${sourceVersion} to ${targetVersion})`);
   }

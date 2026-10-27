@@ -1,19 +1,30 @@
-# Local Pivot codec service
+# Python Pivot codec service (development test oracle)
 
-Run `python backend/server.py --port 47831` from the app directory. Python 3.10+
-and its standard library are sufficient. Install the optional compiled encoder
-and zstd codec with `python -m pip install -r backend/requirements-fast.txt` for
-faster large imports and version-2 container sections; desktop builds bundle the
-encoder. The service binds only to loopback,
-serves the application, and keeps all file decoding outside the render process.
+**The app does not run this code.** Every build (desktop, development server, web) runs the
+Rust codec, `engine/crates/styk-piv` compiled to WebAssembly, in a worker of the editor page
+(`src/codec-web-worker.mjs`; see [Pivot files and the codec service](../docs/engine/formats-piv.md)).
+This directory and `codecs/` are kept as the oracle that implementation is checked against:
+`engine/tools/piv/parity.sh` records this service's answers and replays them against the Rust
+codec, and the Python unit tests below still run. Nothing here is packaged or deployed.
+
+Run `python backend/server.py --port 47831` from the app directory to compare against it by hand.
+Python 3.10+ and its standard library are sufficient. Install the optional compiled encoder and
+zstd codec with `python -m pip install -r backend/requirements-fast.txt` for faster large imports
+and version-2 container sections. The service binds only to loopback, serves the application, and
+keeps all file decoding outside the render process.
 
 The existing verified parsers in `tools/` and the native app's
-`StykAnimate/tools/codec_bridge.py` remain authoritative. This service specializes
+`StykAnimate/tools/codec_bridge.py` remain authoritative for this oracle. This service specializes
 the modern reader in its own process to bulk-read contiguous pose arrays and
 avoid allocating the obsolete scalar-editor JSON-pointer inventory. No existing
 tool is modified. It does not approximate unsupported files.
 
 ## HTTP contract
+
+The Rust codec answers these routes identically over the codec worker's ports, except
+`/api/samples` and `/api/open`: in the app the desktop main process lists and reads samples
+(`desktop/samples.cjs`, under the rules of `ProjectStore.samples`, `safe_child` and `open`), and a
+sample opens as an ordinary `/api/import` of its bytes.
 
 | Request | Response |
 | --- | --- |
@@ -101,41 +112,15 @@ compare their authoritative data when older saves already dropped pose caches.
 Native projects retain their authored name and additional `_styk` metadata.
 Unchanged embedded STK sources also export byte-for-byte after a service restart.
 
-## Desktop packaging
+## Running it as a service
 
-The Electron launcher may set `STYK_TOOLS_ROOT`, `STYK_BRIDGE_PATH`, and
-`STYK_WEB_ROOT` to staged resources. `--workspace` selects sample discovery root;
-`--static-root` overrides web assets. An optional `STYK_API_TOKEN` or `--token`
-requires `Authorization: Bearer <token>` for codec APIs. Health and static
-resources remain available to the launcher. Host and Origin must be local even
-without a token; remote origins and filesystem traversal are rejected.
-
-`--exit-on-stdin-close` makes the server stop when its standard input reaches
-EOF. The desktop app starts the codec with a pipe on stdin and keeps it open, so
-the OS closes it however the app dies (quit, crash, SIGKILL, out-of-memory kill)
-and the codec, whose caches can hold hundreds of MiB, never outlives the app.
-The flag is opt-in: a server started from a terminal ignores stdin.
-
-The desktop app always sets a random per-launch token, so other local processes
-and localhost pages cannot use the codec. The trusted window receives it through
-the preload bridge (`stykDesktop.apiToken`); import and export clients send it by
-default. With a token, health also returns `session`, a SHA-256 proof of the
-token. The launcher requires it before trusting the port, so a listener that
-bound the port first is never loaded as the workspace. The `npm run serve`
-browser development server remains tokenless.
-
-Desktop windows use `desktop/web-host.cjs` as their public loopback origin. It
-serves the packaged web assets immediately and streams `/api/` traffic to this
-codec once it is ready, with at most 16 pending/active file requests, four
-separate cancellation requests and bounded uploads. The editor and worker-native project saving/reopening do not wait for
-Python startup. The launcher cancels a starting or running child on quit. The
-Python static host remains available for browser development and direct codec
-tests. Import/export requests carry a random 32-character lowercase hexadecimal
-`X-Styk-Job-Id`. The UI owns that identity even if its worker is terminated;
-`POST /api/cancel?id=<identity>` with an empty body cancels the service job.
-The endpoint uses the same origin/token checks as file operations. The desktop
-proxy supplies identities for other clients and sends cancellation when its
-upstream client disconnects, using a separate bounded control connection pool.
+`--workspace` selects the sample discovery root (the folder that holds the app by default);
+`--static-root` overrides web assets. An optional `STYK_API_TOKEN` or `--token` requires
+`Authorization: Bearer <token>` for codec APIs; with a token, health also returns `session`, a
+SHA-256 proof of the token. Health and static resources remain available without it. Host and
+Origin must be local even without a token; remote origins and filesystem traversal are rejected.
+`--exit-on-stdin-close` makes the server stop when its standard input reaches EOF. The desktop
+app used these to run this service as a sidecar until the Rust codec replaced it.
 
 The service admits at most 16 heavy requests, with one active request; queued
 uploads wait before body parsing. Health, cancellation and source-release stay outside this
@@ -143,14 +128,13 @@ queue. Cancellation checks occur at existing codec loop/stage boundaries and
 before source-cache publication. Stalled uploads are also cancellable. Native
 calls, JSON parsing/encoding, compression and individual deep copies finish
 before their next checkpoint; this is cooperative cancellation, not thread
-termination. HTTP clients may still half-close their upload and read a valid
-response. Cancelled identities are retained for up to 120 seconds in a bounded
-256-entry race-protection cache. Offline codec APIs have no scheduler dependency.
+termination. Import/export requests carry a random 32-character lowercase hexadecimal
+`X-Styk-Job-Id`; `POST /api/cancel?id=<identity>` with an empty body cancels that job.
+Cancelled identities are retained for up to 120 seconds in a bounded 256-entry
+race-protection cache.
 
-Regression checks: `python -m unittest discover -s backend -p test_jobs.py`,
-`node --test tests/codec-job.test.mjs tests/import-client-recovery.test.mjs tests/desktop-web-host.test.mjs`,
-and `node tests/codec-cancellation.browser.mjs`. Rebuild and run
-`node scripts/verify-sidecar.mjs` when changing the packaged service.
+Regression checks: `python -m unittest discover -s backend -p test_jobs.py` and
+`node backend/test_browser_roundtrip.mjs` (a real browser against this service).
 
 Run verification with `python -m unittest discover -s backend -p test_server.py`.
 Run `python -m unittest discover -s backend -p test_source_lifetime.py` for active
@@ -164,12 +148,12 @@ parse/stringify roundtrips on both large fixtures, native saves, an actual
 backend restart, byte/SHA256 identity checks, and preservation of fractional edits.
 
 The frontend `ImportClient` in `src/import-client.mjs` sends transferable upload
-buffers to `src/import-worker.mjs`; network reads and JSON parsing run there.
-Native containers (`.styk`/`.stkz`/`.stykmov`) decode locally in that worker —
-`src/native-container.mjs` reads version-1 and version-2 containers and legacy
-JSON, checks all digests, expands binary sections, and verifies the embedded
-source fingerprint — and only fall back to `/api/import` when the local codec
-cannot handle the file. Use `importFile(file)`, `openSample(path)`,
+buffers to `src/import-worker.mjs`, which sends them to the codec worker over a
+MessagePort (`src/codec-request.mjs`); response reads and JSON parsing run there.
+Native containers (`.styk`/`.stkz`/`.stykmov`) open locally in that worker —
+the Rust container reader (`src/native-file-codec.mjs`) reads version-1 and version-2 containers and legacy
+JSON, checks all digests, admits the binary sections, and verifies the embedded
+source fingerprint. Use `importFile(file)`, `openSample(path)` (desktop: the main process reads the sample),
 `importNative(file)`, and `dispose()`. All import methods resolve the API
 response above. The worker appends `worker_fetch_ms`, `worker_parse_ms`, and
 `worker_ms` timings. Editable documents return through byte-bounded
@@ -213,7 +197,7 @@ The encoded response uses one concatenation allocation instead of several.
 
 ### Native frame transport and validation-only decoding
 
-The desktop now negotiates the internal native v5 frame transport. The existing
+The editor negotiates the internal native v5 frame transport. The existing
 parser reads definitions, assets and the trailer; `fast_decode.py` validates all
 frame bytes without allocating the 208,373 editable object dictionaries and pose
 lists in the Akane example. It checks every numeric field, background/type
@@ -306,12 +290,12 @@ object inventory charges occur before their allocations.
 
 Set `STYK_DISABLE_NATIVE_SCAN=1` to exercise the Python fallback. A missing or
 incompatible library also falls back; `native_scan.status()` reports the actual
-selected implementation. Release packaging adds the matching library under the
-sidecar's `native` directory. Windows x64 is verified locally; other platform
+selected implementation. No release ships it any more: the Rust codec validates frames itself
+(`styk-piv` `piv/frames.rs`). Windows x64 is verified locally; other platform
 binaries must be built and tested on their target OS.
 
 Run `python -m unittest discover -s backend -p test_native_scan.py -v` after
-building. Set `STYK_REQUIRE_NATIVE_SCAN=1` in release checks to fail if the library
+building. Set `STYK_REQUIRE_NATIVE_SCAN=1` to fail if the library
 is absent. The tests compare both implementations across 1,500 deterministic
 byte mutations, all truncations of a mixed fixture, signed UID boundaries,
 hidden-frame interpolation, a 5,000-object join chain/cycle and exact resource

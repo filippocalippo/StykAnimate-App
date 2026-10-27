@@ -1,0 +1,45 @@
+{
+ "name": "topology-vfx-sheet",
+ "document": "figure-vfx.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "splitSegment",
+   0.5
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "deleteSingleSegment"
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "duplicateSegment",
+   {}
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

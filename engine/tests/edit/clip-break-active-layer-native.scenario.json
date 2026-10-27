@@ -1,0 +1,45 @@
+{
+ "name": "clip-break-active-layer-native",
+ "document": "clip-break-active-layer-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   3.25
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   4.75
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "createEmptyMovieclip",
+   "Branch"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -3,7 +3,7 @@ import {TILE,TILE_BYTES,TileStore,tileKey,tileTransparent} from './drawing-tiles
 const newCanvas=(w,h)=>typeof OffscreenCanvas!=='undefined'?new OffscreenCanvas(w,h):Object.assign(document.createElement('canvas'),{width:w,height:h});
 /** Visible pixel-space rect under the current 2d transform (canvas bounds →
  * local space). */
-export function visiblePixelRect(ctx){
+function visiblePixelRect(ctx){
   const w=ctx.canvas.width,h=ctx.canvas.height,inv=ctx.getTransform().inverse();
   const q=(x,y)=>({x:inv.a*x+inv.c*y+inv.e,y:inv.b*x+inv.d*y+inv.f});
   const cs=[q(0,0),q(w,0),q(w,h),q(0,h)];

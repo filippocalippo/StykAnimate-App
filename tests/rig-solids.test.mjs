@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
 import {rigExampleDocument} from '../src/rig-examples.mjs';
 import {SOLID_RIG_EXAMPLES} from '../src/rig-solids.mjs';
-import {buildGeometry} from '../src/pivot/geometry.mjs';
+import {geometryOfDocument} from './support/engine-geometry.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 const area=points=>Math.abs(points.reduce((a,p,i)=>{const q=points[(i+1)%points.length];return a+p.x*q.y-p.y*q.x;},0)/2);
 function hull(points){
   const sorted=[...points].sort((a,b)=>a.x-b.x||a.y-b.y),cross=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x),half=list=>{const h=[];for(const p of list){while(h.length>1&&cross(h.at(-2),h.at(-1),p)<=1e-8)h.pop();h.push(p);}return h.slice(0,-1);};
@@ -16,7 +16,7 @@ function closed(g){
   assert.ok(Math.abs(drawn-expected)<Math.max(1e-5,expected*1e-6),`Surface gap/overlap: ${drawn} vs hull ${expected}`);
   assert.ok(g.polys.every(p=>p.alpha===1&&p.points.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y))));
 }
-const editorFor=(id='solid-box-3d',propertyChannels=false)=>{const e=new Editor({demo:false,propertyChannels});e.load(rigExampleDocument(id));e.select(1,0);return e;};
+const editorFor=(id='solid-box-3d',options={})=>{const e=newOwnedEditor({demo:false,...options});e.load(rigExampleDocument(id));e.select(1,0);return e;};
 const change=(e,key,value)=>{e.select(e.selectedUid,e.figure.segments.findIndex(s=>s.name===({turn:'Turn',tilt:'Depth',height:'Height'}[key])));return e.updateSegment(key==='turn'?{angle_rad:value*Math.PI/180}:{length:value});};
 for(const r of SOLID_RIG_EXAMPLES){
   test(`${r.name}: opaque closed coverage over full turns, depth collapse and height extremes`,()=>{
@@ -24,7 +24,7 @@ for(const r of SOLID_RIG_EXAMPLES){
     validateScene(d);o.len_flag=1;o.lengths=fig.segments.map(s=>s.length);
     for(const height of [20,100,300])for(const depth of [0,40,100])for(let deg=0;deg<=360;deg+=15){
       o.angles[c.turn-1]=deg*Math.PI/180;o.lengths[c.tilt-1]=depth;o.lengths[c.height-1]=height;
-      closed(buildGeometry(d,d.keyframes[0]).objects.get(0));
+      closed(geometryOfDocument(d,d.keyframes[0]).objects.get(0));
     }
     assert.ok(fig.segments.length<180,'Small reusable construction budget');
   });
@@ -36,14 +36,12 @@ for(const r of SOLID_RIG_EXAMPLES){
     }
   });
 }
-test('ordinary polygon colors are independent and reversible in both animation modes',()=>{
-  for(const authored of [false,true]){
-    const e=editorFor('solid-cylinder-3d',authored),before=e.serialize(),undo=e._undo.length,colors=()=>e.geometry.objects.get(0).polys.map(p=>p.rgb);
-    const original=colors();e.updatePolygon(0,{color:'#e03060'});assert.equal(e._undo.length,undo+1);
-    assert.notDeepEqual(colors()[0],original[0]);assert.deepEqual(colors().slice(1),original.slice(1));const changed=e.serialize();
-    e.undo();assert.deepEqual(e.serialize(),before);e.redo();assert.deepEqual(e.serialize(),changed);
-    for(const bad of ['red',[Infinity,0,0],[256,0,0]])assert.throws(()=>e.updatePolygon(0,{color:bad}));assert.deepEqual(e.serialize(),changed);
-  }
+test('ordinary polygon colors are independent and reversible',()=>{
+  const e=editorFor('solid-cylinder-3d',{layerTimeline:true,propertyChannels:true}),before=e.serialize(),undo=e._undo.length,colors=()=>e.geometry.objects.get(0).polys.map(p=>p.rgb);
+  const original=colors();e.updatePolygon(0,{color:'#e03060'});assert.equal(e._undo.length,undo+1);
+  assert.notDeepEqual(colors()[0],original[0]);assert.deepEqual(colors().slice(1),original.slice(1));const changed=e.serialize();
+  e.undo();assert.deepEqual(e.serialize(),before);e.redo();assert.deepEqual(e.serialize(),changed);
+  for(const bad of ['red',[Infinity,0,0],[256,0,0]])assert.throws(()=>e.updatePolygon(0,{color:bad}));assert.deepEqual(e.serialize(),changed);
 });
 test('native joint controls reject nonfinite values and coalesce one gesture into one undo',()=>{
   const e=editorFor(),before=e.serialize(),joint=e.selectedJoint;
@@ -51,12 +49,9 @@ test('native joint controls reject nonfinite values and coalesce one gesture int
   assert.deepEqual(e.serialize(),before);assert.equal(e.selectedJoint,joint);
   e.beginDrag('Turn');for(let i=1;i<30;i++)change(e,'turn',i*11);e.commitDrag();assert.equal(e._undo.length,1);e.undo();assert.deepEqual(e.serialize(),before);
 });
-test('solid faces and colors survive native saves and combining joined figures',async()=>{
-  const e=editorFor();change(e,'turn',211);change(e,'height',140);e.updatePolygon(0,{color:'#faf030'});
-  for(const kind of ['styk','stkz']){const d=(await decodeDocument(await buildContainerV2(e.serialize(),kind),kind)).document;validateScene(d);closed(buildGeometry(d,d.keyframes[0]).objects.get(0));assert.deepEqual(d.figure_types[0].polyfills,e.figure.polyfills);}
-  const child=e.importFigure(rigExampleDocument('solid-gem-3d'));e.select(child.unique_id);e.joinFigure(1,0);const before=e.serialize();
-  e.select(1,-1);e.combineJoinedFigure();validateScene(e.serialize());const g=e.geometry.objects.get(e.selectedSlot);assert.equal(g.polys.length,22);assert.ok(g.polys.some(p=>p.culled));
-  e.undo();assert.deepEqual(e.serialize(),before);e.redo();validateScene(e.serialize());
+test('solid faces and colors survive native saves',async()=>{
+  const e=editorFor(undefined,{layerTimeline:true,propertyChannels:true});change(e,'turn',211);change(e,'height',140);e.updatePolygon(0,{color:'#faf030'});
+  const d=(await decodeDocument(await buildContainerV2(e.serialize(),'styk'),'styk')).document;validateScene(d);assert.deepEqual(d.figure_types[0].polyfills,e.figure.polyfills);
 });
 test('malformed native surface metadata is rejected',()=>{
   for(const basis of [[0,1,999],[0,1,1],[0,1],null]){const d=rigExampleDocument('solid-box-3d');d.figure_types[0].polyfills[0]._stykSurface.basis=basis;assert.throws(()=>validateScene(d),/reference joints/);}

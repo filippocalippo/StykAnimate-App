@@ -1,0 +1,97 @@
+{
+ "name": "motion-path-ik-joined-unpinned-sheet",
+ "document": "ik-joined-unpinned.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 2,
+    "handleId": 22,
+    "joint": 0
+   },
+   2
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 350,
+    "y": 280
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 370,
+    "y": 300
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 2,
+    "handleId": 22,
+    "joint": 0
+   },
+   5,
+   {
+    "falloff": {
+     "radius": 4,
+     "shape": "sharp"
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 340,
+    "y": 300
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 11,
+    "joint": 0
+   },
+   4
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 310,
+    "y": 290
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

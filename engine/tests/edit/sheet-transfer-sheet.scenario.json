@@ -1,0 +1,90 @@
+{
+ "name": "sheet-transfer-sheet",
+ "document": "sheet-layers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "sheetTransferFrames",
+   [
+    "layer-1"
+   ],
+   [
+    "layer-2"
+   ],
+   0,
+   3,
+   8
+  ],
+  [
+   "sheetTransferFrames",
+   [
+    "layer-2"
+   ],
+   [
+    "layer-1"
+   ],
+   8,
+   9,
+   12,
+   {
+    "copy": true
+   }
+  ],
+  [
+   "sheetPasteFrames",
+   [
+    "layer-1"
+   ],
+   0
+  ],
+  [
+   "sheetTransferFrames",
+   [
+    "layer-1"
+   ],
+   [
+    "nope"
+   ],
+   0,
+   1,
+   2
+  ],
+  [
+   "setLayerLocked",
+   "layer-2",
+   true
+  ],
+  [
+   "sheetTransferFrames",
+   [
+    "layer-1"
+   ],
+   [
+    "layer-2"
+   ],
+   0,
+   1,
+   2
+  ],
+  [
+   "setLayerLocked",
+   "layer-2",
+   false
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

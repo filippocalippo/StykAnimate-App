@@ -60,13 +60,13 @@ try {
   await page.emulateMedia({colorScheme:'light'});
   check('Explicit dark choice overrides the OS',await theme()==='dark');
   check('Native form controls use the selected scheme',await page.locator('html').evaluate(el=>getComputedStyle(el).colorScheme)==='dark');
-  check('Settings and helper text have readable contrast',await readable('.styk-settings-head h2') && await readable('.styk-settings-note'));
+  check('Settings and helper text have readable contrast',await readable('.styk-settings-head h2') && await readable('.styk-settings-hint'));
   await shot('settings-dark');
   await page.getByRole('radio',{name:'Dark',exact:true}).press('ArrowLeft');
   check('Theme control supports the keyboard',await theme()==='light');
   await page.getByRole('radio',{name:'Light',exact:true}).press('ArrowRight');
   check('Keyboard selection restores dark mode',await theme()==='dark');
-  check('Keyboard focus stays visible',await page.locator('[data-setting=theme]:checked + span').evaluate(el=>getComputedStyle(el).outlineStyle)==='solid');
+  check('Keyboard focus stays visible',await page.locator('[data-setting=theme]:checked').evaluate(el=>getComputedStyle(el.closest('label')).outlineStyle)==='solid');
   for(const tab of ['canvas','animation','shortcuts']) {
     await page.locator(`.styk-settings [data-tab=${tab}]`).click();await shot('settings-'+tab+'-dark');
   }

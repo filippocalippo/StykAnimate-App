@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {engineEditor} from './support/owned-editor.mjs';
 import {DrawingController} from '../src/drawing-controller.mjs';
 import {emptyDocument,createObject,createFrame} from '../src/demo.mjs';
 
 test('first-stroke previews keep the drawing layer position while surrounding layers are hidden',()=>{
   const report=emptyDocument();report.keyframes=[createFrame([createObject(report.figure_types[0],1,0,0)])];
-  const editor=new Editor({demo:false,layerTimeline:true}).load(report),layer=editor.createDrawingLayer();
+  const editor=engineEditor({demo:false,layerTimeline:true},report),layer=editor.createDrawingLayer();
+  editor.selectSheetLayer(layer.id);
   editor.reorderLayers([layer.id,'layer-1']);
   const target=editor.prepareDrawingCel(),preview=()=>Object.getOwnPropertyDescriptor(DrawingController.prototype,'renderPreview').get.call({editor,gesture:{target}});
   const order=()=>preview().geometry.orderedObjects.map(g=>g.obj.unique_id);

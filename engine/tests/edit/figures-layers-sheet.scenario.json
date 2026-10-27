@@ -1,0 +1,90 @@
+{
+ "name": "figures-layers-sheet",
+ "document": "sheet-layers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   3,
+   -1
+  ],
+  [
+   "duplicateFigure"
+  ],
+  [
+   "@select",
+   3,
+   -1
+  ],
+  [
+   "unjoinFigure"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "duplicateFigure"
+  ],
+  [
+   "joinTo",
+   3,
+   11
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    3
+   ]
+  ],
+  [
+   "deleteSelection"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@seek",
+   5
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "rotateJoint",
+   0.3
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

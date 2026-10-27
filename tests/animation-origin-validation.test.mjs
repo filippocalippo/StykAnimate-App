@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateOriginSupport, validateOriginSupportSteps, validateOriginObject, validateOriginObjectSteps,
-  invalidateOriginSupportValidation} from '../src/animation-origin-validation.mjs';
+import {validateOriginSupport, validateOriginSupportSteps, validateOriginObject, validateOriginObjectSteps} from '../src/animation-origin-validation.mjs';
 
 const clone = structuredClone;
 const bone = (handleId, parent = -1) => ({handleId, parent, reversed: false, angle_rad: .3, bend_rad: -.1, length: 10});
@@ -142,8 +141,7 @@ test('only complete successful validation is cached and descriptor replacement r
   length = -1e39; assert.throws(() => validateOriginSupport(figure), /length/); assert.throws(() => validateOriginObject(pose, figure), /length/);
   length = 10; validateOriginSupport(figure); figure._styk.animationOrigin = {...figure._styk.animationOrigin, rotationHandleId: 7};
   assert.throws(() => validateOriginObject(pose, figure), /rotation/);
-  figure._styk.animationOrigin.rotationHandleId = null; validateOriginSupport(figure); invalidateOriginSupportValidation(figure);
-  const before = reads; validateOriginObject(pose, figure); assert(reads > before);
+  figure._styk.animationOrigin.rotationHandleId = null; validateOriginSupport(figure); assert.equal(validateOriginObject(pose, figure), pose);
 });
 
 test('100,000 support bones and ghost poses validate in linear work with bounded cooperative checkpoints', () => {

@@ -1,15 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
 import {construction} from '../src/rig-examples-3d.mjs';
 import {createObject,createFrame,emptyDocument} from '../src/demo.mjs';
 import {getPivotHandles,pickCanvasHandle} from '../src/canvas-interactions.mjs';
 import {rigDetailsShown,setRigDetailsShown,validateControlMetadata} from '../src/rig-control-details.mjs';
 import {spatialSections,installSpatialControls} from '../src/spatial-controls.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 
-function fixture() {
+/** `prepare(document, {main, detail})` changes the document before it opens. */
+function fixture(prepare) {
   const q=construction();q.add(0,0,0,'Figure rotation');
   const bone=(name,tip,detail=false)=>{
     const turn=q.add(0,0,0,name+' turn'),pitch=q.add(0,0,0,name+' tilt');
@@ -20,7 +21,8 @@ function fixture() {
   const main=bone('Whole finger',[30,0,0]),detail=bone('Finger middle joint',[0,30,0],true);
   const figure={figure_type_id:1,segments:q.segments,polyfills:[],image_assets:[],text_assets:[]};
   const document={...emptyDocument(),figure_types:[figure],keyframes:[createFrame([createObject(figure,1,100,100)])]};
-  const editor=new Editor({demo:false,layerTimeline:false,propertyChannels:false}).load(document);editor.select(1);
+  prepare?.(document,{main,detail});
+  const editor=newOwnedEditor({demo:false,layerTimeline:false,propertyChannels:false}).load(document);editor.select(1);
   return {editor,main,detail};
 }
 const handles=(e,extra={})=>getPivotHandles(e.geometry,{selectedUid:e.selectedUid,selectedJoint:e.selectedJoint,...extra});
@@ -42,9 +44,7 @@ test('detailed controls are hidden from picking until requested or selected',()=
 });
 
 test('occupied attachment endpoints remain visible when detailed controls are folded',()=>{
-  const {editor:e,detail}=fixture(),figure=e.figure;
-  e.frame.objects.push(createObject(figure,2,100,100,{join:{target_object_slot:0,target_handle_id:detail}}));
-  e._invalidate();
+  const {editor:e,detail}=fixture((document,{detail})=>{const figure=document.figure_types[0];document.keyframes=[createFrame([createObject(figure,1,100,100),createObject(figure,2,100,100,{join:{target_object_slot:0,target_handle_id:detail}})])];});
   const marker=handles(e).find(h=>h.uid===1&&h.id===detail);
   assert.ok(marker);assert.equal(marker.joined,true);
 });
@@ -76,11 +76,10 @@ test('detail metadata round trips and malformed controls fail scene validation',
 });
 
 test('articulated pose selectors contain named poses and Custom without a visibility option',()=>{
-  const {editor:e,main}=fixture();
-  e.figure._styk={poseChoices:[{name:'Hand pose',choices:[
+  const {editor:e,main}=fixture((document,{main})=>{document.figure_types[0]._styk={poseChoices:[{name:'Hand pose',choices:[
     {id:1,label:'Open',angles:[[main,0]],lengths:[]},
     {id:2,label:'Point',angles:[[main,.4]],lengths:[]},
-  ]}]};
+  ]}]};});
   const choice=spatialSections(e).find(section=>section.id==='spatial-choices').rows[0].html;
   assert.match(choice,/Hand pose/);assert.match(choice,/Open/);assert.match(choice,/Point/);
   assert.doesNotMatch(choice,/<option value="0"/);

@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {Editor, emptyDocument} from '../src/editor.mjs';
-import {SharedClipboard, clipboardSnapshot, restoreClipboard, pasteSheetClipboard} from '../src/shared-clipboard.mjs';
+import {installEngineOwner} from '../src/engine/engine-owner.mjs';
+import {newOwnedEditor, ownedEditorFor} from './support/owned-editor.mjs';
+import {SharedClipboard, pasteSheetClipboard} from '../src/shared-clipboard.mjs';
 import {librarySnapshot} from '../src/library-files.mjs';
 import {libraryDragData, readLibraryDrag, LIBRARY_DRAG_TYPE} from '../src/library-drag.mjs';
 const {SharedClipboard: NativeClipboard, FORMAT} = createRequire(import.meta.url)('../desktop/shared-clipboard.cjs');
@@ -12,9 +14,13 @@ function systemClipboard() {
   return {availableFormats: () => [...content.keys()], readBuffer: type => content.get(type),
     writeBuffer: (type, value) => { content = new Map([[type, Buffer.from(value)]]); }, clear: () => content.clear()};
 }
+/** An editor the engine owns, as the app has it: the session runs the copies and pastes, the editor shows the clipboards. */
 function instance(t, os) {
   const native = new NativeClipboard(os); t.after(() => native.dispose());
   const editor = new Editor({propertyChannels: true, layerTimeline: true});
+  const owner = installEngineOwner(editor);
+  t.after(() => { const {refused} = owner; owner.release(); assert.deepEqual(Object.keys(refused), [], 'the session refused nothing'); });
+  assert.ok(owner.ready(), 'the document has its session');
   const desktop = Object.fromEntries([['beginSharedClipboardWrite','beginWrite'],['writeSharedClipboardChunk','write'],['finishSharedClipboardWrite','finish'],['beginSharedClipboardRead','beginRead'],['readSharedClipboardChunk','read'],['cancelSharedClipboardTransfer','cancel']].map(([name, method]) => [name, async (...args) => native[method](...args)]));
   return {editor, clipboard: new SharedClipboard(editor, desktop), native};
 }
@@ -68,12 +74,15 @@ test('filmstrip paste creates missing layers and restores all animation in one u
 
 test('wire transfers embedded media and movieclip definitions without dropping bytes', async t => {
   const os = systemClipboard(), a = instance(t, os), b = instance(t, os);
-  a.editor.select(1); a.editor.createMovieclip({start: 0, end: 12});
-  a.editor.figure._styk.testAsset = 'data:image/png;base64,' + 'ABCD'.repeat(90000);
+  a.editor.select(1); const clip = a.editor.createMovieclip({start: 0, end: 12});
+  // The clip's definition carries a large asset of its own, as a document that embeds media does.
+  const asset = 'data:image/png;base64,' + 'ABCD'.repeat(90000), document = a.editor.serialize();
+  document.figure_types.find(figure => figure.figure_type_id === clip.figure_type_id)._styk.testAsset = asset;
+  a.editor.load(document); a.editor.select(a.editor.evaluatedFrame.objects.find(object => object.figure_type_id === clip.figure_type_id).unique_id);
   await a.clipboard.copy('figures', () => a.editor.copySelection());
   await b.clipboard.paste('figures', () => b.editor.pasteSelection());
   assert.equal(b.editor.figure._styk.movieclip.duration, 12);
-  assert.equal(b.editor.figure._styk.testAsset, a.editor.figure._styk.testAsset);
+  assert.equal(b.editor.figure._styk.testAsset, asset);
 });
 
 test('whole-scene paste shifts surplus destination layers and keeps their artwork outside the inserted frames', async t => {
@@ -152,15 +161,9 @@ test('document switch during a shared read does not modify the new clipboard or 
   assert.equal(b.editor._selectionClipboard, undefined); assert.equal(b.native.jobs.size, 0);
 });
 
-test('native frame snapshots still round trip into another editor', async () => {
-  const a = new Editor(), b = new Editor(); a.copyFrames([0,1]);
-  await restoreClipboard(b, structuredClone(clipboardSnapshot(a, 'frames')));
-  assert.equal(b.clipboardFrameCount, 2); b.pasteFrames(); b.serialize();
-});
-
-for (const layers of [false, true]) test(`library drop placement preserves sets and one undo (layers=${layers})`, () => {
-  const source = new Editor(); source.select(1); source.select(3, {add:true});
-  const doc = librarySnapshot(source), editor = new Editor({propertyChannels:true, layerTimeline:layers});
+test('library drop placement preserves sets and one undo', () => {
+  const source = ownedEditorFor({layerTimeline:true}); source.select(1); source.select(3, {add:true});
+  const doc = librarySnapshot(source), editor = ownedEditorFor({propertyChannels:true, layerTimeline:true});
   const before = editor.serialize(), history = editor._undo.length;
   editor.importFigure(doc, {position:{x:123,y:87}});
   const objects = editor.selectedObjects;
@@ -177,16 +180,14 @@ test('library drag rejects folders and paths outside the library', () => {
   for (const path of ['../secret','C:/secret','/secret','foo/../secret']) assert.throws(() => readLibraryDrag({getData:() => libraryDragData({...item,path})}), /Invalid/);
 });
 
-
 for(const [sourceVersion,targetVersion] of [[2,5],[3,5],[4,5],[5,4],[5,5],[4,4]])test(`figure clipboard preserves rendered colors across instances (${sourceVersion} to ${targetVersion})`,async t=>{
   const {createFrame,createObject}=await import('../src/demo.mjs');
-  const {buildGeometry}=await import('../src/pivot/geometry.mjs');
   const os=systemClipboard(),a=instance(t,os),b=instance(t,os);
   const source=emptyDocument();source.version=sourceVersion;source.frame_delay_ms=40;
   source.figure_types[0].segments.forEach((s,i)=>{s.color_rgb=[20+i*10,90,180];});
   source.keyframes=[createFrame([0xffffffff,0x0033cc,0,0x80112233].map((raw,i)=>createObject(source.figure_types[0],i+1,100+i*140,240,{color_override_raw:raw})))];
   a.editor.load(source);a.editor.selectMany([1,2,3,4]);
-  const colors=e=>buildGeometry(e.report,e.selectionFrame).drawables.map(s=>[s.rgb,s.alpha]);
+  const colors=e=>e.geometry.drawables.map(s=>[s.rgb,s.alpha]);
   const expected=colors(a.editor);
   await a.clipboard.copy('figures',()=>a.editor.copySelection());
   const destination=emptyDocument();destination.version=targetVersion;destination.frame_delay_ms=40;b.editor.load(destination);

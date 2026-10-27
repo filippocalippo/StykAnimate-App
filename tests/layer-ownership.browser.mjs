@@ -9,7 +9,7 @@ page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(30
 try{
   await page.goto(process.env.STYK_URL??'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
   await page.evaluate(async()=>{
-    const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs'),{movieclipFigure}=await import('/src/movieclips.mjs'),{presencePlayback}=await import('/src/movieclip-presence.mjs');
+    const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs'),{movieclipFigure}=await import('/src/movieclips.mjs'),{presencePlayback}=await import('/tests/support/movieclip-playback.mjs');
     const source=emptyDocument(),report=emptyDocument(),clip=movieclipFigure(2,'Motion',source,{duration:1});report.figure_types.push(clip);
     report.keyframes=[0,10,20].map(x=>createFrame([createObject(report.figure_types[0],1,200+x,200),createObject(report.figure_types[0],2,400+x,200),createObject(clip,7,600+x,200,{_stykMovieclip:presencePlayback()})],10));
     styk.settingsUI.commit({timelineMode:'advanced'});const e=styk.editor;e.load(report);
@@ -28,12 +28,12 @@ try{
   await page.getByRole('button',{name:'New layer',exact:true}).click();
   await page.evaluate(()=>{const e=styk.editor;e.seek(5);e.selectSheetLayer('layer-3');styk.actions['add-figure']();});
   assert.equal(await page.evaluate(()=>styk.editor.layerForUid(styk.editor.selectedUid)),'layer-3');checks.newLayerInsertion=true;
-  await page.getByRole('button',{name:'Delete layer',exact:true}).click();
+  await page.evaluate(()=>styk.timeline.deleteLayer());
   await page.waitForFunction(()=>!styk.editor.getLayer('layer-3'));checks.timelineDeletion=true;
 
   if(process.argv[2]){
     await page.evaluate(()=>styk.editor.markSaved());
-    await page.locator('input[type=file]').first().setInputFiles(process.argv[2]);
+    await page.locator('#file-input').setInputFiles(process.argv[2]);
     await page.waitForFunction(()=>styk.editor.report.figure_types.some(f=>f._styk?.movieclip)&&styk.editor.report._styk.layers.order.length>=3,null,{timeout:120000});
     checks.suppliedFile=await page.evaluate(async()=>{
       const e=styk.editor,layer=e.layers.find(l=>l.kind==='layer'&&!e.getLayerFigureUids(l.id).length),figure=e.report.figure_types.find(f=>f._styk?.movieclip);
@@ -45,11 +45,11 @@ try{
     });
   }
   checks.binary=await page.evaluate(async()=>{
-    const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{Editor}=await import('/src/editor.mjs');
+    const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{ pageEditor }=await import('/tests/support/page-editor.mjs');
     const e=styk.editor,expected=sampleOwnership(e),owners=e.report._styk.layers.assignments,exporter=new DocumentExporter(),importer=new ImportClient();
     try{
       const blob=await exporter.export(e.report,{format:'styk',name:'ownership-regression'}),result=await importer.importFile(new File([blob],'ownership-regression.styk'));
-      const reopened=new Editor({demo:false,layerTimeline:true}).load(result.document);
+      const reopened=pageEditor({demo:false,layerTimeline:true}).load(result.document);
       if(JSON.stringify(sampleOwnership(reopened))!==JSON.stringify(expected))throw new Error('Binary reload changed the animation');
       if(JSON.stringify(reopened.report._styk.layers.assignments)!==JSON.stringify(owners))throw new Error('Binary reload changed ownership');
       e.seek(5);styk.fit();return {bytes:blob.size,ticks:expected.length};

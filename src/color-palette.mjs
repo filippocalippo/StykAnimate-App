@@ -15,8 +15,8 @@ import {messageError} from './localized-error.mjs';
 
 export const PROJECT_PALETTE_LIMIT = 64;
 export const PERSONAL_PALETTE_LIMIT = 64;
-export const PERSONAL_PALETTES_LIMIT = 32;
-export const RECENT_LIMIT = 12;
+const PERSONAL_PALETTES_LIMIT = 32;
+const RECENT_LIMIT = 12;
 const NAME_LIMIT = 60;
 const STORE_KEY = 'stykanimate.colors.v1';
 // Draw kept its recent colours with the brushes before palettes were shared.
@@ -24,7 +24,7 @@ const LEGACY_BRUSH_KEY = 'stykanimate.drawing-brushes.v1';
 const HEX = /^#[0-9a-f]{6}$/;
 
 /** Lower-case #rrggbb, or null for anything else. */
-export const paletteHex = value => typeof value === 'string' && HEX.test(value.toLowerCase()) ? value.toLowerCase() : null;
+const paletteHex = value => typeof value === 'string' && HEX.test(value.toLowerCase()) ? value.toLowerCase() : null;
 const cleanList = (list, limit) => {
   const out = [];
   if (Array.isArray(list)) for (const value of list) { const hex = paletteHex(value); if (hex && !out.includes(hex)) out.push(hex); if (out.length >= limit) break; }
@@ -43,13 +43,6 @@ const cleanPalettes = list => {
 
 /** The project's colours in their saved order; tolerant of damaged files. */
 export const projectColors = report => cleanList(report?._styk?.palette?.colors, PROJECT_PALETTE_LIMIT);
-
-/** Validates the colours a palette command stores. */
-export function validateProjectColors(colors) {
-  if (!Array.isArray(colors) || colors.length > PROJECT_PALETTE_LIMIT) throw messageError(new Error(''), "errors.colorPalette.aProjectPaletteHoldsUpToColors", {PROJECT_PALETTE_LIMIT: PROJECT_PALETTE_LIMIT});
-  if (colors.some(color => paletteHex(color) !== color) || new Set(colors).size !== colors.length) throw messageError(new Error(''), "errors.colorPalette.paletteColorsMustBeUniqueRrggbbValues", {});
-  return colors;
-}
 
 let store;
 const listeners = new Set();

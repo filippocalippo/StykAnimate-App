@@ -1,0 +1,109 @@
+{
+ "name": "range-clip-sheet",
+ "document": "sheet-movieclip.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   2
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "offset": 3,
+    "speed": 2
+   }
+  ],
+  [
+   "duplicateInFrames",
+   [
+    0
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "orderFiguresInFrames",
+   1,
+   [
+    0
+   ]
+  ],
+  [
+   "mirrorFiguresInFrames",
+   "horizontal",
+   [
+    0
+   ]
+  ],
+  [
+   "rotateFiguresInFrames",
+   0.3,
+   [
+    0
+   ]
+  ],
+  [
+   "duplicateInFrames",
+   [
+    0
+   ]
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "deleteFiguresInFrames",
+   [
+    0
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "deleteFiguresInFrames",
+   [
+    0,
+    1
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

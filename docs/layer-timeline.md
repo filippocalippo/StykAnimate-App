@@ -65,7 +65,7 @@ The former property-row Advanced component, per-figure movieclip bars, old Simpl
 
 Every edit plans and validates its result before publication, then records one undoable change. Clipboard transfers and movieclip commands group their constituent changes. Rendering, playback, thumbnails, SVG/image/video export and Pivot materialization sample `evaluatedFrame`. Native STYK files retain editable layer data. Pivot export samples the resulting scene in the export worker because Pivot has one scene-wide frame sequence.
 
-The grid renders visible rows and columns only. Pose history stores affected sources and shares unchanged tracks. Imported source evaluation is shared between layers sampling the same time. The Fig 107 diagnostic (`scripts/verify-layer-import.mjs`, using the local decoded fixture) checks duplicate identities, geometry evaluation and exact undo on 194 imported native frames / 3,782 historical instance IDs.
+The grid renders visible rows and columns only. Pose history stores affected sources and shares unchanged tracks. Imported source evaluation is shared between layers sampling the same time.
 
 Filmstrip cards own their event listeners and preview markers. Eviction releases
 both, prunes queued work, and rejects late results for replaced cards. Hidden
@@ -73,7 +73,7 @@ mounts defer preview work and reveal the selected frame at their first visible
 layout; subsequent renders preserve deliberate scrolling. The focused regression
 is `node tests/sheet-filmstrip.browser.mjs`.
 
-The timeline uses the studio's icons, fields, menus and color tokens. Figure and movieclip Properties include a Layer selector. Scrubbing coalesces pointer positions to one seek per display frame, paints the playhead separately, and retains the grid and layer DOM. Unchanged imported poses retain native object identities for geometry reuse. `scripts/benchmark-layer-scrub.mjs` measures imported and edited-layer seeking against the native evaluator.
+The timeline uses the studio's icons, fields, menus and color tokens. Figure and movieclip Properties include a Layer selector. Scrubbing coalesces pointer positions to one seek per display frame, paints the playhead separately, and retains the grid and layer DOM. Unchanged imported poses retain native object identities for geometry reuse.
 
 ## Verification
 
@@ -217,16 +217,14 @@ trailing release/change event.
 interprets legacy Before/After values as fixed distances (including their saved
 spacing), independent of document/key spacing, and persists the explicit pair
 on the first range/sampling edit.
-Colors and other settings retain their values. The renderer and views share the
-same range calculation; the geometry cache retains the active sample range or
-its 24-entry warm budget, whichever is larger, and shrinks when the range
-contracts. Eviction occurs after evaluating a batch so a large active range
-cannot evict its own samples during opacity adjustment.
+Colors and other settings retain their values. The views and the request that asks
+the engine for the skins (`OnionController.request`) share the same range calculation;
+the engine plans the skins ([onion-skin.md](onion-skin.md)) and keeps their evaluated poses
+while the document is the same, drawing the nearest forty-eight at most.
 
 Verification: `node tests/onion-timeline-range.browser.mjs`,
 `node tests/onion-controls.desktop.mjs`, and the `onion-controller`,
-`onion-timeline-range`, `onion-skin`, `onion-layer-sheet`, and `onion-performance`
-unit tests. Desktop coverage includes native 75%, 100%, 150%, and 200% UI scaling.
+`onion-timeline-range`, and `onion-skins` unit tests. Desktop coverage includes native 75%, 100%, 150%, and 200% UI scaling.
 
 Audio tracks share the timeline's existing scroll area. Opening audio or adding
 tracks preserves the user's timeline height; resizing remains a manual action.

@@ -8,6 +8,7 @@
  *   - the playhead moves by its transform (the Advanced playhead and its frame
  *     number; in Simple the filmstrip's playhead line, while its cards stay
  *     still until playback stops);
+ *   - the onion range markers on the ruler move with the playhead;
  *   - #play-button changes only when playback starts and stops;
  *   - chrome code reads no layout (getBoundingClientRect, offset*, client*,
  *     scroll*, getComputedStyle) while playing;
@@ -43,6 +44,8 @@ const ALLOWED = [
   {id: 'time-display', selector: '#time-display', kinds: ['nodes', 'text'], phases: ['start', 'playing', 'stop'], perSecond: TIME_DISPLAY_HZ},
   {id: 'playhead', selector: '.sheet-playhead', kinds: ['nodes', 'text', 'style'], phases: ['start', 'playing', 'stop']},
   {id: 'play-button', selector: '#play-button', kinds: ['nodes', 'text', 'attributes'], phases: ['start', 'stop']},
+  // The onion range markers sit on the ruler beside the playhead and move with it (onion-timeline-range.mjs).
+  {id: 'onion-range', selector: '.onion-range-overlay', kinds: ['attributes', 'style'], phases: ['start', 'playing', 'stop']},
 ];
 // Known writers and readers during playback, each until the milestone that removes it. `scenarios` limits an entry to
 // where it happens; `always` marks deterministic entries, which fail the test once they stop happening.

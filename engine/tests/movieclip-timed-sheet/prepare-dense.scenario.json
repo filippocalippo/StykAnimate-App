@@ -1,0 +1,44 @@
+{
+ "name": "prepare-dense",
+ "document": "prepare-dense.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "_prepareSheetMovieclips"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "_prepareSheetMovieclips"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-1"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

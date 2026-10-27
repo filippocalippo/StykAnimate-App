@@ -12,8 +12,12 @@ const blob = await exporter.export(editor.report, {
   figureTypeId: selectedFigureId, // STK/STKZ selection
   signal: controller.signal,
   getRevision: () => editor.revision,
+  revision: editor.revision, // required for 'piv', 'stk', 'stkz' and 'stykmov'
 });
 ```
+
+A `.styk` save is made from the report the caller passes; the other formats are made by the engine from the
+document it holds at `revision` (see below), so the report is not sent to the worker for them.
 
 Pass the live report directly. Calling `editor.serialize()`, `structuredClone()`,
 or `JSON.stringify()` first would recreate the main-thread pause this API avoids.
@@ -23,15 +27,33 @@ Large embedded source strings, glyph records, and pose arrays are split without
 serializing the whole document. Only keyframe object `runtime_segments` caches
 are omitted; unknown fields and opaque media survive.
 
-A dedicated worker assembles each snapshot, synchronizes existing derived
+For `.piv`, `.stk`, `.stkz` and `.stykmov` nothing of the document is sent: the worker joins the engine and the engine
+makes the document of the file from the one it holds at the editor's `revision`, baking authored tracks, camera
+motion, styles and movieclips into the stored frames Pivot has, and refusing what Pivot cannot keep
+([engine/document.md](engine/document.md#exports-of-the-document)). The worker raises the cancel flag and gives its
+thread back before it ends, so cancelling never terminates it inside the engine. A change that lands while the
+exporter waits for the engine to publish the revision cancels the export, as for every export.
+
+The worker shares the engine's memory, which only a cross-origin isolated page can do (the desktop app and the site are; the engine
+itself still runs on a page that is not, without worker threads). On a page that is not isolated, a `.piv`, `.stk`, `.stkz` or
+`.stykmov` export is refused before a worker starts, with "This kind of file cannot be made here. Use the desktop app or a page that
+allows shared memory."; `.styk` saves do not need the engine's memory and are made as everywhere.
+
+A dedicated worker assembles each `.styk` snapshot, synchronizes existing derived
 aliases, validates the scene, and builds the output. `.styk`/`.stkz`/`.stykmov`
 saves are encoded in the worker as version-2 sectioned containers — large
 numeric arrays and base64 payloads move to binary sections, the original source
-bytes come from `GET /api/source`, and the skeleton compresses with zstd —
-without the document ever being serialized on the service. `.piv`/`.stk` still
-upload to the local file service, as does a native export when local encoding
-cannot run (no zstd support, missing source), preserving the service's exact
-response including actionable error statuses. Missing display aliases remain
+bytes come from the codec's `/api/source` route, and the Rust container writer
+(`styk_formats::files` in the codec module, loaded by the worker itself:
+`src/native-file-codec.mjs`) compresses the skeleton and sections with zstd and
+checks that a figure file holds a self-contained figure — without the document ever
+being serialized by the codec. A native save has no service fallback: a missing
+original source fails the save (status 404 or 410), as do documents over the
+capacity limits. `.piv`/`.stk` exports go to the Pivot codec. The codec is the Rust one
+(`engine/crates/styk-piv`) compiled to WebAssembly and running in a worker of the
+editor page (`src/codec-web-worker.mjs`); it answers the same `/api/...` routes the
+former local file service did, over the worker's message ports, with the same
+responses and actionable error statuses ([engine/formats-piv.md](engine/formats-piv.md)). Missing display aliases remain
 absent so an untouched STK or legacy document does not become a semantic edit
 merely from normalization. A Blob returns to the renderer without JSON or
 base64 conversion. Use the native Blob streaming helper to save it through
@@ -50,15 +72,17 @@ port. A monotonically increasing request ID rejects delayed messages from older
 requests. No editable graph or completed snapshot remains between saves.
 
 The exporter retains only up to eight immutable compressed blocks, totaling at
-most 64 MiB, and passes them to replacement workers. The same idle deadline and
+most 64 MiB (`src/container-cache.mjs`), and passes them to replacement workers
+by transferring their buffers: they leave the page for the duration of one save and
+come back with its result. The same idle deadline and
 failure/disposal paths clear this pool. Each save still snapshots and validates
 current content, then hashes
 fresh raw section bytes; identical SHA-256, length and codec settings can reuse
 compression. Mutable array identity or editor revision is never a content-cache
 key. Changed poses, media and unknown metadata therefore cannot return stale
-data. Multipart container output feeds `Blob(parts)` directly, avoiding the
-additional contiguous whole-file buffer. The layout, compression settings and
-output bytes are unchanged.
+data. The writer returns the whole container, which becomes the Blob. The layout,
+compression settings and output bytes are those of the JavaScript writer this
+replaced.
 
 An imported layer sheet whose tracks still map exactly to the original native
 times does not require Pivot baking. The materializer checks current track
@@ -182,8 +206,8 @@ or video to preserve their appearance, or choose a solid text fill for Pivot.
 
 ## Drawing publication
 
-Pass the live report, as above: `DocumentExporter` and `ExportFrameRenderer`
-await its drawing publication barrier before transport. PNG publication is
+Pass the live report, as above: `DocumentExporter` and the engine's export renderer
+(`EngineExportFrames`) await its drawing publication barrier before transport. PNG publication is
 derived state and does not advance the edit revision. App save/play finishes
 active drawing edits; recovery includes committed strokes. Clipboard, library,
 playback and thumbnail snapshots use the same barrier. Movieclip scopes flush
@@ -193,7 +217,9 @@ and existing atomic writes retain the prior file. See [DRAWING.md](DRAWING.md).
 ## Drawing flattening
 
 `.piv`, `.stk` and SVG exports cannot carry the sparse tile store, so each v2
-drawing cel materializes as an ordinary PNG sprite covering its tile bounds.
+drawing cel materializes as an ordinary PNG sprite covering its tile bounds
+(the engine's draw lists hold cels as tiles of one display level, so an SVG of a frame with a
+drawing is one embedded picture of the frame: [engine rendering](engine/rendering.md#exports)).
 Rasterization uses source resolution up to a 16 Mpx cap; beyond that the
 largest mip level that fits is used and the export stats record the
 downsampled count. Anchors are rewritten into flattened-pixel coordinates so

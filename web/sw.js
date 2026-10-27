@@ -9,7 +9,7 @@
 // A new build installs in the background and takes over when every window of the
 // old one is closed, so an open project is never swapped under its owner. Files
 // that did not change are copied from the previous cache rather than downloaded,
-// which matters most for the 13 MiB Pivot runtime.
+// such as the Pivot codec's WebAssembly module.
 'use strict';
 
 // Entries are [path, hash]; the empty path is the page itself.
@@ -21,8 +21,9 @@ const SCOPE = self.registration.scope;
 const SCOPE_PATH = new URL(SCOPE).pathname;
 const RECORD = new URL('.precache', SCOPE).href;
 const CONCURRENCY = 8;
-// The Pivot runtime is stored in the background after the editor; it is also kept the first time it is used.
-const isCodec = relative => relative.startsWith('vendor/pyodide/') || relative.startsWith('python/');
+// The Pivot codec is stored in the background after the editor; it is also kept the first time it is used.
+// The same list as CODEC_FILES in scripts/build-web.mjs.
+const isCodec = relative => relative === 'src/engine/pkg/styk_codec.js' || relative === 'src/engine/pkg/styk_codec_bg.wasm';
 const urlOf = path => new URL(path, SCOPE).href;
 
 async function recorded(cache) {
@@ -65,7 +66,7 @@ async function store(entries, {download}) {
 
 self.addEventListener('install', event => {
   if (!PRECACHE.core.length) return;
-  // Only the editor must be stored for the install to succeed; the Pivot runtime follows on request.
+  // Only the editor must be stored for the install to succeed; the Pivot codec follows on request.
   event.waitUntil(store(PRECACHE.core, {download: true}).then(() => store(PRECACHE.codec, {download: false})));
 });
 

@@ -1,0 +1,60 @@
+{
+ "name": "split-authored-layer",
+ "document": "split-authored-layer.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   2.75
+  ],
+  [
+   "splitMovieclip",
+   3
+  ],
+  [
+   "@seek",
+   4.25
+  ],
+  [
+   "splitMovieclip",
+   5
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   5.75
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-2"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DrawingResources} from '../src/drawing-resources.mjs';
+import {DrawingHistory} from '../src/drawing-history.mjs';
 import {createDrawingFigure} from '../src/drawing-model.mjs';
 import {TILE_BYTES,TileStore,tileTransparent} from '../src/drawing-tiles.mjs';
 import {TileEncodeCache,decodeTileBlob,TILE_BLOB_PREFIX} from '../src/drawing-tile-codec.mjs';
@@ -89,6 +90,26 @@ test('a newer edit supersedes a partial publication without publishing mixed rev
     await f.resources.flush();assert.deepEqual(f.entry.store.pixel(0,-128),[31,63,95,1]);
     assert.equal(f.worker.calls.length,4,'one obsolete batch then three current batches');await assertPublication(f);
   }finally{f.resources.dispose();}
+});
+
+test('publication waits for an undo or redo being prepared and never finishes the revision it replaces',async()=>{
+  const ticks=async()=>{for(let i=0;i<5;i++)await new Promise(resolve=>setTimeout(resolve,0));};
+  const replay=()=>{const history=new DrawingHistory({disk:{async close(){}},minRecordBytes:Infinity}),root={kind:'drawing-pixels',celId:'publication',tiles:[{tx:0,ty:-2,before:null,after:new Uint8ClampedArray([31,63,95,1])}]};history.track(root);return {history,root};};
+  // The replay applies: the revision it replaces is never encoded, the new one is published once.
+  let {history,root}=replay(),f=fixture({history});
+  try{
+    history.prepare(root);const flush=f.resources.flush();await ticks();
+    assert.equal(f.worker.calls.length,0,'nothing is encoded while the replay is prepared');
+    f.resources.apply(f.figure,root.tiles,'after');history.release(root);await flush;
+    assert.deepEqual(f.worker.calls.map(c=>c.tiles),[64,64,2]);assert.deepEqual(f.entry.store.pixel(0,-128),[31,63,95,1]);await assertPublication(f);
+  }finally{f.resources.dispose();await history.dispose();}
+  // The replay fails: the unchanged revision is published once it ends.
+  ({history,root}=replay());f=fixture({history});
+  try{
+    history.prepare(root);const flush=f.resources.flush();await ticks();
+    assert.equal(f.worker.calls.length,0);history.release(root);await flush;
+    assert.deepEqual(f.worker.calls.map(c=>c.tiles),[64,64,2]);await assertPublication(f);
+  }finally{f.resources.dispose();await history.dispose();}
 });
 
 test('failed batch preserves the previous publication and retry reuses acknowledged PNGs',async()=>{

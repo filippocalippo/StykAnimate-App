@@ -3,7 +3,6 @@ import {tupleMessages, messageTuple, messageHTML, descriptorAttributes, messageA
 import {t as interfaceText} from './localization.mjs';
 
 import {spatialPerspectiveAvailable} from './spatial-projection.mjs';
-import {geometryPlans} from './pivot/geometry-pose.mjs';
 import {drawingSelection} from './movieclip-drawings.mjs';
 /** Animator controls are a view of native pose channels, not a second rig state. */
 import {spatialBone,spatialPoint} from './rig-spatial.mjs';
@@ -12,7 +11,6 @@ import {icon} from './icons.mjs';
 import {poseChoiceGroups} from './rig-pose-choices.mjs';
 import {rigControlIsDetail,rigDetailsShown,setRigDetailsShown} from './rig-control-details.mjs';
 import {propertyToggle} from './property-toggle.mjs';
-import {renderInspector} from './inspector-kit.mjs';
 import {createSpatialGizmo,drawRotationGizmo,startRotationGizmo,rotateGizmo} from './spatial-gizmo.mjs';
 const DEG=180/Math.PI,esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
@@ -22,7 +20,7 @@ export const spatialControlMode=editor=>modes.get(editor)??'pose';
 function limbControl(editor){
  const f=editor.figure,index=editor.selectedJoint,s=f?.segments[index];if(!s)return null;
  const ancestors=new Set();let parent=s;while(parent?._stykRig?.spatial?.parent){ancestors.add(parent._stykRig.spatial.parent);parent=f.segments.find(n=>n.segment_id===parent._stykRig.spatial.parent);}
- for(const[id,c]of Object.entries(editor.object?._stykIK??{}))if(c.spatialTarget&&(ancestors.has(Number(id))||ikChain(f,Number(id),c.chainLength,geometryPlans(editor.geometry.objects.get(editor.selectedSlot))?.definition).includes(index)))
+ for(const[id,c]of Object.entries(editor.object?._stykIK??{}))if(c.spatialTarget&&(ancestors.has(Number(id))||ikChain(f,Number(id),c.chainLength).includes(index)))
   return{index:f.segments.findIndex(s=>s.segment_id===Number(id)),controller:c};
  return null;
 }
@@ -48,7 +46,7 @@ export function spatialSections(editor,{hotkeyLabel}={}){
  const trunk=[['Pelvis','spatialControls.hips'],['Lower torso','spatialControls.torso'],['Waist','spatialControls.waist'],['Chest','spatialControls.chest'],[bones.some(b=>b.s.name==='Head')?'Head':'Neck','spatialControls.head']].flatMap(([name,key])=>{const b=bones.find(b=>b.s.name===name);return b?[choose(b.i,interfaceText(key),false,key)]:[];}).join('');
  const rows=pose?['pitch','turn','bend'].map((key,i)=>{const value=pose[key]*DEG,labelKey=['spatialControls.tilt','spatialControls.turn','spatialControls.bend'][i],label=interfaceText(labelKey);return`<div class="spatial-axis spatial-${key}"><label for="spatial-${key}-number" ${messageAttributes(labelKey)}>${label}</label><input id="spatial-${key}-range" type="range" min="-180" max="180" step="0.1" value="${wrap(pose[key])*DEG}" data-spatial-axis="${key}" aria-label="${label}" ${messageAttributes(labelKey,{},'aria-label')}><label class="field"><input id="spatial-${key}-number" type="number" step="1" value="${Math.round(value*10)/10}" data-spatial-axis="${key}" aria-label="${label} degrees" ${messageAttributes("spatialControls.degrees", {label:{messageKey:labelKey}}, "aria-label")}><small>°</small></label></div>`;}).join(''):'';
  const endpoint=limb?childOf(editor.figure.segments[limb.index].segment_id):null,toe=endpoint?childOf(endpoint.s.segment_id):null;
- const isFoot=/foot|ankle/i.test(endpoint?.s.name??''),chain=limb?ikChain(editor.figure,editor.figure.segments[limb.index].segment_id,ik.chainLength,geometryPlans(editor.geometry.objects.get(editor.selectedSlot))?.definition):[];
+ const isFoot=/foot|ankle/i.test(endpoint?.s.name??''),chain=limb?ikChain(editor.figure,editor.figure.segments[limb.index].segment_id,ik.chainLength):[];
  const rotations=chain.map((index,i)=>{const key=isFoot?(i===0?'spatialControls.thighRotation':'spatialControls.shinRotation'):(i===0?'spatialControls.upperArmRotation':'spatialControls.forearmRotation');return choose(index,interfaceText(key),true,key);}).join('')+(endpoint?choose(endpoint.i,interfaceText(isFoot?'spatialControls.ankleRotation':'spatialControls.handRotation'),true,isFoot?'spatialControls.ankleRotation':'spatialControls.handRotation'):'')+(toe?choose(toe.i,interfaceText("spatialControls.toeBend"),true,'spatialControls.toeBend'):'');
  const camera=editor.getSpatialCamera(),proportions=editor.getSpatialProportions();
  const parameter=(kind,key,label,value,min,max,step=1,unit='', _messages = {})=>`<div class="spatial-axis spatial-proportion"><label for="spatial-${kind}-${key}" ${_messages.label ? messageAttributes(_messages.label.key, _messages.label.params) : ''}>${label}</label><input type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-spatial-${kind}="${key}" aria-label="${label}" ${_messages.label ? messageAttributes(_messages.label.key, _messages.label.params, 'aria-label') : ''}><label class="field"><input id="spatial-${kind}-${key}" type="number" min="${min}" max="${max}" step="${step}" value="${Math.round(value*100)/100}" data-spatial-${kind}="${key}" aria-label="${label} value" ${messageAttributes("spatialControls.value", {label:_messages.label?{messageKey:_messages.label.key,messageParams:_messages.label.params}:label}, "aria-label")}><small>${unit}</small></label></div>`;
@@ -69,8 +67,8 @@ export function spatialSections(editor,{hotkeyLabel}={}){
  const modes=[messageTuple(['pose',interfaceText("spatialControls.pose"),'move'], {1: {key: "spatialControls.pose", params: {}}}),messageTuple(['rotate',interfaceText("spatialControls.rotate"),'rotate'], {1: {key: "spatialControls.rotate", params: {}}})].map((_tuple) => {const [value,label,symbol] = _tuple; const _messages = tupleMessages(_tuple); return `<button type="button" data-spatial-mode="${value}" aria-label="${label}" aria-pressed="${value===(mode==='figure'?'rotate':mode)}"${_messages[1] ? ' ' + messageAttributes(_messages[1].key, _messages[1].params, 'aria-label') : ''}>${icon(symbol)}${_messages[1]?messageHTML(_messages[1].key,_messages[1].params):esc(label)}</button>`;}).join('');
  // Secondary parts hang off the trunk outside the IK limbs: belt ties, hair
  // locks, coat panels. Each gets a shortcut; a tie is named by its upper bone.
- const trunkNames=new Set(['Pelvis','Lower torso','Waist','Chest','Neck','Head']),definition=geometryPlans(editor.geometry.objects.get(editor.selectedSlot))?.definition;
- const limbBones=new Set(targets.flatMap(({s})=>ikChain(editor.figure,s.segment_id,editor.object._stykIK[s.segment_id].chainLength,definition)));
+ const trunkNames=new Set(['Pelvis','Lower torso','Waist','Chest','Neck','Head']);
+ const limbBones=new Set(targets.flatMap(({s})=>ikChain(editor.figure,s.segment_id,editor.object._stykIK[s.segment_id].chainLength)));
  const parts=bones.filter(({s,i})=>{const parent=bones.find(b=>b.s.segment_id===s._stykRig.spatial.parent);return parent&&trunkNames.has(parent.s.name)&&!trunkNames.has(s.name)&&!limbBones.has(i)&&!rigControlIsDetail(s);});
  const detailToggle=bones.some(({s})=>rigControlIsDetail(s))?propertyToggle('spatial-details',interfaceText('spatialControls.detailedControls'),rigDetailsShown(editor),'sliders',{labelKey:'spatialControls.detailedControls'}):'';
  const rig=html=>({kind:'markup',html:`<div class="spatial-rig">${html}</div>`});
@@ -97,9 +95,7 @@ export function spatialSections(editor,{hotkeyLabel}={}){
  ];
 }
 const depthHintMessage=key=>key?{messageKey:'spatialControls.depthHint',messageParams:{key:key.split(' / ')[0]}}:{messageKey:'spatialControls.assignHoldToPose3dPartsInDepth'};
-/** The 3D rig's sections as the inspector renders them. */
-export const spatialControlsView=editor=>{const sections=spatialSections(editor);return sections.length?renderInspector({kind:'spatial-rig',sections}):'';};
-export function spatialGizmo(editor,project){return spatialControlMode(editor)!=='pose'?createSpatialGizmo(editor,project):null;}
+function spatialGizmo(editor,project){return spatialControlMode(editor)!=='pose'?createSpatialGizmo(editor,project):null;}
 export function drawSpatialGizmo(ctx,editor,project){
  drawRotationGizmo(ctx,spatialGizmo(editor,project));
 }

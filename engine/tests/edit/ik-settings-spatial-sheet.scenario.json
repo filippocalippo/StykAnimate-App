@@ -1,0 +1,86 @@
+{
+ "name": "ik-settings-spatial-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/spatial.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "setNodeIK",
+   {
+    "swivel": 0.4
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "swivel": 0.2,
+    "allowStretch": true
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "swivel": "x"
+   }
+  ],
+  [
+   "setSpatialFeetPinned",
+   false
+  ],
+  [
+   "setSpatialFeetPinned",
+   true
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": false
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": true
+   }
+  ],
+  [
+   "rotateIKTarget",
+   0.3
+  ],
+  [
+   "setNodeIK",
+   {
+    "pinned": false
+   }
+  ],
+  [
+   "rotateIKTarget",
+   -0.2
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "setSpatialFeetPinned",
+   false
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

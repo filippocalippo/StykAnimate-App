@@ -1,0 +1,119 @@
+{
+ "name": "channels-live-errors",
+ "document": "channels-live-errors.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "beginTranslationDrag",
+   "Other figure"
+  ],
+  [
+   "moveSelection",
+   4.5,
+   -2.25
+  ],
+  [
+   "sheetApplyChannels",
+   [
+    {
+     "id": "figure:1:pose",
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "pose",
+     "keys": [
+      {
+       "id": "cell-5",
+       "tick": 0,
+       "interpolation": "linear",
+       "value": {
+        "frameId": "frame-3"
+       }
+      },
+      {
+       "id": "cell-6",
+       "tick": 6,
+       "interpolation": "linear",
+       "value": {
+        "frameId": "frame-4"
+       }
+      }
+     ],
+     "movieclipCurve": true,
+     "clipEnd": 1.5
+    }
+   ],
+   "Set movieclip timing"
+  ],
+  [
+   "moveSelection",
+   2,
+   1
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "sheetApplyChannels",
+   [
+    {
+     "id": "figure:1:pose",
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "pose",
+     "keys": [
+      {
+       "id": "cell-5",
+       "tick": 0,
+       "interpolation": "linear",
+       "value": {
+        "frameId": "frame-3"
+       }
+      },
+      {
+       "id": "cell-6",
+       "tick": 6,
+       "interpolation": "linear",
+       "value": {
+        "frameId": "frame-4"
+       }
+      }
+     ],
+     "movieclipCurve": true,
+     "clipEnd": 7
+    }
+   ],
+   "Set movieclip timing"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-1"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

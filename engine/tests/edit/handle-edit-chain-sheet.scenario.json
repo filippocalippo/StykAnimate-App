@@ -1,0 +1,39 @@
+{
+ "name": "handle-edit-chain-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/chain-long.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "editHandlePosition",
+   260,
+   200
+  ],
+  [
+   "@select",
+   2,
+   2
+  ],
+  [
+   "editHandlePosition",
+   560,
+   220,
+   {
+    "bend": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

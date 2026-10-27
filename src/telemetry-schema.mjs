@@ -70,14 +70,15 @@ export const complexityBucket = n => !Number.isFinite(n) || n < 0 ? 'unknown' : 
 export const fpsBucket = n => !Number.isFinite(n) || n <= 0 ? 'unknown' : n <= 24 ? 'up-to-24' : n <= 30 ? '25-30' : n <= 60 ? '31-60' : 'over-60';
 export const ERROR_TYPES = Object.freeze(['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'AbortError', 'OperationError', 'NotSupportedError', 'GPUError', 'RendererCrash', 'RendererHang', 'BackendError', 'UncleanExit']);
 export const ERROR_OPERATIONS = Object.freeze(['app', 'startup', 'import', 'save', 'export', 'playback', 'recovery', 'gpu', 'renderer', 'backend']);
-export const ERROR_MODULES = Object.freeze(['app.mjs', 'renderer.mjs', 'renderer-geometry.mjs', 'render-artwork.mjs', 'editor.mjs', 'editor-load.mjs', 'import-client.mjs', 'import-worker.mjs', 'document-export.mjs', 'document-export-worker.mjs', 'playback.mjs', 'playback-worker.mjs', 'export-frame-renderer.mjs', 'native-video.mjs', 'main.cjs', 'backend.cjs', 'file-streams.cjs', 'video-export-service.cjs', 'vfw-export-service.cjs', 'camera-monitor.mjs', 'geometry.mjs', 'background.mjs', 'export-frame-worker.mjs', 'export-frame-core.mjs', 'export-canvas.mjs', 'export-memory.mjs', 'playback-resources.mjs', 'preview-image.mjs', 'native-container.mjs', 'vfx-camera.mjs', 'vfx-canvas.mjs', 'vfx-gpu.mjs', 'vfx-webgpu.mjs', 'vfx-viewport.mjs']);
+// Basenames of shipped modules (src/, src/engine/, desktop/) that may appear in a forwarded stack; the server holds the same list.
+export const ERROR_MODULES = Object.freeze(['app.mjs', 'renderer-geometry.mjs', 'editor.mjs', 'import-client.mjs', 'import-worker.mjs', 'document-export.mjs', 'document-export-worker.mjs', 'native-video-export.mjs', 'main.cjs', 'file-streams.cjs', 'video-export-service.cjs', 'vfw-export-service.cjs', 'camera-monitor.mjs', 'geometry.mjs', 'background.mjs',  'export-canvas.mjs', 'export-memory.mjs', 'preview-image.mjs', 'native-file-codec.mjs',    'engine.mjs', 'engine-clipboards.mjs', 'engine-composite.mjs', 'engine-document.mjs', 'engine-drawing-worker.mjs', 'engine-drawing.mjs', 'engine-edit-bounds.mjs', 'engine-export-worker.mjs', 'engine-document-export.mjs', 'engine-export.mjs', 'engine-failure.mjs', 'engine-live-cels.mjs', 'engine-memory.mjs', 'engine-open.mjs', 'engine-owner-drawing.mjs', 'engine-owner.mjs', 'engine-patch.mjs', 'engine-pictures.mjs', 'engine-playback.mjs', 'engine-preview-worker.mjs', 'engine-previews.mjs', 'engine-shown.mjs', 'engine-stage.mjs', 'engine-thumbnails.mjs', 'engine-worker.mjs']);
 export const ENV_ENUMS = Object.freeze({
   os: ['win32', 'darwin', 'linux', 'web', 'unknown'], arch: ['x64', 'arm64', 'ia32', 'unknown'],
   osVersion: ['windows-10', 'windows-11', 'mac', 'linux', 'unknown'],
   ramBucket: ['4-or-less', '8', '16', '32', '64-plus', 'unknown'],
   cpuBucket: ['2-or-less', '4', '8', '16', '32-plus', 'unknown'],
   gpuFamily: ['nvidia', 'amd', 'intel', 'apple', 'qualcomm', 'software', 'unknown'],
-  backend: ['webgpu', 'canvas2d', 'unavailable', 'unknown'], mode: ['simple', 'advanced', 'unknown'],
+  backend: ['webgpu', 'webgl2', 'canvas2d', 'unavailable', 'unknown'], mode: ['simple', 'advanced', 'unknown'],
   locale: ['en', 'it', 'de', 'fr', 'es', 'pt', 'ja', 'ko', 'zh', 'ru', 'pl', 'tr', 'other', 'unknown'],
 });
 const object = value => value && typeof value === 'object' && !Array.isArray(value);

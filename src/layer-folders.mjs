@@ -27,18 +27,6 @@ export function validateLayerFolders(state) {
   }
 }
 
-/** Keep a folder's layers together in the existing, back-to-front stack. */
-export function folderLayerOrder(state, order = state.order) {
-  const groups = new Map();
-  for (const id of order) { const key = state.byId[id]?.folderId ?? id; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(id); }
-  const seen = new Set(), front = [];
-  for (const id of order.toReversed()) {
-    const key = state.byId[id]?.folderId ?? id;
-    if (!seen.has(key)) { seen.add(key); front.push(...groups.get(key).toReversed()); }
-  }
-  return front.reverse();
-}
-
 /** Folders have no pose tracks. Collapse is local UI state, never visibility. */
 export function layerFolderRows(layers, state, collapsed = new Set()) {
   const groups = new Map(), rows = [], seen = new Set();

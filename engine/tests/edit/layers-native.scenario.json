@@ -1,0 +1,35 @@
+{
+ "name": "layers-native",
+ "document": "two-limbs.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "setLayerVisible",
+   "layer-1",
+   false
+  ],
+  [
+   "createLayer",
+   "Second"
+  ],
+  [
+   "renameLayer",
+   "layer-1",
+   "Main"
+  ],
+  [
+   "moveLayerTo",
+   "layer-2",
+   0
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

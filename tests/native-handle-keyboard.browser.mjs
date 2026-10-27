@@ -30,7 +30,7 @@ async function setup({camera=false,previous=false}={}){
 async function hover(id=11){const point=await page.evaluate(id=>__screen(styk.editor.geometry.objects.get(0).joints.get(id)),id);await page.mouse.move(point.x,point.y);await page.locator('#viewport').focus();}
 const values=()=>page.evaluate(()=>({points:__points(),angles:styk.editor.object.angles.slice(),history:styk.editor._undo.length,hover:styk.state.hoverHandle,dragging:styk.editor.dragging,frame:styk.editor.frameIndex,uid:styk.editor.selectedUid}));
 try{
-  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>styk?.ready);
+  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
   await setup({camera:true});await hover(0);
   const originBefore=await page.evaluate(()=>__screen(styk.editor.geometry.objects.get(0).root));
   for(let i=0;i<5;i++)await page.keyboard.down('ArrowRight');await page.keyboard.up('ArrowRight');
@@ -63,8 +63,10 @@ try{
   check('Releasing Caps Lock resumes branch rotation even while its toggle remains on',!await page.evaluate(()=>styk.state.isolateHeld)&&near((await values()).angles[1]-isolated.angles[1],Math.PI/2));
   await page.keyboard.press('CapsLock');
 
-  await setup({previous:true});await hover();const locateBefore=await values();
-  const locateTarget=await page.evaluate(async()=>{const{buildGeometry}=await import('/src/pivot/geometry.mjs');return buildGeometry(styk.editor.report,styk.editor.report.keyframes[0]).objects.get(0).joints.get(11);});
+  await setup({previous:true});
+  // Reading the first frame moves the playhead, which clears the hover: read it before hovering.
+  const locateTarget=await page.evaluate(async()=>{const e=styk.editor,at=e.tick;e.seek(e.timeline[0].start);const joint={...e.geometry.objects.get(0).joints.get(11)};e.seek(at);return joint;});
+  await hover();const locateBefore=await values();
   await page.keyboard.down('r');await page.keyboard.press('l');await page.keyboard.up('r');const located=await values();
   check('Hover L in Handle Edit locates the previous frame endpoint without moving other vertices',near(located.points[11].x,locateTarget.x)&&near(located.points[11].y,locateTarget.y)&&Object.keys(locateBefore.points).filter(id=>id!=='11').every(id=>near(located.points[id].x,locateBefore.points[id].x)&&near(located.points[id].y,locateBefore.points[id].y)));
 

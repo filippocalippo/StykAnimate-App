@@ -1,0 +1,63 @@
+{
+ "name": "break-authored",
+ "document": "break-authored.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "@seek",
+   4.25
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "@seek",
+   5.75
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-1"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

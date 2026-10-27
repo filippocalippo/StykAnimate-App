@@ -1,0 +1,94 @@
+{
+ "name": "motion-path-movieclip-sheet",
+ "document": "sheet-movieclip-loose.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 4,
+    "handleId": 0,
+    "joint": -1
+   },
+   3
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 500,
+    "y": 200
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 510,
+    "y": 210
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 4,
+    "handleId": 0,
+    "joint": -1
+   },
+   0,
+   {
+    "falloff": {
+     "radius": 4
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 470,
+    "y": 180
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   3
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 230,
+    "y": 180
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

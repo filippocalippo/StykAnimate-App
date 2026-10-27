@@ -1,0 +1,32 @@
+{
+ "name": "camera-motion-paste-sheet",
+ "document": "camera-motion.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "copyCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002"
+  ],
+  [
+   "@seek",
+   4.5
+  ],
+  [
+   "pasteCameraMotion"
+  ],
+  [
+   "duplicateCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002",
+   30
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

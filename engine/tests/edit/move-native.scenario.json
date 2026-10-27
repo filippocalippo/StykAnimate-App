@@ -1,0 +1,53 @@
+{
+ "name": "move-native",
+ "document": "two-limbs.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   30,
+   -12
+  ],
+  [
+   "moveSelection",
+   -5,
+   4
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "beginDrag",
+   "Move figures"
+  ],
+  [
+   "moveSelection",
+   10,
+   10
+  ],
+  [
+   "moveSelection",
+   2,
+   0
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

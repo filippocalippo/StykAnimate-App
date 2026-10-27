@@ -21,22 +21,21 @@ const SHARED_KEYS = new Set([
   // configuration
   'historyLimit', 'historyBytes', 'propertyChannels', 'layerTimeline', 'autoKey',
   // counters that stay monotonic across every document
-  '_revisionSerial', '_loadRequestId', '_layerRevision', '_definitionRevision', '_frameDraftRevision',
-  // services and listeners installed once
-  '_frameClipboardWorker', '_layerMigrationPlanner', '_inbetweenPlanner', '_frameDraftListener', '_frameDraftEnabled',
+  '_revisionSerial', '_loadRequestId', '_layerRevision', '_layerFocusRevision', '_definitionRevision',
+  // the engine owner's view of the frame on show, which follows whichever document is open
+  '_shown',
   // clipboards
   '_audioClipboard', '_cameraClipboard', '_cameraMotionClipboard', '_figureClipboard', '_selectionClipboard', '_sheetClipboard',
-  '_frameClipboard', '_frameClipboardCopyController', '_frameClipboardCopyPromise', '_segmentValuesClipboard',
+  '_segmentValuesClipboard',
   '_vfxClipClipboard', '_vfxClipClipboardValues', '_drawingPixelClipboard',
   // panel state and diagnostics
-  '_vfxTimelineVisible', '_cameraInspectorTab', 'lastLoadTimings', 'lastInbetweenTimings',
+  '_vfxTimelineVisible', '_cameraInspectorTab', 'lastLoadTimings',
 ]);
 /** Derived from the report and rebuilt on demand: a resting session does not hold them. */
-const DERIVED_KEYS = ['_geometry', '_evaluated', '_incremental', '_seekGeometry', '_propertyChannelCache', '_nativePoseMarkerCache',
-  '_authoredCommitPreview', '_sheetPropertyPreview', '_layerDescriptors'];
+const DERIVED_KEYS = ['_geometry', '_evaluated', '_sheetPropertyPreview', '_layerDescriptors'];
 const sessions = new WeakSet();
 
-const busy = editor => Boolean(editor._drag || editor._animationEdit || editor._authoredPoseEdit || editor._movieclipBatch);
+const busy = editor => Boolean(editor._drag || editor._animationEdit || editor._authoredPoseEdit);
 
 export const editorSessionMethods = {
   /**
@@ -71,10 +70,7 @@ export const editorSessionMethods = {
     this._loadRequestId = (this._loadRequestId ?? 0) + 1;
     for (const key of Object.keys(this)) if (!SHARED_KEYS.has(key)) delete this[key];
     Object.assign(this, session);
-    // The Simple timeline's working frame is stored in the report; its listener restores it below.
-    if (!this._frameDraftEnabled) this._frameDraft = null;
     this._layerRevision = (this._layerRevision ?? 0) + 1;
-    this._frameDraftRevision = (this._frameDraftRevision ?? 0) + 1;
     this._invalidate({timing: true});
     this._emit('document', {structural: true, timing: true, resumed: true});
     return this;

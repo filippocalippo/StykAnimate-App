@@ -1,0 +1,1938 @@
+{
+ "document": "origin-rig-pose-support-sheet.document.json",
+ "cases": [
+  {
+   "name": "stretch-restLength-missing",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-min-missing",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "min"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-max-missing",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "max"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "follow-influence-missing",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "influence"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-angle-missing",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "angle"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-multiplier-missing",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "multiplier"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "connector-restLength-missing",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "restLength"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-restLength-string",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": "1",
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-min-string",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "min"
+   ],
+   "value": "1",
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-max-string",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "max"
+   ],
+   "value": "1",
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "follow-influence-string",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "influence"
+   ],
+   "value": "1",
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-angle-string",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "angle"
+   ],
+   "value": "1",
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-multiplier-string",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "multiplier"
+   ],
+   "value": "1",
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "connector-restLength-string",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "restLength"
+   ],
+   "value": "1",
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-restLength-null",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": null,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-min-null",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "min"
+   ],
+   "value": null,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-max-null",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "max"
+   ],
+   "value": null,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "follow-influence-null",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "influence"
+   ],
+   "value": null,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-angle-null",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "angle"
+   ],
+   "value": null,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-multiplier-null",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "multiplier"
+   ],
+   "value": null,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "connector-restLength-null",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "restLength"
+   ],
+   "value": null,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-restLength-nan",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-min-nan",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "min"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-max-nan",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "max"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "follow-influence-nan",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "influence"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-angle-nan",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "angle"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-multiplier-nan",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "multiplier"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "connector-restLength-nan",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "restLength"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-restLength-infinite",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-min-infinite",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "min"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-max-infinite",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "max"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "follow-influence-infinite",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "influence"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-angle-infinite",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "angle"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-multiplier-infinite",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "multiplier"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "connector-restLength-infinite",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "restLength"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-restLength-negative-infinite",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": {
+    "specialNumber": "-Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-min-negative-infinite",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "min"
+   ],
+   "value": {
+    "specialNumber": "-Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-max-negative-infinite",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "max"
+   ],
+   "value": {
+    "specialNumber": "-Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "follow-influence-negative-infinite",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "influence"
+   ],
+   "value": {
+    "specialNumber": "-Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-angle-negative-infinite",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "angle"
+   ],
+   "value": {
+    "specialNumber": "-Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-multiplier-negative-infinite",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "multiplier"
+   ],
+   "value": {
+    "specialNumber": "-Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "connector-restLength-negative-infinite",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "restLength"
+   ],
+   "value": {
+    "specialNumber": "-Infinity"
+   },
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-restLength-negative",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": -1,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "connector-restLength-negative",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "restLength"
+   ],
+   "value": -1,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-restLength-zero",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": 0,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "connector-restLength-zero",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "restLength"
+   ],
+   "value": 0,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-restLength-below-epsilon",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": 1e-9,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "connector-restLength-below-epsilon",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "restLength"
+   ],
+   "value": 1e-9,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-restLength-overflow",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": 1000001,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "connector-restLength-overflow",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "restLength"
+   ],
+   "value": 1000001,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-min-negative",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "min"
+   ],
+   "value": -0.1,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-min-overflow",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "min"
+   ],
+   "value": 101,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-max-zero",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "max"
+   ],
+   "value": 0,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-max-below-minimum",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "max"
+   ],
+   "value": 0.001,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-max-overflow",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "max"
+   ],
+   "value": 101,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-width-unknown",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "width"
+   ],
+   "value": "future",
+   "refused": true,
+   "key": "errors.rigConstraints.chooseAValidStretchWidthResponse",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.chooseAValidStretchWidthResponse"
+  },
+  {
+   "name": "stretch-branch-string",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "branch"
+   ],
+   "value": "true",
+   "refused": true,
+   "key": "errors.rigConstraints.invalidStretchBranchSetting",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.invalidStretchBranchSetting"
+  },
+  {
+   "name": "stretch-branch-number",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "branch"
+   ],
+   "value": 1,
+   "refused": true,
+   "key": "errors.rigConstraints.invalidStretchBranchSetting",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.invalidStretchBranchSetting"
+  },
+  {
+   "name": "stretch-source-unknown",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "source"
+   ],
+   "value": "future",
+   "refused": true,
+   "key": "errors.rigConstraints.chooseAValidConnectorStretchSource",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.chooseAValidConnectorStretchSource"
+  },
+  {
+   "name": "stretch-source-without-connector",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "source"
+   ],
+   "value": "span",
+   "refused": true,
+   "key": "errors.rigConstraints.chooseAValidConnectorStretchSource",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.chooseAValidConnectorStretchSource"
+  },
+  {
+   "name": "stretch-restPosition-zero",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restPosition"
+   ],
+   "value": 0,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-restPosition-overflow",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restPosition"
+   ],
+   "value": 1.1,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-restPosition-string",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restPosition"
+   ],
+   "value": ".5",
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "follow-influence-below-range",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "influence"
+   ],
+   "value": -4.1,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "follow-influence-above-range",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "influence"
+   ],
+   "value": 4.1,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "follow-automatic-string",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "automatic"
+   ],
+   "value": "true",
+   "refused": true,
+   "key": "errors.rigConstraints.invalidAutomaticStretchBinding",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.invalidAutomaticStretchBinding"
+  },
+  {
+   "name": "follow-mode-unknown",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "mode"
+   ],
+   "value": "future",
+   "refused": true,
+   "key": "errors.rigConstraints.chooseStretchOrFollowWithoutDeforming",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.chooseStretchOrFollowWithoutDeforming"
+  },
+  {
+   "name": "angleLock-angle-overflow",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "angle"
+   ],
+   "value": 1000001,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-multiplier-overflow",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "multiplier"
+   ],
+   "value": 10.1,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "angleLock-space-unknown",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "space"
+   ],
+   "value": "future",
+   "refused": true,
+   "key": "errors.rigConstraints.chooseAValidAngleLockSpace",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.chooseAValidAngleLockSpace"
+  },
+  {
+   "name": "angleLock-secondary-wrong-mode",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "secondary"
+   ],
+   "value": {
+    "reference": 44,
+    "restAngle": 0,
+    "multiplier": 1
+   },
+   "refused": true,
+   "key": "errors.rigConstraints.aSecondAngleReferenceRequiresAParentAngle",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.aSecondAngleReferenceRequiresAParentAngle"
+  },
+  {
+   "name": "connector-start-missing",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "start"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "follow-driver-missing",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "driver"
+   ],
+   "value": null,
+   "remove": true,
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "connector-start-string",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "start"
+   ],
+   "value": "44",
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "follow-driver-string",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "driver"
+   ],
+   "value": "44",
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "connector-start-fractional",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "start"
+   ],
+   "value": 44.5,
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "follow-driver-fractional",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "driver"
+   ],
+   "value": 44.5,
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "connector-start-negative",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "start"
+   ],
+   "value": -1,
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "follow-driver-negative",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "driver"
+   ],
+   "value": -1,
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "connector-start-nonexistent",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "start"
+   ],
+   "value": 999,
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "follow-driver-nonexistent",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "driver"
+   ],
+   "value": 999,
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "connector-start-nan",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "start"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "follow-driver-nan",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "driver"
+   ],
+   "value": {
+    "specialNumber": "NaN"
+   },
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "connector-start-infinite",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "start"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "follow-driver-infinite",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "driver"
+   ],
+   "value": {
+    "specialNumber": "Infinity"
+   },
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "connector-end-same-anchor",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "end"
+   ],
+   "value": 33,
+   "refused": true,
+   "key": "errors.rigConstraints.chooseTwoDifferentConnectorAnchors",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.chooseTwoDifferentConnectorAnchors"
+  },
+  {
+   "name": "connector-start-self-cycle",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "start"
+   ],
+   "value": 67,
+   "refused": true,
+   "key": "errors.rigConstraints.thisRigWouldDependOnItselfChooseAnchors",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.thisRigWouldDependOnItselfChooseAnchors"
+  },
+  {
+   "name": "follow-driver-disabled-driver",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "driver"
+   ],
+   "value": 33,
+   "refused": true,
+   "key": "errors.rigConstraints.theSelectedStretchDriverIsNotEnabledRemove",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.theSelectedStretchDriverIsNotEnabledRemove"
+  },
+  {
+   "name": "follow-driver-self-cycle",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "driver"
+   ],
+   "value": 55,
+   "refused": true,
+   "key": "errors.rigConstraints.theSelectedStretchDriverIsNotEnabledRemove",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.theSelectedStretchDriverIsNotEnabledRemove"
+  },
+  {
+   "name": "stretch-descriptor-boolean",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch"
+   ],
+   "value": true,
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "stretch-descriptor-array",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch"
+   ],
+   "value": [],
+   "refused": true,
+   "key": "errors.cameraMotion.mustBeBetweenAnd",
+   "loadRefused": true,
+   "loadKey": "errors.cameraMotion.mustBeBetweenAnd"
+  },
+  {
+   "name": "follow-descriptor-boolean",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow"
+   ],
+   "value": true,
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "follow-descriptor-array",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow"
+   ],
+   "value": [],
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "connector-descriptor-boolean",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector"
+   ],
+   "value": true,
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "connector-descriptor-array",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector"
+   ],
+   "value": [],
+   "refused": true,
+   "key": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.refersToAMissingJointRemoveOrReconnect"
+  },
+  {
+   "name": "angleLock-descriptor-boolean",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock"
+   ],
+   "value": true,
+   "refused": true,
+   "key": "errors.rigConstraints.invalidRigResponseOrAngleLock",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.invalidRigResponseOrAngleLock"
+  },
+  {
+   "name": "angleLock-descriptor-array",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock"
+   ],
+   "value": [],
+   "refused": true,
+   "key": "errors.rigConstraints.invalidRigResponseOrAngleLock",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.invalidRigResponseOrAngleLock"
+  },
+  {
+   "name": "stretch-restLength-epsilon",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": 1e-8,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "stretch-restLength-maximum",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "restLength"
+   ],
+   "value": 1000000,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "stretch-min-zero-valid",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "min"
+   ],
+   "value": 0,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "stretch-max-maximum-valid",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "max"
+   ],
+   "value": 100,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "stretch-width-inverse-valid",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "width"
+   ],
+   "value": "inverse",
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "stretch-width-scale-valid",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "width"
+   ],
+   "value": "scale",
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "stretch-branch-false-valid",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "branch"
+   ],
+   "value": false,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "follow-influence-minimum-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "influence"
+   ],
+   "value": -4,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "follow-influence-maximum-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "influence"
+   ],
+   "value": 4,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "follow-automatic-false-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow",
+    "automatic"
+   ],
+   "value": false,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "angleLock-angle-minimum-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "angle"
+   ],
+   "value": -1000000,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "angleLock-multiplier-minimum-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "multiplier"
+   ],
+   "value": -10,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "angleLock-space-authored-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "space"
+   ],
+   "value": "authored",
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "angleLock-secondary-null-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock",
+    "secondary"
+   ],
+   "value": null,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "connector-restLength-epsilon",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "restLength"
+   ],
+   "value": 1e-8,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "stretch-futureMetadata-retained",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch",
+    "futureMetadata"
+   ],
+   "value": {
+    "name": "unchanged",
+    "values": [
+     1,
+     2,
+     3
+    ]
+   },
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "connector-futureMetadata-retained",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector",
+    "futureMetadata"
+   ],
+   "value": {
+    "name": "unchanged"
+   },
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "stretch-descriptor-null-valid",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch"
+   ],
+   "value": null,
+   "refused": true,
+   "key": "errors.rigConstraints.theSelectedStretchDriverIsNotEnabledRemove",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.theSelectedStretchDriverIsNotEnabledRemove"
+  },
+  {
+   "name": "stretch-descriptor-false-valid",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch"
+   ],
+   "value": false,
+   "refused": true,
+   "key": "errors.rigConstraints.theSelectedStretchDriverIsNotEnabledRemove",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.theSelectedStretchDriverIsNotEnabledRemove"
+  },
+  {
+   "name": "stretch-descriptor-zero-valid",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch"
+   ],
+   "value": 0,
+   "refused": true,
+   "key": "errors.rigConstraints.theSelectedStretchDriverIsNotEnabledRemove",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.theSelectedStretchDriverIsNotEnabledRemove"
+  },
+  {
+   "name": "follow-descriptor-null-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow"
+   ],
+   "value": null,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "follow-descriptor-false-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow"
+   ],
+   "value": false,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "follow-descriptor-zero-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "follow"
+   ],
+   "value": 0,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "connector-descriptor-null-valid",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector"
+   ],
+   "value": null,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "connector-descriptor-false-valid",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector"
+   ],
+   "value": false,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "connector-descriptor-zero-valid",
+   "path": [
+    "segments",
+    5,
+    "_stykRig",
+    "connector"
+   ],
+   "value": 0,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "angleLock-descriptor-null-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock"
+   ],
+   "value": null,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "angleLock-descriptor-false-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock"
+   ],
+   "value": false,
+   "refused": true,
+   "key": "errors.rigConstraints.invalidRigResponseOrAngleLock",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.invalidRigResponseOrAngleLock"
+  },
+  {
+   "name": "angleLock-descriptor-zero-valid",
+   "path": [
+    "segments",
+    3,
+    "_stykRig",
+    "angleLock"
+   ],
+   "value": 0,
+   "refused": true,
+   "key": "errors.rigConstraints.invalidRigResponseOrAngleLock",
+   "loadRefused": true,
+   "loadKey": "errors.rigConstraints.invalidRigResponseOrAngleLock"
+  },
+  {
+   "name": "stretch-descriptor-null-without-followers-valid",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch"
+   ],
+   "value": null,
+   "removeFollowers": true,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "stretch-descriptor-false-without-followers-valid",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch"
+   ],
+   "value": false,
+   "removeFollowers": true,
+   "refused": false,
+   "loadRefused": false
+  },
+  {
+   "name": "stretch-descriptor-zero-without-followers-valid",
+   "path": [
+    "segments",
+    2,
+    "_stykRig",
+    "stretch"
+   ],
+   "value": 0,
+   "removeFollowers": true,
+   "refused": false,
+   "loadRefused": false
+  }
+ ]
+}

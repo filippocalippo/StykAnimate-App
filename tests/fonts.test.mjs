@@ -113,7 +113,7 @@ test('the packaged desktop app ships and serves the fonts', async t => {
     await mkdir(path.dirname(path.join(webRoot, file)), {recursive: true});
     await copyFile(path.join(root, file), path.join(webRoot, file));
   }
-  const host = await hostModule.startDesktopHost({appRoot: root, resourcesPath: directory, packaged: true, startCodec: () => new Promise(() => {})});
+  const host = await hostModule.startDesktopHost({appRoot: root, resourcesPath: directory, packaged: true});
   t.after(async () => { await host.stop(); await rm(directory, {recursive: true, force: true}); });
   const get = pathname => new Promise((resolve, reject) => http.get(`${host.origin}${pathname}`, {agent: false}, response => {
     response.resume(); response.on('end', () => resolve(response)); response.on('error', reject);

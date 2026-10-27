@@ -27,10 +27,10 @@ function controlledEngine() {
 const channels = [];
 afterEach(() => { for (const channel of channels.splice(0)) { channel.port1.close(); channel.port2.close(); } });
 
-function job(shell, jobId) {
+function job(shell, jobId, cancel) {
   const channel = new MessageChannel(), replies = [];
   channels.push(channel);
-  shell.handleMessage({type: 'connect', jobId, port: channel.port2});
+  shell.handleMessage({type: 'connect', jobId, port: channel.port2, ...(cancel ? {cancel} : {})});
   channel.port1.onmessage = ({data}) => replies.push(data);
   return {replies, send: (id, path) => channel.port1.postMessage({id, method: 'GET', path, headers: {}, body: new Uint8Array(0)}),
     reply: id => replies.find(item => item.id === id)};
@@ -130,4 +130,63 @@ test('unknown messages are ignored', () => {
   const shell = createCodecShell({engine: {handle: async () => ok('')}, post: () => {}});
   shell.handleMessage(null); shell.handleMessage({type: 'nonsense'}); shell.handleMessage(undefined);
   assert.deepEqual(shell.state(), {jobs: 0, skipped: 0, queued: 0, running: false});
+});
+
+/** An engine that works until the request's cancel probe says stop, polling it as the codec does at its checkpoints. */
+function pollingEngine() {
+  const calls = [];
+  return {calls, engine: {handle: request => new Promise(resolve => {
+    calls.push(request.path);
+    const poll = () => request.cancel.cancelled()
+      ? resolve({status: 499, headers: {}, body: new TextEncoder().encode('{"code":"cancelled"}')})
+      : setTimeout(poll, 1);
+    poll();
+  })}};
+}
+
+test('a shared cancellation flag stops the running request; the worker serves the next job', async () => {
+  const control = pollingEngine(), flag = new Int32Array(new SharedArrayBuffer(4));
+  const shell = createCodecShell({engine: control.engine, post: () => {}});
+  const running = job(shell, 'running', flag);
+  running.send(1, '/running');
+  await until(() => control.calls.length === 1, 'the request to start');
+  Atomics.store(flag, 0, 1);
+  await until(() => running.reply(1), 'the cancelled reply');
+  assert.equal(running.reply(1).status, 499, 'no skip message was needed');
+  const nextFlag = new Int32Array(new SharedArrayBuffer(4)), next = job(shell, 'next', nextFlag);
+  next.send(1, '/next');
+  await until(() => control.calls.length === 2, 'the next job to start');
+  assert.deepEqual(control.calls, ['/running', '/next']);
+  assert.equal(next.reply(1), undefined, 'the next job runs on: its own flag is clear');
+  Atomics.store(nextFlag, 0, 1);
+  await until(() => next.reply(1), 'the next reply');
+});
+
+test('a flagged job\'s queued requests are answered 499 without reaching the codec', async () => {
+  const control = controlledEngine(), flag = new Int32Array(new SharedArrayBuffer(4));
+  const shell = createCodecShell({engine: control.engine, post: () => {}});
+  const running = job(shell, 'running'), doomed = job(shell, 'doomed', flag), later = job(shell, 'later');
+  running.send(1, '/running');
+  await until(() => control.calls.length === 1, 'the running request to start');
+  doomed.send(1, '/doomed'); later.send(1, '/later');
+  await until(() => shell.state().queued === 2, 'both requests to queue');
+  Atomics.store(flag, 0, 1);
+  control.finish(0);
+  await until(() => control.calls.length === 2, 'the next request to start');
+  assert.deepEqual(control.calls, ['/running', '/later']);
+  control.finish(1);
+  await until(() => doomed.reply(1) && later.reply(1), 'both replies');
+  assert.equal(doomed.reply(1).status, 499);
+  assert.equal(JSON.parse(textOf(doomed.reply(1).body)).code, 'cancelled');
+});
+
+test('a flag that is not an Int32Array is ignored, never trusted', async () => {
+  const control = controlledEngine();
+  const shell = createCodecShell({engine: control.engine, post: () => {}});
+  const a = job(shell, 'a', {0: 1});
+  a.send(1, '/x');
+  await until(() => control.calls.length === 1, 'the request to run');
+  control.finish(0);
+  await until(() => a.reply(1), 'its reply');
+  assert.equal(a.reply(1).status, 200);
 });

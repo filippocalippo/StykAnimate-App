@@ -15,7 +15,6 @@ import {displayedSegmentPaint,displayedColor} from './figure-colors.mjs';
 import {openSurfaceReference} from './builder-surface-ui.mjs';
 import {openRigTest, openRigExamples} from './rig-test-ui.mjs';
 import {bucketRegion, pickFigureFill, drawFillHighlight} from './builder-fill.mjs';
-import {pickCanvasArtwork} from './canvas-artwork-pick.mjs';
 import {figureJoinAction, joinTargetUids} from './figure-join-action.mjs';
 import {duplicatePreview, drawDuplicatePreview} from './builder-duplicate-preview.mjs';
 import {createConstruction, strokeSegments} from './builder-construction.mjs';
@@ -29,26 +28,30 @@ import {segmentPaint, parseColor, hexColor, backgroundPaint, paintBackground, pa
 import {resolveInstanceFigure, polygonIdentity} from './animation-style.mjs';
 import { applicationMenuItems } from "./application-menu.mjs";
 import { Editor } from "./editor.mjs";
-import { createRenderer,worldToScreen,screenToWorld } from "./renderer.mjs";
+import { worldToScreen, screenToWorld, objectBounds } from "./renderer-geometry.mjs";
+import { createStage } from "./engine/engine-stage.mjs";
+import { createStagePlayback } from "./engine/engine-playback.mjs";
+import { installEngineOwner } from "./engine/engine-owner.mjs";
+import { loadEngine } from "./engine/engine.mjs";
+import { useEngine } from "./engine/engine-open.mjs";
+import { engineDocument } from "./engine/engine-document.mjs";
+import { engineComposite } from "./engine/engine-composite.mjs";
+import { markAppBounds } from "./engine/engine-edit-bounds.mjs";
 import {DrawingController} from './drawing-controller.mjs';
 import { ROW as TIMELINE_ROW, HEADER as TIMELINE_RULER } from "./layer-timeline.mjs";
 import { createTimelineHost } from "./timeline-host.mjs";
-import { OnionSkinCache } from "./onion-skin.mjs";
 import {hasPinnedIK} from './ik.mjs';
 import { OnionControls } from "./onion-controls.mjs";
 import { OnionController } from "./onion-controller.mjs";
-import { ThumbnailRenderer } from "./thumbnail-renderer.mjs";
+import { createThumbnailRenderer } from "./engine/engine-thumbnails.mjs";
+import { EnginePoses } from "./engine/engine-pictures.mjs";
 import { BackgroundDialog } from "./background-dialog.mjs";
 import { ImportClient } from "./import-client.mjs";
-import { codecMode } from "./codec-job.mjs";
-import { browserCodecHost } from "./codec-web-host.mjs";
-import { PlaybackCache } from "./playback.mjs";
+import { browserCodecHost, codecProfile } from "./codec-web-host.mjs";
 import {playbackWindow,playbackLookaheadSize,playbackStartupWindow,normalizePlaybackRange} from './playback-window.mjs';
-import {PlaybackUploadWarmup,PlaybackUploadAhead} from './playback-upload.mjs';
 import {AudioEngine} from './audio-engine.mjs';
 import {audioState, audioFps, audibleClips} from './audio-model.mjs';
 import {PreviewImages} from './preview-images.mjs';
-import {backgroundImageAssets,frameImageDrawables} from './scene-preparation.mjs';
 import { PlaybackMetrics } from "./playback-metrics.mjs";
 import {PlaybackCadence} from './playback-cadence.mjs';
 import {previewQualityLevels, previewMsaaLevels, updatePreviewQuality, playbackQualityIndex} from './preview-quality.mjs';
@@ -67,7 +70,6 @@ import { PrivacyUI } from './privacy-ui.mjs';
 import { FeedbackUI } from './feedback-ui.mjs';
 import { UpdateUI } from './update-ui.mjs';
 import { ReleaseSplash } from './support-ui.mjs';
-import { EditableScenePreparation } from './editable-scene-preparation.mjs';
 import { TextDialog } from "./text-dialog.mjs";
 import { SegmentValuesDialog } from "./segment-values-dialog.mjs";
 import { SpritePlacementDialog } from "./sprite-placement-dialog.mjs";
@@ -79,8 +81,6 @@ import {
   builderShowsStaticHandles,
   drawBuilderHighlight,
 } from "./builder-aids.mjs";
-import { installNativeFrameClipboard } from "./frame-clipboard-storage.mjs";
-import { ClipboardWorkerClient } from "./clipboard-worker-client.mjs";
 import { installShell } from "./shell/dock-host.mjs";
 import { createDockKeyboard } from "./shell/dock-keyboard.mjs";
 import { installDockTabs } from "./shell/dock-tabs.mjs";
@@ -148,13 +148,12 @@ import { runTimelineHotkey } from "./timeline-hotkeys.mjs";
 import { layerIdForUid, layerVisible, layerLocked } from "./layers.mjs";
 import { DocumentExporter } from "./document-export.mjs";
 import { writeNativeBlob as writeNativeBlobRaw, readNativeRecovery } from "./native-files.mjs";
-import { objectBounds } from "./renderer-geometry.mjs";
 import {
   imageFileToFigure,
   imageFileToBackground,
 } from "./media-authoring.mjs";
 import { icon, hydrateIcons } from "./icons.mjs";
-import { MotionPathCache, motionPathTargets, motionPathTargetKey, pickMotionPathPoint, drawMotionPath, drawMotionPathGhost, affineProjection } from "./motion-path.mjs";
+import { MotionTrails, motionPathTargets, motionPathTargetKey, pickMotionPathPoint, drawMotionPath, drawMotionPathGhost, affineProjection } from "./motion-path.mjs";
 import { MOTION_PATH_FALLOFF_MAX } from "./motion-path-falloff.mjs";
 import { CanvasGuides } from "./canvas-guides.mjs";
 import { MotionPathControls } from "./motion-path-controls.mjs";
@@ -173,7 +172,6 @@ import { createCommandPalette } from "./ui/command-palette.mjs";
 import { kitText } from "./ui/ui-strings.mjs";
 import { installTooltips } from "./ui/ui-tooltip.mjs";
 import { withShiftHint } from "./ui/quick-actions.mjs";
-import { buildGeometry, evaluatedFrame } from "./pivot/geometry.mjs";
 import {
   cameraIsIdentity,
   gradientAngleFromBackground,
@@ -193,12 +191,12 @@ const $ = (id) => document.getElementById(id),
           "'": "&#39;",
         })[c],
     );
+// The engine opens every document (src/engine/engine-open.mjs): it loads before the first one.
+useEngine(await loadEngine());
 const editor = new Editor({ demo: false, propertyChannels: true, layerTimeline: true }).newDocument(),
   desktop = window.stykDesktop,
   importer = new ImportClient(),
   documentExporter = new DocumentExporter(),
-  clipboardWorker = new ClipboardWorkerClient(),
-  preparedScenes = new WeakMap(),
   exportJobs = new Set();
 const browserRecovery = desktop ? null : new BrowserRecoverySession();
 const manualSave = new DocumentSave(), recoveryDeadline = new RecoveryDeadline();
@@ -226,7 +224,6 @@ const projects = createProjectTabsHost({editor, hooks: {
 }});
 const audioEngine = new AudioEngine({desktop, onError: error => { pause(); fail(error); }});
 let audioPreparation, audioScrubController, audioScrubAt = 0;
-editor.setFrameClipboardWorker(clipboardWorker);
 function interruptRecovery() {
   let aborted = false;
   // A resting project's copy is not interrupted: nothing the person does in front can change what it stores.
@@ -249,6 +246,8 @@ async function runDocumentExport(format, consume, { recovery = false, controller
   telemetry.count(metric + '_started');
   try {
     const drawingRevision=editor.revision;await drawingBarrier(editor.report,{signal:controller.signal});if(drawingRevision!==editor.revision)throw messageError(new DOMException('', 'AbortError'), "errors.app.theDrawingChangedDuringExport", {});
+    // The engine makes Pivot and figure files from the document it holds: its session starts on the open document and takes what the editor changed.
+    if (format !== 'styk' && !editor._shown?.active) throw Object.assign(messageError(new Error(''), "errors.documentExport.theEngineCannotMakeThisFileHere", {}), {telemetryCode: 'engine_failed', telemetryStage: 'prepare'});
     const blob = await documentExporter.export(recovery ? editor.movieclipProjectReport() : editor.report, {
       format,
       name: recovery ? editor._movieclipScopes?.[0]?.parent.name ?? editor.name : editor.name,
@@ -256,8 +255,9 @@ async function runDocumentExport(format, consume, { recovery = false, controller
       figureTypeId: editor.object?.figure_type_id,
       figureUid: editor.selectedUid,
       tick: editor.tick,
+      revision: editor.revision,
       signal: controller.signal,
-      getRevision: () => `${editor.revision}:${editor.frameDraftRevision}:${saveMutationEpoch}`,
+      getRevision: () => `${editor.revision}:${saveMutationEpoch}`,
     });
     context.size = sizeBucket(blob.size);
     telemetry.performance.record('serialize',performance.now()-started);
@@ -321,13 +321,10 @@ const state = {
   loadedName: null,
   playbackPacket: null,
   playbackRevision: null,
-  playbackScale: null,
-  playbackSoftware: false,
   playbackHiddenKey: "",
   previewGovernor: { index: 0 },
   loopRange: null,
   buffering: false,
-  backgroundPending: null,
   rangeIndices: [],
   applyRange: false,
   scrubbing: false,
@@ -337,31 +334,15 @@ const state = {
   hoverPathPoint: null,
 };
 // A lost device usually returns once the browser's GPU process settles, so
-// accelerated reconnects back off per consecutive loss; a renderer surviving
-// the stable window restores the retry budget for the next transient loss.
+// reconnects back off per consecutive loss; a stage surviving the stable
+// window restores the retry budget for the next transient loss.
 const GPU_RECOVERY_DELAYS = [1000, 5000], GPU_STABLE_MS = 30000;
 let canvas = $("scene"), rendererRecovery, gpuRecoveryTimer, gpuRecoveryAttempts = 0, gpuStableTimer;
 const viewport = $("viewport"),
   overlay = $("overlay"),
   ctx = overlay.getContext("2d"),
-  images = new PreviewImages({managedInvalidation:true,priorityURLs:playbackImagePriority,onReady: ({retained=false,resized=false,unchanged=false,changedURLs}={}) => {
-    // A worker-proven identical decode keeps consumer identities and GPU pixels.
-    if(unchanged){requestRender();return;}
-    // New lookahead backgrounds cannot change already-complete GPU frames.
-    // Keep their uploads resident; live edits/resized variants still invalidate.
-    if(state.playing&&retained&&!resized){requestRender();return;}
-    const renderer = state.renderer;
-    if (renderer?.invalidateImages && changedURLs) { renderer.invalidateImages(changedURLs); requestRender(); return; }
-    if (renderer) {
-      renderer.generation++; renderer.lastGeometry = null;
-      renderer.clearPreparedFrames?.();
-      for (const entry of renderer.backgroundImages?.values() || []) entry.texture.destroy();
-      renderer.backgroundImages?.clear(); renderer.backgroundKey = '';
-      renderer.clearOnionArtwork?.();
-      renderer.clearArtwork?.();
-    }
-    requestRender();
-  }, onError: error => status(error, true)});
+  // The pictures the interface's own painters read (picking, the asset previews): the stage decodes its own.
+  images = new PreviewImages({managedInvalidation:true,onReady: () => requestRender(), onError: error => status(error, true)});
 hydrateIcons();
 // One owner for dialogs, menus and messages (src/ui/overlay-manager.mjs): the
 // hotkey gate, focus return, and the message slot that stays above every modal.
@@ -428,18 +409,20 @@ function writeNativeBlob(bridge,blob,options={}){
   const context=telemetry.consent.diagnostics?telemetry.performance.context():null,epoch=telemetry.epoch;
   return writeNativeBlobRaw(bridge,blob,{...options,...(context?{onTiming:(metric,ms)=>{if(epoch===telemetry.epoch)telemetry.performance.record(metric,ms,context);}}:{})});
 }
+/** The stage's graphics backend as telemetry names it: the engine draws with WebGPU, or with WebGL2 where there is none. */
+const telemetryBackend = () => ({WebGPU: 'webgpu', WebGL2: 'webgl2'})[state.renderer?.stats?.backend] ?? 'unavailable';
 const telemetry = new DesktopTelemetryClient(desktop, { getContext: () => ({
   mode: state.settings.timelineMode, locale: state.settings.locale,
   playing: state.playing,
   pending:playback.stats.pendingFrames,cacheBytes:playback.stats.bytes,cache:playback.stats,
   performance:{
-    backend:state.renderer?.stats?.backend==='WebGPU'?'webgpu':state.renderer?.softwarePlayback?'canvas2d':'unavailable',
+    backend:telemetryBackend(),
     complexity:complexityBucket(state.renderer?.stats?.primitives),fps:fpsBucket(editor.report?.fps),
     pixels:canvas.width*canvas.height<1e6?'under-1mp':canvas.width*canvas.height<4e6?'1-4mp':'4mp-plus',
-    phase:state.playing?'playing':'editing',quality:images.reduced||state.renderer?.stats?.previewReduced||state.previewGovernor?.index?'reduced':'full',
+    phase:state.playing?'playing':'editing',quality:images.reduced||state.previewGovernor?.index?'reduced':'full',
     features:(state.onion?1:0)|(state.inspectorContext==='camera'?2:0)|(state.vfxEnabled?4:0)|(state.motionPaths?8:0)|(state.renderer?.stats?.textureObjects?16:0),
   },
-  backend: state.renderer?.stats?.backend === 'WebGPU' ? 'webgpu' : state.renderer?.stats?.backend === 'Canvas 2D fallback' ? 'canvas2d' : 'unavailable',
+  backend: telemetryBackend(),
   gauges: { gpu_memory_mb: state.renderer?.stats?.gpuBytes / 1048576, draw_calls: state.renderer?.stats?.drawCalls,
     upload_kb: state.renderer?.stats?.uploadBytes / 1024, scene_figures: state.renderer?.stats?.objects,
     scene_primitives: state.renderer?.stats?.primitives, scene_frames: editor.totalTicks },
@@ -462,21 +445,6 @@ const telemetryInit = telemetry.init().catch(() => null);
 globalThis.addEventListener('error', event => telemetry.error(event.error));
 globalThis.addEventListener('unhandledrejection', event => telemetry.error(event.reason));
 globalThis.addEventListener('pagehide', () => { telemetry.performance.finish();void telemetry.flush(); telemetry.dispose(); });
-const editablePreparation = new EditableScenePreparation(editor, {
-  diagnostics:telemetry.performance,
-  onPending(pending) {
-    state.editablePreparing=pending;
-    syncBackgroundInteraction(Boolean(viewGestureActive()));
-    if(!pending){
-      timelineUI?.setPaused?.(state.playing||document.hidden);
-      state.editablePreparationStats=editablePreparation.stats;
-      if(!state.scrubbing)queueUI();
-      requestRender();
-    }
-  },
-  onReady(){state.editingPacket=null;status({messageKey: "app.ready", messageParams: {}});warmPlayback();},
-  onError:fail,
-});
 let lastFpsUI = 0;
 function editingGestureActive(){return Boolean(state.drag||keyboardHandleGesture||editor._drag||editor._authoredPoseEdit||propertyControls?.active||vfxInspector?.active||vfxGizmos?.active||drawingController?.interacting);}
 // The editor chrome as surfaces (src/ui/ui-invalidation.mjs), in today's update order. queueUI()
@@ -485,7 +453,6 @@ function editingGestureActive(){return Boolean(state.drag||keyboardHandleGesture
 // (pause() queues one). Surfaces write through dom-write.mjs, so an unchanged value writes nothing.
 const ui = createInvalidator({
   isPlaying: () => state.playing,
-  isBlocked: () => Boolean(state.editablePreparing),
   afterPass: () => requestRender(),
 });
 ui.surface("title", { on: ["document", "save", "revision"], update: () => updateTitle() });
@@ -499,7 +466,6 @@ ui.surface("assets", { on: ["document", "revision"], quiet: true, update: () => 
 ui.surface("shell", { on: ["mode", "settings", "selection", "context"], quiet: true, update: () => syncShell() });
 ui.surface("stagehead", { on: ["mode", "settings", "selection", "context", "document", "revision", "tick"], quiet: true, update: () => syncStageHead() });
 function queueUI() {
-  if(state.editablePreparing)return;
   ui.invalidate("all");
 }
 /** The band's session (experience.md §2): Build, a movieclip being edited, or the camera (outside Draw and Build). */
@@ -597,130 +563,35 @@ function syncShell() {
   // A workspace change runs this directly (builder onModeChange), outside the invalidator: the stage header follows.
   syncStageHead();
 }
-const playback = new PlaybackCache({
-  gpuIsolation: true,
-  diagnostics:telemetry.performance,
-  onReady: (packet) => {
-    state.lastPacketBytes = packet.byteLength;
-    state.renderer
-      ?.prepareBackgrounds?.(editor.report, packet.frame)
-      .catch(() => {});
-    if (state.playing && state.buffering) requestRender();
-  },
-  onError: (error) => {
-    if (state.playing) {
-      pause();
-      fail(error);
-    }
-  },
-});
-const playbackUploadWarmup = new PlaybackUploadWarmup(requestRender);
-const playbackUploadAhead = new PlaybackUploadAhead();
-let playbackImageTicks=[];
-function playbackImagePriority() {
-  if(!state.playing)return [];
-  const urls=[];
-  // Plain LRU evicts the next prefetched image before recently displayed past
-  // frames. Refresh the bounded lookahead from farthest to nearest instead.
-  for(let i=playbackImageTicks.length-1;i>=0;i--){
-    const packet=playback.get(playbackImageTicks[i]);
-    if(packet)for(const asset of backgroundImageAssets(editor.report,packet.frame))urls.push(assetUrl(asset));
-  }
-  for(const asset of backgroundImageAssets(editor.report,state.playbackPacket?.frame||editor.frame))urls.push(assetUrl(asset));
-  return urls;
-}
-function playbackScale() {
-  // Quantize only after applying the native camera in the worker. Rounding
-  // both here and there can quadruple texture memory at an ordinary zoom.
-  return (
-    state.view.scale *
-    (state.renderer?.dpr ||
-      Math.max(0.5, Math.min(3, window.devicePixelRatio || 1)))
-  );
-}
-const softwarePlayback = () => Boolean(state.renderer?.softwarePlayback);
-// Software packets bake object visibility into the bitmap, so the packet cache
-// observes the same inputs effectiveHidden() reads on the UI thread.
+// The stage: the engine draws every frame of the scene canvas (docs/engine/rendering.md).
+const createRenderer = (surface, options) => createStage(surface, options);
+// D19: the engine owns the document; the editor's calls run in the session its open started (docs/engine/editing.md).
+installEngineOwner(editor);
+// Playback is the engine's: it holds the document already, and a tick is a ticket for a frame it has ready.
+const playback = createStagePlayback({stage: () => state.renderer});
+// Who is hidden is part of each prepared frame, so the engine's frames observe the same
+// inputs effectiveHidden() reads on the UI thread.
 function playbackHiddenKey() {
   const layers = editor.report?._styk?.layers?.byId;
   const layerBits = layers ? Object.keys(layers).sort().map((id) => `${id}:${layers[id].visible === false ? 0 : 1}`).join(",") : "";
   return `${[...state.hidden].sort((a, b) => a - b).join(",")}|${layerBits}`;
 }
 function syncPlayback() {
-  const scale = playbackScale(),
-    cameraEnabled = !state.scrubbing,
-    storedFrames = !editor.report._styk?.layerSheet && state.settings.timelineMode === "simple",
-    softwareFrames = softwarePlayback(),
-    hiddenUids = softwareFrames ? [...state.hidden] : undefined,
-    hiddenKey = softwareFrames ? playbackHiddenKey() : "";
+  const hiddenUids = [...state.hidden], hiddenKey = playbackHiddenKey();
   if (
     state.playbackRevision !== editor.revision ||
     playback.report !== editor.report ||
-    state.playbackScale !== scale ||
-    state.playbackCameraEnabled !== cameraEnabled ||
-    state.playbackStoredFrames !== storedFrames ||
-    state.playbackSoftware !== softwareFrames ||
-    state.playbackHiddenKey !== hiddenKey ||
-    state.playbackDraftRevision !== editor.frameDraftRevision
+    state.playbackHiddenKey !== hiddenKey
   ) {
-    // A density change changes cached pixels, not the current pose. Keep the
-    // uploaded presentation until the replacement view is ready; CPU bitmap
-    // invalidation cannot invalidate an independently owned GPU frame.
-    const heldPacket = state.playing && state.playbackPacket &&
-      state.playbackRevision === editor.revision && playback.report === editor.report &&
-      state.playbackStoredFrames === storedFrames && state.playbackSoftware === softwareFrames &&
-      state.playbackHiddenKey === hiddenKey && state.playbackDraftRevision === editor.frameDraftRevision &&
-      state.playbackCameraEnabled === cameraEnabled && state.renderer?.hasPreparedFrame(state.playbackPacket.key)
-      ? state.playbackPacket : null;
-    // A camera-only toggle keeps prepared frames: packets carry their own crop
-    // mode, so scrubbing does not cold-start the next playback.
-    const cameraOnly =
-      state.playbackRevision === editor.revision &&
-      playback.report === editor.report &&
-      state.playbackScale === scale &&
-      state.playbackStoredFrames === storedFrames &&
-      state.playbackSoftware === softwareFrames &&
-      state.playbackHiddenKey === hiddenKey &&
-      state.playbackDraftRevision === editor.frameDraftRevision &&
-      state.playbackCameraEnabled !== cameraEnabled;
     if (
       state.playbackRevision !== editor.revision ||
       playback.report !== editor.report
     )
-      playback.load(editor.report, {
-        revision: editor.revision,
-        scale,
-        cameraEnabled,
-        storedFrames,
-        softwareFrames,
-        hiddenUids,
-        hiddenKey,
-      });
-    else if (state.playbackDraftRevision !== editor.frameDraftRevision)
-      playback.updateDocument({
-        revision: editor.revision,
-        scale,
-        cameraEnabled,
-        storedFrames,
-        softwareFrames,
-        hiddenUids,
-        hiddenKey,
-        frameIndices: [],
-      });
-    else playback.updateView({ scale, cameraEnabled, storedFrames, softwareFrames, hiddenUids, hiddenKey });
+      playback.load(editor.report, {revision: editor.revision, hiddenUids, hiddenKey});
+    else playback.updateView({hiddenUids, hiddenKey});
     state.playbackRevision = editor.revision;
-    state.playbackScale = scale;
-    state.playbackCameraEnabled = cameraEnabled;
-    state.playbackStoredFrames = storedFrames;
-    state.playbackSoftware = softwareFrames;
     state.playbackHiddenKey = hiddenKey;
-    state.playbackDraftRevision = editor.frameDraftRevision;
-    state.playbackPacket = heldPacket;
-    if (cameraOnly && state.renderer?.retainPreparedFrames)
-      state.renderer.retainPreparedFrames(editor.report, playback.cache.values());
-    else if (heldPacket && state.renderer?.retainPreparedFrames)
-      state.renderer.retainPreparedFrames(editor.report, [heldPacket]);
-    else state.renderer?.clearPreparedFrames?.();
+    state.playbackPacket = null;
   }
 }
 function playbackRange() {
@@ -735,12 +606,9 @@ function prepareAhead(start = editor.tick, count = 48, {bidirectional = false} =
   const cores = navigator.hardwareConcurrency || 4;
   count = playbackLookaheadSize(count, cores);
   const range = playbackRange();
-  // PlaybackCache owns admission using unique bitmap footprints. Multiplying
-  // one frame's size here double-counts shared artwork and starves lookahead
-  // precisely when a scene changes from small vector frames to large rasters.
+  // The engine admits the frames it prepares by their footprints.
   const ticks=playbackWindow(start,count,range,{loop:state.loop,bidirectional});
-  if(state.playing)playbackImageTicks=ticks;
-  return playback.prepareRange(ticks, { replacePending: true }).catch((error) => {
+  return playback.prepareRange(ticks).catch((error) => {
     if (error.name !== "AbortError" && state.playing) {
       pause();
       fail(error);
@@ -750,10 +618,9 @@ function prepareAhead(start = editor.tick, count = 48, {bidirectional = false} =
 let warmGeneration=0;
 function warmPlayback({immediate = false} = {}) {
   const generation=++warmGeneration;
-  if(state.editablePreparing)return;
   clearTimeout(warmTimer);
-  const report=editor.report,revision=editor.revision,tick=editor.tick,draft=editor.frameDraftRevision,scale=state.view.scale;
-  const current=()=>generation===warmGeneration&&editor.report===report&&editor.revision===revision&&editor.tick===tick&&editor.frameDraftRevision===draft&&state.view.scale===scale&&!state.playing&&!editingGestureActive()&&!state.scrubbing&&!state.editablePreparing&&!document.hidden;
+  const report=editor.report,revision=editor.revision,tick=editor.tick;
+  const current=()=>generation===warmGeneration&&editor.report===report&&editor.revision===revision&&editor.tick===tick&&!state.playing&&!editingGestureActive()&&!state.scrubbing&&!document.hidden;
   warmTimer = setTimeout(async () => {
     if(!current())return;
     // Learn the current frame's real footprint before widening the idle window.
@@ -765,33 +632,6 @@ function warmPlayback({immediate = false} = {}) {
 function previewScrub() {
   // Scrubbing is editing: render the current pose with selection and onions.
   requestRender();
-}
-
-let preparationDefinitions, preparationRevision, preparationSizes;
-let preparationRequest=0;
-function queueEditingFrame(){
-  const request=++preparationRequest;
-  // Simple mode updates its working-frame checkpoint in a nested change event.
-  // Capture the final revision after every listener has finished that seek.
-  queueMicrotask(()=>{if(request===preparationRequest)prepareEditingFrame();});
-}
-function prepareEditingFrame() {
-  const renderer=state.renderer;
-  if(state.playing||state.previewing||state.drag||propertyControls?.active||!renderer?.prepareSceneUpdate||renderer.activeReport!==editor.report)return;
-  if(preparationDefinitions!==editor.report.figure_types||preparationRevision!==editor.definitionRevision){
-    preparationDefinitions=editor.report.figure_types;preparationRevision=editor.definitionRevision;
-    // A clip's one editable handle can contain thousands of drawing elements.
-    // Prepare its nested scene cooperatively even when the outer frame is small.
-    preparationSizes=new Map(preparationDefinitions.map(figure=>[figure.figure_type_id,figure._styk?.movieclip ? 2000 : figure.segments.length]));
-  }
-  const objects=editor.evaluatedFrame.objects;
-  const dense=objects.length>=128||objects.reduce((count,object)=>count+(preparationSizes.get(object.figure_type_id)||0),0)>=2000;
-  if(!dense)return;
-  editablePreparation.start(renderer,geometry=>({
-    frame:currentFrame(),view:{...state.view},getView:()=>({...state.view}),cameraEnabled:false,
-    editorBackgroundColor:builderBackgroundColor(state.settings,state),onionFrames:onionSkins(),
-    geometry,artworkRevision:editor.definitionRevision,
-  }));
 }
 
 let nameRevision = -1,
@@ -1119,7 +959,7 @@ const resources = { url: assetUrl, image: imageFor, drawing:figure=>drawingContr
  * status ends it. #status keeps the latest line for tests and the Performance report.
  */
 const activityLog = [];
-let activityTask = null, compatibilityNoticed = false;
+let activityTask = null;
 /** Records a line of activity: #status, the log, and the slow-work message while `busy`. */
 function logActivity(text, error = false, busy = false) {
   const messageKey = text?.messageKey, messageParams = text?.messageParams;
@@ -1206,15 +1046,32 @@ function requestOverlayRender() {
   state.dirtyOverlay = true;
   if (!raf) raf = requestAnimationFrame(loop);
 }
-function currentFrame() {
+/** A camera monitor picture arrived: only the monitor is painted again, not the scene. */
+function requestMonitorRender() {
+  state.dirtyMonitor = true;
+  if (!raf) raf = requestAnimationFrame(loop);
+}
+/** The frame on show; with `shot`, as the scene camera shoots it (the preview and playback always are). */
+/** The pose a motion-path edit shows at the playhead while it changes it (the engine's session builds it), else null. */
+function motionDisplay() { return editor._drag?.motionPath ? editor._drag.display : null; }
+function currentFrame({ shot = state.playing || state.previewing } = {}) {
   // Playback already evaluated this exact tick in the worker. Overlays need
   // its camera/scene metadata, not another evaluation of all figures on input.
   const packet = state.playing && state.playbackPacket;
-  const motionPath = editor._drag?.motionPath;
-  const frame = motionPath?.display?.frame ?? (packet?.tick === editor.tick ? packet.frame : editor.evaluatedFrame || editor.frame);
+  const frame = motionDisplay()?.frame ?? (packet?.tick === editor.tick ? packet.frame : editor.evaluatedFrame || editor.frame);
+  const seen = shot ? shotThrough(frame) : frame;
   return editor.report._styk?.layers?.fixed?.camera?.visible === false
-    ? { ...frame, camera: null }
-    : frame;
+    ? { ...seen, camera: null }
+    : seen;
+}
+const shotFrames = new WeakMap();
+/** A frame of the editor seen through the scene camera: shot with the camera the engine works out for the playhead (follow travel,
+ * then the presets' shake) instead of the authored one. A playback frame already is. */
+function shotThrough(frame) {
+  if (frame.engine || !editor.report._styk?.cameraMotion?.clips.length) return frame;
+  let shot = shotFrames.get(frame);
+  if (!shot) shotFrames.set(frame, shot = { ...frame, camera: editor._shown?.shot() ?? frame.camera });
+  return shot;
 }
 function previewPacket() {
   if (!state.previewing || state.scrubbing) return null;
@@ -1231,18 +1088,17 @@ function worldPoint(event) {
 function cameraSelected() {
   return state.inspectorContext === 'camera' && state.selectedTrackId === 'camera';
 }
-const pathCache = new MotionPathCache();
+const trails = new MotionTrails(editor);
 const PATH_COLORS = ['#0d99ff', '#e8590c', '#12b886', '#7048e8', '#e64980', '#f08c00', '#0ca678', '#1098ad'];
 /** Every active trail: the camera, each selected figure, or every figure when
  * "all targets" is on — with limb tips per figure when that is chosen. Each
  * figure keeps one colour; the primary selection keeps the first (accent). All
  * trails sample together, one animation evaluation per display frame. */
 function activeMotionPaths({sample = true} = {}) {
-  if (!state.motionPaths || state.playing || state.previewing || state.editablePreparing || builderMode?.active) return [];
+  if (!state.motionPaths || state.playing || state.previewing || builderMode?.active) return [];
   if (!["select", "pose"].includes(state.tool)) return [];
   const camera = cameraSelected() && state.settings.showCamera;
   const range = Math.round(state.settings.motionPathRange) || 0;
-  const session = editor._drag?.motionPath ? editor._drag : null;
   let targets;
   if (camera) {
     const track = editor.report._styk?.layers?.fixed?.camera;
@@ -1252,8 +1108,8 @@ function activeMotionPaths({sample = true} = {}) {
   if (!targets.length) return [];
   const maxPoints = Math.min(1600, Math.floor(6400 / targets.length));
   const entries = sample
-    ? pathCache.sample(editor, targets, {session, range, deadline: performance.now() + pathCache.budgetMs, maxPoints})
-    : targets.map(target => pathCache.peek(editor, target));
+    ? trails.read(targets, {range, maxPoints})
+    : targets.map(target => trails.peek(target));
   const colors = new Map(), out = [];
   let pending = false;
   targets.forEach((target, i) => {
@@ -1383,12 +1239,7 @@ function commitPreviewQuality() {
   const index = pendingPreviewQuality;
   pendingPreviewQuality = null;
   resize();
-  const pending = state.renderer?.setMsaa?.(previewMsaaLevels[index]);
-  pending?.catch(error => {
-    telemetry.error(error, 'gpu');
-    status({messageKey: "app.thePreviousAntialiasingSettingWasRetainedAfterA", messageParams: {}}, true);
-    requestRender();
-  });
+  state.renderer?.setMsaa(previewMsaaLevels[index]);
 }
 function resetPreviewQuality() {
   const governor = state.previewGovernor;
@@ -1443,7 +1294,6 @@ const wheelZoom = createWheelZoom({
   onSettled: requestRender,
 });
 let canvasPinch, panIdle = null;
-// Zooming and panning both hold the view's rasters until the gesture ends (renderer.md).
 function viewGestureActive() { return wheelZoom.interacting || panIdle !== null || canvasPinch?.active || drawingController?.touchNavigation?.active || drawingController?.gesture?.kind === 'pan' || ['zoom', 'pan'].includes(state.drag?.kind); }
 // A pan ends once the view has been still for 100 ms, which paints full
 // detail: wheel panning has no end event, and quick drag strokes stay one gesture.
@@ -1476,8 +1326,12 @@ function fitSelection() {
   placeArtboard();
   requestRender();
 }
+// The engine measures this callback itself where it owns the document (engine-edit-bounds.mjs).
+markAppBounds(boundsOf);
 const boundsCache = new WeakMap();
 function boundsOf(g) {
+  // The engine measured a group of its geometry with it (drawlist::app_bounds).
+  if (g.bounds) return g.bounds;
   let b = boundsCache.get(g);
   if (!b) {
     const items = [
@@ -1505,7 +1359,7 @@ function canvasHandles(geometry, {selectStatic = false} = {}) {
     settings = state.settings;
   const key = [
     builderMode?.active ? [...editor.selectedSegmentIds].join(',') : '',
-    editor.layerRevision,
+    editor.layerViewKey,
     showStaticHandles(),
     state.tool,
     state.figureJoin?.uid,
@@ -1562,10 +1416,6 @@ function canvasHandles(geometry, {selectStatic = false} = {}) {
   else handleCache = { geometry, key, handles };
   return handles;
 }
-function gpuHandlesEnabled() {
-  return Boolean(state.renderer?.handleRenderer) && !state.playing && !state.previewing &&
-    !(!editor.branchSelected && (isBuilderContext(state.tool) || builderMode?.active) && state.settings.builderHighlightSegment);
-}
 function drawCanvasHandles(geometry) {
   const handles = canvasHandles(geometry),
     translations = state.drag?.translations;
@@ -1586,7 +1436,6 @@ function drawCanvasHandles(geometry) {
     width: overlay.width / d, height: overlay.height / d, dpr: d, translations,
     outline: state.settings.outlineHandles});
 }
-const onionCache = new OnionSkinCache();
 let onionControls;
 const onionController = new OnionController({editor,
   getSettings: () => state.settings, getEnabled: () => state.onion,
@@ -1597,9 +1446,10 @@ let tweenerControls;
 let canvasGuides;
 // Motion path badges on the overlay draw text in the bundled UI font.
 onFontsReady(requestRender);
+/** The onion skins the engine draws behind the frame, or none when they are off or the animation plays. */
 function onionSkins() {
-  if (!state.onion || state.playing || state.previewing) return [];
-  return onionCache.get(editor, onionController.settings, {selected: selection(), hidden: effectiveHidden(), visibilityKey:[...state.hidden]});
+  if (!state.onion || state.playing || state.previewing) return null;
+  return editor._shown?.onions(onionController.request({selected: selection(), hidden: state.hidden})) ?? null;
 }
 /** What the open falloff gesture changes. */
 function pathInfluence(tick, falloff) {
@@ -1633,7 +1483,7 @@ function drawMotionPaths() {
       faint: motionPaths.length > 1 && focus && focus.key !== key,
     });
   }
-  if (ghost) drawMotionPathGhost(ctx, pathCache.ghost(editor.motionPathReport(), ghost.target, focus.tick, `${editor.revision}:${editor.layerRevision}`), project,
+  if (ghost) drawMotionPathGhost(ctx, trails.ghost(ghost.target, focus.tick), project,
     {color: ghost.color, entry: ghost.entry, relative, tick: editor.tick});
 }
 function overlayRender(geometry) {
@@ -1656,7 +1506,7 @@ function overlayRender(geometry) {
       cameraEnabled: false,
     });
   drawMotionPaths();
-  if ((state.handles || state.tool === 'attach') && !gpuHandlesEnabled()) drawCanvasHandles(geometry);
+  if (state.handles || state.tool === 'attach') drawCanvasHandles(geometry);
   if (
     cameraSelected() &&
     editor.report._styk?.layers?.fixed?.camera?.visible !== false &&
@@ -1667,7 +1517,7 @@ function overlayRender(geometry) {
         ctx,
         cameraViewport(
           editor.report,
-          evaluatedFrame(editor.report, editor.frameIndex - 1),
+          { camera: editor._shown?.frameCamera(editor.timeline[editor.frameIndex - 1].start) },
           state.view,
         ),
         screenPoint,
@@ -1786,10 +1636,9 @@ function overlayRender(geometry) {
     ctx.restore();
   }
 }
+/** Thumbnails wait while the interface is busy: a gesture, a scrub or playback. */
 function syncBackgroundInteraction(viewChanging) {
-  const viewRefining=!state.playing&&!state.previewing&&state.renderer?.artworkRefining;
-  const interacting=Boolean(viewChanging||viewRefining||editingGestureActive()||state.scrubbing||state.editablePreparing||document.hidden);
-  playback.setInteractionActive(interacting);
+  const interacting=Boolean(viewChanging||editingGestureActive()||state.scrubbing||document.hidden);
   thumbnailRenderer?.setPaused(interacting||state.playing);
 }
 function loop(now) {
@@ -1827,21 +1676,10 @@ function loop(now) {
       }
       if (next !== null) {
         const packet = playback.get(next);
-        const backgroundsReady =
-          packet &&
-          (state.renderer.backgroundsReady?.(editor.report, packet.frame) ??
-            true);
         if (!playStarted) playStartupFrames = Math.max(playStartupFrames, playbackStartupWindow(fps,
           Math.max(playback.stats.lastCompileMs, playback.stats.compileMs / Math.max(1, playback.stats.preparedFrames)), navigator.hardwareConcurrency || 4));
-        let startupReady=playStarted || playback.bufferedAhead(next,playStartupFrames,range.end);
-        if(!playStarted&&startupReady&&backgroundsReady){
-          const packets=[];
-          for(let tick=next;tick<Math.min(range.end,next+playStartupFrames);tick++){
-            const ready=playback.get(tick);if(!ready)break;packets.push(ready);
-          }
-          startupReady=playbackUploadWarmup.step(state.renderer,packets,{report:editor.report,view:state.view,cameraEnabled:state.playbackCameraEnabled});
-        }
-        if (packet && backgroundsReady && startupReady) {
+        const startupReady=playStarted || playback.bufferedAhead(next,playStartupFrames,range.end);
+        if (packet && startupReady) {
           if (audioEngine.hasAudio && (!audioEngine.running || next < editor.tick || audioEngine.position > (next + 1.5) / fps))
             void audioEngine.start(next / fps, range.end / fps);
           editor.seek(next, { evaluate: false });
@@ -1864,24 +1702,6 @@ function loop(now) {
           audioEngine.stop();
           state.buffering = true;
           localizedText($("preview-badge"), "app.preparing", {});
-          if (
-            packet &&
-            !backgroundsReady &&
-            state.backgroundPending !== packet.key
-          ) {
-            state.backgroundPending = packet.key;
-            state.renderer
-              .prepareBackgrounds(editor.report, packet.frame)
-              .then(() => {
-                state.backgroundPending = null;
-                requestRender();
-              })
-              .catch((error) => {
-                state.backgroundPending = null;
-                pause();
-                fail(error);
-              });
-          }
           prepareAhead(next, 48);
         }
       }
@@ -1897,70 +1717,37 @@ function loop(now) {
     let stageStarted=sampled?performance.now():0;
     const packet = state.playing ? state.playbackPacket : previewPacket();
     let preparedPresented = false;
-    if(state.editablePreparing){
-      const held=state.editingPacket?.packet;
-      if(held)state.renderer.renderPrepared(held.key,{report:editor.report,view:state.view,cameraEnabled:held.cameraEnabled,hiddenUids:effectiveHidden(),hiddenKey:state.playbackHiddenKey});
-      preparedPresented = true;
-    } else if (packet && state.renderer.renderPrepared && (packet.cameraEnabled ?? true) === !state.scrubbing) {
-      if (!state.renderer.hasPreparedFrame(packet.key))
-        state.renderer.prepareFrame(packet, {
-          report: editor.report,
-          view: state.view,
-          cameraEnabled: !state.scrubbing,
-        });
-      // Software surfaces reject stale visibility or drag states; those ticks
-      // continue into the live render below instead of showing a frozen frame.
-      preparedPresented = state.renderer.renderPrepared(packet.key, {
-        report: editor.report,
-        view: state.view,
-        cameraEnabled: !state.scrubbing,
-        hiddenUids: effectiveHidden(),
-        hiddenKey: state.playbackHiddenKey,
-      }) === true;
+    if (packet && (packet.cameraEnabled ?? true) === !state.scrubbing) {
+      // A frame the engine no longer has ready continues into the live render below
+      // instead of showing a frozen frame.
+      preparedPresented = state.renderer.renderPrepared(packet.key, {view: state.view, cameraEnabled: !state.scrubbing}) === true;
       if (advancedPlayback && preparedPresented)
         recordPlaybackPresentation();
       ctx.clearRect(0, 0, overlay.width, overlay.height);
     }
-    if (!preparedPresented && !state.editablePreparing && (!state.playing || !state.buffering)) {
+    if (!preparedPresented && (!state.playing || !state.buffering)) {
       const drawingPreview=drawingController?.renderPreview;
       const frame = drawingPreview?.frame??currentFrame(),
         geometry =
           drawingPreview?.geometry ||
-          editor._drag?.motionPath?.display?.geometry ||
+          motionDisplay()?.geometry ||
           state.drag?.geometry ||
           keyboardHandleGesture?.geometry ||
           editor.geometry;
-      const onionFrames = onionSkins(),
-        editing = state.editingPacket;
-      if (geometry) void images.prepare([
-        ...frameImageDrawables(geometry),
-        ...onionFrames.flatMap(entry => frameImageDrawables(entry.geometry)),
-        ...backgroundImageAssets(editor.report, frame).map(asset => ({type: 'image', asset})),
-      ], {scale: Math.max(1 / 64, 2 ** Math.ceil(Math.log2(playbackScale() || 1))), maxDimension: 4096}).catch(() => {});
-      state.editingPacket = null;
       state.renderer.render({
         vfxEnabled: state.vfxEnabled,
-        preparedPacket:
-          editing?.report === editor.report &&
-          editing.revision === editor.revision &&
-          editing.tick === editor.tick
-            ? editing.packet
-            : undefined,
         report: drawingPreview?.report??editor.report,
+        documentReport: editor.report,
         frame,
         geometry,
+        // The engine draws the frame its session shows; the interface's own frame (a drawing's first stroke) crosses as poses.
+        source: drawingPreview ? null : editor._shown?.source(Boolean(motionDisplay())) ?? null,
         view: state.view,
-        viewChanging,
         cameraEnabled: state.playing || state.previewing,
         editorBackgroundColor: builderBackgroundColor(state.settings, state),
-        selectedUid: null,
-        showHandles: false,
-        liveEditing: Boolean(editor.dragging || state.drag || keyboardHandleGesture),
-        playing: state.playing,
+        revision: editor.revision,
         artworkRevision: editor.definitionRevision,
-        canvasHandles: !pendingColorSample && !pendingProjectPicture && (state.handles || state.tool === 'attach') && gpuHandlesEnabled() ? canvasHandles(geometry) : undefined,
-        outlineHandles: state.settings.outlineHandles,
-        onionFrames,
+        onions: onionSkins(),
         hiddenUids: effectiveHidden(),
         clipToCanvas: false,
         dragTranslations: state.drag?.translations,
@@ -1973,18 +1760,18 @@ function loop(now) {
       if (advancedPlayback) recordPlaybackPresentation();
       overlayRender(geometry);
       drawingController?.overlayDraw(ctx);
-      setHidden($('preview-quality'), !(images.reduced || state.renderer.stats?.previewReduced || state.previewGovernor?.index));
+      setHidden($('preview-quality'), !(images.reduced || state.previewGovernor?.index));
     }
-    if(pendingColorSample && !state.editablePreparing && (!state.playing || !state.buffering || preparedPresented)){
+    if(pendingColorSample && (!state.playing || !state.buffering || preparedPresented)){
       const sample=pendingColorSample;
       try{
-        const result=sampleCanvasRegion(canvas,sample.clientX,sample.clientY,sample.radius);
+        const result=sampleCanvasRegion(state.renderer.canvas,sample.clientX,sample.clientY,sample.radius);
         sample.finish(null,sample.radius?result:result.color);
       }catch(error){sample.finish(error);}
       requestRender(); // Restore GPU handles after sampling the artwork before presentation.
     }
     // A project's picture is read here too: the canvas holds this frame only until it is presented.
-    if(pendingProjectPicture && !state.editablePreparing && !state.playing){
+    if(pendingProjectPicture && !state.playing){
       const request=pendingProjectPicture,pending=stagePicture();
       if(pending)void pending.then(bitmap=>{if(bitmap)projectTabsView.setPicture(request.id,bitmap);});
       request.finish(Boolean(pending));
@@ -1994,19 +1781,11 @@ function loop(now) {
     // Final editor overlay pass: keep the actual camera above artwork and tool feedback.
     drawFinalOverlay();
     if(sampled){stages.overlay=performance.now()-stageStarted;stageStarted=performance.now();}
-    if (state.inspectorContext === 'camera') {
-      const frame = currentFrame();
-      syncCameraControls($('inspector'), frame, {activeKey:propertyControls?.activeKey,guides:state.cameraGuides});
-      if (!state.editablePreparing) drawCameraMonitor($('inspector').querySelector('[data-camera-monitor]'), {
-        onError:error=>telemetry.error(error,'renderer'),onInvalidate:requestRender,onRecovery:(kind,outcome)=>telemetry.performance.recovery(kind,outcome),
-        report:editor.report,frame,geometry:state.playing?null:state.drag?.geometry || keyboardHandleGesture?.geometry || editor.geometry,
-        resources:state.renderer.resources,hiddenUids:effectiveHidden(),
-        prepared:packet?.key!==undefined&&state.renderer?.renderPreparedInto?{renderer:state.renderer,key:packet.key,hiddenKey:packet.hiddenKey||''}:null,
-      });
-    }
+    state.dirtyMonitor = false;
+    paintCameraMonitor();
     const elapsed = performance.now() - start;
     if(sampled)stages.camera=performance.now()-stageStarted;
-    if(telemetry.isForeground&&!state.editablePreparing)telemetry.performance.frame(elapsed,stages||{},sampled);
+    if(telemetry.isForeground)telemetry.performance.frame(elapsed,stages||{},sampled);
     state.renderSamples.push(elapsed);
     if (telemetry.consent.diagnostics && state.drawCalls % 30 === 0) {
       telemetry.timing('frame_ms', elapsed);
@@ -2018,8 +1797,7 @@ function loop(now) {
     if (now - lastUI > 200) {
       ui.update("transport");
       localizedText($("render-time"), "app.ms", {value:{format:'number',value:elapsed,options:{minimumFractionDigits:1,maximumFractionDigits:1}}});
-      if (state.renderer.stats?.backend === "Canvas 2D fallback") localizedText($("renderer-label"), "app.compatibilityMode");
-      else if (state.renderer.stats?.backend === "WebGPU device lost") localizedText($("renderer-label"), "rendererStatus.deviceLost");
+      if (state.renderer.stats?.backend === "WebGPU device lost") localizedText($("renderer-label"), "rendererStatus.deviceLost");
       else setText($("renderer-label"), state.renderer.stats?.backend || "WebGPU");
       lastUI = now;
     }
@@ -2028,8 +1806,8 @@ function loop(now) {
   // displayed artwork intact; document edits still request a scene render.
   if (state.dirtyOverlay && !scenePainted) {
     state.dirtyOverlay = false;
-    if (!state.playing && !state.previewing && !state.editablePreparing) {
-      overlayRender(drawingController?.renderPreview?.geometry ?? editor._drag?.motionPath?.display?.geometry ??
+    if (!state.playing && !state.previewing) {
+      overlayRender(drawingController?.renderPreview?.geometry ?? motionDisplay()?.geometry ??
         state.drag?.geometry ?? keyboardHandleGesture?.geometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
       drawFinalOverlay();
@@ -2037,30 +1815,36 @@ function loop(now) {
   }
   if (state.playing) {
     const measuredAt = performance.now();
-    if(playStarted&&!state.buffering&&state.playbackPacket){
-      const packets=[state.playbackPacket],range=playbackRange();
-      for(const tick of playbackWindow(editor.tick+1,3,range,{loop:state.loop})){
-        const packet=playback.get(tick);if(!packet)break;packets.push(packet);
-      }
-      playbackUploadAhead.update(state.renderer,packets,{report:editor.report,view:state.view,cameraEnabled:state.playbackCameraEnabled},
-        packet=>state.playing&&!state.scrubbing&&playback.cache.get(packet.tick)===packet);
-    }
     playbackMetrics.buffering(state.buffering, measuredAt);
     if (measuredAt - lastFpsUI >= 250) {
       const sample = playbackMetrics.snapshot(measuredAt), badge = $("playback-fps");
       localizedText(badge, (sample.fps === null ? 'app.fps' : 'app.valueFps'), (sample.fps === null ? {} : {value: sample.fps.toFixed(1)}));
       setAttr(badge, "data-health", sample.coherent === null ? "pending" : sample.coherent ? "good" : "low");
       setAttr(badge, "title", interfaceText('app.sceneTargetValueFps', {value: sample.targetFps.toFixed(1)}));
-      setHidden($('preview-quality'), !(state.playbackPacket?.previewQuality?.reduced || state.previewGovernor?.index));
+      setHidden($('preview-quality'), !state.previewGovernor?.index);
       adaptPreviewQuality(sample, measuredAt);
       lastFpsUI = measuredAt;
     }
+  }
+  if (state.dirtyMonitor) {
+    state.dirtyMonitor = false;
+    paintCameraMonitor();
   }
   // A wheel zoom still gliding has more of the view to draw.
   if (wheelZoom.active) state.dirtyRender = true;
   // A seek/edit event can request the next frame while this callback runs.
   // Keep that request instead of starting a second animation loop.
-  if (!raf && (state.playing || state.dirtyRender || state.dirtyOverlay)) raf = requestAnimationFrame(loop);
+  if (!raf && (state.playing || state.dirtyRender || state.dirtyOverlay || state.dirtyMonitor)) raf = requestAnimationFrame(loop);
+}
+/** The camera inspector's readouts and monitor, for the frame on show. */
+function paintCameraMonitor() {
+  if (state.inspectorContext !== 'camera') return;
+  const frame = currentFrame();
+  syncCameraControls($('inspector'), frame, {activeKey:propertyControls?.activeKey,guides:state.cameraGuides});
+  drawCameraMonitor($('inspector').querySelector('[data-camera-monitor]'), {
+    onError:error=>telemetry.error(error,'renderer'),onInvalidate:requestRender,onRecovery:(kind,outcome)=>telemetry.performance.recovery(kind,outcome),
+    stage:state.renderer,report:editor.report,frame,
+  });
 }
 function drawFinalOverlay() {
   ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
@@ -2072,10 +1856,8 @@ async function play() {
   if (!$("renderer-error").hidden) return;
   if (state.playing) return pause();
   if ([...exportJobs].some(job => job.raster)) return notify(interfaceText("app.finishOrCancelTheExportBeforePlaying"), "app.finishOrCancelTheExportBeforePlaying", {});
-  editablePreparation.cancel();
   state.previewing = false;
   if (editor.totalTicks < 1) return;
-  state.renderer?.cancelArtworkRefinement?.();
   cancelDrag();
   // Optionally fit once on transport start; subsequent zoom and pan remain user-controlled.
   if (state.settings.fitViewOnPlayback) fit();
@@ -2097,7 +1879,6 @@ async function play() {
   setHidden($("playback-fps"), false);
   playStarted = false;
   playStartupFrames = 2;
-  playbackUploadWarmup.reset();
   playDeadline = playStart;
   state.playbackPacket = null;
   // A changed density is committed with its repaint at the next animation task.
@@ -2121,8 +1902,6 @@ async function play() {
   requestRender();
 }
 function pause() {
-  playbackUploadAhead.reset();
-  playbackUploadWarmup.reset();
   state.motionPreviewRange=null;
   if(state.playing)telemetry.performance.resources('stopped');
   audioPreparation?.abort(); audioScrubController?.abort(); audioEngine.stop(); state.audioReady = true;
@@ -2139,41 +1918,25 @@ function pause() {
   }
   setHidden($("playback-fps"), true);
   setHidden($('preview-quality'), true);
-  if (wasPlaying && state.playbackPacket)
-    state.editingPacket = {
-      packet: state.playbackPacket,
-      report: editor.report,
-      revision: editor.revision,
-      tick: editor.tick,
-    };
   state.playing = false;
   state.previewing = false;
   resetPreviewQuality();
-  if (editor.endFrameDraftPreview()) state.editingPacket = null;
-  const prepareEditable=Boolean(wasPlaying&&state.editingPacket&&state.renderer?.prepareSceneUpdate);
-  thumbnailRenderer?.setPaused(prepareEditable||document.hidden);
-  timelineUI?.setPaused?.(prepareEditable||document.hidden);
+  editor.endFrameDraftPreview();
+  thumbnailRenderer?.setPaused(document.hidden);
+  timelineUI?.setPaused?.(document.hidden);
   state.buffering = false;
   state.playbackPacket = null;
   setHidden($("preview-badge"), true);
   timelineHost?.syncPlayButton();
-  if(prepareEditable){
-    editablePreparation.start(state.renderer,geometry=>({
-      frame:currentFrame(),view:{...state.view},getView:()=>({...state.view}),
-      cameraEnabled:false,editorBackgroundColor:builderBackgroundColor(state.settings,state),
-      onionFrames:onionSkins(),geometry,artworkRevision:editor.definitionRevision,
-    }));
-  }
   requestRender();
   if (wasPlaying) {
     reconcileSelectedSegmentTrack();
     queueUI();
-    status(state.editablePreparing?{messageKey: "app.preparingCanvas", messageParams: {}}:{messageKey: "app.ready", messageParams: {}});
+    status({messageKey: "app.ready", messageParams: {}});
   }
 }
 function previewFrame() {
   pause();
-  editablePreparation.cancel();
   cancelDrag();
   state.previewing = true;
   localizedText($("preview-badge"), "app.preview", {});
@@ -2424,7 +2187,7 @@ function polygonClick(p, event = {}) {
     if(!region)return toast(interfaceText("app.noClosedRegionHereCloseTheOutlineAt"), "app.noClosedRegionHereCloseTheOutlineAt", {});
     cancelPolygonDraft();
     const polygon=editor.addPolygon(region.ids,{color:g.segments[editor.selectedJoint]?.rgb??g.segments[0]?.rgb??[43,43,43]});
-    editor.selectPolygon(editor.selectedUid,editor.figure.polyfills.indexOf(polygon));
+    editor.selectPolygon(editor.selectedUid,editor.figure.polyfills.findIndex(item=>item.polyfill_id===polygon.polyfill_id));
     state.bucketPreview=null;status({messageKey: "app.fillAdded", messageParams: {}});return;
   }
   if (!state.polygon && builderMode?.active && !pick(p)) {
@@ -2484,11 +2247,22 @@ function finishPolygon() {
   setTool("select");
   status({messageKey: "app.polygonAdded", messageParams: {}});
 }
+// A click on artwork asks the engine which figure the stage's frame paints at the point (engine-stage.mjs `pickArtwork`).
+function pickedArtwork(p, geometry) {
+  const hidden = [], locked = [];
+  for (const object of editor.evaluatedFrame.objects) {
+    if (isHidden(object.unique_id)) hidden.push(object.unique_id);
+    if (isLocked(object.unique_id)) locked.push(object.unique_id);
+  }
+  const hit = state.renderer.pickArtwork?.(p, {scale: state.view.scale, hiddenUids: hidden, lockedUids: locked});
+  const g = hit && geometry.objects.get(hit.slot);
+  return g ? {g, uid: hit.uid, joint: -1, id: 0, kind: 'body', point: g.root, action: 'select'} : null;
+}
 function pick(p, {preferSelected = false, artwork = false} = {}) {
   const geometry = editor.geometry;
   const body = () => {
     if (!artwork || builderMode?.active || !['select','pose','tweener'].includes(state.tool) || state.handleEditHeld) return null;
-    const hit = pickCanvasArtwork(geometry, p, {resources, hiddenUids: effectiveHidden(), lockedUids: {has: isLocked}, scale: state.view.scale});
+    const hit = pickedArtwork(p, geometry);
     return (state.handles && state.tool !== 'tweener' && pickCanvasSegment(geometry, p,
       {handles: canvasHandles(geometry), uid: hit?.uid, scale: state.view.scale})) || hit;
   };
@@ -2523,12 +2297,10 @@ overlay.addEventListener(
       return;
     }
     finishKeyboardHandle();
-    playback.setInteractionActive(true);
     interruptRecovery();
     toasts.clear({ tones: ["info"] });
     pause();
     viewport.focus({ preventScroll: true });
-    editablePreparation.cancel();
     overlay.setPointerCapture(e.pointerId);
     canvasPointerId = e.pointerId;
     // Where the press began, and how far a pen may wobble before it drags.
@@ -2950,7 +2722,7 @@ const moveCanvasPointer = guarded((e) => {
     if (!drag) {
       // Playback uses worker packets; hover must not materialize an editable
       // scene (and all its handles) for every mouse move between ticks.
-      if (state.previewing || state.playing || state.editablePreparing) return;
+      if (state.previewing || state.playing) return;
       if (state.spritePlacement || state.duplicatePlacement) {
         const point = worldPoint(e),
           pending = state.spritePlacement || state.duplicatePlacement;
@@ -3417,19 +3189,6 @@ canvasPinch = installCanvasPinch({
   onEnd: requestRender,
 });
 
-async function api(path, options = {}) {
-  const headers = importer.token ? { ...options.headers, Authorization: `Bearer ${importer.token}` } : options.headers;
-  const response = await fetch(path, { ...options, headers });
-  if (!response.ok) {
-    let message = `Request failed (${response.status})`;
-    try {
-      const data = await response.json();
-      message = data.error?.message || data.error || data.message || message;
-    } catch {}
-    throw new Error(message);
-  }
-  return response;
-}
 async function acceptImport(
   result,
   name,
@@ -3438,7 +3197,7 @@ async function acceptImport(
   try {
   let report = result.document ?? result.report ?? result;
   if (report.format === "stykanimate") report = report.document;
-  const savedDraft = Boolean(report._styk?.simpleFrameDraft);
+  const savedDraft = result.savedDraft ?? Boolean(report._styk?.simpleFrameDraft);
   const kind =
     result.kind ||
     ((name || result.filename || "").toLowerCase().endsWith(".stk")
@@ -3450,62 +3209,24 @@ async function acceptImport(
     const importedName = result.filename || name || {messageKey: "app.figure"};
     notify(interfaceText("app.imported", {value: importedName}), "app.imported", {value: importedName});
   } else {
-    let initialScene;
-    try {
-      // The project opens in a tab of its own; the one in front rests beside it (openProject).
-      if (!await openProject((session) => editor.loadAsync(
-        report,
-        (name || result.filename || "Untitled").replace(
-          /\.(piv|stk|styk|stkz|stykmov|json|nodes|nodemc|stknds)$/i,
-          "",
-        ),
-        {
-          ...session,
-          initialFrameIndex: kind === "piv" && !savedDraft ? "last" : 0,
-          prepareScene: state.renderer?.prepareInitialScene
-            ? async (incoming) => {
-                const renderer = state.renderer;
-                initialScene = await renderer.prepareInitialScene({
-                  ...incoming,
-                  view: fittedView(incoming.report),
-                  getView: () => fittedView(incoming.report),
-                  cameraEnabled: false,
-                  editorBackgroundColor: builderBackgroundColor(
-                    state.settings,
-                    state,
-                  ),
-                  checkCurrent: () => {
-                    incoming.checkCurrent();
-                    if (state.renderer !== renderer)
-                      throw messageError(new DOMException('', "AbortError"), "errors.app.theGraphicsDeviceChangedWhileImporting", {});
-                  },
-                });
-                preparedScenes.set(incoming.report, initialScene);
-                return initialScene;
-              }
-            : undefined,
-        },
-      ), {openToken, recoveryId})) return false;
-      state.sourceId = result.sourceId || null;
-      importer.adoptSource(result);
-      if(result.playbackFrames) {
-        const importedReport=editor.report,revision=editor.revision,draft=editor.frameDraftRevision;
-        playback.stageNativeSnapshot(importedReport,result.playbackFrames,{revision,
-          isCurrent:()=>editor.report===importedReport&&editor.revision===revision&&editor.frameDraftRevision===draft&&!editingGestureActive()});
-        delete result.playbackFrames;
-      }
-    } finally {
-      if (initialScene) {
-        preparedScenes.delete(initialScene.report);
-        initialScene.dispose();
-      }
-    }
-    if (!initialScene?.activated) {
-      state.hidden.clear();
-      state.locked.clear();
-      images.clear();
-      fit();
-    }
+    // The project opens in a tab of its own; the one in front rests beside it (openProject).
+    if (!await openProject((session) => editor.loadAsync(
+      report,
+      (name || result.filename || "Untitled").replace(
+        /\.(piv|stk|styk|stkz|stykmov|json|nodes|nodemc|stknds)$/i,
+        "",
+      ),
+      {
+        ...session,
+        initialFrameIndex: kind === "piv" && !savedDraft ? "last" : 0,
+      },
+    ), {openToken, recoveryId})) return false;
+    state.sourceId = result.sourceId || null;
+    importer.adoptSource(result);
+    state.hidden.clear();
+    state.locked.clear();
+    images.clear();
+    fit();
   }
   state.lastImportWarnings = [...(result.warnings || report._styk?.sticknodes?.warnings || []), ...(report.import_warnings || [])];
   if(state.lastImportWarnings.length)dialogs.showImportNotes(state.lastImportWarnings, {pivot: Boolean(report.import_warnings?.length),report});
@@ -3565,7 +3286,6 @@ async function settleProject() {
   if (builderMode?.active) { builderMode.requestExit(); if (builderMode.active) return false; }
   if (drawingController?.active) { await studioShell.changeMode("animate"); if (drawingController.active) return false; }
   await drawingController?.barrier();
-  editablePreparation.cancel();
   if (editor._drag || editor._animationEdit || editor._authoredPoseEdit) return false;
   // The tab keeps a picture of the project as it was left: one frame, drawn now.
   await requestProjectPicture();
@@ -3580,6 +3300,8 @@ function stagePicture() {
   if (!state.renderer || document.hidden) return null;
   const box = viewport.getBoundingClientRect(), board = $("artboard").getBoundingClientRect();
   if (!(box.width > 0) || state.view.rotation || state.view.flip) return null;
+  // The surface the last frame was drawn on (the engine's while it draws the scene).
+  const canvas = state.renderer.canvas;
   const ratio = canvas.width / box.width;
   const left = Math.max(0, board.left - box.left), top = Math.max(0, board.top - box.top),
     right = Math.min(box.width, board.right - box.left), bottom = Math.min(box.height, board.bottom - box.top);
@@ -3612,7 +3334,7 @@ function requestProjectPicture() {
 function scheduleProjectPicture(delay = 700, attempts = 4) {
   clearTimeout(pictureTimer);
   pictureTimer = setTimeout(() => {
-    if (state.playing || state.editablePreparing || editingGestureActive()) { if (attempts > 1) scheduleProjectPicture(1200, attempts - 1); return; }
+    if (state.playing || editingGestureActive()) { if (attempts > 1) scheduleProjectPicture(1200, attempts - 1); return; }
     void requestProjectPicture();
   }, delay);
 }
@@ -3823,7 +3545,7 @@ async function importMediaFile(
       return false;
     finishCurrentEdit();
     if (editor.report !== destination) return false;
-    if (background) editor.importBackground(media);
+    if (background) editor.importSceneBackground(media);
     else editor.importFigure(media);
     notify(interfaceText("app.imported2", {name: file.name}), "app.imported2", {name: file.name});
     return true;
@@ -3836,12 +3558,13 @@ async function importMediaFile(
 }
 async function chooseSticknodesFile(file,isCurrent=()=>true) {
   const onProgress=p=>{if(isCurrent())status(`${p.phase || interfaceText("app.importing2")}…`,false,true);};
-  let result=await importer.importFile(file,{onProgress,project:/\.piv$/i.test(file.name)});
+  const open={layerTimeline:editor.layerTimeline};
+  let result=await importer.importFile(file,{onProgress,open,project:/\.piv$/i.test(file.name)});
   if(!isCurrent()){void importer.releaseSource(result);return null;}
   if(result.kind==='sticknodes-archive'){
     const index=await dialogs.chooseSticknodesEntry(result.entries);
     if(index===null||!isCurrent())return null;
-    result=await importer.importFile(file,{entryIndex:index,onProgress});
+    result=await importer.importFile(file,{entryIndex:index,onProgress,open});
   }
   if(!isCurrent()){void importer.releaseSource(result);return null;}
   return result;
@@ -3947,7 +3670,7 @@ async function acceptNativeFileTracked(result) {
 async function openSample(path) {
   pause();
   status({messageKey: "app.decodingPivotFile", messageParams: {}}, false, true);
-  try { await acceptImport(await importer.openSample(path,{project:/\.piv$/i.test(path)})); } catch (error) { throw persistentFailure(error); }
+  try { await acceptImport(await importer.openSample(path,{open:{layerTimeline:editor.layerTimeline},project:/\.piv$/i.test(path)})); } catch (error) { throw persistentFailure(error); }
 }
 function saveNative({ saveAs = false } = {}) {
   if (!manualSave.active) finishCurrentEdit();
@@ -3991,7 +3714,6 @@ async function performNativeSave({saveAs}) {
     interruptRecovery();
     status({messageKey: "app.savingProject", messageParams: {}}, false, true);
     const revision = editor.revision,
-      draftRevision = editor.frameDraftRevision,
       report = editor.report,
       documentToken = state.documentToken,
       name = editor.name;
@@ -4051,7 +3773,6 @@ async function performNativeSave({saveAs}) {
         editor.report === report &&
         state.documentToken === documentToken &&
         editor.revision === revision &&
-        editor.frameDraftRevision === draftRevision &&
         saveMutationEpoch === checkpoint.epoch &&
         !editor.dirty,
     );
@@ -4067,7 +3788,7 @@ async function performNativeSave({saveAs}) {
 function documentStateNow() {
   const open = projects.summary();
   return {name: editor.name || "Untitled", dirty: open.unsaved > 0, activeDirty: editor.dirty, unsaved: open.unsaved, unsavedName: open.unsavedName,
-    revision: `${state.documentToken}:${editor.revision}:${editor.frameDraftRevision}:${saveMutationEpoch}:${open.stamp}`};
+    revision: `${state.documentToken}:${editor.revision}:${saveMutationEpoch}:${open.stamp}`};
 }
 /** Close/restart only the saved revision, including changes arriving during IPC. */
 async function finishDocumentAction(action, savedCheckpoint = null) {
@@ -4078,7 +3799,7 @@ async function finishDocumentAction(action, savedCheckpoint = null) {
   if (!current()) return false;
   finalizingDocument = true;
   try {
-    for (const flush of [() => workspaceLayout?.flushPreferences(), () => editorSettings?.flush(), () => nativeFrameClipboard?.flush()]) {
+    for (const flush of [() => workspaceLayout?.flushPreferences(), () => editorSettings?.flush()]) {
       await flush();
       if (!current()) return false;
     }
@@ -4189,7 +3910,6 @@ function showBackgroundDialog() {
   backgroundDialog ??= new BackgroundDialog({
     dialog: $("dialog"),
     content: $("dialog-content"),
-    resources,
     onError: fail,
   });
   const options = {
@@ -4521,7 +4241,7 @@ overlay.addEventListener(
   }),
 );
 const spatialControls=installSpatialControls({editor,root:$("inspector"),refresh:()=>{queueUI();requestRender();},guard:guarded});
-const rigHost=()=>({editor,showDialog,closeDialog,resources,finish:()=>{pause();finishCurrentEdit();},builderActive:()=>Boolean(builderMode?.active),
+const rigHost=()=>({editor,showDialog,closeDialog,finish:()=>{pause();finishCurrentEdit();},builderActive:()=>Boolean(builderMode?.active),
   addToAnimate:document=>{
     pause();finishCurrentEdit();
     const layer=editor.getLayer(editor.activeLayerId);
@@ -4724,25 +4444,20 @@ const actions = {
   "next-keyframe": () => { pause(); runTimelineHotkey(timelineUI, 'next-keyframe'); },
   "add-frame": () => addFrameKeepingDrag(() => {
     if(editor.getLayer(editor.activeLayerId)?.drawing)return editor.addDrawingFrame();
-    if(editor.report._styk?.layerSheet) {
-      if(state.settings.timelineMode !== 'simple')
-        return timelineUI.addFrameCell();
-      const result=editor.sheetDuplicateFrameAfter(['scene','camera',...editor.report._styk.layers.order]);
-      timelineUI.revealPlayhead();
-      return result;
-    }
-    return editor.addFrame();
+    if(state.settings.timelineMode !== 'simple')
+      return timelineUI.addFrameCell();
+    const result=editor.sheetDuplicateFrameAfter(['scene','camera',...editor.report._styk.layers.order]);
+    timelineUI.revealPlayhead();
+    return result;
   }),
   "extend-keyframe": () => {
     pause();finishCurrentEdit();
     if(drawingController?.active)return editor.extendDrawing(timelineUI?.ids?.length?timelineUI.ids:[editor.activeLayerId],drawingController.settings.length);
-    if(editor.report._styk?.layerSheet) return timelineUI.extendKeyframe();
-    return editor.setFrameDuration(editor.frame.duration_raw + 1);
+    return timelineUI.extendKeyframe();
   },
   "delete-frame": () => {
     pause();
-    if(editor.report._styk?.layerSheet)return state.settings.timelineMode === "simple"?timelineUI.action("delete"):timelineUI.removeFrames();
-    editor.deleteFrame();
+    return state.settings.timelineMode === "simple"?timelineUI.action("delete"):timelineUI.removeFrames();
   },
   "add-figure": () => {
     pause();
@@ -4929,8 +4644,8 @@ const actions = {
       finishCurrentEdit();
       if (editor.branchSelected) return editor.cutSelection();
       if (rangeFrames()) {
-        const count = editor.copySelection();
-        if (count) { editor._selectionClipboard.offset = 0; editor.deleteFiguresInFrames(rangeFrames()); }
+        const count = editor.copySelection({ inPlace: true });
+        if (count) editor.deleteFiguresInFrames(rangeFrames());
         return count;
       }
       return editor.cutSelection();
@@ -5112,13 +4827,12 @@ const actions = {
   close: async () => {
     await workspaceLayout?.flushPreferences?.();
     await editorSettings?.flush();
-    await nativeFrameClipboard?.flush();
     await desktop?.close();
   },
 };
 // The export flow and the app's prompts add their commands (src/export-flow.mjs, src/app-dialogs.mjs).
 const exportFlow = createExportFlow({
-  editor, state, actions, desktop, importer, telemetry, audioEngine, exportJobs, playback, editablePreparation,
+  editor, state, actions, desktop, telemetry, audioEngine, exportJobs, playback,
   fail, status, toast, persistentFailure, finishCurrentEdit, pause, interruptRecovery,
   runDocumentExport, writeNativeBlob, currentFrame, nameOf, simpleFrameCount,
   // The export dialog joins the overlay stack, uses the app's words and remembers its choices in the editor settings.
@@ -5492,7 +5206,6 @@ function cancelKeyboardCommand() {
 function runKeyboardCommand(id, event, modifiers = {shift: event.shiftKey}) {
   if(id!=='cancel'&&id!=='play-pan'&&(drawingController?.gesture?.kind==='stroke'||drawingController?.loading||drawingController?.selection?.committing||drawingController?.operation))
     return drawingController.afterGesture(()=>runKeyboardCommand(id,event,modifiers));
-  editablePreparation.cancel();
   if(drawingController?.active){
     if(id==='play-pan')drawingController.finish();
     if(id.startsWith('drawing-')){drawingController.finish();const tool=id.slice(8),actions={'select-all':'select-all',deselect:'deselect','invert-selection':'invert-selection','fill-selection':'fill-selection',mirror:'mirror-x','flip-view':'flip-view','swap-colors':'swap-colors'};if(['brush','eraser','fill','lasso','shape'].includes(tool))drawingController.tool=tool;else if(tool==='apply')drawingController.run(()=>drawingController.applySelection());else if(actions[tool])return drawingController.run(()=>drawingController.action(actions[tool]));else drawingController.hotkey(tool);drawingController.sync();return;}
@@ -5569,10 +5282,10 @@ const hotkeys = new HotkeyManager({run: guarded(runKeyboardCommand), release: gu
 overlays.hotkeys = hotkeys;
 // The timeline island: its mount, its header's controls and what the header shows (src/timeline-host.mjs).
 timelineHost = createTimelineHost({
-  editor, state, $, actions, guarded, audioEngine, onionController, hotkeys, overlays, play, pause, finishKeyboardHandle, cancelDrag,
+  editor, state, $, actions, guarded, audioEngine, onionController, hotkeys, overlays, play, pause, finishKeyboardHandle,
   cancelPolygonDraft, interruptRecovery, cancelWarmPlayback: () => clearTimeout(warmTimer), warmPlayback, scheduleRecovery,
   requestRender, queueUI, renderInspector, syncSelectionControls, rangeFrames, selectTrack, previewScrub, scrubAudio, stopAudioScrub,
-  changeFigureLayer, runClipboardOperation, confirmDiscardFrame: dialogs.confirmDiscardFrame, simpleFrameCount, fail,
+  changeFigureLayer, confirmDiscardFrame: dialogs.confirmDiscardFrame, simpleFrameCount, fail,
   setTimelineMode: (mode) => editorSettings?.commit({ timelineMode: mode }),
   onMount: (timeline) => { timelineUI = timeline; window.styk.timeline = timeline; },
   propertyControls: () => propertyControls, cameraMotionControls: () => cameraMotionControls, drawing: () => drawingController,
@@ -5789,13 +5502,12 @@ document.addEventListener('visibilitychange', () => {
     }
     // A hidden page cannot present anything; park speculative preparation the
     // same way a long canvas drag does. Exports keep their own workers.
-    playback.setInteractionActive(true);
     thumbnailRenderer?.setPaused(true);
     timelineUI?.setPaused?.(true);
     return;
   }
   syncBackgroundInteraction(Boolean(viewGestureActive()));
-  timelineUI?.setPaused?.(Boolean(state.playing||state.editablePreparing));
+  timelineUI?.setPaused?.(Boolean(state.playing));
   // A warm-up skipped while hidden still owes the playhead its neighbors.
   warmPlayback();
 });
@@ -5811,7 +5523,6 @@ editor.addEventListener("change", (e) => {
   }
   if ((['toggle-selection', 'duplicate-pending'].includes(state.drag?.kind) || state.drag?.kind === 'tweener' && state.drag.press) &&
       ['document', 'seek', 'history', 'selection', 'edit'].includes(kind)) cancelDrag();
-  if(['edit','history','document','preview','frame-draft'].includes(kind))playback.discardNativeSnapshot();
   const joining = state.figureJoin;
   if (joining && (joining.token !== editor._documentToken || joining.uid !== editor.selectedUid ||
       joining.frameIndex !== editor.frameIndex || joining.tick !== editor.tick ||
@@ -5834,7 +5545,6 @@ editor.addEventListener("change", (e) => {
   if (kind === 'document') void audioEngine.clear().catch(fail);
   if(kind==='seek'&&!state.playing&&telemetry.isForeground)telemetry.performance.action('seek');
   if (kind === 'edit' && !e.detail?.live) { telemetry.count('edits'); telemetry.milestone('first_edit'); }
-  if(['edit','history','document','preview','frame-draft','seek'].includes(kind))editablePreparation.cancel();
   const selectedTrack = ["seek", "history", "frame-draft"].includes(kind)
     ? timelineUI?.trackById?.get(state.selectedTrackId)
     : null;
@@ -5852,33 +5562,12 @@ editor.addEventListener("change", (e) => {
       editor.selectedUid !== state.polygon.uid)
   )
     cancelPolygonDraft();
-  if (kind === "document" && e.detail?.scenePrepared) {
-    const prepared = preparedScenes.get(editor.report);
-    if (prepared) {
-      state.hidden.clear();
-      state.locked.clear();
-      images.clear();
-      for (const [url, image] of prepared.images) images.set(url, image);
-      state.view = prepared.view;
-      state.renderer.activatePreparedScene(prepared, {
-        report: editor.report,
-        frame: editor.evaluatedFrame,
-        geometry: editor.geometry,
-        view: state.view,
-      });
-      preparedScenes.delete(editor.report);
-      placeArtboard();
-      requestRender();
-    }
-  }
   if (kind === "document" || kind === "seek") {
     keyboardHandleGesture = null;
     heldArrows.clear();
     state.hoverHandle = null;
     state.hoverCameraHandle = null;
   }
-  if (["edit", "history", "document", "preview", "frame-draft"].includes(kind))
-    state.editingPacket = null;
   if (
     (kind === "selection" || (e.detail?.structural &&
       !(e.detail?.layerSheet && ['camera','scene'].includes(state.inspectorContext)))) &&
@@ -5916,8 +5605,7 @@ editor.addEventListener("change", (e) => {
     (kind === "edit" || kind === "frame-draft" || (kind === "history" && (e.detail.layerSheet || e.detail.figureIndices?.length || (e.detail.frameIndices || e.detail.animation) && !e.detail.structural))) &&
     !e.detail?.live &&
     playback.report === editor.report &&
-    (state.playbackRevision !== editor.revision ||
-      state.playbackDraftRevision !== editor.frameDraftRevision)
+    state.playbackRevision !== editor.revision
   ) {
     const metadataOnly = Boolean(
       kind === "frame-draft" || e.detail.animation || e.detail.cameraMotion || e.detail.layerMetadata || e.detail.layerSheet,
@@ -5935,15 +5623,10 @@ editor.addEventListener("change", (e) => {
       structural: Boolean(e.detail.structural && !metadataOnly),
     });
     state.playbackRevision = editor.revision;
-    state.playbackDraftRevision = editor.frameDraftRevision;
     state.playbackPacket = null;
-    if (state.renderer?.retainPreparedFrames)
-      state.renderer.retainPreparedFrames(editor.report, playback.cache.values());
-    else state.renderer?.clearPreparedFrames?.();
   }
   if (kind === "seek") interruptRecovery();
   if (kind === "seek") {
-    queueEditingFrame();
     requestRender();
     if (!state.playing && !state.scrubbing) {
       queueUI();
@@ -5955,11 +5638,6 @@ editor.addEventListener("change", (e) => {
     requestRender();
     return;
   }
-  // A shared definition commit (and its undo/redo) invalidates every instance.
-  // Use the same bounded staging as a seek before panels or rendering force a
-  // synchronous rebuild. The previous canvas remains visible until activation.
-  if (e.detail?.definition || kind === 'history' && e.detail?.structural)
-    queueEditingFrame();
   queueUI();
   if (["edit", "history", "document", "frame-draft"].includes(kind))
     warmPlayback();
@@ -6092,7 +5770,7 @@ function showRecovery(record, records = [record]) {
         if (!copy || copy.savedAt !== chosen.savedAt || copy.token !== chosen.token) throw messageError(new Error(''), "errors.app.theRecoveryCopyChangedReopenStykanimateToSee", {});
       }
       const name = chosen.name || copy.name;
-      const restored = await importer.importNative(new File([copy.blob], `${name}.styk`));
+      const restored = await importer.importNative(new File([copy.blob], `${name}.styk`), {open: {layerTimeline: editor.layerTimeline}});
       // The restored project adopts the copy it came from: its next recovery write replaces it, saving removes it.
       if (!await acceptImport(restored, name, {recoveryId: chosen.native ? chosen.id : undefined})) return;
       editor.dirty = true;
@@ -6134,9 +5812,7 @@ if (desktop) {
     }),
   );
   desktop.onOpenFile?.(guarded(acceptNativeFile));
-  desktop.onBackendError?.(fail);
 }
-window.addEventListener("pagehide", () => clipboardWorker.dispose());
 window.addEventListener("pagehide", event => { if (!event.persisted) importer.dispose(); });
 window.addEventListener("pagehide", event => { if (!event.persisted) browserRecovery?.dispose(); });
 window.addEventListener("pagehide", () => projects.dispose());
@@ -6156,16 +5832,19 @@ window.styk = {
   tutorials,
   state,
   actions,
+  // The playback adapter: tools drive exports and playback through the app's own objects.
+  playback,
   importFiles,
   acceptImport,
   fit,
   drawingResourcesFor,
+  // The figure-bounds callback of alignment and camera centering: tools replay recorded calls through it.
+  boundsOf,
   // The overlay kit: the open overlays and the hotkey gate, the message slot,
   // the command registry and the tooltip.
   ui: { overlays, toasts, commands, palette, tooltips, context: commandContext, stageHead },
   performance: () => ({
     editingPresentation:state.lastEditingPresentation,
-    editablePreparation:{pending:editablePreparation.pending,...editablePreparation.stats},
     samples: [...state.renderSamples],
     renderer: state.renderer?.stats,
     import: state.lastImport,
@@ -6174,7 +5853,9 @@ window.styk = {
   }),
   ready: false,
 };
-let thumbnailRenderer, nativeFrameClipboard, sharedClipboard;
+let thumbnailRenderer, sharedClipboard;
+// Poses of the open document drawn through a camera of their own (the parallax monitor).
+const posePictures = new EnginePoses(editor, { stage: () => state.renderer });
 async function changeFigureLayer(label, operation, {labelKey} = {}) {
   pause();
   finishKeyboardHandle();
@@ -6246,87 +5927,6 @@ async function changeFigureLayer(label, operation, {labelKey} = {}) {
     queueUI();
   }
 }
-let clipboardOperationTail = Promise.resolve();
-function runClipboardOperation(kind, execute) {
-  const source = editor._documentToken;
-  const operation = clipboardOperationTail.then(() => {
-    if (editor._documentToken !== source) return 0;
-    return performClipboardOperation(kind, execute);
-  });
-  clipboardOperationTail = operation.catch(() => {});
-  return operation;
-}
-async function performClipboardOperation(kind, execute) {
-  finishCurrentEdit();
-  interruptRecovery();
-  const controller = new AbortController(),
-    source = editor._documentToken,
-    dialog = $("dialog"),
-    originalContent = $("dialog-content").firstChild,
-    originalOpen = dialog.open;
-  const labels = {
-    copy: interfaceText("app.copyingFrames"),
-    cut: interfaceText("app.cuttingFrames"),
-    paste: interfaceText("app.pastingFrames"),
-  };
-  let progressElement, latest;
-  const cancel = () => controller.abort();
-  const changed = () => {
-    if (editor._documentToken !== source) cancel();
-  };
-  const onClose = () => {
-    if (!dialog.open || !progressElement?.isConnected) cancel();
-  };
-  const refresh = () => {
-    if (!progressElement?.isConnected || !latest) return;
-    if (Number.isFinite(latest.total) && latest.total > 0) {
-      progressElement.max = latest.total;
-      progressElement.value = latest.completed || 0;
-    } else progressElement.removeAttribute("value");
-  };
-  editor.addEventListener("change", changed);
-  const timer = setTimeout(() => {
-    if (controller.signal.aborted) return;
-    if (
-      $("dialog-content").firstChild !== originalContent ||
-      dialog.open !== originalOpen
-    ) {
-      cancel();
-      return;
-    }
-    showDialog(
-      labels[kind] || interfaceText("app.updatingFrames"),
-      `<progress id="clipboard-progress" style="width:100%;accent-color:#0d99ff"></progress><div class="dialog-actions"><button class="button" id="cancel-clipboard" data-i18n="common.cancel">${messageHTML("app.cancel", {})}</button></div>`,
-      {titleKey: ({copy: "app.copyingFrames", cut: "app.cuttingFrames", paste: "app.pastingFrames"})[kind] ?? "app.updatingFrames"},
-    );
-    progressElement = $("clipboard-progress");
-    $("cancel-clipboard").onclick = cancel;
-    dialog.addEventListener("close", onClose);
-    refresh();
-  }, 150);
-  try {
-    const count = await execute({
-      signal: controller.signal,
-      onProgress: (progress) => {
-        latest = progress;
-        refresh();
-      },
-    });
-    if (count && kind === "copy")
-      notify(interfaceText("app.frameCopied", {count}), "app.frameCopied", {count});
-    return count;
-  } catch (error) {
-    if (error.name !== "AbortError") throw error;
-    status({messageKey: "app.clipboardOperationCancelled", messageParams: {}});
-    return 0;
-  } finally {
-    clearTimeout(timer);
-    editor.removeEventListener("change", changed);
-    dialog.removeEventListener("close", onClose);
-    if (progressElement?.isConnected) closeDialog();
-    queueUI();
-  }
-}
 /** The timeline's audio Scrub option: a short slice of the sound under the scrubbed frame. */
 function scrubAudio(tick) {
   if (timelineUI?.audio?.scrub.checked && performance.now() - audioScrubAt > 100) {
@@ -6362,18 +5962,17 @@ async function init() {
       try { if (previousMode !== next.timelineMode) timelineHost.mount(); }
       catch (error) { state.settings = previousSettings; throw error; }
       if (patch.touchInterface !== undefined) touchMode?.refresh();
-      if (patch.rendererMode !== undefined && state.renderer) void recoverCanvas(true);
       if (patch.playbackQuality !== undefined && state.playing) selectPlaybackQuality();
       if (patch.hotkeys) { hotkeys.setBindings(next.hotkeys); refreshHotkeyHints(hotkeys); }
       onionController.sync();
       syncAutoKey();
-      if (patch.motionPathRange !== undefined || patch.motionPathAllTargets !== undefined) pathCache.clear();
+      if (patch.motionPathRange !== undefined || patch.motionPathAllTargets !== undefined) trails.clear();
       state.handles = drawingController?.active ? false : next.showHandles;
       state.loop = next.loopPlayback;
       state.motionPaths = next.motionPaths;
       pathControls?.sync();
       canvasGuides?.sync();
-      if (!state.motionPaths) { state.hoverPathPoint = null; syncPathTooltip(); pathCache.clear(); }
+      if (!state.motionPaths) { state.hoverPathPoint = null; syncPathTooltip(); trails.clear(); }
       if (patch.motionPathFalloffRadius !== undefined || patch.motionPathFalloffShape !== undefined || patch.motionPaths !== undefined) syncPathFalloff();
       appLocalization.setLocale(next.locale);
       canvasHandleOverlay.clear();
@@ -6424,7 +6023,7 @@ async function init() {
     getState: () => ({settings: state.settings, view: state.view, report: editor.report,
       hidden: state.playing || state.previewing}),
     onChange: patch => editorSettings.commit(patch)});
-  window.styk.onionCache = onionCache;
+  window.styk.onionSkins = () => onionSkins() && editor._shown.skins(onionController.request({selected: selection(), hidden: state.hidden}));
   // The shell: the stored layout loads before its first commit, then the dock
   // host lays the panels out and owns which one shows where.
   shell = await installShell({
@@ -6488,15 +6087,7 @@ async function init() {
   });
   installShellCommands(actions, { shell, keyboard: shellKeyboard, layout: layoutPopover });
   timelineHost.attach(shell);
-  editor.setLayerMigrationPlanner((params, options) => {
-    syncPlayback();
-    return playback.planLayerMigration(params, options);
-  });
-  editor.setInbetweenPlanner((params, options) => {
-    syncPlayback();
-    return playback.planInsertInbetweens(params, options);
-  });
-  cameraMotionControls = new CameraMotionControls($('inspector'),editor,{onError:fail,onRender:()=>{queueUI();requestRender();},beforeEdit:()=>{pause();interruptRecovery();propertyControls?.commit();},onPreview:clip=>{pause();editor.seek(clip.start);state.motionPreviewRange={start:clip.start,end:Math.min(editor.totalTicks,clip.start+clip.duration)};play();},getResources:()=>state.renderer?.resources});
+  cameraMotionControls = new CameraMotionControls($('inspector'),editor,{onError:fail,onRender:()=>{queueUI();requestRender();},beforeEdit:()=>{pause();interruptRecovery();propertyControls?.commit();},onPreview:clip=>{pause();editor.seek(clip.start);state.motionPreviewRange={start:clip.start,end:Math.min(editor.totalTicks,clip.start+clip.duration)};play();},posePicture:(pose,options)=>posePictures.picture(pose,options)});
   propertyControls = new PropertyControls($("inspector"), {
     canHandle: (key, input) =>
       (drawingController?.active&&key.startsWith('draw:')) || cameraMotionControls.handlesProperty(input) || Boolean(propertyChannel(key)) || canEditNativeProperty(editor, key),
@@ -6571,9 +6162,9 @@ async function init() {
   window.styk.vfx=vfxInspector;
   // The timeline's VFX rows follow the VFX panel's visibility, which the shell owns.
   shell.define({id:'vfx',root:()=>$('vfx-panel'),onVisibility:visible=>{editor._vfxTimelineVisible=visible;editor._emit('vfx-selection');vfxInspector.panelVisible(visible);}});
-  vfxGizmos=new VfxGizmos({canvas:overlay,inspector:vfxInspector,editor,pickNativeHandle:event=>pick(worldPoint(event)),getOptions:()=>({report:editor.report,frame:currentFrame(),geometry:state.playing?null:editor.geometry,view:state.view,cameraEnabled:state.playing||state.previewing,playing:state.playing,vfxEnabled:state.vfxEnabled,resources:state.renderer?.resources}),onChange:()=>{queueUI();requestRender();},onError:fail});
+  vfxGizmos=new VfxGizmos({canvas:overlay,inspector:vfxInspector,editor,pickNativeHandle:event=>pick(worldPoint(event)),getOptions:()=>({report:editor.report,frame:currentFrame({shot:true}),geometry:state.playing?null:editor.geometry,view:state.view,cameraEnabled:state.playing||state.previewing,playing:state.playing,vfxEnabled:state.vfxEnabled,resources}),onChange:()=>{queueUI();requestRender();},onError:fail});
   window.styk.vfxGizmos=vfxGizmos;
-  $('vfx-preview').addEventListener('click',()=>{finishCurrentEdit();pause();state.vfxEnabled=!state.vfxEnabled;playback.setVfxEnabled(state.vfxEnabled);state.playbackPacket=null;state.editingPacket=null;state.renderer?.clearPreparedFrames?.();state.renderer.lastGeometry=null;syncStageHead();requestRender();queueUI();});
+  $('vfx-preview').addEventListener('click',()=>{finishCurrentEdit();pause();state.vfxEnabled=!state.vfxEnabled;playback.setVfxEnabled(state.vfxEnabled);state.playbackPacket=null;syncStageHead();requestRender();queueUI();});
   assetLibrary = new AssetLibrary($("asset-list"), {
     onAdd: (id) => {
       pause();
@@ -6584,7 +6175,6 @@ async function init() {
       setTool("select");
     },
     onError: fail,
-    resources,
   });
   window.styk.assets = assetLibrary;
   // The desktop app keeps the library in its Documents folder; in a browser it lives in that browser's own storage.
@@ -6631,7 +6221,7 @@ async function init() {
   actions['chain-cancel'] = () => construction.cancel();
   actions['toggle-builder-snap'] = () => construction.toggleSnap();
   window.styk.builder = builderMode;
-  drawingController=new DrawingController({editor,state,overlay,viewport,onRender:()=>{if(!state.playing&&!state.previewing)syncBackgroundInteraction(Boolean(viewGestureActive()));requestRender();},onOverlayRender:requestOverlayRender,onView:placeArtboard,onUI:queueUI,onError:fail,onStatus:toast,beforeEdit:()=>{finishCurrentEdit();interruptRecovery();},getImageSource:()=>({baseURL:importer.baseURL,token:importer.token}),sampleColor:(x,y,signal)=>sampleCanvasColor(x,y,signal),getTimeline:()=>timelineUI,getClipboard:()=>sharedClipboard,
+  drawingController=new DrawingController({editor,state,overlay,viewport,onRender:()=>{if(!state.playing&&!state.previewing)syncBackgroundInteraction(Boolean(viewGestureActive()));requestRender();},onOverlayRender:requestOverlayRender,onView:placeArtboard,onUI:queueUI,onError:fail,onStatus:toast,beforeEdit:()=>{finishCurrentEdit();interruptRecovery();},artwork:({bounds,matrix,signal})=>engineComposite({document:(report,revision,check)=>engineDocument({stage:state.renderer,report,revision,check}),engine:()=>state.renderer?.engineSide?.engine,current:()=>({report:editor.report,revision:editor.revision,tick:editor.tick}),bounds,matrix,signal}),sampleColor:(x,y,signal)=>sampleCanvasColor(x,y,signal),getTimeline:()=>timelineUI,getClipboard:()=>sharedClipboard,
     // A finger draws in the touch interface (Settings › Draw with a finger); elsewhere it pans, as before.
     // Automatic draws with a finger only in the touch interface; Always also does on a desktop layout.
     fingerDrawing:()=>{const mode=state.settings.fingerDraw;return mode==='auto'&&!touchMode?.active?'never':mode;}});
@@ -6650,25 +6240,17 @@ async function init() {
     if (drawingController?.active) return drawingController.run(() => drawingController.action("new"));
     showAddMenu(event.currentTarget);
   }));
-  if (desktop?.beginClipboardRead)
-    nativeFrameClipboard = installNativeFrameClipboard(editor, desktop, {
-      onError: fail,
-      onRestored: queueUI,
-    });
-  thumbnailRenderer = new ThumbnailRenderer(editor, { onError: fail });
+  // Frame thumbnails: the engine draws them (src/engine/engine-thumbnails.mjs).
+  thumbnailRenderer = createThumbnailRenderer(editor, { stage: () => state.renderer });
   sharedClipboard = new SharedClipboard(editor, desktop);
   window.styk.clipboard = sharedClipboard;
   window.styk.thumbnails = thumbnailRenderer;
   timelineHost.mount();
   status({messageKey: "app.preparingCanvasAndEffects", messageParams: {}}, false, true);
-  try {
-    state.renderer = await createRenderer(canvas, rendererOptions());
-  } catch (error) {
-    // A failure during context configuration leaves this canvas GPU-only.
-    const replacement = canvas.cloneNode(false);
-    canvas.replaceWith(replacement); canvas = replacement;
-    state.renderer = await createRenderer(canvas, {...rendererOptions(), forceCanvas2D: true, fallbackReason: error.message});
-  }
+  // A stage that cannot start is reported by the catch of init() below: nothing else draws the scene.
+  state.renderer = await createRenderer(canvas, rendererOptions());
+  // The document was loaded into playback before the stage existed: the engine takes it now.
+  state.playbackRevision = null;
   new ResizeObserver(resize).observe(viewport);
   resize();
   fit();
@@ -6685,17 +6267,17 @@ async function init() {
   requestAnimationFrame(() => overlays.markReady());
   warmPlayback();
   offerRecovery();
-  // The first Pivot import or export in the browser downloads the converter
-  // (about 13 MB); say so instead of leaving the operation looking stuck. A
-  // failure is reported by the import or export that hit it.
-  if (codecMode() === "browser") {
+  // The first Pivot import or export in the browser downloads the converter;
+  // say so instead of leaving the operation looking stuck. A failure is
+  // reported by the import or export that hit it.
+  if (codecProfile() === "web") {
     browserCodecHost().subscribe(({ state, stage }) => {
       if (state === "loading") status(stage === "runtime" ? {messageKey: "app.loadingThePivotConverterFirstUseOnly", messageParams: {}} : {messageKey: "app.startingThePivotConverter", messageParams: {}}, false, true);
     });
   }
   try {
-    // The in-browser codec has no workspace: people open the files they pick.
-    const data = codecMode() === "browser" ? {samples: []} : await (await api("/api/samples")).json();
+    // Only the desktop app has a sample list (desktop/samples.cjs); in a browser people open the files they pick.
+    const data = desktop?.listSamples ? await desktop.listSamples() : {samples: []};
     state.samples = data.samples || [];
     renderAssets();
   } catch (error) {
@@ -6740,14 +6322,14 @@ function queueStartupPrompts() {
 }
 function scheduleGpuRecovery() {
   if (gpuRecoveryTimer !== undefined) return;
-  // Two accelerated attempts; exhausting them selects software immediately.
-  // Count the fallback too, so recovery does not confuse it with the last retry.
+  // Two attempts, each later than the last: a lost device usually returns once the browser's GPU process settles.
   const delay = GPU_RECOVERY_DELAYS[gpuRecoveryAttempts++] ?? 0;
   gpuRecoveryTimer = setTimeout(() => {
     gpuRecoveryTimer = undefined;
     recoverCanvas().catch(error => {
       localizedText($("renderer-error").querySelector('p'), "app.theCanvasCouldNotReconnectYourAnimationIs", {});
       status(error, true);
+      if (gpuRecoveryAttempts < GPU_RECOVERY_DELAYS.length) scheduleGpuRecovery();
     });
   }, delay);
 }
@@ -6759,27 +6341,11 @@ function recoverCanvas(refreshGpuBudget) {
   rendererRecovery = (async () => {
     // A canvas cannot switch context types. Replace only the scene surface;
     // document/history and pointer handlers on the overlay remain available.
-    editablePreparation.cancel();
-    state.editingPacket = null;
     playback.invalidate();
     state.renderer?.destroy();
-    const replaceCanvas = () => {
-      const replacement = canvas.cloneNode(false);
-      canvas.replaceWith(replacement); canvas = replacement;
-    };
-    replaceCanvas();
-    // An exhausted retry budget takes the software path until the renderer
-    // stays healthy or explicit user action refreshes the budget.
-    const forceCanvas2D = gpuRecoveryAttempts > GPU_RECOVERY_DELAYS.length || state.settings.rendererMode === "canvas";
-    try {
-      state.renderer = await createRenderer(canvas, {...rendererOptions(), forceCanvas2D});
-    } catch (error) {
-      // Initialization may fail after acquiring a WebGPU canvas context.
-      replaceCanvas();
-      state.renderer = await createRenderer(canvas, {...rendererOptions(), forceCanvas2D: true,
-        fallbackReason: `Graphics reconnection failed: ${error.message}`, fallbackReasonKey:'rendererStatus.reconnectionFailed',
-        fallbackReasonParams:{detail:error.messageKey ? error : error.message}});
-    }
+    const replacement = canvas.cloneNode(false);
+    canvas.replaceWith(replacement); canvas = replacement;
+    state.renderer = await createRenderer(canvas, rendererOptions());
     clearTimeout(gpuStableTimer);
     telemetry.performance.recovery('gpu','recovered');
     gpuStableTimer = setTimeout(() => { gpuRecoveryAttempts = 0; }, GPU_STABLE_MS);
@@ -6790,54 +6356,36 @@ function recoverCanvas(refreshGpuBudget) {
 }
 function rendererOptions() {
   return {
-    diagnosticsEnabled:()=>telemetry.consent.diagnostics&&telemetry.isForeground,
-    measurementContext:()=>({...telemetry.performance.context(),epoch:telemetry.epoch}),
-    onGpuTiming:(ms,context)=>{if(context.epoch===telemetry.epoch)telemetry.performance.record('gpu',ms,context);},
-    onGpuTimingSupport:supported=>telemetry.performance.supported('gpu',supported),
-    onRecovery:(kind,outcome)=>telemetry.performance.recovery(kind,outcome),
-    resources,
-    forceCanvas2D: state.settings.rendererMode === "canvas",
-    allowSoftwareAdapter: state.settings.rendererMode === "gpu",
     onInvalidate: requestRender,
+    onMonitorPicture: requestMonitorRender,
+    // A frame the engine refused: the previous picture stays and the document's next revision is tried again.
+    onError: error => { telemetry.error(error, 'renderer'); status(error, true); },
     onStatus: (message) => {
-      const compatibility = message.backend === "Canvas 2D fallback";
-      $("renderer-label").classList.toggle("compatibility", compatibility);
-      if (compatibility) localizedText($("renderer-label"), "app.compatibilityMode");
-      else if (message.backend === "WebGPU device lost") localizedText($("renderer-label"), "rendererStatus.deviceLost");
-      else setText($("renderer-label"), message.backend || "WebGPU");
-      const reason = message.reasonKey ? {messageKey:message.reasonKey, messageParams:message.reasonParams} : message.reason || {messageKey:"app.webgpuIsUnavailable"};
-      if (compatibility) localizedAttribute($("renderer-label"), 'title', 'app.valueCanvasCompatibilityRenderingIsActive', {value:reason});
-      else { clearTranslation($("renderer-label"), 'title'); $("renderer-label").title = ""; }
-      status(typeof message === "string" ? message : message.messageKey ? message : message.message || {messageKey:"app.ready"});
-      // Compatibility rendering is slower: say so once, unless Canvas was chosen in Settings.
-      if (compatibility && !compatibilityNoticed && state.settings.rendererMode !== "canvas") {
-        compatibilityNoticed = true;
-        toasts.show({ message: interfaceText("app.theCanvasUsesCompatibilityRenderingWhichCanBe", {value:reason}), messageKey: "app.theCanvasUsesCompatibilityRenderingWhichCanBe", messageParams: {value:reason}, tone: "warning", timeout: 12000, dismissible: true });
-      }
-      if (message.backend === "WebGPU device lost") {
-        telemetry.performance.recovery('gpu','started');telemetry.performance.incident('gpu');
-        telemetry.count('gpu_errors');
-        telemetry.error(Object.assign(messageError(new Error(''), "errors.app.theGraphicsDeviceWasLost", {}), { name: 'GPUError', telemetryCode: 'device_lost' }), 'gpu');
-        pause();
-        propertyControls?.cancel();
-        cancelDrag();
-        editor.cancelDrag();
-        editor.cancelAnimationEdit();
-        keyboardHandleGesture = null;
-        heldArrows.clear();
-        state.handleEditHeld = false;
-        state.space = false;
-        state.spacePanned = false;
-        state.isolateHeld = false;
-        state.depthHeld = false;
-        state.hoverHandle = null;
-        state.hoverCameraHandle = null;
-        viewport.classList.toggle("panning", state.tool === "hand");
-        $("renderer-error").hidden = false;
-        localizedMarkup($("renderer-error"), `<p data-i18n="app.theGraphicsDeviceWasResetReconnectingYourCanvas">${messageHTML("app.theGraphicsDeviceWasResetReconnectingYourCanvas", {})}</p><button class="button" id="retry-renderer" data-i18n="app.reconnectCanvas">${messageHTML("app.reconnectCanvas", {})}</button>`);
-        $("retry-renderer").onclick = guarded(() => recoverCanvas(true));
-        scheduleGpuRecovery();
-      }
+      if (message.backend !== "WebGPU device lost") return;
+      localizedText($("renderer-label"), "rendererStatus.deviceLost");
+      status({messageKey: message.messageKey, messageParams: message.messageParams});
+      telemetry.performance.recovery('gpu','started');telemetry.performance.incident('gpu');
+      telemetry.count('gpu_errors');
+      telemetry.error(Object.assign(messageError(new Error(''), "errors.app.theGraphicsDeviceWasLost", {}), { name: 'GPUError', telemetryCode: 'device_lost' }), 'gpu');
+      pause();
+      propertyControls?.cancel();
+      cancelDrag();
+      editor.cancelDrag();
+      editor.cancelAnimationEdit();
+      keyboardHandleGesture = null;
+      heldArrows.clear();
+      state.handleEditHeld = false;
+      state.space = false;
+      state.spacePanned = false;
+      state.isolateHeld = false;
+      state.depthHeld = false;
+      state.hoverHandle = null;
+      state.hoverCameraHandle = null;
+      viewport.classList.toggle("panning", state.tool === "hand");
+      $("renderer-error").hidden = false;
+      localizedMarkup($("renderer-error"), `<p data-i18n="app.theGraphicsDeviceWasResetReconnectingYourCanvas">${messageHTML("app.theGraphicsDeviceWasResetReconnectingYourCanvas", {})}</p><button class="button" id="retry-renderer" data-i18n="app.reconnectCanvas">${messageHTML("app.reconnectCanvas", {})}</button>`);
+      $("retry-renderer").onclick = guarded(() => recoverCanvas(true));
+      scheduleGpuRecovery();
     },
   };
 }

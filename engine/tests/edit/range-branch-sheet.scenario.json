@@ -1,0 +1,98 @@
+{
+ "name": "range-branch-sheet",
+ "document": "sheet-layers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "mirrorSelection"
+  ],
+  [
+   "mirrorSelection",
+   "vertical"
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "mirrorFigure",
+   "horizontal"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   2,
+   0
+  ],
+  [
+   "mirrorSelection",
+   "horizontal"
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "mirrorSelection",
+   "vertical",
+   {
+    "center": {
+     "x": 10,
+     "y": 10
+    }
+   }
+  ],
+  [
+   "@select",
+   3,
+   2
+  ],
+  [
+   "mirrorSelection"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "rotateJoint",
+   0.2
+  ],
+  [
+   "mirrorSelection"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

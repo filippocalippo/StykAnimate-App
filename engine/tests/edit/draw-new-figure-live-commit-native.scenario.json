@@ -1,0 +1,81 @@
+{
+ "name": "draw-new-figure-live-commit-native",
+ "document": "draw-new-figure-live-commit-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "rotateJoint",
+   0.13
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegments",
+   [
+    {
+     "type": "line",
+     "length": 31.5,
+     "angle": -0.19,
+     "thickness": 0,
+     "start": {
+      "x": -5.25,
+      "y": 11.75
+     }
+    },
+    {
+     "type": "squareLine",
+     "length": 20.1,
+     "angle": 0.07
+    },
+    {
+     "type": "circleClear",
+     "length": 0,
+     "thickness": 0
+    }
+   ]
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegment",
+   {
+    "type": "circle",
+    "length": 3.25
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

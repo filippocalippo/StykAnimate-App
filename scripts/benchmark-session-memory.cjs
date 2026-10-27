@@ -19,8 +19,8 @@ function install(forcedGC){
     }
   };
   p.settle=async()=>{
-    await p.wait(()=>!styk.state.importing&&!styk.state.editablePreparing&&!styk.state.dirtyRender);
-    await styk.state.renderer.device?.queue.onSubmittedWorkDone();
+    await p.wait(()=>!styk.state.importing&&!styk.state.dirtyRender);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     await new Promise(resolve=>setTimeout(resolve,0));
   };
   p.capture=label=>{
@@ -31,11 +31,11 @@ function install(forcedGC){
   p.pose=()=>JSON.stringify([...styk.editor.geometry.objects.values()].map(g=>({uid:g.obj.unique_id,
     root:g.root,joints:[...g.joints].sort((a,b)=>a[0]-b[0])})).sort((a,b)=>a.uid-b.uid));
   p.exercise=async()=>{
-    const e=styk.editor,history=e.historySize,revision=e.revision;
+    const e=styk.editor,history=e._undo.length,revision=e.revision;
     const seeks=[];
     for(const fraction of [.2,.91,1]){
       const tick=Math.round((e.totalTicks-1)*fraction),at=performance.now();e.seek(tick);await p.settle();
-      p.check(e.tick===tick&&e.historySize===history&&e.revision===revision,'Seek changed document/history');
+      p.check(e.tick===tick&&e._undo.length===history&&e.revision===revision,'Seek changed document/history');
       seeks.push({tick,elapsedMs:performance.now()-at,preparation:structuredClone(styk.performance().editablePreparation)});
     }
     // Use an existing root so attached-object constraints are not bypassed.
@@ -58,7 +58,7 @@ function install(forcedGC){
     }finally{if(styk.state.playing)await styk.actions.play();renderer.renderPrepared=render;styk.state.loop=loop;}
     await p.settle();e.markSaved();
     await stykDesktop.setDocumentState({name:e.name,dirty:false});
-    return {seeks,presented,history:e.historySize,revision:e.revision};
+    return {seeks,presented,history:e._undo.length,revision:e.revision};
   };
   p.sample=async()=>{
     const memory=()=>performance.memory?{used:performance.memory.usedJSHeapSize,total:performance.memory.totalJSHeapSize,

@@ -1,0 +1,60 @@
+{
+ "name": "startup-join-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "duplicateFigure"
+  ],
+  [
+   "joinTo",
+   1,
+   4
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "poseJoint",
+   520,
+   300
+  ],
+  [
+   "@select",
+   2,
+   3
+  ],
+  [
+   "poseJoint",
+   560,
+   320
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "unjoinFigure"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

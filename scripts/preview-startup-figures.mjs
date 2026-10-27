@@ -107,8 +107,8 @@ try {
     });
     await writeFile(path.join(out,`${stem}.styk`),Buffer.from(bytes));
     const png=await page.evaluate(async()=>{
-      const {ExportFrameRenderer}=await import('/src/export-frame-renderer.mjs');
-      const renderer=new ExportFrameRenderer({width:960,height:540});
+      const {pageExporter}=await import('/tests/support/page-export.mjs');
+      const renderer=pageExporter({width:960,height:540});
       try {await renderer.load(styk.editor.report); const canvas=await renderer.renderTick(0);return canvas.toDataURL('image/png').split(',')[1];}
       finally {renderer.dispose();}
     });

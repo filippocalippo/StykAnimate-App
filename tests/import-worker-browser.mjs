@@ -6,25 +6,27 @@ import {createRequire} from 'node:module';
 import {readFile, mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {exposeWorkspaceSamples} from './support/workspace-samples.mjs';
 
 const require = createRequire(import.meta.url);
-const {startBackend} = require('../desktop/backend.cjs');
+const {startDesktopHost} = require('../desktop/web-host.cjs');
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixture = await readFile(path.resolve(appRoot, '../Pivot Animator v5/Animations/tween_camera.piv'));
-const backend = await startBackend({appRoot});
+const backend = await startDesktopHost({appRoot});
 let browser;
 try {
   try { browser = await chromium.launch({headless: true}); }
   catch { browser = await chromium.launch({channel: 'chrome', headless: true}); }
   const page = await browser.newPage();
+  await exposeWorkspaceSamples(page);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`${backend.origin}/api/health`);
+  await page.goto(`${backend.origin}/tests/fixtures/blank.html`);
   const result = await page.evaluate(async ({bytes, origin}) => {
     const {ImportClient} = await import(`${origin}/src/import-client.mjs`);
     const assert = (value, message) => { if (!value) throw new Error(message); };
     const checks = [];
-    const importer = new ImportClient();
+    const importer = new ImportClient({readSample: (await import('/tests/support/page-samples.mjs')).sampleReader()});
     try {
       const source = Uint8Array.from(bytes).buffer;
       const imported = await importer.importFile({name: 'camera.piv', size: source.byteLength,
@@ -43,7 +45,7 @@ try {
       checks.push('Concurrent sample operations preserve request identity and reuse source cache.');
 
       imported.document.keyframes[0].objects[0].root_x += 79.5;
-      const saved = await fetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      const saved = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({document: imported.document, sourceId: imported.sourceId, format: 'styk'})});
       assert(saved.ok, 'Native export failed.');
       const native = await importer.importNative(new File([await saved.arrayBuffer()], 'saved.styk'));
@@ -60,16 +62,18 @@ try {
 
       const large = await importer.openSample('PIVOT ANIMATOR SCENE TEST/Shroobs_JJK_Pack.piv');
       assert(large.timings.document_chunks > 1, 'Large native document did not use bounded transfer batches.');
-      const referenceResponse = await fetch('/api/open', {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({path: 'PIVOT ANIMATOR SCENE TEST/Shroobs_JJK_Pack.piv'})});
+      // The direct decoder response: the same bytes imported as JSON, without the worker's batching.
+      const shroobs = await window.stykTestReadSample('PIVOT ANIMATOR SCENE TEST/Shroobs_JJK_Pack.piv');
+      const referenceResponse = await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=${encodeURIComponent(shroobs.name)}`, {method: 'POST',
+        headers: {'Content-Type': 'application/octet-stream', Accept: 'application/json'}, body: Uint8Array.fromBase64(shroobs.base64)});
       const reference = await referenceResponse.json();
       assert(JSON.stringify(large.document) === JSON.stringify(reference.document), 'Batched import changed native fields or opaque annotations.');
-      const exportOriginal = await fetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      const exportOriginal = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({document: large.document, sourceId: large.sourceId, format: 'piv'})});
       const exportedOriginal = await exportOriginal.arrayBuffer();
       assert(exportOriginal.ok, `Batched native export failed (${exportOriginal.status}).`);
       assert(exportedOriginal.byteLength === large.timings.source_bytes, 'Unedited batched document did not preserve original native source bytes.');
-      const directExport = await fetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      const directExport = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({document: reference.document, sourceId: reference.sourceId, format: 'piv'})});
       assert(directExport.ok, 'Reference native export failed.');
       const hash = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].join(',');
@@ -82,7 +86,7 @@ try {
       assert(malformed?.code === 'invalid_project' && malformed.status === 422, 'Worker error metadata was lost.');
       checks.push('Malformed source returns actionable codec status and error code.');
 
-      const disposable = new ImportClient();
+      const disposable = new ImportClient({readSample: (await import('/tests/support/page-samples.mjs')).sampleReader()});
       const outstanding = disposable.openSample('Pivot Animator v5/Animations/tween_camera.piv');
       disposable.dispose();
       let disposed;

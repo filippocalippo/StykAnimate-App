@@ -1,0 +1,77 @@
+{
+ "name": "ik-movieclip-parent-sheet",
+ "document": "sheet-movieclip-loose.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "joinTo",
+   4,
+   1
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": true,
+    "pinned": false,
+    "chainLength": 2
+   }
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   558.5004272460938,
+   308.2738037109375,
+   {
+    "snap": false
+   }
+  ],
+  [
+   "poseJoint",
+   563.7504272460938,
+   312.6488037109375,
+   {
+    "snap": false
+   }
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   556.6254272460938,
+   323.8988037109375,
+   {
+    "snap": false
+   }
+  ],
+  [
+   "cancelDrag"
+  ]
+ ]
+}

@@ -1,0 +1,70 @@
+{
+ "name": "clip-capture-active-layer-native",
+ "document": "clip-capture-active-layer-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "createMovieclip",
+   {
+    "uids": [
+     2
+    ],
+    "start": 4,
+    "end": 16,
+    "replace": false,
+    "name": "Joined crop"
+   }
+  ],
+  [
+   "@seek",
+   7.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "createMovieclip",
+   {
+    "uids": [
+     2
+    ],
+    "start": 4,
+    "end": 16,
+    "name": "Joined conversion"
+   }
+  ],
+  [
+   "@seek",
+   10.75
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "createEmptyMovieclip",
+   "Branch"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DrawingController} from '../src/drawing-controller.mjs';
-import {Editor} from '../src/editor.mjs';
+import {ownedEditorWithDrawings} from './support/owned-editor.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 
 function fixture() {
   const report = emptyDocument(), figure = report.figure_types[0];
   report.keyframes = [createFrame([createObject(figure, 1, 100, 100)], 1)];
-  const editor = new Editor({demo: false, layerTimeline: true, propertyChannels: true}).load(report);
-  const figureLayer = editor.activeLayerId, drawingLayer = editor.createDrawingLayer().id;
+  const {editor, layers: [{id: drawingLayer}]} = ownedEditorWithDrawings({demo: false, layerTimeline: true, propertyChannels: true}, report);
+  const figureLayer = 'layer-1';
   editor.selectSheetLayer(figureLayer); editor.select(1, 0);
   const drawing = Object.assign(Object.create(DrawingController.prototype), {editor,
     state: {tool: 'pose', handles: true, view: {rotation: .2, flip: true}},

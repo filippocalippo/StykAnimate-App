@@ -1,0 +1,313 @@
+{
+ "name": "vfx-presets-sheet",
+ "document": "joined-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Power up"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Teleport"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Impact"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Hologram"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Ice"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Poison"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Neon"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Golden hour"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Retro screen"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Energy"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Hit flash"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Ghost"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Retro"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "applyVfxPreset",
+   [
+    {
+     "kind": "figure",
+     "uid": 1
+    },
+    {
+     "kind": "segment",
+     "uid": 1,
+     "handleId": 22
+    }
+   ],
+   "Power up"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "scene"
+   },
+   "Golden hour"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "unknown"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 99
+   },
+   "Neon"
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "camera"
+   },
+   "Neon"
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   true
+  ],
+  [
+   "applyVfxPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Ice"
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

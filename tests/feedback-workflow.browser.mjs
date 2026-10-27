@@ -28,9 +28,9 @@ try{
   console.log('PASS artwork click selects joined root; context-menu unjoin and exact undo');
 
   const picks=await page.evaluate(async()=>{
-    const {pickCanvasArtwork}=await import('/src/canvas-artwork-pick.mjs'),e=styk.editor,p={x:400,y:160};
-    return [pickCanvasArtwork(e.geometry,p)?.uid,pickCanvasArtwork(e.geometry,p,{hiddenUids:new Set([2])})?.uid??null,
-      pickCanvasArtwork(e.geometry,p,{lockedUids:new Set([2])})?.uid??null,pickCanvasArtwork(e.geometry,{x:400,y:260})?.uid??null];
+    const r=styk.state.renderer,p={x:400,y:160};
+    return [r.pickArtwork(p)?.uid,r.pickArtwork(p,{hiddenUids:[2]})?.uid??null,
+      r.pickArtwork(p,{lockedUids:[2]})?.uid??null,r.pickArtwork({x:400,y:260})?.uid??null];
   });assert.deepEqual(picks,[2,null,null,null]);
   await page.evaluate(()=>styk.settingsUI.open('canvas'));await page.getByLabel('Pasted figure depth',{exact:true}).selectOption('front');
   assert.equal(await page.evaluate(()=>styk.state.settings.pasteDepth),'front');

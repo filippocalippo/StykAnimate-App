@@ -71,7 +71,7 @@ try {
   check('A view left fitted is fitted again', await value(() => { const fitted = styk.state.view; styk.fit(); return Math.abs(fitted.scale - styk.state.view.scale) < 1e-9; }));
 
   // ---- the clipboard crosses projects
-  await value(() => { const editor = styk.editor; editor.select(editor.selectionFrame.objects[0].unique_id); editor.copyFigure(); });
+  await value(() => { const editor = styk.editor; editor.select(editor.selectionFrame.objects[0].unique_id); editor.copySelection(); });
   await tab('First').click(); await wait(400);
   const figures = await value(() => styk.editor.selectionFrame.objects.length);
   await value(() => styk.editor.pasteSelection()); await wait();

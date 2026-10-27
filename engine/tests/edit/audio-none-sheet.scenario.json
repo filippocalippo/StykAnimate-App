@@ -1,0 +1,32 @@
+{
+ "name": "audio-none-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "deleteAudioTrack",
+   "audio-a"
+  ],
+  [
+   "setAudioTrack",
+   "audio-a",
+   {
+    "mute": true
+   }
+  ],
+  [
+   "setAudioClip",
+   "clip-1",
+   {
+    "start": 1
+   }
+  ],
+  [
+   "deleteAudioClip",
+   "clip-1"
+  ]
+ ]
+}

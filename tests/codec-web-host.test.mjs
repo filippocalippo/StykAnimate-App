@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {BrowserCodecHost} from '../src/codec-web-host.mjs';
-import {codecJob, codecMode} from '../src/codec-job.mjs';
+import {BrowserCodecHost as Host, codecProfile} from '../src/codec-web-host.mjs';
+import {codecJob} from '../src/codec-job.mjs';
 
 /** A Worker stand-in: records what the page posts and lets the test speak as the worker. */
 class FakeWorker extends EventTarget {
@@ -12,9 +12,9 @@ class FakeWorker extends EventTarget {
   say(data) { this.dispatchEvent(Object.assign(new Event('message'), {data})); }
   fail(message) { this.dispatchEvent(Object.assign(new Event('error', {cancelable: true}), {message})); }
 }
-function fixture() {
+function fixture(options = {}) {
   const workers = [];
-  const host = new BrowserCodecHost({createWorker: () => { const worker = new FakeWorker(); workers.push(worker); return worker; }});
+  const host = new Host({createWorker: () => { const worker = new FakeWorker(); workers.push(worker); return worker; }, ...options});
   return {host, workers, types: worker => worker.posted.map(item => item.message.type)};
 }
 
@@ -26,8 +26,10 @@ test('the worker is created lazily and one port per job is connected to it', () 
   assert.equal(workers.length, 1);
   assert.ok(link.fields.codecPort instanceof MessagePort);
   assert.deepEqual(link.transfer, [link.fields.codecPort]);
-  const connect = workers[0].posted[0];
+  assert.deepEqual(workers[0].posted[0].message, {type: 'configure', limits: 'desktop'}, 'the worker learns its limits first');
+  const connect = workers[0].posted[1];
   assert.equal(connect.message.type, 'connect');
+  assert.equal(connect.message.cancel, undefined, 'no shared flag without cross-origin isolation');
   assert.equal(connect.message.jobId, 'a');
   assert.deepEqual(connect.transfer, [connect.message.port]);
   host.link('a');
@@ -37,9 +39,9 @@ test('the worker is created lazily and one port per job is connected to it', () 
 test('releasing a finished job tells the worker to close its ports', () => {
   const {host, workers, types} = fixture();
   host.register('a'); host.link('a'); host.release('a');
-  assert.deepEqual(types(workers[0]), ['connect', 'release']);
+  assert.deepEqual(types(workers[0]), ['configure', 'connect', 'release']);
   host.release('a');
-  assert.deepEqual(types(workers[0]), ['connect', 'release'], 'releasing twice is harmless');
+  assert.deepEqual(types(workers[0]), ['configure', 'connect', 'release'], 'releasing twice is harmless');
 });
 
 test('cancelling the only running job stops the worker; the next job starts a fresh one', () => {
@@ -127,45 +129,60 @@ test('messages from a replaced worker are ignored', () => {
   assert.equal(workers[1].terminated, true, 'the stale idle message did not clear the busy job');
 });
 
-test('codecMode: the desktop app and plain pages use HTTP, the web build and ?codec=browser use the browser codec', () => {
+test('codecProfile: the desktop app and plain pages use the desktop limits, the web build and ?codec=browser the web ones', () => {
   const page = (search, meta) => ({location: {search}, document: {querySelector: () => (meta ? {content: meta} : null)}});
-  assert.equal(codecMode({stykDesktop: {}, ...page('?codec=browser')}), 'http', 'the desktop app always uses its own codec');
-  assert.equal(codecMode(page('', null)), 'http');
-  assert.equal(codecMode(page('', 'browser')), 'browser');
-  assert.equal(codecMode(page('?codec=browser', null)), 'browser');
-  assert.equal(codecMode(page('?codec=http', 'browser')), 'http', 'the URL overrides the page');
-  assert.equal(codecMode(page('', 'nonsense')), 'http');
-  assert.equal(codecMode({}), 'http');
+  assert.equal(codecProfile({stykDesktop: {}, ...page('?codec=browser')}), 'desktop', 'the desktop app is always the desktop');
+  assert.equal(codecProfile(page('', null)), 'desktop');
+  assert.equal(codecProfile(page('', 'browser')), 'web');
+  assert.equal(codecProfile(page('?codec=browser', null)), 'web');
+  assert.equal(codecProfile(page('?codec=http', 'browser')), 'desktop', 'the URL overrides the page');
+  assert.equal(codecProfile(page('', 'nonsense')), 'desktop');
+  assert.equal(codecProfile({}), 'desktop');
 });
 
-test('an HTTP job links nothing and posts its cancellation once', async () => {
-  const original = globalThis.fetch;
-  const calls = [];
-  globalThis.fetch = async (url, init) => { calls.push({url: String(url), init}); return new Response(null, {status: 204}); };
-  try {
-    const job = codecJob('http://127.0.0.1:47831', 'secret', {mode: 'http'});
-    assert.deepEqual(job.link(), {fields: {}, transfer: []});
-    job.cancel(); job.cancel();
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, `http://127.0.0.1:47831/api/cancel?id=${job.id}`);
-    assert.equal(calls[0].init.headers.Authorization, 'Bearer secret');
-    const finished = codecJob('http://127.0.0.1:47831', '', {mode: 'http'});
-    finished.finish(); finished.cancel();
-    assert.equal(calls.length, 1, 'a finished job never posts a cancellation');
-  } finally { globalThis.fetch = original; }
+test('the worker is told the limits of its profile', () => {
+  const {host, workers} = fixture({limits: 'web'});
+  host.register('a'); host.link('a');
+  assert.deepEqual(workers[0].posted[0].message, {type: 'configure', limits: 'web'});
 });
 
-test('a browser job talks to the host, never to the network', () => {
+test('a job talks to the host, never to the network', () => {
   const {host, workers} = fixture();
   const original = globalThis.fetch;
-  globalThis.fetch = () => { throw new Error('the browser codec must not use fetch'); };
+  globalThis.fetch = () => { throw new Error('the codec must not use fetch'); };
   try {
-    const job = codecJob('http://127.0.0.1:1', '', {mode: 'browser', host});
+    const job = codecJob({host});
     assert.ok(job.link().fields.codecPort instanceof MessagePort);
     workers[0].say({type: 'busy', jobId: job.id});
     job.cancel();
     assert.equal(workers[0].terminated, true);
-    const done = codecJob('http://127.0.0.1:1', '', {mode: 'browser', host});
+    const done = codecJob({host});
     done.finish(); done.cancel();
   } finally { globalThis.fetch = original; }
+});
+
+test('with shared memory a job carries one flag, and cancelling sets it instead of stopping the worker', () => {
+  const {host, workers} = fixture({sharedCancel: true});
+  host.register('a');
+  host.link('a'); host.link('a');
+  const connects = workers[0].posted.filter(item => item.message.type === 'connect').map(item => item.message);
+  assert.ok(connects[0].cancel instanceof Int32Array && connects[0].cancel.buffer instanceof SharedArrayBuffer);
+  assert.equal(connects[1].cancel, connects[0].cancel, 'every port of a job shares its flag');
+  assert.equal(Atomics.load(connects[0].cancel, 0), 0);
+  workers[0].say({type: 'busy', jobId: 'a'});
+  host.cancel('a');
+  assert.equal(Atomics.load(connects[0].cancel, 0), 1, 'the running request sees the cancellation at once');
+  assert.equal(workers[0].terminated, false, 'the worker and its imported-source cache survive');
+  assert.deepEqual(workers[0].posted.slice(-2).map(item => item.message.type), ['skip', 'release']);
+  host.register('b'); host.link('b');
+  assert.equal(workers.length, 1, 'the next job reuses the worker');
+  const next = workers[0].posted.at(-1).message;
+  assert.equal(Atomics.load(next.cancel, 0), 0, 'another job has its own clear flag');
+});
+
+test('cancelling a job that never linked sets nothing and creates no worker', () => {
+  const {host, workers} = fixture({sharedCancel: true});
+  host.register('a'); host.cancel('a');
+  assert.equal(workers.length, 0);
+  assert.throws(() => host.link('a'), {name: 'AbortError'});
 });

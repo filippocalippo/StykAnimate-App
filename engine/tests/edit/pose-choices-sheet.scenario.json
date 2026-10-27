@@ -1,0 +1,75 @@
+{
+ "name": "pose-choices-sheet",
+ "document": "pose-choices.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setPoseChoice",
+   "Eyes",
+   7
+  ],
+  [
+   "setPoseChoice",
+   "Eyes",
+   7
+  ],
+  [
+   "setPoseChoice",
+   "Eyes",
+   10
+  ],
+  [
+   "setPoseChoice",
+   "Eyes",
+   0
+  ],
+  [
+   "setPoseChoice",
+   "Eyes",
+   999
+  ],
+  [
+   "setPoseChoice",
+   "Mouth",
+   3
+  ],
+  [
+   "beginDrag",
+   "Expression"
+  ],
+  [
+   "setPoseChoice",
+   "Eyes",
+   4
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "@seek",
+   2
+  ],
+  [
+   "setPoseChoice",
+   "Eyes",
+   4
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

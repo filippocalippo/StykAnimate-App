@@ -50,7 +50,7 @@ native documents without a layer sheet edit an existing stored frame.
 
 ## Ownership and performance
 
-`src/editor-tweener.mjs` owns neighbor resolution and pose planning. It captures
+The engine session's `beginTween` and `updateTween` (`engine/crates/styk-edit/src/tweener.rs`) own neighbor resolution and pose planning. It captures
 endpoint projections once at gesture start, with only selected figures and their
 attachment ancestors. Definitions are shared by reference. The existing native
 evaluator supplies parent-relative angle wrapping, animation-origin and IK
@@ -77,7 +77,7 @@ dense imported scene will open or render within a fixed frame budget.
 Run from the repository root:
 
 ```sh
-node --test tests/tweener.test.mjs tests/editor-authored-pose.test.mjs tests/layer-sheet.test.mjs
+node --import ./tests/support/register-engine.mjs --test tests/tweener.test.mjs tests/layer-sheet.test.mjs
 node tests/tweener.browser.mjs
 npm run check
 ```
@@ -86,7 +86,4 @@ The browser test uses the running local app on port 47831 (override with
 `STYK_URL`) and captures light, dark and compact layouts under `artifacts/tweener`.
 Unit coverage includes cancellation, drift-free input, strict neighbors, held
 and unchanged-pose key insertion, independent layers, shortest-angle rotation,
-selection isolation, undo/redo and project reopening. A synthetic 500-figure,
-131,071-tick workload verifies that each retained projection contains only the
-selected figure and reports the time for 100 model preview updates; that timing
-excludes rendering.
+selection isolation, undo/redo and project reopening.

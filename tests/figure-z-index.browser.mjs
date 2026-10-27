@@ -39,7 +39,7 @@ try {
   await seek(10); await type('figure_z_order', -3);
   await seek(9); check('Stacking holds until the next keyframe', JSON.stringify(await order()) === '[2,3,1]');
   await seek(10); check('Stacking switches on the exact keyframe', JSON.stringify(await order()) === '[1,2,3]');
-  await page.locator('#timeline button[aria-label="Previous keyframe"]').click();
+  await page.locator('#timeline-menu-button').click(); await page.getByRole('menuitem', {name: 'Previous key', exact: true}).click();
   check('Sheet key navigation reaches the previous layer key', await page.evaluate(() => styk.editor.tick === 5));
   await field('figure_z_order').fill('7'); await field('figure_z_order').press('Escape');
   check('Escape cancels the live depth edit', await field('figure_z_order').inputValue() === '3');
@@ -67,10 +67,10 @@ try {
   // whole-pose choice, offered by the timeline interpolation control.
   await page.evaluate(() => { const t = styk.timeline; t._selectCell({tick: 10, row: t.tracks.findIndex(track => track.id === styk.editor.layerForUid(1))}); });
   await page.waitForTimeout(100);
-  const easing = page.locator('#timeline select[aria-label="Frame interpolation"]');
-  check('Sheet keys expose pose interpolation through the timeline control',
-    await easing.isEnabled());
-  await easing.selectOption('linear');
+  await page.evaluate(() => styk.timeline.showEasingPopover());
+  await page.getByRole('dialog', {name: 'Keyframe easing'}).waitFor();
+  check('Sheet keys expose pose interpolation through the easing popover', true);
+  await page.getByRole('radio', {name: 'Linear', exact: true}).click();
   await page.waitForTimeout(100);
   check('Changing interpolation retimes the whole layer key',
     await page.evaluate(() => {
