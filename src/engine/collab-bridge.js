@@ -1,68 +1,78 @@
 // src/engine/collab-bridge.js
 
 export class CollabEngineBridge {
-  constructor(editSession) {
-    // Expects the actual Wasm EditSession instance
+  constructor(editSession, initialGeneration = 0) {
     this.session = editSession;
-    this.lockGeneration = 0;
+    // Define generation ownership to prevent counter collisions across bridge reinstantiations
+    this.lockGeneration = initialGeneration;
   }
 
   /**
-   * Installs session-scoped denied UIDs authoritatively into the engine.
-   * Uses an incrementing generation counter for policy updates/releases.
+   * Installs session-scoped denied UIDs directly on the EditSession native method.
+   * Returns the parsed corrected state returned by the engine.
    */
   updateSessionLocks(deniedUids = []) {
-    if (!this.session || typeof this.session.call !== 'function') {
-      return;
+    if (!this.session || typeof this.session.set_selection_locks !== 'function') {
+      console.warn('[Engine] set_selection_locks native method unavailable.');
+      return null;
     }
 
-    this.lockGeneration += 1;
-    const payload = {
-      generation: this.lockGeneration,
-      locks: JSON.stringify(deniedUids)
-    };
+    const nextGeneration = this.lockGeneration + 1;
+    const locksJson = JSON.stringify(deniedUids);
 
-    // Route lock policy setter through EditSession command interface
-    this.session.call(
-      'set_selection_locks', 
-      JSON.stringify(payload), 
-      JSON.stringify({})
-    );
+    try {
+      // Direct method call on EditSession (not routed through session.call)
+      const rawResult = this.session.set_selection_locks(nextGeneration, locksJson);
+      if (!rawResult) return null;
+
+      const correctedState = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult;
+      
+      // Advance generation counter only after successful call
+      this.lockGeneration = nextGeneration;
+      return correctedState;
+    } catch (e) {
+      console.error('[Engine] Failed to apply selection locks:', e);
+      return null;
+    }
   }
 
   /**
-   * Handles remote selection requests, routing through the supported 
-   * EditSession.call interface and properly handling candidate eligibility.
+   * Invokes native selectConnected via EditSession.call using positional array arguments [uid, options].
    */
-  handleRemoteSelection(uid, eligibleCandidates = null) {
+  handleRemoteSelection(uid, eligibleCandidates = null, add = false, viewJson = 'null') {
     if (!this.session || typeof this.session.call !== 'function') {
-      console.warn(`[Engine] EditSession call interface unavailable.`);
+      console.warn('[Engine] EditSession call interface unavailable.');
       return null;
     }
 
-    // Build command arguments
-    const selectArgs = { target: uid, add: false };
+    const options = { add: Boolean(add) };
 
-    // Omit candidates when unrestricted; do NOT pass an empty array []
-    if (Array.isArray(eligibleCandidates) && eligibleCandidates.length > 0) {
-      selectArgs.candidates = eligibleCandidates;
+    // Explicitly validate and preserve empty candidate array [] vs omitted/null
+    if (eligibleCandidates !== null && eligibleCandidates !== undefined) {
+      if (Array.isArray(eligibleCandidates)) {
+        options.candidates = eligibleCandidates;
+      } else {
+        throw new TypeError('[Engine] eligibleCandidates must be an Array or null/undefined');
+      }
     }
 
-    const argsJson = JSON.stringify(selectArgs);
-    const viewJson = JSON.stringify({});
+    // Pass positional command arguments as a JSON array: [uid, options]
+    const argsJson = JSON.stringify([uid, options]);
 
-    // Route through the supported session/owner command interface
-    const rawResult = this.session.call('selectConnected', argsJson, viewJson);
-
-    if (!rawResult) {
-      return null;
-    }
-
-    // Parse and return the state for normal application path consumption
     try {
-      return typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult;
+      const rawResult = this.session.call('selectConnected', argsJson, viewJson);
+      if (!rawResult) return null;
+
+      const answer = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult;
+
+      // Check real command response status
+      if (answer && answer.status && answer.status !== 'ok' && answer.status !== 'success') {
+        console.warn(`[Engine] Command selectConnected returned non-success status:`, answer.status);
+      }
+
+      return answer;
     } catch (e) {
-      console.error(`[Engine] Failed to parse selection result:`, e);
+      console.error('[Engine] Failed to execute selectConnected:', e);
       return null;
     }
   }
