@@ -123,6 +123,27 @@ describe('StykAnimate P2P Collaboration Engine Bridge (Real Wasm EditSession Int
     assert.deepEqual(selection.selected.sort(), [1, 2, 3, 4]);
   });
 
+  test('Real Engine: updateSessionLocks immediately returns corrected state without subsequent selection command', () => {
+    const session = createConnectedGraphFixture();
+    const bridge = new CollabEngineBridge(session, 0);
+
+    // Initial state: select all connected nodes from 1
+    const initialSelection = bridge.handleRemoteSelection(1, null);
+    assert.deepEqual(initialSelection.selected.sort(), [1, 2, 3, 4]);
+
+    // Simulating the consuming application / owner path:
+    // A remote lock update denies node 2 *without* issuing a new selection command.
+    // The bridge must immediately return the updated/corrected engine state.
+    const lockUpdateResult = bridge.updateSessionLocks([2]);
+
+    assert.equal(lockUpdateResult.status, 'ok');
+    assert.ok(lockUpdateResult.selection, 'Engine state response must include updated selection');
+    
+    // Verify node 2 is immediately absent from the returned active selection state
+    assert.ok(!lockUpdateResult.selection.includes(2), 'Denied node 2 must immediately disappear from state');
+    assert.deepEqual(lockUpdateResult.selection.sort(), [1, 3, 4]);
+  });
+
   test('Throws TypeError on invalid candidate input type', () => {
     const session = createConnectedGraphFixture();
     const bridge = new CollabEngineBridge(session);
