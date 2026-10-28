@@ -3,68 +3,87 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { CollabEngineBridge } from '../src/engine/collab-bridge.js';
 
-describe('StykAnimate P2P Collaboration Bridge Tests', () => {
+describe('StykAnimate P2P Collaboration Engine Bridge (PR #20 Wasm Real-API Alignment)', () => {
 
-  test('Omits candidate array when unrestricted (does not pass empty array)', () => {
-    const mockSession = { call: () => JSON.stringify({ status: 'ok' }) };
-    const bridge = new CollabEngineBridge(mockSession);
-
-    // Mocking handleRemoteSelection payload construction logic or checking behavior
-    const result = bridge.handleRemoteSelection(101, null);
-    assert.notEqual(result, undefined);
-  });
-
-  test('Routes commands via EditSession.call and parses state correctly', () => {
+  test('Passes positional command arguments as JSON array [uid, options]', () => {
     let capturedMethod = null;
     let capturedArgs = null;
 
     const mockSession = {
-      call(method, argsJson) {
+      call(method, argsJson, viewJson) {
         capturedMethod = method;
         capturedArgs = JSON.parse(argsJson);
-        return JSON.stringify({ success: true, selectedTarget: capturedArgs.target });
+        return JSON.stringify({ status: 'ok', selected: [1, 2, 3] });
       }
     };
 
     const bridge = new CollabEngineBridge(mockSession);
-    const state = bridge.handleRemoteSelection(202, [200, 201, 202]);
+    const result = bridge.handleRemoteSelection(1, null, false);
 
     assert.equal(capturedMethod, 'selectConnected');
-    assert.equal(capturedArgs.target, 202);
-    assert.deepEqual(capturedArgs.candidates, [200, 201, 202]);
-    assert.deepEqual(state, { success: true, selectedTarget: 202 });
+    assert.deepEqual(capturedArgs, [1, { add: false }]);
+    assert.deepEqual(result, { status: 'ok', selected: [1, 2, 3] });
   });
 
-  test('Installs authoritative session locks with incrementing generations', () => {
-    const callLog = [];
+  test('Preserves explicit empty candidate array [] vs omitted candidates', () => {
+    let capturedArgsUnrestricted = null;
+    let capturedArgsExplicitEmpty = null;
+
     const mockSession = {
       call(method, argsJson) {
-        callLog.push({ method, args: JSON.parse(argsJson) });
-        return JSON.stringify({ status: 'locks_updated' });
+        const parsed = JSON.parse(argsJson);
+        if (!capturedArgsUnrestricted) {
+          capturedArgsUnrestricted = parsed;
+        } else {
+          capturedArgsExplicitEmpty = parsed;
+        }
+        return JSON.stringify({ status: 'ok' });
       }
     };
 
     const bridge = new CollabEngineBridge(mockSession);
 
-    // First lock update
-    bridge.updateSessionLocks([501, 502]);
-    // Second lock update
-    bridge.updateSessionLocks([501]);
+    // 1. Omitted / Null candidates -> Unrestricted
+    bridge.handleRemoteSelection(1, null);
+    assert.equal(capturedArgsUnrestricted[1].candidates, undefined);
 
-    assert.equal(callLog.length, 2);
-    assert.equal(callLog[0].method, 'set_selection_locks');
-    assert.equal(callLog[0].args.generation, 1);
-    assert.deepEqual(JSON.parse(callLog[0].args.locks), [501, 502]);
-
-    assert.equal(callLog[1].args.generation, 2);
-    assert.deepEqual(JSON.parse(callLog[1].args.locks), [501]);
+    // 2. Explicit [] candidates -> Restricted to none
+    bridge.handleRemoteSelection(1, []);
+    assert.deepEqual(capturedArgsExplicitEmpty[1].candidates, []);
   });
 
-  test('Returns null safely when EditSession call interface is missing', () => {
-    const invalidSession = {};
-    const bridge = new CollabEngineBridge(invalidSession);
+  test('Calls set_selection_locks directly on EditSession and increments generation after success', () => {
+    const lockCalls = [];
 
-    const state = bridge.handleRemoteSelection(101);
-    assert.equal(state, null);
+    const mockSession = {
+      set_selection_locks(generation, locksJson) {
+        lockCalls.push({ generation, locks: JSON.parse(locksJson) });
+        return JSON.stringify({ status: 'ok', selection: [1, 3] });
+      }
+    };
+
+    const bridge = new CollabEngineBridge(mockSession, 0);
+
+    // First lock update (denying UID 2)
+    const state1 = bridge.updateSessionLocks([2]);
+    assert.equal(lockCalls.length, 1);
+    assert.equal(lockCalls[0].generation, 1);
+    assert.deepEqual(lockCalls[0].locks, [2]);
+    assert.deepEqual(state1, { status: 'ok', selection: [1, 3] });
+    assert.equal(bridge.lockGeneration, 1);
+
+    // Second lock update (lock release)
+    const state2 = bridge.updateSessionLocks([]);
+    assert.equal(lockCalls.length, 2);
+    assert.equal(lockCalls[2 - 1].generation, 2);
+    assert.deepEqual(lockCalls[2 - 1].locks, []);
+    assert.equal(bridge.lockGeneration, 2);
+  });
+
+  test('Throws TypeError on invalid candidate input type', () => {
+    const bridge = new CollabEngineBridge({ call: () => {} });
+    assert.throws(() => {
+      bridge.handleRemoteSelection(1, "invalid_candidate_string");
+    }, TypeError);
   });
 });
