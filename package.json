@@ -286,5 +286,8 @@
     "releaseInfo": {
       "releaseNotesFile": "release-notes.md"
     }
+  },
+  "allowScripts": {
+    "electron@39.8.10": true
   }
 }

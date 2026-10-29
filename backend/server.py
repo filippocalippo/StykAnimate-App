@@ -13,6 +13,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import importlib
 import importlib.util
 import io
 import json
@@ -98,11 +99,16 @@ class FastReader(piv_codec.Reader):
 # Process-local specialization: the checked-in decoder and native app stay intact.
 piv_codec.Reader = FastReader
 piv_codec._keyframes = fast_decode.read_keyframes
-spec = importlib.util.spec_from_file_location("styk_web_codec_bridge", BRIDGE)
-if spec is None or spec.loader is None:
+if BRIDGE.is_file():
+    spec = importlib.util.spec_from_file_location("styk_web_codec_bridge", BRIDGE)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load the existing Pivot codec bridge at {BRIDGE}")
+    bridge = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bridge)
+elif getattr(sys, "frozen", False):
+    bridge = importlib.import_module("codec_bridge")
+else:
     raise RuntimeError(f"Cannot load the existing Pivot codec bridge at {BRIDGE}")
-bridge = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(bridge)
 
 MAX_SOURCE = 128 * 1024 * 1024
 MAX_DOCUMENT = 256 * 1024 * 1024

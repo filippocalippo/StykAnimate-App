@@ -77,6 +77,10 @@ def main() -> int:
     result = subprocess.run(command, cwd=app_root, env=build_env, check=False)
     if result.returncode == 0:
         output = app_root / "build" / "sidecar"
+        frozen_scanner_library = output / "styk-codec" / "_internal" / "native" / native_scan.library_name()
+        if not frozen_scanner_library.is_file():
+            print(f"PyInstaller did not freeze the native PIV scanner: {frozen_scanner_library}", file=sys.stderr)
+            return 1
         distribution = importlib.metadata.distribution("orjson")
         license_output = output / "THIRD_PARTY" / "orjson"
         license_output.mkdir(parents=True, exist_ok=True)
@@ -84,7 +88,13 @@ def main() -> int:
             if "/licenses/" in str(entry).replace("\\", "/"):
                 shutil.copyfile(distribution.locate_file(entry), license_output / Path(entry).name)
         manifest = {"platform": sys.platform, "architecture": architecture, "python": platform.python_version(),
-                    "orjson": orjson.__version__, "pyinstaller": importlib.metadata.version("PyInstaller"), "nativeScanner": scanner,
+                    "orjson": orjson.__version__, "pyinstaller": importlib.metadata.version("PyInstaller"),
+                    "nativeScanner": scanner,
+                    "frozenNativeScanner": {
+                        "path": frozen_scanner_library.relative_to(output).as_posix(),
+                        "sha256": digest(frozen_scanner_library),
+                        "bytes": frozen_scanner_library.stat().st_size,
+                    },
                     "runtimeSources": {name: digest(app_root / "backend" / name) for name in ["server.py", "fast_decode.py", "import_wire.py", "native_scan.py", "native_format.py", "jobs.py"]},
                     "codecSources": {file.name: digest(file) for file in sorted((app_root / "codecs").glob("*.py"))}}
         (output / "build-info.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
