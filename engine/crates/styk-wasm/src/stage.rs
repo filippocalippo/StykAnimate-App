@@ -14,10 +14,11 @@ use crate::js_error;
 /// sprites fills its atlas over a few frames instead of stalling one.
 const IMAGE_UPLOAD_BYTES: usize = 8 << 20;
 
-/// The live drawing levels written before a frame has shown which it needs: the cel's own
-/// pixels and the level above (a view that fits the artboard on screen).
 /// Slots waiting for the next frame at most (2,000 slots are 35 MiB of texels): more are written at once.
 const LIVE_PENDING_SLOTS: usize = 2_000;
+
+/// The live drawing levels written before a frame has shown which it needs: the cel's own
+/// pixels and the level above (a view that fits the artboard on screen).
 const FIRST_LEVELS: styk_eval::live::Levels = 0b11;
 
 /// Device errors kept for the interface between two reads; later ones are dropped.
