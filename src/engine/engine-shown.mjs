@@ -84,6 +84,36 @@ function jointOrder(fig) {
 /** The `flags` of a segment row (styk_eval::geometry::interface). */
 const START = 1, END = 2, POINTS = 4, CONNECTOR = 8, SPATIAL = 16;
 
+/**
+ * A geometry record. Its `drawables` getter lives here, outside `geometry()`: V8 gives all the closures of a function one
+ * context holding every variable any of them captures, so a getter made inside `geometry()` kept `previous` alive, and with it
+ * the geometry before that, and so on: every geometry the interface had read stayed in memory (about 1.5 MiB a tick on a dense scene).
+ */
+function geometryRecord({objects, orderedObjects, token, previousToken, changedSlots, warnings}) {
+  let flat;
+  return {objects, orderedObjects, token, previousToken, changedSlots,
+    get drawables() { return flat ??= orderedObjects.flatMap(group => group.drawables); }, warnings};
+}
+
+/** Gives `group` its `drawables` (what paints, in painter order: the faces, then the visible segments, Stick Nodes shapes expanded). Outside
+ * `hydrate` for the reason `geometryRecord` gives: the getter keeps only the faces and segments. */
+function defineDrawables(group, polys, segments) {
+  let drawables;
+  Object.defineProperty(group, 'drawables', {enumerable: true, get() {
+    if (!drawables) {
+      drawables = [];
+      for (const poly of polys) if (!poly.culled) drawables.push(poly);
+      for (const shape of segments) {
+        if (shape.seg.visible === false) continue;
+        const expanded = sticknodesDrawables(shape);
+        if (expanded) drawables.push(...expanded); else drawables.push(shape);
+      }
+      drawables.sort((a, b) => a.z - b.z);
+    }
+    return drawables;
+  }});
+}
+
 /** A group the session sent, as the interface reads it. */
 function hydrate(raw, slot, frame, report, defs) {
   const obj = frame.objects[slot];
@@ -146,21 +176,7 @@ function hydrate(raw, slot, frame, report, defs) {
   if (raw.solved) { group.solvedAngles = raw.solved.angles; if (raw.solved.lengths) group.solvedLengths = raw.solved.lengths; }
   if (raw.bounds) group.bounds = {minX: raw.bounds[0], minY: raw.bounds[1], maxX: raw.bounds[2], maxY: raw.bounds[3]};
   if (raw.drawn) group.drawn = true;
-  let drawables;
-  // What paints, in painter order: the faces, then the visible segments (Stick Nodes shapes expanded).
-  Object.defineProperty(group, 'drawables', {enumerable: true, get() {
-    if (!drawables) {
-      drawables = [];
-      for (const poly of polys) if (!poly.culled) drawables.push(poly);
-      for (const shape of segments) {
-        if (shape.seg.visible === false) continue;
-        const expanded = sticknodesDrawables(shape);
-        if (expanded) drawables.push(...expanded); else drawables.push(shape);
-      }
-      drawables.sort((a, b) => a.z - b.z);
-    }
-    return drawables;
-  }});
+  defineDrawables(group, polys, segments);
   return group;
 }
 
@@ -215,9 +231,8 @@ export function createShown(owner) {
         held[+motion] = {read: answer.token, geometry: previous.geometry};
         return previous.geometry;
       }
-      let flat;
-      const geometry = {objects: groups, orderedObjects, token: {}, previousToken: previous?.geometry.token, changedSlots: answer.full || !previous ? null : changed,
-        get drawables() { return flat ??= orderedObjects.flatMap(group => group.drawables); }, warnings: answer.warnings};
+      const geometry = geometryRecord({objects: groups, orderedObjects, token: {}, previousToken: previous?.geometry.token,
+        changedSlots: answer.full || !previous ? null : changed, warnings: answer.warnings});
       held[+motion] = {read: answer.token, geometry};
       return geometry;
     },
@@ -235,9 +250,7 @@ export function createShown(owner) {
       const order = frame.object_draw_order ?? Array.from({length: answer.count}, (_, slot) => slot);
       const orderedObjects = [];
       for (const slot of order) { const group = objects.get(Number(slot)); if (group?.drawn) orderedObjects.push(group); }
-      let flat;
-      return {objects, orderedObjects, token: {}, previousToken: undefined, changedSlots: null,
-        get drawables() { return flat ??= orderedObjects.flatMap(group => group.drawables); }, warnings: answer.warnings};
+      return geometryRecord({objects, orderedObjects, token: {}, previousToken: undefined, changedSlots: null, warnings: answer.warnings});
     },
     /**
      * A figure, a set of figures or a movieclip with the pose on show as a document of its own, as a library file, the rig test
