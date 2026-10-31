@@ -326,12 +326,17 @@ impl Stage {
 
     /// Replaces the frame the editor is showing with the one `session` shows at `view` (the call's view): the
     /// gesture in progress, else the document at the playhead; with `motion`, the motion-path edit's display where
-    /// it shows one. No pose crosses from the interface.
-    pub fn edit_session(&mut self, session: &mut crate::edit::EditSession, view: &str, motion: bool) -> Result<(), JsError> {
+    /// it shows one. No pose crosses from the interface: the frame is the session's, typed and built. `false` when the
+    /// engine's document is not the session's yet (its publication has not landed): the frame is asked for again.
+    pub fn edit_session(&mut self, session: &mut crate::edit::EditSession, view: &str, motion: bool) -> Result<bool, JsError> {
+        // The session publishes what its reads converted (`EditSession::show`), so the generation is read after it.
+        let shown = session.show(view, motion)?;
         let generation = self.engine.generation().ok_or_else(|| js_error("no document is open"))?;
-        let record = session.show(view, motion)?;
+        if !self.edit.update_shown(&generation, &shown) {
+            return Ok(false);
+        }
         self.edits += 1;
-        self.edit.update_record(&generation, &record).map_err(js_error)
+        Ok(true)
     }
 
     /// Sets the onion skins drawn behind the frame: the ones `session` plans for `request` (the settings, JSON) at `view` (the

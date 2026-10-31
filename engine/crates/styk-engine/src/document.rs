@@ -163,6 +163,16 @@ impl OpenError {
     }
 }
 
+/// Where the typed views of a published tree come from.
+enum Views {
+    /// Made again from the tree.
+    Convert,
+    /// The ones the engine holds: the tree is the one they were made from.
+    Same(Arc<Prepared>),
+    /// The ones the caller made of the tree; the engine's atlas is extended by their document.
+    Made(Arc<Prepared>),
+}
+
 /// The typed views of a document and the image atlas that belong to it: what publishing it needs.
 pub struct Typed {
     /// The tree the views were made from.
@@ -252,27 +262,50 @@ impl Engine {
         store.tree = typed.tree.clone();
         // The tree it was opened as needs no conversion: its views are the ones made at the open.
         let reuse = tree.same_node(&typed.tree).then(|| typed.prepared.clone());
-        self.publish_locked(store, tree.clone(), revision, reuse)
+        self.publish_locked(store, tree.clone(), revision, reuse.map_or(Views::Convert, Views::Same))
     }
 
     /// Brings the engine's document to `tree` at `revision`, converting only the records that changed since the
     /// last publication. `None` when `lineage` is not the document the engine holds (another document is in
     /// front, or none): nothing is published.
     pub fn publish_tree(&self, lineage: u64, tree: Value, revision: u64) -> Result<Option<Committed>, OpenError> {
+        self.publish_tree_with(lineage, tree, revision, None)
+    }
+
+    /// [`Engine::publish_tree`] with the typed views the caller already made of `tree` (the editing session converts the
+    /// document for its own reads): they are published as they are, and the document is converted once.
+    pub fn publish_tree_with(&self, lineage: u64, tree: Value, revision: u64, made: Option<Arc<Prepared>>) -> Result<Option<Committed>, OpenError> {
         let store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if store.lineage != lineage || store.prepared.is_none() {
             return Ok(None);
         }
         // A revision that moved with the tree untouched (a document marked as changed) keeps its typed views.
-        let views = if tree.same_node(&store.tree) { store.prepared.clone() } else { None };
+        let views = if tree.same_node(&store.tree) {
+            store.prepared.clone().map_or(Views::Convert, Views::Same)
+        } else {
+            made.map_or(Views::Convert, Views::Made)
+        };
         self.publish_locked(store, tree, revision, views).map(Some)
     }
 
-    fn publish_locked(&self, mut store: std::sync::MutexGuard<'_, crate::store::Store>, tree: Value, revision: u64, views: Option<Arc<Prepared>>) -> Result<Committed, OpenError> {
+    /// The typed views of the document the engine holds, when `tree` is the tree it was published from.
+    pub fn views_of(&self, tree: &Value) -> Option<Arc<Prepared>> {
+        let store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        store.tree.same_node(tree).then(|| store.prepared.clone()).flatten()
+    }
+
+    fn publish_locked(&self, mut store: std::sync::MutexGuard<'_, crate::store::Store>, tree: Value, revision: u64, views: Views) -> Result<Committed, OpenError> {
         let started = self.now();
         let (prepared, assets, converted) = match views {
-            Some(prepared) => (prepared, store.assets.clone().expect("an activated document has its atlas"), Default::default()),
-            None => {
+            Views::Same(prepared) => (prepared, store.assets.clone().expect("an activated document has its atlas"), Default::default()),
+            Views::Made(prepared) => {
+                let assets = Arc::new(match &store.assets {
+                    Some(previous) => previous.extended(&prepared.doc),
+                    None => Assets::build(&prepared.doc),
+                });
+                (prepared, assets, Default::default())
+            }
+            Views::Convert => {
                 let name = tree.path(&["_styk", "name"]).and_then(Value::as_str).unwrap_or("").to_string();
                 let document = store.loader.document(&tree, &name).map_err(|error| OpenError { stage: OpenStage::Prepare, ..OpenError::decode(error.to_string()) })?;
                 let converted = store.loader.converted;

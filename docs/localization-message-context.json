@@ -7524,8 +7524,8 @@
   "counts.frames": {
     "locations": [
       "src/movieclip-ui.mjs:57",
-      "src/onion-timeline-range.mjs:90",
-      "src/onion-timeline-range.mjs:91",
+      "src/onion-timeline-range.mjs:95",
+      "src/onion-timeline-range.mjs:96",
       "src/vfx-clip-timeline.mjs:115"
     ],
     "context": "{kind:'meta',parts:[{text:interfaceText('movieclipUi.durationSummary',{frames:{messageKey:'counts.frames',messageParams:{count:asset.duration}},seconds:seconds("
@@ -24963,7 +24963,7 @@
   },
   "onionTimelineRange.dragToChange": {
     "locations": [
-      "src/onion-timeline-range.mjs:91"
+      "src/onion-timeline-range.mjs:96"
     ],
     "context": "localizedAttribute(end, \"title\", \"onionTimelineRange.dragToChange\", {spanLabel:{messageKey:'counts.frames',params:{count:value.span}}});"
   },

@@ -72,8 +72,13 @@ export class OnionTimelineRange {
   }
   update(){
     const visible=this.visible;if(this.overlay.hidden!==!visible)this.overlay.hidden=!visible;
-    if(!visible){for(const part of this.parts)this._finish(part,false);return;}
+    if(!visible){this.shown=null;for(const part of this.parts)this._finish(part,false);return;}
     const range=this.controller.snapshot(this.host.pendingScrub??undefined),cellLeft=this.edge(range.tick),cellRight=cellLeft+this.host.pxPerTick;
+    // An edit that moves nothing here (every pose of a drag) writes nothing: the markers are a function of what follows.
+    const shown=[range.tick,cellLeft,this.tabHalf,this.host.labelWidth,this.host.width,this.host.pxPerTick,range.settings.onionBeforeColor,range.settings.onionAfterColor,
+      ...this.parts.flatMap(({direction})=>{const value=range[direction];return [value.span,value.max,value.endpoint];})].join('|');
+    if(shown===this.shown)return;
+    this.shown=shown;
     const center=(cellLeft+cellRight)/2,tabLeft=center-this.tabHalf-GAP,tabRight=center+this.tabHalf+GAP;
     // The markers show over the grid only: from the label column to the grid's end (the ruler tools' column follows it).
     const clip=`xywh(${this.host.labelWidth}px 0 ${Math.max(0,this.host.width??0)}px 100%)`;if(clip!==this.clip){this.clip=clip;this.overlay.style.clipPath=clip;}

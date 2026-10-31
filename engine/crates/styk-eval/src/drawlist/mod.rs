@@ -902,11 +902,22 @@ pub enum Layer {
     Ghost(u32, u32),
 }
 
+/// What encoding keeps of each object for the next frame of the same document: an object whose build the scene's memory kept
+/// ([`Scene::built_in`]) is encoded as it was. Only a plain frame is kept: nothing in it draws effects, 3D faces or text, no drawing
+/// cel is live and the object is not being dragged, so what an object is encoded as depends on its items alone.
+#[derive(Default)]
+pub struct EncodeMemory {
+    /// What the kept objects were encoded under: the atlas their pictures are placed in, whether effects are bypassed.
+    context: Option<(usize, bool, bool)>,
+    /// By slot: the build that made the object, how many items it has, and what they were encoded as.
+    objects: std::collections::HashMap<u32, (u64, usize, Arc<ObjectOut>)>,
+}
+
 /// One scene's objects, encoded and ready to be placed in any order.
 struct Encoded {
     /// Item ranges of consecutive items of one figure instance (same slot and clip chain).
     runs: Vec<(usize, usize)>,
-    objects: Vec<Option<ObjectOut>>,
+    objects: Vec<Option<Arc<ObjectOut>>>,
     /// Run range per object slot.
     of_slot: std::collections::HashMap<u32, (usize, usize)>,
     /// The scene's effects are drawn.
@@ -995,16 +1006,35 @@ fn item_padding(scene: &Scene, it: &Item) -> f64 {
 /// of its effects. A movieclip instance measures only its handle, which paints nothing, so
 /// the rectangle of an empty object; `None` for an object the scene did not build.
 pub fn app_bounds(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes) -> Vec<Option<[f64; 4]>> {
+    bounds_of(scene, images, None)
+}
+
+/// [`app_bounds`] of the objects in `slots` only (the others are `None`): what a read of some of a scene's objects needs, measured
+/// without the others.
+pub fn app_bounds_of(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, slots: &[usize]) -> Vec<Option<[f64; 4]>> {
+    let mut wanted = vec![false; scene.objects.len()];
+    for &slot in slots {
+        if let Some(flag) = wanted.get_mut(slot) {
+            *flag = true;
+        }
+    }
+    bounds_of(scene, images, Some(&wanted))
+}
+
+fn bounds_of(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, wanted: Option<&[bool]>) -> Vec<Option<[f64; 4]>> {
     let mut acc = vec![EMPTY; scene.objects.len()];
     let fx = has_effects(scene);
     for it in &scene.measured {
+        if wanted.is_some_and(|wanted| !wanted.get(it.slot as usize).copied().unwrap_or(false)) {
+            continue;
+        }
         let Some(extent) = item_extent(scene, images, it) else { continue };
         if let Some(acc) = acc.get_mut(it.slot as usize) {
             extent.include(acc, if fx { item_padding(scene, it) } else { 0.0 });
         }
     }
-    scene.objects.iter().zip(acc).map(|(object, acc)| {
-        object.resolved.then(|| {
+    scene.objects.iter().enumerate().zip(acc).map(|((slot, object), acc)| {
+        (object.resolved && wanted.is_none_or(|wanted| wanted[slot])).then(|| {
             let [x, y, width, height] = rounded(acc);
             [x, y, x + width, y + height]
         })
@@ -1020,7 +1050,7 @@ fn node_stack<'s>(fx: &'s ObjectVfx, fig: &Figure, it: &Item) -> Option<&'s [Arc
     fx.segments.iter().find(|(h, _)| *h == handle).map(|(_, stack)| &stack[..]).filter(|s| !s.is_empty())
 }
 
-fn encode_scene(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidden: &[bool], translations: &[(u32, [f64; 2])], tint: Option<[u8; 3]>, bypass: bool, current_drawing: bool) -> Encoded {
+fn encode_scene(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidden: &[bool], translations: &[(u32, [f64; 2])], tint: Option<[u8; 3]>, bypass: bool, current_drawing: bool, memory: Option<&mut EncodeMemory>) -> Encoded {
     let ctx = Ctx { scene, assets, live, tint };
     let mut runs: Vec<(usize, usize)> = Vec::new();
     let mut of_slot: std::collections::HashMap<u32, (usize, usize)> = std::collections::HashMap::new();
@@ -1138,7 +1168,43 @@ fn encode_scene(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidd
         let opacity = if glyph.is_some() { 1.0 } else { opacity };
         Some(ObjectOut { opacity, outline_alpha, outline, items, nodes, figure, extents, has_fx, raster, single_drawing, bounds })
     };
-    let objects: Vec<Option<ObjectOut>> = crate::par::map(&runs, 16, encode_run);
+    // Objects kept from the last frame are not encoded again; the others are, and are kept.
+    let plain = !measured && live.is_none() && tint.is_none() && scene.vfx.is_none() && scene.clip_vfx.iter().all(Option::is_none) && scene.built_in.len() == scene.objects.len();
+    let Some(memory) = memory.filter(|_| plain) else {
+        let objects = crate::par::map(&runs, 16, encode_run).into_iter().map(|out| out.map(Arc::new)).collect();
+        return Encoded { runs, objects, of_slot, fx };
+    };
+    let context = (assets as *const Assets as usize, bypass, current_drawing);
+    if memory.context != Some(context) {
+        memory.objects.clear();
+        memory.context = Some(context);
+    }
+    // The build that made a run's object, when the run is one that is kept: the whole of an object's items, not moved, not nested in a movieclip.
+    let stamp = |&(a, b): &(usize, usize)| -> Option<(u32, u64, usize)> {
+        let first = &scene.items[a];
+        let moved = moved.get(first.slot as usize).copied().flatten().is_some();
+        let build = scene.built_in[first.slot as usize];
+        (first.chain == crate::geometry::NO_CHAIN && !moved && build != 0 && !hidden.get(first.slot as usize).copied().unwrap_or(false)).then_some((first.slot, build, b - a))
+    };
+    let mut objects: Vec<Option<Arc<ObjectOut>>> = vec![None; runs.len()];
+    let mut missing: Vec<usize> = Vec::new();
+    for (k, run) in runs.iter().enumerate() {
+        match stamp(run).and_then(|(slot, build, items)| memory.objects.get(&slot).filter(|(kept, count, _)| *kept == build && *count == items)) {
+            Some((_, _, out)) => objects[k] = Some(out.clone()),
+            None => missing.push(k),
+        }
+    }
+    let encoded = crate::par::map(&missing, 16, |&k| encode_run(&runs[k]));
+    let mut kept: std::collections::HashMap<u32, (u64, usize, Arc<ObjectOut>)> = std::collections::HashMap::with_capacity(runs.len());
+    for (&k, out) in missing.iter().zip(encoded) {
+        objects[k] = out.map(Arc::new);
+    }
+    for (k, run) in runs.iter().enumerate() {
+        if let (Some((slot, build, items)), Some(out)) = (stamp(run), &objects[k]) {
+            kept.insert(slot, (build, items, out.clone()));
+        }
+    }
+    memory.objects = kept;
     Encoded { runs, objects, of_slot, fx }
 }
 
@@ -1467,10 +1533,20 @@ pub fn layer_effects(layer: &EffectLayer) -> &[Arc<Effect>] {
 /// With a scene effect stack the camera image is drawn over the frame and the
 /// onion skins over the camera image, as the editor's overlays.
 pub fn encode_composed(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>) -> DrawList {
+    encode_composed_over(doc, assets, scene, overrides, ghosts, order, None)
+}
+
+/// [`encode_composed`] over the frame `memory` last encoded: the objects the scene's own memory kept are not encoded again, and the
+/// list is the list encoded whole.
+pub fn encode_composed_remembering(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>, memory: &mut EncodeMemory) -> DrawList {
+    encode_composed_over(doc, assets, scene, overrides, ghosts, order, Some(memory))
+}
+
+fn encode_composed_over(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>, memory: Option<&mut EncodeMemory>) -> DrawList {
     let bypass = overrides.bypass_effects;
-    let current = encode_scene(assets, overrides.live, scene, overrides.hidden, overrides.translations, None, bypass, true);
+    let current = encode_scene(assets, overrides.live, scene, overrides.hidden, overrides.translations, None, bypass, true, memory);
     let camera_stack = if bypass { None } else { scene.vfx.as_ref().map(|v| &v.scene).filter(|s| !s.is_empty()) };
-    let ghost_scenes: Vec<Encoded> = ghosts.iter().map(|ghost| encode_scene(assets, overrides.live, ghost.scene, ghost.hidden, &[], ghost.tint, bypass, false)).collect();
+    let ghost_scenes: Vec<Encoded> = ghosts.iter().map(|ghost| encode_scene(assets, overrides.live, ghost.scene, ghost.hidden, &[], ghost.tint, bypass, false, None)).collect();
     // Generated effects: each draw encoded once, placed in the frame and in the camera image.
     let batch = overrides.generators.filter(|_| !bypass);
     // The exportSVG predicate runs on visible source drawables, not on emitted
