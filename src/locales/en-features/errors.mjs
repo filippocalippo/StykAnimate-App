@@ -341,6 +341,7 @@ export default Object.freeze({
   "errors.drawingWorkerPreview.invalidDrawingPreviewBounds": "Invalid drawing preview bounds.",
   "errors.engineStage.theDrawingEngineCouldNotStart": "The drawing engine could not start: {reason}",
   "errors.engine.outOfMemory": "There is not enough memory for this. Close other projects or save your work and restart StykAnimate.",
+  "errors.engine.outOfMemoryWhileSaving": "There is not enough memory to save this. Your project is still open: close other projects and try again.",
   "errors.editorAnimation.keyframeTimeMustBeAnIntegerFrom0": "Keyframe time must be an integer from 0 to 10,000,000.",
   "errors.editorAnimation.exactAnimationTargetingMustBeABoolean": "Exact animation targeting must be a boolean.",
   "errors.editorAnimation.theSelectedFigureIsNotPresentAtThis": "The selected figure is not present at this time.",
