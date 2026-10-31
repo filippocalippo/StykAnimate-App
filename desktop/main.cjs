@@ -2,12 +2,12 @@
 const { t, messageError, useLocale } = require('./localization.cjs');
 
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, session, clipboard, contentTracing } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, session, clipboard, contentTracing, protocol } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs/promises');
 const { mkdirSync, existsSync } = require('node:fs');
-const { startDesktopHost } = require('./web-host.cjs');
+const { registerAppScheme, handleAppProtocol } = require('./web-host.cjs');
 const { applyGpuSwitches, relaunchOnX11 } = require('./gpu-switches.cjs');
 const { RecoveryStore, atomicWrite } = require('./recovery.cjs');
 const { FileStreams } = require('./file-streams.cjs');
@@ -49,7 +49,7 @@ const fileFilters = () => [
   { name: t('desktop.main.stykanimateProject'), extensions: ['styk', 'json'] },
 ];
 let window;
-// The loopback origin the editor page is served from (web-host.cjs).
+// The origin the editor page is served from: the app scheme (web-host.cjs).
 let webHost;
 let fileStreams;
 let videoExports;
@@ -92,6 +92,7 @@ let pendingFiles = process.argv.slice(app.isPackaged ? 1 : 2).filter((arg) => /\
 // Windows and macOS use Chromium's normal driver allowlist. Linux needs the
 // Vulkan WebGPU opt-in to reach the GPU; see gpu-switches.cjs.
 applyGpuSwitches(app.commandLine);
+registerAppScheme(protocol);
 
 // STYK_BACKGROUND_WINDOW=1 (scripts and agents driving the app, packaged smoke tests too) opens the
 // window off-screen, out of the taskbar and without taking focus, and keeps it drawing there
@@ -131,7 +132,7 @@ else {
 
 function trusted(event) {
   const url = event.senderFrame?.url || '';
-  if (!window || event.sender !== window.webContents || !webHost || new URL(url).origin !== webHost.origin) {
+  if (!window || event.sender !== window.webContents || !webHost || !webHost.owns(url)) {
     throw messageError(new Error(''), 'desktop.main.errors.thisOperationIsRestrictedToTheStykAnimateWorkspace', {});
   }
 }
@@ -769,7 +770,7 @@ async function createWindow() {
     return { action: 'deny' };
   });
   window.webContents.on('will-navigate', (event, url) => {
-    if (new URL(url).origin !== webHost.origin) event.preventDefault();
+    if (!webHost.owns(url)) event.preventDefault();
   });
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   const editorWindow = window;
@@ -873,13 +874,13 @@ async function start() {
   library = new LibraryStore(process.env.STYK_LIBRARY_DIR || path.join(app.getPath('documents'), 'StykAnimate', 'library'));
   // A temporarily unavailable Documents volume should not prevent animation work.
   void library.init().catch(error => console.warn('Library initialization:', error.message));
-  webHost = await startDesktopHost({ appRoot: APP_ROOT, resourcesPath: process.resourcesPath, packaged: app.isPackaged });
+  webHost = await handleAppProtocol({ protocol, appRoot: APP_ROOT, resourcesPath: process.resourcesPath, packaged: app.isPackaged });
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
-  // Each workspace owns a separate Chromium session directory, and each
-  // launch gets a new loopback origin. IndexedDB here is temporary worker
-  // storage only; native recovery, preferences and library data live in files.
-  // Reclaim old-origin undo caches before any editor/worker can use the session.
+  // Each workspace owns a separate Chromium session directory. IndexedDB here is
+  // temporary worker storage only; native recovery, preferences and library data
+  // live in files. Reclaim the previous launch's undo caches before any
+  // editor/worker can use the session.
   await session.defaultSession.clearStorageData({storages:['indexdb']}).catch(error=>console.warn('Temporary drawing cache cleanup:',error.message));
   nativeMenu();
   registerIpc();
@@ -897,5 +898,4 @@ app.on('before-quit', (event) => {
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('will-quit', () => updates?.dispose());
-app.on('will-quit', () => { webHost?.stop(); library?.dispose().catch(() => {}); fileStreams?.dispose().catch(() => {}); videoExports?.dispose().catch(() => {}); vfwExports?.dispose().catch(() => {}); audioImports?.dispose().catch(() => {}); });
-process.on('exit', () => webHost?.stop());
+app.on('will-quit', () => { library?.dispose().catch(() => {}); fileStreams?.dispose().catch(() => {}); videoExports?.dispose().catch(() => {}); vfwExports?.dispose().catch(() => {}); audioImports?.dispose().catch(() => {}); });

@@ -35,7 +35,7 @@ try {
     let invalidRejected = false, oversizedRejected = false;
     try { await window.stykDesktop.setWorkspacePreferences([]); } catch { invalidRejected = true; }
     try { await window.stykDesktop.setWorkspacePreferences({ padding: 'x'.repeat(17000) }); } catch { oversizedRejected = true; }
-    return { origin: location.origin, snapshot, disk, editorSettings: await window.stykDesktop.getEditorSettings(), afterRejected: await window.stykDesktop.getWorkspacePreferences(), invalidRejected, oversizedRejected };
+    return { snapshot, disk, editorSettings: await window.stykDesktop.getEditorSettings(), afterRejected: await window.stykDesktop.getWorkspacePreferences(), invalidRejected, oversizedRejected };
   });
   assert.deepEqual(saved.snapshot, saved.disk);
   assert.deepEqual(saved.afterRejected, saved.disk);
@@ -66,8 +66,7 @@ try {
   const second = await launch(); applications.push(second);
   const restoredPage = await second.firstWindow();
   await restoredPage.waitForFunction(() => window.styk?.ready && window.styk.workspace, undefined, { timeout: 20000 });
-  const restored = await restoredPage.evaluate(async () => ({ origin: location.origin, snapshot: window.styk.workspace.preferences, disk: await window.stykDesktop.getWorkspacePreferences(), floating: window.styk.workspace.floating, layouts: window.styk.workspace.layouts.map(item => item.name), span: document.querySelector('.workspace').dataset.bottomSpan, locale:window.styk.settingsUI.value.locale, documentLocale:document.documentElement.lang, editorSettings:await window.stykDesktop.getEditorSettings() }));
-  assert.notEqual(restored.origin, saved.origin);
+  const restored = await restoredPage.evaluate(async () => ({ snapshot: window.styk.workspace.preferences, disk: await window.stykDesktop.getWorkspacePreferences(), floating: window.styk.workspace.floating, layouts: window.styk.workspace.layouts.map(item => item.name), span: document.querySelector('.workspace').dataset.bottomSpan, locale:window.styk.settingsUI.value.locale, documentLocale:document.documentElement.lang, editorSettings:await window.stykDesktop.getEditorSettings() }));
   assert.deepEqual(restored.snapshot, saved.snapshot);
   assert.deepEqual(restored.disk, saved.snapshot);
   assert.deepEqual(restored.floating.map(item => item.panel), ['vfx']);
@@ -82,7 +81,7 @@ try {
     window.styk.workspace.reset();
     await window.styk.workspace.flushPreferences();
   });
-  const evidence = { passed: true, packaged, survivesProcessRestart: true, survivesOriginChange: true, firstOrigin: saved.origin, secondOrigin: restored.origin, snapshot: saved.snapshot, invalidRejected: saved.invalidRejected, oversizedRejected: saved.oversizedRejected, restoredFloatingPanel: true, restoredSavedLayout: true, restoredTimelineSpan: true, restoredLocale:restored.locale, renderedDocumentLocale:restored.documentLocale, restoredEditorSettings:true, checkedAt: new Date().toISOString() };
+  const evidence = { passed: true, packaged, survivesProcessRestart: true, snapshot: saved.snapshot, invalidRejected: saved.invalidRejected, oversizedRejected: saved.oversizedRejected, restoredFloatingPanel: true, restoredSavedLayout: true, restoredTimelineSpan: true, restoredLocale:restored.locale, renderedDocumentLocale:restored.documentLocale, restoredEditorSettings:true, checkedAt: new Date().toISOString() };
   await writeFile(path.join(output, packaged ? 'desktop-packaged-preferences-smoke.json' : 'desktop-preferences-smoke.json'), JSON.stringify(evidence, null, 2));
   console.log(JSON.stringify(evidence, null, 2));
 } finally {

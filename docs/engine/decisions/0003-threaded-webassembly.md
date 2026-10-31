@@ -8,7 +8,7 @@ Each JavaScript playback worker held its own copy of the document. The engine ne
 
 ## Decision
 
-The engine is one WebAssembly module over a `SharedArrayBuffer` memory, run by a pool of Web Workers (`src/engine/engine-worker.mjs`). Every host sends cross-origin isolation headers (COOP `same-origin`, COEP `require-corp`, CORP `same-origin`): the development server, the desktop host (`desktop/web-host.cjs`), the web build (`web/_headers`). A page that is not cross-origin isolated runs the same module without workers, in slices on the interface thread (`engine.pump()`).
+The engine is one WebAssembly module over a `SharedArrayBuffer` memory, run by a pool of Web Workers (`src/engine/engine-worker.mjs`). Every host sends cross-origin isolation headers (COOP `same-origin`, COEP `require-corp`, CORP `same-origin`): the development server, the desktop app scheme and the loopback host for browser development (`desktop/web-host.cjs`), the web build (`web/_headers`). A page that is not cross-origin isolated runs the same module without workers, in slices on the interface thread (`engine.pump()`).
 
 ## Evidence
 
