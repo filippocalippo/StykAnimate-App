@@ -12726,13 +12726,13 @@
   },
   "errors.documentExport.theFileServiceReturnedNoExportedDocument": {
     "locations": [
-      "src/document-export.mjs:218"
+      "src/document-export.mjs:219"
     ],
     "context": "if (!(result.blob instanceof Blob)) throw messageError(new Error(''), \"errors.documentExport.theFileServiceReturnedNoExportedDocument\", {});"
   },
   "errors.documentExportWorker.busy": {
     "locations": [
-      "src/document-export-worker.mjs:73"
+      "src/document-export-worker.mjs:74"
     ],
     "context": "if (running) { self.postMessage({id: message.id, ok: false, error: {message: 'The document export worker is busy.', messageKey:'errors.documentExportWorker.busy"
   },
@@ -12775,8 +12775,8 @@
   "errors.documentExportWorker.theDocumentSnapshotWasNotInitialized": {
     "locations": [
       "src/document-export-worker.mjs:33",
-      "src/document-export-worker.mjs:44",
-      "src/document-export-worker.mjs:84",
+      "src/document-export-worker.mjs:45",
+      "src/document-export-worker.mjs:85",
       "src/document-export.mjs:202"
     ],
     "context": "if (!config.engine || !message.project) throw messageError(new Error(''), \"errors.documentExportWorker.theDocumentSnapshotWasNotInitialized\", {});"
@@ -12798,7 +12798,7 @@
   },
   "errors.documentExportWorker.unknownDocumentExportOperation": {
     "locations": [
-      "src/document-export-worker.mjs:138"
+      "src/document-export-worker.mjs:139"
     ],
     "context": "} else throw messageError(new Error(''), \"errors.documentExportWorker.unknownDocumentExportOperation\", {});"
   },
@@ -15643,43 +15643,43 @@
   },
   "errors.nativeFiles.aBlobIsRequiredForNativeFileWriting": {
     "locations": [
-      "src/native-files.mjs:10"
+      "src/native-files.mjs:12"
     ],
     "context": "if (!(blob instanceof Blob)) throw messageError(new TypeError(''), \"errors.nativeFiles.aBlobIsRequiredForNativeFileWriting\", {});"
   },
   "errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming": {
     "locations": [
-      "src/native-files.mjs:14"
+      "src/native-files.mjs:16"
     ],
     "context": "if (typeof start !== 'function') throw messageError(new Error(''), \"errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming\", {});"
   },
   "errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming2": {
     "locations": [
-      "src/native-files.mjs:44"
+      "src/native-files.mjs:52"
     ],
     "context": "if (typeof desktop.beginRecoveryRead !== 'function') throw messageError(new Error(''), \"errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming2\", {});"
   },
   "errors.nativeFiles.theFileTransferWasCancelled": {
     "locations": [
-      "src/native-files.mjs:5"
+      "src/native-files.mjs:7"
     ],
     "context": "if (signal?.aborted) throw signal.reason || messageError(new DOMException('', 'AbortError'), \"errors.nativeFiles.theFileTransferWasCancelled\", {});"
   },
   "errors.nativeFiles.theRecoveryFileTransferWasIncomplete": {
     "locations": [
-      "src/native-files.mjs:66"
+      "src/native-files.mjs:74"
     ],
     "context": "if (received !== transfer.size) throw messageError(new Error(''), \"errors.nativeFiles.theRecoveryFileTransferWasIncomplete\", {});"
   },
   "errors.nativeFiles.theRecoveryTransferExceededItsDeclaredSize": {
     "locations": [
-      "src/native-files.mjs:61"
+      "src/native-files.mjs:69"
     ],
     "context": "if (received > transfer.size) throw messageError(new Error(''), \"errors.nativeFiles.theRecoveryTransferExceededItsDeclaredSize\", {});"
   },
   "errors.nativeFiles.theRecoveryTransferReturnedInvalidBytes": {
     "locations": [
-      "src/native-files.mjs:59"
+      "src/native-files.mjs:67"
     ],
     "context": "if (!(chunk.bytes instanceof ArrayBuffer)) throw messageError(new Error(''), \"errors.nativeFiles.theRecoveryTransferReturnedInvalidBytes\", {});"
   },

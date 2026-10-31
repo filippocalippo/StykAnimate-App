@@ -215,6 +215,17 @@ impl EngineHandle {
         styk_alloc::reset_peak();
     }
 
+    /// A worker thread stopped under the engine (the page saw its `error` event: a trap, which a thread cannot report itself). Work
+    /// that waits for a job on a worker gives up its wait with an error.
+    pub fn worker_lost(&self) {
+        self.engine.note_worker_lost();
+    }
+
+    /// How many worker threads have been reported stopped.
+    pub fn workers_lost(&self) -> u32 {
+        self.engine.workers_lost()
+    }
+
     /// Asks every worker to leave [`worker_run`].
     pub fn stop(&self) {
         self.engine.stop();

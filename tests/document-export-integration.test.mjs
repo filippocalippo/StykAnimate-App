@@ -9,6 +9,7 @@ import {useExportWorker} from './support/export-worker.mjs';
 import {ownedEditorFor} from './support/owned-editor.mjs';
 import {snapshotDocument} from '../src/engine/engine-owner.mjs';
 import {makeProjectFile} from '../src/engine/engine-document-export.mjs';
+import {registeredEngine} from '../src/engine/engine-open.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 function environment(t, {codecHost = new FakeCodecHost(), ...options} = {}) {
@@ -107,6 +108,18 @@ test('the engine writes the document of the moment the snapshot was taken: an ed
   const reopened = (await decodeDocument(made.bytes, 'styk')).document;
   assert.equal(reopened.canvas_width, width, 'the session kept editing, and the snapshot did not follow it');
   assert.equal(editor.report.canvas_width, width + 9);
+});
+
+test('a save that may use the engine workers writes the bytes of one that may not, and reports where its time went', () => {
+  const editor = project(createDemo()), first = snapshotDocument(editor.report), second = snapshotDocument(editor.report);
+  const alone = makeProjectFile({join: null, cancelled: () => false, request: {snapshots: [first], scopes: [], name: 'Same'}});
+  const lent = makeProjectFile({join: null, cancelled: () => false, address: registeredEngine().handle.address(), request: {snapshots: [second], scopes: [], name: 'Same'}});
+  assert.equal(hash(lent.bytes), hash(alone.bytes));
+  const {timings} = lent;
+  assert.ok(timings.total_ms > 0 && timings.lift_ms >= 0 && timings.prepare_ms >= 0, JSON.stringify(timings));
+  assert.equal(timings.frames.length, 3);
+  assert.equal(timings.frames.reduce((n, frame) => n + frame.raw, 0), lent.rawBytes);
+  assert.ok(timings.frames.every(frame => frame.stored > 0 && frame.hash_ms >= 0 && frame.compress_ms >= 0));
 });
 
 test('real portable movieclip worker packs keys, prunes archives, and leaves the project editable', async t => {
