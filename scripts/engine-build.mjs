@@ -31,6 +31,8 @@ export const CODEC_TOOLCHAIN = 'stable';
 const MAX_MEMORY = 2147483648;
 const dev = process.argv.includes('--dev');
 const profile = dev ? 'release' : 'wasm';
+// Worktrees share one target directory through CARGO_TARGET_DIR: build caches are what fills the disk.
+const target = process.env.CARGO_TARGET_DIR ? path.resolve(process.env.CARGO_TARGET_DIR) : path.join(engine, 'target');
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {stdio: 'inherit', cwd: engine, ...options});
@@ -50,10 +52,10 @@ const rustflags = ['-C', 'target-feature=+atomics,+bulk-memory,+mutable-globals'
   '-C', `link-arg=--max-memory=${MAX_MEMORY}`, '-C', 'link-arg=--export=__wasm_init_tls', '-C', 'link-arg=--export=__tls_size',
   '-C', 'link-arg=--export=__tls_align', '-C', 'link-arg=--export=__tls_base'];
 run('cargo', [`+${TOOLCHAIN}`, 'build', '--profile', profile, '-p', 'styk-wasm', '--target', 'wasm32-unknown-unknown', '-Z', 'build-std=std,panic_abort'],
-  {env: {...process.env, CARGO_ENCODED_RUSTFLAGS: rustflags.join('\x1f'), CARGO_TARGET_DIR: path.join(engine, 'target/wasm-threads')}});
+  {env: {...process.env, CARGO_ENCODED_RUSTFLAGS: rustflags.join('\x1f'), CARGO_TARGET_DIR: path.join(target, 'wasm-threads')}});
 
 mkdirSync(out, {recursive: true});
-const built = path.join(engine, 'target/wasm-threads/wasm32-unknown-unknown', profile, 'styk_wasm.wasm');
+const built = path.join(target, 'wasm-threads/wasm32-unknown-unknown', profile, 'styk_wasm.wasm');
 run('wasm-bindgen', ['--target', 'web', '--out-dir', out, '--out-name', 'styk_engine', '--no-typescript', ...(dev ? ['--keep-debug'] : ['--remove-name-section', '--remove-producers-section']), built]);
 const wasm = path.join(out, 'styk_engine_bg.wasm');
 const before = statSync(wasm).size;
@@ -64,8 +66,8 @@ if (!dev && has('wasm-opt')) {
 // The codec: no shared memory, no threads. `--experimental-reset-state-function` lets the
 // worker replace an instance that trapped (a panic aborts) with a fresh one.
 run('cargo', [`+${CODEC_TOOLCHAIN}`, 'build', '--profile', profile, '-p', 'styk-codec-wasm', '-p', 'styk-drawing-wasm', '--target', 'wasm32-unknown-unknown'],
-  {env: {...process.env, CARGO_TARGET_DIR: path.join(engine, 'target/wasm-codec')}});
-const codecBuilt = path.join(engine, 'target/wasm-codec/wasm32-unknown-unknown', profile, 'styk_codec_wasm.wasm');
+  {env: {...process.env, CARGO_TARGET_DIR: path.join(target, 'wasm-codec')}});
+const codecBuilt = path.join(target, 'wasm-codec/wasm32-unknown-unknown', profile, 'styk_codec_wasm.wasm');
 run('wasm-bindgen', ['--target', 'web', '--out-dir', out, '--out-name', 'styk_codec', '--no-typescript', '--experimental-reset-state-function',
   ...(dev ? ['--keep-debug'] : ['--remove-name-section', '--remove-producers-section']), codecBuilt]);
 const codecWasm = path.join(out, 'styk_codec_bg.wasm');
@@ -76,7 +78,7 @@ if (!dev && has('wasm-opt')) {
 }
 
 // The drawing engine: built with the codec (same toolchain and target directory).
-const drawingBuilt = path.join(engine, 'target/wasm-codec/wasm32-unknown-unknown', profile, 'styk_drawing_wasm.wasm');
+const drawingBuilt = path.join(target, 'wasm-codec/wasm32-unknown-unknown', profile, 'styk_drawing_wasm.wasm');
 run('wasm-bindgen', ['--target', 'web', '--out-dir', out, '--out-name', 'styk_drawing', '--no-typescript', '--experimental-reset-state-function',
   ...(dev ? ['--keep-debug'] : ['--remove-name-section', '--remove-producers-section']), drawingBuilt]);
 const drawingWasm = path.join(out, 'styk_drawing_bg.wasm');
