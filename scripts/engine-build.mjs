@@ -27,6 +27,10 @@ export const TOOLCHAIN = 'nightly-2026-09-15';
 export const WASM_BINDGEN = '0.2.129';
 // The codec needs no atomics, so the stable toolchain builds it.
 export const CODEC_TOOLCHAIN = 'stable';
+// WebAssembly SIMD (+simd128) is on in all three modules: it is in every browser the editor already needs (Chrome 91,
+// Firefox 89, Safari 16.4, the version OffscreenCanvas sets), and the compiler only uses it where IEEE results stay
+// exact (docs/engine/threading.md, Build). The codec and drawing modules take it through RUSTFLAGS: they need nothing else.
+const SIMD_RUSTFLAGS = ['-C', 'target-feature=+simd128'].join('');
 // 2 GiB of address space: every thread shares it, and a shared memory's maximum is fixed when it links.
 const MAX_MEMORY = 2147483648;
 const dev = process.argv.includes('--dev');
@@ -48,7 +52,7 @@ const bindgen = has('wasm-bindgen');
 if (!bindgen?.endsWith(WASM_BINDGEN))
   throw new Error(`wasm-bindgen ${WASM_BINDGEN} is required (found ${bindgen ?? 'none'}): cargo install wasm-bindgen-cli --version ${WASM_BINDGEN} --locked`);
 
-const rustflags = ['-C', 'target-feature=+atomics,+bulk-memory,+mutable-globals', '-C', 'link-arg=--shared-memory', '-C', 'link-arg=--import-memory',
+const rustflags = ['-C', 'target-feature=+atomics,+bulk-memory,+mutable-globals,+simd128', '-C', 'link-arg=--shared-memory', '-C', 'link-arg=--import-memory',
   '-C', `link-arg=--max-memory=${MAX_MEMORY}`, '-C', 'link-arg=--export=__wasm_init_tls', '-C', 'link-arg=--export=__tls_size',
   '-C', 'link-arg=--export=__tls_align', '-C', 'link-arg=--export=__tls_base'];
 run('cargo', [`+${TOOLCHAIN}`, 'build', '--profile', profile, '-p', 'styk-wasm', '--target', 'wasm32-unknown-unknown', '-Z', 'build-std=std,panic_abort'],
@@ -66,7 +70,7 @@ if (!dev && has('wasm-opt')) {
 // The codec: no shared memory, no threads. `--experimental-reset-state-function` lets the
 // worker replace an instance that trapped (a panic aborts) with a fresh one.
 run('cargo', [`+${CODEC_TOOLCHAIN}`, 'build', '--profile', profile, '-p', 'styk-codec-wasm', '-p', 'styk-drawing-wasm', '--target', 'wasm32-unknown-unknown'],
-  {env: {...process.env, CARGO_TARGET_DIR: path.join(target, 'wasm-codec')}});
+  {env: {...process.env, CARGO_ENCODED_RUSTFLAGS: SIMD_RUSTFLAGS, CARGO_TARGET_DIR: path.join(target, 'wasm-codec')}});
 const codecBuilt = path.join(target, 'wasm-codec/wasm32-unknown-unknown', profile, 'styk_codec_wasm.wasm');
 run('wasm-bindgen', ['--target', 'web', '--out-dir', out, '--out-name', 'styk_codec', '--no-typescript', '--experimental-reset-state-function',
   ...(dev ? ['--keep-debug'] : ['--remove-name-section', '--remove-producers-section']), codecBuilt]);
@@ -74,7 +78,7 @@ const codecWasm = path.join(out, 'styk_codec_bg.wasm');
 const codecBefore = statSync(codecWasm).size;
 if (!dev && has('wasm-opt')) {
   run('wasm-opt', ['-O3', '--enable-bulk-memory', '--enable-mutable-globals', '--enable-nontrapping-float-to-int', '--enable-sign-ext',
-    '--enable-reference-types', '--enable-multivalue', '-o', codecWasm, codecWasm]);
+    '--enable-reference-types', '--enable-multivalue', '--enable-simd', '-o', codecWasm, codecWasm]);
 }
 
 // The drawing engine: built with the codec (same toolchain and target directory).
@@ -85,7 +89,7 @@ const drawingWasm = path.join(out, 'styk_drawing_bg.wasm');
 const drawingBefore = statSync(drawingWasm).size;
 if (!dev && has('wasm-opt')) {
   run('wasm-opt', ['-O3', '--enable-bulk-memory', '--enable-mutable-globals', '--enable-nontrapping-float-to-int', '--enable-sign-ext',
-    '--enable-reference-types', '--enable-multivalue', '-o', drawingWasm, drawingWasm]);
+    '--enable-reference-types', '--enable-multivalue', '--enable-simd', '-o', drawingWasm, drawingWasm]);
 }
 
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
