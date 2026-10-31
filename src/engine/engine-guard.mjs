@@ -14,7 +14,9 @@ const OUTSIDE = 0, INSIDE = 1, CLAIMED = 2;
 export const RELEASE_MS = 5000;
 
 const guards = new WeakMap();
-const depths = new WeakMap();
+/** How many stretches this thread is inside at once. One thread, one count: the guard reaches a worker as a new view of the same
+ * memory with every message it is sent in, and a stretch that begins in one view and calls on in another is still one stretch. */
+let depth = 0;
 
 /** The guard of `worker`, made on first ask; send it to the worker with its first message (a `SharedArrayBuffer` view). */
 export function workerGuard(worker) {
@@ -30,12 +32,10 @@ export function workerGuard(worker) {
  */
 export function inside(guard, run) {
   if (!guard) return run();
-  const depth = depths.get(guard) ?? 0;
   if (depth === 0 && Atomics.compareExchange(guard, 0, OUTSIDE, INSIDE) !== OUTSIDE) throw new DOMException('The worker is being ended.', 'AbortError');
-  depths.set(guard, depth + 1);
+  depth++;
   try { return run(); } finally {
-    depths.set(guard, depth);
-    if (depth === 0) Atomics.store(guard, 0, OUTSIDE);
+    if (--depth === 0) Atomics.store(guard, 0, OUTSIDE);
   }
 }
 
@@ -53,16 +53,20 @@ export function guarded(guard, object) {
 /**
  * Interface side: asks `worker` to give its thread back and end, and ends it when it says it has, or when `ms` have passed and
  * it is outside the engine (it cannot be harmed then; what it held stays allocated). A worker still inside the engine is
- * asked again every `ms`: it finishes the call it is in, releases, and the cancel flag the caller raised makes that short.
+ * looked at again every `ms`: it finishes the call it is in and releases (the cancel flag the caller raised makes that short). An
+ * `error` event from the worker ends the watch and the worker: an uncaught exception has left every stretch (the guard is let go
+ * as it unwinds), and a thread that is gone has nothing to protect.
  */
 export function releaseWorker(worker, ms = RELEASE_MS) {
   const guard = guards.get(worker);
-  let timer;
-  const end = () => { clearTimeout(timer); worker.terminate(); };
+  let timer, ended = false;
+  const end = () => { ended = true; clearTimeout(timer); worker.terminate(); };
   const watch = () => {
+    if (ended) return;
     timer = setTimeout(() => { if (!guard || Atomics.compareExchange(guard, 0, OUTSIDE, CLAIMED) === OUTSIDE) end(); else watch(); }, ms);
     timer.unref?.();
   };
   worker.addEventListener('message', ({data}) => { if (data?.released) end(); });
+  worker.addEventListener('error', end);
   try { worker.postMessage({operation: 'release'}); watch(); } catch { end(); }
 }

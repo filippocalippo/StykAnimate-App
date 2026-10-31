@@ -6,11 +6,12 @@ import {inside, guarded, releaseWorker, workerGuard} from '../src/engine/engine-
 
 /** A worker that never answers: it records what it is told and whether it was ended. */
 function silentWorker() {
-  const listeners = [], worker = {messages: [], terminated: false,
-    addEventListener(type, listener) { if (type === 'message') listeners.push(listener); },
+  const listeners = {}, worker = {messages: [], terminated: false,
+    addEventListener(type, listener) { (listeners[type] ??= []).push(listener); },
     postMessage(message) { worker.messages.push(message); },
     terminate() { worker.terminated = true; },
-    say(data) { for (const listener of listeners) listener({data}); }};
+    say(data) { for (const listener of listeners.message ?? []) listener({data}); },
+    fail() { for (const listener of listeners.error ?? []) listener({}); }};
   return worker;
 }
 
@@ -61,4 +62,29 @@ test('inside nests, leaves the guard on every exit, and a guarded object keeps i
   assert.deepEqual(guarded(guard, object).read(), [7, 1]);
   assert.equal(Atomics.load(guard, 0), 0);
   assert.equal(inside(null, () => 'no guard, no claim'), 'no guard, no claim');
+});
+
+test('a stretch that goes on in another view of the same word is still one stretch', () => {
+  // Every message that brings the guard to a worker brings a new view of the same memory; the renderer is made under one message's
+  // and handed a device wrapped with another's.
+  const first = workerGuard({}), second = new Int32Array(first.buffer), third = new Int32Array(first.buffer);
+  const device = guarded(first, {free() { return Atomics.load(first, 0); }});
+  const result = inside(second, () => [device.free(), inside(third, () => guarded(first, {read: () => Atomics.load(first, 0)}).read())]);
+  assert.deepEqual(result, [1, 1]);
+  assert.equal(Atomics.load(first, 0), 0, 'let go once, when the outermost stretch ends');
+  assert.equal(guarded(second, {free: () => 'again'}).free(), 'again', 'and entered again afterwards');
+});
+
+test('a worker that fails while it is being ended is forgotten: the watch stops even if its word was left inside', t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const worker = silentWorker(), guard = workerGuard(worker);
+  Atomics.store(guard, 0, 1); // it died inside a stretch
+  releaseWorker(worker, 5000);
+  t.mock.timers.tick(5000);
+  assert.equal(worker.terminated, false, 'while it may be alive and inside, it is left');
+  worker.fail();
+  assert.equal(worker.terminated, true);
+  worker.terminated = false;
+  t.mock.timers.tick(60000);
+  assert.equal(worker.terminated, false, 'nothing looks at it again');
 });

@@ -51,7 +51,10 @@ export class EnginePreviewWorker {
   _spawn() {
     const worker = this.worker = this.spawnWorker();
     this.stats.starts++;
-    // `answered`: the worker can still free what it holds (it said so); otherwise it is gone or stuck.
+    // `answered`: the worker may still be in the engine or able to free what it holds, so it is released through its guard
+    // (engine-guard.mjs); otherwise it is ended at once. An `error` event is a thread whose uncaught exception has unwound every
+    // stretch into the engine (or one that never loaded), so it is ended. A `messageerror` is the interface failing to read a message
+    // and says nothing of where the worker is.
     const fail = (message, answered) => {
       if (this.worker !== worker) return;
       this.broken = message;
@@ -71,7 +74,7 @@ export class EnginePreviewWorker {
       Object.assign(this.stats, {backend: data.backend ?? null, cpu: Boolean(data.cpu), gpuRefusal: data.gpuRefusal ?? null});
     });
     worker.addEventListener('error', event => { event.preventDefault(); fail(event.message || 'The preview worker stopped.', false); });
-    worker.addEventListener('messageerror', () => fail('A preview could not be transferred.', false));
+    worker.addEventListener('messageerror', () => fail('A preview could not be transferred.', true));
     const {module, memory, stack, progress} = this.engine.join;
     worker.postMessage({operation: 'start', id: 0, module, memory, stack, progress, guard: workerGuard(worker)});
     return worker;

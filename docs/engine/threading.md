@@ -111,8 +111,8 @@ memory the interface creates (`workerGuard`) and sends with its first message. T
 synchronous stretch in which it calls the engine: joining, the document export or save, the renderer's and the previews' methods
 (`guarded` wraps an object so that every method call is such a stretch), and giving its thread back. The interface ends a worker
 (`releaseWorker`) when it answers `release` with `released`, or when 5 s have passed and it can *claim* the guard (compare-exchange
-from outside to claimed); a worker that finds the guard claimed does not enter. Exactly one of the two wins. A worker found inside is
-asked again 5 s later: the cancel flag the caller raised (for a save) makes the engine work stop at its next question, and the
+from outside to claimed); a worker that finds the guard claimed does not enter. Exactly one of the two wins. A thread holds one count however many views of the word it was sent (every message brings a new one). An `error` event from the worker ends the watch and the worker: the exception has unwound its stretches, and the guard with them. A worker found inside is
+looked at again 5 s later (the `release` it was sent waits in its queue): the cancel flag the caller raised (for a save) makes the engine work stop at its next question, and the
 worker releases when the call returns. Promise continuations the engine runs after a GPU read-back settles (the export and preview
 workers) are not wrapped; they are short and run in the event loop, where the worker answers `release` between them.
 

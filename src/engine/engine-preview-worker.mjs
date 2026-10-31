@@ -34,7 +34,7 @@ let session = null;
 const cancelled = new Set();
 
 async function start(message) {
-  guard = message.guard ?? guard;
+  guard ??= message.guard ?? null;
   wasm ??= inside(guard, () => initSync({module: message.module, memory: message.memory, thread_stack_size: message.stack}));
   progress ??= new Int32Array(message.memory.buffer, message.progress, 1);
   if (!previews) {

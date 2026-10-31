@@ -251,7 +251,7 @@ async function release() {
 }
 
 self.addEventListener('message', ({data: message}) => {
-  if (message.guard) guard = message.guard;
+  guard ??= message.guard ?? null;
   if (message.operation === 'release') { release(); return; }
   const run = running.then(() => {
     check();

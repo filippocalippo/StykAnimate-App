@@ -77,7 +77,7 @@ self.addEventListener('message', async event => {
     if (message.operation === 'start') {
       config?.codecPort?.close();
       config = message.options;
-      guard = config.guard ?? null;
+      guard ??= config.guard ?? null;
       timings = {};
       reply(message.id);
     } else if (message.operation === 'export') {
