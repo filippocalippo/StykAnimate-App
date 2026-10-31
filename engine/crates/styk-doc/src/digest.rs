@@ -37,8 +37,9 @@ mod tests {
     #[test]
     fn stepped_digest_equals_one_shot_digest() {
         let bytes: Vec<u8> = (0..STEP * 3 + 77).map(|i| (i * 31 + i / 7) as u8).collect();
-        assert_eq!(sha256(&bytes), <[u8; 32]>::from(Sha256::digest(&bytes)));
-        assert_eq!(sha256(&[]), <[u8; 32]>::from(Sha256::digest([])));
+        for length in [0, 1, 63, 64, 65, STEP - 1, STEP, STEP + 1, STEP * 2, STEP * 3, bytes.len()] {
+            assert_eq!(sha256(&bytes[..length]), <[u8; 32]>::from(Sha256::digest(&bytes[..length])), "{length} bytes");
+        }
         let mut hasher = Sha256::new();
         update(&mut hasher, &bytes[..5]);
         update(&mut hasher, &bytes[5..]);
