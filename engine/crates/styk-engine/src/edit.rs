@@ -17,7 +17,7 @@ use std::sync::Arc;
 use styk_doc::Value;
 use styk_eval::drawlist::{DrawList, EncodeMemory, Ghost, Overrides, encode_composed_remembering};
 use styk_eval::eval::Frame;
-use styk_eval::geometry::{Scene, build};
+use styk_eval::geometry::{BuildMemory, Scene, build_remembering_plain};
 use styk_eval::load::Loader;
 use styk_eval::onion::{GhostPlace, compose};
 use styk_eval::vfx::generated::Batch;
@@ -48,6 +48,10 @@ struct Pose {
     /// The record it was made from, when the pose came as a record ([`EditScene::update_shown`]): the next one is
     /// read as its difference.
     record: Option<Value>,
+    /// The views of the document the pose was converted against (a ghost's, to share its unchanged objects with the pose that replaces it).
+    prepared: Option<Arc<styk_eval::eval::Prepared>>,
+    /// What the pose's scene was built of, for the build after the document is published anew.
+    memory: BuildMemory,
 }
 
 #[cfg(test)]
@@ -101,7 +105,7 @@ impl Pose {
     }
 
     fn shared(frame: Arc<Frame>, used: u64, times: Times) -> Pose {
-        Pose { frame, scene: None, used, motion_tick: times.motion, shot: None, vfx_tick: times.vfx, generators: None, record: None }
+        Pose { frame, scene: None, used, motion_tick: times.motion, shot: None, vfx_tick: times.vfx, generators: None, record: None, prepared: None, memory: BuildMemory::default() }
     }
 
     /// What the scene camera does to this pose, worked out once per document generation
@@ -276,10 +280,17 @@ impl EditScene {
     /// Replaces the pose of ghost `id` with a frame the engine's session evaluated (it draws no effects).
     pub fn update_ghost(&mut self, generation: &Generation, id: u32, record: &Value) -> Result<(), String> {
         self.follow(generation);
-        self.ghosts.remove(&id);
-        let (frame, times) = self.convert(generation, record, None, Effects::None)?;
+        let old = self.ghosts.remove(&id);
+        let (mut frame, times) = self.convert(generation, record, None, Effects::None)?;
+        if let Some((old_record, old_prepared)) = old.as_ref().and_then(|old| old.record.as_ref().zip(old.prepared.as_ref())) {
+            frame.keep_unchanged(record, &old.as_ref().expect("checked").frame, old_record, &old_prepared.doc, &generation.prepared.doc);
+        }
         let mut pose = Pose::new(frame, self.draws, times);
         pose.record = Some(record.clone());
+        pose.prepared = Some(generation.prepared.clone());
+        if let Some(old) = old {
+            pose.memory = old.memory;
+        }
         self.ghosts.insert(id, pose);
         Ok(())
     }
@@ -287,6 +298,14 @@ impl EditScene {
     /// Whether ghost `id` is kept and was made from `record` (the same node: the session's frame has not changed).
     pub fn has_ghost(&self, id: u32, record: &Value) -> bool {
         self.ghosts.get(&id).and_then(|pose| pose.record.as_ref()).is_some_and(|held| held.same_node(record))
+    }
+
+    /// A ghost not shown by the last draw keeps its pose and scene but not what its scene was built of: the builds of every object are
+    /// held only for the ghosts that are on show.
+    fn release_idle_ghosts(&mut self) {
+        for pose in self.ghosts.values_mut().filter(|pose| pose.used != self.draws) {
+            pose.memory = BuildMemory::default();
+        }
     }
 
     pub fn has_frame(&self) -> bool {
@@ -331,7 +350,7 @@ impl EditScene {
         self.camera_pending = None;
         self.draws += 1;
         let doc = &generation.prepared.doc;
-        let scene_of = |pose: &mut Pose| pose.scene.get_or_insert_with(|| Arc::new(build(doc, &pose.frame))).clone();
+        let scene_of = |pose: &mut Pose| pose.scene.get_or_insert_with(|| Arc::new(build_remembering_plain(doc, &pose.frame, &mut pose.memory))).clone();
         let Some(current) = self.current.as_mut() else { return Ok(None) };
         let scene = scene_of(current);
         let hidden = flags(options.hidden, current.frame.objects.len());
@@ -374,7 +393,9 @@ impl EditScene {
         let overrides = Overrides { hidden: &hidden, translations, background: options.background, bypass_effects: options.bypass_effects, generators: batch.as_deref(), live: options.live.map(|cels| styk_eval::live::LiveView { cels, base: generation.assets.pages }) };
         if options.onions.is_empty() {
             let frame_scene = scene;
-            return Ok(Some(Arc::new(encode_composed_remembering(doc, &generation.assets, &frame_scene, &overrides, &[], None, &mut self.encoded))));
+            let list = Arc::new(encode_composed_remembering(doc, &generation.assets, &frame_scene, &overrides, &[], None, &mut self.encoded));
+            self.release_idle_ghosts();
+            return Ok(Some(list));
         }
         let mut scenes = Vec::with_capacity(options.onions.len());
         for onion in options.onions {
@@ -404,6 +425,7 @@ impl EditScene {
             .collect();
         let list = Arc::new(encode_composed_remembering(doc, &generation.assets, &scene, &overrides, &ghosts, Some(&order), &mut self.encoded));
         drop(places);
+        self.release_idle_ghosts();
         if self.ghosts.len() > MAX_GHOSTS {
             let mut by_age: Vec<(u64, u32)> = self.ghosts.iter().map(|(&id, pose)| (pose.used, id)).collect();
             by_age.sort_unstable();

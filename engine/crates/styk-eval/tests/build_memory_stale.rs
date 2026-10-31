@@ -158,3 +158,16 @@ fn a_ghost_encoded_before_is_not_shown_for_another() {
     }
     assert!(exercised > 0);
 }
+
+/// Assets that add nothing place everything where the assets before them did, so what was encoded under them stays good; assets
+/// that add a picture do not.
+#[test]
+fn assets_keep_their_number_until_something_is_added() {
+    let plain = prepared("eval/follow-figures.json");
+    let sprites = prepared("eval/sticknodes-sprites.json");
+    assert!(sprites.doc.images.len() > plain.doc.images.len(), "the second fixture brings pictures the first does not have");
+    let assets = Assets::build(&plain.doc);
+    assert_ne!(assets.id(), 0, "built assets are numbered");
+    assert_eq!(assets.extended(&plain.doc).id(), assets.id(), "a revision that adds nothing is the same assets");
+    assert_ne!(assets.extended(&sprites.doc).id(), assets.id(), "a revision that adds pictures is other assets");
+}
