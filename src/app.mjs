@@ -1680,8 +1680,12 @@ function loop(now) {
       }
       if (next !== null) {
         const packet = playback.get(next);
-        if (!playStarted) playStartupFrames = Math.max(playStartupFrames, playbackStartupWindow(fps,
-          Math.max(playback.stats.lastCompileMs, playback.stats.compileMs / Math.max(1, playback.stats.preparedFrames)), navigator.hardwareConcurrency || 4));
+        if (!playStarted) {
+          // One read of the engine's statistics (each is a JSON answer), not one per field.
+          const { lastCompileMs, compileMs, preparedFrames } = playback.stats;
+          playStartupFrames = Math.max(playStartupFrames, playbackStartupWindow(fps,
+            Math.max(lastCompileMs, compileMs / Math.max(1, preparedFrames)), navigator.hardwareConcurrency || 4));
+        }
         const startupReady=playStarted || playback.bufferedAhead(next,playStartupFrames,range.end);
         if (packet && startupReady) {
           if (audioEngine.hasAudio && (!audioEngine.running || next < editor.tick || audioEngine.position > (next + 1.5) / fps))
