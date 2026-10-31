@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {UserLibrary} from '../src/user-library.mjs';
-import {interfaceLocalization} from '../src/localization.mjs';
+import {interfaceLocalization, loadLocales} from '../src/localization.mjs';
+await loadLocales();
 
 const asset = (id, name, category = 'props') => ({id, name, category, kind: 'figure', author: 'Kim', tags: ['paper'], description: 'Folded artwork', sha256: id});
 const owner = overrides => Object.assign(Object.create(UserLibrary.prototype), {

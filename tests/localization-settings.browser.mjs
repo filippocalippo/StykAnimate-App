@@ -31,6 +31,7 @@ async function setup() {
       }
     };
     const {AppLocalization} = await import('/src/localization-bindings.mjs');
+    await (await import('/src/localization.mjs')).loadLocales();
     const {EditorSettings,EDITOR_SETTINGS_KEY} = await import('/src/settings.mjs');
     const saved = JSON.parse(localStorage.getItem(EDITOR_SETTINGS_KEY) || 'null');
     window.localeApp = new AppLocalization({locale:saved?.locale});

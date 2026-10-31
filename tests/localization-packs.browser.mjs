@@ -27,6 +27,7 @@ try {
   await page.locator('#menu [data-action=settings]').click();
   for (const locale of locales) {
     await page.locator('[data-setting=locale]').selectOption(locale.id);
+    await page.waitForFunction(id=>styk.localization.localization.locale===id,locale.id);
     check(`${locale.id}: selected language and interface direction are active`, await page.evaluate(locale =>
       styk.localization.localization.locale===locale.id&&document.documentElement.lang===locale.id&&document.documentElement.dir===locale.direction
       &&getComputedStyle(document.querySelector('.styk-settings')).direction===locale.direction,locale));

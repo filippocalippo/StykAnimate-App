@@ -381,7 +381,7 @@
   },
   "app.editorReadyFileServiceUnavailable": {
     "locations": [
-      "src/app.mjs:6290"
+      "src/app.mjs:6291"
     ],
     "context": "status({messageKey: \"app.editorReadyFileServiceUnavailable\", messageParams: {}}, true);"
   },
@@ -483,8 +483,8 @@
     "locations": [
       "src/app.mjs:4109",
       "src/app.mjs:4967",
-      "src/app.mjs:6177",
-      "src/app.mjs:6192"
+      "src/app.mjs:6178",
+      "src/app.mjs:6193"
     ],
     "context": "if (builderMode?.active) return toast(interfaceText(\"app.finishTheFigureOrReturnToAnimateTo2\"), \"app.finishTheFigureOrReturnToAnimateTo2\", {});"
   },
@@ -706,7 +706,7 @@
   },
   "app.loadingThePivotConverterFirstUseOnly": {
     "locations": [
-      "src/app.mjs:6281"
+      "src/app.mjs:6282"
     ],
     "context": "if (state === \"loading\") status(stage === \"runtime\" ? {messageKey: \"app.loadingThePivotConverterFirstUseOnly\", messageParams: {}} : {messageKey: \"app.startingTh"
   },
@@ -941,7 +941,7 @@
   },
   "app.preparingCanvasAndEffects": {
     "locations": [
-      "src/app.mjs:6255"
+      "src/app.mjs:6256"
     ],
     "context": "status({messageKey: \"app.preparingCanvasAndEffects\", messageParams: {}}, false, true);"
   },
@@ -975,13 +975,13 @@
       "src/app.mjs:1941",
       "src/app.mjs:3379",
       "src/app.mjs:3639",
-      "src/app.mjs:6264"
+      "src/app.mjs:6265"
     ],
     "context": "status({messageKey: \"app.ready\", messageParams: {}});"
   },
   "app.reconnectCanvas": {
     "locations": [
-      "src/app.mjs:6392"
+      "src/app.mjs:6393"
     ],
     "context": "localizedMarkup($(\"renderer-error\"), `<p data-i18n=\"app.theGraphicsDeviceWasResetReconnectingYourCanvas\">${messageHTML(\"app.theGraphicsDeviceWasResetReconnectin"
   },
@@ -1229,7 +1229,7 @@
   },
   "app.startingThePivotConverter": {
     "locations": [
-      "src/app.mjs:6281"
+      "src/app.mjs:6282"
     ],
     "context": "if (state === \"loading\") status(stage === \"runtime\" ? {messageKey: \"app.loadingThePivotConverterFirstUseOnly\", messageParams: {}} : {messageKey: \"app.startingTh"
   },
@@ -1289,13 +1289,13 @@
   },
   "app.theCanvasCouldNotReconnectYourAnimationIs": {
     "locations": [
-      "src/app.mjs:6336"
+      "src/app.mjs:6337"
     ],
     "context": "localizedText($(\"renderer-error\").querySelector('p'), \"app.theCanvasCouldNotReconnectYourAnimationIs\", {});"
   },
   "app.theGraphicsDeviceWasResetReconnectingYourCanvas": {
     "locations": [
-      "src/app.mjs:6392"
+      "src/app.mjs:6393"
     ],
     "context": "localizedMarkup($(\"renderer-error\"), `<p data-i18n=\"app.theGraphicsDeviceWasResetReconnectingYourCanvas\">${messageHTML(\"app.theGraphicsDeviceWasResetReconnectin"
   },
@@ -4444,57 +4444,57 @@
   },
   "chrome.add": {
     "locations": [
-      "index.html:119"
+      "index.html:120"
     ],
     "context": "<button type=\"button\" class=\"ui-tool-button rail-add\" id=\"open-insert\" aria-label=\"Add\" aria-haspopup=\"menu\" data-rail-menu=\"add\" data-icon=\"plus\" data-i18n-ari"
   },
   "chrome.addATitleOrCaption": {
     "locations": [
-      "index.html:357"
+      "index.html:358"
     ],
     "context": "<button data-action=\"add-text\" data-icon=\"text\"><strong data-i18n=\"chrome.text\">Text</strong><small data-i18n=\"chrome.addATitleOrCaption\">Add a title or caption"
   },
   "chrome.addToYourScene": {
     "locations": [
-      "index.html:354"
+      "index.html:355"
     ],
     "context": "<div class=\"dialog-head\"><div><span class=\"eyebrow\" data-i18n=\"chrome.create\">CREATE</span><h2 id=\"insert-title\" data-i18n=\"chrome.addToYourScene\">Add to your s"
   },
   "chrome.advanced": {
     "locations": [
-      "index.html:237",
+      "index.html:238",
       "src/timeline-header.mjs:283"
     ],
     "context": "<div id=\"timeline-workflow\" class=\"segmented timeline-mode-switch\" role=\"group\" aria-label=\"Timeline mode\" data-i18n-aria-label=\"chrome.timelineMode\"><button ty"
   },
   "chrome.animate": {
     "locations": [
-      "index.html:49",
-      "index.html:50"
+      "index.html:50",
+      "index.html:51"
     ],
     "context": "data-i18n-title=\"chrome.animate\"><span class=\"ui-dot\" data-tint=\"select\" aria-hidden=\"true\"></span><span class=\"band-ws-icon\" data-icon=\"ws-animate\"></span"
   },
   "chrome.animation": {
     "locations": [
-      "index.html:36"
+      "index.html:37"
     ],
     "context": "<button class=\"ui-menubar-item\" role=\"menuitem\" data-app-menu=\"animation\" aria-haspopup=\"menu\" aria-expanded=\"false\" data-i18n=\"chrome.animation\">Animation</but"
   },
   "chrome.animationCanvasVToSelectHToPanDragAFigureOrJointToPoseIt": {
     "locations": [
-      "index.html:203"
+      "index.html:204"
     ],
     "context": "data-i18n-aria-label=\"chrome.animationCanvasVToSelectHToPanDragAFigureOrJointToPoseIt\">"
   },
   "chrome.applicationMenu": {
     "locations": [
-      "index.html:31"
+      "index.html:32"
     ],
     "context": "<nav class=\"app-menubar ui-menubar\" role=\"menubar\" aria-label=\"Application menu\" data-i18n-aria-label=\"chrome.applicationMenu\">"
   },
   "chrome.aReusableAnimatedGroupThatPlaysInsideYourScene": {
     "locations": [
-      "index.html:361"
+      "index.html:362"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
@@ -4506,259 +4506,259 @@
   },
   "chrome.audio": {
     "locations": [
-      "index.html:291"
+      "index.html:292"
     ],
     "context": "<button id=\"timeline-audio\" class=\"icon-button timeline-audio-toggle\" title=\"Show audio\" aria-label=\"Audio\" aria-description=\"Show or hide audio editing. Audio "
   },
   "chrome.backgroundColour": {
     "locations": [
-      "index.html:156"
+      "index.html:157"
     ],
     "context": "<button type=\"button\" class=\"ui-crumb-swatch\" id=\"crumb-background\" data-paint-picker aria-label=\"Background colour\" data-tooltip=\"Background colour\" data-i18n-"
   },
   "chrome.brush": {
     "locations": [
-      "index.html:127"
+      "index.html:128"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"drawing-brush\" data-icon=\"brush\" aria-label=\"Brush\" hidden data-i18n-aria-label=\"chrome.brush\"></bu"
   },
   "chrome.build": {
     "locations": [
-      "index.html:56"
+      "index.html:57"
     ],
     "context": "><span class=\"band-label\" data-i18n=\"chrome.build\">Build</span></button>"
   },
   "chrome.buildActions": {
     "locations": [
-      "index.html:136"
+      "index.html:137"
     ],
     "context": "<div class=\"rail-quick\" role=\"toolbar\" aria-label=\"Build actions\" aria-orientation=\"vertical\" hidden data-i18n-aria-label=\"chrome.buildActions\">"
   },
   "chrome.buildAFigure": {
     "locations": [
-      "index.html:55"
+      "index.html:56"
     ],
     "context": "data-i18n-title=\"chrome.buildAFigure\"><span class=\"ui-dot\" data-tint=\"library\" aria-hidden=\"true\"></span><span class=\"band-ws-icon\" data-icon=\"ws-build\"></span"
   },
   "chrome.cancel": {
     "locations": [
-      "index.html:85"
+      "index.html:86"
     ],
     "context": "title=\"Discard the changes to this movieclip\" hidden data-i18n-title=\"chrome.discardTheChangesToThisMovieclip\"><span class=\"band-label\" data-i18n=\"chrome.cancel"
   },
   "chrome.cancelChain": {
     "locations": [
-      "index.html:158"
+      "index.html:159"
     ],
     "context": "<div id=\"chain-controls\" class=\"polygon-controls stage-mode-controls\" role=\"group\" aria-label=\"Chain\" hidden data-i18n-aria-label=\"chrome.chain\"><span id=\"chain"
   },
   "chrome.cancelEscape": {
     "locations": [
-      "index.html:158"
+      "index.html:159"
     ],
     "context": "<div id=\"chain-controls\" class=\"polygon-controls stage-mode-controls\" role=\"group\" aria-label=\"Chain\" hidden data-i18n-aria-label=\"chrome.chain\"><span id=\"chain"
   },
   "chrome.cancelPolygon": {
     "locations": [
-      "index.html:176"
+      "index.html:177"
     ],
     "context": "data-i18n-aria-label=\"chrome.cancelPolygon\"></button>"
   },
   "chrome.canvasZoom": {
     "locations": [
-      "index.html:192",
+      "index.html:193",
       "src/localization-bindings.mjs:196"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-zoom\" id=\"zoom-label\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"zoom-menu\" aria-haspopup=\"menu\" aria-label=\""
   },
   "chrome.chain": {
     "locations": [
-      "index.html:158"
+      "index.html:159"
     ],
     "context": "<div id=\"chain-controls\" class=\"polygon-controls stage-mode-controls\" role=\"group\" aria-label=\"Chain\" hidden data-i18n-aria-label=\"chrome.chain\"><span id=\"chain"
   },
   "chrome.chainPen": {
     "locations": [
-      "index.html:124"
+      "index.html:125"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"chain\" data-icon=\"builder-chain\" aria-label=\"Chain pen\" data-i18n-aria-label=\"chrome.chainPen\"></bu"
   },
   "chrome.circle": {
     "locations": [
-      "index.html:125"
+      "index.html:126"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"circle\" data-icon=\"circle\" aria-label=\"Circle\" data-i18n-aria-label=\"chrome.circle\"></button>"
   },
   "chrome.close": {
     "locations": [
-      "index.html:109",
+      "index.html:110",
       "src/localization-bindings.mjs:186"
     ],
     "context": "data-i18n-aria-label=\"chrome.close\"></button>"
   },
   "chrome.closeAddDialog": {
     "locations": [
-      "index.html:354"
+      "index.html:355"
     ],
     "context": "<div class=\"dialog-head\"><div><span class=\"eyebrow\" data-i18n=\"chrome.create\">CREATE</span><h2 id=\"insert-title\" data-i18n=\"chrome.addToYourScene\">Add to your s"
   },
   "chrome.constructionBackground": {
     "locations": [
-      "index.html:188"
+      "index.html:189"
     ],
     "context": "<button type=\"button\" class=\"ui-icon-button\" data-action=\"builder-canvas-color\" data-quiet data-workspaces=\"rig\" aria-label=\"Construction background\" data-toolt"
   },
   "chrome.create": {
     "locations": [
-      "index.html:354"
+      "index.html:355"
     ],
     "context": "<div class=\"dialog-head\"><div><span class=\"eyebrow\" data-i18n=\"chrome.create\">CREATE</span><h2 id=\"insert-title\" data-i18n=\"chrome.addToYourScene\">Add to your s"
   },
   "chrome.currentFrame": {
     "locations": [
-      "index.html:197"
+      "index.html:198"
     ],
     "context": "<div class=\"context-strip\"><strong id=\"tool-context\" data-i18n=\"chrome.select\">Select</strong><span id=\"edit-scope\" data-i18n=\"chrome.currentFrame\">Current fram"
   },
   "chrome.deletePart": {
     "locations": [
-      "index.html:142"
+      "index.html:143"
     ],
     "context": "<button type=\"button\" class=\"ui-tool-button\" data-action=\"delete-single-segment\" aria-label=\"Delete part\" data-tooltip=\"Delete part\" data-icon=\"trash\" data-i18n"
   },
   "chrome.discardTheChangesToThisMovieclip": {
     "locations": [
-      "index.html:85"
+      "index.html:86"
     ],
     "context": "title=\"Discard the changes to this movieclip\" hidden data-i18n-title=\"chrome.discardTheChangesToThisMovieclip\"><span class=\"band-label\" data-i18n=\"chrome.cancel"
   },
   "chrome.done": {
     "locations": [
-      "index.html:89",
-      "index.html:91",
-      "index.html:93"
+      "index.html:90",
+      "index.html:92",
+      "index.html:94"
     ],
     "context": "title=\"Finish editing the movieclip\" data-icon=\"check\" hidden data-i18n-title=\"chrome.finishEditingTheMovieclip\"><span class=\"band-label\" data-i18n=\"chrome.done"
   },
   "chrome.draw": {
     "locations": [
-      "index.html:52",
-      "index.html:53"
+      "index.html:53",
+      "index.html:54"
     ],
     "context": "data-i18n-title=\"chrome.draw\"><span class=\"ui-dot\" data-tint=\"draw\" aria-hidden=\"true\"></span><span class=\"band-ws-icon\" data-icon=\"ws-draw\"></span"
   },
   "chrome.dropAStykAnimatePivotOrStickNodesFileHere": {
     "locations": [
-      "index.html:211"
+      "index.html:212"
     ],
     "context": "<div id=\"canvas-empty\" hidden data-i18n=\"chrome.dropAStykAnimatePivotOrStickNodesFileHere\">Drop a StykAnimate, Pivot or Stick Nodes file here</div>"
   },
   "chrome.duplicateBranch": {
     "locations": [
-      "index.html:139"
+      "index.html:140"
     ],
     "context": "<button type=\"button\" class=\"ui-tool-button\" data-action=\"duplicate-branch\" aria-label=\"Duplicate branch\" data-tooltip=\"Duplicate branch\" data-icon=\"duplicate\" "
   },
   "chrome.edit": {
     "locations": [
-      "index.html:33"
+      "index.html:34"
     ],
     "context": "<button class=\"ui-menubar-item\" role=\"menuitem\" data-app-menu=\"edit\" aria-haspopup=\"menu\" aria-expanded=\"false\" data-i18n=\"chrome.edit\">Edit</button>"
   },
   "chrome.editHistory": {
     "locations": [
-      "index.html:60"
+      "index.html:61"
     ],
     "context": "<div class=\"band-history\" role=\"toolbar\" aria-label=\"Edit history\" data-i18n-aria-label=\"chrome.editHistory\">"
   },
   "chrome.editingWorkspace": {
     "locations": [
-      "index.html:47"
+      "index.html:48"
     ],
     "context": "<div class=\"workspace-switch ui-segmented\" role=\"group\" aria-label=\"Editing workspace\" data-size=\"lg\" data-i18n-aria-label=\"chrome.editingWorkspace\">"
   },
   "chrome.editJoints": {
     "locations": [
-      "index.html:120"
+      "index.html:121"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"rig\" data-icon=\"nodes\" aria-label=\"Edit joints\" data-i18n-aria-label=\"chrome.editJoints\"></button>"
   },
   "chrome.editorTools": {
     "locations": [
-      "index.html:117"
+      "index.html:118"
     ],
     "context": "<nav class=\"studio-rail shell-rail\" aria-label=\"Editor tools\" data-i18n-aria-label=\"chrome.editorTools\">"
   },
   "chrome.editSelectedFrames": {
     "locations": [
-      "index.html:289"
+      "index.html:290"
     ],
     "context": "<button type=\"button\" id=\"range-edit\" class=\"button subtle small\" data-action=\"toggle-range-edit\" aria-label=\"Edit selected frames\" aria-pressed=\"false\" title=\""
   },
   "chrome.effects": {
     "locations": [
-      "index.html:185"
+      "index.html:186"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" id=\"vfx-preview\" data-workspaces=\"animate draw\" aria-pressed=\"true\" ari"
   },
   "chrome.effectsPreview": {
     "locations": [
-      "index.html:185"
+      "index.html:186"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" id=\"vfx-preview\" data-workspaces=\"animate draw\" aria-pressed=\"true\" ari"
   },
   "chrome.emptyMovieclip": {
     "locations": [
-      "index.html:361"
+      "index.html:362"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
   "chrome.eraser": {
     "locations": [
-      "index.html:128"
+      "index.html:129"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"drawing-eraser\" data-icon=\"eraser\" aria-label=\"Eraser\" hidden data-i18n-aria-label=\"chrome.eraser\">"
   },
   "chrome.exampleAnimations": {
     "locations": [
-      "index.html:363"
+      "index.html:364"
     ],
     "context": "<details class=\"insert-examples\"><summary data-i18n=\"chrome.exampleAnimations\">Example animations</summary><div id=\"sample-list\"></div></details>"
   },
   "chrome.expandTimeline": {
     "locations": [
-      "index.html:294"
+      "index.html:295"
     ],
     "context": "<button id=\"expand-timeline\" class=\"icon-button\" title=\"Expand timeline\" aria-label=\"Expand timeline\" aria-pressed=\"false\" data-icon=\"maximize\" data-i18n-title="
   },
   "chrome.export": {
     "locations": [
-      "index.html:83",
+      "index.html:84",
       "src/localization-bindings.mjs:182"
     ],
     "context": "data-i18n-title=\"chrome.export\"><span class=\"band-label\" data-i18n-slot data-i18n=\"chrome.export\">Export</span></button>"
   },
   "chrome.figure": {
     "locations": [
-      "index.html:224"
+      "index.html:225"
     ],
     "context": "<div class=\"inspector-header\" data-slot=\"inspector-target\"><div><span class=\"panel-tab-title\" data-i18n=\"chrome.properties\">Properties</span><span id=\"inspector"
   },
   "chrome.figureSelectionAndJointHandles": {
     "locations": [
-      "index.html:209"
+      "index.html:210"
     ],
     "context": "data-i18n-aria-label=\"chrome.figureSelectionAndJointHandles\"></canvas>"
   },
   "chrome.file": {
     "locations": [
-      "index.html:32"
+      "index.html:33"
     ],
     "context": "<button class=\"ui-menubar-item\" role=\"menuitem\" data-app-menu=\"file\" aria-haspopup=\"menu\" aria-expanded=\"false\" data-i18n=\"chrome.file\">File</button>"
   },
   "chrome.fill": {
     "locations": [
-      "index.html:129"
+      "index.html:130"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"drawing-fill\" data-icon=\"paint-bucket\" aria-label=\"Fill\" hidden data-i18n-aria-label=\"chrome.fill\">"
   },
@@ -4770,134 +4770,134 @@
   },
   "chrome.finish": {
     "locations": [
-      "index.html:158",
-      "index.html:168"
+      "index.html:159",
+      "index.html:169"
     ],
     "context": "<div id=\"chain-controls\" class=\"polygon-controls stage-mode-controls\" role=\"group\" aria-label=\"Chain\" hidden data-i18n-aria-label=\"chrome.chain\"><span id=\"chain"
   },
   "chrome.finishBuildingTheFigure": {
     "locations": [
-      "index.html:93"
+      "index.html:94"
     ],
     "context": "title=\"Finish building the figure\" data-icon=\"check\" hidden data-i18n-title=\"chrome.finishBuildingTheFigure\"><span class=\"band-label\" data-i18n=\"chrome.done\">Do"
   },
   "chrome.finishChainEnter": {
     "locations": [
-      "index.html:158"
+      "index.html:159"
     ],
     "context": "<div id=\"chain-controls\" class=\"polygon-controls stage-mode-controls\" role=\"group\" aria-label=\"Chain\" hidden data-i18n-aria-label=\"chrome.chain\"><span id=\"chain"
   },
   "chrome.finishEditingTheCamera": {
     "locations": [
-      "index.html:91"
+      "index.html:92"
     ],
     "context": "title=\"Finish editing the camera\" data-icon=\"check\" hidden data-i18n-title=\"chrome.finishEditingTheCamera\"><span class=\"band-label\" data-i18n=\"chrome.done\">Done"
   },
   "chrome.finishEditingTheMovieclip": {
     "locations": [
-      "index.html:89"
+      "index.html:90"
     ],
     "context": "title=\"Finish editing the movieclip\" data-icon=\"check\" hidden data-i18n-title=\"chrome.finishEditingTheMovieclip\"><span class=\"band-label\" data-i18n=\"chrome.done"
   },
   "chrome.firstFrameHome": {
     "locations": [
-      "index.html:246"
+      "index.html:247"
     ],
     "context": "data-i18n-title=\"chrome.firstFrameHome\"></button"
   },
   "chrome.fitCanvas": {
     "locations": [
-      "index.html:193"
+      "index.html:194"
     ],
     "context": "<button type=\"button\" class=\"ui-icon-button\" data-action=\"zoom-reset\" aria-label=\"Fit canvas\" data-tooltip=\"Fit canvas\" data-icon=\"fit\" data-i18n-aria-label=\"ch"
   },
   "chrome.flipBranchHorizontally": {
     "locations": [
-      "index.html:140"
+      "index.html:141"
     ],
     "context": "<button type=\"button\" class=\"ui-tool-button\" data-action=\"mirror-branch\" aria-label=\"Flip branch horizontally\" data-tooltip=\"Flip branch horizontally\" data-icon"
   },
   "chrome.flipBranchVertically": {
     "locations": [
-      "index.html:141"
+      "index.html:142"
     ],
     "context": "<button type=\"button\" class=\"ui-tool-button\" data-action=\"mirror-branch-vertical\" aria-label=\"Flip branch vertically\" data-tooltip=\"Flip branch vertically\" data"
   },
   "chrome.fps": {
     "locations": [
-      "index.html:210"
+      "index.html:211"
     ],
     "context": "<output id=\"playback-fps\" aria-label=\"Playback frames per second\" hidden data-i18n-aria-label=\"chrome.playbackFramesPerSecond\" data-i18n=\"chrome.fps\">— fps</out"
   },
   "chrome.framesPerSecond": {
     "locations": [
-      "index.html:284"
+      "index.html:285"
     ],
     "context": "data-i18n-aria-label=\"chrome.framesPerSecond\" />fps</label"
   },
   "chrome.fromFrameRange": {
     "locations": [
-      "index.html:361"
+      "index.html:362"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
   "chrome.fromSelection": {
     "locations": [
-      "index.html:361"
+      "index.html:362"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
   "chrome.grid": {
     "locations": [
-      "index.html:184"
+      "index.html:185"
     ],
     "context": "<div class=\"ui-split\" role=\"group\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-button stage-toggle\""
   },
   "chrome.gridAndGuides": {
     "locations": [
-      "index.html:184"
+      "index.html:185"
     ],
     "context": "<div class=\"ui-split\" role=\"group\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-button stage-toggle\""
   },
   "chrome.gridAndGuidesSettings": {
     "locations": [
-      "index.html:184"
+      "index.html:185"
     ],
     "context": "<div class=\"ui-split\" role=\"group\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-button stage-toggle\""
   },
   "chrome.handles": {
     "locations": [
-      "index.html:186"
+      "index.html:187"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"builder-static-handles\" data-workspaces=\"rig\" aria-pressed"
   },
   "chrome.help": {
     "locations": [
-      "index.html:37"
+      "index.html:38"
     ],
     "context": "<button class=\"ui-menubar-item\" role=\"menuitem\" data-app-menu=\"help\" aria-haspopup=\"menu\" aria-expanded=\"false\" data-i18n=\"chrome.help\">Help</button>"
   },
   "chrome.highlight": {
     "locations": [
-      "index.html:187"
+      "index.html:188"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"builder-highlight\" data-workspaces=\"rig\" aria-pressed=\"fal"
   },
   "chrome.highlightPart": {
     "locations": [
-      "index.html:187"
+      "index.html:188"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"builder-highlight\" data-workspaces=\"rig\" aria-pressed=\"fal"
   },
   "chrome.image": {
     "locations": [
-      "index.html:358"
+      "index.html:359"
     ],
     "context": "<button data-action=\"import-sprite\" data-icon=\"image\"><strong data-i18n=\"chrome.image\">Image</strong><small data-i18n=\"chrome.placeAnImage\">Place an image</smal"
   },
   "chrome.importFigure": {
     "locations": [
-      "index.html:359"
+      "index.html:360"
     ],
     "context": "<button data-action=\"import\" data-icon=\"import\"><strong data-i18n=\"chrome.importFigure\">Import figure</strong><small data-i18n=\"chrome.openAFigureOrMovieClip\">O"
   },
@@ -4909,113 +4909,113 @@
   },
   "chrome.initializingWebGPU": {
     "locations": [
-      "index.html:326"
+      "index.html:327"
     ],
     "context": "><span id=\"renderer-label\" data-i18n=\"chrome.initializingWebGPU\">Initializing WebGPU</span"
   },
   "chrome.inspector": {
     "locations": [
-      "index.html:216",
-      "index.html:218"
+      "index.html:217",
+      "index.html:219"
     ],
     "context": "<aside class=\"right-panel shell-right shell-dock\" id=\"right-dock\" data-region=\"right\" aria-label=\"Inspector\" data-i18n-aria-label=\"chrome.inspector\">"
   },
   "chrome.joint": {
     "locations": [
-      "index.html:35"
+      "index.html:36"
     ],
     "context": "<button class=\"ui-menubar-item\" role=\"menuitem\" data-app-menu=\"editor\" aria-haspopup=\"menu\" aria-expanded=\"false\" data-i18n=\"chrome.joint\">Joint</button>"
   },
   "chrome.jointCount": {
     "locations": [
-      "index.html:160"
+      "index.html:161"
     ],
     "context": "<span id=\"polygon-count\" data-i18n=\"chrome.jointCount\">0 joints</span"
   },
   "chrome.joints": {
     "locations": [
-      "index.html:182"
+      "index.html:183"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" id=\"handles-button\" data-action=\"toggle-handles\" data-workspaces=\"anima"
   },
   "chrome.library": {
     "locations": [
-      "index.html:221"
+      "index.html:222"
     ],
     "context": "<button type=\"button\" role=\"tab\" class=\"ui-tab\" id=\"library-tab\" data-panel=\"library\" aria-controls=\"user-library\" aria-selected=\"false\" tabindex=\"-1\" data-i18n"
   },
   "chrome.line": {
     "locations": [
-      "index.html:123"
+      "index.html:124"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"line\" data-icon=\"line\" aria-label=\"Line\" data-i18n-aria-label=\"chrome.line\"></button>"
   },
   "chrome.location": {
     "locations": [
-      "index.html:154"
+      "index.html:155"
     ],
     "context": "<nav class=\"ui-crumb\" aria-label=\"Location\" data-i18n-aria-label=\"chrome.location\">"
   },
   "chrome.loopPlayback": {
     "locations": [
-      "index.html:273"
+      "index.html:274"
     ],
     "context": "data-i18n-title=\"chrome.loopPlayback\"></button"
   },
   "chrome.mainMenu": {
     "locations": [
-      "index.html:27",
+      "index.html:28",
       "src/localization-bindings.mjs:183"
     ],
     "context": "<button class=\"brand shell-mark\" data-action=\"menu\" aria-label=\"Main menu\" aria-haspopup=\"menu\" aria-expanded=\"false\" data-i18n-aria-label=\"chrome.mainMenu\">"
   },
   "chrome.maximize": {
     "locations": [
-      "index.html:104",
+      "index.html:105",
       "src/localization-bindings.mjs:185"
     ],
     "context": "data-i18n-aria-label=\"chrome.maximize\"></button"
   },
   "chrome.minimize": {
     "locations": [
-      "index.html:99",
+      "index.html:100",
       "src/localization-bindings.mjs:184"
     ],
     "context": "data-i18n-aria-label=\"chrome.minimize\"></button"
   },
   "chrome.motionPaths": {
     "locations": [
-      "index.html:183"
+      "index.html:184"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" id=\"paths-button\" data-action=\"toggle-motion-paths\" data-workspaces=\"an"
   },
   "chrome.newAnimation": {
     "locations": [
-      "index.html:43"
+      "index.html:44"
     ],
     "context": "<button type=\"button\" class=\"ui-icon-button project-tabs-add\" data-size=\"sm\" data-action=\"new\" aria-label=\"New animation\" data-icon=\"plus\" data-i18n-aria-label="
   },
   "chrome.nextFrame": {
     "locations": [
-      "index.html:266"
+      "index.html:267"
     ],
     "context": "data-i18n-title=\"chrome.nextFrame\"></button"
   },
   "chrome.onionSkin": {
     "locations": [
-      "index.html:290"
+      "index.html:291"
     ],
     "context": "<div class=\"timeline-onion-controls\"><button class=\"icon-button\" id=\"onion-button\" data-action=\"toggle-onion\" data-icon=\"onion\" title=\"Onion skin · O\" aria-labe"
   },
   "chrome.onionSkinO": {
     "locations": [
-      "index.html:290"
+      "index.html:291"
     ],
     "context": "<div class=\"timeline-onion-controls\"><button class=\"icon-button\" id=\"onion-button\" data-action=\"toggle-onion\" data-icon=\"onion\" title=\"Onion skin · O\" aria-labe"
   },
   "chrome.onionSkinSettings": {
     "locations": [
-      "index.html:290"
+      "index.html:291"
     ],
     "context": "<div class=\"timeline-onion-controls\"><button class=\"icon-button\" id=\"onion-button\" data-action=\"toggle-onion\" data-icon=\"onion\" title=\"Onion skin · O\" aria-labe"
   },
@@ -5027,7 +5027,7 @@
   },
   "chrome.openAFigureOrMovieClip": {
     "locations": [
-      "index.html:359"
+      "index.html:360"
     ],
     "context": "<button data-action=\"import\" data-icon=\"import\"><strong data-i18n=\"chrome.importFigure\">Import figure</strong><small data-i18n=\"chrome.openAFigureOrMovieClip\">O"
   },
@@ -5039,124 +5039,124 @@
   },
   "chrome.openProjects": {
     "locations": [
-      "index.html:42"
+      "index.html:43"
     ],
     "context": "<div class=\"project-tabs-list\" role=\"tablist\" aria-label=\"Open projects\" data-i18n-aria-label=\"chrome.openProjects\"></div>"
   },
   "chrome.panCanvas": {
     "locations": [
-      "index.html:133"
+      "index.html:134"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"hand\" data-icon=\"hand\" aria-label=\"Pan canvas\" data-i18n-aria-label=\"chrome.panCanvas\"></button>"
   },
   "chrome.paths": {
     "locations": [
-      "index.html:183"
+      "index.html:184"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" id=\"paths-button\" data-action=\"toggle-motion-paths\" data-workspaces=\"an"
   },
   "chrome.performanceDetails": {
     "locations": [
-      "index.html:334"
+      "index.html:335"
     ],
     "context": "data-i18n-title=\"chrome.performanceDetails\"></button>"
   },
   "chrome.placeAnImage": {
     "locations": [
-      "index.html:358"
+      "index.html:359"
     ],
     "context": "<button data-action=\"import-sprite\" data-icon=\"image\"><strong data-i18n=\"chrome.image\">Image</strong><small data-i18n=\"chrome.placeAnImage\">Place an image</smal"
   },
   "chrome.play": {
     "locations": [
-      "index.html:260"
+      "index.html:261"
     ],
     "context": "data-i18n-title=\"chrome.playPauseSpace\" data-i18n-aria-label=\"chrome.play\"></button"
   },
   "chrome.playbackFramesPerSecond": {
     "locations": [
-      "index.html:210"
+      "index.html:211"
     ],
     "context": "<output id=\"playback-fps\" aria-label=\"Playback frames per second\" hidden data-i18n-aria-label=\"chrome.playbackFramesPerSecond\" data-i18n=\"chrome.fps\">— fps</out"
   },
   "chrome.playing": {
     "locations": [
-      "index.html:325"
+      "index.html:326"
     ],
     "context": "><span id=\"preview-badge\" hidden data-i18n=\"chrome.playing\">PLAYING</span></span"
   },
   "chrome.playPauseSpace": {
     "locations": [
-      "index.html:260"
+      "index.html:261"
     ],
     "context": "data-i18n-title=\"chrome.playPauseSpace\" data-i18n-aria-label=\"chrome.play\"></button"
   },
   "chrome.polygon": {
     "locations": [
-      "index.html:126",
-      "index.html:159"
+      "index.html:127",
+      "index.html:160"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"polygon\" data-icon=\"polygon\" aria-label=\"Polygon\" data-i18n-aria-label=\"chrome.polygon\"></button>"
   },
   "chrome.previewDetailFollowsYourPlaybackQualitySettingOrAvailableMemoryOriginalArtworkAndExportQualityArePreserved": {
     "locations": [
-      "index.html:190"
+      "index.html:191"
     ],
     "context": "<output id=\"preview-quality\" class=\"stage-head-note\" data-tooltip=\"Preview detail follows your playback quality setting or available memory. Original artwork an"
   },
   "chrome.previousFrame": {
     "locations": [
-      "index.html:252"
+      "index.html:253"
     ],
     "context": "data-i18n-title=\"chrome.previousFrame\"></button"
   },
   "chrome.projectLibrary": {
     "locations": [
-      "index.html:362"
+      "index.html:363"
     ],
     "context": "<div class=\"insert-library\"><h3 data-i18n=\"chrome.projectLibrary\">Project library</h3><div id=\"asset-list\"></div></div>"
   },
   "chrome.properties": {
     "locations": [
-      "index.html:80",
-      "index.html:219",
-      "index.html:224"
+      "index.html:81",
+      "index.html:220",
+      "index.html:225"
     ],
     "context": "data-i18n-aria-label=\"chrome.properties\"></button>"
   },
   "chrome.ready": {
     "locations": [
-      "index.html:321"
+      "index.html:322"
     ],
     "context": "><span id=\"status\" data-i18n=\"chrome.ready\">Ready</span>"
   },
   "chrome.redo": {
     "locations": [
-      "index.html:62"
+      "index.html:63"
     ],
     "context": "<button class=\"ui-icon-button band-redo\" data-action=\"redo\" title=\"Redo · Ctrl+Shift+Z\" aria-label=\"Redo\" data-icon=\"redo\" data-i18n-title=\"chrome.redoCtrlShift"
   },
   "chrome.redoCtrlShiftZ": {
     "locations": [
-      "index.html:62"
+      "index.html:63"
     ],
     "context": "<button class=\"ui-icon-button band-redo\" data-action=\"redo\" title=\"Redo · Ctrl+Shift+Z\" aria-label=\"Redo\" data-icon=\"redo\" data-i18n-title=\"chrome.redoCtrlShift"
   },
   "chrome.reducedPreview": {
     "locations": [
-      "index.html:190"
+      "index.html:191"
     ],
     "context": "<output id=\"preview-quality\" class=\"stage-head-note\" data-tooltip=\"Preview detail follows your playback quality setting or available memory. Original artwork an"
   },
   "chrome.returnToAnimation": {
     "locations": [
-      "index.html:197"
+      "index.html:198"
     ],
     "context": "<div class=\"context-strip\"><strong id=\"tool-context\" data-i18n=\"chrome.select\">Select</strong><span id=\"edit-scope\" data-i18n=\"chrome.currentFrame\">Current fram"
   },
   "chrome.save": {
     "locations": [
-      "index.html:70"
+      "index.html:71"
     ],
     "context": "data-i18n-title=\"chrome.saveProjectCtrlS\" data-i18n-aria-label=\"chrome.save\"></button>"
   },
@@ -5168,19 +5168,19 @@
   },
   "chrome.saveProjectCtrlS": {
     "locations": [
-      "index.html:70"
+      "index.html:71"
     ],
     "context": "data-i18n-title=\"chrome.saveProjectCtrlS\" data-i18n-aria-label=\"chrome.save\"></button>"
   },
   "chrome.scene": {
     "locations": [
-      "index.html:155"
+      "index.html:156"
     ],
     "context": "<button type=\"button\" class=\"ui-crumb-item\" data-action=\"scene-settings\" data-crumb=\"scene\" data-tooltip=\"Scene properties\" data-icon=\"scene\" data-i18n-tooltip="
   },
   "chrome.scene01": {
     "locations": [
-      "index.html:204"
+      "index.html:205"
     ],
     "context": "<div id=\"artboard\"><span class=\"artboard-name\" data-i18n=\"chrome.scene01\">Scene 01</span></div>"
   },
@@ -5192,7 +5192,7 @@
   },
   "chrome.sceneProperties": {
     "locations": [
-      "index.html:155"
+      "index.html:156"
     ],
     "context": "<button type=\"button\" class=\"ui-crumb-item\" data-action=\"scene-settings\" data-crumb=\"scene\" data-tooltip=\"Scene properties\" data-icon=\"scene\" data-i18n-tooltip="
   },
@@ -5204,218 +5204,218 @@
   },
   "chrome.select": {
     "locations": [
-      "index.html:197"
+      "index.html:198"
     ],
     "context": "<div class=\"context-strip\"><strong id=\"tool-context\" data-i18n=\"chrome.select\">Select</strong><span id=\"edit-scope\" data-i18n=\"chrome.currentFrame\">Current fram"
   },
   "chrome.selectAndPose": {
     "locations": [
-      "index.html:121"
+      "index.html:122"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"select\" data-icon=\"cursor\" aria-label=\"Select and pose\" data-i18n-aria-label=\"chrome.selectAndPose\""
   },
   "chrome.selectionActions": {
     "locations": [
-      "index.html:224"
+      "index.html:225"
     ],
     "context": "<div class=\"inspector-header\" data-slot=\"inspector-target\"><div><span class=\"panel-tab-title\" data-i18n=\"chrome.properties\">Properties</span><span id=\"inspector"
   },
   "chrome.selectMultipleFramesToEditThemTogether": {
     "locations": [
-      "index.html:289"
+      "index.html:290"
     ],
     "context": "<button type=\"button\" id=\"range-edit\" class=\"button subtle small\" data-action=\"toggle-range-edit\" aria-label=\"Edit selected frames\" aria-pressed=\"false\" title=\""
   },
   "chrome.selectPixels": {
     "locations": [
-      "index.html:130"
+      "index.html:131"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"drawing-lasso\" data-icon=\"lasso\" aria-label=\"Select pixels\" data-rail-menu=\"lasso\" hidden data-i18n"
   },
   "chrome.shapes": {
     "locations": [
-      "index.html:131"
+      "index.html:132"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"drawing-shape\" data-icon=\"shapes\" aria-label=\"Shapes\" data-rail-menu=\"shape\" hidden data-i18n-aria-"
   },
   "chrome.showAudio": {
     "locations": [
-      "index.html:291"
+      "index.html:292"
     ],
     "context": "<button id=\"timeline-audio\" class=\"icon-button timeline-audio-toggle\" title=\"Show audio\" aria-label=\"Audio\" aria-description=\"Show or hide audio editing. Audio "
   },
   "chrome.showOrHideAudioEditingAudioKeepsPlayingWhenHidden": {
     "locations": [
-      "index.html:291"
+      "index.html:292"
     ],
     "context": "<button id=\"timeline-audio\" class=\"icon-button timeline-audio-toggle\" title=\"Show audio\" aria-label=\"Audio\" aria-description=\"Show or hide audio editing. Audio "
   },
   "chrome.simple": {
     "locations": [
-      "index.html:237",
+      "index.html:238",
       "src/timeline-header.mjs:283"
     ],
     "context": "<div id=\"timeline-workflow\" class=\"segmented timeline-mode-switch\" role=\"group\" aria-label=\"Timeline mode\" data-i18n-aria-label=\"chrome.timelineMode\"><button ty"
   },
   "chrome.splitPart": {
     "locations": [
-      "index.html:138"
+      "index.html:139"
     ],
     "context": "<button type=\"button\" class=\"ui-tool-button\" data-action=\"split-segment\" aria-label=\"Split part\" data-tooltip=\"Split part\" data-icon=\"builder-split\" data-i18n-a"
   },
   "chrome.stage": {
     "locations": [
-      "index.html:151",
-      "index.html:152"
+      "index.html:152",
+      "index.html:153"
     ],
     "context": "<main class=\"center shell-stage\" aria-label=\"Stage\" data-i18n-aria-label=\"chrome.stage\">"
   },
   "chrome.startWithACharacter": {
     "locations": [
-      "index.html:356"
+      "index.html:357"
     ],
     "context": "<button data-action=\"add-figure\" data-icon=\"person\"><strong data-i18n=\"chrome.stickFigure\">Stick figure</strong><small data-i18n=\"chrome.startWithACharacter\">St"
   },
   "chrome.staticHandles": {
     "locations": [
-      "index.html:186"
+      "index.html:187"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"builder-static-handles\" data-workspaces=\"rig\" aria-pressed"
   },
   "chrome.stickFigure": {
     "locations": [
-      "index.html:356"
+      "index.html:357"
     ],
     "context": "<button data-action=\"add-figure\" data-icon=\"person\"><strong data-i18n=\"chrome.stickFigure\">Stick figure</strong><small data-i18n=\"chrome.startWithACharacter\">St"
   },
   "chrome.structure": {
     "locations": [
-      "index.html:145",
-      "index.html:147"
+      "index.html:146",
+      "index.html:148"
     ],
     "context": "<aside class=\"shell-left shell-dock\" id=\"left-dock\" data-region=\"left\" aria-label=\"Structure\" hidden data-i18n-aria-label=\"chrome.structure\">"
   },
   "chrome.testRig": {
     "locations": [
-      "index.html:87"
+      "index.html:88"
     ],
     "context": "title=\"Test rig: pose the figure in a preview\" data-icon=\"test-rig\" hidden data-i18n-title=\"chrome.testRigPoseTheFigureInAPreview\"><span class=\"band-label\" data"
   },
   "chrome.testRigPoseTheFigureInAPreview": {
     "locations": [
-      "index.html:87"
+      "index.html:88"
     ],
     "context": "title=\"Test rig: pose the figure in a preview\" data-icon=\"test-rig\" hidden data-i18n-title=\"chrome.testRigPoseTheFigureInAPreview\"><span class=\"band-label\" data"
   },
   "chrome.text": {
     "locations": [
-      "index.html:357"
+      "index.html:358"
     ],
     "context": "<button data-action=\"add-text\" data-icon=\"text\"><strong data-i18n=\"chrome.text\">Text</strong><small data-i18n=\"chrome.addATitleOrCaption\">Add a title or caption"
   },
   "chrome.timeline": {
     "locations": [
-      "index.html:232",
-      "index.html:234"
+      "index.html:233",
+      "index.html:235"
     ],
     "context": "<section class=\"timeline-panel shell-bottom ui-island\" id=\"animation-timeline\" aria-label=\"Timeline\" data-i18n-aria-label=\"chrome.timeline\">"
   },
   "chrome.timeline2": {
     "locations": [
-      "index.html:235"
+      "index.html:236"
     ],
     "context": "<button type=\"button\" class=\"icon-button shell-timeline-sheet\" data-action=\"timeline-sheet\" aria-label=\"Timeline…\" aria-haspopup=\"dialog\" aria-expanded=\"false\" "
   },
   "chrome.timelineMode": {
     "locations": [
-      "index.html:237"
+      "index.html:238"
     ],
     "context": "<div id=\"timeline-workflow\" class=\"segmented timeline-mode-switch\" role=\"group\" aria-label=\"Timeline mode\" data-i18n-aria-label=\"chrome.timelineMode\"><button ty"
   },
   "chrome.timelineZoom": {
     "locations": [
-      "index.html:304",
+      "index.html:305",
       "src/localization-bindings.mjs:195"
     ],
     "context": "data-i18n-aria-label=\"chrome.timelineZoom\" />"
   },
   "chrome.tools": {
     "locations": [
-      "index.html:118"
+      "index.html:119"
     ],
     "context": "<div class=\"tool-dock ui-rail\" role=\"toolbar\" aria-label=\"Tools\" aria-orientation=\"vertical\" data-i18n-aria-label=\"chrome.tools\">"
   },
   "chrome.transform": {
     "locations": [
-      "index.html:132"
+      "index.html:133"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"drawing-transform\" data-icon=\"transform\" aria-label=\"Transform\" hidden data-i18n-aria-label=\"chrome"
   },
   "chrome.turnARangeOfFramesIntoAMovieclip": {
     "locations": [
-      "index.html:361"
+      "index.html:362"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
   "chrome.turnTheSelectedFiguresIntoAMovieclip": {
     "locations": [
-      "index.html:361"
+      "index.html:362"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
   "chrome.tweener": {
     "locations": [
-      "index.html:122"
+      "index.html:123"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" id=\"tweener-button\" data-tool=\"tweener\" aria-label=\"Tweener\" data-i18n-aria-label=\"chrome.tweener\"></button>"
   },
   "chrome.undo": {
     "locations": [
-      "index.html:61"
+      "index.html:62"
     ],
     "context": "<button class=\"ui-icon-button\" data-action=\"undo\" title=\"Undo · Ctrl+Z\" aria-label=\"Undo\" data-icon=\"undo\" data-i18n-title=\"chrome.undoCtrlZ\" data-i18n-aria-lab"
   },
   "chrome.undoCtrlZ": {
     "locations": [
-      "index.html:61"
+      "index.html:62"
     ],
     "context": "<button class=\"ui-icon-button\" data-action=\"undo\" title=\"Undo · Ctrl+Z\" aria-label=\"Undo\" data-icon=\"undo\" data-i18n-title=\"chrome.undoCtrlZ\" data-i18n-aria-lab"
   },
   "chrome.vfx": {
     "locations": [
-      "index.html:220",
+      "index.html:221",
       "src/shell/layout-popover.mjs:290"
     ],
     "context": "<button type=\"button\" role=\"tab\" class=\"ui-tab\" id=\"vfx-tab\" data-vfx-tab=\"vfx\" data-panel=\"vfx\" aria-controls=\"vfx-panel\" aria-selected=\"false\" tabindex=\"-1\" d"
   },
   "chrome.view": {
     "locations": [
-      "index.html:34",
-      "index.html:181"
+      "index.html:35",
+      "index.html:182"
     ],
     "context": "<button class=\"ui-menubar-item\" role=\"menuitem\" data-app-menu=\"view\" aria-haspopup=\"menu\" aria-expanded=\"false\" data-i18n=\"chrome.view\">View</button>"
   },
   "chrome.webgpuAnimationScene": {
     "locations": [
-      "index.html:205"
+      "index.html:206"
     ],
     "context": "<canvas id=\"scene\" aria-label=\"WebGPU animation scene\" data-i18n-aria-label=\"chrome.webgpuAnimationScene\"></canvas>"
   },
   "chrome.wholeBranch": {
     "locations": [
-      "index.html:137"
+      "index.html:138"
     ],
     "context": "<button type=\"button\" class=\"ui-tool-button\" data-action=\"toggle-builder-branch\" aria-pressed=\"false\" aria-label=\"Whole branch\" data-tooltip=\"Whole branch\" data"
   },
   "chrome.zoom": {
     "locations": [
-      "index.html:191"
+      "index.html:192"
     ],
     "context": "<div class=\"stage-head-cluster\" data-zoom role=\"group\" aria-label=\"Zoom\" data-i18n-aria-label=\"chrome.zoom\">"
   },
   "chrome.zoomOptions": {
     "locations": [
-      "index.html:192",
+      "index.html:193",
       "src/localization-bindings.mjs:196"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-zoom\" id=\"zoom-label\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"zoom-menu\" aria-haspopup=\"menu\" aria-label=\""
@@ -11882,14 +11882,14 @@
   },
   "errors.app.selectionChangedReopenTheColorPicker": {
     "locations": [
-      "src/app.mjs:6422",
-      "src/app.mjs:6429"
+      "src/app.mjs:6423",
+      "src/app.mjs:6430"
     ],
     "context": "if(editor.report!==report||editor.tick!==tick||[...editor.selectedUids].join(',')!==uids)throw messageError(new Error(''), \"errors.app.selectionChangedReopenThe"
   },
   "errors.app.selectionChangedReopenThePalette": {
     "locations": [
-      "src/app.mjs:6415"
+      "src/app.mjs:6416"
     ],
     "context": "if(editor.report!==report||editor.selectedUid!==uid||editor.figure!==figure||editor.tick!==tick)throw messageError(new Error(''), \"errors.app.selectionChangedRe"
   },
@@ -11913,7 +11913,7 @@
   },
   "errors.app.theGraphicsDeviceWasLost": {
     "locations": [
-      "src/app.mjs:6375"
+      "src/app.mjs:6376"
     ],
     "context": "telemetry.error(Object.assign(messageError(new Error(''), \"errors.app.theGraphicsDeviceWasLost\", {}), { name: 'GPUError', telemetryCode: 'device_lost' }), 'gpu'"
   },
@@ -20387,8 +20387,8 @@
   },
   "home.home": {
     "locations": [
-      "index.html:40",
-      "index.html:315"
+      "index.html:41",
+      "index.html:316"
     ],
     "context": "<button type=\"button\" class=\"ui-icon-button band-home\" data-action=\"home\" aria-pressed=\"false\" aria-label=\"Home\" data-tooltip=\"Home\" data-icon=\"home\" data-i18n-"
   },
@@ -24536,7 +24536,7 @@
   },
   "movieclipUi.movieclip": {
     "locations": [
-      "index.html:361",
+      "index.html:362",
       "src/movieclip-ui.mjs:99"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
@@ -25954,7 +25954,7 @@
   "rendererStatus.deviceLost": {
     "locations": [
       "src/app.mjs:1803",
-      "src/app.mjs:6371"
+      "src/app.mjs:6372"
     ],
     "context": "if (state.renderer.stats?.backend === \"WebGPU device lost\") localizedText($(\"renderer-label\"), \"rendererStatus.deviceLost\");"
   },
@@ -26781,123 +26781,123 @@
   },
   "settings.advancedDescription": {
     "locations": [
-      "src/settings.mjs:614"
+      "src/settings.mjs:618"
     ],
     "context": "[\"advanced\", this.t(\"timeline.advanced\"), this.t(\"settings.advancedDescription\")],"
   },
   "settings.altDragFigureRoot": {
     "locations": [
-      "src/settings.mjs:638"
+      "src/settings.mjs:642"
     ],
     "context": "this.select(say('settings.altDragFigureRoot'), 'altDragDuplicate', [messageTuple(['instance', interfaceText(\"settings.linkedInstance\")], {1: {key: \"settings.lin"
   },
   "settings.appearance": {
     "locations": [
-      "src/settings.mjs:623"
+      "src/settings.mjs:627"
     ],
     "context": "return this.group(this.t(\"settings.appearance\"), themes + language + coverage + this.scaleControl())"
   },
   "settings.autosaveInterval": {
     "locations": [
-      "src/settings.mjs:663"
+      "src/settings.mjs:667"
     ],
     "context": "+ this.group(say(\"settings.recovery\"), this.select(say(\"settings.autosaveInterval\"), 'autosaveSeconds', autosave, say(\"settings.autosaveNote\")));"
   },
   "settings.autosaveNote": {
     "locations": [
-      "src/settings.mjs:663"
+      "src/settings.mjs:667"
     ],
     "context": "+ this.group(say(\"settings.recovery\"), this.select(say(\"settings.autosaveInterval\"), 'autosaveSeconds', autosave, say(\"settings.autosaveNote\")));"
   },
   "settings.autosaveOff": {
     "locations": [
-      "src/settings.mjs:656"
+      "src/settings.mjs:660"
     ],
     "context": "const autosave = [messageTuple([0, say(\"settings.autosaveOff\")], {1: {key: \"settings.autosaveOff\", params: {}}}), ...presets.slice(1, -1).map(seconds => message"
   },
   "settings.autoScale": {
     "locations": [
-      "src/settings.mjs:575"
+      "src/settings.mjs:579"
     ],
     "context": "return `<div class=\"styk-settings-row styk-settings-scale\"><span class=\"styk-settings-text\"><label class=\"styk-settings-label\" for=\"styk-ui-scale\" ${messageAttr"
   },
   "settings.autoScaleNote": {
     "locations": [
-      "src/settings.mjs:562",
-      "src/settings.mjs:573"
+      "src/settings.mjs:566",
+      "src/settings.mjs:577"
     ],
     "context": "if (note) { note.hidden = !auto; note.textContent = this.t('settings.autoScaleNote').replace('{scale}', `${autoUIScale()}%`); }"
   },
   "settings.autoSize": {
     "locations": [
-      "src/settings.mjs:642"
+      "src/settings.mjs:646"
     ],
     "context": "+ this.checkbox(say(\"settings.autoSize\"), 'autoSizeHandles')"
   },
   "settings.boxBounds": {
     "locations": [
-      "src/settings.mjs:635"
+      "src/settings.mjs:639"
     ],
     "context": "+ this.select(say(\"settings.boxSelection\"), 'marqueeSelection', [messageTuple(['bounds', say(\"settings.boxBounds\")], {1: {key: \"settings.boxBounds\", params: {}}"
   },
   "settings.boxOrigins": {
     "locations": [
-      "src/settings.mjs:635"
+      "src/settings.mjs:639"
     ],
     "context": "+ this.select(say(\"settings.boxSelection\"), 'marqueeSelection', [messageTuple(['bounds', say(\"settings.boxBounds\")], {1: {key: \"settings.boxBounds\", params: {}}"
   },
   "settings.boxSelection": {
     "locations": [
-      "src/settings.mjs:635"
+      "src/settings.mjs:639"
     ],
     "context": "+ this.select(say(\"settings.boxSelection\"), 'marqueeSelection', [messageTuple(['bounds', say(\"settings.boxBounds\")], {1: {key: \"settings.boxBounds\", params: {}}"
   },
   "settings.browserScale": {
     "locations": [
-      "src/settings.mjs:574"
+      "src/settings.mjs:578"
     ],
     "context": ": `<small class=\"styk-settings-hint\" ${messageAttributes('settings.browserScale', {})}>${escape(this.t('settings.browserScale'))}</small>`;"
   },
   "settings.builder": {
     "locations": [
-      "src/settings.mjs:648"
+      "src/settings.mjs:652"
     ],
     "context": "+ this.group(say(\"settings.builder\"),"
   },
   "settings.chooseWhetherPastedFiguresKeepTheirCopiedDepth": {
     "locations": [
-      "src/settings.mjs:636"
+      "src/settings.mjs:640"
     ],
     "context": "+ this.group(interfaceText(\"settings.pasting\"), this.select(interfaceText(\"settings.pastedFigureDepth\"), 'pasteDepth', [messageTuple(['same', interfaceText(\"set"
   },
   "settings.close": {
     "locations": [
       "src/settings.mjs:306",
-      "src/settings.mjs:442"
+      "src/settings.mjs:446"
     ],
     "context": "localizedMarkup(this.dialog, `<header class=\"styk-settings-head\"><img class=\"styk-settings-mark\" src=\"${SYMBOL_URL}\" alt=\"\"><h2 ${messageAttributes(\"settings.ti"
   },
   "settings.construction": {
     "locations": [
-      "src/settings.mjs:651"
+      "src/settings.mjs:655"
     ],
     "context": "+ this.checkbox(say(\"settings.construction\"), 'useBuilderCanvasColor')"
   },
   "settings.constructionColor": {
     "locations": [
-      "src/settings.mjs:652"
+      "src/settings.mjs:656"
     ],
     "context": "+ `<label class=\"styk-settings-row\">${this.text(say(\"settings.constructionColorShort\"))}<span class=\"styk-settings-color\"><input type=\"color\" data-setting=\"buil"
   },
   "settings.constructionColorShort": {
     "locations": [
-      "src/settings.mjs:652"
+      "src/settings.mjs:656"
     ],
     "context": "+ `<label class=\"styk-settings-row\">${this.text(say(\"settings.constructionColorShort\"))}<span class=\"styk-settings-color\"><input type=\"color\" data-setting=\"buil"
   },
   "settings.customScale": {
     "locations": [
-      "src/settings.mjs:575"
+      "src/settings.mjs:579"
     ],
     "context": "return `<div class=\"styk-settings-row styk-settings-scale\"><span class=\"styk-settings-text\"><label class=\"styk-settings-label\" for=\"styk-ui-scale\" ${messageAttr"
   },
@@ -26905,264 +26905,264 @@
     "locations": [
       "src/settings.mjs:332",
       "src/settings.mjs:333",
-      "src/settings.mjs:454",
-      "src/settings.mjs:455"
+      "src/settings.mjs:458",
+      "src/settings.mjs:459"
     ],
     "context": "localizedMarkup(button, `<span class=\"styk-settings-donate-badge\">${icon('heart')}</span><span class=\"styk-settings-donate-text\"><strong ${messageAttributes('se"
   },
   "settings.donateNote": {
     "locations": [
       "src/settings.mjs:332",
-      "src/settings.mjs:456"
+      "src/settings.mjs:460"
     ],
     "context": "localizedMarkup(button, `<span class=\"styk-settings-donate-badge\">${icon('heart')}</span><span class=\"styk-settings-donate-text\"><strong ${messageAttributes('se"
   },
   "settings.duplication": {
     "locations": [
-      "src/settings.mjs:637"
+      "src/settings.mjs:641"
     ],
     "context": "+ this.group(interfaceText(\"settings.duplication\"),"
   },
   "settings.editorLabel": {
     "locations": [
       "src/settings.mjs:305",
-      "src/settings.mjs:440"
+      "src/settings.mjs:444"
     ],
     "context": "localizedAttribute(this.dialog, \"aria-label\", \"settings.editorLabel\", {});"
   },
   "settings.feedback.myReports": {
     "locations": [
-      "src/settings.mjs:679"
+      "src/settings.mjs:683"
     ],
     "context": "+ `<div class=\"styk-settings-card settings-feedback-private\"><span class=\"settings-feedback-lock\">${icon('lock')}</span>${this.text(say(\"settings.feedback.priva"
   },
   "settings.feedback.private": {
     "locations": [
-      "src/settings.mjs:679"
+      "src/settings.mjs:683"
     ],
     "context": "+ `<div class=\"styk-settings-card settings-feedback-private\"><span class=\"settings-feedback-lock\">${icon('lock')}</span>${this.text(say(\"settings.feedback.priva"
   },
   "settings.feedback.privateNote": {
     "locations": [
-      "src/settings.mjs:679"
+      "src/settings.mjs:683"
     ],
     "context": "+ `<div class=\"styk-settings-card settings-feedback-private\"><span class=\"settings-feedback-lock\">${icon('lock')}</span>${this.text(say(\"settings.feedback.priva"
   },
   "settings.feedback.start": {
     "locations": [
-      "src/settings.mjs:678"
+      "src/settings.mjs:682"
     ],
     "context": "].map(([category, symbol, tint]) => `<button type=\"button\" class=\"settings-feedback-tile\" data-settings-feedback=\"${category}\" data-tint=\"${tint}\"><span class=\""
   },
   "settings.fingerDraw": {
     "locations": [
-      "src/settings.mjs:622"
+      "src/settings.mjs:626"
     ],
     "context": "+ this.select(say(\"settings.fingerDraw\"), 'fingerDraw', [messageTuple(['auto', say(\"settings.fingerDrawAuto\")], {1: {key: \"settings.fingerDrawAuto\", params: {}}"
   },
   "settings.fingerDrawAlways": {
     "locations": [
-      "src/settings.mjs:622"
+      "src/settings.mjs:626"
     ],
     "context": "+ this.select(say(\"settings.fingerDraw\"), 'fingerDraw', [messageTuple(['auto', say(\"settings.fingerDrawAuto\")], {1: {key: \"settings.fingerDrawAuto\", params: {}}"
   },
   "settings.fingerDrawAuto": {
     "locations": [
-      "src/settings.mjs:622"
+      "src/settings.mjs:626"
     ],
     "context": "+ this.select(say(\"settings.fingerDraw\"), 'fingerDraw', [messageTuple(['auto', say(\"settings.fingerDrawAuto\")], {1: {key: \"settings.fingerDrawAuto\", params: {}}"
   },
   "settings.fingerDrawNever": {
     "locations": [
-      "src/settings.mjs:622"
+      "src/settings.mjs:626"
     ],
     "context": "+ this.select(say(\"settings.fingerDraw\"), 'fingerDraw', [messageTuple(['auto', say(\"settings.fingerDrawAuto\")], {1: {key: \"settings.fingerDrawAuto\", params: {}}"
   },
   "settings.fingerDrawNote": {
     "locations": [
-      "src/settings.mjs:622"
+      "src/settings.mjs:626"
     ],
     "context": "+ this.select(say(\"settings.fingerDraw\"), 'fingerDraw', [messageTuple(['auto', say(\"settings.fingerDrawAuto\")], {1: {key: \"settings.fingerDrawAuto\", params: {}}"
   },
   "settings.fitView": {
     "locations": [
-      "src/settings.mjs:662"
+      "src/settings.mjs:666"
     ],
     "context": "+ this.checkbox(say(\"settings.fitView\"), 'fitViewOnPlayback', say(\"settings.fitViewNote\")))"
   },
   "settings.fitViewNote": {
     "locations": [
-      "src/settings.mjs:662"
+      "src/settings.mjs:666"
     ],
     "context": "+ this.checkbox(say(\"settings.fitView\"), 'fitViewOnPlayback', say(\"settings.fitViewNote\")))"
   },
   "settings.gestures": {
     "locations": [
-      "src/settings.mjs:666"
+      "src/settings.mjs:670"
     ],
     "context": "return this.hotkeySettings.html() + this.group(say(\"settings.gestures\"), `<dl class=\"styk-settings-gestures\">${["
   },
   "settings.handlePreview": {
     "locations": [
-      "src/settings.mjs:631"
+      "src/settings.mjs:635"
     ],
     "context": "const handleSize = `<div class=\"styk-settings-row styk-settings-block\"><span class=\"styk-settings-handle-head\">${this.text(say(\"settings.handleRadius\"))}<span c"
   },
   "settings.handleRadius": {
     "locations": [
-      "src/settings.mjs:631"
+      "src/settings.mjs:635"
     ],
     "context": "const handleSize = `<div class=\"styk-settings-row styk-settings-block\"><span class=\"styk-settings-handle-head\">${this.text(say(\"settings.handleRadius\"))}<span c"
   },
   "settings.highlightSegment": {
     "locations": [
-      "src/settings.mjs:650"
+      "src/settings.mjs:654"
     ],
     "context": "+ this.checkbox(say(\"settings.highlightSegment\"), 'builderHighlightSegment')"
   },
   "settings.independentCopy": {
     "locations": [
-      "src/settings.mjs:638"
+      "src/settings.mjs:642"
     ],
     "context": "this.select(say('settings.altDragFigureRoot'), 'altDragDuplicate', [messageTuple(['instance', interfaceText(\"settings.linkedInstance\")], {1: {key: \"settings.lin"
   },
   "settings.inFront": {
     "locations": [
-      "src/settings.mjs:636"
+      "src/settings.mjs:640"
     ],
     "context": "+ this.group(interfaceText(\"settings.pasting\"), this.select(interfaceText(\"settings.pastedFigureDepth\"), 'pasteDepth', [messageTuple(['same', interfaceText(\"set"
   },
   "settings.jointHandles": {
     "locations": [
-      "src/settings.mjs:639"
+      "src/settings.mjs:643"
     ],
     "context": "+ this.group(say(\"settings.jointHandles\"),"
   },
   "settings.keyframes": {
     "locations": [
-      "src/settings.mjs:658"
+      "src/settings.mjs:662"
     ],
     "context": "return this.group(say(\"settings.keyframes\"), this.checkbox(say(\"settings.replaceOnDrop\"), 'replaceKeyframesOnDrop', say(\"settings.replaceOnDropNote\")))"
   },
   "settings.language": {
     "locations": [
-      "src/settings.mjs:611"
+      "src/settings.mjs:615"
     ],
     "context": "const language = this.select(this.t('settings.language'), 'locale', SUPPORTED_LOCALES.map(locale => [locale.id, locale.nativeName]));"
   },
   "settings.linkedInstance": {
     "locations": [
-      "src/settings.mjs:638"
+      "src/settings.mjs:642"
     ],
     "context": "this.select(say('settings.altDragFigureRoot'), 'altDragDuplicate', [messageTuple(['instance', interfaceText(\"settings.linkedInstance\")], {1: {key: \"settings.lin"
   },
   "settings.linkedInstancesShareFigureEditsMadeInBuild": {
     "locations": [
-      "src/settings.mjs:638"
+      "src/settings.mjs:642"
     ],
     "context": "this.select(say('settings.altDragFigureRoot'), 'altDragDuplicate', [messageTuple(['instance', interfaceText(\"settings.linkedInstance\")], {1: {key: \"settings.lin"
   },
   "settings.loop": {
     "locations": [
-      "src/settings.mjs:661"
+      "src/settings.mjs:665"
     ],
     "context": "+ this.checkbox(say(\"settings.loop\"), 'loopPlayback')"
   },
   "settings.message0pxSolidTransparent": {
     "locations": [
-      "src/settings.mjs:631",
-      "src/settings.mjs:746"
+      "src/settings.mjs:635",
+      "src/settings.mjs:750"
     ],
     "context": "const handleSize = `<div class=\"styk-settings-row styk-settings-block\"><span class=\"styk-settings-handle-head\">${this.text(say(\"settings.handleRadius\"))}<span c"
   },
   "settings.message1pxSolid000": {
     "locations": [
-      "src/settings.mjs:631",
-      "src/settings.mjs:746"
+      "src/settings.mjs:635",
+      "src/settings.mjs:750"
     ],
     "context": "const handleSize = `<div class=\"styk-settings-row styk-settings-block\"><span class=\"styk-settings-handle-head\">${this.text(say(\"settings.handleRadius\"))}<span c"
   },
   "settings.minute": {
     "locations": [
-      "src/settings.mjs:656"
+      "src/settings.mjs:660"
     ],
     "context": "const autosave = [messageTuple([0, say(\"settings.autosaveOff\")], {1: {key: \"settings.autosaveOff\", params: {}}}), ...presets.slice(1, -1).map(seconds => message"
   },
   "settings.motionPaths": {
     "locations": [
-      "src/settings.mjs:647"
+      "src/settings.mjs:651"
     ],
     "context": "+ this.checkbox(say(\"settings.motionPaths\"), 'motionPaths'))"
   },
   "settings.navigation": {
     "locations": [
-      "src/settings.mjs:632"
+      "src/settings.mjs:636"
     ],
     "context": "return this.group(say(\"settings.navigation\"),"
   },
   "settings.noResults": {
     "locations": [
-      "src/settings.mjs:602"
+      "src/settings.mjs:606"
     ],
     "context": "if (!found) return `${heading}<div class=\"styk-settings-empty\">${icon('search')}<p ${messageAttributes('settings.noResults', {query: query.trim()})}>${escape(th"
   },
   "settings.outline": {
     "locations": [
-      "src/settings.mjs:643"
+      "src/settings.mjs:647"
     ],
     "context": "+ this.checkbox(say(\"settings.outline\"), 'outlineHandles')"
   },
   "settings.overlays": {
     "locations": [
-      "src/settings.mjs:645"
+      "src/settings.mjs:649"
     ],
     "context": "+ this.group(say(\"settings.overlays\"),"
   },
   "settings.panelLayouts": {
     "locations": [
-      "src/settings.mjs:618"
+      "src/settings.mjs:622"
     ],
     "context": "? this.group(this.t('settings.workspace'), `<div class=\"styk-settings-row\">${this.text(say(\"settings.panelLayouts\"), say(\"settings.panelLayoutsNote\"))}<button t"
   },
   "settings.panelLayoutsNote": {
     "locations": [
-      "src/settings.mjs:618"
+      "src/settings.mjs:622"
     ],
     "context": "? this.group(this.t('settings.workspace'), `<div class=\"styk-settings-row\">${this.text(say(\"settings.panelLayouts\"), say(\"settings.panelLayoutsNote\"))}<button t"
   },
   "settings.partialLanguage": {
     "locations": [
-      "src/settings.mjs:612"
+      "src/settings.mjs:616"
     ],
     "context": "const coverage = this.localization.hasFallback ? `<p class=\"styk-settings-note\">${icon('alert')}<span data-locale-coverage ${messageAttributes('settings.partial"
   },
   "settings.pastedFigureDepth": {
     "locations": [
-      "src/settings.mjs:636"
+      "src/settings.mjs:640"
     ],
     "context": "+ this.group(interfaceText(\"settings.pasting\"), this.select(interfaceText(\"settings.pastedFigureDepth\"), 'pasteDepth', [messageTuple(['same', interfaceText(\"set"
   },
   "settings.pasting": {
     "locations": [
-      "src/settings.mjs:636"
+      "src/settings.mjs:640"
     ],
     "context": "+ this.group(interfaceText(\"settings.pasting\"), this.select(interfaceText(\"settings.pastedFigureDepth\"), 'pasteDepth', [messageTuple(['same', interfaceText(\"set"
   },
   "settings.playback": {
     "locations": [
-      "src/settings.mjs:659"
+      "src/settings.mjs:663"
     ],
     "context": "+ this.group(say(\"settings.playback\"),"
   },
   "settings.playbackQuality": {
     "locations": [
-      "src/settings.mjs:660"
+      "src/settings.mjs:664"
     ],
     "context": "this.select(say(\"settings.playbackQuality\"), 'playbackQuality', playbackQualityOptions.map(option => messageTuple([option.id, say(option.labelKey)], {1: {key: o"
   },
   "settings.playbackQualityNote": {
     "locations": [
-      "src/settings.mjs:660"
+      "src/settings.mjs:664"
     ],
     "context": "this.select(say(\"settings.playbackQuality\"), 'playbackQuality', playbackQualityOptions.map(option => messageTuple([option.id, say(option.labelKey)], {1: {key: o"
   },
@@ -27170,244 +27170,244 @@
     "locations": [
       "src/settings.mjs:324",
       "src/settings.mjs:325",
-      "src/settings.mjs:449"
+      "src/settings.mjs:453"
     ],
     "context": "localizedMarkup(button, `${icon('lock')}<span ${messageAttributes('settings.privacy', {})}>${escape(this.say('settings.privacy'))}</span>`);"
   },
   "settings.recovery": {
     "locations": [
-      "src/settings.mjs:663"
+      "src/settings.mjs:667"
     ],
     "context": "+ this.group(say(\"settings.recovery\"), this.select(say(\"settings.autosaveInterval\"), 'autosaveSeconds', autosave, say(\"settings.autosaveNote\")));"
   },
   "settings.replaceOnDrop": {
     "locations": [
-      "src/settings.mjs:658"
+      "src/settings.mjs:662"
     ],
     "context": "return this.group(say(\"settings.keyframes\"), this.checkbox(say(\"settings.replaceOnDrop\"), 'replaceKeyframesOnDrop', say(\"settings.replaceOnDropNote\")))"
   },
   "settings.replaceOnDropNote": {
     "locations": [
-      "src/settings.mjs:658"
+      "src/settings.mjs:662"
     ],
     "context": "return this.group(say(\"settings.keyframes\"), this.checkbox(say(\"settings.replaceOnDrop\"), 'replaceKeyframesOnDrop', say(\"settings.replaceOnDropNote\")))"
   },
   "settings.resetPanels": {
     "locations": [
-      "src/settings.mjs:618"
+      "src/settings.mjs:622"
     ],
     "context": "? this.group(this.t('settings.workspace'), `<div class=\"styk-settings-row\">${this.text(say(\"settings.panelLayouts\"), say(\"settings.panelLayoutsNote\"))}<button t"
   },
   "settings.resetScale": {
     "locations": [
-      "src/settings.mjs:575"
+      "src/settings.mjs:579"
     ],
     "context": "return `<div class=\"styk-settings-row styk-settings-scale\"><span class=\"styk-settings-text\"><label class=\"styk-settings-label\" for=\"styk-ui-scale\" ${messageAttr"
   },
   "settings.sameZIndexDefault": {
     "locations": [
-      "src/settings.mjs:636"
+      "src/settings.mjs:640"
     ],
     "context": "+ this.group(interfaceText(\"settings.pasting\"), this.select(interfaceText(\"settings.pastedFigureDepth\"), 'pasteDepth', [messageTuple(['same', interfaceText(\"set"
   },
   "settings.search": {
     "locations": [
-      "src/settings.mjs:433"
+      "src/settings.mjs:437"
     ],
     "context": "const label = this.say('settings.search');"
   },
   "settings.searchResults": {
     "locations": [
-      "src/settings.mjs:601"
+      "src/settings.mjs:605"
     ],
     "context": "const heading = `<header class=\"styk-settings-page\"><h3 ${messageAttributes('settings.searchResults', {query: query.trim()})}>${escape(this.say('settings.search"
   },
   "settings.seconds": {
     "locations": [
-      "src/settings.mjs:656",
-      "src/settings.mjs:657"
+      "src/settings.mjs:660",
+      "src/settings.mjs:661"
     ],
     "context": "const autosave = [messageTuple([0, say(\"settings.autosaveOff\")], {1: {key: \"settings.autosaveOff\", params: {}}}), ...presets.slice(1, -1).map(seconds => message"
   },
   "settings.sections": {
     "locations": [
       "src/settings.mjs:306",
-      "src/settings.mjs:443"
+      "src/settings.mjs:447"
     ],
     "context": "localizedMarkup(this.dialog, `<header class=\"styk-settings-head\"><img class=\"styk-settings-mark\" src=\"${SYMBOL_URL}\" alt=\"\"><h2 ${messageAttributes(\"settings.ti"
   },
   "settings.settingsFeedbackNote": {
     "locations": [
-      "src/settings.mjs:678"
+      "src/settings.mjs:682"
     ],
     "context": "].map(([category, symbol, tint]) => `<button type=\"button\" class=\"settings-feedback-tile\" data-settings-feedback=\"${category}\" data-tint=\"${tint}\"><span class=\""
   },
   "settings.showHandles": {
     "locations": [
-      "src/settings.mjs:640"
+      "src/settings.mjs:644"
     ],
     "context": "this.checkbox(say(\"settings.showHandles\"), 'showHandles')"
   },
   "settings.showHomeOnStartup": {
     "locations": [
-      "src/settings.mjs:624"
+      "src/settings.mjs:628"
     ],
     "context": "+ this.group(say(\"settings.startup\"), this.checkbox(say(\"settings.showHomeOnStartup\"), 'showHomeOnStartup', say(\"settings.showHomeOnStartupNote\")))"
   },
   "settings.showHomeOnStartupNote": {
     "locations": [
-      "src/settings.mjs:624"
+      "src/settings.mjs:628"
     ],
     "context": "+ this.group(say(\"settings.startup\"), this.checkbox(say(\"settings.showHomeOnStartup\"), 'showHomeOnStartup', say(\"settings.showHomeOnStartupNote\")))"
   },
   "settings.showUnselected": {
     "locations": [
-      "src/settings.mjs:641"
+      "src/settings.mjs:645"
     ],
     "context": "+ this.checkbox(say(\"settings.showUnselected\"), 'showUnselectedHandles')"
   },
   "settings.simpleDescription": {
     "locations": [
-      "src/settings.mjs:615"
+      "src/settings.mjs:619"
     ],
     "context": "[\"simple\", this.t(\"timeline.simple\"), this.t(\"settings.simpleDescription\")],"
   },
   "settings.sizePx": {
     "locations": [
-      "src/settings.mjs:424"
+      "src/settings.mjs:428"
     ],
     "context": "localizedText(this.content.querySelector(\"[data-handle-value]\"), 'settings.sizePx', {size: size});"
   },
   "settings.smoothZoom": {
     "locations": [
-      "src/settings.mjs:634"
+      "src/settings.mjs:638"
     ],
     "context": "+ this.select(say(\"settings.smoothZoom\"), 'smoothZoom', [messageTuple(['auto', say(\"settings.smoothZoomAuto\")], {1: {key: \"settings.smoothZoomAuto\", params: {}}"
   },
   "settings.smoothZoomAuto": {
     "locations": [
-      "src/settings.mjs:634"
+      "src/settings.mjs:638"
     ],
     "context": "+ this.select(say(\"settings.smoothZoom\"), 'smoothZoom', [messageTuple(['auto', say(\"settings.smoothZoomAuto\")], {1: {key: \"settings.smoothZoomAuto\", params: {}}"
   },
   "settings.smoothZoomNote": {
     "locations": [
-      "src/settings.mjs:634"
+      "src/settings.mjs:638"
     ],
     "context": "+ this.select(say(\"settings.smoothZoom\"), 'smoothZoom', [messageTuple(['auto', say(\"settings.smoothZoomAuto\")], {1: {key: \"settings.smoothZoomAuto\", params: {}}"
   },
   "settings.smoothZoomOff": {
     "locations": [
-      "src/settings.mjs:634"
+      "src/settings.mjs:638"
     ],
     "context": "+ this.select(say(\"settings.smoothZoom\"), 'smoothZoom', [messageTuple(['auto', say(\"settings.smoothZoomAuto\")], {1: {key: \"settings.smoothZoomAuto\", params: {}}"
   },
   "settings.smoothZoomOn": {
     "locations": [
-      "src/settings.mjs:634"
+      "src/settings.mjs:638"
     ],
     "context": "+ this.select(say(\"settings.smoothZoom\"), 'smoothZoom', [messageTuple(['auto', say(\"settings.smoothZoomAuto\")], {1: {key: \"settings.smoothZoomAuto\", params: {}}"
   },
   "settings.startup": {
     "locations": [
-      "src/settings.mjs:624"
+      "src/settings.mjs:628"
     ],
     "context": "+ this.group(say(\"settings.startup\"), this.checkbox(say(\"settings.showHomeOnStartup\"), 'showHomeOnStartup', say(\"settings.showHomeOnStartupNote\")))"
   },
   "settings.staticHandles": {
     "locations": [
-      "src/settings.mjs:649"
+      "src/settings.mjs:653"
     ],
     "context": "this.checkbox(say(\"settings.staticHandles\"), 'builderShowStaticHandles')"
   },
   "settings.theme": {
     "locations": [
-      "src/settings.mjs:610"
+      "src/settings.mjs:614"
     ],
     "context": "const themes = `<div class=\"styk-settings-row styk-settings-block\"><span class=\"styk-settings-label\" ${messageAttributes('settings.theme', {})}>${escape(this.t("
   },
   "settings.timelineMode": {
     "locations": [
-      "src/settings.mjs:613"
+      "src/settings.mjs:617"
     ],
     "context": "const timeline = `<div class=\"styk-settings-row styk-settings-block\"><div class=\"styk-settings-tiles\" data-columns=\"2\" role=\"radiogroup\" aria-label=\"${escape(th"
   },
   "settings.title": {
     "locations": [
       "src/settings.mjs:306",
-      "src/settings.mjs:441"
+      "src/settings.mjs:445"
     ],
     "context": "localizedMarkup(this.dialog, `<header class=\"styk-settings-head\"><img class=\"styk-settings-mark\" src=\"${SYMBOL_URL}\" alt=\"\"><h2 ${messageAttributes(\"settings.ti"
   },
   "settings.touch": {
     "locations": [
-      "src/settings.mjs:620"
+      "src/settings.mjs:624"
     ],
     "context": "const touch = this.group(say(\"settings.touch\"),"
   },
   "settings.touchAuto": {
     "locations": [
-      "src/settings.mjs:621"
+      "src/settings.mjs:625"
     ],
     "context": "this.select(say(\"settings.touchInterface\"), 'touchInterface', [messageTuple(['auto', say(\"settings.touchAuto\")], {1: {key: \"settings.touchAuto\", params: {}}}), "
   },
   "settings.touchInterface": {
     "locations": [
-      "src/settings.mjs:621"
+      "src/settings.mjs:625"
     ],
     "context": "this.select(say(\"settings.touchInterface\"), 'touchInterface', [messageTuple(['auto', say(\"settings.touchAuto\")], {1: {key: \"settings.touchAuto\", params: {}}}), "
   },
   "settings.touchInterfaceNote": {
     "locations": [
-      "src/settings.mjs:621"
+      "src/settings.mjs:625"
     ],
     "context": "this.select(say(\"settings.touchInterface\"), 'touchInterface', [messageTuple(['auto', say(\"settings.touchAuto\")], {1: {key: \"settings.touchAuto\", params: {}}}), "
   },
   "settings.touchOff": {
     "locations": [
-      "src/settings.mjs:621"
+      "src/settings.mjs:625"
     ],
     "context": "this.select(say(\"settings.touchInterface\"), 'touchInterface', [messageTuple(['auto', say(\"settings.touchAuto\")], {1: {key: \"settings.touchAuto\", params: {}}}), "
   },
   "settings.touchOn": {
     "locations": [
-      "src/settings.mjs:621"
+      "src/settings.mjs:625"
     ],
     "context": "this.select(say(\"settings.touchInterface\"), 'touchInterface', [messageTuple(['auto', say(\"settings.touchAuto\")], {1: {key: \"settings.touchAuto\", params: {}}}), "
   },
   "settings.uiScale": {
     "locations": [
-      "src/settings.mjs:575"
+      "src/settings.mjs:579"
     ],
     "context": "return `<div class=\"styk-settings-row styk-settings-scale\"><span class=\"styk-settings-text\"><label class=\"styk-settings-label\" for=\"styk-ui-scale\" ${messageAttr"
   },
   "settings.virtualCamera": {
     "locations": [
-      "src/settings.mjs:646"
+      "src/settings.mjs:650"
     ],
     "context": "this.checkbox(say(\"settings.virtualCamera\"), 'showCamera')"
   },
   "settings.workspace": {
     "locations": [
-      "src/settings.mjs:618"
+      "src/settings.mjs:622"
     ],
     "context": "? this.group(this.t('settings.workspace'), `<div class=\"styk-settings-row\">${this.text(say(\"settings.panelLayouts\"), say(\"settings.panelLayoutsNote\"))}<button t"
   },
   "settings.zoomCtrlScroll": {
     "locations": [
-      "src/settings.mjs:633"
+      "src/settings.mjs:637"
     ],
     "context": "this.select(say(\"settings.zoomGesture\"), 'canvasZoomGesture', [messageTuple(['ctrl-scroll', say(\"settings.zoomCtrlScroll\")], {1: {key: \"settings.zoomCtrlScroll\""
   },
   "settings.zoomGesture": {
     "locations": [
-      "src/settings.mjs:633"
+      "src/settings.mjs:637"
     ],
     "context": "this.select(say(\"settings.zoomGesture\"), 'canvasZoomGesture', [messageTuple(['ctrl-scroll', say(\"settings.zoomCtrlScroll\")], {1: {key: \"settings.zoomCtrlScroll\""
   },
   "settings.zoomScroll": {
     "locations": [
-      "src/settings.mjs:633"
+      "src/settings.mjs:637"
     ],
     "context": "this.select(say(\"settings.zoomGesture\"), 'canvasZoomGesture', [messageTuple(['ctrl-scroll', say(\"settings.zoomCtrlScroll\")], {1: {key: \"settings.zoomCtrlScroll\""
   },
@@ -30799,7 +30799,7 @@
   },
   "timeline.advanced": {
     "locations": [
-      "src/settings.mjs:614"
+      "src/settings.mjs:618"
     ],
     "context": "[\"advanced\", this.t(\"timeline.advanced\"), this.t(\"settings.advancedDescription\")],"
   },
@@ -31162,7 +31162,7 @@
   },
   "timeline.simple": {
     "locations": [
-      "src/settings.mjs:615"
+      "src/settings.mjs:619"
     ],
     "context": "[\"simple\", this.t(\"timeline.simple\"), this.t(\"settings.simpleDescription\")],"
   },
@@ -31175,7 +31175,7 @@
   "timeline.title": {
     "locations": [
       "src/localization-bindings.mjs:191",
-      "src/settings.mjs:626"
+      "src/settings.mjs:630"
     ],
     "context": "['.timeline-title', { text: 'timeline.title' }],"
   },

@@ -1,5 +1,5 @@
 'use strict';
-const { t, messageError, localization, normalizeLocale } = require('./localization.cjs');
+const { t, messageError, useLocale } = require('./localization.cjs');
 
 
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell, session, clipboard, contentTracing } = require('electron');
@@ -482,7 +482,7 @@ function registerIpc() {
   handle('styk:editor-settings-set', async (event, value) => {
     trusted(event);
     await editorSettings.set(value);
-    if (localization.setLocale(normalizeLocale(value?.locale))) nativeMenu();
+    if (useLocale(value?.locale)) nativeMenu();
     return {saved: true};
   });
   handle('styk:vfx-presets-get', (event) => { trusted(event); return vfxPresets.get(); });
@@ -842,7 +842,7 @@ async function createWindow() {
 
 async function start() {
   const saved = await new WorkspacePreferences(app.getPath('userData'), {filename: 'editor-settings.json'}).get();
-  localization.setLocale(normalizeLocale(saved.locale));
+  useLocale(saved.locale);
   const availability = updateAvailabilityDetails({ packaged: app.isPackaged, platform: process.platform,
     appImage: process.env.APPIMAGE,
     portable: Boolean(process.env.PORTABLE_EXECUTABLE_DIR), installed: existsSync(path.join(path.dirname(process.execPath), 'Uninstall StykAnimate.exe')) });
