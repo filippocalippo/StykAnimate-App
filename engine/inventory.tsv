@@ -618,3 +618,4 @@ src/web-offline.mjs	platform	-	stays	file, storage and network services
 src/web-support.js	ui	-	stays	
 src/yield-task.mjs	platform	-	stays	gives the browser its turn between slices of work (scheduler.yield, else a message)
 src/zlib-sync.mjs	engine	styk-formats::container	partial	Rust: inflate of drawing tiles (PNG decoder); deflate still JS
+src/lazy-payload.mjs	ui	-	stays	the editor view's picture fields: a getter that asks the engine for the text on first read (styk_doc::payload names it), and the copies that keep it unread

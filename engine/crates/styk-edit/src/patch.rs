@@ -31,6 +31,75 @@ pub fn diff(before: &Value, after: &Value) -> Value {
     Value::array(ops)
 }
 
+/// `ops` as the read view receives them: the payloads they would carry (the pictures and originals a file lifts
+/// out of its skeleton) are named by token (`S2P:<token>`, `styk_doc::payload`) for the view to ask for when
+/// something reads them, and a string that looks like a marker is escaped (`S2E:` before it). Everything else
+/// is as it was. The flag says whether any was named, for the interface to look for them.
+pub fn for_view(ops: Value) -> (Value, bool) {
+    let Some(list) = ops.as_arr() else { return (ops, false) };
+    let mut changed = false;
+    let list: Vec<Value> = list.iter().map(|op| match view_op(op) {
+        Some(op) => { changed = true; op }
+        None => op.clone(),
+    }).collect();
+    if changed { (Value::array(list), true) } else { (ops, false) }
+}
+
+fn view_op(op: &Value) -> Option<Value> {
+    let object = op.as_obj()?;
+    let key = object.get("p").and_then(Value::as_arr).and_then(|path| path.last()).and_then(Value::as_str).unwrap_or("");
+    let mut values: Vec<Value> = object.values().to_vec();
+    let mut changed = false;
+    for (name, slot) in object.keys().zip(values.iter_mut()) {
+        let replaced = match &**name {
+            "v" => view_value(slot, key),
+            // The elements of a rebuilt array: a kept index or `{v}`.
+            "a" => slot.as_arr().and_then(|refs| rewrite(refs, |item| item.get("v").and_then(|value| view_value(value, "")).map(|value| keyed("v", value)))),
+            // The entries of a rebuilt object: `[key]` or `[key, value]`.
+            "o" => slot.as_arr().and_then(|entries| rewrite(entries, |entry| {
+                let entry = entry.as_arr()?;
+                let value = view_value(entry.get(1)?, entry[0].as_str()?)?;
+                Some(Value::array(vec![entry[0].clone(), value]))
+            })),
+            _ => None,
+        };
+        if let Some(replaced) = replaced { *slot = replaced; changed = true; }
+    }
+    changed.then(|| Value::object(Obj::from_shape(object.shape().clone(), values)))
+}
+
+fn keyed(key: &str, value: Value) -> Value {
+    Value::object(Obj::from_shape(Shape::new(vec![Arc::from(key)]), vec![value]))
+}
+
+/// `items` with `change` applied to each element, or `None` when it changed none.
+fn rewrite(items: &[Value], change: impl Fn(&Value) -> Option<Value>) -> Option<Value> {
+    let mut changed = false;
+    let items: Vec<Value> = items.iter().map(|item| match change(item) {
+        Some(item) => { changed = true; item }
+        None => item.clone(),
+    }).collect();
+    changed.then(|| Value::array(items))
+}
+
+/// `value` held under `key` as the view receives it, or `None` when that is the value itself.
+fn view_value(value: &Value, key: &str) -> Option<Value> {
+    match value {
+        Value::Blob(blob) if styk_doc::payload::lifts(blob, key) => Some(Value::str(&format!("{}{}", styk_doc::payload::MARKER, styk_doc::payload::register(blob)))),
+        Value::Str(text) if text.starts_with("S2P:") || text.starts_with("S2E:") => Some(Value::str(&format!("S2E:{text}"))),
+        Value::Arr(items) => rewrite(items, |item| view_value(item, "")),
+        Value::Obj(object) => {
+            let mut values: Vec<Value> = object.values().to_vec();
+            let mut changed = false;
+            for (name, slot) in object.keys().zip(values.iter_mut()) {
+                if let Some(replaced) = view_value(slot, name) { *slot = replaced; changed = true; }
+            }
+            changed.then(|| Value::object(Obj::from_shape(object.shape().clone(), values)))
+        }
+        _ => None,
+    }
+}
+
 fn path_value(path: &[Value]) -> Value {
     Value::array(path.to_vec())
 }
@@ -298,4 +367,48 @@ mod tests {
         let ops = roundtrip(r#"{"a":0}"#, |doc| { doc.make_obj().unwrap().set("a", Value::Num(-0.0)); });
         assert_eq!(ops.elements().unwrap().len(), 1);
     }
+}
+
+#[cfg(test)]
+mod view_tests {
+    use super::*;
+    use styk_doc::{Blob, payload};
+
+    fn picture(prefix: &str) -> Value {
+        Value::Blob(Arc::new(Blob { prefix: Arc::from(prefix), bytes: Arc::from(vec![5u8; 60_000]) }))
+    }
+    fn text(value: &Value) -> String { styk_doc::json::to_string(value) }
+    fn asset(blob: Value) -> Value {
+        let mut object = Obj::new();
+        object.set("data_url", blob);
+        object.set("label", Value::str("S2P:7"));
+        Value::object(object)
+    }
+
+    #[test]
+    fn a_patch_names_the_pictures_it_carries_and_the_view_can_ask_for_them() {
+        let blob = picture("data:image/png;base64,");
+        let ops = Value::array(vec![
+            op(&[Value::str("figure_types"), Value::Num(2.0)], "v", asset(blob.clone())),
+            op(&[Value::str("figure_types")], "a", Value::array(vec![Value::Num(0.0), keyed("v", asset(blob.clone()))])),
+            op(&[Value::str("backgrounds"), Value::Num(0.0)], "o", Value::array(vec![Value::array(vec![Value::str("kept")]), Value::array(vec![Value::str("data_url"), blob.clone()])])),
+        ]);
+        let (named, any) = for_view(ops);
+        assert!(any);
+        let json = text(&named);
+        assert_eq!(json.matches("\"S2P:").count(), 3, "{json}");
+        assert!(!json.contains("BQUFBQUF"), "no picture text is in the patch");
+        assert!(json.contains("\"S2E:S2P:7\""), "a label that looks like a token is escaped");
+        let token: u64 = json.split("\"S2P:").nth(1).unwrap().split('"').next().unwrap().parse().unwrap();
+        assert_eq!(payload::text(token).unwrap(), blob.text().unwrap());
+    }
+
+    #[test]
+    fn a_patch_without_pictures_is_the_patch() {
+        let ops = Value::array(vec![op(&[Value::str("a")], "v", Value::Num(1.0)), op(&[Value::str("small")], "v", picture_small())]);
+        let (named, any) = for_view(ops.clone());
+        assert!(!any && named.same_node(&ops));
+    }
+
+    fn picture_small() -> Value { Value::Blob(Arc::new(Blob { prefix: Arc::from("data:image/png;base64,"), bytes: Arc::from(vec![1u8; 10]) })) }
 }

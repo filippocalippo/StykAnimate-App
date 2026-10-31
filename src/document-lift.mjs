@@ -1,5 +1,6 @@
 import {messageError} from './localized-error.mjs';
 import {base64ToBytes, bytesToBase64} from './base64.mjs';
+import {defineLazyPayload, namesPayload} from './lazy-payload.mjs';
 
 /** Lifting: a document leaves the editor's object model as a JSON skeleton whose large
  * number arrays and images are markers into two byte sections (docs/native-file-format.md).
@@ -436,8 +437,9 @@ function liftedJSONBytes(skeleton, sections) {
  * an open. The Rust container reader has already admitted the file (native-file-codec.mjs), so
  * nothing is measured here. `shared` remembers what the markers named: a document restored piece by piece
  * (src/engine/engine-open.mjs) passes the same one to every piece, and a section may then hold only the
- * bytes from its `base` on. */
-export function restoreLifted(document, sections, shared = new Map()) {
+ * bytes from its `base` on. `payloads`: the editor's view names pictures by token (`S2P:`) and defines their
+ * fields to read the text through `payloads(token)` when something asks (src/lazy-payload.mjs). */
+export function restoreLifted(document, sections, shared = new Map(), payloads = null) {
   const resolve = value => {
     let match = MARKER_ARRAY.exec(value);
     if (match) {
@@ -475,6 +477,7 @@ export function restoreLifted(document, sections, shared = new Map()) {
     if (Array.isArray(value)) { for (let i = 0; i < value.length; i++) value[i] = walk(value[i]); return value; }
     if (value && typeof value === 'object')
       for (const key of Object.keys(value)) {
+        if (payloads && namesPayload(value[key])) { defineLazyPayload(value, key, value[key], payloads); continue; }
         const walked = walk(value[key]);
         if (walked === value[key]) continue;
         if (key === '__proto__') Object.defineProperty(value, key, {value: walked, writable: true, configurable: true, enumerable: true});

@@ -21,6 +21,7 @@
 
 pub mod json;
 mod number;
+pub mod payload;
 mod value;
 
 pub use number::format_number;

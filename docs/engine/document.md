@@ -50,7 +50,21 @@ The editor's read view is built from the opened tree once, in pieces
 its tables, then each figure, keyframe, background, retained pose source and audio recording, lifted as a
 file lifts them (`container::ViewLifter`: arrays and images the tree shares are written once and named by
 the same marker, so the read view shares them and a save lifts the same bytes) and restored by
-`restoreLifted`. The interface thread restores in slices of 4 ms. The Pivot original of a project
+`restoreLifted`. The interface thread restores in slices of 4 ms.
+
+The pictures and originals the tree holds as bytes (a `Blob` in `data_base64`, `data_url`, `styk_tiles` or `source_base64`
+of 64 K characters or more) are not part of the view's text: the piece names each by a token (`S2P:<token>`,
+`styk_doc::payload`), and `restoreLifted` defines the field as a getter that asks the engine for the text
+(`EngineHandle.payload_text`) when something first reads it and keeps it from then on (`src/lazy-payload.mjs`).
+Readers see an ordinary string property, `JSON.stringify` and the spread read it, and the owner's verify mode
+still compares every byte. The field has no setter: the view is changed by patches, never in place, so a write
+throws. A session patch (`styk_edit::patch::for_view`) names the pictures it carries the same way (the answer's
+`payloads` flag; a string that looks like a token travels as `S2E:` and the string), and `applyDocumentPatch` keeps
+an untouched picture lazy when it copies or rebuilds the record around it. The registry holds blobs weakly: a
+picture no document or history entry holds any more answers with an error, so naming a payload never keeps a
+deleted picture alive. A picture an edit adds (a string in the session's tree) reaches the view as the string.
+The drawing store is the one writer of the view's cels: it attaches a cel's published tiles to its definition in
+place and tells the session (`@publishCel`), replacing a lazy field through `putField`. The Pivot original of a project
 stays with the codec for saving (`/api/source/keep`, leased to the project, sent while the engine decodes); the web build embeds it in
 the document instead (`OpenedDocument.attach_source`).
 

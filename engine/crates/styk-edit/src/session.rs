@@ -937,7 +937,10 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     }
     // `patch: true`: what the call changed in the report, for the read view (D19).
     if view.get("patch") == Some(&Value::Bool(true)) {
-        answer.push(("patch", { let _scope = crate::prof::scope("patch::diff"); crate::patch::diff(&before, report) }));
+        let (ops, named) = { let _scope = crate::prof::scope("patch::diff"); crate::patch::for_view(crate::patch::diff(&before, report)) };
+        answer.push(("patch", ops));
+        // The patch names payloads (pictures) by token: the view asks for their text when something reads them.
+        if named { answer.push(("payloads", Value::Bool(true))); }
         answer.push(("revision", Value::Num(editor.revision as f64)));
         answer.push(("depths", Value::array(vec![Value::Num(editor.undo.len() as f64), Value::Num(editor.redo.len() as f64)])));
         // The pool's draws the call did not take, in order: the editor's next ones.

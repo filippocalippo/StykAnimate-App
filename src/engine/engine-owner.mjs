@@ -29,6 +29,7 @@
  * place shows as a difference.
  */
 import {applyDocumentPatch} from './engine-patch.mjs';
+import {payloadText} from './engine-open.mjs';
 import {messageError} from '../localized-error.mjs';
 import {validationLabel} from '../validation-labels.mjs';
 import {motionParameterMessages} from '../camera-motion-localization.mjs';
@@ -212,7 +213,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     const {state} = answer;
     if (patch && answer.patch?.length) {
       const before = posesBefore(), layers = new Set(Object.keys(editor.report._styk?.layers?.byId ?? {}));
-      applyDocumentPatch(editor.report, answer.patch);
+      applyDocumentPatch(editor.report, answer.patch, answer.payloads ? payloadText : null);
       refresh(answer.patch, before);
       // A layer a call creates joins the layer focus the editor holds (the session left it free as it made it).
       editor._includeCreatedLayersInFocus(Object.keys(editor.report._styk?.layers?.byId ?? {}).filter(id => !layers.has(id)));

@@ -23,6 +23,9 @@ function engineOf(engine) {
   return found;
 }
 
+/** The text of a payload (a picture, a Pivot original) the read view names by token: the view asks when something reads it. */
+export const payloadText = token => engineOf().handle.payload_text(token);
+
 const EMPTY = new Uint8Array(0);
 const encoder = new TextEncoder();
 
@@ -47,7 +50,8 @@ const reads = new WeakMap();
 
 /**
  * The editor's read view of an opened document: its report as JavaScript objects, built piece by piece from
- * the engine's tree, and the indexes the editor adopts with it.
+ * the engine's tree, and the indexes the editor adopts with it. The pictures it holds are named, not read: their
+ * text comes from the engine when something asks (src/lazy-payload.mjs).
  */
 export class Opening {
   constructor(engine, handle) {
@@ -82,7 +86,7 @@ export class Opening {
       // Sequences the piece defines come first: its skeleton and later pieces name them.
       if (part.sequences) for (const {id, v} of JSON.parse(part.sequences)) shared.set(`S2R:${id}`, restoreLifted(v, sections, shared));
       part.free();
-      return restoreLifted(skeleton, sections, shared);
+      return restoreLifted(skeleton, sections, shared, payloadText);
     };
     const report = restore(handle.part(-1, 0));
     let work = 0;

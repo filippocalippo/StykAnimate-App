@@ -12,14 +12,14 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | Rust owner | Modules | Source at start | js | partial | ported | verified | removed | Covered by Rust | Partly covered | Deleted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `styk-doc` | 2 | 20 KiB | 1 | 1 | 0 | 0 | 0 | 0 % | 14 % | 0 % |
-| `styk-drawing` | 36 | 163 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
+| `styk-drawing` | 36 | 163 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 24 % | 4 % |
 | `styk-edit` | 92 | 598 KiB | 22 | 11 | 1 | 4 | 54 | 67 % | 9 % | 63 % |
 | `styk-engine` | 24 | 31 KiB | 6 | 0 | 0 | 0 | 18 | 56 % | 0 % | 56 % |
 | `styk-eval` | 80 | 303 KiB | 10 | 32 | 2 | 2 | 34 | 32 % | 55 % | 19 % |
 | `styk-export` | 14 | 59 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
 | `styk-formats` | 56 | 741 KiB | 22 | 7 | 1 | 22 | 4 | 65 % | 11 % | 7 % |
 | `styk-render` | 51 | 76 KiB | 4 | 1 | 0 | 0 | 46 | 35 % | 29 % | 35 % |
-| **Total** | 355 | 1990 KiB | 82 | 61 | 12 | 28 | 172 | 54 % | 19 % | 27 % |
+| **Total** | 355 | 1991 KiB | 82 | 61 | 12 | 28 | 172 | 54 % | 19 % | 27 % |
 
 ## Engine modules
 
@@ -507,6 +507,7 @@ Interface: stays in JS.
 | `src/keyframe-easing-popover.mjs` |  | stays |  |
 | `src/keyframe-easing-view.mjs` |  | stays |  |
 | `src/layer-timeline.mjs` |  | stays |  |
+| `src/lazy-payload.mjs` |  | stays | the editor view's picture fields: a getter that asks the engine for the text on first read (styk_doc::payload names it), and the copies that keep it unread |
 | `src/library-drag.mjs` |  | stays |  |
 | `src/library-hover-preview.mjs` |  | stays |  |
 | `src/library-matte.mjs` |  | stays |  |

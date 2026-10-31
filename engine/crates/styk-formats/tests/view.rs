@@ -93,3 +93,35 @@ fn pose_channels_that_share_their_keys_name_one_sequence() {
     assert!(two.sequences.is_empty(), "and defines nothing again");
     assert!(later.contains("\"name\":\"S2E:S2R:0\""), "{later}");
 }
+
+fn picture(prefix: &str, size: usize) -> Value {
+    Value::Blob(std::sync::Arc::new(styk_doc::Blob { prefix: std::sync::Arc::from(prefix), bytes: std::sync::Arc::from((0..size).map(|i| (i % 251) as u8).collect::<Vec<u8>>()) }))
+}
+
+#[test]
+fn a_picture_the_tree_holds_is_named_by_token_and_its_bytes_stay_out_of_the_piece() {
+    let mut asset = Obj::new();
+    asset.set("data_base64", picture("", 60_000));
+    asset.set("data_url", picture("data:image/png;base64,", 60_000));
+    asset.set("small", picture("", 100));
+    asset.set("name", Value::str("S2P:not a token"));
+    let record = Value::object(asset);
+    let part = ViewLifter::new().part(&record, "").unwrap();
+    assert!(part.payloads.is_empty(), "no picture bytes are copied out");
+    let skeleton = json::parse(&part.skeleton).unwrap();
+    let token = |key: &str| skeleton.get(key).and_then(Value::as_str).unwrap().strip_prefix("S2P:").unwrap().parse::<u64>().unwrap();
+    assert_ne!(token("data_base64"), token("data_url"), "each blob has its own token");
+    assert_eq!(styk_doc::payload::text(token("data_base64")).unwrap(), record.get("data_base64").unwrap().text().unwrap());
+    assert_eq!(styk_doc::payload::text(token("data_url")).unwrap(), record.get("data_url").unwrap().text().unwrap());
+    assert!(!skeleton.get("small").unwrap().as_str().unwrap().starts_with("S2P:"), "a small picture stays in the skeleton");
+    assert_eq!(skeleton.get("name").unwrap().as_str(), Some("S2E:S2P:not a token"), "a name that looks like a token is a name");
+}
+
+#[test]
+fn a_file_still_lifts_the_same_picture_into_its_payload_section() {
+    let mut asset = Obj::new();
+    asset.set("data_base64", picture("", 60_000));
+    let lifted = lift(&Value::object(asset), &[]).unwrap();
+    assert_eq!(lifted.payloads.len(), 60_000);
+    assert!(String::from_utf8_lossy(&lifted.skeleton).contains("S2S:1:0:60000"));
+}
