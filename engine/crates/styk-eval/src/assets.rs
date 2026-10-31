@@ -127,13 +127,15 @@ impl FineGlyphs {
 
 /// The packer's position: images are only ever appended, so a rectangle handed
 /// out stays valid for every later revision of the document.
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone)]
 struct Cursor {
     layer: u32,
     x: u32,
     y: u32,
     shelf: u32,
     used: bool,
+    /// Free space earlier pages left behind.
+    holes: Vec<Hole>,
 }
 
 /// The pixel size of an image from its header, without decoding it.
@@ -274,7 +276,22 @@ fn collect_outlined_glyphs(doc: &Document, out: &mut Vec<(Arc<Glyph>, f32)>) {
     }
 }
 
+/// Free space on a page that the packer left behind: images that no longer fit the
+/// shelf being filled go here before a new page is opened.
+#[derive(Clone, Copy)]
+struct Hole {
+    layer: u32,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+}
+
 /// Shelf packing into `PAGE`-sized layers, tallest images first, continuing at `cursor`.
+/// An image that fits neither the shelf being filled nor the next one takes the best-fitting
+/// free space an earlier page left (`cursor.holes`) before a new page is opened: a 4K picture
+/// leaves strips beside and below it, which a document of many large pictures would
+/// otherwise leave empty in every page (video memory is allocated per page).
 fn pack(sizes: &[Option<(u32, u32)>], entries: &mut [AtlasEntry], cursor: &mut Cursor, gutter: u32) {
     let max = PAGE - 2 * gutter;
     let mut order: Vec<usize> = (0..sizes.len()).filter(|&i| sizes[i].is_some()).collect();
@@ -289,28 +306,61 @@ fn pack(sizes: &[Option<(u32, u32)>], entries: &mut [AtlasEntry], cursor: &mut C
         let (w, h) = sizes[i].unwrap();
         std::cmp::Reverse(fit(w, h).1)
     });
-    let Cursor { mut layer, mut x, mut y, mut shelf, mut used } = *cursor;
+    let Cursor { mut layer, mut x, mut y, mut shelf, mut used, .. } = *cursor;
+    let mut holes = std::mem::take(&mut cursor.holes);
+    let keep = |holes: &mut Vec<Hole>, hole: Hole| {
+        if hole.w > 0 && hole.h > 0 {
+            holes.push(hole);
+        }
+    };
     for i in order {
         let (sw, sh) = sizes[i].unwrap();
         let (w, h) = fit(sw, sh);
         let (cw, ch) = (w + 2 * gutter, h + 2 * gutter);
-        if x + cw > PAGE {
-            x = 0;
-            y += shelf;
-            shelf = 0;
-        }
-        if y + ch > PAGE {
+        let (at_layer, at_x, at_y);
+        if used && x + cw <= PAGE && y + ch <= PAGE {
+            (at_layer, at_x, at_y) = (layer, x, y);
+            x += cw;
+            shelf = shelf.max(ch);
+        } else if !used || (x + cw > PAGE && y + shelf + ch <= PAGE) {
+            // The next shelf of this page (the first, for the first image).
+            if used {
+                keep(&mut holes, Hole { layer, x, y, w: PAGE - x, h: shelf });
+                y += shelf;
+            }
+            (at_layer, at_x, at_y) = (layer, 0, y);
+            x = cw;
+            shelf = ch;
+            used = true;
+        } else if let Some(index) = best_hole(&holes, cw, ch) {
+            let hole = holes.swap_remove(index);
+            (at_layer, at_x, at_y) = (hole.layer, hole.x, hole.y);
+            keep(&mut holes, Hole { layer: hole.layer, x: hole.x + cw, y: hole.y, w: hole.w - cw, h: ch });
+            keep(&mut holes, Hole { layer: hole.layer, x: hole.x, y: hole.y + ch, w: hole.w, h: hole.h - ch });
+        } else {
+            // A new page; what the old one has left stays available.
+            keep(&mut holes, Hole { layer, x, y, w: PAGE - x, h: PAGE - y });
+            keep(&mut holes, Hole { layer, x: 0, y: y + shelf, w: x, h: PAGE - y - shelf });
             layer += 1;
-            x = 0;
+            (at_layer, at_x, at_y) = (layer, 0, 0);
+            x = cw;
             y = 0;
-            shelf = 0;
+            shelf = ch;
         }
-        entries[i] = AtlasEntry { layer, x: x + gutter, y: y + gutter, w, h, source_w: sw, source_h: sh, valid: true };
-        used = true;
-        x += cw;
-        shelf = shelf.max(ch);
+        entries[i] = AtlasEntry { layer: at_layer, x: at_x + gutter, y: at_y + gutter, w, h, source_w: sw, source_h: sh, valid: true };
     }
-    *cursor = Cursor { layer, x, y, shelf, used };
+    *cursor = Cursor { layer, x, y, shelf, used, holes };
+}
+
+/// The free space that takes `cw` by `ch` with the least left over its shorter side (the
+/// earliest page, then the topmost, on a tie).
+fn best_hole(holes: &[Hole], cw: u32, ch: u32) -> Option<usize> {
+    holes
+        .iter()
+        .enumerate()
+        .filter(|(_, hole)| hole.w >= cw && hole.h >= ch)
+        .min_by_key(|(_, hole)| ((hole.w - cw).min(hole.h - ch), hole.layer, hole.y, hole.x))
+        .map(|(index, _)| index)
 }
 
 /// The path of a glyph. A subpath is closed only where the glyph says so
@@ -533,5 +583,60 @@ mod tests {
         }
         assert_eq!(entries[0].x + entries[0].w + 1, entries[1].x - crate::drawing::BORDER);
         assert_eq!(entries[1].x + entries[1].w + crate::drawing::BORDER, entries[2].x - 1);
+    }
+
+    /// Every stored rectangle with its gutter, as (layer, x0, y0, x1, y1).
+    fn rectangles(entries: &[AtlasEntry]) -> Vec<(u32, u32, u32, u32, u32)> {
+        entries.iter().filter(|e| e.valid).map(|e| (e.layer, e.x - GUTTER, e.y - GUTTER, e.x + e.w + GUTTER, e.y + e.h + GUTTER)).collect()
+    }
+
+    fn assert_disjoint_within_pages(entries: &[AtlasEntry]) {
+        let rects = rectangles(entries);
+        for (i, a) in rects.iter().enumerate() {
+            assert!(a.3 <= PAGE && a.4 <= PAGE, "rectangle {i} leaves its page: {a:?}");
+            for (j, b) in rects.iter().enumerate().skip(i + 1) {
+                let apart = a.0 != b.0 || a.3 <= b.1 || b.3 <= a.1 || a.4 <= b.2 || b.4 <= a.2;
+                assert!(apart, "rectangles {i} and {j} overlap: {a:?} {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn smaller_images_fill_the_strips_large_pictures_leave_on_earlier_pages() {
+        // Four 4K pictures take a page each (a second one fits neither beside nor below the first);
+        // the smaller images then go into the strips of those pages instead of opening new ones.
+        let mut sizes: Vec<Option<(u32, u32)>> = vec![Some((3840, 2160)); 4];
+        sizes.extend(vec![Some((1500, 1500)); 6]);
+        let mut entries = vec![AtlasEntry::default(); sizes.len()];
+        pack(&sizes, &mut entries, &mut Cursor::default(), GUTTER);
+        assert_disjoint_within_pages(&entries);
+        let pages = entries.iter().map(|e| e.layer).max().unwrap() + 1;
+        assert_eq!(pages, 4, "the shelf packer alone needed five pages for these");
+        for (entry, size) in entries.iter().zip(&sizes) {
+            let (w, h) = size.unwrap();
+            assert_eq!([entry.w, entry.h, entry.source_w, entry.source_h], [w, h, w, h], "packing never resizes an image that fits a page");
+        }
+    }
+
+    #[test]
+    fn images_added_later_take_free_space_without_moving_earlier_ones() {
+        let mut entries = vec![AtlasEntry::default(); 6];
+        let mut cursor = Cursor::default();
+        pack(&[Some((3840, 2160)); 3], &mut entries[..3], &mut cursor, GUTTER);
+        let placed: Vec<_> = entries[..3].iter().map(|e| (e.layer, e.x, e.y)).collect();
+        pack(&[Some((1500, 1500)); 3], &mut entries[3..], &mut cursor, GUTTER);
+        assert_eq!(entries[..3].iter().map(|e| (e.layer, e.x, e.y)).collect::<Vec<_>>(), placed);
+        assert_disjoint_within_pages(&entries);
+        assert_eq!(entries.iter().map(|e| e.layer).max().unwrap() + 1, 3, "the later images use the strips of the first pages");
+    }
+
+    #[test]
+    fn a_layout_within_one_page_is_the_shelf_layout() {
+        let sizes: Vec<Option<(u32, u32)>> = vec![Some((1000, 700)), Some((900, 700)), Some((2000, 500)), Some((300, 200))];
+        let mut entries = vec![AtlasEntry::default(); sizes.len()];
+        pack(&sizes, &mut entries, &mut Cursor::default(), GUTTER);
+        // Tallest first, shelves left to right: the layout the packer always made.
+        let at: Vec<_> = entries.iter().map(|e| (e.layer, e.x, e.y)).collect();
+        assert_eq!(at, vec![(0, 1, 1), (0, 1003, 1), (0, 1905, 1), (0, 1, 703)]);
     }
 }
