@@ -25,7 +25,7 @@ const {decodeDocument, buildContainerV2} = await import(`${repoUrl}/tests/suppor
 const {base64ToBytes} = await import(`${repoUrl}/src/base64.mjs`);
 const args = process.argv.slice(2);
 const option = args.indexOf('--styk');
-const styk = option >= 0 ? args.splice(option, 2)[1] : path.join(repo, `engine/target/release/styk${process.platform === 'win32' ? '.exe' : ''}`);
+const styk = option >= 0 ? args.splice(option, 2)[1] : path.join(process.env.CARGO_TARGET_DIR ?? path.join(repo, 'engine/target'), 'release', `styk${process.platform === 'win32' ? '.exe' : ''}`);
 const files = args.flatMap(arg => arg.endsWith('.txt') ? readFileSync(arg, 'utf8').split('\n').filter(Boolean) : [arg]);
 if (!files.length) { console.error('usage: node engine/tools/container-parity.mjs <file-or-list.txt>…'); process.exit(2); }
 const temp = mkdtempSync(path.join(os.tmpdir(), 'styk-parity-'));
