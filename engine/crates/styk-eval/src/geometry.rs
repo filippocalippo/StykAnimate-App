@@ -323,7 +323,30 @@ pub struct Scene {
     /// By object slot, the build ([`BuildMemory::built_in`]) that made its geometry, for a scene built with a memory (empty for any other):
     /// a number is never another build's in any memory, so an object with the same number has the same items.
     pub built_in: Vec<u64>,
+    /// Which scene this is: every build is numbered, and a scene is never changed once built, so what was made of a stamp is what
+    /// the scene still gives. Unlike an address, a stamp is never another scene's.
+    pub stamp: Stamp,
 }
+
+/// The number a build gives its scene (0: a scene that was not built, which nothing is remembered of).
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct Stamp(u64);
+
+impl Stamp {
+    /// The number, 0 if the scene was not built.
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+
+// What a scene is stamped with is not part of what it holds: scenes built twice print alike.
+impl std::fmt::Debug for Stamp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Stamp")
+    }
+}
+
+static STAMPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl Scene {
     /// The actual styled/pose-choice figure of this object's geometry.
@@ -1478,12 +1501,12 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
     scene.items.reserve(total_items);
     scene.points.reserve(total_points);
     for &slot in &frame.draw_order {
-        let Some(b) = built[slot as usize].take() else { continue };
-        // A build the memory also holds is copied; any other is the splice's own.
-        let mut b = Arc::try_unwrap(b).unwrap_or_else(|shared| (*shared).clone());
+        // Read in place: a build the memory also holds is shared, and only the parts the scene owns are copied.
+        let Some(b) = built[slot as usize].as_deref() else { continue };
         let base = scene.points.len() as u32;
         scene.points.extend_from_slice(&b.points);
-        for raw in &mut b.geometry.raw_segments {
+        let mut geometry = b.geometry.clone();
+        for raw in &mut geometry.raw_segments {
             raw.points = (raw.points.0 + base, raw.points.1 + base);
         }
         // Movieclip content brings its own figures, owners and chains.
@@ -1502,13 +1525,13 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
         let owner_base = scene.owners.len() as u32;
         scene.owners.extend_from_slice(&b.owners);
         scene.owner_scales.extend_from_slice(&b.owner_scales);
-        scene.clip_vfx.extend(b.clip_vfx);
+        scene.clip_vfx.extend_from_slice(&b.clip_vfx);
         let chain_base = scene.chains.len() as u32;
         for c in &b.chains {
             scene.chains.push(c.iter().map(|&(o, p)| (o + owner_base, p)).collect());
         }
         let mesh_base = scene.meshes.len() as u32;
-        scene.meshes.extend(b.meshes);
+        scene.meshes.extend_from_slice(&b.meshes);
         let depth_base = scene.depths.len() as u32;
         scene.depths.extend_from_slice(&b.depths);
         let transition_base = scene.transitions.len() as u32;
@@ -1523,7 +1546,8 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
                 else { pose.entries.iter().any(|(_, stack)| crate::vfx::active(stack).next().is_some()) }
             }) || frame.vfx.as_ref().and_then(|vfx| vfx.object(slot)).is_some_and(|vfx| !vfx.figure.is_empty() || vfx.attached.is_some() || !vfx.segments.is_empty())
         });
-        for mut it in b.measured {
+        for it in &b.measured {
+            let mut it = it.clone();
             it.points = (it.points.0 + base, it.points.1 + base);
             it.depth = (it.depth.0 + depth_base, it.depth.1 + depth_base);
             if it.mesh != NO_MESH {
@@ -1531,7 +1555,8 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
             }
             scene.measured.push(it);
         }
-        for mut it in b.items {
+        for it in &b.items {
+            let mut it = it.clone();
             it.export_vfx |= export_vfx;
             it.points = (it.points.0 + base, it.points.1 + base);
             it.depth = (it.depth.0 + depth_base, it.depth.1 + depth_base);
@@ -1549,9 +1574,10 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
             }
             scene.items.push(it);
         }
-        scene.objects[slot as usize] = b.geometry;
+        scene.objects[slot as usize] = geometry;
     }
     scene.figure_of = fig_of;
+    scene.stamp = Stamp(STAMPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1);
     scene.account_buffers();
     scene
 }

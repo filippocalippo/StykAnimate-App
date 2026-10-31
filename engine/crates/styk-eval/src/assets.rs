@@ -57,7 +57,13 @@ pub struct Assets {
     /// Finer tessellations of glyphs drawn large ([`Assets::glyph_at`]), made when first
     /// drawn and shared by the revisions of one document.
     fine: Arc<FineGlyphs>,
+    /// Which assets these are: every [`Assets::extended`] is numbered, unlike the address it lives at (an address is reused once the
+    /// assets are dropped). 0 for assets that were not built.
+    id: u64,
 }
+
+/// Numbers the assets [`Assets::extended`] makes.
+static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Curve flattening of the tessellations a document's assets hold: within this many
 /// glyph units of the outline (level 0).
@@ -144,6 +150,11 @@ pub(crate) fn dimensions(data: &ImageData) -> Option<(u32, u32)> {
 }
 
 impl Assets {
+    /// The number these assets were made under (see the field).
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
     pub fn build(doc: &Document) -> Assets {
         Assets::default().extended(doc)
     }
@@ -153,6 +164,7 @@ impl Assets {
     /// only new glyphs are tessellated.
     pub fn extended(&self, doc: &Document) -> Assets {
         let mut assets = self.clone();
+        assets.id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let known = assets.atlas.len().min(doc.images.len());
         let sizes: Vec<Option<(u32, u32)>> = crate::par::map(&doc.images[known..], 8, dimensions);
         assets.atlas.resize(doc.images.len(), AtlasEntry::default());

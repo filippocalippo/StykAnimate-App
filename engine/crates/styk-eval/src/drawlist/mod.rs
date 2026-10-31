@@ -908,9 +908,21 @@ pub enum Layer {
 #[derive(Default)]
 pub struct EncodeMemory {
     /// What the kept objects were encoded under: the atlas their pictures are placed in, whether effects are bypassed.
-    context: Option<(usize, bool, bool)>,
+    context: Option<(u64, bool, bool)>,
     /// By slot: the build that made the object, how many items it has, and what they were encoded as.
     objects: std::collections::HashMap<u32, (u64, usize, Arc<ObjectOut>)>,
+    /// The onion skins the last frame was drawn with, encoded: a ghost is the same scene every step of a gesture.
+    ghosts: Vec<(GhostKey, Arc<Encoded>)>,
+}
+
+/// What a ghost is encoded from: the scene (by its stamp), the assets its pictures are placed in, and the settings that change how it is encoded.
+#[derive(PartialEq)]
+struct GhostKey {
+    stamp: u64,
+    assets: u64,
+    bypass: bool,
+    tint: Option<[u8; 3]>,
+    hidden: Vec<bool>,
 }
 
 /// One scene's objects, encoded and ready to be placed in any order.
@@ -1174,7 +1186,7 @@ fn encode_scene(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidd
         let objects = crate::par::map(&runs, 16, encode_run).into_iter().map(|out| out.map(Arc::new)).collect();
         return Encoded { runs, objects, of_slot, fx };
     };
-    let context = (assets as *const Assets as usize, bypass, current_drawing);
+    let context = (assets.id(), bypass, current_drawing);
     if memory.context != Some(context) {
         memory.objects.clear();
         memory.context = Some(context);
@@ -1542,11 +1554,11 @@ pub fn encode_composed_remembering(doc: &Document, assets: &Assets, scene: &Scen
     encode_composed_over(doc, assets, scene, overrides, ghosts, order, Some(memory))
 }
 
-fn encode_composed_over(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>, memory: Option<&mut EncodeMemory>) -> DrawList {
+fn encode_composed_over(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>, mut memory: Option<&mut EncodeMemory>) -> DrawList {
     let bypass = overrides.bypass_effects;
-    let current = encode_scene(assets, overrides.live, scene, overrides.hidden, overrides.translations, None, bypass, true, memory);
+    let current = encode_scene(assets, overrides.live, scene, overrides.hidden, overrides.translations, None, bypass, true, memory.as_deref_mut());
     let camera_stack = if bypass { None } else { scene.vfx.as_ref().map(|v| &v.scene).filter(|s| !s.is_empty()) };
-    let ghost_scenes: Vec<Encoded> = ghosts.iter().map(|ghost| encode_scene(assets, overrides.live, ghost.scene, ghost.hidden, &[], ghost.tint, bypass, false, None)).collect();
+    let ghost_scenes = encode_ghosts(assets, overrides.live, ghosts, bypass, memory);
     // Generated effects: each draw encoded once, placed in the frame and in the camera image.
     let batch = overrides.generators.filter(|_| !bypass);
     // The exportSVG predicate runs on visible source drawables, not on emitted
@@ -1640,6 +1652,30 @@ fn encode_composed_over(doc: &Document, assets: &Assets, scene: &Scene, override
     DrawList { composited_export, prims, paints, points, groups, passes, background_prims, layers, materials, glyphs }
 }
 
+/// The ghosts encoded, each as the last frame encoded it when it is the same scene under the same settings. A live cel is drawn in
+/// the ghosts too, so nothing is kept while there is one.
+fn encode_ghosts(assets: &Assets, live: Option<LiveView<'_>>, ghosts: &[Ghost<'_>], bypass: bool, mut memory: Option<&mut EncodeMemory>) -> Vec<Arc<Encoded>> {
+    let cacheable = live.is_none();
+    let before = memory.as_deref_mut().filter(|_| cacheable).map(|memory| std::mem::take(&mut memory.ghosts)).unwrap_or_default();
+    let mut now = Vec::with_capacity(ghosts.len());
+    let encoded = ghosts.iter().map(|ghost| {
+        let key = GhostKey { stamp: ghost.scene.stamp.get(), assets: assets.id(), bypass, tint: ghost.tint, hidden: ghost.hidden.to_vec() };
+        let kept = (cacheable && key.stamp != 0).then(|| before.iter().position(|(held, _)| *held == key)).flatten();
+        let out = match kept {
+            Some(at) => before[at].1.clone(),
+            None => Arc::new(encode_scene(assets, live, ghost.scene, ghost.hidden, &[], ghost.tint, bypass, false, None)),
+        };
+        if cacheable && key.stamp != 0 {
+            now.push((key, out.clone()));
+        }
+        out
+    }).collect();
+    if let Some(memory) = memory {
+        memory.ghosts = now;
+    }
+    encoded
+}
+
 fn close_ghost(b: &mut Builder, open: &mut Option<(u32, usize)>, ghosts: &[Ghost<'_>]) {
     if let Some((ghost, target)) = open.take() {
         b.close(target, ghosts[ghost as usize].opacity, true);
@@ -1647,7 +1683,7 @@ fn close_ghost(b: &mut Builder, open: &mut Option<(u32, usize)>, ghosts: &[Ghost
 }
 
 /// One ghost object, in the ghost's group (opened when another ghost's was).
-fn place_ghost(b: &mut Builder, open: &mut Option<(u32, usize)>, ghosts: &[Ghost<'_>], scenes: &[Encoded], ghost: u32, slot: u32) {
+fn place_ghost(b: &mut Builder, open: &mut Option<(u32, usize)>, ghosts: &[Ghost<'_>], scenes: &[Arc<Encoded>], ghost: u32, slot: u32) {
     let Some(source) = ghosts.get(ghost as usize) else { return };
     if source.opacity <= 0.0 {
         return;
