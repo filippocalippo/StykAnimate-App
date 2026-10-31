@@ -16,6 +16,7 @@ import {invalidateFrameIndex} from './frame-ids.mjs';
 import {editorVfxMethods} from './editor-vfx.mjs';
 import {editorHandleCommandMethods} from './editor-handle-commands.mjs';
 import {prepareLoad, prepareLoadNow} from './engine/engine-open.mjs';
+import {frameRow, frameSummary} from './lazy-table.mjs';
 import {editorMovieclipMethods} from './editor-movieclips.mjs';
 import {editorLayerSheetMethods} from './editor-layer-sheet.mjs';
 import {validateLayerSheet} from './layer-sheet.mjs';
@@ -55,6 +56,8 @@ export class Editor extends EventTarget {
     this.load(demo ? createDemo() : emptyDocument());
   }
   get frame() { return this._authoredPoseEdit?.frame ?? this.report.keyframes[this.frameIndex]; }
+  /** What the interface shows of the stored frame on show: its background, colour override and figure count. A tick of playback or scrubbing asks this, not for the record. */
+  get frameSummary() { return this._authoredPoseEdit ? frameRow(this._authoredPoseEdit.frame) : frameSummary(this.report.keyframes, this.frameIndex); }
   get selectionFrame() { return this._authoredPoseEdit?.frame ?? this.evaluatedFrame; }
   get selectedUid() {
     if (!this.selectedUids?.has(this._selectedUid)) this._selectedUid = [...(this.selectedUids ?? [])].at(-1) ?? null;
@@ -196,7 +199,7 @@ export class Editor extends EventTarget {
     this._animationEdit = null; this._authoredPoseEdit = null;
     this._revision = this._savedRevision = ++this._revisionSerial;
     this._nextUid = prepared.nextUid; this._nextFrameIdentity = prepared.nextFrameIdentity;
-    this._layerUidCounts = prepared.layerUidCounts; this._layerSeenUids = prepared.layerSeenUids; this._layerGroups = prepared.layerGroups;
+    this._layerSeenUids = prepared.layerSeenUids; this._layerGroups = prepared.layerGroups;
     this._layerRevision = (this._layerRevision ?? 0) + 1; this._layerDescriptors = null; this._layerUidArrays = new Map();
     this._invalidate({timing: true}); invalidateFrameIndex(report);
     this.tick=initial.tick;this._timeline=initial.timeline;this._timelineAnimation=initial.animation;this._timelineEndTick=animationEndTick({_styk:{animation:initial.animation}});
@@ -242,7 +245,7 @@ export class Editor extends EventTarget {
     const nextTick = clamp(finite(tick, 'Timeline tick'), 0, allowBeyondEnd ? 10000000 : Math.max(0, this.totalTicks - 1));
     let low = 0, high = this.timeline.length - 1;
     while (low < high) { const mid = Math.ceil((low + high) / 2); if (this.timeline[mid].start <= nextTick) low = mid; else high = mid - 1; }
-    this.tick = nextTick; this.frameIndex = low; this._invalidate(); this._emit('seek'); return evaluate ? this.evaluatedFrame : this.frame;
+    this.tick = nextTick; this.frameIndex = low; this._invalidate(); this._emit('seek'); return evaluate ? this.evaluatedFrame : undefined;
   }
 
 

@@ -127,10 +127,10 @@ pub fn collapse_unfetched(ops: Value, after: &Value, known: &Known) -> Value {
     Value::array(out)
 }
 
-/// What a table knows of a record without holding it (src/lazy-table.mjs `ROW`): a keyframe's identity, a figure type's `figure_row`.
+/// What a table knows of a record without holding it (src/lazy-table.mjs `ROW`): a keyframe's `frame_row`, a figure type's `figure_row`.
 fn row_of(table: &str, record: &Value) -> Value {
     match table {
-        "keyframes" => record.path(&["_styk", "frameId"]).cloned().unwrap_or(Value::Null),
+        "keyframes" => crate::frame_row(record),
         _ => crate::figure_row(record),
     }
 }
@@ -186,11 +186,11 @@ pub fn unfetch_entries(ops: Value, known: &Known) -> Value {
     if changed { Value::array(rewritten) } else { ops }
 }
 
-/// How the figure counts of the poses changed between `before` and `after`: `[[uid, delta], …]` over the keyframes and the retained
-/// pose sources, the poses that left counted down and those that joined counted up. Poses are told apart by node, as the patch's
-/// array rebuilds are; the cost follows the poses that changed, not the document.
-pub fn layer_delta(before: &Value, after: &Value) -> Value {
-    // In the order the poses are met (the ones that left first), so the figures come out in the order the view counted them.
+/// How the figure counts of the poses changed between `before` and `after`: `(uid, delta)` over the keyframes and the retained pose sources, the
+/// poses that left counted down and those that joined counted up, in the order the figures are met (the poses that left first). Poses are told
+/// apart by node, as the patch's array rebuilds are, and only a table that changed is looked at; a figure is found by a map, so the cost is that of
+/// the poses that changed.
+pub fn pose_changes(before: &Value, after: &Value) -> Vec<(u32, i64)> {
     let mut poses: Vec<(Value, i64)> = Vec::new();
     let mut at: HashMap<usize, usize> = HashMap::new();
     let tables = |root: &Value| -> (Option<Value>, Option<Value>) { (root.get("keyframes").cloned(), root.path(&["_styk", "frameSources"]).cloned()) };
@@ -214,17 +214,63 @@ pub fn layer_delta(before: &Value, after: &Value) -> Value {
         count(a, -1);
         count(b, 1);
     }
-    let mut deltas: Vec<(f64, i64)> = Vec::new();
+    let mut deltas: Vec<(u32, i64)> = Vec::new();
+    let mut place: HashMap<u32, usize> = HashMap::new();
     for (record, net) in poses.iter().filter(|(_, net)| *net != 0) {
-        for object in record.get("objects").and_then(Value::elements).map(|items| items.iter().collect::<Vec<_>>()).unwrap_or_default() {
-            let Some(uid) = object.get("unique_id").and_then(Value::as_f64) else { continue };
-            match deltas.iter_mut().find(|(seen, _)| *seen == uid) {
-                Some((_, amount)) => *amount += net,
-                None => deltas.push((uid, *net)),
-            }
+        let Some(objects) = record.get("objects").and_then(Value::elements) else { continue };
+        for object in objects.iter() {
+            let Some(uid) = crate::record::uid(&object) else { continue };
+            let slot = *place.entry(uid).or_insert_with(|| { deltas.push((uid, 0)); deltas.len() - 1 });
+            deltas[slot].1 += net;
         }
     }
-    Value::array(deltas.into_iter().filter(|(_, amount)| *amount != 0).map(|(uid, amount)| Value::array(vec![Value::Num(uid), Value::Num(amount as f64)])).collect())
+    deltas.retain(|(_, amount)| *amount != 0);
+    deltas
+}
+
+/// How many poses hold each figure, over the keyframes and the retained pose sources, for the tables as the last call left them. A call moves it by
+/// the poses it changed (`pose_changes`) and says which figures began or ceased to appear in any pose: the read view keeps which figures each layer
+/// holds, and needs no more. Built from the document when the tables are not those the index was left at (the first call, or a call that changed
+/// the document with a view that did not ask).
+#[derive(Default)]
+pub struct LayerIndex {
+    keyframes: Option<Value>,
+    sources: Option<Value>,
+    counts: HashMap<u32, i64>,
+}
+
+impl LayerIndex {
+    /// The figures that appeared in a pose and those that no longer appear in any, through the call that turned `before` into `after`.
+    pub fn moved(&mut self, before: &Value, after: &Value) -> (Vec<u32>, Vec<u32>) {
+        fn same(held: &Option<Value>, table: Option<&Value>) -> bool {
+            match (held, table) { (Some(a), Some(b)) => a.same_node(b), (None, None) => true, _ => false }
+        }
+        fn sources(root: &Value) -> Option<&Value> {
+            root.path(&["_styk", "frameSources"])
+        }
+        if !same(&self.keyframes, before.get("keyframes")) || !same(&self.sources, sources(before)) {
+            self.counts.clear();
+            for table in [before.get("keyframes"), sources(before)].into_iter().flatten() {
+                let records: Vec<Value> = match table { Value::Obj(object) => object.values().to_vec(), other => other.elements().map(|items| items.iter().collect()).unwrap_or_default() };
+                for record in records {
+                    for object in record.get("objects").and_then(Value::elements).map(|items| items.iter().collect::<Vec<_>>()).unwrap_or_default() {
+                        if let Some(uid) = crate::record::uid(&object) { *self.counts.entry(uid).or_default() += 1; }
+                    }
+                }
+            }
+        }
+        let (mut appeared, mut gone) = (Vec::new(), Vec::new());
+        for (uid, delta) in pose_changes(before, after) {
+            let held = self.counts.entry(uid).or_default();
+            let (was, now) = (*held, *held + delta);
+            *held = now;
+            if now <= 0 { self.counts.remove(&uid); }
+            if was <= 0 && now > 0 { appeared.push(uid); } else if was > 0 && now <= 0 { gone.push(uid); }
+        }
+        self.keyframes = after.get("keyframes").cloned();
+        self.sources = sources(after).cloned();
+        (appeared, gone)
+    }
 }
 
 /// `ops` as the read view receives them: the payloads they would carry (the pictures and originals a file lifts
@@ -600,10 +646,10 @@ mod tests {
             let sources = root.get_mut("_styk").unwrap().make_obj().unwrap().get_mut("frameSources").unwrap().make_obj().unwrap();
             sources.remove("a");
         }
-        let delta = text(&layer_delta(&before, &after));
+        let changes = pose_changes(&before, &after);
         // Left: pose 1 (figure 1) and the source (figure 2); joined: figure 3, then the new pose (figures 1 and 3).
-        assert_eq!(delta, "[[3,2],[2,-1]]", "figure 1 lost one pose and gained one");
-        assert_eq!(text(&layer_delta(&before, &before)), "[]");
+        assert_eq!(changes, vec![(3, 2), (2, -1)], "figure 1 lost one pose and gained one");
+        assert!(pose_changes(&before, &before).is_empty());
     }
 
     #[test]
@@ -641,11 +687,33 @@ mod tests {
             table[0].make_obj().unwrap().set("d", Value::Num(5.0));
             table[1].make_obj().unwrap().set("d", Value::Num(6.0));
         }
-        assert_eq!(text(&for_lazy(diff(&before, &after), &after, &held)), r#"[{"p":["keyframes",0,"d"],"v":5},{"p":["keyframes",1],"lz":"f1"}]"#);
+        assert_eq!(text(&for_lazy(diff(&before, &after), &after, &held)), r#"[{"p":["keyframes",0,"d"],"v":5},{"p":["keyframes",1],"lz":{"id":"f1","background":null,"color":null,"figures":0}}]"#);
         // A rebuild names the new records by their rows.
         let mut inserted = before.clone();
         inserted.make_obj().unwrap().get_mut("keyframes").unwrap().make_arr().unwrap().insert(1, parse(r#"{"_styk":{"frameId":"new"},"d":9}"#));
-        assert_eq!(text(&for_lazy(diff(&before, &inserted), &inserted, &held)), r#"[{"p":["keyframes"],"a":[0,{"lz":"new"},1]}]"#);
+        assert_eq!(text(&for_lazy(diff(&before, &inserted), &inserted, &held)), r#"[{"p":["keyframes"],"a":[0,{"lz":{"id":"new","background":null,"color":null,"figures":0}},1]}]"#);
+    }
+
+    #[test]
+    fn the_layer_index_says_which_figures_appeared_and_which_no_pose_holds_any_more() {
+        let before = parse(r#"{"keyframes":[{"objects":[{"unique_id":1},{"unique_id":2}]},{"objects":[{"unique_id":1}]}],"_styk":{"frameSources":{"a":{"objects":[{"unique_id":2}]}}}}"#);
+        let mut after = before.clone();
+        {
+            let root = after.make_obj().unwrap();
+            let keyframes = root.get_mut("keyframes").unwrap().make_arr().unwrap();
+            keyframes[1] = parse(r#"{"objects":[{"unique_id":3}]}"#);
+            keyframes.push(parse(r#"{"objects":[{"unique_id":1},{"unique_id":3}]}"#));
+            root.get_mut("_styk").unwrap().make_obj().unwrap().get_mut("frameSources").unwrap().make_obj().unwrap().remove("a");
+        }
+        let mut index = LayerIndex::default();
+        // Figure 3 appeared; figure 2 is still in the first pose, figure 1 in two.
+        assert_eq!(index.moved(&before, &after), (vec![3], vec![]));
+        // The first pose goes: figure 2 is in no pose, figure 1 still in the last. The index is the one the last call left, not counted again.
+        let mut last = after.clone();
+        last.make_obj().unwrap().get_mut("keyframes").unwrap().make_arr().unwrap().remove(0);
+        assert_eq!(index.moved(&after, &last), (vec![], vec![2]));
+        // A call the index was not told of (the tables are not those it was left at) is counted from the document before it.
+        assert_eq!(index.moved(&before, &before), (vec![], vec![]));
     }
 
     #[test]

@@ -21,10 +21,21 @@
  * through patches (a record the session replaces comes whole).
  */
 const ROW = {
-  keyframes: frame => frame?._styk?.frameId ?? null,
+  keyframes: frameRow,
   figure_types: figureRow,
 };
-const IDENTITY = {keyframes: row => row, figure_types: row => row.id};
+const IDENTITY = {keyframes: row => row.id, figure_types: row => row.id};
+
+/** The row of a keyframe: its identity, background and colour override, and how many figures it holds (styk_edit::frame_row). */
+export function frameRow(frame) {
+  return {id: frame?._styk?.frameId ?? null, background: frame?.background_id ?? null, color: frame?._stykBackgroundColor ?? null, figures: frame?.objects?.length ?? 0};
+}
+
+/** What the interface shows of the stored frame at `index` of `frames` (its background, colour override and figure count), read without fetching the record. */
+export function frameSummary(frames, index) {
+  const table = tableOf(frames);
+  return table ? table.rowAt(index) : frameRow(frames[index]);
+}
 
 /** The row of a figure type (see `ROW`). */
 export function figureRow(figure) {
@@ -44,11 +55,22 @@ export const tableOf = array => tables.get(array);
 /** How many callers need every record to stay (`holdingAll`), and the tables that outgrew their limit meanwhile. */
 let holding = 0;
 const overfull = new Set();
+/**
+ * Keeps every record the tables fetch until the returned function is called: the tests' verify mode (src/engine/engine-owner.mjs) compares the
+ * view with the session's document, and a record written in place that the table gave back before the comparison would not show.
+ */
+export function holdAllRecords() {
+  holding++;
+  let held = true;
+  return () => { if (held) { held = false; if (--holding === 0) trim(); } };
+}
+const trim = () => { for (const table of overfull) table.release(null); overfull.clear(); };
+
 /** Runs `read` without the tables giving records back: a read of the whole document (the tests' comparison of the view with the session's document). */
 export function holdingAll(read) {
   holding++;
   try { return read(); } finally {
-    if (--holding === 0) { for (const table of overfull) table.release(null); overfull.clear(); }
+    if (--holding === 0) trim();
   }
 }
 
@@ -122,6 +144,13 @@ class Table {
     if (!slot) throw new Error(`The document patch sets ${this.name}[${index}], which the table does not have.`);
     if (slot.record !== undefined) this.held--;
     slot.record = undefined; slot.row = row; slot.used = 0; this.positions = null;
+  }
+
+  /** The row of the record at `index`, without fetching it. */
+  rowAt(index) {
+    const slot = this.slots[index];
+    if (!slot) return ROW[this.name](undefined);
+    return slot.record === undefined ? slot.row : ROW[this.name](slot.record);
   }
 
   /** The row of every record, in order, without fetching any. */

@@ -482,8 +482,8 @@ function bandSession() {
 }
 /** The scene's background as the crumb's chip shows it: the frame's colour override, else its background. */
 function sceneBackground() {
-  const frame = editor.frame, background = editor.report.backgrounds?.find((item) => item.background_id === frame?.background_id);
-  const override = frame?._stykBackgroundColor;
+  const frame = editor.frameSummary, background = editor.report.backgrounds?.find((item) => item.background_id === frame.background);
+  const override = frame.color ?? undefined;
   const paint = backgroundPaint(override === undefined ? background : { kind: 2, color: override });
   return { css: paintCSS(paint), label: paint.type === "solid" ? hexColor(paint.stops[0].color).toUpperCase() : interfaceText('app.valueValue1Gradient', {value: {messageKey: 'colorPicker.' + paint.type}, value1: ''}) };
 }
@@ -1990,7 +1990,7 @@ function updateUI() {
 }
 /** The scene's size and the figure count. (#selection-summary is the shell's: studio-shell writes the scope there.) */
 function updateStatus() {
-  localizedText($("object-count"), 'counts.figures', {count: editor.frame.objects.length});
+  localizedText($("object-count"), 'counts.figures', {count: editor.frameSummary.figures});
 }
 function renderLayers() {
   if ($("layer-count"))

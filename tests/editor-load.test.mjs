@@ -38,7 +38,7 @@ test('cooperative import publishes once with identical validated poses, UID/laye
   const sync=new Editor({demo:false}).load(clone(report),'Imported.piv',{initialFrameIndex:'last'});
   assert(yields>1);assert.deepEqual(editor.report,sync.report);
   assert.equal(editor.frameIndex,49);assert.equal(editor.tick,147);assert.equal(editor.selectedUid,1);
-  assert.deepEqual(editor._layerUidCounts,sync._layerUidCounts);assert.deepEqual(editor.layers,sync.layers);
+  assert.deepEqual(editor._layerGroups,sync._layerGroups);assert.deepEqual(editor._layerSeenUids,sync._layerSeenUids);assert.deepEqual(editor.layers,sync.layers);
   assert.equal(editor._nextUid,81);assert.equal(editor._nextFrameIdentity,51);
   assert.deepEqual(events,[{kind:'document',index:49,tick:147}]);
   assert(editor.lastLoadTimings.slices>1);assert(Number.isFinite(editor.lastLoadTimings.commitMs));

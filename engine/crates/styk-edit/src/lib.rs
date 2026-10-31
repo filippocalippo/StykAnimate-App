@@ -120,6 +120,17 @@ pub fn figure_row(figure: &Value) -> Value {
     Value::object(row)
 }
 
+/// What the interface's read view knows of a keyframe without holding it (src/lazy-table.mjs `frameRow`): its `id` (`_styk.frameId`), `background` (`background_id`),
+/// colour override (`_stykBackgroundColor`) and how many `figures` it holds. A field the keyframe lacks is `null`.
+pub fn frame_row(frame: &Value) -> Value {
+    let mut row = Obj::new();
+    row.set("id", frame.path(&["_styk", "frameId"]).cloned().unwrap_or(Value::Null));
+    row.set("background", frame.get("background_id").cloned().unwrap_or(Value::Null));
+    row.set("color", frame.get("_stykBackgroundColor").cloned().unwrap_or(Value::Null));
+    row.set("figures", Value::Num(frame.get("objects").and_then(Value::elements).map_or(0, |items| items.len()) as f64));
+    Value::object(row)
+}
+
 /// The timeline of a document (`editor.timeline`): where each row starts and how many ticks it lasts.
 pub fn timeline_rows(report: &Value) -> Vec<(f64, f64)> {
     timeline::rows(report).into_iter().map(|row| (row.start, row.count)).collect()
@@ -300,6 +311,8 @@ pub struct Editor {
     /// (`_layerUidCounts`), and every figure seen so far (`_layerSeenUids`). Read
     /// from the document when first needed, then kept with every command.
     pub(crate) uid_counts: Option<(HashMap<u32, i64>, std::collections::HashSet<u32>)>,
+    /// How many poses hold each figure, as the read view's layer index needs it (`patch::LayerIndex`); kept by the answers of calls whose view is lazy.
+    pub(crate) layer_index: Option<patch::LayerIndex>,
     /// `auto_key` of [`Options`], which the app may change between calls.
     pub(crate) auto_key: bool,
     /// Pose sources this session captured, in order (`_generatedFrameSources`).
@@ -459,6 +472,7 @@ impl Editor {
             next_frame_identity,
             next_uid: 1,
             uid_counts: None,
+            layer_index: None,
             auto_key: options.auto_key,
             generated_sources: Vec::new(),
             pending_source_layer_changes: Vec::new(),
@@ -1278,6 +1292,13 @@ mod views_tests;
 #[cfg(test)]
 mod figure_row_tests {
     use super::*;
+
+    #[test]
+    fn a_frame_row_says_what_the_inspector_shows_of_the_frame() {
+        let row = |text: &str| styk_doc::json::to_string(&frame_row(&styk_doc::json::parse(text.as_bytes()).unwrap()));
+        assert_eq!(row(r#"{"_styk":{"frameId":"frame-3"},"background_id":2,"_stykBackgroundColor":4278190335,"objects":[{},{}]}"#), r#"{"id":"frame-3","background":2,"color":4278190335,"figures":2}"#);
+        assert_eq!(row(r#"{}"#), r#"{"id":null,"background":null,"color":null,"figures":0}"#);
+    }
 
     fn row(text: &str) -> String {
         styk_doc::json::to_string(&figure_row(&styk_doc::json::parse(text.as_bytes()).unwrap()))

@@ -2,7 +2,7 @@
 // in a bounded cache, and kept in step with the session by its patches (src/engine/engine-patch.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fetchedRecords, figureRow, holdingAll, lazyKeyedTable, lazyTable, tableOf, useRecords} from '../src/lazy-table.mjs';
+import {fetchedRecords, figureRow, frameRow, frameSummary, holdingAll, lazyKeyedTable, lazyTable, tableOf, useRecords} from '../src/lazy-table.mjs';
 import {drawingFigures, figureForCel, figureRows, findFigureType, hasDrawingFigures, movieclipFigures, nextFigureTypeId} from '../src/figure-types.mjs';
 import {createImageFigure} from '../src/media-authoring.mjs';
 import {createDrawingFigure} from '../src/drawing-model.mjs';
@@ -18,7 +18,7 @@ function source(count) {
 }
 const table = (count, limit) => {
   const from = source(count);
-  return {from, array: lazyTable('keyframes', count, from.records.map(record => record._styk.frameId), from, limit)};
+  return {from, array: lazyTable('keyframes', count, from.records.map(frameRow), from, limit)};
 };
 const held = array => fetchedRecords({keyframes: array}).keyframes;
 
@@ -123,9 +123,9 @@ test('the engine owns a document whose view fetches its keyframes: edits, undo a
   assert.equal(now(), session.report_json());
   assert.notEqual(now(), moved);
   assert.ok(held(editor.report.keyframes).length <= 64, 'the cache is bounded');
-  const counted = new Map(editor._layerUidCounts);
+  const kept = [...editor._layerGroups].map(([id, members]) => [id, [...members].sort()]);
   holdingAll(() => editor._initializeLayers());
-  assert.deepEqual([...counted], [...editor._layerUidCounts], 'the layer index the patches kept is the one counted from the whole document');
+  assert.deepEqual(kept, [...editor._layerGroups].map(([id, members]) => [id, [...members].sort()]), 'the layer index the patches kept is the one counted from the whole document');
 });
 
 // --- the figure types and the pose sources -------------------------------------------------------------------------------------------
@@ -212,7 +212,7 @@ test('a patch names a record the view does not hold by its row, and the view fet
   const {from, array} = table(6);
   const root = {keyframes: array};
   array[1];
-  applyDocumentPatch(root, [{p: ['keyframes', 1], lz: 'frame-1b'}, {p: ['keyframes'], a: [0, {lz: 'inserted'}, 1, 2, 3, 4, 5]}]);
+  applyDocumentPatch(root, [{p: ['keyframes', 1], lz: {id: 'frame-1b', background: 0, color: null, figures: 1}}, {p: ['keyframes'], a: [0, {lz: {id: 'inserted', background: 0, color: null, figures: 1}}, 1, 2, 3, 4, 5]}]);
   assert.deepEqual(held(root.keyframes), [], 'the record replaced is given up, and the one the patch names is not read');
   const keyframes = tableOf(root.keyframes);
   assert.equal(keyframes.positionOf('inserted'), 1);
@@ -221,4 +221,41 @@ test('a patch names a record the view does not hold by its row, and the view fet
   assert.deepEqual(from.asked, [1]);
   assert.equal(root.keyframes[1].objects[0].unique_id, 2, 'read: fetched from the session at its place');
   assert.deepEqual(from.asked, [1, 1]);
+});
+
+test('verify mode sees a record written in place, even with more records than the table holds', () => {
+  const document = emptyDocument(), figure = document.figure_types[0];
+  document.keyframes = Array.from({length: 150}, (_, index) => createFrame([createObject(figure, 1, 100 + index, 100)], 2));
+  const {editor} = ownedEditorSync({demo: false, layerTimeline: true}, document, {verify: true});
+  editor.selectFrame(3);
+  editor.frame.objects[0].root_x = 999;
+  editor.selectFrame(140);
+  editor.select(1);
+  assert.throws(() => editor.moveSelection(1, 1), /differs from the read view/, 'the write is not given back by the comparison that counts the figures of every pose');
+});
+
+test('what the interface shows of the frame on show is read from the table, not from the record', () => {
+  const {from, array} = table(5);
+  from.records[3].background_id = 7; from.records[3]._stykBackgroundColor = 0xff112233;
+  const rows = lazyTable('keyframes', 5, from.records.map(frameRow), from);
+  assert.deepEqual(frameSummary(rows, 3), {id: 'frame-3', background: 7, color: 0xff112233, figures: 1});
+  assert.deepEqual(from.asked, [], 'no record was read');
+  assert.deepEqual(frameSummary(from.records, 3), frameSummary(rows, 3), 'a plain array answers the same');
+  void array;
+});
+
+test('playback and scrubbing read no keyframe: a seek that does not evaluate, the summary of the frame on show', () => {
+  const document = emptyDocument(), figure = document.figure_types[0];
+  document.keyframes = Array.from({length: 80}, (_, index) => createFrame([createObject(figure, 1, 100 + index, 100)], 2));
+  const {editor} = ownedEditorSync({demo: false, layerTimeline: true}, document, {verify: false});
+  const table = tableOf(editor.report.keyframes), reads = [];
+  const records = table.records, fetch = records.fetch.bind(records);
+  records.fetch = (name, at) => { reads.push(at); return fetch(name, at); };
+  for (let tick = 0; tick < 160; tick += 2) {
+    assert.equal(editor.seek(tick, {evaluate: false}), undefined);
+    assert.equal(editor.frameSummary.figures, 1);
+  }
+  assert.deepEqual(reads, [], 'the frames passed were not fetched');
+  assert.equal(editor.frame.objects.length, 1);
+  assert.equal(reads.length, 1, 'the one read of a frame is the one asked for');
 });

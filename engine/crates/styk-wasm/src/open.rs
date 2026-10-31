@@ -283,7 +283,7 @@ impl OpenedDocument {
         let tree = &opened.tree;
         let column = |table: &str, id: &dyn Fn(&Value) -> Value| Value::array(tree.get(table).and_then(Value::elements).map(|records| records.iter().map(|record| id(&record)).collect()).unwrap_or_default());
         let mut rows = Obj::new();
-        rows.set("keyframes", column("keyframes", &|frame| frame.path(&["_styk", "frameId"]).cloned().unwrap_or(Value::Null)));
+        rows.set("keyframes", column("keyframes", &styk_edit::frame_row));
         rows.set("figure_types", column("figure_types", &styk_edit::figure_row));
         out.set("rows", Value::object(rows));
         out.set("timeline", Value::array(styk_edit::timeline_rows(tree).into_iter().map(|(start, count)| Value::array(vec![Value::Num(start), Value::Num(count)])).collect()));

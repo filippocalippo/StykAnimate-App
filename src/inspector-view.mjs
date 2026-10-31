@@ -218,11 +218,11 @@ function drawingDescriptor(editor, drawing, number, hotkeyLabel) {
 }
 
 function sceneDescriptor(editor, number, propertyState) {
-  const report = editor.report, frame = editor.frame, colorState = propertyState?.('scene_color'), backgroundState = propertyState?.('scene_background');
-  const background = report.backgrounds?.find(item => item.background_id === (backgroundState?.value ?? frame.background_id));
+  const report = editor.report, frame = editor.frameSummary, colorState = propertyState?.('scene_color'), backgroundState = propertyState?.('scene_background');
+  const background = report.backgrounds?.find(item => item.background_id === (backgroundState?.value ?? frame.background));
   const raw = colorState?.value ?? background?.color ?? 0xffffffff;
   const color = typeof raw === 'string' && /^#[0-9a-f]{6}$/i.test(raw) ? raw : `#${(raw & 0xffffff).toString(16).padStart(6, '0')}`;
-  const name = background?.name || interfaceText("inspectorView.white"), figures = editor.frame.objects.length, frames = editor.totalTicks ?? report.keyframes.length;
+  const name = background?.name || interfaceText("inspectorView.white"), figures = frame.figures, frames = editor.totalTicks ?? report.keyframes.length;
   const scopes = editor._movieclipScopes ?? [];
   return {kind: 'scene', target: {name: scopes.length ? scopes.map(scope => scope.name).join(' › ') : interfaceText("inspectorView.scene"), ...(!scopes.length?{nameKey:'inspectorView.scene'}:{}), glyph: scopes.length ? 'frame' : 'scene'}, sections: [
     {id: 'summary', rows: [{kind: 'meta', text: interfaceText("inspectorView.s", {value: plural(figures, 'figure'), value2: plural(frames, 'frame'), value3: num(frames / report.fps)}), textKey: "inspectorView.s", textParams: {value: plural(figures, 'figure'), value2: plural(frames, 'frame'), value3: num(frames / report.fps)}}]},

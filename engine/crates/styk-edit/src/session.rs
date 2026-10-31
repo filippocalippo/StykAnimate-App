@@ -978,8 +978,11 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
             // A view that fetches the records of its tables on demand holds some of them: the others come whole.
             if let Some(known) = crate::patch::known(&view) {
                 ops = crate::patch::for_lazy(ops, report, &known);
-                // Such a view cannot tell from the records it replaced how many poses hold each figure: the session tells it.
-                answer.push(("layerDelta", crate::patch::layer_delta(&before, report)));
+                // Such a view cannot tell from the records it replaced which figures a pose gained or lost altogether: the session tells it.
+                let after = report.clone();
+                let (appeared, gone) = editor.layer_index.get_or_insert_with(Default::default).moved(&before, &after);
+                let uids = |list: Vec<u32>| Value::array(list.into_iter().map(|uid| Value::Num(uid as f64)).collect());
+                answer.push(("layerChanges", response_value(vec![("appeared", uids(appeared)), ("gone", uids(gone))])));
             }
             crate::patch::for_view(ops)
         };

@@ -68,7 +68,7 @@ the drawing cels, the next free id, the movieclips and the telemetry's and the G
 the types they then show. The timeline rows (`timeline`, `styk_edit::timeline_rows`) are sent with the open for the first frame. A reader that
 walks every record of a table fetches every record (and sees the table give the first ones back as it goes): none does on an interactive path,
 and the tests that read the whole view do it inside `holdingAll`. What still does: the validators of a document the interface exports
-or imports (`validateScene`, `validateAnimationDocument`, `serialize`) and a stored frame draft being saved (`storedFrameReport`).
+or imports (`validateScene`, `validateAnimationDocument`, `serialize`) and a stored frame draft being saved on leaving a movieclip (`storedFrameReport`).
 
 How patches keep a lazy view in step: the call's view names the records each table holds (`lazy`:
 `fetchedRecords`), and the session never sends a record the view does not hold (`styk_edit::patch::for_lazy`). A change inside one
@@ -80,8 +80,10 @@ sources before, 16 KB now), and undoing and redoing a pose key no longer carries
 and the places of those it does not (a record not fetched is the session's at its place, and every unfetched record is equal to the
 session's: verify mode checks the held ones). A copy the interface makes to show a variation of the document (a motion-path edit's virtual
 report, a drawing's first stroke) holds records the session does not have and gives none back. The table a patch replaces is retired: its records are still read, but one it never fetched raises, as
-it can no longer say which document state it was. Such an answer also carries `layerDelta`, how many poses gained or lost each
-figure, which updates the editor's layer index without the replaced records (a view cannot count what it never held). A patch the
+it can no longer say which document state it was. Such an answer also carries `layerChanges`, the figures that began to appear in a
+pose and those that no pose holds any more, which updates the editor's layer index without the replaced records (a view cannot tell what it never
+held). The session keeps the counts behind it (`patch::LayerIndex`), moved by the poses a call changed, found by node, so the cost follows the
+change and the answer stays a few bytes; verify mode counts the figures again from the whole document and compares. A patch the
 session makes over its own document (a motion-path edit's virtual report) fetches the record it changes and leaves the table in use.
 
 The pictures and originals the tree holds as bytes (a `Blob` in `data_base64`, `data_url`, `styk_tiles` or `source_base64`

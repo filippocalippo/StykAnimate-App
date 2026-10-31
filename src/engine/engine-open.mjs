@@ -148,7 +148,7 @@ export class Opening {
     useRecords(report, this.records);
     return {
       report, opening: this, nextFrameIdentity: indexes.nextFrameIdentity, nextUid: indexes.nextUid,
-      layerUidCounts: new Map(indexes.layerUidCounts), layerSeenUids: new Set(indexes.layerSeenUids),
+      layerSeenUids: new Set(indexes.layerSeenUids),
       layerGroups: new Map(indexes.layerGroups.map(([id, uids]) => [id, new Set(uids)])),
       // Where each keyframe starts, as the engine's timeline has it.
       timeline: meta.timeline.map(([start, count], index) => ({index, start, count})),
