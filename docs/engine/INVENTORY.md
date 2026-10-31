@@ -13,7 +13,7 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `styk-doc` | 2 | 20 KiB | 1 | 1 | 0 | 0 | 0 | 0 % | 14 % | 0 % |
 | `styk-drawing` | 36 | 163 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
-| `styk-edit` | 92 | 599 KiB | 22 | 11 | 1 | 4 | 54 | 67 % | 9 % | 63 % |
+| `styk-edit` | 92 | 598 KiB | 22 | 11 | 1 | 4 | 54 | 67 % | 9 % | 63 % |
 | `styk-engine` | 24 | 31 KiB | 6 | 0 | 0 | 0 | 18 | 56 % | 0 % | 56 % |
 | `styk-eval` | 80 | 303 KiB | 10 | 32 | 2 | 2 | 34 | 32 % | 55 % | 19 % |
 | `styk-export` | 14 | 59 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |

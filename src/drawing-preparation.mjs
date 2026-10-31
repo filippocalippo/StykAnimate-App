@@ -2,6 +2,9 @@ import {messageError} from './localized-error.mjs';
 import {TILE,TILE_BYTES,assertTileCoordinates} from './drawing-tiles.mjs';
 
 const DRAWING_PREPARATION_BYTES=1024*1024;
+/** Replacements up to this size apply on the interface thread in the commit itself (about 13 µs a tile, measured: a stroke's
+ * undo is 100 tiles): a worker round trip would wait behind whatever the pixel worker is publishing. Larger ones are prepared in batches. */
+const DRAWING_SYNC_BYTES=4*1024*1024;
 const BATCH_TILES=DRAWING_PREPARATION_BYTES/TILE_BYTES;
 const aborted=()=>messageError(new DOMException('', 'AbortError'), "errors.drawingPreparation.drawingPreparationCancelledOrSuperseded", {});
 
@@ -16,7 +19,7 @@ export function validateDrawingChanges(tiles){
   }
 }
 export function needsDrawingPreparation(root,direction){
-  let bytes=0;for(const command of drawingPixelCommands(root,direction))for(const tile of command.tiles??[])if(tile[direction]!=null){bytes+=TILE_BYTES;if(bytes>DRAWING_PREPARATION_BYTES)return true;}return false;
+  let bytes=0;for(const command of drawingPixelCommands(root,direction))for(const tile of command.tiles??[])if(tile[direction]!=null){bytes+=TILE_BYTES;if(bytes>DRAWING_SYNC_BYTES)return true;}return false;
 }
 
 /** Owns detached replacements until a synchronous editor transaction adopts

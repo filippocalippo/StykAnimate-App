@@ -32,7 +32,9 @@ How the engine runs in the app (`engine/crates/styk-engine`,
 - `src/engine/engine.mjs`: loads the module with shared memory, starts
   `navigator.hardwareConcurrency - 1` workers, at most 8 (`engine-worker.mjs`), and
   without cross-origin isolation runs the same module without workers through
-  `pump()`. `join` hands another thread what it needs to join the engine (the
+  `pump()`. `src/engine/engine-start.mjs`, the page's first script (index.html), loads the engine and requests the scene canvas's
+  graphics device while the application's modules are still arriving; the application's `loadEngine()` and `createStage()` take
+  what it started (`prepareStage`, `stageHandoff`). `join` hands another thread what it needs to join the engine (the
   compiled module, the memory, a stack size, the progress counter's address).
 - The export worker (`src/engine/engine-export-worker.mjs`, one per export, see
   [rendering.md](rendering.md#exports)): joins the shared memory like a preparation
@@ -146,10 +148,18 @@ Mobile pin compatibility: `Engine::stage` now returns a checked result and
 ## Building
 
 `npm run engine:build` (`scripts/engine-build.mjs`): nightly `nightly-2026-09-15`,
-`-Z build-std=std,panic_abort`, `+atomics,+bulk-memory,+mutable-globals`,
+`-Z build-std=std,panic_abort`, `+atomics,+bulk-memory,+mutable-globals,+simd128`,
 imported shared memory (maximum 2 GiB), wasm-bindgen 0.2.129 `--target web`,
 output in `src/engine/pkg/` ([D9](decisions/0009-generated-engine-build-output.md)).
 Never strip the profile ([D10](decisions/0010-keep-wasm-symbols.md)).
+
+All three modules (engine, codec, drawing) are compiled with `+simd128`: WebAssembly SIMD is in Chrome 91, Firefox 89 and
+Safari 16.4, the last being the floor `OffscreenCanvas` already sets for the web build (`src/web-support.js` explains a browser
+that lacks it). The compiler only vectorises where the IEEE result is identical, and WebAssembly has no fused multiply-add
+(relaxed SIMD stays off), so stored arithmetic is unchanged: `styk-math`'s results in the built module equal V8's `Math`
+bit for bit (checked on 1.4 million inputs for `sin`, `cos`, `asin`, `acos`, `log`, `atan2`, `hypot`).
+
+`npm run engine:build -- --dev` is the iteration build (profile `wasm-dev`: no LTO, 256 codegen units, incremental, D10 kept): a change in `styk-eval` rebuilds in about 25 s against about 5 minutes for the release profile. It is for iterating and diagnosis, and no number measured on it is a result. The first build on a machine compiles the dependencies once (about 8 minutes).
 
 ## Memory growth
 

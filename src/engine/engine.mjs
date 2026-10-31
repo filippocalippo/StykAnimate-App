@@ -96,6 +96,7 @@ async function load({workers = defaultWorkerCount(), deviceMemory = globalThis.n
     })));
   }
   const progress = new Int32Array(memory.buffer, handle.progress_address(), 1);
+  const stages = stageHandoff(canvas => Stage.create(canvas, handle));
   let pumping = false;
   /** Without workers, background work runs here in slices that leave the frame its time. */
   const pump = () => {
@@ -134,13 +135,40 @@ async function load({workers = defaultWorkerCount(), deviceMemory = globalThis.n
     memoryMaximumBytes: reserved.maximumBytes,
     /** Where the memory is: linear memory, bytes the allocator handed out, and what the engine holds of it. */
     memory: () => JSON.parse(handle.memory()),
-    createStage: canvas => Stage.create(canvas, handle),
+    /**
+     * Starts the stage over `canvas` ahead of its owner (src/engine/engine-start.mjs, while the application's modules are
+     * still arriving): the `createStage` for the same canvas takes it instead of starting another.
+     */
+    prepareStage: canvas => stages.prepare(canvas),
+    createStage: canvas => stages.take(canvas),
     /** An edit session on the document `json` exactly as the editor holds it (D19). */
     editSession: (json, state, revision) => EditSession.from_document(json, state, revision),
     destroy() {
       handle.stop();
       for (const worker of pool) worker.terminate();
       loading = null;
+    },
+  };
+}
+
+/**
+ * Stages started ahead of their owner: `prepare(canvas)` starts the stage over a canvas, and `take(canvas)` hands that stage
+ * over once (starting one when none was prepared), so a canvas never gets two.
+ */
+export function stageHandoff(start) {
+  const prepared = new WeakMap();
+  return {
+    prepare(canvas) {
+      if (prepared.has(canvas)) return;
+      const stage = start(canvas);
+      // The owner that takes the stage reports its failure; until then it is not an unhandled rejection.
+      stage.catch(() => {});
+      prepared.set(canvas, stage);
+    },
+    take(canvas) {
+      const stage = prepared.get(canvas);
+      prepared.delete(canvas);
+      return stage ?? start(canvas);
     },
   };
 }

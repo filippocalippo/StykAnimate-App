@@ -2,7 +2,7 @@ import {tupleMessages, messageTuple, localizedAttribute, messageAttributes, loca
 
 import {updateInspectorDOM} from './inspector-dom.mjs';
 
-import {t as interfaceText, Localization, normalizeLocale, SUPPORTED_LOCALES, messageText as sayDialog} from './localization.mjs';
+import {t as interfaceText, Localization, loadLocale, normalizeLocale, SUPPORTED_LOCALES, messageText as sayDialog} from './localization.mjs';
 
 import { icon } from "./icons.mjs";
 import { PIVOT_HANDLE_COLORS } from "./canvas-interactions.mjs";
@@ -395,7 +395,7 @@ export class EditorSettings {
           this.showError(error),
         );
     });
-    this.dialog.addEventListener("change", (event) => {
+    this.dialog.addEventListener("change", async (event) => {
       const input = event.target.closest("[data-setting]");
       if (!input) return;
       let value =
@@ -405,6 +405,10 @@ export class EditorSettings {
             ? Number(input.value)
             : input.value;
       if (input.dataset.setting === "onionOpacity") value /= 100;
+      // A language is chosen once its messages are in.
+      if (input.dataset.setting === "locale") {
+        try { await loadLocale(value); } catch (error) { this.showError(error); return; }
+      }
       this.commit({ [input.dataset.setting]: value });
     });
     this.dialog.addEventListener("input", (event) => {

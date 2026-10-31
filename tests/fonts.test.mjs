@@ -13,7 +13,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import hostModule from '../desktop/web-host.cjs';
 import english from '../src/locales/en.mjs';
-import packs from '../src/locales/locale-packs.mjs';
+import locales from '../src/locales/locale-index.mjs';
 import {parseCss} from '../scripts/check-css.mjs';
 import {canvasFont, onFontsReady} from '../src/ui/font-loading.mjs';
 
@@ -78,10 +78,11 @@ test('index.html preloads the Inter latin face and nothing else', () => {
   for (const preload of preloads) assert.deepEqual({...preload, href: undefined}, {href: undefined, as: 'font', type: 'font/woff2', crossorigin: true});
 });
 
-test('the fonts cover every shipped language that Inter supports', () => {
-  assert.equal(packs.length, 27);
-  for (const {locale, messages} of packs) {
-    const captions = Object.values(locale.id === 'en' ? english : messages)
+test('the fonts cover every shipped language that Inter supports', async () => {
+  assert.equal(locales.length, 27);
+  for (const locale of locales) {
+    const messages = locale.id === 'en' ? english : (await import(`../src/locales/messages/${locale.id}.mjs`)).default;
+    const captions = Object.values(messages)
       .flatMap(value => typeof value === 'string' ? [value] : Object.values(value));
     const text = [locale.nativeName, ...captions].join('');
     const letters = [...new Set(text.match(/[\p{L}\p{M}]/gu))];

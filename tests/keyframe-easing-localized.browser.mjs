@@ -10,7 +10,7 @@ page.on('pageerror',error=>errors.push(error.message));
 const settle=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 // The easing popover's own wiring must not depend on English copy: translated labels once left its close button unfound.
 try {
-  await page.goto(backend.origin);await page.waitForFunction(()=>window.styk?.ready);
+  await page.goto(backend.origin);await page.waitForFunction(()=>window.styk?.ready);await page.evaluate(async()=>{const {loadLocales}=await import('/src/localization.mjs');await loadLocales();});
   await page.evaluate(async()=>{const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');const report=emptyDocument();report.keyframes=[0,60].map(x=>createFrame([createObject(report.figure_types[0],1,200+x,250)],12));styk.settingsUI.commit({timelineMode:'advanced'});styk.editor.load(report);styk.fit();styk.localization.setLocale('it');});
   await settle();
   const popover=page.locator('.styk-easing-popover'),keyAt=tick=>page.evaluate(tick=>styk.editor.report._styk.layerSheet.tracks['layer-1'].keys.find(key=>key.tick===tick),tick);

@@ -40,7 +40,7 @@ triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
 | `pipeline.rs` | the one WGSL pipeline (`prim.wgsl`) for every kind, bind layouts ([D8](decisions/0008-renderer-without-storage-buffers.md)) |
 | `frame.rs` | one frame: isolation layer passes by round and depth, each depth's effect stacks after its passes, then the frame pass (MSAA ×4, resolved once) |
 | `isolation.rs` | the layer atlas (8 pages of at least the frame's size, grown for larger effect layers, two for depth parity) and `plan_rounds`: layers that do not fit render in full-resolution rounds, the frame drawn between rounds |
-| `images.rs` | the sprite atlas (texture array of 4,096² pages laid out by `styk_eval::assets`), uploads of decoded images and drawing tiles |
+| `images.rs` | the sprite atlas (texture array of 4,096² pages laid out by `styk_eval::assets`: shelves, and the free space an earlier page left before a new page opens), uploads of decoded images and drawing tiles |
 | `resources.rs` | GPU record layouts, lookup tables in float textures, buffers |
 | `present.rs` | copy into the host's surface, read-back |
 | `view.rs` | world → output transform, artboard |

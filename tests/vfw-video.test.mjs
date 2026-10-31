@@ -6,7 +6,8 @@ import {execFileSync} from 'node:child_process';
 import {rgbaToVfwBgr24} from '../src/vfw-pixels.mjs';
 import {getVfwCapabilities, encodeVfwVideo, configureVfwCodec} from '../src/vfw-video-export.mjs';
 import {VfwExportControls} from '../src/vfw-export-controls.mjs';
-import {interfaceLocalization, Localization} from '../src/localization.mjs';
+import {interfaceLocalization, Localization, loadLocales} from '../src/localization.mjs';
+await loadLocales();
 import service from '../desktop/vfw-export-service.cjs';
 import {missingFixture} from './helpers/local-fixtures.mjs';
 

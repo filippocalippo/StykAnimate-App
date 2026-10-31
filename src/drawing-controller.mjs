@@ -313,7 +313,9 @@ export class DrawingController {
     else{layer=this.editor.createDrawingLayer();this.onStatus(interfaceText('drawingController.createdLayer', {name:layer.name}), 'drawingController.createdLayer', {name:layer.name});}
     this.editor.selectSheetLayer(layer.id);this.state.selectedTrackId=layer.id;this.getTimeline()?.selectTrack?.(layer.id);this.sync();this.onUI();
   }
-  enter(){if(this.active)return;this.beforeEdit();this.prior={handles:this.state.handles,tool:this.state.tool,rotation:this.state.view.rotation??0,flip:Boolean(this.state.view.flip),documentToken:this.editor._documentToken,layerId:this.editor.activeLayerId,uid:this.editor.selectedUid,joint:this.editor.selectedJoint};this.active=true;this.state.handles=false;this.state.tool='drawing-brush';this.state.drawing=true;this.cursor=null;this.bind();
+  /** The wet ink canvas, made when Draw opens so the first stroke does not pay for its layout. */
+  wetInk(){return this.wet??=new WetInk(this.viewport,this.overlay);}
+  enter(){if(this.active)return;this.beforeEdit();this.prior={handles:this.state.handles,tool:this.state.tool,rotation:this.state.view.rotation??0,flip:Boolean(this.state.view.flip),documentToken:this.editor._documentToken,layerId:this.editor.activeLayerId,uid:this.editor.selectedUid,joint:this.editor.selectedJoint};this.active=true;this.state.handles=false;this.state.tool='drawing-brush';this.state.drawing=true;this.cursor=null;this.bind();this.wetInk();
     const layers=this.editor.layers.filter(layer=>isDrawingLayer(layer)&&!layer.locked&&layer.visible),target=layers.find(l=>l.id===this.editor.activeLayerId)||layers.find(l=>l.id===this.lastLayer)||layers.at(-1);if(target){this.editor.selectSheetLayer(target.id);this.state.selectedTrackId=target.id;}this.sync();this.prepareVisible();this.onUI();this.onRender();}
   exit(){
     if(!this.active)return;
@@ -456,17 +458,17 @@ export class DrawingController {
     }
     for(const sample of pending.samples)this.move({...sample,pointerId:event.pointerId});if(pending.released)this.finish();this.onRender();
   }
-  /** Remember the colour that just painted, most recent first. */
-  rememberColor(){rememberRecentColor(this.settings.color);}
+  /** Remember the colour that painted, most recent first, once the stroke is over: the palette's refresh must not land on the first samples of the pen. */
+  rememberColor(color){setTimeout(()=>rememberRecentColor(color),0);}
   saveLibrary(){try{globalThis.localStorage?.setItem(BRUSH_LIBRARY_KEY,JSON.stringify(this.library));}catch{/* Brush library storage is optional. */}}
   /** Open a stroke session on a loaded surface and make it the gesture. */
   beginStroke(target,surface,{id,erase=false}){
-      if(!erase)this.rememberColor();
       // Painting keeps the selection outline as a clip mask; a moved or
       // resized floating selection is committed first.
       this.settleFloating();const color=this.settings.color.slice(1).match(/../g).map(n=>parseInt(n,16));
       const d=drawingMetadata(target.figure),s={id:++this.strokeId,target,surface,seq:0,sent:new Set(),before:new Map(),pending:[],posted:new Map(),outstanding:0,ended:false,cancelled:false,erase,revision:this.editor.revision,owner:this.owner};
       s.done=new Promise(resolve=>s.resolveDone=resolve);
+      if(!erase){const painted=this.settings.color;s.done.then(()=>this.rememberColor(painted));}
       this.sessions.set(s.id,s);this.gesture={id,target,surface,kind:'stroke',session:s};
       // Painting owns the UI thread: publication and thumbnails wait it out.
       s.owner.busy=true;
@@ -482,7 +484,7 @@ export class DrawingController {
       this.strokePaths(s);
       // Wet ink previews worker brushes it can match closely; exact-only modes skip it.
       const br=s.brush;s.inflight=[];s.wetStyle=!s.erase&&br.blend==='normal'&&br.tip==='round'&&!br.alphaLock&&!settings.mask&&br.flow>=.5&&br.hardness>=.5&&br.roundness>=.9&&br.scatter<=.2?{color:this.settings.color,opacity:br.opacity*(br.texture>.3?.85:1)}:null;
-      if(s.wetStyle){this.wet??=new WetInk(this.viewport,this.overlay);this.wetSession=s;}
+      if(s.wetStyle){this.wetInk();this.wetSession=s;}
       return s;
   }
   /** The current brush settings for a stroke, with lengths scaled from

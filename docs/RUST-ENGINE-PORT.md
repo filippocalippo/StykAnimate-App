@@ -9,9 +9,54 @@ nothing here should need re-deriving.
   open-source history: commit IDs written earlier on this page and in `docs/engine/` are the old ones,
   and [`engine/history-map.tsv`](../engine/history-map.tsv) gives the commit each became.
 - **Status in one line:** the cutover is complete: the Rust engine is the app's only engine
-  (2026-10-25); the next phase is performance.
-- **Handoff:** the next section: how the app works now, gate results, what remains, known
-  differences and the next phase. The milestone log stops at the cutover; git history has the rest.
+  (2026-10-25); the performance phase is in progress (running record below).
+- **Handoff:** the next two sections: the performance phase's running record, then how the app works
+  now, gate results, what remains and known differences. The milestone log stops at the cutover; git
+  history has the rest.
+
+## Performance phase: running record (started 2026-10-31)
+
+**Goal.** Opening, playing, scrubbing, posing, dragging, drawing, undoing and saving respond on the next
+display refresh on the heaviest projects, no hitch or flicker, far less memory; obvious side by side with
+`main`. Targets, floors and rules are the owner's brief: the scoreboard in `scripts/benchmark-app-summary.mjs`
+holds the target table once it lands.
+
+**How the work runs.** The orchestrator plans, briefs, reviews and merges; Sonnet subagents implement, each in its own
+worktree (`~/.t3/worktrees/StykAnimate-webapp/`), branch merged into `engine-rust` when its checks pass. Tooling outside the repository, in
+`perf/` beside the checkout: `perf/briefs/common.md` (rules every agent follows), `perf/slot.mjs` (machine slots: builds and tests
+never overlap a benchmark), `perf/env.sh` (shared `CARGO_TARGET_DIR`, commit identity), `perf/bench.mjs` until the harness lands in `scripts/`,
+`perf/baseline/all/summary.md` (baseline: `main` against `fd0536cd`), `perf/research/` (findings). Checkouts `wt/perf-main` and `wt/perf-rust` are what
+gates measure; a gate points `wt/perf-rust` at the commit and rebuilds its `src/engine/pkg` as a release build.
+
+**Baseline (median of 3, release build; `main` / `fd0536cd`).**
+
+| Row | main | baseline | Target |
+| --- | ---: | ---: | ---: |
+| Start until usable | 2.6 s | 2.7 s | ≤ 1 s |
+| Open tdd2 / svr_uriel / testingupload | 20.3 / 10.5 / 5.8 s | 5.0 / 4.0 / 10.6 s | ≤ 1 / 0.6 / 0.8 s |
+| Memory tdd2 settled / session peak | 2.4 / 4.1 GB | 3.9 / 5.2 GB | ≤ 0.4 GB over the empty app / ≤ 1.5 GB |
+| Play stutters tdd2 / svr_uriel; worst interval svr_uriel | 1 / 0; 51 ms | 7 / 11; 127 ms | 0 / 0; ≤ frame + 1 refresh |
+| Draws per animation frame | 1 | 2, flickering | 1 |
+| Scrub p95 tdd2 / svr_uriel; jump p95; next-frame key p95 | 42 / 115; 90; 22 ms | 14 / 48; 46; 19 ms | ≤ 9; ≤ 16; ≤ 9 ms |
+| Joint drag p50 / p95 tdd2; frames per second | 3.9 / 7.5 ms; 110–115 | 9.9 / 10.9 ms; 61–70 | ≤ 3 / ≤ 7 ms; one per input |
+| Drag freeze testingupload; release→committed svr_uriel | 49; 50 ms | 111; 46 ms | ≤ 16; ≤ 10 ms |
+| Undo / redo svr_uriel | 34 / 42 ms | 25 / 35 ms | ≤ 10 ms |
+| Brush p95; undo stroke median / worst | 5.8; 22 / 23 ms | 8.8; 35 / 251 ms | ≤ 7; ≤ 10 / ≤ 16 ms |
+| Save tdd2 / testingupload | 10.9 / 6.4 s | 8.7 / 11.8 s | ≤ 1 / ≤ 0.8 s |
+
+**How it runs since 2026-10-31 10:30 (owner's steer: waiting was the main cost).** Land first, measure per batch. A chunk merges when its focused tests pass, plus a fresh-context review if it touches saving, undo, formats or the draw path. Agents take no exclusive benchmarks (the queue refuses them); they diagnose with `slot.mjs probe` on `engine-build.mjs --dev`, whose numbers are never results. Per batch: `perf/batch.sh prepare|suites|bench <name>` on `wt/perf-now` (the merged tree; `wt/perf-rust` stays the baseline). A round's sentinel of the baseline and the CPU of other processes say whether it was disturbed.
+
+**Batch 1 landed (2026-10-31, `2a96d9f9`: the harness, one draw per frame in playback, the engine started early, one language loaded).** Playback rows, release build, median of 3, measured under other load (below), main / baseline / now: stutters tdd2 1 / 7 / 0 and svr_uriel 0 / 11 / 0; worst frame interval svr_uriel 51 / 127 / 62.6 ms; tdd2 88.4 / 90.5 / 57.9 ms; playback flicker tdd2 9 / 44 / 9 and svr_uriel 8 / 35 / 8; worst UI freeze in play svr_uriel 35 / 90 / 21 ms. Draws per tick: 1 (73 draws for 73 frames in the smoke; the benchmark's row had a bug, fixed in `a026e9f0`).
+Every other row of that run read about 1.7 times slower than the baseline, on an engine binary identical to the baseline's: the run had no baseline beside it and other processes were using the CPU (a browser alone took 1.4 cores in the comparison below). A controlled comparison (`perf/e1`: old and new harness on baseline and merged code, in turns) shows no difference on scrub, jump, drag or undo, so those rows did not regress and are not results of this batch. Startup was too noisy to read (2.6 to 6.0 s across those runs), so the early start has no measured gain yet.
+Gate of batch 1: `npm run check`, `npm test`, the Rust workspace, the drawing and playback smokes pass. Save and video smokes (missing prerequisites in the checkout, supplied since) and `engine:parity` (stopped while clearing orphans) did not complete: they run on batch 2. **The web test fails** at "Native save and open do not download the Pivot codec", **on the baseline too**, so it predates this phase, but the checks after it have not been running: fix next.
+
+**Merged since, for batch 2.** Stroke undo without waiting on the pixel worker (the 251 ms spike's measured cause; median still needs GPU upload work); the Pivot original's `keep` started with the open.
+
+**In flight.** C: cold WebAssembly (first heavy calls run at about a fifth of optimised speed: the cause of the `.styk` regression). O2: picture payloads and the embedded original out of the read view. S: the Rust session writes `.styk`, removing the JavaScript save path and the session's memory peak. M: GPU picture memory (1.85 GB of tdd2's 3 GB above the empty app, 2.2 times the raw pixels). D's first step (`d0ee204a`, one scene per frame) in review by V3. B: `+simd128`.
+
+**Next.** D: drag follow-ups, then scrub, jump and next-frame key on its boundary. U: GPU upload per stroke undo (about 20 MB rewritten per undo). T: serve the app over a custom scheme with module preload, shorten the 1 s stage creation. P: svr_uriel scrub flicker (35 of 37 counted as artifacts on main and engine-rust alike), the rest of the playback tail. Then the lazy read view, the WebAssembly high-water mark (519 MiB dead), JS heap growth in use (svr_uriel +730 MiB), baselines of the new benchmark steps (`perf/baseline-v2-driver.sh`) before anyone works on those rows, the web test, the long tail, the final gate and report.
+
+**Floors recorded.** None yet.
 
 ## Handoff (2026-10-26, cutover complete)
 

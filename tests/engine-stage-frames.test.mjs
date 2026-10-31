@@ -311,3 +311,23 @@ test('after an error the poses are sent again: the engine may not hold what the 
   assert.equal(sent(), 2, 'and only once');
   renderer.destroy();
 });
+
+test('a stage prepared ahead of its owner is taken once, and a failed start reaches whoever takes it', async () => {
+  const {stageHandoff} = await import('../src/engine/engine.mjs');
+  const canvas = {}, other = {};
+  const started = [];
+  const handoff = stageHandoff(surface => { started.push(surface); return Promise.resolve({surface}); });
+  handoff.prepare(canvas);
+  handoff.prepare(canvas);
+  assert.equal(started.length, 1, 'preparing twice starts one stage');
+  const stage = await handoff.take(canvas);
+  assert.equal(stage.surface, canvas);
+  assert.equal(started.length, 1, 'taking the prepared stage starts nothing');
+  await handoff.take(canvas);
+  assert.equal(started.length, 2, 'a stage is handed over once; the next take starts its own');
+  await handoff.take(other);
+  assert.equal(started.length, 3);
+  const failing = stageHandoff(() => Promise.reject(new Error('no device')));
+  failing.prepare(canvas);
+  await assert.rejects(failing.take(canvas), /no device/);
+});

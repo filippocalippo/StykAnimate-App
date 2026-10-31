@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use sha2::{Digest, Sha256};
 use styk_doc::{Obj, Value};
 
 use crate::Kind;
@@ -142,13 +141,13 @@ pub fn verify_embedded_source(document: &Value) -> Result<(), NativeError> {
             if blob.text_len() > LIMIT {
                 return Err(NativeError::SourceInvalid);
             }
-            Sha256::digest(&blob.bytes)
+            styk_doc::digest::sha256(&blob.bytes)
         }
         Some(Value::Str(text)) => {
             if text.len() > LIMIT {
                 return Err(NativeError::SourceInvalid);
             }
-            Sha256::digest(styk_doc::json::base64_strict(text).ok_or(NativeError::SourceCorrupted)?)
+            styk_doc::digest::sha256(&styk_doc::json::base64_strict(text).ok_or(NativeError::SourceCorrupted)?)
         }
         _ => return Err(NativeError::SourceInvalid),
     };

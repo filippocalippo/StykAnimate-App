@@ -52,7 +52,7 @@ async function graph(entry) {
     for (const dependency of edges.get(file) ?? []) queue.push([...trail, dependency]);
   }
   return {entry, modules: files.length, bytes: files.reduce((sum, file) => sum + file.bytes, 0),
-    includesAllPacks: visited.has(path.join(root, 'src', 'locales', 'locale-packs.mjs')), localizationPath,
+    includesAllPacks: [...visited].some(file => file.includes(path.join('locales', 'messages'))), localizationPath,
     directLocalizationImporters: [...edges].filter(([, targets]) => targets.includes(target))
       .map(([file]) => slash(path.relative(root, file))).sort(),
     largest: files.sort((a, b) => b.bytes - a.bytes).slice(0, 5)};
@@ -140,7 +140,8 @@ const summary = Object.fromEntries(cases.map(item => {
   return [item.id, Object.fromEntries(['importMs', 'processWallMs', 'heapDeltaBytes', 'rssDeltaBytes']
     .map(key => [key, stats(rows, key)]))];
 }));
-const allPackBytes = (await source(path.join(root, 'src', 'locales', 'locale-packs.mjs'))).byteLength;
+let allPackBytes = 0;
+for (const name of await readdir(path.join(root, 'src', 'locales', 'messages'))) allPackBytes += (await source(path.join(root, 'src', 'locales', 'messages', name))).byteLength;
 const maximumPack = [...packs].sort((a, b) => b.sourceBytes - a.sourceBytes)[0];
 const projection = {
   selected, maximumPack, allPackBytes,

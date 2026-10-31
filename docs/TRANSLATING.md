@@ -45,7 +45,7 @@ existing translations and all placeholders. Validate with `npm run locales:valid
 -- --locale fr`; report coverage and uncertain terminology. Do not
 edit generated files, English catalogs or UI code.” Disjoint pack files can merge
 independently. The integration agent owns English keys, UI bindings, shared code,
-`src/locales/locale-packs.mjs`, `docs/localization-message-context.json`, the marked
+`src/locales/locale-index.mjs`, `src/locales/messages/`, `docs/localization-message-context.json`, the marked
 generated diagnostic block in `desktop/preload.cjs`, scripts, tests and
 documentation. It merges pack edits, regenerates once, validates, runs relevant
 UI checks and commits the reviewed result. Do not edit `native-catalogs.mjs`: it records the original imported

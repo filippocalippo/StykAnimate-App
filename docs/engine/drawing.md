@@ -69,7 +69,7 @@ weight the interface measured. `src/engine/engine-owner-drawing.mjs` is the inte
   group and reverts its document and history.
 * **Undo and redo**: the session names the pixel commits of the entry on top (`drawingReplay`: cel and record, in the
   order it applies them). The interface pins and loads those records (a cold record comes from the disk), prepares large
-  replacements in the pixel worker, checks nothing changed meanwhile (document, revision, cancellation), and only then
+  replacements (over 4 MiB, about 256 tiles; a stroke is about a hundred) in the pixel worker, and applies smaller ones in the step itself (about 13 µs a tile on the interface thread), so a stroke's undo never waits behind a publication in that worker, checks nothing changed meanwhile (document, revision, cancellation), and only then
   runs the session's undo or redo and applies the tiles in the same synchronous step. A failed read, a cancelled replay
   or an intervening edit changes neither the pixels nor the history. A cel the undo removed (a creation undone) keeps
   its pixels in the store for the redo.

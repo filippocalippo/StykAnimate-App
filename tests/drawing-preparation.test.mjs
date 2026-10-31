@@ -26,7 +26,9 @@ async function fixture(options={}){
   const target=editor.prepareDrawingCel(),surface=await owner.surface(target.figure);
   return{editor,worker,owner,target,surface};
 }
-const changes=(color=[127,5,249,1])=>Array.from({length:130},(_,tx)=>({tx,ty:-1,before:null,after:new Uint8ClampedArray(color)}));
+// More tiles than the interface thread applies in the commit itself (4 MiB), so they are prepared in the pixel worker.
+const TILES=300;
+const changes=(color=[127,5,249,1])=>Array.from({length:TILES},(_,tx)=>({tx,ty:-1,before:null,after:new Uint8ClampedArray(color)}));
 const command=(target,tiles)=>({kind:'drawing-pixels',celId:drawingMetadata(target.figure).celId,tiles});
 
 test('preparation reuses private full-tile allocations and expands only compact colors',async()=>{
@@ -52,7 +54,7 @@ test('cancellation and a late worker failure leave live pixels and history untou
 });
 
 test('the full replacement and one transfer batch are reserved before allocating pixels',async()=>{
-  const {owner,worker,target,surface}=await fixture({tileBytes:194*TILE_BYTES,hardBytes:194*TILE_BYTES-1});
+  const {owner,worker,target,surface}=await fixture({tileBytes:(TILES+64)*TILE_BYTES,hardBytes:(TILES+64)*TILE_BYTES-1});
   try{
     await assert.rejects(owner.prepareChanges(command(target,changes()),'after'),/memory is full/);assert.equal(worker.calls.length,0);assert.equal(owner.workingBytes,0);assert.equal(surface.preparing,0);
     owner.hardBudget++;const prepared=await owner.prepareChanges(command(target,changes()),'after');prepared.release();assert.equal(owner.workingBytes,0);
@@ -79,18 +81,34 @@ test('retired history keeps pinned source buffers accounted until preparation re
   const history=new DrawingHistory({disk:{async close(){}},minRecordBytes:Infinity}),tiles=changes(),root={kind:'drawing-pixels',tiles,bytes:99999};
   try{
     history.track(root);history.prepare(root);history.retain([]);
-    assert.equal(root.tiles,null);assert.equal(history.residentBytes,130*4);
+    assert.equal(root.tiles,null);assert.equal(history.residentBytes,TILES*4);
     history.release(root);assert.equal(history.residentBytes,0);
   }finally{await history.dispose();}
 });
 
 test('source stores stay resident while a prepared replacement owns their snapshots',async()=>{
-  const {owner,worker,target,surface}=await fixture({tileBytes:TILE_BYTES,hardBytes:195*TILE_BYTES});
+  const {owner,worker,target,surface}=await fixture({tileBytes:TILE_BYTES,hardBytes:(TILES+65)*TILE_BYTES});
   const pixels=new Uint8ClampedArray([1,2,3,255]);surface.store.set(0,0,pixels);surface.published={revision:surface.revision,url:null};
   const source=surface.store,gate=deferred(),started=deferred();worker.before=async count=>{if(count===1){started.resolve();await gate.promise;}};
   try{
     const pending=owner.prepareChanges(command(target,changes()),'after');await started.promise;
     assert.equal(surface.store,source);assert.throws(()=>owner.reserve(TILE_BYTES),/memory is full/);assert.equal(surface.store,source);
-    gate.resolve();const prepared=await pending;prepared.release();owner.reserve(195*TILE_BYTES);assert.equal(surface.store,null,'released clean stores are evictable again');
+    gate.resolve();const prepared=await pending;prepared.release();owner.reserve((TILES+65)*TILE_BYTES);assert.equal(surface.store,null,'released clean stores are evictable again');
   }finally{gate.resolve();owner.dispose();}
+});
+
+test('a stroke-sized replay is applied in the commit itself, a larger one is prepared in the worker',async()=>{
+  const {owner,worker,target,surface}=await fixture();
+  const full=()=>new Uint8ClampedArray(TILE_BYTES).fill(9),sides=count=>Array.from({length:count},(_,tx)=>({tx,ty:0,before:full(),after:full()}));
+  try{
+    // A stroke touches about a hundred tiles: its undo and redo must not wait for a worker (behind a publication, or still loading).
+    for(const direction of ['before','after']){
+      assert.equal(owner.needsPreparation(command(target,sides(100)),direction),false);
+      assert.equal(owner.needsPreparation(command(target,sides(256)),direction),false);
+      assert.equal(owner.needsPreparation(command(target,sides(257)),direction),true);
+    }
+    assert.equal(await owner.prepareChanges(command(target,sides(100)),'before'),null);assert.equal(worker.calls.length,0);
+    const tiles=sides(100);owner.apply(target.figure,tiles,'after');assert.equal(surface.store.size,100);
+    owner.apply(target.figure,tiles.map(t=>({...t,after:null})),'after');assert.equal(surface.store.size,0);
+  }finally{owner.dispose();}
 });

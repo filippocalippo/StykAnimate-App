@@ -28,7 +28,7 @@ const run = (name, command, commandArgs, options = {}) => {
 };
 const windows = process.platform === 'win32';
 const nice = windows ? [] : ['nice', '-n', '10'];
-const styk = `engine/target/release/styk${windows ? '.exe' : ''}`;
+const styk = path.join(process.env.CARGO_TARGET_DIR ?? 'engine/target', 'release', `styk${windows ? '.exe' : ''}`);
 /** Whether `paths` are as committed: no changed file and no new one (`git diff` misses new files). */
 const unchanged = (...paths) => spawnSync('git', ['status', '--porcelain', '--untracked-files=all', '--', ...paths], {cwd: root, encoding: 'utf8'}).stdout.trim() === '';
 const cargo = (...rest) => [nice[0] ?? 'cargo', [...nice.slice(1), ...(nice.length ? ['cargo'] : []), ...rest, '--manifest-path', 'engine/Cargo.toml']];
