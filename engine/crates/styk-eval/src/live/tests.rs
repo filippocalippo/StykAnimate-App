@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use image::ImageEncoder;
 
+use std::collections::{HashMap, HashSet};
+
 use super::*;
 use crate::doc::DrawingTiles;
 use styk_draw::{DrawList, F_DRAWING, K_IMAGE};
@@ -345,4 +347,115 @@ fn the_levels_shown_follow_the_scale_and_ask_for_the_level_above() {
     assert_eq!(shown_levels(&list(vec![drawing_tile(0, 3, 1, 64.0)]), 3, 1.0), ALL_LEVELS);
     // The exact boundary shows the levels on both sides.
     assert_eq!(at(0.5) & 0b111, 0b111);
+}
+
+/// The texels a set of runs leaves in a page, by cell.
+fn written_by_runs(runs: &[Run]) -> HashMap<(u32, u32, u32), Vec<u8>> {
+    let mut cells = HashMap::new();
+    for run in runs {
+        let row = (CELL * 4) as usize;
+        for cell in 0..run.cells as usize {
+            let mut rgba = Vec::new();
+            for line in 0..CELL as usize {
+                let start = (line * run.cells as usize + cell) * row;
+                rgba.extend_from_slice(&run.rgba[start..start + row]);
+            }
+            cells.insert((run.page, run.x + BORDER + cell as u32 * CELL, run.y + BORDER), rgba);
+        }
+    }
+    cells
+}
+
+#[test]
+fn coalesced_writes_leave_the_texels_of_the_uploads_in_order() {
+    let mut noise = Noise(5);
+    let mut tiles: HashMap<Coord, Vec<u8>> = HashMap::new();
+    let mut cels = LiveCels::default();
+    let mut one_by_one = Atlas::default();
+    let mut batched = Vec::new();
+    let mut single = 0;
+    edit_rounds(&mut noise, 40, &mut tiles, |changes| {
+        let uploads = cels.update("a", false, changes).unwrap();
+        single += uploads.len();
+        batched.extend(uploads.clone());
+        one_by_one.write(uploads);
+    });
+    let runs = coalesce(batched);
+    let written = written_by_runs(&runs);
+    assert!(written == one_by_one.0, "the runs write what the uploads wrote, the last write of a slot winning");
+    let cells: u32 = runs.iter().map(|run| run.cells).sum();
+    assert_eq!(cells as usize, written.len(), "a slot is written once");
+    assert!((cells as usize) < single, "the slots rewritten by several calls are written once ({cells} of {single})");
+    assert!(runs.len() < cells as usize, "neighbours in a row are one write ({} for {cells} slots)", runs.len());
+}
+
+#[test]
+fn slots_given_back_are_taken_lowest_first_and_a_row_becomes_one_write() {
+    let mut noise = Noise(9);
+    let mut cels = LiveCels::default();
+    // A row of six tiles: its slots are side by side in the page.
+    let row: Vec<(Coord, Option<Vec<u8>>)> = (0..6).map(|x| ((x, 0), Some(tile(&mut noise)))).collect();
+    let runs = coalesce(cels.update("a", false, row).unwrap());
+    let widest = runs.iter().map(|run| run.cells).max().unwrap();
+    assert!(widest >= 8, "a row of tiles with their halos is written as a run ({widest} cells)");
+    // Removing them and drawing others again takes the same low slots, not scattered ones.
+    let before = cels.stats().slots;
+    cels.update("a", false, (0..6).map(|x| ((x, 0), None)).collect()).unwrap();
+    assert_eq!(cels.stats().slots, 0);
+    cels.update("a", false, (10..16).map(|x| ((x, 7), Some(tile(&mut noise)))).collect()).unwrap();
+    assert_eq!(cels.stats().slots, before);
+    assert_eq!(cels.pages(), 1, "the slots given back are used before new pages");
+}
+
+/// The reduction as the texel-by-texel formula states it (the published path's `downTile`).
+fn reduced_by_the_formula(below: &HashMap<Coord, Vec<u8>>, tx: i32, ty: i32) -> Option<Vec<u8>> {
+    let subs = [below.get(&(2 * tx, 2 * ty)), below.get(&(2 * tx + 1, 2 * ty)), below.get(&(2 * tx, 2 * ty + 1)), below.get(&(2 * tx + 1, 2 * ty + 1))];
+    if subs.iter().all(Option::is_none) {
+        return None;
+    }
+    let (t, h) = (TILE as usize, TILE as usize / 2);
+    let mut out = vec![0u8; TILE_BYTES];
+    for (q, sub) in subs.iter().enumerate() {
+        let Some(sub) = sub else { continue };
+        for py in 0..h {
+            for px in 0..h {
+                let i = (2 * py * t + 2 * px) * 4;
+                let texels = [i, i + 4, i + t * 4, i + t * 4 + 4];
+                let alpha: u32 = texels.iter().map(|&k| u32::from(sub[k + 3])).sum();
+                if alpha == 0 {
+                    continue;
+                }
+                let o = (((q >> 1) * h + py) * t + (q & 1) * h + px) * 4;
+                for c in 0..3 {
+                    let weighted: u32 = texels.iter().map(|&k| u32::from(sub[k + c]) * u32::from(sub[k + 3])).sum();
+                    out[o + c] = ((2 * weighted + alpha) / (2 * alpha)) as u8;
+                }
+                out[o + 3] = ((alpha + 2) / 4) as u8;
+            }
+        }
+    }
+    Some(out)
+}
+
+#[test]
+fn reduced_tiles_equal_the_formula_for_opaque_translucent_and_empty_texels() {
+    let mut noise = Noise(77);
+    let mut below: HashMap<Coord, Vec<u8>> = HashMap::new();
+    for coord in [(0, 0), (1, 0), (0, 1)] {
+        // Quarters of opaque, empty and random alpha, so every branch of the reduction runs.
+        let mut pixels = vec![0u8; TILE_BYTES];
+        for (index, texel) in pixels.chunks_exact_mut(4).enumerate() {
+            let alpha = match (index / 7 + (index / 64) / 5) % 4 {
+                0 => 255,
+                1 => 0,
+                _ => noise.next() as u8,
+            };
+            texel.copy_from_slice(&[noise.next() as u8, noise.next() as u8, noise.next() as u8, alpha]);
+        }
+        below.insert(coord, pixels);
+    }
+    let fast: HashMap<Coord, Vec<u8>, CoordBuild> = below.iter().map(|(c, p)| (*c, p.clone())).collect();
+    for coord in [(0, 0), (1, 0), (-1, -1), (0, -1)] {
+        assert_eq!(crate::drawing::down_tile(&fast, coord.0, coord.1), reduced_by_the_formula(&below, coord.0, coord.1), "reduced tile {coord:?}");
+    }
 }
