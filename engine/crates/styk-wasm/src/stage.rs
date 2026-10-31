@@ -18,6 +18,10 @@ const IMAGE_UPLOAD_BYTES: usize = 8 << 20;
 /// level of the cel, megabytes after an undo) are not what the frame shows, and uploading them at once took 20 to 70 ms.
 const LIVE_IMAGE_UPLOAD_BYTES: usize = 512 << 10;
 
+/// And while live cels are held but quiet (a drawing session between strokes): a burst of the full amount stalls the
+/// frame a stroke may begin on, as a stroke's undo found 10 ms bursts a moment after it.
+const HELD_IMAGE_UPLOAD_BYTES: usize = 2 << 20;
+
 /// The live drawing levels written before a frame has shown which it needs: the cel's own
 /// pixels and the level above (a view that fits the artboard on screen).
 const FIRST_LEVELS: styk_eval::live::Levels = 0b11;
@@ -478,7 +482,14 @@ impl Stage {
     pub(crate) fn sync_images(&mut self, generation: &Generation) {
         self.sync_atlas(generation);
         self.flush_live();
-        let images = self.engine.take_images(if self.live.changing() { LIVE_IMAGE_UPLOAD_BYTES } else { IMAGE_UPLOAD_BYTES });
+        let budget = if self.live.changing() {
+            LIVE_IMAGE_UPLOAD_BYTES
+        } else if !self.live.is_empty() {
+            HELD_IMAGE_UPLOAD_BYTES
+        } else {
+            IMAGE_UPLOAD_BYTES
+        };
+        let images = self.engine.take_images(budget);
         self.upload_bytes = images.iter().map(|image| image.rgba.len()).sum();
         if !images.is_empty() {
             self.renderer.upload_images(&generation.assets, images.iter().map(|image| &**image));
