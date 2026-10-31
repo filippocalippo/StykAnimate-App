@@ -56,12 +56,12 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   styk-raster), each tile when asked for. Pages that are not cross-origin isolated
   cannot export.
 - The document export worker (`src/document-export-worker.mjs`, kept for as long as exports follow one another) joins the
-  shared memory for the Pivot and figure files and calls `export_document` (`styk-wasm`) on the engine's document at the
-  editor's revision, as one synchronous stretch of work that asks a flag in shared memory for cancellation between the
-  ticks it bakes (see [document.md](document.md#exports-of-the-document)). It is not terminated while it may be inside the
+  shared memory and calls `export_document` (`styk-wasm`) on the engine's document at the editor's revision (Pivot and figure
+  files), or `save_project` on the snapshot of an edit session (a `.styk` project), as one synchronous stretch of work that asks a
+  flag in shared memory for cancellation between the ticks it bakes or the steps it takes (see
+  [document.md](document.md#exports-of-the-document)). It is not terminated while it may be inside the
   engine: the interface raises the flag and sends `release`, the worker gives its thread back
   (`__wbindgen_thread_destroy`) after the call returns and closes, and one that does not answer within 5 s is terminated.
-  A `.styk` save does not join the engine.
 - The preview worker (`src/engine/engine-preview-worker.mjs`, one per page,
   `engine-previews.mjs`; see [rendering.md](rendering.md#thumbnails-library-previews-and-the-camera-monitor)):
   joins the shared memory like the export worker and keeps its event loop for a GPU

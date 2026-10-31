@@ -78,9 +78,8 @@ Rust tests that open recorded documents as they are.
 ## Exports of the document
 
 The files that cannot hold the editable document are made from the document the engine holds: Pivot animations and
-figures (`.piv`, `.stk`), figure files (`.stkz`) and movieclip files (`.stykmov`). A `.styk` save is not among them: it
-needs no evaluation, so the interface sends the editable document to the export worker in bounded chunks and the worker
-writes the container.
+figures (`.piv`, `.stk`), figure files (`.stkz`) and movieclip files (`.stykmov`). A `.styk` save needs no evaluation: the
+engine writes it from the tree of the editing session that holds the document (`save_project`, below).
 
 The document export worker (`src/document-export-worker.mjs`) joins the engine as the export renderer does, and calls
 `export_document` (`styk-wasm`, `styk_engine::document_export`) on the document the engine holds at the revision the
@@ -99,11 +98,23 @@ takes no part in the work (D7). The work is `styk_edit::export`:
 - **Figure files** (`figure.rs`, `pose_sequences.rs`): a figure, a set of figures or a movieclip with the pose it shows as a
   document of its own, portable (without the project's source), with the poses its channels share stored once.
 
-The answer is the document as JSON (figure files, which the worker writes as a container) or the body of the codec's
+The answer is the container of a figure file (written by the engine: `styk_engine::save`) or the body of the codec's
 export request with the document in it (Pivot files, which the codec encodes). Drawing cels that Pivot cannot carry
 are flagged and flattened into pictures by the worker. The engine returns an error, never a panic, for what it
 refuses; the worker passes it on with its message key. The export asks `cancelled()` (a flag in shared memory) between
 the ticks it bakes, and a worker that joined gives its thread back before it ends (`release`).
+
+### Saving a project
+
+A `.styk` project is written from a snapshot of an edit session's tree (`EditSession.snapshot`: a token in a registry in the shared
+memory, a clone of the copy-on-write root, nothing copied), by `save_project` on the document export worker
+(`styk_engine::save::save_project`). Any session can be saved, the one in front, one a tab keeps, or a project whose movieclip is being
+edited: the documents the clips were entered from come with the movieclip each holds, and `styk_edit::export::fold_movieclip` stores
+the clip inside its parent as a recovery copy does. `project_document` prepares the tree (metadata, no `runtime_segments`, the load's
+validations, display aliases in line, pose sequences stored once), the Pivot original the codec holds is stored first in the payload
+section, and `styk_formats::container::lift` and `files::save` write the container. The work runs on a worker that joined the engine,
+reserves its working memory first (`errors.engine.outOfMemory` when the memory cannot hold it), and asks the cancel flag between
+steps. The session keeps editing while it runs. The saved bytes of an unchanged document are those the JavaScript writer wrote.
 
 ## Invariants
 

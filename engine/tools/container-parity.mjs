@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 // Container parity: the document the app opens a native file into (the Rust container module in a worker,
 // src/native-file-codec.mjs, then the interface's own restore of the lifted form) must be the document the
-// Rust store reads (`styk container json`), and saving it again must write the file's bytes.
+// Rust store reads (`styk container json`), and the Rust writer must write the file's bytes again
+// (`styk container roundtrip`: the engine's save lifts and frames the document as that command does).
 //
 //   node engine/tools/container-parity.mjs <file-or-list.txt>… [--styk <path to styk>]
 //
 // A `.txt` argument is a list of files, one per line. For each file:
 // - the JSON text of the document the app's open path produces (JSON.stringify) and of the Rust store's
 //   reader (`styk container json`) are compared byte for byte, and both refusing a file counts as agreement;
-// - for a version 2 project or figure file, the app's save path (lift, with the embedded original source stored
-//   first as the document export worker does, then the Rust writer) must write the bytes the file holds.
-// Exit code 1 when any file differs. The JavaScript reader that was this tool's oracle is gone; its documents
-// and the bytes of its writer were compared with these on 261 files before it was deleted (see docs/engine/formats.md).
+// - for a version 2 project or figure file, `styk container roundtrip` (lift, with the embedded original source stored
+//   first as a save does, then the writer) must write the bytes the file holds.
+// Exit code 1 when any file differs. The JavaScript reader and writer that were this tool's oracles are gone; their documents
+// and bytes were compared with these on 261 files before they were deleted (see docs/engine/formats.md).
 import {pathToFileURL} from 'node:url';
 import {readFileSync, mkdtempSync, rmSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
@@ -21,8 +22,7 @@ import path from 'node:path';
 
 const repo = path.resolve(import.meta.dirname, '../..');
 const repoUrl = pathToFileURL(repo).href;
-const {decodeDocument, buildContainerV2} = await import(`${repoUrl}/tests/support/native-files.mjs`);
-const {base64ToBytes} = await import(`${repoUrl}/src/base64.mjs`);
+const {decodeDocument} = await import(`${repoUrl}/tests/support/native-files.mjs`);
 const args = process.argv.slice(2);
 const option = args.indexOf('--styk');
 const styk = option >= 0 ? args.splice(option, 2)[1] : path.join(process.env.CARGO_TARGET_DIR ?? path.join(repo, 'engine/target'), 'release', `styk${process.platform === 'win32' ? '.exe' : ''}`);
@@ -54,12 +54,11 @@ try {
       continue;
     }
     if (opened.version === 2) {
-      // The document export worker stores the embedded original source first (document-export-worker.mjs).
-      const document = opened.document, source = document._stykSource?.source_base64;
-      const output = typeof source === 'string' ? {...document, _stykSource: {...document._stykSource, source_base64: base64ToBytes(source)}} : document;
-      const written = await buildContainerV2(output, kind, typeof source === 'string' ? {preBlobs: [output._stykSource.source_base64]} : {});
-      if (Buffer.compare(Buffer.from(written), Buffer.from(bytes)) === 0) saved++;
-      else { different++; console.log(`DIFFERENT ${file}: saved again, the app writes ${written.length} bytes (${sha(written).slice(0, 12)}), the file holds ${bytes.length} (${sha(bytes).slice(0, 12)})`); }
+      const again = spawnSync(styk, ['container', 'roundtrip', file], {encoding: 'utf8'});
+      let result = null;
+      try { result = JSON.parse(again.stdout); } catch { /* reported below */ }
+      if (again.status === 0 && result?.fileIdentical) saved++;
+      else { different++; console.log(`DIFFERENT ${file}: written again, the writer's bytes are not the file's (${(again.stdout || again.stderr).trim().slice(0, 300)})`); }
     }
   }
 } finally { rmSync(temp, {recursive: true, force: true}); }

@@ -10,6 +10,9 @@
 
 use styk_doc::{Obj, Value};
 use styk_edit::export::{Exported, Format, Hold, Request};
+use styk_formats::Kind;
+
+use crate::save::SaveError;
 
 use crate::Engine;
 
@@ -21,6 +24,8 @@ pub struct DocumentExport {
     pub figure_type_id: Option<f64>,
     /// The document holds drawing cels the interface still flattens into pictures.
     pub drawings: bool,
+    /// What the container held before compression (`Output::Container`), else the length of `bytes`.
+    pub raw_bytes: usize,
 }
 
 /// What the answer is.
@@ -30,6 +35,8 @@ pub enum Output {
     Document,
     /// `{document, sourceId, format, filename, figureTypeId}`: the body of the codec's export request.
     CodecRequest { source_id: Option<String>, format: String },
+    /// The figure file's container (`.stkz`, `.stykmov`), written and checked here.
+    Container,
 }
 
 #[derive(Debug)]
@@ -40,6 +47,8 @@ pub enum DocumentExportError {
     /// A refusal: the editor's message key (with its values after a separator), as the commands raise them.
     Refused(String),
     Unported(String),
+    /// The container could not be written.
+    Save(SaveError),
 }
 
 impl std::fmt::Display for DocumentExportError {
@@ -49,6 +58,7 @@ impl std::fmt::Display for DocumentExportError {
             DocumentExportError::Cancelled => f.write_str("The export was cancelled."),
             DocumentExportError::Refused(message) => f.write_str(message),
             DocumentExportError::Unported(feature) => write!(f, "{feature} is not exported by the engine yet"),
+            DocumentExportError::Save(error) => error.fmt(f),
         }
     }
 }
@@ -78,6 +88,18 @@ impl Engine {
         }
         let bytes = match output {
             Output::Document => styk_doc::json::to_string(&document).into_bytes(),
+            Output::Container => {
+                let kind = match request.format {
+                    Format::Stkz => Kind::Stkz,
+                    Format::Stykmov => Kind::Stykmov,
+                    Format::Piv | Format::Stk => return Err(DocumentExportError::Refused("errors.documentExport.chooseAPivStkStykStkzOrStykmov".into())),
+                };
+                let written = crate::save::save_figure_file(&document, kind, cancel).map_err(|error| match error {
+                    SaveError::Cancelled => DocumentExportError::Cancelled,
+                    other => DocumentExportError::Save(other),
+                })?;
+                return Ok(DocumentExport { bytes: written.bytes, figure_type_id, drawings, raw_bytes: written.raw_bytes });
+            }
             Output::CodecRequest { source_id, format } => {
                 let mut body = Obj::new();
                 body.set("document", document);
@@ -94,7 +116,7 @@ impl Engine {
                 styk_doc::json::to_string(&Value::object(body)).into_bytes()
             }
         };
-        Ok(DocumentExport { bytes, figure_type_id, drawings })
+        Ok(DocumentExport { raw_bytes: bytes.len(), bytes, figure_type_id, drawings })
     }
 }
 
