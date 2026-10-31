@@ -74,7 +74,8 @@ export class Editor extends EventTarget {
   }
   get branchSelected() { return Boolean(this._branchSelection && this._branchSelection.uid === this.selectedUid && this._branchSelection.joint === this.selectedJoint && this.selectedJoint >= 0); }
   set selectedUid(uid) { this._polygonSelection = null; this._segmentSelection = null; this._branchSelection = null; this._selectedUid = uid ?? null; this.selectedUids = new Set(uid === null || uid === undefined ? [] : [uid]); }
-  get selectedObjects() { return this.selectionFrame?.objects.filter(o => this.selectedUids?.has(o.unique_id)) ?? []; }
+  // With nothing selected there is nothing to look up: the frame on show is not built for it (the library reads this on every tick of playback).
+  get selectedObjects() { return this.selectedUids?.size ? this.selectionFrame?.objects.filter(o => this.selectedUids.has(o.unique_id)) ?? [] : []; }
   get object() { return this.selectionFrame?.objects.find(o => o.unique_id === this.selectedUid) ?? this.selectedObjects.at(-1) ?? null; }
   get figure() { const typeId = this.object?.figure_type_id; return this.report.figure_types.find(f => f.figure_type_id === typeId) ?? null; }
   get selectedSlot() { return this.selectionFrame?.objects.findIndex(o => o.unique_id === this.selectedUid) ?? -1; }
