@@ -200,18 +200,18 @@ fn jobs_run_side_by_side_on_the_workers_and_the_caller_takes_what_no_worker_star
     use std::sync::atomic::AtomicBool;
     for workers in [0usize, 3] {
         let pool = Workers::start(workers);
-        let ran: Mutex<Vec<std::thread::ThreadId>> = Mutex::new(Vec::new());
-        let jobs: Vec<styk_formats::files::Job<'_>> = (0..6)
+        let ran: Arc<Mutex<Vec<std::thread::ThreadId>>> = Arc::new(Mutex::new(Vec::new()));
+        let jobs: Vec<styk_formats::files::Job> = (0..6)
             .map(|_| {
-                let ran = &ran;
+                let ran = ran.clone();
                 Box::new(move |_: &dyn Fn() -> bool| {
                     std::thread::sleep(std::time::Duration::from_millis(60));
                     ran.lock().unwrap().push(std::thread::current().id());
-                }) as styk_formats::files::Job<'_>
+                }) as styk_formats::files::Job
             })
             .collect();
         let started = std::time::Instant::now();
-        pool.engine.run_together(jobs, &Arc::new(AtomicBool::new(false)), &|| false, 3);
+        pool.engine.run_together(jobs, &Arc::new(AtomicBool::new(false)), &|| false, 3).unwrap();
         let ids = ran.lock().unwrap().clone();
         assert_eq!(ids.len(), 6, "every job ran before run_together returned ({workers} workers)");
         let distinct: std::collections::HashSet<_> = ids.iter().collect();
@@ -222,6 +222,121 @@ fn jobs_run_side_by_side_on_the_workers_and_the_caller_takes_what_no_worker_star
             assert!(started.elapsed() < std::time::Duration::from_millis(330), "side by side, not one after another: {:?}", started.elapsed());
         }
     }
+}
+
+/// A job that holds some bytes of its own, sleeps, then checks them and says so.
+fn slow_reader(data: Arc<Vec<u8>>, started: Arc<std::sync::atomic::AtomicBool>, verdict: Arc<std::sync::Mutex<Option<bool>>>) -> styk_formats::files::Job {
+    Box::new(move |_| {
+        started.store(true, std::sync::atomic::Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        // Read after the caller has long returned, and dropped everything it held: the bytes are this job's own.
+        *verdict.lock().unwrap() = Some(data.iter().all(|byte| *byte == 0xA5));
+    })
+}
+
+#[test]
+fn a_caller_that_fails_while_a_worker_is_in_a_job_leaves_the_worker_nothing_that_is_freed() {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use styk_formats::files::JobsFailed;
+    // The probe of the review: the job the caller runs panics while a worker is in another one. The jobs own their bytes, so the worker
+    // reads valid memory, and run_together comes back with the failure instead of unwinding past a borrowed frame.
+    let pool = Workers::start(3);
+    for round in 0..12 {
+        let started = Arc::new(AtomicBool::new(false));
+        let verdict = Arc::new(Mutex::new(None));
+        let data = Arc::new(vec![0xA5u8; 1 << 20]);
+        let waiting = started.clone();
+        let panicking: styk_formats::files::Job = Box::new(move |_| {
+            while !waiting.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+            panic!("the job of the caller fails");
+        });
+        let result = pool.engine.run_together(vec![slow_reader(data.clone(), started.clone(), verdict.clone()), panicking], &Arc::new(AtomicBool::new(false)), &|| false, 3);
+        assert_eq!(result, Err(JobsFailed::Panicked), "round {round}");
+        drop(data);
+        let seen = (0..100).find_map(|_| { std::thread::sleep(std::time::Duration::from_millis(30)); *verdict.lock().unwrap() });
+        assert_eq!(seen, Some(true), "round {round}: the worker's job finished on bytes that were still there");
+    }
+}
+
+#[test]
+fn a_job_that_panics_on_a_worker_ends_the_wait_with_an_error_and_the_next_run_works() {
+    use std::sync::atomic::AtomicBool;
+    use styk_formats::files::JobsFailed;
+    let pool = Workers::start(3);
+    let slow: styk_formats::files::Job = Box::new(|_| std::thread::sleep(std::time::Duration::from_millis(150)));
+    let boom: styk_formats::files::Job = Box::new(|_| panic!("the job fails"));
+    let started = std::time::Instant::now();
+    let result = pool.engine.run_together(vec![slow, boom], &Arc::new(AtomicBool::new(false)), &|| false, 3);
+    assert_eq!(result, Err(JobsFailed::Panicked));
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "it did not wait for ever: {:?}", started.elapsed());
+    let fine: Vec<styk_formats::files::Job> = (0..4).map(|_| Box::new(|_: &dyn Fn() -> bool| {}) as styk_formats::files::Job).collect();
+    assert_eq!(pool.engine.run_together(fine, &Arc::new(AtomicBool::new(false)), &|| false, 3), Ok(()), "the next run works");
+}
+
+#[test]
+fn a_worker_reported_lost_ends_the_wait_for_its_job() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use styk_formats::files::JobsFailed;
+    // A thread that traps cannot say so: the host reports it (the page saw the worker's error event), and the job it had never ends.
+    let pool = Workers::start(3);
+    let release = Arc::new(AtomicBool::new(false));
+    let caller = std::thread::current().id();
+    let stuck: styk_formats::files::Job = {
+        let release = release.clone();
+        Box::new(move |_| {
+            if std::thread::current().id() == caller {
+                return;
+            }
+            while !release.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        })
+    };
+    let busy: styk_formats::files::Job = Box::new(|_| std::thread::sleep(std::time::Duration::from_millis(100)));
+    let engine = pool.engine.clone();
+    let reporter = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        engine.note_worker_lost();
+    });
+    let started = std::time::Instant::now();
+    let result = pool.engine.run_together(vec![busy, stuck], &Arc::new(AtomicBool::new(false)), &|| false, 3);
+    reporter.join().unwrap();
+    release.store(true, Ordering::SeqCst);
+    // The caller ran `busy`; a worker took `stuck` almost surely, and then the wait ended with the report. (If the caller ran both, nothing
+    // was lost to wait for.)
+    if result.is_err() {
+        assert_eq!(result, Err(JobsFailed::WorkerLost));
+        assert!(started.elapsed() < std::time::Duration::from_secs(3), "{:?}", started.elapsed());
+        assert_eq!(pool.engine.workers_lost(), 1);
+    }
+    let fine: Vec<styk_formats::files::Job> = (0..3).map(|_| Box::new(|_: &dyn Fn() -> bool| {}) as styk_formats::files::Job).collect();
+    assert_eq!(pool.engine.run_together(fine, &Arc::new(AtomicBool::new(false)), &|| false, 3), Ok(()), "the report is about that wait: the next save works");
+}
+
+#[test]
+fn a_save_whose_worker_failed_is_a_failed_save_that_the_next_save_survives() {
+    use styk_engine::save::EngineHost;
+    use styk_formats::files::JobsFailed;
+    struct Failing;
+    impl styk_formats::files::Host for Failing {
+        fn cancelled(&self) -> bool {
+            false
+        }
+        fn together(&self, _jobs: Vec<styk_formats::files::Job>, _stop: &Arc<std::sync::atomic::AtomicBool>) -> Result<(), JobsFailed> {
+            Err(JobsFailed::WorkerLost)
+        }
+    }
+    let tree = tree("engine/tests/edit/startup.document.json");
+    let request = || ProjectRequest { name: None, source: None };
+    let failed = save_project(std::slice::from_ref(&tree), &[], request(), &Failing);
+    let Err(SaveError::File(error)) = failed else { panic!("{:?}", failed.map(|written| written.bytes.len())) };
+    assert_eq!((error.code, error.message_key), (Some("worker_failed"), "errors.documentExport.documentExportFailed"));
+    let pool = Workers::start(2);
+    let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 2 };
+    assert!(save_project(std::slice::from_ref(&tree), &[], request(), &host).is_ok(), "the tree is untouched by a failed save: it saves");
 }
 
 #[test]

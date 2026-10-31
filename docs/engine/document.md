@@ -131,7 +131,7 @@ reserves its working memory first (`errors.engine.outOfMemoryWhileSaving` when t
 written), and runs the scene check (`validateScene`, the slowest of the checks and read-only) beside the lift (`check_scene`; its error is the save's), and asks the cancel flag between the steps of the preparation, every few thousand values of the lift, every 4 MiB hashed,
 and before and after each of the three zstd frames. The three hashes and the three frames (in turn, so that only one frame's output buffer, the size of the worst case, is held at a time) are four
 independent jobs: the save thread and up to three of the engine's other workers (the interface passes `engine.workers - 1`, at most 3, so one stays free for the
-frame on show) take them largest first (`Host::together`, `Engine::run_together`, tasks claimed by whoever starts them first; a
+frame on show) take them largest first (`Host::together`, `Engine::run_together`: `'static` jobs that own their blocks, claimed by whoever starts them first, a panic or a lost worker ending the save with an error and nothing freed under a worker still running one; a
 host without workers runs them all itself). The workers cannot ask the interface's cancel, so the save thread asks it every 25 ms
 while it waits and raises a flag they read. The save's own timings (`prepare_ms`, `lift_ms`, `frames_ms`, per block
 `hash_ms` and `compress_ms`, `assemble_ms`) come back with the file and are in the exporter's `lastTimings.engine`. Each frame is one `zstd::bulk::compress` call (level 3), because the bytes of an unchanged

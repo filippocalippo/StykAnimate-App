@@ -154,9 +154,19 @@ fn keeps_document(checked: &container::Checked, kind: Kind, rules: Rules) -> Res
     Ok(true)
 }
 
-/// A piece of a save that can run on any thread. It is handed the question "should this stop?" that is right for the thread it
+/// A piece of a save that can run on any thread, and owns everything it touches: a thread may still be running it when the save that
+/// made it has failed, been stopped or lost its own thread. It is handed the question "should this stop?" that is right for the thread it
 /// runs on: the host's own cancel where that thread can ask it, a flag the host keeps up to date elsewhere.
-pub type Job<'a> = Box<dyn FnOnce(&dyn Fn() -> bool) + Send + 'a>;
+pub type Job = Box<dyn FnOnce(&dyn Fn() -> bool) + Send + 'static>;
+
+/// Why jobs given to [`Host::together`] were not all done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobsFailed {
+    /// A job panicked.
+    Panicked,
+    /// A worker that may have been running one stopped.
+    WorkerLost,
+}
 
 /// What a save asks of the thread and the machine it runs on. Any `Fn() -> bool` is a host that is stopped when it says so, has no
 /// clock and runs jobs one after another, which is what the tools and the tests want.
@@ -171,13 +181,14 @@ pub trait Host {
 
     /// Runs `jobs` and returns when all of them are done: side by side where the host has threads to spare, else one after another.
     /// A host that stops (`cancelled`) sets `stop`, which the jobs on other threads see; jobs that notice it end early.
-    fn together(&self, jobs: Vec<Job<'_>>, stop: &Arc<AtomicBool>) {
+    fn together(&self, jobs: Vec<Job>, stop: &Arc<AtomicBool>) -> Result<(), JobsFailed> {
         one_after_another(self, jobs, stop);
+        Ok(())
     }
 }
 
 /// [`Host::together` ](Host::together) on the calling thread: each job in turn, none started once the host is stopped.
-pub fn one_after_another<H: Host + ?Sized>(host: &H, jobs: Vec<Job<'_>>, stop: &Arc<AtomicBool>) {
+pub fn one_after_another<H: Host + ?Sized>(host: &H, jobs: Vec<Job>, stop: &Arc<AtomicBool>) {
     let asked = || {
         if !stop.load(Ordering::Relaxed) && host.cancelled() {
             stop.store(true, Ordering::Relaxed);
@@ -233,67 +244,76 @@ struct Made {
 /// `.stykmov` skeleton must be the self-contained figure the file stores
 /// (`native::validate_figure`). The hash of each block and its zstd frame (one `zstd::bulk::compress` call at level 3: frames made
 /// any other way are other, valid frames, and an unchanged document must save to the bytes it was opened from) are independent jobs: three
-/// hashes and the three frames in turn, which the `host` may run side by side. `host.cancelled()` is asked by the hashing every few megabytes and before and after
-/// each frame; a save it stops fails with the code [`container::CANCELLED`] and produces nothing.
-pub fn save(kind: Kind, skeleton: &[u8], arrays: &[u8], payloads: &[u8], host: &dyn Host) -> Result<Saved, FileError> {
+/// hashes and the three frames in turn, which the `host` may run side by side. The blocks are shared (`Arc`), because a job that a thread
+/// of the host is still running may outlive this call (see [`Job`]). `host.cancelled()` is asked by the hashing every few megabytes and
+/// before and after each frame; a save it stops fails with the code [`container::CANCELLED`] and produces nothing, and one whose jobs
+/// could not all be done (a panic, a lost worker) with [`ContainerError::WorkerStopped`].
+pub fn save(kind: Kind, skeleton: Arc<Vec<u8>>, arrays: Arc<Vec<u8>>, payloads: Arc<Vec<u8>>, host: &dyn Host) -> Result<Saved, FileError> {
     if kind != Kind::Styk {
-        native::validate_figure(&json::parse(skeleton).map_err(ContainerError::from)?, kind)?;
+        native::validate_figure(&json::parse(&skeleton).map_err(ContainerError::from)?, kind)?;
     }
     let stats = SaveStats { container_raw_bytes: skeleton.len() + arrays.len() + payloads.len() };
     let clock = host.clock();
     let mut frames_ms = 0.0;
     let mut timings = [FrameTimings::default(); 3];
-    let bytes = encode_v2_with(skeleton, arrays, payloads, kind, &mut |blocks| {
-        let made: [Made; 3] = Default::default();
+    let blocks = [skeleton, arrays, payloads];
+    let lengths = [blocks[0].len(), blocks[1].len(), blocks[2].len()];
+    let bytes = encode_v2_with(lengths, kind, &mut || {
+        let made: Arc<[Made; 3]> = Arc::new(Default::default());
         let stop = Arc::new(AtomicBool::new(false));
-        let mut jobs: Vec<Job<'_>> = Vec::with_capacity(4);
+        let mut jobs: Vec<Job> = Vec::with_capacity(4);
         // The largest blocks first: a host with fewer threads than jobs starts the longest ones earliest.
         let mut order = [0usize, 1, 2];
-        order.sort_by_key(|&index| std::cmp::Reverse(blocks[index].len()));
+        order.sort_by_key(|&index| std::cmp::Reverse(lengths[index]));
         // The frames run one after another in a single job, started first because it takes longest, and the hashes run beside it. The frames are one job: `zstd::bulk::compress` needs an output buffer
         // the size of the worst case, and three of them at once would put the largest two beside the sections in the memory.
-        let (blocks_ref, made_ref) = (&blocks, &made);
-        jobs.push(Box::new(move |stop_now| {
-            for &index in &order {
-                // One call per frame, so a stop is obeyed before it and after it, not inside it.
-                if stop_now() {
-                    return;
+        {
+            let (blocks, made) = (blocks.clone(), made.clone());
+            jobs.push(Box::new(move |stop_now| {
+                for &index in &order {
+                    // One call per frame, so a stop is obeyed before it and after it, not inside it.
+                    if stop_now() {
+                        return;
+                    }
+                    let started = clock();
+                    let stored = pack_zstd(&blocks[index]);
+                    if stop_now() {
+                        return;
+                    }
+                    *made[index].stored.lock().unwrap_or_else(|p| p.into_inner()) = Some((stored, clock() - started));
                 }
-                let started = clock();
-                let stored = pack_zstd(blocks_ref[index]);
-                if stop_now() {
-                    return;
-                }
-                *made_ref[index].stored.lock().unwrap_or_else(|p| p.into_inner()) = Some((stored, clock() - started));
-            }
-        }));
+            }));
+        }
         for &index in &order {
-            let (raw, slot) = (blocks[index], &made[index]);
+            let (raw, made) = (blocks[index].clone(), made.clone());
             jobs.push(Box::new(move |stop_now| {
                 let started = clock();
-                if let Some(digest) = styk_doc::digest::sha256_until(raw, stop_now) {
-                    *slot.digest.lock().unwrap_or_else(|p| p.into_inner()) = Some((digest, clock() - started));
+                if let Some(digest) = styk_doc::digest::sha256_until(&raw, stop_now) {
+                    *made[index].digest.lock().unwrap_or_else(|p| p.into_inner()) = Some((digest, clock() - started));
                 }
             }));
         }
         let started = clock();
-        host.together(jobs, &stop);
+        let together = host.together(jobs, &stop);
         frames_ms = clock() - started;
+        if together.is_err() {
+            return Err(ContainerError::WorkerStopped);
+        }
         if stop.load(Ordering::Relaxed) {
             return Err(ContainerError::Cancelled);
         }
         let mut frames = Vec::with_capacity(3);
-        for (index, slot) in made.into_iter().enumerate() {
-            let digest = slot.digest.into_inner().unwrap_or_else(|p| p.into_inner());
-            let stored = slot.stored.into_inner().unwrap_or_else(|p| p.into_inner());
+        for (index, slot) in made.iter().enumerate() {
+            let digest = slot.digest.lock().unwrap_or_else(|p| p.into_inner()).take();
+            let stored = slot.stored.lock().unwrap_or_else(|p| p.into_inner()).take();
             let (Some((digest, hash_ms)), Some((stored, compress_ms))) = (digest, stored) else { return Err(ContainerError::Cancelled) };
-            timings[index] = FrameTimings { raw_bytes: blocks[index].len(), stored_bytes: stored.len(), hash_ms, compress_ms };
+            timings[index] = FrameTimings { raw_bytes: lengths[index], stored_bytes: stored.len(), hash_ms, compress_ms };
             frames.push(Frame { digest, stored });
         }
         Ok(frames.try_into().unwrap_or_else(|_| unreachable!("three blocks, three frames")))
     })
     .map_err(|error| match error {
-        ContainerError::Cancelled => FileError::from(error),
+        ContainerError::Cancelled | ContainerError::WorkerStopped => FileError::from(error),
         error => FileError { code: Some("document_too_large"), ..FileError::from(error) },
     })?;
     Ok(Saved { bytes, stats, frames: timings, frames_ms })

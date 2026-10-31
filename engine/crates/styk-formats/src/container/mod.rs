@@ -140,6 +140,9 @@ pub enum ContainerError {
     /// The caller stopped the write (a cancel it passed in said so); nothing was produced.
     #[error("the write was cancelled")]
     Cancelled,
+    /// A job of the write could not be done (it panicked, or the worker that had it stopped); nothing was produced.
+    #[error("a worker of the write stopped before it was done")]
+    WorkerStopped,
 }
 
 /// The machine code of [`ContainerError::Cancelled`].
@@ -166,7 +169,7 @@ impl ContainerError {
             NonFinite { .. } => "errors.nativeContainer.theStykanimateDocumentContainsNonFiniteNumbers",
             DocumentTooLarge(_) => "errors.nativeContainer.theStykanimateDocumentExceedsTheUncompressedSizeLimit",
             Json(_) => "errors.nativeContainer.projectDataMustBeAJsonObject",
-            Cancelled => "errors.documentExport.documentExportFailed",
+            Cancelled | WorkerStopped => "errors.documentExport.documentExportFailed",
         }
     }
 
@@ -175,6 +178,7 @@ impl ContainerError {
         match self {
             ContainerError::DocumentTooLarge(_) => Some("document_too_large"),
             ContainerError::Cancelled => Some(CANCELLED),
+            ContainerError::WorkerStopped => Some("worker_failed"),
             _ => None,
         }
     }

@@ -161,6 +161,8 @@ struct Inner {
     /// Pictures not decoded because the module was too low on memory ([`Engine::pictures_refused`]).
     pictures_refused: std::sync::atomic::AtomicUsize,
     progress: std::sync::atomic::AtomicU32,
+    /// Worker threads that stopped under the engine ([`Engine::note_worker_lost`]).
+    workers_lost: std::sync::atomic::AtomicU32,
     notifier: Option<Notifier>,
 }
 
@@ -193,6 +195,7 @@ impl Engine {
                 picture_bytes: budgets.picture_bytes,
                 pictures_refused: Default::default(),
                 progress: std::sync::atomic::AtomicU32::new(0),
+                workers_lost: std::sync::atomic::AtomicU32::new(0),
                 notifier,
             }),
         }
@@ -277,6 +280,17 @@ impl Engine {
         self.try_generation_header().ok().map(|header| header.map_or([0; 3], |header| {
             [header.generation, header.lineage, header.revision]
         }))
+    }
+
+    /// The host tells the engine that a worker thread stopped (a trap in WebAssembly, where a thread cannot report its own end). Work
+    /// that waits for a job on one of the workers ([`Engine::run_together`]) gives up its wait.
+    pub fn note_worker_lost(&self) {
+        self.inner.workers_lost.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// How many worker threads have been reported stopped.
+    pub fn workers_lost(&self) -> u32 {
+        self.inner.workers_lost.load(Ordering::SeqCst)
     }
 
     /// Asks every worker to return from [`Engine::work`].

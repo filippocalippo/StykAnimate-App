@@ -17,6 +17,10 @@ async function yieldToInput() {
   else await new Promise(resolve => setTimeout(resolve, 0));
 }
 
+/** How many of the engine's preparation threads a save may borrow for its hashes and frames: at most three, and one always stays for
+ * the frame on show (a save gets none from an engine with one thread or none). */
+export const lendableWorkers = engine => Math.min(3, Math.max(0, (engine?.workers ?? 0) - 1));
+
 /** Document exports on a worker that joined the engine, and codec requests.
  * Callers must abort on every document mutation, including uncommitted gestures.
  * getRevision catches committed edits before the work starts and before returning data.
@@ -202,7 +206,7 @@ export class DocumentExporter {
           throw messageError(new Error(''), "errors.documentExportWorker.theDocumentSnapshotWasNotInitialized", {});
         }
         // The save may take some of the engine's workers for its hashes and frames, but leaves at least one for the frame on show.
-        work = {project: {snapshots, scopes: scopes?.typeIds ?? [], address: engine.handle.address(), helpers: Math.min(3, Math.max(0, (engine.workers ?? 0) - 1))}, cancel: cancelFlag};
+        work = {project: {snapshots, scopes: scopes?.typeIds ?? [], address: engine.handle.address(), helpers: lendableWorkers(engine)}, cancel: cancelFlag};
       } else {
         // The session publishes every change at the editor's revision; one still on its way is waited for briefly.
         for (let waited = 0; !holdsRevision(engine, revision); waited += 16) {

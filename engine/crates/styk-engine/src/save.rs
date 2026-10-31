@@ -21,7 +21,7 @@ use styk_edit::EditError;
 use styk_edit::export::{Hold, Projected, check_scene, fold_movieclip, prepare_project};
 use styk_formats::Kind;
 use styk_formats::container::{self, ContainerError};
-use styk_formats::files::{self, FileError, FrameTimings, Host, Job};
+use styk_formats::files::{self, FileError, FrameTimings, Host, Job, JobsFailed};
 
 /// The original file of a project opened from Pivot (`_stykSource`): the codec's description of it and its bytes, which
 /// the container stores first in its payload section.
@@ -143,10 +143,13 @@ impl Host for EngineHost<'_> {
         self.clock
     }
 
-    fn together(&self, jobs: Vec<Job<'_>>, stop: &std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    fn together(&self, jobs: Vec<Job>, stop: &Arc<AtomicBool>) -> Result<(), JobsFailed> {
         match self.engine {
             Some(engine) => engine.run_together(jobs, stop, self.cancel, self.helpers),
-            None => files::one_after_another(self, jobs, stop),
+            None => {
+                files::one_after_another(self, jobs, stop);
+                Ok(())
+            }
         }
     }
 }
@@ -201,35 +204,40 @@ fn write(document: &Value, kind: Kind, reserved: &[Arc<[u8]>], scene: Option<Val
     }
     let clock = host.clock();
     let started = clock();
+    // The jobs own what they use: a worker may still be running one when this returns early.
     let stop = Arc::new(AtomicBool::new(false));
-    let lifted: Mutex<Option<(Result<container::Lifted, ContainerError>, f64)>> = Mutex::new(None);
-    let checked: Mutex<Option<(Result<(), EditError>, f64)>> = Mutex::new(None);
-    let mut jobs: Vec<Job<'_>> = vec![Box::new(|stop_now| {
-        let begun = clock();
-        let result = container::lift_until(document, reserved, stop_now);
-        *lifted.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((result, clock() - begun));
-    })];
-    if let Some(scene) = &scene {
-        jobs.push(Box::new(|_| {
+    let lifted: Arc<Mutex<Option<(Result<container::Lifted, ContainerError>, f64)>>> = Arc::new(Mutex::new(None));
+    let checked: Arc<Mutex<Option<(Result<(), EditError>, f64)>>> = Arc::new(Mutex::new(None));
+    let mut jobs: Vec<Job> = Vec::with_capacity(2);
+    {
+        let (document, reserved, lifted) = (document.clone(), reserved.to_vec(), lifted.clone());
+        jobs.push(Box::new(move |stop_now| {
             let begun = clock();
-            let result = check_scene(scene);
+            let result = container::lift_until(&document, &reserved, stop_now);
+            *lifted.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((result, clock() - begun));
+        }));
+    }
+    if let Some(scene) = scene {
+        let checked = checked.clone();
+        jobs.push(Box::new(move |_| {
+            let begun = clock();
+            let result = check_scene(&scene);
             *checked.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((result, clock() - begun));
         }));
     }
-    host.together(jobs, &stop);
-    drop(scene);
+    host.together(jobs, &stop).map_err(|_| ContainerError::WorkerStopped)?;
     let lifted_at = clock();
     if stop.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(SaveError::Cancelled);
     }
     let mut scene_ms = 0.0;
-    if let Some((result, took)) = checked.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+    if let Some((result, took)) = checked.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() {
         result?;
         scene_ms = took;
     }
-    let Some((lifted_result, lift_ms)) = lifted.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()) else { return Err(SaveError::Cancelled) };
+    let Some((lifted_result, lift_ms)) = lifted.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() else { return Err(SaveError::Cancelled) };
     let lifted_document = lifted_result?;
-    let saved = files::save(kind, &lifted_document.skeleton, &lifted_document.arrays, &lifted_document.payloads, host)?;
+    let saved = files::save(kind, Arc::new(lifted_document.skeleton), Arc::new(lifted_document.arrays), Arc::new(lifted_document.payloads), host)?;
     let timings = SaveTimings { lift_ms, scene_ms, stage_ms: lifted_at - started, frames: saved.frames, frames_ms: saved.frames_ms, assemble_ms: clock() - lifted_at - saved.frames_ms, ..SaveTimings::default() };
     Ok(Written { bytes: saved.bytes, raw_bytes: saved.stats.container_raw_bytes, timings })
 }
