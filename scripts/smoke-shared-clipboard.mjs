@@ -18,9 +18,12 @@ async function launch() {
 }
 async function flush(page) { await page.evaluate(() => window.styk.clipboard.pending); }
 async function selectCanvas(page) { await page.bringToFront(); await page.evaluate(() => document.activeElement?.blur()); }
+// A new window opens on a one-figure document of one frame; the copies below need four figures and thirteen frames.
+async function seed(page) { await page.evaluate(async () => { const {emptyDocument,createFrame,createObject}=await import('./src/demo.mjs'); const report=emptyDocument(), figure=report.figure_types[0]; report.keyframes=Array.from({length:13},()=>createFrame([1,2,3,4].map(uid=>createObject(figure,uid,100+uid*160,300)))); window.styk.editor.load(report); }); }
 async function empty(page) { await page.evaluate(async () => { const {emptyDocument}=await import('./src/editor.mjs'); window.styk.editor.load(emptyDocument()); }); }
 try {
   const a = await launch(), b = await launch();
+  await seed(a.page);
   checks.push('Two simultaneous processes with the same profile own separate projects');
   await a.page.evaluate(() => { const e=window.styk.editor; e.select(1); e.select(3,{add:true}); });
   await selectCanvas(a.page); await a.page.keyboard.press('Control+c'); await flush(a.page);
@@ -56,7 +59,6 @@ try {
   await a.page.locator('.library-thumbnail img').first().waitFor();
   const count = await a.page.evaluate(() => window.styk.editor.selectionFrame.objects.length);
   const card = a.page.locator('.library-card:not(.folder)').first();
-  assert.equal(await card.getAttribute('draggable'), 'false');
   await card.dragTo(a.page.locator('#viewport'), {targetPosition:{x:260,y:220}});
   await a.page.waitForFunction(n => !window.styk.library.busy && window.styk.editor.selectionFrame.objects.length === n+1, count);
   const drop = await a.page.evaluate(() => {

@@ -300,11 +300,12 @@ impl EditScene {
         self.ghosts.get(&id).and_then(|pose| pose.record.as_ref()).is_some_and(|held| held.same_node(record))
     }
 
-    /// A ghost not shown by the last draw keeps its pose and scene but not what its scene was built of: the builds of every object are
-    /// held only for the ghosts that are on show.
+    /// A ghost not shown by the last draw keeps its pose and scene but not what its scene was built of, nor the views of the document it was
+    /// converted against: those are held only for the ghosts that are on show.
     fn release_idle_ghosts(&mut self) {
         for pose in self.ghosts.values_mut().filter(|pose| pose.used != self.draws) {
             pose.memory = BuildMemory::default();
+            pose.prepared = None;
         }
     }
 

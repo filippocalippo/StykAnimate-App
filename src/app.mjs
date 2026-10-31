@@ -1736,21 +1736,18 @@ function loop(now) {
     // Playback shows prepared frames only: the editing view is unclipped and would blink at the artboard's edge.
     if (!preparedPresented && !state.playing) {
       const drawingPreview=drawingController?.renderPreview;
-      const frame = drawingPreview?.frame??currentFrame(),
-        geometry =
-          drawingPreview?.geometry ||
-          motionDisplay()?.geometry ||
-          state.drag?.geometry ||
-          keyboardHandleGesture?.geometry ||
-          editor.geometry;
+      // The geometry the overlay reads. The engine draws from its session, so the picture does not wait for it: it is read after the picture.
+      const heldGeometry = drawingPreview?.geometry || motionDisplay()?.geometry || state.drag?.geometry || keyboardHandleGesture?.geometry;
+      const source = drawingPreview ? null : editor._shown?.source(Boolean(motionDisplay())) ?? null;
       const editingDrawn = state.renderer.render({
         vfxEnabled: state.vfxEnabled,
         report: drawingPreview?.report??editor.report,
         documentReport: editor.report,
-        frame,
-        geometry,
+        // The frame as poses is read only by a draw that does not take it from the session.
+        get frame() { return drawingPreview?.frame ?? currentFrame(); },
+        geometry: source ? undefined : heldGeometry ?? editor.geometry,
         // The engine draws the frame its session shows; the interface's own frame (a drawing's first stroke) crosses as poses.
-        source: drawingPreview ? null : editor._shown?.source(Boolean(motionDisplay())) ?? null,
+        source,
         view: state.view,
         cameraEnabled: state.playing || state.previewing,
         editorBackgroundColor: builderBackgroundColor(state.settings, state),
@@ -1767,7 +1764,7 @@ function loop(now) {
       // What is presented is what was drawn: a frame the stage could not draw yet leaves the previous picture on show.
       if (editingDrawn) state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
         sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
-      overlayRender(geometry);
+      overlayRender(heldGeometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
       setHidden($('preview-quality'), !(images.reduced || state.previewGovernor?.index));
     }

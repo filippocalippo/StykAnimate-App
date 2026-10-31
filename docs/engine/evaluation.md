@@ -325,7 +325,7 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   points, a connector's handle, a 3D bone's `spatialFrame`; under a camera the joints and bone starts also carry
   `rawPoint`, where they are before perspective, which the commands that pose in perspective unproject from) and every polygon (culled ones flagged, a one-sided face that looks at the viewer `culled: false`, depth values of
   depth-tested faces), what inverse kinematics solved, and the figure's bounds as `boundsOf` measures them
-  (`drawlist::app_bounds`). `write_groups` writes them as JSON (a segment is a row of numbers that leaves out what the reader works out: where it starts is where its parent ends, where it ends is its joint); `engine-shown.mjs` makes them the groups the canvas, the
+  (`drawlist::app_bounds`). `pack_groups` writes them as a packet of 64-bit floats, not text (`EditSession.query_packet`; the layout is documented in `styk-eval/src/geometry/interface.rs`: a segment is a row of numbers that leaves out what the reader works out: where it starts is where its parent ends, where it ends is its joint; nothing is formatted or parsed on the way, and a non-finite number stays non-finite, which the reader takes for the `null` it once was); `engine-shown.mjs` reads the words where they lie and makes them the groups the canvas, the
   handles and the pickers read (`{objects: Map<slot, group|null>, orderedObjects, drawables, token, changedSlots,
   warnings}`; a group `{slot, obj, fig, root, joints, segments, polys, bounds, solvedAngles, solvedLengths}`, `drawables`
   built when read, with Stick Nodes shapes expanded). The groups carry no drawables for a 3D mesh or a movieclip's contents: the
