@@ -1,9 +1,11 @@
 //! Writing a project from the document an edit session holds: the file reads back as that document, with the metadata every
 //! project carries and the Pivot original stored first, the same document saves to the same bytes, and a stopped save writes
-//! nothing. Byte identity with the JavaScript writer this replaced is checked on the app's documents by
+//! nothing. Byte identity with the JavaScript writer this replaced is checked on the repository's recorded files by
 //! `tests/save-references.test.mjs`.
 use sha2::{Digest, Sha256};
-use styk_doc::{Obj, Value, json};
+use std::sync::Arc;
+
+use styk_doc::{Nums, Obj, Value, json};
 use styk_engine::document::{OpenOptions, OpenSource};
 use styk_engine::save::{ProjectRequest, SaveError, Source, save_figure_file, save_project};
 use styk_engine::{Budgets, Engine};
@@ -89,4 +91,82 @@ fn a_figure_file_is_checked_for_being_self_contained_before_it_is_written() {
     let refused = save_figure_file(&tree, Kind::Stkz, &|| false).unwrap_err();
     let SaveError::File(error) = refused else { panic!("{refused:?}") };
     assert!(error.message_key.starts_with("errors.nativeContainer."), "{error:?}");
+}
+
+/// The tree of a repository document with a numeric array of `count` values (single precision, so it is stored as `f32`) added.
+fn heavy_tree(count: usize) -> Value {
+    let mut tree = tree("engine/tests/edit/startup.document.json");
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let values: Vec<f64> = (0..count)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            f64::from((state % 4096) as f32 / 8.0)
+        })
+        .collect();
+    tree.make_obj().unwrap().set("heavy", Value::Nums(Arc::new(Nums::new(&values))));
+    tree
+}
+
+#[test]
+fn a_save_stops_at_the_question_that_says_so_wherever_it_is_asked_and_writes_nothing() {
+    // The worker that runs a save is ended five seconds after it is told to stop, and must not be inside the engine then
+    // (docs/engine/threading.md): the longest stretch between two questions is the lift of a few thousand values, the
+    // preparation of the document, or hashing or compressing a few megabytes. Counting the questions shows the stretches are short
+    // (hashing alone asks for every 4 MiB of a document of 32 MiB of numbers) and that a stop is obeyed by the very next question.
+    let tree = heavy_tree(8 << 20);
+    let asked = std::cell::Cell::new(0usize);
+    let saved = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| { asked.set(asked.get() + 1); false }).unwrap();
+    let total = asked.get();
+    assert!(saved.raw_bytes >= 32 << 20, "{} raw bytes", saved.raw_bytes);
+    assert!(total >= 32 / 4 + 2, "{total} questions for {} MiB", saved.raw_bytes >> 20);
+    // Stopped at the start, in the preparation, in the lift, while hashing and while compressing: the same answer.
+    for stop_at in [1, 2, 5, total / 4, total / 2, total * 3 / 4, total - 1, total] {
+        let asked = std::cell::Cell::new(0usize);
+        let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| { asked.set(asked.get() + 1); asked.get() >= stop_at });
+        assert!(matches!(stopped, Err(SaveError::Cancelled)), "stopped at question {stop_at} of {total}: {:?}", stopped.map(|written| written.bytes.len()));
+        assert_eq!(asked.get(), stop_at, "nothing is asked, and no work is started, after the question that said stop");
+    }
+}
+
+#[test]
+fn a_save_the_memory_cannot_hold_is_refused_before_it_starts() {
+    let tree = tree("engine/tests/edit/startup.document.json");
+    // The save reserves what its sections and the compressed file take; with the memory limited to 8 MiB it is refused whole.
+    let refused = styk_alloc::with_limit(8 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| false));
+    assert!(matches!(refused, Err(SaveError::OutOfMemory(_))), "{refused:?}");
+    // The same document saves when the memory is there, and a refused save changed nothing of it.
+    assert!(save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| false).is_ok());
+    // The Pivot original counts twice: a document that fits alone does not fit with an original that takes most of the memory.
+    let original = Source { record: Value::object(Obj::new()), bytes: vec![0; 100 << 20] };
+    let refused = styk_alloc::with_limit(256 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: Some(original) }, &|| false));
+    assert!(matches!(refused, Err(SaveError::OutOfMemory(_))), "{:?}", refused.map(|written| written.bytes.len()));
+}
+
+#[test]
+fn every_recorded_project_opens_and_saves_to_its_own_bytes() {
+    // The files the repository records were written by the JavaScript writer; a document opened from one and not changed saves
+    // to the same bytes, arrays several records share included (`project-shared-arrays.styk`). The app's side of this is
+    // `tests/save-references.test.mjs`.
+    let mut checked = Vec::new();
+    for entry in std::fs::read_dir(repo("engine/tests/containers")).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        if !name.ends_with(".styk") || name.contains("version-1") {
+            continue;
+        }
+        let recorded = std::fs::read(&path).unwrap();
+        // As the app opens a file, except the one whose movieclip frames the open gives identities the file lacks: that one is the tree as stored.
+        let tree = if name.contains("shared") {
+            files::open_document(&recorded, Kind::Styk).unwrap()
+        } else {
+            let engine = Engine::new(|| 0.0, Budgets::for_device(None));
+            engine.open_document(OpenSource::File { bytes: &recorded, name: &name }, OpenOptions { layer_timeline: false }, &|| false).unwrap().tree
+        };
+        let saved = save(&tree, None, None);
+        assert!(saved == recorded, "{name}: {} bytes saved, {} recorded", saved.len(), recorded.len());
+        checked.push(name);
+    }
+    assert!(checked.contains(&"project-shared-arrays.styk".to_string()) && checked.len() >= 5, "{checked:?}");
 }

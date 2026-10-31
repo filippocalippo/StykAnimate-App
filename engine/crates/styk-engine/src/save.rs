@@ -4,8 +4,11 @@
 //! immutable snapshot of the copy-on-write tree: the session goes on editing meanwhile.
 //!
 //! The document is prepared as the save has always prepared it (`styk_edit::export::project_document`), lifted into the
-//! container's skeleton and sections (`styk_formats::container::lift`, which makes the choices the JavaScript writer made) and
-//! framed (`styk_formats::files::save`).
+//! container's skeleton and sections (`styk_formats::container::lift_until`, which makes the choices the JavaScript writer made) and
+//! framed (`styk_formats::files::save`). The worker that runs it may be told to give its thread back at any moment, so the interface does not wait on it: the lift asks `cancel` every few thousand values, hashing every few megabytes and the
+//! preparation between its steps, and compression (one call per frame, to keep the frames' bytes) before and after each frame. A
+//! worker found inside this function when it is told to stop finishes the frame it is on and returns `Cancelled`; it is never ended
+//! inside it (`docs/engine/threading.md`, "Ending a worker").
 
 use std::sync::Arc;
 
@@ -76,7 +79,16 @@ impl From<EditError> for SaveError {
 
 impl From<ContainerError> for SaveError {
     fn from(error: ContainerError) -> Self {
-        SaveError::File(FileError::from(error))
+        match error {
+            ContainerError::Cancelled => SaveError::Cancelled,
+            error => SaveError::File(FileError::from(error)),
+        }
+    }
+}
+
+impl From<FileError> for SaveError {
+    fn from(error: FileError) -> Self {
+        if error.code == Some(styk_formats::container::CANCELLED) { SaveError::Cancelled } else { SaveError::File(error) }
     }
 }
 
@@ -123,10 +135,7 @@ fn write(document: &Value, kind: Kind, reserved: &[Arc<[u8]>], cancel: &dyn Fn()
     if cancel() {
         return Err(SaveError::Cancelled);
     }
-    let lifted = container::lift(document, reserved)?;
-    if cancel() {
-        return Err(SaveError::Cancelled);
-    }
-    let saved = files::save(kind, &lifted.skeleton, &lifted.arrays, &lifted.payloads, &mut NoStore).map_err(SaveError::File)?;
+    let lifted = container::lift_until(document, reserved, cancel)?;
+    let saved = files::save(kind, &lifted.skeleton, &lifted.arrays, &lifted.payloads, &mut NoStore, cancel)?;
     Ok(Written { bytes: saved.bytes, raw_bytes: saved.stats.container_raw_bytes })
 }

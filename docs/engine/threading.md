@@ -52,8 +52,8 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   before the worker closes, with no turn of its event loop in between (a call into the
   module after the destructor writes through a stack the shared memory has taken back:
   cancelling an export of URIEL 3 crashed the page that way until the answers were
-  let through first); a worker that does not answer within 5 s is terminated
-  (what it held then stays allocated in the shared memory). A worker that gets no GPU
+  let through first); a worker that does not answer within 5 s is terminated only if it is outside the engine at that moment
+  (what it held then stays allocated in the shared memory; see "Ending a worker" below). A worker that gets no GPU
   device draws the export with the CPU rasterizer (`ExportRenderer::create_cpu`,
   styk-raster), each tile when asked for. Pages that are not cross-origin isolated
   cannot export.
@@ -61,9 +61,10 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   shared memory and calls `export_document` (`styk-wasm`) on the engine's document at the editor's revision (Pivot and figure
   files), or `save_project` on the snapshot of an edit session (a `.styk` project), as one synchronous stretch of work that asks a
   flag in shared memory for cancellation between the ticks it bakes or the steps it takes (see
-  [document.md](document.md#exports-of-the-document)). It is not terminated while it may be inside the
-  engine: the interface raises the flag and sends `release`, the worker gives its thread back
-  (`__wbindgen_thread_destroy`) after the call returns and closes, and one that does not answer within 5 s is terminated.
+  [document.md](document.md#exports-of-the-document)). It is never terminated while it is inside the engine (see "Ending a worker"):
+  the interface raises the flag and sends `release`, the worker finishes the call it is in, gives its thread back
+  (`__wbindgen_thread_destroy`) and closes. A save that is cancelled drops the result; a compression that takes a while after the
+  cancel costs only CPU, and the next save gets a worker of its own at once. The flag is raised on every path that ends the worker.
 - The preview worker (`src/engine/engine-preview-worker.mjs`, one per page,
   `engine-previews.mjs`; see [rendering.md](rendering.md#thumbnails-library-previews-and-the-camera-monitor)):
   joins the shared memory like the export worker and keeps its event loop for a GPU
@@ -74,8 +75,7 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   does). It starts with the first request, runs requests one
   at a time and is released after five idle minutes, as the export worker is (device
   destroyed, pending answers let through, then the thread destroyed); it is never
-  terminated to cancel a preview (a cancelled request's answer is dropped), because a
-  thread of the shared memory terminated mid-call could hold the allocator or a lock.
+  terminated to cancel a preview (a cancelled request's answer is dropped), and never while inside the engine ("Ending a worker").
 - Frame thumbnails and the camera monitor are drawn by the stage on the interface
   thread (`styk-wasm/src/views.rs`), the only work done there being the draw itself:
   a thumbnail's frame is prepared on the preparation workers (`ExportFrames::prefetch`)
@@ -101,6 +101,20 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   parallelism is whole frames on workers.
 - Library code has no clock, file or thread of its own: the host injects a
   clock (`styk_wasm::clock`), and native tools use rayon through `par`.
+
+## Ending a worker
+
+A thread of the shared memory ended in the middle of a call into the engine can hold its allocator or a lock for good, and every thread
+that needs them then waits for ever (the engine freezes). So the interface never ends a worker that is inside the engine, and does not
+rely on the engine work being short. `src/engine/engine-guard.mjs`: every worker that joins the engine has a *guard*, a word of shared
+memory the interface creates (`workerGuard`) and sends with its first message. The worker holds the guard (`inside`) for each
+synchronous stretch in which it calls the engine: joining, the document export or save, the renderer's and the previews' methods
+(`guarded` wraps an object so that every method call is such a stretch), and giving its thread back. The interface ends a worker
+(`releaseWorker`) when it answers `release` with `released`, or when 5 s have passed and it can *claim* the guard (compare-exchange
+from outside to claimed); a worker that finds the guard claimed does not enter. Exactly one of the two wins. A thread holds one count however many views of the word it was sent (every message brings a new one). An `error` event from the worker ends the watch and the worker: the exception has unwound its stretches, and the guard with them. A worker found inside is
+looked at again 5 s later (the `release` it was sent waits in its queue): the cancel flag the caller raised (for a save) makes the engine work stop at its next question, and the
+worker releases when the call returns. Promise continuations the engine runs after a GPU read-back settles (the export and preview
+workers) are not wrapped; they are short and run in the event loop, where the worker answers `release` between them.
 
 ## Prepared samples
 
