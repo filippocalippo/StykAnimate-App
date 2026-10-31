@@ -61,6 +61,7 @@ try {
     assert.notEqual(guidance.text,guidance.state.message,'the real update IPC preserves English diagnostics and displays Italian guidance');
   }
   const closed = first.waitForEvent('close');
+  await page.evaluate(() => localStorage.clear());
   await first.evaluate(({ app }) => app.exit(0)).catch(() => {});
   await closed;
   const second = await launch(); applications.push(second);
