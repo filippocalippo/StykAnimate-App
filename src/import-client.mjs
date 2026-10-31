@@ -249,27 +249,29 @@ export class ImportClient {
   async _openProject(filename,bytes,{onProgress,project,open}) {
     const started=performance.now(),controller=new AbortController(),{signal}=controller;
     this.opening.add(controller);
-    let kept=null,opening=null;
+    let keeping=null,opening=null,keepFailure=null;
     try {
-      // The codec keeps a copy of the original; the engine reads the bytes it is given.
+      // The codec keeps a copy of the original while the engine reads the bytes it is given: both need only the bytes.
       const original=project&&/\.piv$/i.test(filename)?bytes.slice(0):null;
+      keeping=original?this._keep(filename,original):null;
+      // A codec that fails stops the open, and the open fails with the codec's error instead of its own cancellation.
+      keeping?.catch(error=>{if(!signal.aborted){keepFailure=error;controller.abort();}});
       opening=await openBytes(bytes,filename,{layerTimeline:open.layerTimeline,signal});
       const decoded=performance.now();
-      if(original){
-        kept=await this._keep(filename,original,signal);
-        if(kept.sourceDescription){
-          // The web build embeds the original in the document: it is the file the engine read, as the codec fingerprinted it.
-          if(await sha256(bytes)!==kept.sourceDescription.sha256)throw messageError(new Error(''), "errors.nativeContainer.embeddedOriginalSourceFingerprintDoesNotMatch", {});
-          opening.attachSource(kept.sourceDescription,bytes);
-          kept=null;
-        }
+      let kept=keeping?await keeping:null;
+      if(kept?.sourceDescription){
+        // The web build embeds the original in the document: it is the file the engine read, as the codec fingerprinted it.
+        if(await sha256(bytes)!==kept.sourceDescription.sha256)throw messageError(new Error(''), "errors.nativeContainer.embeddedOriginalSourceFingerprintDoesNotMatch", {});
+        opening.attachSource(kept.sourceDescription,bytes);
+        keeping=kept=null;
       }
       const read=await opening.read({signal,onProgress});
       return this._opened(read,opening,filename,{sourceId:kept?.sourceId??null,sourceOwner:kept?.sourceOwner,sourceBytes:bytes.byteLength,started,decoded});
     } catch (error) {
       opening?.dispose();
-      if(kept)void this.releaseSource(kept);
-      throw error;
+      // What the codec kept, even if it is still being kept, is let go once it is done (a stopped open included).
+      void keeping?.then(kept=>this.releaseSource(kept),()=>{});
+      throw keepFailure??error;
     } finally { this.opening.delete(controller); }
   }
 
@@ -297,12 +299,7 @@ export class ImportClient {
   }
 
   /** Keeps the original of a Pivot project in the codec, leased to a new owner (src/import-worker.mjs, `keep`). */
-  _keep(filename,bytes,signal) {
-    const kept=this._request('keep',{filename,bytes},[bytes],undefined,true);
-    // An open that was stopped lets the codec finish, then lets go of what it kept.
-    signal.addEventListener('abort',()=>kept.then(result=>this.releaseSource(result),()=>{}),{once:true});
-    return kept;
-  }
+  _keep(filename,bytes) { return this._request('keep',{filename,bytes},[bytes],undefined,true); }
 
   cancelPending() {
     this.cancelGeneration++;
