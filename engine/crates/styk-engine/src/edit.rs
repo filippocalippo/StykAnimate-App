@@ -45,7 +45,7 @@ struct Pose {
     vfx_tick: Option<f64>,
     /// Its generated effects, built when first drawn (again while incomplete).
     generators: Option<Arc<Batch>>,
-    /// The record it was made from, when the pose came as a record ([`EditScene::update_record`]): the next one is
+    /// The record it was made from, when the pose came as a record ([`EditScene::update_shown`]): the next one is
     /// read as its difference.
     record: Option<Value>,
 }
