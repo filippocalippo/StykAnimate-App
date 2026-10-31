@@ -2,7 +2,7 @@
  * Builds the engine's three WebAssembly modules into src/engine/pkg/ (git-ignored):
  *
  *   node scripts/engine-build.mjs            release build (wasm-opt when available)
- *   node scripts/engine-build.mjs --dev      faster build, no wasm-opt
+ *   node scripts/engine-build.mjs --dev      iteration build (profile wasm-dev): seconds, for diagnosis, never for a measured result
  *
  * - The engine (`styk-wasm`, styk_engine.js) uses WebAssembly threads over one shared
  *   memory, which needs the standard library rebuilt with atomics: the pinned nightly
@@ -30,7 +30,7 @@ export const CODEC_TOOLCHAIN = 'stable';
 // 2 GiB of address space: every thread shares it, and a shared memory's maximum is fixed when it links.
 const MAX_MEMORY = 2147483648;
 const dev = process.argv.includes('--dev');
-const profile = dev ? 'release' : 'wasm';
+const profile = dev ? 'wasm-dev' : 'wasm';
 // Worktrees share one target directory through CARGO_TARGET_DIR: build caches are what fills the disk.
 const target = process.env.CARGO_TARGET_DIR ? path.resolve(process.env.CARGO_TARGET_DIR) : path.join(engine, 'target');
 

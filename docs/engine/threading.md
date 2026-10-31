@@ -151,6 +151,8 @@ imported shared memory (maximum 2 GiB), wasm-bindgen 0.2.129 `--target web`,
 output in `src/engine/pkg/` ([D9](decisions/0009-generated-engine-build-output.md)).
 Never strip the profile ([D10](decisions/0010-keep-wasm-symbols.md)).
 
+`npm run engine:build -- --dev` is the iteration build (profile `wasm-dev`: no LTO, 256 codegen units, incremental, D10 kept): a change in `styk-eval` rebuilds in about 25 s against about 5 minutes for the release profile. It is for iterating and diagnosis, and no number measured on it is a result. The first build on a machine compiles the dependencies once (about 8 minutes).
+
 ## Memory growth
 
 Rust's allocator on `wasm32-unknown-unknown` (dlmalloc) asks the host for more linear memory
