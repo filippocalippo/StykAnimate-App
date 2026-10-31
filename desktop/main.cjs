@@ -116,16 +116,16 @@ if (!primaryInstance) {
   app.setPath('crashDumps', path.join(instanceDirectory, 'crashes'));
 }
 /**
- * What the page keeps in the browser lasts one launch: what must last lives in native files. IndexedDB here is
- * temporary worker storage (undo caches), so the previous launch's is reclaimed before any editor or worker can use
- * the session. The folders (Chromium keeps local storage in `Local Storage`, newer versions in `WebStorage`) go before
- * Chromium opens its storage, which happens after `ready`: far quicker than clearing them through the session, and the
- * page loads once they are gone. `scripts/smoke-storage.mjs` checks that nothing survives a restart.
+ * IndexedDB here is temporary worker storage (undo caches), so the previous launch's is reclaimed before any editor or
+ * worker can use the session. The folder goes before Chromium opens its storage, which happens after `ready`: far quicker
+ * than clearing it through the session, and the page loads once it is gone. Local storage stays: the origin is the same on
+ * every launch, so recent colours, palettes and the brush library last, as in the browser; settings, layout, hotkeys and
+ * recovery live in native files (`scripts/smoke-storage.mjs`, and the restart smokes clear local storage to prove it).
  */
 let browserStorageCleared = Promise.resolve();
 if (!primaryInstance && pendingProtocol) app.quit();
 else {
-  browserStorageCleared = Promise.all(['IndexedDB', 'Local Storage', 'WebStorage'].map(name => fs.rm(path.join(app.getPath('sessionData'), name), {recursive: true, force: true})))
+  browserStorageCleared = fs.rm(path.join(app.getPath('sessionData'), 'IndexedDB'), {recursive: true, force: true})
     .then(() => {}, error => console.warn('Temporary browser storage cleanup:', error.message));
   app.on('second-instance', (_event, argv) => {
     // Each ordinary launch owns its project. Protocol links still target the
