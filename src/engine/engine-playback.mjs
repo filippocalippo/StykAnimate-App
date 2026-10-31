@@ -185,10 +185,12 @@ export function createStagePlayback({stage, maxTickets}) {
       dropPackets();
       return playback;
     },
-    async prepareRange(ticks) {
+    /** Asks the engine to prepare `ticks`. `idle`: nobody is waiting for them (the warm-up while the editor rests), so the engine's remaining threads are not started for it. */
+    async prepareRange(ticks, {idle = false} = {}) {
       // A busy earlier admission stays cold, but cannot suppress newer demand.
       if (!held() || !ticks.length || !sample(ticks[0])) return;
       const engine = side().engine;
+      if (!idle) engine.grow?.();
       requested = [];
       for (let index = 0; index < Math.min(ticks.length, ticketLimit); index++) {
         const tick = ticks[index];

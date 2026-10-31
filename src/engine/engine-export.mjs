@@ -57,6 +57,7 @@ let warm = null;
 export function prewarmExportRenderer({stage} = {}) {
   const engine = stage?.engineSide?.engine;
   if (warm || !engine?.threaded || typeof Worker !== 'function') return;
+  engine.grow?.();
   const worker = new Worker(new URL('./engine-export-worker.mjs', import.meta.url), {type: 'module', name: WORKER_NAME});
   const entry = warm = {worker, timer: setTimeout(() => { if (warm === entry) { warm = null; release(worker); } }, WARM_MS)};
   worker.addEventListener('message', ({data}) => { if (data?.warmed === false && warm === entry) { warm = null; clearTimeout(entry.timer); release(worker); } });
@@ -80,6 +81,7 @@ export function createExportFrameRenderer(options, {stage, revision, range, vect
   const side = stage?.engineSide;
   if (!side?.engine?.threaded || typeof stage.prepareExport !== 'function')
     throw unavailable('no engine with worker threads');
+  side.engine.grow?.();
   return new EngineExportFrames(options, {stage, revision, range, vector});
 }
 

@@ -389,3 +389,14 @@ test('a document loaded before the stage exists is served once the stage has the
   assert.deepEqual(requested, [0], 'the engine holds the revision the transport is at');
   playback.dispose();
 });
+
+test('frames someone waits for start the engine\'s remaining threads; the idle warm-up does not', async () => {
+  const {playback, engine} = playbackSide();
+  let grown = 0;
+  engine.grow = () => { grown++; };
+  playback.load({}, {revision: 1});
+  await playback.prepareRange([0, 1], {idle: true});
+  assert.equal(grown, 0, 'a warm-up of an editor at rest uses the threads there are');
+  await playback.prepareRange([0, 1]);
+  assert.equal(grown, 1);
+});
