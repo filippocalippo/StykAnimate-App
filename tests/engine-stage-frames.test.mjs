@@ -21,6 +21,7 @@ function standInStage(behaviour = {}) {
     take_device_errors: () => behaviour.errors?.() ?? '',
     device_lost: () => behaviour.lost?.() ?? '',
     max_texture: () => 4096,
+    edit_uids: () => behaviour.uids ?? [],
     refining: () => false, camera_pending: () => false, pictures_pending: () => 0, surface_pending: () => behaviour.pending?.() ?? false,
     ...Object.fromEntries(['resize', 'set_effects', 'set_canvas_drawing', 'set_view_orientation', 'set_multisampled', 'edit_frame', 'set_onions', 'clear_onions', 'lose_device', 'free']
       .map(name => [name, record(name)])),
@@ -330,4 +331,17 @@ test('a stage prepared ahead of its owner is taken once, and a failed start reac
   const failing = stageHandoff(() => Promise.reject(new Error('no device')));
   failing.prepare(canvas);
   await assert.rejects(failing.take(canvas), /no device/);
+});
+
+test('the slots of the figures not drawn and dragged come from the engine, and a draw from the session reads no frame', async () => {
+  const {renderer, stage} = await open({uids: [5, 7, 9]});
+  let read = 0;
+  const asked = request({hiddenUids: new Set([7, 9]), dragTranslations: new Map([[7, {x: 3, y: -4}], [9, {x: 0, y: 0}]]), source: {session: {name: 'session'}, view: '{}', motion: false}});
+  Object.defineProperty(asked, 'frame', {get() { read++; return frame; }});
+  assert.equal(renderer.render(asked), true);
+  const [, , , , , , hidden, translations] = stage.calls.find(([name]) => name === 'render_edit');
+  assert.deepEqual([...hidden], [1, 2], 'the slots of the ids');
+  assert.deepEqual([...translations], [1, 3, -4], 'a figure that did not move is not listed');
+  assert.equal(read, 0, 'the frame as poses was not made for a draw the session answers');
+  renderer.destroy();
 });

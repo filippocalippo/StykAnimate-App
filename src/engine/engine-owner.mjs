@@ -135,6 +135,11 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
       try { return session.query(kind, JSON.stringify(args), adopting ? 'null' : playhead()); }
       catch (error) { throw queryFailure(error); }
     },
+    packet(kind, args) {
+      if (!reading()) return null;
+      try { return session.query_packet(kind, JSON.stringify(args), adopting ? 'null' : playhead()); }
+      catch (error) { throw queryFailure(error); }
+    },
     source(motion) {
       if (!reading()) return null;
       return {session, view: playhead(), motion};
@@ -475,6 +480,8 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   const parked = new Map();
   const park = () => {
     if (!session) return;
+    // Nothing shows the document of a parked session: what it keeps for showing it (frames, scenes, builds) goes, and is made again on return.
+    session.release_scenes();
     parked.set(document, {session, depths, history});
     session = null; document = null;
   };

@@ -160,6 +160,12 @@ impl EditSession {
         crate::document_export::snapshot(self.session().report().clone())
     }
 
+    /// Lets go of the frames, scenes and builds the session keeps for showing its document: it is parked (another project is in front, or a
+    /// movieclip is being edited inside it) and they are made again when it comes back.
+    pub fn release_scenes(&self) {
+        self.session().release_scenes();
+    }
+
     /// The interface revision of the document the session started from.
     pub fn revision(&self) -> f64 {
         self.revision
@@ -179,6 +185,14 @@ impl EditSession {
     /// since the read `since`). Answers JSON text; the document does not change.
     pub fn query(&mut self, kind: &str, args: &str, view: &str) -> Result<String, JsError> {
         let answer = self.session.as_mut().expect("a session is open until it is dropped").query(kind, args, view).map_err(js_error);
+        self.publish();
+        answer
+    }
+
+    /// The geometry packet of the frame on show (`geometry`) or of a frame the document does not hold (`previewGeometry`): words, not text
+    /// (`styk_edit::session::Session::query_packet`). Empty where a motion-path edit shows the document.
+    pub fn query_packet(&mut self, kind: &str, args: &str, view: &str) -> Result<Vec<f64>, JsError> {
+        let answer = self.session.as_mut().expect("a session is open until it is dropped").query_packet(kind, args, view).map_err(js_error);
         self.publish();
         answer
     }

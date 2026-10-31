@@ -227,12 +227,11 @@ impl Editor {
     }
 
     /// `editor.geometry` of the frame on show (or of the motion-path display with `motion`), the groups
-    /// that changed since the read `since` named: `{token, full, count, slots: [[slot, group|null], …],
-    /// warnings}`. `null` where a motion-path edit shows the document.
-    pub(crate) fn interface_geometry(&self, args: &Value) -> Result<String, EditError> {
+    /// that changed since the read `since` named, as a packet ([`geometry_packet`]). Empty where a motion-path edit shows the document.
+    pub(crate) fn interface_geometry(&self, args: &Value) -> Result<Vec<f64>, EditError> {
         let motion = args.get("motion").is_some_and(Value::truthy);
         let since = args.get("since").and_then(Value::as_f64).map(|token| token as u64);
-        let Some(shown) = self.shown_scene(motion, crate::shown::Flavor::Composed)? else { return Ok("null".into()) };
+        let Some(shown) = self.shown_scene(motion, crate::shown::Flavor::Composed)? else { return Ok(Vec::new()) };
         let count = shown.frame.objects.len();
         let mut caches = self.shown.borrow_mut();
         let cache = &mut caches[usize::from(motion)];
@@ -241,22 +240,23 @@ impl Editor {
         let reuse = since.is_some() && since == Some(cache.token) && cache.count == count;
         let slots: Vec<usize> = (0..count).filter(|&slot| !reuse || shown.built_in[slot] > cache.through).collect();
         let full = slots.len() == count;
-        let groups = if slots.is_empty() {
-            (Vec::new(), Vec::new())
-        } else {
+        let mut groups = Vec::new();
+        if !slots.is_empty() {
             let bounds = styk_eval::drawlist::app_bounds_of(&shown.scene, shown.prepared.doc.as_ref(), &slots);
-            (styk_eval::geometry::write_groups(&shown.scene, &slots, &bounds), shown.scene.warnings.clone())
-        };
+            styk_eval::geometry::pack_groups(&shown.scene, &slots, &bounds, &mut groups);
+        }
         cache.token += 1;
         cache.count = count;
         cache.through = shown.serial;
-        geometry_text(cache.token, full, count, &slots, &groups)
+        // A read that changed nothing says nothing of the scene's warnings, which the interface holds.
+        let warnings = if slots.is_empty() { &[][..] } else { &shown.scene.warnings[..] };
+        Ok(geometry_packet(cache.token, full, count, slots.len(), warnings, &groups))
     }
 
     /// The geometry of a frame that is not the document's: `frame` (the frame on show with a drawing cel the document does not hold yet
     /// added to it) seen against the document with `figure` among its figure types and its object on the layer `layerId`
     /// (`{frame, figure, uid, layerId}`), as a full geometry read of it.
-    pub(crate) fn interface_preview_geometry(&self, args: &Value) -> Result<String, EditError> {
+    pub(crate) fn interface_preview_geometry(&self, args: &Value) -> Result<Vec<f64>, EditError> {
         let invalid = |what: &str| EditError::Invalid(format!("the geometry preview needs {what}"));
         let record = args.get("frame").filter(|frame| frame.is_object()).ok_or_else(|| invalid("a frame"))?;
         let figure = args.get("figure").filter(|figure| figure.is_object()).ok_or_else(|| invalid("a figure"))?;
@@ -284,25 +284,23 @@ impl Editor {
         let scene = styk_eval::geometry::build_shapes(&prepared.doc, &frame, None);
         let bounds = styk_eval::drawlist::app_bounds(&scene, prepared.doc.as_ref());
         let slots: Vec<usize> = (0..count).collect();
-        let groups = (styk_eval::geometry::write_groups(&scene, &slots, &bounds), scene.warnings);
-        geometry_text(0, true, count, &slots, &groups)
+        let mut groups = Vec::new();
+        styk_eval::geometry::pack_groups(&scene, &slots, &bounds, &mut groups);
+        Ok(geometry_packet(0, true, count, slots.len(), &scene.warnings, &groups))
     }
 }
 
-/// A geometry read as the interface takes it (`{token, full, count, slots: [[slot, group|null], …], warnings}`).
-fn geometry_text(token: u64, full: bool, count: usize, slots: &[usize], groups: &(Vec<String>, Vec<String>)) -> Result<String, EditError> {
-    let mut out = Vec::with_capacity(64 + groups.0.iter().map(|group| group.len() + 8).sum::<usize>());
-    out.extend_from_slice(format!("{{\"token\":{token},\"full\":{full},\"count\":{count},\"slots\":[").as_bytes());
-    for (n, (slot, group)) in slots.iter().zip(&groups.0).enumerate() {
-        if n > 0 {
-            out.push(b',');
-        }
-        out.extend_from_slice(format!("[{slot},").as_bytes());
-        out.extend_from_slice(group.as_bytes());
-        out.push(b']');
+/// A geometry read as the interface takes it: words, `token, full (0 or 1), count (of objects), groups (how many follow), warnings` (how
+/// many, then each as its length and its UTF-16 code units), then the groups as `slot, length, words`
+/// ([`styk_eval::geometry::interface`]). The interface reads them where they lie.
+fn geometry_packet(token: u64, full: bool, count: usize, groups: usize, warnings: &[String], words: &[f64]) -> Vec<f64> {
+    let mut out = Vec::with_capacity(8 + words.len() + warnings.iter().map(|warning| warning.len() + 1).sum::<usize>());
+    out.extend_from_slice(&[token as f64, if full { 1.0 } else { 0.0 }, count as f64, groups as f64, warnings.len() as f64]);
+    for warning in warnings {
+        let units: Vec<u16> = warning.encode_utf16().collect();
+        out.push(units.len() as f64);
+        out.extend(units.into_iter().map(f64::from));
     }
-    out.extend_from_slice(b"],\"warnings\":");
-    styk_doc::json::write(&Value::array(groups.1.iter().map(|warning| Value::str(warning)).collect()), &mut out);
-    out.push(b'}');
-    String::from_utf8(out).map_err(|error| EditError::Invalid(error.to_string()))
+    out.extend_from_slice(words);
+    out
 }

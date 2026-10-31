@@ -1645,6 +1645,10 @@ function syncBackgroundInteraction(viewChanging) {
   const interacting=Boolean(viewChanging||editingGestureActive()||state.scrubbing||document.hidden);
   thumbnailRenderer?.setPaused(interacting||state.playing);
 }
+/** How long the handles may show an earlier playhead while a scrub keeps drawing pictures (ms): then they are drawn with the picture. */
+const OVERLAY_LAG_MS = 64;
+/** When the overlay was last drawn (the animation frame's time), and whether the picture just drawn left it for the next frame. */
+let overlayDrawnAt = 0, deferredOverlay = false;
 function loop(now) {
   flushPoseMove();
   canvasGuides?.render();
@@ -1736,21 +1740,23 @@ function loop(now) {
     // Playback shows prepared frames only: the editing view is unclipped and would blink at the artboard's edge.
     if (!preparedPresented && !state.playing) {
       const drawingPreview=drawingController?.renderPreview;
-      const frame = drawingPreview?.frame??currentFrame(),
-        geometry =
-          drawingPreview?.geometry ||
-          motionDisplay()?.geometry ||
-          state.drag?.geometry ||
-          keyboardHandleGesture?.geometry ||
-          editor.geometry;
+      // The geometry the overlay reads. The engine draws from its session, so the picture does not wait for it: it is read after the picture.
+      const heldGeometry = drawingPreview?.geometry || motionDisplay()?.geometry || state.drag?.geometry || keyboardHandleGesture?.geometry;
+      const source = drawingPreview ? null : editor._shown?.source(Boolean(motionDisplay())) ?? null;
+      // Only the playhead moved since the last picture (a scrub, a jump, a step): the picture is presented first, and the handles and the
+      // overlay follow on the next animation frame, unless they have waited OVERLAY_LAG_MS already.
+      const shown = state.lastEditingPresentation;
+      const seekOnly = Boolean(source && !heldGeometry && shown && shown.tick !== editor.tick && shown.revision === editor.revision && !editingGestureActive()
+        && now - overlayDrawnAt < OVERLAY_LAG_MS);
       const editingDrawn = state.renderer.render({
         vfxEnabled: state.vfxEnabled,
         report: drawingPreview?.report??editor.report,
         documentReport: editor.report,
-        frame,
-        geometry,
+        // The frame as poses is read only by a draw that does not take it from the session.
+        get frame() { return drawingPreview?.frame ?? currentFrame(); },
+        geometry: source ? undefined : heldGeometry ?? editor.geometry,
         // The engine draws the frame its session shows; the interface's own frame (a drawing's first stroke) crosses as poses.
-        source: drawingPreview ? null : editor._shown?.source(Boolean(motionDisplay())) ?? null,
+        source,
         view: state.view,
         cameraEnabled: state.playing || state.previewing,
         editorBackgroundColor: builderBackgroundColor(state.settings, state),
@@ -1767,8 +1773,12 @@ function loop(now) {
       // What is presented is what was drawn: a frame the stage could not draw yet leaves the previous picture on show.
       if (editingDrawn) state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
         sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
-      overlayRender(geometry);
-      drawingController?.overlayDraw(ctx);
+      if (seekOnly && editingDrawn) deferredOverlay = true;
+      else {
+        overlayRender(heldGeometry ?? editor.geometry);
+        drawingController?.overlayDraw(ctx);
+        overlayDrawnAt = now;
+      }
       setHidden($('preview-quality'), !(images.reduced || state.previewGovernor?.index));
     }
     if(pendingColorSample && (!state.playing || !state.buffering || preparedPresented)){
@@ -1788,7 +1798,7 @@ function loop(now) {
     }
     if(sampled){stages.scene=performance.now()-stageStarted;stageStarted=performance.now();Object.assign(stages,state.renderer.telemetryStages);}
     // Final editor overlay pass: keep the actual camera above artwork and tool feedback.
-    drawFinalOverlay();
+    if (deferredOverlay) { deferredOverlay = false; state.dirtyOverlay = true; } else drawFinalOverlay();
     if(sampled){stages.overlay=performance.now()-stageStarted;stageStarted=performance.now();}
     state.dirtyMonitor = false;
     paintCameraMonitor();
@@ -1822,6 +1832,7 @@ function loop(now) {
         state.drag?.geometry ?? keyboardHandleGesture?.geometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
       drawFinalOverlay();
+      overlayDrawnAt = now;
     }
   }
   if (state.playing) {
