@@ -3,8 +3,10 @@
 //! The layout (`styk_eval::assets`) gives every picture a place on a 4,096² page, for the whole document, and the draw
 //! lists name those places. A document of more than [`ATLAS_PAGES`] pages does not get a texture of its own size: the
 //! stage keeps the pages its frames show in a few layers ([`Residency`]), the least recently shown page leaves when
-//! another is wanted, and a page that comes back is decoded again from the document's encoded pictures
-//! ([`crate::Engine::decode_images`]). The texture is bigger than that only when one frame shows more pages.
+//! another is wanted. Pictures are loaded one at a time into the layer of their page, decoded from the document's
+//! encoded bytes ([`crate::Engine::decode_images`]) when a frame (or, ahead of one, the document's table of what each
+//! tick draws, [`crate::Engine::picture_row`]) needs them. The texture is bigger than that only when one frame shows
+//! more pages.
 
 use std::collections::HashSet;
 
@@ -12,36 +14,50 @@ use styk_draw::{DrawList, F_DRAWING, K_BG_IMAGE, K_IMAGE};
 use styk_eval::assets::Assets;
 
 /// Pages of the layout a document may have before its pictures are kept by [`Residency`] instead of all at once: the
-/// pages the sprite texture holds beside the layer nothing is written to, 384 MiB of video memory. Measured on the
-/// private documents (`styk pages`): one frame shows at most 3 pages of a 20 page document and the 48 frames after it
-/// 5 on average, so six keep a document playing without loading while a document of 16 pictures of 4K is not
-/// held whole.
-pub const ATLAS_PAGES: u32 = 6;
+/// pages the sprite texture holds beside the layer nothing is written to (the default of [`crate::Engine::atlas_pages`]),
+/// 12 of 64 MiB. Measured on tdd2 (`styk pages`: one frame draws from at most 3 of its 20 pages, the 48 ticks after one from
+/// 4.7 on average) and playing it through and jumping across it with 6, 12 and 20 pages (docs/engine/memory.md): 6 loses a
+/// picture to eviction often enough to show in playback, 12 plays without a late frame.
+pub const ATLAS_PAGES: u32 = 12;
 
-/// Whether the pictures of `assets` are kept by [`Residency`]: their layout has more pages than [`ATLAS_PAGES`].
-pub fn on_demand(assets: &Assets) -> bool {
-    assets.pages > ATLAS_PAGES
+/// Whether the pictures of `assets` are kept by [`Residency`]: their layout has more than `budget` pages.
+pub fn on_demand(assets: &Assets, budget: u32) -> bool {
+    assets.pages > budget
 }
 
-/// The pages of the layout whose pictures `list` draws (the pictures and backgrounds; the drawing cels' pages stay
-/// resident), in ascending order.
-pub fn pages_of(list: &DrawList) -> Vec<u32> {
-    let mut pages: Vec<u32> = Vec::new();
+/// Which picture of the document an atlas place is: what a frame's records name (a page and the corner of a rectangle)
+/// to the index of the image laid out there. Drawing cel tiles are not pictures of the document and are not in it.
+#[derive(Default)]
+pub struct PlaceIndex {
+    pictures: std::collections::HashMap<u64, u32>,
+}
+
+impl PlaceIndex {
+    pub fn new(assets: &Assets) -> PlaceIndex {
+        PlaceIndex { pictures: assets.atlas.iter().enumerate().filter(|(_, entry)| entry.valid).map(|(index, entry)| (super::place(entry.layer, entry.x, entry.y), index as u32)).collect() }
+    }
+}
+
+/// The pictures (indices into the document's images) `list` draws, in ascending order: its images and backgrounds, not
+/// the drawing cels' tiles (their pages stay resident).
+pub fn pictures_of(list: &DrawList, index: &PlaceIndex) -> Vec<u32> {
+    let mut pictures: Vec<u32> = Vec::new();
     let mut last = u32::MAX;
     for prim in &list.prims {
-        let page = match prim.kind & 255 {
-            K_IMAGE if prim.kind & F_DRAWING == 0 => prim.b[2] as u32,
-            K_BG_IMAGE => prim.a[2] as u32,
+        let (layer, u, v) = match prim.kind & 255 {
+            K_IMAGE if prim.kind & F_DRAWING == 0 => (prim.b[2], prim.c[0], prim.c[1]),
+            K_BG_IMAGE => (prim.a[2], prim.c[0], prim.c[1]),
             _ => continue,
         };
-        // Records of one picture follow each other: most repeat the page before them.
-        if page != last && !pages.contains(&page) {
-            pages.push(page);
+        let Some(&picture) = index.pictures.get(&super::record_place(layer, u, v)) else { continue };
+        // Records of one picture follow each other: most repeat the one before them.
+        if picture != last && !pictures.contains(&picture) {
+            pictures.push(picture);
         }
-        last = page;
+        last = picture;
     }
-    pages.sort_unstable();
-    pages
+    pictures.sort_unstable();
+    pictures
 }
 
 /// The pictures (indices into the document's images) laid out on `page`.
@@ -62,8 +78,6 @@ struct Page {
     used: u64,
     /// Never leaves (drawing cels, live drawing slots).
     pinned: bool,
-    /// Pictures of the page whose pixels are not in the layer yet.
-    missing: u32,
 }
 
 /// What [`Residency::acquire`] did.
@@ -119,29 +133,6 @@ impl Residency {
         self.pages.iter().filter(|page| page.layer.is_some()).count()
     }
 
-    /// Pictures of `page` still to be uploaded.
-    pub fn missing(&self, page: u32) -> u32 {
-        self.pages.get(page as usize).map_or(0, |page| page.missing)
-    }
-
-    pub fn set_missing(&mut self, page: u32, count: u32) {
-        if let Some(page) = self.pages.get_mut(page as usize) {
-            page.missing = count;
-        }
-    }
-
-    /// A picture of `page` was uploaded.
-    pub fn arrived(&mut self, page: u32) {
-        if let Some(page) = self.pages.get_mut(page as usize) {
-            page.missing = page.missing.saturating_sub(1);
-        }
-    }
-
-    /// Whether every picture of `page` is in its layer.
-    pub fn loaded(&self, page: u32) -> bool {
-        self.pages.get(page as usize).is_some_and(|page| page.layer.is_some() && page.missing == 0)
-    }
-
     /// Stamps `pages` as shown now.
     pub fn touch(&mut self, pages: &[u32]) {
         self.clock += 1;
@@ -183,7 +174,6 @@ impl Residency {
             .map(|(index, _)| index)
         {
             let layer = self.pages[victim].layer.take().expect("a resident page has a layer");
-            self.pages[victim].missing = 0;
             self.evictions += 1;
             (layer, Some(victim as u32))
         } else if grow {
@@ -195,7 +185,6 @@ impl Residency {
         let slot = &mut self.pages[page as usize];
         slot.layer = Some(layer);
         slot.used = self.clock;
-        slot.missing = 0;
         self.loads += 1;
         Acquired::Given { layer, evicted }
     }
@@ -234,13 +223,19 @@ mod tests {
     }
 
     #[test]
-    fn the_pages_of_a_list_are_those_of_its_pictures_and_backgrounds() {
-        let prim = |kind: u32, background: f32, image: f32| styk_draw::Prim { kind, group: 0, color: 0, paint: 0, a: [0.0, 0.0, background, 0.0], b: [0.0, 0.0, image, 0.0], c: [0.0; 4] };
-        let list = DrawList {
-            prims: vec![prim(K_IMAGE, 0.0, 5.0), prim(K_IMAGE, 0.0, 5.0), prim(K_BG_IMAGE, 2.0, 0.0), prim(K_IMAGE | F_DRAWING, 0.0, 9.0), prim(K_IMAGE, 0.0, 1.0), prim(0, 7.0, 7.0), prim(K_IMAGE, 0.0, 5.0)],
-            ..Default::default()
+    fn the_pictures_of_a_list_are_those_its_image_and_background_records_name() {
+        use styk_eval::assets::AtlasEntry;
+        let mut assets = Assets::default();
+        for (layer, x) in [(1, 1), (1, 600), (2, 1), (5, 1)] {
+            assets.atlas.push(AtlasEntry { layer, x, y: 1, w: 500, h: 500, source_w: 500, source_h: 500, valid: true });
+        }
+        let index = PlaceIndex::new(&assets);
+        let prim = |kind: u32, entry: usize| {
+            let layer = assets.atlas[entry].layer as f32;
+            styk_draw::Prim { kind, group: 0, color: 0, paint: 0, a: [0.0, 0.0, layer, 0.0], b: [0.0, 0.0, layer, 0.0], c: assets.atlas[entry].uv() }
         };
-        assert_eq!(pages_of(&list), vec![1, 2, 5]);
+        let list = DrawList { prims: vec![prim(K_IMAGE, 3), prim(K_IMAGE, 3), prim(K_BG_IMAGE, 2), prim(K_IMAGE | F_DRAWING, 0), prim(K_IMAGE, 1), prim(0, 0), prim(K_IMAGE, 3)], ..Default::default() };
+        assert_eq!(pictures_of(&list, &index), vec![1, 2, 3]);
     }
 
     #[test]
@@ -276,20 +271,6 @@ mod tests {
         let (layer, _) = given(residency.acquire(0, &[], false));
         assert_eq!(residency.acquire(0, &[], false), Acquired::Resident(layer));
         assert_eq!(residency.loads, 1);
-    }
-
-    #[test]
-    fn a_page_is_loaded_when_its_pictures_have_arrived() {
-        let mut residency = Residency::new(4, 2);
-        assert!(!residency.loaded(0));
-        given(residency.acquire(0, &[], false));
-        assert!(residency.loaded(0));
-        residency.set_missing(0, 2);
-        assert!(!residency.loaded(0));
-        residency.arrived(0);
-        residency.arrived(0);
-        residency.arrived(0);
-        assert!(residency.loaded(0));
     }
 
     #[test]

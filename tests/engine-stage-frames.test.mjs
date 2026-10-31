@@ -22,7 +22,7 @@ function standInStage(behaviour = {}) {
     device_lost: () => behaviour.lost?.() ?? '',
     max_texture: () => 4096,
     refining: () => false, camera_pending: () => false, pictures_pending: () => behaviour.pictures_pending?.() ?? 0, surface_pending: () => behaviour.pending?.() ?? false,
-    ...Object.fromEntries(['resize', 'set_effects', 'set_canvas_drawing', 'set_view_orientation', 'set_multisampled', 'edit_frame', 'set_onions', 'clear_onions', 'lose_device', 'free']
+    ...Object.fromEntries(['resize', 'set_effects', 'set_canvas_drawing', 'set_view_orientation', 'set_multisampled', 'edit_frame', 'set_onions', 'clear_onions', 'lose_device', 'free', 'hint_tick']
       .map(name => [name, record(name)])),
     // The session's frame is taken once the engine holds the session's document (`false` until then).
     edit_session: (...args) => { calls.push(['edit_session', ...args]); return behaviour.edit_session ? behaviour.edit_session(...args) : true; },
@@ -345,5 +345,15 @@ test('a frame the engine does not draw while its pictures are loaded is drawn ag
   progress.at(-1)();
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.ok(events.invalidations > before, 'the frame is asked for again');
+  renderer.destroy();
+});
+
+test('the tick the person went to is told to the engine once, so the pictures around it are loaded', async () => {
+  const {renderer, stage} = await open();
+  renderer.render(request({tick: 5}));
+  renderer.render(request({tick: 5}));
+  renderer.render(request({tick: 6}));
+  renderer.render(request());
+  assert.deepEqual(stage.calls.filter(([name]) => name === 'hint_tick'), [['hint_tick', 5], ['hint_tick', 6]]);
   renderer.destroy();
 });

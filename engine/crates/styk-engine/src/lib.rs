@@ -30,6 +30,7 @@ pub mod export;
 pub mod save;
 mod frames;
 mod images;
+mod picture_table;
 mod publication;
 pub use publication::PublicationRetirement;
 mod store;
@@ -44,7 +45,7 @@ use styk_eval::assets::Assets;
 use styk_eval::eval::Prepared;
 
 pub use frames::{FrameAdmission, FrameData, FrameMetadata, FrameSnapshot, FrameStats, GenerationHeader};
-pub use images::{drawing_pages, images_on, on_demand, pages_of, Acquired, DecodedImage, Residency, Uploaded, ATLAS_PAGES};
+pub use images::{drawing_pages, images_on, on_demand, pictures_of, Acquired, DecodedImage, PlaceIndex, Residency, Uploaded, ATLAS_PAGES};
 use sync::Shared;
 
 type Task = Box<dyn FnOnce(&Engine) + Send>;
@@ -143,6 +144,8 @@ struct State {
     images: images::Store,
     /// Background tasks that are not frames (image decoding), oldest first.
     tasks: TaskQueue,
+    /// Tasks that run only when no frame or ordinary task is waiting ([`Engine::spawn_idle`]).
+    idle_tasks: TaskQueue,
     /// Cleanup tasks survive document replacement: what a replaced document held
     /// is disposed on a worker, never where the replacement was published.
     retained_tasks: std::collections::LinkedList<Box<dyn FnOnce(&Engine) + Send>>,
@@ -157,6 +160,10 @@ struct Inner {
     stopping: AtomicBool,
     /// [`Budgets::picture_bytes`].
     picture_bytes: usize,
+    /// Pages of a document's sprite layout the stage keeps at a time ([`Engine::atlas_pages`]).
+    atlas_pages: std::sync::atomic::AtomicU32,
+    /// What each tick of the open document draws ([`Engine::request_picture_table`]).
+    picture_table: std::sync::Mutex<picture_table::PictureTable>,
     /// Pictures not decoded because the module was too low on memory ([`Engine::pictures_refused`]).
     pictures_refused: std::sync::atomic::AtomicUsize,
     progress: std::sync::atomic::AtomicU32,
@@ -183,6 +190,7 @@ impl Engine {
                     frames: frames::Cache::new(budgets.frame_cache_bytes),
                     images: images::Store::default(),
                     tasks: Default::default(),
+                    idle_tasks: Default::default(),
                     retained_tasks: Default::default(),
                 }),
                 store: Default::default(),
@@ -190,6 +198,8 @@ impl Engine {
                 next_generation: AtomicU64::new(1),
                 stopping: AtomicBool::new(false),
                 picture_bytes: budgets.picture_bytes,
+                atlas_pages: std::sync::atomic::AtomicU32::new(ATLAS_PAGES),
+                picture_table: Default::default(),
                 pictures_refused: Default::default(),
                 progress: std::sync::atomic::AtomicU32::new(0),
                 notifier,
@@ -243,6 +253,26 @@ impl Engine {
         node.push_back(OrdinaryTask::Run(Box::new(task)));
         self.inner.state.lock().tasks.append(&mut node);
         self.inner.state.notify_all();
+    }
+
+    /// Runs `task` in the background once no frame, picture or other task is waiting for a worker (`spawn`'s tasks run
+    /// before frames; these run after them), so work nothing is waiting for never delays what is.
+    pub fn spawn_idle(&self, task: impl FnOnce(&Engine) + Send + 'static) {
+        let mut node = TaskQueue::new();
+        node.push_back(OrdinaryTask::Run(Box::new(task)));
+        self.inner.state.lock().idle_tasks.append(&mut node);
+        self.inner.state.notify_all();
+    }
+
+    /// Pages of a document's sprite layout the stage keeps in its texture at a time: a document with more pages is not
+    /// decoded whole, its pictures are loaded when frames need them ([`Residency`]). [`ATLAS_PAGES`] unless set.
+    pub fn atlas_pages(&self) -> u32 {
+        self.inner.atlas_pages.load(Ordering::Relaxed)
+    }
+
+    /// Sets [`Engine::atlas_pages`] for the documents opened from now on (at least one page).
+    pub fn set_atlas_pages(&self, pages: u32) {
+        self.inner.atlas_pages.store(pages.max(1), Ordering::Relaxed);
     }
 
     /// Cleanup that must outlive the generation being replaced: runs on a worker
@@ -332,7 +362,14 @@ impl Engine {
                 OrdinaryTask::Redecode(scope) => self.prepare_redecode(scope),
                 OrdinaryTask::Decode(generation, picture) => self.decode_picture(&generation, picture),
             },
-            Job::Frames(work) => { if !work.step(self) { return false; } }
+            Job::Frames(work) => {
+                if !work.step(self) {
+                    // Nothing is waiting for a frame: the work nothing waits for runs.
+                    let idle = detach_task(&mut self.inner.state.lock().idle_tasks);
+                    let Some(mut node) = idle else { return false };
+                    if let Some(OrdinaryTask::Run(task)) = node.pop_front() { task(self); }
+                }
+            }
         }
         self.notify_progress();
         true

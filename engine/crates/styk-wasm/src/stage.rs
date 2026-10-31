@@ -76,11 +76,12 @@ pub struct Stage {
     /// The pages of the sprite layout in the sprite texture, for a document with more of them than it keeps
     /// ([`styk_engine::Residency`]); none for a document whose texture is the layout's size.
     residency: Option<styk_engine::Residency>,
-    /// The images of the document the residency has seen, to tell the ones a later revision adds.
-    residency_images: usize,
-    /// The layout pages the frame on show draws, and those of the prepared frames after it.
+    /// The pictures asked of the engine for that document (`pictures.rs`).
+    loading: pictures::Loading,
+    /// The layout pages the frame on show draws.
     shown_pages: Vec<u32>,
-    ahead: pictures::Ahead,
+    /// A picture being uploaded a few rows a frame, and the rows done.
+    partial: Option<(Arc<styk_engine::DecodedImage>, u32)>,
     pictures: u32,
     /// Bytes of pictures the last frame uploaded to the atlas.
     upload_bytes: usize,
@@ -202,9 +203,9 @@ impl Stage {
             live_pages: 0,
             uploaded: Uploaded::default(),
             residency: None,
-            residency_images: 0,
+            loading: Default::default(),
             shown_pages: Vec::new(),
-            ahead: Default::default(),
+            partial: None,
             pictures: PICTURES_COMPLETE,
             upload_bytes: 0,
             edit: EditScene::default(),
@@ -326,7 +327,7 @@ impl Stage {
         let drawn = self.draw(generation, &frame.list, if camera { frame.camera } else { None }, zoom, pan, clip_to_artboard)?;
         if drawn {
             self.shown = Shown::Prepared { generation: generation.id, tick: frame.tick, epoch: snapshot.epoch };
-            self.prefetch_pictures(frame.tick);
+            self.pictures_ahead(frame.tick);
         }
         Ok(drawn)
     }
@@ -421,6 +422,12 @@ impl Stage {
         if decoded > 0 { PICTURES_DECODED } else if decoding > 0 { PICTURES_DECODING } else { PICTURES_COMPLETE }
     }
 
+    /// The picture on show is tick `tick`, which the person went to (a jump, a drag): a document whose pictures are kept a
+    /// few pages at a time loads those of the ticks around it, so the next one is in when it is asked for.
+    pub fn hint_tick(&mut self, tick: f64) {
+        self.pictures_near(tick);
+    }
+
     /// A cold followed pose is accepted but awaits the engine worker's shared path.
     pub fn camera_pending(&self) -> bool { self.edit.camera_pending().is_some() }
 
@@ -488,12 +495,32 @@ impl Stage {
     /// since (the camera monitor and thumbnails sample the same atlas).
     pub(crate) fn sync_images(&mut self, generation: &Arc<Generation>) {
         self.sync_atlas(generation);
-        let images = self.engine.take_images(IMAGE_UPLOAD_BYTES);
-        self.upload_bytes = images.iter().map(|image| image.rgba.len()).sum();
-        if !images.is_empty() {
-            self.renderer.upload_images(&generation.assets, images.iter().map(|image| &**image));
-            for image in &images {
-                self.picture_arrived(&generation.assets, image);
+        // A frame waiting for its pictures takes every one that is decoded; otherwise a slice a frame, and a picture
+        // larger than the slice goes in over several frames (a 4K picture is 64 MiB).
+        let waiting = self.loading.waiting();
+        self.upload_bytes = 0;
+        if let Some((image, done)) = self.partial.take() {
+            let rows = if waiting { image.height } else { (IMAGE_UPLOAD_BYTES / (image.width as usize * 4)).max(1) as u32 };
+            self.renderer.upload_rows(&generation.assets, &image, done, rows);
+            self.upload_bytes = rows.min(image.height - done) as usize * image.width as usize * 4;
+            if done + rows < image.height {
+                self.partial = Some((image, done + rows));
+            } else {
+                self.picture_arrived(&generation.assets, &image);
+            }
+            return;
+        }
+        let images = self.engine.take_images(if waiting { usize::MAX } else { IMAGE_UPLOAD_BYTES });
+        for image in images {
+            let rows = (IMAGE_UPLOAD_BYTES / (image.width as usize * 4)).max(1) as u32;
+            if waiting || image.height <= rows {
+                self.renderer.upload_rows(&generation.assets, &image, 0, image.height);
+                self.upload_bytes += image.rgba.len();
+                self.picture_arrived(&generation.assets, &image);
+            } else {
+                self.renderer.upload_rows(&generation.assets, &image, 0, rows);
+                self.upload_bytes += rows as usize * image.width as usize * 4;
+                self.partial = Some((image, rows));
             }
         }
     }
@@ -502,7 +529,7 @@ impl Stage {
     fn sync_atlas(&mut self, generation: &Arc<Generation>) {
         let layout = (generation.lineage, generation.assets.pages);
         let live_pages = self.live.pages();
-        if styk_engine::on_demand(&generation.assets) {
+        if styk_engine::on_demand(&generation.assets, self.engine.atlas_pages()) {
             return self.sync_atlas_resident(generation, live_pages);
         }
         if self.atlas_of != Some(layout) || self.residency.is_some() {

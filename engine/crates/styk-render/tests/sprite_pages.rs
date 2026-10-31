@@ -123,4 +123,17 @@ fn a_page_draws_from_its_layer_and_a_page_without_one_draws_nothing() {
     kept.upload_images(&assets, &images);
     assert_eq!(kept.sprite_memory().0, 4);
     assert_eq!(draw(&mut kept, &device, &queue), reference, "growing the texture keeps the pictures in it");
+
+    // A picture uploaded in bands of rows, a few a frame, draws as one uploaded whole.
+    let mut banded = Renderer::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+    banded.prepare_sprites_resident(PAGES, 3);
+    banded.map_sprite_page(1, Some(1));
+    banded.map_sprite_page(2, Some(2));
+    banded.flush_sprite_map();
+    for image in &images {
+        for first in (0..image.height).step_by(5) {
+            banded.upload_rows(&assets, image, first, 5);
+        }
+    }
+    assert_eq!(draw(&mut banded, &device, &queue), reference, "pictures uploaded in bands of rows draw as they do whole");
 }

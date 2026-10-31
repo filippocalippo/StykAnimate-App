@@ -89,46 +89,59 @@ either); the layer and glyph targets grow with play.
 
 ### Pages kept against a budget
 
-A document whose layout has more than `ATLAS_PAGES` (6) pages is not held whole
+A document whose layout has more than `ATLAS_PAGES` (12) pages is not held whole
 (`styk_engine::Residency`, `styk-wasm/src/stage/pictures.rs`). Measured on tdd2 (`styk pages`: the layout's pages each
 frame draws from, over 589 ticks): one frame draws from at most 3 of its 20 pages (0.4 on average), and the 48 frames
-after one from 4.7 on average, 18 at most. So the stage's sprite texture has the empty layer 0 and 6 layers (448 MiB),
+after one from 4.7 on average, 18 at most. So the stage's sprite texture has the empty layer 0 and `ATLAS_PAGES` layers (832 MiB for 12),
 the layout's pages are mapped onto them by a table the shader reads (`sprite_layer` in prim.wgsl, `Renderer::map_sprite_page`;
 a page without a layer reads layer 0 and draws nothing), and:
 
-- a page gets a layer when a frame draws from it, or a prepared frame up to 24 ticks ahead of the one on show does
-  (`Stage::prefetch_pictures`, which only looks at frames the workers have prepared); the least recently shown page
-  leaves for it. The pages of the frame being drawn, of the frame on show and of the frames looked at ahead are never taken;
-  only a frame that draws from more pages than there are layers makes the texture grow (for that frame's pages, by copying
-  the texture once: the budget is soft in that case only).
-- the pictures of a page are decoded again from the document's encoded bytes (`Engine::decode_images`, ahead of the
-  frame queue, under the picture budget above) and uploaded in the slices that already exist; a document of this size is
-  not decoded with the document, and its idle upload of every picture does not run.
-- a frame draws only when every picture of its pages is in: until then `Stage::render_*` returns false, the picture on
-  show stays, and `pictures_pending` says what to wait for (the same rule as pictures still on their way when a document
-  opens, `waitForPictures`). A picture that cannot be decoded does not hold a frame back once nothing is being decoded.
+- the unit of loading is the picture, the unit of residency the page: a frame needs a few pictures, each is decoded from
+  the document's encoded bytes and uploaded on its own (`Engine::decode_images`, the frame's ahead of the queue and
+  decoded three at a time across the workers, `DEMAND_DECODES` times the picture budget above), into the layer of its page;
+  the page is given a layer when its first picture is wanted, and the least recently shown page leaves for it. The pages
+  of the frame being drawn are never taken, so only a frame that draws from more pages than there are layers makes the
+  texture grow (for that frame's pages, by copying the texture once: the budget is soft in that case only). The number
+  of layers is `Engine::atlas_pages` (`ATLAS_PAGES` unless `EngineHandle::set_atlas_pages` says otherwise before the
+  document opens).
+- a document of this size is not decoded with the document and its idle upload of every picture does not run. A
+  table of what each tick draws (`Engine::request_picture_table`, `picture_table.rs`) is made on the workers when
+  nothing else waits (`Engine::spawn_idle`: after frames and pictures, never before): each tick is evaluated and encoded
+  as a frame is, and the pictures its draw list names are kept. Playback loads the pictures of the next 72 ticks from it
+  (`Stage::pictures_ahead`), the interface tells the stage the tick the person went to (`Stage::hint_tick`, from
+  `engine-stage.mjs`) and the pictures of the 12 ticks on each side are loaded; these are asked for behind what a frame
+  waits for. A table belongs to one revision: an edit makes the next one when asked for.
+- a frame draws only when every picture it draws is in: until then `Stage::render_*` returns false, the picture on show
+  stays, and `pictures_pending` says what to wait for (the same rule as pictures still on their way when a document
+  opens, `waitForPictures`); the pictures a frame waits for are uploaded whole at once, the others a slice of 8 MiB a frame
+  (a 4K picture, 64 MiB, goes in over eight frames, `Renderer::upload_rows`). A picture that cannot be decoded does not hold a frame back
+  once nothing is being decoded; one the engine refused for want of memory is asked for again three times first.
 - drawing cels' pages (they are decoded with the document) and the live drawing slots keep their layers for good;
-  frame thumbnails need their pages loaded too, take layers only from pages the frame on show does not draw, and wait
+  frame thumbnails need their pictures loaded too, take layers only from pages the frame on show does not draw, and wait
   otherwise. Exports, the preview worker and the thumbnails' CPU path hold their own atlases and are unchanged.
 
-Measured on 2026-10-31 (probe runs of a `--dev` build on the private documents, beside other jobs: directional; GPU
-process private bytes, MiB; the empty app's is 412–434):
+Measured on 2026-10-31 on tdd2 with a release build (one run each, off-screen app run beside other agents' builds: directional;
+a jump is a seek to a far tick until the app paints it, a drag ends at the last tick; GPU process private bytes, MiB; the empty
+app's is 403–417):
 
-| tdd2 | before | after |
-| --- | ---: | ---: |
-| sprite atlas (pages) | 1,280 (20) | 448 (7 layers) |
-| GPU process, settled | 1,853–1,877 | 878–1,030 |
-| GPU process, after playing through and scrubbing the whole animation | not measured | 1,111 (84 page loads, 78 evictions, no growth) |
-| playing through (12 s, 24 fps): frames more than 1.5 intervals late / worst interval | 7 / 90 ms (release, baseline table) | 6 / 87 ms |
+| atlas layers | jump to picture p50 / p90 / worst (ms) | drag end (ms) | playCold: late frames, over 100 ms, worst (ms) | playWarm: same | GPU settled | GPU after jumps and drags |
+| --- | --- | --- | --- | --- | ---: | ---: |
+| whole layout (20 pages, before) | 44 / 84 / 243 | 22–39 | 1, 0, 65 | 0, 0, 49 | 1,946 | 1,928 |
+| 12 + empty | 45–60 / 217–226 / 279–463 | 41–55 | 1–2, 0, 65–80 | 0, 0, 48–56 | 1,389–1,409 | 1,590–1,631 |
+| 6 + empty | 44–45 / 139–149 / 310–522 | 26–36 | 1, 0–1, 94–95 | 1, 1, 110–119 | 1,019–1,022 | 1,217–1,272 |
 
-The same frame (two pages of pictures) before its pages were evicted and after they were loaded again differs in 90 of
-400,000 pixels, by one level (the compositor's rounding). A texture the last handle to is dropped is not given back by
+The jump rows are the cost of a picture that is not on the GPU: it is decoded (a 4K picture takes 100 to 300 ms) and uploaded
+before its frame draws, and the picture on show stays until then (the first change of this kind took up to 1,849 ms: a page
+of pictures decoded one after another). Only a document held whole answers a jump at once. Pictures a frame is
+about to need are loaded ahead (playback, drag), so those rows are close to the whole layout's.
+
+A texture the last handle to is dropped is not given back by
 the browser until it collects it: a sprite texture that was replaced (the grow above, another document) is `destroy`ed
 once its texels are copied (before this, two grows kept 960 MiB beyond the atlas). The 280 to 400 MiB of the GPU process
 that no counter names is in the empty app already (the stage's own allocations there are 12 MiB of targets); this change
 does not name it (hypothesis: the driver and the browser's device and pipelines).
 
-A document of up to 6 pages keeps today's behaviour: a texture of the layout's size, every picture decoded and uploaded
+A document of up to `ATLAS_PAGES` pages keeps today's behaviour: a texture of the layout's size, every picture decoded and uploaded
 with the document. A picture shown at 4K on a 4K display is never reduced. Left: the page is the unit (a page with 16
 small pictures loads them all; a page of one 4K picture is a 64 MiB upload); a smaller level of a picture shown small would
 need the owner's decision.

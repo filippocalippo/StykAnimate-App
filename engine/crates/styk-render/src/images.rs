@@ -221,27 +221,35 @@ impl Renderer {
 
     /// Uploads decoded images into the atlas prepared by [`prepare_sprites`].
     pub fn upload_images<'a>(&mut self, assets: &Assets, images: impl IntoIterator<Item = &'a DecodedImage>) {
-        if assets.pages == 0 {
+        for img in images {
+            self.upload_rows(assets, img, 0, img.height);
+        }
+    }
+
+    /// Uploads rows `first..first + rows` of a decoded image: a large picture goes in over several calls, so no
+    /// frame is made to wait for all of it.
+    pub fn upload_rows(&mut self, assets: &Assets, img: &DecodedImage, first: u32, rows: u32) {
+        if assets.pages == 0 || first >= img.height {
             return;
         }
-        for img in images {
-            let entry = if img.drawing { assets.drawing.get(img.index as usize) } else { assets.atlas.get(img.index as usize) };
-            let Some(e) = entry.filter(|e| e.valid) else { continue };
-            // A page without a layer (taken away while the picture was decoded) takes nothing.
-            let Some(layer) = self.sprite_map.layer(e.layer) else { continue };
-            let border = if img.drawing { styk_eval::drawing::BORDER } else { 1 };
-            self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.sprites,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d { x: e.x - border, y: e.y - border, z: layer },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &img.rgba,
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(img.width * 4), rows_per_image: Some(img.height) },
-                wgpu::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 },
-            );
-        }
+        let rows = rows.min(img.height - first);
+        let entry = if img.drawing { assets.drawing.get(img.index as usize) } else { assets.atlas.get(img.index as usize) };
+        let Some(e) = entry.filter(|e| e.valid) else { return };
+        // A page without a layer (taken away while the picture was decoded) takes nothing.
+        let Some(layer) = self.sprite_map.layer(e.layer) else { return };
+        let border = if img.drawing { styk_eval::drawing::BORDER } else { 1 };
+        let row_bytes = img.width as usize * 4;
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.sprites,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: e.x - border, y: e.y - border + first, z: layer },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &img.rgba[first as usize * row_bytes..(first + rows) as usize * row_bytes],
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(img.width * 4), rows_per_image: Some(rows) },
+            wgpu::Extent3d { width: img.width, height: rows, depth_or_array_layers: 1 },
+        );
     }
 
 }

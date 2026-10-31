@@ -1744,6 +1744,7 @@ function loop(now) {
           keyboardHandleGesture?.geometry ||
           editor.geometry;
       const editingDrawn = state.renderer.render({
+        tick: editor.tick,
         vfxEnabled: state.vfxEnabled,
         report: drawingPreview?.report??editor.report,
         documentReport: editor.report,
