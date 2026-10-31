@@ -205,6 +205,13 @@ pub(crate) fn lift_record(tree: &Value, table: &str, index: u32) -> Result<ViewP
     ViewLifter::new().part(&record, "").map(ViewPart::from).map_err(js_error)
 }
 
+/// The record under `key` of the table of records by key at `table` (the path with dots: `_styk.frameSources`), lifted on its own.
+pub(crate) fn lift_keyed_record(tree: &Value, table: &str, key: &str) -> Result<ViewPart, JsError> {
+    let path: Vec<&str> = table.split('.').collect();
+    let record = tree.path(&path).and_then(|records| records.get(key)).ok_or_else(|| js_error("no such document entry"))?;
+    ViewLifter::new().part(record, "").map(ViewPart::from).map_err(js_error)
+}
+
 #[wasm_bindgen]
 impl ViewPart {
     /// The JSON text of the record, with markers (`S2B:…`, `S2D:…`) where arrays and images moved out.
@@ -271,14 +278,14 @@ impl OpenedDocument {
             })
             .collect();
         out.set("splits", Value::array(splits));
-        // What the view knows of its lazy tables without fetching a record (`LAZY_TABLES`): the identity of each record, and the
+        // What the view knows of its lazy tables without fetching a record (`LAZY_TABLES`): the row of each record (its identity, for a keyframe), and the
         // timeline the keyframes make.
         let tree = &opened.tree;
         let column = |table: &str, id: &dyn Fn(&Value) -> Value| Value::array(tree.get(table).and_then(Value::elements).map(|records| records.iter().map(|record| id(&record)).collect()).unwrap_or_default());
-        let mut ids = Obj::new();
-        ids.set("keyframes", column("keyframes", &|frame| frame.path(&["_styk", "frameId"]).cloned().unwrap_or(Value::Null)));
-        ids.set("figure_types", column("figure_types", &|figure| figure.get("figure_type_id").cloned().unwrap_or(Value::Null)));
-        out.set("ids", Value::object(ids));
+        let mut rows = Obj::new();
+        rows.set("keyframes", column("keyframes", &|frame| frame.path(&["_styk", "frameId"]).cloned().unwrap_or(Value::Null)));
+        rows.set("figure_types", column("figure_types", &styk_edit::figure_row));
+        out.set("rows", Value::object(rows));
         out.set("timeline", Value::array(styk_edit::timeline_rows(tree).into_iter().map(|(start, count)| Value::array(vec![Value::Num(start), Value::Num(count)])).collect()));
         json::to_string(&Value::object(out))
     }
@@ -307,6 +314,11 @@ impl OpenedDocument {
     /// (nothing is shared with the pieces asked for before), for a view that fetches its records when something reads them.
     pub fn record(&self, table: &str, index: u32) -> Result<ViewPart, JsError> {
         lift_record(&self.opened().tree, table, index)
+    }
+
+    /// The record under `key` of the table of records by key `table` (`_styk.frameSources`), lifted on its own.
+    pub fn keyed_record(&self, table: &str, key: &str) -> Result<ViewPart, JsError> {
+        lift_keyed_record(&self.opened().tree, table, key)
     }
 
     /// Gives the document the Pivot file it was read from (`description`: the codec's JSON description of it), so

@@ -31,14 +31,56 @@ pub fn diff(before: &Value, after: &Value) -> Value {
     Value::array(ops)
 }
 
-/// The records of its lazy tables the read view holds (`keyframes`: indices into the table), as the call's view names them
-/// (`lazy`). A table that is not named is held whole.
-pub type Known = HashMap<String, std::collections::HashSet<usize>>;
+/// The tables the read view fetches the records of when something reads them (src/lazy-table.mjs). The array tables are named by their key
+/// in the report (`keyframes`, `figure_types`: their records are told by index); the tables of records by key are named by their path with
+/// dots, and listed here with the path.
+const KEYED: [(&str, [&str; 2]); 1] = [("_styk.frameSources", ["_styk", "frameSources"])];
 
-/// The records the read view has fetched, from the view of a call (`{"lazy": {"keyframes": [3, 4]}}`), or `None` when it holds no lazy table.
+/// The records of its lazy tables the read view holds, as the call's view names them (`lazy`). A table that is not named is held whole.
+#[derive(Default)]
+pub struct Known {
+    arrays: HashMap<String, std::collections::HashSet<usize>>,
+    keyed: HashMap<String, std::collections::HashSet<String>>,
+}
+
+impl Known {
+    /// A view that holds the records at `indices` of the array table `table`.
+    pub fn with_array(mut self, table: &str, indices: &[usize]) -> Known {
+        self.arrays.insert(table.to_string(), indices.iter().copied().collect());
+        self
+    }
+
+    /// A view that holds the records under `keys` of the table `table` of records by key.
+    pub fn with_keyed(mut self, table: &str, keys: &[&str]) -> Known {
+        self.keyed.insert(table.to_string(), keys.iter().map(|key| key.to_string()).collect());
+        self
+    }
+}
+
+/// The records the read view has fetched, from the view of a call (`{"lazy": {"keyframes": [3, 4], "_styk.frameSources": ["frame-9"]}}`), or
+/// `None` when it holds no lazy table.
 pub fn known(view: &Value) -> Option<Known> {
     let lazy = view.get("lazy")?.as_obj()?;
-    Some(lazy.iter().map(|(table, indices)| (table.to_string(), indices.elements().map(|list| list.iter().filter_map(|index| index.as_f64()).map(|index| index as usize).collect()).unwrap_or_default())).collect())
+    let mut known = Known::default();
+    for (table, held) in lazy.iter() {
+        let items: Vec<Value> = held.elements().map(|list| list.iter().collect()).unwrap_or_default();
+        if KEYED.iter().any(|(name, _)| *name == &**table) {
+            known.keyed.insert(table.to_string(), items.iter().filter_map(|key| key.as_str().map(str::to_string)).collect());
+        } else {
+            known.arrays.insert(table.to_string(), items.iter().filter_map(Value::as_f64).map(|index| index as usize).collect());
+        }
+    }
+    Some(known)
+}
+
+fn path_of(op: &Value) -> Option<Vec<Value>> {
+    Some(op.get("p")?.elements()?.iter().collect())
+}
+
+/// `ops` as a view that fetches the records of its tables on demand receives them: a change inside a record the view has not fetched comes
+/// as the record whole (`collapse_unfetched`), and the records of a table of records by key come as keys alone (`unfetch_entries`).
+pub fn for_lazy(ops: Value, after: &Value, known: &Known) -> Value {
+    unfetch_entries(collapse_unfetched(ops, after, known), known)
 }
 
 /// `ops` with every change inside a record of a lazy table that the view has not fetched replaced by the record whole, taken from
@@ -46,25 +88,102 @@ pub fn known(view: &Value) -> Option<Known> {
 /// change inside a record the view holds, and the rebuilds of the table itself, are kept as they are.
 pub fn collapse_unfetched(ops: Value, after: &Value, known: &Known) -> Value {
     let Some(list) = ops.as_arr() else { return ops };
-    let enters_unfetched = |op: &Value| -> Option<(Arc<str>, usize)> {
-        let path: Vec<Value> = op.get("p")?.elements()?.iter().collect();
-        if path.len() < 3 { return None; }
-        let (Value::Str(table), Value::Num(index)) = (&path[0], &path[1]) else { return None };
-        let held = known.get(&**table)?;
-        (!held.contains(&(*index as usize))).then(|| (table.clone(), *index as usize))
+    // The path of the record a change enters without the view holding it.
+    let enters_unfetched = |op: &Value| -> Option<Vec<Value>> {
+        let path = path_of(op)?;
+        if let (Some(Value::Str(table)), Some(Value::Num(index))) = (path.first(), path.get(1)) {
+            if path.len() >= 3 && known.arrays.get(&**table).is_some_and(|held| !held.contains(&(*index as usize))) { return Some(path[..2].to_vec()); }
+        }
+        for (name, table) in KEYED {
+            let Some(held) = known.keyed.get(name) else { continue };
+            let at = table.len();
+            if path.len() >= at + 2 && path.iter().zip(table).all(|(step, key)| matches!(step, Value::Str(text) if &**text == key)) {
+                if let Value::Str(key) = &path[at] {
+                    if !held.contains(&**key) { return Some(path[..=at].to_vec()); }
+                }
+            }
+        }
+        None
     };
     if !list.iter().any(|op| enters_unfetched(op).is_some()) { return ops; }
-    let mut done = std::collections::HashSet::new();
+    let mut done: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out = Vec::with_capacity(list.len());
     for change in list.iter() {
-        let Some((table, index)) = enters_unfetched(change) else { out.push(change.clone()); continue };
-        if !done.insert((table.clone(), index)) { continue; }
-        match after.get(&table).and_then(Value::elements).and_then(|records| records.get(index)) {
-            Some(record) => out.push(op(&[Value::Str(table), Value::Num(index as f64)], "v", record)),
+        let Some(record_path) = enters_unfetched(change) else { out.push(change.clone()); continue };
+        if !done.insert(styk_doc::json::to_string(&Value::array(record_path.clone()))) { continue; }
+        let mut node: Option<Value> = Some(after.clone());
+        for step in &record_path {
+            node = match (step, node) {
+                (Value::Str(key), Some(value)) => value.get(key).cloned(),
+                (Value::Num(index), Some(value)) => value.item(*index as usize),
+                _ => None,
+            };
+        }
+        match node {
+            Some(record) => out.push(op(&record_path, "v", record)),
             None => out.push(change.clone()),
         }
     }
     Value::array(out)
+}
+
+/// What a table knows of a record without holding it (src/lazy-table.mjs `ROW`): a keyframe's identity, a figure type's `figure_row`.
+fn row_of(table: &str, record: &Value) -> Value {
+    match table {
+        "keyframes" => record.path(&["_styk", "frameId"]).cloned().unwrap_or(Value::Null),
+        _ => crate::figure_row(record),
+    }
+}
+
+/// `ops` with the records the view does not hold left out of the operations that set them. A record of an array table (`keyframes`,
+/// `figure_types`) set at an index, or met in a rebuild of the table, comes as its row (`{p, lz: row}`, `{lz: row}` among the refs): the
+/// view keeps the place and fetches the record when something reads it. For a table of records by key (`_styk.frameSources`), the table set, rebuilt
+/// or given an entry, `lz`, names the keys the view then holds unfetched (`{p, lz: [key, …]}` for the table, `{p, lz: 1}` for an entry;
+/// `[key, null, 1]` for an entry of a rebuilt table). A change inside a record the view holds is left as it is.
+pub fn unfetch_entries(ops: Value, known: &Known) -> Value {
+    let Some(list) = ops.as_arr() else { return ops };
+    let mut changed = false;
+    let rewritten: Vec<Value> = list.iter().map(|change| {
+        let Some(path) = path_of(change) else { return change.clone() };
+        if let Some(Value::Str(table)) = path.first() && known.arrays.contains_key(&**table) {
+            if path.len() == 2 && matches!(path[1], Value::Num(_)) && let Some(record) = change.get("v") {
+                changed = true;
+                return op(&path, "lz", row_of(table, record));
+            }
+            if path.len() == 1 && let Some(refs) = change.get("a").and_then(Value::elements) {
+                changed = true;
+                let refs = refs.iter().map(|item| match item.get("v") {
+                    Some(record) => Value::object(Obj::from_shape(Shape::new(vec![Arc::from("lz")]), vec![row_of(table, record)])),
+                    None => item,
+                }).collect();
+                return op(&path, "a", Value::array(refs));
+            }
+        }
+        for (name, table) in KEYED {
+            if !known.keyed.contains_key(name) { continue; }
+            let at = table.len();
+            if path.len() < at || !path.iter().zip(table).all(|(step, key)| matches!(step, Value::Str(text) if &**text == key)) { continue; }
+            if path.len() == at {
+                if let Some(value) = change.get("v").and_then(Value::as_obj) {
+                    changed = true;
+                    return op(&path, "lz", Value::array(value.keys().map(|key| Value::Str(key.clone())).collect()));
+                }
+                if let Some(entries) = change.get("o").and_then(Value::elements) {
+                    changed = true;
+                    let entries = entries.iter().map(|entry| match entry.item(0) {
+                        Some(key) if entry.array_len() == Some(2) => Value::array(vec![key, Value::Null, Value::Num(1.0)]),
+                        _ => entry,
+                    }).collect();
+                    return op(&path, "o", Value::array(entries));
+                }
+            } else if path.len() == at + 1 && change.get("v").is_some() {
+                changed = true;
+                return op(&path, "lz", Value::Num(1.0));
+            }
+        }
+        change.clone()
+    }).collect();
+    if changed { Value::array(rewritten) } else { ops }
 }
 
 /// How the figure counts of the poses changed between `before` and `after`: `[[uid, delta], …]` over the keyframes and the retained
@@ -452,7 +571,7 @@ mod tests {
         let after = edit_records(&before, &[(0, "d", 5.0), (0, "e", 6.0), (2, "d", 7.0)]);
         let ops = diff(&before, &after);
         assert_eq!(ops.elements().unwrap().len(), 3, "{}", text(&ops));
-        let known: Known = [("keyframes".to_string(), [0usize].into_iter().collect())].into_iter().collect();
+        let known = Known::default().with_array("keyframes", &[0]);
         let collapsed = collapse_unfetched(ops.clone(), &after, &known);
         let list = text(&collapsed);
         assert!(list.contains(r#"{"p":["keyframes",0,"d"],"v":5}"#) && list.contains(r#"{"p":["keyframes",0,"e"],"v":6}"#), "the record the view holds keeps its changes: {list}");
@@ -461,10 +580,10 @@ mod tests {
         // Whatever the view holds, the patch still turns the document before into the one after.
         assert_eq!(text(&apply(&before, &collapsed).unwrap()), text(&after));
         // A view that holds nothing of the table gets every changed record whole, once each.
-        let none: Known = [("keyframes".to_string(), Default::default())].into_iter().collect();
+        let none = Known::default().with_array("keyframes", &[]);
         assert_eq!(collapse_unfetched(ops.clone(), &after, &none).elements().unwrap().len(), 2);
         // A table the view holds whole, and a rebuild of the table, are left alone.
-        let other: Known = [("other".to_string(), Default::default())].into_iter().collect();
+        let other = Known::default().with_array("other", &[]);
         assert_eq!(text(&collapse_unfetched(ops.clone(), &after, &other)), text(&ops));
     }
 
@@ -485,6 +604,48 @@ mod tests {
         // Left: pose 1 (figure 1) and the source (figure 2); joined: figure 3, then the new pose (figures 1 and 3).
         assert_eq!(delta, "[[3,2],[2,-1]]", "figure 1 lost one pose and gained one");
         assert_eq!(text(&layer_delta(&before, &before)), "[]");
+    }
+
+    #[test]
+    fn the_records_of_a_table_by_key_come_as_keys_alone() {
+        let before = parse(r#"{"_styk":{"frameSources":{"a":{"d":1},"b":{"d":2}}}}"#);
+        let held = Known::default().with_keyed("_styk.frameSources", &["a"]);
+        let for_view = |after: &Value| text(&for_lazy(diff(&before, after), after, &held));
+        // A source the view lacks, changed inside: the entry is the view's to fetch again.
+        let mut after = before.clone();
+        after.make_obj().unwrap().get_mut("_styk").unwrap().make_obj().unwrap().get_mut("frameSources").unwrap().make_obj().unwrap().get_mut("b").unwrap().make_obj().unwrap().set("d", Value::Num(3.0));
+        assert_eq!(for_view(&after), r#"[{"p":["_styk","frameSources","b"],"lz":1}]"#);
+        // A source it holds, changed inside, keeps the change.
+        let mut after = before.clone();
+        after.make_obj().unwrap().get_mut("_styk").unwrap().make_obj().unwrap().get_mut("frameSources").unwrap().make_obj().unwrap().get_mut("a").unwrap().make_obj().unwrap().set("d", Value::Num(9.0));
+        assert_eq!(for_view(&after), r#"[{"p":["_styk","frameSources","a","d"],"v":9}]"#);
+        // The table set whole names its keys.
+        let bare = parse(r#"{"_styk":{}}"#);
+        let mut after = bare.clone();
+        after.make_obj().unwrap().get_mut("_styk").unwrap().make_obj().unwrap().set("frameSources", parse(r#"{"x":{"d":1},"y":{"d":2}}"#));
+        assert_eq!(text(&for_lazy(diff(&bare, &after), &after, &held)), r#"[{"p":["_styk","frameSources"],"lz":["x","y"]}]"#);
+        // A new source is a key.
+        let mut after = before.clone();
+        after.make_obj().unwrap().get_mut("_styk").unwrap().make_obj().unwrap().get_mut("frameSources").unwrap().make_obj().unwrap().set("c", parse(r#"{"d":5}"#));
+        assert_eq!(for_view(&after), r#"[{"p":["_styk","frameSources","c"],"lz":1}]"#);
+    }
+
+    #[test]
+    fn the_records_of_an_array_table_the_view_lacks_come_as_their_rows() {
+        let before = parse(r#"{"keyframes":[{"_styk":{"frameId":"f0"},"d":1},{"_styk":{"frameId":"f1"},"d":2}]}"#);
+        let held = Known::default().with_array("keyframes", &[0]);
+        // A record the view holds changes inside; one it lacks changes: it is a row, not a record.
+        let mut after = before.clone();
+        {
+            let table = after.make_obj().unwrap().get_mut("keyframes").unwrap().make_arr().unwrap();
+            table[0].make_obj().unwrap().set("d", Value::Num(5.0));
+            table[1].make_obj().unwrap().set("d", Value::Num(6.0));
+        }
+        assert_eq!(text(&for_lazy(diff(&before, &after), &after, &held)), r#"[{"p":["keyframes",0,"d"],"v":5},{"p":["keyframes",1],"lz":"f1"}]"#);
+        // A rebuild names the new records by their rows.
+        let mut inserted = before.clone();
+        inserted.make_obj().unwrap().get_mut("keyframes").unwrap().make_arr().unwrap().insert(1, parse(r#"{"_styk":{"frameId":"new"},"d":9}"#));
+        assert_eq!(text(&for_lazy(diff(&before, &inserted), &inserted, &held)), r#"[{"p":["keyframes"],"a":[0,{"lz":"new"},1]}]"#);
     }
 
     #[test]

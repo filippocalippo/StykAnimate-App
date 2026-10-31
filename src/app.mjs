@@ -177,6 +177,7 @@ import {
   gradientAngleFromBackground,
   inverseCameraScale,
 } from "./pivot/background.mjs";
+import {findFigureType, figureRows} from './figure-types.mjs';
 
 const $ = (id) => document.getElementById(id),
   esc = (v) =>
@@ -646,9 +647,7 @@ function nameOf(o) {
   if (nameRevision !== editor.revision || nameReport !== editor.report) {
     nameRevision = editor.revision;
     nameReport = editor.report;
-    nameMap = new Map(
-      editor.report.figure_types.map((f) => [f.figure_type_id, f.name]),
-    );
+    nameMap = new Map(figureRows(editor.report.figure_types).map((row) => [row.id, row.name]));
   }
   return nameMap.get(o?.figure_type_id) || `Figure ${o?.unique_id ?? ""}`;
 }
@@ -766,9 +765,7 @@ function reconcileSelectedSegmentTrack(
   const object = editor.selectionFrame.objects.find(
     (object) => object.unique_id === target.uid,
   );
-  const figure = editor.report.figure_types.find(
-    (figure) => figure.figure_type_id === target.figureTypeId,
-  );
+  const figure = findFigureType(editor.report.figure_types, target.figureTypeId);
   const index =
     object?.figure_type_id === target.figureTypeId
       ? (figure?.segments?.findIndex(
@@ -2534,8 +2531,7 @@ overlay.addEventListener(
             parent = point;
             joint =
               hit.g.fig?.segments?.findIndex((s) => s.segment_id === id) ??
-              editor.report.figure_types
-                .find((f) => f.figure_type_id === hit.g.obj.figure_type_id)
+              findFigureType(editor.report.figure_types, hit.g.obj.figure_type_id)
                 .segments.findIndex((s) => s.segment_id === id);
           }
         }
@@ -5382,9 +5378,9 @@ const projectProvider = {
         ranges: match.ranges, run: () => { selectTrack({ id: layer.id, target: { kind: "layer", id: layer.id } }); timelineUI?.selectTrack?.(layer.id); } });
     }
     if (context?.mode !== "draw") {
-      const figures = new Map(editor.report.figure_types.map((figure) => [figure.figure_type_id, figure]));
+      const names = new Map(figureRows(editor.report.figure_types).map((row) => [row.id, row.name]));
       for (const object of editor.selectionFrame?.objects ?? []) {
-        const figure = figures.get(object.figure_type_id), name = figure?.name;
+        const name = names.get(object.figure_type_id);
         const match = name && fuzzyMatch(query, name);
         if (!match) continue;
         const layer = editor.getLayer(editor.layerForUid(object.unique_id))?.name ?? "";

@@ -46,6 +46,7 @@ import {sheetKeyAt} from './layer-sheet.mjs';
 import {iconNames} from './icons.mjs';
 import {SectionMemory, renderInspector} from './inspector-kit.mjs';
 import {esc, grid, group, heading, numericField, propertyPrecision} from './inspector-legacy.mjs';
+import {findFigureType} from './figure-types.mjs';
 
 const hex = rgb => `#${(rgb || [43, 43, 43]).map(n => (Math.round(n)).toString(16).padStart(2, '0')).join('')}`;
 const num = n => Number(Number(n ?? 0).toFixed(2));
@@ -307,7 +308,7 @@ function layerDescriptor(editor) {
 function selectionDescriptor(editor, number, {bounds: b, selectionCount, range, scope}) {
   const objects = editor.selectedObjects ?? [editor.object], object = editor.object;
   const opacities = new Set(objects.map(item => item.field28 || 0));
-  const figureOf = item => resolveInstanceFigure(editor.report.figure_types.find(type => type.figure_type_id === item.figure_type_id), item);
+  const figureOf = item => resolveInstanceFigure(findFigureType(editor.report.figure_types, item.figure_type_id), item);
   const colours = new Set(objects.flatMap(item => figurePalette(editor.report, figureOf(item), item).map(entry => entry.color)));
   const joined = objects.some(item => item.join) || editor.frame.objects.some(part => part.join && objects.some(item => item.object_slot === part.join.target_object_slot));
   const align = [messageTuple(['left', 'align-left', interfaceText("inspectorView.alignLeft")], {2: {key: "inspectorView.alignLeft", params: {}}}), messageTuple(['center-x', 'align-horizontal-center', interfaceText("inspectorView.alignCenter")], {2: {key: "inspectorView.alignCenter", params: {}}}), messageTuple(['right', 'align-right', interfaceText("inspectorView.alignRight")], {2: {key: "inspectorView.alignRight", params: {}}}),
@@ -379,7 +380,7 @@ function figureDescriptor(editor, figure, number, {range, scope, drawingSets, sp
   const kind = figure.segments.every(segment => segment.primitive_code === 5) ? 'text' : figure.segments.every(segment => segment.primitive_code === 2) ? 'image' : 'figure';
   const children = frame.objects.some(part => part.join?.target_object_slot === object.object_slot);
   const parent = object.join ? frame.objects[object.join.target_object_slot] : null;
-  const parentName = parent && (parent.name || report.figure_types.find(type => type.figure_type_id === parent.figure_type_id)?.name || interfaceText("inspectorView.figure"));
+  const parentName = parent && (parent.name || findFigureType(report.figure_types, parent.figure_type_id)?.name || interfaceText("inspectorView.figure"));
   const polygons = figure.polyfills || [], start = Math.min(Math.max(0, polygonPage) * 12, Math.max(0, Math.floor((polygons.length - 1) / 12) * 12));
   const paletteStart = Math.min(Math.max(0, palettePage) * 32, Math.max(0, Math.ceil(palette.length / 32) - 1) * 32);
   const joinLabel = parent ? interfaceText("inspectorView.unjoinFigure") : interfaceText("inspectorView.joinToFigure");

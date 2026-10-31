@@ -9,7 +9,7 @@
  * the same tree (`startSession`). Nothing here validates or normalizes a document.
  */
 import {restoreLifted} from '../document-lift.mjs';
-import {lazyTable} from '../lazy-table.mjs';
+import {lazyKeyedTable, lazyTable, useRecords} from '../lazy-table.mjs';
 import {messageError, restoreMessageError} from '../localized-error.mjs';
 import {yieldLoadTask} from '../yield-task.mjs';
 
@@ -31,7 +31,9 @@ const EMPTY = new Uint8Array(0);
 const encoder = new TextEncoder();
 
 /** The tables of the read view whose records are fetched when something reads them (src/lazy-table.mjs). */
-const LAZY_TABLES = new Set(['keyframes']);
+const LAZY_TABLES = new Set(['keyframes', 'figure_types']);
+/** The tables of records by key that are fetched the same way (a split's path joined with dots). */
+const LAZY_KEYED = new Set(['_styk.frameSources']);
 
 /** A piece of the document (an `OpenedDocument.part` or `record`) as the view holds it. `shared`: the arrays that pieces asked for before define. */
 function restorePart(part, sections, shared) {
@@ -50,9 +52,11 @@ function restorePart(part, sections, shared) {
  */
 class Records {
   constructor(holder) { this.holder = holder; }
-  fetch(table, index) {
+  /** The record at `index` of an array table, or under `key` of a table of records by key. */
+  fetch(table, at) {
     if (!this.holder) throw new Error('The document is closed: its records can no longer be read.');
-    return restorePart(this.holder.record(table, index), [{bytes: EMPTY, base: 0}, {bytes: EMPTY, base: 0}], new Map());
+    const part = typeof at === 'string' ? this.holder.keyed_record(table, at) : this.holder.record(table, at);
+    return restorePart(part, [{bytes: EMPTY, base: 0}, {bytes: EMPTY, base: 0}], new Map());
   }
 }
 
@@ -116,7 +120,12 @@ export class Opening {
       for (const key of split.path.slice(0, -1)) container = container[key];
       const name = split.path.at(-1);
       if (split.count !== undefined && split.path.length === 1 && LAZY_TABLES.has(name)) {
-        container[name] = lazyTable(name, split.count, meta.ids?.[name], this.records);
+        container[name] = lazyTable(name, split.count, meta.rows?.[name], this.records);
+        yield {phase: 'reading', checked: ++work};
+        continue;
+      }
+      if (split.keys && LAZY_KEYED.has(split.path.join('.'))) {
+        container[name] = lazyKeyedTable(split.path.join('.'), split.keys, this.records);
         yield {phase: 'reading', checked: ++work};
         continue;
       }
@@ -136,6 +145,7 @@ export class Opening {
       }
     }
     const indexes = meta.indexes;
+    useRecords(report, this.records);
     return {
       report, opening: this, nextFrameIdentity: indexes.nextFrameIdentity, nextUid: indexes.nextUid,
       layerUidCounts: new Map(indexes.layerUidCounts), layerSeenUids: new Set(indexes.layerSeenUids),

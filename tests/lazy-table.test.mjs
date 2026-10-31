@@ -2,7 +2,10 @@
 // in a bounded cache, and kept in step with the session by its patches (src/engine/engine-patch.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fetchedRecords, holdingAll, lazyTable, tableOf} from '../src/lazy-table.mjs';
+import {fetchedRecords, figureRow, holdingAll, lazyKeyedTable, lazyTable, tableOf, useRecords} from '../src/lazy-table.mjs';
+import {drawingFigures, figureForCel, figureRows, findFigureType, hasDrawingFigures, movieclipFigures, nextFigureTypeId} from '../src/figure-types.mjs';
+import {createImageFigure} from '../src/media-authoring.mjs';
+import {createDrawingFigure} from '../src/drawing-model.mjs';
 import {applyDocumentPatch} from '../src/engine/engine-patch.mjs';
 import {createFrame, createObject, emptyDocument} from '../src/demo.mjs';
 import {ownedEditorSync} from './support/owned-editor.mjs';
@@ -123,4 +126,99 @@ test('the engine owns a document whose view fetches its keyframes: edits, undo a
   const counted = new Map(editor._layerUidCounts);
   holdingAll(() => editor._initializeLayers());
   assert.deepEqual([...counted], [...editor._layerUidCounts], 'the layer index the patches kept is the one counted from the whole document');
+});
+
+// --- the figure types and the pose sources -------------------------------------------------------------------------------------------
+
+const figureOf = (id, extra = {}) => ({figure_type_id: id, name: `Figure ${id}`, segments: [{segment_id: 1}, {segment_id: 2}], ...extra});
+function figureSource(figures) {
+  const asked = [];
+  return {asked, fetch(name, index) { asked.push(index); return structuredClone(figures[index]); }};
+}
+const figureTable = (figures, limit) => {
+  const from = figureSource(figures);
+  return {from, array: lazyTable('figure_types', figures.length, figures.map(figureRow), from, limit)};
+};
+
+test('a figure type is found by its id, and the figures are listed, without fetching the others', () => {
+  const figures = [figureOf(3), figureOf(8, {image_assets: [{}]}), figureOf(5, {_styk: {drawing: {celId: 'cel-a', version: 2}}}), figureOf(9, {_styk: {movieclip: {}}})];
+  const {from, array} = figureTable(figures);
+  assert.equal(findFigureType(array, 5)?.figure_type_id, 5);
+  assert.equal(findFigureType(array, 77), undefined);
+  assert.deepEqual(from.asked, [2], 'only the type asked for');
+  assert.deepEqual(figureRows(array).map(row => [row.id, row.kind, row.cel, row.segments]), [[3, 'Figure', null, 2], [8, 'Image', null, 2], [5, 'Figure', 'cel-a', 2], [9, 'Movieclip', null, 2]]);
+  assert.equal(nextFigureTypeId(array), 10);
+  assert.equal(hasDrawingFigures(array), true);
+  assert.equal(figureForCel(array, 'cel-a').figure_type_id, 5);
+  assert.deepEqual(drawingFigures(array).map(figure => figure.figure_type_id), [5]);
+  assert.deepEqual(movieclipFigures(array).map(figure => figure.figure_type_id), [9]);
+  assert.deepEqual(from.asked, [2, 3], 'the cel type and the movieclip type, nothing else');
+  assert.deepEqual(figureRows(figures), figureRows(array), 'a plain array answers the same');
+  assert.equal(findFigureType(figures, 8).figure_type_id, 8);
+});
+
+test('the rows the open sends are the rows of the records, for every kind of figure', async () => {
+  const document = emptyDocument();
+  document.figure_types.push(createImageFigure({dataUrl: 'data:image/png;base64,iVBORw0KGgo=', width: 8, height: 8, name: 'Photo', figureTypeId: 2}), createDrawingFigure({figureTypeId: 3}));
+  const {editor} = ownedEditorSync({demo: false}, document, {verify: false});
+  const table = tableOf(editor.report.figure_types);
+  assert.ok(table, 'the figure types are a lazy table');
+  const sent = table.rows();
+  assert.deepEqual(holdingAll(() => editor.report.figure_types.map(figureRow)), sent);
+  assert.deepEqual(sent.map(row => row.kind), ['Figure', 'Image', 'Image']);
+  assert.equal(sent[2].cel !== null, true);
+  assert.equal(sent[1].pictures, true);
+});
+
+test('pose sources are keys until something reads one, and a patch gives keys, not records', () => {
+  const records = {asked: [], fetch(name, key) { this.asked.push(key); return {objects: [{unique_id: key.length}], key}; }};
+  const root = {_styk: {frameSources: lazyKeyedTable('_styk.frameSources', ['a', 'bb'], records)}};
+  useRecords(root, records);
+  assert.deepEqual(Object.keys(root._styk.frameSources), ['a', 'bb']);
+  assert.equal(Object.hasOwn(root._styk.frameSources, 'bb'), true);
+  assert.deepEqual(records.asked, []);
+  assert.equal(root._styk.frameSources.bb.objects[0].unique_id, 2);
+  applyDocumentPatch(root, [{p: ['_styk', 'frameSources', 'bb', 'objects', 0, 'x'], v: 5}, {p: ['_styk', 'frameSources', 'a'], lz: 1}, {p: ['_styk', 'frameSources', 'ccc'], lz: 1}]);
+  assert.deepEqual(Object.keys(root._styk.frameSources), ['a', 'bb', 'ccc']);
+  assert.equal(root._styk.frameSources.bb.objects[0].x, 5, 'a change inside a record the view holds');
+  assert.deepEqual(records.asked, ['bb'], 'the others are not read');
+  assert.equal(root._styk.frameSources.ccc.key, 'ccc');
+  assert.deepEqual(fetchedRecords(root)['_styk.frameSources'], ['bb', 'ccc']);
+  assert.throws(() => applyDocumentPatch(root, [{p: ['_styk', 'frameSources', 'a', 'objects'], v: []}]), /not fetched/);
+  applyDocumentPatch(root, [{p: ['_styk', 'frameSources'], o: [['bb'], ['d', null, 1], ['ccc']]}, {p: ['_styk', 'frameSources', 'bb'], x: 1}]);
+  assert.deepEqual(Object.keys(root._styk.frameSources), ['d', 'ccc']);
+  applyDocumentPatch(root, [{p: ['_styk', 'frameSources'], lz: ['x', 'y']}]);
+  assert.deepEqual(Object.keys(root._styk.frameSources), ['x', 'y']);
+  assert.deepEqual(JSON.parse(JSON.stringify(root._styk.frameSources.y)), {objects: [{unique_id: 1}], key: 'y'});
+});
+
+test('duplicating a frame answers with the new frame, not with a copy of every pose the layer sheet captures', () => {
+  const document = emptyDocument(), figure = document.figure_types[0];
+  document.keyframes = Array.from({length: 120}, (_, index) => createFrame(Array.from({length: 30}, (_, slot) => createObject(figure, slot + 1, index + slot, 100)), 2));
+  const {editor, owner} = ownedEditorSync({demo: false, layerTimeline: true}, document, {verify: false});
+  const session = owner.session(), call = session.call.bind(session);
+  let bytes = 0;
+  session.call = (method, args, view) => { const answer = call(method, args, view); if (method === 'sheetDuplicateFrameAfter') bytes = answer.length; return answer; };
+  editor.selectFrame(5);
+  editor.sheetDuplicateFrameAfter();
+  const text = holdingAll(() => JSON.stringify(editor.report));
+  assert.equal(text, session.report_json(), 'the view is the session\'s document');
+  assert.ok(bytes > 0 && bytes < 300_000, `the answer is ${bytes} bytes`);
+  assert.ok(editor.undo());
+  assert.equal(holdingAll(() => JSON.stringify(editor.report)), session.report_json());
+});
+
+test('a patch names a record the view does not hold by its row, and the view fetches it when it is read', () => {
+  const {from, array} = table(6);
+  const root = {keyframes: array};
+  array[1];
+  applyDocumentPatch(root, [{p: ['keyframes', 1], lz: 'frame-1b'}, {p: ['keyframes'], a: [0, {lz: 'inserted'}, 1, 2, 3, 4, 5]}]);
+  assert.deepEqual(held(root.keyframes), [], 'the record replaced is given up, and the one the patch names is not read');
+  const keyframes = tableOf(root.keyframes);
+  assert.equal(keyframes.positionOf('inserted'), 1);
+  assert.equal(keyframes.positionOf('frame-1b'), 2, 'the identity a patch names is the identity of the place');
+  assert.equal(keyframes.positionOf('frame-1'), -1);
+  assert.deepEqual(from.asked, [1]);
+  assert.equal(root.keyframes[1].objects[0].unique_id, 2, 'read: fetched from the session at its place');
+  assert.deepEqual(from.asked, [1, 1]);
 });

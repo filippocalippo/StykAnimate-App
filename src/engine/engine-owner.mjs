@@ -46,6 +46,7 @@ import {createShown} from './engine-shown.mjs';
 import {createClipboards} from './engine-clipboards.mjs';
 import {SESSION_COMMANDS, VIEW_CALLS} from './engine-commands.mjs';
 import {yieldLoadTask} from '../yield-task.mjs';
+import {drawingFigures} from '../figure-types.mjs';
 
 /** How many values of each kind a call that draws many identities is handed. */
 const MANY_DRAWS = 512;
@@ -550,7 +551,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   };
   /** The cels a call copied take the pixels of the cels they copy: the interface holds the pixels, not the session. */
   const forkDrawings = forks => {
-    const cels = new Map(editor.report.figure_types.filter(drawingMetadata).map(figure => [drawingMetadata(figure).celId, figure]));
+    const cels = new Map(drawingFigures(editor.report.figure_types).map(figure => [drawingMetadata(figure).celId, figure]));
     for (const [from, to] of forks) {
       const old = cels.get(from), copy = cels.get(to);
       if (old && copy) editor.drawingResources.fork(old, copy);

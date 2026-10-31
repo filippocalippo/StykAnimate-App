@@ -16,6 +16,7 @@
 import {resolveInstanceFigure} from '../animation-style.mjs';
 import {isStatic} from '../pivot/read-view.mjs';
 import {isMovieclip} from '../movieclips.mjs';
+import {findFigureType} from '../figure-types.mjs';
 import {sticknodesDrawables, sticknodesSpriteAsset} from '../sticknodes/geometry.mjs';
 
 const point = ([x, y]) => ({x, y});
@@ -30,14 +31,8 @@ const rawAt = (triples, index) => triples && triples[3 * index] !== null ? [trip
 /** A number the session wrote as `null` (not finite) is NaN. */
 const real = value => value ?? NaN;
 
-const definitionsOf = new WeakMap();
-/** The figure definitions of a report by type id (a call the editor runs adds a definition to the table in place). */
-function definitions(report) {
-  const figures = report.figure_types ?? [];
-  let known = definitionsOf.get(figures);
-  if (!known || known.count !== figures.length) { known = {count: figures.length, map: new Map(figures.map(figure => [Number(figure.figure_type_id), figure]))}; definitionsOf.set(figures, known); }
-  return known.map;
-}
+/** The figure definitions of a report by type id: the ones the objects drawn use are the ones fetched. */
+const definitions = report => ({get: id => findFigureType(report.figure_types ?? [], id)});
 
 /** The image or text asset a segment draws (`segmentAt` in the editor's geometry). */
 function assetOf(fig, seg, obj) {
@@ -243,8 +238,8 @@ export function createShown(owner) {
     previewGeometry(frame, figure, layerId, uid) {
       const answer = read('previewGeometry', {frame, figure, uid, layerId});
       if (!answer) return null;
-      const report = owner.report(), defs = new Map(definitions(report));
-      defs.set(Number(figure.figure_type_id), figure);
+      const report = owner.report(), held = definitions(report), added = Number(figure.figure_type_id);
+      const defs = {get: id => id === added ? figure : held.get(id)};
       const objects = new Map();
       for (const [slot, raw] of answer.slots) objects.set(slot, raw && hydrate(raw, slot, frame, report, defs));
       const order = frame.object_draw_order ?? Array.from({length: answer.count}, (_, slot) => slot);

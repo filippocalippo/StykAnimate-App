@@ -1,4 +1,5 @@
 import {messageError} from './localized-error.mjs';
+import {figureRows} from './figure-types.mjs';
 import {validateVfxClips} from './vfx-clips.mjs';
 import {validateCameraMotion} from './camera-motion.mjs';
 import {validateCameraParallaxOffset} from './layer-parallax.mjs';
@@ -102,8 +103,8 @@ export function* validateAnimationDocumentSteps(report) {
     if (channel.target.figureTypeId !== undefined) {
       if (!figureTypeIds) {
         figureTypeIds = new Set();
-        for (const figure of report.figure_types ?? []) {
-          figureTypeIds.add(figure.figure_type_id);
+        for (const row of figureRows(report.figure_types)) {
+          figureTypeIds.add(row.id);
           if (++visited % 256 === 0) yield {phase:'animation',channels:channels.size,keys:keyCount};
         }
       }

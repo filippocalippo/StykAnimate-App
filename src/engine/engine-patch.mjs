@@ -1,5 +1,5 @@
 import {copyField, copyRecord, defineLazyPayload, namesPayload, putField} from '../lazy-payload.mjs';
-import {tableOf} from '../lazy-table.mjs';
+import {lazyKeyedTable, recordsOf, tableOf} from '../lazy-table.mjs';
 
 /**
  * Applies a document patch from the engine (styk-edit's `patch` module, D19) to the
@@ -59,15 +59,24 @@ export function applyDocumentPatch(root, ops, payloads = null, {strict = true} =
     let parent = root;
     for (let at = 0; at < path.length - 1; at++) parent = own(parent, path[at]);
     const key = path.at(-1);
-    if (Object.hasOwn(op, 'v')) set(parent, key, op.v);
-    else if (op.x) delete parent[key];
+    if (Object.hasOwn(op, 'lz')) {
+      // The session sends no record for a table of records by key: the keys, or one key, are the view's to fetch when something reads them.
+      if (Array.isArray(op.lz)) {
+        const records = recordsOf(root);
+        if (!records) throw new Error('The document patch names a table of records the view cannot fetch.');
+        const next = lazyKeyedTable(path.join('.'), op.lz, records);
+        parent[key] = next; fresh.add(next);
+      } else tableOf(parent).setUnfetched(key, op.lz);
+    } else if (Object.hasOwn(op, 'v')) set(parent, key, op.v);
+    else if (op.x) { const table = tableOf(parent); if (table) table.remove(key); else delete parent[key]; }
     else if (op.a) {
       const before = parent[key];
       const next = tableOf(before)?.rebuild(op.a, ref => received(ref.v), strict) ?? op.a.map(ref => typeof ref === 'number' ? before[ref] : received(ref.v));
       parent[key] = next; fresh.add(next);
     } else if (op.o) {
-      const before = parent[key], next = {};
-      for (const [name, ...value] of op.o) { if (value.length) set(next, name, value[0]); else copyField(next, before, name); }
+      const before = parent[key], rebuilt = tableOf(before)?.rebuild(op.o, received, strict);
+      const next = rebuilt ?? {};
+      if (!rebuilt) for (const [name, ...value] of op.o) { if (value.length) set(next, name, value[0]); else copyField(next, before, name); }
       parent[key] = next; fresh.add(next);
     } else throw new Error('The document patch has an operation it does not know.');
   }

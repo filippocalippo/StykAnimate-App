@@ -25,6 +25,8 @@ import {TRANSFORM_BYTES,transformSupportBounds,tileIntersects,inverseMatrix,mult
 import {validatePixelClipboard} from './drawing-clipboard.mjs';
 import {selectionMatrix,selectionTiles,selectionPresenter} from './drawing-selection.mjs';
 import {installCanvasPinch} from './canvas-pinch.mjs';
+import {nextFigureTypeId, hasDrawingFigures} from './figure-types.mjs';
+import {withRecords} from './lazy-table.mjs';
 
 const pointerSample=e=>({clientX:e.clientX,clientY:e.clientY,pressure:e.pressure,pointerType:e.pointerType,timeStamp:e.timeStamp,button:e.button,buttons:e.buttons,shiftKey:e.shiftKey,altKey:e.altKey,ctrlKey:e.ctrlKey,metaKey:e.metaKey,tiltX:e.tiltX,tiltY:e.tiltY});
 const yieldToInput=()=>globalThis.scheduler?.yield?globalThis.scheduler.yield():new Promise(resolve=>setTimeout(resolve,0));
@@ -127,7 +129,7 @@ export class DrawingController {
     // Resources exist only for reports that carry drawings (or while Draw is
     // open and is about to create one); an animation without drawings must
     // never spawn stores, workers or presenters.
-    const report=this.editor.report,owner=drawingResourcesFor(report)??((required||this.active||report.figure_types?.some(figure=>drawingMetadata(figure)))?this.editor.drawingResources:null);
+    const report=this.editor.report,owner=drawingResourcesFor(report)??((required||this.active||hasDrawingFigures(report.figure_types))?this.editor.drawingResources:null);
     if(owner===this.owner)return;this.owner=owner;if(!owner)return;
     // A decoded or evicted cel changes its own entry's store and stamp; each
     // cached raster records the entries it painted and repaints only when one
@@ -360,7 +362,7 @@ export class DrawingController {
   get renderPreview(){
     const g=this.gesture??this.selection;if(!g?.target?.created&&!g?.target?.migratedFrom)return null;
     if(!g.preview){
-      const source=this.editor.evaluatedFrame,report={...this.editor.report,figure_types:[...this.editor.report.figure_types,g.target.figure],_styk:{...this.editor.report._styk,layers:{...this.editor.report._styk.layers,assignments:{...this.editor.report._styk.layers.assignments,[g.target.object.unique_id]:g.target.id}}}};
+      const source=this.editor.evaluatedFrame,report={...this.editor.report,figure_types:withRecords(this.editor.report.figure_types,[g.target.figure]),_styk:{...this.editor.report._styk,layers:{...this.editor.report._styk.layers,assignments:{...this.editor.report._styk.layers.assignments,[g.target.object.unique_id]:g.target.id}}}};
       let frame=createFrame([...source.objects.filter(o=>o.unique_id!==g.target.object.unique_id),g.target.object]);
       frame.camera=source.camera;
       for(const key of ['background_id','background_id_b','background_mix','background_color','_stykBackgroundColor'])if(key in source)frame[key]=source[key];
@@ -424,7 +426,7 @@ export class DrawingController {
       // v1 cels migrate lazily on the first pixel edit; posing keeps them v1.
       const d=drawingMetadata(target.figure);
       if(d?.version===1&&['brush','eraser','fill','lasso','shape'].includes(this.tool)){
-        const figure=migrateDrawingFigure(target.figure,this.editor.report.figure_types.reduce((n,f)=>Math.max(n,f.figure_type_id+1),1),{bounds:surface.store.bounds});
+        const figure=migrateDrawingFigure(target.figure,nextFigureTypeId(this.editor.report.figure_types),{bounds:surface.store.bounds});
         owner.retarget(d.celId,figure);
         target={...target,figure,object:{...structuredClone(target.object),figure_type_id:figure.figure_type_id},migratedFrom:d.celId};
       }
@@ -942,7 +944,7 @@ export class DrawingController {
       try{
         surface=await owner.surface(target.figure);op.check();surface.pinned=true;op.reserve(surface,owner.hardBudget,owner.scratchBudget);
         const d=drawingMetadata(target.figure);
-        if(d.version===1){const figure=migrateDrawingFigure(target.figure,e.report.figure_types.reduce((n,f)=>Math.max(n,f.figure_type_id+1),1),{bounds:surface.store.bounds});owner.retarget(d.celId,figure);target={...target,figure,object:{...structuredClone(target.object),figure_type_id:figure.figure_type_id},migratedFrom:d.celId};}
+        if(d.version===1){const figure=migrateDrawingFigure(target.figure,nextFigureTypeId(e.report.figure_types),{bounds:surface.store.bounds});owner.retarget(d.celId,figure);target={...target,figure,object:{...structuredClone(target.object),figure_type_id:figure.figure_type_id},migratedFrom:d.celId};}
         const sourceMatrix=clip.matrix??[1/clip.pixelsPerUnit,0,0,1/clip.pixelsPerUnit,clip.world?.x??0,clip.world?.y??0];
         const matrix=multiplyMatrix(inverseMatrix(this.pixelMatrix(target)),sourceMatrix).map(n=>Math.abs(n-Math.round(n))<1e-9?Math.round(n):n);
         const coverage=clip.version===2?indexedTileCoverage(clip.tiles,matrix,this.settings.filter,op.maxBytes):null;

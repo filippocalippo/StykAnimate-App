@@ -3,6 +3,7 @@
  * ordinary editor commands. This module chooses what to show a trail of, holds what the engine sampled and draws it.
  */
 import {falloffWeight} from './motion-path-falloff.mjs';
+import {findFigureType} from './figure-types.mjs';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -28,7 +29,7 @@ export function figureTipJoints(figure) {
 export function motionPathTargets(editor, {camera = false, all = false, joints = 'selected', maxTargets = 48} = {}) {
   if (camera) return [{kind: 'camera'}];
   const frame = editor.selectionFrame ?? editor.evaluatedFrame, out = [], seen = new Set();
-  const figures = new Map(editor.report.figure_types.map(f => [f.figure_type_id, f]));
+  const figures = {get: id => findFigureType(editor.report.figure_types, id)};
   const objects = new Map(frame?.objects.map(o => [o.unique_id, o]) ?? []);
   const add = (uid, figure, j) => {
     if (out.length >= maxTargets) return;

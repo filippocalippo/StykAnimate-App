@@ -959,7 +959,7 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
             let mut ops = crate::patch::diff(&before, report);
             // A view that fetches the records of its tables on demand holds some of them: the others come whole.
             if let Some(known) = crate::patch::known(&view) {
-                ops = crate::patch::collapse_unfetched(ops, report, &known);
+                ops = crate::patch::for_lazy(ops, report, &known);
                 // Such a view cannot tell from the records it replaced how many poses hold each figure: the session tells it.
                 answer.push(("layerDelta", crate::patch::layer_delta(&before, report)));
             }

@@ -1,5 +1,6 @@
 import {sheetKeyAt} from './layer-sheet.mjs';
 import {drawingMetadata,isDrawingLayer} from './drawing-model.mjs';
+import {findFigureType} from './figure-types.mjs';
 
 /** Timeline distance of every drawing cel from the playhead, over all
  * drawing layers, measured circularly because playback and scrubbing loop:
@@ -12,7 +13,7 @@ export function drawingCelDistances(editor){
       const frame=key?.value?.frameId?editor.getFrameById(key.value.frameId):null;
       for(const object of frame?.objects??[]){
         if(editor.layerForUid(object.unique_id)!==layer.id)continue;
-        const figure=editor.report.figure_types.find(f=>f.figure_type_id===object.figure_type_id),id=drawingMetadata(figure)?.celId;if(!id)continue;
+        const figure=findFigureType(editor.report.figure_types, object.figure_type_id),id=drawingMetadata(figure)?.celId;if(!id)continue;
         const start=key.tick,end=track.keys[i+1]?.tick??track.end,linear=tick<start?start-tick:tick>=end?tick-end+1:0;
         const d=Math.min(linear,Math.max(0,total-linear));
         if(!(distances.get(id)<=d))distances.set(id,d);
@@ -29,7 +30,7 @@ export function drawingCelPrefetch(editor,layerId,{before=2,after=2}={}){
   const layer=editor.getLayer(layerId);if(!isDrawingLayer(layer)||!layer.visible)return null;
   const track=editor.report._styk?.layerSheet?.tracks[layerId];if(!track)return null;
   const index=sheetKeyAt(track,editor.tick).index;
-  const figureAt=key=>{const frame=key?.value?.frameId?editor.getFrameById(key.value.frameId):null;const object=frame?.objects.find(o=>editor.layerForUid(o.unique_id)===layerId);const figure=object&&editor.report.figure_types.find(f=>f.figure_type_id===object.figure_type_id);return figure&&drawingMetadata(figure)?figure:null;};
+  const figureAt=key=>{const frame=key?.value?.frameId?editor.getFrameById(key.value.frameId):null;const object=frame?.objects.find(o=>editor.layerForUid(o.unique_id)===layerId);const figure=object&&findFigureType(editor.report.figure_types, object.figure_type_id);return figure&&drawingMetadata(figure)?figure:null;};
   const current=figureAt(track.keys[index]),neighbors=[],seen=new Set([drawingMetadata(current)?.celId]);
   for(const direction of [-1,1]){
     let found=0;
