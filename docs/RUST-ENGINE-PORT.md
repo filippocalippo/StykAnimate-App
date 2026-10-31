@@ -9,9 +9,51 @@ nothing here should need re-deriving.
   open-source history: commit IDs written earlier on this page and in `docs/engine/` are the old ones,
   and [`engine/history-map.tsv`](../engine/history-map.tsv) gives the commit each became.
 - **Status in one line:** the cutover is complete: the Rust engine is the app's only engine
-  (2026-10-25); the next phase is performance.
-- **Handoff:** the next section: how the app works now, gate results, what remains, known
-  differences and the next phase. The milestone log stops at the cutover; git history has the rest.
+  (2026-10-25); the performance phase is in progress (running record below).
+- **Handoff:** the next two sections: the performance phase's running record, then how the app works
+  now, gate results, what remains and known differences. The milestone log stops at the cutover; git
+  history has the rest.
+
+## Performance phase: running record (started 2026-10-31)
+
+**Goal.** Opening, playing, scrubbing, posing, dragging, drawing, undoing and saving respond on the next
+display refresh on the heaviest projects, no hitch or flicker, far less memory; obvious side by side with
+`main`. Targets, floors and rules are the owner's brief: the scoreboard in `scripts/benchmark-app-summary.mjs`
+holds the target table once it lands.
+
+**How the work runs.** The orchestrator plans, briefs, reviews and merges; Sonnet subagents implement, each in its own
+worktree (`~/.t3/worktrees/StykAnimate-webapp/`), branch merged into `engine-rust` when its checks pass. Tooling outside the repository, in
+`perf/` beside the checkout: `perf/briefs/common.md` (rules every agent follows), `perf/slot.mjs` (machine slots: builds and tests
+never overlap a benchmark), `perf/env.sh` (shared `CARGO_TARGET_DIR`, commit identity), `perf/bench.mjs` until the harness lands in `scripts/`,
+`perf/baseline/all/summary.md` (baseline: `main` against `fd0536cd`), `perf/research/` (findings). Checkouts `wt/perf-main` and `wt/perf-rust` are what
+gates measure; a gate points `wt/perf-rust` at the commit and rebuilds its `src/engine/pkg` as a release build.
+
+**Baseline (median of 3, release build; `main` / `fd0536cd`).**
+
+| Row | main | baseline | Target |
+| --- | ---: | ---: | ---: |
+| Start until usable | 2.6 s | 2.7 s | ≤ 1 s |
+| Open tdd2 / svr_uriel / testingupload | 20.3 / 10.5 / 5.8 s | 5.0 / 4.0 / 10.6 s | ≤ 1 / 0.6 / 0.8 s |
+| Memory tdd2 settled / session peak | 2.4 / 4.1 GB | 3.9 / 5.2 GB | ≤ 0.4 GB over the empty app / ≤ 1.5 GB |
+| Play stutters tdd2 / svr_uriel; worst interval svr_uriel | 1 / 0; 51 ms | 7 / 11; 127 ms | 0 / 0; ≤ frame + 1 refresh |
+| Draws per animation frame | 1 | 2, flickering | 1 |
+| Scrub p95 tdd2 / svr_uriel; jump p95; next-frame key p95 | 42 / 115; 90; 22 ms | 14 / 48; 46; 19 ms | ≤ 9; ≤ 16; ≤ 9 ms |
+| Joint drag p50 / p95 tdd2; frames per second | 3.9 / 7.5 ms; 110–115 | 9.9 / 10.9 ms; 61–70 | ≤ 3 / ≤ 7 ms; one per input |
+| Drag freeze testingupload; release→committed svr_uriel | 49; 50 ms | 111; 46 ms | ≤ 16; ≤ 10 ms |
+| Undo / redo svr_uriel | 34 / 42 ms | 25 / 35 ms | ≤ 10 ms |
+| Brush p95; undo stroke median / worst | 5.8; 22 / 23 ms | 8.8; 35 / 251 ms | ≤ 7; ≤ 10 / ≤ 16 ms |
+| Save tdd2 / testingupload | 10.9 / 6.4 s | 8.7 / 11.8 s | ≤ 1 / ≤ 0.8 s |
+
+**Now.** Nothing merged yet; numbers above are current.
+
+**In flight (first wave, 2026-10-31).** H: the benchmark into `scripts/`, new scenarios, baselines of them. P: one draw per frame in playback, flicker, stutters. D: the drag
+boundary. R: research only, where open, save and memory go (`perf/research/open-save-memory.md`), and whether the read view can be lazy. U: stroke undo and brush.
+B: compiler flags (`+simd128`, wasm-opt: neither is on today), allocator contention. T: startup and the empty app's memory.
+
+**Next.** After R: `.styk` open and save, memory lifetime and the read view, by R's ranking. After D: scrub, jump and next-frame key on D's boundary. Then the regression gate,
+the structural work, the long tail (zoom, onion skins, timeline, tabs, export dialog, Home) and the final gate and report.
+
+**Floors recorded.** None yet.
 
 ## Handoff (2026-10-26, cutover complete)
 
