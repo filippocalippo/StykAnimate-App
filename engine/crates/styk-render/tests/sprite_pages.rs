@@ -168,7 +168,8 @@ fn a_picture_draws_soft_until_it_is_in_and_sharp_after_and_never_blank_between()
     let mut larger = assets.clone();
     larger.pages = PAGES + 6;
     larger.atlas.push(entry(PAGES + 5, 1, 1, PICTURE));
-    kept.extend_pictures(&larger);
+    assert!(kept.sync_pictures(&larger), "a layout with pictures the table does not know replaces it");
+    assert!(!kept.sync_pictures(&larger), "and the next call finds it current");
     assert_eq!(draw(&mut kept, &device, &queue, &list), reference, "growing the layout keeps the pictures in");
     kept.set_picture(&assets.atlas[1], None);
     kept.set_picture(&assets.atlas[2], None);
@@ -312,4 +313,74 @@ fn live_pages_of_a_resident_renderer_draw_from_the_layer_they_are_mapped_to() {
     kept.upload_live(base, &[run([250, 250, 10, 255])]);
     let back = draw(&mut kept, &device, &queue, &list);
     assert!(close(centre(&back, 36), [250, 250, 10, 255]), "a live page mapped again draws its new pixels");
+}
+
+/// A revision that appends a picture to a page the layout already had (the page count does not change) must put it in
+/// the table: it was drawn from a soft copy a renderer holding the whole layout does not have, so it drew nothing, and a
+/// resident renderer ignored the sharp pixels for ever.
+#[test]
+fn a_picture_added_to_a_page_that_was_there_draws() {
+    let Some((device, queue)) = device() else { return };
+    let before = assets();
+    let mut after = before.clone();
+    // The same page, further along: another picture of the document, as an image added or replaced makes.
+    after.atlas.push(entry(1, 200, 1, PICTURE));
+    let added = after.atlas.len() - 1;
+    let list = list(vec![sprite(&after, added, [4.0, 4.0])]);
+    let full = sharp(&after, added as u32, [10, 200, 30, 255]);
+
+    // The layout held whole.
+    let mut whole = renderer(&device, &queue);
+    whole.prepare_sprites(&before);
+    assert!(whole.sync_pictures(&after), "the table did not know the new picture");
+    whole.upload_images(&after, [&full]);
+    assert!(close(centre(&draw(&mut whole, &device, &queue, &list), 4), [10, 200, 30, 255]), "a picture added to a page draws");
+    assert!(!whole.sync_pictures(&after));
+
+    // A resident renderer: its soft copy first, then the picture itself once it is in.
+    let mut kept = renderer(&device, &queue);
+    kept.prepare_sprites_resident(&before, 0, 2);
+    assert!(kept.sync_pictures(&after));
+    kept.map_sprite_page(1, Some(0));
+    kept.flush_sprite_map();
+    kept.upload_images(&after, [&soft(&after, added as u32, [200, 10, 10, 255])]);
+    assert!(close(centre(&draw(&mut kept, &device, &queue, &list), 4), [200, 10, 10, 255]), "its soft copy draws at once");
+    kept.upload_images(&after, [&full]);
+    kept.set_picture(&after.atlas[added], Some(0));
+    kept.flush_pictures();
+    assert!(close(centre(&draw(&mut kept, &device, &queue, &list), 4), [10, 200, 30, 255]), "and the picture once it is in");
+}
+
+/// The live drawing pages of a document whose texture already has the layers they need (a one-page document has two):
+/// they are mapped all the same, or their tiles read no layer and nothing written to them shows.
+#[test]
+fn live_pages_of_a_whole_layout_draw_whether_or_not_the_texture_had_room() {
+    let Some((device, queue)) = device() else { return };
+    let (cell, tile, border) = (styk_eval::live::CELL, styk_eval::drawing::TILE, styk_eval::drawing::BORDER);
+    let run = |page: u32, color: [u8; 4]| styk_eval::live::Run { page, x: 0, y: 0, cells: 1, rgba: color.iter().copied().cycle().take((cell * cell * 4) as usize).collect() };
+    let tile_on = |layer: u32, at: f32| {
+        let slot = entry(layer, border, border, tile);
+        Prim { kind: K_IMAGE | styk_draw::F_DRAWING, group: 0, color: 0xffff_ffff, paint: u32::MAX, a: [at, at, tile as f32, 0.0], b: [0.0, tile as f32, layer as f32, 0.0], c: slot.uv() }
+    };
+    // One page of pictures: the texture has two layers, and one live page needs the second.
+    let mut one = Assets::default();
+    one.pages = 1;
+    one.atlas.push(AtlasEntry { layer: 0, x: 1, y: 1, w: PICTURE, h: PICTURE, source_w: PICTURE, source_h: PICTURE, valid: true });
+    let mut renderer_one = renderer(&device, &queue);
+    renderer_one.prepare_sprites(&one);
+    renderer_one.grow_sprites(&one, 1);
+    renderer_one.upload_live(1, &[run(0, [30, 60, 220, 255])]);
+    // The tile at its own size on the artboard's corner (a tile drawn smaller shows a reduced level).
+    let frame = draw(&mut renderer_one, &device, &queue, &list(vec![tile_on(1, 0.0)]));
+    assert!(close(frame[((8 * SIZE[0] + 8) * 4) as usize..][..4].try_into().unwrap(), [30, 60, 220, 255]), "a live page of a one-page document draws");
+
+    // Three pages: growing makes a new texture, and the pages of two live cels are mapped in it.
+    let three = assets();
+    let mut renderer_three = renderer(&device, &queue);
+    renderer_three.prepare_sprites(&three);
+    renderer_three.grow_sprites(&three, 2);
+    renderer_three.upload_live(PAGES, &[run(0, [220, 60, 30, 255]), run(1, [60, 220, 30, 255])]);
+    let frame = draw(&mut renderer_three, &device, &queue, &list(vec![tile_on(PAGES, 0.0), tile_on(PAGES + 1, 32.0)]));
+    assert!(close(frame[((8 * SIZE[0] + 8) * 4) as usize..][..4].try_into().unwrap(), [220, 60, 30, 255]), "the first live page draws");
+    assert!(close(frame[((40 * SIZE[0] + 40) * 4) as usize..][..4].try_into().unwrap(), [60, 220, 30, 255]), "the second live page draws");
 }

@@ -367,10 +367,11 @@ impl Stage {
         let generation = frames.generation().clone();
         // A thumbnail never shows a frame without its pictures: they reach the atlas first.
         self.sync_images(&generation);
-        if !self.pictures_ready_for_view(&generation, &frame.list) {
+        let framing = card(&generation.prepared.doc, frame.camera.as_ref(), width, height);
+        let scale = (framing.matrix[0] * framing.matrix[3] - framing.matrix[1] * framing.matrix[2]).abs().sqrt();
+        if !self.pictures_ready_for_view(&generation, &frame.list, scale) {
             return Ok(WAIT);
         }
-        let framing = card(&generation.prepared.doc, frame.camera.as_ref(), width, height);
         let mut thumbnails = self.views.thumbnails.take().expect("checked above");
         let drawn = thumbnails.draw(self, &frame.list, &view_of(framing, CARD), width, height, DrawingGrid::Destination);
         self.views.thumbnails = Some(thumbnails);

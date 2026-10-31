@@ -46,12 +46,17 @@ pub(crate) struct PictureState {
     /// The entry of each picture, by page and corner.
     slots: HashMap<(u32, u32), usize>,
     dirty: bool,
+    /// The renderer holds the whole layout: every picture is in at its page's layer, new ones too.
+    pub(crate) whole: bool,
+    /// The pictures of the layout the table was made for ([`styk_eval::assets::Assets::atlas`] entries): a layout with more
+    /// has pictures the table does not know.
+    pub(crate) known: usize,
 }
 
 impl PictureState {
     /// A table of the pictures of `assets` whose layer is `layer_of`'s (`None`: only the soft copy draws), and a soft atlas
     /// for `soft_pages` pages of the layout (a one texel placeholder for none).
-    pub(crate) fn new(device: &wgpu::Device, queue: &wgpu::Queue, assets: &Assets, soft_pages: u32, layer_of: impl Fn(&AtlasEntry) -> Option<u32>) -> PictureState {
+    pub(crate) fn new(device: &wgpu::Device, queue: &wgpu::Queue, assets: &Assets, soft_pages: u32, whole: bool, layer_of: impl Fn(&AtlasEntry) -> Option<u32>) -> PictureState {
         let pictures: Vec<&AtlasEntry> = assets.atlas.iter().filter(|entry| entry.valid && entry.layer < crate::MAX_PAGES).collect();
         let mut capacity = (pictures.len() * 4).next_power_of_two().max(TABLE_WIDTH as usize);
         let (entries, slots) = loop {
@@ -81,7 +86,7 @@ impl PictureState {
         } else {
             array_texture(device, "styk soft sprites", [SOFT_LAYER, SOFT_LAYER], soft_pages.min(crate::MAX_PAGES).div_ceil(SOFT_PER_LAYER), false)
         };
-        let mut state = PictureState { soft, soft_view, table, table_view, entries, slots, dirty: true };
+        let mut state = PictureState { soft, soft_view, table, table_view, entries, slots, dirty: true, whole, known: assets.atlas.len() };
         state.flush(queue);
         state
     }

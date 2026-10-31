@@ -222,22 +222,32 @@ impl Stage {
         None
     }
 
-    /// [`Stage::pictures_ready`] for a view that is not the stage's frame (a thumbnail): it takes layers only from pages
-    /// the frame on show does not need, and the texture does not grow for it.
-    pub(crate) fn pictures_ready_for_view(&mut self, generation: &Arc<Generation>, list: &DrawList) -> bool {
+    /// [`Stage::pictures_ready`] for a view that is not the stage's frame (a thumbnail drawn at `scale` pixels to a world
+    /// unit): a picture that is not in the sprite texture is drawn from its soft copy when that has a texel for every pixel
+    /// the picture covers on the card (a 4K picture on a card of a few hundred pixels), and has to be loaded otherwise
+    /// (a small picture); those are asked for like the stage's own, the pages of the frame on show kept, and the texture
+    /// grows for them if no layer is to be had, so a thumbnail always finishes and never takes the stage's frame.
+    pub(crate) fn pictures_ready_for_view(&mut self, generation: &Arc<Generation>, list: &DrawList, scale: f64) -> bool {
         if self.residency.is_none() {
             return self.engine.images_pending() == 0;
         }
         let index = self.place_index(generation);
-        let wanted = styk_engine::pictures_of(list, &index);
-        if !self.request_pictures(generation, &wanted, &[], false, false) {
-            return false;
+        let widths = styk_engine::picture_widths(list, &index);
+        let need = styk_engine::pictures_needing_sharp(
+            &widths,
+            &generation.assets,
+            scale,
+            |picture| self.loading.soft.contains(&picture),
+            |picture| generation.assets.atlas.get(picture as usize).is_some_and(|entry| self.uploaded.has(entry)),
+        );
+        if need.is_empty() {
+            return true;
         }
+        self.request_pictures(generation, &need, &[], true, false);
         if let Some(residency) = self.residency.as_mut() {
-            residency.touch(&Self::pages_of_pictures(generation, &wanted));
+            residency.touch(&Self::pages_of_pictures(generation, &need));
         }
-        // A thumbnail never shows the soft copy of a picture.
-        self.pictures_in(generation, &wanted, true)
+        self.pictures_in(generation, &need, true)
     }
 
     /// The frame about to be drawn was drawn: its pages are what is on show.
@@ -343,8 +353,6 @@ impl Stage {
             if let Some(residency) = self.residency.as_mut() {
                 residency.extend(pages);
             }
-            self.renderer.extend_pictures(&generation.assets);
-            self.atlas_serial += 1;
             self.atlas_of = Some(layout);
             return;
         }

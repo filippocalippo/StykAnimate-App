@@ -146,7 +146,7 @@ impl Renderer {
         let material_sampler = crate::materials::sampler(&device);
         let glyphs = crate::glyphs::GlyphMasks::new(&device);
         let sprite_map = crate::images::SpriteMap::new(&device);
-        let pictures = crate::pictures::PictureState::new(&device, &queue, &styk_eval::assets::Assets::default(), 0, |_| None);
+        let pictures = crate::pictures::PictureState::new(&device, &queue, &styk_eval::assets::Assets::default(), 0, false, |_| None);
         let sprite_bind = Self::sprite_bind(&device, &layout1, &sprite_view, &linear, &materials.view, &material_sampler, &glyphs.view, &sprite_map.view, &pictures);
         let make_layers = |label: &str| {
             let (texture, view) = array_texture(&device, label, [1, 1], 1, true);

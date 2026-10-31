@@ -60,6 +60,46 @@ pub fn pictures_of(list: &DrawList, index: &PlaceIndex) -> Vec<u32> {
     pictures
 }
 
+/// The pictures `list` draws (as [`pictures_of`]) and the widest each is drawn, in world units.
+pub fn picture_widths(list: &DrawList, index: &PlaceIndex) -> Vec<(u32, f32)> {
+    let mut widths: Vec<(u32, f32)> = Vec::new();
+    for prim in &list.prims {
+        let (layer, width) = match prim.kind & 255 {
+            K_IMAGE if prim.kind & F_DRAWING == 0 => (prim.b[2], prim.a[2].hypot(prim.a[3])),
+            K_BG_IMAGE => (prim.a[2], prim.a[0]),
+            _ => continue,
+        };
+        let Some(&picture) = index.pictures.get(&super::record_place(layer, prim.c[0], prim.c[1])) else { continue };
+        match widths.iter_mut().find(|(known, _)| *known == picture) {
+            Some((_, widest)) => *widest = widest.max(width),
+            None => widths.push((picture, width)),
+        }
+    }
+    widths.sort_unstable_by_key(|(picture, _)| *picture);
+    widths
+}
+
+/// Whether the soft copy of the picture at `entry`, drawn `width` world units wide at `scale` pixels to a world unit,
+/// has a texel for every pixel it covers: a small card shows it as the picture would, and a large picture needs no
+/// more than it.
+pub fn soft_resolves(entry: &styk_eval::assets::AtlasEntry, width: f32, scale: f64) -> bool {
+    entry.w as f64 / styk_eval::assets::SOFT_SCALE as f64 >= width as f64 * scale
+}
+
+/// The pictures of `widths` ([`picture_widths`]) a view drawn at `scale` pixels to a world unit must have sharp: those not
+/// in the sprite texture (`sharp`) whose soft copy (`soft`, when it has one) does not resolve them. A thumbnail waits for
+/// these only; asking for pictures no layer can be given for ever would never finish.
+pub fn pictures_needing_sharp(widths: &[(u32, f32)], assets: &Assets, scale: f64, soft: impl Fn(u32) -> bool, sharp: impl Fn(u32) -> bool) -> Vec<u32> {
+    widths
+        .iter()
+        .filter(|&&(picture, width)| {
+            let Some(entry) = assets.atlas.get(picture as usize).filter(|entry| entry.valid) else { return false };
+            !sharp(picture) && !(soft(picture) && soft_resolves(entry, width, scale))
+        })
+        .map(|&(picture, _)| picture)
+        .collect()
+}
+
 /// The pictures (indices into the document's images) laid out on `page`.
 pub fn images_on(assets: &Assets, page: u32) -> Vec<usize> {
     assets.atlas.iter().enumerate().filter(|(_, entry)| entry.valid && entry.layer == page).map(|(index, _)| index).collect()
@@ -318,6 +358,40 @@ mod tests {
         assert_eq!(residency.acquire(3, &[2], true), Acquired::Given { layer: 2, evicted: None });
         assert_eq!(residency.layers(), 3);
         assert_eq!(residency.layer_of(4), Some(live_layer), "the live page kept its layer");
+    }
+
+    #[test]
+    fn a_thumbnail_waits_only_for_the_pictures_its_soft_copies_do_not_resolve() {
+        use styk_eval::assets::AtlasEntry;
+        let mut assets = Assets::default();
+        for (layer, w) in [(1, 4000), (2, 800), (3, 4000), (4, 4000)] {
+            assets.atlas.push(AtlasEntry { layer, x: 1, y: 1, w, h: w, source_w: w, source_h: w, valid: true });
+        }
+        // A card at a sixth of a pixel to a world unit: a 4,000 pixel picture drawn 960 wide covers 160 pixels and its soft
+        // copy has 500 texels across; an 800 pixel picture drawn 960 wide has 100 texels for the same 160 pixels.
+        let widths = [(0, 960.0), (1, 960.0), (2, 960.0), (3, 960.0)];
+        let scale = 1.0 / 6.0;
+        let soft = |picture: u32| picture != 3;
+        let sharp = |picture: u32| picture == 2;
+        assert_eq!(pictures_needing_sharp(&widths, &assets, scale, soft, sharp), vec![1, 3], "the small picture, and the one with no soft copy yet");
+        // With no picture sharp and no layer to be had, thumbnails of 4K pictures still finish: nothing is waited for.
+        assert!(pictures_needing_sharp(&[(0, 960.0), (3, 960.0)], &assets, scale, |_| true, |_| false).is_empty());
+        // A view at the stage's own scale needs them all.
+        assert_eq!(pictures_needing_sharp(&[(0, 960.0)], &assets, 1.0, |_| true, |_| false), vec![0]);
+    }
+
+    #[test]
+    fn the_widths_a_list_draws_its_pictures_in_are_the_longest_edge_of_their_records() {
+        use styk_eval::assets::AtlasEntry;
+        let mut assets = Assets::default();
+        assets.atlas.push(AtlasEntry { layer: 1, x: 1, y: 1, w: 500, h: 500, source_w: 500, source_h: 500, valid: true });
+        let index = PlaceIndex::new(&assets);
+        let prim = |kind: u32, width: f32| styk_draw::Prim { kind, group: 0, color: 0, paint: 0, a: [width, 0.0, 1.0, 0.0], b: [0.0, 0.0, 1.0, 0.0], c: assets.atlas[0].uv() };
+        // A picture as an image record (the u axis is a.zw: 3, 4) and as a background (a.x is its width).
+        let mut image = prim(K_IMAGE, 0.0);
+        image.a = [0.0, 0.0, 3.0, 4.0];
+        let list = DrawList { prims: vec![image, prim(K_BG_IMAGE, 9.0), prim(K_IMAGE | F_DRAWING, 99.0)], ..Default::default() };
+        assert_eq!(picture_widths(&list, &index), vec![(0, 9.0)]);
     }
 
     #[test]

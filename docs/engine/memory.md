@@ -159,10 +159,18 @@ document opens), and:
   A picture that cannot be decoded is not waited for; one the engine refused for want of memory is asked for again three
   times. Pixels of a picture whose page left while it was decoded are not written (`styk_engine::has_place`): the rows already
   written would be missing from the picture when its page is given a layer again.
-- **Where the soft copy is never seen**: exports, previews and the thumbnails of the CPU path hold their own renderers, whole-layout
-  ones; the stage's frame thumbnails wait for the sharp picture (`Stage::pictures_ready_for_view`); saved files do not hold
-  it. The camera monitor shares the stage's textures and table, so while the stage waits for a picture it draws the soft
-  copy, not a blank.
+- **Where the soft copy is seen**: the stage's frame while a picture is not in, and its camera monitor (which shares the stage's
+  textures and table, so while the stage waits it draws the soft copy, not a blank). Never in an export, a preview or a saved
+  file: those hold their own renderers, whole-layout ones. A frame thumbnail on the stage's device (`Stage::pictures_ready_for_view`)
+  draws a picture that is not in from its soft copy only when the soft copy has a texel for every pixel the picture covers on the
+  card (`styk_engine::pictures_needing_sharp`: a 4K picture on a card of a few hundred pixels); a picture it cannot resolve is loaded
+  like the stage's own, and the texture grows once for it if no layer is free, so a thumbnail always finishes and the stage keeps its
+  frame (before, a thumbnail asked for every picture sharp, was refused a layer when the four were taken and requested nothing).
+- **The table follows the layout**: `Renderer::sync_pictures` runs on every frame (`Stage::sync_atlas`) and makes the table (and the
+  soft atlas) know every picture of the layout drawn, whatever the page count: a revision that appends a picture to a page that was
+  there is a layout with one more picture, not one more page. The preview worker and the export device key their atlas by the
+  number of pictures too. A renderer holding the whole layout has the new picture in the table at its page's layer; a resident one
+  has it soft until its pixels are in.
 - **A layout of more than 1,024 pages** (`MAX_PAGES`, 64 GiB of pictures) has no row for the pages beyond: their pictures are not
   loaded (counted as lost), the table has no entry for them and the shader draws nothing for them (never another page's picture).
 - Drawing cels' pages (decoded with the document) and the live drawing slots keep their layers for good.

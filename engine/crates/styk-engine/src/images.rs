@@ -11,7 +11,7 @@ use crate::{Engine, Generation, TaskQueue};
 pub use styk_eval::assets::DecodedImage;
 
 pub(crate) mod residency;
-pub use residency::{drawing_pages, has_place, images_on, on_demand, pictures_of, Acquired, PlaceIndex, Residency, ATLAS_PAGES};
+pub use residency::{drawing_pages, has_place, images_on, on_demand, picture_widths, pictures_needing_sharp, pictures_of, soft_resolves, Acquired, PlaceIndex, Residency, ATLAS_PAGES};
 
 /// Which places of a sprite atlas hold their pixels: what a renderer that takes decoded
 /// images a slice at a time ([`Engine::take_images`]) has uploaded, so it can tell

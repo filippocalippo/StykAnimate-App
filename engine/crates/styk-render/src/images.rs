@@ -114,7 +114,7 @@ impl Renderer {
         self.sprite_map.layers = (0..pages.min(MAX_PAGES)).collect();
         self.sprite_map.flush(&self.queue);
         // Every picture is in, in the layer of its page.
-        let held = PictureState::new(&self.device, &self.queue, assets, 0, |entry| Some(entry.layer));
+        let held = PictureState::new(&self.device, &self.queue, assets, 0, true, |entry| Some(entry.layer));
         std::mem::replace(&mut self.pictures, held).destroy();
         let old = std::mem::replace(&mut self.sprites, texture);
         self.rebind_sprites();
@@ -132,18 +132,28 @@ impl Renderer {
         self.sprite_view = view;
         self.sprite_map.layers = vec![UNMAPPED; pages.min(MAX_PAGES) as usize];
         self.sprite_map.flush(&self.queue);
-        let held = PictureState::new(&self.device, &self.queue, assets, assets.pages, |_| None);
+        let held = PictureState::new(&self.device, &self.queue, assets, assets.pages, false, |_| None);
         std::mem::replace(&mut self.pictures, held).destroy();
         let old = std::mem::replace(&mut self.sprites, texture);
         self.rebind_sprites();
         old.destroy();
     }
 
-    /// The layout of a resident renderer grew (pictures were appended to its document): the table has them, and the
-    /// soft atlas room for their pages, keeping what is in.
-    pub fn extend_pictures(&mut self, assets: &Assets) {
-        let values = self.pictures.values();
-        let held = PictureState::new(&self.device, &self.queue, assets, assets.pages, |entry| values.get(&(entry.layer, entry.y << 12 | entry.x)).and_then(|value| value.checked_sub(1)));
+    /// Makes the table know every picture of `assets`, the layout of the document drawn now: a revision that appended
+    /// pictures (to a page that existed, as often as to a new one) has some the table was not made with, and a picture
+    /// the table does not know is drawn from its soft copy, which a renderer that holds the whole layout does not have.
+    /// What is in stays in; a new picture is in when the renderer holds the whole layout, and has its soft copy only
+    /// otherwise. Returns whether the table and the soft atlas were replaced (a renderer sharing them shares them again).
+    pub fn sync_pictures(&mut self, assets: &Assets) -> bool {
+        if assets.atlas.len() == self.pictures.known {
+            return false;
+        }
+        let (values, whole) = (self.pictures.values(), self.pictures.whole);
+        let soft_pages = if whole { 0 } else { assets.pages };
+        let held = PictureState::new(&self.device, &self.queue, assets, soft_pages, whole, |entry| match values.get(&(entry.layer, entry.y << 12 | entry.x)) {
+            Some(value) => value.checked_sub(1),
+            None => whole.then_some(entry.layer),
+        });
         let old = std::mem::replace(&mut self.pictures, held);
         if old.has_soft() {
             let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("styk soft sprites grow") });
@@ -156,6 +166,7 @@ impl Renderer {
         }
         old.destroy();
         self.rebind_sprites();
+        true
     }
 
     /// The picture at `entry` is in layer `layer` of the sprite texture (`None`: it is not, its soft copy draws). Takes
@@ -217,6 +228,10 @@ impl Renderer {
         let wanted = (assets.pages + live).max(2);
         let have = self.sprites.depth_or_array_layers();
         if wanted <= have && self.sprites.width() == PAGE {
+            // The texture has the layers (it always has two): the pages of the live cels still need their rows of the
+            // map, or they read no layer and nothing written to them lands.
+            self.sprite_map.layers = (0..(assets.pages + live).min(MAX_PAGES)).collect();
+            self.sprite_map.flush(&self.queue);
             return;
         }
         let old = self.install_sprites(assets, live);

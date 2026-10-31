@@ -560,6 +560,15 @@ impl Stage {
 
     /// Lays the sprite atlas out for `generation`, with room for the live drawing cels' slots.
     fn sync_atlas(&mut self, generation: &Arc<Generation>) {
+        self.sync_atlas_layout(generation);
+        // A revision may have appended pictures to a page that was there: the table of pictures must know them.
+        if self.renderer.sync_pictures(&generation.assets) {
+            self.atlas_serial += 1;
+        }
+    }
+
+    /// The layout of the sprite texture for `generation`.
+    fn sync_atlas_layout(&mut self, generation: &Arc<Generation>) {
         let layout = (generation.lineage, generation.assets.pages);
         let live_pages = self.live.pages();
         if styk_engine::on_demand(&generation.assets, self.engine.atlas_pages()) {
