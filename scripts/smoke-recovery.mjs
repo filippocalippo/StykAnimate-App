@@ -28,7 +28,7 @@ try {
     for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
     const data = btoa(binary);
     const result = await window.stykDesktop.saveRecovery({ data, name: 'Recovery restart' });
-    return { data, result, origin: location.origin, byteLength: bytes.length };
+    return { data, result, byteLength: bytes.length };
   });
   assert.equal(saved.result.saved, true);
   const firstClosed = first.waitForEvent('close');
@@ -39,13 +39,12 @@ try {
   applications.push(second);
   const restartedPage = await second.firstWindow();
   await restartedPage.waitForFunction(() => window.styk?.ready, undefined, { timeout: 20000 });
-  const recovered = await restartedPage.evaluate(async () => ({ recovery: await window.stykDesktop.getRecovery(), origin: location.origin }));
+  const recovered = await restartedPage.evaluate(async () => ({ recovery: await window.stykDesktop.getRecovery() }));
   assert.equal(recovered.recovery.data, saved.data);
   assert.equal(recovered.recovery.name, 'Recovery restart');
-  assert.notEqual(recovered.origin, saved.origin, 'This restart must exercise a changed loopback origin.');
   await restartedPage.evaluate(() => window.stykDesktop.deleteRecovery());
   assert.equal(await restartedPage.evaluate(() => window.stykDesktop.getRecovery()), null);
-  const evidence = { passed: true, packaged, survivesProcessRestart: true, survivesOriginChange: true, firstOrigin: saved.origin, secondOrigin: recovered.origin, bytes: saved.byteLength, name: recovered.recovery.name, deleted: true, checkedAt: new Date().toISOString() };
+  const evidence = { passed: true, packaged, survivesProcessRestart: true, bytes: saved.byteLength, name: recovered.recovery.name, deleted: true, checkedAt: new Date().toISOString() };
   await writeFile(path.join(output, packaged ? 'desktop-packaged-recovery-smoke.json' : 'desktop-recovery-smoke.json'), JSON.stringify(evidence, null, 2));
   console.log(JSON.stringify(evidence, null, 2));
 } finally {

@@ -592,7 +592,8 @@ it on the editor, for every document.
   `tests/engine-owner-command-list.test.mjs`, and the owner installs each on the editor itself: the editor holds no body of them (they were deleted with the cutover). The calls that only move the view (selecting, seeking),
   the queries and the lifecycle stay the editor's. Its answer (`patch: true`) carries the document patch
   (`styk_edit::patch`, copy-on-write identity diff), the state, the gesture and its draft,
-  the retained frame and the change events. The owner applies the patch to `editor.report`
+  the retained frame and the change events; it carries nothing else of what a command published (the sheet, its tracks, the
+  layers and the frame sources, which the patch already holds: a commit that keys a pose is the pose once, not three times). The owner applies the patch to `editor.report`
   copy-on-write (`src/engine/engine-patch.mjs`), refreshes what the editor derives from the
   records (layer index, frame index, caches), sets selection and counters, mirrors the
   gesture into `_drag`/`_authoredPoseEdit` and re-emits the events.
@@ -911,22 +912,14 @@ same response builder used by `Session::call`; it does not introduce another edi
 or serializer. Tests compare 830 actual full/compact and malformed calls across 14
 families. Worker publication and durable Session ownership remain separate work.
 
-Ordinary joint shape reads use `geometry::build_joint_for_shape` through the same
-Prepared/shown-frame conversion. Only the selected segment and its ancestors are
-resolved; callers must neither render the returned Scene nor read other joints.
-When the complete typed frame has no pinned controller, ordinary joined objects
-also narrow their selected segments; every needed parent retains full numeric
-geometry. Rich needed figures, pins, aliases or ambiguous segment topology retain
-the full shape query.
-Nonfinite or overflowing retained geometry retries the original whole-object loop,
-preserving its previous-curve buffer behavior.
-Only a frame without joins also borrows its sole selected slot directly instead
-of constructing whole-frame join levels and filtered root lists. Joined queries
-keep the complete topology traversal, ancestor construction and needed filters.
-Figure resolution, warnings and original draw-order publication remain; omitted
-slots stay unresolved and repeated slots publish once. The existing portable
-query API now covers joined frames without pins; signatures and stored fields
-are unchanged.
+The geometry the pose commands read of one figure (`geometry::build_only_for_shape`, for the 3D commands) resolves the figures asked for and
+the figures they are joined to; callers neither render the returned Scene nor read the others. Figure resolution, warnings and
+original draw-order publication remain; omitted slots stay unresolved and repeated slots publish once.
+
+The frame on show is typed and built once for every reader (`ShownScene`, [evaluation.md](evaluation.md#the-interfaces-frame)): the
+pose commands read where a joint is from the scene the interface and the stage read, not from a geometry of their own. The
+pair below follows a publication of the document (a commit, an undo, a redo) to its new views when every object's figure is the
+definition it was made against (`Cache::follow_views`), so the frame that stays on show after the publication is not converted again.
 
 The Cache retains one coherent raw/typed frame pair. `Loader::edit_frame_reusing_ik`
 reuses immutable parsed IK and warning-free effect tables only when their raw nodes,

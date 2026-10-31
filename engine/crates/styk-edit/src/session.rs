@@ -494,14 +494,20 @@ impl Session {
     }
 
     /// The frame the stage draws, at `view` (its playhead): the gesture in progress, else the document at the playhead; with `motion`,
-    /// the motion-path edit's display where one is shown. The record is the editor's own (no text is made).
-    pub fn show(&mut self, view: &str, motion: bool) -> Result<Value, String> {
+    /// the motion-path edit's display where one is shown. The frame is typed and its scene built (the geometry the interface reads
+    /// is the same scene, `crate::shown`); no text is made.
+    pub fn show(&mut self, view: &str, motion: bool) -> Result<Arc<crate::ShownScene>, String> {
         let view = styk_doc::json::parse(view.as_bytes()).map_err(|error| error.to_string())?;
         apply_playhead(&mut self.editor, &view);
-        self.editor.interface_record(motion).map_err(|error| match error {
+        let refused = |error| match error {
             EditError::Invalid(message) => message,
             EditError::Unported(message) => format!("{UNPORTED}{message}"),
-        })
+        };
+        let displayed = if motion { self.editor.shown_scene(true, crate::Flavor::Sampled).map_err(refused)? } else { None };
+        match displayed {
+            Some(shown) => Ok(shown),
+            None => self.editor.shown_scene(false, crate::Flavor::Sampled).map_err(refused)?.ok_or_else(|| "the frame on show has no scene".to_string()),
+        }
     }
 
     /// The same command and response owner over already decoded COW values.
@@ -518,6 +524,12 @@ impl Session {
     pub fn report(&self) -> &Value {
         self.editor.report()
     }
+
+    /// The typed views the session has made of its document as it is now, if it has.
+    pub fn views(&self) -> Option<Arc<styk_eval::eval::Prepared>> { self.editor.views() }
+
+    /// Takes the typed views the engine made of the session's document (`report`, as it is now): it converts it once.
+    pub fn adopt_views(&self, report: &Value, prepared: Arc<styk_eval::eval::Prepared>) { self.editor.adopt_views(report, prepared) }
 
     /// Actual owning history revision, for worker handoff validation.
     pub fn revision(&self) -> u64 { self.editor.revision }
@@ -656,6 +668,8 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     // Owned calls request only changed COW records. The default remains complete for
     // shadow comparison and existing native session consumers.
     let changes_only = flag(view, "changesOnly");
+    // The read view takes what the call changed as a patch (`patch`, below) and nothing it published besides.
+    let patched = flag(view, "patch");
     if changes_only {
         answer.push(("changesOnly", Value::Bool(true)));
     }
@@ -784,58 +798,60 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     // it: layer edits also replace the sheet (its tracks follow the layers) without it.
     let published = events.iter().any(|event| event.get("layerSheet").is_some_and(Value::truthy));
     if published {
-        // What a command publishes: the sheet (with the tracks it replaced; `trackOrder`
-        // names them all), the layers and the sources its events name.
-        let styk = report.get("_styk");
-        let tracks = |document: &Value| document.path(&["_styk", "layerSheet", "tracks"]).and_then(Value::as_obj).cloned().unwrap_or_default();
-        let (old, new) = (tracks(&before), tracks(report));
-        let changed: Vec<&std::sync::Arc<str>> = new.iter().filter(|(id, track)| !old.get(id).is_some_and(|previous| previous.same_node(track))).map(|(id, _)| id).collect();
-        let current_sheet = styk.and_then(|s| s.get("layerSheet")).and_then(Value::as_obj).cloned().unwrap_or_default();
-        let old_sheet = before.path(&["_styk", "layerSheet"]).and_then(Value::as_obj);
-        if changes_only && !old_sheet.into_iter().flat_map(|sheet| sheet.keys()).eq(current_sheet.keys()) {
-            answer.push(("sheetOrder", Value::array(current_sheet.keys().map(|key| Value::str(key)).collect())));
-        }
-        let mut sheet = if changes_only {
-            let mut delta = Obj::new();
-            for (key, value) in current_sheet.iter().filter(|(key, _)| &***key != "tracks") {
-                if !old_sheet.and_then(|sheet| sheet.get(key)).is_some_and(|old| old.same_node(value)) {
-                    delta.set(key, value.clone());
+        if !patched {
+            // What a command publishes: the sheet (with the tracks it replaced; `trackOrder`
+            // names them all), the layers and the sources its events name.
+            let styk = report.get("_styk");
+            let tracks = |document: &Value| document.path(&["_styk", "layerSheet", "tracks"]).and_then(Value::as_obj).cloned().unwrap_or_default();
+            let (old, new) = (tracks(&before), tracks(report));
+            let changed: Vec<&std::sync::Arc<str>> = new.iter().filter(|(id, track)| !old.get(id).is_some_and(|previous| previous.same_node(track))).map(|(id, _)| id).collect();
+            let current_sheet = styk.and_then(|s| s.get("layerSheet")).and_then(Value::as_obj).cloned().unwrap_or_default();
+            let old_sheet = before.path(&["_styk", "layerSheet"]).and_then(Value::as_obj);
+            if changes_only && !old_sheet.into_iter().flat_map(|sheet| sheet.keys()).eq(current_sheet.keys()) {
+                answer.push(("sheetOrder", Value::array(current_sheet.keys().map(|key| Value::str(key)).collect())));
+            }
+            let mut sheet = if changes_only {
+                let mut delta = Obj::new();
+                for (key, value) in current_sheet.iter().filter(|(key, _)| &***key != "tracks") {
+                    if !old_sheet.and_then(|sheet| sheet.get(key)).is_some_and(|old| old.same_node(value)) {
+                        delta.set(key, value.clone());
+                    }
+                }
+                let removed: Vec<Value> = old_sheet.into_iter().flat_map(|sheet| sheet.keys()).filter(|key| &***key != "tracks" && !current_sheet.contains(key)).map(|key| Value::str(key)).collect();
+                if !removed.is_empty() {
+                    answer.push(("sheetRemoved", Value::array(removed)));
+                }
+                delta
+            } else { current_sheet };
+            let mut replaced = Obj::new();
+            for id in &changed {
+                replaced.set(id, new.get(id).cloned().unwrap_or(Value::Null));
+            }
+            sheet.set("tracks", Value::object(replaced));
+            answer.push(("sheet", Value::object(sheet)));
+            if !changes_only || !old.keys().eq(new.keys()) {
+                answer.push(("trackOrder", Value::array(new.keys().map(|id| Value::str(id)).collect())));
+            }
+            if !changes_only {
+                answer.push(("changedTracks", Value::array(changed.iter().map(|id| Value::str(id)).collect())));
+            }
+            let layers = styk.and_then(|s| s.get("layers")).cloned().unwrap_or(Value::Null);
+            if !changes_only || !before.path(&["_styk", "layers"]).is_some_and(|old| old.same_node(&layers)) {
+                answer.push(("layers", layers));
+            }
+            let mut sources = Obj::new();
+            for id in events.iter().flat_map(|event| event.get("sourceIds").and_then(Value::elements).map(|e| e.iter().collect::<Vec<_>>()).unwrap_or_default()) {
+                if let Some(id) = id.as_str() {
+                    sources.set(id, styk.and_then(|s| s.path(&["frameSources", id])).cloned().unwrap_or(Value::Null));
                 }
             }
-            let removed: Vec<Value> = old_sheet.into_iter().flat_map(|sheet| sheet.keys()).filter(|key| &***key != "tracks" && !current_sheet.contains(key)).map(|key| Value::str(key)).collect();
-            if !removed.is_empty() {
-                answer.push(("sheetRemoved", Value::array(removed)));
+            answer.push(("sources", Value::object(sources)));
+            // Figure definitions the publication added (a paste's copies), after the others.
+            let count = |document: &Value| document.get("figure_types").and_then(Value::array_len).unwrap_or(0);
+            if count(report) > count(&before) {
+                let added: Vec<Value> = report.get("figure_types").and_then(Value::elements).map(|e| e.iter().skip(count(&before)).collect()).unwrap_or_default();
+                answer.push(("definitions", Value::array(added)));
             }
-            delta
-        } else { current_sheet };
-        let mut replaced = Obj::new();
-        for id in &changed {
-            replaced.set(id, new.get(id).cloned().unwrap_or(Value::Null));
-        }
-        sheet.set("tracks", Value::object(replaced));
-        answer.push(("sheet", Value::object(sheet)));
-        if !changes_only || !old.keys().eq(new.keys()) {
-            answer.push(("trackOrder", Value::array(new.keys().map(|id| Value::str(id)).collect())));
-        }
-        if !changes_only {
-            answer.push(("changedTracks", Value::array(changed.iter().map(|id| Value::str(id)).collect())));
-        }
-        let layers = styk.and_then(|s| s.get("layers")).cloned().unwrap_or(Value::Null);
-        if !changes_only || !before.path(&["_styk", "layers"]).is_some_and(|old| old.same_node(&layers)) {
-            answer.push(("layers", layers));
-        }
-        let mut sources = Obj::new();
-        for id in events.iter().flat_map(|event| event.get("sourceIds").and_then(Value::elements).map(|e| e.iter().collect::<Vec<_>>()).unwrap_or_default()) {
-            if let Some(id) = id.as_str() {
-                sources.set(id, styk.and_then(|s| s.path(&["frameSources", id])).cloned().unwrap_or(Value::Null));
-            }
-        }
-        answer.push(("sources", Value::object(sources)));
-        // Figure definitions the publication added (a paste's copies), after the others.
-        let count = |document: &Value| document.get("figure_types").and_then(Value::array_len).unwrap_or(0);
-        if count(report) > count(&before) {
-            let added: Vec<Value> = report.get("figure_types").and_then(Value::elements).map(|e| e.iter().skip(count(&before)).collect()).unwrap_or_default();
-            answer.push(("definitions", Value::array(added)));
         }
         // A committed gesture's draft stays on show (`_authoredCommitPreview`), with what
         // the commit itself changed in it (joined figures' roots from geometry): its figures.

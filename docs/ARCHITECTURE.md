@@ -166,11 +166,12 @@ The shell (`src/shell/`) lays the editor out as islands on the window's field: t
 
 Editor styles load through `src/styles/app.css`, the only stylesheet `index.html` links. It declares the cascade layers and imports every sheet in cascade order; see [Design system](DESIGN-SYSTEM.md). Modules do not link stylesheets at runtime, except that the desktop feedback shell links `src/styles/support-bridge.css` when Feedback first opens, so the website's shared `src/support-center.css` loads only when needed; `src/styles/features/support-desktop.css` restyles it for the editor from the `features` layer. `npm run check` enforces this and the layer rules with `scripts/check-css.mjs`. Colours, type and spacing come from `src/styles/tokens.css`, the StykAnimate brand tokens for the light and dark themes; `src/styles/legacy-bridge.css` points the older `--theme-*` names at them. The UI fonts ship in `assets/fonts/` and load through `src/styles/base/fonts.css`.
 
-Electron uses context isolation, sandboxed renderer code, and no renderer Node globals. Native IPC exposes specific file/stream/window/preference operations, not arbitrary filesystem commands. Workspace preferences live in a fixed, atomically written user-data JSON file capped at 16 KiB. They and recovery survive a restarted process even though its loopback origin changes.
+Electron uses context isolation, sandboxed renderer code, and no renderer Node globals. Native IPC exposes specific file/stream/window/preference operations, not arbitrary filesystem commands. Workspace preferences live in a fixed, atomically written user-data JSON file capped at 16 KiB. They and recovery survive a restarted process.
 
-`desktop/web-host.cjs` owns the desktop's loopback origin: it streams the web assets,
-read-only, to this machine's pages only, cross-origin isolated. `npm run serve` uses the same
-host for browser development. Pivot and STK files are read and written by the Pivot codec,
+`desktop/web-host.cjs` owns the desktop's origin: the privileged `styk-app://app` scheme, which the main
+process answers itself from the web assets, read-only, cross-origin isolated (no sockets, so no connection
+limit while hundreds of modules load, and the same origin on every launch, which keeps V8's code cache
+between launches). `npm run serve` and the browser tests use the same assets through a loopback HTTP host. Pivot and STK files are read and written by the Pivot codec,
 `engine/crates/styk-piv` compiled to WebAssembly, in a worker of the editor page on every
 platform, desktop, development server and web build alike
 ([Pivot files and the codec service](engine/formats-piv.md)). Import and export workers reach it

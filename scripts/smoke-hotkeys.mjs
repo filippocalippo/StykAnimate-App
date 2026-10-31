@@ -55,10 +55,8 @@ try {
   check('The old native Undo accelerator stays disabled',await page.evaluate(()=>styk.editor.totalTicks)===original+1);
   await page.keyboard.press('Control+Alt+u');
   check('Reassigned Undo works in Electron',await page.evaluate(()=>styk.editor.totalTicks)===original);
-  const firstOrigin=await page.evaluate(()=>location.origin);
   await stop();page=await launch();
   check('Custom shortcuts survive an actual desktop process restart',await page.evaluate(()=>styk.hotkeys.label('add-frame')==='B'&&styk.hotkeys.label('undo')==='Ctrl+Alt+U'));
-  check('Persistence is independent of the local server origin',await page.evaluate(()=>location.origin)!==firstOrigin);
   const restored=await page.evaluate(()=>styk.editor.totalTicks);
   await page.locator('#overlay').focus();await page.keyboard.press('a');
   check('Old A remains disabled after restart',await page.evaluate(()=>styk.editor.totalTicks)===restored);

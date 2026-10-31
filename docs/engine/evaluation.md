@@ -320,7 +320,7 @@ selection is the editor's to tell with a call, and the frame does not depend on 
 - `motion` is the pose a motion-path edit shows at the playhead while it changes it
   (`Editor::motion_display_frame_worker`), `null` outside the ticks it changes.
 - `timeline` is the rows (`[[start, count], …]`, `timeline::rows`).
-- `geometry` is `styk_eval::geometry::build_shapes` of the typed frame: per object (slot) its root, one joint per
+- `geometry` is the scene built of the typed frame on show (`styk_eval::geometry::build_remembering`, the kind `build_shapes` builds; below): per object (slot) its root, one joint per
   segment, every segment as built (drawn or not: start, end, angle, bend, length, thickness, z, colour, opacity, curve
   points, a connector's handle, a 3D bone's `spatialFrame`; under a camera the joints and bone starts also carry
   `rawPoint`, where they are before perspective, which the commands that pose in perspective unproject from) and every polygon (culled ones flagged, a one-sided face that looks at the viewer `culled: false`, depth values of
@@ -330,11 +330,19 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   warnings}`; a group `{slot, obj, fig, root, joints, segments, polys, bounds, solvedAngles, solvedLengths}`, `drawables`
   built when read, with Stick Nodes shapes expanded). The groups carry no drawables for a 3D mesh or a movieclip's contents: the
   stage draws them in the engine, and a click on artwork asks the engine which figure the stage's frame paints at the point ([rendering.md](rendering.md#picking-artwork)).
-- A geometry read names the read the interface holds (`since`). The session sends the groups of the figures whose
-  pose record is not the one the held read was built from, and of every figure joined to them (one component: an
-  assembly's inverse kinematics reaches across joins), or all of them when a figure definition changed. The groups held
-  stay as they are, so the descriptors the canvas keeps by their identity stay valid while a gesture moves other figures.
-  Unchanged: the same geometry object comes back.
+- **One scene for every reader.** The typed frame of the record on show and the scene built from it are one `ShownScene`
+  (`styk-edit/src/shown.rs`), kept for as long as the record, the playhead and the document's views are what it was made
+  from. The interface's geometry, the commands that read where a joint is (`Editor::shape`) and the stage (`Stage::edit_session`)
+  all read it: nothing converts the frame or builds the scene a second time. A frame of a document with effects is two (the
+  effects the editor composed for the interface, the effects sampled at the tick for the stage); a frame of one without is one.
+  Each build is made over the one before it (`BuildMemory`): an object whose typed node, figure, root and inverse-kinematics
+  solution are the ones its last build had is not built again, so a gesture builds the figure it changes and the figures that hang
+  from what moved, not the frame. The scene is the same scene whether objects were built or kept
+  (`styk-eval/tests/build_memory.rs`).
+- A geometry read names the read the interface holds (`since`). The session sends the groups of the objects built since that
+  read, or all of them when the read named is not the one the session last answered. The groups held stay as they are, so the
+  descriptors the canvas keeps by their identity stay valid while a gesture moves other figures. Unchanged: the same
+  geometry object comes back.
 - The values the interface shows of the frame (`animationValue`, `vfxEffects`, `segmentAnimationTarget`,
   `getIKSettings`, `getSpatialPose` and `getSpatialMotion` of the selected 3D bone, `sampleVfxClip`: an effect clip's
   effects with their keys sampled at a tick) are the session's reads too (`Editor::interface_query`, at the editor's
@@ -351,8 +359,10 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   that figure and layer assignment, the given frame read against it, the full geometry of the result;
   `drawing-controller.mjs` reads it once for a gesture).
 - The stage draws the same frame inside the engine (`Stage::edit_session`, [rendering.md](rendering.md)): the session's
-  record, with its `tick` (and the camera-motion tick), is read against the open document with the effect clips sampled at
-  the tick, as a prepared frame's are.
+  `ShownScene` of the frame, with its `tick` (and the camera-motion tick), whose effect clips are sampled at the tick as a
+  prepared frame's are. It is drawn against the engine's document, which is the session's: the session and the engine convert
+  the document once between them (`Engine::publish_tree_with` takes the views the session made of an edited document, and the
+  session takes the engine's, `Session::adopt_views`), so a frame whose views are not the engine's yet is asked for again.
 
 An editor the engine does not own has no frame, geometry or timeline: the reads raise `EngineUnavailable`. A movieclip being edited is a
 document of the engine like any other: it has a session, and the frame, geometry, onion skins and trails are its.

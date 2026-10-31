@@ -63,8 +63,8 @@ impl Drop for EditSession {
 }
 
 impl EditSession {
-    /// The record of the frame the stage draws ([`styk_edit::session::Session::show`]).
-    pub(crate) fn show(&mut self, view: &str, motion: bool) -> Result<Value, JsError> {
+    /// The frame the stage draws, typed and built ([`styk_edit::session::Session::show`]).
+    pub(crate) fn show(&mut self, view: &str, motion: bool) -> Result<Arc<styk_edit::ShownScene>, JsError> {
         let record = self.session.as_mut().expect("a session is open until it is dropped").show(view, motion).map_err(js_error);
         self.publish();
         record
@@ -98,8 +98,13 @@ impl EditSession {
         if report.same_node(published) && revision == *at {
             return;
         }
-        match publisher.engine.publish_tree(publisher.opened.lineage(), report.clone(), revision) {
+        // The document is converted once: by the session when its own reads needed it, else by the engine, and the other takes the views.
+        let made = session.views();
+        match publisher.engine.publish_tree_with(publisher.opened.lineage(), report.clone(), revision, made.clone()) {
             Ok(Some(_)) => {
+                if made.is_none() && let Some(views) = publisher.engine.views_of(report) {
+                    session.adopt_views(report, views);
+                }
                 publisher.published = Some((report.clone(), revision));
                 publisher.error = None;
             }
@@ -129,6 +134,10 @@ impl EditSession {
         let tree = self.session().report().clone();
         let Some(publisher) = &mut self.publisher else { return Err(js_error("this session has no document to publish")) };
         let done = publisher.engine.activate(&publisher.opened.typed, &tree, revision as u64).map_err(|error| js_error(error.to_json()))?;
+        // A document edited since it was opened was converted again: the session reads the views the engine draws.
+        if let Some(views) = publisher.engine.views_of(&tree) {
+            self.session.as_ref().expect("a session is open until it is dropped").adopt_views(&tree, views);
+        }
         publisher.published = Some((tree, revision as u64));
         publisher.error = None;
         Ok(format!("{{\"generation\":{},\"revision\":{},\"ms\":{:.3}}}", done.generation, done.revision, done.ms))

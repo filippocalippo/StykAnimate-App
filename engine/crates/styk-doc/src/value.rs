@@ -440,6 +440,21 @@ impl Value {
         }
     }
 
+    /// Whether two values hold the same data to the bit, however it is shared: numbers compare by their bits (`-0` is not `0`).
+    pub fn same_data(&self, other: &Value) -> bool {
+        match (self, other) {
+            (Value::Null, Value::Null) => true,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Num(a), Value::Num(b)) => a.to_bits() == b.to_bits(),
+            (Value::Str(a), Value::Str(b)) => Arc::ptr_eq(a, b) || a == b,
+            (Value::Blob(a), Value::Blob(b)) => Arc::ptr_eq(a, b) || a == b,
+            (Value::Nums(a), Value::Nums(b)) => Arc::ptr_eq(a, b) || (a.len() == b.len() && (0..a.len()).all(|i| a.get(i).map(f64::to_bits) == b.get(i).map(f64::to_bits))),
+            (Value::Arr(a), Value::Arr(b)) => Arc::ptr_eq(a, b) || (a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.same_data(y))),
+            (Value::Obj(a), Value::Obj(b)) => Arc::ptr_eq(a, b) || (a.len() == b.len() && a.iter().zip(b.iter()).all(|((ka, va), (kb, vb))| ka == kb && va.same_data(vb))),
+            _ => false,
+        }
+    }
+
     /// Bytes this node and everything below it holds, counting shared nodes each
     /// time they are reached. An estimate for cache and history budgets.
     pub fn heap_bytes(&self) -> usize {

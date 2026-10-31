@@ -416,6 +416,15 @@ square root, then 417–422 ms against 553–568 ms without it, interleaved at l
 WebAssembly engine module grew by 109 KiB (7,980,628 → 8,092,410 bytes without wasm-opt, the
 build before this work against this one).
 
+## Encoding over the last frame
+
+A gesture changes a few objects of a frame of hundreds. The edit frame is the session's `ShownScene`
+([evaluation.md](evaluation.md#the-interfaces-frame)), built over the one before it, and its scene says which build made each
+object's geometry (`Scene::built_in`, numbered across every memory). `EditScene` keeps what the last frame was encoded as
+(`drawlist::EncodeMemory`), and `encode_composed_remembering` encodes only the objects whose build is not the one it kept; the list
+is the list encoded whole (`styk-eval/tests/build_memory.rs`). Only a plain frame is kept: nothing in it draws effects, 3D faces or
+text, no drawing cel is live, and an object being dragged is encoded afresh (its translation is applied after encoding).
+
 ## In the app
 
 `src/engine/engine-stage.mjs` draws the page's scene canvas (`#scene`) with the

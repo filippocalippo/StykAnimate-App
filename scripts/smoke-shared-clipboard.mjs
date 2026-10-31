@@ -21,8 +21,7 @@ async function selectCanvas(page) { await page.bringToFront(); await page.evalua
 async function empty(page) { await page.evaluate(async () => { const {emptyDocument}=await import('./src/editor.mjs'); window.styk.editor.load(emptyDocument()); }); }
 try {
   const a = await launch(), b = await launch();
-  assert.notEqual(new URL(a.page.url()).origin, new URL(b.page.url()).origin);
-  checks.push('Two simultaneous processes with the same profile own separate projects and backend origins');
+  checks.push('Two simultaneous processes with the same profile own separate projects');
   await a.page.evaluate(() => { const e=window.styk.editor; e.select(1); e.select(3,{add:true}); });
   await selectCanvas(a.page); await a.page.keyboard.press('Control+c'); await flush(a.page);
   await empty(b.page); await selectCanvas(b.page); await b.page.keyboard.press('Control+v'); await flush(b.page);

@@ -320,6 +320,9 @@ pub struct Scene {
     /// before a Stick Nodes shape expands it, every polygon (culled ones too) and the figure's
     /// mesh. Empty from every other build.
     pub measured: Vec<Item>,
+    /// By object slot, the build ([`BuildMemory::built_in`]) that made its geometry, for a scene built with a memory (empty for any other):
+    /// a number is never another build's in any memory, so an object with the same number has the same items.
+    pub built_in: Vec<u64>,
 }
 
 impl Scene {
@@ -393,6 +396,7 @@ pub fn mix_color(base: [u8; 3], raw: u32) -> [u8; 3] {
 }
 
 /// Per-object build output before it is spliced into the scene buffers.
+#[derive(Clone)]
 struct Built {
     geometry: ObjectGeometry,
     items: Vec<Item>,
@@ -410,6 +414,85 @@ struct Built {
     transitions: Vec<ColorTransition>,
     /// [`Scene::measured`] of this object.
     measured: Vec<Item>,
+}
+
+/// What a build keeps of one object for the next build over the same document.
+#[derive(Clone)]
+struct Kept {
+    object: Arc<Object>,
+    figure: Arc<Figure>,
+    /// Where the figure stood in the scene's table (the items name it).
+    table: u32,
+    root: [u64; 2],
+    ik: Option<crate::ik::Solution>,
+    built: Arc<Built>,
+    /// The build that made it ([`BuildMemory::serial`]).
+    serial: u64,
+}
+
+impl Kept {
+    fn new(object: &Arc<Object>, figure: &Arc<Figure>, table: u32, root: [f64; 2], ik: Option<crate::ik::Solution>, built: Arc<Built>) -> Kept {
+        Kept { object: object.clone(), figure: figure.clone(), table, root: root.map(f64::to_bits), ik, built, serial: 0 }
+    }
+}
+
+/// The build of an object the last build kept, when everything the build reads of it is what it read then: the object
+/// (the same node of the typed frame), its figure, the root it hangs from and the pose inverse kinematics gave it.
+fn reuse(previous: Option<&[Option<Kept>]>, slot: usize, object: &Arc<Object>, figure: &Arc<Figure>, table: u32, root: [f64; 2], ik: Option<&crate::ik::Solution>) -> Option<Arc<Built>> {
+    let kept = previous?.get(slot)?.as_ref()?;
+    (Arc::ptr_eq(&kept.object, object) && Arc::ptr_eq(&kept.figure, figure) && kept.table == table && kept.root == root.map(f64::to_bits) && kept.ik.as_ref() == ik).then(|| kept.built.clone())
+}
+
+/// Numbers the builds of every memory: an object's build is never taken for another memory's.
+static BUILDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// What successive builds of one document's frame share: an object whose inputs are the ones its last build had is not built
+/// again, so a gesture that moves one figure builds that figure and the figures that hang from what moved, not the frame.
+/// The scene is the same whether objects were built or kept. One memory serves one kind of build (`measure`) of one
+/// document: the owner drops it with the document.
+#[derive(Default, Clone)]
+pub struct BuildMemory {
+    slots: Vec<Option<Kept>>,
+    measure: Option<(Measure, u32)>,
+    serial: u64,
+}
+
+impl BuildMemory {
+    /// Starts a build of `count` objects of kind `measure` of a document of `version`: another kind, count or version
+    /// forgets what was kept.
+    fn begin(&mut self, count: usize, measure: Measure, version: u32) {
+        if self.slots.len() != count || self.measure != Some((measure, version)) {
+            self.slots.clear();
+            self.slots.resize_with(count, || None);
+            self.measure = Some((measure, version));
+        }
+    }
+
+    /// Ends the build: the objects built anew are kept (numbered by this build), the others stay as they were, and an
+    /// object the build did not make is forgotten.
+    fn finish(&mut self, built: &[Option<Arc<Built>>], anew: Vec<(usize, Kept)>) {
+        self.serial = BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        for (slot, mut kept) in anew {
+            kept.serial = self.serial;
+            self.slots[slot] = Some(kept);
+        }
+        for (slot, built) in built.iter().enumerate() {
+            if built.is_none() {
+                self.slots[slot] = None;
+            }
+        }
+    }
+
+    /// The number of the last build (builds are numbered in the order they end, across every memory).
+    pub fn serial(&self) -> u64 {
+        self.serial
+    }
+
+    /// The build that last made the object at `slot` (0 for none): an object whose number is above that of an earlier build
+    /// is not what that build had.
+    pub fn built_in(&self, slot: usize) -> u64 {
+        self.slots.get(slot).and_then(Option::as_ref).map_or(0, |kept| kept.serial)
+    }
 }
 
 impl Built {
@@ -437,7 +520,7 @@ pub fn segment_pose(obj: &Object, seg: &crate::doc::Segment, i: usize) -> (f64, 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, root: [f64; 2], ik: Option<&crate::ik::Solution>, measure: Measure, render_output: bool, joints: Option<&[bool]>) -> Built {
+fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, root: [f64; 2], ik: Option<&crate::ik::Solution>, measure: Measure, render_output: bool) -> Built {
     let obj = &frame.objects[slot];
     let n = fig.segments.len();
     let scale = obj.scale;
@@ -477,9 +560,6 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
     let mut start_raws: Vec<Option<[f64; 3]>> = if has_spatial { vec![None; n] } else { Vec::new() };
     for &i in order {
         let i = i as usize;
-        if joints.is_some_and(|joints| !joints[i]) {
-            continue;
-        }
         let seg = &fig.segments[i];
         let parent = plan.parent[i];
         let start = if parent == u32::MAX { root } else { ends[parent as usize] };
@@ -525,12 +605,6 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
             let derived = seg.rig.as_ref().is_some_and(|r| r.spatial.is_some() || r.weighted.is_some());
             rig_handle = st.handle.map(|h| (h, derived));
         }
-        // A nonfinite arc can append nothing and then consume the previous
-        // segment's last curve point. Retain that whole-object ordering instead
-        // of using a partial buffer; the unmasked retry cannot recurse again.
-        if joints.is_some() && [start[0], start[1], angle, length, bend].iter().any(|value| !value.is_finite()) {
-            return build_object(doc, version, frame, slot, figure_slot, fig, root, ik, measure, render_output, None);
-        }
         let p0 = points.len() as u32;
         let end;
         if let Some((h, true)) = rig_handle {
@@ -544,11 +618,6 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
             if let Some(l) = points.last_mut() {
                 *l = end;
             }
-        }
-        // Finite inputs can overflow during arc sampling or fround. A later
-        // retained child must see the same prior curve buffer as the full loop.
-        if joints.is_some() && (!end[0].is_finite() || !end[1].is_finite() || points[p0 as usize..].iter().any(|point| !point[0].is_finite() || !point[1].is_finite())) {
-            return build_object(doc, version, frame, slot, figure_slot, fig, root, ik, measure, render_output, None);
         }
         let p1 = points.len() as u32;
         // Children and joins attach at the rig handle (a connector's slider), drawing ends at `end`.
@@ -1197,7 +1266,7 @@ pub fn build_measured(doc: &Document, frame: &Frame) -> Scene {
 /// [`build_only`] with [`Scene::measured`]: what the app's `boundsOf` reads of the objects in
 /// `slots`, for [`crate::drawlist::app_bounds`].
 pub fn build_only_measured(doc: &Document, frame: &Frame, slots: &[usize]) -> Scene {
-    build_only_with(doc, frame, slots, true, None, Measure::Bounds)
+    build_only_with(doc, frame, slots, true, Measure::Bounds)
 }
 
 /// [`build_only`] with what the interface reads of each object (`Scene::measured` holds every segment
@@ -1205,16 +1274,22 @@ pub fn build_only_measured(doc: &Document, frame: &Frame, slots: &[usize]) -> Sc
 /// `slots` (and the ones they are joined to), or all of them.
 pub fn build_shapes(doc: &Document, frame: &Frame, slots: Option<&[usize]>) -> Scene {
     match slots {
-        Some(slots) => build_only_with(doc, frame, slots, true, None, Measure::Shapes),
+        Some(slots) => build_only_with(doc, frame, slots, true, Measure::Shapes),
         None => build_filtered(doc, frame, None, Measure::Shapes, true, None),
     }
+}
+
+/// [`build_shapes` of every object](build_shapes), keeping what it builds in `memory` and taking from it what a previous
+/// build of this document's frame built the same way.
+pub fn build_remembering(doc: &Document, frame: &Frame, memory: &mut BuildMemory) -> Scene {
+    build_filtered(doc, frame, None, Measure::Shapes, true, Some(memory))
 }
 
 /// [`build`] for the objects in `slots` and the objects they are joined to, the others
 /// left unresolved: what an editing call reads of one figure's geometry, without the
 /// whole frame's.
 pub fn build_only(doc: &Document, frame: &Frame, slots: &[usize]) -> Scene {
-    build_only_with(doc, frame, slots, true, None, Measure::Off)
+    build_only_with(doc, frame, slots, true, Measure::Off)
 }
 
 /// [`build_only`] for a shape query: ordinary 2D objects retain their joints,
@@ -1223,22 +1298,10 @@ pub fn build_only(doc: &Document, frame: &Frame, slots: &[usize]) -> Scene {
 /// rig, spatial pose, movieclip, mesh, surface or Stick Nodes shape uses the full builder.
 /// The returned scene is query geometry; callers must not render it.
 pub fn build_only_for_shape(doc: &Document, frame: &Frame, slots: &[usize]) -> Scene {
-    build_only_with(doc, frame, slots, false, None, Measure::Off)
+    build_only_with(doc, frame, slots, false, Measure::Off)
 }
 
-/// [`build_only_for_shape`] for one selected segment. When no object has a pinned
-/// controller, an ordinary 2D object builds only that segment and its segment
-/// ancestors, in the original geometry order. Joined parent objects still build
-/// their complete numeric geometry; other selected-object segments remain NaN.
-/// The selected joint's endpoints, scaled length and raw curve are unchanged;
-/// callers must not render this scene or query unrelated joints from it.
-/// Rich needed figures, any pinned controller, selected UID aliases and ambiguous
-/// segment topology retain the existing whole-object shape query.
-pub fn build_joint_for_shape(doc: &Document, frame: &Frame, slot: usize, joint: usize) -> Scene {
-    build_only_with(doc, frame, &[slot], false, Some((slot, joint)), Measure::Off)
-}
-
-fn build_only_with(doc: &Document, frame: &Frame, slots: &[usize], render_output: bool, joint: Option<(usize, usize)>, measure: Measure) -> Scene {
+fn build_only_with(doc: &Document, frame: &Frame, slots: &[usize], render_output: bool, measure: Measure) -> Scene {
     let count = frame.objects.len();
     let mut needed = vec![false; count];
     for &slot in slots {
@@ -1248,59 +1311,14 @@ fn build_only_with(doc: &Document, frame: &Frame, slots: &[usize], render_output
             at = frame.objects[i].join.map(|j| j.slot as usize);
         }
     }
-    build_filtered(doc, frame, Some(&needed), measure, render_output, joint)
+    build_filtered(doc, frame, Some(&needed), measure, render_output, None)
 }
 
-// The compiled parent/order plan is the sole topology owner. A query whose
-// dependencies are ambiguous simply retains the original complete segment loop.
-fn joint_ancestors(frame: &Frame, figure: &Figure, slot: usize, joint: usize) -> Option<Vec<bool>> {
-    let object = frame.objects.get(slot)?;
-    if frame.objects.iter().any(|object| crate::ik::has_pinned(object))
-        || frame.objects.iter().filter(|other| other.uid == object.uid).count() != 1
-    {
-        return None;
-    }
-    let plan = &figure.plan;
-    let count = figure.segments.len();
-    if joint >= count || plan.parent.len() != count || plan.order.len() != count || plan.index_of.len() != count {
-        return None;
-    }
-    for (i, segment) in figure.segments.iter().enumerate() {
-        if segment.id == 0 || plan.index_of.get(&segment.id).copied() != Some(i as u32) {
-            return None;
-        }
-        let parent = if segment.parent == 0 { u32::MAX } else { *plan.index_of.get(&segment.parent)? };
-        if plan.parent[i] != parent {
-            return None;
-        }
-    }
-    let mut joints = vec![false; count];
-    for &i in &plan.order {
-        let visited = joints.get_mut(i as usize)?;
-        if *visited {
-            return None;
-        }
-        *visited = true;
-    }
-    joints.fill(false);
-    let mut at = joint;
-    loop {
-        let visited = joints.get_mut(at)?;
-        if *visited {
-            return None;
-        }
-        *visited = true;
-        let parent = plan.parent[at];
-        if parent == u32::MAX {
-            break;
-        }
-        at = parent as usize;
-    }
-    Some(joints)
-}
-
-fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, joint: Option<(usize, usize)>) -> Scene {
+fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>) -> Scene {
     let count = frame.objects.len();
+    if let Some(memory) = memory.as_deref_mut() {
+        memory.begin(count, measure, doc.version);
+    }
     let mut scene = Scene {
         objects: vec![ObjectGeometry::default(); count],
         camera: frame.camera,
@@ -1342,20 +1360,7 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
             || figure.polyfills.iter().any(|polygon| polygon.surface.is_some())
             || figure.segments.iter().any(|segment| crate::sticknodes::shape_for(segment, object).is_some())
     });
-    // Narrow only the existing segment loop, after the original rich-output
-    // decision. All frame/figure resolution, joined solving and publication
-    // retain their original owners and order.
-    let joints = joint.filter(|_| !render_output).and_then(|(slot, joint)| {
-        let figure = scene.figures.get(*fig_of.get(slot)? as usize)?;
-        joint_ancestors(frame, figure, slot, joint).map(|joints| (slot, joints))
-    });
-    // The segment mask can also narrow an unpinned joined object. Only a frame
-    // without any joins has one needed object and no join levels to resolve;
-    // joined queries retain complete ancestor construction and global topology.
-    let single_root = joints.is_some() && frame.objects.iter().all(|object| object.join.is_none());
-    let (level, order) = if single_root {
-        (vec![0; count], Vec::new())
-    } else {
+    let (level, order) = {
         let mut level = vec![u32::MAX; count];
         let mut order: Vec<Vec<usize>> = Vec::new();
         let mut children: Vec<Vec<usize>> = vec![Vec::new(); count];
@@ -1384,19 +1389,21 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
     };
     // IK across joined figures solves once per assembly, before its objects build (`solveJoinedIK`).
     let joined_ik = crate::ik::joined::solve(frame, &|slot| fig_of.get(slot).filter(|&&s| s != u32::MAX).map(|&s| &scene.figures[s as usize]));
-    let mut built: Vec<Option<Built>> = (0..count).map(|_| None).collect();
-    // An unjoined selected slot is borrowed directly; joined queries keep the
-    // original level and needed filters. Publication still follows draw order.
-    for slots in order.iter().map(Vec::as_slice).chain(joints.as_ref().filter(|_| single_root).map(|(slot, _)| std::slice::from_ref(slot))) {
+    let mut built: Vec<Option<Arc<Built>>> = (0..count).map(|_| None).collect();
+    // What the last build of this document kept of each object, and what this one builds anew.
+    let previous = memory.as_deref().map(|memory| &memory.slots[..]);
+    let mut anew: Vec<(usize, Kept)> = Vec::new();
+    // Publication still follows draw order.
+    for slots in order.iter().map(Vec::as_slice) {
         let filtered: Vec<usize>;
         let slots = match needed {
-            Some(needed) if !single_root => {
+            Some(needed) => {
                 filtered = slots.iter().copied().filter(|&i| needed[i]).collect();
                 &filtered
             }
             _ => slots,
         };
-        let resolve_root = |i: usize, built: &[Option<Built>]| -> Option<[f64; 2]> {
+        let resolve_root = |i: usize, built: &[Option<Arc<Built>>]| -> Option<[f64; 2]> {
             let o = &frame.objects[i];
             let mut root = [o.root[0], o.root[1]];
             if let Some(j) = o.join {
@@ -1408,7 +1415,7 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
             }
             Some(root)
         };
-        let make = |&i: &usize| -> Option<(usize, Built)> {
+        let make = |&i: &usize| -> Option<(usize, Arc<Built>, Option<Kept>)> {
             let fig = &scene.figures[*fig_of.get(i)? as usize];
             let root = resolve_root(i, &built).unwrap_or(frame.objects[i].root);
             if let Some(clip) = &fig.movieclip {
@@ -1419,10 +1426,19 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
                     let figure = scene.figures.get(*fig_of.get(j.slot as usize)? as usize)?;
                     Some(JoinedParent { object: &frame.objects[j.slot as usize], figure, geometry })
                 });
-                if let Some(meshes) = &clip.meshes {
-                    return Some((i, build_clip_mesh(frame, i, fig_of[i], fig, clip, meshes, root, parent, measure)));
+                // What an instance reads of its parent's geometry is not part of what a kept build is checked against.
+                let remembered = previous.filter(|_| parent.is_none());
+                if let Some(kept) = reuse(remembered, i, &frame.objects[i], fig, fig_of[i], root, None) {
+                    return Some((i, kept, None));
                 }
-                return Some((i, build_clip(frame, i, fig, clip, root, parent)));
+                let built = if let Some(meshes) = &clip.meshes {
+                    build_clip_mesh(frame, i, fig_of[i], fig, clip, meshes, root, parent, measure)
+                } else {
+                    build_clip(frame, i, fig, clip, root, parent)
+                };
+                let built = Arc::new(built);
+                // Kept whether or not it can be reused, so that the build is numbered: what reads the scene learns the instance changed.
+                return Some((i, built.clone(), previous.map(|_| Kept::new(&frame.objects[i], fig, fig_of[i], root, None, built))));
             }
             // IK: a pinned object draws its derived pose, from its assembly or solved on its own (`evaluateIKPose`).
             let local;
@@ -1433,12 +1449,18 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
                     local.as_ref()
                 }
             };
-            let joints = joints.as_ref().filter(|(slot, _)| *slot == i).map(|(_, joints)| joints.as_slice());
-            Some((i, build_object(doc, doc.version, frame, i, fig_of[i], fig, root, ik, measure, render_output, joints)))
+            if let Some(kept) = reuse(previous, i, &frame.objects[i], fig, fig_of[i], root, ik) {
+                return Some((i, kept, None));
+            }
+            let built = Arc::new(build_object(doc, doc.version, frame, i, fig_of[i], fig, root, ik, measure, render_output));
+            Some((i, built.clone(), previous.map(|_| Kept::new(&frame.objects[i], fig, fig_of[i], root, ik.cloned(), built))))
         };
-        let results: Vec<(usize, Built)> = crate::par::map(&slots, 32, make).into_iter().flatten().collect();
-        for (i, b) in results {
+        let results: Vec<(usize, Arc<Built>, Option<Kept>)> = crate::par::map(&slots, 32, make).into_iter().flatten().collect();
+        for (i, b, fresh) in results {
             built[i] = Some(b);
+            if let Some(fresh) = fresh {
+                anew.push((i, fresh));
+            }
         }
     }
     for (i, l) in level.iter().enumerate() {
@@ -1446,13 +1468,19 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
             scene.warnings.push(format!("Cyclic join or unresolved target at object {i}"));
         }
     }
+    if let Some(memory) = memory {
+        memory.finish(&built, anew);
+        scene.built_in = (0..count).map(|slot| memory.built_in(slot)).collect();
+    }
     // Splice in draw order.
     let total_items: usize = built.iter().flatten().map(|b| b.items.len()).sum();
     let total_points: usize = built.iter().flatten().map(|b| b.points.len()).sum();
     scene.items.reserve(total_items);
     scene.points.reserve(total_points);
     for &slot in &frame.draw_order {
-        let Some(mut b) = built[slot as usize].take() else { continue };
+        let Some(b) = built[slot as usize].take() else { continue };
+        // A build the memory also holds is copied; any other is the splice's own.
+        let mut b = Arc::try_unwrap(b).unwrap_or_else(|shared| (*shared).clone());
         let base = scene.points.len() as u32;
         scene.points.extend_from_slice(&b.points);
         for raw in &mut b.geometry.raw_segments {

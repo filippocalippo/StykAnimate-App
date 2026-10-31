@@ -25,7 +25,7 @@
     }
   } catch { /* The module decides once it loads. */ }
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0a0b0f' : '#eceff4');
-  // Desktop backend ports change between runs. Read the native preference now,
+  // Desktop browser storage is cleared at each launch. Read the native preference now,
   // before the large app module graph loads, rather than relying on origin storage.
   if (window.stykDesktop?.getEditorSettings) {
     document.documentElement.dataset.themePending = '';

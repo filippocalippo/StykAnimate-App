@@ -77,6 +77,7 @@ mod rig_drag;
 mod scene_backgrounds;
 mod select;
 pub mod session;
+mod shown;
 mod sheet;
 mod sheet_clipboard;
 mod sheet_frames;
@@ -102,6 +103,7 @@ pub use frame::FrameSlice;
 pub use onion_skins::{Ghost, OnionSet, MAX_GHOSTS};
 pub use layer_focus::FocusLock;
 pub use select::Selection;
+pub use shown::{Flavor, ShownScene};
 
 /// What a failed call says. `Unported` means "run this in JavaScript": the call
 /// changed nothing.

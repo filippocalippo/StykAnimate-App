@@ -18,14 +18,23 @@
 //! * `float` is a floating selection: its tiles drawn through `matrix` (cel pixels to cel
 //!   pixels) right after the base, in the same place among the layers.
 //!
-//! The module is pure: the host writes the [`Upload`]s into its atlas.
+//! Only the levels the view shows are written (the host says which with
+//! [`LiveCels::set_resident`], from [`shown_levels`] of the list it is about to draw); the
+//! others are remembered stale and written when a view first calls for them. The module is pure:
+//! the host writes the [`Upload`]s into its atlas.
 
 use std::collections::{HashMap, HashSet};
+
+use styk_draw::{DrawList, F_DRAWING, K_IMAGE};
 
 use crate::assets::{AtlasEntry, PAGE};
 pub use crate::drawing::TILE_BYTES;
 use crate::drawing::{bordered, down_tile, BORDER, MAX_LEVEL, TILE};
 
+/// A set of display levels: bit `n` is level `n`.
+pub type Levels = u16;
+/// Every level, 0 to [`MAX_LEVEL`].
+pub const ALL_LEVELS: Levels = (1 << (MAX_LEVEL + 1)) - 1;
 
 /// Texels a slot covers: a tile and its border on every side.
 pub const CELL: u32 = TILE + 2 * BORDER;
@@ -107,6 +116,9 @@ pub struct Layer {
     /// a tile of the layer, and the ones around them (the halo).
     drawn: Vec<Vec<Coord>>,
     slots: Vec<HashMap<Coord, u32>>,
+    /// The slots (by level) whose contents changed while their level was not resident: the
+    /// atlas holds older pixels there until [`Layer::flush`] writes them.
+    stale: Vec<HashSet<Coord>>,
 }
 
 fn visible(pixels: &[u8]) -> bool {
@@ -161,12 +173,14 @@ impl Layer {
 
     /// Replaces the tiles in `changes` (`None` removes one) and brings the reduced levels, the
     /// drawn tiles and the slots up to date. Returns the slots to write: each tile that
-    /// changed, or has a neighbour that did, at every level that follows from it.
-    fn apply(&mut self, pool: &mut Pool, changes: Vec<(Coord, Option<Vec<u8>>)>) -> Result<Vec<(u32, Vec<u8>)>, Full> {
+    /// changed, or has a neighbour that did, at every level that follows from it and is in
+    /// `resident`; the same slots of the other levels are remembered stale.
+    fn apply(&mut self, pool: &mut Pool, resident: Levels, changes: Vec<(Coord, Option<Vec<u8>>)>) -> Result<Vec<(u32, Vec<u8>)>, Full> {
         if self.drawn.is_empty() {
             self.reduced = (0..MAX_LEVEL).map(|_| Level::new()).collect();
             self.drawn = (0..=MAX_LEVEL).map(|_| Vec::new()).collect();
             self.slots = (0..=MAX_LEVEL).map(|_| HashMap::new()).collect();
+            self.stale = (0..=MAX_LEVEL).map(|_| HashSet::new()).collect();
         }
         let mut dirty: Vec<HashSet<Coord>> = vec![HashSet::new()];
         let mut membership = false;
@@ -218,6 +232,7 @@ impl Layer {
                 drawn.sort_unstable_by_key(|&(x, y)| (y, x));
                 let gone: Vec<Coord> = self.slots[n].keys().filter(|coord| drawn.binary_search_by_key(&(coord.1, coord.0), |&(x, y)| (y, x)).is_err()).copied().collect();
                 for coord in gone {
+                    self.stale[n].remove(&coord);
                     if let Some(slot) = self.slots[n].remove(&coord) {
                         pool.free.push(slot);
                     }
@@ -243,6 +258,10 @@ impl Layer {
                 }
             }
             let mut want: Vec<Coord> = want.into_iter().filter(|coord| self.slots[n].contains_key(coord)).collect();
+            if resident >> n & 1 == 0 {
+                self.stale[n].extend(want);
+                continue;
+            }
             want.sort_unstable_by_key(|&(x, y)| (y, x));
             for coord in want {
                 uploads.push((self.slots[n][&coord], bordered(self.level(n), coord.0, coord.1)));
@@ -251,11 +270,32 @@ impl Layer {
         Ok(uploads)
     }
 
-    /// Every slot's contents (the atlas was allocated again).
-    fn all(&self) -> Vec<(u32, Vec<u8>)> {
+    /// The slots of the levels in `levels` that are stale, with their contents; they are
+    /// current once written.
+    fn flush(&mut self, levels: Levels) -> Vec<(u32, Vec<u8>)> {
         let mut out = Vec::new();
-        for (n, slots) in self.slots.iter().enumerate() {
-            for (&coord, &slot) in slots {
+        for n in 0..self.stale.len() {
+            if levels >> n & 1 == 0 || self.stale[n].is_empty() {
+                continue;
+            }
+            let mut coords: Vec<Coord> = self.stale[n].drain().filter(|coord| self.slots[n].contains_key(coord)).collect();
+            coords.sort_unstable_by_key(|&(x, y)| (y, x));
+            out.extend(coords.into_iter().map(|coord| (self.slots[n][&coord], bordered(self.level(n), coord.0, coord.1))));
+        }
+        out
+    }
+
+    /// The slots of the levels in `resident` with their contents (the atlas was allocated
+    /// again); every slot of the other levels is stale.
+    fn all(&mut self, resident: Levels) -> Vec<(u32, Vec<u8>)> {
+        let mut out = Vec::new();
+        for n in 0..self.slots.len() {
+            if resident >> n & 1 == 0 {
+                self.stale[n] = self.slots[n].keys().copied().collect();
+                continue;
+            }
+            self.stale[n].clear();
+            for (&coord, &slot) in &self.slots[n] {
                 out.push((slot, bordered(self.level(n), coord.0, coord.1)));
             }
         }
@@ -283,10 +323,18 @@ impl Default for LiveCel {
 }
 
 /// The live cels of a stage, by cel id (`_styk.drawing.celId`), sharing a pool of atlas slots.
-#[derive(Default)]
 pub struct LiveCels {
     cels: HashMap<String, LiveCel>,
     pool: Pool,
+    /// The levels written as tiles change; the others wait ([`LiveCels::set_resident`]).
+    resident: Levels,
+}
+
+impl Default for LiveCels {
+    /// Every level resident: nothing waits.
+    fn default() -> Self {
+        LiveCels::new(ALL_LEVELS)
+    }
 }
 
 impl std::fmt::Debug for LiveCels {
@@ -305,6 +353,11 @@ pub struct Stats {
 }
 
 impl LiveCels {
+    /// Live cels that write the levels in `resident` as tiles change.
+    pub fn new(resident: Levels) -> Self {
+        LiveCels { cels: HashMap::new(), pool: Pool::default(), resident }
+    }
+
     /// Pages of the atlas the slots need after the document's own.
     pub fn pages(&self) -> u32 {
         self.pool.high.div_ceil(PAGE_SLOTS)
@@ -333,7 +386,7 @@ impl LiveCels {
     pub fn update(&mut self, id: &str, float: bool, changes: Vec<(Coord, Option<Vec<u8>>)>) -> Result<Vec<Upload>, Full> {
         let cel = self.cels.entry(id.to_string()).or_default();
         let layer = if float { &mut cel.float } else { &mut cel.base };
-        match layer.apply(&mut self.pool, changes) {
+        match layer.apply(&mut self.pool, self.resident, changes) {
             Ok(slots) => Ok(slots
                 .into_iter()
                 .map(|(slot, rgba)| {
@@ -346,6 +399,30 @@ impl LiveCels {
                 Err(Full)
             }
         }
+    }
+
+    /// Chooses the levels written as tiles change: those the next frame shows. Returns the
+    /// slots of the levels that were not resident and changed meanwhile, to write before that
+    /// frame is drawn.
+    pub fn set_resident(&mut self, resident: Levels) -> Vec<Upload> {
+        let newly = resident & !self.resident;
+        self.resident = resident;
+        if newly == 0 {
+            return Vec::new();
+        }
+        self.cels
+            .values_mut()
+            .flat_map(|cel| cel.base.flush(newly).into_iter().chain(cel.float.flush(newly)))
+            .map(|(slot, rgba)| {
+                let (page, x, y) = place(slot);
+                Upload { page, x, y, rgba }
+            })
+            .collect()
+    }
+
+    /// The levels written as tiles change.
+    pub fn resident(&self) -> Levels {
+        self.resident
     }
 
     /// Chooses what a cel shows: its base in place of the published cel, and its floating
@@ -386,11 +463,13 @@ impl LiveCels {
         self.pool.reset();
     }
 
-    /// Every slot in use, to write again after the atlas was allocated anew.
-    pub fn uploads(&self) -> Vec<Upload> {
+    /// The slots in use at the resident levels, to write again after the atlas was allocated
+    /// anew (those of the other levels are stale).
+    pub fn uploads(&mut self) -> Vec<Upload> {
+        let resident = self.resident;
         self.cels
-            .values()
-            .flat_map(|cel| cel.base.all().into_iter().chain(cel.float.all()))
+            .values_mut()
+            .flat_map(|cel| cel.base.all(resident).into_iter().chain(cel.float.all(resident)))
             .map(|(slot, rgba)| {
                 let (page, x, y) = place(slot);
                 Upload { page, x, y, rgba }
@@ -423,6 +502,30 @@ impl<'a> LiveView<'a> {
         let (page, x, y) = place(slot);
         AtlasEntry { layer: self.base + page, x, y, w: TILE, h: TILE, source_w: TILE, source_h: TILE, valid: true }
     }
+}
+
+/// The levels of live cels a view shows: those whose tiles the shader draws at `scale` (the
+/// view's world-to-target scale), and the level above each, which a tile blends in
+/// (`prim.wgsl`, `F_DRAWING`). `base` is the atlas layer of the first live page. A drawing tile
+/// in an isolation group is drawn at a scale this does not know, so it asks for every level.
+pub fn shown_levels(list: &DrawList, base: u32, scale: f64) -> Levels {
+    // The shader's own test in single precision; the margin keeps a boundary on both sides.
+    const MARGIN: f64 = 1.0 / 64.0;
+    let mut shown: Levels = 0;
+    for prim in &list.prims {
+        if prim.kind & 255 != K_IMAGE || prim.kind & F_DRAWING == 0 || (prim.b[2] as u32) < base {
+            continue;
+        }
+        if prim.group != 0 {
+            return ALL_LEVELS;
+        }
+        let level = prim.b[3] as u32;
+        let pixels = f64::from(prim.a[2]).hypot(f64::from(prim.a[3])) * scale / f64::from(TILE);
+        if (level == 0 || pixels <= 1.0 + MARGIN) && (level == MAX_LEVEL || pixels > 0.5 - MARGIN) {
+            shown |= 3 << level;
+        }
+    }
+    shown & ALL_LEVELS
 }
 
 impl Upload {
