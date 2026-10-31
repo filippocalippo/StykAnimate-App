@@ -8,7 +8,7 @@ Stable Rust ships no atomics-enabled standard library for `wasm32-unknown-unknow
 
 ## Decision
 
-`scripts/engine-build.mjs` builds with `nightly-2026-09-15`, `-Z build-std=std,panic_abort`, target features `+atomics,+bulk-memory,+mutable-globals`, imported shared memory, and wasm-bindgen 0.2.129 (`--target web`). The output goes to `src/engine/pkg/` (D9). One module serves pages with and without cross-origin isolation.
+`scripts/engine-build.mjs` builds with `nightly-2026-09-15`, `-Z build-std=std,panic_abort`, target features `+atomics,+bulk-memory,+mutable-globals,+simd128`, imported shared memory, and wasm-bindgen 0.2.129 (`--target web`). The output goes to `src/engine/pkg/` (D9). One module serves pages with and without cross-origin isolation.
 
 ## Evidence
 

@@ -148,10 +148,16 @@ Mobile pin compatibility: `Engine::stage` now returns a checked result and
 ## Building
 
 `npm run engine:build` (`scripts/engine-build.mjs`): nightly `nightly-2026-09-15`,
-`-Z build-std=std,panic_abort`, `+atomics,+bulk-memory,+mutable-globals`,
+`-Z build-std=std,panic_abort`, `+atomics,+bulk-memory,+mutable-globals,+simd128`,
 imported shared memory (maximum 2 GiB), wasm-bindgen 0.2.129 `--target web`,
 output in `src/engine/pkg/` ([D9](decisions/0009-generated-engine-build-output.md)).
 Never strip the profile ([D10](decisions/0010-keep-wasm-symbols.md)).
+
+All three modules (engine, codec, drawing) are compiled with `+simd128`: WebAssembly SIMD is in Chrome 91, Firefox 89 and
+Safari 16.4, the last being the floor `OffscreenCanvas` already sets for the web build (`src/web-support.js` explains a browser
+that lacks it). The compiler only vectorises where the IEEE result is identical, and WebAssembly has no fused multiply-add
+(relaxed SIMD stays off), so stored arithmetic is unchanged: `styk-math`'s results in the built module equal V8's `Math`
+bit for bit (checked on 1.4 million inputs for `sin`, `cos`, `asin`, `acos`, `log`, `atan2`, `hypot`).
 
 `npm run engine:build -- --dev` is the iteration build (profile `wasm-dev`: no LTO, 256 codegen units, incremental, D10 kept): a change in `styk-eval` rebuilds in about 25 s against about 5 minutes for the release profile. It is for iterating and diagnosis, and no number measured on it is a result. The first build on a machine compiles the dependencies once (about 8 minutes).
 

@@ -7524,8 +7524,8 @@
   "counts.frames": {
     "locations": [
       "src/movieclip-ui.mjs:57",
-      "src/onion-timeline-range.mjs:90",
-      "src/onion-timeline-range.mjs:91",
+      "src/onion-timeline-range.mjs:95",
+      "src/onion-timeline-range.mjs:96",
       "src/vfx-clip-timeline.mjs:115"
     ],
     "context": "{kind:'meta',parts:[{text:interfaceText('movieclipUi.durationSummary',{frames:{messageKey:'counts.frames',messageParams:{count:asset.duration}},seconds:seconds("
@@ -9902,13 +9902,13 @@
   },
   "drawingController.alreadyDrawing": {
     "locations": [
-      "src/drawing-controller.mjs:914"
+      "src/drawing-controller.mjs:916"
     ],
     "context": "if(action==='blank')return e.drawingKey(ids,e.tick,{blank:true});if(action==='copy-key'){if(!e.drawingKey(ids))this.onStatus(interfaceText('drawingController.al"
   },
   "drawingController.blank": {
     "locations": [
-      "src/drawing-controller.mjs:352"
+      "src/drawing-controller.mjs:354"
     ],
     "context": "get exposureMessage(){try{const t=this.editor.drawingTarget();return {key: 'drawingController.exposure', params: {kind: {messageKey: t.figure ? 'drawingControll"
   },
@@ -9920,7 +9920,7 @@
   },
   "drawingController.brushSaved": {
     "locations": [
-      "src/drawing-controller.mjs:909"
+      "src/drawing-controller.mjs:911"
     ],
     "context": "const preset={id:'custom-'+(Date.now()).toString(36)+n,name:base+' '+n,description:interfaceText('drawingController.savedBrush'),...tip};this.library.presets=[."
   },
@@ -9932,7 +9932,7 @@
   },
   "drawingController.copyingPixels": {
     "locations": [
-      "src/drawing-controller.mjs:920"
+      "src/drawing-controller.mjs:922"
     ],
     "context": "if(['copy-pixels','cut-pixels'].includes(action)){await this.ensureFloating();return this.pixelOperation({messageKey:'drawingController.copyingPixels'},async op"
   },
@@ -9944,20 +9944,20 @@
   },
   "drawingController.deleteSelection": {
     "locations": [
-      "src/drawing-controller.mjs:918"
+      "src/drawing-controller.mjs:920"
     ],
     "context": "if(action==='delete-pixels'){const s=await this.ensureFloating();if(!s)return;return this.commitSelection(s,'Delete selected pixels',{remove:true,labelKey:'draw"
   },
   "drawingController.drawing": {
     "locations": [
-      "src/drawing-controller.mjs:352",
+      "src/drawing-controller.mjs:354",
       "src/studio-shell.mjs:140"
     ],
     "context": "get exposureMessage(){try{const t=this.editor.drawingTarget();return {key: 'drawingController.exposure', params: {kind: {messageKey: t.figure ? 'drawingControll"
   },
   "drawingController.drawingCanvasBBrushEEraserGFillU": {
     "locations": [
-      "src/drawing-controller.mjs:354"
+      "src/drawing-controller.mjs:356"
     ],
     "context": "sync(){if(!this.active)return;try{const t=this.editor.drawingTarget();this.exposure={layerId:t.id,start:t.key.tick,end:t.end};this.lastLayer=t.id;}catch{this.ex"
   },
@@ -9969,43 +9969,43 @@
   },
   "drawingController.editingHold": {
     "locations": [
-      "src/drawing-controller.mjs:352"
+      "src/drawing-controller.mjs:354"
     ],
     "context": "get exposureMessage(){try{const t=this.editor.drawingTarget();return {key: 'drawingController.exposure', params: {kind: {messageKey: t.figure ? 'drawingControll"
   },
   "drawingController.exposure": {
     "locations": [
-      "src/drawing-controller.mjs:352"
+      "src/drawing-controller.mjs:354"
     ],
     "context": "get exposureMessage(){try{const t=this.editor.drawingTarget();return {key: 'drawingController.exposure', params: {kind: {messageKey: t.figure ? 'drawingControll"
   },
   "drawingController.filled": {
     "locations": [
-      "src/drawing-controller.mjs:783"
+      "src/drawing-controller.mjs:785"
     ],
     "context": "op.check();op.received(result.tiles);await this.commitPixels(target,result.tiles,'Fill drawing',op);this.onStatus(interfaceText('drawingController.filled'), 'dr"
   },
   "drawingController.fillingDrawing": {
     "locations": [
-      "src/drawing-controller.mjs:762"
+      "src/drawing-controller.mjs:764"
     ],
     "context": "fill(target,surface,point){return this.pixelOperation({messageKey:'drawingController.fillingDrawing'},async op=>{"
   },
   "drawingController.fillSelection": {
     "locations": [
-      "src/drawing-controller.mjs:902"
+      "src/drawing-controller.mjs:904"
     ],
     "context": "const surface=await this.owner.surface(target.figure);return this.pixelTool(target,surface,'fill-mask',{mask:m.mask,color:[...this.settings.color.slice(1).match"
   },
   "drawingController.fillShape": {
     "locations": [
-      "src/drawing-controller.mjs:549"
+      "src/drawing-controller.mjs:551"
     ],
     "context": "return this.pixelTool(g.target,g.surface,'fill-mask',{mask:clip,color:[...this.settings.color.slice(1).match(/../g).map(n=>parseInt(n,16)),Math.round(this.setti"
   },
   "drawingController.noExposure": {
     "locations": [
-      "src/drawing-controller.mjs:352"
+      "src/drawing-controller.mjs:354"
     ],
     "context": "get exposureMessage(){try{const t=this.editor.drawingTarget();return {key: 'drawingController.exposure', params: {kind: {messageKey: t.figure ? 'drawingControll"
   },
@@ -10023,19 +10023,19 @@
   },
   "drawingController.pastingPixels": {
     "locations": [
-      "src/drawing-controller.mjs:936"
+      "src/drawing-controller.mjs:938"
     ],
     "context": "if(action==='paste-pixels')return this.pixelOperation({messageKey:'drawingController.pastingPixels'},op=>this.getClipboard().paste('drawing-pixels',async()=>{"
   },
   "drawingController.resampled": {
     "locations": [
-      "src/drawing-controller.mjs:964"
+      "src/drawing-controller.mjs:966"
     ],
     "context": "this.onStatus(interfaceText('drawingController.resampled'), 'drawingController.resampled');"
   },
   "drawingController.resamplingDrawing": {
     "locations": [
-      "src/drawing-controller.mjs:958"
+      "src/drawing-controller.mjs:960"
     ],
     "context": "return this.pixelOperation({messageKey:'drawingController.resamplingDrawing'},async op=>{"
   },
@@ -10053,13 +10053,13 @@
   },
   "drawingController.sameResolution": {
     "locations": [
-      "src/drawing-controller.mjs:956"
+      "src/drawing-controller.mjs:958"
     ],
     "context": "if(ratio===1){this.onStatus(interfaceText('drawingController.sameResolution'), 'drawingController.sameResolution');return;}"
   },
   "drawingController.savedBrush": {
     "locations": [
-      "src/drawing-controller.mjs:909"
+      "src/drawing-controller.mjs:911"
     ],
     "context": "const preset={id:'custom-'+(Date.now()).toString(36)+n,name:base+' '+n,description:interfaceText('drawingController.savedBrush'),...tip};this.library.presets=[."
   },
@@ -10071,19 +10071,19 @@
   },
   "drawingController.selected": {
     "locations": [
-      "src/drawing-controller.mjs:797"
+      "src/drawing-controller.mjs:799"
     ],
     "context": "s.presenter=selectionPresenter(s,owner);this.selection=s;if(outline)this.marquee=outline;else this.setMarquee(g.target,g.surface,g.mask??{...bounds,points:g.poi"
   },
   "drawingController.selectingPixels": {
     "locations": [
-      "src/drawing-controller.mjs:790"
+      "src/drawing-controller.mjs:792"
     ],
     "context": "return this.pixelOperation({messageKey:'drawingController.selectingPixels'},async op=>{"
   },
   "drawingController.transformSelection": {
     "locations": [
-      "src/drawing-controller.mjs:820"
+      "src/drawing-controller.mjs:822"
     ],
     "context": "applySelection(){const s=this.selection;if(!s)return;if(s.committing)return s.committing;if(!moved(s)){this.cancelSelection();return;}return this.commitSelectio"
   },
@@ -10579,7 +10579,7 @@
   },
   "drawingView.custom": {
     "locations": [
-      "src/drawing-controller.mjs:908",
+      "src/drawing-controller.mjs:910",
       "src/drawing-view.mjs:165"
     ],
     "context": "const base=interfaceText(brushMessages[this.settings.preset]?.nameKey??'drawingView.custom'),n=this.library.presets.length+1,tip=Object.fromEntries(brushKeys.fi"
@@ -12939,14 +12939,14 @@
   },
   "errors.drawingCompositeTransport.theFillExceedsTheDrawingWorkingMemoryLimit": {
     "locations": [
-      "src/drawing-controller.mjs:771",
-      "src/drawing-controller.mjs:777"
+      "src/drawing-controller.mjs:773",
+      "src/drawing-controller.mjs:779"
     ],
     "context": "if(sourceBytes*2>owner.hardBudget)throw messageError(new Error(''), \"errors.drawingCompositeTransport.theFillExceedsTheDrawingWorkingMemoryLimit\", {});"
   },
   "errors.drawingController.copySelectedPixelsFirst": {
     "locations": [
-      "src/drawing-controller.mjs:937"
+      "src/drawing-controller.mjs:939"
     ],
     "context": "const clip=e._drawingPixelClipboard;if(!clip)throw messageError(new Error(''), \"errors.drawingController.copySelectedPixelsFirst\", {});validatePixelClipboard(cl"
   },
@@ -12958,8 +12958,8 @@
   },
   "errors.drawingController.drawingInputExceededTheQueueLimit": {
     "locations": [
-      "src/drawing-controller.mjs:566",
-      "src/drawing-controller.mjs:701"
+      "src/drawing-controller.mjs:568",
+      "src/drawing-controller.mjs:703"
     ],
     "context": "if(s.queue.length>=MAX_STROKE_SAMPLES)throw messageError(new Error(''), \"errors.drawingController.drawingInputExceededTheQueueLimit\", {});"
   },
@@ -12971,107 +12971,107 @@
   },
   "errors.drawingController.paintADrawingBeforeFilteringIt": {
     "locations": [
-      "src/drawing-controller.mjs:825"
+      "src/drawing-controller.mjs:827"
     ],
     "context": "const e=this.editor,target=e.drawingTarget();if(!target.figure)throw messageError(new Error(''), \"errors.drawingController.paintADrawingBeforeFilteringIt\", {});"
   },
   "errors.drawingController.paintADrawingBeforeResamplingIt": {
     "locations": [
-      "src/drawing-controller.mjs:954"
+      "src/drawing-controller.mjs:956"
     ],
     "context": "const target=e.drawingTarget();if(!target.figure)throw messageError(new Error(''), \"errors.drawingController.paintADrawingBeforeResamplingIt\", {});"
   },
   "errors.drawingController.paintADrawingBeforeSelectingItsPixels": {
     "locations": [
-      "src/drawing-controller.mjs:893"
+      "src/drawing-controller.mjs:895"
     ],
     "context": "await this.settleFloating();const target=e.drawingTarget();if(!target.figure)throw messageError(new Error(''), \"errors.drawingController.paintADrawingBeforeSele"
   },
   "errors.drawingController.sampleAllLayersSupportsFillRegionsUpTo": {
     "locations": [
-      "src/drawing-controller.mjs:769"
+      "src/drawing-controller.mjs:771"
     ],
     "context": "if(bounds.width*bounds.height>FILL_SOURCE_MAX_PIXELS)throw messageError(new Error(''), \"errors.drawingController.sampleAllLayersSupportsFillRegionsUpTo\", {});"
   },
   "errors.drawingController.selectASmallerAreaTheFilterExceeds16": {
     "locations": [
-      "src/drawing-controller.mjs:532",
-      "src/drawing-controller.mjs:830"
+      "src/drawing-controller.mjs:534",
+      "src/drawing-controller.mjs:832"
     ],
     "context": "if(work&&work.pixels>DRAWING_MAX_PIXELS)throw messageError(new Error(''), \"errors.drawingController.selectASmallerAreaTheFilterExceeds16\", {});"
   },
   "errors.drawingController.selectionChanged": {
     "locations": [
-      "src/drawing-controller.mjs:805",
-      "src/drawing-controller.mjs:811"
+      "src/drawing-controller.mjs:807",
+      "src/drawing-controller.mjs:813"
     ],
     "context": "if(this.selection!==s)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingController.selectionChanged\", {});"
   },
   "errors.drawingController.selectPixelsBeforeFillingTheSelection": {
     "locations": [
-      "src/drawing-controller.mjs:900"
+      "src/drawing-controller.mjs:902"
     ],
     "context": "await this.settleFloating();const m=this.marquee;if(!m)throw messageError(new Error(''), \"errors.drawingController.selectPixelsBeforeFillingTheSelection\", {});"
   },
   "errors.drawingController.selectPixelsToFlip": {
     "locations": [
-      "src/drawing-controller.mjs:904"
+      "src/drawing-controller.mjs:906"
     ],
     "context": "if(action==='flip-selection-x'||action==='flip-selection-y'){const s=await this.ensureFloating();if(!s)throw messageError(new Error(''), \"errors.drawingControll"
   },
   "errors.drawingController.selectPixelsWithTheLassoFirst": {
     "locations": [
-      "src/drawing-controller.mjs:921"
+      "src/drawing-controller.mjs:923"
     ],
     "context": "const s=this.selection;if(!s)throw messageError(new Error(''), \"errors.drawingController.selectPixelsWithTheLassoFirst\", {});"
   },
   "errors.drawingController.theDrawingPoseIsUnavailable": {
     "locations": [
-      "src/drawing-controller.mjs:383"
+      "src/drawing-controller.mjs:385"
     ],
     "context": "geometryItem(target){let item;if(target.created||target.migratedFrom)item=this.previewItem(target);else item=this.editor.geometry.drawables.find(i=>i.obj.unique"
   },
   "errors.drawingController.theOperationExceedsTheDrawingWorkingMemoryLimit": {
     "locations": [
       "src/drawing-controller.mjs:186",
-      "src/drawing-controller.mjs:536"
+      "src/drawing-controller.mjs:538"
     ],
     "context": "if((op.copiedBytes??0)+bytes.byteLength>op.maxBytes)throw messageError(new Error(''), \"errors.drawingController.theOperationExceedsTheDrawingWorkingMemoryLimit\""
   },
   "errors.drawingController.theSelectionBelongsToAnotherDrawing": {
     "locations": [
-      "src/drawing-controller.mjs:901"
+      "src/drawing-controller.mjs:903"
     ],
     "context": "const target=e.drawingTarget();if(!this.marqueeOn(target))throw messageError(new Error(''), \"errors.drawingController.theSelectionBelongsToAnotherDrawing\", {});"
   },
   "errors.drawingController.theSelectionChangedCopyItAgain": {
     "locations": [
-      "src/drawing-controller.mjs:926"
+      "src/drawing-controller.mjs:928"
     ],
     "context": "op.check();if(this.selection!==s)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingController.theSelectionChangedCopyItAgain\", {});"
   },
   "errors.drawingController.theStrokeExceedsTheDrawingWorkingMemoryLimit": {
     "locations": [
-      "src/drawing-controller.mjs:597",
-      "src/drawing-controller.mjs:599"
+      "src/drawing-controller.mjs:599",
+      "src/drawing-controller.mjs:601"
     ],
     "context": "if(![x0,y0,x1,y1].every(Number.isFinite)||Math.max(Math.abs(x0),Math.abs(y0),Math.abs(x1),Math.abs(y1))>2147483647*TILE||(Math.ceil((x1-x0)/TILE)+1)*(Math.ceil("
   },
   "errors.drawingController.unknownDrawingFilter": {
     "locations": [
-      "src/drawing-controller.mjs:824"
+      "src/drawing-controller.mjs:826"
     ],
     "context": "if(!FILTER_LABELS[kind])throw messageError(new Error(''), \"errors.drawingController.unknownDrawingFilter\", {});await this.settleFloating();"
   },
   "errors.drawingController.waitForTheDrawingToFinishLoading": {
     "locations": [
-      "src/drawing-controller.mjs:754"
+      "src/drawing-controller.mjs:756"
     ],
     "context": "async barrier(options){await this.settle({selection:true});if(this.loading)throw messageError(new Error(''), \"errors.drawingController.waitForTheDrawingToFinish"
   },
   "errors.drawingController.zoomInBeforeSelectingTheAreaExceeds16": {
     "locations": [
-      "src/drawing-controller.mjs:856"
+      "src/drawing-controller.mjs:858"
     ],
     "context": "if(!bounds)return;if(bounds.width*bounds.height>DRAWING_MAX_PIXELS)throw messageError(new Error(''), \"errors.drawingController.zoomInBeforeSelectingTheAreaExcee"
   },
@@ -13127,7 +13127,7 @@
   },
   "errors.drawingHistoryCodec.invalidDrawingHistoryTile": {
     "locations": [
-      "src/drawing-preparation.mjs:15"
+      "src/drawing-preparation.mjs:18"
     ],
     "context": "for(const side of [tile.before,tile.after])if(side!=null&&(!(side instanceof Uint8ClampedArray||side instanceof Uint8Array)||side.byteLength!==4&&side.byteLengt"
   },
@@ -13316,31 +13316,31 @@
   },
   "errors.drawingPreparation.drawingPreparationCancelledOrSuperseded": {
     "locations": [
-      "src/drawing-preparation.mjs:6"
+      "src/drawing-preparation.mjs:9"
     ],
     "context": "const aborted=()=>messageError(new DOMException('', 'AbortError'), \"errors.drawingPreparation.drawingPreparationCancelledOrSuperseded\", {});"
   },
   "errors.drawingPreparation.incompletePreparedDrawingTiles": {
     "locations": [
-      "src/drawing-preparation.mjs:71"
+      "src/drawing-preparation.mjs:74"
     ],
     "context": "check();if(result.tiles?.length!==input.length)throw messageError(new Error(''), \"errors.drawingPreparation.incompletePreparedDrawingTiles\", {});"
   },
   "errors.drawingPreparation.invalidPreparedDrawingTile": {
     "locations": [
-      "src/drawing-preparation.mjs:74"
+      "src/drawing-preparation.mjs:77"
     ],
     "context": "if(t.tx!==input[i].tx||t.ty!==input[i].ty||t.pixels!=null&&(!(t.pixels instanceof ArrayBuffer)||t.pixels.byteLength!==TILE_BYTES)||t.pixels!=null&&(!b||![b.x,b."
   },
   "errors.drawingPreparation.preparedPixelsDoNotMatchThisDrawingCommand": {
     "locations": [
-      "src/drawing-preparation.mjs:45"
+      "src/drawing-preparation.mjs:48"
     ],
     "context": "if(direction!==this.direction||plan?.changes!==changes||plan.celId!==celId)throw messageError(new Error(''), \"errors.drawingPreparation.preparedPixelsDoNotMatch"
   },
   "errors.drawingPreparation.preparedPixelsDoNotMatchThisDrawingTransaction": {
     "locations": [
-      "src/drawing-preparation.mjs:41"
+      "src/drawing-preparation.mjs:44"
     ],
     "context": "if(direction!==this.direction||this.index||commands.length!==this.plans.length||commands.some((c,i)=>c.tiles!==this.plans[i].changes||c.celId!==this.plans[i].ce"
   },
@@ -14506,7 +14506,7 @@
   },
   "errors.importClient.chooseAProjectFromTheLibrary": {
     "locations": [
-      "src/import-client.mjs:324"
+      "src/import-client.mjs:321"
     ],
     "context": "if (typeof path !== 'string' || !path) throw messageError(new Error(''), \"errors.importClient.chooseAProjectFromTheLibrary\", {});"
   },
@@ -14518,15 +14518,15 @@
   },
   "errors.importClient.chooseAStykProjectStkzFigureStykmovMovieclip": {
     "locations": [
-      "src/import-client.mjs:316"
+      "src/import-client.mjs:313"
     ],
     "context": "return Promise.reject(messageError(new Error(''), \"errors.importClient.chooseAStykProjectStkzFigureStykmovMovieclip\", {}));"
   },
   "errors.importClient.importSuperseded": {
     "locations": [
       "src/import-client.mjs:235",
-      "src/import-client.mjs:310",
-      "src/import-client.mjs:326"
+      "src/import-client.mjs:307",
+      "src/import-client.mjs:323"
     ],
     "context": "if(generation!==this.cancelGeneration)throw messageError(new DOMException('', 'AbortError'), \"errors.importClient.importSuperseded\", {});"
   },
@@ -14540,8 +14540,8 @@
     "locations": [
       "src/import-client.mjs:189",
       "src/import-client.mjs:227",
-      "src/import-client.mjs:323",
-      "src/import-client.mjs:340"
+      "src/import-client.mjs:320",
+      "src/import-client.mjs:337"
     ],
     "context": "if (this.disposed) return Promise.reject(messageError(new Error(''), \"errors.importClient.theFileImporterHasBeenDisposed\", {}));"
   },
@@ -14668,7 +14668,7 @@
   },
   "errors.importWorker.importFailed": {
     "locations": [
-      "src/import-client.mjs:330",
+      "src/import-client.mjs:327",
       "src/import-worker.mjs:47"
     ],
     "context": "const error=sample?.error?new Error(sample.error):messageError(new Error(''), 'errors.importWorker.importFailed', {status});"
@@ -15612,7 +15612,7 @@
   },
   "errors.nativeContainer.embeddedOriginalSourceFingerprintDoesNotMatch": {
     "locations": [
-      "src/import-client.mjs:262",
+      "src/import-client.mjs:264",
       "src/import-worker.mjs:157"
     ],
     "context": "if(await sha256(bytes)!==kept.sourceDescription.sha256)throw messageError(new Error(''), \"errors.nativeContainer.embeddedOriginalSourceFingerprintDoesNotMatch\","
@@ -24963,7 +24963,7 @@
   },
   "onionTimelineRange.dragToChange": {
     "locations": [
-      "src/onion-timeline-range.mjs:91"
+      "src/onion-timeline-range.mjs:96"
     ],
     "context": "localizedAttribute(end, \"title\", \"onionTimelineRange.dragToChange\", {spanLabel:{messageKey:'counts.frames',params:{count:value.span}}});"
   },

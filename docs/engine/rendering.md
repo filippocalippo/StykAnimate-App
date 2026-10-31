@@ -40,7 +40,7 @@ triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
 | `pipeline.rs` | the one WGSL pipeline (`prim.wgsl`) for every kind, bind layouts ([D8](decisions/0008-renderer-without-storage-buffers.md)) |
 | `frame.rs` | one frame: isolation layer passes by round and depth, each depth's effect stacks after its passes, then the frame pass (MSAA ×4, resolved once) |
 | `isolation.rs` | the layer atlas (8 pages of at least the frame's size, grown for larger effect layers, two for depth parity) and `plan_rounds`: layers that do not fit render in full-resolution rounds, the frame drawn between rounds |
-| `images.rs` | the sprite atlas (texture array of 4,096² pages laid out by `styk_eval::assets`), uploads of decoded images and drawing tiles |
+| `images.rs` | the sprite atlas (texture array of 4,096² pages laid out by `styk_eval::assets`: shelves, and the free space an earlier page left before a new page opens), uploads of decoded images and drawing tiles |
 | `resources.rs` | GPU record layouts, lookup tables in float textures, buffers |
 | `present.rs` | copy into the host's surface, read-back |
 | `view.rs` | world → output transform, artboard |
@@ -415,6 +415,15 @@ of milliseconds a pass at export sizes. In the app's export, frames are drawn in
 square root, then 417–422 ms against 553–568 ms without it, interleaved at load 15–17). The
 WebAssembly engine module grew by 109 KiB (7,980,628 → 8,092,410 bytes without wasm-opt, the
 build before this work against this one).
+
+## Encoding over the last frame
+
+A gesture changes a few objects of a frame of hundreds. The edit frame is the session's `ShownScene`
+([evaluation.md](evaluation.md#the-interfaces-frame)), built over the one before it, and its scene says which build made each
+object's geometry (`Scene::built_in`, numbered across every memory). `EditScene` keeps what the last frame was encoded as
+(`drawlist::EncodeMemory`), and `encode_composed_remembering` encodes only the objects whose build is not the one it kept; the list
+is the list encoded whole (`styk-eval/tests/build_memory.rs`). Only a plain frame is kept: nothing in it draws effects, 3D faces or
+text, no drawing cel is live, and an object being dragged is encoded afresh (its translation is applied after encoding).
 
 ## In the app
 

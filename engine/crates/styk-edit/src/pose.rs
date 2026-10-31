@@ -236,23 +236,15 @@ impl Editor {
     /// (`geometry.objects.get(slot).segments`).
     pub(crate) fn shapes(&self, object: &Value) -> Result<Vec<Option<Shape>>, EditError> {
         let count = self.figure_value(object).get("segments").and_then(Value::array_len).unwrap_or(0);
-        (0..count).map(|joint| self.shape(object, joint, None)).collect()
+        (0..count).map(|joint| self.shape(object, joint)).collect()
     }
 
-    /// The selected segment as the geometry at the playhead draws it.
-    fn shape(&self, object: &Value, joint: usize, known_slot: Option<usize>) -> Result<Option<Shape>, EditError> {
-        // The selected figure's geometry, and that of the figures it hangs from: its slot in
-        // the frame geometry is built from (the frame on show, whose slots a layer sheet's
-        // composition may order differently from the keyframe's).
-        // Ordinary pose already found this same selection-frame slot in joint_context,
-        // before any edit. Other callers retain the existing identity lookup.
-        let slot = match known_slot {
-            Some(slot) => Some(slot),
-            None => self.selection_frame()?.iter().position(|o| uid(o) == uid(object)),
-        };
-        let (prepared, frame, scene) = self.evaluate_for_joint_shape(slot, joint)?;
+    /// The selected segment as the geometry at the playhead draws it: the scene the frame on show was built into, which the
+    /// interface and the stage read as well.
+    fn shape(&self, object: &Value, joint: usize) -> Result<Option<Shape>, EditError> {
+        let Some(shown) = self.shown_scene(false, crate::Flavor::Composed)? else { return Ok(None) };
         let Some(id) = uid(object) else { return Ok(None) };
-        Self::drawn_shape(&prepared, &frame, &scene, id, joint)
+        Self::drawn_shape(&shown.prepared, &shown.frame, &shown.scene, id, joint)
     }
 
     /// Segment `joint` of the figure `id` as `scene` draws it (`geometry.objects.get(slot).segments[joint]`): a rigged joint
@@ -426,7 +418,7 @@ impl Editor {
         if rig_has(segment, &["spatial", "origin"]) {
             return self.pose_spatial_joint(x, y, &raw_options);
         }
-        let Some(shape) = self.shape(&object, joint, Some(slot))? else { return Ok(false) };
+        let Some(shape) = self.shape(&object, joint)? else { return Ok(false) };
         let scale = object.get("scale").and_then(Value::as_f64).unwrap_or(f64::NAN);
         let authored_length = if object.get("len_flag").is_some_and(Value::truthy) {
             object.get("lengths").and_then(|l| l.item(joint)).and_then(|v| v.as_f64()).unwrap_or(f64::NAN)
@@ -529,7 +521,7 @@ impl Editor {
         if (is_static(segment) && rig_bend.is_none()) || !(primitive == 0.0 || primitive == 6.0) {
             return Ok(false);
         }
-        let Some(shape) = self.shape(&object, joint, None)? else { return Ok(false) };
+        let Some(shape) = self.shape(&object, joint)? else { return Ok(false) };
         if shape.connector {
             return self.bend_connector(slot, &segments, joint, x, y, &shape);
         }
@@ -611,7 +603,7 @@ impl Editor {
     pub(crate) fn slide_connector(&mut self, slot: usize, object: &Value, joint: usize, x: f64, y: f64) -> Result<bool, EditError> {
         rig_finite(x, -1e9, 1e9, "Joint X")?;
         rig_finite(y, -1e9, 1e9, "Joint Y")?;
-        let Some(shape) = self.shape(object, joint, None)? else { return Ok(false) };
+        let Some(shape) = self.shape(object, joint)? else { return Ok(false) };
         if !shape.connector {
             return Ok(false);
         }

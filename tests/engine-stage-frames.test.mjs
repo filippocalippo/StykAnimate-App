@@ -22,8 +22,10 @@ function standInStage(behaviour = {}) {
     device_lost: () => behaviour.lost?.() ?? '',
     max_texture: () => 4096,
     refining: () => false, camera_pending: () => false, pictures_pending: () => 0, surface_pending: () => behaviour.pending?.() ?? false,
-    ...Object.fromEntries(['resize', 'set_effects', 'set_canvas_drawing', 'set_view_orientation', 'set_multisampled', 'edit_frame', 'edit_session', 'set_onions', 'clear_onions', 'lose_device', 'free']
+    ...Object.fromEntries(['resize', 'set_effects', 'set_canvas_drawing', 'set_view_orientation', 'set_multisampled', 'edit_frame', 'set_onions', 'clear_onions', 'lose_device', 'free']
       .map(name => [name, record(name)])),
+    // The session's frame is taken once the engine holds the session's document (`false` until then).
+    edit_session: (...args) => { calls.push(['edit_session', ...args]); return behaviour.edit_session ? behaviour.edit_session(...args) : true; },
     render_edit: (...args) => { calls.push(['render_edit', ...args]); return behaviour.render_edit ? behaviour.render_edit(...args) : true; },
     render_ticket: (...args) => { calls.push(['render_ticket', ...args]); return behaviour.render_ticket ? behaviour.render_ticket(...args) : true; },
   };
@@ -92,6 +94,19 @@ test("the frame on show is the session's: no pose crosses, and the poses sent la
   stage.calls.length = 0;
   renderer.render(request({frame: posed, source: {...source, motion: true}}));
   assert.equal(stage.calls.find(([name]) => name === 'edit_session')[3], true);
+  renderer.destroy();
+});
+
+test("a session whose document the engine does not hold yet is drawn when it does", async () => {
+  const held = {yes: false};
+  const {renderer, stage, progress} = await open({edit_session: () => held.yes});
+  const source = {session: {name: 'session'}, view: '{"tick":3,"frameIndex":0}', motion: false};
+  assert.equal(renderer.render(request({source})), false, 'nothing is drawn, and the previous picture stays');
+  assert.equal(stage.calls.some(([name]) => name === 'render_edit'), false);
+  assert.equal(renderer.engineSide.stats.retries, 1, 'it is tried again when the engine has made progress');
+  held.yes = true;
+  assert.equal(renderer.render(request({source})), true);
+  assert.equal(stage.calls.some(([name]) => name === 'render_edit'), true);
   renderer.destroy();
 });
 
