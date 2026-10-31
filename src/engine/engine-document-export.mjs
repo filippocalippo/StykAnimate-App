@@ -12,6 +12,7 @@
 import {initSync, export_document, save_project, release_snapshot} from './pkg/styk_engine.js';
 import {messageError} from '../localized-error.mjs';
 import {validationLabel} from '../validation-labels.mjs';
+import {inside} from './engine-guard.mjs';
 
 let wasm = null;
 
@@ -53,14 +54,17 @@ function failure(error) {
  * `figureUids`, `tick`, `output` (`document`, `container` for the figure file as it is stored, or `codec` for the body of the
  * codec's export request, with `sourceId`).
  * `address` is a fresh `engine.handle.address()`; `cancelled()` says whether the export is stopped.
- * `join` is null where the caller is a thread of the engine already (the tests, which run it in-process).
+ * `join` is null where the caller is a thread of the engine already (the tests, which run it in-process). `guard` is the worker's
+ * (src/engine/engine-guard.mjs): the call is made with it held, so the interface cannot end the worker inside the engine.
  * @returns {{bytes: Uint8Array, figureTypeId: (number|undefined), drawings: boolean, rawBytes: number}}
  */
-export function makeExportDocument({join, address, revision, request, cancelled}) {
-  if (join) joinEngine(join);
-  let made;
-  try { made = export_document(address, revision, JSON.stringify(request), cancelled); } catch (error) { throw failure(error); }
-  try { return {bytes: made.bytes(), figureTypeId: made.figure_type_id() ?? undefined, drawings: made.drawings(), rawBytes: made.raw_bytes()}; } finally { made.free(); }
+export function makeExportDocument({join, address, revision, request, cancelled, guard}) {
+  return inside(guard, () => {
+    if (join) joinEngine(join);
+    let made;
+    try { made = export_document(address, revision, JSON.stringify(request), cancelled); } catch (error) { throw failure(error); }
+    try { return {bytes: made.bytes(), figureTypeId: made.figure_type_id() ?? undefined, drawings: made.drawings(), rawBytes: made.raw_bytes()}; } finally { made.free(); }
+  });
 }
 
 /**
@@ -71,11 +75,13 @@ export function makeExportDocument({join, address, revision, request, cancelled}
  * `join` is null where the caller is a thread of the engine already (the tests, which run it in-process).
  * @returns {{bytes: Uint8Array, rawBytes: number}}
  */
-export function makeProjectFile({join, request, source, cancelled}) {
-  if (join) joinEngine(join);
-  let made;
-  try { made = save_project(JSON.stringify(request), source, cancelled); } catch (error) { throw failure(error); }
-  try { return {bytes: made.bytes(), rawBytes: made.raw_bytes()}; } finally { made.free(); }
+export function makeProjectFile({join, request, source, cancelled, guard}) {
+  return inside(guard, () => {
+    if (join) joinEngine(join);
+    let made;
+    try { made = save_project(JSON.stringify(request), source, cancelled); } catch (error) { throw failure(error); }
+    try { return {bytes: made.bytes(), rawBytes: made.raw_bytes()}; } finally { made.free(); }
+  });
 }
 
 /** Lets go of the snapshots of a save that did not take them (a cancelled or failed one); harmless for those it took. */
@@ -83,8 +89,11 @@ export function releaseSnapshots(snapshots) {
   for (const token of snapshots) release_snapshot(token);
 }
 
-/** Gives this thread back to the engine; no call into the module may follow. */
-export function releaseEngineThread() {
-  try { wasm?.__wbindgen_thread_destroy(); } catch { /* never started */ }
-  wasm = null;
+/** Gives this thread back to the engine; no call into the module may follow. Throws an AbortError, doing nothing, when the interface
+ * has claimed `guard` to end this worker (src/engine/engine-guard.mjs). */
+export function releaseEngineThread(guard) {
+  inside(guard, () => {
+    try { wasm?.__wbindgen_thread_destroy(); } catch { /* never started */ }
+    wasm = null;
+  });
 }

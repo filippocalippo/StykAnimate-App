@@ -85,7 +85,7 @@ pub(crate) fn save_failure(failure: SaveError) -> JsError {
             });
             error_coded("Error", &file.detail, Some(file.message_key), params, file.code)
         }
-        SaveError::OutOfMemory(memory) => error_coded("Error", &memory.to_string(), Some(styk_engine::document::OUT_OF_MEMORY), None, Some("out_of_memory")),
+        SaveError::OutOfMemory(memory) => error_coded("Error", &memory.to_string(), Some(styk_engine::document::OUT_OF_MEMORY_SAVING), None, Some("out_of_memory")),
     }
 }
 

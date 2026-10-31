@@ -5,6 +5,7 @@ const { messageError } = require('./localization.cjs');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { renameWithRetry } = require('./rename-retry.cjs');
 
 const MAX_RECOVERY_BYTES = 256 * 1024 * 1024;
 // One copy per open project. Copies a crashed session left behind are offered at the next start; the oldest of
@@ -19,7 +20,7 @@ async function atomicWrite(destination, data) {
     const handle = await fs.open(temporary, 'wx');
     try { await handle.writeFile(data); await handle.sync(); }
     finally { await handle.close(); }
-    await fs.rename(temporary, destination);
+    await renameWithRetry(temporary, destination);
   } finally {
     await fs.unlink(temporary).catch((error) => { if (error.code !== 'ENOENT') throw error; });
   }
