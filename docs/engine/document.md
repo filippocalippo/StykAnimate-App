@@ -51,7 +51,7 @@ its tables, then each figure, keyframe, background, retained pose source and aud
 file lifts them (`container::ViewLifter`: arrays and images the tree shares are written once and named by
 the same marker, so the read view shares them and a save lifts the same bytes) and restored by
 `restoreLifted`. The interface thread restores in slices of 4 ms. The Pivot original of a project
-stays with the codec for saving (`/api/source/keep`, leased to the project); the web build embeds it in
+stays with the codec for saving (`/api/source/keep`, leased to the project, sent while the engine decodes); the web build embeds it in
 the document instead (`OpenedDocument.attach_source`).
 
 The session that edits the document starts from the same tree and typed views
