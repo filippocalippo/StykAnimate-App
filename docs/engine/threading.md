@@ -191,13 +191,15 @@ module spent most of its CPU time in `dlmalloc::sys::System::alloc` (the functio
 
 `engine/crates/styk-alloc` is the global allocator of the engine module (`styk-wasm`) and the
 codec module (`styk-codec-wasm`): the standard allocator, and whenever it had to grow the
-memory it grows it further in one step (an eighth of the memory, between 16 and 128 MiB) and
+memory it grows it further in one step (an eighth of the memory, between 16 and 32 MiB) and
 returns the extra pages to the allocator's free space. A step the memory cannot take (the
 shared memory's maximum, [D14](decisions/0014-shared-memory-maximum.md)) is halved until one
 fits. Near the maximum this can refuse a later large request that the standard allocator
 would have met, within one step of the ceiling (not seen on any document). Allocation results, and so documents and
 bytes, are unchanged; the memory ends at most one step larger than the document needs, in pages
-that are committed but untouched (opening tdd2 uriel nemesis: engine memory 1,071 to 1,183 MiB). The drawing module keeps the standard allocator: its memory
+that are committed but untouched, which the browser counts as the app's memory (Electron's private bytes are the commit
+charge): steps of up to 128 MiB left that much dead at the top of a large document's memory, and 32 MiB reach the
+largest memory in about seventy steps of a millisecond or two each. The drawing module keeps the standard allocator: its memory
 grows in few, large steps.
 
 Measure it by opening a large Pivot file in Node (`engine-open.mjs`: the engine's open job and the

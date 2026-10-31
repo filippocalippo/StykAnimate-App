@@ -32,6 +32,38 @@ Three things filled the memory of a large document, each without a bound:
    (append-only: an index names an image for good) took the picture in again. tdd2 gained 70 to 110
    MiB for each undo and redo.
 
+## The high-water mark
+
+The memory only grows (dlmalloc never gives pages back, and a shared memory cannot shrink), so the most it ever held at
+once is paid for the whole session: Electron counts every page the module grew to as the app's private bytes, touched or
+not. Measured on 2026-10-31 (`slot.mjs probe`, dev build, one run each; MiB; `heap` is the linear memory, `live` what
+the allocator handed out, `peak` its high-water mark, `Tab` the renderer's private bytes):
+
+| tdd2 | heap | live | peak | Tab |
+| --- | ---: | ---: | ---: | ---: |
+| empty app | 18 | 4 | 4 | 177–212 |
+| opened (decoded, normalised, typed views, the Pivot original attached) | 304–306 | 284 | 291 | 730–763 |
+| pictures decoding (settle) before | 644–682 | 510 | 511 | 1,299–1,359 |
+| pictures decoding (settle) after | 467 | 317 | 350 | 1,123 |
+| playing, scrubbing, after | 467 | 211–267 | 350 | 1,110–1,208 |
+
+Opening takes the memory to about 300 and the pictures then took it to 680: a live peak of 510 against 213 kept, in the
+two seconds the stage takes the document's pictures in. Live blocks of 2 MiB or more, sampled at that peak, named it: four
+decoded 4K pictures (28 to 36 each: the pictures being decoded and queued) and **one block of 129**. That block was the
+float intermediate of `image::imageops::resize` for a 4,096-wide picture the atlas keeps at 4,094 (the library resizes in two
+passes over a float picture of the source's width and the new height), on top of the decoded picture, its resize and its
+stored copy: 225 MiB of working memory for one picture, 7.8 times its stored size, while the other 36 large pictures
+needed 1.0 to 1.3. `styk_eval::assets::decode_image` now decodes a picture of 8-bit RGB or RGBA at its atlas size into the
+end of its final buffer and borders it there (`read_into_tail`, `border_in_place`: 1.0 times the stored size), and resizes
+row by row with the library's own weights, order of summing and rounding (`resize_triangle`: a float row, not a float
+picture; the tests compare it with the library byte for byte). Pixels are unchanged. The grow-ahead step is 16 to 32 MiB
+(was 16 to 128): the pages of a step are committed whether used or not.
+
+What is left of the 150 MiB between the live peak (317) and what stays (211): the Pivot reader's inflated payload while the
+tree is built (tdd2: live 186 after the decode against a peak of 314, measured natively), and the pictures in flight and
+queued (a thirtieth of the memory). The open's own temporaries are free space afterwards, which later work reuses, so the
+heap stays near the open's own peak (300) plus what the pictures add on top of the document.
+
 ## What is bounded now
 
 - **Pictures** (`styk_engine::images`, `Budgets::picture_bytes`): a picture is decoded only while the
