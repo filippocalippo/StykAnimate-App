@@ -436,6 +436,12 @@ impl Stage {
         })
     }
 
+    /// The unique ids of the objects of the edit frame the stage holds, by slot: what the interface needs to say which figures are hidden or
+    /// dragged, without a copy of the frame (the frame is the session's).
+    pub fn edit_uids(&self) -> Vec<u32> {
+        self.edit.frame().map(|frame| frame.objects.iter().map(|object| object.uid).collect()).unwrap_or_default()
+    }
+
     /// Draws the edit frame with the onion skins set by [`Stage::set_onions`]. `hidden` lists object slots not drawn;
     /// `translations` holds `slot, dx, dy` triples of dragged objects; `background` is an ARGB canvas colour
     /// replacing the scene background, or a negative number for none.
