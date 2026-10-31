@@ -114,7 +114,8 @@ export class UserLibrary {
       for (const item of items) if (item.isIntersecting) { this.observer.unobserve(item.target); this.loadThumbnail(item.target, this.generation); }
     }, {root: this.content, rootMargin: '150px'});
     window.addEventListener('focus', () => { if (this.visible && this.source === 'mine' && !this.busy && !this.grid.querySelector('input')) this.run(() => this.refresh()); });
-    editor.addEventListener('change', () => this.syncSelection()); this.syncSelection();
+    editor.addEventListener('change', event => this.editorChanged(event));
+    this.syncSelection();
     // stykanimate://library/<id> from the website: the main process keeps the link until it is taken.
     if (desktop?.takePublicLibraryLink) {
       const take = () => this.run(async () => { const id = await desktop.takePublicLibraryLink(); if (id !== null && id !== undefined) await this.openPublic(id); });
@@ -191,6 +192,13 @@ export class UserLibrary {
   }
   setFilter(value) { this.filterValue = value; this.kindSelect.value = value; this.render(); }
   setBackground(value) { this.background = value; this.container.dataset.background = value; }
+  /** A playhead move changes only which selected figures the frame on show holds, and finding out builds that frame: playback moves
+   * the playhead on every tick, so these wait for the playhead to rest. Any other change is shown at once. */
+  editorChanged(event) {
+    if (event.detail?.kind !== 'seek') return this.syncSelection();
+    clearTimeout(this.selectionTimer);
+    this.selectionTimer = setTimeout(() => this.syncSelection(), 250);
+  }
   syncSelection() {
     const count = this.editor.selectedObjects.length, available = Boolean(this.desktop?.listLibrary);
     const saves = this.roots.flatMap(root => [...root.querySelectorAll('[data-library-action="save"]')]);
