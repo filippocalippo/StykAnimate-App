@@ -93,14 +93,14 @@ impl Renderer {
     }
 
     /// Writes live drawing slots, `base` being the layer of the first live page.
-    pub fn upload_live(&mut self, base: u32, uploads: &[styk_eval::live::Upload]) {
-        for upload in uploads {
-            let (x, y) = upload.origin();
+    pub fn upload_live(&mut self, base: u32, runs: &[styk_eval::live::Run]) {
+        for run in runs {
+            let width = run.cells * styk_eval::live::CELL;
             self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo { texture: &self.sprites, mip_level: 0, origin: wgpu::Origin3d { x, y, z: base + upload.page }, aspect: wgpu::TextureAspect::All },
-                &upload.rgba,
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(styk_eval::live::CELL * 4), rows_per_image: Some(styk_eval::live::CELL) },
-                wgpu::Extent3d { width: styk_eval::live::CELL, height: styk_eval::live::CELL, depth_or_array_layers: 1 },
+                wgpu::TexelCopyTextureInfo { texture: &self.sprites, mip_level: 0, origin: wgpu::Origin3d { x: run.x, y: run.y, z: base + run.page }, aspect: wgpu::TextureAspect::All },
+                &run.rgba,
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(styk_eval::live::CELL) },
+                wgpu::Extent3d { width, height: styk_eval::live::CELL, depth_or_array_layers: 1 },
             );
         }
     }

@@ -194,6 +194,14 @@ impl EditSession {
         answer
     }
 
+    /// The geometry packet of the frame on show (`geometry`) or of a frame the document does not hold (`previewGeometry`): words, not text
+    /// (`styk_edit::session::Session::query_packet`). Empty where a motion-path edit shows the document.
+    pub fn query_packet(&mut self, kind: &str, args: &str, view: &str) -> Result<Vec<f64>, JsError> {
+        let answer = self.session.as_mut().expect("a session is open until it is dropped").query_packet(kind, args, view).map_err(js_error);
+        self.publish();
+        answer
+    }
+
     /// Runs one editor call: its JavaScript name, its arguments as a JSON array and
     /// the editor's view before it (JSON). Answers with JSON: status, result, state,
     /// events, the gesture's draft and what a command published. With `changesOnly: true`

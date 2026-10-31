@@ -139,6 +139,11 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
       try { return session.query(kind, JSON.stringify(args), adopting ? 'null' : playhead()); }
       catch (error) { throw queryFailure(error); }
     },
+    packet(kind, args) {
+      if (!reading()) return null;
+      try { return session.query_packet(kind, JSON.stringify(args), adopting ? 'null' : playhead()); }
+      catch (error) { throw queryFailure(error); }
+    },
     source(motion) {
       if (!reading()) return null;
       return {session, view: playhead(), motion};

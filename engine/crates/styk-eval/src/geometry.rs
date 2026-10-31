@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 mod cache;
-mod interface;
-pub use interface::write_groups;
+pub mod interface;
+pub use interface::pack_groups;
 pub(crate) use cache::{Resolved, arc_allocation};
 pub use cache::{ClipSceneCache, RetainedScene, SceneBudget};
 

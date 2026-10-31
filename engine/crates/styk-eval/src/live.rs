@@ -23,13 +23,18 @@
 //! others are remembered stale and written when a view first calls for them. The module is pure:
 //! the host writes the [`Upload`]s into its atlas.
 
-use std::collections::{HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap as StdMap, HashSet as StdSet};
 
 use styk_draw::{DrawList, F_DRAWING, K_IMAGE};
 
 use crate::assets::{AtlasEntry, PAGE};
 pub use crate::drawing::TILE_BYTES;
-use crate::drawing::{bordered, down_tile, BORDER, MAX_LEVEL, TILE};
+use crate::drawing::{bordered, down_tile, CoordBuild, BORDER, MAX_LEVEL, TILE};
+
+/// Maps and sets keyed by tile coordinates or slots.
+type HashMap<K, V> = StdMap<K, V, CoordBuild>;
+type HashSet<K> = StdSet<K, CoordBuild>;
 
 /// A set of display levels: bit `n` is level `n`.
 pub type Levels = u16;
@@ -66,6 +71,54 @@ pub struct Upload {
     pub rgba: Vec<u8>,
 }
 
+/// Slots written side by side in one row of a live page, as one rectangle of `cells` × [`CELL`]
+/// texels at `(x, y)` (the corner of the first cell, border included).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Run {
+    pub page: u32,
+    pub x: u32,
+    pub y: u32,
+    pub cells: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// The uploads of one or several calls as the fewest writes that leave the same texels: a slot
+/// written twice keeps its last contents (a tile's neighbourhood is rewritten by each call that
+/// changes a tile beside it), and slots next to each other in a row become one rectangle.
+pub fn coalesce(uploads: Vec<Upload>) -> Vec<Run> {
+    let mut last: HashMap<(u32, u32, u32), Vec<u8>> = HashMap::default();
+    for upload in uploads {
+        last.insert((upload.page, upload.y, upload.x), upload.rgba);
+    }
+    let mut cells: Vec<((u32, u32, u32), Vec<u8>)> = last.into_iter().collect();
+    cells.sort_unstable_by_key(|(key, _)| *key);
+    let row = (CELL * 4) as usize;
+    let mut runs: Vec<Run> = Vec::new();
+    let mut at = 0;
+    while at < cells.len() {
+        let ((page, y, x), _) = cells[at];
+        let mut end = at + 1;
+        while end < cells.len() && cells[end].0 == (page, y, x + CELL * (end - at) as u32) {
+            end += 1;
+        }
+        let count = end - at;
+        let rgba = if count == 1 {
+            std::mem::take(&mut cells[at].1)
+        } else {
+            let mut rgba = Vec::with_capacity(count * row * CELL as usize);
+            for line in 0..CELL as usize {
+                for cell in &cells[at..end] {
+                    rgba.extend_from_slice(&cell.1[line * row..(line + 1) * row]);
+                }
+            }
+            rgba
+        };
+        runs.push(Run { page, x: x - BORDER, y: y - BORDER, cells: count as u32, rgba });
+        at = end;
+    }
+    runs
+}
+
 /// Where a slot sits in the live pages.
 fn place(slot: u32) -> (u32, u32, u32) {
     let (page, cell) = (slot / PAGE_SLOTS, slot % PAGE_SLOTS);
@@ -73,7 +126,9 @@ fn place(slot: u32) -> (u32, u32, u32) {
 }
 
 struct Pool {
-    free: Vec<u32>,
+    /// Slots given back, the lowest taken first: the pages fill from the start, and the tiles of a
+    /// row of the cel tend to sit side by side in a row of the page, which [`coalesce`] writes at once.
+    free: BinaryHeap<Reverse<u32>>,
     /// Slots handed out so far at most: the pages the atlas needs.
     high: u32,
     capacity: u32,
@@ -81,7 +136,7 @@ struct Pool {
 
 impl Default for Pool {
     fn default() -> Self {
-        Pool { free: Vec::new(), high: 0, capacity: MAX_PAGES * PAGE_SLOTS }
+        Pool { free: BinaryHeap::new(), high: 0, capacity: MAX_PAGES * PAGE_SLOTS }
     }
 }
 
@@ -92,7 +147,7 @@ impl Pool {
     }
 
     fn take(&mut self) -> Result<u32, Full> {
-        if let Some(slot) = self.free.pop() {
+        if let Some(Reverse(slot)) = self.free.pop() {
             return Ok(slot);
         }
         if self.high >= self.capacity {
@@ -166,7 +221,7 @@ impl Layer {
 
     fn release(&mut self, pool: &mut Pool) {
         for level in &mut self.slots {
-            pool.free.extend(level.drain().map(|(_, slot)| slot));
+            pool.free.extend(level.drain().map(|(_, slot)| Reverse(slot)));
         }
         *self = Layer::default();
     }
@@ -177,12 +232,12 @@ impl Layer {
     /// `resident`; the same slots of the other levels are remembered stale.
     fn apply(&mut self, pool: &mut Pool, resident: Levels, changes: Vec<(Coord, Option<Vec<u8>>)>) -> Result<Vec<(u32, Vec<u8>)>, Full> {
         if self.drawn.is_empty() {
-            self.reduced = (0..MAX_LEVEL).map(|_| Level::new()).collect();
+            self.reduced = (0..MAX_LEVEL).map(|_| Level::default()).collect();
             self.drawn = (0..=MAX_LEVEL).map(|_| Vec::new()).collect();
-            self.slots = (0..=MAX_LEVEL).map(|_| HashMap::new()).collect();
-            self.stale = (0..=MAX_LEVEL).map(|_| HashSet::new()).collect();
+            self.slots = (0..=MAX_LEVEL).map(|_| HashMap::default()).collect();
+            self.stale = (0..=MAX_LEVEL).map(|_| HashSet::default()).collect();
         }
-        let mut dirty: Vec<HashSet<Coord>> = vec![HashSet::new()];
+        let mut dirty: Vec<HashSet<Coord>> = vec![HashSet::default()];
         let mut membership = false;
         for (coord, pixels) in changes {
             match pixels.filter(|pixels| pixels.len() == TILE_BYTES && visible(pixels)) {
@@ -205,7 +260,7 @@ impl Layer {
             let parents: HashSet<Coord> = dirty[n - 1].iter().map(|&(x, y)| (x.div_euclid(2), y.div_euclid(2))).collect();
             let fresh: Vec<(Coord, Option<Vec<u8>>)> =
                 parents.into_iter().map(|(x, y)| ((x, y), down_tile(self.level(n - 1), x, y).filter(|tile| visible(tile)))).collect();
-            let mut changed = HashSet::new();
+            let mut changed = HashSet::default();
             for (coord, tile) in fresh {
                 if self.reduced[n - 1].get(&coord) == tile.as_ref() {
                     continue;
@@ -223,7 +278,7 @@ impl Layer {
             dirty.push(changed);
         }
         // Drawn tiles and their slots follow the tile set.
-        let mut fresh: Vec<HashSet<Coord>> = (0..=MAX_LEVEL).map(|_| HashSet::new()).collect();
+        let mut fresh: Vec<HashSet<Coord>> = (0..=MAX_LEVEL).map(|_| HashSet::default()).collect();
         if membership {
             let tiles: Vec<Coord> = self.level0.keys().copied().collect();
             for n in 0..=MAX_LEVEL as usize {
@@ -234,7 +289,7 @@ impl Layer {
                 for coord in gone {
                     self.stale[n].remove(&coord);
                     if let Some(slot) = self.slots[n].remove(&coord) {
-                        pool.free.push(slot);
+                        pool.free.push(Reverse(slot));
                     }
                 }
                 for &coord in &drawn {
@@ -324,7 +379,7 @@ impl Default for LiveCel {
 
 /// The live cels of a stage, by cel id (`_styk.drawing.celId`), sharing a pool of atlas slots.
 pub struct LiveCels {
-    cels: HashMap<String, LiveCel>,
+    cels: StdMap<String, LiveCel>,
     pool: Pool,
     /// The levels written as tiles change; the others wait ([`LiveCels::set_resident`]).
     resident: Levels,
@@ -355,7 +410,7 @@ pub struct Stats {
 impl LiveCels {
     /// Live cels that write the levels in `resident` as tiles change.
     pub fn new(resident: Levels) -> Self {
-        LiveCels { cels: HashMap::new(), pool: Pool::default(), resident }
+        LiveCels { cels: StdMap::new(), pool: Pool::default(), resident }
     }
 
     /// Pages of the atlas the slots need after the document's own.
@@ -526,13 +581,6 @@ pub fn shown_levels(list: &DrawList, base: u32, scale: f64) -> Levels {
         }
     }
     shown & ALL_LEVELS
-}
-
-impl Upload {
-    /// The corner of the written rectangle in the page (the border included).
-    pub fn origin(&self) -> (u32, u32) {
-        (self.x - BORDER, self.y - BORDER)
-    }
 }
 
 #[cfg(test)]

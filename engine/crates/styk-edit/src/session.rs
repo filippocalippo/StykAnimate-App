@@ -375,6 +375,9 @@ impl Session {
             editor.set_active_layer_id(active);
         }
         editor.set_sheet_selection(sheet_selection_of(&state));
+        // Which figures the frames hold is counted now, not by the first commit: it scans every pose of the document (tens of milliseconds
+        // on a dense one), which the first gesture of a session paid for as a freeze.
+        editor.ensure_counts();
         Ok(Session { editor })
     }
 
@@ -428,19 +431,34 @@ impl Session {
         styk_doc::json::to_string(&answer)
     }
 
-    /// A read of what the interface shows, at `view` (its playhead: `tick` and `frameIndex`): `kind` is `frame`, `document`, `motion`,
-    /// `timeline` or `geometry` (`args`: `{since, motion}`); or the name of one of the editor's reads the session answers
+    /// The geometry of the frame on show (`geometry`: `args` `{since, motion}`; empty where a motion-path edit shows the document) or of
+    /// a frame the document does not hold (`previewGeometry`), as a packet of words (`interface.rs`), at `view` (its playhead). Errors are
+    /// those of [`Session::query`].
+    pub fn query_packet(&mut self, kind: &str, args: &str, view: &str) -> Result<Vec<f64>, String> {
+        let (args, view) = (styk_doc::json::parse(args.as_bytes()).map_err(|error| error.to_string())?, styk_doc::json::parse(view.as_bytes()).map_err(|error| error.to_string())?);
+        apply_playhead(&mut self.editor, &view);
+        let packet = match kind {
+            "geometry" => self.editor.interface_geometry(&args),
+            "previewGeometry" => self.editor.interface_preview_geometry(&args),
+            other => Err(EditError::Invalid(format!("the session answers no packet '{other}'"))),
+        };
+        packet.map_err(|error| match error {
+            EditError::Invalid(message) => message,
+            EditError::Unported(message) => format!("{UNPORTED}{message}"),
+        })
+    }
+
+    /// A read of what the interface shows, at `view` (its playhead: `tick` and `frameIndex`): `kind` is `frame`, `document`, `motion`
+    /// or `timeline`; or the name of one of the editor's reads the session answers
     /// (`Editor::interface_query`, at the whole view: `{"v": value}`, or `{}` where the editor answers `undefined`). The answer is
     /// JSON text; the document does not change. An error that starts with [`UNPORTED`] is a document the session does not answer for.
     pub fn query(&mut self, kind: &str, args: &str, view: &str) -> Result<String, String> {
         let (args, view) = (styk_doc::json::parse(args.as_bytes()).map_err(|error| error.to_string())?, styk_doc::json::parse(view.as_bytes()).map_err(|error| error.to_string())?);
         let shown = match kind {
-            "timeline" | "geometry" | "previewGeometry" | "figureDocument" | "frame" | "document" | "motion" => {
+            "timeline" | "figureDocument" | "frame" | "document" | "motion" => {
                 apply_playhead(&mut self.editor, &view);
                 match kind {
                     "timeline" => Ok(self.editor.interface_timeline()),
-                    "geometry" => self.editor.interface_geometry(&args),
-                    "previewGeometry" => self.editor.interface_preview_geometry(&args),
                     "figureDocument" => self.editor.interface_figure_document(&args),
                     other => self.editor.interface_frame(other),
                 }
