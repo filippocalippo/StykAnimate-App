@@ -32,7 +32,9 @@ How the engine runs in the app (`engine/crates/styk-engine`,
 - `src/engine/engine.mjs`: loads the module with shared memory, starts
   `navigator.hardwareConcurrency - 1` workers, at most 8 (`engine-worker.mjs`), and
   without cross-origin isolation runs the same module without workers through
-  `pump()`. `join` hands another thread what it needs to join the engine (the
+  `pump()`. `src/engine/engine-start.mjs`, the page's first script (index.html), loads the engine and requests the scene canvas's
+  graphics device while the application's modules are still arriving; the application's `loadEngine()` and `createStage()` take
+  what it started (`prepareStage`, `stageHandoff`). `join` hands another thread what it needs to join the engine (the
   compiled module, the memory, a stack size, the progress counter's address).
 - The export worker (`src/engine/engine-export-worker.mjs`, one per export, see
   [rendering.md](rendering.md#exports)): joins the shared memory like a preparation
