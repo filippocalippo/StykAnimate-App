@@ -1645,3 +1645,25 @@ pub fn apply_layer_order(doc: &Document, frame: &mut Frame) {
     }
     frame.draw_order = next;
 }
+
+impl Frame {
+    /// Makes this frame (converted of `record`, against `doc`) share the objects of `prior` (converted of `prior_record`, against
+    /// `prior_doc`) where nothing changed: an object whose record holds the data the prior one did, of a figure that is the same
+    /// definition in both documents, is the prior frame's own object. What was built of it, it still is
+    /// ([`crate::geometry::BuildMemory`] keeps builds by the identity of the object).
+    pub fn keep_unchanged(&mut self, record: &styk_doc::Value, prior: &Frame, prior_record: &styk_doc::Value, prior_doc: &Document, doc: &Document) {
+        let (now, before) = (record.get("objects").and_then(styk_doc::Value::as_arr), prior_record.get("objects").and_then(styk_doc::Value::as_arr));
+        let (Some(now), Some(before)) = (now, before) else { return };
+        if now.len() != before.len() || now.len() != self.objects.len() || self.objects.len() != prior.objects.len() {
+            return;
+        }
+        for (slot, object) in self.objects.iter_mut().enumerate() {
+            let kept = &prior.objects[slot];
+            let figure = object.figure;
+            let same_figure = prior_doc.figure(figure).zip(doc.figure(figure)).is_some_and(|(was, is)| Arc::ptr_eq(was, is));
+            if !Arc::ptr_eq(object, kept) && same_figure && now[slot].same_data(&before[slot]) {
+                *object = kept.clone();
+            }
+        }
+    }
+}

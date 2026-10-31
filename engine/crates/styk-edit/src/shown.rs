@@ -86,20 +86,8 @@ impl Editor {
         frame.tick = self.tick;
         // An object whose record holds the data the held frame's did is that frame's object: what a scene built of it was, it still is.
         let held = self.shown.borrow()[usize::from(motion)].scenes.latest();
-        if let Some(held) = held.filter(|held| held.frame.objects.len() == frame.objects.len()) {
-            let (now, before) = (source.get("objects").and_then(Value::as_arr), held.record.get("objects").and_then(Value::as_arr));
-            if let (Some(now), Some(before)) = (now, before)
-                && now.len() == before.len() && now.len() == frame.objects.len()
-            {
-                for (slot, object) in frame.objects.iter_mut().enumerate() {
-                    let kept = &held.frame.objects[slot];
-                    let figure = object.figure;
-                    let same_figure = held.prepared.doc.figure(figure).zip(prepared.doc.figure(figure)).is_some_and(|(was, is)| Arc::ptr_eq(was, is));
-                    if !Arc::ptr_eq(object, kept) && same_figure && now[slot].same_data(&before[slot]) {
-                        *object = kept.clone();
-                    }
-                }
-            }
+        if let Some(held) = held {
+            frame.keep_unchanged(&source, &held.frame, &held.record, &held.prepared.doc, &prepared.doc);
         }
         let fields = frame.pose_vfx.is_some() || frame.objects.iter().any(|object| object.vfx.is_some() || object.vfx_connected.is_some());
         let plain = !(fields || prepared.has_vfx);

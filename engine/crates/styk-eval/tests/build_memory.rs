@@ -122,3 +122,23 @@ fn a_list_encoded_over_the_last_is_the_list_encoded_whole() {
         }
     }
 }
+
+/// An onion skin's scene is built plain (no shapes) over its own memory: the same scene as built whole, and an object that did not
+/// change is not built again when the scene is built again (the document it is drawn against was published anew).
+#[test]
+fn a_plain_build_over_the_last_is_the_build_whole() {
+    for name in FIXTURES {
+        let prepared = prepared(name);
+        let mut memory = BuildMemory::default();
+        let frame = prepared.evaluate(0.0);
+        same_scene(&geometry::build_remembering_plain(&prepared.doc, &frame, &mut memory), &geometry::build(&prepared.doc, &frame), &format!("{name}: first"));
+        let first: Vec<u64> = (0..frame.objects.len()).map(|slot| memory.built_in(slot)).collect();
+        same_scene(&geometry::build_remembering_plain(&prepared.doc, &frame, &mut memory), &geometry::build(&prepared.doc, &frame), &format!("{name}: again"));
+        assert_eq!((0..frame.objects.len()).map(|slot| memory.built_in(slot)).collect::<Vec<_>>(), first, "{name}: nothing is built again");
+        if let Some(slot) = (0..frame.objects.len()).find(|&slot| !frame.objects[slot].angles.is_empty()) {
+            let next = turned(&frame, slot);
+            same_scene(&geometry::build_remembering_plain(&prepared.doc, &next, &mut memory), &geometry::build(&prepared.doc, &next), &format!("{name}: turned"));
+            assert_ne!(memory.built_in(slot), first[slot], "{name}: the object turned is built again");
+        }
+    }
+}

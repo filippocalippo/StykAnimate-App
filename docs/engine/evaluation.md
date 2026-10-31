@@ -399,7 +399,9 @@ playhead's. `src/engine/engine-shown.mjs` asks `EditSession.query` (`Session::qu
   Each ghost is the document evaluated at its tick (the committed pose, never a gesture's draft) with the slots that are
   not drawn (scope, hidden figures and layers, the layer it samples), its opacity and tint. The set is kept while the
   document, the playhead and the request are the same; the stage keeps a pose per tick (`EditScene::update_ghost`) and
-  builds its geometry when it is first drawn. The `onions` query answers the plan as JSON without the poses.
+  builds its geometry when it is first drawn, over what the pose's last build made (`BuildMemory`, held only for the ghosts on show), so a
+  document published anew (a commit, an undo) builds the objects of a ghost that changed, not all of them. A pose that replaces another of
+  the same tick shares the objects whose records hold the same data (`Frame::keep_unchanged`, also how the shown frame keeps its own). The `onions` query answers the plan as JSON without the poses.
 - **The camera** (`styk-edit/src/camera_views.rs`): `shot` is the camera the frame on show is seen through at the playhead
   (`Editor::camera_at_time`: follow travel, then the presets' impulse); `frameCamera` the authored camera of the document at a
   tick; `cameraSamples` what one clip alone does to the shot at each tick (`x, y, rotation, zoom`), the clip being given, so
