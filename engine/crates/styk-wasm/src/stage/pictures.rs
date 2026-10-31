@@ -378,8 +378,9 @@ impl Stage {
             self.pin_page(generation, page);
         }
         // The live slots lived in the texture that was replaced.
+        self.live_pending.clear();
         let uploads = self.live.uploads();
-        self.write_live(&uploads);
+        self.write_live(uploads);
     }
 
     /// Gives `page` a layer for good.

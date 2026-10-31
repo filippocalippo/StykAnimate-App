@@ -16,6 +16,9 @@ use crate::js_error;
 /// sprites fills its atlas over a few frames instead of stalling one.
 const IMAGE_UPLOAD_BYTES: usize = 8 << 20;
 
+/// Slots waiting for the next frame at most (2,000 slots are 35 MiB of texels): more are written at once.
+const LIVE_PENDING_SLOTS: usize = 2_000;
+
 /// The live drawing levels written before a frame has shown which it needs: the cel's own
 /// pixels and the level above (a view that fits the artboard on screen).
 const FIRST_LEVELS: styk_eval::live::Levels = 0b11;
@@ -70,6 +73,9 @@ pub struct Stage {
     /// Their slots are written for the levels a frame shows ([`Stage::show_live_levels`]).
     pub(crate) live: styk_eval::live::LiveCels,
     live_pages: u32,
+    /// Slots the live cels changed since the last frame, written together before the next one draws
+    /// ([`Stage::flush_live`]): the calls of a frame rewrite the same neighbourhoods.
+    live_pending: Vec<styk_eval::live::Upload>,
     /// The atlas places uploaded so far, and whether the last frame drawn lacked a
     /// picture ([`Stage::pictures_pending`]).
     uploaded: Uploaded,
@@ -203,6 +209,7 @@ impl Stage {
             atlas_serial: 0,
             live: styk_eval::live::LiveCels::new(FIRST_LEVELS),
             live_pages: 0,
+            live_pending: Vec::new(),
             uploaded: Uploaded::default(),
             residency: None,
             loading: Default::default(),
@@ -498,6 +505,7 @@ impl Stage {
     /// since (the camera monitor and thumbnails sample the same atlas).
     pub(crate) fn sync_images(&mut self, generation: &Arc<Generation>) {
         self.sync_atlas(generation);
+        self.flush_live();
         // A frame waiting for its pictures takes every one that is decoded; otherwise a slice a frame, and a picture
         // larger than the slice goes in over several frames (a 4K picture is 64 MiB).
         let waiting = self.loading.waiting();
@@ -559,8 +567,10 @@ impl Stage {
             }
             self.atlas_of = Some(layout);
             // The live slots lived in the texture that was replaced.
+            // The slots as they are now: what waited for the frame is older.
+            self.live_pending.clear();
             let uploads = self.live.uploads();
-            self.write_live(&uploads);
+            self.write_live(uploads);
         } else if live_pages > self.live_pages {
             // More live slots than pages: the texture grows and keeps what it holds.
             self.renderer.grow_sprites(&generation.assets, live_pages);
@@ -579,16 +589,28 @@ impl Stage {
         let levels = styk_eval::live::shown_levels(list, generation.assets.pages, (matrix[0] * matrix[3] - matrix[1] * matrix[2]).abs().sqrt());
         if levels != 0 {
             let uploads = self.live.set_resident(levels);
-            self.write_live(&uploads);
+            self.write_live(uploads);
         }
     }
 
-    /// Writes live drawing slots into the atlas laid out for the document drawn last.
-    fn write_live(&mut self, uploads: &[styk_eval::live::Upload]) {
+    /// Writes live drawing slots into the atlas laid out for the document drawn last, as few writes as
+    /// leave the same texels ([`styk_eval::live::coalesce`]).
+    fn write_live(&mut self, uploads: Vec<styk_eval::live::Upload>) {
         let Some((_, base)) = self.atlas_of else { return };
-        self.renderer.upload_live(base, uploads);
-        for upload in uploads {
-            self.uploaded.mark(base + upload.page, upload.x, upload.y);
+        let runs = styk_eval::live::coalesce(uploads);
+        self.renderer.upload_live(base, &runs);
+        for run in &runs {
+            for cell in 0..run.cells {
+                self.uploaded.mark(base + run.page, run.x + styk_eval::drawing::BORDER + cell * styk_eval::live::CELL, run.y + styk_eval::drawing::BORDER);
+            }
+        }
+    }
+
+    /// Writes the slots changed since the last frame.
+    fn flush_live(&mut self) {
+        if !self.live_pending.is_empty() {
+            let uploads = std::mem::take(&mut self.live_pending);
+            self.write_live(uploads);
         }
     }
 
@@ -695,7 +717,10 @@ impl Stage {
         changes.extend(removed.chunks_exact(2).map(|pair| ((pair[0], pair[1]), None)));
         let uploads = self.live.update(id, float, changes).map_err(|_| js_error("the live drawing slots are full"))?;
         self.sync_atlas(&generation);
-        self.write_live(&uploads);
+        self.live_pending.extend(uploads);
+        if self.live_pending.len() >= LIVE_PENDING_SLOTS {
+            self.flush_live();
+        }
         Ok(())
     }
 
