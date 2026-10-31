@@ -1743,7 +1743,7 @@ function loop(now) {
           state.drag?.geometry ||
           keyboardHandleGesture?.geometry ||
           editor.geometry;
-      state.renderer.render({
+      const editingDrawn = state.renderer.render({
         vfxEnabled: state.vfxEnabled,
         report: drawingPreview?.report??editor.report,
         documentReport: editor.report,
@@ -1764,7 +1764,8 @@ function loop(now) {
       // This paint can start or cancel the last capture. Reconcile both
       // directions before yielding; cancellation may leave no further RAF.
       syncBackgroundInteraction(viewChanging);
-      state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
+      // What is presented is what was drawn: a frame the stage could not draw yet leaves the previous picture on show.
+      if (editingDrawn) state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
         sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
       overlayRender(geometry);
       drawingController?.overlayDraw(ctx);

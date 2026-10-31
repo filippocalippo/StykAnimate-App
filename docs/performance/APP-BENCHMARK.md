@@ -99,3 +99,5 @@ other row within 5 % of main. A row the checkout cannot measure reads `absent`.
 
 The display here refreshes at 144 Hz (one refresh is 7 ms); `REFRESH` in the summary assumes it. Latencies end at the app's paint; scan-out adds about
 one display frame on every checkout alike. CPU or GPU throttling is not simulated: numbers from different machines are not comparable.
+
+The paint a latency ends at is `lastEditingPresentation`, which the app records only for a frame the stage actually drew (since 2026-10-31). Before that it was recorded when the app asked for a frame, so a frame the stage could not draw yet read as a fast paint. On a checkout older than that the rows that wait on a frame could understate a wait; in the baseline such frames are rare (a document still being published).
