@@ -522,3 +522,23 @@ fn a_neighbour_is_rewritten_only_when_the_edge_it_copies_changed() {
     assert!(level0(&cels, &written, (0, 0)) && level0(&cels, &written, (1, 0)));
     assert!(!level0(&cels, &written, (-1, 0)) && !level0(&cels, &written, (0, 1)) && !level0(&cels, &written, (1, 1)), "only the neighbour beside that edge changes");
 }
+
+#[test]
+fn cels_count_as_changing_until_a_few_frames_pass_without_a_change() {
+    let mut noise = Noise(8);
+    let mut cels = LiveCels::default();
+    assert!(!cels.changing(), "nothing is held");
+    update(&mut cels, "a", false, vec![((0, 0), Some(tile(&mut noise)))]).unwrap();
+    assert!(cels.changing());
+    for _ in 0..QUIET_FRAMES - 1 {
+        cels.frame_drawn();
+    }
+    assert!(cels.changing(), "the last frame of the window");
+    cels.frame_drawn();
+    assert!(!cels.changing(), "a quiet cel leaves the frame its whole upload budget");
+    // A call that changes nothing does not start the window; one that changes a tile does.
+    update(&mut cels, "a", false, Vec::new()).unwrap();
+    assert!(!cels.changing());
+    update(&mut cels, "a", false, vec![((1, 0), Some(tile(&mut noise)))]).unwrap();
+    assert!(cels.changing());
+}

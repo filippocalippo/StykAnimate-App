@@ -14,6 +14,10 @@ use crate::js_error;
 /// sprites fills its atlas over a few frames instead of stalling one.
 const IMAGE_UPLOAD_BYTES: usize = 8 << 20;
 
+/// The same while live drawing cels are changing: the published pictures decoded from the pixels being drawn (every
+/// level of the cel, megabytes after an undo) are not what the frame shows, and uploading them at once took 20 to 70 ms.
+const LIVE_IMAGE_UPLOAD_BYTES: usize = 512 << 10;
+
 /// The live drawing levels written before a frame has shown which it needs: the cel's own
 /// pixels and the level above (a view that fits the artboard on screen).
 const FIRST_LEVELS: styk_eval::live::Levels = 0b11;
@@ -474,7 +478,7 @@ impl Stage {
     pub(crate) fn sync_images(&mut self, generation: &Generation) {
         self.sync_atlas(generation);
         self.flush_live();
-        let images = self.engine.take_images(IMAGE_UPLOAD_BYTES);
+        let images = self.engine.take_images(if self.live.changing() { LIVE_IMAGE_UPLOAD_BYTES } else { IMAGE_UPLOAD_BYTES });
         self.upload_bytes = images.iter().map(|image| image.rgba.len()).sum();
         if !images.is_empty() {
             self.renderer.upload_images(&generation.assets, images.iter().map(|image| &**image));
@@ -557,6 +561,7 @@ impl Stage {
             return Ok(false);
         }
         self.sync_images(generation);
+        self.live.frame_drawn();
         let doc = &generation.prepared.doc;
         // The Draw view turns and mirrors about the artboard's centre, after the scene camera.
         let orientation = styk_eval::view::orientation(self.rotation, self.flip, [pan[0] + doc.canvas[0] as f64 * zoom / 2.0, pan[1] + doc.canvas[1] as f64 * zoom / 2.0]);

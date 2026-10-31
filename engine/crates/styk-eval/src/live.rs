@@ -51,6 +51,9 @@ pub const PAGE_SLOTS: u32 = COLUMNS * COLUMNS;
 /// Pages live cels may use together (4,096² texels each, 64 MiB).
 pub const MAX_PAGES: u32 = 4;
 
+/// Frames after the last change to a live cel during which the cels count as changing ([`LiveCels::changing`]).
+pub const QUIET_FRAMES: u32 = 24;
+
 /// The slots are all in use: the interface drops cels it can do without and tries again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Full;
@@ -357,6 +360,8 @@ pub struct LiveCels {
     pool: Pool,
     /// The levels written as tiles change; the others wait ([`LiveCels::set_resident`]).
     resident: Levels,
+    /// Frames drawn since a cel last changed.
+    quiet: u32,
 }
 
 impl Default for LiveCels {
@@ -384,7 +389,7 @@ pub struct Stats {
 impl LiveCels {
     /// Live cels that write the levels in `resident` as tiles change.
     pub fn new(resident: Levels) -> Self {
-        LiveCels { cels: StdMap::new(), pool: Pool::default(), resident }
+        LiveCels { cels: StdMap::new(), pool: Pool::default(), resident, quiet: QUIET_FRAMES }
     }
 
     /// Pages of the atlas the slots need after the document's own.
@@ -413,6 +418,9 @@ impl LiveCels {
     /// first update and stays hidden until [`LiveCels::show`]. The slots that change are marked for
     /// [`LiveCels::take_runs`]. On [`Full`] the cel is dropped whole, since a partial update would draw wrong.
     pub fn update(&mut self, id: &str, float: bool, changes: Vec<(Coord, Option<Vec<u8>>)>) -> Result<(), Full> {
+        if !changes.is_empty() {
+            self.quiet = 0;
+        }
         let cel = self.cels.entry(id.to_string()).or_default();
         let layer = if float { &mut cel.float } else { &mut cel.base };
         let result = layer.apply(&mut self.pool, self.resident, changes);
@@ -420,6 +428,18 @@ impl LiveCels {
             self.drop_cel(id);
         }
         result
+    }
+
+    /// A frame was drawn.
+    pub fn frame_drawn(&mut self) {
+        self.quiet = self.quiet.saturating_add(1);
+    }
+
+    /// Whether cels are held and one changed within the last [`QUIET_FRAMES`] frames: a stroke, an undo or a
+    /// move is being drawn from live tiles, and the frame has no time to spare for the published copies of those
+    /// pixels (the host uploads them in small slices until the cels are quiet).
+    pub fn changing(&self) -> bool {
+        !self.cels.is_empty() && self.quiet < QUIET_FRAMES
     }
 
     /// Chooses the levels written as tiles change: those the next frame shows. Marks the slots
