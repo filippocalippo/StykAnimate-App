@@ -438,9 +438,7 @@ the interface), onion skins (the poses the session plans, `Stage::set_onions`: [
 ([D4](decisions/0004-strangler-gate.md), [Every document](#every-document)); no other
 renderer draws a frame. A draw from the session needs neither the frame as poses nor the geometry: `request.frame` is read only by a draw that
 does not take the frame from the session, the figures not drawn and the ones dragged are named by slot from `Stage::edit_uids`, and the geometry
-(a read of the session) is read by the overlay. When only the playhead moved since the last picture (a scrub, a jump, a step) the picture is
-presented first and the handles and the overlay are drawn on the next animation frame (`loop` in `src/app.mjs`; at most 64 ms behind while
-pictures keep coming). The WebGPU surface is configured with
+(a read of the session) is read by the overlay. The WebGPU surface is configured with
 premultiplied alpha so the page shows through the pasteboard. Through the scene
 camera (prepared playback frames, and edit frames in the camera preview) the scene is
 seen through the shot (follow clips, camera-motion impulses) and parallax layers
