@@ -16,12 +16,24 @@ const API_VERSION = 1;
 /** Each worker's stack: evaluation recurses through nested movieclips. */
 const WORKER_STACK_BYTES = 2 * 1024 * 1024;
 
+/** The preparation threads a launch starts; `grow()` starts the rest when the first document, playback or export needs them. */
+const LAUNCH_WORKERS = 2;
+
 /** How many preparation threads a device gets: its cores minus the interface thread, at most eight. */
 function defaultWorkerCount(cores = globalThis.navigator?.hardwareConcurrency || 4) {
   return Math.max(1, Math.min(8, cores - 1));
 }
 
 let loading = null;
+
+let adapter = null;
+/**
+ * The browser's graphics adapter, asked for once (null where there is none): the one the stage will use, and what the
+ * status line names. Asking takes most of a second in the browser's graphics process, so the page starts it early.
+ */
+export function requestGraphicsAdapter() {
+  return adapter ??= (globalThis.navigator?.gpu?.requestAdapter?.({powerPreference: 'high-performance'}) ?? Promise.resolve(null)).catch(() => null);
+}
 
 /**
  * Loads the engine once per page.
@@ -86,15 +98,16 @@ async function load({workers = defaultWorkerCount(), deviceMemory = globalThis.n
   // Threads need the memory to be shareable with workers, which a page that is not cross-origin isolated cannot do.
   const threaded = workers > 0 && globalThis.crossOriginIsolated !== false && typeof Worker === 'function';
   const pool = [];
-  if (threaded) {
-    await Promise.all(Array.from({length: workers}, () => new Promise((resolve, reject) => {
-      const worker = new Worker(new URL('./engine-worker.mjs', import.meta.url), {type: 'module', name: 'styk-engine'});
-      worker.onmessage = () => resolve();
-      worker.onerror = event => reject(new Error(`An engine worker failed to start: ${event.message}`));
-      worker.postMessage({module, memory, address: handle.address(), stack: WORKER_STACK_BYTES});
-      pool.push(worker);
-    })));
-  }
+  /** Starts one more preparation thread; resolves when it has joined the engine. */
+  const spawn = () => new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./engine-worker.mjs', import.meta.url), {type: 'module', name: 'styk-engine'});
+    worker.onmessage = () => resolve();
+    worker.onerror = event => reject(new Error(`An engine worker failed to start: ${event.message}`));
+    worker.postMessage({module, memory, address: handle.address(), stack: WORKER_STACK_BYTES});
+    pool.push(worker);
+  });
+  if (threaded) await Promise.all(Array.from({length: Math.min(workers, LAUNCH_WORKERS)}, spawn));
+  let growing = null, stopped = false;
   const progress = new Int32Array(memory.buffer, handle.progress_address(), 1);
   const stages = stageHandoff(canvas => Stage.create(canvas, handle));
   let pumping = false;
@@ -123,7 +136,15 @@ async function load({workers = defaultWorkerCount(), deviceMemory = globalThis.n
     return waitForEngineProgress(progress, threaded, seen, timeoutMs);
   };
   return {
-    handle, workers: pool.length, threaded, pump, whenProgress, progressSeen,
+    handle, get workers() { return pool.length; }, threaded, pump, whenProgress, progressSeen,
+    /**
+     * Starts the preparation threads a launch left unstarted (once): a document is about to open, play or export.
+     * Work already queued runs on the threads there are until the others join; a thread that cannot start leaves the pool as it is.
+     */
+    grow() {
+      return growing ??= Promise.all(Array.from({length: threaded && !stopped ? workers - pool.length : 0}, spawn))
+        .then(() => {}, error => console.warn(error.message));
+    },
     /**
      * What another thread needs to join the engine (the export worker, engine-export.mjs):
      * the compiled module, the shared memory, a worker's stack size and the address of
@@ -144,6 +165,7 @@ async function load({workers = defaultWorkerCount(), deviceMemory = globalThis.n
     /** An edit session on the document `json` exactly as the editor holds it (D19). */
     editSession: (json, state, revision) => EditSession.from_document(json, state, revision),
     destroy() {
+      stopped = true;
       handle.stop();
       for (const worker of pool) worker.terminate();
       loading = null;

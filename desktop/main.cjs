@@ -115,8 +115,18 @@ if (!primaryInstance) {
   app.setPath('sessionData', instanceDirectory);
   app.setPath('crashDumps', path.join(instanceDirectory, 'crashes'));
 }
+/**
+ * What the page keeps in the browser lasts one launch: what must last lives in native files. IndexedDB here is
+ * temporary worker storage (undo caches), so the previous launch's is reclaimed before any editor or worker can use
+ * the session. The folders (Chromium keeps local storage in `Local Storage`, newer versions in `WebStorage`) go before
+ * Chromium opens its storage, which happens after `ready`: far quicker than clearing them through the session, and the
+ * page loads once they are gone. `scripts/smoke-storage.mjs` checks that nothing survives a restart.
+ */
+let browserStorageCleared = Promise.resolve();
 if (!primaryInstance && pendingProtocol) app.quit();
 else {
+  browserStorageCleared = Promise.all(['IndexedDB', 'Local Storage', 'WebStorage'].map(name => fs.rm(path.join(app.getPath('sessionData'), name), {recursive: true, force: true})))
+    .then(() => {}, error => console.warn('Temporary browser storage cleanup:', error.message));
   app.on('second-instance', (_event, argv) => {
     // Each ordinary launch owns its project. Protocol links still target the
     // primary workspace without opening an extra editor.
@@ -746,7 +756,8 @@ function startupView() {
   return pendingFiles.length || pendingProtocol ? 'editor' : null;
 }
 
-async function createWindow() {
+/** `storageCleared` settles when the previous launch's browser storage is gone: the page loads after it. */
+async function createWindow(storageCleared = Promise.resolve()) {
   const view = startupView();
   window = new BrowserWindow({
     width: 1560, height: 1000, minWidth: 1000, minHeight: 680,
@@ -836,6 +847,7 @@ async function createWindow() {
     if ((event.isMainFrame ?? mainFrame) && !(event.isSameDocument ?? inPlace)) projectFiles.clear();
   });
   window.webContents.on('did-finish-load', () => { rendererFailed = false; pageLoaded = true; void flushPendingOpens(); });
+  await storageCleared;
   await window.loadURL(webHost.origin);
   if (process.env.STYK_DEVTOOLS === '1') window.webContents.openDevTools({ mode: 'detach' });
   await flushPendingOpens();
@@ -881,11 +893,9 @@ async function start() {
   // temporary worker storage only; native recovery, preferences and library data
   // live in files. Reclaim the previous launch's undo caches before any
   // editor/worker can use the session.
-  // What the page keeps in the browser lasts one launch: what must last lives in native files.
-  await session.defaultSession.clearStorageData({storages:['indexdb','localstorage']}).catch(error=>console.warn('Temporary browser storage cleanup:',error.message));
   nativeMenu();
   registerIpc();
-  await createWindow();
+  await createWindow(browserStorageCleared);
   updates.start();
   app.on('activate', () => { if (!window) createWindow(); });
 }

@@ -50,7 +50,7 @@ const faces = fontFaces();
 const preloaded = face => face.family === 'Inter' && /-latin-opsz-/.test(face.file);
 const covers = (family, character) => faces.some(face => face.family === family &&
   face.ranges.some(([low, high = low]) => character.codePointAt(0) >= low && character.codePointAt(0) <= high));
-const preloads = [...read('index.html').matchAll(/<link\s[^>]*rel="preload"[^>]*>/g)].map(([tag]) => ({
+const preloads = [...read('index.html').matchAll(/<link\s[^>]*rel="preload"[^>]*>/g)].filter(([tag]) => /\bas="font"/.test(tag)).map(([tag]) => ({
   href: /href="([^"]+)"/.exec(tag)?.[1], as: /\bas="([^"]+)"/.exec(tag)?.[1], type: /type="([^"]+)"/.exec(tag)?.[1], crossorigin: /\scrossorigin\b/.test(tag),
 }));
 
@@ -72,7 +72,7 @@ test('each family declares every subset once, as a bundled variable font', () =>
   assert.match(read('src/styles/tokens.css'), /--font-display:\s*"Inter Tight",/, 'the display font starts with Inter Tight');
 });
 
-test('index.html preloads the Inter latin face and nothing else', () => {
+test('index.html preloads the Inter latin face and no other font', () => {
   assert.deepEqual(preloads.map(preload => preload.href), faces.filter(preloaded).map(face => `./${face.file}`));
   assert.equal(preloads.length, 1);
   for (const preload of preloads) assert.deepEqual({...preload, href: undefined}, {href: undefined, as: 'font', type: 'font/woff2', crossorigin: true});

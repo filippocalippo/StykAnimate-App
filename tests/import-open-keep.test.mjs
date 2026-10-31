@@ -14,7 +14,7 @@ const META = JSON.stringify({name: 'a', kind: 'piv', version: 5, savedDraft: fal
 function fakeEngine() {
   const engine = {
     cancelled: [], job: null, outcome: undefined, wake: null,
-    progressSeen: () => 0,
+    progressSeen: () => 0, grow: () => {},
     whenProgress: () => new Promise(resolve => { engine.wake = resolve; }),
     handle: {
       admit_open() {},

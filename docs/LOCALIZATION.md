@@ -8,8 +8,10 @@ menus use the same catalog and fallback rules. Existing accurate translations ar
 
 `src/localization.mjs` owns `Localization`, the shared `interfaceLocalization`,
 `t(key, params)`, and the component-kit adapter `messageText(optionalTranslator,
-key, params)`. `src/locales/en.mjs` composes English common and feature namespaces;
-`src/locales/en-features/` separates feature copy and diagnostics. Keys describe
+key, params)`. `src/locales/en-catalog.mjs` composes English common and feature namespaces;
+`src/locales/en-features/` separates feature copy and diagnostics. The page loads
+English as one generated module, `src/locales/en.mjs`, which `npm run locales:build`
+writes from the catalog (`locales:check` rejects a stale one). Keys describe
 semantic intent and remain stable when English wording changes. Duplicate English
 ownership fails validation. No UI imports a particular language or matches English
 captions to infer behavior.

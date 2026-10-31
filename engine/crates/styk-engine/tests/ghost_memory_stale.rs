@@ -1,4 +1,4 @@
-//! V13: an onion skin kept across republished generations (memory + shared objects) draws what a scene that never saw
+//! An onion skin kept across republished generations (memory + shared objects) draws what a scene that never saw
 //! another generation draws.
 
 use std::path::Path;
