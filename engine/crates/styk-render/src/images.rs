@@ -245,3 +245,51 @@ impl Renderer {
     }
 
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whether writing to `texture` is refused because it was destroyed.
+    fn refused(renderer: &Renderer, texture: &wgpu::Texture) -> bool {
+        let scope = renderer.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        renderer.queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &[0; 4],
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        );
+        pollster::block_on(scope.pop()).is_some()
+    }
+
+    fn assets(pages: u32) -> Assets {
+        let mut assets = Assets::default();
+        assets.pages = pages;
+        assets
+    }
+
+    /// A replaced sprite texture is given back at once, not when the browser next collects it.
+    #[test]
+    fn a_replaced_sprite_texture_is_destroyed() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
+        let mut renderer = Renderer::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+        renderer.prepare_sprites(&assets(2));
+        let first = renderer.sprites.clone();
+        assert!(!refused(&renderer, &first), "the texture in use takes writes");
+        // Another document: a new texture, and the first is gone.
+        renderer.prepare_sprites(&assets(3));
+        assert!(refused(&renderer, &first), "the replaced texture was destroyed");
+        let second = renderer.sprites.clone();
+        assert!(!refused(&renderer, &second));
+        // Live pages that need more room: the texture grows, keeps what it held and the old one is destroyed.
+        renderer.grow_sprites(&assets(3), 2);
+        assert_eq!(renderer.sprites.depth_or_array_layers(), 5);
+        assert!(refused(&renderer, &second), "the texture that was grown from was destroyed");
+        assert!(!refused(&renderer, &renderer.sprites.clone()));
+    }
+}
