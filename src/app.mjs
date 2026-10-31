@@ -405,6 +405,8 @@ let warmTimer = null,
 const playbackMetrics = new PlaybackMetrics();
 const playbackCadence = new PlaybackCadence();
 let presentationDeadline = null;
+/** Playback moved to a frame the stage has not drawn yet. */
+let playbackAwaitsDraw = false;
 function writeNativeBlob(bridge,blob,options={}){
   const context=telemetry.consent.diagnostics?telemetry.performance.context():null,epoch=telemetry.epoch;
   return writeNativeBlobRaw(bridge,blob,{...options,...(context?{onTiming:(metric,ms)=>{if(epoch===telemetry.epoch)telemetry.performance.record(metric,ms,context);}}:{})});
@@ -453,7 +455,8 @@ function editingGestureActive(){return Boolean(state.drag||keyboardHandleGesture
 // (pause() queues one). Surfaces write through dom-write.mjs, so an unchanged value writes nothing.
 const ui = createInvalidator({
   isPlaying: () => state.playing,
-  afterPass: () => requestRender(),
+  // Playback draws its own frames; only the transport updates then, and nothing on the stage changes with it.
+  afterPass: () => { if (!state.playing) requestRender(); },
 });
 ui.surface("title", { on: ["document", "save", "revision"], update: () => updateTitle() });
 ui.surface("transport", { on: ["tick", "document", "settings"], playbackInterval: 200, update: () => timelineHost?.updateTransport() });
@@ -1650,9 +1653,9 @@ function loop(now) {
   // before drawing, never after publishing that task's completed frame.
   commitPreviewQuality();
   if (state.playing) syncPlayback();
+  let prepareFrom = null;
   const viewChanging=!state.playing&&!state.previewing&&Boolean(viewGestureActive());
   syncBackgroundInteraction(viewChanging);
-  let advancedPlayback = false;
   if (!$("renderer-error").hidden) return;
   if (state.playing) {
     const fps = editor.report.frame_delay_ms
@@ -1684,7 +1687,7 @@ function loop(now) {
             void audioEngine.start(next / fps, range.end / fps);
           editor.seek(next, { evaluate: false });
           state.playbackPacket = packet;
-          advancedPlayback = true;
+          playbackAwaitsDraw = true;
           presentationDeadline = playStarted ? playDeadline : null;
           playDeadline =
             !playStarted || state.buffering
@@ -1696,7 +1699,7 @@ function loop(now) {
             status({messageKey: "app.playing", messageParams: {}});
             localizedText($("preview-badge"), "app.playing2", {});
           }
-          prepareAhead(next + 1, 48);
+          prepareFrom = next + 1;
           state.dirtyRender = true;
         } else {
           audioEngine.stop();
@@ -1718,14 +1721,15 @@ function loop(now) {
     const packet = state.playing ? state.playbackPacket : previewPacket();
     let preparedPresented = false;
     if (packet && (packet.cameraEnabled ?? true) === !state.scrubbing) {
-      // A frame the engine no longer has ready continues into the live render below
-      // instead of showing a frozen frame.
       preparedPresented = state.renderer.renderPrepared(packet.key, {view: state.view, cameraEnabled: !state.scrubbing}) === true;
-      if (advancedPlayback && preparedPresented)
-        recordPlaybackPresentation();
-      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      if (preparedPresented) {
+        if (playbackAwaitsDraw) recordPlaybackPresentation();
+        playbackAwaitsDraw = false;
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+      } else if (state.playing) state.dirtyRender = true; // The picture on show stays and the frame is drawn on the next animation frame.
     }
-    if (!preparedPresented && (!state.playing || !state.buffering)) {
+    // Playback shows prepared frames only: the editing view is unclipped and would blink at the artboard's edge.
+    if (!preparedPresented && !state.playing) {
       const drawingPreview=drawingController?.renderPreview;
       const frame = drawingPreview?.frame??currentFrame(),
         geometry =
@@ -1757,7 +1761,6 @@ function loop(now) {
       syncBackgroundInteraction(viewChanging);
       state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
         sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
-      if (advancedPlayback) recordPlaybackPresentation();
       overlayRender(geometry);
       drawingController?.overlayDraw(ctx);
       setHidden($('preview-quality'), !(images.reduced || state.previewGovernor?.index));
@@ -1802,6 +1805,8 @@ function loop(now) {
       lastUI = now;
     }
   }
+  // The engine's workers wake for this request and contend for the frames' lock: after the draw, which reads it.
+  if (prepareFrom !== null) prepareAhead(prepareFrom, 48);
   // Hover, previews and path sampling change only tool feedback. Keep the
   // displayed artwork intact; document edits still request a scene render.
   if (state.dirtyOverlay && !scenePainted) {
@@ -1878,6 +1883,7 @@ async function play() {
   setAttr($("playback-fps"), "data-health", "pending");
   setHidden($("playback-fps"), false);
   playStarted = false;
+  playbackAwaitsDraw = false;
   playStartupFrames = 2;
   playDeadline = playStart;
   state.playbackPacket = null;
