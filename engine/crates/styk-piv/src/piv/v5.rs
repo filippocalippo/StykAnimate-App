@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-use sha2::{Digest, Sha256};
 use styk_doc::{Nums, Obj, Value};
 
 use crate::ctx::{Ctx, ObjB, empty_list, int, key, list, num, shape, text};
@@ -26,7 +25,7 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes))
+    hex(&styk_doc::digest::sha256(bytes))
 }
 
 fn istr(name: &'static str) -> Value {

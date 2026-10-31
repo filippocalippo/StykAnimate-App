@@ -145,7 +145,7 @@ pub(crate) fn document_digest(ctx: &Ctx<'_>, document: &Value, canonical: bool, 
     let mut emitter = Emitter { out: Vec::new(), canonical, origin, orders: HashMap::new() };
     let Some(root) = document.as_obj() else {
         emitter.value(document, None)?;
-        hasher.update(&emitter.out);
+        styk_doc::digest::update(&mut hasher, &emitter.out);
         return Ok(hex(&hasher.finalize()));
     };
     let mut keys: Vec<(&str, &Value)> = root.iter().map(|(key, value)| (&**key, value)).filter(|(key, _)| !matches!(*key, "_stykSource" | "_styk" | "_stykWeb")).collect();
@@ -168,18 +168,18 @@ pub(crate) fn document_digest(ctx: &Ctx<'_>, document: &Value, canonical: bool, 
                     }
                     emitter.frame(frame, canonical)?;
                     // One frame of text at a time: the fingerprint never holds a second document.
-                    hasher.update(&emitter.out);
+                    styk_doc::digest::update(&mut hasher, &emitter.out);
                     emitter.out.clear();
                 }
                 emitter.out.push(b']');
             }
             (_, other) => emitter.value(other, None)?,
         }
-        hasher.update(&emitter.out);
+        styk_doc::digest::update(&mut hasher, &emitter.out);
         emitter.out.clear();
     }
     emitter.out.push(b'}');
-    hasher.update(&emitter.out);
+    styk_doc::digest::update(&mut hasher, &emitter.out);
     Ok(hex(&hasher.finalize()))
 }
 
