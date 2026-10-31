@@ -805,6 +805,7 @@ impl Editor {
             "@markSaved" => return self.mark_saved(),
             "@touch" => return self.mark_changed(),
             "@publishCel" => return self.publish_cel(args),
+            "@celState" => return self.cel_state(args),
             "@drawingBytes" => return self.set_pixels_bytes(args),
             "@retractDrawing" => return self.retract_pixels(args),
             "@setClipboard" => return self.set_clipboard(args),
