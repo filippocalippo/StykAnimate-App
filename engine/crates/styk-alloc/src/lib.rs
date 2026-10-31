@@ -47,7 +47,7 @@ pub const LARGE_BYTES: usize = 256 * 1024;
 
 /// How many pages to add ahead of the allocator when a memory of `current` pages had to
 /// grow: an eighth of the memory, between 16 and 32 MiB, so the number of steps stays
-/// small (about sixty for the largest memory, a millisecond or two each) while the unused tail stays small.
+/// small (about seventy for the largest memory, a millisecond or two each) while the unused tail stays small.
 pub fn grow_ahead_pages(current: usize) -> usize {
     (current / 8).clamp(MIN_AHEAD_PAGES, MAX_AHEAD_PAGES)
 }

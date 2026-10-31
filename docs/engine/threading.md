@@ -197,7 +197,7 @@ would have met, within one step of the ceiling (not seen on any document). Alloc
 bytes, are unchanged; the memory ends at most one step larger than the document needs, in pages
 that are committed but untouched, which the browser counts as the app's memory (Electron's private bytes are the commit
 charge): steps of up to 128 MiB left that much dead at the top of a large document's memory, and 32 MiB reach the
-largest memory in about sixty steps of a millisecond or two each. The drawing module keeps the standard allocator: its memory
+largest memory in about seventy steps of a millisecond or two each. The drawing module keeps the standard allocator: its memory
 grows in few, large steps.
 
 Measure it by opening a large Pivot file in Node (`engine-open.mjs`: the engine's open job and the

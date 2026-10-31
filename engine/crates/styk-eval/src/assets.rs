@@ -593,6 +593,11 @@ fn stored_pixels(bytes: &[u8], color_key: Option<[u8; 3]>, size: (u32, u32)) -> 
 /// the passes are separable by row, so this does both for one output row at a time and the float row is the only
 /// intermediate. The weights, their order of summing and the rounding are the library's.
 fn resize_triangle(from: &[u8], (sw, sh): (u32, u32), (dw, dh): (u32, u32), to: &mut [u8]) {
+    // A picture with a zero side (a header that claims one) has nothing to sample: the library gives a blank picture.
+    if sw == 0 || sh == 0 {
+        to.fill(0);
+        return;
+    }
     fn weights(source: u32, target: u32, at: u32) -> (usize, Vec<f32>) {
         let ratio = source as f32 / target as f32;
         let sratio = if ratio < 1.0 { 1.0 } else { ratio };
@@ -778,6 +783,17 @@ mod tests {
             let mut ours = vec![0u8; to.0 as usize * to.1 as usize * 4];
             resize_triangle(source.as_raw(), from, to, &mut ours);
             assert_eq!(library.as_raw(), &ours, "{from:?} to {to:?}");
+        }
+    }
+
+    #[test]
+    fn a_picture_with_a_zero_side_is_blank_not_a_panic() {
+        // A 9 x 0 GIF: the atlas raises the side to 1 and takes a 9 x 1 place for it; the decoder gives nothing to sample.
+        let hex = "4749463839610900000082000052ccbd40cec80ac81ed6ba5ca05e44d107f900000000000021f904010000d8002c000000000900010000080d000308104040c00003000a0404003b";
+        let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap()).collect();
+        assert_eq!(bytes.len(), 72);
+        for key in [None, Some([0, 0, 0])] {
+            assert_eq!(stored_pixels(&bytes, key, (9, 1)).unwrap(), vec![0u8; 11 * 3 * 4], "{key:?}");
         }
     }
 
