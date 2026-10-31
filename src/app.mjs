@@ -1819,7 +1819,6 @@ function loop(now) {
         state.drag?.geometry ?? keyboardHandleGesture?.geometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
       drawFinalOverlay();
-
     }
   }
   if (state.playing) {
