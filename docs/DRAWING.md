@@ -449,8 +449,8 @@ same session are reclaimed when its worker reopens the database. Without Web
 Locks, only explicit disposal deletes a session. Closing a document releases
 its cache and worker. Native saving and recovery remain self-contained.
 Desktop startup additionally clears temporary IndexedDB storage in its own
-Chromium workspace session before opening the editor, because its loopback
-origin changes between launches. Desktop preferences, recovery and library
+Chromium workspace session before opening the editor, so a launch never inherits the
+previous one's cache. Desktop preferences, recovery and library
 data use native files; they must not be placed in this temporary database tier.
 
 Fill, paste, resample and
