@@ -230,13 +230,14 @@ export class DocumentExporter {
       // A snapshot the worker did not take (a save stopped before it began) is let go; one it took is gone already.
       releaseSnapshots(snapshots);
       clearTimeout(timer);
+      // A worker that ends with the export is told to stop first (the flag is raised by `_retire`, which needs it still in place).
+      if (!completed) this._terminateWorker();
       if (this.cancelFlag === cancelFlag) this.cancelFlag = null;
       signal?.removeEventListener('abort', abort);
       backendJob.cancel();
       worker.removeEventListener('error', onError);
       worker.removeEventListener('messageerror', onMessageError);
       worker.removeEventListener('message', onMessage);
-      if (!completed) this._terminateWorker();
     }
   }
 

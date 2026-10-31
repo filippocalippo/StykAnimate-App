@@ -22,7 +22,7 @@ mod write;
 
 
 pub use read::{Checked, Decoded, Parts, check, decode, decode_parts, member_value, parse_lifted, parse_lifted_owned, parse_lifted_owned_within, parse_lifted_owned_admitted_within, LiftedAdmitted};
-pub use write::{Lifted, ViewLifter, ViewPart, encode_v1, encode_v2, encode_v2_with, lift, lift_within};
+pub use write::{Lifted, ViewLifter, ViewPart, encode_v1, encode_v2, encode_v2_with, lift, lift_until, lift_within};
 
 pub(crate) const HEADER: usize = 56;
 pub(crate) const SECTION: usize = 64;
@@ -137,7 +137,13 @@ pub enum ContainerError {
     DocumentTooLarge(&'static str),
     #[error("the JSON document is invalid: {0}")]
     Json(#[from] styk_doc::JsonError),
+    /// The caller stopped the write (a cancel it passed in said so); nothing was produced.
+    #[error("the write was cancelled")]
+    Cancelled,
 }
+
+/// The machine code of [`ContainerError::Cancelled`].
+pub const CANCELLED: &str = "cancelled";
 
 impl ContainerError {
     /// The localized message of this error, under `errors.nativeContainer.` in the locale packs.
@@ -160,6 +166,7 @@ impl ContainerError {
             NonFinite { .. } => "errors.nativeContainer.theStykanimateDocumentContainsNonFiniteNumbers",
             DocumentTooLarge(_) => "errors.nativeContainer.theStykanimateDocumentExceedsTheUncompressedSizeLimit",
             Json(_) => "errors.nativeContainer.projectDataMustBeAJsonObject",
+            Cancelled => "errors.documentExport.documentExportFailed",
         }
     }
 
@@ -167,12 +174,13 @@ impl ContainerError {
     pub fn code(&self) -> Option<&'static str> {
         match self {
             ContainerError::DocumentTooLarge(_) => Some("document_too_large"),
+            ContainerError::Cancelled => Some(CANCELLED),
             _ => None,
         }
     }
 }
 
-pub(crate) use styk_doc::digest::sha256;
+pub(crate) use styk_doc::digest::{sha256, sha256_until};
 
 /// Restores a stored block. The output is bounded by the declared length before
 /// anything is allocated for it, and must match it exactly.
@@ -216,6 +224,37 @@ pub(crate) fn unpack(codec: Codec, stored: &[u8], raw_length: usize, what: &dyn 
 /// zstd at level 3 in one frame, as the app has always written sections.
 pub(crate) fn pack_zstd(raw: &[u8]) -> Vec<u8> {
     zstd::bulk::compress(raw, 3).expect("in-memory zstd compression cannot fail")
+}
+
+/// Compressed bytes the compressor may produce between two questions to the cancel: a few milliseconds' work, even in WebAssembly.
+const ZSTD_OUT_STEP: usize = 1 << 20;
+
+/// [`pack_zstd`] asking `cancel` before every megabyte of output; `None` once it says so. The frame is the one `pack_zstd` makes:
+/// the same level and pledged size, and the input is read in place (a stable input buffer), so the compressor's window is as
+/// contiguous as for a one-shot call. Feeding the input in pieces through the compressor's own buffer is not the same: once the
+/// input is larger than the window (2 MiB at level 3) that buffer wraps and the frame comes out differently.
+pub(crate) fn pack_zstd_until(raw: &[u8], cancel: &dyn Fn() -> bool) -> Option<Vec<u8>> {
+    use zstd::zstd_safe::{CCtx, CParameter, InBuffer, OutBuffer, zstd_sys::ZSTD_EndDirective};
+    let mut context = CCtx::create();
+    context.set_parameter(CParameter::CompressionLevel(3)).expect("level 3 is valid");
+    context.set_parameter(CParameter::StableInBuffer(true)).expect("the input buffer can be stable");
+    context.set_pledged_src_size(Some(raw.len() as u64)).expect("a fresh context takes its size");
+    let mut input = InBuffer::around(raw);
+    let mut step = vec![0u8; ZSTD_OUT_STEP];
+    // Grown a step at a time rather than to the worst case up front, which would commit the size of the input again.
+    let mut out: Vec<u8> = Vec::with_capacity(raw.len() / 4 + ZSTD_OUT_STEP);
+    loop {
+        if cancel() {
+            return None;
+        }
+        let mut buffer = OutBuffer::around(&mut step[..]);
+        let remaining = context.compress_stream2(&mut buffer, &mut input, ZSTD_EndDirective::ZSTD_e_end).expect("in-memory zstd compression cannot fail");
+        let written = buffer.pos();
+        out.extend_from_slice(&step[..written]);
+        if remaining == 0 {
+            return Some(out);
+        }
+    }
 }
 
 pub(crate) fn pack_zlib(raw: &[u8]) -> Vec<u8> {

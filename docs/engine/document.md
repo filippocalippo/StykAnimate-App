@@ -127,8 +127,12 @@ edited: the documents the clips were entered from come with the movieclip each h
 the clip inside its parent as a recovery copy does. `project_document` prepares the tree (metadata, no `runtime_segments`, the load's
 validations, display aliases in line, pose sequences stored once), the Pivot original the codec holds is stored first in the payload
 section, and `styk_formats::container::lift` and `files::save` write the container. The work runs on a worker that joined the engine,
-reserves its working memory first (`errors.engine.outOfMemory` when the memory cannot hold it), and asks the cancel flag between
-steps. The session keeps editing while it runs. The saved bytes of an unchanged document are those the JavaScript writer wrote.
+reserves its working memory first (`errors.engine.outOfMemoryWhileSaving` when the memory cannot hold it: the project stays open and nothing was
+written), and asks the cancel flag between the steps of the preparation, every few thousand values of the lift, and every few megabytes of
+hashing (4 MiB) and zstd compression (each megabyte it produces; one frame read in place, whose bytes equal the one-shot compression's: feeding the compressor's own buffer in pieces changes the frame once the input passes the 2 MiB window), so that a worker told to
+stop is out of the engine within tens of milliseconds, far inside the 5 s after which the interface ends it
+([threading](threading.md)). The session keeps editing while it runs. The saved bytes of an unchanged document are those the JavaScript writer wrote (`tests/save-references.test.mjs` and `engine/crates/styk-engine/tests/save.rs` compare every recorded file in `engine/tests/containers/`).
+Arrays the tree shares (a copied frame, a keyframe and the stored frame it came from) are stored once and named by one marker each time, as the former writer did for arrays the interface shared; a copy-like edit can therefore make a file with shared arrays where the former writer made separate ones. The former app reads a shared marker as one array, but its edits of a project with a layer sheet write a new stored frame instead of changing the one on show, so no other frame changes (checked in that app, opening such a file and posing a joint).
 
 ## Invariants
 

@@ -9,7 +9,7 @@ publish.workspace = true
 [dependencies]
 styk-doc = { path = "../styk-doc" }
 flate2 = "1"
-zstd = "0.13"
+zstd = { version = "0.13", features = ["experimental"] }
 thiserror = "2"
 
 [dev-dependencies]

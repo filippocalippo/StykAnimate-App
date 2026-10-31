@@ -95,11 +95,28 @@ for (const reason of ['cancel', 'error', 'messageerror', 'timeout']) test(`a ${r
     t.mock.timers.tick(1);
   } else workers[0].fail(reason);
   await rejected; assert.equal(workers[0].terminated, true); assert.equal(cancellations.length, 1);
+  // The engine work in the worker was told to stop, whatever ended the export: a worker ended inside the shared memory could freeze it.
+  assert.equal(Atomics.load(workers[0].messages.find(message => message.operation === 'export').cancel, 0), 1);
   const next = exporter.export(report);
   await until(() => workers[1]?.messages.at(-1)?.operation === 'export', pollTurn);
   workers[0].reply(workers[1].messages.at(-1).id, {blob: new Blob(['stale'])});
   workers[1].finish(); assert.equal(await (await next).text(), 'exact bytes');
   assert.equal(workers.length, 2); assert.equal(cancellations.length, 1);
+});
+
+test('a worker ended after its export returned is told to stop the engine work first, even when the document changed meanwhile', async t => {
+  const {workers, exporter} = environment(t);
+  let revision = 1;
+  const report = project(), result = exporter.export(report, {getRevision: () => revision});
+  const rejected = assert.rejects(result, {name: 'AbortError'});
+  await until(() => workers[0]?.messages.at(-1)?.operation === 'export');
+  const {cancel} = workers[0].messages.at(-1);
+  assert.equal(Atomics.load(cancel, 0), 0);
+  revision = 2;
+  workers[0].finish();
+  await rejected;
+  assert.equal(workers[0].terminated, true);
+  assert.equal(Atomics.load(cancel, 0), 1);
 });
 
 test('queued revision changes reject before snapshot and disposal cancels active and waiting requests', async t => {

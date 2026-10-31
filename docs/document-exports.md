@@ -57,7 +57,7 @@ service did, over the worker's message ports, with the same responses and action
 not become a semantic edit merely from normalization. A Blob returns to the renderer without JSON or base64 conversion. Use the
 native Blob streaming helper to save it through Electron; browser downloads and IndexedDB can consume the Blob directly.
 
-A save stopped by the cancel flag (a flag in shared memory, asked between the steps) writes nothing; the snapshot it did not
+A save stopped by the cancel flag (a flag in shared memory, asked between the steps and every few megabytes of hashing and compression) writes nothing; the snapshot it did not
 take is released (`release_snapshot`). The writer works on the snapshot, so an edit made while it runs does not enter the file;
 the interface still cancels the save at a document mutation, as it always has, so the checkpoint a save marks saved is the one
 the document had when it began.
@@ -115,7 +115,7 @@ path for subclasses. Integer precision, negative zero, nonfinite rejection,
 unknown fields and per-container cancellation checkpoints remain unchanged; the
 JSON encoder and fingerprint bytes are unchanged.
 
-The native file writer reports success at atomic destination commit. A later
+The native file writer reports success at atomic destination commit. The rename onto the destination is tried again for about a second when Windows refuses it for a moment (`EPERM`, `EACCES` or `EBUSY`: a scanner or indexer holding the new file); a refusal that lasts, such as a read-only target, is reported then, with the previous file kept and the temporary file removed (`desktop/rename-retry.cjs`, also used by recovery copies). A later
 failure updating optional recent-file or recovery display metadata does not
 turn a saved document into a failed save; it reports an app diagnostic and sets
 `metadataSaved: false` in the finish result. Failures before commit still reject

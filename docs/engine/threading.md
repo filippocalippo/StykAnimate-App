@@ -61,7 +61,10 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   flag in shared memory for cancellation between the ticks it bakes or the steps it takes (see
   [document.md](document.md#exports-of-the-document)). It is not terminated while it may be inside the
   engine: the interface raises the flag and sends `release`, the worker gives its thread back
-  (`__wbindgen_thread_destroy`) after the call returns and closes, and one that does not answer within 5 s is terminated.
+  (`__wbindgen_thread_destroy`) after the call returns and closes, and one that does not answer within 5 s is terminated. That 5 s is the
+bound the engine work must keep: it asks the flag at least every few tens of milliseconds, including inside hashing and compression
+(`styk_engine::save`), because a thread terminated inside the shared memory can hold the allocator or a lock. The flag is raised on every
+path that ends the worker (a failure on the interface side too), before the worker is told to release.
 - The preview worker (`src/engine/engine-preview-worker.mjs`, one per page,
   `engine-previews.mjs`; see [rendering.md](rendering.md#thumbnails-library-previews-and-the-camera-monitor)):
   joins the shared memory like the export worker and keeps its event loop for a GPU

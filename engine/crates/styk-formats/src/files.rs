@@ -11,7 +11,7 @@
 
 use styk_doc::json;
 
-use crate::container::{self, ContainerError, Kind, encode_v2_with, pack_zstd};
+use crate::container::{self, ContainerError, Kind, encode_v2_with, pack_zstd_until};
 use crate::native::{self, NativeError};
 
 /// Why a file could not be opened or saved: the interface's message for it
@@ -193,25 +193,29 @@ fn hex(digest: &[u8; 32]) -> String {
 /// Writes a version 2 container of `kind` around a lifted document. A `.stkz` or
 /// `.stykmov` skeleton must be the self-contained figure the file stores
 /// (`native::validate_figure`). The caller's `store` supplies the compressed form
-/// of blocks it has compressed before.
-pub fn save(kind: Kind, skeleton: &[u8], arrays: &[u8], payloads: &[u8], store: &mut dyn BlockStore) -> Result<Saved, FileError> {
+/// of blocks it has compressed before. `cancel` is asked by the hashing and the compression every few megabytes; a save it
+/// stops fails with the code [`container::CANCELLED`] and produces nothing.
+pub fn save(kind: Kind, skeleton: &[u8], arrays: &[u8], payloads: &[u8], store: &mut dyn BlockStore, cancel: &dyn Fn() -> bool) -> Result<Saved, FileError> {
     if kind != Kind::Styk {
         native::validate_figure(&json::parse(skeleton).map_err(ContainerError::from)?, kind)?;
     }
     let mut stats = SaveStats { container_raw_bytes: skeleton.len() + arrays.len() + payloads.len(), ..SaveStats::default() };
-    let bytes = encode_v2_with(skeleton, arrays, payloads, kind, &mut |raw, digest| {
+    let bytes = encode_v2_with(skeleton, arrays, payloads, kind, cancel, &mut |raw, digest| {
         let key = format!("2:3:{}:{}", raw.len(), hex(digest));
         if let Some(stored) = store.get(&key) {
             stats.hits += 1;
             stats.raw_bytes_reused += raw.len();
             stats.compressed_bytes_reused += stored.len();
-            return stored;
+            return Some(stored);
         }
         stats.misses += 1;
-        let stored = pack_zstd(raw);
+        let stored = pack_zstd_until(raw, cancel)?;
         store.put(&key, &stored);
-        stored
+        Some(stored)
     })
-    .map_err(|error| FileError { code: Some("document_too_large"), ..FileError::from(error) })?;
+    .map_err(|error| match error {
+        ContainerError::Cancelled => FileError::from(error),
+        error => FileError { code: Some("document_too_large"), ..FileError::from(error) },
+    })?;
     Ok(Saved { bytes, stats })
 }

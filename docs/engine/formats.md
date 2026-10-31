@@ -17,7 +17,10 @@ oracle for Pivot files.
   sections the way the JavaScript `liftDocument` did (a save writes this layout, byte for byte, and so does the interface's read view);
   `parse_lifted` reads a lifted record back (the tests of `files` check what a skeleton and its sections stand for with it).
 - `container::encode_v2` writes version 2 (zstd level 3, [D5](decisions/0005-zstd-from-c.md));
-  `encode_v1` writes version 1.
+  `encode_v1` writes version 1. `files::save` and `container::lift_until` take a cancel that a save on a worker asks every few thousand
+  values, every 4 MiB hashed and for every megabyte of compressed output (the zstd input is read in place, so the frame is the
+  one-shot frame: the compressor's own input buffer wraps past its 2 MiB window and would change it); a stopped one is
+  `ContainerError::Cancelled` and produces nothing.
 - `native::normalize_decoded`, `validate_figure` and `verify_embedded_source`
   apply the native document rules after decoding, with the editor's error keys
   (`ContainerError::message_key`, `NativeError::message_key`).

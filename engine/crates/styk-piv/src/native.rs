@@ -76,6 +76,7 @@ mod containers {
             MalformedMarker { .. } => "The StykAnimate file is damaged (malformed section marker).",
             NonFinite { .. } => "The StykAnimate document contains non-finite numbers.",
             Json(_) => return error.to_string(),
+            Cancelled => "The write was cancelled.",
         }
         .to_string()
     }

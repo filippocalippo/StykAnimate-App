@@ -54,7 +54,7 @@ fn a_project_opens_into_the_lifted_form_and_saves_back_to_the_same_bytes() {
     let opened = files::open(&file, Kind::Styk, Rules::PROJECT).unwrap();
     assert_eq!(opened.version, 2);
     assert!(opened.materialized_bytes > opened.skeleton.len());
-    let saved = files::save(Kind::Styk, &opened.skeleton, &opened.sections[0], &opened.sections[1], &mut NoStore).unwrap();
+    let saved = files::save(Kind::Styk, &opened.skeleton, &opened.sections[0], &opened.sections[1], &mut NoStore, &|| false).unwrap();
     assert_eq!(saved.bytes, file, "an unchanged project saves to the bytes it was opened from");
     assert_eq!((saved.stats.hits, saved.stats.misses), (0, 3));
 }
@@ -91,13 +91,13 @@ fn a_figure_file_must_hold_one_pose_of_reusable_figures() {
     let error = files::open(&file, Kind::Stkz, Rules::PREVIEW).err().unwrap();
     assert_eq!((error.message_key, error.code, error.kind), ("errors.nativeContainer.theFigureMustBeSelfContained", Some("invalid_native_figure"), Some("stkz")));
     assert!(files::open(&file, Kind::Stkz, Rules::RAW).is_ok(), "raw reads the container only");
-    let saved = files::save(Kind::Stkz, figure.as_bytes(), &[], &[], &mut NoStore).err().unwrap();
+    let saved = files::save(Kind::Stkz, figure.as_bytes(), &[], &[], &mut NoStore, &|| false).err().unwrap();
     assert_eq!((saved.message_key, saved.code, saved.kind), ("errors.nativeContainer.theFigureMustBeSelfContained", Some("invalid_native_figure"), Some("stkz")));
     let movieclip = r#"{"figure_types":[{"figure_type_id":1}],"keyframes":[{"objects":[{"figure_type_id":1}]}]}"#;
-    let error = files::save(Kind::Stykmov, movieclip.as_bytes(), &[], &[], &mut NoStore).err().unwrap();
+    let error = files::save(Kind::Stykmov, movieclip.as_bytes(), &[], &[], &mut NoStore, &|| false).err().unwrap();
     assert_eq!((error.message_key, error.code), ("errors.nativeContainer.aStykmovFileMustContainOneMovieclip", Some("invalid_movieclip")));
-    assert!(files::save(Kind::Stkz, movieclip.as_bytes(), &[], &[], &mut NoStore).is_ok());
-    assert!(files::save(Kind::Styk, figure.as_bytes(), &[], &[], &mut NoStore).is_ok(), "a project is not a figure file");
+    assert!(files::save(Kind::Stkz, movieclip.as_bytes(), &[], &[], &mut NoStore, &|| false).is_ok());
+    assert!(files::save(Kind::Styk, figure.as_bytes(), &[], &[], &mut NoStore, &|| false).is_ok(), "a project is not a figure file");
 }
 
 #[test]
@@ -140,18 +140,18 @@ fn compressed_blocks_are_reused_only_for_the_same_bytes() {
     let opened = files::open(&project(), Kind::Styk, Rules::PROJECT).unwrap();
     let (skeleton, arrays, payloads) = (&opened.skeleton, &opened.sections[0], &opened.sections[1]);
     let mut store = Kept::default();
-    let first = files::save(Kind::Styk, skeleton, arrays, payloads, &mut store).unwrap();
+    let first = files::save(Kind::Styk, skeleton, arrays, payloads, &mut store, &|| false).unwrap();
     assert_eq!((first.stats.hits, first.stats.misses, store.0.len()), (0, 3, 3));
     assert_eq!(first.stats.container_raw_bytes, skeleton.len() + arrays.len() + payloads.len());
     assert!(store.0.keys().all(|key| key.starts_with("2:3:")));
-    let second = files::save(Kind::Styk, skeleton, arrays, payloads, &mut store).unwrap();
+    let second = files::save(Kind::Styk, skeleton, arrays, payloads, &mut store, &|| false).unwrap();
     assert_eq!(second.bytes, first.bytes);
     assert_eq!((second.stats.hits, second.stats.misses), (3, 0));
     assert_eq!(second.stats.raw_bytes_reused, first.stats.container_raw_bytes);
     // An edited array misses; the other two blocks are still found.
     let mut edited = arrays.clone();
     edited[0] ^= 1;
-    let third = files::save(Kind::Styk, skeleton, &edited, payloads, &mut store).unwrap();
+    let third = files::save(Kind::Styk, skeleton, &edited, payloads, &mut store, &|| false).unwrap();
     assert_eq!((third.stats.hits, third.stats.misses), (2, 1));
     assert_ne!(third.bytes, first.bytes);
     let reopened = files::open(&third.bytes, Kind::Styk, Rules::RAW).unwrap();
@@ -160,7 +160,7 @@ fn compressed_blocks_are_reused_only_for_the_same_bytes() {
 
 #[test]
 fn saving_refuses_what_the_format_cannot_hold() {
-    let error = files::save(Kind::Styk, b"{}", &vec![0; (256 << 20) + 1], &[], &mut NoStore).err().unwrap();
+    let error = files::save(Kind::Styk, b"{}", &vec![0; (256 << 20) + 1], &[], &mut NoStore, &|| false).err().unwrap();
     assert_eq!((error.message_key, error.code), ("errors.nativeContainer.theStykanimateDocumentExceedsTheUncompressedSizeLimit", Some("document_too_large")));
 }
 
@@ -239,4 +239,57 @@ fn a_string_that_looks_like_a_marker_is_only_a_marker_in_a_version_two_skeleton(
     let lifted = files::open(&wrapped, Kind::Styk, Rules::PROJECT).unwrap();
     assert!(lifted.markers);
     assert_eq!(lifted.skeleton, br#"{"literal":"S2E:S2B:f64:0:0:5"}"#);
+}
+
+/// Bytes that compress about threefold and never repeat a long run (a numeric section's shape), from a seed.
+fn sample(length: usize, seed: u64) -> Vec<u8> {
+    let mut state = seed | 1;
+    (0..length)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state & 0x1f) as u8
+        })
+        .collect()
+}
+
+#[test]
+fn sections_compressed_in_strides_are_the_frames_one_shot_compression_makes() {
+    // `encode_v2` compresses each block in one call; `files::save` in steps that it can stop between. The frames are the same
+    // bytes, whatever the length: around the compressor's block (128 KiB) and its window (2 MiB), empty, and well beyond the window.
+    for (index, length) in [0usize, 1, 100, 131_071, 131_072, 131_073, 2 << 20, (2 << 20) + 1, 5_255_225, 9 << 20, 25 << 20].into_iter().enumerate() {
+        let (arrays, payloads) = (sample(length, index as u64 + 1), sample(length / 3, 99));
+        let one_shot = encode_v2(&styk_formats::container::Lifted { skeleton: b"{\"a\":1}".to_vec(), arrays: arrays.clone(), payloads: payloads.clone(), reserved_offsets: Vec::new() }, Kind::Styk).unwrap();
+        let strides = files::save(Kind::Styk, b"{\"a\":1}", &arrays, &payloads, &mut NoStore, &|| false).unwrap().bytes;
+        assert!(strides == one_shot, "{length} bytes in the arrays section");
+    }
+}
+
+#[test]
+fn a_save_asks_whether_to_stop_often_enough_and_stops_at_once() {
+    let (arrays, payloads) = (sample(40 << 20, 7), sample(6 << 20, 8));
+    let asked = std::cell::Cell::new(0usize);
+    let saved = files::save(Kind::Styk, b"{}", &arrays, &payloads, &mut NoStore, &|| { asked.set(asked.get() + 1); false }).unwrap();
+    // Hashing asks every 4 MiB, compression for every megabyte it produces: no stretch of work between two questions is long.
+    let (hashing, compressing) = (46usize.div_ceil(4), saved.bytes.len() >> 20);
+    assert!(compressing >= 10 && asked.get() >= hashing + compressing, "{} questions for {} MiB written from {} MiB", asked.get(), saved.bytes.len() >> 20, 46);
+    assert!(!saved.bytes.is_empty());
+    // Whichever question says stop, the save ends there with the code the callers read, and has asked nothing since.
+    for stop_at in [1, 2, hashing + 3, asked.get() - 1, asked.get()] {
+        let asked = std::cell::Cell::new(0usize);
+        let stopped = files::save(Kind::Styk, b"{}", &arrays, &payloads, &mut NoStore, &|| { asked.set(asked.get() + 1); asked.get() >= stop_at }).err().expect("stopped");
+        assert_eq!(stopped.code, Some(styk_formats::container::CANCELLED), "stopped at question {stop_at}");
+        assert_eq!(asked.get(), stop_at, "no question after the one that said stop");
+    }
+}
+
+#[test]
+fn a_lift_asks_whether_to_stop() {
+    let document = doc(&format!("{{\"items\":[{}]}}", (0..20_000).map(|i| format!("{{\"n\":{i}}}")).collect::<Vec<_>>().join(",")));
+    let asked = std::cell::Cell::new(0usize);
+    styk_formats::container::lift_until(&document, &[], &|| { asked.set(asked.get() + 1); false }).unwrap();
+    assert!(asked.get() >= 8, "{} questions for 40,000 values", asked.get());
+    let stopped = styk_formats::container::lift_until(&document, &[], &|| true).err().expect("stopped");
+    assert_eq!(stopped, styk_formats::container::ContainerError::Cancelled);
 }
