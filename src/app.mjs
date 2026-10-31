@@ -65,7 +65,7 @@ import {createHome} from './home/home.mjs';
 import {createTutorials} from './tutorials/tutorials.mjs';
 import {installProjectTabs} from './shell/project-tabs-view.mjs';
 import {createProjectSwitcher} from './shell/project-switcher.mjs';
-import {sessionProject} from './editor-sessions.mjs';
+import {movieclipScopes, sessionProjectName} from './editor-sessions.mjs';
 import { PrivacyUI } from './privacy-ui.mjs';
 import { FeedbackUI } from './feedback-ui.mjs';
 import { UpdateUI } from './update-ui.mjs';
@@ -248,8 +248,9 @@ async function runDocumentExport(format, consume, { recovery = false, controller
     const drawingRevision=editor.revision;await drawingBarrier(editor.report,{signal:controller.signal});if(drawingRevision!==editor.revision)throw messageError(new DOMException('', 'AbortError'), "errors.app.theDrawingChangedDuringExport", {});
     // The engine makes Pivot and figure files from the document it holds: its session starts on the open document and takes what the editor changed.
     if (format !== 'styk' && !editor._shown?.active) throw Object.assign(messageError(new Error(''), "errors.documentExport.theEngineCannotMakeThisFileHere", {}), {telemetryCode: 'engine_failed', telemetryStage: 'prepare'});
-    const blob = await documentExporter.export(recovery ? editor.movieclipProjectReport() : editor.report, {
+    const blob = await documentExporter.export(editor.report, {
       format,
+      scopes: recovery ? movieclipScopes(editor) : undefined,
       name: recovery ? editor._movieclipScopes?.[0]?.parent.name ?? editor.name : editor.name,
       sourceId: state.sourceId,
       figureTypeId: editor.object?.figure_type_id,
@@ -3414,13 +3415,13 @@ function projectRefused(reason) {
  * rests, so the snapshot needs no revision checks and edits to the project in front do not interrupt it.
  */
 async function writeRestingRecovery(record, signal) {
-  const { report, name } = sessionProject(record.session), saved = record.state;
+  const { report } = record.session, name = sessionProjectName(record.session), saved = record.state;
   const controller = new AbortController(), job = { controller, recovery: true, resting: true };
   const abort = () => controller.abort();
   signal.addEventListener("abort", abort, { once: true });
   exportJobs.add(job);
   try {
-    const blob = await documentExporter.export(report, { format: "styk", name, sourceId: saved.sourceId, signal: controller.signal });
+    const blob = await documentExporter.export(report, { format: "styk", name, sourceId: saved.sourceId, scopes: movieclipScopes(record.session), signal: controller.signal });
     if (desktop) return await writeNativeBlob(desktop, blob, { recovery: true, name, signal: controller.signal, documentToken: saved.documentToken });
     return await browserRecovery.write(blob, name, controller.signal, record.id);
   } finally {

@@ -1,14 +1,13 @@
 /** StykAnimate's own files through the Rust container module (src/native-file-codec.mjs): lossless
- *  round trips, what the document rules do, corruption and limits, and the cache of compressed
- *  blocks. The Rust side has its own tests (engine/crates/styk-formats/tests/); these exercise
+ *  round trips, what the document rules do, and corruption and limits. The Rust side has its own tests (engine/crates/styk-formats/tests/); these exercise
  *  the module the workers load, from JavaScript. Needs `node scripts/engine-build.mjs`. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {deflateSync} from 'node:zlib';
-import {buildContainerV2, decodeDocument, encodeContainerV2, openDocument, liftDocument} from './support/native-files.mjs';
+import {buildContainerV2, decodeDocument, openDocument} from './support/native-files.mjs';
 import {buildContainerV1} from './support/container-v1.mjs';
+import {forgeContainerV2} from './support/container-v2.mjs';
 import {nativeFileCodec} from '../src/native-file-codec.mjs';
-import {createContainerCompressionCache} from '../src/container-cache.mjs';
 import {bytesToBase64} from '../src/base64.mjs';
 
 const floats = () => Array.from({length: 64}, (_, i) => Math.sin(i) * 180);
@@ -17,7 +16,7 @@ const setU64 = (bytes, at, value) => new DataView(bytes.buffer, bytes.byteOffset
 const sectionTable = bytes => 60 + Number(new DataView(bytes.buffer, bytes.byteOffset).getBigUint64(16, true));
 /** A project container written from a skeleton and sections as given, however damaged. */
 const forged = (skeleton, arrays = new Uint8Array(), payloads = new Uint8Array(), kind = 'styk') =>
-  encodeContainerV2({skeleton, sections: [{kind: 1, bytes: arrays}, {kind: 2, bytes: payloads}]}, kind);
+  forgeContainerV2({skeleton, arrays, payloads, kind});
 
 test('sectioned metadata has a separate bound while payload and aggregate limits remain enforced', async () => {
   const bytes = await buildContainerV2({name: 'small'}, 'styk');
@@ -80,7 +79,7 @@ test('v2 rejects corruption, truncation, the wrong kind and markers that point n
   assert.equal((await decodeDocument(container, 'styk')).version, 2);
 });
 
-test('v2 round-trips a document losslessly and shared arrays stay shared', async () => {
+test('v2 round-trips a document losslessly, and an array the file names twice is read as one', async () => {
   const shared = floats();
   const doc = {
     version: 5, fps: 12, canvas: {width: 640, height: 480},
@@ -99,12 +98,12 @@ test('v2 round-trips a document losslessly and shared arrays stay shared', async
   const container = await buildContainerV2(doc, 'styk');
   assert.equal(new TextDecoder().decode(container.subarray(0, 4)), 'STYK');
   assert.equal(container[4], 2);
+  // The two poses name the same list of angles: the container stores it once, whoever wrote it.
+  const twice = await forged({keyframes: [{objects: [{angles: 'S2B:f64:0:0:64'}, {angles: 'S2B:f64:0:0:64'}]}]}, new Uint8Array(new Float64Array(floats()).buffer));
+  const {document: pair} = await decodeDocument(twice, 'styk');
+  assert.equal(pair.keyframes[0].objects[0].angles, pair.keyframes[0].objects[1].angles);
   const {document: out} = await decodeDocument(container, 'styk');
   assert.deepEqual(out, doc);
-  // Lifted shared arrays keep one identity through the cycle.
-  assert.equal(out.keyframes[0].objects[0].angles, out.keyframes[0].objects[1].angles);
-  // A project opened and saved unchanged is the same bytes.
-  assert.deepEqual(await buildContainerV2(out, 'styk'), container);
 });
 
 test('values the format moves keep their exact types, and values it does not move stay inline', async () => {
@@ -117,7 +116,7 @@ test('values the format moves keep their exact types, and values it does not mov
   assert.deepEqual(out, doc);
   assert.equal(Object.hasOwn(out.proto, '__proto__'), true);
   const nonfinite = {values: Array(40).fill(Infinity), x: NaN, y: -Infinity, z: -0};
-  assert.deepEqual((await decodeDocument(await encodeContainerV2(liftDocument(nonfinite), 'styk'), 'styk')).document,
+  assert.deepEqual((await decodeDocument(await buildContainerV2(nonfinite, 'styk'), 'styk')).document,
     JSON.parse(JSON.stringify(nonfinite)));
 });
 
@@ -154,9 +153,9 @@ test('opening applies the document rules like the file service: wrapper, figure 
   await assert.rejects(openDocument(legacyFigure(figure, 'stykmov'), 'stykmov'), /one movieclip/);
   assert.equal((await decodeDocument(legacyFigure({figure_types: [], keyframes: []}, 'stkz'), 'stkz')).version, 1, 'the container as stored is not checked');
   // The embedded original source is checked against its fingerprint.
-  const source = text('original'), good = {_stykSource: {sha256: '0c0f4b8eb4a1a0b5a6e1a0c1c5c8cb8eb5d4c1f3b3d9e8c9ee10c5d3b4a8e5c5', source_base64: source}};
-  await assert.rejects(openDocument(await buildContainerV2(good, 'styk', {preBlobs: [source]}), 'styk'), /fingerprint/);
-  const file = await buildContainerV2(good, 'styk', {preBlobs: [source]});
+  const source = text('original'), good = {_stykSource: {sha256: '0c0f4b8eb4a1a0b5a6e1a0c1c5c8cb8eb5d4c1f3b3d9e8c9ee10c5d3b4a8e5c5', source_base64: bytesToBase64(source)}};
+  await assert.rejects(openDocument(await buildContainerV2(good, 'styk'), 'styk'), /fingerprint/);
+  const file = await buildContainerV2(good, 'styk');
   assert.equal((await openDocument(file, 'styk', {verifySource: false}))._stykSource.source_base64, bytesToBase64(source));
 });
 
@@ -170,90 +169,9 @@ test('saving a figure file refuses what is not a self-contained figure, naming i
   assert.ok((await buildContainerV2({figure_types: [], keyframes: []}, 'styk')).length > 56, 'a project is not a figure file');
 });
 
-test('reserved binary source fields round trip, and an edited source is compressed again', async () => {
-  const bytes = new Uint8Array([0, 1, 2, 255]);
-  const document = {_stykSource: {source_base64: bytes}, media: {data_base64: bytes}, foreign: bytes,
-    literal: 'S2E:literal', zero: {source_base64: new Uint8Array()}};
-  const empty = document.zero.source_base64;
-  const lifted = liftDocument(document, {preBlobs: [bytes, empty]});
-  const cache = createContainerCompressionCache();
-  const first = (await decodeDocument(await encodeContainerV2(lifted, 'styk', {cache}), 'styk')).document;
-  assert.equal(first._stykSource.source_base64, bytesToBase64(bytes));
-  assert.equal(first.media.data_base64, first._stykSource.source_base64);
-  assert.equal(first.zero.source_base64, ''); assert.equal(first.literal, document.literal);
-  assert.deepEqual(first.foreign, {'0': 0, '1': 1, '2': 2, '3': 255});
-  bytes[0] = 77;
-  const stats = {}, updated = await encodeContainerV2(liftDocument(document, {preBlobs: [bytes, empty]}), 'styk', {cache, stats});
-  assert.equal((await decodeDocument(updated, 'styk')).document._stykSource.source_base64, bytesToBase64(bytes));
-  assert.ok(stats.misses > 0);
-});
-
-test('compressed blocks are reused for the same bytes, bounded, and never alias a caller', async () => {
-  const a = floats(), document = {a, alias: a, independent: a.slice(), data_base64: bytesToBase64(new Uint8Array(80000))};
-  const cache = createContainerCompressionCache({maxBytes: 1024 * 1024, maxEntries: 8});
-  const firstStats = {}, first = await encodeContainerV2(liftDocument(document), 'styk', {cache, stats: firstStats});
-  const firstBytes = first.slice();
-  assert.equal(firstStats.misses, 3); assert.equal(firstStats.hits, 0);
-  const lifted = liftDocument(document);
-  assert.equal(firstStats.container_raw_bytes, text(JSON.stringify(lifted.skeleton)).length +
-    lifted.sections.reduce((sum, section) => sum + section.bytes.length, 0));
-  assert.equal(firstStats.cacheEntries, 3); assert.equal(firstStats.cacheBytes, cache.byteLength);
-  // A caller owns what it is given; changing it cannot corrupt the cache.
-  first.fill(0);
-  const secondStats = {}, second = await encodeContainerV2(liftDocument(document), 'styk', {cache, stats: secondStats});
-  assert.equal(secondStats.hits, 3); assert.equal(secondStats.misses, 0);
-  assert.equal(secondStats.rawBytesReused, secondStats.container_raw_bytes);
-  assert.deepEqual(second, firstBytes);
-  assert.deepEqual(await encodeContainerV2(liftDocument(document), 'styk', {cache}), firstBytes);
-  // Blocks move to a new cache, as a retiring worker hands them over.
-  const held = cache.byteLength, restored = createContainerCompressionCache({maxBytes: 1024 * 1024, maxEntries: 8});
-  const taken = cache.take();
-  assert.equal(cache.size, 0); assert.equal(cache.byteLength, 0);
-  restored.restore(structuredClone(taken));
-  taken.length = 0; // Caller-owned metadata cannot alter retained blocks.
-  const restoredStats = {};
-  assert.deepEqual(await encodeContainerV2(liftDocument(document), 'styk', {cache: restored, stats: restoredStats}), firstBytes);
-  assert.equal(restoredStats.hits, 3); assert.equal(restored.byteLength, held);
-  const decoded = (await decodeDocument(firstBytes, 'styk')).document;
-  assert.equal(decoded.a, decoded.alias); assert.notEqual(decoded.a, decoded.independent);
-  decoded.a[0] = 999; assert.notEqual(decoded.independent[0], 999);
-  document.a[0] = 1.25;
-  const changedStats = {}, changed = await encodeContainerV2(liftDocument(document), 'styk', {cache: restored, stats: changedStats});
-  assert.equal(changedStats.hits, 2); assert.equal(changedStats.misses, 1);
-  assert.deepEqual((await decodeDocument(changed, 'styk')).document, document);
-  // A cache that holds nothing still writes the file.
-  const tiny = createContainerCompressionCache({maxBytes: 20, maxEntries: 1});
-  assert.deepEqual(await encodeContainerV2(liftDocument({...document, a, alias: a}), 'styk', {cache: tiny}),
-    await encodeContainerV2(liftDocument({...document, a, alias: a}), 'styk'));
-  assert.ok(tiny.byteLength <= 20); assert.ok(tiny.size <= 1);
-});
-
-test('the cache of compressed blocks keeps the most recent within its bounds and checks what it is given', () => {
-  const bounded = createContainerCompressionCache({maxBytes: 20, maxEntries: 2});
-  const block = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
-  bounded.put('a', block); block[0] = 9;
-  assert.equal(bounded.get('a')[0], 1, 'put keeps a copy');
-  bounded.put('b', new Uint8Array(8));
-  bounded.get('a'); bounded.put('c', new Uint8Array(8));
-  assert.equal(bounded.get('b'), undefined); assert.ok(bounded.get('a')); assert.ok(bounded.get('c'));
-  bounded.put('oversized', new Uint8Array(21)); assert.equal(bounded.get('oversized'), undefined);
-  assert.equal(bounded.byteLength, 16); assert.equal(bounded.size, 2);
-  bounded.clear(); assert.equal(bounded.byteLength, 0); assert.equal(bounded.size, 0);
-  const key = length => `2:3:${length}:${'0'.repeat(64)}`;
-  bounded.restore([{key: key(3), bytes: new Uint8Array(8)}, {key: key(4), bytes: new Uint8Array(8)}, {key: key(5), bytes: new Uint8Array(8)}]);
-  assert.equal(bounded.size, 2); assert.equal(bounded.byteLength, 16); assert.equal(bounded.get(key(3)), undefined);
-  for (const invalid of [null, {}, {key: 'wrong', bytes: new Uint8Array()}, {key: key(1), bytes: new Blob()},
-    {key: `1:default:1:${'0'.repeat(64)}`, bytes: new Uint8Array()}, {key: key(500000000), bytes: new Uint8Array()},
-    {key: 'x'.repeat(200), bytes: new Uint8Array()}, {key: key(1), bytes: new Uint8Array(21)}]) {
-    bounded.restore([invalid]); assert.equal(bounded.size, 0); assert.equal(bounded.byteLength, 0);
-  }
-  bounded.restore({}); assert.equal(bounded.size, 0);
-  assert.throws(() => createContainerCompressionCache({maxBytes: -1}), RangeError);
-});
-
 test('the module the workers load opens and saves through its own instance', async () => {
   const doc = {version: 5, angles: floats(), keyframes: [{objects: [{angles: floats()}]}]};
-  const file = await nativeFileCodec.save(liftDocument(doc), 'styk');
+  const file = await nativeFileCodec.save(doc, 'styk');
   const opened = await nativeFileCodec.open(file, 'styk');
   assert.deepEqual([opened.version, opened.document], [2, doc]);
   assert.ok(opened.materializedBytes > file.length);

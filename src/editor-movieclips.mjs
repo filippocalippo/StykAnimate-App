@@ -1,7 +1,6 @@
 import {messageError} from './localized-error.mjs';
 import {drawingResourcesFor} from './drawing-resources.mjs';
 import {movieclipAsset, isMovieclip} from './movieclips.mjs';
-import {timeline} from './pivot/read-view.mjs';
 import {storedFrameReport} from './pivot-frame-draft.mjs';
 
 const clone=value=>structuredClone(value);
@@ -16,15 +15,6 @@ export const editorMovieclipMethods={
     const document=clone(movieclipAsset(figure).document);
     this.load(document,figure.name,{preserveDrawingResources:true});this._movieclipScopes=[...scopes,{parent,typeId,name:figure.name}];
     this._emit('movieclip-scope',{structural:true,timing:true});return this;
-  },
-  movieclipProjectReport(){
-    let document=this.report;
-    for(const scope of [...(this._movieclipScopes??[])].reverse()){
-      const parent=scope.parent.report,rows=timeline(storedFrameReport(document,{validate:false}));
-      document={...parent,_styk:{...parent._styk},figure_types:parent.figure_types.map(figure=>figure.figure_type_id!==scope.typeId?figure:
-        {...figure,_styk:{...figure._styk,movieclip:{...movieclipAsset(figure),document,duration:Math.max(1,rows.at(-1)?.end??((rows.at(-1)?.start??0)+(rows.at(-1)?.count??1)))}}})};
-    }
-    return document;
   },
   leaveMovieclip({save=true}={}){
     const scopes=this._movieclipScopes;if(!scopes?.length)return false;

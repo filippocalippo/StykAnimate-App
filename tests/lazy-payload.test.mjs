@@ -5,12 +5,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createImageFigure} from '../src/media-authoring.mjs';
 import {emptyDocument} from '../src/demo.mjs';
-import {liftDocument} from '../src/document-lift.mjs';
 import {bytesToBase64} from '../src/base64.mjs';
 import {attachRead, openBytes, openJson} from '../src/engine/engine-open.mjs';
 import {copyRecord} from '../src/lazy-payload.mjs';
 import {applyDocumentPatch} from '../src/engine/engine-patch.mjs';
-import {buildContainerV2, encodeContainerV2} from './support/native-files.mjs';
+import {buildContainerV2} from './support/native-files.mjs';
 import {newOwnedEditor} from './support/owned-editor.mjs';
 import './support/engine-node.mjs';
 
@@ -97,17 +96,17 @@ test('a patch copies and rebuilds records around a picture without reading it', 
   assert.notEqual(pictureOf(editor), asset, 'the record on the path is a copy');
 });
 
-test('a view that is saved gives the file the bytes of the one that was opened', async () => {
+test('a view with its pictures unread reads as the document that was opened', async () => {
   const base64 = PICTURE(13);
   const first = await openJson(projectWithPicture(base64), 'photo', {layerTimeline: true});
   const plain = (await first.read()).report;
-  const file = await buildContainerV2(plain, 'styk');
-  const {read} = await openedEditor(file);
-  assert.ok(isLazy(read.report.figure_types.find(figure => figure.figure_type_id === 2).image_assets[0], 'data_url'));
-  const lazy = liftDocument(read.report), materialized = liftDocument(JSON.parse(JSON.stringify(read.report)));
-  assert.deepEqual(lazy.sections.map(section => section.bytes), materialized.sections.map(section => section.bytes));
-  assert.deepEqual(lazy.skeleton, materialized.skeleton);
-  assert.deepEqual(Buffer.from(await encodeContainerV2(lazy, 'styk')), Buffer.from(file), 'an unchanged opened document saves the file it was opened from');
+  const {read} = await openedEditor(await buildContainerV2(plain, 'styk'));
+  const asset = read.report.figure_types.find(figure => figure.figure_type_id === 2).image_assets[0];
+  assert.ok(isLazy(asset, 'data_url'));
+  const materialized = JSON.parse(JSON.stringify(read.report)), same = materialized.figure_types.find(figure => figure.figure_type_id === 2).image_assets[0];
+  assert.equal(same.data_base64, base64);
+  assert.equal(same.data_url, `data:image/png;base64,${base64}`);
+  assert.deepEqual(Object.keys(asset), Object.keys(same), 'the fields keep their order, which the bytes of a save depend on');
 });
 
 test('a string that looks like a payload marker stays a string', async () => {

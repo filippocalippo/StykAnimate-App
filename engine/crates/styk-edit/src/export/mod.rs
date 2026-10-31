@@ -11,6 +11,7 @@
 mod figure;
 mod pivot;
 mod pose_sequences;
+mod save;
 mod style;
 #[cfg(test)]
 mod tests;
@@ -24,6 +25,7 @@ use styk_eval::load::Loader;
 use styk_eval::records::Records;
 
 pub use figure::FigureRequest;
+pub use save::{fold_movieclip, project_document};
 
 use crate::{EditError, Editor, Options};
 

@@ -90,6 +90,15 @@ const selectionMetadata = state => Object.fromEntries(['polygonSelection', 'segm
 const installed = new WeakMap();
 export const ownerOf = editor => installed.get(editor);
 
+/** How each document a session holds (the open one, a parked tab's, the one a movieclip was entered from) hands it over for a save. */
+const handovers = new WeakMap();
+/**
+ * Hands the document the interface reads as `document` over for a save: a token naming the tree its session holds at this
+ * moment (`EditSession.snapshot`), which the export worker writes while the session goes on editing. `undefined` when no
+ * session holds it. The saver takes the token, or lets go of it (`releaseSnapshots`).
+ */
+export const snapshotDocument = document => handovers.get(document)?.(document);
+
 /**
  * @param {object} editor the app's Editor
  * @param {{start?(editor): object|null, verify?: boolean, draws?(): Array, detached?: boolean}} options
@@ -483,6 +492,8 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     else { ended = parked.get(closed)?.session; parked.delete(closed); }
     if (ended) end(ended);
   };
+  /** The token of the tree the session of document `held` holds, the open one or a parked one. */
+  const handOver = held => (document === held ? session : parked.get(held)?.session)?.snapshot();
   const call = (method, args) => {
     const answer = JSON.parse(session.call(method, JSON.stringify(args), JSON.stringify(view())));
     if (answer.status !== 'ok') throw new Error(`${method}: ${answer.error ?? answer.reason}`);
@@ -498,7 +509,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     const resumed = parked.get(editor.report);
     if (resumed) {
       parked.delete(editor.report);
-      ({session} = resumed); document = editor.report;
+      ({session} = resumed); document = editor.report; handovers.set(document, handOver);
       ({depths, history} = resumed);
       // Revisions never repeat across the documents one editor holds (editor-sessions.mjs): the editor's numbering went on meanwhile.
       call('@revisions', [null, editor._revisionSerial, null]);
@@ -508,7 +519,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     let started = null;
     try { started = start(editor); } catch (error) { report.broken = String(error.message ?? error); }
     if (!started) return null;
-    session = started; document = editor.report;
+    session = started; document = editor.report; handovers.set(document, handOver);
     depths = [0, 0];
     try {
       call('@historyLimits', [editor.historyLimit, editor.historyBytes]);
