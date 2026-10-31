@@ -1,36 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {Worker as NodeWorker} from 'node:worker_threads';
 import {randomBytes, createHash} from 'node:crypto';
 import {DocumentExporter} from '../src/document-export.mjs';
 import {decodeDocument, openDocument} from './support/native-files.mjs';
 import {createDemo} from '../src/demo.mjs';
 import {FakeCodecHost} from './support/codec-host.mjs';
+import {useExportWorker} from './support/export-worker.mjs';
 import {ownedEditorFor} from './support/owned-editor.mjs';
 import {snapshotDocument} from '../src/engine/engine-owner.mjs';
 import {makeProjectFile} from '../src/engine/engine-document-export.mjs';
 
-class WorkerFacade extends EventTarget {
-  constructor() {
-    super();
-    this.worker = new NodeWorker(new URL('./document-export-node-worker.mjs', import.meta.url), {execArgv: []});
-    this.worker.on('message', data => { const event = new Event('message'); event.data = data; this.dispatchEvent(event); });
-    this.worker.on('error', error => { const event = new Event('error', {cancelable: true}); event.message = error.message; this.dispatchEvent(event); });
-    this.worker.on('messageerror', () => this.dispatchEvent(new Event('messageerror')));
-  }
-  postMessage(value, transfer) { this.worker.postMessage(value, transfer); }
-  terminate() { void this.worker.terminate(); }
-}
-
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 function environment(t, {codecHost = new FakeCodecHost(), ...options} = {}) {
-  const previous = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
-  Object.defineProperty(globalThis, 'Worker', {value: WorkerFacade, configurable: true});
+  useExportWorker(t);
   const exporter = new DocumentExporter({codecHost, idleMs: 1000, ...options});
-  t.after(() => {
-    exporter.dispose(); codecHost.close();
-    if (previous) Object.defineProperty(globalThis, 'Worker', previous); else delete globalThis.Worker;
-  });
+  t.after(() => { exporter.dispose(); codecHost.close(); });
   return exporter;
 }
 

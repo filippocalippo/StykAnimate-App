@@ -18,12 +18,11 @@
  * or an OffscreenCanvas, the helpers below resolve null and no preview is drawn.
  */
 import {loadEngine} from './engine.mjs';
+import {workerGuard, releaseWorker} from './engine-guard.mjs';
 
 const WORKER_NAME = 'StykAnimate previews (engine)';
 /** How long an idle worker keeps its pictures and thread. */
 const PREVIEW_IDLE_MS = 300000;
-/** How long a worker may take to release the engine memory it holds. */
-const RELEASE_MS = 5000;
 
 const abortError = () => new DOMException('The preview was superseded.', 'AbortError');
 const settled = request => request?.signal?.removeEventListener('abort', request.onAbort);
@@ -52,7 +51,10 @@ export class EnginePreviewWorker {
   _spawn() {
     const worker = this.worker = this.spawnWorker();
     this.stats.starts++;
-    // `answered`: the worker can still free what it holds (it said so); otherwise it is gone or stuck.
+    // `answered`: the worker may still be in the engine or able to free what it holds, so it is released through its guard
+    // (engine-guard.mjs); otherwise it is ended at once. An `error` event is a thread whose uncaught exception has unwound every
+    // stretch into the engine (or one that never loaded), so it is ended. A `messageerror` is the interface failing to read a message
+    // and says nothing of where the worker is.
     const fail = (message, answered) => {
       if (this.worker !== worker) return;
       this.broken = message;
@@ -72,9 +74,9 @@ export class EnginePreviewWorker {
       Object.assign(this.stats, {backend: data.backend ?? null, cpu: Boolean(data.cpu), gpuRefusal: data.gpuRefusal ?? null});
     });
     worker.addEventListener('error', event => { event.preventDefault(); fail(event.message || 'The preview worker stopped.', false); });
-    worker.addEventListener('messageerror', () => fail('A preview could not be transferred.', false));
+    worker.addEventListener('messageerror', () => fail('A preview could not be transferred.', true));
     const {module, memory, stack, progress} = this.engine.join;
-    worker.postMessage({operation: 'start', id: 0, module, memory, stack, progress});
+    worker.postMessage({operation: 'start', id: 0, module, memory, stack, progress, guard: workerGuard(worker)});
     return worker;
   }
 
@@ -156,14 +158,10 @@ export class EnginePreviewWorker {
 }
 
 /**
- * Asks a preview worker to free what it holds in the engine's memory and its device, then end;
- * terminated if it does not say so in time (what it held then stays allocated).
+ * Asks a preview worker to free what it holds in the engine's memory and its device, then end; terminated if it does not say so
+ * in time and is outside the engine (what it held then stays allocated), never inside it (engine-guard.mjs).
  */
-function dismiss(worker) {
-  const timer = setTimeout(() => worker.terminate(), RELEASE_MS);
-  worker.addEventListener('message', ({data}) => { if (data?.released) { clearTimeout(timer); worker.terminate(); } });
-  try { worker.postMessage({operation: 'release'}); } catch { clearTimeout(timer); worker.terminate(); }
-}
+const dismiss = worker => releaseWorker(worker);
 
 let shared = null;
 

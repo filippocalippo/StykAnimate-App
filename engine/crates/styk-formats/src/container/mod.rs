@@ -22,7 +22,7 @@ mod write;
 
 
 pub use read::{Checked, Decoded, Parts, check, decode, decode_parts, member_value, parse_lifted, parse_lifted_owned, parse_lifted_owned_within, parse_lifted_owned_admitted_within, LiftedAdmitted};
-pub use write::{Lifted, ViewLifter, ViewPart, encode_v1, encode_v2, encode_v2_with, lift, lift_within};
+pub use write::{Lifted, ViewLifter, ViewPart, encode_v1, encode_v2, encode_v2_with, lift, lift_until, lift_within};
 
 pub(crate) const HEADER: usize = 56;
 pub(crate) const SECTION: usize = 64;
@@ -137,7 +137,13 @@ pub enum ContainerError {
     DocumentTooLarge(&'static str),
     #[error("the JSON document is invalid: {0}")]
     Json(#[from] styk_doc::JsonError),
+    /// The caller stopped the write (a cancel it passed in said so); nothing was produced.
+    #[error("the write was cancelled")]
+    Cancelled,
 }
+
+/// The machine code of [`ContainerError::Cancelled`].
+pub const CANCELLED: &str = "cancelled";
 
 impl ContainerError {
     /// The localized message of this error, under `errors.nativeContainer.` in the locale packs.
@@ -160,6 +166,7 @@ impl ContainerError {
             NonFinite { .. } => "errors.nativeContainer.theStykanimateDocumentContainsNonFiniteNumbers",
             DocumentTooLarge(_) => "errors.nativeContainer.theStykanimateDocumentExceedsTheUncompressedSizeLimit",
             Json(_) => "errors.nativeContainer.projectDataMustBeAJsonObject",
+            Cancelled => "errors.documentExport.documentExportFailed",
         }
     }
 
@@ -167,12 +174,13 @@ impl ContainerError {
     pub fn code(&self) -> Option<&'static str> {
         match self {
             ContainerError::DocumentTooLarge(_) => Some("document_too_large"),
+            ContainerError::Cancelled => Some(CANCELLED),
             _ => None,
         }
     }
 }
 
-pub(crate) use styk_doc::digest::sha256;
+pub(crate) use styk_doc::digest::{sha256, sha256_until};
 
 /// Restores a stored block. The output is bounded by the declared length before
 /// anything is allocated for it, and must match it exactly.
@@ -213,7 +221,8 @@ pub(crate) fn unpack(codec: Codec, stored: &[u8], raw_length: usize, what: &dyn 
     }
 }
 
-/// zstd at level 3 in one frame, as the app has always written sections.
+/// zstd at level 3 in one frame, as the app has always written sections. One call, never fed in pieces: the compressor then writes other
+/// (valid) frames on real data, and an unchanged document has to save to the bytes it was opened from.
 pub(crate) fn pack_zstd(raw: &[u8]) -> Vec<u8> {
     zstd::bulk::compress(raw, 3).expect("in-memory zstd compression cannot fail")
 }

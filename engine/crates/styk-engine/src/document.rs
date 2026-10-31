@@ -74,6 +74,10 @@ const UNREADABLE: &str = "errors.importWorker.unreadableProject";
 /// refuses the work and goes on with what it holds ([`styk_alloc`]).
 pub const OUT_OF_MEMORY: &str = "errors.engine.outOfMemory";
 
+/// [`OUT_OF_MEMORY`] for a save or an export, which fails without touching the open document: the message does not tell
+/// the person to save their work.
+pub const OUT_OF_MEMORY_SAVING: &str = "errors.engine.outOfMemoryWhileSaving";
+
 /// What opening a document takes beyond its file, per byte of the file or text, at most: the decoded document, its
 /// typed views and what the reader holds on the way. Measured at the peak of opening (2026-10-24, the private
 /// documents): a Pivot file of 4 to 41 MB took 6.7 to 14.2 bytes, a .styk of 35 MB 11.4. Opening reserves this
