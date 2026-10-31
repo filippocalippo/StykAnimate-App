@@ -12,7 +12,7 @@ function fixture() {
   editor.selectSheetLayer(figureLayer); editor.select(1, 0);
   const drawing = Object.assign(Object.create(DrawingController.prototype), {editor,
     state: {tool: 'pose', handles: true, view: {rotation: .2, flip: true}},
-    beforeEdit() {}, bind() {}, sync() {}, prepareVisible() {}, onUI() {}, onRender() {}, closePalette() {}, settle() {},
+    beforeEdit() {}, bind() {}, sync() {}, prepareVisible() {}, onUI() {}, onRender() {}, closePalette() {}, settle() {}, wetInk() {},
     getTimeline: () => ({selectTrack: id => { drawing.timelineLayer = id; }})});
   return {editor, drawing, figureLayer, drawingLayer};
 }

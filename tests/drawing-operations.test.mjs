@@ -154,3 +154,12 @@ test('cancelled point filters reject a late worker reply and retain the original
   await assert.rejects(pending,{name:'AbortError'});assert.equal(committed,false);assert.deepEqual(store.pixel(0,0),[20,40,60,255]);
   assert.equal(surface.pinned,false);assert.equal(d.holds.size,0);assert.equal(d.operation,null);
 });
+
+test('the colour a stroke painted joins the recent colours after the stroke, not on the pen going down',async()=>{
+  const {recentColors}=await import('../src/color-palette.mjs');
+  const d=fixture(),before=recentColors()[0],color=before==='#123456'?'#654321':'#123456';
+  d.rememberColor(color);
+  assert.equal(recentColors()[0],before,'the palette refresh waits for a later task');
+  await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(recentColors()[0],color);
+});

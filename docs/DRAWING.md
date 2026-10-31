@@ -398,9 +398,9 @@ Frame and structural commands wait for the closing stroke's pixel commit;
 view-only navigation does not discard its final worker reply. The completed
 stroke still belongs to the exposure where it started.
 
-Pixel transactions with more than 1 MiB of expanded replacement tiles prepare
+Pixel transactions with more than 4 MiB (about 256 tiles) of expanded replacement tiles prepare
 those tiles in the pixel worker before committing. The owner reserves the
-complete replacement set plus one 1 MiB input batch, protects its source stores
+complete replacement set plus one 1 MiB input batch (smaller sets apply in the commit itself, on the interface thread), protects its source stores
 from eviction, and validates every returned tile and its alpha bounds. The
 editor then adopts the prepared buffers in one synchronous transaction. History
 keeps separate, unchanged before/after buffers. Cancellation, a newer edit,
