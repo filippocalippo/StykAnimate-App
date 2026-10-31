@@ -6,13 +6,18 @@ const fs = require('node:fs/promises');
 const TRANSIENT = new Set(['EPERM', 'EACCES', 'EBUSY']);
 const DELAYS_MS = [20, 40, 80, 160, 320, 400];
 
-/** `fs.rename(from, to)`, tried again after a transient failure; the last failure is thrown as it was. */
-async function renameWithRetry(from, to, delays = DELAYS_MS) {
+/**
+ * `fs.rename(from, to)`, tried again after a transient failure; the last failure is thrown as it was. `stopped()` is asked before
+ * every new attempt: a rename that has not happened yet gives way to a cancel (the wait is at most the longest delay), one that has
+ * happened is a committed save and nothing here undoes it.
+ */
+async function renameWithRetry(from, to, { delays = DELAYS_MS, stopped = () => false } = {}) {
   for (let attempt = 0; ; attempt++) {
     try { return await fs.rename(from, to); }
     catch (error) {
-      if (!TRANSIENT.has(error?.code) || attempt >= delays.length) throw error;
+      if (!TRANSIENT.has(error?.code) || attempt >= delays.length || stopped()) throw error;
       await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+      if (stopped()) throw error;
     }
   }
 }

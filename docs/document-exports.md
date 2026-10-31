@@ -64,7 +64,7 @@ the document had when it began.
 
 One exporter runs one worker at a time, with at most four queued requests. Waiting requests remain cancellable and recheck the
 captured revision before the work starts. Successful work reuses the worker for 30 seconds; idle expiry, disposal, cancellation,
-timeout and failure end it (a worker that joined the engine is told to give its thread back first and is not terminated inside the
+timeout and failure end it (a worker is told to stop and give its thread back first, and is never terminated inside the
 engine). Every request resets its options, timings and codec port. A monotonically increasing request ID rejects delayed messages
 from older requests. No snapshot or document remains in the worker between saves.
 
@@ -115,7 +115,7 @@ path for subclasses. Integer precision, negative zero, nonfinite rejection,
 unknown fields and per-container cancellation checkpoints remain unchanged; the
 JSON encoder and fingerprint bytes are unchanged.
 
-The native file writer reports success at atomic destination commit. The rename onto the destination is tried again for about a second when Windows refuses it for a moment (`EPERM`, `EACCES` or `EBUSY`: a scanner or indexer holding the new file); a refusal that lasts, such as a read-only target, is reported then, with the previous file kept and the temporary file removed (`desktop/rename-retry.cjs`, also used by recovery copies). A later
+The native file writer reports success at atomic destination commit. The rename onto the destination is tried again for about a second when Windows refuses it for a moment (`EPERM`, `EACCES` or `EBUSY`: a scanner or indexer holding the new file); a refusal that lasts, such as a read-only target, is reported then, with the previous file kept and the temporary file removed (`desktop/rename-retry.cjs`, also used by recovery copies). A cancel (or closing the window) that comes while it is being retried stops it at the next attempt, within 400 ms, and nothing is replaced; a cancel that comes after the rename went through is too late, and the save is reported as saved. A later
 failure updating optional recent-file or recovery display metadata does not
 turn a saved document into a failed save; it reports an app diagnostic and sets
 `metadataSaved: false` in the finish result. Failures before commit still reject

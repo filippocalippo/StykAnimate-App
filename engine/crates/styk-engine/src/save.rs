@@ -5,9 +5,10 @@
 //!
 //! The document is prepared as the save has always prepared it (`styk_edit::export::project_document`), lifted into the
 //! container's skeleton and sections (`styk_formats::container::lift_until`, which makes the choices the JavaScript writer made) and
-//! framed (`styk_formats::files::save`). The worker that runs it may be told to give its thread back at any moment and is
-//! ended if it does not (`docs/engine/threading.md`), so no stretch of it runs long without asking `cancel`: the lift every few
-//! thousand values, hashing and compression every few megabytes, the preparation between its steps.
+//! framed (`styk_formats::files::save`). The worker that runs it may be told to give its thread back at any moment, so the interface does not wait on it: the lift asks `cancel` every few thousand values, hashing every few megabytes and the
+//! preparation between its steps, and compression (one call per frame, to keep the frames' bytes) before and after each frame. A
+//! worker found inside this function when it is told to stop finishes the frame it is on and returns `Cancelled`; it is never ended
+//! inside it (`docs/engine/threading.md`, "Ending a worker").
 
 use std::sync::Arc;
 

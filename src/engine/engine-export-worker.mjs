@@ -26,6 +26,7 @@
 import {initSync, ExportDevice, ExportRenderer} from './pkg/styk_engine.js';
 import {applyDocumentChunk} from '../document-transport.mjs';
 import {exportContext, checkExportContext, deliverExportFrame} from '../export-canvas.mjs';
+import {inside, guarded} from './engine-guard.mjs';
 
 /** When this worker's modules were loaded, from its creation (ms). */
 const loadedAt = performance.now();
@@ -36,6 +37,8 @@ const STRIP = new Set(['runtime_segments']);
 /** Frames drawn ahead of the one asked for, at most (within the renderer's read-back slots). */
 const AHEAD = 6;
 
+/** The interface's claim on this worker (engine-guard.mjs): every call into the engine is made with it held. */
+let guard = null;
 let wasm = null, device = null, renderer = null, progress = null, options = null, canvas = null, context = null, tile = null, frameDocument;
 /** Why this worker has no GPU device (its exports are drawn on the CPU), or null. */
 let noDevice = null;
@@ -65,7 +68,7 @@ function whenProgress(seen) {
  * Where none can be had, the export is drawn by the CPU rasterizer (`noDevice` says why).
  */
 async function warm(message) {
-  wasm ??= initSync({module: message.module, memory: message.memory, thread_stack_size: message.stack});
+  wasm ??= inside(guard, () => initSync({module: message.module, memory: message.memory, thread_stack_size: message.stack}));
   progress ??= new Int32Array(message.memory.buffer, message.progress, 1);
   if (device && !device.usable()) { device.dispose(); device.free(); device = null; }
   // A vector export (SVG) draws no tiles: the picture of a frame without a vector form is the CPU rasterizer's.
@@ -74,7 +77,7 @@ async function warm(message) {
     if (device) { device.dispose(); device.free(); device = null; }
   }
   if (!device && !noDevice) {
-    try { device = await ExportDevice.create(new OffscreenCanvas(1, 1)); }
+    try { device = guarded(guard, await inside(guard, () => ExportDevice.create(new OffscreenCanvas(1, 1)))); }
     catch (error) { noDevice = String(error?.message ?? error); }
   }
   return {warm: true, cpu: Boolean(noDevice)};
@@ -93,10 +96,10 @@ async function start(message) {
       // The device moves into the renderer.
       const ready = device;
       device = null;
-      renderer = ExportRenderer.create(message.address, message.revision, message.width, message.height, message.smoothing, message.maxPixels, message.tileSize, ready);
+      renderer = guarded(guard, inside(guard, () => ExportRenderer.create(message.address, message.revision, message.width, message.height, message.smoothing, message.maxPixels, message.tileSize, ready)));
     } else {
       // No GPU device in this worker: the CPU rasterizer draws the same frames (docs/engine/rendering.md, CPU).
-      renderer = ExportRenderer.create_cpu(message.address, message.revision, message.width, message.height, message.smoothing, message.maxPixels, message.tileSize);
+      renderer = guarded(guard, inside(guard, () => ExportRenderer.create_cpu(message.address, message.revision, message.width, message.height, message.smoothing, message.maxPixels, message.tileSize)));
     }
   } catch (error) {
     renderer = null;
@@ -242,12 +245,13 @@ async function release() {
   if (canvas) canvas.width = canvas.height = 1;
   canvas = context = tile = frameDocument = null;
   // No call into the module may follow on this thread (wasm-bindgen's thread destructor).
-  try { wasm?.__wbindgen_thread_destroy(); } catch { /* never started */ }
+  try { inside(guard, () => wasm?.__wbindgen_thread_destroy()); } catch { /* never started, or ended by the interface */ }
   self.postMessage({released: true});
   self.close();
 }
 
 self.addEventListener('message', ({data: message}) => {
+  if (message.guard) guard = message.guard;
   if (message.operation === 'release') { release(); return; }
   const run = running.then(() => {
     check();

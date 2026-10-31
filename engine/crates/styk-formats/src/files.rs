@@ -11,7 +11,7 @@
 
 use styk_doc::json;
 
-use crate::container::{self, ContainerError, Kind, encode_v2_with, pack_zstd_until};
+use crate::container::{self, ContainerError, Kind, encode_v2_with, pack_zstd};
 use crate::native::{self, NativeError};
 
 /// Why a file could not be opened or saved: the interface's message for it
@@ -193,7 +193,7 @@ fn hex(digest: &[u8; 32]) -> String {
 /// Writes a version 2 container of `kind` around a lifted document. A `.stkz` or
 /// `.stykmov` skeleton must be the self-contained figure the file stores
 /// (`native::validate_figure`). The caller's `store` supplies the compressed form
-/// of blocks it has compressed before. `cancel` is asked by the hashing and the compression every few megabytes; a save it
+/// of blocks it has compressed before. `cancel` is asked by the hashing every few megabytes and before and after each compressed frame; a save it
 /// stops fails with the code [`container::CANCELLED`] and produces nothing.
 pub fn save(kind: Kind, skeleton: &[u8], arrays: &[u8], payloads: &[u8], store: &mut dyn BlockStore, cancel: &dyn Fn() -> bool) -> Result<Saved, FileError> {
     if kind != Kind::Styk {
@@ -209,7 +209,14 @@ pub fn save(kind: Kind, skeleton: &[u8], arrays: &[u8], payloads: &[u8], store: 
             return Some(stored);
         }
         stats.misses += 1;
-        let stored = pack_zstd_until(raw, cancel)?;
+        // One call per frame, so a stop is obeyed before it and after it, not inside it.
+        if cancel() {
+            return None;
+        }
+        let stored = pack_zstd(raw);
+        if cancel() {
+            return None;
+        }
         store.put(&key, &stored);
         Some(stored)
     })

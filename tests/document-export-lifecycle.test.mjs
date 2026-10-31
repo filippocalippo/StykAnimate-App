@@ -119,6 +119,34 @@ test('a worker ended after its export returned is told to stop the engine work f
   assert.equal(Atomics.load(cancel, 0), 1);
 });
 
+test('a worker that is inside the engine when its export is cancelled is not ended, and the next save does not wait for it', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const pollTurn = async () => { await Promise.resolve(); t.mock.timers.tick(0); };
+  const {workers, exporter} = environment(t);
+  const controller = new AbortController(), report = project();
+  const first = exporter.export(report, {signal: controller.signal});
+  const rejected = assert.rejects(first, {name: 'AbortError'});
+  await until(() => workers[0]?.messages.at(-1)?.operation === 'export', pollTurn);
+  const {guard} = workers[0].messages.find(message => message.operation === 'start').options;
+  // The worker is in a long call into the engine: it neither answers the release nor can be ended.
+  Atomics.store(guard, 0, 1);
+  workers[0].postMessage = message => { workers[0].messages.push(message); };
+  controller.abort();
+  await rejected;
+  assert.equal(Atomics.load(workers[0].messages.find(message => message.operation === 'export').cancel, 0), 1, 'told to stop');
+  assert.ok(workers[0].messages.some(message => message.operation === 'release'), 'told to give its thread back');
+  // The next save gets a worker of its own at once.
+  const next = exporter.export(report);
+  await until(() => workers[1]?.messages.at(-1)?.operation === 'export', pollTurn);
+  workers[1].finish(); assert.equal(await (await next).text(), 'exact bytes');
+  t.mock.timers.tick(30000);
+  assert.equal(workers[0].terminated, undefined, 'still inside the engine after the timeout, so not ended');
+  // The call returned and the worker is outside: the next look at it ends it.
+  Atomics.store(guard, 0, 0);
+  t.mock.timers.tick(5000);
+  assert.equal(workers[0].terminated, true);
+});
+
 test('queued revision changes reject before snapshot and disposal cancels active and waiting requests', async t => {
   const {workers, exporter} = environment(t);
   const report = project(), first = exporter.export(report);

@@ -221,40 +221,10 @@ pub(crate) fn unpack(codec: Codec, stored: &[u8], raw_length: usize, what: &dyn 
     }
 }
 
-/// zstd at level 3 in one frame, as the app has always written sections.
+/// zstd at level 3 in one frame, as the app has always written sections. One call, never fed in pieces: the compressor then writes other
+/// (valid) frames on real data, and an unchanged document has to save to the bytes it was opened from.
 pub(crate) fn pack_zstd(raw: &[u8]) -> Vec<u8> {
     zstd::bulk::compress(raw, 3).expect("in-memory zstd compression cannot fail")
-}
-
-/// Compressed bytes the compressor may produce between two questions to the cancel: a few milliseconds' work, even in WebAssembly.
-const ZSTD_OUT_STEP: usize = 1 << 20;
-
-/// [`pack_zstd`] asking `cancel` before every megabyte of output; `None` once it says so. The frame is the one `pack_zstd` makes:
-/// the same level and pledged size, and the input is read in place (a stable input buffer), so the compressor's window is as
-/// contiguous as for a one-shot call. Feeding the input in pieces through the compressor's own buffer is not the same: once the
-/// input is larger than the window (2 MiB at level 3) that buffer wraps and the frame comes out differently.
-pub(crate) fn pack_zstd_until(raw: &[u8], cancel: &dyn Fn() -> bool) -> Option<Vec<u8>> {
-    use zstd::zstd_safe::{CCtx, CParameter, InBuffer, OutBuffer, zstd_sys::ZSTD_EndDirective};
-    let mut context = CCtx::create();
-    context.set_parameter(CParameter::CompressionLevel(3)).expect("level 3 is valid");
-    context.set_parameter(CParameter::StableInBuffer(true)).expect("the input buffer can be stable");
-    context.set_pledged_src_size(Some(raw.len() as u64)).expect("a fresh context takes its size");
-    let mut input = InBuffer::around(raw);
-    let mut step = vec![0u8; ZSTD_OUT_STEP];
-    // Grown a step at a time rather than to the worst case up front, which would commit the size of the input again.
-    let mut out: Vec<u8> = Vec::with_capacity(raw.len() / 4 + ZSTD_OUT_STEP);
-    loop {
-        if cancel() {
-            return None;
-        }
-        let mut buffer = OutBuffer::around(&mut step[..]);
-        let remaining = context.compress_stream2(&mut buffer, &mut input, ZSTD_EndDirective::ZSTD_e_end).expect("in-memory zstd compression cannot fail");
-        let written = buffer.pos();
-        out.extend_from_slice(&step[..written]);
-        if remaining == 0 {
-            return Some(out);
-        }
-    }
 }
 
 pub(crate) fn pack_zlib(raw: &[u8]) -> Vec<u8> {

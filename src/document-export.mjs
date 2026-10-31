@@ -6,13 +6,12 @@ import {browserCodecHost} from './codec-web-host.mjs';
 import {registeredEngine, holdsRevision} from './engine/engine-open.mjs';
 import {snapshotDocument} from './engine/engine-owner.mjs';
 import {releaseSnapshots} from './engine/engine-document-export.mjs';
+import {workerGuard, releaseWorker} from './engine/engine-guard.mjs';
 
 function abortError(message = 'Document export cancelled.') { return new DOMException(message, 'AbortError'); }
 /** The formats whose document the engine makes from the one it holds at the editor's revision: they need it evaluated
  * (docs/engine/document.md). A `.styk` project needs no evaluation: it is written from the snapshot of the editing session. */
 const ENGINE_FORMATS = new Set(['piv', 'stk', 'stkz', 'stykmov']);
-/** How long a worker that joined the engine has to give its thread back before it is ended. */
-const RELEASE_MS = 5000;
 async function yieldToInput() {
   if (globalThis.scheduler?.yield) await scheduler.yield();
   else await new Promise(resolve => setTimeout(resolve, 0));
@@ -41,7 +40,6 @@ export class DocumentExporter {
     this.active = false;
     this.sequence = 0;
     this.engine = engine ?? registeredEngine();
-    this.joined = new WeakSet();
   }
 
   _terminateWorker() {
@@ -51,15 +49,13 @@ export class DocumentExporter {
     this.worker = null;
   }
 
-  /** Ends a worker. One that joined the engine is told to give its thread back first, and the engine work it is in the middle of
-   * to stop: a thread of the shared memory ended mid-call could hold the engine's allocator. */
+  /** Ends a worker. It is told to stop the engine work it is in the middle of (the cancel flag) and to give its thread back, and is
+   * ended when it says it has, or after a while if it is outside the engine; never while it is inside it, where a thread of the
+   * shared memory ended mid-call could hold the engine's allocator or a lock (src/engine/engine-guard.mjs). The next save does not
+   * wait for it: it gets a worker of its own. */
   _retire(worker) {
     if (this.cancelFlag) Atomics.store(this.cancelFlag, 0, 1);
-    if (!this.joined.has(worker)) { worker.terminate(); return; }
-    const timer = setTimeout(() => worker.terminate(), RELEASE_MS);
-    timer.unref?.();
-    worker.addEventListener('message', ({data}) => { if (data?.released) { clearTimeout(timer); worker.terminate(); } });
-    try { worker.postMessage({operation: 'release'}); } catch { clearTimeout(timer); worker.terminate(); }
+    releaseWorker(worker);
   }
 
   _acquire(signal) {
@@ -194,8 +190,7 @@ export class DocumentExporter {
     const timer = this.timeoutMs > 0 ? setTimeout(() => fail(Object.assign(messageError(new Error(''), "errors.documentExport.documentExportTimedOut", {}), { telemetryCode: 'timeout', telemetryStage: 'serialize' })), this.timeoutMs) : null;
     try {
       const link = backendJob.link();
-      await request('start', {options: {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, jobId: backendJob.id, engine: {join: engine.join}, ...link.fields}}, link.transfer);
-      this.joined.add(worker);
+      await request('start', {options: {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, jobId: backendJob.id, engine: {join: engine.join}, guard: workerGuard(worker), ...link.fields}}, link.transfer);
       check();
       const snapshotStarted = performance.now();
       let work;

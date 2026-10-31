@@ -13,7 +13,7 @@ import {decodeSourceRecord} from './source-record.mjs';
  * the engine makes the document of the export from the one it holds at the interface's revision and the worker carries it on to
  * the codec's export request; figure files `.stkz`/`.stykmov` are written by the engine as well.
  */
-let config, running = false;
+let config, running = false, guard = null;
 let timings = {};
 function reply(id, payload, transfer = []) { self.postMessage({id, ok: true, ...payload}, transfer); }
 
@@ -33,7 +33,7 @@ async function projectFile(message) {
   if (!config.engine || !message.project) throw messageError(new Error(''), "errors.documentExportWorker.theDocumentSnapshotWasNotInitialized", {});
   const cancelled = () => Boolean(message.cancel && Atomics.load(message.cancel, 0));
   const source = config.sourceId ? await fetchOriginalSource() : null;
-  const made = makeProjectFile({join: config.engine.join, cancelled, source: source?.bytes,
+  const made = makeProjectFile({join: config.engine.join, guard, cancelled, source: source?.bytes,
     request: {snapshots: message.project.snapshots, scopes: message.project.scopes, name: config.name, source: source?.meta}});
   timings.container_raw_bytes = made.rawBytes;
   return made.bytes;
@@ -44,7 +44,7 @@ function engineDocument(message) {
   if (!config.engine || !message.engine) throw messageError(new Error(''), "errors.documentExportWorker.theDocumentSnapshotWasNotInitialized", {});
   const cancelled = () => Boolean(message.cancel && Atomics.load(message.cancel, 0));
   const piv = ['piv', 'stk'].includes(config.format);
-  return makeExportDocument({join: config.engine.join, address: message.engine.address, revision: message.engine.revision, cancelled, request: {
+  return makeExportDocument({join: config.engine.join, guard, address: message.engine.address, revision: message.engine.revision, cancelled, request: {
     format: config.format, name: config.name, figureTypeId: config.figureTypeId, figureUid: config.figureUid, figureUids: config.figureUids,
     tick: config.tick, output: piv ? 'codec' : 'container', sourceId: config.sourceId}});
 }
@@ -63,8 +63,9 @@ async function codecBody(made) {
 self.addEventListener('message', async event => {
   const message = event.data;
   if (message.operation === 'release') {
-    // A worker that joined the engine gives its thread back before it ends; no call into the module may follow.
-    releaseEngineThread();
+    // A worker that joined the engine gives its thread back before it ends; no call into the module may follow. One the interface
+    // already claimed to end it (src/engine/engine-guard.mjs) has nothing to give back.
+    try { releaseEngineThread(guard); } catch { /* ended */ }
     self.postMessage({released: true});
     self.close?.();
     return;
@@ -76,6 +77,7 @@ self.addEventListener('message', async event => {
     if (message.operation === 'start') {
       config?.codecPort?.close();
       config = message.options;
+      guard = config.guard ?? null;
       timings = {};
       reply(message.id);
     } else if (message.operation === 'export') {

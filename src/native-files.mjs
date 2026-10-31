@@ -33,6 +33,8 @@ export async function writeNativeBlob(desktop, blob, options = {}) {
     return Boolean(result?.saved);
   } catch (error) {
     await desktop.cancelFileWrite(transfer.token).catch(() => {});
+    // A save stopped on the way is a cancelled save, whatever the transfer made of it: the previous file was kept.
+    if (signal?.aborted && error?.name !== 'AbortError') checkAbort(signal);
     throw error;
   }
 }
