@@ -57,8 +57,9 @@ pub struct Assets {
     /// Finer tessellations of glyphs drawn large ([`Assets::glyph_at`]), made when first
     /// drawn and shared by the revisions of one document.
     fine: Arc<FineGlyphs>,
-    /// Which assets these are: every [`Assets::extended`] is numbered, unlike the address it lives at (an address is reused once the
-    /// assets are dropped). 0 for assets that were not built.
+    /// Which assets these are: an [`Assets::extended`] that adds something is numbered anew, unlike the address it lives at (an address is
+    /// reused once the assets are dropped); one that adds nothing places everything where the assets before it did and keeps the number.
+    /// 0 for assets that were not built.
     id: u64,
 }
 
@@ -164,7 +165,7 @@ impl Assets {
     /// only new glyphs are tessellated.
     pub fn extended(&self, doc: &Document) -> Assets {
         let mut assets = self.clone();
-        assets.id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let held = (self.atlas.len(), self.drawing.len(), self.cels.len(), self.glyphs.len(), self.glyph_strokes.len());
         let known = assets.atlas.len().min(doc.images.len());
         let sizes: Vec<Option<(u32, u32)>> = crate::par::map(&doc.images[known..], 8, dimensions);
         assets.atlas.resize(doc.images.len(), AtlasEntry::default());
@@ -205,6 +206,9 @@ impl Assets {
         outlined.dedup_by(|a, b| Arc::ptr_eq(&a.0, &b.0) && a.1 == b.1);
         for (glyph, width, triangles) in crate::par::map(&outlined, 8, |(g, w)| (g.clone(), *w, stroke(&g.path, *w))) {
             assets.glyph_strokes.insert((Arc::as_ptr(&glyph) as usize, width.to_bits()), (glyph, triangles));
+        }
+        if self.id == 0 || held != (assets.atlas.len(), assets.drawing.len(), assets.cels.len(), assets.glyphs.len(), assets.glyph_strokes.len()) {
+            assets.id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
         assets
     }

@@ -66,6 +66,7 @@
     "test:desktop": "node scripts/smoke-desktop.mjs",
     "test:desktop:packaged": "node scripts/smoke-desktop.mjs --packaged",
     "test:boot": "node scripts/smoke-boot.mjs",
+    "test:storage:desktop": "node scripts/smoke-storage.mjs",
     "test:native-formats": "node scripts/smoke-native-formats.mjs",
     "test:boot:packaged": "node scripts/smoke-boot.mjs --packaged",
     "test:export:desktop": "node scripts/smoke-video-export.mjs",

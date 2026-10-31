@@ -197,6 +197,7 @@ function memoryRefusal(engine, size) {
  */
 export function openBytes(bytes, filename, {engine, layerTimeline, signal} = {}) {
   engine = engineOf(engine);
+  engine.grow();
   const refusal = memoryRefusal(engine, bytes.byteLength);
   if (refusal) return Promise.reject(refusal);
   const job = engine.handle.open_document(bytesOf(bytes), filename, 'file', optionsText({layerTimeline}));
@@ -205,10 +206,14 @@ export function openBytes(bytes, filename, {engine, layerTimeline, signal} = {})
 
 const jsonBytes = document => encoder.encode(typeof document === 'string' ? document : JSON.stringify(document));
 
+/** A document given as JSON smaller than this (the blank one a launch opens, a tutorial's) is no reason to start the engine's remaining threads. */
+const SMALL_JSON_BYTES = 256 * 1024;
+
 /** Opens a document given as JSON text or as an object, on the engine's workers. */
 export function openJson(document, name, {engine, layerTimeline, signal} = {}) {
   engine = engineOf(engine);
   const text = jsonBytes(document), refusal = memoryRefusal(engine, text.byteLength);
+  if (text.byteLength >= SMALL_JSON_BYTES) engine.grow();
   if (refusal) return Promise.reject(refusal);
   const job = engine.handle.open_document(text, name ?? 'Untitled animation', 'json', optionsText({layerTimeline}));
   return finish(engine, job, signal);

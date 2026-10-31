@@ -30,10 +30,12 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   `Stage` (a wgpu surface on a canvas, edit frames and ghosts, prepared
   frames), `worker_run` (a worker's loop).
 - `src/engine/engine.mjs`: loads the module with shared memory, starts
-  `navigator.hardwareConcurrency - 1` workers, at most 8 (`engine-worker.mjs`), and
-  without cross-origin isolation runs the same module without workers through
-  `pump()`. `src/engine/engine-start.mjs`, the page's first script (index.html), loads the engine and requests the scene canvas's
-  graphics device while the application's modules are still arriving; the application's `loadEngine()` and `createStage()` take
+  two workers at launch (`engine-worker.mjs`); `grow()` starts the rest, up to `navigator.hardwareConcurrency - 1` and at most 8, when a file or a
+  large document opens, when playback prepares frames for someone waiting (not the idle warm-up) and when an export starts, so an empty editor holds
+  two threads (about 40 MiB less than eight). Work queued meanwhile runs on the threads there are. Without cross-origin isolation the same module
+  runs without workers through `pump()`. `src/engine/engine-start.mjs`, the page's first script (index.html), loads the engine, asks the browser's
+  graphics process for an adapter and a device (let go of at once: the first request is slow whoever makes it, so the stage's own meets a process
+  that is up) and requests the scene canvas's graphics device while the application's modules are still arriving; the application's `loadEngine()` and `createStage()` take
   what it started (`prepareStage`, `stageHandoff`). `join` hands another thread what it needs to join the engine (the
   compiled module, the memory, a stack size, the progress counter's address).
 - The export worker (`src/engine/engine-export-worker.mjs`, one per export, see

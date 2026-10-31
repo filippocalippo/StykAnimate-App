@@ -1276,6 +1276,12 @@ pub fn drawing_view(frame: &Frame, scene: &Scene, slot: usize) -> Option<Drawing
     Some(DrawingView { frame: drawing.frame, angle: drawing.angle, scale: drawing.scale, flip: drawing.flip })
 }
 
+/// [`build`] keeping what it builds in `memory` and taking from it what a previous build of this frame's objects built the same way
+/// (an onion skin's scene, built again when the document it is drawn against was published anew).
+pub fn build_remembering_plain(doc: &Document, frame: &Frame, memory: &mut BuildMemory) -> Scene {
+    build_filtered(doc, frame, None, Measure::Off, true, Some(memory))
+}
+
 /// Builds the scene for an evaluated frame.
 pub fn build(doc: &Document, frame: &Frame) -> Scene {
     build_filtered(doc, frame, None, Measure::Off, true, None)
