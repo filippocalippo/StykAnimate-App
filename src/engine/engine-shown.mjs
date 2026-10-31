@@ -18,17 +18,20 @@ import {isStatic} from '../pivot/read-view.mjs';
 import {isMovieclip} from '../movieclips.mjs';
 import {sticknodesDrawables, sticknodesSpriteAsset} from '../sticknodes/geometry.mjs';
 
-const point = ([x, y]) => ({x, y});
-/** `[x0, y0, x1, y1, …]` as points. */
-const pointList = flat => {
-  const points = new Array(flat.length >> 1);
-  for (let i = 0; i < points.length; i++) points[i] = {x: flat[2 * i], y: flat[2 * i + 1]};
+/** A number the session wrote that is not finite is the `null` it once was in JSON text. */
+const fin = value => Number.isFinite(value) ? value : null;
+/** `n` words of the packet from `at` as numbers (`null` where not finite). */
+const numbers = (w, at, n) => { const out = new Array(n); for (let k = 0; k < n; k++) out[k] = fin(w[at + k]); return out; };
+/** `[x0, y0, x1, y1, …]` (`n` numbers from `at`) as points. */
+const pointList = (w, at, n) => {
+  const points = new Array(n >> 1);
+  for (let k = 0; k < points.length; k++) points[k] = {x: fin(w[at + 2 * k]), y: fin(w[at + 2 * k + 1])};
   return points;
 };
-/** The point before perspective at place `index` of the flat triples the session sent, or `undefined`. */
-const rawAt = (triples, index) => triples && triples[3 * index] !== null ? [triples[3 * index], triples[3 * index + 1], triples[3 * index + 2]] : undefined;
-/** A number the session wrote as `null` (not finite) is NaN. */
-const real = value => value ?? NaN;
+/** The point before perspective at place `index` of the `n` words of triples from `at`, or `undefined`. */
+const rawAt = (w, at, n, index) => 3 * index + 2 < n && fin(w[at + 3 * index]) !== null ? [fin(w[at + 3 * index]), fin(w[at + 3 * index + 1]), fin(w[at + 3 * index + 2])] : undefined;
+/** A number that was not finite is NaN. */
+const real = value => Number.isFinite(value) ? value : NaN;
 
 const definitionsOf = new WeakMap();
 /** The figure definitions of a report by type id (a call the editor runs adds a definition to the table in place). */
@@ -53,11 +56,14 @@ function assetOf(fig, seg, obj) {
   return obj._sticknodesSprite ? sticknodesSpriteAsset(asset, obj) : asset;
 }
 
-function spatialFrame(raw) {
-  const {motionValue, choiceScale, shape, restLength, ...frame} = raw;
-  if (motionValue !== null && motionValue !== undefined) frame.motionValue = motionValue;
-  if (choiceScale !== undefined) frame.choiceScale = choiceScale;
-  if (shape) { frame.shape = shape; frame.restLength = restLength; }
+/** The 3D frame of a bone from its `SPATIAL_WORDS` words at `at` (styk_eval::geometry::interface). */
+function spatialFrame(w, at) {
+  const frame = {q: numbers(w, at, 4), t: numbers(w, at + 4, 3), dual: numbers(w, at + 7, 4), nativeBend: fin(w[at + 11]), authoredBend: fin(w[at + 12]),
+    origin: numbers(w, at + 14, 3), axis: numbers(w, at + 17, 3), stretch: fin(w[at + 20])};
+  const motionValue = fin(w[at + 13]);
+  if (motionValue !== null) frame.motionValue = motionValue;
+  if (w[at + 21] === 1) frame.choiceScale = fin(w[at + 22]);
+  if (w[at + 23] === 1) { frame.shape = {width: fin(w[at + 24]), taper: fin(w[at + 25])}; frame.restLength = fin(w[at + 26]); }
   return frame;
 }
 
@@ -81,8 +87,10 @@ function jointOrder(fig) {
   return order;
 }
 
-/** The `flags` of a segment row (styk_eval::geometry::interface). */
-const START = 1, END = 2, POINTS = 4, CONNECTOR = 8, SPATIAL = 16;
+/** The `flags` of a group, of a segment row and of a polygon (styk_eval::geometry::interface). */
+const DRAWN = 1, BOUNDS = 2, SOLVED = 4, SOLVED_LENGTHS = 8;
+const START = 1, END = 2, POINTS = 4, CONNECTOR = 8, SPATIAL = 16, SPATIAL_WORDS = 27;
+const CULLED_POLY = 1, DEPTH_POLY = 2;
 
 /**
  * A geometry record. Its `drawables` getter lives here, outside `geometry()`: V8 gives all the closures of a function one
@@ -114,77 +122,115 @@ function defineDrawables(group, polys, segments) {
   }});
 }
 
-/** A group the session sent, as the interface reads it. */
-function hydrate(raw, slot, frame, report, defs) {
+/**
+ * A group the session sent, as the interface reads it: the `length` words of the packet `w` from `start` (the layout is that of
+ * styk_eval::geometry::interface). `null` where the group has no figure here.
+ */
+function hydrate(w, start, length, slot, frame, report, defs) {
   const obj = frame.objects[slot];
   const fig = obj && resolveInstanceFigure(defs.get(Number(obj.figure_type_id)), obj);
   if (!obj || !fig) return null;
-  const root = point(raw.root);
+  let at = start;
+  const flags = w[at++];
+  const root = {x: fin(w[at]), y: fin(w[at + 1])};
+  at += 2;
   const joints = new Map([[0, root]]);
-  const {ends, raws, startRaws} = raw;
+  const endsAt = at + 1, endsLength = w[at];
+  at = endsAt + endsLength;
+  const rawsAt = at + 1, rawsLength = w[at];
+  at = rawsAt + rawsLength;
+  const startRawsAt = at + 1, startRawsLength = w[at];
+  at = startRawsAt + startRawsLength;
   for (const i of jointOrder(fig)) {
-    if (2 * i >= ends.length || ends[2 * i] === null) continue;
-    const joint = {x: ends[2 * i], y: ends[2 * i + 1]}, rawPoint = rawAt(raws, i);
+    if (2 * i >= endsLength) continue;
+    const x = fin(w[endsAt + 2 * i]);
+    if (x === null) continue;
+    const joint = {x, y: fin(w[endsAt + 2 * i + 1])}, rawPoint = rawAt(w, rawsAt, rawsLength, i);
     if (rawPoint) joint.rawPoint = rawPoint;
     joints.set(Number(fig.segments[i].segment_id), joint);
   }
+  let group;
+  const rows = w[at++];
   if (isMovieclip(fig)) {
     // A movieclip instance is its handle: forty units from the root along its angle (what it draws is the engine's).
-    const [row] = raw.segs, end = joints.get(Number(fig.segments[0].segment_id));
-    const handle = {seg: fig.segments[0], obj, fig, slot, index: 0, start: root, end, points: [root, end], angle: real(row[1]), length: real(row[3]),
+    const end = joints.get(Number(fig.segments[0].segment_id));
+    const handle = {seg: fig.segments[0], obj, fig, slot, index: 0, start: root, end, points: [root, end], angle: real(w[at + 1]), length: real(w[at + 3]),
       bend: 0, thickness: 0, opacity: 1, alpha: 1, rgb: [0, 0, 0]};
-    const group = {slot, obj, fig, root, joints, segments: [handle], polys: [], drawables: []};
-    if (raw.bounds) group.bounds = {minX: raw.bounds[0], minY: raw.bounds[1], maxX: raw.bounds[2], maxY: raw.bounds[3]};
-    if (raw.drawn) group.drawn = true;
-    return group;
-  }
-  const segments = raw.segs.map(row => {
-    const index = row[0], flags = row[11], seg = fig.segments[index];
-    let at = 12;
-    // A segment starts where its parent ends, unless it says otherwise.
-    let start = flags & START ? {x: row[at++], y: row[at++]} : joints.get(Number(seg.parent_id)) ?? root;
-    // A 3D bone's start before perspective: its own, unless it is its parent's joint as it stands.
-    const startRaw = rawAt(startRaws, index);
-    if (startRaw) {
-      if (flags & START) start.rawPoint = startRaw;
-      else if (start.rawPoint?.some((value, axis) => value !== startRaw[axis]) ?? true) start = {x: start.x, y: start.y, rawPoint: startRaw};
+    group = {slot, obj, fig, root, joints, segments: [handle], polys: [], drawables: []};
+  } else {
+    const segments = new Array(rows);
+    for (let n = 0; n < rows; n++) {
+      const index = w[at], rowFlags = w[at + 11], seg = fig.segments[index];
+      const angle = real(w[at + 1]), bend = fin(w[at + 2]), rowLength = real(w[at + 3]), thickness = fin(w[at + 4]), z = fin(w[at + 5]);
+      const rgb = [w[at + 6], w[at + 7], w[at + 8]], alpha = fin(w[at + 9]), opacity = fin(w[at + 10]);
+      at += 12;
+      // A segment starts where its parent ends, unless it says otherwise.
+      let segStart;
+      if (rowFlags & START) { segStart = {x: fin(w[at]), y: fin(w[at + 1])}; at += 2; } else segStart = joints.get(Number(seg.parent_id)) ?? root;
+      // A 3D bone's start before perspective: its own, unless it is its parent's joint as it stands.
+      const startRaw = rawAt(w, startRawsAt, startRawsLength, index);
+      if (startRaw) {
+        if (rowFlags & START) segStart.rawPoint = startRaw;
+        else if (segStart.rawPoint?.some((value, axis) => value !== startRaw[axis]) ?? true) segStart = {x: segStart.x, y: segStart.y, rawPoint: startRaw};
+      }
+      const joint = joints.get(Number(seg.segment_id));
+      let end;
+      if (rowFlags & END) { end = {x: fin(w[at]), y: fin(w[at + 1])}; at += 2; } else end = joint;
+      let points;
+      if (rowFlags & POINTS) {
+        const count = w[at++];
+        points = pointList(w, at, count);
+        at += count;
+        points[points.length - 1] = end;
+      } else points = [segStart, end];
+      const result = {
+        type: seg.segment_type === 'circle' || seg.segment_type === 'image' || seg.segment_type === 'text' ? seg.segment_type : 'line',
+        seg, obj, fig, asset: assetOf(fig, seg, obj), version: report.version, slot, index, start: segStart, end, points,
+        angle, bend: bend ?? 0, length: rowLength, z: Number(z ?? seg.z_order ?? index + 1),
+        thickness: thickness ?? 0, rgb, alpha: alpha ?? 1, opacity: opacity ?? 1, static: isStatic(seg),
+      };
+      if (rowFlags & CONNECTOR) { result.handle = joint; result.connector = true; }
+      if (rowFlags & SPATIAL) { result.spatialFrame = spatialFrame(w, at); at += SPATIAL_WORDS; }
+      segments[n] = result;
     }
-    const joint = joints.get(Number(seg.segment_id));
-    const end = flags & END ? {x: row[at++], y: row[at++]} : joint;
-    const points = flags & POINTS ? pointList(row[at++]) : [start, end];
-    if (flags & POINTS) points[points.length - 1] = end;
-    const result = {
-      type: seg.segment_type === 'circle' || seg.segment_type === 'image' || seg.segment_type === 'text' ? seg.segment_type : 'line',
-      seg, obj, fig, asset: assetOf(fig, seg, obj), version: report.version, slot, index, start, end, points,
-      angle: real(row[1]), bend: row[2] ?? 0, length: real(row[3]), z: Number(row[5] ?? seg.z_order ?? index + 1),
-      thickness: row[4] ?? 0, rgb: [row[6], row[7], row[8]], alpha: row[9] ?? 1, opacity: row[10] ?? 1, static: isStatic(seg),
-    };
-    if (flags & CONNECTOR) { result.handle = joint; result.connector = true; }
-    if (flags & SPATIAL) result.spatialFrame = spatialFrame(row[at++]);
-    return result;
-  });
-  const polys = raw.polys.map(shape => {
-    const poly = {type: 'poly', poly: fig.polyfills[shape.index], obj, fig, slot, index: shape.index, points: pointList(shape.points),
-      z: shape.z, rgb: shape.rgb, alpha: shape.alpha, opacity: shape.opacity};
-    // A one-sided face says whether it looks away (`culled: false` when it does not), as the editor's own geometry does.
-    if (shape.culled) poly.culled = true;
-    else if (poly.poly?._stykSurface) poly.culled = false;
-    if (shape.depthValues) poly.depthValues = shape.depthValues;
-    return poly;
-  });
-  const group = {slot, obj, fig, root, joints, segments, polys};
-  if (raw.solved) { group.solvedAngles = raw.solved.angles; if (raw.solved.lengths) group.solvedLengths = raw.solved.lengths; }
-  if (raw.bounds) group.bounds = {minX: raw.bounds[0], minY: raw.bounds[1], maxX: raw.bounds[2], maxY: raw.bounds[3]};
-  if (raw.drawn) group.drawn = true;
-  defineDrawables(group, polys, segments);
+    const count = w[at++];
+    const polys = new Array(count);
+    for (let n = 0; n < count; n++) {
+      const index = w[at], points = w[at + 1];
+      const shape = {index, points: pointList(w, at + 2, points)};
+      at += 2 + points;
+      const poly = {type: 'poly', poly: fig.polyfills[index], obj, fig, slot, index, points: shape.points,
+        z: fin(w[at]), rgb: [w[at + 1], w[at + 2], w[at + 3]], alpha: fin(w[at + 4]), opacity: fin(w[at + 5])};
+      const polyFlags = w[at + 6];
+      at += 7;
+      // A one-sided face says whether it looks away (`culled: false` when it does not), as the editor's own geometry does.
+      if (polyFlags & CULLED_POLY) poly.culled = true;
+      else if (poly.poly?._stykSurface) poly.culled = false;
+      if (polyFlags & DEPTH_POLY) { const depths = w[at++]; poly.depthValues = numbers(w, at, depths); at += depths; }
+      polys[n] = poly;
+    }
+    group = {slot, obj, fig, root, joints, segments, polys};
+    if (flags & SOLVED) {
+      const angles = w[at++];
+      group.solvedAngles = numbers(w, at, angles);
+      at += angles;
+      if (flags & SOLVED_LENGTHS) { const lengths = w[at++]; group.solvedLengths = numbers(w, at, lengths); at += lengths; }
+    }
+    defineDrawables(group, polys, segments);
+  }
+  if (flags & BOUNDS) {
+    const [minX, minY, maxX, maxY] = numbers(w, start + length - 4, 4);
+    group.bounds = {minX, minY, maxX, maxY};
+  }
+  if (flags & DRAWN) group.drawn = true;
   return group;
 }
 
 /**
- * @param {{ask(kind: string, args: object): (string|null), source(motion: boolean): (object|null), report(): object}} owner
+ * @param {{ask(kind: string, args: object): (string|null), packet(kind: string, args: object): (Float64Array|null), source(motion: boolean): (object|null), report(): object}} owner
  *   `ask` reads the session (flushing the editor's pending edits first) and answers JSON text, `null` where the
- *   engine does not hold the document (no session runs it); `source` gives
- *   the stage what it draws from.
+ *   engine does not hold the document (no session runs it); `packet` is the same for the geometry, which comes as words
+ *   (styk_eval::geometry::interface) and is read where it lies; `source` gives the stage what it draws from.
  */
 export function createShown(owner) {
   /** The geometry the interface holds, per kind of frame (the frame on show, the motion-path display). */
@@ -198,6 +244,30 @@ export function createShown(owner) {
     const text = owner.ask(kind, args);
     if (text === null) throw Object.assign(new Error('The engine does not hold this document.'), {name: 'EngineUnavailable'});
     return JSON.parse(text);
+  };
+  /** A geometry packet: the header, then the groups of the slots the session sent, each made into the group the interface reads. `null` for an empty packet. */
+  const groupsOf = (words, frame, report, defs) => {
+    if (!words || words.length === 0) return null;
+    const warnings = [];
+    let at = 5;
+    for (let n = 0; n < words[4]; n++) {
+      const length = words[at++];
+      warnings.push(String.fromCharCode(...words.subarray(at, at + length)));
+      at += length;
+    }
+    const slots = [];
+    for (let n = 0; n < words[3]; n++) {
+      const slot = words[at], length = words[at + 1];
+      slots.push([slot, length === 0 ? null : hydrate(words, at + 2, length, slot, frame, report, defs)]);
+      at += 2 + length;
+    }
+    return {token: words[0], full: words[1] === 1, count: words[2], slots, warnings};
+  };
+  /** A read of the geometry, which the interface cannot go without unless it is of the motion display. */
+  const packet = (kind, args, motion) => {
+    const words = owner.packet(kind, args);
+    if (words === null && !motion) throw Object.assign(new Error('The engine does not hold this document.'), {name: 'EngineUnavailable'});
+    return words;
   };
   return {
     /** Whether the engine answers (the session holds the open document). */
@@ -216,12 +286,12 @@ export function createShown(owner) {
      */
     geometry(frame, {motion = false} = {}) {
       const previous = held[+motion];
-      const answer = (motion ? read : required)('geometry', {since: previous?.read ?? null, motion});
-      if (!answer) return null;
       const report = owner.report(), defs = definitions(report);
+      const answer = groupsOf(packet('geometry', {since: previous?.read ?? null, motion}, motion), frame, report, defs);
+      if (!answer) return null;
       const groups = answer.full || !previous ? new Map() : new Map(previous.geometry.objects);
       const changed = new Set();
-      for (const [slot, raw] of answer.slots) { groups.set(slot, raw && hydrate(raw, slot, frame, report, defs)); changed.add(slot); }
+      for (const [slot, group] of answer.slots) { groups.set(slot, group); changed.add(slot); }
       for (const slot of [...groups.keys()]) if (slot >= answer.count) groups.delete(slot);
       const order = frame.object_draw_order ?? Array.from({length: answer.count}, (_, slot) => slot);
       const orderedObjects = [];
@@ -241,12 +311,13 @@ export function createShown(owner) {
      * `layerId`) and its object added, which the document does not hold yet. Read once, whole; `null` where the engine does not answer.
      */
     previewGeometry(frame, figure, layerId, uid) {
-      const answer = read('previewGeometry', {frame, figure, uid, layerId});
-      if (!answer) return null;
+      const words = owner.packet('previewGeometry', {frame, figure, uid, layerId});
       const report = owner.report(), defs = new Map(definitions(report));
       defs.set(Number(figure.figure_type_id), figure);
+      const answer = groupsOf(words, frame, report, defs);
+      if (!answer) return null;
       const objects = new Map();
-      for (const [slot, raw] of answer.slots) objects.set(slot, raw && hydrate(raw, slot, frame, report, defs));
+      for (const [slot, group] of answer.slots) objects.set(slot, group);
       const order = frame.object_draw_order ?? Array.from({length: answer.count}, (_, slot) => slot);
       const orderedObjects = [];
       for (const slot of order) { const group = objects.get(Number(slot)); if (group?.drawn) orderedObjects.push(group); }

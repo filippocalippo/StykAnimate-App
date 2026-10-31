@@ -43,13 +43,111 @@ fn run(session: &mut Session, step: &Value) {
     assert_ne!(answer.get("status").and_then(Value::as_str), Some("unported"), "{method}: {answer:?}");
 }
 
+/// A geometry packet (`styk_eval::geometry::interface`) as the JSON the interface once read: `{token, full, count, slots: [[slot, group|null], …],
+/// warnings}`, a non-finite number as `null`; `Null` for the empty packet of a motion display that shows the document.
+fn unpack(packet: &[f64]) -> Value {
+    use styk_eval::geometry::interface::{BOUNDS, CULLED_POLY, DEPTH_POLY, DRAWN, END, POINTS, SOLVED, SOLVED_LENGTHS, SPATIAL, SPATIAL_WORDS, START};
+    struct Reader<'a>(&'a [f64], usize);
+    impl Reader<'_> {
+        fn word(&mut self) -> f64 {
+            self.1 += 1;
+            self.0[self.1 - 1]
+        }
+        fn number(&mut self) -> Value {
+            let value = self.word();
+            if value.is_finite() { Value::Num(value) } else { Value::Null }
+        }
+        fn numbers(&mut self, n: usize) -> Value {
+            Value::array((0..n).map(|_| self.number()).collect())
+        }
+        fn counted(&mut self) -> Value {
+            let n = self.word() as usize;
+            self.numbers(n)
+        }
+    }
+    if packet.is_empty() {
+        return Value::Null;
+    }
+    let mut r = Reader(packet, 0);
+    let (token, full, count, groups, warnings) = (r.word(), r.word(), r.word(), r.word() as usize, r.word() as usize);
+    let warnings: Vec<Value> = (0..warnings).map(|_| {
+        let n = r.word() as usize;
+        let units: Vec<u16> = (0..n).map(|_| r.word() as u16).collect();
+        Value::str(&String::from_utf16(&units).unwrap())
+    }).collect();
+    let mut slots = Vec::new();
+    for _ in 0..groups {
+        let (slot, length) = (r.word(), r.word() as usize);
+        if length == 0 {
+            slots.push(Value::array(vec![Value::Num(slot), Value::Null]));
+            continue;
+        }
+        let end = r.1 + length;
+        let flags = r.word() as u32;
+        let mut group = styk_doc::Obj::new();
+        group.set("root", r.numbers(2));
+        group.set("ends", r.counted());
+        for name in ["raws", "startRaws"] {
+            let n = r.word() as usize;
+            if n > 0 {
+                group.set(name, r.numbers(n));
+            }
+        }
+        let rows = r.word() as usize;
+        let mut segs = Vec::new();
+        for _ in 0..rows {
+            let mut row: Vec<Value> = (0..12).map(|_| r.number()).collect();
+            let row_flags = row[11].as_f64().unwrap() as u32;
+            if row_flags & START != 0 { row.extend((0..2).map(|_| r.number())); }
+            if row_flags & END != 0 { row.extend((0..2).map(|_| r.number())); }
+            if row_flags & POINTS != 0 { row.push(r.counted()); }
+            if row_flags & SPATIAL != 0 { row.push(r.numbers(SPATIAL_WORDS)); }
+            segs.push(Value::array(row));
+        }
+        group.set("segs", Value::array(segs));
+        let polys = r.word() as usize;
+        let mut list = Vec::new();
+        for _ in 0..polys {
+            let mut poly = styk_doc::Obj::new();
+            poly.set("index", r.number());
+            poly.set("points", r.counted());
+            for name in ["z"] { poly.set(name, r.number()); }
+            poly.set("rgb", r.numbers(3));
+            poly.set("alpha", r.number());
+            poly.set("opacity", r.number());
+            let flags = r.word() as u32;
+            if flags & CULLED_POLY != 0 { poly.set("culled", Value::Bool(true)); } else if flags & DEPTH_POLY != 0 { poly.set("depthValues", r.counted()); }
+            list.push(Value::object(poly));
+        }
+        group.set("polys", Value::array(list));
+        if flags & SOLVED != 0 {
+            let mut solved = styk_doc::Obj::new();
+            solved.set("angles", r.counted());
+            if flags & SOLVED_LENGTHS != 0 { solved.set("lengths", r.counted()); }
+            group.set("solved", Value::object(solved));
+        }
+        if flags & DRAWN != 0 { group.set("drawn", Value::Bool(true)); }
+        if flags & BOUNDS != 0 { group.set("bounds", r.numbers(4)); }
+        assert_eq!(r.1, end, "slot {slot}: the group's length is what it holds");
+        slots.push(Value::array(vec![Value::Num(slot), Value::object(group)]));
+    }
+    assert_eq!(r.1, packet.len(), "nothing is left over");
+    let mut read = styk_doc::Obj::new();
+    read.set("token", Value::Num(token));
+    read.set("full", Value::Bool(full == 1.0));
+    read.set("count", Value::Num(count));
+    read.set("slots", Value::array(slots));
+    read.set("warnings", Value::array(warnings));
+    Value::object(read)
+}
+
 fn geometry(session: &mut Session, since: Option<f64>) -> Value {
     let args = match since {
         Some(token) => format!("{{\"since\":{token}}}"),
         None => "{}".to_string(),
     };
     let view = view(session);
-    parse(&session.query("geometry", &args, &view).unwrap())
+    unpack(&session.query_packet("geometry", &args, &view).unwrap())
 }
 
 fn slots_of(read: &Value) -> Vec<usize> {
@@ -255,6 +353,9 @@ fn the_timeline_is_one_start_and_count_per_row() {
 /// What the session answers to a read of the editor's own, as `{"v": value}` text (or `{}`).
 fn read(session: &mut Session, name: &str, args: &str) -> Value {
     let view = view(session);
+    if name == "previewGeometry" {
+        return unpack(&session.query_packet(name, args, &view).unwrap_or_else(|error| panic!("{name}: {error}")));
+    }
     parse(&session.query(name, args, &view).unwrap_or_else(|error| panic!("{name}: {error}")))
 }
 
