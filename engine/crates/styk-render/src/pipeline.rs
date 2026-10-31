@@ -87,8 +87,11 @@ impl Renderer {
                 texture_entry(2, wgpu::TextureViewDimension::D2),
                 sampler_entry(3),
                 texture_entry(4, wgpu::TextureViewDimension::D2Array),
-                // Where each page of the sprite layout is in the sprite texture.
+                // Where each page of the sprite layout is in the sprite texture (drawing cels' tiles).
                 table_entry(5),
+                // The soft copies of the document's pictures, and which of them are in the sprite texture (prim.wgsl `picture_layer`).
+                texture_entry(6, wgpu::TextureViewDimension::D2Array),
+                uint_table_entry(7),
             ],
         });
         let layout2 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -143,7 +146,8 @@ impl Renderer {
         let material_sampler = crate::materials::sampler(&device);
         let glyphs = crate::glyphs::GlyphMasks::new(&device);
         let sprite_map = crate::images::SpriteMap::new(&device);
-        let sprite_bind = Self::sprite_bind(&device, &layout1, &sprite_view, &linear, &materials.view, &material_sampler, &glyphs.view, &sprite_map.view);
+        let pictures = crate::pictures::PictureState::new(&device, &queue, &styk_eval::assets::Assets::default(), 0, |_| None);
+        let sprite_bind = Self::sprite_bind(&device, &layout1, &sprite_view, &linear, &materials.view, &material_sampler, &glyphs.view, &sprite_map.view, &pictures);
         let make_layers = |label: &str| {
             let (texture, view) = array_texture(&device, label, [1, 1], 1, true);
             LayerAtlas { texture, view, size: [1, 1], pages: 1 }
@@ -181,6 +185,7 @@ impl Renderer {
             sprites,
             sprite_view,
             sprite_map,
+            pictures,
             sprite_bind,
             materials,
             material_sampler,

@@ -1,8 +1,10 @@
 //! The stage's pictures for a document whose sprite layout has more pages than the sprite texture keeps
-//! (`styk_engine::Residency`, docs/engine/memory.md): the pages a frame shows are given layers, the pictures of a page
-//! are decoded and uploaded one at a time when a frame needs them (or, ahead of one, when the document's table of what
-//! each tick draws says playback or the person is about to), and a frame whose pictures are not all in waits (the
-//! picture on show stays) instead of drawing blank where one is missing.
+//! (`styk_engine::Residency`, docs/engine/memory.md): every picture has a soft copy in the soft atlas, always resident
+//! (a few MiB: `styk_eval::assets::soften_image`), so a frame draws at once; the pages a frame shows are given layers,
+//! the pictures of a page are decoded and uploaded one at a time when a frame needs them (or, ahead of one, when the
+//! document's table of what each tick draws says playback or the person is about to), and the soft copy gives way to
+//! the picture in one frame when it lands. A frame whose picture has no soft copy yet (a document just opened) waits:
+//! the picture on show stays.
 
 use std::collections::{HashMap, HashSet};
 
@@ -29,14 +31,23 @@ pub(super) struct Loading {
     index: Option<(u64, Arc<PlaceIndex>)>,
     /// The pictures refused for want of memory the last time they were counted.
     refused: usize,
-    /// A frame waits for pictures: they are uploaded as they come, not a slice a frame.
+    /// A frame waits for pictures, or is drawn with soft ones: the sharp ones are uploaded as they come, not a slice a frame.
     waiting: bool,
+    /// Pictures (indices into the document's images) whose soft copy is in the soft atlas.
+    soft: HashSet<u32>,
+    /// Pictures the last frame checked that draw soft.
+    placeholders: usize,
 }
 
 impl Loading {
     /// Whether uploads are not sliced: a frame is waiting for pictures.
     pub(super) fn waiting(&self) -> bool {
         self.waiting
+    }
+
+    /// Pictures the last frame checked that draw soft.
+    pub(super) fn placeholders(&self) -> usize {
+        self.placeholders
     }
 }
 
@@ -73,6 +84,10 @@ impl Stage {
             if let Some(old) = evicted {
                 self.renderer.map_sprite_page(old, None);
                 self.uploaded.forget_page(old);
+                // The pictures of that page draw their soft copies from now on.
+                for picture in styk_engine::images_on(&generation.assets, old) {
+                    self.renderer.set_picture(&generation.assets.atlas[picture], None);
+                }
                 let on_old = |picture: &u32| generation.assets.atlas.get(*picture as usize).is_some_and(|entry| entry.layer == old);
                 self.loading.asked.retain(|picture, _| !on_old(picture));
                 self.loading.lost.retain(|picture| !on_old(picture));
@@ -85,6 +100,7 @@ impl Stage {
             self.uploaded.forget_page(page);
         }
         self.renderer.flush_sprite_map();
+        self.renderer.flush_pictures();
     }
 
     /// Asks for the pictures `wanted` (indices into the document's images) that are not in the sprite texture or on
@@ -95,11 +111,23 @@ impl Stage {
     fn request_pictures(&mut self, generation: &Arc<Generation>, wanted: &[u32], protect: &[u32], grow: bool, urgent: bool) -> bool {
         let Some(residency) = self.residency.as_mut() else { return true };
         let mut keep = protect.to_vec();
-        keep.extend(Self::pages_of_pictures(generation, wanted));
+        // The frame about to be drawn keeps every page it draws from; what is loaded ahead of it, nearest first, keeps the
+        // pages of the pictures before it only, so a page needed sooner may take the layer of one needed later.
+        if grow {
+            keep.extend(Self::pages_of_pictures(generation, wanted));
+        }
         let (mut complete, mut given, mut decode) = (true, Vec::new(), Vec::new());
         for &picture in wanted {
             let Some(entry) = generation.assets.atlas.get(picture as usize).filter(|entry| entry.valid) else { continue };
+            if !grow {
+                keep.push(entry.layer);
+            }
             if self.uploaded.has(entry) || self.loading.asked.contains_key(&picture) || self.loading.lost.contains(&picture) {
+                continue;
+            }
+            if entry.layer >= styk_render::MAX_PAGES {
+                // A page the renderer has no row for: nothing of it is drawn.
+                self.loading.lost.insert(picture);
                 continue;
             }
             match residency.acquire(entry.layer, &keep, grow) {
@@ -124,32 +152,45 @@ impl Stage {
         complete
     }
 
-    /// Whether the pictures `wanted` are all in the sprite texture; one that cannot be decoded is not waited for, and
-    /// one the engine refused for want of memory is asked for again a few times first.
-    fn pictures_in(&mut self, generation: &Generation, wanted: &[u32]) -> bool {
+    /// Whether the pictures `wanted` can be drawn: each is in the sprite texture or, unless `sharp`, has its soft copy
+    /// (`self.loading.placeholders` counts those that draw soft). One that cannot be decoded is not waited for, and one the
+    /// engine refused for want of memory is asked for again a few times first.
+    fn pictures_in(&mut self, generation: &Generation, wanted: &[u32], sharp: bool) -> bool {
         let (decoding, decoded) = self.engine.images_backlog();
         // A picture being uploaded a few rows a frame is on its way too.
         let decoded = decoded + usize::from(self.partial.is_some());
         let refused = self.engine.pictures_refused();
         let grew = refused != self.loading.refused;
         self.loading.refused = refused;
-        let mut all = true;
+        let (mut all, mut placeholders) = (true, 0);
         for &picture in wanted {
             let Some(entry) = generation.assets.atlas.get(picture as usize).filter(|entry| entry.valid) else { continue };
-            if self.uploaded.has(entry) || self.loading.lost.contains(&picture) {
+            if self.uploaded.has(entry) {
                 continue;
             }
-            if decoding + decoded > 0 {
-                all = false;
-            } else if self.loading.asked.get(&picture).is_some_and(|&times| grew && times < RETRIES) {
-                // Nothing is on its way and the engine refused some: it is asked for again.
-                self.loading.asked.remove(&picture);
-                all = false;
+            let soft = !sharp && self.loading.soft.contains(&picture);
+            if self.loading.lost.contains(&picture) {
+                placeholders += usize::from(soft);
+                continue;
+            }
+            if decoding + decoded == 0 && self.loading.asked.contains_key(&picture) {
+                if self.loading.asked.get(&picture).is_some_and(|&times| grew && times < RETRIES) {
+                    // Nothing is on its way and the engine refused some: it is asked for again.
+                    self.loading.asked.remove(&picture);
+                } else {
+                    self.loading.asked.remove(&picture);
+                    self.loading.lost.insert(picture);
+                    placeholders += usize::from(soft);
+                    continue;
+                }
+            }
+            if soft {
+                placeholders += 1;
             } else {
-                self.loading.asked.remove(&picture);
-                self.loading.lost.insert(picture);
+                all = false;
             }
         }
+        self.loading.placeholders = placeholders;
         all
     }
 
@@ -168,13 +209,14 @@ impl Stage {
             residency.touch(&pages);
         }
         self.request_pictures(generation, &wanted, &[], true, true);
-        if self.pictures_in(generation, &wanted) {
-            self.loading.waiting = false;
+        let ready = self.pictures_in(generation, &wanted, false);
+        // The sharp pictures a frame shows soft are uploaded whole as soon as they are decoded.
+        self.loading.waiting = !ready || self.loading.placeholders > 0;
+        if ready {
             return Some(pages);
         }
         let (_, decoded) = self.engine.images_backlog();
         let decoded = decoded + usize::from(self.partial.is_some());
-        self.loading.waiting = true;
         self.pictures = if decoded > 0 { PICTURES_DECODED } else { PICTURES_DECODING };
         None
     }
@@ -193,7 +235,8 @@ impl Stage {
         if let Some(residency) = self.residency.as_mut() {
             residency.touch(&Self::pages_of_pictures(generation, &wanted));
         }
-        self.pictures_in(generation, &wanted)
+        // A thumbnail never shows the soft copy of a picture.
+        self.pictures_in(generation, &wanted, true)
     }
 
     /// The frame about to be drawn was drawn: its pages are what is on show.
@@ -220,25 +263,30 @@ impl Stage {
         self.engine.request_picture_table(&generation);
         let base = tick.floor() as i64;
         let mut wanted: Vec<u32> = Vec::new();
+        // When each page is next needed: the nearest tick that draws from it.
+        let mut uses: HashMap<u32, u32> = HashMap::new();
         for step in 1..=ahead.max(behind) as i64 {
             for (reaches, at) in [(step <= ahead as i64, base + step), (step <= behind as i64, base - step)] {
                 if !reaches {
                     continue;
                 }
                 if let Some(row) = self.engine.picture_row(generation.id, at.rem_euclid(total as i64) as u32) {
+                    for picture in Self::pages_of_pictures(&generation, &row) {
+                        uses.entry(picture).or_insert(step as u32);
+                    }
                     let fresh: Vec<u32> = row.iter().copied().filter(|picture| !wanted.contains(picture)).collect();
                     wanted.extend(fresh);
                 }
             }
+        }
+        if let Some(residency) = self.residency.as_mut() {
+            residency.set_next_use(&uses);
         }
         if wanted.is_empty() {
             return;
         }
         let protect = self.shown_pages.clone();
         self.request_pictures(&generation, &wanted, &protect, false, false);
-        if let Some(residency) = self.residency.as_mut() {
-            residency.touch(&Self::pages_of_pictures(&generation, &wanted));
-        }
     }
 
     /// The picture on show is the tick `tick` the person went to: the pictures of the ticks around it are loaded.
@@ -251,8 +299,17 @@ impl Stage {
         self.prefetch_pictures(tick, PLAY_AHEAD, 0);
     }
 
+    /// Whether the pixels of `image` have a place to go (`styk_engine::has_place`).
+    pub(super) fn has_place(&self, assets: &styk_eval::assets::Assets, image: &DecodedImage) -> bool {
+        self.residency.as_ref().is_none_or(|residency| styk_engine::has_place(residency, assets, image))
+    }
+
     /// A picture was uploaded (or not: the page left while it was decoded). Whether it was.
     pub(super) fn picture_arrived(&mut self, assets: &styk_eval::assets::Assets, image: &DecodedImage) -> bool {
+        if image.soft {
+            self.loading.soft.insert(image.index);
+            return true;
+        }
         if !image.drawing {
             if let (Some(residency), Some(entry)) = (&self.residency, assets.atlas.get(image.index as usize).filter(|entry| entry.valid))
                 && residency.layer_of(entry.layer).is_none()
@@ -262,6 +319,10 @@ impl Stage {
             self.loading.asked.remove(&image.index);
         }
         self.uploaded.record(assets, image);
+        // The picture is in: its frame draws it, not its soft copy, from the next frame on.
+        if let (Some(residency), Some(entry)) = (&self.residency, assets.atlas.get(image.index as usize).filter(|entry| !image.drawing && entry.valid)) {
+            self.renderer.set_picture(entry, residency.layer_of(entry.layer));
+        }
         true
     }
 
@@ -281,6 +342,8 @@ impl Stage {
             if let Some(residency) = self.residency.as_mut() {
                 residency.extend(pages);
             }
+            self.renderer.extend_pictures(&generation.assets);
+            self.atlas_serial += 1;
             self.atlas_of = Some(layout);
             return;
         }
@@ -298,7 +361,7 @@ impl Stage {
         // Another project, or a layout that moved the live pages: the texture is allocated again.
         let pinned = styk_engine::drawing_pages(&generation.assets);
         let residency = Residency::new(pages + live_pages, self.engine.atlas_pages() + pinned.len() as u32 + live_pages);
-        self.renderer.prepare_sprites_resident(pages + live_pages, residency.layers());
+        self.renderer.prepare_sprites_resident(&generation.assets, live_pages, residency.layers());
         self.residency = Some(residency);
         self.shown_pages.clear();
         self.loading = Loading::default();

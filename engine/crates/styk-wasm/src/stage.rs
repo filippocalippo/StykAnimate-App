@@ -80,6 +80,8 @@ pub struct Stage {
     loading: pictures::Loading,
     /// The layout pages the frame on show draws.
     shown_pages: Vec<u32>,
+    /// Frames drawn with the soft copy of some picture (a document whose pages are kept a few at a time).
+    soft_frames: u64,
     /// A picture being uploaded a few rows a frame, and the rows done.
     partial: Option<(Arc<styk_engine::DecodedImage>, u32)>,
     pictures: u32,
@@ -206,6 +208,7 @@ impl Stage {
             loading: Default::default(),
             shown_pages: Vec::new(),
             partial: None,
+            soft_frames: 0,
             pictures: PICTURES_COMPLETE,
             upload_bytes: 0,
             edit: EditScene::default(),
@@ -499,7 +502,12 @@ impl Stage {
         // larger than the slice goes in over several frames (a 4K picture is 64 MiB).
         let waiting = self.loading.waiting();
         self.upload_bytes = 0;
+        // What this call uploads is in the table the shaders read from the next frame on.
+        let flush = |stage: &mut Stage| stage.renderer.flush_pictures();
         if let Some((image, done)) = self.partial.take() {
+            if !self.has_place(&generation.assets, &image) {
+                return;
+            }
             let rows = if waiting { image.height } else { (IMAGE_UPLOAD_BYTES / (image.width as usize * 4)).max(1) as u32 };
             self.renderer.upload_rows(&generation.assets, &image, done, rows);
             self.upload_bytes = rows.min(image.height - done) as usize * image.width as usize * 4;
@@ -507,11 +515,16 @@ impl Stage {
                 self.partial = Some((image, done + rows));
             } else {
                 self.picture_arrived(&generation.assets, &image);
+                flush(self);
             }
             return;
         }
         let images = self.engine.take_images(if waiting { usize::MAX } else { IMAGE_UPLOAD_BYTES });
         for image in images {
+            // A picture whose page left while it was decoded is dropped: it is decoded again when it is wanted.
+            if !self.has_place(&generation.assets, &image) {
+                continue;
+            }
             let rows = (IMAGE_UPLOAD_BYTES / (image.width as usize * 4)).max(1) as u32;
             if waiting || image.height <= rows {
                 self.renderer.upload_rows(&generation.assets, &image, 0, image.height);
@@ -523,6 +536,7 @@ impl Stage {
                 self.partial = Some((image, rows));
             }
         }
+        flush(self);
     }
 
     /// Lays the sprite atlas out for `generation`, with room for the live drawing cels' slots.
@@ -582,6 +596,8 @@ impl Stage {
     /// through only while pictures of the document are still on their way.
     fn pictures_after(&self, list: &styk_eval::drawlist::DrawList) -> u32 {
         let (decoding, decoded) = self.engine.images_backlog();
+        // A picture uploaded a few rows a frame is on its way too.
+        let decoded = decoded + usize::from(self.partial.is_some());
         if decoding + decoded == 0 || !self.uploaded.lacks(list) {
             PICTURES_COMPLETE
         } else if decoded > 0 {
@@ -652,6 +668,7 @@ impl Stage {
         self.queue.submit([encoder.finish()]);
         self.queue.present(target);
         self.pictures = self.pictures_after(list);
+        self.soft_frames += u64::from(self.loading.placeholders() > 0);
         self.pictures_shown(pages);
         Ok(true)
     }
@@ -729,10 +746,10 @@ impl Stage {
         let (sprite_pages, sprite_bytes) = self.renderer.sprite_memory();
         let (resident, loads, evictions) = self.residency_stats();
         format!(
-            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{}}}",
+            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{}}}",
             s.prims, s.groups, s.passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
             sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled(),
-            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len()
+            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory()
         )
     }
 }

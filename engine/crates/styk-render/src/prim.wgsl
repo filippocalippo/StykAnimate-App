@@ -61,15 +61,58 @@ struct Group {
 // (three texels each), and the atlas of their coverage masks, sampled bilinearly.
 @group(0) @binding(4) var glyph_table: texture_2d<f32>;
 @group(1) @binding(4) var glyph_masks: texture_2d_array<f32>;
-// Where each page of the document's sprite layout lives in the sprite texture (images.rs): a layer of
-// `sprites`, 0 (a layer nothing is ever written to) for a page that is not resident.
+// Where each page of the document's sprite layout lives in the sprite texture (images.rs), for drawing cels' tiles: a
+// layer of `sprites`, -1 for a page that is not resident.
 @group(1) @binding(5) var page_table: texture_2d<f32>;
+// The soft copies of the document's pictures (pictures.rs): one texel to SOFT_SCALE of the atlas page's, four pages to a
+// layer in a 2 by 2 square, and which pictures are in `sprites` (a hash table of [corner, page, layer + 1, 0]).
+@group(1) @binding(6) var soft_sprites: texture_2d_array<f32>;
+@group(1) @binding(7) var picture_table: texture_2d<u32>;
 
 const TABLE_WIDTH: u32 = 1024u;
+// Pages of the sprite layout a table has a row for (MAX_PAGES in images.rs).
+const MAX_PAGES: u32 = 1024u;
+const ATLAS_PAGE: f32 = 4096.0;
+const SOFT_PAGE: f32 = 512.0;
+// Entries of the picture table read at most to find a picture (PROBES in pictures.rs).
+const PICTURE_PROBES: u32 = 16u;
 
 fn sprite_layer(page: f32) -> i32 {
-    let at = table_at(u32(max(page, 0.0)));
-    return i32(textureLoad(page_table, at, 0).r);
+    let at = u32(max(page, 0.0));
+    if (at >= MAX_PAGES) { return -1; }
+    return i32(textureLoad(page_table, table_at(at), 0).r);
+}
+
+// The layer of `sprites` that holds the picture whose rectangle starts at `corner` (a uv) of `page`, or -1 when only its
+// soft copy is in: the same hash and probes as pictures.rs.
+fn picture_layer(page: f32, corner: vec2<f32>) -> i32 {
+    let pg = u32(max(page, 0.0));
+    let xy = (u32(round(corner.y * ATLAS_PAGE)) << 12u) | u32(round(corner.x * ATLAS_PAGE));
+    var h = (pg * 0x9E3779B1u) ^ (xy * 0x85EBCA6Bu);
+    h = h ^ (h >> 15u);
+    let size = textureDimensions(picture_table);
+    let mask = size.x * size.y - 1u;
+    for (var i = 0u; i < PICTURE_PROBES; i = i + 1u) {
+        let slot = (h + i) & mask;
+        let e = textureLoad(picture_table, vec2<i32>(i32(slot % TABLE_WIDTH), i32(slot / TABLE_WIDTH)), 0);
+        if (e.x == xy && e.y == pg) { return i32(e.z) - 1; }
+        if (e.x == 0u) { return -1; }
+    }
+    return -1;
+}
+
+// The soft copy of a picture at `uv` of its page (inset by half a soft texel from its rectangle `rect`, so a
+// neighbour's texels are not read).
+fn soft_sample(page: f32, rect: vec4<f32>, raw: vec2<f32>) -> vec4<f32> {
+    let centre = (rect.xy + rect.zw) * 0.5;
+    let reach = max((rect.zw - rect.xy) * 0.5 - vec2<f32>(0.5 / SOFT_PAGE), vec2<f32>(0.0));
+    let uv = clamp(raw, centre - reach, centre + reach);
+    let pg = u32(max(page, 0.0));
+    // A page the soft atlas has no room for draws nothing.
+    if (pg >= MAX_PAGES) { return vec4<f32>(0.0); }
+    let layer = min(i32(pg >> 2u), i32(textureNumLayers(soft_sprites)) - 1);
+    let cell = vec2<f32>(f32(pg & 1u), f32((pg >> 1u) & 1u));
+    return textureSampleLevel(soft_sprites, linear_sampler, (cell + uv) * 0.5, layer, 0.0);
 }
 
 fn table_at(i: u32) -> vec2<i32> {
@@ -888,11 +931,17 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
                 let up = tile_bilinear(vec2<i32>(parent.yz) + vec2<i32>(cp), sprite_layer(parent.x), tp - cp);
                 tex = mix(tex, up, in.sampling);
             }
-        } else if ((p.kind & F_SMOOTH) != 0u && !crisp()) {
-            tex = textureSampleLevel(sprites, linear_sampler, raw, sprite_layer(p.b.z), 0.0);
         } else {
-            let q = clamp(raw, rect.xy + texel * 0.5, rect.zw - texel * 0.5);
-            tex = textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), sprite_layer(p.b.z), 0.0);
+            // A picture of the document: from the sprite texture, or its soft copy while that is not in.
+            let layer = picture_layer(p.b.z, rect.xy);
+            if (layer < 0) {
+                tex = soft_sample(p.b.z, rect, raw);
+            } else if ((p.kind & F_SMOOTH) != 0u && !crisp()) {
+                tex = textureSampleLevel(sprites, linear_sampler, raw, layer, 0.0);
+            } else {
+                let q = clamp(raw, rect.xy + texel * 0.5, rect.zw - texel * 0.5);
+                tex = textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), layer, 0.0);
+            }
         }
         if ((p.kind & F_TINT) != 0u) {
             // An onion skin's sprite: its coverage in the tint colour.
@@ -905,8 +954,12 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
         let size = vec2<f32>(textureDimensions(sprites).xy);
         let texel = 1.0 / size;
         let uv = clamp(w / p.a.xy, vec2<f32>(0.0), vec2<f32>(1.0));
+        let layer = picture_layer(p.a.z, rect.xy);
+        if (layer < 0) {
+            return soft_sample(p.a.z, rect, mix(rect.xy, rect.zw, uv)) * base.a;
+        }
         let q = clamp(mix(rect.xy, rect.zw, uv), rect.xy + texel * 0.5, rect.zw - texel * 0.5);
-        return textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), sprite_layer(p.a.z), 0.0) * base.a;
+        return textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), layer, 0.0) * base.a;
     }
     if (kind == K_COMPOSITE) {
         // Bilinear, clamped to the child's own rectangle as an exact texture's edge would be

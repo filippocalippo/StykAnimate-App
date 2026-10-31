@@ -13,6 +13,11 @@ use lyon_tessellation::{BuffersBuilder, FillOptions, FillRule, FillTessellator, 
 use crate::doc::{Document, DrawingTiles, Glyph, ImageData, PathCmd};
 
 pub const PAGE: u32 = 4096;
+/// A soft copy of a picture (a placeholder the renderer draws until the picture itself is on the GPU) has one texel
+/// for every [`SOFT_SCALE`]² of the atlas page it lies on.
+pub const SOFT_SCALE: u32 = 8;
+/// A page of the soft atlas, in soft texels.
+pub const SOFT_PAGE: u32 = PAGE / SOFT_SCALE;
 const GUTTER: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -477,6 +482,9 @@ pub struct DecodedImage {
     pub index: u32,
     /// A drawing cel tile: straight alpha, with its neighbours' texels as its border.
     pub drawing: bool,
+    /// The soft copy of an image of the document ([`soften_image`]) instead of the image: `width` by `height` texels
+    /// of the soft atlas at [`soft_rect`] of its place.
+    pub soft: bool,
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
@@ -488,7 +496,7 @@ pub fn decode_cel(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<DecodedImage>
     let side = crate::drawing::TILE + 2 * crate::drawing::BORDER;
     crate::drawing::decode_cel(cel)
         .into_iter()
-        .map(|(level, index, rgba)| DecodedImage { index: starts[level as usize] + index, drawing: true, width: side, height: side, rgba })
+        .map(|(level, index, rgba)| DecodedImage { index: starts[level as usize] + index, drawing: true, soft: false, width: side, height: side, rgba })
         .collect()
 }
 
@@ -499,13 +507,15 @@ pub enum Picture {
     Image(usize),
     /// A drawing cel, by its key in [`Assets::cels`].
     Cel(usize),
+    /// The soft copy of an image of the document, without the image ([`soften_image`]).
+    Soft(usize),
 }
 
 impl Assets {
     /// The pixels decoding `picture` produces, as far as is known without decoding it: its atlas places.
     pub fn picture_bytes(&self, picture: Picture) -> usize {
         match picture {
-            Picture::Image(index) => self.atlas.get(index).filter(|entry| entry.valid).map_or(0, |entry| (entry.w as usize + 2) * (entry.h as usize + 2) * 4),
+            Picture::Image(index) | Picture::Soft(index) => self.atlas.get(index).filter(|entry| entry.valid).map_or(0, |entry| (entry.w as usize + 2) * (entry.h as usize + 2) * 4),
             Picture::Cel(cel) => {
                 let side = (crate::drawing::TILE + 2 * crate::drawing::BORDER) as usize;
                 self.cels.get(&cel).map_or(0, |(tiles, _)| tiles.levels.iter().map(Vec::len).sum::<usize>() * side * side * 4)
@@ -523,6 +533,10 @@ pub fn decode_picture(doc: &Document, assets: &Assets, picture: Picture) -> Resu
             let _working = styk_alloc::reserve(decode_image_working_bytes(assets, index))?;
             Ok(decode_image(doc, assets, index).into_iter().collect())
         }
+        Picture::Soft(index) => {
+            let _working = styk_alloc::reserve(soften_working_bytes(assets, index))?;
+            Ok(soften_image(doc, assets, index).into_iter().collect())
+        }
         Picture::Cel(cel) => {
             let Some((tiles, _)) = assets.cels.get(&cel) else { return Ok(Vec::new()) };
             let _working = styk_alloc::reserve(3 * assets.picture_bytes(picture))?;
@@ -538,6 +552,73 @@ pub fn decode_image_working_bytes(assets: &Assets, index: usize) -> usize {
     let source = entry.source_w as usize * entry.source_h as usize * 4;
     let stored = (entry.w as usize + 2) * (entry.h as usize + 2) * 4;
     2 * source + 2 * stored
+}
+
+/// The soft atlas texels the soft copy of the picture at `entry` covers: `(x, y, width, height)`. Every texel of the
+/// rectangle covers at least one pixel of the picture, so a soft texel is the average of the picture's pixels it covers.
+pub fn soft_rect(entry: &AtlasEntry) -> (u32, u32, u32, u32) {
+    let (x0, y0) = (entry.x / SOFT_SCALE, entry.y / SOFT_SCALE);
+    let (x1, y1) = ((entry.x + entry.w - 1) / SOFT_SCALE, (entry.y + entry.h - 1) / SOFT_SCALE);
+    (x0, y0, x1 - x0 + 1, y1 - y0 + 1)
+}
+
+/// The most memory [`soften_image`] holds at once: the picture decoded at its own size (twice: the decoder keeps its
+/// own copy), and resized to its atlas place, and the soft copy. Zero for an image without a place.
+pub fn soften_working_bytes(assets: &Assets, index: usize) -> usize {
+    let Some(entry) = assets.atlas.get(index).filter(|entry| entry.valid) else { return 0 };
+    let source = entry.source_w as usize * entry.source_h as usize * 4;
+    let stored = entry.w as usize * entry.h as usize * 4;
+    2 * source + stored + (entry.w as usize / SOFT_SCALE as usize + 2) * (entry.h as usize / SOFT_SCALE as usize + 2) * 4
+}
+
+/// The soft copy of image `index`: the picture's premultiplied pixels averaged over the `SOFT_SCALE` × `SOFT_SCALE`
+/// blocks of its atlas page (so it lines up with the picture whatever its place), the rest of the pixels dropped.
+/// `None` when the image has no place in the atlas or cannot be decoded.
+pub fn soften_image(doc: &Document, assets: &Assets, index: usize) -> Option<DecodedImage> {
+    let data = doc.images.get(index)?;
+    let entry = assets.atlas.get(index).filter(|entry| entry.valid)?;
+    let mut rgba = image::load_from_memory(&data.bytes).ok()?.to_rgba8();
+    if let Some(key) = data.color_key {
+        for pixel in rgba.pixels_mut() {
+            if pixel[0] == key[0] && pixel[1] == key[1] && pixel[2] == key[2] {
+                pixel[3] = 0;
+            }
+        }
+    }
+    if rgba.width() != entry.w || rgba.height() != entry.h {
+        rgba = image::imageops::resize(&rgba, entry.w, entry.h, image::imageops::FilterType::Triangle);
+    }
+    let (sx0, sy0, sw, sh) = soft_rect(entry);
+    let mut out = Vec::new();
+    out.try_reserve_exact((sw * sh * 4) as usize).ok()?;
+    out.resize((sw * sh * 4) as usize, 0u8);
+    let source = rgba.as_raw();
+    for sy in 0..sh {
+        // The rows of the picture in this block of the page.
+        let top = ((sy0 + sy) * SOFT_SCALE).max(entry.y) - entry.y;
+        let bottom = ((sy0 + sy + 1) * SOFT_SCALE).min(entry.y + entry.h) - entry.y;
+        for sx in 0..sw {
+            let left = ((sx0 + sx) * SOFT_SCALE).max(entry.x) - entry.x;
+            let right = ((sx0 + sx + 1) * SOFT_SCALE).min(entry.x + entry.w) - entry.x;
+            let mut sum = [0u32; 4];
+            for y in top..bottom {
+                for x in left..right {
+                    let at = ((y * entry.w + x) * 4) as usize;
+                    let a = source[at + 3] as u32;
+                    for k in 0..3 {
+                        sum[k] += (source[at + k] as u32 * a + 127) / 255;
+                    }
+                    sum[3] += a;
+                }
+            }
+            let n = ((bottom - top) * (right - left)).max(1);
+            let o = ((sy * sw + sx) * 4) as usize;
+            for k in 0..4 {
+                out[o + k] = ((sum[k] + n / 2) / n) as u8;
+            }
+        }
+    }
+    Some(DecodedImage { index: index as u32, drawing: false, soft: true, width: sw, height: sh, rgba: out })
 }
 
 /// Decodes image `index` of `doc` for the atlas `assets` laid out. `None` when the
@@ -576,7 +657,7 @@ pub fn decode_image(doc: &Document, assets: &Assets, index: usize) -> Option<Dec
             out[o + 3] = a as u8;
         }
     }
-    Some(DecodedImage { index: index as u32, drawing: false, width: gw as u32, height: gh as u32, rgba: out })
+    Some(DecodedImage { index: index as u32, drawing: false, soft: false, width: gw as u32, height: gh as u32, rgba: out })
 }
 
 #[cfg(test)]

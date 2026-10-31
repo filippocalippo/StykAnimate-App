@@ -14,7 +14,7 @@ fn drawing() -> Engine {
     engine
 }
 fn image(index: u32) -> Arc<DecodedImage> {
-    Arc::new(DecodedImage { index, drawing: true, width: 512, height: 512, rgba: vec![index as u8; 1024 * 1024] })
+    Arc::new(DecodedImage { index, drawing: true, soft: false, width: 512, height: 512, rgba: vec![index as u8; 1024 * 1024] })
 }
 fn pause_worker(engine: &Engine, nth: usize, work: impl FnOnce(Engine) + Send + 'static) -> (Arc<[Barrier; 2]>, std::thread::JoinHandle<()>) {
     let worker = engine.clone();

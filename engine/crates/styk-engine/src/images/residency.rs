@@ -11,14 +11,14 @@
 use std::collections::HashSet;
 
 use styk_draw::{DrawList, F_DRAWING, K_BG_IMAGE, K_IMAGE};
-use styk_eval::assets::Assets;
+use styk_eval::assets::{Assets, DecodedImage};
 
 /// Pages of the layout a document may have before its pictures are kept by [`Residency`] instead of all at once: the
-/// pages the sprite texture holds beside the layer nothing is written to (the default of [`crate::Engine::atlas_pages`]),
-/// 12 of 64 MiB. Measured on tdd2 (`styk pages`: one frame draws from at most 3 of its 20 pages, the 48 ticks after one from
-/// 4.7 on average) and playing it through and jumping across it with 6, 12 and 20 pages (docs/engine/memory.md): 6 loses a
-/// picture to eviction often enough to show in playback, 12 plays without a late frame.
-pub const ATLAS_PAGES: u32 = 12;
+/// layers of the sprite texture (the default of [`crate::Engine::atlas_pages`]), 64 MiB each. Measured on tdd2
+/// (docs/engine/memory.md): one frame draws from at most 3 of its 20 pages, so 3 layers grow to 4 at once; with the
+/// soft copies and the table of what each tick draws, 3 layers show a soft picture in 1 of 241 frames of playback and 6
+/// in none, both at the speed of a document held whole.
+pub const ATLAS_PAGES: u32 = 4;
 
 /// Whether the pictures of `assets` are kept by [`Residency`]: their layout has more than `budget` pages.
 pub fn on_demand(assets: &Assets, budget: u32) -> bool {
@@ -65,12 +65,22 @@ pub fn images_on(assets: &Assets, page: u32) -> Vec<usize> {
     assets.atlas.iter().enumerate().filter(|(_, entry)| entry.valid && entry.layer == page).map(|(index, _)| index).collect()
 }
 
+/// Whether the pixels of `image` have a place to go: a soft copy always has one, a drawing cel's tile lies on a page that
+/// never leaves, and a picture of the document needs its page to have a layer. Rows of a picture whose page has none
+/// are not written: they would be missing from it when the page is given a layer again.
+pub fn has_place(residency: &Residency, assets: &Assets, image: &DecodedImage) -> bool {
+    if image.soft || image.drawing {
+        return true;
+    }
+    assets.atlas.get(image.index as usize).filter(|entry| entry.valid).is_some_and(|entry| residency.layer_of(entry.layer).is_some())
+}
+
 /// The pages that hold drawing cel tiles: they are decoded with the document and never leave.
 pub fn drawing_pages(assets: &Assets) -> HashSet<u32> {
     assets.drawing.iter().filter(|entry| entry.valid).map(|entry| entry.layer).collect()
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct Page {
     /// The layer of the sprite texture the page is in.
     layer: Option<u32>,
@@ -78,6 +88,15 @@ struct Page {
     used: u64,
     /// Never leaves (drawing cels, live drawing slots).
     pinned: bool,
+    /// Ticks from the one on show to the next that draws from it, where the document's table of what each tick draws
+    /// says ([`Residency::set_next_use`]); `u32::MAX` for a page nothing near needs.
+    next: u32,
+}
+
+impl Default for Page {
+    fn default() -> Page {
+        Page { layer: None, used: 0, pinned: false, next: u32::MAX }
+    }
 }
 
 /// What [`Residency::acquire`] did.
@@ -94,7 +113,7 @@ pub enum Acquired {
 /// The pages of a layout that are in the sprite texture, and in which layer.
 #[derive(Debug)]
 pub struct Residency {
-    /// Layers of the sprite texture, the empty layer 0 included.
+    /// Layers of the sprite texture.
     layers: u32,
     pages: Vec<Page>,
     free: Vec<u32>,
@@ -107,12 +126,12 @@ pub struct Residency {
 }
 
 impl Residency {
-    /// A layout of `pages` pages (the live drawing pages included) and a texture of the empty layer and `budget` more.
+    /// A layout of `pages` pages (the live drawing pages included) and a texture of `budget` layers.
     pub fn new(pages: u32, budget: u32) -> Residency {
-        Residency { layers: 1 + budget, pages: vec![Page::default(); pages as usize], free: (1..=budget).rev().collect(), clock: 0, hold: Vec::new(), loads: 0, evictions: 0 }
+        Residency { layers: budget, pages: vec![Page::default(); pages as usize], free: (0..budget).rev().collect(), clock: 0, hold: Vec::new(), loads: 0, evictions: 0 }
     }
 
-    /// Layers the sprite texture needs now.
+    /// Layers the sprite texture needs now (at least two are allocated: the texture is an array, [D11](../../../docs/engine/decisions/0011-array-textures-two-layers.md)).
     pub fn layers(&self) -> u32 {
         self.layers
     }
@@ -131,6 +150,15 @@ impl Residency {
     /// How many pages are in the texture.
     pub fn resident(&self) -> usize {
         self.pages.iter().filter(|page| page.layer.is_some()).count()
+    }
+
+    /// Tells the residency when each page is next needed, in ticks from the one on show (pages not named are not needed
+    /// soon): a page is given the layer of the page whose next use is the farthest, and, of the pages nothing near
+    /// needs, of the least recently shown.
+    pub fn set_next_use(&mut self, uses: &std::collections::HashMap<u32, u32>) {
+        for (index, page) in self.pages.iter_mut().enumerate() {
+            page.next = uses.get(&(index as u32)).copied().unwrap_or(u32::MAX);
+        }
     }
 
     /// Stamps `pages` as shown now.
@@ -170,7 +198,7 @@ impl Residency {
             .iter()
             .enumerate()
             .filter(|(index, page)| page.layer.is_some() && !page.pinned && !protect.contains(&(*index as u32)) && !self.hold.contains(&(*index as u32)))
-            .min_by_key(|(_, page)| page.used)
+            .max_by(|(_, a), (_, b)| a.next.cmp(&b.next).then(b.used.cmp(&a.used)))
             .map(|(index, _)| index)
         {
             let layer = self.pages[victim].layer.take().expect("a resident page has a layer");
@@ -204,14 +232,14 @@ mod tests {
     #[test]
     fn pages_take_free_layers_then_the_least_recently_shown_leaves() {
         let mut residency = Residency::new(10, 2);
-        assert_eq!(residency.layers(), 3);
+        assert_eq!(residency.layers(), 2);
         residency.touch(&[0]);
         let first = given(residency.acquire(0, &[], false));
         residency.touch(&[1]);
         let second = given(residency.acquire(1, &[], false));
         assert_eq!((first.1, second.1), (None, None));
         assert_ne!(first.0, second.0);
-        assert!(first.0 >= 1 && second.0 >= 1, "layer 0 stays empty");
+        assert!(first.0 < 2 && second.0 < 2, "the layers are 0 and 1");
         // Page 0 was shown before page 1: it leaves for page 2, and takes its layer's place.
         residency.touch(&[2]);
         let third = given(residency.acquire(2, &[], false));
@@ -239,6 +267,37 @@ mod tests {
     }
 
     #[test]
+    fn pixels_of_a_picture_whose_page_has_no_layer_have_no_place() {
+        use styk_eval::assets::AtlasEntry;
+        let mut assets = Assets::default();
+        assets.atlas.push(AtlasEntry { layer: 1, x: 1, y: 1, w: 8, h: 8, source_w: 8, source_h: 8, valid: true });
+        let image = |soft: bool, drawing: bool| DecodedImage { index: 0, drawing, soft, width: 10, height: 10, rgba: Vec::new() };
+        let mut residency = Residency::new(4, 1);
+        assert!(!has_place(&residency, &assets, &image(false, false)), "its page has no layer yet");
+        assert!(has_place(&residency, &assets, &image(true, false)), "a soft copy always has a place");
+        assert!(has_place(&residency, &assets, &image(false, true)), "a drawing tile's page never leaves");
+        given(residency.acquire(1, &[], false));
+        assert!(has_place(&residency, &assets, &image(false, false)));
+        // Another page takes the only layer: the picture has none again.
+        given(residency.acquire(2, &[], false));
+        assert!(!has_place(&residency, &assets, &image(false, false)));
+    }
+
+    #[test]
+    fn the_page_needed_farthest_in_the_future_leaves_first() {
+        let mut residency = Residency::new(10, 3);
+        for page in 0..3 {
+            residency.touch(&[page]);
+            given(residency.acquire(page, &[], false));
+        }
+        // Page 0 was shown longest ago, but it is the next needed; page 2 is needed last; page 1 not at all soon.
+        residency.set_next_use(&[(0, 2), (2, 40), (5, 3)].into_iter().collect());
+        assert_eq!(given(residency.acquire(5, &[], false)).1, Some(1), "pages nothing near needs go first");
+        assert_eq!(given(residency.acquire(6, &[], false)).1, Some(2), "then the one needed last, though it was shown most recently");
+        assert_eq!(residency.layer_of(0).is_some() && residency.layer_of(5).is_some(), true, "the pages needed soon stay");
+    }
+
+    #[test]
     fn a_page_the_frame_needs_never_leaves() {
         let mut residency = Residency::new(10, 2);
         residency.touch(&[0]);
@@ -249,8 +308,8 @@ mod tests {
         assert_eq!(given(residency.acquire(2, &[0], false)).1, Some(1));
         // Both layers are protected: nothing leaves, and the texture grows only when it may.
         assert_eq!(residency.acquire(3, &[0, 2], false), Acquired::Full);
-        assert_eq!(residency.acquire(3, &[0, 2], true), Acquired::Given { layer: 3, evicted: None });
-        assert_eq!(residency.layers(), 4);
+        assert_eq!(residency.acquire(3, &[0, 2], true), Acquired::Given { layer: 2, evicted: None });
+        assert_eq!(residency.layers(), 3);
     }
 
     #[test]

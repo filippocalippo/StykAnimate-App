@@ -11,7 +11,7 @@ use crate::{Engine, Generation, TaskQueue};
 pub use styk_eval::assets::DecodedImage;
 
 pub(crate) mod residency;
-pub use residency::{drawing_pages, images_on, on_demand, pictures_of, Acquired, PlaceIndex, Residency, ATLAS_PAGES};
+pub use residency::{drawing_pages, has_place, images_on, on_demand, pictures_of, Acquired, PlaceIndex, Residency, ATLAS_PAGES};
 
 /// Which places of a sprite atlas hold their pixels: what a renderer that takes decoded
 /// images a slice at a time ([`Engine::take_images`]) has uploaded, so it can tell
@@ -78,14 +78,15 @@ impl Uploaded {
 
 pub(crate) use styk_eval::assets::Picture;
 
-/// The pictures a document is decoded as a whole into: its drawing cels, and its images unless their pages are kept
-/// a few at a time ([`Residency`]), when the stage asks for them ([`Engine::decode_images`]).
-pub(crate) fn images_to_decode(generation: &Generation, atlas_pages: u32) -> usize {
-    if residency::on_demand(&generation.assets, atlas_pages) { 0 } else { generation.prepared.doc.images.len() }
+/// What decoding image `index` of `generation`'s document is for: the image itself, or, when the pages of its pictures
+/// are kept a few at a time ([`Residency`]), only its soft copy (the stage asks for the picture when a frame needs it,
+/// [`Engine::decode_images`]).
+pub(crate) fn picture_of_image(generation: &Generation, atlas_pages: u32, index: usize) -> Picture {
+    if residency::on_demand(&generation.assets, atlas_pages) { Picture::Soft(index) } else { Picture::Image(index) }
 }
 
-fn pictures_to_decode(generation: &Generation, atlas_pages: u32) -> usize {
-    images_to_decode(generation, atlas_pages) + generation.assets.cels.len()
+fn pictures_to_decode(generation: &Generation) -> usize {
+    generation.prepared.doc.images.len() + generation.assets.cels.len()
 }
 
 /// The pixels decoding `picture` produces, as far as is known without decoding it.
@@ -190,7 +191,7 @@ impl Engine {
     pub(crate) fn decode_pixels(&self, generation: &Generation, picture: Picture) -> Vec<DecodedImage> {
         let before = match picture {
             Picture::Cel(cel) => generation.assets.cels.get(&cel).map(|(tiles, _)| (tiles.clone(), tiles.artwork_bounds())),
-            Picture::Image(_) => None,
+            Picture::Image(_) | Picture::Soft(_) => None,
         };
         match styk_eval::assets::decode_picture(&generation.prepared.doc, &generation.assets, picture) {
             Ok(decoded) => {
@@ -298,7 +299,7 @@ impl Engine {
             let mut state = self.inner.state.lock();
             if self.inner.stopping.load(std::sync::atomic::Ordering::SeqCst) || state.images.redecode_pending { return }
             let Some(generation) = state.current.as_ref() else { return };
-            let mut fresh = Store::for_publication(generation.lineage, pictures_to_decode(&generation, self.atlas_pages()));
+            let mut fresh = Store::for_publication(generation.lineage, pictures_to_decode(&generation));
             fresh.epoch = state.images.epoch.wrapping_add(1);
             fresh.redecode_pending = true;
             *job.front_mut().expect("prebuilt placeholder") = crate::OrdinaryTask::Redecode(DecodeScope { lineage: fresh.lineage, epoch: fresh.epoch });
@@ -320,13 +321,13 @@ impl Engine {
                 (generation, state.images.epoch)
             };
             let mut tasks = crate::TaskQueue::new();
-            for index in 0..images_to_decode(&generation, self.atlas_pages()) {
-                tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), Picture::Image(index)));
+            for index in 0..generation.prepared.doc.images.len() {
+                tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), picture_of_image(&generation, self.atlas_pages(), index)));
             }
             for &cel in generation.assets.cels.keys() {
                 tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), Picture::Cel(cel)));
             }
-            let mut fresh = Store::for_publication(generation.lineage, pictures_to_decode(&generation, self.atlas_pages()));
+            let mut fresh = Store::for_publication(generation.lineage, pictures_to_decode(&generation));
             fresh.epoch = epoch.wrapping_add(1);
             let retired = {
                 let mut state = self.inner.state.lock();
