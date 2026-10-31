@@ -58,7 +58,8 @@ weight the interface measured. `src/engine/engine-owner-drawing.mjs` is the inte
   names the record the history is about to make (for the first stroke on a blank exposure or on a v1 cel it writes the
   cel's definition and key into the layer sheet in the same entry; the call carries the cel's figure and object, not
   its pixels), then the tiles apply to the store, the history tracks the record, and the cel's definition (revision,
-  bounds) is sent to the session (`@publishCel`), all before the call's events reach the interface. A commit the session
+  bounds) is sent to the session (`@celState`: those two members, not the definition with its encoded tiles, which
+  only a publication sends again with `@publishCel`), all before the call's events reach the interface. A commit the session
   refuses leaves no record; the pixels stay with the caller. A commit whose tiles the store cannot apply after the
   session recorded the entry is taken back (`@retractDrawing`: the entry, with the cel it created, leaves the history
   as the last entry; the redo branch its recording dropped stays dropped) and the record's identity is not used
@@ -106,12 +107,17 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
   shows. The tiles are raw straight-alpha RGBA, 16 KiB each; the engine reduces them to levels 1
   to 8 as the published path does (`down_tile`, with the same filter on empty tiles), builds each
   drawn tile's slot with its border texels (`bordered`) and writes only the slots a change reaches:
-  the tile, the tiles around it and the parents that cover it, at the levels the view shows. The slots
-  a call changes wait for the next frame (`Stage::flush_live`, before the frame's pictures): the calls of one
-  frame rewrite the same neighbourhoods, so they are written once, the last contents of a slot winning, and slots
-  side by side in a page row are one write (`styk_eval::live::coalesce`). The reduced levels and the slot
-  contents are built with a cheap hasher on the tile coordinates (`CoordHasher`) and row copies; a block of four
-  opaque texels reduces without the division.
+  the tile and the parents that cover it, and a neighbour (or the parent's) only when the two-texel edge it copies
+  from the tile differs from before, at the levels the view shows. A call only marks those slots; the frame builds
+  each marked slot once, from the pixels as they are then, straight into the rectangle that holds the slots side by
+  side in a page row (`LiveCels::take_runs`, written by `Stage::flush_live` before the frame's pictures), so the
+  calls of one frame, which touch the same neighbourhoods, cost one build and one write per run. The reduced
+  levels and the slot contents are built with a cheap hasher on the tile coordinates (`CoordHasher`) and row
+  copies; a block of four opaque texels reduces without the division, and an empty block with one comparison.
+* The published pictures of a cel (the engine decodes every level of it again after each publication) are not what a
+  frame draws while its live tiles are shown, so while a live cel changed within the last 24 frames
+  (`LiveCels::changing`) a frame uploads at most 512 KiB of decoded pictures, 2 MiB while cels are held and quiet,
+  and 8 MiB when none is held (a document loading). The rest waits in the engine's queue.
 * A frame draws one level of a cel (the shader keeps the level whose tiles are between half a pixel
   and one pixel on the screen) and blends in the level above, so only those are written as tiles
   change. Before each frame the stage reads the levels its list shows at the view's scale

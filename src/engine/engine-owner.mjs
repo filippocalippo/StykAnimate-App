@@ -706,7 +706,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
       check();
     },
     // Cel definitions changed in place (revision, bounds): the session's copies follow at once.
-    synced(figures) { for (const figure of figures) editor._drawingPublished(figure); },
+    synced(figures) { for (const figure of figures) editor._drawingState(figure); },
   });
   /** A call retired a history entry that referred to drawings: the store lets go of what no entry refers to, once the call has ended. */
   let collecting = false;
@@ -771,6 +771,16 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     const celId = drawingMetadata(figure)?.celId;
     if (!session || document !== editor.report || !celId) return;
     send('@publishCel', [celId, figure]);
+    check();
+  };
+  // A commit or a replay changed a cel's revision and bounds in place: the session's copy follows without the encoded tiles of the definition.
+  layer._drawingState = function owned(figure) {
+    const d = drawingMetadata(figure), celId = d?.celId;
+    if (!session || document !== editor.report || !celId) return;
+    const state = {};
+    if (d.revision !== undefined) state.revision = d.revision;
+    if (Object.hasOwn(d, 'bounds')) state.bounds = d.bounds ?? null;
+    send('@celState', [celId, state]);
     check();
   };
   // The drawing store keeps the pixels the session's history refers to.
