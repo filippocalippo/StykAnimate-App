@@ -64,6 +64,34 @@ Three things filled the memory of a large document, each without a bound:
   retires the older ones (testingupload's movieclip edit weighs 100 MiB by the history's accounting and
   holds 3 MiB of memory).
 
+## GPU memory
+
+The GPU process is the largest part of the app's memory with a large document open, and it is the
+sprite atlas: `styk_render::Renderer::prepare_sprites` allocates every page of the document's layout (4,096² RGBA8,
+64 MiB each) when the stage first draws it, whether or not their pictures have been uploaded. `Stage::stats()`
+reports it (`spritePages`, `spriteBytes`, with `targetBytes`, `layerBytes`, `glyphBytes` and the rest).
+Measured on 2026-10-31 (private bytes of the GPU process, probe runs, one each; the empty app's is 281–300 MiB):
+
+| | tdd2 settled | svr_uriel settled | svr_uriel after play and scrub |
+| --- | ---: | ---: | ---: |
+| GPU process | 2,273 → 1,877 (second run: 2,135 → 1,853) | 666 | 903 |
+| sprite atlas | 1,664 (26 pages) → 1,280 (20 pages) | 128 (2 pages) | 128 |
+| frame, MSAA and output targets | 22 | 12 | 27 |
+| layer atlases, glyph masks | 5 + 2 | 0 | 60 + 64 |
+| not named by any counter | about 300 | about 220 | about 320 |
+
+There is no second copy of the pictures: the atlas is the allocation, 1.5 to 2 times the pixels the pictures hold.
+The shelf packer put each 4K picture on a page of its own and never went back to the strips beside and below it (a
+fifth of a page each), so a document of many large pictures held pages half empty; it now places an image that fits no
+shelf of the current page in the best free space an earlier page left, before opening a new page
+(`styk_eval::assets::pack`; a layout within one page is unchanged). About 200 to 300 MiB of the GPU process is named by no counter, in every document (the empty app's 281–404 MiB is not itemised
+either); the layer and glyph targets grow with play.
+
+Left: pages are allocated for the whole layout while the pictures are uploaded over two seconds, and nothing is
+evicted; a picture resident only while frames use it (re-uploaded from its encoded bytes), or a smaller level of a picture
+shown small, would bring the atlas under the pictures a frame samples, at the cost of the rules for a picture that is
+not there yet (`Stage::pictures_pending`). A picture shown at 4K on a 4K display cannot be reduced.
+
 ## When the memory cannot hold the work
 
 `styk-alloc` (the allocator of every WebAssembly module) counts the bytes it hands out and knows the

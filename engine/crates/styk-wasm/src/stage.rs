@@ -14,6 +14,10 @@ use crate::js_error;
 /// sprites fills its atlas over a few frames instead of stalling one.
 const IMAGE_UPLOAD_BYTES: usize = 8 << 20;
 
+/// The live drawing levels written before a frame has shown which it needs: the cel's own
+/// pixels and the level above (a view that fits the artboard on screen).
+const FIRST_LEVELS: styk_eval::live::Levels = 0b11;
+
 /// Device errors kept for the interface between two reads; later ones are dropped.
 const MAX_REPORTED_ERRORS: usize = 8;
 
@@ -61,6 +65,7 @@ pub struct Stage {
     pub(crate) atlas_serial: u32,
     /// Drawing cels the interface holds live, drawn in place of their published tiles
     /// (`styk_eval::live`), and the atlas pages after the document's own allocated for their slots.
+    /// Their slots are written for the levels a frame shows ([`Stage::show_live_levels`]).
     pub(crate) live: styk_eval::live::LiveCels,
     live_pages: u32,
     /// The atlas places uploaded so far, and whether the last frame drawn lacked a
@@ -183,7 +188,7 @@ impl Stage {
             backend: format!("{:?} · {}", info.backend, info.name),
             atlas_of: None,
             atlas_serial: 0,
-            live: Default::default(),
+            live: styk_eval::live::LiveCels::new(FIRST_LEVELS),
             live_pages: 0,
             uploaded: Uploaded::default(),
             pictures: PICTURES_COMPLETE,
@@ -499,6 +504,20 @@ impl Stage {
         }
     }
 
+    /// Tells the live cels which of their levels `list` shows at the view `matrix`, and writes
+    /// the slots of those that changed while another level was on show, before the frame draws.
+    /// A list that shows no live tile leaves the choice as it was.
+    fn show_live_levels(&mut self, generation: &Generation, list: &styk_eval::drawlist::DrawList, matrix: [f64; 6]) {
+        if self.live.is_empty() {
+            return;
+        }
+        let levels = styk_eval::live::shown_levels(list, generation.assets.pages, (matrix[0] * matrix[3] - matrix[1] * matrix[2]).abs().sqrt());
+        if levels != 0 {
+            let uploads = self.live.set_resident(levels);
+            self.write_live(&uploads);
+        }
+    }
+
     /// Writes live drawing slots into the atlas laid out for the document drawn last.
     fn write_live(&mut self, uploads: &[styk_eval::live::Upload]) {
         let Some((_, base)) = self.atlas_of else { return };
@@ -532,6 +551,7 @@ impl Stage {
         let orientation = styk_eval::view::orientation(self.rotation, self.flip, [pan[0] + doc.canvas[0] as f64 * zoom / 2.0, pan[1] + doc.canvas[1] as f64 * zoom / 2.0]);
         let upright = styk_eval::view::camera_matrix(doc, camera.as_ref(), zoom, pan);
         let m = orientation.map_or(upright, |o| styk_eval::view::compose(o, upright));
+        self.show_live_levels(generation, list, m);
         self.renderer.set_orientation(orientation);
         // The artboard is the scene rectangle under the workspace view alone: the camera moves the scene inside it.
         let (p0, p1) = (pan, [pan[0] + doc.canvas[0] as f64 * zoom, pan[1] + doc.canvas[1] as f64 * zoom]);
@@ -652,10 +672,11 @@ impl Stage {
     /// uploaded, the pictures held and whether edges are multisampled, as JSON.
     pub fn stats(&self) -> String {
         let s = &self.renderer.stats;
+        let (sprite_pages, sprite_bytes) = self.renderer.sprite_memory();
         format!(
-            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{}}}",
+            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{}}}",
             s.prims, s.groups, s.passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
-            self.upload_bytes, self.uploaded.len(), self.renderer.multisampled()
+            sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled()
         )
     }
 }

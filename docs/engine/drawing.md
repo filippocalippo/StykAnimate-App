@@ -106,7 +106,18 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
   shows. The tiles are raw straight-alpha RGBA, 16 KiB each; the engine reduces them to levels 1
   to 8 as the published path does (`down_tile`, with the same filter on empty tiles), builds each
   drawn tile's slot with its border texels (`bordered`) and writes only the slots a change reaches:
-  the tile, the tiles around it and the parents that cover it, at every level.
+  the tile, the tiles around it and the parents that cover it, at the levels the view shows.
+* A frame draws one level of a cel (the shader keeps the level whose tiles are between half a pixel
+  and one pixel on the screen) and blends in the level above, so only those are written as tiles
+  change. Before each frame the stage reads the levels its list shows at the view's scale
+  (`styk_eval::live::shown_levels`, with a margin at the boundaries; a drawing in an isolation group
+  asks for every level) and tells the live cels (`LiveCels::set_resident`): the slots a change
+  reached at another level are remembered stale, and written, from the cel's pixels at that moment,
+  before the frame that first shows their level draws (zooming right after an undo shows the right
+  pixels at once). A new atlas is written at the resident levels the same way. A frame whose list
+  shows no live tile leaves the choice alone, so a cel registering over several frames is not
+  written all at once when it is shown. Before the first frame the levels are the cel's own and the
+  one above (`FIRST_LEVELS`).
 * The slots are pages of the sprite atlas after the document's own (`PAGE_SLOTS` = 3,600 slots a
   page, at most four pages). A texture of more layers is allocated by copying the old one on the
   GPU (`Renderer::grow_sprites`): the document's pictures are not decoded again. A document that
