@@ -125,6 +125,10 @@ pub(crate) fn down_tile<S: std::hash::BuildHasher>(below: &HashMap<(i32, i32), V
             let row = &mut out[((oy + py) * t + ox) * 4..][..h * 4];
             for (px, texel) in row.chunks_exact_mut(4).enumerate() {
                 let (a, b) = (&upper[px * 8..px * 8 + 8], &lower[px * 8..px * 8 + 8]);
+                // Most of a stroke's tile is empty or opaque: an empty block is one comparison.
+                if u64::from_le_bytes(a.try_into().expect("eight bytes")) | u64::from_le_bytes(b.try_into().expect("eight bytes")) == 0 {
+                    continue;
+                }
                 let pa = a[3] as u32 + a[7] as u32 + b[3] as u32 + b[7] as u32;
                 if pa == 0 {
                     continue;
@@ -151,9 +155,16 @@ pub(crate) fn down_tile<S: std::hash::BuildHasher>(below: &HashMap<(i32, i32), V
 /// One drawn tile's slot contents: `(TILE + 2 * BORDER)²` straight-alpha RGBA
 /// texels, its own in the middle and its eight neighbours' edges around them.
 pub(crate) fn bordered<S: std::hash::BuildHasher>(level: &HashMap<(i32, i32), Vec<u8>, S>, tx: i32, ty: i32) -> Vec<u8> {
-    let (t, border) = (TILE as usize, BORDER as usize);
-    let side = t + 2 * border;
+    let side = (TILE + 2 * BORDER) as usize;
     let mut out = vec![0u8; side * side * 4];
+    bordered_into(level, tx, ty, &mut out, side, 0);
+    out
+}
+
+/// Writes [`bordered`]'s texels into `out`, a zeroed buffer `stride` texels wide, with the slot's left edge
+/// at texel `column` (a run of slots side by side is built in one buffer).
+pub(crate) fn bordered_into<S: std::hash::BuildHasher>(level: &HashMap<(i32, i32), Vec<u8>, S>, tx: i32, ty: i32, out: &mut [u8], stride: usize, column: usize) {
+    let (t, border) = (TILE as usize, BORDER as usize);
     // Where a neighbour's texels come from and go to along one axis: the far edge of the tile before,
     // all of this one, the near edge of the tile after.
     let span = |d: i32| match d {
@@ -167,12 +178,11 @@ pub(crate) fn bordered<S: std::hash::BuildHasher>(level: &HashMap<(i32, i32), Ve
             let ((sx, ox, width), (sy, oy, height)) = (span(dx), span(dy));
             for row in 0..height {
                 let from = ((sy + row) * t + sx) * 4;
-                let to = ((oy + row) * side + ox) * 4;
+                let to = ((oy + row) * stride + column + ox) * 4;
                 out[to..to + width * 4].copy_from_slice(&pixels[from..from + width * 4]);
             }
         }
     }
-    out
 }
 
 /// Decodes a cel and builds every drawn tile at every level, in the order of

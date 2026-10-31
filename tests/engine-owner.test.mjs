@@ -780,3 +780,23 @@ test("a drawing cel the drawing store finished is the session's at once, and is 
   editor._drawingPublished({...figure, _styk: {...figure._styk, drawing: {...cel, celId: 'gone'}}});
   owner.release();
 });
+
+test("a cel's revision and bounds the store changed reach the session without sending its encoded tiles", {skip: !engineBuilt}, async () => {
+  const document = JSON.parse(readFileSync(new URL('startup.document.json', folder), 'utf8'));
+  document.figure_types.push(createDrawingFigure({pixelsPerUnit: 1, figureTypeId: Math.max(...document.figure_types.map(figure => figure.figure_type_id)) + 1}));
+  const {editor, owner} = await ownedEditor({demo: false, layerTimeline: true, propertyChannels: true}, document);
+  const figure = editor.report.figure_types.find(drawingMetadata), cel = drawingMetadata(figure), revision = editor.revision, entries = editor._undo.length;
+  // A big published blob already in both copies: only the two members move.
+  figure.image_assets[0].styk_tiles = `data:application/octet-stream;base64,${'A'.repeat(300000)}`;
+  editor._drawingPublished(figure);
+  const sent = [], send = owner.session().call.bind(owner.session());
+  owner.session().call = (method, args, view) => { sent.push([method, args]); return send(method, args, view); };
+  cel.revision = 9; cel.bounds = {x: 1, y: 2, width: 64, height: 32};
+  editor._drawingState(figure);
+  assert.deepEqual(sent.map(([method]) => method), ['@celState']);
+  assert.ok(sent[0][1].length < 300, 'the call does not carry the encoded tiles');
+  assert.equal(owner.session().report_json(), JSON.stringify(editor.report), 'the same document as the read view');
+  assert.equal(editor.revision, revision);
+  assert.equal(editor._undo.length, entries);
+  owner.release();
+});
