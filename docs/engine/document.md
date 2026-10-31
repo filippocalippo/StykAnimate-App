@@ -47,10 +47,32 @@ each value replaced by values of the wrong kind or removed.
 
 The editor's read view is built from the opened tree once, in pieces
 (`OpenedDocument.part`, `Opening.read` in `engine-open.mjs`): the document without the contents of
-its tables, then each figure, keyframe, background, retained pose source and audio recording, lifted as a
+its tables, then each figure, background, retained pose source and audio recording, lifted as a
 file lifts them (`container::ViewLifter`: arrays and images the tree shares are written once and named by
 the same marker, so the read view shares them and a save lifts the same bytes) and restored by
 `restoreLifted`. The interface thread restores in slices of 4 ms.
+
+The keyframes are not part of that building. `report.keyframes` is a lazy table (`src/lazy-table.mjs`): an array to its
+readers (`Array.isArray`, `length`, indexing, `map`, `find`, `slice`, `for...of`, spread, `JSON.stringify`,
+`structuredClone`) whose records the interface fetches from the session when something reads them
+(`EditSession.record`; until the session starts, `OpenedDocument.record`), each lifted on its own, whole, and restored like a
+piece. A record is the same object for as long as the table holds it; the table holds at most 64, giving the least recently
+read back, and fetches it again, equal, when it is read again. The elements have no setters, as the lazy picture fields have
+none: the view is changed by patches, never in place. What a reader needs without the record is the table's own: the identity of
+each (`positionOf`: `getFrameById` and the pose sources are found without fetching the others), which the open sends in its
+metadata (`ids`) and the table keeps through patches, and the timeline rows (`timeline`, `styk_edit::timeline_rows`), which
+the load reads for the first frame. A reader that walks every keyframe fetches every keyframe (and sees the table give the first
+ones back as it goes: the walkers of the interface take what they need from the session instead, and the tests that read the
+whole view do it inside `holdingAll`).
+
+How patches keep a lazy view in step: the call's view names the records the table holds (`lazy`:
+`fetchedRecords`), and the session sends a change inside a record the view does not hold as the record whole
+(`styk_edit::patch::collapse_unfetched`); a table the patch rebuilds (`a`) keeps the records it holds and the places of those it
+does not (a record not fetched is the session's at its index, and every unfetched record is equal to the session's: verify mode
+checks the held ones). The table a patch replaces is retired: its records are still read, but one it never fetched raises, as
+it can no longer say which document state it was. Such an answer also carries `layerDelta`, how many poses gained or lost each
+figure, which updates the editor's layer index without the replaced records (a view cannot count what it never held). A patch the
+session makes over its own document (a motion-path edit's virtual report) fetches the record it changes and leaves the table in use.
 
 The pictures and originals the tree holds as bytes (a `Blob` in `data_base64`, `data_url`, `styk_tiles` or `source_base64`
 of 64 K characters or more) are not part of the view's text: the piece names each by a token (`S2P:<token>`,

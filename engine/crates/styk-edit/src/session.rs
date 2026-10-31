@@ -954,7 +954,17 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     }
     // `patch: true`: what the call changed in the report, for the read view (D19).
     if view.get("patch") == Some(&Value::Bool(true)) {
-        let (ops, named) = { let _scope = crate::prof::scope("patch::diff"); crate::patch::for_view(crate::patch::diff(&before, report)) };
+        let (ops, named) = {
+            let _scope = crate::prof::scope("patch::diff");
+            let mut ops = crate::patch::diff(&before, report);
+            // A view that fetches the records of its tables on demand holds some of them: the others come whole.
+            if let Some(known) = crate::patch::known(&view) {
+                ops = crate::patch::collapse_unfetched(ops, report, &known);
+                // Such a view cannot tell from the records it replaced how many poses hold each figure: the session tells it.
+                answer.push(("layerDelta", crate::patch::layer_delta(&before, report)));
+            }
+            crate::patch::for_view(ops)
+        };
         answer.push(("patch", ops));
         // The patch names payloads (pictures) by token: the view asks for their text when something reads them.
         if named { answer.push(("payloads", Value::Bool(true))); }

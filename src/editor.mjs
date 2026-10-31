@@ -1,7 +1,6 @@
 import {validationLabel} from "./validation-labels.mjs";
 import {messageError} from './localized-error.mjs';
 import {editorSpatialMethods} from './editor-spatial.mjs';
-import {timeline} from './pivot/read-view.mjs';
 import {validateScene, syncDerived} from './pivot/model.mjs';
 import {resolveJoinSelection} from './pivot/structure.mjs';
 import {createDemo, emptyDocument, defaultFigure} from './demo.mjs';
@@ -27,10 +26,10 @@ import {editorSessionMethods} from './editor-sessions.mjs';
 const clone = value => structuredClone(value);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const finite = (value, label) => { if (!Number.isFinite(value)) throw messageError(new Error(''), "errors.editorCamera.mustBeFinite", {label: validationLabel(label)}); return value; };
-function initialLoadState(report,{initialFrameIndex=0,initialTick}={}){
+function initialLoadState(report,rows,{initialFrameIndex=0,initialTick}={}){
   let frameIndex=initialFrameIndex==='last'?report.keyframes.length-1:clamp(Math.trunc(finite(initialFrameIndex,'Initial frame')),0,report.keyframes.length-1);
   if(initialTick!==undefined)finite(initialTick,'Initial tick');
-  const rows=timeline(report),last=rows.at(-1),total=last?last.start+last.count:0;
+  const last=rows.at(-1),total=last?last.start+last.count:0;
   const tick=initialTick===undefined?rows[frameIndex]?.start??0:clamp(initialTick,0,Math.max(0,total-1));
   if(initialTick!==undefined){let low=0,high=rows.length-1;while(low<high){const mid=Math.ceil((low+high)/2);if(rows[mid].start<=tick)low=mid;else high=mid-1;}frameIndex=low;}
   return {frameIndex,tick,timeline:rows,animation:report._styk?.animation};
@@ -179,7 +178,7 @@ export class Editor extends EventTarget {
   _publishLoadedReport(prepared, name, {initialFrameIndex=0, initialTick, preserveDrawingResources=false, onDetach} = {}) {
     const {report} = prepared;
     if (name !== undefined && name !== null && typeof name !== 'string') throw messageError(new Error(''), "errors.editor.theDocumentNameMustBeText", {});
-    const initial=initialLoadState(report,{initialFrameIndex,initialTick}),index=initial.frameIndex;
+    const initial=initialLoadState(report,prepared.timeline,{initialFrameIndex,initialTick}),index=initial.frameIndex;
     const started = performance.now();
     // The open document stays open beside the loaded one (editor-sessions.mjs): its owner receives it whole.
     if(onDetach)this.handOverDocument(onDetach);

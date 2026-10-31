@@ -30,6 +30,7 @@
  */
 import {applyDocumentPatch} from './engine-patch.mjs';
 import {payloadText} from './engine-open.mjs';
+import {fetchedRecords, holdingAll} from '../lazy-table.mjs';
 import {messageError} from '../localized-error.mjs';
 import {validationLabel} from '../validation-labels.mjs';
 import {motionParameterMessages} from '../camera-motion-localization.mjs';
@@ -117,7 +118,9 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   const view = () => ({tick: editor.tick, frameIndex: editor.frameIndex, selectedUid: editor.selectedUid ?? null, selectedUids: [...(editor.selectedUids ?? [])], layerFocusLock: editor.layerFocusLock(), // the layers Focus and lock leaves free: the session locks the rest for the call
     selectedJoint: editor.selectedJoint ?? -1, activeLayerId: editor.activeLayerId, autoKey: Boolean(editor.autoKey), audioRipple: Boolean(editor.audioRipple),
     sheetSelection: editor._sheetSelection ? {id: editor._sheetSelection.id, contents: Boolean(editor._sheetSelection.contents)} : null,
-    ...selectionMetadata(editor._selectionState())});
+    ...selectionMetadata(editor._selectionState()),
+    // The records of its tables the read view holds: the session sends a change inside any other whole, and the layer counts it moved.
+    lazy: fetchedRecords(editor.report)});
 
   // --- what the interface reads of the frame on show ----------------------------------
   /** How many answers are being applied: the session is the editor's source of truth meanwhile, so a read does not tell it
@@ -146,7 +149,8 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
 
   const check = () => {
     if (!verify || !session) return;
-    const engine = session.report_json(), view = JSON.stringify(editor.report);
+    // The tables give no record back meanwhile: a record changed in place and then given back would not show.
+    const engine = session.report_json(), view = holdingAll(() => JSON.stringify(editor.report));
     if (engine !== view) {
       let at = 0; while (engine[at] === view[at]) at++;
       throw new Error(`The engine's document differs from the read view at ${at}: engine …${engine.slice(Math.max(0, at - 60), at + 60)}… view …${view.slice(Math.max(0, at - 60), at + 60)}…`);
@@ -163,13 +167,15 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   };
 
   // --- answers ------------------------------------------------------------------------
-  /** The pose records and layer state before a patch, to update the layer index from. */
-  const posesBefore = () => ({frames: editor.report.keyframes, sources: editor.report._styk?.frameSources, layers: editor.report._styk?.layers});
-  /** Updates what the editor derives from the records a patch replaced: the layer index
-   * from the poses that changed (by identity), frame and type indices, caches. */
-  const refresh = (patch, before) => {
+  /** The layer state before a patch, to update the layer index from. */
+  const posesBefore = () => ({layers: editor.report._styk?.layers});
+  /** Updates what the editor derives from the records a patch replaced: the layer index from the figures the session says
+   * the poses gained and lost (`delta`: the view cannot tell from the records it replaced, it holds some of them), frame and type
+   * indices, caches. */
+  const refresh = (patch, before, delta) => {
     const touched = new Set(patch.map(op => op.p[0] ?? '*'));
-    const index = editor._layerUidCounts && before && !touched.has('*') ? before : null;
+    if (!Array.isArray(delta)) throw new Error('The session answered a patch without the figure counts it moved.');
+    const index = editor._layerUidCounts ? before : null;
     if (!index) {
       // Counted again from the document, figures seen before kept.
       const seen = editor._layerSeenUids, revision = editor._layerRevision;
@@ -179,16 +185,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
       if (seen) for (const uid of seen) editor._layerSeenUids.add(uid);
     } else {
       const counts = editor._layerUidCounts, groups = editor._layerGroups, report = editor.report;
-      const delta = new Map(), crossed = [];
-      const count = (records, sign) => { for (const record of records) for (const object of record?.objects ?? []) delta.set(object.unique_id, (delta.get(object.unique_id) ?? 0) + sign); };
-      const compare = (old, next) => {
-        if (old === next) return;
-        const previous = new Set(old ?? []), current = new Set(next ?? []);
-        count([...previous].filter(record => !current.has(record)), -1);
-        count([...current].filter(record => !previous.has(record)), 1);
-      };
-      compare(index.frames, report.keyframes);
-      if (index.sources !== report._styk?.frameSources) compare(Object.values(index.sources ?? {}), Object.values(report._styk?.frameSources ?? {}));
+      const crossed = [];
       for (const [uid, amount] of delta) {
         if (!amount) continue;
         const previous = counts.get(uid) ?? 0, next = previous + amount;
@@ -223,7 +220,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     if (patch && answer.patch?.length) {
       const before = posesBefore(), layers = new Set(Object.keys(editor.report._styk?.layers?.byId ?? {}));
       applyDocumentPatch(editor.report, answer.patch, answer.payloads ? payloadText : null);
-      refresh(answer.patch, before);
+      refresh(answer.patch, before, answer.layerDelta);
       // A layer a call creates joins the layer focus the editor holds (the session left it free as it made it).
       editor._includeCreatedLayersInFocus(Object.keys(editor.report._styk?.layers?.byId ?? {}).filter(id => !layers.has(id)));
       editor._invalidate({timing: true});
@@ -392,7 +389,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
         if (!this.ops.length) return editor.report;
         if (built?.document !== editor.report || built.ops !== this.ops) {
           const report = {...editor.report};
-          applyDocumentPatch(report, this.ops);
+          applyDocumentPatch(report, this.ops, null, {strict: false});
           built = {document: editor.report, ops: this.ops, report};
         }
         return built.report;

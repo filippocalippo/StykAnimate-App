@@ -1,4 +1,5 @@
 import {copyField, copyRecord, defineLazyPayload, namesPayload, putField} from '../lazy-payload.mjs';
+import {tableOf} from '../lazy-table.mjs';
 
 /**
  * Applies a document patch from the engine (styk-edit's `patch` module, D19) to the
@@ -15,24 +16,32 @@ import {copyField, copyRecord, defineLazyPayload, namesPayload, putField} from '
  * becomes a lazy payload of the view (src/lazy-payload.mjs), and a string the engine escaped (`S2E:`) is restored. A
  * lazy payload a copy or a rebuild keeps stays unread.
  *
+ * The records of a lazy table (src/lazy-table.mjs) the view has not fetched cannot be changed in place: the session names only the
+ * ones the view holds (`strict`, an answer's patch); a patch over the session's own document (`strict` false, a motion-path edit's
+ * operations) fetches the record it changes. A table a patch changes is replaced by a copy; the copy shares the records.
+ *
  * Returns the root keys the patch touched, in order.
  */
-export function applyDocumentPatch(root, ops, payloads = null) {
+export function applyDocumentPatch(root, ops, payloads = null, {strict = true} = {}) {
   const fresh = new Set([root]);
   const touched = [];
   const own = (parent, key) => {
-    const child = parent[key];
+    const table = tableOf(parent);
+    const child = table ? table.peek(key, strict) : parent[key];
     if (child === null || typeof child !== 'object') throw new Error(`The document patch steps into ${typeof child} at ${String(key)}.`);
     if (fresh.has(child)) return child;
-    const copy = Array.isArray(child) ? child.slice() : copyRecord(child);
-    parent[key] = copy; fresh.add(copy);
+    const copy = tableOf(child)?.copy(strict) ?? (Array.isArray(child) ? child.slice() : copyRecord(child));
+    if (table) table.put(key, copy); else parent[key] = copy;
+    fresh.add(copy);
     return copy;
   };
   /** A value the engine sent, as the view holds it: what it named by token is lazy, what it escaped is restored. */
   const received = value => payloads ? restoreNamed(value, payloads) : value;
   /** Sets `target[key]` to a value the engine sent. */
   const set = (target, key, value) => {
-    if (payloads && namesPayload(value)) defineLazyPayload(target, key, value, payloads);
+    const table = tableOf(target);
+    if (table) table.put(key, received(value));
+    else if (payloads && namesPayload(value)) defineLazyPayload(target, key, value, payloads);
     else putField(target, key, received(value));
   };
   for (const op of ops) {
@@ -54,7 +63,7 @@ export function applyDocumentPatch(root, ops, payloads = null) {
     else if (op.x) delete parent[key];
     else if (op.a) {
       const before = parent[key];
-      const next = op.a.map(ref => typeof ref === 'number' ? before[ref] : received(ref.v));
+      const next = tableOf(before)?.rebuild(op.a, ref => received(ref.v), strict) ?? op.a.map(ref => typeof ref === 'number' ? before[ref] : received(ref.v));
       parent[key] = next; fresh.add(next);
     } else if (op.o) {
       const before = parent[key], next = {};

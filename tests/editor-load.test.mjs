@@ -28,7 +28,9 @@ test('New publishes its starter figure once with clean history and first-edit un
 });
 
 test('cooperative import publishes once with identical validated poses, UID/layer indices and initial frame',async()=>{
+  // The keyframes are read when something asks; the tables that are read at the open (here the backgrounds) are what the slices cut.
   const report=fixture(),editor=open({demo:false}),before=state(editor),events=[];let yields=0;
+  report.backgrounds=Array.from({length:30},(_,i)=>({background_id:i+1,kind:2,color:0xff203040+i,name:`Background ${i}`}));
   editor.addEventListener('change',event=>events.push({kind:event.detail.kind,index:editor.frameIndex,tick:editor.tick}));
   await editor.loadAsync(report,'Imported.piv',{sliceMs:.1,initialFrameIndex:'last',yieldControl:async()=>{
     yields++;assert.deepEqual(state(editor),before);assert.equal(events.length,0);

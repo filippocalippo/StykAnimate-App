@@ -98,6 +98,11 @@ use std::sync::Arc;
 
 use styk_doc::{Obj, Value};
 
+/// The timeline of a document (`editor.timeline`): where each row starts and how many ticks it lasts.
+pub fn timeline_rows(report: &Value) -> Vec<(f64, f64)> {
+    timeline::rows(report).into_iter().map(|row| (row.start, row.count)).collect()
+}
+
 pub use history::{Command, CommandKind, HistoryLimits};
 pub use frame::FrameSlice;
 pub use onion_skins::{Ghost, OnionSet, MAX_GHOSTS};
