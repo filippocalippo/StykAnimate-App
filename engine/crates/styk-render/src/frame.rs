@@ -192,6 +192,13 @@ impl Renderer {
         slot.as_ref().unwrap().0.create_view(&Default::default())
     }
 
+    /// GPU memory of the frame's output and multisampled targets.
+    pub fn target_bytes(&self) -> u64 {
+        let output = self.output.as_ref().map_or(0, |o| o.3[0] as u64 * o.3[1] as u64 * 4);
+        let msaa: u64 = [&self.msaa_main, &self.msaa_layer].iter().filter_map(|m| m.as_ref()).map(|m| m.1[0] as u64 * m.1[1] as u64 * 4 * self.samples as u64).sum();
+        output + msaa
+    }
+
     /// Renders the current draw list into the offscreen frame.
     pub fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &ViewParams, size: [u32; 2]) {
         self.root_gpu_source = false;

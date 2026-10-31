@@ -78,6 +78,12 @@ impl Renderer {
         }
     }
 
+    /// The sprite atlas: its pages (layers) and its bytes of GPU memory.
+    pub fn sprite_memory(&self) -> (u32, u64) {
+        let pages = self.sprites.depth_or_array_layers();
+        (pages, self.sprites.width() as u64 * self.sprites.height() as u64 * 4 * pages as u64)
+    }
+
     /// Writes live drawing slots, `base` being the layer of the first live page.
     pub fn upload_live(&mut self, base: u32, uploads: &[styk_eval::live::Upload]) {
         for upload in uploads {
