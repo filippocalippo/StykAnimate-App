@@ -602,7 +602,7 @@ function playbackRange() {
   if(state.motionPreviewRange)return state.motionPreviewRange;
   return normalizePlaybackRange(state.loopRange, editor.totalTicks);
 }
-function prepareAhead(start = editor.tick, count = 48, {bidirectional = false} = {}) {
+function prepareAhead(start = editor.tick, count = 48, {bidirectional = false, idle = false} = {}) {
   if (state.drag || state.scrubbing || !editor.totalTicks) return;
   syncPlayback();
   // Preparation shares the CPU with the UI thread: shallow lookahead keeps
@@ -612,7 +612,7 @@ function prepareAhead(start = editor.tick, count = 48, {bidirectional = false} =
   const range = playbackRange();
   // The engine admits the frames it prepares by their footprints.
   const ticks=playbackWindow(start,count,range,{loop:state.loop,bidirectional});
-  return playback.prepareRange(ticks).catch((error) => {
+  return playback.prepareRange(ticks, {idle}).catch((error) => {
     if (error.name !== "AbortError" && state.playing) {
       pause();
       fail(error);
@@ -629,8 +629,8 @@ function warmPlayback({immediate = false} = {}) {
     if(!current())return;
     // Learn the current frame's real footprint before widening the idle window.
     // User input owns the foreground; obsolete warm-up never chases the playhead.
-    await prepareAhead(tick,2);
-    if(current())await prepareAhead(tick,48,{bidirectional:true});
+    await prepareAhead(tick,2,{idle:true});
+    if(current())await prepareAhead(tick,48,{bidirectional:true,idle:true});
   }, immediate||playback.report!==report ? 0 : 150);
 }
 function previewScrub() {

@@ -3,7 +3,7 @@
 Each language owns one `src/locales/packs/<BCP-47 ID>.json` file. Its `locale`
 metadata contains `id`, English `name`, `nativeName`, `direction` (`ltr` or `rtl`),
 and optional explicit `aliases`. Its `messages` object uses the stable semantic
-keys in `src/locales/en.mjs`, composed from English feature files. Keys describe
+keys in `src/locales/en.mjs` (generated from the English feature files that `src/locales/en-catalog.mjs` composes). Keys describe
 intent, not English spelling or an element's location. Read the owning component
 for context; `docs/localization-message-context.json` lists source locations and
 caption snippets for review. Preserve distinctions between a figure definition,

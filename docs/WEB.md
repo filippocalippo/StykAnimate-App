@@ -66,7 +66,8 @@ HTTP/1.1 without compression by the development server it took 3.9 s on
 localhost and 5.9 s at 50 ms latency and 20 Mbps. Over a local HTTP/2 server at
 20 ms and 20 Mbps it took 3.25 s, and declaring the whole module graph up front
 with `modulepreload` did not change that (3.21 s): loading is transfer-bound, not
-waterfall-bound, so the page carries no preload list. Brotli level 5 estimates
+waterfall-bound, so the page preloads only what starts the engine (its start module, loader and WebAssembly
+file), which would otherwise begin late in the graph. Brotli level 5 estimates
 what Cloudflare sends: 5.5 MiB for the editor and assets on first load (measured
 before the engine's own module joined the site), and, only when a Pivot file is first
 opened, 0.43 MiB for the codec module (1.47 MiB raw). Before the Rust codec, that first
