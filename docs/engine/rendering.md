@@ -602,7 +602,7 @@ are the editor's: `objectBounds` with each item's effect padding
 (`transferToImageBitmap`); nothing is read back. The card's backdrop is chosen in the worker from
 sixteen 40-pixel samples by `libraryPreviewMatte` (`src/library-matte.mjs`). Requests run one at a time; one cancelled before it starts is never sent. The
 worker stays between hovers and is released after five idle minutes (its device destroyed, its
-memory and thread stack freed, then it ends; terminated if it does not answer within 5 s). A worker
+memory and thread stack freed, then it ends; terminated if it does not answer within 5 s and is outside the engine, [threading](threading.md#ending-a-worker)). A worker
 that gets no GPU device, or whose canvas fails the probe, draws the same pictures with the CPU
 rasterizer (`Previews::create_cpu`) and puts them on a 2D `OffscreenCanvas` to hand them over the
 same way; a file the engine cannot read shows no preview. The worker's
@@ -883,7 +883,7 @@ loop until it does.
 pending request at once; the worker is asked to `release`: it destroys the
 device, lets the read-backs that rejects settle, frees the renderer and gives back its thread's
 stack, then closes ([threading.md](threading.md)). A worker that does
-not answer within 5 s is terminated. The save layer is unchanged: a cancelled or failed export
+not answer within 5 s is terminated unless it is inside the engine ([threading](threading.md#ending-a-worker)). The save layer is unchanged: a cancelled or failed export
 leaves an existing file untouched.
 
 **Why the GPU, measured** (`styk export`, native, RTX 4070 SUPER, 1,920×1,080, Smooth edges, the

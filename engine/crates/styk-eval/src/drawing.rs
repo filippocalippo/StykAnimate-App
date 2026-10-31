@@ -72,34 +72,76 @@ pub fn level_tiles(tiles: &[(i32, i32, Arc<[u8]>)]) -> Vec<Vec<(i32, i32)>> {
         .collect()
 }
 
+/// A fast hasher for tile coordinates. The live cels look tiles up thousands of times per
+/// edit, and the standard hasher (SipHash) cost more than the lookups it guards; nothing
+/// here needs its resistance to chosen keys.
+#[derive(Default, Clone, Copy)]
+pub struct CoordHasher(u64);
+
+impl CoordHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl std::hash::Hasher for CoordHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.add(u64::from(byte));
+        }
+    }
+
+    fn write_i32(&mut self, value: i32) {
+        self.add(u64::from(value as u32));
+    }
+
+    fn finish(&self) -> u64 {
+        // The multiplication leaves its entropy in the high bits; the table indexes with the low ones.
+        self.0 ^ (self.0 >> 32)
+    }
+}
+
+/// The hash state of the maps and sets keyed by tile coordinates.
+pub type CoordBuild = std::hash::BuildHasherDefault<CoordHasher>;
+
 /// `downTile`: one level-`n + 1` tile from the four level-`n` tiles below it.
 /// Each output texel is the alpha-weighted mean of a 2×2 block, rounded half up,
 /// with the block's mean alpha. `None` when none of the four exists.
-pub(crate) fn down_tile(below: &HashMap<(i32, i32), Vec<u8>>, tx: i32, ty: i32) -> Option<Vec<u8>> {
+pub(crate) fn down_tile<S: std::hash::BuildHasher>(below: &HashMap<(i32, i32), Vec<u8>, S>, tx: i32, ty: i32) -> Option<Vec<u8>> {
     let subs = [below.get(&(2 * tx, 2 * ty)), below.get(&(2 * tx + 1, 2 * ty)), below.get(&(2 * tx, 2 * ty + 1)), below.get(&(2 * tx + 1, 2 * ty + 1))];
     if subs.iter().all(Option::is_none) {
         return None;
     }
     let mut out = vec![0u8; TILE_BYTES];
     let (t, h) = (TILE as usize, TILE as usize / 2);
+    let line = t * 4;
     for (q, sub) in subs.iter().enumerate() {
         let Some(sub) = sub else { continue };
         let (ox, oy) = ((q & 1) * h, (q >> 1) * h);
         for py in 0..h {
-            for px in 0..h {
-                let i = ((2 * py) * t + 2 * px) * 4;
-                let j = i + t * 4;
-                let texels = [i, i + 4, j, j + 4];
-                let pa: u32 = texels.iter().map(|&k| sub[k + 3] as u32).sum();
+            // Two source rows and the output row as slices: no index below is checked one texel at a time.
+            let upper = &sub[2 * py * line..(2 * py + 1) * line];
+            let lower = &sub[(2 * py + 1) * line..(2 * py + 2) * line];
+            let row = &mut out[((oy + py) * t + ox) * 4..][..h * 4];
+            for (px, texel) in row.chunks_exact_mut(4).enumerate() {
+                let (a, b) = (&upper[px * 8..px * 8 + 8], &lower[px * 8..px * 8 + 8]);
+                let pa = a[3] as u32 + a[7] as u32 + b[3] as u32 + b[7] as u32;
                 if pa == 0 {
                     continue;
                 }
-                let o = ((oy + py) * t + ox + px) * 4;
-                for c in 0..3 {
-                    let weighted: u32 = texels.iter().map(|&k| sub[k + c] as u32 * sub[k + 3] as u32).sum();
-                    out[o + c] = ((2 * weighted + pa) / (2 * pa)) as u8;
+                if pa == 4 * 255 {
+                    // Four opaque texels: (2 * 255 * sum + 1020) / 2040 is (sum + 2) / 4, without the division.
+                    for c in 0..3 {
+                        texel[c] = ((a[c] as u32 + a[4 + c] as u32 + b[c] as u32 + b[4 + c] as u32 + 2) / 4) as u8;
+                    }
+                    texel[3] = 255;
+                    continue;
                 }
-                out[o + 3] = ((pa + 2) / 4) as u8;
+                for c in 0..3 {
+                    let weighted = a[c] as u32 * a[3] as u32 + a[4 + c] as u32 * a[7] as u32 + b[c] as u32 * b[3] as u32 + b[4 + c] as u32 * b[7] as u32;
+                    texel[c] = ((2 * weighted + pa) / (2 * pa)) as u8;
+                }
+                texel[3] = ((pa + 2) / 4) as u8;
             }
         }
     }
@@ -108,33 +150,25 @@ pub(crate) fn down_tile(below: &HashMap<(i32, i32), Vec<u8>>, tx: i32, ty: i32) 
 
 /// One drawn tile's slot contents: `(TILE + 2 * BORDER)²` straight-alpha RGBA
 /// texels, its own in the middle and its eight neighbours' edges around them.
-pub(crate) fn bordered(level: &HashMap<(i32, i32), Vec<u8>>, tx: i32, ty: i32) -> Vec<u8> {
-    let t = TILE as i32;
-    let border = BORDER as i32;
-    let side = (t + 2 * border) as usize;
+pub(crate) fn bordered<S: std::hash::BuildHasher>(level: &HashMap<(i32, i32), Vec<u8>, S>, tx: i32, ty: i32) -> Vec<u8> {
+    let (t, border) = (TILE as usize, BORDER as usize);
+    let side = t + 2 * border;
     let mut out = vec![0u8; side * side * 4];
+    // Where a neighbour's texels come from and go to along one axis: the far edge of the tile before,
+    // all of this one, the near edge of the tile after.
+    let span = |d: i32| match d {
+        -1 => (t - border, 0, border),
+        0 => (0, border, t),
+        _ => (0, border + t, border),
+    };
     for dy in -1..=1 {
         for dx in -1..=1 {
             let Some(pixels) = level.get(&(tx + dx, ty + dy)) else { continue };
-            // All of this tile, two edge rows/columns of a neighbour, or their corner.
-            let xs: Vec<i32> = match dx {
-                -1 => (t - border..t).collect(),
-                0 => (0..t).collect(),
-                _ => (0..border).collect(),
-            };
-            let ys: Vec<i32> = match dy {
-                -1 => (t - border..t).collect(),
-                0 => (0..t).collect(),
-                _ => (0..border).collect(),
-            };
-            for &sy in &ys {
-                let oy = (sy + dy * t + border) as usize;
-                for &sx in &xs {
-                    let ox = (sx + dx * t + border) as usize;
-                    let s = ((sy * t + sx) * 4) as usize;
-                    let o = (oy * side + ox) * 4;
-                    out[o..o + 4].copy_from_slice(&pixels[s..s + 4]);
-                }
+            let ((sx, ox, width), (sy, oy, height)) = (span(dx), span(dy));
+            for row in 0..height {
+                let from = ((sy + row) * t + sx) * 4;
+                let to = ((oy + row) * side + ox) * 4;
+                out[to..to + width * 4].copy_from_slice(&pixels[from..from + width * 4]);
             }
         }
     }

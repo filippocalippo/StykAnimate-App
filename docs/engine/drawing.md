@@ -106,7 +106,12 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
   shows. The tiles are raw straight-alpha RGBA, 16 KiB each; the engine reduces them to levels 1
   to 8 as the published path does (`down_tile`, with the same filter on empty tiles), builds each
   drawn tile's slot with its border texels (`bordered`) and writes only the slots a change reaches:
-  the tile, the tiles around it and the parents that cover it, at the levels the view shows.
+  the tile, the tiles around it and the parents that cover it, at the levels the view shows. The slots
+  a call changes wait for the next frame (`Stage::flush_live`, before the frame's pictures): the calls of one
+  frame rewrite the same neighbourhoods, so they are written once, the last contents of a slot winning, and slots
+  side by side in a page row are one write (`styk_eval::live::coalesce`). The reduced levels and the slot
+  contents are built with a cheap hasher on the tile coordinates (`CoordHasher`) and row copies; a block of four
+  opaque texels reduces without the division.
 * A frame draws one level of a cel (the shader keeps the level whose tiles are between half a pixel
   and one pixel on the screen) and blends in the level above, so only those are written as tiles
   change. Before each frame the stage reads the levels its list shows at the view's scale
@@ -119,7 +124,7 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
   written all at once when it is shown. Before the first frame the levels are the cel's own and the
   one above (`FIRST_LEVELS`).
 * The slots are pages of the sprite atlas after the document's own (`PAGE_SLOTS` = 3,600 slots a
-  page, at most four pages). A texture of more layers is allocated by copying the old one on the
+  page, at most four pages; a slot given back is the next one taken, lowest first, so a cel's rows stay together). A texture of more layers is allocated by copying the old one on the
   GPU (`Renderer::grow_sprites`): the document's pictures are not decoded again. A document that
   gains an atlas page (a publication) allocates the atlas anew as it always did and writes the
   live slots again from the engine's copy of their tiles. When the slots are used up the engine

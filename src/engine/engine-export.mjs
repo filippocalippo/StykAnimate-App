@@ -24,11 +24,10 @@ import {exportMemoryPlan} from '../export-memory.mjs';
 import {exportContext, checkExportContext} from '../export-canvas.mjs';
 import {EXPORT_MAX_PIXELS} from '../export-sampling.mjs';
 import {engineDocument} from './engine-document.mjs';
+import {workerGuard, releaseWorker} from './engine-guard.mjs';
 
 /** Rendered pixels a side of an export tile at most (styk-export `TILE_SIDE`). */
 export const ENGINE_TILE_SIDE = 2048;
-/** How long a worker may take to release the engine memory and GPU device it holds. */
-const RELEASE_MS = 5000;
 /** How long a worker warmed for an export waits for it. */
 const WARM_MS = 60000;
 const WORKER_NAME = 'StykAnimate export rendering (engine)';
@@ -36,15 +35,10 @@ const WORKER_NAME = 'StykAnimate export rendering (engine)';
 const abortError = (message = 'Export rendering cancelled.') => new DOMException(message, 'AbortError');
 
 /**
- * Asks an engine export worker to free what it holds in the engine's memory and its GPU
- * device, then end; it is terminated if it does not say so in time (what it held then stays
- * allocated).
+ * Asks an engine export worker to free what it holds in the engine's memory and its GPU device, then end; it is terminated if it
+ * does not say so in time and is outside the engine (what it held then stays allocated), never inside it (engine-guard.mjs).
  */
-function release(worker) {
-  const timer = setTimeout(() => worker.terminate(), RELEASE_MS);
-  worker.addEventListener('message', ({data}) => { if (data?.released) { clearTimeout(timer); worker.terminate(); } });
-  try { worker.postMessage({operation: 'release'}); } catch { clearTimeout(timer); worker.terminate(); }
-}
+const release = worker => releaseWorker(worker);
 
 /** An engine export worker started ahead of an export, and when it is given up. */
 let warm = null;
@@ -61,7 +55,7 @@ export function prewarmExportRenderer({stage} = {}) {
   const worker = new Worker(new URL('./engine-export-worker.mjs', import.meta.url), {type: 'module', name: WORKER_NAME});
   const entry = warm = {worker, timer: setTimeout(() => { if (warm === entry) { warm = null; release(worker); } }, WARM_MS)};
   worker.addEventListener('message', ({data}) => { if (data?.warmed === false && warm === entry) { warm = null; clearTimeout(entry.timer); release(worker); } });
-  worker.postMessage({operation: 'warm', ...engine.join});
+  worker.postMessage({operation: 'warm', ...engine.join, guard: workerGuard(worker)});
 }
 
 /** The warmed worker, for an export that uses it. */
@@ -194,7 +188,7 @@ export class EngineExportFrames {
           : null;
       this.pending = {id, resolve, reject, timer};
       try {
-        this.worker.postMessage({id, operation, ...payload});
+        this.worker.postMessage({id, operation, ...payload, ...(operation === 'start' ? {guard: workerGuard(this.worker)} : {})});
       } catch (error) {
         this._fail(error);
       }
