@@ -12,6 +12,7 @@ const check=(name,condition)=>{assert.ok(condition,name);checks.push(name);conso
 try {
   await page.goto(process.env.STYK_TEST_URL||'http://127.0.0.1:47831');
   await page.waitForFunction(()=>window.styk?.ready);
+  await page.evaluate(async()=>{const {loadLocales}=await import('/src/localization.mjs');await loadLocales();});
   await page.waitForFunction(()=>styk.assets.count.getAttribute('data-i18n')==='counts.figures');
   check('Asset library connects its count after startup without swallowed binding errors',await page.evaluate(()=>styk.assets.count.getAttribute('data-i18n')==='counts.figures'&&styk.assets.count.textContent===styk.localization.t('counts.figures',{count:styk.assets.records.length})));
 

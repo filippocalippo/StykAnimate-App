@@ -3,7 +3,7 @@ import {tupleMessages, messageTuple, messageHTML, localizedAttribute, localizedT
 import {messageError} from './localized-error.mjs';
 import {errorText, presentError} from './error-presentation.mjs';
 
-import {t as interfaceText} from './localization.mjs';
+import {t as interfaceText, loadLocale} from './localization.mjs';
 
 import {installSpatialControls,drawSpatialGizmo,spatialGizmoDrag,updateSpatialGizmo,spatialControlMode} from './spatial-controls.mjs';
 import {rigDetailsShown} from './rig-control-details.mjs';
@@ -5951,6 +5951,7 @@ async function init() {
     : desktop?.getEditorSettings
     ? await desktop.getEditorSettings()
     : undefined;
+  await loadLocale(settingsValue?.locale);
   appLocalization = new AppLocalization({ locale: settingsValue?.locale });
   editorSettings = new EditorSettings({
     value: settingsValue,

@@ -5,7 +5,8 @@ import {emptyDocument,defaultFigure,createObject,createFrame} from '../src/demo.
 import {movieclipFigure,validateMovieclipGraph} from '../src/movieclips.mjs';
 import {drawingSelection} from '../src/movieclip-drawings.mjs';
 import {drawingSetsView,joinedDrawingSetsView} from '../src/movieclip-drawings-view.mjs';
-import {interfaceLocalization} from '../src/localization.mjs';
+import {interfaceLocalization, loadLocales} from '../src/localization.mjs';
+await loadLocales();
 function fixture(){
  const f=defaultFigure(1),inner={...emptyDocument(),figure_types:[f],keyframes:[createFrame([createObject(f,1,0,0)]),createFrame([createObject(f,1,10,0)])]};
  const head=movieclipFigure(2,'Head <drawings>',inner,{duration:2});head._styk.movieclip.drawingSets=[{name:'Normal',views:[{name:'Front',frame:0}]},{name:'Alternate',views:[{name:'Side',frame:1}]}];
