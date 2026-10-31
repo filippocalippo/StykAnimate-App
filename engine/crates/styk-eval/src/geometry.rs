@@ -1437,7 +1437,8 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
                     build_clip(frame, i, fig, clip, root, parent)
                 };
                 let built = Arc::new(built);
-                return Some((i, built.clone(), remembered.map(|_| Kept::new(&frame.objects[i], fig, fig_of[i], root, None, built))));
+                // Kept whether or not it can be reused, so that the build is numbered: what reads the scene learns the instance changed.
+                return Some((i, built.clone(), previous.map(|_| Kept::new(&frame.objects[i], fig, fig_of[i], root, None, built))));
             }
             // IK: a pinned object draws its derived pose, from its assembly or solved on its own (`evaluateIKPose`).
             let local;

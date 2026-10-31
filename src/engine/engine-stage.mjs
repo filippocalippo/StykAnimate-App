@@ -220,12 +220,12 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
    * A revision it has not published yet is waited for (`engine_busy`: drawn when the engine has made progress); one it
    * does not publish at all is a refusal.
    */
-  const holds = revision => {
-    if (holdsRevision(side.engine, revision)) { side.waiting = 0; return; }
-    const error = new Error('the engine does not hold this revision of the document');
+  const notYet = message => {
+    const error = new Error(message);
     if (++side.waiting > 120) { side.waiting = 0; throw error; }
     throw Object.assign(error, {code: 'engine_busy'});
   };
+  const holds = revision => { if (!holdsRevision(side.engine, revision)) notYet('the engine does not hold this revision of the document'); };
 
   /**
    * A first stroke on a blank exposure draws a cel the document does not hold yet: the frame is drawn from a draft of
@@ -260,7 +260,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     const {frame, geometry, source} = request, objects = frame.objects ?? [];
     if (source) {
       // The session publishes what it changed after the call; a frame asked for before that landed is drawn when the engine holds it.
-      if (!stage.edit_session(source.session, source.view, source.motion)) throw Object.assign(new Error('the engine does not hold the document the session edits yet'), {code: 'engine_busy'});
+      if (!stage.edit_session(source.session, source.view, source.motion)) notYet('the engine does not hold the document the session edits yet');
       // The poses the engine holds are the session's: the next frame sent as poses is sent whole.
       side.groups = []; side.count = -1; side.fields = null;
     } else {
@@ -268,6 +268,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       // An unchanged frame is not parsed again; the first frame and every changed one are.
       if (json !== null) { stage.edit_frame(json); side.frameSent = true; }
     }
+    side.waiting = 0;
     // The onion skins are the session's: it plans them from its document and the settings, and the stage keeps their poses.
     if (request.onions) stage.set_onions(request.onions.session, request.onions.view, request.onions.request);
     else stage.clear_onions();
