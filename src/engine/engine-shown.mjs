@@ -18,8 +18,8 @@ import {isStatic} from '../pivot/read-view.mjs';
 import {isMovieclip} from '../movieclips.mjs';
 import {sticknodesDrawables, sticknodesSpriteAsset} from '../sticknodes/geometry.mjs';
 
-/** A number the session wrote that is not finite is the `null` it once was in JSON text. */
-const fin = value => Number.isFinite(value) ? value : null;
+/** A number the session wrote, as JSON text gave it: not finite is `null`, and `-0` is `0` (`+ 0`), so the sign of a zero never reaches the interface's arithmetic. */
+const fin = value => Number.isFinite(value) ? value + 0 : null;
 /** `n` words of the packet from `at` as numbers (`null` where not finite). */
 const numbers = (w, at, n) => { const out = new Array(n); for (let k = 0; k < n; k++) out[k] = fin(w[at + k]); return out; };
 /** `[x0, y0, x1, y1, …]` (`n` numbers from `at`) as points. */
@@ -30,8 +30,8 @@ const pointList = (w, at, n) => {
 };
 /** The point before perspective at place `index` of the `n` words of triples from `at`, or `undefined`. */
 const rawAt = (w, at, n, index) => 3 * index + 2 < n && fin(w[at + 3 * index]) !== null ? [fin(w[at + 3 * index]), fin(w[at + 3 * index + 1]), fin(w[at + 3 * index + 2])] : undefined;
-/** A number that was not finite is NaN. */
-const real = value => Number.isFinite(value) ? value : NaN;
+/** A number as `fin` gives it, but not finite is NaN. */
+const real = value => Number.isFinite(value) ? value + 0 : NaN;
 
 const definitionsOf = new WeakMap();
 /** The figure definitions of a report by type id (a call the editor runs adds a definition to the table in place). */
