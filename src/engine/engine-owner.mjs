@@ -480,6 +480,8 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   const parked = new Map();
   const park = () => {
     if (!session) return;
+    // Nothing shows the document of a parked session: what it keeps for showing it (frames, scenes, builds) goes, and is made again on return.
+    session.release_scenes();
     parked.set(document, {session, depths, history});
     session = null; document = null;
   };

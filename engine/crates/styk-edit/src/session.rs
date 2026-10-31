@@ -504,6 +504,11 @@ impl Session {
         })
     }
 
+    /// Lets go of what the session keeps for showing its document ([`Editor::release_scenes`]): it is parked.
+    pub fn release_scenes(&self) {
+        self.editor.release_scenes();
+    }
+
     /// The clock reads that are given a time to take are held to (milliseconds).
     pub fn set_clock(&mut self, clock: fn() -> f64) {
         self.editor.clock = Some(clock);
