@@ -1130,6 +1130,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "ryu-js",
+ "sha2",
  "thiserror",
 ]
 

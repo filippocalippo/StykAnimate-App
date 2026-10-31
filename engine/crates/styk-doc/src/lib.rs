@@ -19,6 +19,7 @@
 //! JavaScript's `JSON.stringify` produces for the same data, which is what the
 //! file format hashes and stores.
 
+pub mod digest;
 pub mod json;
 mod number;
 mod value;

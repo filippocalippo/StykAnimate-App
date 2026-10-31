@@ -8,7 +8,9 @@ publish.workspace = true
 
 [dependencies]
 styk-doc = { path = "../styk-doc" }
-sha2 = "0.10"
 flate2 = "1"
 zstd = "0.13"
 thiserror = "2"
+
+[dev-dependencies]
+sha2 = "0.10"

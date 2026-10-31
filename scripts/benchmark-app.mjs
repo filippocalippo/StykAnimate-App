@@ -551,7 +551,8 @@ async function drawsPerFrame(ctx, seconds = 5) {
   await page.evaluate(() => { if (window.styk.state.playing) window.styk.actions.play(); });
   await setMark(page, 'idle');
   const counter = before.engineFrames !== null && after.engineFrames !== null;
-  const shown = after.shown - before.shown;
+  // A play starts its presentation count over, so the ticks shown are the count at the end.
+  const shown = after.shown;
   return {counter, engineFrames: counter ? after.engineFrames - before.engineFrames : null, ticksShown: shown,
     drawsPerFrame: counter && shown > 0 ? +((after.engineFrames - before.engineFrames) / shown).toFixed(3) : null, seconds};
 }

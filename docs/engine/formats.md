@@ -69,6 +69,17 @@ sections its markers name (`src/document-lift.mjs`, the form a save lifts the ed
 engine reads exactly the document the editor imports. Both produce a tree that
 `styk_eval::from_value` turns into typed views.
 
+## Hashing large buffers on a cold module
+
+V8 runs WebAssembly in its baseline tier (Liftoff) first and moves a function to optimised code between calls: there is
+no on-stack replacement, so one call that loops for seconds stays baseline code for all of it. A container's SHA-256
+checks (a 175 MB `.styk` hashes about 175 MB) were exactly that: `sha2`'s block function ran for the whole buffer in one
+call, and a profile of the first open of a large `.styk` showed it as 7.9 s of 15 s of CPU (the same decode again in one
+process: about 1 s). Every hash of a large buffer therefore goes through `styk_doc::digest`, which feeds the hasher in
+16 KiB calls of a non-inlined function so the optimised code is picked up within the first megabyte. The digest is the
+same. Apply the same shape to any new loop over megabytes that runs once per document (a scan, a checksum, a copy with
+a transform); a loop that already recurses or is called per record needs nothing.
+
 ## Changing a format
 
 Add the field where the writer writes it (`container::lift` for the store, `src/document-lift.mjs` for the interface), keep unknown fields
