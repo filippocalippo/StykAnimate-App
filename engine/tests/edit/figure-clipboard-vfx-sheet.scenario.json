@@ -1,0 +1,36 @@
+{
+ "name": "figure-clipboard-vfx-sheet",
+ "document": "figure-vfx.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "copySelection"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "pasteSelection",
+   {
+    "pasteMode": "instance"
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

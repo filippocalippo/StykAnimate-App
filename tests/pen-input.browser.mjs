@@ -11,7 +11,7 @@ const pen=async(type,x,y,{button='left',modifiers=0,buttons=1,pointerType='pen'}
 const stroke=async(from,to,options={})=>{await pen('mousePressed',from.x,from.y,options);const steps=8;for(let i=1;i<=steps;i++)await pen('mouseMoved',from.x+(to.x-from.x)*i/steps,from.y+(to.y-from.y)*i/steps,options);await pen('mouseReleased',to.x,to.y,options);await page.waitForTimeout(60);};
 const state=()=>page.evaluate(()=>({undo:styk.editor._undo.length,root:[styk.editor.object?.root_x,styk.editor.object?.root_y],scale:styk.state.view.scale,rotation:styk.state.view.rotation??0,playing:Boolean(styk.state.playing)}));
 try{
-  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>styk.ready);
+  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
   await page.evaluate(async()=>{const {createDemo}=await import('/src/demo.mjs');styk.editor.load(createDemo());styk.state.settings.autosaveSeconds=0;});
   await page.waitForTimeout(300);
   const origin=await page.evaluate(()=>{const {editor,state}=styk,r=document.getElementById('viewport').getBoundingClientRect(),o=editor.frame.objects[0];return {x:r.x+state.view.x+o.root_x*state.view.scale,y:r.y+state.view.y+o.root_y*state.view.scale};});

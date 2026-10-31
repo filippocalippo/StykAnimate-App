@@ -170,6 +170,7 @@ group('animation', [
   ['toggle-loop', english["commands.toggleLoop"], 'loop', {labelKey: "commands.toggleLoop", toggle: true, keywords: ['repeat']}],
   ['toggle-onion', english["commands.toggleOnion"], 'onion', {labelKey: "commands.toggleOnion", toggle: true, keywords: ['ghost', 'previous frames']}],
   ['toggle-range-edit', english["commands.toggleRangeEdit"], 'frame', {labelKey: "commands.toggleRangeEdit", toggle: true, keywords: ['range', 'apply to frames', 'edit selected frames']}],
+  ['toggle-auto-key', english["timeline.autoKey"], 'circle', {labelKey: "timeline.autoKey", toggle: true, keywords: ['record', 'keyframes', 'automatic']}],
   ['toggle-audio', english["commands.toggleAudio"], 'music', {labelKey: "commands.toggleAudio", toggle: true, keywords: ['sound', 'music', 'track']}],
   ['timeline-layer-up', english["commands.timelineLayerUp"], 'up', {...internal, labelKey: "commands.timelineLayerUp"}],
   ['timeline-layer-down', english["commands.timelineLayerDown"], 'down', {...internal, labelKey: "commands.timelineLayerDown"}],
@@ -255,6 +256,7 @@ group('build', [
   ['copy-builder-appearance', english["commands.copyBuilderAppearance"], 'duplicate', {labelKey: "commands.copyBuilderAppearance", ...build, requires: ['joint'], keywords: ['style', 'color', 'colour']}],
   ['paste-builder-appearance', english["commands.pasteBuilderAppearance"], 'clipboard', {labelKey: "commands.pasteBuilderAppearance", ...build, requires: ['joint', 'appearance'], keywords: ['style', 'color', 'colour']}],
   ['toggle-builder-branch', english["commands.toggleBuilderBranch"], 'builder-branch', {labelKey: "commands.toggleBuilderBranch", ...build, toggle: true}],
+  ['toggle-builder-snap', english["builderOutliner.smartSnapping"], 'builder-snap', {labelKey: "builderOutliner.smartSnapping", ...build, toggle: true, keywords: ['snap', 'magnet']}],
   ['add-sprite-segment', english["commands.addSpriteSegment"], 'image', {labelKey: "commands.addSpriteSegment", ...build, keywords: ['sprite', 'picture']}],
   ['rig-connect', english["commands.rigConnect"], 'link', {labelKey: "commands.rigConnect", ...build, requires: ['figure'], keywords: ['rig', 'anchor']}],
   ['rig-weighted', english["commands.rigWeighted"], 'nodes', {labelKey: "commands.rigWeighted", ...build, requires: ['joint'], keywords: ['rig']}],
@@ -266,6 +268,7 @@ group('build', [
   ['rig-examples', english["commands.rigExamples"], 'layers', {labelKey: "commands.rigExamples", keywords: ['samples', 'library']}],
 ]);
 group('camera', [
+  ['camera-follow', english["app.followWithCamera"], 'camera', {labelKey: "app.followWithCamera", requires: ['figure'], keywords: ['track', 'follow figure']}],
   ['camera-done', english["commands.cameraDone"], 'check', {labelKey: "commands.cameraDone", requires: ['camera-session']}],
   ['camera-copy', english["commands.cameraCopy"], 'duplicate', {labelKey: "commands.cameraCopy"}],
   ['camera-paste', english["commands.cameraPaste"], 'clipboard', {labelKey: "commands.cameraPaste"}],

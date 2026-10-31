@@ -1,0 +1,61 @@
+{
+ "name": "recolor-mesh-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/spatial/mesh-sheet.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "replaceFigureColor",
+   "#d65c40",
+   "#102030"
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "replace",
+    "color": "#ffffff",
+    "targets": {
+     "segments": [],
+     "polygons": [],
+     "meshColors": [
+      1,
+      3
+     ]
+    }
+   }
+  ],
+  [
+   "setFigureColor",
+   "#808000"
+  ],
+  [
+   "resetFigureColors"
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "replace",
+    "color": "#000000",
+    "targets": {
+     "segments": [],
+     "meshColors": [
+      9
+     ]
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

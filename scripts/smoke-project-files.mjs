@@ -36,9 +36,9 @@ try {
   });
   const choose = (value) => app.evaluate((_electron, choice) => { globalThis.__saveChoices.push(choice); }, value);
   const count = () => app.evaluate(() => globalThis.__saveDialogCount);
-  await page.evaluate(async () => { window.styk.settingsUI.commit({locale:'it'}); await window.styk.settingsUI.flush(); });
+  await page.evaluate(async () => { await (await import('/src/localization.mjs')).loadLocale('it'); window.styk.settingsUI.commit({locale:'it'}); await window.styk.settingsUI.flush(); });
   await page.evaluate(async () => {
-    const response = await fetch('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${window.stykDesktop.apiToken}` }, body: JSON.stringify({ document: window.styk.editor.serialize(), format: 'styk' }) });
+    const response = await (async (path, init) => { const [{codecJob}, {codecRequest}] = await Promise.all([import('/src/codec-job.mjs'), import('/src/codec-request.mjs')]); const job = codecJob(); try { return await codecRequest(job.link().fields, path, init); } finally { job.finish(); } })('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ document: window.styk.editor.serialize(), format: 'styk' }) });
     if (!response.ok) throw new Error('Could not create a valid native project fixture.');
     const {ImportClient} = await import('/src/import-client.mjs');
     const importer = new ImportClient();
@@ -151,18 +151,18 @@ try {
     let invalidRejected = false, oversizedRejected = false;
     try { await window.stykDesktop.setEditorSettings([]); } catch { invalidRejected = true; }
     try { await window.stykDesktop.setEditorSettings({ huge: 'x'.repeat(17000) }); } catch { oversizedRejected = true; }
-    return { settings, origin: location.origin, invalidRejected, oversizedRejected, actual: await window.stykDesktop.getEditorSettings() };
+    return { settings, invalidRejected, oversizedRejected, actual: await window.stykDesktop.getEditorSettings() };
   });
   assert.equal(persisted.invalidRejected, true); assert.equal(persisted.oversizedRejected, true); assert.deepEqual(persisted.actual, persisted.settings);
   assert.deepEqual(rendererErrors, []);
   const closed = app.waitForEvent('close'); await app.evaluate(({ app }) => app.exit(0)).catch(() => {}); await closed;
   const restarted = await launch(); applications.push(restarted);
   const next = await restarted.firstWindow(); await next.waitForFunction(() => window.styk?.ready, undefined, { timeout: 30000 });
-  const restored = await next.evaluate(async () => ({ origin: location.origin, settings: await window.stykDesktop.getEditorSettings(), workspace: await window.stykDesktop.getWorkspacePreferences() }));
-  assert.notEqual(restored.origin, persisted.origin); assert.deepEqual(restored.settings, persisted.settings); assert.deepEqual(restored.workspace, { left: 257 });
+  const restored = await next.evaluate(async () => ({ settings: await window.stykDesktop.getEditorSettings(), workspace: await window.stykDesktop.getWorkspacePreferences() }));
+  assert.deepEqual(restored.settings, persisted.settings); assert.deepEqual(restored.workspace, { left: 257 });
   assert.equal((await readdir(runDirectory)).some((name) => name.endsWith('.tmp')), false);
-  checks.push('Editor settings persist independently across process/origin restart; malformed and oversized values preserve them.');
-  const evidence = { passed: true, checks, dialogCount, firstOrigin: persisted.origin, secondOrigin: restored.origin, settings: restored.settings, pivotSourceUntouched: true, rendererErrors, checkedAt: new Date().toISOString() };
+  checks.push('Editor settings persist across a process restart; malformed and oversized values preserve them.');
+  const evidence = { passed: true, checks, dialogCount, settings: restored.settings, pivotSourceUntouched: true, rendererErrors, checkedAt: new Date().toISOString() };
   await writeFile(path.join(output, 'desktop-project-files-smoke.json'), JSON.stringify(evidence, null, 2));
   console.log(JSON.stringify(evidence, null, 2));
 } finally { for (const app of applications) await app.evaluate(({ app }) => app.exit(0)).catch(() => {}); }

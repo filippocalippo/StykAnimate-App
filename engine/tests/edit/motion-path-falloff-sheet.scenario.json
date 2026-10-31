@@ -1,0 +1,605 @@
+{
+ "name": "motion-path-falloff-sheet",
+ "document": "motion-path.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   10,
+   {
+    "falloff": {
+     "radius": 5,
+     "shape": "smooth"
+    }
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 250,
+    "y": 180
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 262,
+    "y": 190
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   10,
+   {
+    "falloff": {
+     "radius": 6,
+     "shape": "linear"
+    }
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 260,
+    "y": 180
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 272,
+    "y": 186
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   10,
+   {
+    "falloff": {
+     "radius": 7,
+     "shape": "sharp"
+    }
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 270,
+    "y": 180
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 282,
+    "y": 182
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   10,
+   {
+    "falloff": {
+     "radius": 8,
+     "shape": "flat"
+    }
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 280,
+    "y": 180
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 292,
+    "y": 178
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 22,
+    "joint": 1
+   },
+   6,
+   {
+    "falloff": {
+     "radius": 8,
+     "shape": "linear"
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 330,
+    "y": 320
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 320,
+    "y": 330
+   },
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 55,
+    "joint": 4
+   },
+   13,
+   {
+    "falloff": {
+     "radius": 3,
+     "shape": "sharp"
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 210,
+    "y": 330
+   },
+   {
+    "isolate": true
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 2,
+    "handleId": 0,
+    "joint": -1
+   },
+   9,
+   {
+    "falloff": {
+     "radius": 4
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 430,
+    "y": 320
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 2,
+    "handleId": 22,
+    "joint": 1
+   },
+   16,
+   {
+    "falloff": {
+     "radius": 30,
+     "shape": "flat"
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 470,
+    "y": 330
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   14
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 260,
+    "y": 160
+   }
+  ],
+  [
+   "setMotionPathFalloff",
+   {
+    "radius": 4,
+    "shape": "sharp"
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "setMotionPathFalloff",
+   {
+    "radius": 4,
+    "shape": "sharp"
+   }
+  ],
+  [
+   "setMotionPathFalloff",
+   {
+    "radius": 7,
+    "shape": "smooth"
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 266,
+    "y": 166
+   }
+  ],
+  [
+   "setMotionPathFalloff",
+   null
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "setMotionPathFalloff",
+   {
+    "radius": 2
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   17,
+   {
+    "falloff": {
+     "radius": 3
+    }
+   }
+  ],
+  [
+   "setMotionPathFalloff",
+   {
+    "radius": 5,
+    "shape": "linear"
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 270,
+    "y": 150
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   11,
+   {
+    "falloff": {
+     "radius": 0.4
+    }
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   11,
+   {
+    "falloff": {
+     "radius": 2.5,
+     "shape": "bogus"
+    }
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   11,
+   {
+    "falloff": {
+     "radius": 1000
+    }
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 240,
+    "y": 175
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   11,
+   {
+    "falloff": {
+     "radius": true
+    }
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   11,
+   {
+    "falloff": null
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   1,
+   {
+    "falloff": {
+     "radius": 2
+    },
+    "label": "Reshape the step"
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 205,
+    "y": 155
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   19,
+   {
+    "falloff": {
+     "radius": 3
+    }
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   19,
+   {
+    "falloff": {
+     "radius": 3
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 1000,
+    "y": 1000
+   }
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

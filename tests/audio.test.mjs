@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
-import {audioState, validateAudioState, audibleClips, rippleAudio, clipGainAt} from '../src/audio-model.mjs';
+import {audioState, audibleClips, clipGainAt} from '../src/audio-model.mjs';
 import {inspectWave, pcmWave, wavePeaks, mixAudio} from '../src/audio-pcm.mjs';
-import {playbackProperties} from '../src/playback-patch.mjs';
 import {documentChunks, applyDocumentChunk} from '../src/document-transport.mjs';
-import {buildContainerV2, decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2, decodeDocument} from './support/native-files.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 
 const asset = (duration = 2) => ({id:'sound-test', name:'Voice.wav', size:3, duration, chunks:[{data_base64:'AQID'}], peaks:[0,.5,1,.5]});
-const editorWithAudio = () => { const editor = new Editor({layerTimeline:true}); editor.importAudio(asset(),{start:0}); return editor; };
+const editorWithAudio = () => { const editor = ownedEditorFor({layerTimeline:true}); editor.importAudio(asset(),{start:0}); return editor; };
 
 test('repeated audio control commits do not create empty undo steps', () => {
   const editor = editorWithAudio(), track = audioState(editor.report).tracks[0], clip = track.clips[0];
@@ -20,14 +20,7 @@ test('repeated audio control commits do not create empty undo steps', () => {
   editor.undo(); assert.equal(audioState(editor.report).tracks[0].clips[0].gain, 1);
 });
 test('undoing the first import restores the exact original document',()=>{
-  const editor=new Editor({layerTimeline:true}),before=JSON.stringify(editor.serialize());editor.importAudio(asset(),{start:0});editor.undo();assert.equal(JSON.stringify(editor.serialize()),before);
-});
-test('audio edits preserve poses, store immutable assets once and undo exactly', () => {
-  const editor = editorWithAudio(), report = editor.report, pose = report.keyframes, imported = audioState(report), clip = imported.tracks[0].clips[0];
-  editor.markSaved(); editor.setAudioClip(clip.id,{start:1,duration:1,fadeIn:.2,gain:.4});
-  assert.equal(report.keyframes,pose); assert.equal(audioState(report).assets,imported.assets); assert.ok(editor.dirty);
-  assert.ok(editor._undo.at(-1).bytes < 6000); assert.equal(editor._undo.at(-1).before,imported);
-  editor.undo(); assert.equal(audioState(report),imported); assert.equal(editor.dirty,false); editor.redo(); assert.equal(audioState(report).tracks[0].clips[0].start,1);
+  const editor=ownedEditorFor({layerTimeline:true}),before=JSON.stringify(editor.serialize());editor.importAudio(asset(),{start:0});editor.undo();assert.equal(JSON.stringify(editor.serialize()),before);
 });
 test('splitting and duplicating retain source offsets without copying recordings', () => {
   const editor = editorWithAudio(), clip = audioState(editor.report).tracks[0].clips[0];
@@ -43,7 +36,8 @@ test('invalid clip edits, missing media and invalid imports reject before public
   assert.equal(editor.revision,revision); assert.equal(audioState(editor.report),state);
   const broken = structuredClone(editor.report); broken._styk.audio.assets = {};
   assert.throws(()=>editor.load(broken)); assert.equal(audioState(editor.report),state);
-  assert.throws(()=>validateAudioState({...state,assets:{'sound-test':{...asset(),chunks:[{data_base64:'not data'}]}}}));
+  assert.throws(()=>editor.importAudio({...asset(),id:'sound-bad',chunks:[{data_base64:'not data'}]},{start:0}));
+  assert.equal(editor.revision,revision); assert.equal(audioState(editor.report),state);
 });
 test('asset deletion is undoable and track mute/solo determine the same mix', () => {
   const editor = editorWithAudio(), first = audioState(editor.report).tracks[0], second = editor.addAudioTrack('Effects');
@@ -59,25 +53,18 @@ test('audio clipboard survives document replacement and pastes one independent c
   assert.equal(state.tracks[0].clips[0].duration,1);editor.undo();assert.equal(audioState(editor.report).tracks.length,0);
 });
 test('overlap admission bounds the mixer and prototype names cannot impersonate an asset', () => {
-  const editor=editorWithAudio(),state=structuredClone(audioState(editor.report)),clip=state.tracks[0].clips[0];
-  state.tracks[0].clips=Array.from({length:33},(_,index)=>({...clip,id:`clip-${index}`}));assert.throws(()=>validateAudioState(state),/32 audio/);
-  state.tracks[0].clips=[{...clip,assetId:'toString'}];assert.throws(()=>validateAudioState(state),/missing recording/);
+  const editor=editorWithAudio(),track=audioState(editor.report).tracks[0];
+  for(let i=1;i<32;i++)editor.importAudio({...asset(),id:`sound-${i}`},{trackId:track.id,start:0});
+  assert.throws(()=>editor.importAudio({...asset(),id:'sound-33'},{trackId:track.id,start:0}),/32 audio/);
+  const broken=structuredClone(editor.report);broken._styk.audio.tracks[0].clips[0].assetId='toString';assert.throws(()=>editor.load(broken),/missing recording/);
 });
 test('FPS edits leave recording speed and source offsets unchanged', () => {
   const editor = editorWithAudio(), state = audioState(editor.report); editor.setFPS(60); assert.equal(audioState(editor.report),state);
 });
-test('explicit ripple splits at inserted time and joins surviving source ranges after removal', () => {
-  const editor = editorWithAudio(), original = audioState(editor.report), insert = rippleAudio(original,.5,0,1);
-  assert.deepEqual(insert.tracks[0].clips.map(c=>[c.start,c.offset,c.duration]),[[0,0,.5],[1.5,.5,1.5]]);
-  const removed = rippleAudio(original,.5,.5,0);
-  assert.deepEqual(removed.tracks[0].clips.map(c=>[c.start,c.offset,c.duration]),[[0,0,.5],[.5,1,1]]);
-  const ids=['scene','camera',...editor.report._styk.layers.order]; editor.audioRipple=true;
-  const frames=editor.totalTicks; editor.sheetInsertFrames(ids,1,2); editor.undo(); assert.equal(editor.totalTicks,frames); assert.equal(audioState(editor.report),original);
-});
-test('save transport retains original bytes but prepared render metadata excludes them', () => {
+test('save transport retains the original recording bytes', () => {
   const editor = editorWithAudio(); let copy;
   for (const chunk of documentChunks(editor.report,{maxBytes:4096})) copy=applyDocumentChunk(copy,chunk);
-  assert.deepEqual(copy._styk.audio,editor.report._styk.audio); assert.equal(playbackProperties(editor.report)._styk.audio,undefined);
+  assert.deepEqual(copy._styk.audio,editor.report._styk.audio);
   const loaded = new Editor({layerTimeline:true}); loaded.load(copy); assert.deepEqual(audioState(loaded.report),audioState(editor.report));
 });
 test('WAV parsing and waveform peaks read original mono/stereo PCM', async () => {

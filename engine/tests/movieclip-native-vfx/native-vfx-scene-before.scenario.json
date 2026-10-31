@@ -1,0 +1,1 @@
+{"name":"native-vfx-scene-before","document":"native-vfx-scene-before.document.json","editor":{},"steps":[["@select",1,-1],["@frame"],["@seek",2.25],["@frame"],["@seek",7.75],["@frame"],["@seek",16],["@frame"]]}

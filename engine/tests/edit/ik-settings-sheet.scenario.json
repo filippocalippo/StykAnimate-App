@@ -1,0 +1,167 @@
+{
+ "name": "ik-settings-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "setNodeIK",
+   {
+    "pinned": true
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "allowStretch": true
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "bendDirection": -1
+   }
+  ],
+  [
+   "poseJoint",
+   240,
+   330
+  ],
+  [
+   "setNodeIK",
+   {
+    "bendDirection": 0
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "bendDirection": 1
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "chainLength": 1
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "chainLength": 99
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "bogus": 1
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": "yes"
+   }
+  ],
+  [
+   "rotateIKTarget",
+   0.4
+  ],
+  [
+   "poseJoint",
+   250,
+   300
+  ],
+  [
+   "setNodeIK",
+   {
+    "pinned": false
+   }
+  ],
+  [
+   "rotateIKTarget",
+   -0.3
+  ],
+  [
+   "rotateIKTarget",
+   "x"
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": false
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": true,
+    "chainLength": 1
+   }
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": true
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": true
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "pinned": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -8,7 +8,7 @@ const check=(name,value)=>{assert.ok(value,name);console.log('PASS',name);};
 const stroke=async(x,y)=>{await page.mouse.move(x,y);await page.mouse.down();await page.waitForFunction(()=>Boolean(styk.drawing.gesture));await page.mouse.move(x+90,y+35,{steps:10});await page.mouse.up();await page.waitForFunction(()=>!styk.drawing.gesture);await page.evaluate(()=>styk.drawing.barrier());};
 const drawingLayers=()=>page.evaluate(async()=>{const {isDrawingLayer}=await import('/src/drawing-model.mjs');return styk.editor.layers.filter(isDrawingLayer).map(l=>l.id);});
 try{
-  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>styk.ready);
+  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
   await page.evaluate(()=>styk.state.settings.autosaveSeconds=0);
   check('the document starts without a drawing layer',(await drawingLayers()).length===0);
   await page.locator('[data-workspace-mode="draw"]').click();

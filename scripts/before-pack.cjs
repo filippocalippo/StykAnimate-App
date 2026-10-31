@@ -11,30 +11,17 @@ module.exports = async function beforePack(context) {
   const hash = bytes => createHash('sha256').update(bytes).digest('hex');
   const notes = JSON.parse(await fs.readFile(path.join(appRoot, 'desktop', 'release-info.json'), 'utf8'));
   if (notes.version !== context.packager.appInfo.version) throw new Error('Release notes must match the packaged version. Run npm run release:prepare.');
-  const manifestPath = path.join(context.packager.info.appDir, 'build', 'sidecar', 'build-info.json');
-  let manifest;
-  try { manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')); }
-  catch { throw new Error('Build the pinned native codec on this OS before packaging: npm run build:sidecar'); }
   const architecture = typeof context.arch === 'number' ? Arch[context.arch] : context.arch;
-  if (manifest.platform !== context.electronPlatformName || manifest.architecture !== architecture) {
-    throw new Error(`Codec ${manifest.platform}/${manifest.architecture} cannot be packaged for ${context.electronPlatformName}/${architecture}. Build the sidecar on the target OS and architecture.`);
+  // The engine, the Pivot codec and the drawing raster engine ship as WebAssembly modules among the web resources (src/engine/pkg).
+  let modules;
+  try { modules = JSON.parse(await fs.readFile(path.join(appRoot, 'src', 'engine', 'pkg', 'build-info.json'), 'utf8')); }
+  catch { throw new Error('Build the engine and the Pivot codec before packaging: node scripts/engine-build.mjs'); }
+  for (const [name, expected] of [['styk_engine_bg.wasm', modules.sha256], ['styk_codec_bg.wasm', modules.codec?.sha256], ['styk_drawing_bg.wasm', modules.drawing?.sha256]]) {
+    let bytes;
+    try { bytes = await fs.readFile(path.join(appRoot, 'src', 'engine', 'pkg', name)); }
+    catch { throw new Error(`${name} is missing; build it with node scripts/engine-build.mjs`); }
+    if (!expected || hash(bytes) !== expected) throw new Error(`src/engine/pkg/${name} differs from its build record; rebuild with node scripts/engine-build.mjs`);
   }
-  if (manifest.orjson !== '3.12.0') throw new Error('The desktop release requires the pinned orjson 3.12.0 sidecar.');
-  for (const filename of (await fs.readdir(path.join(appRoot, 'codecs'))).filter(name => name.endsWith('.py'))) {
-    if (manifest.codecSources?.[filename] !== hash(await fs.readFile(path.join(appRoot, 'codecs', filename))))
-      throw new Error(`The frozen codec is stale for ${filename}; run npm run build:sidecar.`);
-  }
-  for (const filename of ['server.py','fast_decode.py','import_wire.py','native_scan.py','native_format.py','jobs.py']) {
-    if (manifest.runtimeSources?.[filename] !== hash(await fs.readFile(path.join(appRoot,'backend',filename))))
-      throw new Error(`The frozen codec is stale for ${filename}; run npm run build:sidecar.`);
-  }
-  const scanner = manifest.nativeScanner;
-  if (scanner?.abiVersion !== 1 || scanner.platform !== context.electronPlatformName || scanner.architecture !== architecture ||
-      scanner.source?.sha256 !== hash(await fs.readFile(path.join(appRoot,'native','piv-frame-scan.cpp'))))
-    throw new Error('Build and freeze the current native PIV scanner before packaging.');
-  const scannerName=context.electronPlatformName==='win32'?'styk-piv-frame-scan.dll':context.electronPlatformName==='darwin'?'libstyk-piv-frame-scan.dylib':'libstyk-piv-frame-scan.so';
-  if(scanner.library?.sha256!==hash(await fs.readFile(path.join(appRoot,'build','sidecar','styk-codec','_internal','native',scannerName))))
-    throw new Error('The frozen native PIV scanner differs from its verified build.');
   let video;
   try { video = JSON.parse(await fs.readFile(path.join(context.packager.info.appDir, 'build', 'video-encoder', 'build-info.json'), 'utf8')); }
   catch { throw new Error('Stage the pinned offline video encoder before packaging: npm run build:video-encoder'); }

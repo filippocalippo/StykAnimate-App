@@ -1,0 +1,164 @@
+{
+ "name": "origin-rig-inactive-connector-null-sheet",
+ "document": "origin-rig-inactive-connector-null-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true,
+  "autoKey": false
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "beginDrag",
+   "Inactive connector cancel"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "poseJoint",
+   322.2674255371094,
+   329.7144775390625,
+   {
+    "stretch": true,
+    "snap": false
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "poseJoint",
+   304.1424255371094,
+   341.9644775390625,
+   {
+    "snap": false
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "poseJoint",
+   314.11846923828125,
+   350.950439453125,
+   {
+    "stretch": true,
+    "snap": false
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "rotateJoint",
+   0.23
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "bendJoint",
+   304.8754577636719,
+   363.97174072265625,
+   {
+    "snap": false
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "slideConnector",
+   450.125,
+   250.25
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "setConnectorPosition",
+   0.7
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@seek",
+   0
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@seek",
+   8
+  ],
+  [
+   "@frame"
+  ]
+ ]
+}

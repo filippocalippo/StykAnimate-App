@@ -1,0 +1,214 @@
+{
+ "name": "figure-align-measured-native",
+ "document": "measured-bounds.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "selectMany",
+   [
+    2,
+    3
+   ]
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "start",
+   [
+    0,
+    1
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "center",
+   [
+    0,
+    1
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "end",
+   [
+    0,
+    1
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "y",
+   "start",
+   [
+    0,
+    1
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "y",
+   "center",
+   [
+    0,
+    1
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "y",
+   "end",
+   [
+    0,
+    1
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "alignSelection",
+   "x",
+   "center",
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginDrag"
+  ],
+  [
+   "moveSelection",
+   8,
+   2
+  ],
+  [
+   "alignSelection",
+   "y",
+   "end",
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "z",
+   "start",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "bogus",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "alignSelection",
+   "x",
+   "start",
+   {
+    "boundsOf": {
+     "@boundsCallback": "constant",
+     "value": null
+    }
+   }
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    2
+   ]
+  ],
+  [
+   "alignSelection",
+   "x",
+   "start",
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ]
+ ]
+}

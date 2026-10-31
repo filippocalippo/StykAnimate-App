@@ -1,0 +1,355 @@
+{
+ "name": "vfx-clip-presets-sheet",
+ "document": "joined-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Power up",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Teleport",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Impact",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Hologram",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Ice",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Poison",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Neon",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Golden hour",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Retro screen",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Energy",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Hit flash",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Ghost",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Retro",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "scene"
+   },
+   "Golden hour",
+   {
+    "start": 2,
+    "duration": 20
+   }
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "segment",
+    "uid": 1,
+    "handleId": 22
+   },
+   "Power up"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "bad"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "camera"
+   },
+   "Neon"
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Neon",
+   {
+    "duration": 0
+   }
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Neon",
+   {
+    "includeAttached": 1
+   }
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   true
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "Ice"
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

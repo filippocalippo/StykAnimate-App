@@ -1,0 +1,191 @@
+{
+ "name": "spatial-drag-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/spatial/mesh-perspective.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   8
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   380,
+   230
+  ],
+  [
+   "poseJoint",
+   390,
+   250
+  ],
+  [
+   "poseJoint",
+   400,
+   270
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   380,
+   230,
+   {
+    "depth": true
+   }
+  ],
+  [
+   "poseJoint",
+   360,
+   240,
+   {
+    "depth": true,
+    "alternate": true
+   }
+  ],
+  [
+   "poseJoint",
+   350,
+   260
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   390,
+   240,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "poseJoint",
+   395,
+   250,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "bendJoint",
+   300,
+   200
+  ],
+  [
+   "bendJoint",
+   340,
+   200,
+   {
+    "pixel": 2
+   }
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "bendJoint",
+   320,
+   210
+  ],
+  [
+   "poseJoint",
+   300,
+   250,
+   {
+    "depth": true,
+    "pixel": 2,
+    "anchor": {
+     "x": 310,
+     "y": 240
+    }
+   }
+  ],
+  [
+   "@select",
+   1,
+   8
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   380,
+   230,
+   {
+    "depth": true,
+    "pixel": 3
+   }
+  ],
+  [
+   "poseJoint",
+   340,
+   200,
+   {
+    "depth": true,
+    "pixel": 3
+   }
+  ],
+  [
+   "poseJoint",
+   420,
+   260,
+   {
+    "depth": true,
+    "alternate": true,
+    "pixel": 3
+   }
+  ],
+  [
+   "poseJoint",
+   360,
+   280,
+   {
+    "depth": true,
+    "alternate": true,
+    "pixel": 3
+   }
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

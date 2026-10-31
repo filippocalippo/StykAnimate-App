@@ -1,0 +1,39 @@
+{
+ "name": "channels-follow-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/channels/channels-follow.sheet.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "@seek",
+   16
+  ],
+  [
+   "moveSelection",
+   20,
+   -6
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "rotateJoint",
+   -0.3
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

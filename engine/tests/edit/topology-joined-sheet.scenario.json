@@ -1,0 +1,72 @@
+{
+ "name": "topology-joined-sheet",
+ "document": "joined-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "deleteSingleSegment"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "mirrorSegment",
+   "vertical"
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "unsplitSegment"
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "deleteSegment",
+   {}
+  ],
+  [
+   "@select",
+   2,
+   0
+  ],
+  [
+   "splitSegment",
+   0.5
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

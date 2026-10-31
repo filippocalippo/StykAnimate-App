@@ -16,7 +16,7 @@ async function scrub(selector,dx,{key,scale=1,modifier,cancel=false}={}) {
  return preview-original*scale;
 }
 try {
- await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>styk?.ready);await page.locator('#guides-options-button').click();
+ await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);await page.locator('#guides-options-button').click();
  for(const [selector,key,scale] of [['[data-position="X"]','canvasGuideX',960],['[data-position="Y"]','canvasGuideY',540],['[data-setting="canvasGridSpacing"]','canvasGridSpacing',1]]) {
   const delta=await scrub(selector,20,{key,scale});assert.ok(Math.abs(delta-20)<.01);console.log('PASS live drag and release',key);
  }

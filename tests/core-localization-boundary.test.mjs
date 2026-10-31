@@ -5,7 +5,8 @@ import {Worker} from 'node:worker_threads';
 import {EASING_MODES} from '../src/keyframe-easing.mjs';
 import {EXPORT_SMOOTHING} from '../src/export-sampling.mjs';
 import {restoreMessageError} from '../src/localized-error.mjs';
-import {Localization} from '../src/localization.mjs';
+import {Localization, loadLocales} from '../src/localization.mjs';
+await loadLocales();
 
 test('core descriptors retain English fallback captions and presentation keys', () => {
   assert.deepEqual(EASING_MODES.map(mode => [mode.id, mode.label]), [

@@ -1,0 +1,26 @@
+{
+ "name": "insert-native-locked",
+ "document": "insert-native-locked.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

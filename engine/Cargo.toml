@@ -1,0 +1,47 @@
+# The StykAnimate engine. See docs/ARCHITECTURE.md and docs/engine/.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "UNLICENSED"
+publish = false
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+debug = "line-tables-only"
+
+# The WebAssembly module: smallest fast code, no unwinding tables.
+[profile.wasm]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+# Symbol names must survive linking: wasm-bindgen finds each thread's stack pointer and
+# thread-local base by name. It drops the name section itself afterwards.
+strip = false
+
+# The WebAssembly module for iterating and diagnosing (`engine-build.mjs --dev`): built in a fraction of the time and
+# never measured for a result. D10 holds here too: symbol names must survive linking.
+[profile.wasm-dev]
+inherits = "release"
+opt-level = 2
+lto = "off"
+codegen-units = 256
+incremental = true
+panic = "abort"
+debug = false
+strip = false
+[profile.wasm-dev.package."*"]
+opt-level = 3
+
+# Dependencies stay fast in debug builds so tests on real files finish in seconds.
+[profile.dev.package."*"]
+opt-level = 3
+[profile.dev]
+opt-level = 1

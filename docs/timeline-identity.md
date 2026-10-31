@@ -6,4 +6,4 @@ The replacement Advanced timeline has persistent layer rows and time cells. A ke
 
 Layer selection follows the contents at each time, including blank spans and replacement poses. Simple and Advanced read the same exposure sheet. The old standalone authored-key navigation strip and assembly/property rows have been removed.
 
-See [layer timeline architecture](layer-timeline.md). `tests/layer-sheet.test.mjs` covers retiming, interpolation, ownership, connected figures, history and clipboard identity; `tests/layer-timeline.browser.mjs` covers interactive cells and binary save/reopen. Older native-reader regressions remain in `tests/timeline-identity.test.mjs`.
+See [layer timeline architecture](layer-timeline.md). `tests/layer-sheet.test.mjs` covers retiming, interpolation, ownership, connected figures, history and clipboard identity; `tests/layer-timeline.browser.mjs` covers interactive cells and binary save/reopen.

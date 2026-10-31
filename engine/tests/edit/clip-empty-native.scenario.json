@@ -1,0 +1,26 @@
+{
+ "name": "clip-empty-native",
+ "document": "clip-empty-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "createEmptyMovieclip"
+  ],
+  [
+   "createEmptyMovieclip",
+   "Custom clip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -5,11 +5,11 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {chromium} from './support/playwright.mjs';
-import backendTools from '../desktop/backend.cjs';
+import backendTools from '../desktop/web-host.cjs';
 
 assert.ok(process.argv.length>2,'Supply one or more local PIV fixtures');
 const out=path.resolve('artifacts/piv-media');await mkdir(out,{recursive:true});
-const backend=await backendTools.startBackend({appRoot:process.cwd()});let browser;
+const backend=await backendTools.startDesktopHost({appRoot:process.cwd()});let browser;
 try {
   browser=await chromium.launch({channel:'chrome',headless:true});
   const results=[];
@@ -30,9 +30,9 @@ try {
       for(const index of [...new Set([0,Math.floor(frames.length/2),frames.length-1])]) {
         editor.selectFrame(index);styk.fit();
         await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-        await state.renderer.device.queue.onSubmittedWorkDone();
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
         if(editor.geometry.objects.size!==counts[index])throw new Error('Import dropped figures');
-        samples.push({index,objects:counts[index],rasterBytes:state.renderer.rasterCache.bytes});
+        samples.push({index,objects:counts[index],gpuBytes:state.renderer.stats.gpuBytes});
       }
       return {keys:frames.length,types:editor.report.figure_types.length,objects:counts.reduce((a,b)=>a+b,0),
         warnings:state.lastImportWarnings,missing:editor.report.piv_missing_images,

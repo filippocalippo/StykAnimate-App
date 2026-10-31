@@ -31,10 +31,10 @@ import {rigIKAllowed} from './rig-constraints.mjs';
 import {cameraMotionView, parallaxView} from './camera-motion-ui.mjs';
 import {paintCSS} from './paint.mjs';
 import {figurePalette, displayedSegmentPaint, displayedColor} from './figure-colors.mjs';
-import {isStatic} from './pivot/geometry.mjs';
-import {cameraValues} from './editor-camera.mjs';
+import {isStatic} from './pivot/read-view.mjs';
+import {cameraValues} from './pivot/model.mjs';
 import {builderDrawables} from './editor-builder-style.mjs';
-import {branchSegmentIndices} from './editor-builder-branch.mjs';
+import {segmentBranchIndices} from './pivot/structure.mjs';
 import {isBuilderContext} from './builder-aids.mjs';
 import {partNameMessage, partGlyph} from './builder-outliner.mjs';
 import {resolveInstanceFigure} from './animation-style.mjs';
@@ -505,7 +505,7 @@ function jointDescriptor(editor, figure, segment, number, {range, scope, drawing
   };
   if (builder) {
     // One part (not a picked branch) with Whole branch on: the scope line names what an edit reaches and stops it.
-    const branchParts = builderBranch && single && !editor.branchSelected ? branchSegmentIndices(figure, joint).length : 0;
+    const branchParts = builderBranch && single && !editor.branchSelected ? segmentBranchIndices(figure.segments, segment.segment_id).length : 0;
     const branchScope = branchParts > 1 && !scope
       ? {label: interfaceText("inspectorView.editingTheWholeBranch", {value: plural(branchParts, 'part')}), labelKey: "inspectorView.editingTheWholeBranch", labelParams: {value: plural(branchParts, 'part')}, stop: {action: 'toggle-builder-branch', label: interfaceText("inspectorView.stop"), labelKey: "inspectorView.stop", tip: interfaceText("inspectorView.editOnlyThisPartB"), tipKey: "inspectorView.editOnlyThisPartB"}} : null;
     return {kind: 'joint', target: {name: title, ...titleBinding, glyph: part ? 'link' : partGlyph(segment), rename: single && !editor.branchSelected && !part ? partRename : undefined},

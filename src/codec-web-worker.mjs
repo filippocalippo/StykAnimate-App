@@ -1,26 +1,30 @@
-import {messageError} from './localized-error.mjs';
-/** Worker shell around the in-browser Pivot codec: Pyodide (codec-web-engine.mjs)
- * behind the request queue in codec-web-shell.mjs. Status of the runtime download
- * and boot goes to the page as {type: 'status', state, stage?, message?}. */
-import {createCodecEngine} from './codec-web-engine.mjs';
+/** Worker shell around the Pivot codec: the WebAssembly codec (codec-engine.mjs)
+ * behind the request queue in codec-web-shell.mjs. The page sends
+ * {type: 'configure', limits} first; loading the module is reported to it as
+ * {type: 'status', state, stage?, message?}. */
+import {createCodecEngine} from './codec-engine.mjs';
 import {createCodecShell} from './codec-web-shell.mjs';
 
-// The web build places the runtime and the Python sources beside the app.
-const RUNTIME = new URL('../vendor/pyodide/', import.meta.url);
-const BUNDLE = new URL('../python/codec-bundle.json', import.meta.url);
+// scripts/engine-build.mjs builds the module beside the engine's.
+const MODULE = new URL('./engine/pkg/styk_codec.js', import.meta.url);
 
-const engine = createCodecEngine({
-  onStatus: status => self.postMessage({type: 'status', ...status}),
-  async loadRuntime() {
-    const {loadPyodide} = await import(new URL('pyodide.mjs', RUNTIME).href);
-    return loadPyodide({indexURL: RUNTIME.href});
-  },
-  async loadBundle() {
-    const response = await fetch(BUNDLE);
-    if (!response.ok) throw messageError(new Error(''), "errors.codecWebWorker.theCodecSourcesAreUnavailable", {status: response.status});
-    return response.json();
-  },
+let shell = null;
+const post = message => self.postMessage(message);
+
+function configure(limits) {
+  const engine = createCodecEngine({
+    limits,
+    onStatus: status => post({type: 'status', ...status}),
+    async loadModule() {
+      const glue = await import(MODULE.href);
+      await glue.default();
+      return glue;
+    },
+  });
+  shell = createCodecShell({engine, post});
+}
+
+self.addEventListener('message', ({data}) => {
+  if (data?.type === 'configure') { if (!shell) configure(data.limits === 'desktop' ? 'desktop' : 'web'); return; }
+  shell?.handleMessage(data);
 });
-
-const shell = createCodecShell({engine, post: message => self.postMessage(message)});
-self.addEventListener('message', ({data}) => shell.handleMessage(data));

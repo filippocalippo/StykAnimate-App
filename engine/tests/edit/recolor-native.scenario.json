@@ -1,0 +1,33 @@
+{
+ "name": "recolor-native",
+ "document": "two-limbs.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setFigureColor",
+   "#ff0000"
+  ],
+  [
+   "replaceFigureColor",
+   "#ff0000",
+   "#00ff00"
+  ],
+  [
+   "resetFigureColors"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

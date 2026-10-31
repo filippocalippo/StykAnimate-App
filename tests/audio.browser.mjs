@@ -52,7 +52,7 @@ try {
   // Native binary project save/reopen uses original embedded bytes, then a cold
   // worker reconstructs PCM without a link to the input file.
   const persistence=await page.evaluate(async()=>{
-    const {DocumentExporter}=await import('/src/document-export.mjs'),{decodeDocument}=await import('/src/native-container.mjs');
+    const {DocumentExporter}=await import('/src/document-export.mjs'),{decodeDocument}=await import('/tests/support/native-files.mjs');
     const exporter=new DocumentExporter(),blob=await exporter.export(styk.editor.report,{format:'styk',name:'Audio test'});
     const {document}=await decodeDocument(new Uint8Array(await blob.arrayBuffer()),'styk');exporter.dispose();
     const before=JSON.stringify(styk.editor.report._styk.audio);styk.editor.load(document);await styk.audioEngine.clear();await styk.audioEngine.prepare(styk.editor.report,{start:0,end:4});
@@ -63,11 +63,6 @@ try {
   await page.waitForFunction(()=>styk.audioEngine.running&&styk.editor.tick>=10,null,{timeout:30000});
   const sync=await page.evaluate(()=>({tick:styk.editor.tick,time:styk.audioEngine.position,fps:styk.editor.report.fps}));
   assert.ok(Math.abs(sync.tick/sync.fps-sync.time)<.2,JSON.stringify(sync));
-  await page.evaluate(()=>{window.audioReadyOriginal=styk.state.renderer.backgroundsReady;styk.state.renderer.backgroundsReady=()=>false;});
-  await page.waitForFunction(()=>styk.state.buffering&&!styk.audioEngine.running);
-  const held=await page.evaluate(()=>styk.editor.tick);await page.waitForTimeout(160);assert.equal(await page.evaluate(()=>styk.editor.tick),held);
-  await page.evaluate(()=>{styk.state.renderer.backgroundsReady=window.audioReadyOriginal;delete window.audioReadyOriginal;});
-  await page.waitForFunction(tick=>styk.audioEngine.running&&styk.editor.tick>tick,held);
   await page.evaluate(()=>styk.actions.play());assert.equal(await page.evaluate(()=>styk.audioEngine.running),false);
   await page.evaluate(()=>{
     styk.state.loopRange={startTick:0,endTick:12};styk.state.loop=true;styk.editor.seek(0);window.audioLoops=0;let previous=0;
@@ -98,7 +93,7 @@ try {
   await page.waitForFunction(()=>!styk.timeline.audio.importController);
   assert.equal(await page.evaluate(()=>JSON.stringify(styk.editor.serialize())),empty);
   if(process.env.STYK_AUDIO_MP3){await page.getByLabel('Choose audio recording').setInputFiles(process.env.STYK_AUDIO_MP3);await page.waitForFunction(()=>styk.editor.report._styk.audio?.tracks.length===1);}
-  assert.deepEqual(errors,[]);await writeFile(`${out}/browser.json`,JSON.stringify({persistence,sync,loopSync,held,errors},null,2));
+  assert.deepEqual(errors,[]);await writeFile(`${out}/browser.json`,JSON.stringify({persistence,sync,loopSync,errors},null,2));
   console.log('PASS audio UI, isolated undo, properties, split, mute, both timelines, native persistence, cold playback and synchronization',persistence,sync);
 } catch(error) { await page.screenshot({path:`${out}/failure.png`});throw error; }
 finally {await browser.close();}

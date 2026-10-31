@@ -27,17 +27,16 @@ Inspect these contracts and their current callers before editing. Proposed new m
 
 | Concern | Existing owner / contract |
 | --- | --- |
-| Document, commands, history | `src/editor.mjs`, `src/animation-history.mjs`, `docs/ARCHITECTURE.md` |
+| Document, commands, history | `src/editor.mjs`, `docs/engine/editing.md`, `docs/ARCHITECTURE.md` |
 | Layers and independent exposures | `src/editor-layer-sheet.mjs`, `src/layer-sheet.mjs`, `src/editor-layers.mjs`, `src/layers.mjs` |
 | Timeline UI and shortcuts | `src/layer-timeline.mjs`, `src/timeline-hotkeys.mjs`, `src/hotkeys.mjs`, `docs/TIMELINE.md`, `docs/animation-modes.md` |
 | Sprite representation | `src/media-authoring.mjs`, especially `createImageFigure` |
 | Image decoding | `src/media-image-worker.mjs` |
-| Rendering and ordering | `src/renderer.mjs`, `src/scene-order.mjs`, `docs/renderer.md` |
-| Onion skin | `src/onion-controller.mjs`, `src/onion-skin.mjs`, `src/onion-range.mjs` |
-| Worker synchronization | `src/playback-patch.mjs`, `src/playback.mjs`, `src/thumbnail-renderer.mjs` |
-| Memory and prepared playback | `src/playback-budget.mjs`, `src/playback-resources.mjs`, `docs/ADAPTIVE-PREVIEW.md` |
+| Rendering and ordering | `src/engine/engine-stage.mjs`, `docs/engine/rendering.md` |
+| Onion skin | `src/onion-controller.mjs`, `src/onion-range.mjs`, `src/drawing-cel-prefetch.mjs`, the engine's `onion_skins.rs` |
+| Memory and prepared playback | `src/playback-budget.mjs`, `docs/ADAPTIVE-PREVIEW.md` |
 | Persistence and recovery | `src/document-export.mjs`, `src/document-export-worker.mjs`, `src/browser-recovery.mjs`, `docs/document-exports.md`, `docs/native-file-format.md` |
-| Rendered and native export | `src/export-frame-renderer.mjs`, `src/export-frame-worker.mjs`, `src/pivot-export-materialize.mjs`, `src/svg-export.mjs` |
+| Rendered and native export | `src/engine/engine-export.mjs`, `src/engine/engine-export-worker.mjs`, `engine/crates/styk-edit/src/export`, `engine/crates/styk-export` |
 
 Observed constraints to preserve:
 

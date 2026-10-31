@@ -1,0 +1,42 @@
+{
+ "name": "move-sheet",
+ "document": "two-limbs.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   20,
+   5
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "moveSelection",
+   40,
+   -10
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

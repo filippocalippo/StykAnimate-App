@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
 import {construction} from '../src/rig-examples-3d.mjs';
 import {createFrame,createObject} from '../src/demo.mjs';
-import {buildContainerV2,decodeDocument} from '../src/native-container.mjs';
-import {buildGeometryAsync} from '../src/pivot/geometry.mjs';
+import {buildContainerV2,decodeDocument} from './support/native-files.mjs';
+import {geometryOfFrame} from './support/engine-geometry.mjs';
 import {rigSections,rigControlChange} from '../src/rig-controls.mjs';
 import {renderInspector} from '../src/inspector-kit.mjs';
 const rigView=e=>renderInspector({kind:'joint',sections:rigSections(e)});
@@ -17,7 +17,7 @@ function fixture(angle=.3){
   const vertex=q.add(control,30,.7,'Attached surface',{rig:{...follow,angleLock:{mode:'parent',reference:control,restAngle:angle,angle:.7,multiplier:1,space:'authored'}}});
   const offset=q.add(vertex,12,0,'Depth offset',{rig:{...follow,angleLock:{mode:'world',angle:0,multiplier:1,space:'authored'}}});
   const f={figure_type_id:1,name:'Projected joint',segments:q.segments,polyfills:q.polyfills,segment_count:q.segments.length,image_assets:[],text_assets:[]};
-  const e=new Editor({demo:false});e.load({version:5,canvas_width:640,canvas_height:480,fps:30,auto_easing:false,auto_easing_disabled_raw:1,backgrounds:[],figure_types:[f],keyframes:[createFrame([createObject(f,1,100,100)])]});
+  const e=newOwnedEditor({demo:false});e.load({version:5,canvas_width:640,canvas_height:480,fps:30,auto_easing:false,auto_easing_disabled_raw:1,backgrounds:[],figure_types:[f],keyframes:[createFrame([createObject(f,1,100,100)])]});
   return {e,driver,control,vertex,offset};
 }
 const at=(e,id)=>{e.select(1,id-1);return e;};
@@ -32,11 +32,11 @@ test('angle followers project authored rotation once through positive, collapsed
     near(c.end.x-c.start.x,50*Math.cos(.9)*scale);near(c.end.y-c.start.y,50*Math.sin(.9));
     near(v.end.x-v.start.x,30*Math.cos(1.3)*scale);near(v.end.y-v.start.y,30*Math.sin(1.3));
     near(z.end.x-z.start.x,12*scale);near(z.end.y-z.start.y,0);
-    const asyncGeometry=(await buildGeometryAsync(e.report,e.frame)).objects.get(0);
-    assert.deepEqual(asyncGeometry.segments.map(s=>s.end),e.geometry.objects.get(0).segments.map(s=>s.end));
+    const rebuilt=geometryOfFrame(e,e.frame).objects.get(0);
+    assert.deepEqual(rebuilt.segments.map(s=>s.end),e.geometry.objects.get(0).segments.map(s=>s.end));
   }
   const decoded=(await decodeDocument(await buildContainerV2(e.serialize(),'styk'),'styk')).document;
-  const restored=new Editor({demo:false});restored.load(decoded);
+  const restored=newOwnedEditor({demo:false});restored.load(decoded);
   for(const id of [control,vertex,offset]){near(shape(restored,id).end.x,shape(e,id).end.x);near(shape(restored,id).end.y,shape(e,id).end.y);}
 });
 

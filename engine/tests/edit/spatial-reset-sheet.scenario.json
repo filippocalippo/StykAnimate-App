@@ -1,0 +1,77 @@
+{
+ "name": "spatial-reset-sheet",
+ "document": "spatial-reset.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   11
+  ],
+  [
+   "setSpatialMotion",
+   10
+  ],
+  [
+   "resetSpatialPose"
+  ],
+  [
+   "@select",
+   1,
+   8
+  ],
+  [
+   "setSpatialMotion",
+   0.9
+  ],
+  [
+   "resetSpatialPose"
+  ],
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "setSpatialPose",
+   {
+    "turn": 0.2,
+    "pitch": 0.1
+   }
+  ],
+  [
+   "resetSpatialPose"
+  ],
+  [
+   "setSpatialPose",
+   {
+    "turn": -0.3
+   }
+  ],
+  [
+   "@select",
+   1,
+   11
+  ],
+  [
+   "setSpatialMotion",
+   4
+  ],
+  [
+   "resetSpatialPose",
+   true
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

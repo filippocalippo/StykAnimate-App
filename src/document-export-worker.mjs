@@ -1,33 +1,26 @@
 import {errorMessageData, messageError} from './localized-error.mjs';
 
-import {documentHasRigConstraints} from './rig-constraints.mjs';
-import {documentHasSurfaces} from './pivot/surfaces.mjs';
-import {applyDocumentChunk} from './document-transport.mjs';
 import {diagnosticDetails} from './telemetry-schema.mjs';
-import {validateScene} from './pivot/model.mjs';
-import {synchronizeExistingDerived} from './document-normalize.mjs';
-import {materializePivotDocument} from './pivot-export-materialize.mjs';
-import {validateAnimationDocument} from './animation-channels.mjs';
-import {materializeStyledFigureForStk} from './pivot-style-materialize.mjs';
-import {nativeFigureDocument} from './native-figure.mjs';
-import {validateMovieclipGraph,isMovieclip} from './movieclips.mjs';
-import {packPoseSequences} from './pose-sequence-storage.mjs';
-import {documentHasVfx} from './vfx.mjs';
-import {liftDocument, encodeContainerV2Parts, createContainerCompressionCache, validateNativeFigure} from './native-container.mjs';
+import {makeExportDocument, makeProjectFile, releaseEngineThread} from './engine/engine-document-export.mjs';
 import {flattenDrawingFigures} from './drawing-flatten.mjs';
 import {codecRequest} from './codec-request.mjs';
 import {decodeSourceRecord} from './source-record.mjs';
 
-let document, config, running = false;
+/**
+ * The document export worker. Every file is made by the engine, which the worker joins (src/engine/engine-document-export.mjs):
+ * a `.styk` project is written from the snapshot of the editing session the interface took (the Pivot original, which the codec
+ * holds for a project opened from Pivot, is fetched here and goes in with it); Pivot `.piv`/`.stk` need the document evaluated, so
+ * the engine makes the document of the export from the one it holds at the interface's revision and the worker carries it on to
+ * the codec's export request; figure files `.stkz`/`.stykmov` are written by the engine as well.
+ */
+let config, running = false;
 let timings = {};
-const compressionCache = createContainerCompressionCache({maxBytes: 64 * 1024 * 1024, maxEntries: 8});
-function reply(id, payload) { self.postMessage({id, ok: true, ...payload}); }
+function reply(id, payload, transfer = []) { self.postMessage({id, ok: true, ...payload}, transfer); }
 
 /** Fetch the retained original binary source for native-save provenance.
  * Returns {meta, bytes} or null when the cache holds no binary source. */
 async function fetchOriginalSource() {
   const headers = config.jobId ? {'X-Styk-Job-Id': config.jobId} : {};
-  if (config.token) headers.Authorization = `Bearer ${config.token}`;
   const response = await codecRequest(config, `/api/source?id=${encodeURIComponent(config.sourceId)}`, {headers});
   if (response.status === 422) return null;
   if (!response.ok) throw Object.assign(messageError(new Error(''), "errors.documentExportWorker.theOriginalSourceIsUnavailable", {status: response.status}), {status: response.status});
@@ -35,31 +28,47 @@ async function fetchOriginalSource() {
   return {meta, bytes};
 }
 
-/** Build the native container in this worker: the editable document becomes a
- * compact skeleton plus binary sections instead of one large JSON payload. */
-async function buildNativeContainer() {
-  const portable = config.format === 'styk' ? document : {...document};
-  if (config.format !== 'styk') {
-    delete portable._stykSource;
-    validateNativeFigure(portable, config.format);
-  }
-  const output = packPoseSequences(portable);
-  output._styk = {...output._styk, format: 'StykAnimate', format_version: 1};
-  let preBlobs = [], sourceMeta = null;
-  if (config.format === 'styk' && config.sourceId) {
-    const source = await fetchOriginalSource();
-    if (source) { preBlobs = [source.bytes]; sourceMeta = source.meta; }
-  }
-  if (sourceMeta) output._stykSource = {...sourceMeta, source_base64: preBlobs[0]};
-  const lifted = liftDocument(output, {preBlobs});
-  const stats = {};
-  const encoded = await encodeContainerV2Parts(lifted, config.format, {cache: compressionCache, stats});
-  Object.assign(timings, stats);
-  return encoded.parts;
+/** The `.styk` container of the project the interface handed over, written by the engine. */
+async function projectFile(message) {
+  if (!config.engine || !message.project) throw messageError(new Error(''), "errors.documentExportWorker.theDocumentSnapshotWasNotInitialized", {});
+  const cancelled = () => Boolean(message.cancel && Atomics.load(message.cancel, 0));
+  const source = config.sourceId ? await fetchOriginalSource() : null;
+  const made = makeProjectFile({join: config.engine.join, cancelled, source: source?.bytes,
+    request: {snapshots: message.project.snapshots, scopes: message.project.scopes, name: config.name, source: source?.meta}});
+  timings.container_raw_bytes = made.rawBytes;
+  return made.bytes;
+}
+
+/** The document the export in `config` saves, made by the engine from the document it holds at the interface's revision. */
+function engineDocument(message) {
+  if (!config.engine || !message.engine) throw messageError(new Error(''), "errors.documentExportWorker.theDocumentSnapshotWasNotInitialized", {});
+  const cancelled = () => Boolean(message.cancel && Atomics.load(message.cancel, 0));
+  const piv = ['piv', 'stk'].includes(config.format);
+  return makeExportDocument({join: config.engine.join, address: message.engine.address, revision: message.engine.revision, cancelled, request: {
+    format: config.format, name: config.name, figureTypeId: config.figureTypeId, figureUid: config.figureUid, figureUids: config.figureUids,
+    tick: config.tick, output: piv ? 'codec' : 'container', sourceId: config.sourceId}});
+}
+
+/** The body of the codec's export request. Pivot formats cannot carry tile blobs: drawing cels flatten into ordinary
+ * sprites at source resolution (largest mip level past the 16 Mpx cap), with anchors rewritten so placement is identical. */
+async function codecBody(made) {
+  if (!made.drawings) return made.bytes;
+  const request = JSON.parse(new TextDecoder().decode(made.bytes)), flattenStats = {}, flattening = performance.now();
+  timings.drawing_flattens = await flattenDrawingFigures(request.document, {stats: flattenStats});
+  if (flattenStats.downsampled) timings.drawing_downsampled = flattenStats.downsampled;
+  timings.drawing_flatten_ms = +(performance.now() - flattening).toFixed(3);
+  return new TextEncoder().encode(JSON.stringify(request));
 }
 
 self.addEventListener('message', async event => {
   const message = event.data;
+  if (message.operation === 'release') {
+    // A worker that joined the engine gives its thread back before it ends; no call into the module may follow.
+    releaseEngineThread();
+    self.postMessage({released: true});
+    self.close?.();
+    return;
+  }
   if (running) { self.postMessage({id: message.id, ok: false, error: {message: 'The document export worker is busy.', messageKey:'errors.documentExportWorker.busy', telemetryCode: 'worker_busy', telemetryStage: 'prepare'}}); return; }
   running = true;
   let stage = 'prepare';
@@ -67,110 +76,36 @@ self.addEventListener('message', async event => {
     if (message.operation === 'start') {
       config?.codecPort?.close();
       config = message.options;
-      document = undefined;
       timings = {};
-      compressionCache.restore(message.cacheEntries);
-      reply(message.id);
-    } else if (message.operation === 'chunk') {
-      document = applyDocumentChunk(document, message.chunk);
       reply(message.id);
     } else if (message.operation === 'export') {
-      if (!document || !config) throw messageError(new Error(''), "errors.documentExportWorker.theDocumentSnapshotWasNotInitialized", {});
+      if (!config) throw messageError(new Error(''), "errors.documentExportWorker.theDocumentSnapshotWasNotInitialized", {});
       const started = performance.now();
-      document._styk = {...document._styk, format: 'StykAnimate', format_version: 1,
-        ...(config.name ? {name: config.name} : {})};
-      for (const frame of document.keyframes || []) for (const object of frame.objects || []) delete object.runtime_segments;
-      stage = 'validate';
-      if(['piv','stk'].includes(config.format)&&documentHasVfx(document))throw Object.assign(messageError(new Error(''), "errors.documentExportWorker.pivotFilesCannotPreserveVfxSaveAsStyk", {}),{telemetryCode:'unsupported_feature'});
-      validateAnimationDocument(document);
-      validateMovieclipGraph(document);
-      if (config.format === 'stkz' || config.format === 'stykmov') {
-        document = nativeFigureDocument(document, config);
-        if(config.format==='stykmov'&&!isMovieclip(document.figure_types[0]))throw messageError(new Error(''), "errors.documentExportWorker.selectAMovieclipToExportAsStykmov", {});
-        config.sourceId = undefined;
-        config.name = document._styk.name;
-      }
-      if(['piv','stk'].includes(config.format)) {
-        if(documentHasRigConstraints(document)||documentHasSurfaces(document))throw Object.assign(messageError(new Error(''), "errors.documentExportWorker.pivotCannotPreserveConnectorsSmartStretchOrOne", {}),{telemetryCode:'unsupported_feature'});
-        const visited=new Set(),hasSourceShapes=doc=>{
-          if(visited.has(doc))return false;visited.add(doc);
-          return doc.figure_types.some(f=>f.segments.some(s=>s._sticknodes)||
-            (f._styk?.movieclip&&hasSourceShapes(f._styk.movieclip.document)))||
-            doc.keyframes.some(f=>f.objects.some(o=>o._sticknodesSprite));
-        };
-        if(hasSourceShapes(document))throw Object.assign(messageError(new Error(''), "errors.documentExportWorker.pivotCannotRetainTheseStickNodesShapesSave", {}), {telemetryCode: 'unsupported_feature'});
-      }
-      if (['piv','stk'].includes(config.format)) {
-        // Pivot formats cannot carry tile blobs: drawing cels flatten into
-        // ordinary sprites at source resolution (largest mip level past the
-        // 16 Mpx cap), with anchors rewritten so placement is identical.
-        const flattenStats = {}, flattening = performance.now();
-        timings.drawing_flattens = await flattenDrawingFigures(document, {stats: flattenStats});
-        if (flattenStats.downsampled) timings.drawing_downsampled = flattenStats.downsampled;
-        timings.drawing_flatten_ms = +(performance.now() - flattening).toFixed(3);
-      }
-      if (config.format === 'piv') {
-        const composing = performance.now(), originalFrames = document.keyframes.length;
-        document = materializePivotDocument(document);
-        // Native source frames acquire editor reference identities on load.
-        // They are not Pivot data and must not force a changed-source rewrite.
-        // This worker owns the snapshot; live document identities stay intact.
-        for (const frame of document.keyframes) if (frame._styk?.frameId !== undefined) {
-          const metadata = {...frame._styk}; delete metadata.frameId;
-          if (Object.keys(metadata).length) frame._styk = metadata; else delete frame._styk;
-        }
-        timings.compose_ms = performance.now() - composing;
-        timings.source_keyframes = originalFrames; timings.export_keyframes = document.keyframes.length;
-      } else if (config.format === 'stk') {
-        if(isMovieclip(document.figure_types.find(f=>f.figure_type_id===config.figureTypeId)))
-          throw Object.assign(messageError(new Error(''), "errors.documentExportWorker.saveMovieclipsAsStykmovUseBreakApartTo", {}), {telemetryCode: 'unsupported_feature'});
-        const resolved = materializeStyledFigureForStk(document, config);
-        document = resolved.report; config.figureTypeId = resolved.figureTypeId;
-      }
-      if(['piv','stk'].includes(config.format)) {
-        const figures=config.format==='stk'?document.figure_types.filter(f=>f.figure_type_id===config.figureTypeId):document.figure_types;
-        const unsupported=p=>p && p.type!=='solid' && (p.type!=='linear'||p.angle%360!==0||p.stops.length!==2||p.stops[0].offset!==0||p.stops[1].offset!==1);
-        // Native text gradients run vertically per glyph. A paint fill spans
-        // the entire text run, even when it is a two-stop linear gradient.
-        if(figures.some(f=>f.segments.some(s=>unsupported(s.paint)||s.paint&&s.paint.type!=='solid'&&(s.primitive_code===5||s.segment_type==='text'))) || (config.format==='piv' && document.backgrounds?.some(b=>b.paint&&b.paint.type!=='solid')))
-          throw Object.assign(messageError(new Error(''), "errors.documentExportWorker.pivotFilesCannotRepresentTheseGradientFillsSave", {}), {telemetryCode: 'unsupported_feature'});
-      }
-      synchronizeExistingDerived(document);
-      // Zero stored frames are a valid native PIV boundary. The materializer
-      // already validated the editable placeholder before removing it; retain
-      // full figure-table validation without inventing an exported exposure.
-      validateScene(config.format === 'piv' && document.keyframes.length === 0
-        ? {...document, keyframes: [{objects: [], duration_raw: 0}]} : document);
-      timings.normalize_ms = performance.now() - started;
-      stage = 'serialize';
-      let blob = null;
-      if (['styk', 'stkz', 'stykmov'].includes(config.format)) {
-        const building = performance.now();
-        try {
-          blob = new Blob(await buildNativeContainer());
-          timings.container_build_ms = +(performance.now() - building).toFixed(3);
-        } catch (error) {
-          // A capacity rejection also applies to the JSON service fallback.
-          // Preserve that actionable error instead of attempting an even larger
-          // string and replacing it with a V8 "Invalid string length" failure.
-          if (error?.code === 'document_too_large') throw error;
-          // The service path remains authoritative for unusual documents and
-          // produces the same user-facing errors on genuinely invalid input.
-          timings.local_build_error = error?.message || String(error);
-        }
-      }
-      if (!blob) {
-        const serializing = performance.now();
-        const body = JSON.stringify({document: ['styk', 'stkz', 'stykmov'].includes(config.format) ? packPoseSequences(document) : document, sourceId: config.sourceId, format: config.format,
-          filename: config.name, figureTypeId: config.figureTypeId});
-        timings.stringify_ms = performance.now() - serializing;
+      let body, blob;
+      if (config.format === 'styk') {
+        stage = 'serialize';
+        blob = new Blob([await projectFile(message)]);
+        timings.container_build_ms = timings.normalize_ms = +(performance.now() - started).toFixed(3);
+      } else if (['stkz', 'stykmov'].includes(config.format)) {
+        // The engine bakes, validates, refuses and writes the figure file.
+        stage = 'validate';
+        const made = engineDocument(message);
+        timings.normalize_ms = timings.compose_ms = timings.container_build_ms = performance.now() - started;
+        timings.container_raw_bytes = made.rawBytes;
+        blob = new Blob([made.bytes]);
+      } else {
+        // The engine bakes, validates and refuses; this worker carries the result on.
+        stage = 'validate';
+        const made = engineDocument(message);
+        timings.normalize_ms = timings.compose_ms = performance.now() - started;
+        body = await codecBody(made);
+        stage = 'serialize';
+        // The engine wrote the request; fetch consumes the large body in this worker. Passing it back to the main thread
+        // would recreate the freeze.
         timings.json_characters = body.length;
-        // Fetch consumes the large JSON body in this worker. Passing a string or
-        // expanded document back to the main thread would recreate the freeze.
         const sending = performance.now();
         const headers = {'Content-Type': 'application/json'};
         if (config.jobId) headers['X-Styk-Job-Id'] = config.jobId;
-        if (config.token) headers.Authorization = `Bearer ${config.token}`;
         stage = 'request';
         const response = await codecRequest(config, '/api/export', {method: 'POST', headers, body});
         if (!response.ok) {
@@ -195,17 +130,15 @@ self.addEventListener('message', async event => {
       }
       timings.worker_ms = performance.now() - started;
       timings.output_bytes = blob.size;
-      document = null;
-      reply(message.id, {blob, timings, cacheEntries: compressionCache.snapshot()});
+      reply(message.id, {blob, timings});
       config.codecPort?.close();
       config = null;
     } else throw messageError(new Error(''), "errors.documentExportWorker.unknownDocumentExportOperation", {});
   } catch (error) {
-    document = null;
     config?.codecPort?.close();
     config = null;
     self.postMessage({id: message.id, ok: false, error: {message: error?.message || String(error), ...errorMessageData(error),
-      code: error?.code, status: error?.status,
+      code: error?.code, status: error?.status, name: error?.name,
       ...diagnosticDetails(error,stage,stage === 'validate' ? 'invalid_document' : stage === 'serialize' ? 'serialize_failed' : stage === 'request' ? 'backend_unavailable' : 'snapshot_failed')}});
   } finally { running = false; }
 });

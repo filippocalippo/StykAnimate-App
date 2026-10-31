@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
 import {isSharedEditorKey} from '../src/editor-sessions.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 import {beginNativePropertyEdit, previewNativePropertyEdit, commitNativePropertyEdit} from '../src/native-property-edit.mjs';
+import {ownedScope} from './support/owned-scope.mjs';
 
-const application = () => new Editor({demo: false, propertyChannels: true, layerTimeline: true}).newDocument();
+const open = ownedScope();
+
+const application = () => open({demo: false, propertyChannels: true, layerTimeline: true}).newDocument();
 function scene(count = 3, objects = 2) {
   const report = emptyDocument(), figure = report.figure_types[0];
   report.keyframes = Array.from({length: count}, (_, i) => createFrame(Array.from({length: objects}, (_, j) => createObject(figure, j + 1, i * 10 + j * 100, 180)), 5));
@@ -20,7 +22,7 @@ const rootX = editor => editor.frame.objects[0].root_x;
 const events = editor => { const seen = []; editor.addEventListener('change', event => seen.push(event.detail)); return seen; };
 
 test('a detached project comes back with its history, selection, playhead and saved state', () => {
-  const editor = new Editor({demo: false}).load(scene(), 'First');
+  const editor = open({demo: false}).load(scene(), 'First');
   const first = editor.report, start = rootX(editor);
   setX(editor, 55); setX(editor, 80); editor.undo();
   editor.selectFrame(2);
@@ -54,7 +56,7 @@ test('a detached project comes back with its history, selection, playhead and sa
 });
 
 test('a session is spent once resumed and an edit in progress keeps the project in front', () => {
-  const editor = new Editor({demo: false}).load(scene(), 'First');
+  const editor = open({demo: false}).load(scene(), 'First');
   const resting = editor.detachDocument();
   editor.load(scene(1), 'Second');
   const second = editor.detachDocument();
@@ -100,11 +102,11 @@ test('resuming publishes one document replacement that every listener rebuilds f
   const first = editor.detachDocument();
   editor.newDocument();
   const second = editor.detachDocument();
-  const seen = events(editor), definition = editor.definitionRevision, layers = editor.layerRevision, draft = editor.frameDraftRevision;
+  const seen = events(editor), definition = editor.definitionRevision, layers = editor.layerRevision;
   editor.resumeDocument(first);
   assert.deepEqual(seen.map(detail => detail.kind), ['document']);
   assert.equal(seen[0].resumed, true); assert.equal(seen[0].structural, true); assert.equal(seen[0].timing, true);
-  assert.ok(editor.definitionRevision > definition); assert.ok(editor.layerRevision > layers); assert.ok(editor.frameDraftRevision > draft);
+  assert.ok(editor.definitionRevision > definition); assert.ok(editor.layerRevision > layers);
   assert.equal(editor.geometry.objects.size > 0, true);
   editor.detachDocument(); editor.resumeDocument(second);
   assert.equal(seen.filter(detail => detail.kind === 'document').length, 2);
@@ -127,8 +129,7 @@ test('a loaded project receives nothing from the one it replaces in front, and g
 
 test('clipboards, configuration and installed services belong to the editor, not to a project', () => {
   const editor = application();
-  const planner = () => {};
-  editor.setInbetweenPlanner(planner); editor.autoKey = true;
+  editor.autoKey = true;
   const uid = editor.frame.objects[0].unique_id;
   editor.select(uid); editor.copySelection();
   const copied = editor._selectionClipboard ?? editor._figureClipboard;
@@ -137,9 +138,7 @@ test('clipboards, configuration and installed services belong to the editor, not
   const first = editor.detachDocument();
   editor.newDocument();
   assert.equal(editor._selectionClipboard ?? editor._figureClipboard, copied);
-  assert.equal(editor._inbetweenPlanner, planner);
   assert.equal(editor.autoKey, true); assert.equal(editor.layerTimeline, true); assert.equal(editor.propertyChannels, true);
-  assert.equal(editor.hasFigureClipboard, true);
   assert.notEqual(editor._documentToken, source);
   const count = editor.selectionFrame.objects.length;
   editor.pasteSelection();
@@ -149,7 +148,7 @@ test('clipboards, configuration and installed services belong to the editor, not
 });
 
 test('an asynchronous load hands the open project over only when the new one is published', async () => {
-  const editor = new Editor({demo: false}).load(scene(), 'First');
+  const editor = open({demo: false}).load(scene(), 'First');
   setX(editor, 44);
   const first = editor.report;
   let detached = null;
@@ -167,7 +166,7 @@ test('an asynchronous load hands the open project over only when the new one is 
 });
 
 test('a load whose receiver fails leaves the open project in place', async () => {
-  const editor = new Editor({demo: false}).load(scene(), 'First');
+  const editor = open({demo: false}).load(scene(), 'First');
   setX(editor, 44);
   const first = editor.report, seen = events(editor);
   let received = null;
@@ -180,27 +179,3 @@ test('a load whose receiver fails leaves the open project in place', async () =>
   assert.equal(editor.report, first);
 });
 
-test('the Simple timeline working frame follows the project, and the mode follows the editor', () => {
-  const editor = new Editor({demo: false}).load(scene(), 'First');
-  editor.enableFrameDrafts();
-  setX(editor, 91);
-  assert.equal(editor.frameDraft.dirty, true);
-  const stored = editor.report._styk.simpleFrameDraft;
-  const first = editor.detachDocument();
-  editor.load(scene(2), 'Second');
-  assert.equal(editor._frameDraftEnabled, true);
-  assert.equal(editor.frameDraft.dirty, false);
-  const second = editor.detachDocument();
-  editor.resumeDocument(first);
-  assert.equal(editor.frameDraft.dirty, true); assert.equal(rootX(editor), 91);
-  assert.deepEqual(editor.report._styk.simpleFrameDraft.baseline, stored.baseline);
-  editor.discardFrameDraft(); assert.notEqual(rootX(editor), 91);
-  // Switched to the Advanced timeline while another project was in front.
-  editor.detachDocument(); editor.resumeDocument(second);
-  editor.disableFrameDrafts();
-  const secondAgain = editor.detachDocument();
-  editor.load(scene(), 'Third');
-  assert.equal(editor._frameDraftEnabled, false); assert.equal(editor.frameDraft, null);
-  editor.detachDocument(); editor.resumeDocument(secondAgain);
-  assert.equal(editor.frameDraft, null);
-});

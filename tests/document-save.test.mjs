@@ -13,13 +13,13 @@ const epochSource = source.slice(source.indexOf('  const kind = e.detail?.kind;'
 
 /** Exercise the application's actual save/close functions with staged I/O. */
 function app({browser = false} = {}) {
-  const editor = {report: {}, revision: 1, frameDraftRevision: 0, dirty: true, name: 'Animation', markSaved() {this.dirty = false;}};
+  const editor = {report: {}, revision: 1, dirty: true, name: 'Animation', markSaved() {this.dirty = false;}};
   const state = {documentToken: 'document-1'}, manualSave = new DocumentSave(), recoveryDeadline = new RecoveryDeadline();
   const calls = {pickers: 0, writes: 0, committed: 0, closed: 0, restarted: 0, failed: [], statuses: [], cleared: []};
   // One open project: the list of open projects reports the editor's own state.
   const projects = {tabs: {activeId: 'project-1'}, summary: () => ({open: 1, unsaved: editor.dirty ? 1 : 0, unsavedName: editor.dirty ? editor.name : '', stamp: 0}),
     saveAll: async save => !editor.dirty || save()};
-  const hooks = {write: async () => {}, cleanup: async () => {}, picker: async () => {}, flushPreferences: async () => {}, flushSettings: async () => {}, flushClipboard: async () => {}, publish: async () => {}, close: async () => {}};
+  const hooks = {write: async () => {}, cleanup: async () => {}, picker: async () => {}, flushPreferences: async () => {}, flushSettings: async () => {}, publish: async () => {}, close: async () => {}};
   const desktop = browser ? null : {
     beginProjectWrite() {}, async deleteRecovery(target) {calls.cleared.push(target); await hooks.cleanup();},
     async setDocumentState(value) {await hooks.publish(value);},
@@ -37,7 +37,7 @@ function app({browser = false} = {}) {
     async writeNativeBlob(_desktop, _blob, {signal}) {calls.writes++; await hooks.write(); if (signal.aborted) throw new DOMException('', 'AbortError'); calls.committed++; return true;},
     async runDocumentExport(_format, consume, {controller}) {return consume({}, controller.signal);},
     workspaceLayout: {flushPreferences: () => hooks.flushPreferences()},
-    editorSettings: {flush: () => hooks.flushSettings()}, nativeFrameClipboard: {flush: () => hooks.flushClipboard()},
+    editorSettings: {flush: () => hooks.flushSettings()},
   });
   const functions = vm.runInContext(`let savingDocument = false, lastSave = null, saveMutationEpoch = 0, finalizingDocument = false, recoveredEpoch = -1;\n${saveSource}\nfunction editorChanged(e) {${epochSource}}\n({saveNative, finishDocumentAction, saveEveryProjectThen, checkpoint: () => lastSave, emitChange: kind => editorChanged({detail: {kind}})})`, context);
   return {editor, state, calls, hooks, projects, ...functions};
@@ -84,7 +84,7 @@ test('failed native writing leaves work dirty and permits a later retry', async 
   a.hooks.write = async () => {}; assert.equal(await a.saveNative(), true);
 });
 
-for (const action of ['close', 'restartForUpdate']) for (const stage of ['flushPreferences', 'flushSettings', 'flushClipboard', 'publish']) {
+for (const action of ['close', 'restartForUpdate']) for (const stage of ['flushPreferences', 'flushSettings', 'publish']) {
   test(`${action} preserves an edit arriving during ${stage}`, async () => {
     const a = app(); assert.equal(await a.saveNative(), true);
     a.hooks[stage] = async () => {a.editor.revision++; a.editor.dirty = true;};
@@ -93,8 +93,8 @@ for (const action of ['close', 'restartForUpdate']) for (const stage of ['flushP
   });
 }
 
-test('close rejects replacement documents and new frame drafts despite clean dirty flags', async () => {
-  for (const change of [a => {a.editor.report = {};}, a => {a.state.documentToken = 'replacement';}, a => {a.editor.frameDraftRevision++;}]) {
+test('close rejects replacement documents despite clean dirty flags', async () => {
+  for (const change of [a => {a.editor.report = {};}, a => {a.state.documentToken = 'replacement';}]) {
     const a = app(); assert.equal(await a.saveNative(), true); change(a);
     assert.equal(await a.finishDocumentAction('close', a.checkpoint()), false); assert.equal(a.calls.closed, 0);
   }
@@ -123,8 +123,8 @@ test('final close handoff is bounded and honors a main-process checkpoint reject
   a.hooks.flushPreferences = () => held.promise;
   const closing = a.finishDocumentAction('close', a.checkpoint());
   assert.equal(await a.finishDocumentAction('close', a.checkpoint()), false);
-  // The checkpoint names the project in front, its revision, draft and mutation epoch, and the list of open projects.
-  a.hooks.close = async checkpoint => {assert.equal(checkpoint.saved, true); assert.equal(checkpoint.revision, 'document-1:1:0:0:0'); return false;};
+  // The checkpoint names the project in front, its revision and mutation epoch, and the list of open projects.
+  a.hooks.close = async checkpoint => {assert.equal(checkpoint.saved, true); assert.equal(checkpoint.revision, 'document-1:1:0:0'); return false;};
   held.resolve(); assert.equal(await closing, false); assert.equal(a.calls.closed, 1);
 });
 
@@ -143,7 +143,7 @@ test('the desktop is told what every open project would lose, and closing needs 
   assert.equal(await a.saveNative(), true);
   a.projects.summary = () => ({open: 3, unsaved: 1, unsavedName: 'Resting project', stamp: 4});
   assert.equal(await a.finishDocumentAction('close'), true);
-  assert.deepEqual({...published.at(-1)}, {name: 'Animation', dirty: true, activeDirty: false, unsaved: 1, unsavedName: 'Resting project', revision: 'document-1:1:0:0:4'});
+  assert.deepEqual({...published.at(-1)}, {name: 'Animation', dirty: true, activeDirty: false, unsaved: 1, unsavedName: 'Resting project', revision: 'document-1:1:0:4'});
   // Save and close saves the others first and stops when one of them is not saved.
   let saved = 0;
   a.projects.saveAll = async () => { saved++; return false; };
@@ -151,7 +151,7 @@ test('the desktop is told what every open project would lose, and closing needs 
   a.projects.saveAll = async () => true;
   assert.equal(await a.saveEveryProjectThen('close'), false, 'a project still unsaved keeps the window open');
   a.projects.summary = () => ({open: 3, unsaved: 0, unsavedName: '', stamp: 5});
-  a.hooks.close = async checkpoint => { assert.equal(checkpoint.saved, true); assert.equal(checkpoint.revision, 'document-1:1:0:0:5'); };
+  a.hooks.close = async checkpoint => { assert.equal(checkpoint.saved, true); assert.equal(checkpoint.revision, 'document-1:1:0:5'); };
   assert.equal(await a.saveEveryProjectThen('close'), true); assert.equal(a.calls.closed, 2);
 });
 
@@ -176,7 +176,7 @@ test('recovery retry floors bound failed work and a hidden-page checkpoint can e
 
 function recoveryApp() {
   let now = 0, timerId = 0;
-  const timers = new Map(), editor = {report: {}, revision: 1, frameDraftRevision: 0, dirty: true, name: 'Animation'};
+  const timers = new Map(), editor = {report: {}, revision: 1, dirty: true, name: 'Animation'};
   const state = {documentToken: 'document-1', settings: {autosaveSeconds: 2.5}, recoveryBackoff: 1};
   const calls = {exports: 0, writes: 0, warnings: 0}, hooks = {export: async () => {}}, manualSave = new DocumentSave();
   let busy = false, controller;

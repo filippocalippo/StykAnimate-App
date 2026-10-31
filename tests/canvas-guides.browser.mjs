@@ -8,7 +8,7 @@ page.on('pageerror',e=>errors.push(e.message));
 const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('PASS',name);};
 const settings=()=>page.evaluate(()=>styk.state.settings);
 try {
- await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>styk?.ready);
+ await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
  const before=await page.evaluate(()=>({revision:styk.editor.revision,dirty:styk.editor.dirty}));
  await page.locator('#guides-options-button').click();
  for(const name of ['canvasGuideVertical','canvasGuideHorizontal','canvasGrid'])await page.locator(`[data-setting="${name}"]`).check();
@@ -30,7 +30,7 @@ try {
  check('Lock disables dragging and position edits',await handle.isDisabled()&&await page.locator('[data-position="X"]').isDisabled());
  await page.keyboard.press('Escape');
  const after=await page.evaluate(()=>({revision:styk.editor.revision,dirty:styk.editor.dirty}));check('Aids do not modify animation document',JSON.stringify(before)===JSON.stringify(after));
- await page.evaluate(()=>styk.settingsUI.flush());await page.reload();await page.waitForFunction(()=>styk?.ready);
+ await page.evaluate(()=>styk.settingsUI.flush());await page.reload();await page.waitForFunction(()=>window.styk?.ready);
  check('Preferences survive reload',(await settings()).canvasGrid&&(await settings()).canvasGuidesLocked&&Math.abs((await settings()).canvasGuideX*960-401)<1e-5);
  await page.locator('#zoom-label').click();await page.locator('#menu [data-action="zoom-25"]').click();
  await page.waitForFunction(()=>Math.abs(parseFloat(document.querySelector('.canvas-guide.vertical').style.left)-(styk.state.view.x+styk.state.settings.canvasGuideX*styk.editor.report.canvas_width*styk.state.view.scale))<1);

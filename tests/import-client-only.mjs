@@ -4,14 +4,14 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 import {corpusPath} from './support/corpus.mjs';
 const app=path.dirname(path.dirname(fileURLToPath(import.meta.url))), output=path.join(app,'artifacts/import-client-only');
 await mkdir(output,{recursive:true});
-const server=await backend.startBackend({appRoot:app});let browser;
+const server=await backend.startDesktopHost({appRoot:app});let browser;
 try {
   browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage();
-  const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(server.origin+'/api/health');
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(server.origin+'/tests/fixtures/blank.html');
   await page.evaluate(async()=>{
     const {ImportClient}=await import('/src/import-client.mjs');window.importer=new ImportClient();window.runs=[];window.longTasks=[];
     new PerformanceObserver(list=>longTasks.push(...list.getEntries().map(e=>({at:e.startTime,ms:e.duration})))).observe({type:'longtask'});
@@ -31,7 +31,7 @@ try {
     await page.evaluate(()=>document.querySelector('#source').value='');
   }
   const result=await page.evaluate(()=>({runs,health:JSON.parse(document.querySelector('body').firstChild.textContent)})).catch(async()=>({runs:await page.evaluate(()=>runs)}));
-  result.health=await page.evaluate(async()=>await(await fetch('/api/health')).json());result.errors=errors;
+  result.health=await page.evaluate(async()=>await(await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/health')).json());result.errors=errors;
   for(const run of result.runs) {assert.equal(run.error,undefined);assert.equal(run.frames,1479);assert.equal(run.objects,208373);}
   assert.equal(result.runs[0].timings.cache_hit,false);assert.equal(result.runs[1].timings.cache_hit,true);assert.deepEqual(errors,[]);
   result.method='Fresh local codec and blank Chrome health page, file-input upload through actual ImportClient; no editor, preview worker or GPU renderer. One cold and one warm diagnostic.';

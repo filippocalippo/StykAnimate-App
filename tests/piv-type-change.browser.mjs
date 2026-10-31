@@ -7,12 +7,14 @@ import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from './support/playwright.mjs';
-import backendTools from '../desktop/backend.cjs';
+import backendTools from '../desktop/web-host.cjs';
+import {pythonCandidates} from '../scripts/run-python.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(appRoot, 'artifacts/piv-type-change');
 await mkdir(out, {recursive: true});
-const python = backendTools.pythonCandidates()[0];
+// The fixture comes from the Python codec's own regression suite (the development oracle).
+const python = pythonCandidates()[0];
 const generated = spawnSync(python.command, [...python.args, '-c', String.raw`
 import sys,zlib
 from pathlib import Path
@@ -22,23 +24,20 @@ Path(sys.argv[1]).write_bytes(zlib.compress(type_change_source(frame_count=1129)
 `, path.join(out, 'type-change.piv')], {cwd: appRoot, encoding: 'utf8', windowsHide: true});
 assert.equal(generated.status, 0, generated.error?.message || generated.stderr);
 const source = await readFile(path.join(out, 'type-change.piv'));
-const backend = await backendTools.startBackend({appRoot});
+const backend = await backendTools.startDesktopHost({appRoot});
 let browser;
 try {
   browser = await chromium.launch({channel: 'chrome', headless: true});
   const page = await browser.newPage({viewport: {width: 1440, height: 960}});
-  const errors = [], responses = [];
+  const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  page.on('response', response => {
-    if (new URL(response.url()).pathname === '/api/import')
-      responses.push({status: response.status(), type: response.headers()['content-type']});
-  });
   await page.goto(backend.origin);
   await page.waitForFunction(() => window.styk?.ready);
   const checks = await page.evaluate(async bytes => {
     const check = (value, message) => { if (!value) throw new Error(message); };
     const source = new File([Uint8Array.from(bytes)], 'type-change.piv');
     check(await styk.importFiles([source]) !== false, 'Import was cancelled');
+    check(styk.state.lastImport?.transport === 'engine-open', 'The engine opens the import');
     const {editor} = styk, frames = editor.report.keyframes;
     check(frames.length === 1129 && editor.totalTicks === 1134, 'Import lost keyframes or timing');
     check(frames[0].objects[0].figure_type_id === 1 && frames[1].objects[0].figure_type_id === 2,
@@ -65,7 +64,7 @@ try {
     const importer = new ImportClient();
     try {
       for (const format of ['piv', 'styk']) {
-        const response = await fetch('/api/export', {method: 'POST',
+        const response = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({document: editor.serialize(), sourceId: styk.state.sourceId, format})});
         check(response.ok, `${format} export failed: ${await response.clone().text()}`);
@@ -84,11 +83,9 @@ try {
   await page.screenshot({path: path.join(out, 'before-transition.png')});
   await page.evaluate(() => { styk.editor.seek(4); });
   await page.screenshot({path: path.join(out, 'after-transition.png')});
-  assert.ok(responses.some(r => r.status === 200 && r.type?.startsWith('application/vnd.stykanimate.piv-frames-v1')),
-    'Real import must exercise the native frame transport');
   assert.deepEqual(errors, []);
-  await writeFile(path.join(out, 'report.json'), JSON.stringify({checks, responses, errors}, null, 2));
-  console.log(JSON.stringify({checks, responses, errors}, null, 2));
+  await writeFile(path.join(out, 'report.json'), JSON.stringify({checks, errors}, null, 2));
+  console.log(JSON.stringify({checks, errors}, null, 2));
 } finally {
   await browser?.close();
   backend.stop();

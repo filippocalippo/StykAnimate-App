@@ -1,0 +1,20 @@
+[package]
+name = "styk-export"
+description = "Export frames of StykAnimate documents: sampling, tiles, the output view, GPU rendering and read-back, CPU rendering."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+styk-draw = { path = "../styk-draw" }
+styk-eval = { path = "../styk-eval" }
+styk-render = { path = "../styk-render" }
+styk-raster = { path = "../styk-raster" }
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif"] }
+
+[dev-dependencies]
+styk-doc = { path = "../styk-doc" }
+pollster = "0.4"
+styk-engine = { path = "../styk-engine" }

@@ -6,7 +6,7 @@ await mkdir('artifacts/figure-palette',{recursive:true});
 const browser=await chromium.launch({channel:'chrome',headless:true});
 const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 page.on('pageerror',error=>errors.push(error.message));
-const settle=async()=>{await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.waitForFunction(()=>!styk.state.editablePreparing&&styk.state.renderer.last?.report===styk.editor.report);};
+const settle=async()=>{await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.waitForFunction(()=>styk.state.renderer.engineSide?.frameReport===styk.editor.report);};
 const choose=async(selector,hex)=>{await page.locator(selector).click();const input=page.locator('.paint-picker [data-hex]');await input.fill(hex);await input.press('Tab');await page.locator('.paint-picker [data-close]').click();await settle();};
 /** Opens the figure's Colours section (titled, remembered) unless it is open. */
 const openColours=async()=>{const toggle=page.locator('[data-section-toggle="colours"]');if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();};
@@ -39,7 +39,7 @@ try{
   for(const color of ['eecc11','778899']){await page.locator('.paint-picker [data-hex]').fill(color);await page.locator('.paint-picker [data-hex]').press('Tab');await settle();}
   await page.locator('.paint-picker [data-close]').click();
   assert.deepEqual(await palette(),[['#778899',info.segments-1],['#eecc11',1]]);
-  const geometry=await page.evaluate(()=>styk.state.renderer.lastGeometry.objects.get(styk.editor.selectedSlot).segments.map(s=>s.rgb));
+  const geometry=await page.evaluate(()=>styk.editor.geometry.objects.get(styk.editor.selectedSlot).segments.map(s=>s.rgb));
   assert.deepEqual(geometry[0],[238,204,17]);assert.ok(geometry.slice(1).every(rgb=>JSON.stringify(rgb)==='[119,136,153]'));
   await page.locator('[data-palette-color]').last().scrollIntoViewIfNeeded();
   await page.screenshot({path:'artifacts/figure-palette/hands-palette.png'});
@@ -64,7 +64,7 @@ try{
   await openColours();
   assert.equal(await page.locator('[data-palette-color="#0a141e"]').count(),1);
   await choose('[data-palette-color="#0a141e"]','44aacc');
-  const attached=await page.evaluate(()=>[0,1,2,3].map(slot=>styk.state.renderer.lastGeometry.objects.get(slot).segments[0].rgb));
+  const attached=await page.evaluate(()=>[0,1,2,3].map(slot=>styk.editor.geometry.objects.get(slot).segments[0].rgb));
   assert.deepEqual(attached,[[200,40,50],[68,170,204],[68,170,204],[10,20,30]]);
   await page.locator('[data-section="colours"] .ui-swatch-grid').scrollIntoViewIfNeeded();
   await page.screenshot({path:'artifacts/figure-palette/attached-palette.png'});

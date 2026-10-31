@@ -1,0 +1,166 @@
+{
+ "name": "clip-playback-all-sheet",
+ "document": "sheet-movieclip.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "createLayer",
+   "Clips"
+  ],
+  [
+   "sheetTransferFrames",
+   [
+    "layer-1"
+   ],
+   [
+    "layer-2"
+   ],
+   6,
+   6,
+   3
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   5,
+   -1
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 3
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 3
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@seek",
+   0
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 2,
+    "mode": "once"
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "offset": 1
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "start": 3
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "restartMovieclip"
+  ],
+  [
+   "removeMovieclipRestart"
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 2,
+    "mode": "once"
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "createLayer",
+   "Clips"
+  ],
+  [
+   "sheetTransferFrames",
+   [
+    "layer-1"
+   ],
+   [
+    "layer-2"
+   ],
+   6,
+   6,
+   3
+  ],
+  [
+   "@seek",
+   0
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "mode": "hold"
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

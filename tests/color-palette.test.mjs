@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
-import {buildContainerV2, decodeDocument} from '../src/native-container.mjs';
+import {buildContainerV2, decodeDocument} from './support/native-files.mjs';
 import {projectColors, paletteColors, paletteView, setPaletteView, rememberColor, recentColors, setRecentColors, subscribePalette, PROJECT_PALETTE_LIMIT,
   createPersonalPalette, renamePersonalPalette, deletePersonalPalette, addPersonalColor, removePersonalColor, movePersonalColor, personalPalettes,
   currentPersonalPalette, selectPersonalPalette, suggestPaletteName, saveTarget, saveColor, bindProjectPalette, PERSONAL_PALETTE_LIMIT} from '../src/color-palette.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 
 test('project colors are one undoable edit each and never touch frames', () => {
-  const editor = new Editor({layerTimeline: true}), frames = JSON.stringify(editor.report.keyframes), events = [];
+  const editor = ownedEditorFor({layerTimeline: true}), frames = JSON.stringify(editor.report.keyframes), events = [];
   editor.addEventListener('change', event => events.push(event.detail));
   assert.equal(editor.addPaletteColor('#FF8800'), true);
   assert.equal(editor.addPaletteColor([255, 136, 0]), false, 'the same color is not added twice');
@@ -28,15 +29,15 @@ test('project colors are one undoable edit each and never touch frames', () => {
 });
 
 test('the project palette is full at its limit and removing the last color deletes it', () => {
-  const editor = new Editor({layerTimeline: true});
+  const editor = ownedEditorFor({layerTimeline: true});
   for (let i = 0; i < PROJECT_PALETTE_LIMIT; i++) editor.addPaletteColor('#' + i.toString(16).padStart(6, '0'));
   assert.throws(() => editor.addPaletteColor('#ffffff'), /full/);
-  const one = new Editor({layerTimeline: true}); one.addPaletteColor('#123456'); one.removePaletteColor('#123456');
+  const one = ownedEditorFor({layerTimeline: true}); one.addPaletteColor('#123456'); one.removePaletteColor('#123456');
   assert.equal(one.report._styk.palette, undefined);
 });
 
 test('project colors save and reopen with the project, and damaged entries are ignored', async () => {
-  const editor = new Editor({layerTimeline: true}); editor.addPaletteColor('#ff0000'); editor.addPaletteColor('#00ff00');
+  const editor = ownedEditorFor({layerTimeline: true}); editor.addPaletteColor('#ff0000'); editor.addPaletteColor('#00ff00');
   const {document} = await decodeDocument(await buildContainerV2(editor.report, 'styk'), 'styk');
   const reopened = new Editor({layerTimeline: true}); reopened.load(document);
   assert.deepEqual(projectColors(reopened.report), ['#ff0000', '#00ff00']);
@@ -60,7 +61,7 @@ test('recent colors and the chosen view are shared, and the view follows the pro
 });
 
 test('personal palettes are named, kept for every project and edited in place', () => {
-  const editor = new Editor({layerTimeline: true});
+  const editor = ownedEditorFor({layerTimeline: true});
   bindProjectPalette({colors: () => projectColors(editor.report), add: color => editor.addPaletteColor(color), addMany: colors => editor.addPaletteColors(colors),
     remove: color => editor.removePaletteColor(color), move: (color, index) => editor.movePaletteColor(color, index)});
   assert.equal(suggestPaletteName(), 'My palette');

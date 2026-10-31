@@ -2,9 +2,9 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {chromium} from './support/playwright.mjs';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 
-const service=await backend.startBackend({appRoot:process.cwd()});
+const service=await backend.startDesktopHost({appRoot:process.cwd()});
 let browser;
 try{
   browser=await chromium.launch({channel:'chrome',headless:true});
@@ -13,7 +13,6 @@ try{
   await page.goto(service.origin);await page.waitForFunction(()=>window.styk?.ready);
   const result=await page.evaluate(async()=>{
     const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');
-    const {Editor}=await import('/src/editor.mjs');
     const check=(value,message)=>{if(!value)throw new Error(message);};
     const equal=(a,b,message)=>check(JSON.stringify(a)===JSON.stringify(b),message);
     const settle=async()=>{for(let i=0;i<3;i++)await new Promise(resolve=>requestAnimationFrame(resolve));};
@@ -24,12 +23,12 @@ try{
     let paints=0;const paint=t._paint;t._paint=function(...args){paints++;return paint.apply(this,args);};
     const checks=[],keys=()=>e.layerFrameKeys('layer-1').map(k=>k.tick),snapshot=()=>JSON.stringify(e.serialize());
     try{
-      const before=snapshot(),history=e.historySize,initialKeys=keys(),grid=t.canvas.toDataURL(),root=e.object.root_x;
+      const before=snapshot(),history=e._undo.length,initialKeys=keys(),grid=t.canvas.toDataURL(),root=e.object.root_x;
       paints=0;e.beginTranslationDrag();
       for(let i=1;i<=8;i++){e.moveSelection(i*3,i,{fromStart:true});await settle();}
       check(e.object.root_x===root+24,'Live pose did not move');
       equal(keys(),initialKeys,'Live pose created an exposure key');
-      check(e.historySize===history&&snapshot()===before,'Live pose changed authored document or history');
+      check(e._undo.length===history&&snapshot()===before,'Live pose changed authored document or history');
       check(t.canvas.toDataURL()===grid,'Live pose changed exposure grid pixels');
       check(paints===0,`Live pose repainted an unchanged grid ${paints} times`);
       checks.push('live pose changes canvas geometry without repainting unchanged exposure cells');
@@ -49,16 +48,10 @@ try{
       e.cancelAnimationEdit();await settle();check(paints>0&&snapshot()===committed,'Property cancellation did not restore state');
       checks.push('pose and sheet property cancellation preserve document and history');
 
-      // Legacy property previews really author keys before commit: retain redraw.
-      const legacyDoc=structuredClone(doc);delete legacyDoc._styk.layerSheet;
-      const legacy=new Editor({demo:false,propertyChannels:true}).load(legacyDoc);legacy.seek(5);legacy.select(1);
-      const events=[];legacy.addEventListener('change',event=>events.push(event.detail));
-      legacy.beginAnimationEdit({kind:'figure',uid:1},'x');legacy.previewAnimationEdit(350);
-      const event=events.findLast(detail=>detail.live);
-      check(event?.animation&&t._changeNeedsPaint(event),'Legacy preview keys lost their redraw');legacy.cancelAnimationEdit();
+      // Every kind of live change that carries timeline content repaints the sheet.
       for(const flag of ['structural','timing','layers','layerSheet','definition','audio','drawing','vfxClips','camera','motionPath'])
         check(t._changeNeedsPaint({kind:'edit',live:true,[flag]:true}),`${flag} change lost its redraw`);
-      checks.push('legacy keys and all timeline-bearing live changes retain redraw');
+      checks.push('all timeline-bearing live changes retain redraw');
 
       // Add frame and Next copy are the shared header's (timeline-header.mjs); the grid tells it what they show.
       const add=document.querySelector('.timeline-toolbar .sheet-add-button'),cel=document.querySelector('.timeline-toolbar .tl-cel'),celMain=cel.querySelector('.tl-cel-main');

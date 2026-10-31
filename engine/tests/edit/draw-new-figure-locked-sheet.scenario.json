@@ -1,0 +1,101 @@
+{
+ "name": "draw-new-figure-locked-sheet",
+ "document": "draw-new-figure-locked-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegments",
+   [
+    {
+     "type": "line",
+     "length": 31.5,
+     "angle": -0.19,
+     "thickness": 0,
+     "start": {
+      "x": -5.25,
+      "y": 11.75
+     }
+    },
+    {
+     "type": "squareLine",
+     "length": 20.1,
+     "angle": 0.07
+    },
+    {
+     "type": "circleClear",
+     "length": 0,
+     "thickness": 0
+    }
+   ]
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "addSegments",
+   [
+    {
+     "type": "line",
+     "length": 31.5,
+     "angle": -0.19,
+     "thickness": 0,
+     "start": {
+      "x": -5.25,
+      "y": 11.75
+     }
+    },
+    {
+     "type": "squareLine",
+     "length": 20.1,
+     "angle": 0.07
+    },
+    {
+     "type": "circleClear",
+     "length": 0,
+     "thickness": 0
+    }
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "setLayerVisible",
+   "layer-1",
+   false
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegment",
+   {
+    "length": 4
+   }
+  ],
+  [
+   "setLayerVisible",
+   "layer-1",
+   true
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

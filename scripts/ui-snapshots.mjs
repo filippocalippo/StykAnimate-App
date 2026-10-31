@@ -15,6 +15,10 @@
  *   --sizes <WxH,…>      default 1440x900,1280x720,1024x700,800x600
  *   --themes <a,b>       default light,dark
  *   --only <text,…>      capture only shots whose name contains one of these
+ *   --touch              also capture the touch interface: a phone and a tablet, upright and on
+ *                        their side (touch emulation at 2× density), in the states marked for it
+ *   --chrome-only        with --compare, ignore pixels inside the stage and other pictures the
+ *                        engine draws (CHROME_MASKS); the full comparison is still written
  *   --out <dir>          default artifacts/ui-redesign/snapshots
  *
  * The matrix is theme × state × size. States are Animate, Draw and the open
@@ -54,6 +58,15 @@ const sizes = list(args.sizes, '1440x900,1280x720,1024x700,800x600').map(size =>
 });
 const themes = list(args.themes, 'light,dark');
 const only = args.only ? list(args.only) : null;
+// The touch layouts of docs/TOUCH.md: a phone and a tablet, upright and on their side.
+const TOUCH_SIZES = [['phone-portrait', 390, 780], ['phone-landscape', 780, 390], ['tablet-portrait', 820, 1180], ['tablet-landscape', 1180, 820]]
+  .map(([layout, width, height]) => ({width, height, name: `${layout}-${width}x${height}`, touch: true}));
+if (args.touch) sizes.push(...TOUCH_SIZES);
+// Pictures the engine draws (the stage, thumbnails, previews). --chrome-only ignores their pixels,
+// so a comparison can show that the interface around them did not change.
+const CHROME_MASKS = ['#viewport', '.sheet-filmstrip canvas', '.sheet-filmstrip img', '.project-tab img', '.project-tab canvas',
+  '.home canvas', '.home img', '#camera-monitor', '.library-preview', '#user-library img', '#user-library canvas',
+  '#export-dialog canvas', '#export-dialog img', '#insert-dialog canvas', '#insert-dialog img', '.simple-timeline canvas', '.simple-timeline img'];
 
 const WALKER = 1;          // createDemo(): the walker, the locked ground and the ball are uids 1-3.
 const WALKER_JOINT = 4;
@@ -78,17 +91,27 @@ const select = (uid, joint = -1) => async page => {
   await page.evaluate(([uid, joint]) => window.styk.editor.select(uid, joint), [uid, joint]);
   await frames(page);
 };
+// Runs one of the app's commands without waiting for it: some open a dialog and resolve when it closes.
+const action = name => async page => {
+  await page.evaluate(name => { void window.styk.actions[name](); }, name);
+  await page.waitForTimeout(250);
+};
+const showPanel = panel => async page => {
+  await page.evaluate(panel => window.styk.workspace.show(panel), panel);
+  await page.waitForTimeout(250);
+  await frames(page);
+};
 const steps = (...actions) => async page => { for (const action of actions) await action(page); };
 
 /** `timelines` lists the timeline modes a state is captured in (Advanced is the default). */
 const STATES = [
-  {name: 'animate', timelines: ['advanced', 'simple'], enter: workspace('animate')},
-  {name: 'draw', timelines: ['advanced', 'simple'], enter: workspace('draw')},
+  {name: 'animate', timelines: ['advanced', 'simple'], touch: true, enter: workspace('animate')},
+  {name: 'draw', timelines: ['advanced', 'simple'], touch: true, enter: workspace('draw')},
   // The audio panel below the timeline, empty (no clips in the fixture).
   {name: 'audio', timelines: ['advanced', 'simple'], enter: steps(click('#timeline-audio'), waitFor('#timeline-audio-panel'))},
-  {name: 'build', enter: steps(select(WALKER), workspace('rig'))},
-  {name: 'figure-selected', enter: select(WALKER)},
-  {name: 'joint-selected', enter: select(WALKER, WALKER_JOINT)},
+  {name: 'build', touch: true, enter: steps(select(WALKER), workspace('rig'))},
+  {name: 'figure-selected', touch: true, enter: select(WALKER)},
+  {name: 'joint-selected', touch: true, enter: select(WALKER, WALKER_JOINT)},
   // The Polygons section is a closed disclosure; open it like a user and scroll it into view.
   {name: 'polygon-rows', enter: steps(select(WALKER), click('#inspector details[data-section="Polygons"] > summary'), frames,
     page => page.evaluate(() => document.querySelector('#inspector details[data-section="Polygons"]').scrollIntoView({block: 'start'})), frames)},
@@ -100,6 +123,24 @@ const STATES = [
   {name: 'onion-popover', enter: steps(click('#onion-settings-button'), waitFor('#onion-popover'))},
   ...SETTINGS_TABS.map(tab => ({name: `settings-${tab}`, enter: steps(
     page => page.evaluate(tab => window.styk.settingsUI.open(tab), tab), waitFor('.styk-settings[open]'))})),
+  // Screens and panels reached through the app's own commands, so they open the same way on touch.
+  {name: 'home', touch: true, enter: steps(action('home'), frames)},
+  {name: 'tutorials', touch: true, enter: steps(action('tutorials'), frames)},
+  {name: 'properties-panel', touch: true, enter: steps(select(WALKER), showPanel('properties'))},
+  {name: 'vfx-panel', touch: true, enter: steps(select(WALKER), showPanel('vfx'))},
+  {name: 'library-panel', touch: true, enter: showPanel('library')},
+  {name: 'camera-selected', touch: true, enter: steps(action('toggle-camera'), frames)},
+  {name: 'scene-settings', touch: true, enter: steps(action('scene-settings'), frames)},
+  {name: 'command-palette', enter: steps(action('command-palette'), frames)},
+  {name: 'onion-skins', touch: true, enter: steps(page => page.evaluate(() => { window.styk.editor.seek(Math.min(4, window.styk.editor.totalTicks - 1)); }), action('toggle-onion'), frames)},
+  {name: 'motion-paths', enter: steps(select(WALKER, WALKER_JOINT), action('toggle-motion-paths'), frames)},
+  {name: 'main-menu', touch: true, enter: steps(action('menu'), frames)},
+  {name: 'layout-menu', enter: steps(action('layout-menu'), frames)},
+  {name: 'recent-files', enter: steps(action('open-recent'), frames)},
+  {name: 'performance', enter: steps(action('performance'), frames)},
+  {name: 'about', enter: steps(action('about'), frames)},
+  {name: 'export-sheet', touch: true, enter: steps(action('export'), waitFor('#export-dialog[open]'))},
+  {name: 'settings', touch: true, enter: steps(page => page.evaluate(() => window.styk.settingsUI.open('interface')), waitFor('.styk-settings[open]'))},
   {name: 'export-dialog', enter: steps(click('.titlebar [data-action="export"]'), waitFor('#export-dialog[open]'))},
   {name: 'text-dialog', enter: steps(page => page.evaluate(() => { void window.styk.actions['add-text'](); }), waitFor('dialog[open]'))},
   // The desktop feedback shell and its lazily loaded support styles, through a
@@ -116,7 +157,7 @@ const STATES = [
 ];
 
 const report = {label, url, commit: git('rev-parse', 'HEAD'), uncommittedFiles: git('status', '--porcelain', '--', 'index.html', 'src').split('\n').filter(Boolean).length,
-  createdAt: new Date().toISOString(), sizes: sizes.map(size => size.name), themes, shots: [], errors: []};
+  createdAt: new Date().toISOString(), sizes: sizes.map(size => size.name), themes, shots: [], skipped: [], errors: []};
 const shots = new Map();
 const dir = path.join(out, label);
 let exitCode = 0;
@@ -159,7 +200,7 @@ process.exitCode = exitCode;
 function plan() {
   return themes.flatMap(theme => ['advanced', 'simple'].flatMap(timeline => STATES
     .filter(state => (state.timelines ?? ['advanced']).includes(timeline))
-    .flatMap(state => sizes.map(size => ({theme, timeline, state, size, name: shotName(theme, state, timeline, size)})))))
+    .flatMap(state => sizes.filter(size => !size.touch || state.touch).map(size => ({theme, timeline, state, size, name: shotName(theme, state, timeline, size)})))))
     .filter(shot => !only || only.some(text => shot.name.includes(text)));
 }
 
@@ -167,21 +208,29 @@ function plan() {
  * resize history), so an image does not depend on which others were captured. */
 async function capture(planned) {
   for (const {theme, timeline, state, size, name} of planned) {
-    const context = await browser.newContext({viewport: size, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: theme});
+    const context = await browser.newContext({viewport: {width: size.width, height: size.height}, deviceScaleFactor: size.touch ? 2 : 1,
+      isMobile: !!size.touch, hasTouch: !!size.touch, locale: 'en-US', timezoneId: 'UTC', colorScheme: theme});
     await context.addInitScript(settings => {
       localStorage.setItem('stykanimate.editor.settings.v1', JSON.stringify(settings));
       localStorage.setItem('stykanimate.theme.v1', settings.theme);
-    }, {theme, timelineMode: timeline, rendererMode: 'canvas', locale: 'en', uiScale: 100});
+    }, {theme, timelineMode: timeline, locale: 'en', uiScale: 100});
     const page = await context.newPage();
     page.on('pageerror', error => report.errors.push(`${name}: ${error.message}`));
     try {
       await page.goto(url);
       await page.waitForFunction(() => window.styk?.ready === true, null, {timeout: 60000});
       await loadFixture(page);
-      await state.enter(page);
+      // A state the current interface no longer has is skipped and reported, not fatal:
+      // the matrix must finish, and a comparison then lists it as missing on both sides.
+      try { await state.enter(page); }
+      catch (error) { report.skipped.push({name, reason: String(error.message).split('\n')[0]}); console.log(`  ${name} skipped: ${String(error.message).split('\n')[0]}`); continue; }
       const shot = await settledScreenshot(page, path.join(dir, `${name}.png`));
       const recaptures = shots.has(name) ? shots.get(name).recaptures + 1 : 0;
-      shots.set(name, {name, theme, timeline, state: state.name, size: size.name, ...shot, recaptures});
+      const masks = await page.evaluate(selectors => selectors.flatMap(selector => [...document.querySelectorAll(selector)].map(element => {
+        const rect = element.getBoundingClientRect();
+        return rect.width && rect.height ? {selector, x: Math.floor(rect.left), y: Math.floor(rect.top), width: Math.ceil(rect.right) - Math.floor(rect.left), height: Math.ceil(rect.bottom) - Math.floor(rect.top)} : null;
+      }).filter(Boolean)), CHROME_MASKS);
+      shots.set(name, {name, theme, timeline, state: state.name, size: size.name, ...shot, recaptures, masks});
       console.log(`  ${name}${shot.stable ? '' : ' did not settle'}`);
     } finally {
       await context.close();
@@ -245,7 +294,14 @@ async function compare(beforeDir, afterDir) {
   const names = async folder => new Set((await readdir(folder)).filter(file => file.endsWith('.png')));
   const before = await names(beforeDir), after = await names(afterDir);
   const other = path.basename(beforeDir);
-  const diffDir = path.join(afterDir, `diff-${other}`);
+  const maskTable = async folder => {
+    const manifest = JSON.parse(await readFile(path.join(folder, 'manifest.json'), 'utf8').catch(() => '{"shots":[]}'));
+    return new Map(manifest.shots.map(shot => [`${shot.name}.png`, shot.masks ?? []]));
+  };
+  // The live capture's manifest is written after comparing, so its masks come from memory.
+  const beforeMasks = await maskTable(beforeDir);
+  const afterMasks = shots.size ? new Map([...shots.values()].map(shot => [`${shot.name}.png`, shot.masks ?? []])) : await maskTable(afterDir);
+  const diffDir = path.join(afterDir, `diff-${other}${args['chrome-only'] ? '-chrome' : ''}`);
   await rm(diffDir, {recursive: true, force: true});
   const page = await browser.newPage();
   await page.setContent('<!doctype html><title>compare</title>');
@@ -258,7 +314,9 @@ async function compare(beforeDir, afterDir) {
     }
     const [a, b] = await Promise.all([readFile(path.join(beforeDir, file)), readFile(path.join(afterDir, file))]);
     if (a.equals(b)) { results.push({file, status: 'same', changedPixels: 0}); continue; }
-    const result = await page.evaluate(diffImages, [a.toString('base64'), b.toString('base64')]);
+    const masks = args['chrome-only'] ? [...(beforeMasks.get(file) ?? []), ...(afterMasks.get(file) ?? [])] : [];
+    const result = await page.evaluate(diffImages, [a.toString('base64'), b.toString('base64'), masks]);
+    if (args['chrome-only']) result.maskedRegions = masks.length;
     if (result.diff) {
       await mkdir(diffDir, {recursive: true});
       await writeFile(path.join(diffDir, file), Buffer.from(result.diff, 'base64'));
@@ -270,7 +328,7 @@ async function compare(beforeDir, afterDir) {
   const changed = results.filter(result => result.status !== 'same');
   const summary = {before: other, after: path.basename(afterDir), compared: results.length, changed: changed.length,
     changedPixels: changed.reduce((sum, result) => sum + (result.changedPixels ?? 0), 0), results};
-  await writeFile(path.join(afterDir, `compare-${other}.json`), JSON.stringify(summary, null, 2));
+  await writeFile(path.join(afterDir, `compare-${other}${args['chrome-only'] ? '-chrome' : ''}.json`), JSON.stringify(summary, null, 2));
   return summary;
 }
 
@@ -279,7 +337,7 @@ function describe({bounds, sizeChanged}) {
 }
 
 /** Runs in the page: decodes both PNGs and paints changed pixels red over a faded copy of the new image. */
-async function diffImages([beforeBase64, afterBase64]) {
+async function diffImages([beforeBase64, afterBase64, masks = []]) {
   const decode = async base64 => {
     const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0));
     const bitmap = await createImageBitmap(new Blob([bytes], {type: 'image/png'}), {colorSpaceConversion: 'none', premultiplyAlpha: 'none'});
@@ -291,13 +349,15 @@ async function diffImages([beforeBase64, afterBase64]) {
   const [before, after] = await Promise.all([decode(beforeBase64), decode(afterBase64)]);
   const width = Math.max(before.width, after.width), height = Math.max(before.height, after.height);
   const output = new ImageData(width, height);
+  const scale = 1;  // Screenshots are taken at CSS scale, the masks' unit.
   let changedPixels = 0, left = width, top = height, right = -1, bottom = -1;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const o = (y * width + x) * 4;
       const inBefore = x < before.width && y < before.height, inAfter = x < after.width && y < after.height;
       const a = (y * before.width + x) * 4, b = (y * after.width + x) * 4;
-      const same = inBefore && inAfter && before.data[a] === after.data[b] && before.data[a + 1] === after.data[b + 1]
+      const masked = masks.some(mask => x >= mask.x * scale && x < (mask.x + mask.width) * scale && y >= mask.y * scale && y < (mask.y + mask.height) * scale);
+      const same = masked || inBefore && inAfter && before.data[a] === after.data[b] && before.data[a + 1] === after.data[b + 1]
         && before.data[a + 2] === after.data[b + 2] && before.data[a + 3] === after.data[b + 3];
       if (same) {
         const gray = (after.data[b] * 0.3 + after.data[b + 1] * 0.59 + after.data[b + 2] * 0.11) * 0.25 + 191;
@@ -323,7 +383,7 @@ async function diffImages([beforeBase64, afterBase64]) {
 }
 
 function parseArgs(argv) {
-  const flags = new Set(['no-capture', 'allow-diff']), result = {};
+  const flags = new Set(['no-capture', 'allow-diff', 'touch', 'chrome-only']), result = {};
   for (let i = 0; i < argv.length; i++) {
     const name = argv[i].replace(/^--/, '');
     if (!argv[i].startsWith('--')) fail(`Unexpected argument ${argv[i]}`);

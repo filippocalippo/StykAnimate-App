@@ -4,7 +4,7 @@ import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import backend from '../desktop/backend.cjs';
+import {pythonCandidates} from '../scripts/run-python.mjs';
 import {chooseExport, exportDialogClosed, openEncoding} from './helpers/export-dialog.mjs';
 
 const root = path.resolve(import.meta.dirname, '..'), output = path.join(root, 'artifacts', 'webm-alpha-renderer'); await mkdir(output, {recursive: true});
@@ -31,7 +31,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#export-mp4-codec')?.options.length >= 2 && document.querySelector('#export-avi-codec')?.options.length >= 3, undefined, {timeout: 30000});
   const installedId = await page.evaluate(async () => (await window.stykDesktop.getVfwCapabilities({width: 64, height: 36})).codecs.find(codec => codec.arch === 'x86' && codec.supported && codec.configure).id);
   await page.locator('#export-vfw-codec').selectOption(installedId); await page.locator('#export-vfw-configure').click();
-  const python = backend.pythonCandidates()[0], configuration = JSON.parse(execFileSync(python.command, [...python.args, path.join(root, 'tests/vfw-owned-dialog-cancel.py'), '--parent', String(await app.evaluate(() => process.pid))], {windowsHide: true, encoding: 'utf8', timeout: 15000}));
+  const python = pythonCandidates()[0], configuration = JSON.parse(execFileSync(python.command, [...python.args, path.join(root, 'tests/vfw-owned-dialog-cancel.py'), '--parent', String(await app.evaluate(() => process.pid))], {windowsHide: true, encoding: 'utf8', timeout: 15000}));
   await page.waitForFunction(() => document.querySelector('.vfw-config-state')?.textContent === 'Custom codec settings');
   const codecOptions = await page.evaluate(() => Object.fromEntries(['mp4', 'avi'].map(format => { const select = document.querySelector(`#export-${format}-codec`); return [format, {value: select.value, disabled: select.disabled, labels: [...select.options].map(option => option.label)}]; })));
   assert.ok(codecOptions.mp4.value && codecOptions.avi.value && !codecOptions.mp4.disabled && !codecOptions.avi.disabled); checks.push('MP4 and AVI codec choices remain populated and usable after the native Configure dialog');

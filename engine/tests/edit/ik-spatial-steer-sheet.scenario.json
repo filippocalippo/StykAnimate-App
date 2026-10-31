@@ -1,0 +1,141 @@
+{
+ "name": "ik-spatial-steer-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/spatial.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   6
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   218.10000610351562,
+   182.3000030517578
+  ],
+  [
+   "poseJoint",
+   233.10000610351562,
+   172.3000030517578
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "poseJoint",
+   193.10000610351562,
+   178.3000030517578
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "bendJoint",
+   208.10000610351562,
+   178.3000030517578
+  ],
+  [
+   "bendJoint",
+   248.10000610351562,
+   178.3000030517578
+  ],
+  [
+   "bendJoint",
+   298.1000061035156,
+   183.3000030517578,
+   {
+    "pixel": 2
+   }
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "bendJoint",
+   208.10000610351562,
+   178.3000030517578
+  ],
+  [
+   "bendJoint",
+   158.10000610351562,
+   178.3000030517578
+  ],
+  [
+   "bendJoint",
+   128.10000610351562,
+   188.3000030517578
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "setSpatialPose",
+   {
+    "turn": 0.4
+   },
+   {
+    "wholeFigure": true
+   }
+  ],
+  [
+   "setSpatialPose",
+   {
+    "pitch": -0.2,
+    "bend": 0.1
+   },
+   {
+    "wholeFigure": true
+   }
+  ],
+  [
+   "resetSpatialPose",
+   true
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   1,
+   6
+  ],
+  [
+   "resetSpatialPose"
+  ],
+  [
+   "resetSpatialPose",
+   true
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

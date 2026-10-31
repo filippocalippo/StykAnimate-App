@@ -1,67 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import backend from '../desktop/backend.cjs';
-import {Editor} from '../src/editor.mjs';
-import {nativePlaybackSnapshot,materializePlaybackSnapshot} from '../src/playback-native.mjs';
-import {documentChunks,applyDocumentChunk} from '../src/document-transport.mjs';
-import {unpackNativeFrameResponse,materializeNativeFrames} from '../src/import-wire.mjs';
+import {NATIVE_FRAME_CONTENT_TYPE,unpackNativeFrameResponse,materializeNativeFrames} from '../src/import-wire.mjs';
 import {missingFixture} from './helpers/local-fixtures.mjs';
+import {nodeCodec} from './support/codec.mjs';
 const app=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const py=String.raw`
-import json,sys
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-import server
-root=Path(sys.argv[1]); store=server.ProjectStore(server.WORKSPACE)
-manifest=json.loads((server.WORKSPACE/'docs/piv_corpus_manifest.json').read_text())
-rows=[]
-for i,item in enumerate(manifest['fixtures']):
-    source=server.WORKSPACE/item['path']; data=source.read_bytes()
-    wire=store.import_bytes(data,source.name,as_json=True,prefer_native=True)
-    if not wire.startswith(b'STYKPIV1'): continue
-    original=store.import_bytes(data,source.name,as_json=True)
-    (root/f'{i}.wire').write_bytes(wire);(root/f'{i}.json').write_bytes(original)
-    rows.append({'index':i,'name':source.name})
-print(json.dumps(rows))
-`;
+// Every corpus file the codec answers with the native frame transport, and its canonical JSON import.
+async function* corpusTransfers() {
+  const workspace=path.dirname(app), codec=nodeCodec();
+  const manifest=JSON.parse(await readFile(path.join(workspace,'docs/piv_corpus_manifest.json'),'utf8'));
+  for(const item of manifest.fixtures){
+    const source=path.join(workspace,item.path), data=await readFile(source), name=path.basename(source);
+    const request=accept=>codec.fetch(`/api/import?filename=${encodeURIComponent(name)}`,{method:'POST',headers:{Accept:accept},body:data});
+    const wire=await request(`${NATIVE_FRAME_CONTENT_TYPE}, application/json`);
+    if(wire.headers.get('Content-Type')!==NATIVE_FRAME_CONTENT_TYPE)continue;
+    yield {name,buffer:await wire.arrayBuffer(),expected:await (await request('application/json')).json()};
+  }
+}
 test('all native v5 corpus wire frames recreate every canonical field exactly',{skip:missingFixture('../docs/piv_corpus_manifest.json')},async()=>{
-  const temp=await mkdtemp(path.join(tmpdir(),'styk-wire-'));
-  try {
-    const candidate=backend.pythonCandidates()[0];
-    const generated=spawnSync(candidate.command,[...candidate.args,'-c',py,temp],{cwd:app,encoding:'utf8',windowsHide:true,maxBuffer:1024*1024});
-    assert.equal(generated.status,0,generated.error?.message||generated.stderr);
-    const rows=JSON.parse(generated.stdout); assert.equal(rows.length,23);
-    for(const row of rows) {
-      const raw=await readFile(path.join(temp,`${row.index}.wire`)), buffer=raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength);
-      const packet=unpackNativeFrameResponse(buffer), expected=JSON.parse(await readFile(path.join(temp,`${row.index}.json`),'utf8'));
-      const nativeMeta={...packet.result.nativeFrames};
+  {
+    let rows=0;
+    for await(const row of corpusTransfers()) {
+      rows++;
+      const buffer=row.buffer, packet=unpackNativeFrameResponse(buffer), expected=row.expected;
       const result=await materializeNativeFrames(packet.result,buffer,packet.offset,{yieldControl:()=>Promise.resolve()});
       assert.deepEqual(result.document,expected.document,row.name);
       // Preserve enumerable field ordering too: existing native-save comparisons
       // and diagnostic clients use the canonical parser's JSON property order.
       assert.equal(JSON.stringify(result.document),JSON.stringify(expected.document),row.name);
-      const snapshot=nativePlaybackSnapshot(result.document,buffer,packet.offset,nativeMeta);
-      if(snapshot){
-        const editor=new Editor({demo:false,propertyChannels:true,layerTimeline:true});editor.load(result.document);
-        let mirror,ordinary;
-        for(const chunk of documentChunks(editor.report,{sharedFigures:true}))ordinary=applyDocumentChunk(ordinary,structuredClone(chunk));
-        const header={...editor.report,keyframes:editor.report.keyframes.map(frame=>({_styk:frame._styk}))};
-        for(const chunk of documentChunks(header,{sharedFigures:true}))mirror=applyDocumentChunk(mirror,structuredClone(chunk));
-        const bytes=new Uint8Array(buffer.slice(packet.offset));
-        await materializePlaybackSnapshot(mirror,{bytes,meta:nativeMeta,position:bytes.length},{yieldControl:()=>Promise.resolve()});
-        assert.deepEqual(mirror,ordinary,`native playback: ${row.name}`);
-        assert.equal(JSON.stringify(mirror),JSON.stringify(ordinary),`native playback property order: ${row.name}`);
-      }
       const invalid=buffer.slice(0,-1); assert.throws(()=>unpackNativeFrameResponse(invalid),/metadata/);
       const fresh=unpackNativeFrameResponse(buffer);
       await assert.rejects(materializeNativeFrames(fresh.result,buffer,fresh.offset,{isCancelled:()=>true}),{name:'AbortError'});
     }
-  } finally {await rm(temp,{recursive:true,force:true});}
+    assert.equal(rows,23);
+  }
 });
 test('malformed transfer metadata and signatures fail before materialization',()=>{
   assert.throws(()=>unpackNativeFrameResponse(new ArrayBuffer(5)),/size/);

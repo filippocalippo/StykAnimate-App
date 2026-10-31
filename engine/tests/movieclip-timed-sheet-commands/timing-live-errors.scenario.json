@@ -1,0 +1,81 @@
+{
+ "name": "timing-live-errors",
+ "document": "timing-live-errors.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "beginTranslationDrag",
+   "Other figure"
+  ],
+  [
+   "moveSelection",
+   4.5,
+   -2.25
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 0
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 1.5
+   }
+  ],
+  [
+   "splitMovieclip",
+   2.5
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "moveSelection",
+   2,
+   1
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 0.5
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -1,0 +1,13 @@
+[package]
+name = "styk-doc"
+description = "StykAnimate document store: a lossless, copy-on-write tree with packed numeric arrays, and JSON text identical to the JavaScript writer."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ryu-js = "1"
+base64 = "0.22"
+sha2 = "0.10"
+thiserror = "2"

@@ -1,20 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {engineEditor} from './support/owned-editor.mjs';
+/** The frames of the layer sheet at these ticks, as the timeline chooses them. */
+const sheetRange=(e,ticks)=>Object.assign([e.frameIndex],{sheetTicks:ticks});
 import {emptyDocument,createFrame,createObject} from '../src/demo.mjs';
 import {movieclipFigure} from '../src/movieclips.mjs';
-import {presencePlayback} from '../src/movieclip-presence.mjs';
-import {poseObjectSignature} from '../src/pose-snapshot.mjs';
+import {presencePlayback} from './support/movieclip-playback.mjs';
+import {poseObjectSignature} from './support/pose-snapshot.mjs';
 import {validateLayerState} from '../src/layers.mjs';
 import {validateLayerSheet} from '../src/layer-sheet.mjs';
-import {buildGeometry} from '../src/pivot/geometry.mjs';
 
 function fixture({destination='new'}={}){
   const source=emptyDocument();source.keyframes=[createFrame([createObject(source.figure_types[0],1,100,100)],3),createFrame([createObject(source.figure_types[0],1,110,100)])];
   const clip=movieclipFigure(2,'Motion',source,{duration:4});
   const report=emptyDocument();report.figure_types.push(clip);
   report.keyframes=[0,10,20].map(x=>createFrame([createObject(report.figure_types[0],1,100+x,100),createObject(report.figure_types[0],2,200+x,100),createObject(clip,7,300+x,100,{_stykMovieclip:presencePlayback()})],10));
-  const e=new Editor({demo:false,layerTimeline:true}).load(report),second=e.createLayer('Second').id;
+  const e=engineEditor({demo:false,layerTimeline:true}, report),second=e.createLayer('Second').id;
   e.assignFiguresToLayer([2],second);e.sheetInsertKey(['layer-1',second],0);
   const target=e.createLayer('Destination').id;
   if(destination!=='new')e.sheetInsertKey([target],0,{blank:true});
@@ -23,21 +24,21 @@ function fixture({destination='new'}={}){
 }
 function samples(e,uids){const tick=e.tick,result=[];for(let t=0;t<e.totalTicks;t++){e.seek(t);const frame=e.evaluatedFrame;result.push(frame.objects.filter(o=>uids.includes(o.unique_id)).map(o=>[o.unique_id,poseObjectSignature(o,frame),o._movieclipSample]).sort((a,b)=>a[0]-b[0]));}e.seek(tick);return result;}
 function checkState(e){validateLayerState(e.report._styk.layers);validateLayerSheet(e.report);for(let tick=0;tick<e.totalTicks;tick++){e.seek(tick);const ids=e.evaluatedFrame.objects.map(o=>o.unique_id);assert.equal(new Set(ids).size,ids.length);for(const uid of ids){assert.equal(e.getLayer(e.layerForUid(uid))?.kind,'layer');assert.ok(e.getLayerFigureUids(e.layerForUid(uid)).includes(uid));}}}
-function history(e,before){const after=e.serialize();checkState(e);e.undo();assert.deepEqual(e.serialize(),before);e.redo();assert.deepEqual(e.serialize(),after);checkState(new Editor({demo:false,layerTimeline:true}).load(after));}
-function geometrySamples(e,uids){const tick=e.tick,result=[];for(let t=0;t<e.totalTicks;t++){e.seek(t);const frame=e.evaluatedFrame,geometry=buildGeometry(e.report,frame);result.push(frame.objects.filter(o=>uids.includes(o.unique_id)).map(o=>{
+function history(e,before){const after=e.serialize();checkState(e);e.undo();assert.deepEqual(e.serialize(),before);e.redo();assert.deepEqual(e.serialize(),after);checkState(engineEditor({demo:false,layerTimeline:true},after));}
+function geometrySamples(e,uids){const tick=e.tick,result=[];for(let t=0;t<e.totalTicks;t++){e.seek(t);const frame=e.evaluatedFrame,geometry=e.geometry;result.push(frame.objects.filter(o=>uids.includes(o.unique_id)).map(o=>{
   const posed=geometry.objects.get(o.object_slot);return {uid:o.unique_id,points:[posed.root,...posed.segments.flatMap(s=>[s.start,s.end])].flatMap(p=>[p.x,p.y])};
 }).sort((a,b)=>a.uid-b.uid));}e.seek(tick);return result;}
 function equivalentGeometry(actual,expected){assert.equal(actual.length,expected.length);actual.forEach((frame,t)=>{assert.deepEqual(frame.map(o=>o.uid),expected[t].map(o=>o.uid));frame.forEach((o,i)=>o.points.forEach((v,j)=>assert.ok(Math.abs(v-expected[t][i].points[j])<1e-7,`tick ${t}, UID ${o.uid}, coordinate ${j}: ${v} != ${expected[t][i].points[j]}`)));});}
 
 for(const destination of ['new','short','hold'])for(const operation of ['add-range','paste-one','paste-group','paste-foreign-clip','import'])test(`${operation} inserts into ${destination} layer without changing existing ownership or poses`,()=>{
   const {e,target,source}=fixture({destination});
-  if(operation==='paste-one'){e.select(1);e.copyFigure();}
+  if(operation==='paste-one'){e.select(1);e.copySelection();}
   if(operation==='paste-group'){e.selectMany([1,2]);e.copySelection();}
   if(operation==='paste-foreign-clip'){
-    const donor=fixture().e;donor.select(7);donor.copyFigure();e._figureClipboard=donor._figureClipboard;
+    const donor=fixture().e;donor.select(7);donor.copySelection();e._selectionClipboard=donor._selectionClipboard;
   }
   const original=samples(e,[1,2,7]);e.seek(5);e.selectSheetLayer(target);const before=e.serialize(),next=e._nextUid;
-  if(operation==='add-range')e.applyFigureRange({kind:'add',typeId:1},{ticks:[5]});
+  if(operation==='add-range')e.addFigureInFrames(1,sheetRange(e,[5]));
   else if(operation==='import')e.importFigure(source);
   else e.pasteSelection();
   e.seek(5);const added=e.evaluatedFrame.objects.filter(o=>o.unique_id>=next);assert.equal(added.length,operation==='paste-group'?2:1);
@@ -46,7 +47,7 @@ for(const destination of ['new','short','hold'])for(const operation of ['add-ran
 });
 for(const target of ['scene','camera'])test(`range insertions while ${target} is active use a user layer`,()=>{
   const {e}=fixture();e.seek(5);e.setActiveLayer(target);const before=e.serialize();
-  const {insertedUids}=e.applyFigureRange({kind:'add',typeId:1},{ticks:[5]});e.seek(5);
+  const {insertedUids}=e.addFigureInFrames(1,sheetRange(e,[5]));e.seek(5);
   assert.equal(e.layerForUid(insertedUids[0]),e.report._styk.layers.defaultLayerId);assert.ok(e.evaluatedFrame.objects.some(o=>o.unique_id===insertedUids[0]));history(e,before);
 });
 test('moving a patched movieclip preserves every pose and source phase',()=>{
@@ -100,28 +101,21 @@ test('timeline paste rejects duplicate destination rows atomically',()=>{
   assert.throws(()=>e.sheetPasteFrames([target,target],5),/distinct|unique/i);assert.deepEqual(e.serialize(),before);
 });
 
-for(const rejected of ['cancel','change','budget'])test(`background layer migration is atomic on ${rejected}`,async()=>{
-  const {e,second}=fixture(),controller=new AbortController(),before=e.serialize(),undo=e._undo.length;
-  let progress=0;
-  const options=rejected==='budget'?{maxSourceBytes:1}:{signal:controller.signal,onProgress(){progress++;if(rejected==='cancel')controller.abort();else e.renameLayer(second,'Changed while preparing');}};
-  await assert.rejects(e.assignFiguresToLayerAsync([7],second,options),rejected==='cancel'?{name:'AbortError'}:rejected==='budget'?/memory budget/:/changed/);
-  if(rejected==='change')e.undo();else assert.equal(e._undo.length,undo);
-  assert.deepEqual(e.serialize(),before);if(rejected!=='budget')assert.ok(progress>0);
-});
-test('background layer migration preserves the animation and supports history',async()=>{
-  const {e,second}=fixture(),before=e.serialize(),original=samples(e,[1,2,7]);let progress=0;
-  await e.assignFiguresToLayerAsync([7],second,{onProgress(){progress++;}});
-  assert.ok(progress>0);assert.deepEqual(samples(e,[1,2,7]),original);history(e,before);
+test('moving figures to a layer in the background preserves the animation and supports history',async()=>{
+  const {e,second}=fixture(),before=e.serialize(),original=samples(e,[1,2,7]);
+  await e.assignFiguresToLayerAsync([7],second);
+  assert.deepEqual(samples(e,[1,2,7]),original);history(e,before);
 });
 
 for(const operation of ['add','paste','range'])test(`${operation} beyond a populated short layer leaves its expired content absent`,()=>{
-  const {e,second}=fixture();e.sheetRemoveFrames([second],2,29);e.seek(0);e.select(1);e.copyFigure();
+  const {e,second}=fixture();e.sheetRemoveFrames([second],2,29);e.seek(0);e.select(1);e.copySelection();
   const original=samples(e,[1,2,7]);e.seek(5);e.selectSheetLayer(second);const before=e.serialize();
-  if(operation==='add')e.addFigure();else if(operation==='paste')e.pasteSelection();else e.applyFigureRange({kind:'add',typeId:1},{ticks:[5]});
+  if(operation==='add')e.addFigure();else if(operation==='paste')e.pasteSelection();else e.addFigureInFrames(1,sheetRange(e,[5]));
   assert.deepEqual(samples(e,[1,2,7]),original);history(e,before);
 });
 test('deleting a layer clears assignments whose figures no longer have retained poses',()=>{
-  const {e,target}=fixture();e.report._styk.layers.assignments[123456]=target;const before=e.serialize();
+  const {e:source,target}=fixture(),document=source.serialize();document._styk.layers.assignments[123456]=target;
+  const e=engineEditor({demo:false,layerTimeline:true}, document),before=e.serialize();
   e.deleteLayer(target);validateLayerState(e.report._styk.layers);history(e,before);
 });
 
@@ -137,7 +131,7 @@ for(const childLayer of ['fallback','other'])test(`deleting a parent layer prese
     parent.angles=parent.angles.map(a=>a+index*.4);child.angles=child.angles.map(a=>a+index*.4);child.join={target_object_slot:0,target_handle_id:1};
     return createFrame([parent,child,createObject(figure,3,500+index*10,300)],10);
   });
-  const e=new Editor({demo:false,layerTimeline:true}).load(report),second=e.createLayer('Fallback').id,third=e.createLayer('Other').id;
+  const e=engineEditor({demo:false,layerTimeline:true}, report),second=e.createLayer('Fallback').id,third=e.createLayer('Other').id;
   e.assignFiguresToLayer([2],childLayer==='fallback'?second:third);e.assignFiguresToLayer([3],childLayer==='fallback'?third:second);
   const original=geometrySamples(e,[2,3]),before=e.serialize();e.deleteLayer('layer-1');
   equivalentGeometry(geometrySamples(e,[2,3]),original);history(e,before);
@@ -149,16 +143,10 @@ test('deleting layers preserves remaining movieclip patches and continuation pha
   assert.deepEqual(samples(e,kept),original);history(e,before);
 });
 
-for(const mode of ['cancel','budget'])test(`background deletion rejects ${mode} without changing layer ownership or history`,async()=>{
-  const {e,second,target}=fixture();e.reorderLayers(['layer-1',second,target]);const before=e.serialize(),undo=e._undo.length,controller=new AbortController();
-  await assert.rejects(e.deleteLayerAsync('layer-1',mode==='budget'?{maxSourceBytes:1}:{signal:controller.signal,onProgress(){controller.abort();}}),mode==='cancel'?{name:'AbortError'}:/memory budget/);
-  assert.deepEqual(e.serialize(),before);assert.equal(e._undo.length,undo);
-});
-
 for(const operation of ['range','group-paste','import','move','delete'])test(`locked layers reject ${operation} atomically`,()=>{
   const {e,target,source}=fixture();e.selectMany([1,2]);e.copySelection();e.selectSheetLayer(target);e.setLayerLocked(target,true);
   const before=e.serialize(),undo=e._undo.length;
-  const execute=()=>{if(operation==='range')e.applyFigureRange({kind:'add',typeId:1},{ticks:[5]});else if(operation==='group-paste')e.pasteSelection();else if(operation==='import')e.importFigure(source);else if(operation==='move')e.assignFiguresToLayer([1],target);else e.deleteLayer(target);};
+  const execute=()=>{if(operation==='range')e.addFigureInFrames(1,sheetRange(e,[5]));else if(operation==='group-paste')e.pasteSelection();else if(operation==='import')e.importFigure(source);else if(operation==='move')e.assignFiguresToLayer([1],target);else e.deleteLayer(target);};
   assert.throws(execute,/Unlock/);assert.deepEqual(e.serialize(),before);assert.equal(e._undo.length,undo);
 });
 

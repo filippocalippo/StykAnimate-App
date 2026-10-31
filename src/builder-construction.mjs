@@ -1,7 +1,7 @@
 import {messageError} from './localized-error.mjs';
 import {localizedText} from './localization-bindings.mjs';
 import {builderStrokeAppearance, setBuilderStroke} from './builder-appearance.mjs';
-import {segmentBranchIndices} from './editor-builder.mjs';
+import {segmentBranchIndices} from './pivot/structure.mjs';
 import {canvasFont} from './ui/font-loading.mjs';
 /** Gesture-local spatial index. Construction never scans unrelated scene objects. */
 export class ConstructionIndex {

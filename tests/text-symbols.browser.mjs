@@ -4,13 +4,13 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import backendModule from '../desktop/backend.cjs';
+import backendModule from '../desktop/web-host.cjs';
 import fontModule from '../desktop/font-service.cjs';
 const appRoot=fileURLToPath(new URL('..',import.meta.url)),output=path.join(appRoot,'artifacts/text-symbols');
 await mkdir(output,{recursive:true});
 const service=new fontModule.FontService({directories:['C:/Windows/Fonts'],maxDepth:0});
 const rows=(await service.listFonts()).filter(row=>['MS Gothic','MS PGothic'].includes(row.family)&&row.style==='Regular');
-assert.equal(rows.length,2);const backend=await backendModule.startBackend({appRoot}),checks=[],errors=[];let browser;
+assert.equal(rows.length,2);const backend=await backendModule.startDesktopHost({appRoot}),checks=[],errors=[];let browser;
 try{
   browser=await chromium.launch({channel:'chrome',headless:true});
   const page=await browser.newPage({viewport:{width:1280,height:900}});page.on('pageerror',e=>errors.push(e.message));
@@ -21,8 +21,8 @@ try{
   });
   await page.goto(backend.origin);
   await page.evaluate(async rows=>{
-    const{TextDialog}=await import('/src/text-dialog.mjs'),{Editor}=await import('/src/editor.mjs');
-    window.editor=new Editor({demo:false});window.applied=0;
+    const{TextDialog}=await import('/src/text-dialog.mjs'),{pageEditor,registerPageEngine}=await import('/tests/support/page-editor.mjs');
+    await registerPageEngine();window.editor=pageEditor();window.applied=0;
     window.textDialog=new TextDialog({dialog:document.querySelector('#dialog'),content:document.querySelector('#dialog-content'),
       fontService:{listFonts:async()=>rows,readFont:async id=>new Uint8Array(await(await fetch('/test-font/'+id)).arrayBuffer())}});
     window.openText=()=>textDialog.open({onApply:figure=>{window.lastFigure=figure;window.applied++;editor.importFigure(figure);}});
@@ -46,7 +46,8 @@ try{
   await page.locator('#text-installed-font').selectOption(String(rows.findIndex(row=>row.family==='MS PGothic')));await ready();
   check('A second face from the same collection is separately selectable',await page.evaluate(()=>textDialog.result.text_assets[0].font_name==='MS PGothic'));
   await page.screenshot({path:path.join(output,'japanese.png')});await page.locator('#create-text').click();
-  check('TTC text creation and undo retain the earlier symbol figure',await page.evaluate(()=>{if(applied!==2)return false;editor.undo();return editor.frame.objects.length===1&&editor.report.figure_types.some(f=>f.text_assets?.some(a=>a.text==='b()[]{}'));}));
+  const undone=await page.evaluate(()=>{if(applied!==2)return null;editor.undo();return {objects:editor.evaluatedFrame.objects.length,texts:editor.report.figure_types.flatMap(f=>f.text_assets?.map(a=>a.text)??[])};});
+  check('TTC text creation and undo retain the earlier symbol figure',undone?.objects===1&&undone.texts.includes('b()[]{}'));
   assert.deepEqual(errors,[]);await writeFile(path.join(output,'report.json'),JSON.stringify({checks,errors},null,2));
   console.log(JSON.stringify({checks:checks.length,errors}));
 }finally{await browser?.close();backend.stop();}

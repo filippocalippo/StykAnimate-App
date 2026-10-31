@@ -6,9 +6,9 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const require = createRequire(import.meta.url);
-const {startBackend} = require('../desktop/backend.cjs');
+const {startDesktopHost} = require('../desktop/web-host.cjs');
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const backend = await startBackend({appRoot});
+const backend = await startDesktopHost({appRoot});
 let browser;
 try {
   try { browser = await chromium.launch({headless: true}); }
@@ -16,7 +16,7 @@ try {
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`${backend.origin}/api/health`);
+  await page.goto(`${backend.origin}/tests/fixtures/blank.html`);
   const result = await page.evaluate(async origin => {
     const {encodeWebM} = await import(`${origin}/src/video-export.mjs`);
     const assert = (value, message) => { if (!value) throw new Error(message); };

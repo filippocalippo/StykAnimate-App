@@ -1,0 +1,101 @@
+{
+ "name": "ik-spatial-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/spatial.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   10,
+   5
+  ],
+  [
+   "rotateSelection",
+   0.1
+  ],
+  [
+   "@seek",
+   2
+  ],
+  [
+   "sheetInsertKey",
+   [
+    "layer-1"
+   ],
+   2
+  ],
+  [
+   "duplicateFigure"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "rotateJoint",
+   0.2
+  ],
+  [
+   "@select",
+   1,
+   12
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   330,
+   300
+  ],
+  [
+   "poseJoint",
+   340,
+   310
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "rotateJoint",
+   0.3
+  ],
+  [
+   "rotateJoint",
+   0.25,
+   {
+    "isolate": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   6
+  ],
+  [
+   "rotateJoint",
+   0.15
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

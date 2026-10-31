@@ -42,10 +42,8 @@ For a local Windows release, install the locked dependencies and build prerequis
 
 ```powershell
 npm run changelog:check
-npm run build:frame-scan
+node scripts/engine-build.mjs
 npm run build:vfw
-npm run build:sidecar
-npm run verify:sidecar
 npm run build:video-encoder
 $releaseVersion = (Get-Content package.json | ConvertFrom-Json).version
 npm run dist:win -- --x64 --publish never "--config.directories.output=release/$releaseVersion"

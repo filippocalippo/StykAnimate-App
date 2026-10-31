@@ -62,7 +62,7 @@ try {
   before = await view();
   await wheel({});
   assert.equal((await view()).scale,before.scale);
-  // Smooth zooming: Automatic glides except in Compatibility mode; On and Off override it.
+  // Smooth zooming: Automatic glides except on the WebGL2 backend; On and Off override it.
   const notch = async () => {
     // A 100 px notch, then the view one frame later: a glide has only started, a step has finished.
     const before = (await view()).scale;
@@ -77,7 +77,7 @@ try {
   assert.equal(await smooth.inputValue(),'auto');
   await page.screenshot({path:'artifacts/canvas-zoom-smooth-setting.png'});
   await page.evaluate(() => styk.settingsUI.close());
-  const expectedAutomatic = backend !== 'Canvas 2D fallback';
+  const expectedAutomatic = backend !== 'WebGL2';
   for (const [mode, glides] of [['auto', expectedAutomatic], ['on', true], ['off', false]]) {
     await page.evaluate(async mode => { styk.settingsUI.commit({smoothZoom:mode}); await styk.settingsUI.flush(); }, mode);
     const step = await notch();

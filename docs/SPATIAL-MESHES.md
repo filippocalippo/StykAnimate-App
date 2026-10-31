@@ -98,7 +98,7 @@ A mesh may add `viewPositions`: four or eight complete position arrays with the
 same length and vertex order as `positions`, authored for headings 0°, 90°... or
 0°, 45°... of the attachment bone (slot k faces turn k×step). The evaluator blends
 the two sets around the bone's current heading with the same smoothstep and
-vertical fade as view-corrected skin (`spatialViewInterpolation`), then applies the
+vertical fade as view-corrected skin, then applies the
 ordinary bone, figure and perspective transforms. Topology, indices, palette and
 draw order never change; looking straight up or down uses `positions`. This is
 art direction in the style of per-camera model adjustment: it lets an attached

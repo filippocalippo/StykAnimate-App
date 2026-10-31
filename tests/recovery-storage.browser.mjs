@@ -3,7 +3,7 @@ import {writeFile} from 'node:fs/promises';
 const browser = await chromium.launch({channel: 'chrome', headless: true});
 try {
   const page = await browser.newPage(); await page.goto('http://127.0.0.1:47831/');
-  await page.waitForFunction(() => styk?.ready);
+  await page.waitForFunction(() => window.styk?.ready);
   const write = await page.evaluate(() => new Promise(resolve => {
     const req = indexedDB.open('styk-recovery-storage-test', 1);
     req.onupgradeneeded = () => req.result.createObjectStore('records');
@@ -15,7 +15,7 @@ try {
       tx.onabort = () => { resolve({abort: tx.error?.message}); db.close(); };
     }; req.onerror = () => resolve({openError: req.error?.message});
   }));
-  await page.reload(); await page.waitForFunction(() => styk?.ready);
+  await page.reload(); await page.waitForFunction(() => window.styk?.ready);
   const read = await page.evaluate(() => new Promise(resolve => {
     const req = indexedDB.open('styk-recovery-storage-test', 1);
     req.onsuccess = () => {

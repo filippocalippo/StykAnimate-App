@@ -11,7 +11,7 @@ export const PERFORMANCE_METRICS = Object.freeze(Object.fromEntries([
   ...['gpu','vfx','import_worker','playback_worker','camera'].map(name=>['recovery_'+name,{family:'recovery',unit:'ms'}]),
 ]));
 export const PERFORMANCE_CONTEXT = Object.freeze({
-  backend:['unknown','webgpu','canvas2d','unavailable'],
+  backend:['unknown','webgpu','webgl2','canvas2d','unavailable'],
   complexity:['unknown','under-100','100-999','1000-9999','10000-plus'],
   fps:['unknown','up-to-24','25-30','31-60','over-60'],
   pixels:['unknown','under-1mp','1-4mp','4mp-plus'],

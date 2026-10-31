@@ -60,17 +60,17 @@ for panning. This preference changes the workspace view, not the document.
 
 Settings → Canvas → Smooth zooming chooses how a mouse-wheel notch moves the
 view. **Automatic** (the default) glides between zoom levels with WebGPU and
-zooms each notch at once in Compatibility mode, where every extra frame of a
-glide is a software repaint of the scene. **On** and **Off** apply everywhere.
+zooms each notch at once on slower graphics (the engine's WebGL2 backend),
+where every extra frame of a glide is a costly repaint of the scene. **On** and **Off** apply everywhere.
 A notch zooms about 1.35x either way; only the motion differs. Trackpad and
 touch pinches stay continuous, and reduced-motion system settings always zoom
 directly (`src/canvas-wheel-zoom.mjs`).
 
-Every color picker ends with the palette (`src/color-palette.mjs`), under a hairline: a Project | Recent | Mine ▾ switch, + and one grid of swatches, ten a row. Project colors belong to the document (`_styk.palette`, up to 64 unique `#rrggbb` values in order) and change only through `addPaletteColor`, `removePaletteColor` and `movePaletteColor` in `src/editor-colors.mjs`: each is one undo step that touches no frame or figure, and its `palette` event keeps playback's prepared frames. Recent colors are the app's last twelve colors painted in Draw or chosen in a picker (the color it closes on, when it changed), kept in local storage with the chosen view. Personal palettes are named palettes kept in local storage beside the recent colors (up to 32, of up to 64 colors each), offered in every project and never saved in one. Mine ▾ replaces the grid with them, in the order made, each with its first five colors, then New palette…, Save project colors as a palette… and, for the palette shown, Add “name” to this project (`addPaletteColors`, one undo step), Rename… and Delete…; naming and the delete confirmation happen in place, and Escape returns to the grid. Personal palette edits are not undoable, like brush presets. Until someone chooses a view it follows the project: Recent while the project has no colors, then Project. + saves the color being edited to the palette shown (`saveTarget`): the project in the Project view, the personal palette in Mine, nothing in a chosen Recent view and, until a view is chosen, the project while it has none, so the first color saved switches to Project. Clicking a swatch applies it to the solid color or selected gradient stop, keeping opacity. Project and personal swatches drag to reorder and remove with right-click or Delete; arrow keys, Home and End move between swatches, and the current color holds the one tab stop. Draw's color rail (`docs/DRAWING.md`) shows the same palette; the rail exists only in Draw.
+Every color picker ends with the palette (`src/color-palette.mjs`), under a hairline: a Project | Recent | Mine ▾ switch, + and one grid of swatches, ten a row. Project colors belong to the document (`_styk.palette`, up to 64 unique `#rrggbb` values in order) and change only through `addPaletteColor`, `removePaletteColor` and `movePaletteColor` (engine session commands, `styk-edit/src/palette.rs`): each is one undo step that touches no frame or figure, and its `palette` event keeps playback's prepared frames. Recent colors are the app's last twelve colors painted in Draw or chosen in a picker (the color it closes on, when it changed), kept in local storage with the chosen view. Personal palettes are named palettes kept in local storage beside the recent colors (up to 32, of up to 64 colors each), offered in every project and never saved in one. Mine ▾ replaces the grid with them, in the order made, each with its first five colors, then New palette…, Save project colors as a palette… and, for the palette shown, Add “name” to this project (`addPaletteColors`, one undo step), Rename… and Delete…; naming and the delete confirmation happen in place, and Escape returns to the grid. Personal palette edits are not undoable, like brush presets. Until someone chooses a view it follows the project: Recent while the project has no colors, then Project. + saves the color being edited to the palette shown (`saveTarget`): the project in the Project view, the personal palette in Mine, nothing in a chosen Recent view and, until a view is chosen, the project while it has none, so the first color saved switches to Project. Clicking a swatch applies it to the solid color or selected gradient stop, keeping opacity. Project and personal swatches drag to reorder and remove with right-click or Delete; arrow keys, Home and End move between swatches, and the current color holds the one tab stop. Draw's color rail (`docs/DRAWING.md`) shows the same palette; the rail exists only in Draw.
 
 The color picker opens with canvas sampling off, so clicking outside the panel dismisses it. Click the Eyedropper button to enable sampling and its canvas cursor; click it again to turn sampling off. A floating loupe enlarges an 11×11 pixel neighborhood, marks the center pixel and shows its HEX color. Click to copy the rendered RGB color into the solid color or selected gradient stop, preserving opacity. Sampling keeps the picker and canvas selection open; Escape or clicking another control closes the picker. The normal paint command supplies undo. Pixels are read immediately after a requested render, with GPU handles omitted for that sample, so idle WebGPU canvases and scaled preview buffers are supported. Hover requests are coalesced to at most 30 per second with one readback in flight, stop when the pointer is idle, and cancel on leaving the canvas or closing the picker. The loupe never intercepts canvas input or enters the sampled artwork.
 
-`src/editor-scene.mjs` is installed on `Editor`. It supplies these commands:
+These are commands of the engine session (`styk-edit/src/property_edit.rs` for the colors and backgrounds, `scene_backgrounds.rs` for importing and renaming one; layer-sheet documents, which the app always opens) that `Editor` forwards to:
 
 | API | Behavior |
 | --- | --- |
@@ -99,14 +99,10 @@ existing figure arrays or unrelated images. Authored snapshots contain only
 changed channels and small source frames; the standard source-history lifecycle
 keeps required sources available through undo/redo and prunes unused captures.
 
-`tests/editor-scene.test.mjs` passes 12 cases covering sparse ranges, authored
-inbetween edits, null/transparent colors, atomic image import, name-only history,
-source pruning, invalid/locked/hidden edits and real PIV writer/reimport. A 2 MB
-unrelated image does not appear in color history; native color history stays below
-5 KB, and renaming a 1 MB image stays below 2 KB.
+The recorded edit tapes (`engine/tests/edit/*scene*.scenario.json`) and the session tests (`cargo test -p styk-edit`) state sparse ranges, authored inbetween edits, null/transparent colors, atomic image import, name-only history, invalid/locked/hidden edits and history sizes: a 2 MB unrelated image does not appear in color history, and renaming a 1 MB image stays small.
 
-Rendering uses the shared Scene override in Canvas, WebGPU, prepared playback and
-SVG. `tests/scene-background.browser.mjs` previously passed 35 checks with all four
+Rendering uses the shared Scene override on the engine's stage, playback and
+SVG. A browser check of the background previously passed 35 checks with all four
 paths, transparent/translucent colors, Scene/Camera visibility and retained-cache
 changes. The pixel report is in
 [`artifacts/scene-background/report.json`](../artifacts/scene-background/report.json).
@@ -159,8 +155,8 @@ the existing pen/touch slop. Releasing Alt during the drag keeps the same copy.
 Insertion and movement share one undo step. Escape, pointer cancellation, lost
 capture and window blur remove unfinished copies without clearing redo. The
 editor reuses sparse paste commands and translation previews; no document-wide
-gesture snapshot is added. Coverage: `tests/editor-duplicate-drag.test.mjs` and
-`tests/alt-drag-duplicate.browser.mjs`.
+gesture snapshot is added. Coverage: `tests/alt-drag-preference.test.mjs`, the
+duplicate-drag edit tapes and `tests/alt-drag-duplicate.browser.mjs`.
 
 Settings → Canvas → **Rectangle selects** switches between **Origins** (the
 default) and **Bounds** (overlapping artwork). Origins tests each figure’s
@@ -220,8 +216,8 @@ cancels a model gesture left behind after pointer-up. Regression coverage is in
 ## Figure colors
 
 `src/figure-colors.mjs` reads displayed segment and fill colors and builds pure
-recolor plans. `src/editor-colors.mjs` publishes them through the existing figure
-range commands. The Properties palette counts a segment once for each color it
+recolor plans. the engine session publishes them through the existing figure
+range commands (`editFigureColors`). The Properties palette counts a segment once for each color it
 uses, including gradient stops; polygon uses are listed separately. Palette rows
 are paged in groups of 32. Bitmap pixels and VFX colors are not palette entries.
 Selecting a figure origin includes its attached descendants in the palette.
@@ -248,8 +244,7 @@ style variants and converts untouched legacy COLORREF values to Pivot 5 too.
 Layer-sheet edits use the existing held-key/interpolated-boundary policy and range
 history. Legacy scalar timelines keep independent color/paint channels and native
 Simple working-copy behavior. Tests are in `tests/figure-colors.test.mjs` and
-`tests/figure-colors.browser.mjs`; `scripts/verify-figure-colors.mjs` checks local
-hands-pack STYK/PIV round trips and records command timings.
+`tests/figure-colors.browser.mjs`.
 
 ## Figure flips
 

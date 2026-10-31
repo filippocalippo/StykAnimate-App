@@ -6,14 +6,14 @@ const browser=await chromium.launch({channel:'chrome',headless:true});
 const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 page.on('pageerror',e=>errors.push(e.message));
 const settle=()=>page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
-const screen=point=>page.evaluate(async point=>{const {worldToScreen}=await import('/src/renderer.mjs'),{editor,state}=styk;const p=worldToScreen(point,{report:editor.report,frame:editor.frame,view:state.view}),r=document.querySelector('#viewport').getBoundingClientRect();return {x:r.x+p.x,y:r.y+p.y};},point);
+const screen=point=>page.evaluate(async point=>{const {worldToScreen}=await import('/src/renderer-geometry.mjs'),{editor,state}=styk;const p=worldToScreen(point,{report:editor.report,frame:editor.frame,view:state.view}),r=document.querySelector('#viewport').getBoundingClientRect();return {x:r.x+p.x,y:r.y+p.y};},point);
 const fixture=builderFixture(6);
 fixture.figure_types[0].segments.forEach((s,i)=>{s.parent_id=i<4?i:0;s.angle_rad=i<4?i*Math.PI/2:4.2+(i-4)*.7;s.length=i<4?80:45;s.thickness=4;});
 fixture.keyframes[0].objects[0].angles=fixture.figure_types[0].segments.map(s=>s.angle_rad);
 try {
  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47841');await page.waitForFunction(()=>window.styk?.ready);
- await page.evaluate(f=>{styk.editor.load(f);styk.editor.select(1,-1);styk.builder.enter();},fixture);
- await page.locator('.builder-footer [data-action=zoom-selection]').click();await page.locator('[data-tool=select]').click();await settle();
+ await page.evaluate(f=>{styk.editor.load(f);styk.editor.select(1,-1);styk.builder.enter();styk.workspace.dock('structure','left');},fixture);
+ await page.locator('.ui-quick [data-action=zoom-selection]').click();await page.locator('[data-tool=select]').click();await settle();
  const joints=await page.evaluate(()=>styk.editor.geometry.objects.get(styk.editor.selectedSlot).segments.map(s=>s.end));
  const a=await screen(joints[0]),b=await screen(joints[2]);
  await page.mouse.click(a.x,a.y);await page.keyboard.down('Shift');await page.mouse.click(b.x,b.y);await page.keyboard.up('Shift');await settle();

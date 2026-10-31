@@ -1,0 +1,45 @@
+{
+ "name": "figure-clipboard-ik-sheet",
+ "document": "ik-joined-unpinned.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "selectMany",
+   [
+    2,
+    3
+   ]
+  ],
+  [
+   "copySelection"
+  ],
+  [
+   "pasteSelection",
+   {
+    "pasteMode": "instance"
+   }
+  ],
+  [
+   "@select",
+   5,
+   0
+  ],
+  [
+   "poseJoint",
+   340,
+   290
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

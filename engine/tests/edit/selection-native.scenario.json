@@ -1,0 +1,94 @@
+{
+ "name": "selection-native",
+ "document": "two-limbs.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   99,
+   -1
+  ],
+  [
+   "moveSelection",
+   5,
+   5
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "@select",
+   2,
+   {
+    "add": true
+   }
+  ],
+  [
+   "moveSelection",
+   3,
+   3
+  ],
+  [
+   "@select",
+   1,
+   {
+    "toggle": true
+   }
+  ],
+  [
+   "selectMany",
+   [
+    2,
+    1,
+    7
+   ]
+  ],
+  [
+   "moveSelection",
+   -3,
+   1
+  ],
+  [
+   "@seek",
+   -4
+  ],
+  [
+   "@seek",
+   100
+  ],
+  [
+   "@seek",
+   2.5
+  ],
+  [
+   "moveSelection",
+   1,
+   1
+  ],
+  [
+   "moveSelection",
+   null,
+   1
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

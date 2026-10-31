@@ -1,0 +1,221 @@
+{
+ "name": "audio-sheet",
+ "document": "audio.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "setAudioTrack",
+   "audio-a",
+   {
+    "name": "Voice",
+    "gain": 0.5
+   }
+  ],
+  [
+   "setAudioTrack",
+   "audio-a",
+   {
+    "name": "Voice"
+   }
+  ],
+  [
+   "setAudioTrack",
+   "audio-a",
+   {
+    "pan": 1
+   }
+  ],
+  [
+   "setAudioTrack",
+   "nope",
+   {
+    "mute": true
+   }
+  ],
+  [
+   "setAudioTrack",
+   "audio-b",
+   {
+    "solo": true
+   }
+  ],
+  [
+   "setAudioTrack",
+   "audio-a",
+   {
+    "gain": 5
+   }
+  ],
+  [
+   "setAudioTrack",
+   "audio-a",
+   {
+    "name": "  "
+   }
+  ],
+  [
+   "setAudioTrack",
+   "audio-c",
+   {
+    "mute": false
+   }
+  ],
+  [
+   "setAudioTrack",
+   "audio-b",
+   {
+    "solo": false
+   }
+  ],
+  [
+   "setAudioTrack",
+   "audio-a",
+   {
+    "mute": true
+   }
+  ],
+  [
+   "setAudioTrack",
+   "audio-b",
+   {
+    "solo": false
+   }
+  ],
+  [
+   "setAudioClip",
+   "crowd-0",
+   {
+    "gain": 0
+   }
+  ],
+  [
+   "setAudioTrack",
+   "audio-a",
+   {
+    "mute": false
+   }
+  ],
+  [
+   "setAudioClip",
+   "clip-1",
+   {
+    "start": 1.5,
+    "duration": 0.2
+   }
+  ],
+  [
+   "setAudioClip",
+   "clip-1",
+   {
+    "start": 1.5
+   }
+  ],
+  [
+   "setAudioClip",
+   "clip-2",
+   {
+    "fadeIn": 3
+   }
+  ],
+  [
+   "setAudioClip",
+   "clip-1",
+   {},
+   "audio-b"
+  ],
+  [
+   "setAudioClip",
+   "clip-1",
+   {
+    "gain": "x"
+   }
+  ],
+  [
+   "setAudioClip",
+   "clip-1",
+   {
+    "volume": 1
+   }
+  ],
+  [
+   "setAudioClip",
+   "clip-1",
+   {
+    "duration": 99
+   }
+  ],
+  [
+   "setAudioClip",
+   "clip-1",
+   {},
+   "nope"
+  ],
+  [
+   "setAudioClip",
+   "nope",
+   {
+    "start": 0
+   }
+  ],
+  [
+   "setAudioClip",
+   "clip-2",
+   {
+    "offset": 1.9,
+    "duration": 0.2
+   }
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "beginDrag",
+   "Pose joint"
+  ],
+  [
+   "poseJoint",
+   520,
+   300
+  ],
+  [
+   "setAudioTrack",
+   "audio-a",
+   {
+    "gain": 0.7
+   }
+  ],
+  [
+   "deleteAudioClip",
+   "clip-3"
+  ],
+  [
+   "deleteAudioClip",
+   "nope"
+  ],
+  [
+   "deleteAudioTrack",
+   "audio-c"
+  ],
+  [
+   "deleteAudioTrack",
+   "nope"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

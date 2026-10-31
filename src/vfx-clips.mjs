@@ -1,14 +1,10 @@
 import {messageError} from './localized-error.mjs';
-import {createVfx,validateVfxStack,validateVfxValue,vfxDescriptor,vfxOwnerKey,vfxProperty} from './vfx.mjs';
-import {interpolateVfxColor} from './vfx-paint.mjs';
-import {isGeneratorType} from './vfx-registry.mjs';
-import {easedProgress,validateKeyEasing} from './keyframe-easing.mjs';
+import {createVfx,validateVfxStack,validateVfxValue,vfxDescriptor,vfxOwnerKey} from './vfx.mjs';
+import {validateKeyEasing} from './keyframe-easing.mjs';
 
-export const VFX_CLIP_LIMIT=4096;
-const empty=Object.freeze([]),indices=new WeakMap(),validated=new WeakSet(),rendered=new WeakSet(),frames=new WeakMap();
+const VFX_CLIP_LIMIT=4096;
+const empty=Object.freeze([]),validated=new WeakSet();
 export const vfxClips=report=>report?._styk?.vfxClips?.clips??empty;
-/** Timeline effect clips owned by figures or their nodes, carried by figure clipboards. */
-export const figureVfxClips=(report,uids)=>{const set=new Set(uids);return vfxClips(report).filter(c=>c.target.kind!=='scene'&&set.has(c.target.uid));};
 export const sameVfxTarget=(a,b)=>a.kind===b.kind&&a.uid===b.uid&&a.handleId===b.handleId&&a.figureTypeId===b.figureTypeId;
 export const clipContains=(clip,tick)=>clip.duration===null||tick>=clip.start&&tick<clip.start+clip.duration;
 export const clipTime=(clip,tick)=>Math.max(0,tick-clip.start+clip.offset);
@@ -40,63 +36,4 @@ export function validateVfxClips(state,{immutable=false}={}){
  }
  for(const list of events.values()){let active=0;list.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);for(const [,change] of list){active+=change;if(active>64)throw messageError(new Error(''), "errors.vfxClips.aTargetSupportsUpTo64SimultaneousEffects", {});}}
 }
-export function sampleVfxKeys(keys,tick,fallback,property){
- if(!keys?.length)return fallback;
- let low=0,high=keys.length-1;while(low<high){const mid=(low+high+1)>>>1;if(keys[mid].tick<=tick)low=mid;else high=mid-1;}
- const a=keys[low],b=keys[low+1],d=vfxDescriptor(property);
- if(tick<=a.tick||!b||d.discrete)return a.value;
- const t=easedProgress(a,(tick-a.tick)/(b.tick-a.tick));return d.type==='color'?interpolateVfxColor(a.value,b.value,t):a.value+(b.value-a.value)*t;
-}
-/** Inspector activity uses keyed switches/strength, without evaluating colors,
- * spatial parameters or geometry. Fade endpoints remain part of a timed clip. */
-export function vfxClipActiveAt(clip,tick){
- if(!clip.enabled||!clip.strength||!clipContains(clip,tick))return false;
- const time=clipTime(clip,tick);
- return clip.effects.some(effect=>{
-  const enabled=vfxProperty(effect.type,effect.id,'enabled'),strength=vfxProperty(effect.type,effect.id,'effectStrength');
-  return Boolean(sampleVfxKeys(clip.keys[enabled],time,+effect.enabled,enabled))&&sampleVfxKeys(clip.keys[strength],time,effect.params.effectStrength??1,strength)>0;
- });
-}
 export const vfxFadeAt=(clip,elapsed)=>clip.duration===null?1:Math.min(clip.fadeIn?Math.max(0,Math.min(1,elapsed/clip.fadeIn)):1,clip.fadeOut?Math.max(0,Math.min(1,(clip.duration-elapsed)/clip.fadeOut)):1);
-export function sampleVfxClip(clip,tick,{envelope=false}={}){
- const age=clipTime(clip,tick),elapsed=tick-clip.start;
- const strength=envelope?clip.strength*vfxFadeAt(clip,elapsed):1;
- return clip.effects.map(effect=>{
-  let result=effect;
-  for(const [property,keys] of Object.entries(clip.keys)){
-   const d=vfxDescriptor(property);if(d.id!==effect.id||!keys.length)continue;
-   const value=sampleVfxKeys(keys,age,d.param==='enabled'?+effect.enabled:effect.params[d.param],property);
-   result=d.param==='enabled'?{...result,enabled:Boolean(value)}:{...result,params:{...result.params,[d.param]:value}};
-  }
-  return strength===1?result:{...result,params:{...result.params,effectStrength:(result.params.effectStrength??1)*strength}};
- });
-}
-function indexFor(clips){let index=indices.get(clips);if(!index){index=new Map();for(const c of clips){const id=c.target.kind==='scene'?'scene':c.target.uid,list=index.get(id)??[];list.push(c);index.set(id,list);}indices.set(clips,index);}return index;}
-export function renderVfxOwner(owner,clips,tick){
- let result=owner;
- for(const clip of clips??empty){
-  if(!clip.enabled||!clipContains(clip,tick)||!clip.strength||clip.target.kind==='segment'&&clip.target.figureTypeId!==undefined&&clip.target.figureTypeId!==owner.figure_type_id)continue;
-  // Generators draw their own artwork (vfx-generators.mjs); only filters compose here.
-  if(!clip.effects.some(e=>!isGeneratorType(e.type)))continue;
-  const effects=sampleVfxClip(clip,tick,{envelope:true}).filter(e=>!isGeneratorType(e.type)),key=vfxOwnerKey(clip.target);
-  const connected=result._vfxConnectedEffects??(owner._stykVfxScope===1?owner._stykVfx?.figure??empty:empty);
-  result={...result,_stykVfx:{...result._stykVfx,[key]:[...(result._stykVfx?.[key]??empty),...effects]},
-   _vfxConnectedEffects:clip.includeAttached&&clip.target.kind==='figure'?[...connected,...effects]:connected};
-  if(clip.includeAttached&&clip.target.kind==='figure')result._stykVfxScope=1;
- }
- return result;
-}
-export function frameWithVfxTime(report,frame,tick){
- const clips=vfxClips(report);if(!clips.length)return frame;
- const scene=renderVfxOwner(frame,indexFor(clips).get('scene'),tick);
- return {...frame,_vfxTimelineTick:tick,_vfxTimelineScene:scene._stykVfx?.figure??empty};
-}
-/** Only geometry receives composed effects. Pose snapshots retain authored data. */
-export function invalidateVfxRenderFrame(frame){if(frame)frames.delete(frame);}
-export function vfxRenderFrame(report,frame){
- if(frame._vfxTimelineTick===undefined||rendered.has(frame))return frame;
- if(!vfxClips(report).length&&report._styk?.movieclipSource?.document)return vfxRenderFrame(report._styk.movieclipSource.document,frame);
- const state=report._styk?.vfxClips,prior=frames.get(frame);if(prior?.state===state)return prior.result;
- const index=indexFor(vfxClips(report));if(!index.size)return frame;
- const result={...frame,objects:frame.objects.map(o=>renderVfxOwner(o,index.get(o.unique_id),frame._vfxTimelineTick))};rendered.add(result);frames.set(frame,{state,result});return result;
-}

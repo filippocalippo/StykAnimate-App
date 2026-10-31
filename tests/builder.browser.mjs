@@ -33,9 +33,10 @@ const check = (name, result = true) => {
 const value = (fn) => page.evaluate(fn);
 const segmentCount = () => value(() => styk.editor.figure.segments.length);
 async function selectJoint(index) {
+  if (await page.locator('[data-tool="rig"]').isHidden()) await page.locator('[data-workspace-mode="rig"]').click();
   await page.locator('[data-tool="rig"]').click();
   const point = await page.evaluate(async (index) => {
-    const { worldToScreen } = await import("/src/renderer.mjs");
+    const { worldToScreen } = await import("/src/renderer-geometry.mjs");
     const { editor, state } = styk,
       r = document.querySelector("#viewport").getBoundingClientRect();
     const p = worldToScreen(
@@ -86,7 +87,7 @@ try {
   // to the evaluated frame — not just report.keyframes.
   await value(() => {
     const e = styk.editor;
-    e.select(e.frame.objects[0].unique_id);
+    e.select(e.evaluatedFrame.objects[0].unique_id);
     e.updateObject({ root_x: e.object.root_x + 12 });
     e.select(null);
   });
@@ -118,7 +119,7 @@ try {
   await value(() => {
     const e = styk.editor;
     e.newDocument();
-    e.selectMany(e.frame.objects.map((o) => o.unique_id));
+    e.selectMany(e.evaluatedFrame.objects.map((o) => o.unique_id));
     e.deleteSelection();
   });
   await page.locator('[data-workspace-mode="rig"]').click();
@@ -242,16 +243,16 @@ try {
     }),
   );
   await selectJoint(0);
-  await page.locator('[data-action="split-segment"]').click();
+  await page.locator('.ui-quick [data-action="split-segment"]').click();
   check("Split button inserts a joint", (await segmentCount()) === 4);
   await undo();
   check("Split undoes in one step", (await segmentCount()) === 3);
   await selectJoint(1);
   await page
-    .locator('[data-action="duplicate-segment"]')
+    .locator('.ui-quick [data-action="duplicate-segment"]')
     .click({ modifiers: ["Shift"] });
   const parentJoint = await value(async () => {
-    const { worldToScreen } = await import("/src/renderer.mjs");
+    const { worldToScreen } = await import("/src/renderer-geometry.mjs");
     const { editor, state } = styk,
       r = document.querySelector("#viewport").getBoundingClientRect(),
       p = worldToScreen(
@@ -262,7 +263,7 @@ try {
   });
   await page.mouse.click(parentJoint.x, parentJoint.y);
   check("Duplicate branch clones descendants", (await segmentCount()) === 5);
-  await page.locator('[data-action="delete-segment"]').click();
+  await page.locator('.ui-quick [data-action="delete-single-segment"]').click({ modifiers: ["Shift"] });
   check("Delete branch removes its descendants", (await segmentCount()) === 3);
   await undo();
   check("Branch deletion is undoable", (await segmentCount()) === 5);
@@ -276,7 +277,7 @@ try {
     ].map((p) => [p.x, p.y]),
   );
   await selectJoint(1);
-  await page.locator('[data-action="origin-segment"]').click();
+  await page.evaluate(() => styk.actions['origin-segment']());
   const afterOrigin = await value(() =>
     [
       ...styk.editor.geometry.objects
@@ -330,9 +331,10 @@ try {
   );
 
   // Small deterministic fixture; actions below still pass through the real export dialog.
-  await value(() => {
-    const e = styk.editor;
-    e.newDocument();
+  await value(async () => {
+    const e = styk.editor, {emptyDocument, createFrame, createObject} = await import("/src/demo.mjs"), blank = emptyDocument();
+    blank.keyframes = [createFrame([createObject(blank.figure_types[0], 1, 150, 90, {scale: 0.3})], 1)];
+    e.load(blank, "Export fixture");
     e.setCanvasSize(320, 180);
     e.setFPS(24);
     e.select(e.evaluatedFrame.objects[0].unique_id);

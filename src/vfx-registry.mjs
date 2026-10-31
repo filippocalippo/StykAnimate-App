@@ -34,7 +34,7 @@ export const VFX_REGISTRY={
  lightSweep:{name:'Light sweep',category:'Light',icon:'lightSweep',params:{position:n('Position',.5,-.5,1.5,.01,'%'),angle:n('Angle',25,-180,180,1,'°'),width:n('Width',.2,.01,1,.01,'%'),softness:n('Softness',.6,.01,1,.01,'%'),intensity:n('Intensity',.8,0,3),color:c('Color',0xffffff)}},
  crt:{name:'CRT / scanlines',category:'Texture',icon:'crt',scene:true,params:{amount:n('Scanlines',.25,0,1,.01,'%'),spacing:n('Line spacing',3,1,32,1,'px'),curvature:n('Curvature',0,0,.5),...advanced({chromatic:n('RGB fringe',0,0,16,1,'px'),phase:n('Phase',0,-32,32,.1,'px'),color:c('Line color',0)})}},
  // Generators create artwork instead of filtering it. They only live in effect
- // clips; vfx-generators.mjs compiles them and the renderers draw them.
+ // clips; the engine compiles and draws them.
  particles:{name:'Particles',category:'Generate',icon:'particles',generator:true,params:{emission:choice('Emission',0,['Continuous','Burst']),rate:{...n('Rate',6,0,200,.1,'/f'),when:{emission:[0]}},count:{...n('Count',40,1,5000,1),when:{emission:[1]}},life:n('Lifetime',30,1,300,1,'f'),
   look:choice('Look',0,['Soft glow','Spark','Dot','Ring','Shard','Smoke','Star','Bokeh','Flame','Cartoon cloud','Cartoon flame','Leaf','Petal','Snowflake','Drop','Heart','Cartoon star','Pixel','Lightning','Wisp','Rock','Splat','Burst']),
   color:c('Color',0x66ccff),size:n('Size',6,.5,400,.5,'px'),speed:n('Speed',3,0,120,.1,'px/f'),direction:n('Direction',-90,-180,180,1,'°'),spread:n('Spread',60,0,360,1,'°'),gravity:n('Gravity',0,-3,3,.01),
@@ -61,5 +61,5 @@ export const VFX_REGISTRY={
 };
 for(const definition of Object.values(VFX_REGISTRY)){definition.params={effectStrength:n(definition.generator?'Opacity':'Effect strength',1,0,1,.01,'%'),...definition.params};for(const p of Object.values(definition.params))Object.freeze(p);Object.freeze(definition.params);Object.freeze(definition);}Object.freeze(VFX_REGISTRY);
 export const isGeneratorType=type=>Boolean(VFX_REGISTRY[type]?.generator);
-export const VFX_SCENE_TYPES=new Set(['tint','blur','grade','pixelate','noise','vignette','dissolve','rgbSplit','wave','shockwave','bloom','lightSweep','crt','turbulence','particles','beam','explosion','smoke']);
+const VFX_SCENE_TYPES=new Set(['tint','blur','grade','pixelate','noise','vignette','dissolve','rgbSplit','wave','shockwave','bloom','lightSweep','crt','turbulence','particles','beam','explosion','smoke']);
 export const effectAvailable=(type,scene)=>scene?VFX_SCENE_TYPES.has(type):!VFX_REGISTRY[type]?.scene&&type!=='vignette';

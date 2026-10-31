@@ -6,10 +6,10 @@ import {mkdir, writeFile, readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {nodeEditor} from './support/node-editor.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 import {chooseExport, exportDialogClosed} from './helpers/export-dialog.mjs';
-const require = createRequire(import.meta.url), {startBackend} = require('../desktop/backend.cjs');
+const require = createRequire(import.meta.url), {startDesktopHost} = require('../desktop/web-host.cjs');
 const appRoot = fileURLToPath(new URL('..', import.meta.url)), out = path.join(appRoot, 'artifacts');
 await mkdir(out, {recursive: true});
 const report = emptyDocument(); report.canvas_width = 640; report.canvas_height = 400;
@@ -18,10 +18,10 @@ report.keyframes = [120, 300, 160].map((x, index) => ({...createFrame([
   createObject(report.figure_types[0], 1, x, 230), createObject(report.figure_types[0], 2, 450 - index * 10, 225),
   createObject(report.figure_types[0], 3, x, 152, {scale: .35, join: {target_object_slot: 0, target_unique_id: 1, target_handle_id: 1}}),
 ], 50), background_id: index, camera: {is_default: false, x: 15 + index * 15, y: 20, scale: 1.2 + index * .2, angle_rad: .1 + index * .1}}));
-const fixture = new Editor({demo: false}).load(report), second = fixture.createLayer('Other figure');
+const fixture = nodeEditor(report), second = fixture.createLayer('Other figure');
 fixture.assignFiguresToLayer([2], second.id); fixture.report._styk.name = 'Timeline integration';
 const sourcePath = path.join(out, 'advanced-track-source.styk'); await writeFile(sourcePath, JSON.stringify(fixture.serialize()));
-const backend = await startBackend({appRoot}); let browser;
+const backend = await startDesktopHost({appRoot}); let browser;
 const checks = [], errors = [], findings = [], check = (name, value = true) => { assert.ok(value, name); checks.push(name); console.log('PASS', name); };
 try {
   browser = await chromium.launch({channel: 'chrome', headless: true});
@@ -63,11 +63,11 @@ try {
     }, blobs);
   }
   const values = () => page.evaluate(() => Object.fromEntries(styk.editor.evaluatedFrame.objects.map(object => [object.unique_id, {x: object.root_x, y: object.root_y, angles: object.angles}])));
-  await page.goto(backend.origin); await page.waitForFunction(() => styk?.ready);
+  await page.goto(backend.origin); await page.waitForFunction(() => window.styk?.ready);
   await openProject(sourcePath); await page.waitForFunction(() => styk.editor.report.keyframes.length === 3 && styk.editor.report.keyframes[0].objects[0].root_x === 120);
   check('Actual app starts a WebGPU scene and the layer exposure sheet', await page.evaluate(() => styk.state.renderer.stats.backend === 'WebGPU' && Boolean(styk.editor.report._styk?.layerSheet) && styk.timeline.tracks.some(track => track.kind === 'scene')));
-  await page.locator('#timeline .sheet-zoom').focus(); await page.keyboard.press('Home'); await settle();
-  check('The timeline zoom control reaches its minimum for the full sequence', await page.evaluate(() => styk.timeline.pxPerTick === 6));
+  await page.locator('#timeline-zoom').fill('6'); await page.locator('#timeline-zoom').dispatchEvent('input'); await settle();
+  check('The timeline zoom control zooms out to show the full sequence', await page.evaluate(() => styk.timeline.pxPerTick === 6));
   const nativeFrames = await page.evaluate(() => JSON.stringify(styk.editor.report.keyframes));
   await seek(25); const initial = await values(); assert.equal(initial[1].x, 210); assert.equal(initial[2].x, 445);
   const from = await point('layer-1', 50), to = await point('layer-1', 70);

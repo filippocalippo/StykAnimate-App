@@ -1,6 +1,6 @@
 import {mkdir,writeFile} from 'node:fs/promises';
 import {RIG_EXAMPLES,rigExampleDocument} from '../src/rig-examples.mjs';
-import {buildContainerV2} from '../src/native-container.mjs';
+import {buildContainerV2} from '../tests/support/native-files.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 const directory='artifacts/connector-3d-rigs';await mkdir(directory,{recursive:true});
 for(const example of RIG_EXAMPLES){

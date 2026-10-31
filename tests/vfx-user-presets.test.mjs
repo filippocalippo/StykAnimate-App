@@ -1,14 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
 import {emptyDocument,createObject,createFrame} from '../src/demo.mjs';
-import {initializeLayerSheet} from '../src/editor-layer-sheet.mjs';
 import {vfxProperty} from '../src/vfx.mjs';
 import {validateVfxClips} from '../src/vfx-clips.mjs';
 import {VfxPresetStore,presetFromClip,clipFromPreset,normalizeUserPresets,USER_PRESET_LIMIT} from '../src/vfx-user-presets.mjs';
 
 const target={kind:'figure',uid:1};
-function fixture(){const report=emptyDocument(),fig=report.figure_types[0];report.keyframes=[0,1,2].map(()=>createFrame([createObject(fig,1,120,180),createObject(fig,2,280,180)],10));const e=new Editor({demo:false}).load(report);initializeLayerSheet(e.report);e._invalidate({timing:true});return e;}
+function fixture(){const report=emptyDocument(),fig=report.figure_types[0];report.keyframes=[0,1,2].map(()=>createFrame([createObject(fig,1,120,180),createObject(fig,2,280,180)],10));const e=newOwnedEditor({demo:false,layerTimeline:true}).load(report);return e;}
 /** A timed group: Glow with a keyed radius, then Blur, faded in. */
 function group(e){
  const id=e.addVfxClip(target,'glow',{start:4,duration:20}),glow=e.getVfxClips().find(c=>c.id===id).effects[0];

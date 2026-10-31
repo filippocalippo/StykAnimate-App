@@ -1,34 +1,60 @@
 import english from './locales/en.mjs';
-import packs from './locales/locale-packs.mjs';
+import locales from './locales/locale-index.mjs';
 
 export const DEFAULT_LOCALE = 'en';
-export const SUPPORTED_LOCALES = Object.freeze(packs.map(pack => pack.locale).sort((a, b) => a.id === 'en' ? -1 : b.id === 'en' ? 1 : a.name.localeCompare(b.name, 'en')));
-const catalogs = Object.freeze(Object.fromEntries(packs.map(pack => [pack.locale.id, pack.locale.id === 'en' ? english : pack.messages])));
-const aliases = Object.freeze(Object.fromEntries(packs.flatMap(pack => (pack.locale.aliases ?? []).map(alias => [alias, pack.locale.id]))));
+export const SUPPORTED_LOCALES = Object.freeze([...locales].sort((a, b) => a.id === 'en' ? -1 : b.id === 'en' ? 1 : a.name.localeCompare(b.name, 'en')));
+const known = Object.freeze(Object.fromEntries(locales.map(locale => [locale.id, true])));
+const aliases = Object.freeze(Object.fromEntries(locales.flatMap(locale => (locale.aliases ?? []).map(alias => [alias, locale.id]))));
+/** The messages of every language loaded so far. English is always there; the others are separate modules
+ * (locales/messages/<id>.mjs) that `loadLocale` brings in, so a session carries one language, not all of them. */
+const catalogs = {en: english};
 const owns = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 const MAX_FORMATTERS = 16;
+const LOADING = 'Load the interface language before choosing it.';
 
 function supportedLocale(value) {
   if (typeof value !== 'string' || !value || value.length > 64) return null;
   try {
     const canonical = Intl.getCanonicalLocales(value)[0];
-    if (owns(catalogs, canonical)) return canonical;
+    if (owns(known, canonical)) return canonical;
     const parsed = new Intl.Locale(canonical), base = parsed.baseName;
-    if (owns(catalogs, base)) return base;
+    if (owns(known, base)) return base;
     if (owns(aliases, base)) return aliases[base];
     // A script request never crosses scripts. A language-only pack may serve
     // regional preferences; region-specific packs need explicit aliases.
     if (parsed.script) {
       const script = `${parsed.language}-${parsed.script}`;
-      return owns(catalogs, script) ? script : null;
+      return owns(known, script) ? script : null;
     }
-    return owns(catalogs, parsed.language) ? parsed.language : null;
+    return owns(known, parsed.language) ? parsed.language : null;
   } catch { return null; }
 }
 
 /** Persist a supported language ID; invalid or unimplemented preferences use English. */
 export function normalizeLocale(value) { return supportedLocale(value) ?? DEFAULT_LOCALE; }
 export function isSupportedLocale(value) { return supportedLocale(value) !== null; }
+
+/** Hands the messages of language `id` to the service (the desktop main process requires its module itself; see `loadLocale`). */
+export function registerLocale(id, messages) {
+  if (!owns(known, id) || id === DEFAULT_LOCALE) throw new RangeError('Unknown interface language.');
+  catalogs[id] = messages;
+}
+
+/**
+ * Loads the messages of the language `value` names (a tag as `normalizeLocale` takes), once; resolves to its ID.
+ * `Localization` switches only to languages loaded here, so the owner of a language choice (the saved setting at
+ * startup, the language picker) awaits this before it chooses.
+ */
+export async function loadLocale(value) {
+  const id = normalizeLocale(value);
+  if (!owns(catalogs, id)) registerLocale(id, (await import(`./locales/messages/${id}.mjs`)).default);
+  return id;
+}
+
+/** Loads the given languages, by default all of them (tools and tests that switch between languages). */
+export async function loadLocales(ids = SUPPORTED_LOCALES.map(locale => locale.id)) {
+  await Promise.all(ids.map(loadLocale));
+}
 
 /**
  * Plain-text, DOM-free catalog service. It schedules no work and touches no
@@ -38,6 +64,7 @@ export function isSupportedLocale(value) { return supportedLocale(value) !== nul
 export class Localization {
   constructor({ locale = DEFAULT_LOCALE, pseudo = null } = {}) {
     this.locale = normalizeLocale(locale);
+    if (!owns(catalogs, this.locale)) throw new RangeError(LOADING);
     this.listeners = new Set();
     this.formatters = new Map();
     this.pseudo = pseudo;
@@ -70,6 +97,7 @@ export class Localization {
     const locale = supportedLocale(value);
     if (!locale) throw new RangeError('Choose a supported interface language.');
     if (locale === this.locale) return false;
+    if (!owns(catalogs, locale)) throw new RangeError(LOADING);
     const previousLocale = this.locale;
     this.locale = locale;
     this.formatters.clear();

@@ -2,7 +2,7 @@ import {tupleMessages, messageTuple, localizedAttribute, messageAttributes, loca
 
 import {updateInspectorDOM} from './inspector-dom.mjs';
 
-import {t as interfaceText, Localization, normalizeLocale, SUPPORTED_LOCALES, messageText as sayDialog} from './localization.mjs';
+import {t as interfaceText, Localization, loadLocale, normalizeLocale, SUPPORTED_LOCALES, messageText as sayDialog} from './localization.mjs';
 
 import { icon } from "./icons.mjs";
 import { PIVOT_HANDLE_COLORS } from "./canvas-interactions.mjs";
@@ -36,7 +36,7 @@ export const DEFAULT_EDITOR_SETTINGS = Object.freeze({
   showUnselectedHandles: true,
   canvasGrid: false,
   canvasZoomGesture: "ctrl-scroll",
-  // Wheel zoom glides between levels. Automatic glides except in Compatibility mode (canvas-wheel-zoom.mjs).
+  // Wheel zoom glides between levels. Automatic glides except on the WebGL2 backend (canvas-wheel-zoom.mjs).
   smoothZoom: "auto",
   marqueeSelection: "origins",
   pasteDepth: "same",
@@ -89,7 +89,6 @@ export const DEFAULT_EDITOR_SETTINGS = Object.freeze({
   loopPlayback: true,
   fitViewOnPlayback: true,
   playbackQuality: 'normal',
-  rendererMode: "auto",
   autosaveSeconds: 2.5,
   // The inspector's titled sections a person left open, per kind of selection: {figure: {colours: true}}.
   inspectorSections: Object.freeze({}),
@@ -191,7 +190,6 @@ export function normalizeEditorSettings(value = {}) {
   if (['smooth','linear','sharp','flat'].includes(value?.motionPathFalloffShape)) result.motionPathFalloffShape = value.motionPathFalloffShape;
   if (['all','selected'].includes(value?.onionScope)) result.onionScope = value.onionScope;
   if (['keyframes','frames'].includes(value?.onionMode)) result.onionMode = value.onionMode;
-  if (['auto','canvas','gpu'].includes(value?.rendererMode)) result.rendererMode = value.rendererMode;
   result.inspectorSections = normalizeSectionMemory(value?.inspectorSections);
   if (value?.exportPreferences && typeof value.exportPreferences === 'object') result.exportPreferences = normalizeExportPreferences(value.exportPreferences);
   if (['grid', 'list'].includes(value?.homeLayout)) result.homeLayout = value.homeLayout;
@@ -397,7 +395,7 @@ export class EditorSettings {
           this.showError(error),
         );
     });
-    this.dialog.addEventListener("change", (event) => {
+    this.dialog.addEventListener("change", async (event) => {
       const input = event.target.closest("[data-setting]");
       if (!input) return;
       let value =
@@ -407,6 +405,10 @@ export class EditorSettings {
             ? Number(input.value)
             : input.value;
       if (input.dataset.setting === "onionOpacity") value /= 100;
+      // A language is chosen once its messages are in.
+      if (input.dataset.setting === "locale") {
+        try { await loadLocale(value); } catch (error) { this.showError(error); return; }
+      }
       this.commit({ [input.dataset.setting]: value });
     });
     this.dialog.addEventListener("input", (event) => {
@@ -651,9 +653,7 @@ export class EditorSettings {
           this.checkbox(say("settings.staticHandles"), 'builderShowStaticHandles')
           + this.checkbox(say("settings.highlightSegment"), 'builderHighlightSegment')
           + this.checkbox(say("settings.construction"), 'useBuilderCanvasColor')
-          + `<label class="styk-settings-row">${this.text(say("settings.constructionColorShort"))}<span class="styk-settings-color"><input type="color" data-setting="builderCanvasColor" value="${value.builderCanvasColor}" aria-label="${escape(say("settings.constructionColor"))}" ${messageAttributes("settings.constructionColor", {}, "aria-label")}></span></label>`)
-        + this.group(say("settings.graphics"),
-          this.select(say("settings.graphicsMode"), 'rendererMode', [messageTuple(['auto', say("settings.graphicsAuto")], {1: {key: "settings.graphicsAuto", params: {}}}), messageTuple(['canvas', interfaceText("settings.canvas2d")], {1: {key: "settings.canvas2d", params: {}}}), messageTuple(['gpu', interfaceText("settings.webgpu")], {1: {key: "settings.webgpu", params: {}}})]));
+          + `<label class="styk-settings-row">${this.text(say("settings.constructionColorShort"))}<span class="styk-settings-color"><input type="color" data-setting="builderCanvasColor" value="${value.builderCanvasColor}" aria-label="${escape(say("settings.constructionColor"))}" ${messageAttributes("settings.constructionColor", {}, "aria-label")}></span></label>`);
     }
     if (tab === "animation") {
       const presets = [0, 2.5, 5, 10, 30, 60];

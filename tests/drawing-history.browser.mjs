@@ -8,19 +8,19 @@ const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('
 try{
   await page.goto(process.env.STYK_URL||'http://127.0.0.1:47839');await page.waitForFunction(()=>window.styk?.ready);
   const storage=await page.evaluate(async()=>{
-    const {DrawingHistoryDatabase}=await import('/src/drawing-history-database.mjs'),name='stykanimate-history-test-'+crypto.randomUUID(),a=new DrawingHistoryDatabase({name}),b=new DrawingHistoryDatabase({name}),tiny=new DrawingHistoryDatabase({name,maxBytes:1});
+    const {DrawingHistoryDatabase}=await import('/src/drawing-history-database.mjs'),{historyCodec:codec,loadDrawingEngine}=await import('/src/engine/engine-drawing.mjs');await loadDrawingEngine();const name='stykanimate-history-test-'+crypto.randomUUID(),a=new DrawingHistoryDatabase({codec,name}),b=new DrawingHistoryDatabase({codec,name}),tiny=new DrawingHistoryDatabase({codec,name,maxBytes:1});
     const tiles=[{tx:-100,ty:200,before:null,after:Uint8ClampedArray.from({length:16384},(_,i)=>(i*17)%256)}];
     try{
       await a.begin(1);await a.append(1,tiles);let unpublished=false;try{await a.info(1);}catch{unpublished=true;}await a.finish(1);
       await b.begin(1);await b.append(1,tiles);await b.finish(1);const isolated=(await a.read(1,0))[0].after.every((n,i)=>n===tiles[0].after[i]);
       await tiny.begin(1);let quota=false;try{await tiny.append(1,tiles);}catch(e){quota=e.name==='QuotaExceededError';}
       await b.close();const survivesOtherClose=(await a.read(1,0))[0].tx===-100;
-      const abandoned=new DrawingHistoryDatabase({name,externalLease:true});await abandoned.begin(9);await abandoned.append(9,tiles);await abandoned.finish(9);abandoned.db.close();
-      const sweep=new DrawingHistoryDatabase({name});await sweep.open();
+      const abandoned=new DrawingHistoryDatabase({codec,name,externalLease:true});await abandoned.begin(9);await abandoned.append(9,tiles);await abandoned.finish(9);abandoned.db.close();
+      const sweep=new DrawingHistoryDatabase({codec,name});await sweep.open();
       const ids=await new Promise((resolve,reject)=>{const r=sweep.db.transaction('sessions').objectStore('sessions').getAllKeys();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
       const cleaned=!ids.includes(abandoned.session)&&ids.includes(a.session);await sweep.close();
-      const interrupted=new DrawingHistoryDatabase({name,externalLease:true});await interrupted.begin(7);await interrupted.append(7,tiles);interrupted.db.close();
-      const restarted=new DrawingHistoryDatabase({name,session:interrupted.session,externalLease:true});await restarted.open();
+      const interrupted=new DrawingHistoryDatabase({codec,name,externalLease:true});await interrupted.begin(7);await interrupted.append(7,tiles);interrupted.db.close();
+      const restarted=new DrawingHistoryDatabase({codec,name,session:interrupted.session,externalLease:true});await restarted.open();
       const leftover=await new Promise((resolve,reject)=>{const r=restarted.db.transaction('chunks').objectStore('chunks').count(IDBKeyRange.bound([interrupted.session],[interrupted.session,[]]));r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
       const partialReclaimed=leftover===0&&restarted.bytes===0;await restarted.close();
       const tx=a.db.transaction('chunks','readwrite'),store=tx.objectStore('chunks'),key=[a.session,1,0],get=store.get(key);
@@ -84,11 +84,11 @@ try{
     finally{exporter.dispose();}
   });
   check('native save remains self-contained after the disk history session closes',saved);
-  await page.evaluate(()=>styk.fit());await page.waitForFunction(()=>!styk.state.editablePreparing&&!styk.state.dirtyRender&&styk.state.renderer.stats.drawingGpuBytes>0);
+  await page.evaluate(()=>styk.fit());await page.waitForFunction(()=>!styk.state.editablePreparing&&!styk.state.dirtyRender);
   check('the reopened cel appears on the canvas',await page.evaluate(()=>styk.editor.evaluatedFrame.objects.length>0));
   check('no uncaught browser errors',errors.length===0);await page.screenshot({path:out+'/workspace.png'});
   await writeFile(out+'/result.json',JSON.stringify({checks,storage,measured,errors,browser:await browser.version()},null,2));console.log(JSON.stringify(measured,null,2));
 }catch(error){
-  const state=await page.evaluate(()=>({errors:window.__errors,dirty:styk.state.dirtyRender,preparing:styk.state.editablePreparing,renderer:styk.state.renderer.stats,frame:styk.editor.evaluatedFrame.objects.map(o=>({id:o.unique_id,type:o.figure_type_id})),owner:styk.drawing.owner.stats,previews:{active:Boolean(styk.drawing.owner.previews.active),size:styk.drawing.owner.previews.cache.size}})).catch(()=>null);
+  const state=await page.evaluate(()=>({errors:window.__errors,dirty:styk.state.dirtyRender,renderer:styk.state.renderer.stats,frame:styk.editor.evaluatedFrame.objects.map(o=>({id:o.unique_id,type:o.figure_type_id})),owner:styk.drawing.owner.stats,previews:{active:Boolean(styk.drawing.owner.previews.active),size:styk.drawing.owner.previews.cache.size}})).catch(()=>null);
   console.error(JSON.stringify({message:error.message,errors,state},null,2));await page.screenshot({path:out+'/failure.png'});throw error;
 }finally{await browser.close();}

@@ -8,12 +8,13 @@
  *   - the playhead moves by its transform (the Advanced playhead and its frame
  *     number; in Simple the filmstrip's playhead line, while its cards stay
  *     still until playback stops);
+ *   - the onion range markers on the ruler move with the playhead;
  *   - #play-button changes only when playback starts and stops;
  *   - chrome code reads no layout (getBoundingClientRect, offset*, client*,
  *     scroll*, getComputedStyle) while playing;
- *   - the canvas draws about twice per animation frame, whatever the
- *     display's refresh rate: once for the new frame and once after the chrome
- *     pass its seek schedules (DRAWS_PER_FRAME).
+ *   - the canvas draws once per animation frame, whatever the display's
+ *     refresh rate (DRAWS_PER_FRAME leaves room for a frame redrawn after a
+ *     stall); the chrome's passes never repaint it.
  *
  * Everything else that still writes or reads during playback is listed in
  * RATCHET with the milestone that removes it. The list only shrinks: a
@@ -33,16 +34,18 @@ import {chromium} from './support/playwright.mjs';
 const URL = process.env.STYK_URL || 'http://127.0.0.1:47831';
 const PLAY_MS = 2000;
 const TIME_DISPLAY_HZ = 5;
-// Draws per animation frame: the new frame, the repaint after its chrome pass, and a quarter for the readout's passes
-// and timing. A chrome pass that repaints while nothing updated would draw on every display frame instead (~5.5 per
-// animation frame at 144 Hz before this budget).
-const DRAWS_PER_FRAME = 2.5;
+// Draws per animation frame: the new frame, and a quarter for one drawn again after the engine could not give it at once.
+// A repaint after a chrome pass doubled it (2 per frame), and one on every display frame would draw ~5.5 per animation
+// frame at 144 Hz.
+const DRAWS_PER_FRAME = 1.25;
 
 // Mutations the contract allows while playing (selector: the element or its ancestor the record's target is in).
 const ALLOWED = [
   {id: 'time-display', selector: '#time-display', kinds: ['nodes', 'text'], phases: ['start', 'playing', 'stop'], perSecond: TIME_DISPLAY_HZ},
   {id: 'playhead', selector: '.sheet-playhead', kinds: ['nodes', 'text', 'style'], phases: ['start', 'playing', 'stop']},
   {id: 'play-button', selector: '#play-button', kinds: ['nodes', 'text', 'attributes'], phases: ['start', 'stop']},
+  // The onion range markers sit on the ruler beside the playhead and move with it (onion-timeline-range.mjs).
+  {id: 'onion-range', selector: '.onion-range-overlay', kinds: ['attributes', 'style'], phases: ['start', 'playing', 'stop']},
 ];
 // Known writers and readers during playback, each until the milestone that removes it. `scenarios` limits an entry to
 // where it happens; `always` marks deterministic entries, which fail the test once they stop happening.

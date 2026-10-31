@@ -60,13 +60,6 @@ export function showPopoverFrom(element, source) {
   element.showPopover();
 }
 
-/** Hides a popover or closes a dialog if it is showing. */
-export function hideOverlayElement(element) {
-  if (!element) return;
-  if (element.localName === 'dialog') { if (element.open) element.close(); return; }
-  if (element.matches?.(':popover-open')) element.hidePopover();
-}
-
 /**
  * True when `element` can take focus now: connected, enabled, not inert and
  * rendered. A button inside a closed popover, a hidden panel or an overflowed

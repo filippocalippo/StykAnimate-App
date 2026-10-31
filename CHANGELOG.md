@@ -22,10 +22,42 @@ What's new in each version of StykAnimate.
 
 - Ctrl-dragging a node that uses IK stretches it like any other node.
 - A calmer top bar: the menus are in the StykAnimate menu, and your open projects take their place.
+- Exports preserve effects and 3D artwork when No smoothing is selected.
 
 ### Fixed
 
+- Moving a figure shows its new position immediately.
+- Repeated pastes keep the expected spacing between copied figures.
+- Pasting segment settings no longer fails after changing the selected segment.
+- Undoing a timeline change made of several steps keeps your selection and shows the right frame.
+- Timeline and camera previews show the correct frame and parallax layer positions.
+- Moving a segment while building a figure no longer bends other parts of the figure.
+- Fixed fine brush detail on drawing layers and clipped edges in camera previews with blur, glow or outlines.
+- Fixed errors when adjusting motion paths on joined figures.
+- Failed attempts to add figures or movieclips keep the project and figure joins unchanged.
+- Fixed an inspector error when viewing between frames.
 - Fixed an error when deleting your last color palette.
+- Fixed changing a figure's draw order on a keyframe with a custom easing curve.
+- Fixed editing an existing text figure, which opened with the default text instead of its own.
+- Fixed Auto key, builder snapping and camera follow missing from the command palette.
+
+### Performance
+
+- Large Pivot files open several times faster, and in the web app the first one no longer waits for a large download.
+- StykAnimate starts faster, and large projects save in a fraction of the time without pausing the app.
+- Large projects play without stutters, and artwork near the edge of the canvas no longer blinks during playback.
+- Dragging joints and undoing keep up better on large animations, and undoing a brush stroke no longer pauses.
+- Editing large animations and 3D figures is faster.
+- Exporting animations with effects, particles, 3D or many figures is several times faster.
+- Animations with particles, auras, beams, smoke or explosions play and edit more smoothly.
+- Fills, magic wand selections, filters and saving are faster on drawing layers.
+- Timeline and asset library previews appear almost instantly, and large projects use less memory while they are shown.
+- Smoother playback for animations with parallax layers, a following camera, moved figure origins, Stick Nodes sprites, turning 3D drawings or animated properties.
+- Undoing and redoing big movieclip edits is much faster.
+
+### Removed
+
+- The Graphics mode setting: StykAnimate now chooses the best option for your computer automatically.
 
 ## [1.2.5]
 

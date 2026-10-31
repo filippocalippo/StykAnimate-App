@@ -18,61 +18,30 @@ try {
   });
   assert.ok(Object.values(dom).every(Boolean),JSON.stringify(dom));console.log('PASS inspector node identity, focus, values and disclosure');
   const roundtrip=await page.evaluate(async()=>{
-    const {Editor}=await import('/src/editor.mjs'),{emptyDocument,createObject,createFrame}=await import('/src/demo.mjs');
+    const { pageEditor }=await import('/tests/support/page-editor.mjs'),{emptyDocument,createObject,createFrame}=await import('/src/demo.mjs');
     const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs');
-    const {buildGeometry}=await import('/src/pivot/geometry.mjs');
     const report=emptyDocument(),figure=report.figure_types[0];
     report.keyframes=Array.from({length:80},(_,frame)=>createFrame(Array.from({length:30},(_,slot)=>createObject(figure,slot+1,200+frame,250,
       {join:slot?{target_object_slot:slot-1,target_handle_id:1}:null})),3));
-    const editor=new Editor({demo:false,propertyChannels:true}).load(report);editor.select(1);
+    const editor=pageEditor({demo:false,propertyChannels:true}).load(report);editor.select(1);
     editor.beginTranslationDrag();editor.moveSelection(5,3);editor.commitDrag();
-    editor.moveAnimationKeys(editor.animationChannels.map(c=>({channelId:c.id,keyIds:[c.keys[1].id]})),1);
     const exporter=new DocumentExporter(),importer=new ImportClient();
     try {
-      const blob=await exporter.export(editor.report,{format:'styk',name:'architecture-roundtrip'});
+      const blob=await exporter.export(editor.report,{format:'styk',name:'architecture-roundtrip',revision:editor.revision});
       const imported=await importer.importFile(new File([blob],'architecture-roundtrip.styk'));
-      const reopened=new Editor({demo:false,propertyChannels:true}).load(imported.document);
+      const reopened=pageEditor({demo:false,propertyChannels:true}).load(imported.document);
       const canonical=value=>JSON.stringify(value,(_,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
       const same=canonical(reopened.report._styk.animation)===canonical(editor.report._styk.animation);
       let exact=true;
       for(const tick of [0,1,3,4,8,239]){
         editor.seek(tick);reopened.seek(tick);
-        const points=e=>JSON.stringify([...buildGeometry(e.report,e.evaluatedFrame).objects].map(([slot,g])=>[slot,[...g.joints]]));
+        const points=e=>JSON.stringify([...e.geometry.objects].map(([slot,g])=>[slot,[...g.joints]]));
         exact&&=points(editor)===points(reopened);
       }
-      window.architectureReport=editor.serialize();
-      return {same,exact,sequences:new Set(reopened.animationChannels.map(c=>c.keys)).size,bytes:blob.size};
+      return {same,exact,bytes:blob.size};
     }finally{exporter.dispose();importer.dispose();}
   });
-  assert.equal(roundtrip.same,true,JSON.stringify(roundtrip));assert.equal(roundtrip.exact,true,JSON.stringify(roundtrip));assert.equal(roundtrip.sequences,1);
-  console.log('PASS native binary save/reopen, shared sequences, retiming and exact evaluated joins',roundtrip);
-  await page.evaluate(()=>{styk.settingsUI.commit({timelineMode:'advanced'});styk.editor.load(architectureReport);styk.editor.markSaved();styk.fit();});
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&styk.state.renderer.last?.report===styk.editor.report);
-  await page.evaluate(()=>{styk.editor.selectFrame(20);styk.editor.selectFrame(50);styk.editor.selectFrame(2);});
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&styk.performance().editingPresentation?.tick===styk.editor.tick);
-  const seek=await page.evaluate(async()=>{
-    const {buildGeometry}=await import('/src/pivot/geometry.mjs'),e=styk.editor,r=styk.state.renderer;
-    const before=r.lastGeometry.drawables.map(({obj,fig,...item})=>({...item,obj:obj.unique_id,fig:fig.figure_type_id}));
-    const expected=buildGeometry(e.report,e.evaluatedFrame).drawables.map(({obj,fig,...item})=>({...item,obj:obj.unique_id,fig:fig.figure_type_id}));
-    return {frame:e.frameIndex,exact:JSON.stringify(before)===JSON.stringify(expected),leases:r.rasterCache.leasedBytes??0};
-  });
-  assert.equal(seek.frame,2);assert.equal(seek.exact,true);console.log('PASS superseded frame requests publish the latest exact geometry');
-  await page.evaluate(()=>document.querySelector('#play-button').click());
-  await page.waitForFunction(()=>styk.state.playing&&styk.state.playbackPacket);
-  await page.evaluate(()=>document.querySelector('#play-button').click());
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&!styk.state.playing);
-  await page.evaluate(()=>{
-    const e=styk.editor;e.select(1);e.beginTranslationDrag();e.moveSelection(2,1);e.commitDrag();
-  });
-  await page.waitForFunction(()=>styk.performance().playback.loadKind==='patch',null,{timeout:10000}).catch(async error=>{throw Error(`${error.message} ${JSON.stringify(await page.evaluate(()=>styk.performance().playback))}`);});
-  await page.evaluate(()=>styk.editor.undo());
-  await page.waitForFunction(()=>styk.performance().playback.loadKind==='patch');
-  await page.evaluate(()=>styk.editor.markSaved());
-  await page.evaluate(()=>styk.settingsUI.commit({timelineMode:'simple'}));
-  await page.evaluate(()=>{styk.editor.selectFrame(15);styk.editor.selectFrame(3);});
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&styk.performance().editingPresentation?.tick===styk.editor.tick);
-  const simple=await page.evaluate(()=>({frame:styk.editor.frameIndex,preparation:styk.performance().editablePreparation}));
-  assert.equal(simple.frame,3);assert.equal(simple.preparation.completed,true);assert.notEqual(simple.preparation.cancelled,true);
-  console.log('PASS Simple working-frame notifications retain cooperative preparation');
-  assert.deepEqual(errors,[]);console.log('PASS edit and animation undo use incremental worker updates');
+  assert.equal(roundtrip.same,true,JSON.stringify(roundtrip));assert.equal(roundtrip.exact,true,JSON.stringify(roundtrip));
+  console.log('PASS native binary save/reopen and exact evaluated joins',roundtrip);
+  assert.deepEqual(errors,[]);console.log('PASS no browser errors');
 } finally {await browser.close();}

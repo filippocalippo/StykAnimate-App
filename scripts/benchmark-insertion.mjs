@@ -41,11 +41,11 @@ try {
   async function phase(name,operation){
     await page.waitForTimeout(500);await client.send('Profiler.start');
     const result=await page.evaluate(async operation=>{
-      const start=performance.now(),bytes=styk.editor.historySize;
+      const start=performance.now();
       const result=await (0,eval)(operation);
       const commandMs=performance.now()-start;
       await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-      return {commandMs,paintMs:performance.now()-start,historyBytes:styk.editor.historySize-bytes,result,start,
+      return {commandMs,paintMs:performance.now()-start,result,start,
         longTasks:__insert.longTasks.filter(task=>task.start>=start)};
     },operation);
     const {profile}=await client.send('Profiler.stop');
@@ -64,24 +64,24 @@ try {
   });
   await phase('figure-drop','styk.editor.importFigure(__insert.figureAsset,{position:{x:300,y:200}}).unique_id');
   await page.evaluate(()=>{styk.editor.undo();styk.editor.select(__insert.uid);});
-  await page.evaluate(async()=>{
-    const {buildGeometry}=await import('/src/pivot/geometry.mjs'),{sampleSheet}=await import('/tests/helpers/sheet-samples.mjs');
+  await page.evaluate(()=>{
     const e=styk.editor,start=e.tick,end=Math.min(e.totalTicks,start+16);
     __insert.captureTicks=[...new Set([Math.max(0,start-1),start,(start+end-1)/2,end-1,Math.min(e.totalTicks-1,end)])];
-    __insert.shape=t=>buildGeometry(e.report,sampleSheet(e.report,t)).drawables.map(d=>({type:d.type,rgb:d.rgb,alpha:d.alpha,points:d.points?.map(p=>[p.x,p.y])??[]}));
-    __insert.beforeCapture=__insert.captureTicks.map(__insert.shape);
+    // The engine's geometry at each tick, then the playhead back where it was.
+    __insert.shape=t=>{e.seek(t);return e.geometry.drawables.map(d=>({type:d.type,rgb:d.rgb,alpha:d.alpha,points:d.points?.map(p=>[p.x,p.y])??[]}));};
+    __insert.beforeCapture=__insert.captureTicks.map(__insert.shape);e.seek(start);
   });
   await phase('clip-create',`(()=>{const e=styk.editor;return e.createMovieclip({start:e.tick,end:Math.min(e.totalTicks,e.tick+16)}).figure_type_id;})()`);
   const clipCheck=await page.evaluate(()=>{
-    const mismatches=[];
+    const mismatches=[],start=styk.editor.tick;
     __insert.captureTicks.forEach((tick,i)=>{
       const actual=__insert.shape(tick),expected=__insert.beforeCapture[i];
       if(actual.length!==expected.length||actual.some((a,j)=>{
         const b=expected[j];return a.type!==b.type||JSON.stringify(a.rgb)!==JSON.stringify(b.rgb)||a.alpha!==b.alpha||a.points.length!==b.points.length||a.points.some((p,k)=>p.some((n,l)=>Math.abs(n-b.points[k][l])>.0001));
       }))mismatches.push(tick);
     });
-    const command=styk.editor._undo.at(-1),sources=command.commands.flatMap(c=>c.frameSourceChanges??[]);
-    return {ticks:__insert.captureTicks,mismatches,historyBytes:command.bytes,sourceFrames:sources.length,sourceObjects:sources.reduce((n,s)=>n+s.after.value.objects.length,0)};
+    styk.editor.seek(start);
+    return {ticks:__insert.captureTicks,mismatches};
   });
   assert.deepEqual(clipCheck.mismatches,[],'Movieclip conversion preserves the dense scene before, inside and after its range.');
   await phase('clip-copy','styk.editor.copySelection()');
@@ -90,7 +90,7 @@ try {
   await page.evaluate(async()=>{const {librarySnapshot}=await import('/src/library-files.mjs');__insert.clipAsset=librarySnapshot(styk.editor);});
   await phase('clip-drop','styk.editor.importFigure(__insert.clipAsset,{position:{x:500,y:350}}).unique_id');
   const target=await page.evaluate(async()=>{
-    const {worldToScreen}=await import('/src/renderer.mjs');
+    const {worldToScreen}=await import('/src/renderer-geometry.mjs');
     const e=styk.editor,s=styk.state,r=document.querySelector('#viewport').getBoundingClientRect(),root=e.geometry.objects.get(e.selectedSlot).root;
     const point=worldToScreen(root,{report:e.report,frame:e.frame,view:s.view,cameraEnabled:false});
     s.view.x+=r.width/2-point.x;s.view.y+=r.height/2-point.y;s.dirtyRender=true;window.dispatchEvent(new Event('resize'));

@@ -7,15 +7,15 @@ import {mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from './support/playwright.mjs';
-import backendTools from '../desktop/backend.cjs';
+import backendTools from '../desktop/web-host.cjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const external = process.argv[2], output = path.join(appRoot, 'artifacts/selection-order', external ? 'reported' : 'synthetic');
 await mkdir(output, {recursive: true});
-const backend = await backendTools.startBackend({appRoot});
+const backend = await backendTools.startDesktopHost({appRoot});
 let browser, page;
 const checks = [], errors = [];
-const toolbar = action => page.locator(`.canvas-toolbar [data-action="${action}"]`);
+const toolbar = action => page.locator(['undo', 'redo'].includes(action) ? `.band-history [data-action="${action}"]` : `.ui-quick [data-action="${action}"]`);
 const order = () => page.evaluate(() => styk.editor.evaluatedFrame.object_draw_order_unique_ids);
 const selection = () => page.evaluate(() => styk.editor._selectionState());
 const partition = (before, selected, front) => {
@@ -24,12 +24,8 @@ const partition = (before, selected, front) => {
 };
 async function rendered(expected) {
   assert.deepEqual(await order(), expected);
-  await page.waitForFunction(expected => {
-    const last = styk.state.renderer.last;
-    return last && JSON.stringify(last.frame.object_draw_order_unique_ids) === JSON.stringify(expected) &&
-      JSON.stringify(last.geometry.orderedObjects.map(g => g.obj.unique_id)) === JSON.stringify(
-        styk.editor.geometry.orderedObjects.map(g => g.obj.unique_id));
-  }, expected);
+  // The geometry the engine answers for the frame draws in the same order.
+  assert.deepEqual(await page.evaluate(() => styk.editor.geometry.orderedObjects.map(g => g.obj.unique_id)), expected);
 }
 try {
   browser = await chromium.launch({channel: 'chrome', headless: true});
@@ -38,7 +34,7 @@ try {
   await page.goto(backend.origin);
   await page.waitForFunction(() => window.styk?.ready);
   if (external) {
-    await page.locator('input[type=file]').first().setInputFiles(path.resolve(external));
+    await page.locator('#file-input').setInputFiles(path.resolve(external));
     await page.waitForFunction(() => styk.editor.report.figure_types.some(f => f.name === 'Bren MK2 LMG'));
   } else await page.evaluate(async () => {
     const {emptyDocument, createFrame, createObject} = await import('/src/demo.mjs');
@@ -111,14 +107,14 @@ try {
     if (styk.editor.frameDraft?.dirty) styk.editor.commitFrameDraft({mode: 'update'});
     const {DocumentExporter} = await import('/src/document-export.mjs');
     const {ImportClient} = await import('/src/import-client.mjs');
-    const {Editor} = await import('/src/editor.mjs');
+    const { pageEditor } = await import('/tests/support/page-editor.mjs');
     const exporter = new DocumentExporter(), importer = new ImportClient(), e = styk.editor;
     const expected = e.evaluatedFrame.object_draw_order_unique_ids, tick = e.tick, result = [];
     try {
       for (const format of ['styk', 'piv']) {
-        const blob = await exporter.export(e.report, {sourceId: styk.state.sourceId, format, name: 'selection-order'});
+        const blob = await exporter.export(e.report, {sourceId: styk.state.sourceId, format, name: 'selection-order', revision: e.revision});
         const imported = await importer.importFile(new File([blob], `selection-order.${format}`));
-        const reopened = new Editor({demo: false, layerTimeline: true}).load(imported.document); reopened.seek(tick);
+        const reopened = pageEditor({demo: false, layerTimeline: true}).load(imported.document); reopened.seek(tick);
         if (JSON.stringify(reopened.evaluatedFrame.object_draw_order_unique_ids) !== JSON.stringify(expected))
           throw new Error(`${format} changed the edited draw order`);
         result.push(format);

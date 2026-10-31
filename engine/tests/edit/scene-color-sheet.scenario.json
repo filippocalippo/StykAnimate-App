@@ -1,0 +1,79 @@
+{
+ "name": "scene-color-sheet",
+ "document": "property-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "setSceneColor",
+   4280303712
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "setSceneColor",
+   4282409088,
+   {
+    "indices": [
+     0,
+     1
+    ]
+   }
+  ],
+  [
+   "setSceneColor",
+   -1
+  ],
+  [
+   "setSceneColor",
+   1.5
+  ],
+  [
+   "setSceneBackground",
+   1
+  ],
+  [
+   "setSceneBackground",
+   0,
+   {
+    "indices": [
+     1
+    ]
+   }
+  ],
+  [
+   "setSceneBackground",
+   7
+  ],
+  [
+   "setBackgroundColor",
+   4294901760
+  ],
+  [
+   "setBackgroundColor",
+   "red"
+  ],
+  [
+   "setSceneColor",
+   4280303712,
+   {
+    "indices": [
+     5
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

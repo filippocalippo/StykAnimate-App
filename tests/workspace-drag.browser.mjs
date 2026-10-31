@@ -9,7 +9,7 @@ const browser = await chromium.launch({channel: 'chrome', headless: true});
 const page = await browser.newPage({viewport: {width: 1440, height: 900}});
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
-await page.addInitScript(() => localStorage.setItem('stykanimate.editor.settings.v1', JSON.stringify({rendererMode: 'canvas', locale: 'en'})));
+await page.addInitScript(() => localStorage.setItem('stykanimate.editor.settings.v1', JSON.stringify({locale: 'en'})));
 const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 const box = selector => page.locator(selector).boundingBox();
 const placement = id => page.evaluate(id => styk.workspace.layout.modes[document.querySelector('.workspace').dataset.mode].panels.find(panel => panel.id === id), id);
@@ -85,6 +85,9 @@ try {
   await page.locator('.workspace-switch [data-workspace-mode="rig"]').click(); await settle();
   assert.equal(await page.locator('.workspace').getAttribute('data-rail'), 'left', 'workspace arrangements are independent');
   viewport = await box('#viewport');
+  // Build's Structure starts folded to its strip; its button opens it as a sheet, and the sheet's tab drags it out.
+  assert.equal((await placement('structure')).dock, 'strip');
+  await page.locator('.shell-strip > [data-panel="structure"]').click(); await settle();
   await drag('#structure-tab', {x: viewport.x + viewport.width / 2, y: viewport.y + 70}, {label: 'Float here'});
   assert.equal((await placement('structure')).dock, 'float');
   assert.equal(await page.locator('#builder-outliner').isVisible(), true);

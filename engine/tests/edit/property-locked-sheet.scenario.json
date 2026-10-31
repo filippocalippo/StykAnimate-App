@@ -1,0 +1,62 @@
+{
+ "name": "property-locked-sheet",
+ "document": "sheet-locked.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 3
+     },
+     "property": "scale",
+     "tick": 0,
+     "value": 1.5
+    }
+   ]
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "scale",
+     "tick": 0,
+     "value": 1.5
+    }
+   ]
+  ],
+  [
+   "setSceneColor",
+   4279246896
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 3
+   },
+   "fx-any",
+   "radius",
+   1
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-any",
+   "radius",
+   1
+  ]
+ ]
+}

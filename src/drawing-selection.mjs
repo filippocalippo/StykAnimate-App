@@ -1,7 +1,6 @@
-import {messageError} from './localized-error.mjs';
-import {TILE,TILE_BYTES,TileStore,tileKey} from './drawing-tiles.mjs';
-import {tileChanges,tileAlignedRect} from './drawing-pixels.mjs';
-import {transformTiles,transformBounds,transformTileCoverage,inverseMatrix,TRANSFORM_BYTES} from './drawing-transform.mjs';
+import {TILE,TileStore,tileKey} from './drawing-tiles.mjs';
+import {tileAlignedRect} from './drawing-pixels.mjs';
+import {transformBounds,transformTileCoverage} from './drawing-transform.mjs';
 import {paintDrawingTiles} from './drawing-raster.mjs';
 
 export function selectionMatrix(s){const a=s.angle*Math.PI/180,c=Math.cos(a)*s.scale,n=Math.sin(a)*s.scale;const fx=s.fx??1,fy=s.fy??1;return[c*fx,n*fx,-n*fy,c*fy,s.cx+s.dx-c*fx*s.cx+n*fy*s.cy,s.cy+s.dy-n*fx*s.cx-c*fy*s.cy];}
@@ -12,25 +11,6 @@ export function selectionTiles(store,source,m,filter,{remove=false,maxBytes}={})
 }
 const canvas=(w,h)=>typeof OffscreenCanvas==='function'?new OffscreenCanvas(w,h):Object.assign(document.createElement('canvas'),{width:w,height:h});
 
-/** Commit in the pixel worker. Selected nonzero alpha is the removal coverage;
- * unselected and zero-alpha RGB bytes never round-trip through a canvas. */
-export function transformSelectedPixels(store,{source,matrix,remove=false,filter='smooth',maxBytes=TRANSFORM_BYTES}){
-  inverseMatrix(matrix);
-  const before=new Map();let bytes=store.bytes+source.bytes;
-  if(!Number.isFinite(maxBytes)||bytes>maxBytes)throw messageError(new Error(''), "errors.drawingLasso.theSelectionExceedsTheDrawingWorkingMemoryLimit", {});
-  for(const selected of source){
-    const tile=store.get(selected.tx,selected.ty);if(!tile)continue;let pixels=null;
-    for(let i=3;i<TILE_BYTES;i+=4)if(selected.pixels[i]&&tile.pixels[i]){
-      if(!pixels){
-        if(bytes+TILE_BYTES*2>maxBytes)throw messageError(new Error(''), "errors.drawingLasso.theSelectionExceedsTheDrawingWorkingMemoryLimit", {});
-        bytes+=TILE_BYTES*2;before.set(tileKey(tile.tx,tile.ty),tile.pixels.slice());pixels=store.writable(tile.tx,tile.ty).pixels;
-      }
-      pixels[i]=0;
-    }
-  }
-  if(!remove)transformTiles(source,matrix,{target:store,before,filter,maxBytes});
-  return tileChanges(store,before);
-}
 
 /** Preview surfaces share untouched cel tiles and use the existing bounded
  * raster cache/worker. Only one additional viewport canvas is composited. */

@@ -1,0 +1,69 @@
+{
+ "name": "place-imported",
+ "document": "place-imported.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 1,
+    "end": 9
+   },
+   {
+    "move": true
+   }
+  ],
+  [
+   "@seek",
+   4.5
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 0,
+    "end": 10
+   }
+  ],
+  [
+   "@seek",
+   6.5
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-1"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

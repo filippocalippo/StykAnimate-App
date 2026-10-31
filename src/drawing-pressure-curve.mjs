@@ -8,7 +8,7 @@ import {LINEAR_PRESSURE} from './drawing-brush.mjs';
  * a global pen setting (drawing-brush.mjs pressureMap applies it to every
  * brush). Like the drawing sliders, one delegated installation drives every
  * editor in `root` and updates it in place while dragging. */
-export const PRESSURE_PRESETS=[messageTuple(['soft',interfaceText("drawingPressureCurve.soft"),[.1,.5,.4,.95]], {1: {key: "drawingPressureCurve.soft", params: {}}}),messageTuple(['linear',interfaceText("drawingPressureCurve.linear"),[...LINEAR_PRESSURE]], {1: {key: "drawingPressureCurve.linear", params: {}}}),messageTuple(['firm',interfaceText("drawingPressureCurve.firm"),[.6,.05,.9,.5]], {1: {key: "drawingPressureCurve.firm", params: {}}})];
+const PRESSURE_PRESETS=[messageTuple(['soft',interfaceText("drawingPressureCurve.soft"),[.1,.5,.4,.95]], {1: {key: "drawingPressureCurve.soft", params: {}}}),messageTuple(['linear',interfaceText("drawingPressureCurve.linear"),[...LINEAR_PRESSURE]], {1: {key: "drawingPressureCurve.linear", params: {}}}),messageTuple(['firm',interfaceText("drawingPressureCurve.firm"),[.6,.05,.9,.5]], {1: {key: "drawingPressureCurve.firm", params: {}}})];
 const S=100,round=n=>Math.round(n*1000)/1000;
 const point=(x,y)=>[+(x*S).toFixed(1),+((1-y)*S).toFixed(1)];
 const same=(a,b)=>a.every((n,i)=>Math.abs(n-b[i])<.005);

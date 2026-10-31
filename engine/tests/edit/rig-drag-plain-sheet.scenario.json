@@ -1,0 +1,109 @@
+{
+ "name": "rig-drag-plain-sheet",
+ "document": "builder.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "updateSegment",
+   {
+    "length": 120
+   }
+  ],
+  [
+   "editRigJoint",
+   360,
+   110,
+   {
+    "reposition": false,
+    "stretch": true
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "static": true
+   }
+  ],
+  [
+   "beginRigDrag",
+   {
+    "bend": true
+   }
+  ],
+  [
+   "bendJoint",
+   365,
+   125
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "beginRigDrag",
+   {}
+  ],
+  [
+   "editRigJoint",
+   330,
+   120
+  ],
+  [
+   "commitRigDrag"
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "editRigJoint",
+   230,
+   260,
+   {
+    "reposition": false,
+    "stretch": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   6
+  ],
+  [
+   "beginRigDrag",
+   {
+    "bend": true
+   }
+  ],
+  [
+   "bendJoint",
+   350,
+   120
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

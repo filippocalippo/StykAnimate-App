@@ -2,67 +2,39 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Editor} from '../src/editor.mjs';
 import {DrawingResources,defaultTileBudget} from '../src/drawing-resources.mjs';
-import {DrawingStroke,filterTiles,lassoMask,tileChanges,applyTileChanges,pixelChangeBytes} from '../src/drawing-pixels.mjs';
-import {BrushStroke,normalizeBrush,dabShape} from '../src/drawing-brush.mjs';
-import {floodTiles} from '../src/drawing-fill.mjs';
-import {drawingMetadata,validateDrawings,drawingMatrix,drawingPixelMatrix,inversePoint,transformPoint,migrateDrawingFigure,EMPTY_PNG} from '../src/drawing-model.mjs';
-import {TileStore,TILE,TILE_BYTES,tileKey,tileTransparent} from '../src/drawing-tiles.mjs';
-import {encodeTileBlob,decodeTileBlob,tileStoreFromList,encodeTile,assembleTileBlobBytes,TILE_BLOB_PREFIX,TileEncodeCache} from '../src/drawing-tile-codec.mjs';
+import {applyTileChanges} from '../src/drawing-pixels.mjs';
+import {DrawingStroke} from './support/sketch-stroke.mjs';
+import {drawingEngineOperation} from '../src/engine/engine-drawing-worker.mjs';
+import {drawingMetadata,drawingMatrix,drawingPixelMatrix,inversePoint,transformPoint,migrateDrawingFigure} from '../src/drawing-model.mjs';
+import {TileStore,TILE,TILE_BYTES,tileKey} from '../src/drawing-tiles.mjs';
+import {encodeTileBlob,decodeTileBlob,tileStoreFromList,TILE_BLOB_PREFIX} from '../src/drawing-tile-codec.mjs';
 import {encodeDrawingPNG,decodeDrawingPNG} from '../src/drawing-png.mjs';
-import {encodePNGPortable} from '../src/sticknodes/decoder/png-browser.mjs';
-import {StrokeEngine} from '../src/drawing-stroke-engine.mjs';
 import {presenterScratch,levelStore,invalidateLevels,flattenedDrawingPNG} from '../src/drawing-raster.mjs';
-import {DrawingTileProvider} from '../src/drawing-provider.mjs';
 import {createDrawingFigure} from '../src/drawing-model.mjs';
 import {objectBounds} from '../src/renderer-geometry.mjs';
 import {createImageFigure} from '../src/media-authoring.mjs';
-import {buildGeometry} from '../src/pivot/geometry.mjs';
 import {createFrame,createObject} from '../src/demo.mjs';
+import {installEngineOwner} from '../src/engine/engine-owner.mjs';
 
-// In-process stand-in for drawing-worker.mjs; the browser tests exercise the
-// real worker. OffscreenCanvas ops (paste/resample/thumbnail) are not stubbed.
+// The pixel worker (drawing-worker.mjs) answered in this thread by the drawing raster engine; the
+// browser tests exercise the real worker. OffscreenCanvas ops (preview, thumbnail) are not answered.
 function workerStub(){
-  const storeOf=data=>{const store=new TileStore();for(const t of data.tiles??[])store.tiles.set(tileKey(t.tx,t.ty),{tx:t.tx,ty:t.ty,pixels:new Uint8ClampedArray(t.pixels),frozen:false,png:t.png?new Uint8Array(t.png):undefined});return store;};
-  // Mirrors drawing-worker.mjs: the encoded-tile cache survives requests so a
-  // re-publish only encodes tiles the caller resent.
-  const encodeCache=new TileEncodeCache();
   return {async request(kind,data){
-    if(kind==='decode-legacy'){
-      const crop=data.crop??{x:0,y:0},image=await decodeDrawingPNG(data.url),tiles=[];
-      for(const [tx,ty] of TileStore.tilesInRect(crop.x,crop.y,image.width,image.height)){
-        const pixels=new Uint8ClampedArray(TILE_BYTES),ox=tx*TILE-crop.x,oy=ty*TILE-crop.y;
-        for(let py=Math.max(0,-oy);py<Math.min(TILE,image.height-oy);py++)pixels.set(image.pixels.subarray(((py+oy)*image.width+Math.max(0,ox))*4,((py+oy)*image.width+Math.min(image.width,ox+TILE))*4),(py*TILE+Math.max(0,-ox))*4);
-        const tile={tx,ty,pixels};if(!tileTransparent(tile))tiles.push({tx,ty,pixels:pixels.buffer});
-      }
-      return {tiles};
-    }
-    if(kind==='decode-tiles'){
-      const decoded=await decodeTileBlob(data.url,{shard:data.shard}),levels=[];
-      if(data.levels>0&&decoded.length){const entry={store:tileStoreFromList(decoded),levels:[]};for(let k=1;k<=data.levels;k++){const level=levelStore(entry,k);levels.push([...level].map(t=>({tx:t.tx,ty:t.ty,pixels:t.pixels.slice().buffer})));if(!data.shard&&level.size<=4)break;}}
-      return {tiles:decoded.map(t=>({tx:t.tx,ty:t.ty,pixels:t.pixels.buffer,png:t.png.buffer})),levels};
-    }
-    if(kind==='encode-pngs')return {tiles:(data.tiles??[]).map(t=>({tx:t.tx,ty:t.ty,png:encodeTile(t.pixels).buffer}))};
-    if(kind==='encode-tiles'){
-      if(data.pngs?.length)encodeCache.adopt(data.celId,data.pngs);
-      const result=await encodeCache.encode(data.celId,data.keep??null,data.tiles??[],{partial:data.partial});
-      const out=result.tiles.map(t=>({tx:t.tx,ty:t.ty,png:t.png.slice().buffer}));
-      if(result.missing||data.partial)return{missing:result.missing,tiles:out,encoded:result.encoded};
-      let text='';for(let i=0;i<result.bytes.length;i+=16384)text+=String.fromCharCode(...result.bytes.subarray(i,i+16384));
-      return {tiles:out,blobUrl:TILE_BLOB_PREFIX+btoa(text),encoded:result.encoded,reused:result.reused};
-    }
-    if(kind==='fill'){
-      const store=storeOf(data),before=new Map();
-      for(const [tx,ty] of TileStore.tilesInRect(data.bounds.x,data.bounds.y,data.bounds.width,data.bounds.height))before.set(tileKey(tx,ty),store.get(tx,ty)?.pixels.slice()??null);
-      floodTiles(store,{...data.options,bounds:data.bounds,source:data.source?new Uint8ClampedArray(data.source):undefined});
-      return {tiles:tileChanges(store,before)};
-    }
-    throw new Error(`Unstubbed drawing worker op: ${kind}`);
+    let reply;await drawingEngineOperation({id:0,kind,...structuredClone(data)},message=>{reply=message;});
+    if(reply.error)throw Object.assign(new Error(reply.error),{messageKey:reply.messageKey});
+    return reply;
   },dispose(){}};
 }
+/** Opening a copy of the document: the engine checks drawing figures, tile blobs and cel identities as it opens it. */
+const opens=report=>new Editor({demo:false,layerTimeline:true}).load(structuredClone(report));
 function fixture(){
   const e=new Editor({demo:false,layerTimeline:true});e.report.canvas_width=64;e.report.canvas_height=64;
-  const resources=new DrawingResources(e.report,{worker:workerStub()});e.createDrawingLayer();return {e,resources};
+  const resources=new DrawingResources(e.report,{worker:workerStub()});
+  // The structure of a drawing layer (its cels, exposures and auto key) is the engine session's.
+  installEngineOwner(e);e.createDrawingLayer();return {e,resources};
 }
+/** The engine's geometry of `frame`, with `figure` (not in the document yet) as the figure of the object `uid` on the active layer. */
+const celGeometry=(e,frame,figure,uid)=>e._shown.previewGeometry(frame,figure,e.activeLayerId,uid);
 async function stroke(e,x=40,y=40){
   const target=e.prepareDrawingCel({pixelsPerUnit:1,world:{x:32,y:32}}),surface=await e.drawingResources.surface(target.figure);
   const brush=new DrawingStroke(surface.store,{size:8,pressureSize:false});brush.sample({x,y});
@@ -167,20 +139,6 @@ test('stroke undo restores null for newly allocated tiles and reapplies exactly'
   assert.ok(store.pixel(-70,-30)[3]>0);
 });
 
-test('floodTiles stays inside its bounds, closes gaps and allocates only touched tiles',()=>{
-  const wall=new Uint8ClampedArray(10*10*4);for(let y=0;y<10;y++)if(y!==5)wall.set([0,0,0,255],(y*10+5)*4);
-  const leaky=new TileStore();leaky.writeRect(0,0,10,10,wall);
-  floodTiles(leaky,{x:0,y:0,color:[255,0,0,255],tolerance:0,bounds:{x:0,y:0,width:10,height:10}});
-  assert.equal(leaky.pixel(0,0)[3],255);assert.equal(leaky.pixel(9,5)[3],255);assert.equal(leaky.size,1);
-  const sealed=new TileStore();sealed.writeRect(0,0,10,10,wall);
-  floodTiles(sealed,{x:0,y:0,color:[255,0,0,255],tolerance:0,gap:1,bounds:{x:0,y:0,width:10,height:10}});
-  assert.equal(sealed.pixel(9,5)[3],0);assert.equal(sealed.pixel(9,9)[3],0);
-  // A seed outside the bounds rect is rejected silently.
-  const empty=new TileStore();floodTiles(empty,{x:500,y:0,color:[1,2,3,255],bounds:{x:0,y:0,width:10,height:10}});assert.equal(empty.size,0);
-  assert.throws(()=>floodTiles(empty,{x:0,y:0,bounds:{x:0,y:0,width:8192,height:8193},maxBytes:1024*1024}),/memory/);
-  assert.equal(empty.size,0,'An over-budget fill leaves the source untouched.');
-});
-
 test('tile blobs round-trip exact RGBA at negative coordinates and skip transparent tiles',async()=>{
   const store=new TileStore(),px=new Uint8ClampedArray(TILE_BYTES);
   px.set([1,2,3,4],0);px.set([200,100,50,255],(33*64+17)*4);px.set([9,9,9,128],TILE_BYTES-4);
@@ -198,12 +156,12 @@ test('tile blobs round-trip exact RGBA at negative coordinates and skip transpar
 
 test('v1 to v2 migration preserves pixel world positions with rotated, mirrored and reversed poses',async()=>{
   const {e,resources}=fixture();try{
-    const {figure:v1}=await legacyFigure(),migrated=migrateDrawingFigure(v1,99,{bounds:{x:0,y:0,width:96,height:64}});
+    const {figure:v1}=await legacyFigure({figureTypeId:50}),migrated=migrateDrawingFigure(v1,99,{bounds:{x:0,y:0,width:96,height:64}});
     assert.equal(drawingMetadata(migrated).version,2);assert.ok(/^cel-/.test(drawingMetadata(migrated).celId));
     for(const mirror of [0,1])for(const reverse of [0,1]){
       const object={...createObject(v1,7,0,0),angle_rad:.8,angles:[.8],scale:1.5,image_text_flags:0};
       for(const f of [v1,migrated])f.segments[0].extra_u8_a=reverse,f.segments[0].extra_u8_b=mirror;
-      const item=f=>buildGeometry({...e.report,figure_types:[f]},createFrame([{...object,figure_type_id:f.figure_type_id}])).drawables[0];
+      const item=f=>celGeometry(e,createFrame([{...object,figure_type_id:f.figure_type_id}]),f,7).drawables[0];
       const a=transformPoint(drawingMatrix(item(v1)),{x:50.25,y:60.75}),b=transformPoint(drawingPixelMatrix(item(migrated)),{x:50.25,y:60.75});
       assert.ok(Math.hypot(a.x-b.x,a.y-b.y)<1e-8,`mirror=${mirror} reverse=${reverse}`);
     }
@@ -220,7 +178,7 @@ test('v1 cels decode into tiles at crop offsets through the resource store',asyn
   }finally{resources.dispose();}
 });
 
-test('copyDrawingFigure plus a resource fork shares tiles until only the edited tile diverges',async()=>{
+test('an extended cel forks its resource and shares tiles until only the edited tile diverges',async()=>{
   const {e,resources}=fixture();try{
     const {target,surface}=await stroke(e);e.extendDrawing(undefined,9);e.seek(5);e.drawingKey();const copy=e.drawingTarget();
     assert.notEqual(drawingMetadata(copy.figure).celId,drawingMetadata(target.figure).celId);
@@ -261,18 +219,18 @@ test('checkHistory rejects tile work that would exceed the resident budget',asyn
   }finally{resources.dispose();}
 });
 
-test('validateDrawings accepts v1 and v2 figures and rejects malformed tile blobs',async()=>{
+test('opening accepts v1 and v2 figures and rejects malformed tile blobs',async()=>{
   const {e,resources}=fixture();try{
     await stroke(e);await resources.flush();
-    validateDrawings(e.report);
-    const {figure:v1}=await legacyFigure({figureTypeId:88});e.report.figure_types.push(v1);validateDrawings(e.report);
+    opens(e.report);
+    const {figure:v1}=await legacyFigure({figureTypeId:88});e.report.figure_types.push(v1);opens(e.report);
     const figure=e.drawingTarget().figure,asset=figure.image_assets[0];
     assert.ok(asset.styk_tiles?.startsWith(TILE_BLOB_PREFIX));
-    const bad=structuredClone(figure);bad._styk.drawing.celId='cel-bad-2';bad.image_assets[0].styk_tiles='data:image/png;base64,AAAA';
-    e.report.figure_types.push(bad);assert.throws(()=>validateDrawings(e.report),/tile blob/);e.report.figure_types.pop();
-    const dup=structuredClone(figure);e.report.figure_types.push(dup);assert.throws(()=>validateDrawings(e.report),/unique/);e.report.figure_types.pop();
+    const bad=structuredClone(figure);bad.figure_type_id=997;bad._styk.drawing.celId='cel-bad-2';bad.image_assets[0].styk_tiles='data:image/png;base64,AAAA';
+    e.report.figure_types.push(bad);assert.throws(()=>opens(e.report),/tile blob/);e.report.figure_types.pop();
+    const dup=structuredClone(figure);dup.figure_type_id=998;e.report.figure_types.push(dup);assert.throws(()=>opens(e.report),/unique/);e.report.figure_types.pop();
     drawingMetadata(figure).bounds={x:0,y:0,width:Number.MAX_SAFE_INTEGER,height:1};
-    assert.throws(()=>validateDrawings(e.report),/metadata/);
+    assert.throws(()=>opens(e.report),/metadata/);
   }finally{resources.dispose();}
 });
 
@@ -300,24 +258,8 @@ test('drawing target and atomic lock checks reject before mutation',()=>{
     e.seek(20,{allowBeyondEnd:true});assert.throws(()=>e.prepareDrawingCel(),/Blank drawing/);
     const second=e.createDrawingLayer('Second');e.setLayerLocked(second.id,true);const before=e.serialize();
     assert.throws(()=>e.drawingKey(['layer-2',second.id],0,{blank:true}),/unlock/i);assert.deepEqual(e.serialize(),before);
-    assert.throws(()=>e.sheetAssignFigures([],second.id),/drawing/i);
+    assert.throws(()=>e.assignFiguresToLayer([1],second.id),/drawing/i);
   }finally{resources.dispose();}
-});
-test('stroke opacity caps overlapping dabs; cancellation and transparent erasing preserve exact history',()=>{
-  const store=new TileStore(),b=new DrawingStroke(store,{size:20,opacity:.5,flow:1,pressureSize:false});
-  for(let i=0;i<8;i++)b.dab({x:20,y:20});assert.equal(store.pixel(20,20)[3],128);
-  b.cancel();assert.equal(store.size,0);
-  const full=new Uint8ClampedArray(64*64*4).fill(255);store.writeRect(0,0,64,64,full);
-  const eraser=new DrawingStroke(store,{size:20,opacity:.5,erase:true,pressureSize:false});for(let i=0;i<8;i++)eraser.dab({x:20,y:20});assert.equal(store.pixel(20,20)[3],128);
-  const tiles=eraser.finish();applyTileChanges(store,tiles,'before');assert.deepEqual(store.readRect(0,0,64,64),full);
-});
-test('long strokes spanning tiles are never refused; rollback restores every touched tile',()=>{
-  const store=new TileStore(),stroke=new DrawingStroke(store,{size:8,maxBytes:33088});stroke.sample({x:10,y:20});
-  // Midpoint interpolation lags half a segment: the second tile is touched
-  // once the next push curves through it. The former undo-budget throw is
-  // gone: authored strokes always finish, and cancel() still restores.
-  stroke.sample({x:100,y:20});stroke.sample({x:190,y:20});
-  assert.ok(store.size>=2);stroke.cancel();assert.equal(store.size,0);
 });
 test('an unstabilized jittery stroke paints a continuous curve through its corner',()=>{
   const store=new TileStore(),s=new DrawingStroke(store,{size:8,color:[0,0,0],pressureSize:false,stabilization:0,spacingRatio:.2});
@@ -353,12 +295,9 @@ test('the stroke ends exactly on the final input at any stabilization',()=>{
     assert.ok(hit>200,`stabilization ${stabilization} endpoint dab at the last sample`);
   }
 });
-test('undo and redo retain a shared history byte budget',async()=>{
-  const {e,resources}=fixture();try{await stroke(e);const bytes=e.historySize;e.undo();assert.equal(e.historySize,bytes);e.redo();assert.equal(e.historySize,bytes);e.undo();const redo=e._redo.reduce((n,c)=>n+c.bytes,0);e.renameLayer(e.activeLayerId,'Ink');assert.equal(e.historySize,bytes-redo+e._undo.at(-1).bytes);}finally{resources.dispose();}
-});
 test('painting an existing cel does not publish structural timeline changes',async()=>{
   const {e,resources}=fixture();try{await stroke(e);const events=[];e.addEventListener('change',event=>events.push(event.detail));await stroke(e,80);
-    assert.equal(e._undo.at(-1).kind,'drawing-pixels');assert.ok(events.some(event=>event.drawing));assert.ok(events.every(event=>!event.structural&&!event.timing));
+    assert.equal(e.undoLabel,'Brush stroke');assert.ok(events.some(event=>event.drawing));assert.ok(events.every(event=>!event.structural&&!event.timing));
     e.undo();e.redo();assert.ok(events.every(event=>!event.structural&&!event.timing));
   }finally{resources.dispose();}
 });
@@ -369,19 +308,7 @@ test('sprite mapping inverts scale, rotation, mirror, reverse and crop anchor',(
   }
 });
 test('malformed and duplicate drawing metadata is rejected',async()=>{
-  const {e,resources}=fixture();try{const {target}=await stroke(e);validateDrawings(e.report);const copy=structuredClone(target.figure);e.report.figure_types.push(copy);assert.throws(()=>validateDrawings(e.report),/unique/);e.report.figure_types.pop();drawingMetadata(e.report.figure_types.at(-1)).bounds={x:0,y:0,width:0,height:1};assert.throws(()=>validateDrawings(e.report),/metadata/);}finally{resources.dispose();}
-});
-test('pressure release cannot remove paint laid earlier in the same stroke',()=>{
-  const store=new TileStore(),b=new DrawingStroke(store,{size:16,pressureSize:false,pressureOpacity:true,flow:1});
-  b.dab({x:16,y:16,pressure:1});const before=store.readRect(0,0,32,32);b.dab({x:16,y:16,pressure:.1});assert.deepEqual(store.readRect(0,0,32,32),before);
-});
-test('clipboard captures pending pixels once and remains independent of later source edits',async()=>{
-  const {e,resources}=fixture();try{
-    await stroke(e);e.sheetCopyFrames([e.activeLayerId],0,0);const source=e.drawingTarget(),original=storePixels(resources.entry(source.figure).store);
-    await stroke(e,80);const layer=e.createDrawingLayer('Pasted');e.sheetPasteFrames([layer.id],0);const pasted=await resources.surface(e.drawingTarget().figure);
-    assert.deepEqual(storePixels(pasted.store),original);assert.notEqual(e.drawingTarget().figure._styk.drawing.celId,source.figure._styk.drawing.celId);
-    await stroke(e,100);assert.notDeepEqual(storePixels(resources.entry(source.figure).store),storePixels(pasted.store));
-  }finally{resources.dispose();}
+  const {e,resources}=fixture();try{const {target}=await stroke(e);opens(e.report);const copy=structuredClone(target.figure);copy.figure_type_id=999;e.report.figure_types.push(copy);assert.throws(()=>opens(e.report),/unique/);e.report.figure_types.pop();drawingMetadata(e.report.figure_types.at(-1)).bounds={x:0,y:0,width:0,height:1};assert.throws(()=>opens(e.report),/metadata/);}finally{resources.dispose();}
 });
 test('history restores tile snapshots synchronously after a published store is evicted',async()=>{
   const {e,resources}=fixture();try{
@@ -390,25 +317,6 @@ test('history restores tile snapshots synchronously after a published store is e
     e.undo();const restored=await resources.surface(e.drawingTarget().figure);assert.deepEqual(storePixels(restored.store),first);
     e.redo();assert.notDeepEqual(storePixels(restored.store),first);
   }finally{resources.dispose();}
-});
-test('drawing onion samples skip the current held cel and retain frame-mode sampling',async()=>{
-  const {drawingOnionSamples}=await import('../src/onion-skin.mjs');const {e,resources}=fixture();try{await stroke(e);e.extendDrawing(undefined,9);e.seek(5);e.drawingKey();e.seek(7);
-    const settings={onionMode:'keys',onionBefore:2,onionAfter:2,onionStep:1};assert.deepEqual(drawingOnionSamples(e,settings).map(s=>s.tick),[0]);assert.deepEqual(drawingOnionSamples(e,{...settings,onionMode:'frames'}),[]);
-  }finally{resources.dispose();}
-});
-test('drawing onion samples show the nearest drawings from blank frames and past the layer end',async()=>{
-  const {drawingOnionSamples}=await import('../src/onion-skin.mjs'),{sheetKeyAt}=await import('../src/layer-sheet.mjs');
-  const e={tick:0,layers:[{id:'d',drawing:{version:1},visible:true}],report:{_styk:{layerSheet:{tracks:{d:{end:6,keys:[{tick:0,value:{frameId:'a'}},{tick:1,value:{frameId:null}},{tick:2,value:{frameId:'b'}},{tick:3,value:{frameId:null}},{tick:4,value:{frameId:null}}]}}}}}};
-  const ticks=(tick,settings={})=>{e.tick=tick;return drawingOnionSamples(e,{onionMode:'keyframes',onionBefore:2,onionAfter:2,onionStep:1,...settings}).map(s=>[s.direction,s.tick,s.distance]);};
-  assert.equal(sheetKeyAt(e.report._styk.layerSheet.tracks.d,4).index,4);
-  // Blank keys are skipped instead of using up the onion range.
-  assert.deepEqual(ticks(4),[[-1,2,1],[-1,0,2]]);
-  assert.deepEqual(ticks(1),[[-1,0,1],[1,2,1]]);
-  // Past the layer end, the last drawing is the nearest one before.
-  e.report._styk.layerSheet.tracks.d.keys.splice(3);e.report._styk.layerSheet.tracks.d.end=3;
-  assert.deepEqual(ticks(5),[[-1,2,1],[-1,0,2]]);
-  assert.deepEqual(ticks(2),[[-1,0,1]]);
-  assert.deepEqual(ticks(5,{onionStep:2}),[[-1,2,1]]);
 });
 test('a replacement document disposes drawing workers and their pending state',async()=>{
   const {e,resources}=fixture();await stroke(e);e.load(new Editor({demo:false}).report);assert.equal(resources.disposed,true);assert.equal(resources.entries.size,0);
@@ -427,195 +335,16 @@ test('out-of-order encode results never replace newer committed tiles',async()=>
     assert.equal(calls,2);assert.equal(entry.published.revision,entry.revision);assert.deepEqual(storePixels(entry.store),latest);
   }finally{resources.dispose();}
 });
-test('uniform full-region fill history is compact and restores exact RGBA',()=>{
-  const store=new TileStore(),rect={x:0,y:0,width:1984,height:1152},before=new Map();
-  for(const [tx,ty] of TileStore.tilesInRect(rect.x,rect.y,rect.width,rect.height))before.set(tileKey(tx,ty),null);
-  const after=new Uint8ClampedArray(rect.width*rect.height*4);new Uint32Array(after.buffer).fill(0x7F461E5A);store.writeRect(rect.x,rect.y,rect.width,rect.height,after);
-  const tiles=tileChanges(store,before);assert.ok(pixelChangeBytes(tiles)<100000);
-  applyTileChanges(store,tiles,'before');assert.equal(store.size,0);
-  applyTileChanges(store,tiles,'after');assert.deepEqual(store.readRect(0,0,rect.width,rect.height),after);
-});
-test('whole-scene paste matches drawing tracks by kind and pads extra drawing layers',async()=>{
-  const {pasteSheetClipboard}=await import('../src/shared-clipboard.mjs');const {e,resources}=fixture(),other=new Editor({demo:false,layerTimeline:true});
-  try{
-    e.sheetCopyFrames(['scene','camera',e.activeLayerId,'layer-1'],0,0);
-    const existing=other.createDrawingLayer('Existing ink'),surplus=other.createDrawingLayer('Spare ink');
-    other._sheetClipboard={...structuredClone(e._sheetClipboard),document:null};
-    const before=other.serialize();pasteSheetClipboard(other,[],0,{wholeScene:true,insert:true});
-    assert.ok(other.getLayer(existing.id).drawing);assert.ok(other.getLayer(surplus.id).drawing);assert.equal(other.layers.filter(l=>l.drawing).length,2);
-    other.undo();assert.deepEqual(other.serialize(),before);
-  }finally{resources.dispose();other.drawingResources.dispose();}
-});
-test('high-resolution brush tips retain their logical size instead of capping at 2048 pixels',()=>{
-  const store=new TileStore(),brush=new DrawingStroke(store,{size:4096,pressureSize:false,maxBytes:256*1024*1024});
-  brush.dab({x:1100,y:1});assert.equal(store.pixel(2190,0)[3],255);
-});
 test('v2 cels place pixel (0,0) at the pointer world position independently of stage size',async()=>{
   const {e,resources}=fixture();try{
     e.report.canvas_width=8000;e.report.canvas_height=8000;
     const target=e.prepareDrawingCel({pixelsPerUnit:4,world:{x:3000,y:-100}});
     assert.equal(target.figure._styk.drawing.pixelsPerUnit,4);assert.equal(target.figure._styk.drawing.version,2);
-    const item=buildGeometry({...e.report,figure_types:[...e.report.figure_types,target.figure]},createFrame([target.object])).drawables[0];
+    const item=celGeometry(e,createFrame([target.object]),target.figure,target.object.unique_id).drawables[0];
     const origin=transformPoint(drawingPixelMatrix(item),{x:0,y:0});
     assert.ok(Math.hypot(origin.x-3000,origin.y+100)<1e-8);
-    validateDrawings({...e.report,figure_types:[...e.report.figure_types,target.figure]});
+    opens({...e.report,figure_types:[...e.report.figure_types,target.figure]});
   }finally{resources.dispose();}
-});
-
-// The stroke worker's engine runs in-process here; the browser tests exercise
-// the real worker. The driver mirrors the controller: the dab pipeline runs on
-// the caller's side, and each batch carries its dab shapes, a moved
-// provisional tail, and every store tile they reach that the worker has not
-// seen for this stroke yet. The final batch carries the dabs the pipeline
-// emits when it finishes.
-function strokeDrive(engine,id,settings,chunks,{store=new TileStore(),apply=false}={}){
-  const sent=new Set(),replies=[];let pending=[],sentTail=null;
-  const stroke=new BrushStroke(settings,shape=>pending.push(shape));
-  engine.begin(id,settings);let seq=0;
-  const flush=()=>{
-    const dabs=pending,tiles=[],tail=stroke.hasTail?stroke.tailShapes():null,sendTail=tail&&tail!==sentTail?tail:undefined;pending=[];if(tail)sentTail=tail;
-    for(const dab of [...dabs,...sendTail??[]])for(let ty=Math.floor(dab.top/TILE);ty*TILE<dab.bottom;ty++)for(let tx=Math.floor(dab.left/TILE);tx*TILE<dab.right;tx++){
-      const key=tileKey(tx,ty);if(sent.has(key))continue;sent.add(key);
-      const tile=store.get(tx,ty);tiles.push({tx,ty,pixels:tile?tile.pixels.slice().buffer:null});
-    }
-    const reply=engine.dabs(id,++seq,dabs,tiles,sendTail);replies.push(reply);
-    // Like the controller, the live store adopts every returned tile.
-    if(apply&&reply)for(const t of reply.tiles)store.set(t.tx,t.ty,new Uint8ClampedArray(t.pixels));
-  };
-  for(const samples of chunks){for(const p of samples)stroke.sample(p);flush();}
-  stroke.finish();flush();
-  return {replies,changes:engine.end(id)};
-}
-/** One dab shape at (x,y) for driving the engine directly. */
-const dabAt=(settings,x,y)=>dabShape(normalizeBrush(settings),{x,y,pressure:1});
-const replayFinal=(initial,changes)=>{const store=new TileStore();for(const [key,pixels] of initial){const [tx,ty]=key.split(',').map(Number);store.set(tx,ty,pixels);}applyTileChanges(store,changes,'after');return store;};
-const pathPoints=n=>Array.from({length:n},(_,i)=>({x:10+i*2.4,y:10+Math.sin(i/9)*40+i*1.3,pressure:.4+.6*(i%7)/6,time:i*8}));
-
-test('stroke engine batches of 1, 3 and 17 samples produce byte-identical tiles',()=>{
-  const seedStore=()=>{const store=new TileStore();const px=new Uint8ClampedArray(TILE_BYTES);for(let i=0;i<TILE*TILE;i++)px.set([30,60,90,200],i*4);store.set(1,0,px);store.set(2,1,px.slice());return store;};
-  const samples=pathPoints(51),settings={size:14,color:[200,40,80],hardness:.6,flow:.8,texture:.4,seed:9,stabilization:.3,spacingRatio:.09};
-  const chunk=n=>{const out=[];for(let i=0;i<samples.length;i+=n)out.push(samples.slice(i,i+n));return out;};
-  const initial=snapshotStore(seedStore()),results=[1,3,17,51].map(n=>{const {changes}=strokeDrive(new StrokeEngine(),'s',settings,chunk(n),{store:seedStore()});return replayFinal(initial,changes);});
-  for(const store of results.slice(1))assert.deepEqual(store.readRect(-64,-64,512,512),results[0].readRect(-64,-64,512,512));
-  assert.ok(results[0].bounds&&results[0].size>4,'expected a multi-tile stroke');
-});
-
-test('a stabilized stroke crossing four tiles leaves no gaps along its path',()=>{
-  const engine=new StrokeEngine(),settings={size:12,color:[0,0,0],stabilization:.5,spacingRatio:.08,pressureSize:false,seed:3};
-  const samples=Array.from({length:40},(_,i)=>({x:8+i*5,y:12+i*3.2,pressure:1,time:i*8}));
-  const {changes}=strokeDrive(engine,'s',settings,[samples]);
-  const store=replayFinal(new Map(),changes);
-  const near=(x,y)=>{for(let dy=-24;dy<=24;dy++)for(let dx=-24;dx<=24;dx++)if(store.pixel(Math.round(x)+dx,Math.round(y)+dy)[3]>200)return true;return false;};
-  for(let i=0;i<50;i++){const t=i/49,x=8+(8+39*5-8)*t,y=12+(12+39*3.2-12)*t;assert.ok(near(x,y),`gap near ${x},${y}`);}
-});
-
-test('a tap yields one dab and the final dab lands exactly on the last input',()=>{
-  const engine=new StrokeEngine(),settings={size:10,color:[9,9,9],pressureSize:false,spacingRatio:1,stabilization:.6,seed:1};
-  const tap=strokeDrive(engine,'tap',settings,[[{x:33,y:41,pressure:1,time:0}]]);
-  const tapStore=replayFinal(new Map(),tap.changes);
-  assert.ok(tapStore.pixel(33,41)[3]>200);
-  const drag=strokeDrive(engine,'drag',settings,[Array.from({length:6},(_,i)=>({x:20+i*30,y:20,pressure:1,time:i*16}))]);
-  const dragStore=replayFinal(new Map(),drag.changes);
-  assert.ok(dragStore.pixel(170,20)[3]>200,'the stabilized tail reaches the final input');
-});
-
-test('pencil texture is deterministic per seed and differs between seeds',()=>{
-  const samples=pathPoints(30),settings={size:16,color:[40,40,40],texture:.6,spacingRatio:.05,hardness:.8,flow:1,pressureSize:false};
-  const run=seed=>{const {changes}=strokeDrive(new StrokeEngine(),'s',{...settings,seed},[samples]);return replayFinal(new Map(),changes).readRect(0,0,256,256);};
-  assert.deepEqual(run(5),run(5));assert.notDeepEqual(run(5),run(6));
-  const flat={...settings,texture:0,seed:5};
-  assert.deepEqual(replayFinal(new Map(),strokeDrive(new StrokeEngine(),'s',flat,[samples]).changes).readRect(0,0,256,256),replayFinal(new Map(),strokeDrive(new StrokeEngine(),'s',flat,[samples]).changes).readRect(0,0,256,256));
-});
-
-test('stroke engine replies carry only tiles changed by that batch and cancel returns nothing',()=>{
-  const engine=new StrokeEngine(),settings={size:8,color:[1,2,3],pressureSize:false,seed:2};
-  const {replies}=strokeDrive(engine,'s',settings,[[{x:10,y:10,pressure:1,time:0},{x:150,y:10,pressure:1,time:8}],[{x:150,y:150,pressure:1,time:16}]]);
-  const keys=r=>new Set(r.tiles.map(t=>tileKey(t.tx,t.ty)));
-  assert.ok(keys(replies[0]).has('0,0')&&keys(replies[0]).has('1,0'));
-  // The midpoint curve from (80,10) toward (150,150) stays inside tiles
-  // 1,0/2,0/2,1: tile 0,0 is untouched by this batch.
-  assert.ok(keys(replies[1]).has('2,1')&&!keys(replies[1]).has('0,0'));
-  assert.ok(replies[0].dirty.width%64===0&&replies[0].dirty.x%64===0);
-  const small={size:8,pressureSize:false};
-  engine.begin('x',small);engine.dabs('x',1,[dabAt(small,5,5)],[{tx:0,ty:0,pixels:null}]);
-  engine.cancel('x');assert.equal(engine.end('x'),null);assert.equal(engine.dabs('x',2,[dabAt(small,9,9)],[]),null);
-  engine.begin('y',small);
-  assert.ok(engine.dabs('y',2,[dabAt(small,5,5)],[{tx:0,ty:0,pixels:null}]));assert.equal(engine.dabs('y',1,[dabAt(small,9,9)],[]),null,'out-of-order batches are ignored');
-});
-
-test('stroke engine end records equal the diff between initial and final tiles',()=>{
-  const initialStore=new TileStore(),px=new Uint8ClampedArray(TILE_BYTES);
-  for(let i=0;i<TILE*TILE;i++)px.set([200,100,50,255],i*4);initialStore.set(0,0,px);
-  const initial=snapshotStore(initialStore),samples=pathPoints(24),settings={size:18,color:[10,20,30],flow:1,seed:4,spacingRatio:.07};
-  const {changes}=strokeDrive(new StrokeEngine(),'s',settings,[samples],{store:initialStore});
-  const control=new TileStore();control.set(0,0,px.slice());
-  const brush=new DrawingStroke(control,settings);for(const p of samples)brush.sample(p);brush.finish();
-  const result=replayFinal(initial,changes);
-  assert.deepEqual(result.readRect(-64,-64,384,384),control.readRect(-64,-64,384,384));
-  applyTileChanges(result,changes,'before');
-  assert.deepEqual(result.readRect(0,0,64,64),initialStore.readRect(0,0,64,64));
-});
-
-test('fast strokes over existing artwork never wipe tiles between batches, and undo restores them',()=>{
-  // One sample per animation frame, far apart: each segment's curve crosses
-  // tiles outside both batches' sample boxes. Those tiles must be seeded.
-  for(const stabilization of [0,.6,.95]){
-    const store=new TileStore(),red=new Uint8ClampedArray([255,0,0,255]);
-    for(let ty=-1;ty<6;ty++)for(let tx=-1;tx<6;tx++)store.set(tx,ty,red);
-    const initial=snapshotStore(store),before=store.readRect(-64,-64,448,448);
-    const chunks=[[{x:10,y:10}],[{x:210,y:210}],[{x:300,y:300}],[{x:20,y:330}],[{x:330,y:15}]].map(c=>c.map((p,i)=>({...p,pressure:1,time:i})));
-    const {changes}=strokeDrive(new StrokeEngine(),'fast',{size:8,color:[0,0,0],pressureSize:false,stabilization},chunks,{store,apply:true});
-    const after=replayFinal(initial,changes),pixels=after.readRect(-64,-64,448,448);
-    // Every pixel is either untouched red or blended toward the black ink:
-    // no pixel may lose alpha, which is what a wiped tile looks like.
-    let lost=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i+3]<255||(pixels[i]>0&&pixels[i]<255&&pixels[i+1]!==0))lost++;
-    assert.equal(lost,0,`stabilization ${stabilization}: ${lost} pixels lost their artwork`);
-    let inked=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i]<40)inked++;
-    assert.ok(inked>1500,'the stroke itself painted');
-    applyTileChanges(after,changes,'before');
-    assert.deepEqual(after.readRect(-64,-64,448,448),before,'undo restores the exact artwork');
-  }
-});
-
-test('the stroke engine refuses a dab that reaches a tile it was never given',()=>{
-  const engine=new StrokeEngine(),small={size:8,pressureSize:false};engine.begin('s',small);
-  assert.throws(()=>engine.dabs('s',1,[dabAt(small,100,100)],[{tx:0,ty:0,pixels:null}]),/not loaded/);
-  engine.begin('t',small);
-  assert.ok(engine.dabs('t',1,[dabAt(small,100,100)],[{tx:1,ty:1,pixels:null}]).tiles.length===1);
-});
-
-test('dab shape bounds hold every painted pixel for jittered, scattered, elliptical, tapered and image tips',()=>{
-  for(const settings of [{size:30,texture:1,sizeJitter:.3,seed:7},{size:20,scatter:2,seed:3},{size:40,roundness:.2,angle:35,angleJitter:.5},{size:3,hardness:.2},{size:24,taperIn:40,taperOut:60},{size:36,tip:'chalk',texture:.8,grain:'paper'},{size:30,tip:'bristle',angleMode:'direction',roundness:.5}]){
-    const store=new TileStore(),brush=normalizeBrush({pressureSize:false,...settings}),stroke=new DrawingStroke(store,brush);
-    const dabs=[],pipeline=new BrushStroke(brush,d=>dabs.push(d));
-    for(let i=0;i<40;i++)pipeline.sample({x:100+i*7,y:100+Math.sin(i)*30});pipeline.finish();
-    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
-    for(const d of dabs){x0=Math.min(x0,d.left);y0=Math.min(y0,d.top);x1=Math.max(x1,d.right);y1=Math.max(y1,d.bottom);}
-    stroke.paint(dabs);const b=store.bounds;
-    assert.ok(b&&b.x>=x0&&b.y>=y0&&b.x+b.width<=x1&&b.y+b.height<=y1,JSON.stringify(settings));
-  }
-});
-
-test('brush blend modes, alpha lock and selection masks composite like Krita',()=>{
-  const paint=(settings,backdrop,{mask}={})=>{const store=new TileStore();if(backdrop)store.set(0,0,new Uint8ClampedArray(backdrop));const s=new DrawingStroke(store,{size:12,pressureSize:false,...settings},{mask});s.sample({x:32,y:32});s.finish();return store;};
-  // Normal paint over opaque grey replaces it at full opacity.
-  assert.deepEqual(paint({color:[200,0,0]},[128,128,128,255]).pixel(32,32),[200,0,0,255]);
-  // Multiply darkens by the backdrop: 200*128/255 ≈ 100.
-  assert.deepEqual(paint({color:[200,255,0],blend:'multiply'},[128,128,128,255]).pixel(32,32),[100,128,0,255]);
-  // Screen lightens.
-  assert.ok(paint({color:[200,0,0],blend:'screen'},[128,128,128,255]).pixel(32,32)[0]>200);
-  // Behind never covers opaque artwork but fills transparent pixels.
-  assert.deepEqual(paint({color:[0,0,255],blend:'behind'},[128,128,128,255]).pixel(32,32),[128,128,128,255]);
-  assert.deepEqual(paint({color:[0,0,255],blend:'behind'},null).pixel(32,32),[0,0,255,255]);
-  // Color keeps the backdrop's luminosity with the brush's hue.
-  const colored=paint({color:[255,0,0],blend:'color'},[128,128,128,255]).pixel(32,32);assert.ok(colored[0]>colored[1]&&Math.abs(.3*colored[0]+.59*colored[1]+.11*colored[2]-128)<2);
-  // Alpha lock preserves alpha, recolours only existing pixels, skips empty tiles.
-  assert.deepEqual(paint({color:[0,255,0],alphaLock:true},[10,10,10,100]).pixel(32,32),[0,255,0,100]);
-  assert.equal(paint({color:[0,255,0],alphaLock:true},null).size,0);
-  // A selection mask clips coverage to the selected pixels only.
-  const mask={x:0,y:0,width:32,height:64,mask:new Uint8Array(32*64).fill(1)};
-  const masked=paint({color:[0,0,0]},null,{mask});
-  assert.equal(masked.pixel(34,32)[3],0);assert.equal(masked.pixel(30,32)[3],255);
 });
 
 test('an elliptical tip follows its fixed angle and the stroke direction',()=>{
@@ -720,32 +449,6 @@ test('memory pressure evicts the cels farthest from the playhead before recently
     assert.equal(resources.entry(figures[3]).store,null,'the far cel is evicted first');
     assert.ok(resources.entry(figures[1]).store&&resources.entry(figures[0]).store,'cels beside the playhead stay resident');
   }finally{resources.dispose();}
-});
-
-test('the smudge brush drags colour, batches deterministically and undoes exactly',()=>{
-  const seed=()=>{const store=new TileStore();for(let ty=0;ty<2;ty++){store.set(0,ty,new Uint8ClampedArray([255,0,0,255]));store.set(1,ty,new Uint8ClampedArray([0,0,255,255]));}return store;};
-  const samples=Array.from({length:24},(_,i)=>({x:20+i*4,y:64,pressure:1,time:i}));
-  const settings={size:20,hardness:.5,blend:'smudge',smudgeLength:.9,pressureSize:false,spacingRatio:.1,color:[0,0,0]};
-  const runs=[1,5,24].map(n=>{const store=seed(),initial=snapshotStore(store),chunks=[];for(let i=0;i<samples.length;i+=n)chunks.push(samples.slice(i,i+n));const {changes}=strokeDrive(new StrokeEngine(),'s',settings,chunks,{store});return {result:replayFinal(initial,changes),changes,initial};});
-  for(const r of runs.slice(1))assert.deepEqual(r.result.readRect(0,0,128,128),runs[0].result.readRect(0,0,128,128));
-  const pulled=runs[0].result.pixel(80,64);assert.ok(pulled[0]>100&&pulled[2]<200,'red is dragged into the blue half');
-  assert.deepEqual(runs[0].result.pixel(120,10),[0,0,255,255],'untouched paint stays');
-  applyTileChanges(runs[0].result,runs[0].changes,'before');assert.deepEqual(runs[0].result.readRect(0,0,128,128),seed().readRect(0,0,128,128));
-  // Colour rate mixes the brush colour into the carried paint.
-  const mix=seed(),s=new DrawingStroke(mix,{...settings,colorRate:.6,color:[0,255,0]});for(const p of samples)s.sample(p);s.finish();
-  assert.ok(mix.pixel(80,64)[1]>80,'colour rate adds the brush colour');
-});
-
-test('drawing filters blur premultiplied, adjust colour and respect the selection',()=>{
-  const make=()=>{const store=new TileStore(),px=new Uint8ClampedArray(TILE_BYTES);for(let y=0;y<64;y++)for(let x=0;x<32;x++)px.set([200,40,40,255],(y*64+x)*4);store.set(0,0,px);return store;};
-  const bounds={x:-16,y:-16,width:96,height:96};
-  const blurred=make();filterTiles(blurred,{bounds,kind:'blur',radius:6});
-  const edge=blurred.pixel(33,32);assert.ok(edge[3]>20&&edge[3]<200,'blur softens the edge');assert.deepEqual(edge.slice(0,3),[200,40,40],'transparent pixels never darken the colour');
-  const hue=make();filterTiles(hue,{bounds,kind:'hsl',hue:120});assert.deepEqual(hue.pixel(5,5),[40,200,40,255]);assert.equal(hue.pixel(50,5)[3],0);
-  const inv=make();filterTiles(inv,{bounds,kind:'invert'});assert.deepEqual(inv.pixel(5,5),[55,215,215,255]);
-  const masked=make(),mask={x:0,y:0,width:16,height:64,mask:new Uint8Array(16*64).fill(1)};filterTiles(masked,{bounds,kind:'invert',mask});
-  assert.deepEqual(masked.pixel(5,5),[55,215,215,255]);assert.deepEqual(masked.pixel(20,5),[200,40,40,255],'pixels outside the selection keep their exact bytes');
-  const tone=make();filterTiles(tone,{bounds,kind:'brightness',brightness:20,contrast:0});assert.equal(tone.pixel(5,5)[0],251);
 });
 
 // Phase 3: mip levels, tile-anchored scratch, budgets and the shared provider.
@@ -890,7 +593,7 @@ test('a stroke over the remaining tile budget evicts clean stores instead of thr
   const e=new Editor({demo:false,layerTimeline:true});e.report.canvas_width=64;e.report.canvas_height=64;
   const resources=new DrawingResources(e.report,{worker:workerStub(),tileBytes:4*TILE_BYTES});
   try{
-    e.createDrawingLayer();
+    installEngineOwner(e);e.createDrawingLayer();
     const t1=e.prepareDrawingCel({pixelsPerUnit:1,world:{x:32,y:32}}),s1=await resources.surface(t1.figure);
     const b1=new DrawingStroke(s1.store,{size:8,pressureSize:false});b1.sample({x:40,y:40});e.commitDrawingPixels(t1,b1.finish());
     await resources.flush();
@@ -900,6 +603,8 @@ test('a stroke over the remaining tile budget evicts clean stores instead of thr
     const t2=e.prepareDrawingCel({pixelsPerUnit:1,world:{x:32,y:32}}),s2=await resources.surface(t2.figure);
     // Four touched tiles + the resident cel exceed the 4-tile budget: the
     // clean store must evict rather than rejecting the edit.
+    // The pointer holds the cel it paints on until the commit, as the controller does.
+    s2.pinned=true;
     const b2=new DrawingStroke(s2.store,{size:48,pressureSize:false});
     b2.sample({x:32,y:32});b2.sample({x:230,y:32});
     e.commitDrawingPixels(t2,b2.finish());
@@ -938,57 +643,20 @@ test('forking a cel does not double-count copy-on-write tiles in the byte stats'
   }finally{resources.dispose();}
 });
 
-test('the drawing provider decodes published blobs and evicts LRU over budget',async()=>{
-  const store=new TileStore();store.set(-1,0,new Uint8ClampedArray([7,8,9,200]));store.set(3,3,new Uint8ClampedArray([4,5,6,255]));
-  const figure=id=>{const f=createDrawingFigure({celId:id});f._styk.drawing.revision=1;f._styk.drawing.bounds={...store.bounds};return f;};
-  const blob=await encodeTileBlob(store);
-  const provider=new DrawingTileProvider({budgetBytes:4*TILE_BYTES});
-  try{
-    const [a,b,c]=[figure('cel-a'),figure('cel-b'),figure('cel-c')];
-    a.image_assets[0].styk_tiles=blob;b.image_assets[0].styk_tiles=blob;c.image_assets[0].styk_tiles=blob;
-    await provider.prepare([a]);assert.equal(provider.presenter(a).store.pixel(-32,5)[3],200);
-    assert.equal(provider.presenter(a).store.tileBounds.x,-64);
-    await provider.prepare([b]);await provider.prepare([c]);
-    assert.equal(provider.presenter(a),null,'LRU eviction released the oldest cel');
-    assert.ok(provider.presenter(b)?.store&&provider.presenter(c)?.store);
-    assert.ok(provider.bytes<=provider.budgetBytes);
-    // A matching revision is a cache hit; a stale revision decodes again.
-    await provider.prepare([b]);b._styk.drawing.revision=2;await provider.prepare([b]);
-    assert.equal(provider.entries.get('cel-b').revision,2);
-  }finally{provider.dispose();}
-});
-
-test('the drawing provider never serves a superseded revision',async()=>{
-  const store=new TileStore();store.set(0,0,new Uint8ClampedArray([7,8,9,255]));
-  const blob=await encodeTileBlob(store);
-  const provider=new DrawingTileProvider();
-  try{
-    const figure=createDrawingFigure({celId:'cel-gate'});
-    figure._styk.drawing.revision=1;figure._styk.drawing.bounds={...store.bounds};figure.image_assets[0].styk_tiles=blob;
-    await provider.prepare([figure]);
-    assert.equal(provider.presenter(figure)?.store?.pixel(5,5)?.[3],255);
-    // A patch bumps the figure's revision before the worker re-decodes; the
-    // stale store must not answer bounds or paint queries in between.
-    figure._styk.drawing.revision=2;
-    assert.equal(provider.presenter(figure),null);
-    await provider.prepare([figure]);
-    assert.equal(provider.presenter(figure)?.revision,2);
-    assert.equal(provider.presenter(figure)?.store?.pixel(5,5)?.[3],255);
-  }finally{provider.dispose();}
-});
-
 test('a v2 cel world bounds equal its tile bounds through drawingPixelMatrix',()=>{
-  const figure=createDrawingFigure({celId:'cel-bounds'});
+  const {e,resources}=fixture();try{
+  const figure=createDrawingFigure({celId:'cel-bounds',figureTypeId:60});
   // Tile bounds that also cover the segment endpoints, which objectBounds
   // unions with the image quad for every figure.
   figure._styk.drawing.bounds={x:-64,y:-64,width:384,height:192};
   const object=createObject(figure,7,120,-40,{scale:1.5});
-  const item=buildGeometry({figure_types:[figure],canvas_width:640,canvas_height:480},createFrame([object])).drawables[0];
+  const item=celGeometry(e,createFrame([object]),figure,7).drawables[0];
   const bounds=objectBounds([item],{}),matrix=drawingPixelMatrix(item),b=figure._styk.drawing.bounds;
   const corners=[[b.x,b.y],[b.x+b.width,b.y],[b.x,b.y+b.height],[b.x+b.width,b.y+b.height]].map(([x,y])=>transformPoint(matrix,{x,y}));
   const x0=Math.min(...corners.map(p=>p.x)),y0=Math.min(...corners.map(p=>p.y)),x1=Math.max(...corners.map(p=>p.x)),y1=Math.max(...corners.map(p=>p.y));
   // objectBounds adds a 3px guard pad around painted geometry.
   assert.deepEqual(bounds,{x:Math.floor(x0-3),y:Math.floor(y0-3),width:Math.ceil(x1+3)-Math.floor(x0-3),height:Math.ceil(y1+3)-Math.floor(y0-3)});
+  }finally{resources.dispose();}
 });
 
 test('flattening a tile store yields a PNG at source resolution with source-space anchors',async()=>{
@@ -1026,28 +694,6 @@ test('publication re-encodes only changed tiles and resends PNGs the worker cach
     const decoded=await decodeTileBlob(figure.image_assets[0].styk_tiles);
     assert.equal(decoded.length,entry.store.size);
     for(const t of decoded)assert.deepEqual([...t.pixels],[...entry.store.get(t.tx,t.ty).pixels]);
-  }finally{resources.dispose();}
-});
-
-test('an edit larger than the remaining history evicts older commands; oversized edits still apply with exact undo',async()=>{
-  const {e,resources}=fixture();try{
-    await stroke(e);const firstBytes=e._undo.at(-1).bytes;
-    const dab=x=>{const t=e.drawingTarget(),surface=resources.entry(t.figure);const b=new DrawingStroke(surface.store,{size:8,pressureSize:false});b.sample({x,y:40});e.commitDrawingPixels(t,b.finish());return e._undo.at(-1).bytes;};
-    const strokeBytes=dab(100);dab(200);
-    // Budget fits the creation batch plus two strokes, not three.
-    e.historyBytes=firstBytes+2*strokeBytes+64;
-    const before=e.revision;dab(300);
-    assert.equal(e._undo.length,3,'the creation command was evicted, not rejected');
-    assert.ok(e.historySize<=e.historyBytes);assert.ok(e.revision>before);
-    e.undo();e.undo();assert.equal(e._undo.length,1,'undo stops at the evicted boundary');
-    // An edit larger than the soft budget still applies and keeps an exact
-    // record; eviction — never rejection — bounds history memory.
-    e.historyBytes=64;
-    const tiles=[{tx:9,ty:9,before:null,after:new Uint8ClampedArray(TILE_BYTES).fill(255)},{tx:10,ty:9,before:null,after:new Uint8ClampedArray(TILE_BYTES).fill(255)}];
-    e.commitDrawingPixels(e.drawingTarget(),tiles);
-    assert.equal(e._undo.at(-1).kind,'drawing-pixels');
-    assert.equal(resources.entry(e.drawingTarget().figure).store.get(9,9)?.pixels.length,TILE_BYTES);
-    e.undo();assert.equal(resources.entry(e.drawingTarget().figure).store.get(9,9),undefined);
   }finally{resources.dispose();}
 });
 
@@ -1160,7 +806,7 @@ test('sparse distant marks retain valid metadata and exact tiles after publicati
   const {e,resources}=fixture();try{
     const target=e.prepareDrawingCel({pixelsPerUnit:1});await resources.surface(target.figure);
     e.commitDrawingPixels(target,[{tx:0,ty:0,before:null,after:new Uint8ClampedArray([255,0,0,255])},{tx:300,ty:300,before:null,after:new Uint8ClampedArray([0,0,255,255])}]);
-    await resources.flush();validateDrawings(e.report);
+    await resources.flush();opens(e.report);
     const copy=new Editor({demo:false,layerTimeline:true});copy.load(structuredClone(e.report));
     const figure=copy.drawingTarget().figure,tiles=await decodeTileBlob(figure.image_assets[0].styk_tiles);
     assert.equal(tiles.length,2);assert.equal(drawingMetadata(figure).bounds.width,19264);
@@ -1184,33 +830,6 @@ test('copy after undo of an evicted cel captures pending pixels independently',a
   }finally{resources.dispose();}
 });
 
-test('pressure-aware spacing keeps light ink and pressure ramps continuous across batches',()=>{
-  for(const pressure of [.05,.1,.5]){
-    const store=new TileStore(),s=new DrawingStroke(store,{size:200,spacingRatio:.08,pressureSize:true});
-    for(let x=32;x<=512;x++)s.sample({x,y:32,pressure});s.finish();
-    for(let x=48;x<496;x++)assert.ok(store.pixel(x,32)[3]>0,`pressure ${pressure}, x ${x}`);
-  }
-  const points=Array.from({length:100},(_,i)=>({x:32+i*3,y:32,pressure:.05+.9*Math.sin(i/99*Math.PI)**2}));
-  const a=new StrokeEngine(),b=new StrokeEngine(),settings={size:100,spacingRatio:.08};a.begin(1,settings);b.begin(1,settings);
-  const dabs=[],pipeline=new BrushStroke(settings,p=>dabs.push(p));points.forEach(p=>pipeline.sample(p));pipeline.finish();
-  const tiles=new Map();for(const p of dabs)for(const [tx,ty] of TileStore.tilesInRect(p.left,p.top,p.right-p.left,p.bottom-p.top))tiles.set(tx+','+ty,{tx,ty,pixels:null});
-  a.dabs(1,1,dabs,[...tiles.values()]);dabs.forEach((p,i)=>b.dabs(1,i+1,[p],i?[]:[...tiles.values()]));assert.deepEqual(a.end(1),b.end(1));
-});
-
-test('clipboard snapshots preserve deferred undo even when the source changes before paste',async()=>{
-  const {e,resources}=fixture(),{copyDrawingFigure}=await import('../src/drawing-model.mjs');try{
-    const t=e.prepareDrawingCel({pixelsPerUnit:1});await resources.surface(t.figure);
-    const red=new Uint8ClampedArray([255,0,0,255]),blue=new Uint8ClampedArray([0,0,255,255]);
-    e.commitDrawingPixels(t,[{tx:0,ty:0,before:null,after:red}]);
-    e.commitDrawingPixels(e.drawingTarget(),[{tx:0,ty:0,before:red,after:blue}]);await resources.flush();
-    const source=e.drawingTarget().figure;resources.entry(source).store=null;e.undo();
-    const clipboard={figures:[structuredClone(source)]};resources.captureClipboard(clipboard);e.redo();
-    const copy=copyDrawingFigure(clipboard.figures[0],999);e.report.figure_types.push(copy);resources.pasteClipboard([[clipboard.figures[0],copy]],clipboard);
-    assert.deepEqual((await resources.surface(copy)).store.pixel(0,0),[255,0,0,255]);
-    assert.deepEqual((await resources.surface(source)).store.pixel(0,0),[0,0,255,255]);
-  }finally{resources.dispose();}
-});
-
 test('a closing stroke commits to its original exposure after a view-only seek',async()=>{
   const {e,resources}=fixture();try{
     const {target}=await stroke(e);e.extendDrawing(undefined,2);e.nextDrawing(undefined,{blank:true});
@@ -1222,25 +841,6 @@ test('a closing stroke commits to its original exposure after a view-only seek',
   }finally{resources.dispose();}
 });
 
-test('a movieclip of drawings gets its own figure layer, drawing keys and cels',async()=>{
-  const {e,resources}=fixture();try{
-    const layer=e.activeLayerId;await stroke(e,20,20);e.drawingKey([layer],1,{blank:true});e.seek(1);await stroke(e,44,44);await resources.flush();
-    const parentCels=new Set(e.report.figure_types.map(f=>drawingMetadata(f)?.celId).filter(Boolean)),shownOn=(id,tick)=>{e.seek(tick);return e.evaluatedFrame.objects.filter(o=>e.layerForUid(o.unique_id)===id).length;};
-    e.seek(0);const clip=e.createMovieclip({name:'Ink',start:0,end:2,uids:[]});
-    // Inside the clip the drawings are ordinary drawing keys with their own cels.
-    const doc=clip._styk.movieclip.document,keys=doc._styk.layerSheet.tracks[layer].keys;
-    assert.equal(keys.length,2);
-    for(const key of keys){
-      const frame=doc._styk.frameSources[key.value.frameId],figure=doc.figure_types.find(f=>f.figure_type_id===frame.objects[0].figure_type_id);
-      assert.equal(frame.objects.length,1);assert.ok(drawingMetadata(figure),'each key holds a drawing cel');assert.ok(!parentCels.has(drawingMetadata(figure).celId),'the clip owns fresh cel identities');
-    }
-    // The instance sits on a new figure layer; the drawing layer keeps only drawings.
-    const owner=e.getLayer(e.layerForUid(e.selectedUid));
-    assert.ok(owner&&!owner.drawing,'the clip is on a figure layer');assert.equal(owner.name,'Ink');
-    assert.deepEqual([shownOn(layer,0),shownOn(layer,1)],[0,0],'the captured drawings leave the drawing layer');
-    e.undo();assert.ok(!e.getLayer(owner.id),'undo removes the clip layer');assert.deepEqual([shownOn(layer,0),shownOn(layer,1)],[1,1],'undo restores the drawings');
-  }finally{resources.dispose();}
-});
 test('decoded tiles keep their published PNG as bytes for republication',()=>{
   const store=tileStoreFromList([{tx:0,ty:0,pixels:new ArrayBuffer(TILE_BYTES),png:new Uint8Array([1,2,3]).buffer}]);
   const png=store.get(0,0).png;assert.ok(png instanceof Uint8Array);assert.deepEqual([...png.slice()],[1,2,3]);

@@ -506,16 +506,16 @@ try {
   });
   await step("simple-initial-reveal", async () => {
     const hidden = await page.evaluate(async () => {
-      const { SimpleTimeline } = await import("/src/simple-timeline.mjs");
-      const { Editor } = await import("/src/editor.mjs");
-      const editor = new Editor({ demo: true, layerTimeline:true });
+      const { SheetFilmstrip } = await import("/src/sheet-filmstrip.mjs");
+      const { pageEditor } = await import("/tests/support/page-editor.mjs");
+      const editor = pageEditor({ demo: true, layerTimeline:true });
       editor.selectFrame(23);
       const host = document.createElement("div");
       host.id = "simple-hidden-mount";
       host.style.cssText =
         "position:fixed;left:20px;top:60px;width:600px;height:205px;z-index:80;display:none!important";
       document.body.append(host);
-      const ui = new SimpleTimeline(host, editor);
+      const ui = new SheetFilmstrip(host, editor);
       window.hiddenSimpleTest = { host, ui, editor };
       return ui.revealPending && ui.strip.clientWidth === 0;
     });
@@ -574,7 +574,7 @@ try {
       drag: styk.state.drag?.kind,
       dragging: !!styk.editor.dragging,
     }));
-    await page.evaluate(() => styk.state.renderer.device.destroy());
+    await page.evaluate(() => styk.state.renderer.loseDevice());
     await page.locator("#retry-renderer").waitFor({ state: "visible" });
     const lost = await page.evaluate(() => ({
       drag: styk.state.drag?.kind,
@@ -620,7 +620,7 @@ try {
     }));
     await page.keyboard.down("ArrowRight");
     const held = await page.evaluate(() => !!styk.editor.dragging);
-    await page.evaluate(() => styk.state.renderer.device.destroy());
+    await page.evaluate(() => styk.state.renderer.loseDevice());
     await page.locator("#retry-renderer").waitFor({ state: "visible" });
     await page.keyboard.up("ArrowRight");
     await settle();
@@ -681,7 +681,7 @@ try {
     await page.mouse.down();
     await page.mouse.move(x + 18, y, { steps: 5 });
     const active = await page.evaluate(() => !!styk.properties.gesture);
-    await page.evaluate(() => styk.state.renderer.device.destroy());
+    await page.evaluate(() => styk.state.renderer.loseDevice());
     await page.locator("#retry-renderer").waitFor({ state: "visible" });
     await page.mouse.up();
     await settle();
@@ -711,7 +711,7 @@ try {
       () => styk.editor.report.keyframes.length,
     );
     await page.keyboard.down("Space");
-    await page.evaluate(() => styk.state.renderer.device.destroy());
+    await page.evaluate(() => styk.state.renderer.loseDevice());
     await page.locator("#retry-renderer").waitFor({ state: "visible" });
     await page.keyboard.up("Space");
     await settle();
@@ -732,7 +732,7 @@ try {
         document.querySelector("#renderer-error").hidden,
     );
   });
-  await step("compatibility", async () => {
+  await step("webgl2-backend", async () => {
     const fallback = await browser.newPage({
       viewport: { width: 1100, height: 740 },
     });
@@ -742,28 +742,26 @@ try {
       );
       await fallback.goto(process.env.STYK_URL || "http://127.0.0.1:47831");
       await fallback.waitForFunction(() => window.styk?.ready);
+      await fallback.waitForFunction(
+        () => document.querySelector("#renderer-label")?.textContent === "WebGL2",
+      );
       const label = await fallback.locator("#renderer-label").evaluate((e) => ({
         text: e.textContent,
-        title: e.title,
         display: getComputedStyle(e).display,
         backend: styk.state.renderer.stats.backend,
       }));
       check(
-        "Unavailable WebGPU reveals stable compatibility label and reason",
-        label.text === "Compatibility mode" &&
-          label.title.includes("unavailable") &&
-          label.display !== "none" &&
-          label.backend === "Canvas 2D fallback",
+        "Without WebGPU the engine draws with WebGL2 and the status text names it",
+        label.text === "WebGL2" && label.backend === "WebGL2",
         label,
       );
       await fallback.evaluate(() => styk.editor.moveSelection(10, 0));
       await fallback.waitForTimeout(60);
       check(
-        "Compatibility label remains stable while editing",
-        (await fallback.locator("#renderer-label").textContent()) ===
-          "Compatibility mode",
+        "The backend label remains stable while editing",
+        (await fallback.locator("#renderer-label").textContent()) === "WebGL2",
       );
-      await fallback.screenshot({ path: `${out}/compatibility-1100.png` });
+      await fallback.screenshot({ path: `${out}/webgl2-1100.png` });
     } finally {
       await fallback.close();
     }

@@ -289,9 +289,9 @@ try {
   });
 
   // Styles: rest states from the tokens.
-  await inPage('Fields are 32px sunken boxes with no ring at rest; a switch is 32×18; the unit follows its value', () => {
+  await inPage('Fields are 36px sunken boxes with no ring at rest; a switch is 32×18; the unit follows its value', () => {
     const {root} = window.kitPage, field = root.querySelector('.ui-field[data-property-row="root_x"]'), style = getComputedStyle(field);
-    const box = style.blockSize === '32px' && style.boxShadow.startsWith('rgba(0, 0, 0, 0)') && style.backgroundColor !== 'rgba(0, 0, 0, 0)';
+    const box = style.blockSize === '36px' && style.boxShadow.startsWith('rgba(0, 0, 0, 0)') && style.backgroundColor !== 'rgba(0, 0, 0, 0)';
     const sw = getComputedStyle(root.querySelector('#node-is-ik'));
     const suffix = root.querySelector('[data-property-row="root_x"] .ui-field-suffix').getBoundingClientRect(), value = root.querySelector('input[data-property="root_x"]').getBoundingClientRect();
     return box && sw.inlineSize === '32px' && sw.blockSize === '18px' && suffix.left - value.right < 8 && suffix.left >= value.right - 1;

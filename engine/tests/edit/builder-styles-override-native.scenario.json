@@ -1,0 +1,54 @@
+{
+ "name": "builder-styles-override-native",
+ "document": "builder.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "color_override_raw": 2164195328
+   },
+   [
+    0
+   ]
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "color": "#00ff00"
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "opacity": 0.5
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "static": true,
+    "color": "#0000ff"
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

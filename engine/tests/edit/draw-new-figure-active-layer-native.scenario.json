@@ -1,0 +1,88 @@
+{
+ "name": "draw-new-figure-active-layer-native",
+ "document": "draw-new-figure-active-layer-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegments",
+   [
+    {
+     "type": "line",
+     "length": 31.5,
+     "angle": -0.19,
+     "thickness": 0,
+     "start": {
+      "x": -5.25,
+      "y": 11.75
+     }
+    },
+    {
+     "type": "squareLine",
+     "length": 20.1,
+     "angle": 0.07
+    },
+    {
+     "type": "circleClear",
+     "length": 0,
+     "thickness": 0
+    }
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "setLayerLocked",
+   "layer-2",
+   true
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegment",
+   {
+    "length": 5.25
+   }
+  ],
+  [
+   "setLayerLocked",
+   "layer-2",
+   false
+  ],
+  [
+   "setLayerVisible",
+   "layer-2",
+   false
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegment",
+   {
+    "length": 8.75
+   }
+  ],
+  [
+   "setLayerVisible",
+   "layer-2",
+   true
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

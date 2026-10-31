@@ -1,0 +1,36 @@
+{
+ "name": "pose-choice-mechanism-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/spatial/mesh-mechanism.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setPoseChoice",
+   "Mouth",
+   18
+  ],
+  [
+   "setPoseChoice",
+   "Mouth",
+   0
+  ],
+  [
+   "setPoseChoice",
+   "Mouth",
+   18
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

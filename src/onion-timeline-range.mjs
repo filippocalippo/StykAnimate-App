@@ -1,6 +1,7 @@
 import {appendLocalized, localizedAttribute} from './localization-bindings.mjs';
 /** Room kept between a marker and the playhead's tab, so the two never share a target. */
 const GAP=2;
+function setAttributeOnce(element,name,value){if(element.getAttribute(name)!==value)element.setAttribute(name,value);}
 
 /**
  * Onion range markers on the ruler: a bracket at each end of the range and a tinted band back to the playhead.
@@ -71,8 +72,13 @@ export class OnionTimelineRange {
   }
   update(){
     const visible=this.visible;if(this.overlay.hidden!==!visible)this.overlay.hidden=!visible;
-    if(!visible){for(const part of this.parts)this._finish(part,false);return;}
+    if(!visible){this.shown=null;for(const part of this.parts)this._finish(part,false);return;}
     const range=this.controller.snapshot(this.host.pendingScrub??undefined),cellLeft=this.edge(range.tick),cellRight=cellLeft+this.host.pxPerTick;
+    // An edit that moves nothing here (every pose of a drag) writes nothing: the markers are a function of what follows.
+    const shown=[range.tick,cellLeft,this.tabHalf,this.host.labelWidth,this.host.width,this.host.pxPerTick,range.settings.onionBeforeColor,range.settings.onionAfterColor,
+      ...this.parts.flatMap(({direction})=>{const value=range[direction];return [value.span,value.max,value.endpoint];})].join('|');
+    if(shown===this.shown)return;
+    this.shown=shown;
     const center=(cellLeft+cellRight)/2,tabLeft=center-this.tabHalf-GAP,tabRight=center+this.tabHalf+GAP;
     // The markers show over the grid only: from the label column to the grid's end (the ruler tools' column follows it).
     const clip=`xywh(${this.host.labelWidth}px 0 ${Math.max(0,this.host.width??0)}px 100%)`;if(clip!==this.clip){this.clip=clip;this.overlay.style.clipPath=clip;}
@@ -83,7 +89,8 @@ export class OnionTimelineRange {
       band.hidden=value.span===0;
       if(value.span){band.style.left=`${Math.min(outer,inner)}px`;band.style.width=`${Math.abs(inner-outer)}px`;}
       end.style.left=`${marker}px`;
-      end.setAttribute('aria-valuemin','0');end.setAttribute('aria-valuemax',String(value.max));end.setAttribute('aria-valuenow',String(value.span));
+      // Playback moves the markers every frame: write the slider's values only when they change.
+      setAttributeOnce(end,'aria-valuemin','0');setAttributeOnce(end,'aria-valuemax',String(value.max));setAttributeOnce(end,'aria-valuenow',String(value.span));
       // The slider name identifies its side; its value uses the locale's frame plural.
       localizedAttribute(end, 'aria-valuetext', 'counts.frames', {count:value.span});
       localizedAttribute(end, "title", "onionTimelineRange.dragToChange", {spanLabel:{messageKey:'counts.frames',params:{count:value.span}}});

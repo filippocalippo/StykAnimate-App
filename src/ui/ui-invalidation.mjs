@@ -23,9 +23,6 @@ import {messageError} from '../localized-error.mjs';
  *                     every frame) wakes the pass that updates it.
  *   visible           an optional () => boolean; a hidden surface stays
  *                     marked, and show(name) updates it when it shows.
- * isBlocked() (the canvas being prepared after playback) skips whole passes
- * and keeps every mark; the caller invalidates again when it unblocks.
- *
  * afterPass runs after a pass that updated at least one surface (the app
  * repaints then); a pass that only finds surfaces waiting does not call it.
  *
@@ -41,7 +38,6 @@ export function createInvalidator({
   delay = (callback, ms) => setTimeout(callback, ms),
   now = () => performance.now(),
   isPlaying = () => false,
-  isBlocked = () => false,
   afterPass = null,
   onError = error => { throw error; },
 } = {}) {
@@ -75,7 +71,6 @@ export function createInvalidator({
   };
   function pass({force = false} = {}) {
     scheduled = false;
-    if (isBlocked()) return false;
     const playing = isPlaying(), time = now();
     let due = Infinity, updated = false;
     for (const surface of surfaces) {
@@ -111,8 +106,7 @@ export function createInvalidator({
     },
     /**
      * Updates one surface now if it may (quiet, visibility, interval); otherwise it stays marked for a
-     * later pass. A direct update is the caller's own timing (the render loop's readout), so isBlocked()
-     * does not hold it back.
+     * later pass. A direct update is the caller's own timing (the render loop's readout).
      */
     update(name) {
       const surface = byName.get(name);
@@ -129,7 +123,7 @@ export function createInvalidator({
     /** A surface that became visible updates now if it was marked while hidden. */
     show(name) {
       const surface = byName.get(name);
-      if (surface?.dirty && !isBlocked() && ready(surface, isPlaying(), now(), false) === true) run(surface, now());
+      if (surface?.dirty && ready(surface, isPlaying(), now(), false) === true) run(surface, now());
     },
     isDirty: name => Boolean(byName.get(name)?.dirty),
     /** How often each surface updated, for tests and diagnostics. */

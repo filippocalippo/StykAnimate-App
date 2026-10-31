@@ -1,0 +1,80 @@
+{
+ "name": "clip-playback-live-native",
+ "document": "clip-playback-live-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginTranslationDrag",
+   "Live clip"
+  ],
+  [
+   "moveSelection",
+   4.5,
+   -2.25
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 0
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "restartMovieclip"
+  ],
+  [
+   "moveSelection",
+   2,
+   3
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "@batch",
+   "Abort timing",
+   [
+    [
+     "setMovieclipPlayback",
+     {
+      "offset": 2
+     },
+     {
+      "allFrames": true
+     }
+    ],
+    [
+     "setMovieclipPlayback",
+     {
+      "end": -1
+     },
+     {
+      "allFrames": true
+     }
+    ]
+   ]
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 1.5
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

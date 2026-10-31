@@ -44,22 +44,20 @@ async function imported(target, name) {
 }
 const renderPixels = (target) =>
   target.evaluate(async () => {
-    const { buildGeometry, drawGeometry } = await import(
-        "/src/pivot/geometry.mjs"
-      ),
-      doc = styk.editor.serialize(),
-      canvas = document.createElement("canvas");
-    canvas.width = doc.canvas_width;
-    canvas.height = doc.canvas_height;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    ctx.fillText =
-      ctx.strokeText =
-      ctx.measureText =
-        () => {
-          throw new Error("Text must use embedded vectors");
-        };
-    drawGeometry(ctx, buildGeometry(doc, styk.editor.evaluatedFrame));
-    return Array.from(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+    // The engine draws the frame on show, as an export does.
+    const { pageExporter } = await import("/tests/support/page-export.mjs"),
+      e = styk.editor,
+      width = e.report.canvas_width,
+      height = e.report.canvas_height,
+      frames = pageExporter({ width, height });
+    try {
+      await frames.load(e.report);
+      const ctx = new OffscreenCanvas(width, height).getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(await frames.renderTick(Math.floor(e.tick)), 0, 0);
+      return Array.from(ctx.getImageData(0, 0, width, height).data);
+    } finally {
+      frames.dispose();
+    }
   });
 await installProjectSavePicker(page);
 try {
@@ -175,7 +173,7 @@ try {
   check('Pivot export rejects text-run gradients instead of changing their appearance', await page.evaluate(async () => {
     const {DocumentExporter} = await import('/src/document-export.mjs');
     const exporter = new DocumentExporter();
-    try { await exporter.export(styk.editor.serialize(), {format:'piv'}); return false; }
+    try { await exporter.export(styk.editor.report, {format:'piv', revision: styk.editor.revision}); return false; }
     catch (error) { return error.message.includes('cannot represent these gradient fills'); }
     finally { exporter.dispose(); }
   }));

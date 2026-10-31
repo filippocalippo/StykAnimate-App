@@ -12,9 +12,9 @@ page.on('pageerror',e=>errors.push(e.message));
 try {
  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47841');await page.waitForFunction(()=>window.styk?.ready);
  await page.locator('[data-workspace-mode="rig"]').click();
- await page.locator('.rail-quick [data-action="zoom-selection"]').click();await settle();
+ await page.locator('.ui-quick [data-action="zoom-selection"]').click();await settle();
  const jointPoint=async index=>page.evaluate(async index=>{
-  const {worldToScreen}=await import('/src/renderer.mjs'),{editor,state}=styk;
+  const {worldToScreen}=await import('/src/renderer-geometry.mjs'),{editor,state}=styk;
   const p=worldToScreen(editor.geometry.objects.get(editor.selectedSlot).segments[index].end,{report:editor.report,frame:editor.frame,view:state.view});
   const r=document.querySelector('#viewport').getBoundingClientRect();return {x:r.x+p.x,y:r.y+p.y};
  },index);

@@ -1,0 +1,39 @@
+{
+ "name": "insert-native-repeat",
+ "document": "insert-native-repeat.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@seek",
+   2
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "@seek",
+   5
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "@seek",
+   7.75
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

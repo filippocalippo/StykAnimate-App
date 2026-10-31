@@ -1,0 +1,65 @@
+{
+ "name": "timing-locked",
+ "document": "timing-locked.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 0.625
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 1,
+    "end": 9
+   },
+   {
+    "move": true
+   }
+  ],
+  [
+   "splitMovieclip",
+   3
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 1,
+    "end": 9
+   },
+   {
+    "move": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

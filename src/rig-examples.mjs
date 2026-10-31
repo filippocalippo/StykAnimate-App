@@ -13,7 +13,7 @@ const connector=(id,a,b,span,angle=0,width=5,name='Connector',position=.5)=>line
 const stretch=(restLength,width='keep')=>({restLength,min:0,max:8,width});
 const follower=(driver,mode='stretch',influence=1)=>({follow:{driver,mode,influence}});
 
-export const CONSTRAINT_TEST_RIGS = [
+const CONSTRAINT_TEST_RIGS = [
   {id:'sliding-carriage',name:'Sliding carriage',description:'Slide the connector joint to move the carriage along its rail. The carriage remains rigid.',control:3,
     segments:()=>[line(1,0,120,Math.PI,0,'Rail start'),line(2,0,120,0,0,'Rail end'),connector(3,1,2,240,0,4,'Rail · slide me'),
       line(4,3,30,-Math.PI/2,16,'Carriage stem'),line(5,4,35,0,22,'Carriage body'),line(6,4,35,Math.PI,22,'Carriage body')]},

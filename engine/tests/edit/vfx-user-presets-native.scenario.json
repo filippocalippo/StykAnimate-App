@@ -1,0 +1,970 @@
+{
+ "name": "vfx-user-presets-native",
+ "document": "joined-chain.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "addVfxUserPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   {
+    "id": "user-preset",
+    "name": "Gradient pulse",
+    "created": 0,
+    "effects": [
+     {
+      "version": 2,
+      "id": "fx-paint",
+      "type": "tint",
+      "enabled": true,
+      "params": {
+       "color": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "mix": 0.7
+      }
+     },
+     {
+      "version": 2,
+      "id": "fx-seeded",
+      "type": "particles",
+      "enabled": true,
+      "params": {
+       "effectStrength": 1,
+       "emission": 0,
+       "rate": 6,
+       "count": 40,
+       "life": 30,
+       "look": 0,
+       "color": 6737151,
+       "size": 6,
+       "speed": 3,
+       "direction": -90,
+       "spread": 60,
+       "gravity": 0,
+       "shape": 0,
+       "radius": 0,
+       "endSize": 0.4,
+       "sizeMode": 0,
+       "variation": 0.4,
+       "drag": 0,
+       "wind": 0,
+       "turbulence": 0,
+       "flow": 0,
+       "swirl": 0,
+       "rotation": 0,
+       "spin": 0,
+       "stretch": 2,
+       "fade": 0.5,
+       "twinkle": 0,
+       "shading": 1,
+       "glow": 0,
+       "trail": 0,
+       "outline": 0,
+       "outlineColor": 1446428,
+       "outlineWidth": 2,
+       "colorMode": 0,
+       "blend": 0,
+       "space": 0,
+       "ground": 0,
+       "layer": 0,
+       "delay": 0,
+       "step": 0,
+       "seed": 1,
+       "x": 0.5,
+       "y": 0.5
+      }
+     }
+    ],
+    "strength": 0.8,
+    "fadeIn": 2,
+    "fadeOut": 3,
+    "duration": 12,
+    "offset": 2,
+    "keys": {
+     "vfx1:tint:fx-paint:color": [
+      {
+       "tick": 0,
+       "value": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "interpolation": "ease-in"
+      },
+      {
+       "tick": 6,
+       "value": 16777215,
+       "interpolation": "linear"
+      }
+     ]
+    }
+   },
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "addVfxUserPreset",
+   {
+    "kind": "scene"
+   },
+   {
+    "id": "user-preset",
+    "name": "Gradient pulse",
+    "created": 0,
+    "effects": [
+     {
+      "version": 2,
+      "id": "fx-paint",
+      "type": "tint",
+      "enabled": true,
+      "params": {
+       "color": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "mix": 0.7
+      }
+     },
+     {
+      "version": 2,
+      "id": "fx-seeded",
+      "type": "particles",
+      "enabled": true,
+      "params": {
+       "effectStrength": 1,
+       "emission": 0,
+       "rate": 6,
+       "count": 40,
+       "life": 30,
+       "look": 0,
+       "color": 6737151,
+       "size": 6,
+       "speed": 3,
+       "direction": -90,
+       "spread": 60,
+       "gravity": 0,
+       "shape": 0,
+       "radius": 0,
+       "endSize": 0.4,
+       "sizeMode": 0,
+       "variation": 0.4,
+       "drag": 0,
+       "wind": 0,
+       "turbulence": 0,
+       "flow": 0,
+       "swirl": 0,
+       "rotation": 0,
+       "spin": 0,
+       "stretch": 2,
+       "fade": 0.5,
+       "twinkle": 0,
+       "shading": 1,
+       "glow": 0,
+       "trail": 0,
+       "outline": 0,
+       "outlineColor": 1446428,
+       "outlineWidth": 2,
+       "colorMode": 0,
+       "blend": 0,
+       "space": 0,
+       "ground": 0,
+       "layer": 0,
+       "delay": 0,
+       "step": 0,
+       "seed": 1,
+       "x": 0.5,
+       "y": 0.5
+      }
+     }
+    ],
+    "strength": 0.8,
+    "fadeIn": 2,
+    "fadeOut": 3,
+    "duration": 12,
+    "offset": 2,
+    "keys": {
+     "vfx1:tint:fx-paint:color": [
+      {
+       "tick": 0,
+       "value": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "interpolation": "ease-in"
+      },
+      {
+       "tick": 6,
+       "value": 16777215,
+       "interpolation": "linear"
+      }
+     ]
+    }
+   },
+   {
+    "start": -4
+   }
+  ],
+  [
+   "addVfxUserPreset",
+   {
+    "kind": "segment",
+    "uid": 1,
+    "handleId": 22
+   },
+   {
+    "id": "user-preset",
+    "name": "Gradient pulse",
+    "created": 0,
+    "effects": [
+     {
+      "version": 2,
+      "id": "fx-paint",
+      "type": "tint",
+      "enabled": true,
+      "params": {
+       "color": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "mix": 0.7
+      }
+     },
+     {
+      "version": 2,
+      "id": "fx-seeded",
+      "type": "particles",
+      "enabled": true,
+      "params": {
+       "effectStrength": 1,
+       "emission": 0,
+       "rate": 6,
+       "count": 40,
+       "life": 30,
+       "look": 0,
+       "color": 6737151,
+       "size": 6,
+       "speed": 3,
+       "direction": -90,
+       "spread": 60,
+       "gravity": 0,
+       "shape": 0,
+       "radius": 0,
+       "endSize": 0.4,
+       "sizeMode": 0,
+       "variation": 0.4,
+       "drag": 0,
+       "wind": 0,
+       "turbulence": 0,
+       "flow": 0,
+       "swirl": 0,
+       "rotation": 0,
+       "spin": 0,
+       "stretch": 2,
+       "fade": 0.5,
+       "twinkle": 0,
+       "shading": 1,
+       "glow": 0,
+       "trail": 0,
+       "outline": 0,
+       "outlineColor": 1446428,
+       "outlineWidth": 2,
+       "colorMode": 0,
+       "blend": 0,
+       "space": 0,
+       "ground": 0,
+       "layer": 0,
+       "delay": 0,
+       "step": 0,
+       "seed": 1,
+       "x": 0.5,
+       "y": 0.5
+      }
+     }
+    ],
+    "strength": 0.8,
+    "fadeIn": 2,
+    "fadeOut": 3,
+    "duration": null,
+    "offset": 0,
+    "keys": {
+     "vfx1:tint:fx-paint:color": [
+      {
+       "tick": 0,
+       "value": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "interpolation": "ease-in"
+      },
+      {
+       "tick": 6,
+       "value": 16777215,
+       "interpolation": "linear"
+      }
+     ]
+    }
+   },
+   {
+    "start": 100
+   }
+  ],
+  [
+   "addVfxUserPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   {
+    "id": "user-preset",
+    "name": "Gradient pulse",
+    "created": 0,
+    "effects": [
+     {
+      "version": 2,
+      "id": "fx-paint",
+      "type": "tint",
+      "enabled": true,
+      "params": {
+       "color": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "mix": 0.7
+      }
+     },
+     {
+      "version": 2,
+      "id": "fx-seeded",
+      "type": "particles",
+      "enabled": true,
+      "params": {
+       "effectStrength": 1,
+       "emission": 0,
+       "rate": 6,
+       "count": 40,
+       "life": 30,
+       "look": 0,
+       "color": 6737151,
+       "size": 6,
+       "speed": 3,
+       "direction": -90,
+       "spread": 60,
+       "gravity": 0,
+       "shape": 0,
+       "radius": 0,
+       "endSize": 0.4,
+       "sizeMode": 0,
+       "variation": 0.4,
+       "drag": 0,
+       "wind": 0,
+       "turbulence": 0,
+       "flow": 0,
+       "swirl": 0,
+       "rotation": 0,
+       "spin": 0,
+       "stretch": 2,
+       "fade": 0.5,
+       "twinkle": 0,
+       "shading": 1,
+       "glow": 0,
+       "trail": 0,
+       "outline": 0,
+       "outlineColor": 1446428,
+       "outlineWidth": 2,
+       "colorMode": 0,
+       "blend": 0,
+       "space": 0,
+       "ground": 0,
+       "layer": 0,
+       "delay": 0,
+       "step": 0,
+       "seed": 1,
+       "x": 0.5,
+       "y": 0.5
+      }
+     }
+    ],
+    "strength": 0.8,
+    "fadeIn": 2,
+    "fadeOut": 3,
+    "duration": 12,
+    "offset": 2,
+    "keys": {
+     "vfx1:tint:fx-paint:color": [
+      {
+       "tick": 0,
+       "value": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "interpolation": "ease-in"
+      },
+      {
+       "tick": 6,
+       "value": 16777215,
+       "interpolation": "linear"
+      }
+     ]
+    }
+   },
+   {
+    "start": 100000000
+   }
+  ],
+  [
+   "addVfxUserPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   {
+    "id": "user-preset",
+    "name": "Gradient pulse",
+    "created": 0,
+    "effects": [
+     {
+      "version": 2,
+      "id": "fx-paint",
+      "type": "tint",
+      "enabled": true,
+      "params": {
+       "color": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "mix": 0.7
+      }
+     },
+     {
+      "version": 2,
+      "id": "fx-seeded",
+      "type": "particles",
+      "enabled": true,
+      "params": {
+       "effectStrength": 1,
+       "emission": 0,
+       "rate": 6,
+       "count": 40,
+       "life": 30,
+       "look": 0,
+       "color": 6737151,
+       "size": 6,
+       "speed": 3,
+       "direction": -90,
+       "spread": 60,
+       "gravity": 0,
+       "shape": 0,
+       "radius": 0,
+       "endSize": 0.4,
+       "sizeMode": 0,
+       "variation": 0.4,
+       "drag": 0,
+       "wind": 0,
+       "turbulence": 0,
+       "flow": 0,
+       "swirl": 0,
+       "rotation": 0,
+       "spin": 0,
+       "stretch": 2,
+       "fade": 0.5,
+       "twinkle": 0,
+       "shading": 1,
+       "glow": 0,
+       "trail": 0,
+       "outline": 0,
+       "outlineColor": 1446428,
+       "outlineWidth": 2,
+       "colorMode": 0,
+       "blend": 0,
+       "space": 0,
+       "ground": 0,
+       "layer": 0,
+       "delay": 0,
+       "step": 0,
+       "seed": 1,
+       "x": 0.5,
+       "y": 0.5
+      }
+     }
+    ],
+    "strength": 2,
+    "fadeIn": 2,
+    "fadeOut": 3,
+    "duration": 12,
+    "offset": 2,
+    "keys": {
+     "vfx1:tint:fx-paint:color": [
+      {
+       "tick": 0,
+       "value": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "interpolation": "ease-in"
+      },
+      {
+       "tick": 6,
+       "value": 16777215,
+       "interpolation": "linear"
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "addVfxUserPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   {
+    "id": "user-preset",
+    "name": "Gradient pulse",
+    "created": 0,
+    "effects": [
+     {
+      "version": 2,
+      "id": "fx-paint",
+      "type": "tint",
+      "enabled": true,
+      "params": {
+       "color": {
+        "type": "bad",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "strength": 0.8,
+    "fadeIn": 2,
+    "fadeOut": 3,
+    "duration": 12,
+    "offset": 2,
+    "keys": {
+     "vfx1:tint:fx-paint:color": [
+      {
+       "tick": 0,
+       "value": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "interpolation": "ease-in"
+      },
+      {
+       "tick": 6,
+       "value": 16777215,
+       "interpolation": "linear"
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   true
+  ],
+  [
+   "addVfxUserPreset",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   {
+    "id": "user-preset",
+    "name": "Gradient pulse",
+    "created": 0,
+    "effects": [
+     {
+      "version": 2,
+      "id": "fx-paint",
+      "type": "tint",
+      "enabled": true,
+      "params": {
+       "color": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "mix": 0.7
+      }
+     },
+     {
+      "version": 2,
+      "id": "fx-seeded",
+      "type": "particles",
+      "enabled": true,
+      "params": {
+       "effectStrength": 1,
+       "emission": 0,
+       "rate": 6,
+       "count": 40,
+       "life": 30,
+       "look": 0,
+       "color": 6737151,
+       "size": 6,
+       "speed": 3,
+       "direction": -90,
+       "spread": 60,
+       "gravity": 0,
+       "shape": 0,
+       "radius": 0,
+       "endSize": 0.4,
+       "sizeMode": 0,
+       "variation": 0.4,
+       "drag": 0,
+       "wind": 0,
+       "turbulence": 0,
+       "flow": 0,
+       "swirl": 0,
+       "rotation": 0,
+       "spin": 0,
+       "stretch": 2,
+       "fade": 0.5,
+       "twinkle": 0,
+       "shading": 1,
+       "glow": 0,
+       "trail": 0,
+       "outline": 0,
+       "outlineColor": 1446428,
+       "outlineWidth": 2,
+       "colorMode": 0,
+       "blend": 0,
+       "space": 0,
+       "ground": 0,
+       "layer": 0,
+       "delay": 0,
+       "step": 0,
+       "seed": 1,
+       "x": 0.5,
+       "y": 0.5
+      }
+     }
+    ],
+    "strength": 0.8,
+    "fadeIn": 2,
+    "fadeOut": 3,
+    "duration": 12,
+    "offset": 2,
+    "keys": {
+     "vfx1:tint:fx-paint:color": [
+      {
+       "tick": 0,
+       "value": {
+        "type": "linear",
+        "angle": 45,
+        "stops": [
+         {
+          "offset": 1,
+          "color": [
+           240.5,
+           60.2,
+           80
+          ],
+          "opacity": 0.6
+         },
+         {
+          "offset": 0,
+          "color": [
+           40,
+           120.5,
+           255
+          ],
+          "opacity": 1
+         }
+        ]
+       },
+       "interpolation": "ease-in"
+      },
+      {
+       "tick": 6,
+       "value": 16777215,
+       "interpolation": "linear"
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

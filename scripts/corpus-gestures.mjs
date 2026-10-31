@@ -5,7 +5,7 @@ import path from 'node:path';
 /** Real pointer gestures on the measured scene. Screenshots and exact pose
  * restoration stay outside timed movement samples. */
 export async function probeCorpusGestures(page,{tick,dir}){
-  const ready=()=>page.waitForFunction(()=>!styk.state.editablePreparing&&!styk.state.dirtyRender,null,{timeout:120000});
+  const ready=()=>page.waitForFunction(()=>!styk.state.dirtyRender,null,{timeout:120000});
   await page.evaluate(tick=>{styk.editor.seek(tick);styk.fit();},tick);await ready();
   await page.evaluate(()=>{
     const p=window.gestureProbe={samples:[],phase:'setup',input:0};
@@ -23,7 +23,7 @@ export async function probeCorpusGestures(page,{tick,dir}){
       const g=[...e.geometry.objects.values()].find(g=>g.segments.some(d=>!d.static&&d.length>3&&d.opacity>0));
       if(!g)return null;
       e.select(g.obj.unique_id,0);const point=g.segments.find(d=>!d.static&&d.length>3&&d.opacity>0).end;
-      const {worldToScreen}=await import('/src/renderer.mjs'),p=worldToScreen(point,{report:e.report,frame:e.frame,view:s.view,cameraEnabled:false});
+      const {worldToScreen}=await import('/src/renderer-geometry.mjs'),p=worldToScreen(point,{report:e.report,frame:e.frame,view:s.view,cameraEnabled:false});
       s.view.x+=r.width/2-p.x;s.view.y+=r.height/2-p.y;window.dispatchEvent(new Event('resize'));
       return{x:r.x+r.width/2,y:r.y+r.height/2};
     },kind);

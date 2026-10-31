@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 import {Timeline} from '../src/layer-timeline.mjs';
 
 function fixture() {
   const report = emptyDocument(), figure = report.figure_types[0];
   report.keyframes = [createFrame([1, 2, 3].map(uid => createObject(figure, uid, uid * 100, 100)), 10)];
-  const editor = new Editor({demo: false, layerTimeline: true}).load(report);
+  const editor = newOwnedEditor({demo: false, layerTimeline: true}).load(report);
   for (const name of ['Second', 'Third', 'Empty']) editor.createLayer(name);
   editor.assignFiguresToLayer([2], 'layer-2'); editor.assignFiguresToLayer([3], 'layer-3');
   editor.setActiveLayer('layer-1'); editor.select(1);

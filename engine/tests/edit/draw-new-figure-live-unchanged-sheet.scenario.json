@@ -1,0 +1,57 @@
+{
+ "name": "draw-new-figure-live-unchanged-sheet",
+ "document": "draw-new-figure-live-unchanged-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegment",
+   {
+    "length": 9.75,
+    "angle": -0.2
+   }
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegment",
+   {
+    "type": "circleClear",
+    "length": 0,
+    "thickness": 0
+   }
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

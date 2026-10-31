@@ -263,6 +263,12 @@ are not supported.
 
 ## Runtime and performance
 
+The raster work below runs in the Rust drawing engine (`styk-drawing`,
+[docs/engine/drawing.md](engine/drawing.md)): the stroke, pixel and history
+workers each load its WebAssembly module, and the controller's brush model
+computes dab shapes with it. The JavaScript raster engine it replaced is gone;
+its recorded answers are the engine's frozen test oracle.
+
 `drawing-resources.mjs` owns sparse tile stores, worker jobs and disposal for
 one report. Resident tiles are limited by a budget scaled from device memory
 (192–768 MiB; the hard ceiling for unpublished work is at least 768 MiB);
@@ -295,8 +301,7 @@ mip levels and the cel arrives display-ready at any zoom.
 Seeking prefetches the two unique neighbouring cels on each side of the
 playhead plus the current one, queued last so it wins eviction. Thumbnails
 have one worker, at most 48 queued requests and 256 small cached images;
-their pump pauses while a stroke or a scrub owns the thread. Renderer GPU
-drawing textures follow the current layout and are released with it.
+their pump pauses while a stroke or a scrub owns the thread.
 
 The selection is a polygon or bounded pixel mask on one cel (the outline). It clips stroke
 coverage in the worker and confines fills; moving, scaling or rotating
@@ -305,35 +310,31 @@ committed as one undo step. An untransformed float shows the exact stored
 pixels. Sparse worker previews preserve translucent colors and avoid allocating
 the empty space between distant selected tiles.
 
-On WebGPU every brush and the eraser — including tip shape, grain, scatter,
-pressure flow, every blend mode, alpha lock, selection clipping and smudge —
-rasterize on the GPU in the frame that receives input, and cels display from
-GPU-resident tiles; see [GPU drawing residency and brush](DRAWING-GPU.md).
-The stroke worker described below remains the Canvas 2D brush, the brush for
-selections too large for a pixel mask, and the replay path for a failed GPU
-stroke. Both commit through the same transaction and history.
+Every brush and the eraser — including tip shape, grain, scatter, pressure flow,
+every blend mode, alpha lock, selection clipping and smudge — rasterize in the
+stroke worker, which commits through the same transaction and history as every
+other pixel operation. The engine's stage draws each batch of tiles as it returns
+([live cels](engine/drawing.md#live-cels)).
 
-The brush model (`drawing-brush.mjs`) runs on the main thread and is pure
-geometry. `BrushStroke` maps input through the pen pressure curve into
-`StrokePath` (stabilization, curve joining, dab spacing and arc length), then
-`dabShape()` turns each path dab into its final tip — pressure size, tapers,
-size/opacity/angle jitter, scatter, per-dab opacity and flow, tip angle — with
-exact pixel bounds. Jitter is a hash of the stroke seed and the dab index, so a
-dab's shape never depends on painting order and the worker and the GPU brush
-receive identical shapes. Each batch seeds the stroke worker with exactly the
+The brush model (`drawing-brush.mjs` holds the settings; the engine's `BrushPath`
+the geometry) runs on the main thread and is pure geometry. `RustBrushStroke`
+maps input through the pen pressure curve into the stroke path (stabilization,
+curve joining, dab spacing and arc length), then turns each path dab into its
+final tip — pressure size, tapers, size/opacity/angle jitter, scatter, per-dab
+opacity and flow, tip angle — with exact pixel bounds. Jitter is a hash of the
+stroke seed and the dab index, so a dab's shape never depends on painting order. Each batch seeds the stroke worker with exactly the
 tiles its shapes reach, and the worker refuses a dab outside its seeded tiles
 rather than painting over a blank guess. A start taper shrinks the tip and its
 spacing over the first pixels. An end taper cannot be known until pen-up, so
 dabs within the taper length of the pen stay a provisional tail: both
-rasterizers paint it at full size into scratch coverage over the final
+the raster paints it at full size into scratch coverage over the final
 coverage every update and replace it the next, and at pen-up the tail is
 re-spaced along its path and tapered to a point. Final pixels are identical to
-painting the finished shapes once (`tests/drawing-brush.test.mjs`). A tap
+painting the finished shapes once (the stroke fixtures of `styk-drawing`). A tap
 paints a full dot whatever the tapers. Smudge keeps the round tip and has no
 end taper, because every smudge dab reads the previous one. Image tips and
-grains (`drawing-brush-textures.mjs`) are generated procedurally and
-deterministically on first use into one atlas the CPU raster and the GPU brush
-sample with the same bilinear formulas; the CPU computes grain once per tile.
+grains are generated procedurally and deterministically on first use into one
+atlas the raster samples with bilinear formulas; it computes grain once per tile.
 Symmetry feeds each mirrored sample into its own pipeline (with its own jitter
 seed) so mirrored strokes keep even spacing while sharing one coverage buffer
 and undo step.
@@ -343,18 +344,15 @@ pointer and its predicted position — on a desynchronized canvas between the
 scene and the overlay, at most every 8 ms (pens can report several hundred
 samples a second). Points closer than a CSS pixel merge and consecutive
 segments of one width share a path: a canvas call per dab once flooded the
-compositor with fine brushes and stalled every frame. The renderer records each
-presenter's `presentedStamp` when it uploads (or paints) a stamp, and a batch's
-wet segments retire one frame after their stamp is presented, so the exact
-stroke is always on screen before its preview leaves. Only brushes the preview
+compositor with fine brushes and stalled every frame. The stage records each
+cel's `presentedStamp` when a frame it drew carried the tiles of that stamp, and a
+batch's wet segments retire one frame after their stamp is presented, so the
+exact stroke is always on screen before its preview leaves. Only brushes the preview
 matches closely use it (normal blend, firm round analytic tips, flow ≥ 50%, no
 selection clip); erasing, smudging and special blends show exact pixels only.
-GPU strokes paint in the frame itself and use no wet ink.
 
-The WebGPU renderer refreshes drawing entries without re-preparing the scene:
-each entry carries its presenter and stamp, and frames without a geometry
-change re-run only entries whose pixels changed (or all of them when the view
-moved), repainting the scratch's dirty tiles and uploading that region.
+The stage hands the engine the tiles of a cel that changed, a slice of them each
+frame, so a frame without a geometry change draws only what the stroke added.
 A pointer interrupted mid-gesture (lost capture, `pointercancel`, window
 blur) finishes the gesture and keeps its ink; only Escape discards it.
 
@@ -400,9 +398,9 @@ Frame and structural commands wait for the closing stroke's pixel commit;
 view-only navigation does not discard its final worker reply. The completed
 stroke still belongs to the exposure where it started.
 
-Pixel transactions with more than 1 MiB of expanded replacement tiles prepare
+Pixel transactions with more than 4 MiB (about 256 tiles) of expanded replacement tiles prepare
 those tiles in the pixel worker before committing. The owner reserves the
-complete replacement set plus one 1 MiB input batch, protects its source stores
+complete replacement set plus one 1 MiB input batch (smaller sets apply in the commit itself, on the interface thread), protects its source stores
 from eviction, and validates every returned tile and its alpha bounds. The
 editor then adopts the prepared buffers in one synchronous transaction. History
 keeps separate, unchanged before/after buffers. Cancellation, a newer edit,
@@ -418,7 +416,8 @@ on demand in the same worker, keeping their caches for later requests. A module
 load failure releases that worker and rejects all pending requests so retrying
 can start a fresh one. This adds no extra worker or queue.
 
-Undo belongs to the editor's chronological history. Before/after tile records
+Undo belongs to the engine session's chronological history, whose entries name
+the records of the pixel history below ([docs/engine/drawing.md](engine/drawing.md#history)). Before/after tile records
 are exact; absent sides are `null` and uniform tiles use a four-byte color
 representation. Where workers and IndexedDB are available, records of at least
 64 KiB move to a session-owned disk tier. Its dedicated worker encodes, hashes
@@ -450,8 +449,8 @@ same session are reclaimed when its worker reopens the database. Without Web
 Locks, only explicit disposal deletes a session. Closing a document releases
 its cache and worker. Native saving and recovery remain self-contained.
 Desktop startup additionally clears temporary IndexedDB storage in its own
-Chromium workspace session before opening the editor, because its loopback
-origin changes between launches. Desktop preferences, recovery and library
+Chromium workspace session before opening the editor, so a launch never inherits the
+previous one's cache. Desktop preferences, recovery and library
 data use native files; they must not be placed in this temporary database tier.
 
 Fill, paste, resample and
@@ -477,7 +476,13 @@ adaptively filtered rows, whichever LZ77 can reuse more of), and decoded with
 its table-driven inflate; per-tile compression streams cost more in setup than
 the work itself. Larger images keep the native streams. The blob format and
 PNG bytes stay standard, so older files and other readers are unaffected. encoding retains dirty work for retry, and the publication debounce yields to
-active strokes and scrubbing. A gesture's pin on its tile store ends inside
+active strokes and scrubbing. Publication also pauses between batches while an
+undo or redo loads and prepares its tiles (`DrawingHistory.replaying()`): the
+replay is about to replace the revision being published, and finishing it (the
+blob's assembly in the pixel worker, then the figure update it triggers on the
+interface thread, 0.2–0.7 s on a 2,040-tile cel) would land inside the replay.
+The replayed revision publishes once the replay ends, or the unchanged one if it
+fails. A gesture's pin on its tile store ends inside
 the commit, before the change broadcast — the playback/export barriers that
 broadcast triggers always see the committed tiles, and pixel commits reach
 the playback worker as sparse figure updates instead of full snapshots.
@@ -493,16 +498,14 @@ resampling and eviction. Uncommitted preview bounds never enter this snapshot.
 
 Paused playback and scrubbing use the same lazy drawing resource owner, including
 drawings contained only in nested movieclips. Cooperative scene preparation carries
-the viewport dimensions and the live tile backend; it plans without taking ownership
-of shared GPU resources. Composite raster variants track drawing presenter stamps
+the viewport dimensions and the live tile backend. Composite raster variants track drawing presenter stamps
 and decoded stores, so completion of a decode or preview invalidates an empty raster.
 Existing cache budgets and preparation leases retain their lifetime guarantees.
 A parent caches a nested cel publication without writing back into the child definition;
 changed revisions, undo and superseded decodes replace only that cached cel.
 
-The scratch-canvas presenter below serves the Canvas 2D renderer, onion
-skins, selection previews, cels with drawable effects and a WebGPU renderer
-with GPU drawing switched off. Live drawing textures participate in the normal scene compositor, including
+The scratch-canvas presenter below serves the JavaScript painters that remain; the editing canvas is the engine's stage, which draws
+cels, onion skins and floating selections from the tiles it holds. Drawing textures participate in the normal scene compositor, including
 ordering, opacity, erasing, camera and clipping. Tiles are painted into
 tile-anchored scratch canvases; each presenter keeps a bounded LRU of them,
 and a request contained in an already-painted cover reuses it without
@@ -580,27 +583,22 @@ rig conversion or vector tracing.
 
 ## Evidence and limits
 
-Run `node --test tests/drawing.test.mjs`, `node tests/drawing.browser.mjs` and
-`node scripts/benchmark-drawing.mjs` with the local app at port 47839 (or set
+Run `node --test tests/drawing.test.mjs`; the browser suites
+(`tests/drawing-*.browser.mjs`) run against the local app at port 47839 (or set
 `STYK_URL`). See [verification report](../artifacts/drawing/VERIFICATION.md).
-`tests/drawing-gpu.browser.mjs` checks GPU/CPU brush parity, exact reduced
-levels, GPU alpha bounds, cancellation, failure replay, undo/redo, held
-erasing, zoomed-out strokes and eviction; `tests/drawing-latency.browser.mjs`
-measures input-to-frame latency (see [DRAWING-GPU.md](DRAWING-GPU.md)).
+`tests/drawing-latency.browser.mjs` measures input-to-frame latency.
 The pan, expansion and shortcut refinements have a separate regression suite:
 `node tests/drawing-ux.browser.mjs`; see its [report](../artifacts/drawing-ux/VERIFICATION.md). A run writes its
 screenshots and ux.json to the ignored `artifacts/drawing-ux-latest`; set
 `STYK_DRAWING_UX_OUT=artifacts/drawing-ux` to refresh the recorded report.
 `npm run test:drawing:desktop` paints through real input in the Electron app,
 saves natively, restarts the process and verifies every cel reopens
-pixel-identical. `npm run benchmark:drawing-load` measures a heavy workload (24
-dense 4× cels beyond the tile budget: scrubbing, playback, a large soft stroke
-and saving) against a running local app.
+pixel-identical, with live strokes, a fill that samples all layers and a
+selection moved and applied checked on the engine's stage.
 `tests/drawing-tools.browser.mjs` covers selection shapes and modes, clipped
 painting and fills, the magic wand, symmetry, straight lines, colour picking,
 brush resizing, view flipping and alpha lock through real input,
 `tests/drawing-stroke.browser.mjs` covers the worker stroke pipeline,
-`tests/drawing-render.browser.mjs` covers visible-tile rendering and seams,
 `tests/drawing-save.browser.mjs` covers save/reload/recovery fidelity and
 `tests/drawing-timeline.browser.mjs` covers cache bounding and the
 drawing-free-document overhead contract.
@@ -610,8 +608,8 @@ fill/selection/resample history, clipboard, both renderer paths and encoders.
 Mouse/browser checks and deterministic pressure tests do not certify physical
 pen drivers, input-to-photon latency or every GPU. Pen tilt steers tilt-mode tips; vector strokes and
 resolution-independent drawing are outside this implementation. Fill follows
-stage plus artwork bounds, independently of zoom. The `drawing-fill.mjs` worker
-kernel allocates masks only for reached tiles and the gap/expansion halo, so a
+stage plus artwork bounds, independently of zoom. The fill kernel (`styk-drawing`)
+allocates masks only for reached tiles and the gap/expansion halo, so a
 small enclosed fill is independent of distant artwork or total bounds area.
 Tolerance still compares premultiplied RGBA; gap closing and expansion retain
 four-neighbour distances across tile boundaries. Uniform tiles use a fast path.

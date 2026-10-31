@@ -1,0 +1,34 @@
+{
+ "name": "clip-capture-joined-channel-uid2",
+ "document": "clip-capture-joined-channel-uid2.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "createMovieclip",
+   {
+    "uids": [
+     2
+    ],
+    "start": 4,
+    "end": 16,
+    "replace": false,
+    "name": "Joined crop"
+   }
+  ],
+  [
+   "@seek",
+   7.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

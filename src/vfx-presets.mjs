@@ -20,6 +20,6 @@ export const VFX_PRESETS={
 /** Catalogue order of preset categories. */
 export const PRESET_CATEGORIES=[looks];
 /** Default length of a newly added generated effect, in frames. */
-export const GENERATOR_DURATIONS={particles:48,aura:72,beam:48,explosion:36,smoke:72};
+const GENERATOR_DURATIONS={particles:48,aura:72,beam:48,explosion:36,smoke:72};
 /** Whether a preset can be applied to this kind of target. */
 export const presetAvailable=(preset,scene,effectAvailable)=>(!preset.target||preset.target===(scene?'scene':'figure'))&&preset.effects.every(([type])=>effectAvailable(type,scene));

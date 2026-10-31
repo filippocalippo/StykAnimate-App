@@ -5,7 +5,6 @@ import {restoreClipboard} from '../src/shared-clipboard.mjs';
 import {DrawingResources} from '../src/drawing-resources.mjs';
 import {createDrawingFigure} from '../src/drawing-model.mjs';
 import {TILE_BYTES,TileStore} from '../src/drawing-tiles.mjs';
-import {filterTiles,tileChanges} from '../src/drawing-pixels.mjs';
 
 function fixture(){
   const d=Object.create(DrawingController.prototype),holds=new Map();
@@ -31,12 +30,12 @@ test('input tile copying shares one reservation across source and destination',a
 });
 
 test('small warm history keeps synchronous command behavior and avoids a pixel operation',()=>{
-  const d=fixture();d.owner.history={needsLoad:()=>false};d.editor._undo=[{}];d.editor.undo=()=>true;
+  const d=fixture();d.owner.history={needsLoad:()=>false};d.editor.historyPixels=()=>({});d.editor.undo=()=>true;
   assert.equal(d.history('undo'),true);assert.equal(d.operation,undefined);assert.equal(d.owner.busy,false);
 });
 
 test('large warm history owns the pixel-operation gate and accepts Escape cancellation',async()=>{
-  const d=fixture(),gate=deferred();d.owner.needsPreparation=()=>true;d.editor._redo=[{}];
+  const d=fixture(),gate=deferred();d.owner.needsPreparation=()=>true;d.editor.historyPixels=()=>({});
   d.editor.redo=async({signal})=>{await gate.promise;if(signal.aborted)throw new DOMException('Cancelled','AbortError');return true;};
   const pending=d.history('redo');await Promise.resolve();assert.ok(d.operation?.history);assert.equal(d.owner.busy,true);
   d.cancel();gate.resolve();await assert.rejects(pending,{name:'AbortError'});assert.equal(d.owner.busy,false);assert.equal(d.operation,null);
@@ -116,10 +115,8 @@ test('point filters reserve only intersecting tile replacements beside a larger 
   const surface={store},budget=2*TILE_BYTES+mask.mask.byteLength;
   Object.assign(d.owner,{hardBudget:store.bytes+budget,stats:{bytes:store.bytes,historyBytes:0,deferredBytes:0,workingBytes:0},reserve:()=>{},discard:()=>{},worker:{request:async(kind,data)=>{
     assert.equal(kind,'filter');assert.equal(data.tiles.length,1);assert.equal(data.tiles[0].tx,-1);
-    const privateStore=new TileStore(),before=new Map();
-    for(const tile of data.tiles)privateStore.adopt(tile.tx,tile.ty,new Uint8ClampedArray(tile.pixels));
-    filterTiles(privateStore,{...data.options,bounds:data.bounds,before});
-    return {tiles:tileChanges(privateStore,before)};
+    // The engine's answer: the undo record of the one tile it was sent.
+    return {tiles:[{tx:-1,ty:0,before:new Uint8ClampedArray([20,40,60,255]),after:new Uint8ClampedArray([235,215,195,255])}]};
   }}});
   let committed;
   d.commitPixels=async(target,tiles,label,op)=>{op.check();committed=tiles;return true;};
@@ -156,4 +153,13 @@ test('cancelled point filters reject a late worker reply and retain the original
   while(!requested)await Promise.resolve();d.cancel();gate.resolve({tiles:[{tx:0,ty:0,before:new Uint8ClampedArray([20,40,60,255]),after:new Uint8ClampedArray([235,215,195,255])}]});
   await assert.rejects(pending,{name:'AbortError'});assert.equal(committed,false);assert.deepEqual(store.pixel(0,0),[20,40,60,255]);
   assert.equal(surface.pinned,false);assert.equal(d.holds.size,0);assert.equal(d.operation,null);
+});
+
+test('the colour a stroke painted joins the recent colours after the stroke, not on the pen going down',async()=>{
+  const {recentColors}=await import('../src/color-palette.mjs');
+  const d=fixture(),before=recentColors()[0],color=before==='#123456'?'#654321':'#123456';
+  d.rememberColor(color);
+  assert.equal(recentColors()[0],before,'the palette refresh waits for a later task');
+  await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(recentColors()[0],color);
 });

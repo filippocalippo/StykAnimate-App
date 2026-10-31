@@ -4,7 +4,7 @@ import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import backend from '../desktop/backend.cjs';
+import {pythonCandidates} from '../scripts/run-python.mjs';
 import {chooseExport, exportDialogClosed, openEncoding} from './helpers/export-dialog.mjs';
 
 const root = path.resolve(import.meta.dirname, '..'), output = path.join(root, 'artifacts', 'vfw-renderer');
@@ -79,7 +79,7 @@ try {
   await page.locator('#export-vfw-codec').selectOption(installed.id);
   assert.equal(await page.locator('#export-vfw-configure').isDisabled(), false); result.checks.push('Installed codec selection enables its genuine native configuration dialog');
   await page.locator('#export-vfw-configure').click();
-  const python = backend.pythonCandidates()[0];
+  const python = pythonCandidates()[0];
   try { result.configurationDialog = JSON.parse(execFileSync(python.command, [...python.args, path.join(root, 'tests/vfw-owned-dialog-cancel.py'), '--parent', String(await app.evaluate(() => process.pid))], {windowsHide: true, encoding: 'utf8', timeout: 15000})); }
   catch (error) { console.log('Configuration diagnostic', await app.evaluate(() => globalThis.__vfwConfiguration), await page.locator('#export-dialog').innerText()); throw error; }
   await page.waitForFunction(() => document.querySelector('.vfw-config-state')?.textContent === 'Custom codec settings');

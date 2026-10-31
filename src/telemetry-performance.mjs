@@ -1,5 +1,11 @@
 import { emptyPerformance,recordPerformance,coverage,addIncident,performanceContext,provenance,trimPerformance } from './telemetry-performance-schema.mjs';
 
+// Long-frame script attribution (the module basename of a script that ran in a long animation frame): the engine's
+// stage, playback and picture modules are the renderer; its other modules (the owner of the document, its editing
+// reads, workers' clients) are the editor.
+const STAGE_MODULE = /^engine-(stage|playback|composite|pictures|thumbnails|previews|shown|live-cels)\.mjs$/;
+const ENGINE_MODULE = /^engine(-[a-z-]+)?\.mjs$/;
+
 // No timers, document traversal, frame retention or clock conversion across workers.
 export class PerformanceMeasurements {
   constructor(collector,{getContext=()=>({}),random=Math.random,now=()=>performance.now()}={}){
@@ -76,7 +82,7 @@ export class PerformanceMeasurements {
       let scripts=0;for(const script of (entry.scripts||[]).slice(0,20)){
         scripts+=Math.max(0,script.duration||0);
         const module=String(script.sourceURL||'').split(/[\\/]/).at(-1)?.split('?')[0];
-        const source=module==='app.mjs'?'app':module==='renderer.mjs'?'renderer':['layer-timeline.mjs','sheet-filmstrip.mjs'].includes(module)?'timeline':module==='editor.mjs'?'editor':module==='camera-monitor.mjs'?'camera':/^vfx-[a-z-]+\.mjs$/.test(module)?'vfx':'other';
+        const source=module==='app.mjs'?'app':STAGE_MODULE.test(module)?'renderer':['layer-timeline.mjs','sheet-filmstrip.mjs'].includes(module)?'timeline':module==='editor.mjs'||ENGINE_MODULE.test(module)?'editor':module==='camera-monitor.mjs'?'camera':/^vfx-[a-z-]+\.mjs$/.test(module)?'vfx':'other';
         this.record('loaf_script',script.duration,{source});
       }
       // Browser attribution URLs/invokers can contain user content. Only numeric totals survive.

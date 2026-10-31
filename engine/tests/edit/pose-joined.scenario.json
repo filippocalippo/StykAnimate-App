@@ -1,0 +1,101 @@
+{
+ "name": "pose-joined",
+ "document": "joined-chain.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "rotateJoint",
+   0.4
+  ],
+  [
+   "poseJoint",
+   250,
+   300
+  ],
+  [
+   "rotateJoint",
+   0.2,
+   {
+    "isolate": true
+   }
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "poseJoint",
+   300,
+   380
+  ],
+  [
+   "bendJoint",
+   290,
+   390,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "poseJoint",
+   230,
+   310
+  ],
+  [
+   "@select",
+   3,
+   0
+  ],
+  [
+   "poseJoint",
+   260,
+   420,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "rotateJoint",
+   -0.5
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

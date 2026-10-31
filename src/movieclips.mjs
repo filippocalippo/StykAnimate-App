@@ -3,53 +3,9 @@ import {validateDrawingSets} from './movieclip-drawings.mjs';
 import {validateMovieclipMeshes} from './movieclip-mesh.mjs';
 /** Movieclip assets are immutable figure definitions. Scene poses contain only
  * a small playback descriptor; sampled scenes and geometry never enter history. */
-export const MOVIECLIP_VERSION = 1;
+const MOVIECLIP_VERSION = 1;
 export const isMovieclip = figure => Boolean(figure?._styk?.movieclip);
 export const movieclipAsset = figure => figure?._styk?.movieclip;
-/** Published clip documents are immutable: entering a clip owns a clone and
- * leaving publishes a replacement. Clipboard/history need their own editable
- * figure shell, but can retain the captured animation without copying it. */
-export function snapshotFigureDefinition(figure) {
-  const asset = movieclipAsset(figure), mesh = figure?._styk?.spatialMesh;
-  // Immutable meshes are shared by every snapshot, like clip meshes below.
-  if (mesh) {const {spatialMesh, ...rest} = figure._styk, copy = snapshotFigureDefinition({...figure, _styk: rest}); copy._styk.spatialMesh = mesh; return copy;}
-  if (!asset) return structuredClone(figure);
-  const {document, spatialMeshes, ...settings} = asset;
-  const copy = structuredClone({...figure, _styk: {...figure._styk, movieclip: settings}});
-  copy._styk.movieclip.document = document;
-  if(spatialMeshes)copy._styk.movieclip.spatialMeshes=spatialMeshes;
-  return copy;
-}
-const typeIndices = new WeakMap();
-const sourceDocuments=new WeakMap();
-export function movieclipSourceDocument(report){
-  const descriptor=report._styk?.movieclipSource;
-  if(!descriptor)return null;
-  if(!descriptor.inheritFigures)return descriptor.document;
-  let cached=sourceDocuments.get(descriptor);
-  if(!cached||cached.figures!==report.figure_types){cached={figures:report.figure_types,document:{...descriptor.document,figure_types:report.figure_types}};sourceDocuments.set(descriptor,cached);}
-  return cached.document;
-}
-export function movieclipTypes(report) {
-  const figures = report.figure_types ?? [];
-  let index = typeIndices.get(figures);
-  if (!index || index.length !== figures.length || index.entries.some(([i, figure]) => figures[i] !== figure)) {
-    const entries = [];
-    figures.forEach((figure, i) => { if (isMovieclip(figure)) entries.push([i, figure]); });
-    index = {length: figures.length, entries, types: new Map(entries.map(([, figure]) => [figure.figure_type_id, figure]))};
-    typeIndices.set(figures, index);
-  }
-  return index.types;
-}
-export function invalidateMovieclipTypes(report) { typeIndices.delete(report.figure_types); }
-export function* movieclipSourceFrames(report){
-  let source=report._styk?.movieclipSource?.document,sourceDepth=1;
-  while(source){
-    for(let index=0;index<source.keyframes.length;index++)yield {frame:source.keyframes[index],index,sourceDepth};
-    for(const [sourceId,frame] of Object.entries(source._styk?.frameSources??{}))yield {frame,index:-1,sourceId,sourceDepth};
-    source=source._styk?.movieclipSource?.document;sourceDepth++;
-  }
-}
 export function movieclipAssetFigures(figure){
   const figures=[],documents=new Set(),queue=[figure];
   for(let i=0;i<queue.length;i++){
@@ -57,36 +13,6 @@ export function movieclipAssetFigures(figure){
     if(document&&!documents.has(document)){documents.add(document);queue.push(...document.figure_types);}
   }
   return figures;
-}
-/** Upgrade the early placement descriptors once on load. Legacy restart poses
- * changed `start`; reconstruct phase keys without moving the container. */
-export function normalizeLegacyMovieclips(report,rows,total){
-  const types=movieclipTypes(report);if(!types.size)return;
-  const frames=[...report.keyframes,...Object.values(report._styk?.frameSources??{})],byFrame=new Map(frames.map(frame=>[frame._styk?.frameId,frame]));
-  const objects=new Map();
-  for(const frame of frames)for(const object of frame.objects)if(types.has(object.figure_type_id)){
-    const list=objects.get(object.unique_id)??[];list.push(object);objects.set(object.unique_id,list);
-  }
-  const poses=new Map((report._styk?.animation?.channels??[]).filter(c=>c.property==='pose'&&c.target.kind==='figure').map(c=>[c.target.uid,c]));
-  for(const [uid,instances] of objects){
-    const owner=poses.get(uid),keys=(owner?.keys??[]).flatMap(key=>{const object=byFrame.get(key.value?.frameId)?.objects.find(o=>o.unique_id===uid);return object?[{key,object}]:[];});
-    const base=playbackSettings(keys[0]?.object??instances[0]);
-    if(base.clock==='presence')continue;
-    let end=base.end;
-    if(end===null){
-      end=owner?.keys.find(k=>k.tick>base.start&&k.value?.frameId===null)?.tick;
-      if(end===undefined&&!owner){
-        let index=rows.findLastIndex(row=>row.start<=base.start);
-        for(let i=Math.max(0,index);i<rows.length;i++){if(!report.keyframes[i].objects.some(o=>o.unique_id===uid))break;end=rows[i].start+rows[i].count;}
-      }
-      end=Math.max(base.start+1,end??total);
-    }
-    const phases=new Map((base.restarts??[]).map(key=>[key.tick,key]));
-    for(const {key,object} of keys){const p=playbackSettings(object);if(!p.restarts&&p.start>base.start&&p.start===key.tick)phases.set(key.tick,{tick:key.tick,offset:p.offset});}
-    const legacyRestart=phases.size>(base.restarts?.length??0);
-    if(base.end===null||legacyRestart)for(const object of instances)object._stykMovieclip=legacyRestart?
-      {...base,end,restarts:[...phases.values()].sort((a,b)=>a.tick-b.tick)}:{...playbackSettings(object),end};
-  }
 }
 export function playbackSettings(object, defaults = {}) {
   return {start: 0, end: null, offset: 0, speed: 1, mode: 'loop', ...defaults, ...object?._stykMovieclip};
@@ -108,7 +34,7 @@ export function validatePlayback(settings) {
     throw messageError(new Error(''), "errors.movieclips.invalidMovieclipRestartKeys", {});
   return value;
 }
-export function movieclipSourceTime(asset, settings, tick, fps) {
+function movieclipSourceTime(asset, settings, tick, fps) {
   const keys=settings.restarts??[];let low=0,high=keys.length;
   while(low<high){const mid=(low+high)>>>1;if(keys[mid].tick<=tick)low=mid+1;else high=mid;}
   const phase=low?keys[low-1]:{tick:settings.start,offset:settings.offset};
@@ -121,38 +47,6 @@ export function movieclipTime(asset, settings, tick, fps) {
   if (settings.mode === 'loop') return ((raw % duration) + duration) % duration;
   if (settings.mode === 'once' && raw >= duration) return null;
   return Math.max(0, Math.min(duration - 1, raw));
-}
-export function sampleMovieclipObjects(report, frame, tick, resolveGeometry, elapsed, retainedSamples=false) {
-  const types = movieclipTypes(report);
-  if (!types.size) return frame;
-  let changed = false;
-  const objects = frame.objects.map(object => {
-    const figure = types.get(object.figure_type_id); if (!figure) return object;
-    changed = true;
-    const asset=movieclipAsset(figure),settings=playbackSettings(object);
-    const local = retainedSamples&&settings.clock==='presence'&&Object.hasOwn(object,'_movieclipSample')?object._movieclipSample:settings.clock==='presence'
-      ? movieclipTime(asset,{...settings,start:0,end:null,speed:1},settings.mode==='single'?0:elapsed(object.unique_id,tick),report.fps)
-      : movieclipTime(asset, settings, tick, report.fps);
-    return {...object, _movieclipSample: local};
-  });
-  if(!changed)return frame;
-  const hidden=objects.some(object=>object._movieclipSample===null);
-  if(!hidden)return {...frame,objects};
-  const slots=new Map();objects.forEach((object,slot)=>{if(object._movieclipSample!==null)slots.set(slot,slots.size);});
-  let geometry;
-  const visible=objects.flatMap((object,slot)=>{
-    if(!slots.has(slot))return [];
-    const next={...object,object_slot:slots.get(slot)};
-    if(object.join){
-      const parent=slots.get(object.join.target_object_slot);
-      if(parent!==undefined)next.join={...object.join,target_object_slot:parent};
-      else{geometry??=resolveGeometry?.(report,{...frame,objects});const root=geometry?.objects.get(slot)?.root;
-        if(root){next.root_x=root.x;next.root_y=root.y;}next.join=null;delete next.runtime_segments;}
-    }
-    return [next];
-  });
-  const order=(frame.object_draw_order??objects.map((_,i)=>i)).filter(slot=>slots.has(slot)).map(slot=>slots.get(slot));
-  return {...frame,objects:visible,object_count:visible.length,object_draw_order:order,object_draw_order_unique_ids:order.map(slot=>visible[slot].unique_id)};
 }
 export function movieclipFigure(id, name, document, {duration, sourceStart = 0, pivot = {x: 0, y: 0}} = {}) {
   return {figure_type_id: id, name, segment_count: 1,

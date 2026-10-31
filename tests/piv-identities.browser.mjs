@@ -2,12 +2,11 @@
  * node tests/piv-identities.browser.mjs [path/to/reported.piv]
  */
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {mkdir, writeFile} from 'node:fs/promises';
+import {copyFile, mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from './support/playwright.mjs';
-import backendTools from '../desktop/backend.cjs';
+import backendTools from '../desktop/web-host.cjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const external = process.argv[2];
@@ -15,31 +14,20 @@ const out = path.join(appRoot, 'artifacts/piv-identities', external ? 'reported'
 await mkdir(out, {recursive: true});
 let source = external && path.resolve(external);
 if (!source) {
+  // backend/test_piv_identities.py identity_source(), as the codec's fixture (engine/tools/piv/fixtures.py).
   source = path.join(out, 'identities.piv');
-  const python = backendTools.pythonCandidates()[0];
-  const generated = spawnSync(python.command, [...python.args, '-c', String.raw`
-import sys,zlib
-from pathlib import Path
-sys.path.insert(0,str(Path('backend').resolve()))
-from test_piv_identities import identity_source
-Path(sys.argv[1]).write_bytes(zlib.compress(identity_source()))
-`, source], {cwd: appRoot, encoding: 'utf8', windowsHide: true});
-  assert.equal(generated.status, 0, generated.error?.message || generated.stderr);
+  await copyFile(path.join(appRoot, 'engine/crates/styk-piv/tests/fixtures/modern-identities.piv'), source);
 }
-const backend = await backendTools.startBackend({appRoot});
+const backend = await backendTools.startDesktopHost({appRoot});
 let browser;
 try {
   browser = await chromium.launch({channel: 'chrome', headless: true});
   const page = await browser.newPage({viewport: {width: 1440, height: 960}});
-  const errors = [], responses = [];
+  const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  page.on('response', response => {
-    if (new URL(response.url()).pathname === '/api/import')
-      responses.push({status: response.status(), type: response.headers()['content-type']});
-  });
   await page.goto(backend.origin);
   await page.waitForFunction(() => window.styk?.ready);
-  await page.locator('input[type=file]').first().setInputFiles(source);
+  await page.locator('#file-input').setInputFiles(source);
   await page.waitForFunction(() => styk.state.lastImportWarnings?.some(w => w.code === 'piv_duplicate_object_ids'),
     null, {timeout: 240000});
   await page.screenshot({path: path.join(out, 'import-notes.png')});
@@ -90,7 +78,7 @@ try {
           // worker intentionally bakes output ticks and joined root positions.
           let blob;
           if (format === 'piv') {
-            const response = await fetch('/api/export', {method:'POST', headers:{'Content-Type':'application/json'},
+            const response = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method:'POST', headers:{'Content-Type':'application/json'},
               body:JSON.stringify({document, sourceId:styk.state.sourceId, format})});
             if (!response.ok) throw new Error(await response.text());
             blob = await response.blob();
@@ -102,8 +90,9 @@ try {
       } finally { exporter.dispose(); importer.dispose(); }
     });
   }
-  assert.ok(responses.some(r => r.status === 200 && r.type?.startsWith('application/vnd.stykanimate.piv-frames-v1')));
+  const transport = await page.evaluate(() => ({transport: styk.state.lastImport?.transport}));
+  assert.equal(transport.transport, 'engine-open', 'The engine opens the import');
   assert.deepEqual(errors, []);
-  await writeFile(path.join(out, 'report.json'), JSON.stringify({checks, responses, errors}, null, 2));
-  console.log(JSON.stringify({checks, responses, errors}, null, 2));
+  await writeFile(path.join(out, 'report.json'), JSON.stringify({checks, transport, errors}, null, 2));
+  console.log(JSON.stringify({checks, transport, errors}, null, 2));
 } finally { await browser?.close(); backend.stop(); }

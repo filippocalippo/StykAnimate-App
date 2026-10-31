@@ -39,7 +39,7 @@ function boundedSize(value, limit) {
  */
 export function* documentChunks(report, options = 1000) {
   if (typeof options === 'number') options = { maxRecords: options };
-  const { maxRecords = 1000, maxBytes = 256 * 1024, timeBudgetMs = 3, omitRuntimeSegments = false, sharedFigures = false } = options;
+  const { maxRecords = 1000, maxBytes = 256 * 1024, timeBudgetMs = 3, sharedFigures = false } = options;
   if (!Number.isInteger(maxRecords) || maxRecords < 1) throw messageError(new Error(''), "errors.documentTransport.documentTransportBatchSizeMustBeAPositive", {});
   if (!Number.isInteger(maxBytes) || maxBytes < 1024) throw messageError(new Error(''), "errors.documentTransport.documentTransportByteBudgetMustBeAtLeast", {});
   if (!report || typeof report !== 'object' || Array.isArray(report)) throw messageError(new Error(''), "errors.documentTransport.documentTransportRequiresADocumentRecord", {});
@@ -56,11 +56,7 @@ export function* documentChunks(report, options = 1000) {
     const frame = stack.at(-1);
     if (frame.index >= countOf(frame.value, frame.keys)) { stack.pop(); continue; }
     const key = frame.keys ? frame.keys[frame.index++] : frame.index++;
-    let value = frame.value[key]; const path = [...frame.path, key];
-    const poseObject = path[0] === 'keyframes' && path.length === 4 && path[2] === 'objects';
-    if (omitRuntimeSegments && poseObject && value && Object.hasOwn(value, 'runtime_segments')) {
-      const { runtime_segments, ...nativePose } = value; value = nativePose;
-    }
+    const value = frame.value[key]; const path = [...frame.path, key];
     const pathBytes = path.reduce((sum, part) => sum + (typeof part === 'string' ? part.length * 2 + 16 : 16), 64);
     // Preserve identity already present in the document, never merge merely
     // similar figures. Movie-clip libraries often reuse the same definitions.
@@ -84,13 +80,12 @@ export function* documentChunks(report, options = 1000) {
       }
       poseSequences.set(value,path);
     }
-    const visitPoses = omitRuntimeSegments && path[0] === 'keyframes' && (path.length <= 2 || (path.length === 3 && path[2] === 'objects'));
     // Visit channel records even when small so shared sequences survive ACK
     // boundaries instead of being cloned again for every connected member.
     const visitFigures=sharedFigures&&((key==='figure_types'&&Array.isArray(value))||
       (figureEntry&&value._styk?.movieclip)||(key==='_styk'&&value?.movieclip)||
       (key==='movieclip'&&value?.document)||(key==='document'&&Array.isArray(value?.figure_types)));
-    const size = visitPoses || visitFigures || value?.property === 'pose' && Array.isArray(value.keys) ? atomicLimit + 1 : boundedSize(value, atomicLimit);
+    const size = visitFigures || value?.property === 'pose' && Array.isArray(value.keys) ? atomicLimit + 1 : boundedSize(value, atomicLimit);
     if (size <= atomicLimit) {
       if (operations.length && bytes + size + pathBytes > maxBytes) {
         yield { operations, estimatedBytes: bytes }; operations = []; bytes = 64; started = performance.now();

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>StykAnimate engine viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; background: #e9eaee; font: 13px/1.4 system-ui, sans-serif; color: #1c1e24; overflow: hidden; }
+  #stage { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  #bar { position: absolute; left: 8px; top: 8px; right: 8px; display: flex; gap: 8px; align-items: center; pointer-events: none; }
+  #bar > * { pointer-events: auto; }
+  button, input[type=range] { font: inherit; }
+  #seek { flex: 1; min-width: 80px; }
+  #info { position: absolute; left: 8px; bottom: 8px; background: rgb(255 255 255 / .85); padding: 4px 8px; border-radius: 6px; white-space: pre; font: 12px/1.4 ui-monospace, monospace; }
+</style>
+<canvas id="stage"></canvas>
+<div id="bar">
+  <input id="file" type="file" accept=".styk,.stkz,.stykmov,.piv,.json">
+  <button id="play" type="button">Play</button>
+  <button id="fit" type="button">Fit</button>
+  <label><input id="camera" type="checkbox" checked> Camera</label>
+  <input id="seek" type="range" min="0" max="0" value="0">
+</div>
+<div id="info">Loading the engine…</div>
+<script type="module" src="./viewer.mjs"></script>
+</html>

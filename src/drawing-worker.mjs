@@ -1,26 +1,18 @@
 import {errorMessageData} from './localized-error.mjs';
-import {materializeDrawingTiles} from './drawing-preparation.mjs';
+import {loadDrawingEngine,drawingEngineMemory,drawingEngineGeneration} from './engine/engine-drawing.mjs';
 
-// Preparing a commit needs only the tile kernel. Load codecs, brush/fill and
-// preview machinery on their first request, in the same bounded worker.
+// The drawing raster engine (Rust, src/engine/engine-drawing.mjs) answers every request.
+const engine=loadDrawingEngine();
+let operations=null;
+
+// The operations load on the first request, in the same bounded worker.
 self.onmessage=async({data})=>{
-  if(data.kind==='prepare-tiles'){
-    try{
-      const tiles=materializeDrawingTiles(data.tiles);
-      self.postMessage({id:data.id,tiles},tiles.flatMap(t=>t.pixels?[t.pixels]:[]));
-    }catch(error){self.postMessage({id:data.id,error:error.message, ...errorMessageData(error)});}
-    return;
+  // The module's memory and instance (diagnostics and tests).
+  if(data.kind==='engine'){
+    try{await engine;}catch(error){self.postMessage({id:data.id,error:error.message, ...errorMessageData(error),fatal:true});return;}
+    self.postMessage({id:data.id,memory:drawingEngineMemory(),generation:drawingEngineGeneration()});return;
   }
-  if(data.kind==='preview'){
-    let preview;
-    try{preview=await import('./drawing-worker-preview.mjs');}
-    catch(error){self.postMessage({id:data.id,error:error.message, ...errorMessageData(error),fatal:true});return;}
-    try{const bitmap=preview.drawingWorkerPreview(data);self.postMessage({id:data.id,bitmap},[bitmap]);}
-    catch(error){self.postMessage({id:data.id,error:error.message, ...errorMessageData(error)});}
-    return;
-  }
-  let operations;
-  try{operations=await import('./drawing-worker-operations.mjs');}
+  try{await engine;operations??=await import('./engine/engine-drawing-worker.mjs');}
   catch(error){self.postMessage({id:data.id,error:error.message, ...errorMessageData(error),fatal:true});return;}
-  await operations.drawingWorkerOperation(data);
+  await operations.drawingEngineOperation(data);
 };

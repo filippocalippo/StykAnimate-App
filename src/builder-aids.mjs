@@ -1,7 +1,7 @@
 import { cameraMatrix } from './renderer-geometry.mjs';
-import {segmentBranchIndices} from './editor-builder.mjs';
+import {segmentBranchIndices} from './pivot/structure.mjs';
 
-export const BUILDER_HIGHLIGHT_COLORS = Object.freeze({dynamic:'#0000ff',static:'#4444cc',path:'#0000ff'});
+const BUILDER_HIGHLIGHT_COLORS = Object.freeze({dynamic:'#0000ff',static:'#4444cc',path:'#0000ff'});
 export function isBuilderContext(tool) { return ['rig','line','chain','circle','polygon'].includes(tool); }
 /** `builderActive` keeps the construction background for every tool while a
  * bounded builder session is open; outside a session it stays tool-scoped. */

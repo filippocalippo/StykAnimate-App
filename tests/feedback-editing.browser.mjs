@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {chromium} from './support/playwright.mjs';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 
-const server = await backend.startBackend({appRoot: fileURLToPath(new URL('..', import.meta.url))});
+const server = await backend.startDesktopHost({appRoot: fileURLToPath(new URL('..', import.meta.url))});
 const browser = await chromium.launch({channel: 'chrome', headless: true});
 const output = 'artifacts/feedback-editing';
 await mkdir(output, {recursive: true});
@@ -12,7 +12,7 @@ const checks = [], errors = [];
 try {
   const page = await browser.newPage({viewport: {width: 1440, height: 960}});
   page.on('pageerror', error => errors.push(error.message));
-  await page.addInitScript(() => localStorage.setItem('stykanimate.editor.settings.v1', JSON.stringify({rendererMode: 'canvas', locale: 'en'})));
+  await page.addInitScript(() => localStorage.setItem('stykanimate.editor.settings.v1', JSON.stringify({locale: 'en'})));
   await page.goto(server.origin); await page.waitForFunction(() => window.styk?.ready);
   const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const mode = async name => {
@@ -109,7 +109,7 @@ try {
   });
   await run('Build right-drag bends reusable figure', async () => {
     await fixture();
-    await page.evaluate(() => {const e = styk.editor; e.figure.segments[0].is_static = true; e.figure.segments[0].aux_code = 1; e.touch();});
+    await page.evaluate(() => {const e = styk.editor; e.select(e.selectedUid, 0); e.updateSegment({is_static: true});});
     await mode('rig');
     const p = await page.evaluate(() => feedbackPoint());
     const before = await page.evaluate(() => JSON.stringify(styk.editor.serialize()));
