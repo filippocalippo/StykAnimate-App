@@ -624,3 +624,48 @@ fn a_gesture_builds_the_figure_it_moves_and_the_figures_that_hang_from_what_move
     }
     call(&mut session, "cancelDrag", "[]");
 }
+
+/// What the interface holds of the geometry after a read: the groups by slot (a whole read replaces them).
+fn hold(held: &mut std::collections::BTreeMap<usize, String>, read: &Value) {
+    if read.get("full") == Some(&Value::Bool(true)) {
+        held.clear();
+    }
+    for pair in read.get("slots").unwrap().elements().unwrap().iter() {
+        held.insert(pair.item(0).unwrap().as_f64().unwrap() as usize, json(&pair.item(1).unwrap()));
+    }
+}
+
+#[test]
+fn the_groups_the_interface_holds_stay_those_of_a_whole_read_through_gestures_undo_and_redo() {
+    // One session is read incrementally after every step, as the interface reads it; the other is read whole, each time.
+    let (mut reading, _) = tape("channels-pose-sheet");
+    let (mut whole, _) = tape("channels-pose-sheet");
+    let (mut held, mut token) = (std::collections::BTreeMap::new(), None);
+    let steps: [(&str, &str); 17] = [
+        ("seek", "[11]"), ("select", "[3,-1]"), ("beginTranslationDrag", "[]"), ("moveSelection", "[12,0,{\"fromStart\":true}]"),
+        ("moveSelection", "[30,5,{\"fromStart\":true}]"), ("commitDrag", "[]"), ("undo", "[]"), ("redo", "[]"), ("undo", "[]"),
+        ("select", "[2,-1]"), ("rotateSelection", "[0.4]"), ("undo", "[]"), ("seek", "[4]"), ("seek", "[11]"), ("select", "[4,-1]"),
+        ("rotateSelection", "[0.2]"), ("undo", "[]"),
+    ];
+    for (n, (method, args)) in steps.into_iter().enumerate() {
+        call(&mut reading, method, args);
+        call(&mut whole, method, args);
+        let read = geometry(&mut reading, token);
+        token = read.get("token").and_then(Value::as_f64);
+        hold(&mut held, &read);
+        let fresh = geometry(&mut whole, None);
+        let mut expected = std::collections::BTreeMap::new();
+        hold(&mut expected, &fresh);
+        for (slot, group) in &expected {
+            assert_eq!(held.get(slot), Some(group), "step {n} ({method} {args}): the interface holds a group of slot {slot} that is not the one a whole read gives");
+        }
+        assert_eq!(held.len(), expected.len(), "step {n} ({method} {args})");
+        // The scene the stage draws is the scene built whole.
+        let shown = reading.editor.shown_scene(false, crate::Flavor::Composed).unwrap().unwrap();
+        let built = styk_eval::geometry::build_shapes(&shown.prepared.doc, &shown.frame, None);
+        for (kept, fresh) in shown.scene.objects.iter().zip(&built.objects) {
+            let bits = |points: &[[f64; 2]]| points.iter().map(|p| p.map(f64::to_bits)).collect::<Vec<_>>();
+            assert_eq!((bits(&kept.starts), bits(&kept.ends), kept.root.map(f64::to_bits)), (bits(&fresh.starts), bits(&fresh.ends), fresh.root.map(f64::to_bits)), "step {n} ({method} {args}): slot {}", kept.slot);
+        }
+    }
+}
