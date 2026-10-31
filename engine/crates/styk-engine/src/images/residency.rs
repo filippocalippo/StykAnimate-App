@@ -298,6 +298,29 @@ mod tests {
     }
 
     #[test]
+    fn a_live_page_takes_a_layer_when_the_budget_is_full_and_keeps_it() {
+        // Four document pages and a live page (page 4); two layers, both held by document pages.
+        let mut residency = Residency::new(5, 2);
+        residency.touch(&[0]);
+        given(residency.acquire(0, &[], false));
+        residency.touch(&[1]);
+        given(residency.acquire(1, &[], false));
+        // The first stroke: the live page is given a layer for good, the document page shown longest ago gives its layer up.
+        let (live_layer, evicted) = given(residency.acquire(4, &[], true));
+        residency.pin(4);
+        assert_eq!(evicted, Some(0));
+        assert_eq!(residency.layer_of(0), None);
+        // Document pages come and go; the live page never leaves.
+        residency.touch(&[2]);
+        assert_eq!(given(residency.acquire(2, &[], false)).1, Some(1));
+        assert_eq!(residency.acquire(3, &[2], false), Acquired::Full, "nothing may leave: the live page is pinned, the frame needs page 2");
+        // A frame that needs both makes the texture grow (once) instead of taking the live page's layer.
+        assert_eq!(residency.acquire(3, &[2], true), Acquired::Given { layer: 2, evicted: None });
+        assert_eq!(residency.layers(), 3);
+        assert_eq!(residency.layer_of(4), Some(live_layer), "the live page kept its layer");
+    }
+
+    #[test]
     fn a_page_the_frame_needs_never_leaves() {
         let mut residency = Residency::new(10, 2);
         residency.touch(&[0]);

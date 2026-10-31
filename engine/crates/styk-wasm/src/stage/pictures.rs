@@ -210,8 +210,9 @@ impl Stage {
         }
         self.request_pictures(generation, &wanted, &[], true, true);
         let ready = self.pictures_in(generation, &wanted, false);
-        // The sharp pictures a frame shows soft are uploaded whole as soon as they are decoded.
-        self.loading.waiting = !ready || self.loading.placeholders > 0;
+        // Only a frame that cannot be drawn takes every decoded picture whole: the sharp pictures of a frame drawn soft are
+        // uploaded a slice a frame, so no frame waits for the upload of a picture that was not asked for by it.
+        self.loading.waiting = !ready;
         if ready {
             return Some(pages);
         }

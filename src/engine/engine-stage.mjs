@@ -290,7 +290,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       Number.isFinite(request.editorBackgroundColor) ? request.editorBackgroundColor >>> 0 : -1);
     if (drawn) side.live.presented();
     // The person went to this tick: a document whose pictures are kept a few pages at a time loads those around it.
-    if (Number.isFinite(request.tick) && request.tick !== side.hintedTick) { side.hintedTick = request.tick; stage.hint_tick?.(request.tick); }
+    if (Number.isFinite(request.tick) && request.tick !== side.hintedTick) { side.hintedTick = request.tick; const hinted = performance.now(); stage.hint_tick?.(request.tick); side.stats.hintMs = performance.now() - hinted; }
     Object.assign(side.stats, {frames: side.stats.frames + (drawn ? 1 : 0), lastSendMs: sendMs, lastDrawMs: performance.now() - started - sendMs});
     // Generated effects whose trails are still being sampled refine on the next frame
     // (6 ms of sampling a frame).

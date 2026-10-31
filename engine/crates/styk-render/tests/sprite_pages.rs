@@ -267,3 +267,49 @@ fn a_page_beyond_the_table_draws_nothing() {
     assert!(close(centre(&frame, 4), SOFT[1]), "pages inside the table draw as before");
     assert!(close(centre(&frame, 36), NOTHING), "a page beyond the table draws nothing");
 }
+
+/// Live drawing cels (`styk_eval::live`) of a resident renderer: their pages come after the document's, are given a layer
+/// with the page map like any page, and what is written to a page without one goes nowhere.
+#[test]
+fn live_pages_of_a_resident_renderer_draw_from_the_layer_they_are_mapped_to() {
+    let Some((device, queue)) = device() else { return };
+    let assets = assets();
+    let base = assets.pages;
+    let (cell, tile, border) = (styk_eval::live::CELL, styk_eval::drawing::TILE, styk_eval::drawing::BORDER);
+    let run = |color: [u8; 4]| styk_eval::live::Run { page: 0, x: 0, y: 0, cells: 1, rgba: color.iter().copied().cycle().take((cell * cell * 4) as usize).collect() };
+    // The first slot of the first live page: its tile starts a border inside the cell.
+    let slot = entry(base, border, border, tile);
+    // The tile at its own size (a tile drawn smaller shows a reduced level), under the document's picture.
+    let tile = Prim { kind: K_IMAGE | styk_draw::F_DRAWING, group: 0, color: 0xffff_ffff, paint: u32::MAX, a: [0.0, 0.0, tile as f32, 0.0], b: [0.0, tile as f32, base as f32, 0.0], c: slot.uv() };
+    let list = list(vec![tile, sprite(&assets, 1, [4.0, 4.0])]);
+    let fulls: Vec<DecodedImage> = (1..PAGES).map(|p| sharp(&assets, p, SHARP[p as usize])).collect();
+
+    // Two layers: the document's page 1 takes layer 0, the live page (the layout's page after the last) layer 1.
+    let mut kept = renderer(&device, &queue);
+    kept.prepare_sprites_resident(&assets, 1, 2);
+    kept.map_sprite_page(1, Some(0));
+    kept.map_sprite_page(base, Some(1));
+    kept.flush_sprite_map();
+    kept.upload_images(&assets, &fulls[..1]);
+    kept.set_picture(&assets.atlas[1], Some(0));
+    kept.flush_pictures();
+    kept.upload_live(base, &[run([30, 60, 220, 255])]);
+    let first = draw(&mut kept, &device, &queue, &list);
+    assert!(close(centre(&first, 36), [30, 60, 220, 255]), "the live tile draws from the layer its page was mapped to");
+    assert!(close(centre(&first, 4), SHARP[1]), "the document's picture is not touched by the live page's write");
+
+    // The page loses its layer: a write to it goes nowhere (not into the document's layer), and it draws nothing.
+    kept.map_sprite_page(base, None);
+    kept.flush_sprite_map();
+    kept.upload_live(base, &[run([250, 250, 10, 255])]);
+    let gone = draw(&mut kept, &device, &queue, &list);
+    assert!(close(centre(&gone, 36), NOTHING), "a live page without a layer draws nothing");
+    assert!(close(centre(&gone, 4), SHARP[1]), "and the write did not land in another page's layer");
+
+    // The page is given the layer again and written: it draws what was written.
+    kept.map_sprite_page(base, Some(1));
+    kept.flush_sprite_map();
+    kept.upload_live(base, &[run([250, 250, 10, 255])]);
+    let back = draw(&mut kept, &device, &queue, &list);
+    assert!(close(centre(&back, 36), [250, 250, 10, 255]), "a live page mapped again draws its new pixels");
+}

@@ -86,6 +86,9 @@ pub struct Stage {
     loading: pictures::Loading,
     /// The layout pages the frame on show draws.
     shown_pages: Vec<u32>,
+    /// Milliseconds the last frame spent uploading pictures, and deciding whether its pictures are in.
+    sync_ms: f64,
+    ready_ms: f64,
     /// Frames drawn with the soft copy of some picture (a document whose pages are kept a few at a time).
     soft_frames: u64,
     /// A picture being uploaded a few rows a frame, and the rows done.
@@ -216,6 +219,8 @@ impl Stage {
             shown_pages: Vec::new(),
             partial: None,
             soft_frames: 0,
+            sync_ms: 0.0,
+            ready_ms: 0.0,
             pictures: PICTURES_COMPLETE,
             upload_bytes: 0,
             edit: EditScene::default(),
@@ -634,9 +639,13 @@ impl Stage {
         if self.lost.get().is_some() {
             return Ok(false);
         }
+        let started = crate::clock();
         self.sync_images(generation);
+        let synced = crate::clock();
         // The picture on show stays until the pictures this frame draws are all in the sprite texture.
-        let Some(pages) = self.pictures_ready(generation, list).or_else(|| self.residency.is_none().then(Vec::new)) else { return Ok(false) };
+        let ready = self.pictures_ready(generation, list).or_else(|| self.residency.is_none().then(Vec::new));
+        (self.sync_ms, self.ready_ms) = (synced - started, crate::clock() - synced);
+        let Some(pages) = ready else { return Ok(false) };
         let doc = &generation.prepared.doc;
         // The Draw view turns and mirrors about the artboard's centre, after the scene camera.
         let orientation = styk_eval::view::orientation(self.rotation, self.flip, [pan[0] + doc.canvas[0] as f64 * zoom / 2.0, pan[1] + doc.canvas[1] as f64 * zoom / 2.0]);
@@ -771,10 +780,10 @@ impl Stage {
         let (sprite_pages, sprite_bytes) = self.renderer.sprite_memory();
         let (resident, loads, evictions) = self.residency_stats();
         format!(
-            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{}}}",
+            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3}}}",
             s.prims, s.groups, s.passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
             sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled(),
-            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory()
+            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms
         )
     }
 }

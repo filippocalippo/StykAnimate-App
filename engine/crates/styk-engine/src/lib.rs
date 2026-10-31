@@ -364,10 +364,12 @@ impl Engine {
             },
             Job::Frames(work) => {
                 if !work.step(self) {
-                    // Nothing is waiting for a frame: the work nothing waits for runs.
+                    // Nothing is waiting for a frame: the work nothing waits for runs, and wakes nobody (a waiter of the
+                    // progress counter redraws on every tick of it).
                     let idle = detach_task(&mut self.inner.state.lock().idle_tasks);
                     let Some(mut node) = idle else { return false };
                     if let Some(OrdinaryTask::Run(task)) = node.pop_front() { task(self); }
+                    return true;
                 }
             }
         }
