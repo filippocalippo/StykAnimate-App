@@ -124,12 +124,17 @@ A `.styk` project is written from a snapshot of an edit session's tree (`EditSes
 memory, a clone of the copy-on-write root, nothing copied), by `save_project` on the document export worker
 (`styk_engine::save::save_project`). Any session can be saved, the one in front, one a tab keeps, or a project whose movieclip is being
 edited: the documents the clips were entered from come with the movieclip each holds, and `styk_edit::export::fold_movieclip` stores
-the clip inside its parent as a recovery copy does. `project_document` prepares the tree (metadata, no `runtime_segments`, the load's
+the clip inside its parent as a recovery copy does. `prepare_project` prepares the tree (metadata, no `runtime_segments`, the load's
 validations, display aliases in line, pose sequences stored once), the Pivot original the codec holds is stored first in the payload
 section, and `styk_formats::container::lift` and `files::save` write the container. The work runs on a worker that joined the engine,
 reserves its working memory first (`errors.engine.outOfMemoryWhileSaving` when the memory cannot hold it: the project stays open and nothing was
-written), and asks the cancel flag between the steps of the preparation, every few thousand values of the lift, every 4 MiB hashed,
-and before and after each of the three zstd frames. Each frame is one `zstd::bulk::compress` call (level 3), because the bytes of an unchanged
+written), and runs the scene check (`validateScene`, the slowest of the checks and read-only) beside the lift (`check_scene`; its error is the save's), and asks the cancel flag between the steps of the preparation, every few thousand values of the lift, every 4 MiB hashed,
+and before and after each of the three zstd frames. The three hashes and the three frames (in turn, so that only one frame's output buffer, the size of the worst case, is held at a time) are four
+independent jobs: the save thread and up to three of the engine's other workers (the interface passes `engine.workers - 1`, at most 3, so one stays free for the
+frame on show) take them largest first (`Host::together`, `Engine::run_together`, tasks claimed by whoever starts them first; a
+host without workers runs them all itself). The workers cannot ask the interface's cancel, so the save thread asks it every 25 ms
+while it waits and raises a flag they read. The save's own timings (`prepare_ms`, `lift_ms`, `frames_ms`, per block
+`hash_ms` and `compress_ms`, `assemble_ms`) come back with the file and are in the exporter's `lastTimings.engine`. Each frame is one `zstd::bulk::compress` call (level 3), because the bytes of an unchanged
 document must be those the former writer wrote: a compressor fed in pieces, or with a small output buffer, writes other, valid frames
 on real data (the test `sections_shaped_like_real_ones_compress_to_the_frames_one_shot_compression_makes`). A cancel therefore takes effect
 after the frame in progress; the interface does not wait for it and never ends the worker inside the engine

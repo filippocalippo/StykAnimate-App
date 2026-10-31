@@ -28,6 +28,7 @@ pub mod document_export;
 pub mod edit;
 pub mod export;
 pub mod save;
+mod together;
 mod frames;
 mod images;
 mod publication;

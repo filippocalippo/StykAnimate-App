@@ -201,7 +201,8 @@ export class DocumentExporter {
           snapshots = snapshots.filter(token => token !== undefined);
           throw messageError(new Error(''), "errors.documentExportWorker.theDocumentSnapshotWasNotInitialized", {});
         }
-        work = {project: {snapshots, scopes: scopes?.typeIds ?? []}, cancel: cancelFlag};
+        // The save may take some of the engine's workers for its hashes and frames, but leaves at least one for the frame on show.
+        work = {project: {snapshots, scopes: scopes?.typeIds ?? [], address: engine.handle.address(), helpers: Math.min(3, Math.max(0, (engine.workers ?? 0) - 1))}, cancel: cancelFlag};
       } else {
         // The session publishes every change at the editor's revision; one still on its way is waited for briefly.
         for (let waited = 0; !holdsRevision(engine, revision); waited += 16) {

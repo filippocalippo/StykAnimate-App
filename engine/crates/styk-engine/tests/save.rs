@@ -170,3 +170,94 @@ fn every_recorded_project_opens_and_saves_to_its_own_bytes() {
     }
     assert!(checked.contains(&"project-shared-arrays.styk".to_string()) && checked.len() >= 5, "{checked:?}");
 }
+
+/// An engine with `workers` threads running its background work, stopped and joined when dropped.
+struct Workers {
+    engine: Engine,
+    threads: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl Workers {
+    fn start(workers: usize) -> Workers {
+        let engine = Engine::new(|| 0.0, Budgets::for_device(None));
+        let threads = (0..workers).map(|_| { let engine = engine.clone(); std::thread::spawn(move || engine.work()) }).collect();
+        Workers { engine, threads }
+    }
+}
+
+impl Drop for Workers {
+    fn drop(&mut self) {
+        self.engine.stop();
+        for thread in self.threads.drain(..) {
+            let _ = thread.join();
+        }
+    }
+}
+
+#[test]
+fn jobs_run_side_by_side_on_the_workers_and_the_caller_takes_what_no_worker_started() {
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicBool;
+    for workers in [0usize, 3] {
+        let pool = Workers::start(workers);
+        let ran: Mutex<Vec<std::thread::ThreadId>> = Mutex::new(Vec::new());
+        let jobs: Vec<styk_formats::files::Job<'_>> = (0..6)
+            .map(|_| {
+                let ran = &ran;
+                Box::new(move |_: &dyn Fn() -> bool| {
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                    ran.lock().unwrap().push(std::thread::current().id());
+                }) as styk_formats::files::Job<'_>
+            })
+            .collect();
+        let started = std::time::Instant::now();
+        pool.engine.run_together(jobs, &Arc::new(AtomicBool::new(false)), &|| false, 3);
+        let ids = ran.lock().unwrap().clone();
+        assert_eq!(ids.len(), 6, "every job ran before run_together returned ({workers} workers)");
+        let distinct: std::collections::HashSet<_> = ids.iter().collect();
+        if workers == 0 {
+            assert_eq!(distinct.len(), 1, "no workers: the caller ran them all");
+        } else {
+            assert!(distinct.len() > 1, "{workers} workers took part");
+            assert!(started.elapsed() < std::time::Duration::from_millis(330), "side by side, not one after another: {:?}", started.elapsed());
+        }
+    }
+}
+
+#[test]
+fn a_save_on_the_workers_writes_the_bytes_of_a_save_on_one_thread_and_a_cancel_reaches_the_workers() {
+    use styk_engine::save::EngineHost;
+    let tree = heavy_tree(2 << 20);
+    let request = || ProjectRequest { name: Some("Side by side".into()), source: None };
+    let alone = save_project(std::slice::from_ref(&tree), &[], request(), &|| false).unwrap();
+    let pool = Workers::start(3);
+    let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3 };
+    let together = save_project(std::slice::from_ref(&tree), &[], request(), &host).unwrap();
+    assert!(together.bytes == alone.bytes, "{} bytes on workers, {} on one thread", together.bytes.len(), alone.bytes.len());
+    // Stopped once the preparation is over (it asks four times in the preparation): the jobs on the workers end without a container.
+    let asked = std::cell::Cell::new(0usize);
+    let stopping = EngineHost { engine: Some(&pool.engine), cancel: &|| { asked.set(asked.get() + 1); asked.get() > 4 }, clock: || 0.0, helpers: 3 };
+    let stopped = save_project(std::slice::from_ref(&tree), &[], request(), &stopping);
+    assert!(matches!(stopped, Err(SaveError::Cancelled)), "{:?}", stopped.map(|written| written.bytes.len()));
+}
+
+#[test]
+fn a_save_tells_where_its_time_went() {
+    struct Ticking;
+    impl styk_formats::files::Host for Ticking {
+        fn cancelled(&self) -> bool {
+            false
+        }
+        fn clock(&self) -> fn() -> f64 {
+            || {
+                thread_local!(static NOW: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) });
+                NOW.with(|now| { now.set(now.get() + 1.0); now.get() })
+            }
+        }
+    }
+    let tree = tree("engine/tests/edit/startup.document.json");
+    let written = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &Ticking).unwrap();
+    let t = written.timings;
+    assert!(t.prepare_ms > 0.0 && t.lift_ms > 0.0 && t.frames_ms > 0.0 && t.total_ms >= t.prepare_ms + t.lift_ms, "{t:?}");
+    assert_eq!(t.frames.iter().map(|frame| frame.raw_bytes).sum::<usize>(), written.raw_bytes);
+}

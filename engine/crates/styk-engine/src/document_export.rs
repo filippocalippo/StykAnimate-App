@@ -94,7 +94,7 @@ impl Engine {
                     Format::Stykmov => Kind::Stykmov,
                     Format::Piv | Format::Stk => return Err(DocumentExportError::Refused("errors.documentExport.chooseAPivStkStykStkzOrStykmov".into())),
                 };
-                let written = crate::save::save_figure_file(&document, kind, cancel).map_err(|error| match error {
+                let written = crate::save::save_figure_file(&document, kind, &cancel).map_err(|error| match error {
                     SaveError::Cancelled => DocumentExportError::Cancelled,
                     other => DocumentExportError::Save(other),
                 })?;
