@@ -14,7 +14,7 @@ oracle for Pivot files.
   number arrays and payloads) into a `styk_doc::Value`. `decode_parts` returns
   the skeleton and sections without lifting them back.
 - `container::lift` / `lift_within` split a document into skeleton and
-  sections the way `liftDocument` does (saves use the same layout);
+  sections the way the JavaScript `liftDocument` did (a save writes this layout, byte for byte, and so does the interface's read view);
   `parse_lifted` reads a lifted record back (the tests of `files` check what a skeleton and its sections stand for with it).
 - `container::encode_v2` writes version 2 (zstd level 3, [D5](decisions/0005-zstd-from-c.md));
   `encode_v1` writes version 1.
@@ -38,11 +38,13 @@ movieclip file (`styk-engine`'s library previews) open these, not the local asse
 
 ## Opening and saving for the app's workers
 
-The import, library-preview and document-export workers open and save native files through
-`styk_formats::files`, bound in the codec module (`engine/crates/styk-codec-wasm/src/native.rs`,
-`src/native-file-codec.mjs`). Each worker loads the module itself, so a library preview never waits for a
-Pivot import in the codec worker. What crosses is the *lifted form*: a JSON skeleton and the byte
-sections its markers name (`src/document-lift.mjs`, the form a save lifts the editor's document in).
+The import and library-preview workers open native files through `styk_formats::files`, bound in the codec module
+(`engine/crates/styk-codec-wasm/src/native.rs`, `src/native-file-codec.mjs`). Each worker loads the module itself, so a library
+preview never waits for a Pivot import in the codec worker. What crosses is the *lifted form*: a JSON skeleton and the byte
+sections its markers name (`src/document-lift.mjs` restores it into the editor's objects). The app **writes** its files from the
+engine's document, not through this module: `styk_engine::save` lifts the tree an edit session holds and `files::save` frames it
+(a project, on the document export worker: [document.md](document.md#saving-a-project)); the codec module's `saveNativeDocument`
+writes a document given as JSON, for the tests and tools that make a file to read.
 
 - `files::open(bytes, kind, rules)` reads a container and returns the skeleton and sections. A project
   whose document the rules leave as it is (nearly every one) is checked by `container::check`, which
@@ -54,11 +56,10 @@ sections its markers name (`src/document-lift.mjs`, the form a save lifts the ed
   into the store, normalized and lifted.
 - `Rules`: `RAW` returns the container as stored, `PROJECT` applies `native::normalize_decoded` and
   `verify_embedded_source`, `PREVIEW` the same without the source check.
-- `files::save(kind, skeleton, arrays, payloads, store)` writes a version 2 container from what the
-  interface lifted from its document (`src/document-lift.mjs`; the identity of an array decides what is
-  stored once, so the document stays the interface's until the engine owns it). A `.stkz` or `.stykmov`
-  skeleton must be a self-contained figure. `BlockStore` is the caller's cache of compressed blocks, keyed
-  `2:3:<length>:<sha256>`; `src/container-cache.mjs` keeps it across the export worker's retirements.
+- `files::save(kind, skeleton, arrays, payloads, store)` writes a version 2 container from a lifted document
+  (`container::lift`; an array held once by the tree is stored once). A `.stkz` or `.stykmov` skeleton must be a
+  self-contained figure. `BlockStore` is a cache of compressed blocks, keyed `2:3:<length>:<sha256>`; the app
+  passes none (`NoStore`).
 - Failures are `FileError`s: the message key (`errors.nativeContainer.*`), the machine code
   (`document_too_large` for anything a save refuses for size) and the `kind` some messages name.
 
@@ -82,7 +83,7 @@ a transform); a loop that already recurses or is called per record needs nothing
 
 ## Changing a format
 
-Add the field where the writer writes it (`container::lift` for the store, `src/document-lift.mjs` for the interface), keep unknown fields
+Add the field where the writer writes it (`container::lift`), keep unknown fields
 flowing through the tree (no typed view is needed to preserve a field), add a
 corpus or fixture file that has it, and check `npm run engine:parity`. A new
 container version needs a reader here; the interface only sees the lifted form

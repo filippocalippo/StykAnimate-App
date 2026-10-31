@@ -73,12 +73,21 @@ Each is a name for `--only=`; `open` always runs in a document run.
 ## Flicker
 
 `flicker` counts pictures that differ from both neighbours while the neighbours agree (A-B-A), and blank pictures between non-blank ones. The raw
-counts (`transients`, `blanks`) never changed. Some animations contain an A-B-A themselves, so a settled reference is taken after the raw passes:
-one picture per tick, after that tick has fully settled (shown, nothing drawn or pending for 250 ms). An A-B-A (or blank) that the settled pictures of
-the same ticks show too is the animation's own content (`contentTransients`, `contentBlanks`); the rest are drawing artifacts
-(`artifactTransients`, `artifactBlanks`), and zero is the target for those. The reference of `flicker-play` is the paused view without onion
-skins, so a camera move the paused view does not show makes real content count as artifacts, never the reverse. Idle and drag have no reference:
-every one counts as an artifact.
+counts (`transients`, `blanks`) never changed. Some animations contain an A-B-A themselves (a strobe, a camera that jumps), so a reference is taken
+after the raw passes: one picture per tick, as the tick looks once it has fully settled. An A-B-A (or blank) that the reference pictures of the same
+ticks show too is the animation's own content (`contentTransients`, `contentBlanks`); the rest are drawing artifacts (`artifactTransients`,
+`artifactBlanks`), and zero is the target for those. Idle and drag have no reference: every one counts as an artifact.
+
+- **`flicker-scrub`**: the reference is the paused view at the same view as the pass: each tick shown, nothing drawn or pending for 250 ms, the picture
+  of its last draw.
+- **`flicker-play`**: the reference is each tick's prepared frame drawn again while paused with the call playback uses, at the view and under the
+  overlay playback had (playback fits the view itself), once the frame has all its pictures. The old app keeps the paused editing view without
+  onion skins.
+- Pictures are read in the animation-frame callback that drew them, as the raw ones are: a WebGPU canvas holds nothing between frames, so a picture
+  read later is a blank stage. Until 2026-10-31 the reference was read that way, and its view was whatever the drag steps before it had left, so almost
+  nothing matched and nearly every real content blink counted as an artifact.
+- `blinks` lists the first twelve A-B-A of a pass (the ticks shown, the blocks, the engine's draw counter, whether it is content). `redrawChanges`
+  counts ticks drawn twice whose second picture differs from the first, the blink a person sees from a frame shown before its pictures are in.
 
 ## Reading the summary
 

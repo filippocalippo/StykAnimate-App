@@ -1502,7 +1502,7 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
     scene.points.reserve(total_points);
     for &slot in &frame.draw_order {
         // Read in place: a build the memory also holds is shared, and only the parts the scene owns are copied.
-        let Some(b) = built[slot as usize].as_deref() else { continue };
+        let Some(b) = built[slot as usize].take() else { continue };
         let base = scene.points.len() as u32;
         scene.points.extend_from_slice(&b.points);
         let mut geometry = b.geometry.clone();
