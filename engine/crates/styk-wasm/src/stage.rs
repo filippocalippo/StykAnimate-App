@@ -69,6 +69,8 @@ pub struct Stage {
     pictures: u32,
     /// Bytes of pictures the last frame uploaded to the atlas.
     upload_bytes: usize,
+    /// Milliseconds the last frame spent: evaluating the draw list, preparing pictures, recording the pass, submitting.
+    phase_ms: [f64; 4],
     pub(crate) edit: EditScene,
     /// What a click on artwork draws with ([`Stage::pick_artwork`]).
     picker: styk_export::pick::Picker,
@@ -188,6 +190,7 @@ impl Stage {
             uploaded: Uploaded::default(),
             pictures: PICTURES_COMPLETE,
             upload_bytes: 0,
+            phase_ms: [0.0; 4],
             edit: EditScene::default(),
             picker: Default::default(),
             skins: None,
@@ -321,12 +324,17 @@ impl Stage {
 
     /// Replaces the frame the editor is showing with the one `session` shows at `view` (the call's view): the
     /// gesture in progress, else the document at the playhead; with `motion`, the motion-path edit's display where
-    /// it shows one. No pose crosses from the interface.
-    pub fn edit_session(&mut self, session: &mut crate::edit::EditSession, view: &str, motion: bool) -> Result<(), JsError> {
+    /// it shows one. No pose crosses from the interface: the frame is the session's, typed and built. `false` when the
+    /// engine's document is not the session's yet (its publication has not landed): the frame is asked for again.
+    pub fn edit_session(&mut self, session: &mut crate::edit::EditSession, view: &str, motion: bool) -> Result<bool, JsError> {
+        // The session publishes what its reads converted (`EditSession::show`), so the generation is read after it.
+        let shown = session.show(view, motion)?;
         let generation = self.engine.generation().ok_or_else(|| js_error("no document is open"))?;
-        let record = session.show(view, motion)?;
+        if !self.edit.update_shown(&generation, &shown) {
+            return Ok(false);
+        }
         self.edits += 1;
-        self.edit.update_record(&generation, &record).map_err(js_error)
+        Ok(true)
     }
 
     /// Sets the onion skins drawn behind the frame: the ones `session` plans for `request` (the settings, JSON) at `view` (the
@@ -434,6 +442,7 @@ impl Stage {
         // Generated effects evaluate earlier anchors for at most 6 ms a frame, as the editor does
         // (`INTERACTIVE_SAMPLING_MS`); the rest refine over the next frames (`refining`).
         let options = EditOptions { hidden, translations: &translations, background: (background >= 0.0).then_some(background as u32), onions: &onion_list, bypass_effects: !self.effects, camera, prepare_camera: false, clock: Some(crate::clock), anchor_budget_ms: 6.0, live: (!self.live.is_empty()).then_some(&self.live) };
+        let listed = crate::clock();
         let Some(list) = self.edit.draw_list(&generation, &options).map_err(js_error)? else {
             if let Some(tick) = self.edit.camera_pending()
                 && !generation.prepared.doc.keyframes.is_empty()
@@ -452,6 +461,7 @@ impl Stage {
             return Ok(false);
         };
         let scene_camera = if camera { self.edit.camera() } else { None };
+        self.phase_ms[0] = crate::clock() - listed;
         let drawn = self.draw(&generation, &list, scene_camera, zoom, [pan_x, pan_y], clip_to_artboard)?;
         if drawn {
             self.shown = Shown::Edit { generation: generation.id, edits: self.edits, effects: self.effects, scene: std::sync::Arc::new(self.edit.snapshot()), hidden: hidden.to_vec(), translations };
@@ -526,6 +536,7 @@ impl Stage {
         if self.lost.get().is_some() {
             return Ok(false);
         }
+        let began = crate::clock();
         self.sync_images(generation);
         let doc = &generation.prepared.doc;
         // The Draw view turns and mirrors about the artboard's centre, after the scene camera.
@@ -556,6 +567,8 @@ impl Stage {
             }
         };
         self.surface_missed = false;
+        self.phase_ms[1] = crate::clock() - began;
+        let recording = crate::clock();
         self.renderer.set_list(list);
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("styk frame") });
         self.renderer.render(&mut encoder, &view, [self.config.width, self.config.height]);
@@ -576,8 +589,11 @@ impl Stage {
             });
             self.renderer.present(&mut pass);
         }
+        self.phase_ms[2] = crate::clock() - recording;
+        let submitting = crate::clock();
         self.queue.submit([encoder.finish()]);
         self.queue.present(target);
+        self.phase_ms[3] = crate::clock() - submitting;
         self.pictures = self.pictures_after(list);
         Ok(true)
     }
@@ -653,9 +669,9 @@ impl Stage {
     pub fn stats(&self) -> String {
         let s = &self.renderer.stats;
         format!(
-            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{}}}",
+            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"phaseMs\":[{:.3},{:.3},{:.3},{:.3}]}}",
             s.prims, s.groups, s.passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
-            self.upload_bytes, self.uploaded.len(), self.renderer.multisampled()
+            self.upload_bytes, self.uploaded.len(), self.renderer.multisampled(), self.phase_ms[0], self.phase_ms[1], self.phase_ms[2], self.phase_ms[3]
         )
     }
 }

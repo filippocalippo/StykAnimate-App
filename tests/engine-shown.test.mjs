@@ -76,6 +76,33 @@ test('a gesture rebuilds the groups of the figures it moves and keeps the others
   } finally { owner.release(); }
 });
 
+test('posing a joint rebuilds the group of the figure posed alone, and undo and redo put the joint back and where it was posed', {skip: !engineBuilt}, async () => {
+  const {editor, owner} = await poses();
+  try {
+    editor.seek(11);
+    const slotOf = uid => editor.evaluatedFrame.objects.findIndex(object => object.unique_id === uid);
+    const before = editor.geometry, alone = slotOf(4);
+    const figure = editor.report.figure_types.find(type => type.figure_type_id === editor.evaluatedFrame.objects[alone].figure_type_id);
+    const joint = figure.segments.length - 1, end = {...before.objects.get(alone).segments[joint].end};
+    editor.select(4, joint);
+    assert.equal(editor.beginDrag('Pose joint'), true);
+    assert.equal(editor.poseJoint(end.x + 30, end.y + 30, {snap: false}), true);
+    const during = editor.geometry;
+    assert.deepEqual([...during.changedSlots], [alone], 'the figure that was posed is the only group read');
+    for (const [slot, group] of before.objects) if (slot !== alone) assert.equal(during.objects.get(slot), group, `the group of slot ${slot} is the one already held`);
+    // A second pose reads the figure again, and still no other.
+    assert.equal(editor.poseJoint(end.x + 40, end.y + 10, {snap: false}), true);
+    assert.deepEqual([...editor.geometry.changedSlots], [alone]);
+    editor.commitDrag();
+    const posed = {...editor.geometry.objects.get(alone).segments[joint].end};
+    assert.notDeepEqual(posed, end, 'the joint moved');
+    editor.undo();
+    assert.deepEqual(editor.geometry.objects.get(alone).segments[joint].end, end, 'undo puts the joint back');
+    editor.redo();
+    assert.deepEqual(editor.geometry.objects.get(alone).segments[joint].end, posed, 'redo puts it where it was posed');
+  } finally { owner.release(); }
+});
+
 test('a movieclip being edited is a document of the engine like any other: its session answers and the stage draws it', {skip: !engineBuilt}, async () => {
   const document = JSON.parse(readFileSync(new URL('../engine/tests/edit/startup.document.json', import.meta.url), 'utf8'));
   const {editor, owner} = await ownedEditor(options, document);

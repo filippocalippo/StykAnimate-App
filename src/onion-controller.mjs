@@ -11,7 +11,8 @@ export class OnionController {
     this.listeners=new Set();this.session=null;this.events=new AbortController();
     editor.addEventListener('change',event=>{
       if(this.session&&(['seek','document','history'].includes(event.detail?.kind)||editor.revision!==this.session.revision))this.cancel();
-      else this.sync(false);
+      // A pose in progress (a live edit) changes neither the keys the range counts nor the settings: the commit that ends it syncs.
+      else if(!event.detail?.live)this.sync(false);
     },{signal:this.events.signal});
   }
   get settings(){return {...onionRangeSettings(this.getSettings()),...this.session?.patch};}

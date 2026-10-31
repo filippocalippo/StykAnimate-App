@@ -259,7 +259,8 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     side.live.sync(drawingResourcesFor(request.documentReport ?? request.report));
     const {frame, geometry, source} = request, objects = frame.objects ?? [];
     if (source) {
-      stage.edit_session(source.session, source.view, source.motion);
+      // The session publishes what it changed after the call; a frame asked for before that landed is drawn when the engine holds it.
+      if (!stage.edit_session(source.session, source.view, source.motion)) throw Object.assign(new Error('the engine does not hold the document the session edits yet'), {code: 'engine_busy'});
       // The poses the engine holds are the session's: the next frame sent as poses is sent whole.
       side.groups = []; side.count = -1; side.fields = null;
     } else {

@@ -1,8 +1,10 @@
 //! The frame the editor is showing while it edits.
 //!
-//! Editing commands still run in JavaScript, which evaluates the pose it is
-//! changing. The interface passes that pose here (only the objects that changed
-//! since the last frame) and the engine builds its geometry and draw list. The
+//! Editing commands run in the engine's session, which shows the frame it is
+//! editing, typed and built ([`EditScene::update_shown`]): the stage draws it as it
+//! is. The one frame the session cannot show is the interface's own (a first
+//! stroke on a blank exposure, whose cel the document does not hold yet): it
+//! crosses as poses, only the objects that changed since the last frame. The
 //! document's frames are not involved, so a gesture never waits for a commit.
 //!
 //! Onion skins are other poses of the document, kept by an id the caller chooses
@@ -13,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use styk_doc::Value;
-use styk_eval::drawlist::{DrawList, Ghost, Overrides, encode_composed};
+use styk_eval::drawlist::{DrawList, EncodeMemory, Ghost, Overrides, encode_composed_remembering};
 use styk_eval::eval::Frame;
 use styk_eval::geometry::{Scene, build};
 use styk_eval::load::Loader;
@@ -71,8 +73,6 @@ mod snapshot_tests {
 enum Effects {
     /// The pose holds the effects the editor composed into it (clips included).
     Composed,
-    /// The engine's session made the pose: its effect clips are sampled at its tick, as a prepared frame's are.
-    Sampled,
     /// A ghost draws no effects.
     None,
 }
@@ -97,7 +97,11 @@ struct Times {
 
 impl Pose {
     fn new(frame: Frame, used: u64, times: Times) -> Pose {
-        Pose { frame: Arc::new(frame), scene: None, used, motion_tick: times.motion, shot: None, vfx_tick: times.vfx, generators: None, record: None }
+        Pose::shared(Arc::new(frame), used, times)
+    }
+
+    fn shared(frame: Arc<Frame>, used: u64, times: Times) -> Pose {
+        Pose { frame, scene: None, used, motion_tick: times.motion, shot: None, vfx_tick: times.vfx, generators: None, record: None }
     }
 
     /// What the scene camera does to this pose, worked out once per document generation
@@ -138,6 +142,8 @@ pub struct EditScene {
     refining: bool,
     /// The displayed pose needs a worker to warm its shared follow-camera path.
     camera_pending: Option<f64>,
+    /// What the last frame was encoded as, for the objects the next frame keeps.
+    encoded: EncodeMemory,
 }
 
 /// One onion skin of a frame.
@@ -183,19 +189,6 @@ fn no_clock() -> f64 {
     0.0
 }
 
-/// `record` with `null` for each figure that is the node `last` holds: the form that asks the loader to keep the
-/// figure it has. `None` when the two do not have the same figures to compare.
-fn unchanged(record: &Value, last: &Value, held: usize) -> Option<Value> {
-    let now = record.get("objects")?.as_arr()?;
-    let before = last.get("objects")?.as_arr()?;
-    if now.len() != before.len() || now.len() != held || !now.iter().all(Value::is_object) || !now.iter().zip(before).any(|(item, old)| item.same_node(old)) {
-        return None;
-    }
-    let mut value = record.as_obj()?.clone();
-    value.set("objects", Value::array(now.iter().zip(before).map(|(item, old)| if item.same_node(old) { Value::Null } else { item.clone() }).collect()));
-    Some(Value::object(value))
-}
-
 fn flags(slots: &[u32], count: usize) -> Vec<bool> {
     let mut hidden = vec![false; count];
     for &slot in slots {
@@ -219,6 +212,7 @@ impl EditScene {
             self.loader = Some(Loader::new());
             self.current = None;
             self.ghosts.clear();
+            self.encoded = EncodeMemory::default();
             self.lineage = generation.lineage;
         }
         if self.generation != generation.id {
@@ -241,8 +235,7 @@ impl EditScene {
         self.convert(generation, &value, previous, Effects::Composed)
     }
 
-    /// [`EditScene::parse`] of a pose already read. A pose the interface composed holds its effect clips already; one
-    /// the engine's session made has them sampled here at its `tick`, as a prepared frame's are.
+    /// [`EditScene::parse`] of a pose already read. A pose the interface composed holds its effect clips already.
     fn convert(&mut self, generation: &Generation, value: &Value, previous: Option<&Frame>, effects: Effects) -> Result<(Frame, Times), String> {
         let times = Times { vfx: value.get("_vfxTimelineTick").and_then(Value::as_f64), motion: value.get("_cameraMotionTick").and_then(Value::as_f64) };
         let loader = self.loader.as_mut().expect("follow() ran");
@@ -250,7 +243,7 @@ impl EditScene {
         let mut frame = loader.edit_frame(value, previous, doc).map_err(|e| e.to_string())?;
         let fields = frame.pose_vfx.is_some() || frame.objects.iter().any(|o| o.vfx.is_some() || o.vfx_connected.is_some());
         if (fields || generation.prepared.has_vfx) && effects != Effects::None {
-            frame.vfx = if effects == Effects::Sampled { styk_eval::vfx::frame::evaluate(doc, &frame) } else { styk_eval::vfx::frame::composed(doc, &frame) };
+            frame.vfx = styk_eval::vfx::frame::composed(doc, &frame);
         }
         Ok((frame, times))
     }
@@ -265,26 +258,19 @@ impl EditScene {
         Ok(())
     }
 
-    /// Replaces the frame with a record the engine's own session made (the frame on show, with its `tick`): the figures
-    /// whose records are the ones the last frame was made from are not read again.
-    pub fn update_record(&mut self, generation: &Generation, record: &Value) -> Result<(), String> {
-        // Figures made against other definitions are read again.
-        let same = self.lineage == generation.lineage && self.generation == generation.id;
+    /// Replaces the frame with the one the engine's own session shows, typed and built (`styk_edit::Editor::shown_scene`): nothing is
+    /// converted or built here. `false` when the session's document is not the one `generation` holds (the session publishes after a
+    /// change, and the frame is taken once that has landed).
+    pub fn update_shown(&mut self, generation: &Generation, shown: &styk_edit::ShownScene) -> bool {
+        if !Arc::ptr_eq(&shown.prepared, &generation.prepared) {
+            return false;
+        }
         self.follow(generation);
-        let previous = self.current.take();
-        let changed;
-        let source = match previous.as_ref().filter(|_| same).and_then(|pose| pose.record.as_ref().map(|last| (pose, last))) {
-            Some((pose, last)) => match unchanged(record, last, pose.frame.objects.len()) {
-                Some(delta) => { changed = delta; &changed }
-                None => record,
-            },
-            None => record,
-        };
-        let (frame, times) = self.convert(generation, source, previous.as_ref().map(|pose| pose.frame.as_ref()), Effects::Sampled)?;
-        let mut pose = Pose::new(frame, self.draws, times);
-        pose.record = Some(record.clone());
+        let times = Times { vfx: shown.times.0, motion: shown.times.1 };
+        let mut pose = Pose::shared(shown.frame.clone(), self.draws, times);
+        pose.scene = Some(shown.scene.clone());
         self.current = Some(pose);
-        Ok(())
+        true
     }
 
     /// Replaces the pose of ghost `id` with a frame the engine's session evaluated (it draws no effects).
@@ -388,7 +374,7 @@ impl EditScene {
         let overrides = Overrides { hidden: &hidden, translations, background: options.background, bypass_effects: options.bypass_effects, generators: batch.as_deref(), live: options.live.map(|cels| styk_eval::live::LiveView { cels, base: generation.assets.pages }) };
         if options.onions.is_empty() {
             let frame_scene = scene;
-            return Ok(Some(Arc::new(encode_composed(doc, &generation.assets, &frame_scene, &overrides, &[], None))));
+            return Ok(Some(Arc::new(encode_composed_remembering(doc, &generation.assets, &frame_scene, &overrides, &[], None, &mut self.encoded))));
         }
         let mut scenes = Vec::with_capacity(options.onions.len());
         for onion in options.onions {
@@ -416,7 +402,7 @@ impl EditScene {
             .zip(&scenes)
             .map(|(onion, (ghost_scene, ghost_hidden))| Ghost { scene: ghost_scene, opacity: onion.opacity, tint: onion.tint, hidden: ghost_hidden })
             .collect();
-        let list = Arc::new(encode_composed(doc, &generation.assets, &scene, &overrides, &ghosts, Some(&order)));
+        let list = Arc::new(encode_composed_remembering(doc, &generation.assets, &scene, &overrides, &ghosts, Some(&order), &mut self.encoded));
         drop(places);
         if self.ghosts.len() > MAX_GHOSTS {
             let mut by_age: Vec<(u64, u32)> = self.ghosts.iter().map(|(&id, pose)| (pose.used, id)).collect();

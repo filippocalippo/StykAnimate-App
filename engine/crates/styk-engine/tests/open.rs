@@ -100,6 +100,37 @@ fn a_document_that_cannot_open_says_why() {
 }
 
 #[test]
+fn the_document_is_converted_once_whichever_side_does_it() {
+    use std::sync::Arc;
+    let engine = engine();
+    let text = std::fs::read(repo("engine/tests/edit/startup.document.json")).unwrap();
+    let opened = engine.open_document(OpenSource::Json { bytes: &text, name: "Untitled" }, APP, &|| false).unwrap();
+    engine.activate(&opened.typed, &opened.tree, 1).unwrap();
+    let mut session = opened.start_session(STATE).unwrap();
+    let shown_at = "{\"tick\":0,\"frameIndex\":0}";
+    let call = |session: &mut styk_edit::session::Session, fps: u32| {
+        let answer = json::parse(session.call("setFPS", &format!("[{fps}]"), "null").as_bytes()).unwrap();
+        assert_eq!(answer.get("status").and_then(Value::as_str), Some("ok"), "{answer}");
+    };
+    // The session reads the edited document (the frame on show) and so converts it: the engine publishes those views.
+    call(&mut session, 30);
+    session.show(shown_at, false).unwrap();
+    let made = session.views().expect("the session converted the document it reads");
+    engine.publish_tree_with(opened.lineage(), session.report().clone(), session.revision(), Some(made.clone())).unwrap().expect("the document is in front");
+    assert!(Arc::ptr_eq(&engine.generation().unwrap().prepared, &made), "the engine publishes the views the session made");
+    assert_eq!(engine.generation().unwrap().prepared.doc.fps, 30.0);
+    // The engine converts it when the session did not, and the session takes its views.
+    call(&mut session, 12);
+    engine.publish_tree(opened.lineage(), session.report().clone(), session.revision()).unwrap().expect("the document is in front");
+    let published = engine.views_of(session.report()).expect("the engine holds the views of what it published");
+    assert_eq!(published.doc.fps, 12.0);
+    session.adopt_views(session.report(), published.clone());
+    assert!(Arc::ptr_eq(&session.views().unwrap(), &published), "the session reads the engine's views");
+    // The frame the session shows is then drawn against the engine's document.
+    assert!(Arc::ptr_eq(&session.show(shown_at, false).unwrap().prepared, &engine.generation().unwrap().prepared));
+}
+
+#[test]
 fn a_revision_that_moves_with_the_tree_untouched_is_published_without_converting_anything() {
     let engine = engine();
     let text = std::fs::read(repo("engine/tests/edit/startup.document.json")).unwrap();

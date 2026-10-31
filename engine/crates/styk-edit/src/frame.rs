@@ -37,6 +37,17 @@ struct EditFramePair {
 }
 
 impl Cache {
+    /// A document published since (a commit, an undo) has new views: the pair serves them while every object's figure is the
+    /// definition it was made against, an object reading its document only for its figure.
+    pub(crate) fn follow_views(&mut self, prepared: &Arc<Prepared>) {
+        let Some(pair) = &self.latest_typed else { return };
+        if Arc::ptr_eq(&pair.prepared, prepared) { return; }
+        let same = pair.prepared.doc.version == prepared.doc.version && pair.frame.objects.iter().all(|object| {
+            pair.prepared.doc.figure(object.figure).zip(prepared.doc.figure(object.figure)).is_some_and(|(before, now)| Arc::ptr_eq(before, now))
+        });
+        self.latest_typed = same.then(|| Arc::new(EditFramePair { prepared: prepared.clone(), record: pair.record.clone(), frame: pair.frame.clone() }));
+    }
+
     pub(crate) fn typed_worker(&self, report: &Value) -> Option<(&styk_eval::load::Loader, &Arc<Prepared>)> {
         if !self.report.as_ref().is_some_and(|cached| cached.same_node(report)) { return None; }
         Some((&self.loader, self.prepared.as_ref()?))
@@ -108,6 +119,27 @@ impl Editor {
         cache.latest_typed = None;
     }
 
+    /// The typed views the editor holds of `report` (the document as it is now), when it has made them.
+    pub fn views(&self) -> Option<Arc<Prepared>> {
+        let cache = self.eval.borrow();
+        cache.report.as_ref().filter(|held| held.same_node(&self.report))?;
+        cache.prepared.clone()
+    }
+
+    /// Takes the typed views the engine made of the document (`report`, the editor's report as it is now) in place of
+    /// converting it again.
+    pub fn adopt_views(&self, report: &Value, prepared: Arc<Prepared>) {
+        if !report.same_node(&self.report) { return; }
+        let mut cache = self.eval.borrow_mut();
+        let held = cache.report.as_ref().is_some_and(|held| held.same_node(report));
+        if held && cache.prepared.as_ref().is_some_and(|views| Arc::ptr_eq(views, &prepared)) { return; }
+        // The frames evaluated are records of the document, not of its views.
+        if !held { cache.frames.clear(); }
+        cache.report = Some(report.clone());
+        cache.follow_views(&prepared);
+        cache.prepared = Some(prepared);
+    }
+
     /// The typed views of the current document.
     pub(crate) fn prepared(&self) -> Result<Arc<Prepared>, EditError> {
         let mut cache = self.eval.borrow_mut();
@@ -115,10 +147,11 @@ impl Editor {
             let document = cache.loader.document(&self.report, "").map_err(|error| EditError::Invalid(error.to_string()))?;
             // The views of records the document and its history no longer hold go with them.
             cache.loader.release_unused();
-            cache.prepared = Some(Arc::new(Prepared::new(Arc::new(document))));
+            let views = Arc::new(Prepared::new(Arc::new(document)));
             cache.report = Some(self.report.clone());
             cache.frames.clear();
-            cache.latest_typed = None;
+            cache.follow_views(&views);
+            cache.prepared = Some(views);
         }
         Ok(cache.prepared.clone().unwrap())
     }
@@ -236,23 +269,14 @@ impl Editor {
     /// [`Editor::evaluate`] with the geometry of the figures in `slots` (and those they are
     /// joined to) only, when given.
     pub(crate) fn evaluate_only(&self, slots: Option<&[usize]>) -> Result<(Arc<Prepared>, styk_eval::eval::Frame, styk_eval::geometry::Scene), EditError> {
-        self.evaluate_geometry(slots, false, None)
+        self.evaluate_geometry(slots, false)
     }
 
     /// The same shown-frame/typed owner, with only the geometry `shape` consumes.
     /// Missing slot information keeps the original full build; the geometry owner
     /// retains its full-output fallback for rigged and other rich figures.
     pub(crate) fn evaluate_for_shape(&self, slots: Option<&[usize]>) -> Result<(Arc<Prepared>, styk_eval::eval::Frame, styk_eval::geometry::Scene), EditError> {
-        self.evaluate_geometry(slots, true, None)
-    }
-
-    /// The selected segment through the same guarded typed-frame and geometry
-    /// owners. Missing slot information preserves the original full build.
-    pub(crate) fn evaluate_for_joint_shape(&self, slot: Option<usize>, joint: usize) -> Result<(Arc<Prepared>, styk_eval::eval::Frame, styk_eval::geometry::Scene), EditError> {
-        match slot {
-            Some(slot) => self.evaluate_geometry(Some(&[slot]), true, Some((slot, joint))),
-            None => self.evaluate_for_shape(None),
-        }
+        self.evaluate_geometry(slots, true)
     }
 
     /// The same guarded shown-frame conversion, for callers that do not read geometry.
@@ -264,13 +288,12 @@ impl Editor {
         Ok((prepared, frame))
     }
 
-    fn evaluate_geometry(&self, slots: Option<&[usize]>, for_shape: bool, joint: Option<(usize, usize)>) -> Result<(Arc<Prepared>, styk_eval::eval::Frame, styk_eval::geometry::Scene), EditError> {
+    fn evaluate_geometry(&self, slots: Option<&[usize]>, for_shape: bool) -> Result<(Arc<Prepared>, styk_eval::eval::Frame, styk_eval::geometry::Scene), EditError> {
         let (prepared, frame) = self.evaluate_frame()?;
-        let scene = match (slots, joint) {
-            (Some(_), Some((slot, joint))) => styk_eval::geometry::build_joint_for_shape(&prepared.doc, &frame, slot, joint),
-            (Some(slots), _) if for_shape => styk_eval::geometry::build_only_for_shape(&prepared.doc, &frame, slots),
-            (Some(slots), _) => styk_eval::geometry::build_only(&prepared.doc, &frame, slots),
-            (None, _) => styk_eval::geometry::build(&prepared.doc, &frame),
+        let scene = match slots {
+            Some(slots) if for_shape => styk_eval::geometry::build_only_for_shape(&prepared.doc, &frame, slots),
+            Some(slots) => styk_eval::geometry::build_only(&prepared.doc, &frame, slots),
+            None => styk_eval::geometry::build(&prepared.doc, &frame),
         };
         Ok((prepared, frame, scene))
     }
@@ -1194,7 +1217,8 @@ mod tests {
         let Some(slot) = selected else { return };
         let (prepared, frame, full) = editor.evaluate_only(Some(&[slot])).unwrap();
         let (query_prepared, query_frame, query) = editor.evaluate_for_shape(Some(&[slot])).unwrap();
-        assert!(Arc::ptr_eq(&prepared, &query_prepared));
+        let shown = editor.shown_scene(false, crate::Flavor::Composed).unwrap().expect("the frame on show has a scene");
+        assert!(Arc::ptr_eq(&prepared, &query_prepared) && Arc::ptr_eq(&prepared, &shown.prepared));
         assert_eq!(frame.objects.len(), query_frame.objects.len());
         for (before, after) in frame.objects.iter().zip(&query_frame.objects) { assert!(Arc::ptr_eq(before, after)); }
         assert_eq!(full.figure_of, query.figure_of);
@@ -1228,21 +1252,16 @@ mod tests {
                     assert_eq!(full.points_of(item).iter().map(|p| p.map(f64::to_bits)).collect::<Vec<_>>(), query.points_of(actual).iter().map(|p| p.map(f64::to_bits)).collect::<Vec<_>>());
                 }
             }
-            if at == slot {
-                let index = usize::try_from(editor.selection.joint).ok().filter(|&index| index < figure.segments.len()).unwrap_or(0);
-                if figure.segments.get(index).is_some() {
-                    let (joint_prepared, joint_frame, joint_scene) = editor.evaluate_for_joint_shape(Some(slot), index).unwrap();
-                    assert!(Arc::ptr_eq(&prepared, &joint_prepared));
-                    for (before, after) in frame.objects.iter().zip(&joint_frame.objects) { assert!(Arc::ptr_eq(before, after)); }
-                    let joint_geometry = &joint_scene.objects[slot];
-                    assert_eq!((geometry.slot, geometry.uid, geometry.figure, geometry.resolved), (joint_geometry.slot, joint_geometry.uid, joint_geometry.figure, joint_geometry.resolved));
-                    assert_eq!(geometry.root.map(f64::to_bits), joint_geometry.root.map(f64::to_bits));
-                    assert_eq!(geometry.starts[index].map(f64::to_bits), joint_geometry.starts[index].map(f64::to_bits));
-                    assert_eq!(geometry.ends[index].map(f64::to_bits), joint_geometry.ends[index].map(f64::to_bits));
-                    assert_eq!(geometry.lengths[index].to_bits(), joint_geometry.lengths[index].to_bits());
-                    assert_eq!(crate::ik::shape_angle(&prepared, &frame, &full, at, index).to_bits(), crate::ik::shape_angle(&joint_prepared, &joint_frame, &joint_scene, at, index).to_bits(), "selected shape angle slot{at}/joint{index}");
-                    assert_eq!(rig_bits(&geometry.rig), rig_bits(&joint_geometry.rig));
-                }
+            // The scene the interface, the stage and the pose commands share has the geometry the full build has.
+            let seen = &shown.scene.objects[at];
+            assert_eq!((geometry.slot, geometry.uid, geometry.figure, geometry.resolved), (seen.slot, seen.uid, seen.figure, seen.resolved));
+            assert_eq!(geometry.root.map(f64::to_bits), seen.root.map(f64::to_bits));
+            assert_eq!(geometry.starts.iter().map(|p| p.map(f64::to_bits)).collect::<Vec<_>>(), seen.starts.iter().map(|p| p.map(f64::to_bits)).collect::<Vec<_>>());
+            assert_eq!(geometry.ends.iter().map(|p| p.map(f64::to_bits)).collect::<Vec<_>>(), seen.ends.iter().map(|p| p.map(f64::to_bits)).collect::<Vec<_>>());
+            assert_eq!(geometry.lengths.iter().map(|l| l.to_bits()).collect::<Vec<_>>(), seen.lengths.iter().map(|l| l.to_bits()).collect::<Vec<_>>());
+            assert_eq!(rig_bits(&geometry.rig), rig_bits(&seen.rig));
+            for index in 0..figure.segments.len() {
+                assert_eq!(crate::ik::shape_angle(&prepared, &frame, &full, at, index).to_bits(), crate::ik::shape_angle(&shown.prepared, &shown.frame, &shown.scene, at, index).to_bits(), "shown shape angle slot{at}/joint{index}");
             }
             counts[0] += 1;
             counts[1] += usize::from(geometry.rig.is_some());
@@ -1304,7 +1323,6 @@ mod tests {
         let old = editor.evaluate_only(Some(&[0])).err().unwrap();
         assert!(matches!(&old, EditError::Invalid(_)));
         assert_eq!(format!("{old:?}"), format!("{:?}", editor.evaluate_for_shape(Some(&[0])).err().unwrap()));
-        assert_eq!(format!("{old:?}"), format!("{:?}", editor.evaluate_for_joint_shape(Some(0), 0).err().unwrap()));
         assert!(Arc::ptr_eq(editor.eval.borrow().latest_typed.as_ref().unwrap(), &coherent), "conversion error never installs a partial typed frame");
     }
 

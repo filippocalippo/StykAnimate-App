@@ -579,3 +579,48 @@ fn the_frame_carries_the_playhead_as_the_time_of_the_effect_clips_the_document_h
         assert_eq!(frame.get("_cameraMotionTick"), None, "{name}: the camera is read from the shot, not from a time");
     }
 }
+
+#[test]
+fn the_interface_the_stage_and_the_pose_commands_read_one_scene() {
+    use std::sync::Arc;
+    let (mut session, _) = tape("channels-pose-sheet");
+    call(&mut session, "seek", "[11]");
+    call(&mut session, "select", "[4,-1]");
+    let composed = session.editor.shown_scene(false, crate::Flavor::Composed).unwrap().unwrap();
+    // A document without effects has one scene, whichever effects are asked for.
+    let sampled = session.editor.shown_scene(false, crate::Flavor::Sampled).unwrap().unwrap();
+    assert!(Arc::ptr_eq(&composed, &sampled), "the stage reads the scene the interface reads");
+    assert!(Arc::ptr_eq(&composed, &session.editor.shown_scene(false, crate::Flavor::Composed).unwrap().unwrap()), "a frame that did not change is the one held");
+    // The geometry the interface was sent is that scene's.
+    let read = geometry(&mut session, None);
+    assert_eq!(slots_of(&read).len(), composed.frame.objects.len());
+    let again = session.editor.shown_scene(false, crate::Flavor::Composed).unwrap().unwrap();
+    assert!(Arc::ptr_eq(&composed, &again), "reading the geometry builds nothing");
+}
+
+#[test]
+fn a_gesture_builds_the_figure_it_moves_and_the_figures_that_hang_from_what_moved() {
+    use std::sync::Arc;
+    let (mut session, _) = tape("channels-pose-sheet");
+    call(&mut session, "seek", "[11]");
+    call(&mut session, "select", "[4,-1]");
+    let before = session.editor.shown_scene(false, crate::Flavor::Composed).unwrap().unwrap();
+    call(&mut session, "beginTranslationDrag", "[]");
+    call(&mut session, "moveSelection", "[12,0,{\"fromStart\":true}]");
+    let during = session.editor.shown_scene(false, crate::Flavor::Composed).unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&before, &during));
+    let uid_at = |slot: usize| during.frame.objects[slot].uid;
+    let rebuilt: Vec<u32> = (0..during.frame.objects.len()).filter(|&slot| during.built_in[slot] > before.serial).map(uid_at).collect();
+    assert_eq!(rebuilt, vec![4], "only the figure the gesture moves is built again");
+    for slot in 0..during.frame.objects.len() {
+        if during.built_in[slot] <= before.serial {
+            assert_eq!(during.scene.objects[slot].root.map(f64::to_bits), before.scene.objects[slot].root.map(f64::to_bits), "slot {slot} is where it was");
+        }
+    }
+    // The scene is the scene built whole.
+    let whole = styk_eval::geometry::build_shapes(&during.prepared.doc, &during.frame, None);
+    for (kept, fresh) in during.scene.objects.iter().zip(&whole.objects) {
+        assert_eq!(kept.ends.iter().map(|p| p.map(f64::to_bits)).collect::<Vec<_>>(), fresh.ends.iter().map(|p| p.map(f64::to_bits)).collect::<Vec<_>>());
+    }
+    call(&mut session, "cancelDrag", "[]");
+}

@@ -13,18 +13,18 @@ use std::sync::Arc;
 use styk_doc::Value;
 use styk_eval::eval::Prepared;
 
-use crate::frame::objects_of;
 use crate::{EditError, Editor};
 
-/// What the interface holds of one kind of frame's geometry.
+/// What the interface holds of one kind of frame's geometry, and the scenes built for that kind of frame.
 #[derive(Clone, Default)]
 pub(crate) struct Cache {
     /// The read it holds; zero before the first.
     token: u64,
-    /// The figure definitions its groups were built against (identities, and the document's version).
-    definitions: Vec<usize>,
-    /// The pose records its groups were built from, by slot.
-    objects: Vec<Value>,
+    /// How many objects the frame had then, and the build of its scene ([`crate::shown::ShownScene::serial`]): an object built
+    /// after it has changed since.
+    count: usize,
+    through: u64,
+    pub(crate) scenes: crate::shown::Scenes,
 }
 
 impl Editor {
@@ -232,66 +232,24 @@ impl Editor {
     pub(crate) fn interface_geometry(&self, args: &Value) -> Result<String, EditError> {
         let motion = args.get("motion").is_some_and(Value::truthy);
         let since = args.get("since").and_then(Value::as_f64).map(|token| token as u64);
-        let record = if motion {
-            match self.motion_display_frame_worker()? {
-                Some(record) => record,
-                None => return Ok("null".into()),
-            }
-        } else {
-            self.shown_frame()?
-        };
-        let prepared = self.prepared()?;
-        let mut frame = self.eval.borrow_mut().edit_frame(&record, &prepared).map_err(|error| EditError::Invalid(error.to_string()))?;
-        let fields = frame.pose_vfx.is_some() || frame.objects.iter().any(|object| object.vfx.is_some() || object.vfx_connected.is_some());
-        if fields || prepared.has_vfx {
-            frame.vfx = styk_eval::vfx::frame::composed(&prepared.doc, &frame);
-        }
-        let objects = objects_of(&record);
-        let count = frame.objects.len();
+        let Some(shown) = self.shown_scene(motion, crate::shown::Flavor::Composed)? else { return Ok("null".into()) };
+        let count = shown.frame.objects.len();
         let mut caches = self.shown.borrow_mut();
         let cache = &mut caches[usize::from(motion)];
-        // Selecting another layer is a new document node but the same figures: their groups stay.
-        let definitions: Vec<usize> = std::iter::once(prepared.doc.version as usize).chain(prepared.doc.figures.iter().map(|figure| Arc::as_ptr(figure) as usize)).collect();
-        let reuse = since.is_some() && since == Some(cache.token) && cache.definitions == definitions && cache.objects.len() == objects.len() && count == objects.len();
-        let mut dirty: Vec<bool> = if reuse { objects.iter().zip(&cache.objects).map(|(now, before)| !(now.same_node(before) || now == before)).collect() } else { vec![true; count] };
-        if reuse && dirty.iter().any(|dirty| *dirty) {
-            // A figure's pose moves the figures joined to it (and an assembly's inverse kinematics reaches across them).
-            let mut root: Vec<usize> = (0..count).collect();
-            for (i, object) in frame.objects.iter().enumerate() {
-                if let Some(join) = object.join.filter(|join| (join.slot as usize) < count) {
-                    root[i] = join.slot as usize;
-                }
-            }
-            let top = |mut i: usize| {
-                let mut steps = 0;
-                while root[i] != i && steps <= count {
-                    i = root[i];
-                    steps += 1;
-                }
-                i
-            };
-            let mut component = vec![false; count];
-            for i in 0..count {
-                if dirty[i] {
-                    component[top(i)] = true;
-                }
-            }
-            for i in 0..count {
-                dirty[i] = component[top(i)];
-            }
-        }
-        let slots: Vec<usize> = (0..count).filter(|&i| dirty[i]).collect();
+        // The held read is this one's predecessor: the objects built since are the ones that changed. Another read, or one of another
+        // frame, is all of them.
+        let reuse = since.is_some() && since == Some(cache.token) && cache.count == count;
+        let slots: Vec<usize> = (0..count).filter(|&slot| !reuse || shown.built_in[slot] > cache.through).collect();
         let full = slots.len() == count;
         let groups = if slots.is_empty() {
             (Vec::new(), Vec::new())
         } else {
-            let scene = styk_eval::geometry::build_shapes(&prepared.doc, &frame, (!full).then_some(&slots[..]));
-            let bounds = styk_eval::drawlist::app_bounds(&scene, prepared.doc.as_ref());
-            (styk_eval::geometry::write_groups(&scene, &slots, &bounds), scene.warnings)
+            let bounds = styk_eval::drawlist::app_bounds_of(&shown.scene, shown.prepared.doc.as_ref(), &slots);
+            (styk_eval::geometry::write_groups(&shown.scene, &slots, &bounds), shown.scene.warnings.clone())
         };
         cache.token += 1;
-        cache.definitions = definitions;
-        cache.objects = objects;
+        cache.count = count;
+        cache.through = shown.serial;
         geometry_text(cache.token, full, count, &slots, &groups)
     }
 
