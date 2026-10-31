@@ -7,6 +7,8 @@ use styk_engine::{Engine, Generation, Uploaded};
 use styk_render::{Renderer, ViewParams, wgpu};
 use wasm_bindgen::prelude::*;
 
+mod pictures;
+
 use crate::engine::EngineHandle;
 use crate::js_error;
 
@@ -66,6 +68,14 @@ pub struct Stage {
     /// The atlas places uploaded so far, and whether the last frame drawn lacked a
     /// picture ([`Stage::pictures_pending`]).
     uploaded: Uploaded,
+    /// The pages of the sprite layout in the sprite texture, for a document with more of them than it keeps
+    /// ([`styk_engine::Residency`]); none for a document whose texture is the layout's size.
+    residency: Option<styk_engine::Residency>,
+    /// The images of the document the residency has seen, to tell the ones a later revision adds.
+    residency_images: usize,
+    /// The layout pages the frame on show draws, and those of the prepared frames after it.
+    shown_pages: Vec<u32>,
+    ahead: pictures::Ahead,
     pictures: u32,
     /// Bytes of pictures the last frame uploaded to the atlas.
     upload_bytes: usize,
@@ -186,6 +196,10 @@ impl Stage {
             live: Default::default(),
             live_pages: 0,
             uploaded: Uploaded::default(),
+            residency: None,
+            residency_images: 0,
+            shown_pages: Vec::new(),
+            ahead: Default::default(),
             pictures: PICTURES_COMPLETE,
             upload_bytes: 0,
             edit: EditScene::default(),
@@ -307,6 +321,7 @@ impl Stage {
         let drawn = self.draw(generation, &frame.list, if camera { frame.camera } else { None }, zoom, pan, clip_to_artboard)?;
         if drawn {
             self.shown = Shown::Prepared { generation: generation.id, tick: frame.tick, epoch: snapshot.epoch };
+            self.prefetch_pictures(frame.tick);
         }
         Ok(drawn)
     }
@@ -461,23 +476,27 @@ impl Stage {
 
     /// Lays the sprite atlas out for `generation` and uploads a slice of the pictures decoded
     /// since (the camera monitor and thumbnails sample the same atlas).
-    pub(crate) fn sync_images(&mut self, generation: &Generation) {
+    pub(crate) fn sync_images(&mut self, generation: &Arc<Generation>) {
         self.sync_atlas(generation);
         let images = self.engine.take_images(IMAGE_UPLOAD_BYTES);
         self.upload_bytes = images.iter().map(|image| image.rgba.len()).sum();
         if !images.is_empty() {
             self.renderer.upload_images(&generation.assets, images.iter().map(|image| &**image));
             for image in &images {
-                self.uploaded.record(&generation.assets, image);
+                self.picture_arrived(&generation.assets, image);
             }
         }
     }
 
     /// Lays the sprite atlas out for `generation`, with room for the live drawing cels' slots.
-    fn sync_atlas(&mut self, generation: &Generation) {
+    fn sync_atlas(&mut self, generation: &Arc<Generation>) {
         let layout = (generation.lineage, generation.assets.pages);
         let live_pages = self.live.pages();
-        if self.atlas_of != Some(layout) {
+        if styk_engine::on_demand(&generation.assets) {
+            return self.sync_atlas_resident(generation, live_pages);
+        }
+        if self.atlas_of != Some(layout) || self.residency.is_some() {
+            self.residency = None;
             // Another project, or more atlas pages than before: the texture is allocated
             // again and every image decoded so far is uploaded again by the engine.
             self.renderer.prepare_sprites_live(&generation.assets, live_pages);
@@ -527,6 +546,8 @@ impl Stage {
             return Ok(false);
         }
         self.sync_images(generation);
+        // The picture on show stays until the pictures this frame draws are all in the sprite texture.
+        let Some(pages) = self.pictures_ready(generation, list).or_else(|| self.residency.is_none().then(Vec::new)) else { return Ok(false) };
         let doc = &generation.prepared.doc;
         // The Draw view turns and mirrors about the artboard's centre, after the scene camera.
         let orientation = styk_eval::view::orientation(self.rotation, self.flip, [pan[0] + doc.canvas[0] as f64 * zoom / 2.0, pan[1] + doc.canvas[1] as f64 * zoom / 2.0]);
@@ -579,6 +600,7 @@ impl Stage {
         self.queue.submit([encoder.finish()]);
         self.queue.present(target);
         self.pictures = self.pictures_after(list);
+        self.pictures_shown(pages);
         Ok(true)
     }
 
@@ -653,10 +675,12 @@ impl Stage {
     pub fn stats(&self) -> String {
         let s = &self.renderer.stats;
         let (sprite_pages, sprite_bytes) = self.renderer.sprite_memory();
+        let (resident, loads, evictions) = self.residency_stats();
         format!(
-            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{}}}",
+            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{}}}",
             s.prims, s.groups, s.passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
-            sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled()
+            sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled(),
+            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len()
         )
     }
 }

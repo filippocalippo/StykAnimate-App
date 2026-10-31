@@ -87,6 +87,8 @@ impl Renderer {
                 texture_entry(2, wgpu::TextureViewDimension::D2),
                 sampler_entry(3),
                 texture_entry(4, wgpu::TextureViewDimension::D2Array),
+                // Where each page of the sprite layout is in the sprite texture.
+                table_entry(5),
             ],
         });
         let layout2 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -140,7 +142,8 @@ impl Renderer {
         let materials = crate::materials::Materials::placeholder(&device);
         let material_sampler = crate::materials::sampler(&device);
         let glyphs = crate::glyphs::GlyphMasks::new(&device);
-        let sprite_bind = Self::sprite_bind(&device, &layout1, &sprite_view, &linear, &materials.view, &material_sampler, &glyphs.view);
+        let sprite_map = crate::images::SpriteMap::new(&device);
+        let sprite_bind = Self::sprite_bind(&device, &layout1, &sprite_view, &linear, &materials.view, &material_sampler, &glyphs.view, &sprite_map.view);
         let make_layers = |label: &str| {
             let (texture, view) = array_texture(&device, label, [1, 1], 1, true);
             LayerAtlas { texture, view, size: [1, 1], pages: 1 }
@@ -177,6 +180,7 @@ impl Renderer {
             layout2,
             sprites,
             sprite_view,
+            sprite_map,
             sprite_bind,
             materials,
             material_sampler,

@@ -295,7 +295,8 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     side.stats.cameraPending = pendingCamera;
     // The pose is shown through a follow camera whose path a worker is still warming: drawn again when it is done.
     if (pendingCamera) side.engine.whenProgress(seen).then(() => { if (!destroyed) invalidate(); });
-    if (drawn || pendingCamera) awaitPictures(seen);
+    // A frame not drawn because pictures of its pages are still being loaded (the picture on show stays) is drawn once they are in.
+    if (drawn || pendingCamera || stage.pictures_pending?.()) awaitPictures(seen);
     // A surface that was being resized takes the frame on the next animation frame.
     else if (stage.surface_pending()) redrawSoon();
     // The previous picture stays visible while the shared follow path warms.

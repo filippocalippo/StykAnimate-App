@@ -87,10 +87,51 @@ shelf of the current page in the best free space an earlier page left, before op
 (`styk_eval::assets::pack`; a layout within one page is unchanged). About 200 to 300 MiB of the GPU process is named by no counter, in every document (the empty app's 281–404 MiB is not itemised
 either); the layer and glyph targets grow with play.
 
-Left: pages are allocated for the whole layout while the pictures are uploaded over two seconds, and nothing is
-evicted; a picture resident only while frames use it (re-uploaded from its encoded bytes), or a smaller level of a picture
-shown small, would bring the atlas under the pictures a frame samples, at the cost of the rules for a picture that is
-not there yet (`Stage::pictures_pending`). A picture shown at 4K on a 4K display cannot be reduced.
+### Pages kept against a budget
+
+A document whose layout has more than `ATLAS_PAGES` (6) pages is not held whole
+(`styk_engine::Residency`, `styk-wasm/src/stage/pictures.rs`). Measured on tdd2 (`styk pages`: the layout's pages each
+frame draws from, over 589 ticks): one frame draws from at most 3 of its 20 pages (0.4 on average), and the 48 frames
+after one from 4.7 on average, 18 at most. So the stage's sprite texture has the empty layer 0 and 6 layers (448 MiB),
+the layout's pages are mapped onto them by a table the shader reads (`sprite_layer` in prim.wgsl, `Renderer::map_sprite_page`;
+a page without a layer reads layer 0 and draws nothing), and:
+
+- a page gets a layer when a frame draws from it, or a prepared frame up to 24 ticks ahead of the one on show does
+  (`Stage::prefetch_pictures`, which only looks at frames the workers have prepared); the least recently shown page
+  leaves for it. The pages of the frame being drawn, of the frame on show and of the frames looked at ahead are never taken;
+  only a frame that draws from more pages than there are layers makes the texture grow (for that frame's pages, by copying
+  the texture once: the budget is soft in that case only).
+- the pictures of a page are decoded again from the document's encoded bytes (`Engine::decode_images`, ahead of the
+  frame queue, under the picture budget above) and uploaded in the slices that already exist; a document of this size is
+  not decoded with the document, and its idle upload of every picture does not run.
+- a frame draws only when every picture of its pages is in: until then `Stage::render_*` returns false, the picture on
+  show stays, and `pictures_pending` says what to wait for (the same rule as pictures still on their way when a document
+  opens, `waitForPictures`). A picture that cannot be decoded does not hold a frame back once nothing is being decoded.
+- drawing cels' pages (they are decoded with the document) and the live drawing slots keep their layers for good;
+  frame thumbnails need their pages loaded too, take layers only from pages the frame on show does not draw, and wait
+  otherwise. Exports, the preview worker and the thumbnails' CPU path hold their own atlases and are unchanged.
+
+Measured on 2026-10-31 (probe runs of a `--dev` build on the private documents, beside other jobs: directional; GPU
+process private bytes, MiB; the empty app's is 412–434):
+
+| tdd2 | before | after |
+| --- | ---: | ---: |
+| sprite atlas (pages) | 1,280 (20) | 448 (7 layers) |
+| GPU process, settled | 1,853–1,877 | 878–1,030 |
+| GPU process, after playing through and scrubbing the whole animation | not measured | 1,111 (84 page loads, 78 evictions, no growth) |
+| playing through (12 s, 24 fps): frames more than 1.5 intervals late / worst interval | 7 / 90 ms (release, baseline table) | 6 / 87 ms |
+
+The same frame (two pages of pictures) before its pages were evicted and after they were loaded again differs in 90 of
+400,000 pixels, by one level (the compositor's rounding). A texture the last handle to is dropped is not given back by
+the browser until it collects it: a sprite texture that was replaced (the grow above, another document) is `destroy`ed
+once its texels are copied (before this, two grows kept 960 MiB beyond the atlas). The 280 to 400 MiB of the GPU process
+that no counter names is in the empty app already (the stage's own allocations there are 12 MiB of targets); this change
+does not name it (hypothesis: the driver and the browser's device and pipelines).
+
+A document of up to 6 pages keeps today's behaviour: a texture of the layout's size, every picture decoded and uploaded
+with the document. A picture shown at 4K on a 4K display is never reduced. Left: the page is the unit (a page with 16
+small pictures loads them all; a page of one 4K picture is a 64 MiB upload); a smaller level of a picture shown small would
+need the owner's decision.
 
 ## When the memory cannot hold the work
 

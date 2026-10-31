@@ -367,7 +367,7 @@ impl Stage {
         let generation = frames.generation().clone();
         // A thumbnail never shows a frame without its pictures: they reach the atlas first.
         self.sync_images(&generation);
-        if self.engine.images_pending() > 0 {
+        if !self.pictures_ready_for_view(&generation, &frame.list) {
             return Ok(WAIT);
         }
         let framing = card(&generation.prepared.doc, frame.camera.as_ref(), width, height);

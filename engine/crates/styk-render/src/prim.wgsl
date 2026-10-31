@@ -61,8 +61,16 @@ struct Group {
 // (three texels each), and the atlas of their coverage masks, sampled bilinearly.
 @group(0) @binding(4) var glyph_table: texture_2d<f32>;
 @group(1) @binding(4) var glyph_masks: texture_2d_array<f32>;
+// Where each page of the document's sprite layout lives in the sprite texture (images.rs): a layer of
+// `sprites`, 0 (a layer nothing is ever written to) for a page that is not resident.
+@group(1) @binding(5) var page_table: texture_2d<f32>;
 
 const TABLE_WIDTH: u32 = 1024u;
+
+fn sprite_layer(page: f32) -> i32 {
+    let at = table_at(u32(max(page, 0.0)));
+    return i32(textureLoad(page_table, at, 0).r);
+}
 
 fn table_at(i: u32) -> vec2<i32> {
     return vec2<i32>(i32(i % TABLE_WIDTH), i32(i / TABLE_WIDTH));
@@ -856,7 +864,7 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
         if ((p.kind & F_DRAWING) != 0u && crisp()) {
             // Crisp edges: the nearest texel of the tile, unfiltered.
             let nearest = vec2<i32>(round(rect.xy * size)) + vec2<i32>(clamp(floor(in.uv * 64.0), vec2<f32>(0.0), vec2<f32>(63.0)));
-            tex = premul(textureLoad(sprites, nearest, i32(p.b.z), 0));
+            tex = premul(textureLoad(sprites, nearest, sprite_layer(p.b.z), 0));
         } else if ((p.kind & F_DRAWING) != 0u) {
             // Premultiply each straight-alpha texel before filtering. Canvas enlargement
             // uses Mitchell; other sampling is bilinear, optionally blended with a parent.
@@ -865,7 +873,7 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
             let f = t - cell;
             let start = vec2<i32>(round(rect.xy * size));
             let origin = start + vec2<i32>(cell);
-            let layer = i32(p.b.z);
+            let layer = sprite_layer(p.b.z);
             if (in.sampling < 0.0) {
                 tex = tile_mitchell(start, layer, t);
             } else {
@@ -877,14 +885,14 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
                 let q = u32(parent.w);
                 let tp = in.uv * 32.0 + vec2<f32>(f32(q & 1u), f32(q >> 1u)) * 32.0 - vec2<f32>(0.5);
                 let cp = floor(tp);
-                let up = tile_bilinear(vec2<i32>(parent.yz) + vec2<i32>(cp), i32(parent.x), tp - cp);
+                let up = tile_bilinear(vec2<i32>(parent.yz) + vec2<i32>(cp), sprite_layer(parent.x), tp - cp);
                 tex = mix(tex, up, in.sampling);
             }
         } else if ((p.kind & F_SMOOTH) != 0u && !crisp()) {
-            tex = textureSampleLevel(sprites, linear_sampler, raw, i32(p.b.z), 0.0);
+            tex = textureSampleLevel(sprites, linear_sampler, raw, sprite_layer(p.b.z), 0.0);
         } else {
             let q = clamp(raw, rect.xy + texel * 0.5, rect.zw - texel * 0.5);
-            tex = textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), i32(p.b.z), 0.0);
+            tex = textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), sprite_layer(p.b.z), 0.0);
         }
         if ((p.kind & F_TINT) != 0u) {
             // An onion skin's sprite: its coverage in the tint colour.
@@ -898,7 +906,7 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
         let texel = 1.0 / size;
         let uv = clamp(w / p.a.xy, vec2<f32>(0.0), vec2<f32>(1.0));
         let q = clamp(mix(rect.xy, rect.zw, uv), rect.xy + texel * 0.5, rect.zw - texel * 0.5);
-        return textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), i32(p.a.z), 0.0) * base.a;
+        return textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), sprite_layer(p.a.z), 0.0) * base.a;
     }
     if (kind == K_COMPOSITE) {
         // Bilinear, clamped to the child's own rectangle as an exact texture's edge would be

@@ -21,7 +21,7 @@ function standInStage(behaviour = {}) {
     take_device_errors: () => behaviour.errors?.() ?? '',
     device_lost: () => behaviour.lost?.() ?? '',
     max_texture: () => 4096,
-    refining: () => false, camera_pending: () => false, pictures_pending: () => 0, surface_pending: () => behaviour.pending?.() ?? false,
+    refining: () => false, camera_pending: () => false, pictures_pending: () => behaviour.pictures_pending?.() ?? 0, surface_pending: () => behaviour.pending?.() ?? false,
     ...Object.fromEntries(['resize', 'set_effects', 'set_canvas_drawing', 'set_view_orientation', 'set_multisampled', 'edit_frame', 'edit_session', 'set_onions', 'clear_onions', 'lose_device', 'free']
       .map(name => [name, record(name)])),
     render_edit: (...args) => { calls.push(['render_edit', ...args]); return behaviour.render_edit ? behaviour.render_edit(...args) : true; },
@@ -315,4 +315,20 @@ test('a stage prepared ahead of its owner is taken once, and a failed start reac
   const failing = stageHandoff(() => Promise.reject(new Error('no device')));
   failing.prepare(canvas);
   await assert.rejects(failing.take(canvas), /no device/);
+});
+
+test('a frame the engine does not draw while its pictures are loaded is drawn again once the engine finishes something', async () => {
+  // A document kept a few sprite pages at a time: the picture on show stays until the pages the frame draws are in.
+  let pending = 2, progressed = 0;
+  const {renderer, progress, engine, events} = await open({pictures_pending: () => pending, render_edit: () => pending === 0});
+  engine.progressSeen = () => progressed;
+  const before = events.invalidations;
+  assert.equal(renderer.render(request()), false);
+  await Promise.resolve();
+  assert.ok(progress.length > 0, 'it waits on the engine, not on a timer');
+  pending = 0; progressed = 1;
+  progress.at(-1)();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(events.invalidations > before, 'the frame is asked for again');
+  renderer.destroy();
 });

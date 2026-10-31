@@ -20,9 +20,53 @@ pub fn decode_images(doc: &Document, assets: &Assets) -> Vec<DecodedImage> {
 }
 
 
+/// A page of the document's sprite layout that has no layer of the sprite texture.
+pub(crate) const UNMAPPED: u32 = u32::MAX;
+
+/// Pages a layout may have: one row of the table.
+pub const MAX_PAGES: u32 = crate::resources::TABLE_WIDTH;
+
+/// Where each page of the document's sprite layout (`styk_eval::assets`) lives in the sprite texture: the layer a
+/// shader reads for a record's page (prim.wgsl `sprite_layer`). A renderer that holds the whole layout maps a page
+/// to the layer of its own number; the stage's, for a document with more pages than it keeps
+/// (`styk_engine::Residency`), maps the pages that are resident and sends every other page to layer 0, which
+/// nothing is ever written to.
+pub(crate) struct SpriteMap {
+    pub(crate) texture: wgpu::Texture,
+    pub(crate) view: wgpu::TextureView,
+    /// The layer of each page, [`UNMAPPED`] for a page without one.
+    layers: Vec<u32>,
+}
+
+impl SpriteMap {
+    pub(crate) fn new(device: &wgpu::Device) -> SpriteMap {
+        let (texture, view) = crate::resources::Table::allocate(device, "styk sprite pages", wgpu::TextureFormat::R32Float, 1);
+        SpriteMap { texture, view, layers: Vec::new() }
+    }
+
+    /// Writes the table: a page with no layer reads layer 0.
+    fn flush(&self, queue: &wgpu::Queue) {
+        let mut row = vec![0f32; MAX_PAGES as usize];
+        for (page, &layer) in self.layers.iter().enumerate().take(MAX_PAGES as usize) {
+            row[page] = if layer == UNMAPPED { 0.0 } else { layer as f32 };
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &self.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            bytemuck::cast_slice(&row),
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(MAX_PAGES * 4), rows_per_image: Some(1) },
+            wgpu::Extent3d { width: MAX_PAGES, height: 1, depth_or_array_layers: 1 },
+        );
+    }
+
+    /// The layer of `page`, if it has one.
+    pub(crate) fn layer(&self, page: u32) -> Option<u32> {
+        self.layers.get(page as usize).copied().filter(|&layer| layer != UNMAPPED)
+    }
+}
+
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn sprite_bind(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, view: &wgpu::TextureView, linear: &wgpu::Sampler, materials: &wgpu::TextureView, material_sampler: &wgpu::Sampler, glyphs: &wgpu::TextureView) -> wgpu::BindGroup {
+    pub(crate) fn sprite_bind(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, view: &wgpu::TextureView, linear: &wgpu::Sampler, materials: &wgpu::TextureView, material_sampler: &wgpu::Sampler, glyphs: &wgpu::TextureView, pages: &wgpu::TextureView) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("styk sprites"),
             layout,
@@ -32,13 +76,14 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(materials) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(material_sampler) },
                 wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(glyphs) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(pages) },
             ],
         })
     }
 
     /// Binds the sprite atlas, the particle materials and the glyph masks again (one was replaced).
     pub(crate) fn rebind_sprites(&mut self) {
-        self.sprite_bind = Self::sprite_bind(&self.device, &self.layout1, &self.sprite_view, &self.linear, &self.materials.view, &self.material_sampler, &self.glyphs.view);
+        self.sprite_bind = Self::sprite_bind(&self.device, &self.layout1, &self.sprite_view, &self.linear, &self.materials.view, &self.material_sampler, &self.glyphs.view, &self.sprite_map.view);
     }
 
     /// Allocates the sprite atlas for a document (pages from its asset layout).
@@ -49,12 +94,77 @@ impl Renderer {
     /// Allocates the sprite atlas for a document, with `live` more pages after its own for the
     /// drawing cels held live ([`styk_eval::live`]).
     pub fn prepare_sprites_live(&mut self, assets: &Assets, live: u32) {
+        self.install_sprites(assets, live).destroy();
+    }
+
+    /// Allocates the texture of [`Renderer::prepare_sprites_live`] and returns the one it replaces. A texture the
+    /// last handle to is dropped is not given back until the browser collects it (WebGPU frees it on `destroy`),
+    /// so what a renderer replaces is destroyed, once nothing needs its texels.
+    fn install_sprites(&mut self, assets: &Assets, live: u32) -> wgpu::Texture {
         let pages = assets.pages + live;
         let size = if pages == 0 { [1, 1] } else { [PAGE, PAGE] };
         let (texture, view) = array_texture(&self.device, "styk sprites", size, pages.max(1), false);
+        self.sprite_view = view;
+        self.sprite_map.layers = (0..pages.min(MAX_PAGES)).collect();
+        self.sprite_map.flush(&self.queue);
+        let old = std::mem::replace(&mut self.sprites, texture);
+        self.rebind_sprites();
+        old
+    }
+
+    /// Allocates the sprite texture of a document whose layout has `pages` pages (the live drawing pages included)
+    /// for a renderer that keeps `layers` of them at a time: layer 0 stays empty, the others are given to pages with
+    /// [`Renderer::map_sprite_page`], and a page without one draws nothing. Nothing is mapped yet.
+    pub fn prepare_sprites_resident(&mut self, pages: u32, layers: u32) {
+        let (texture, view) = array_texture(&self.device, "styk sprites", [PAGE, PAGE], layers.max(2), false);
+        self.sprite_view = view;
+        self.sprite_map.layers = vec![UNMAPPED; pages.min(MAX_PAGES) as usize];
+        self.sprite_map.flush(&self.queue);
+        let old = std::mem::replace(&mut self.sprites, texture);
+        self.rebind_sprites();
+        old.destroy();
+    }
+
+    /// Gives `page` of the layout the layer `layer` of the sprite texture (`None`: takes its layer away, the page
+    /// draws nothing). The layout may have grown since the texture was prepared. Takes effect with
+    /// [`Renderer::flush_sprite_map`].
+    pub fn map_sprite_page(&mut self, page: u32, layer: Option<u32>) {
+        if page >= MAX_PAGES {
+            return;
+        }
+        let map = &mut self.sprite_map.layers;
+        if map.len() <= page as usize {
+            map.resize(page as usize + 1, UNMAPPED);
+        }
+        map[page as usize] = layer.unwrap_or(UNMAPPED);
+    }
+
+    /// Writes the pages mapped since the last call to the table shaders read.
+    pub fn flush_sprite_map(&self) {
+        self.sprite_map.flush(&self.queue);
+    }
+
+    /// Gives the sprite texture `layers` layers (at least as many as it has), keeping every texel written. The old
+    /// texture exists until the copy has run, so this is for a working set the texture was too small for, not a
+    /// routine step.
+    pub fn resize_sprite_layers(&mut self, layers: u32) {
+        let have = self.sprites.depth_or_array_layers();
+        if layers <= have {
+            return;
+        }
+        let old = self.sprites.clone();
+        let (texture, view) = array_texture(&self.device, "styk sprites", [PAGE, PAGE], layers, false);
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("styk sprites grow") });
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo { texture: &old, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::Extent3d { width: PAGE, height: PAGE, depth_or_array_layers: have },
+        );
+        self.queue.submit([encoder.finish()]);
         self.sprites = texture;
         self.sprite_view = view;
         self.rebind_sprites();
+        old.destroy();
     }
 
     /// Makes room for `live` pages after the document's own, keeping every texel written
@@ -65,8 +175,7 @@ impl Renderer {
         if wanted <= have && self.sprites.width() == PAGE {
             return;
         }
-        let old = self.sprites.clone();
-        self.prepare_sprites_live(assets, live);
+        let old = self.install_sprites(assets, live);
         if old.width() == PAGE {
             let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("styk sprites grow") });
             encoder.copy_texture_to_texture(
@@ -76,6 +185,7 @@ impl Renderer {
             );
             self.queue.submit([encoder.finish()]);
         }
+        old.destroy();
     }
 
     /// The sprite atlas: its pages (layers) and its bytes of GPU memory.
@@ -88,8 +198,9 @@ impl Renderer {
     pub fn upload_live(&mut self, base: u32, uploads: &[styk_eval::live::Upload]) {
         for upload in uploads {
             let (x, y) = upload.origin();
+            let Some(layer) = self.sprite_map.layer(base + upload.page) else { continue };
             self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo { texture: &self.sprites, mip_level: 0, origin: wgpu::Origin3d { x, y, z: base + upload.page }, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyTextureInfo { texture: &self.sprites, mip_level: 0, origin: wgpu::Origin3d { x, y, z: layer }, aspect: wgpu::TextureAspect::All },
                 &upload.rgba,
                 wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(styk_eval::live::CELL * 4), rows_per_image: Some(styk_eval::live::CELL) },
                 wgpu::Extent3d { width: styk_eval::live::CELL, height: styk_eval::live::CELL, depth_or_array_layers: 1 },
@@ -103,6 +214,8 @@ impl Renderer {
     pub fn share_sprites(&mut self, other: &Renderer) {
         self.sprites = other.sprites.clone();
         self.sprite_view = other.sprite_view.clone();
+        self.sprite_map.texture = other.sprite_map.texture.clone();
+        self.sprite_map.view = other.sprite_map.view.clone();
         self.rebind_sprites();
     }
 
@@ -114,12 +227,14 @@ impl Renderer {
         for img in images {
             let entry = if img.drawing { assets.drawing.get(img.index as usize) } else { assets.atlas.get(img.index as usize) };
             let Some(e) = entry.filter(|e| e.valid) else { continue };
+            // A page without a layer (taken away while the picture was decoded) takes nothing.
+            let Some(layer) = self.sprite_map.layer(e.layer) else { continue };
             let border = if img.drawing { styk_eval::drawing::BORDER } else { 1 };
             self.queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &self.sprites,
                     mip_level: 0,
-                    origin: wgpu::Origin3d { x: e.x - border, y: e.y - border, z: e.layer },
+                    origin: wgpu::Origin3d { x: e.x - border, y: e.y - border, z: layer },
                     aspect: wgpu::TextureAspect::All,
                 },
                 &img.rgba,

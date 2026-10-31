@@ -25,7 +25,10 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   atlas places it uploaded (`Uploaded`); a frame drawn while some picture it shows is
   still on its way is drawn again once it can be shown (`Stage::pictures_pending`:
   on the next frame for pictures decoded and waiting, else after the progress counter
-  advances; `waitForPictures` in `engine-stage.mjs`).
+  advances; `waitForPictures` in `engine-stage.mjs`). A document with more sprite pages than the stage's texture keeps
+  (`styk_engine::ATLAS_PAGES`) is not decoded whole: the stage asks for the pictures of the pages a frame draws
+  (`Engine::decode_images`, ahead of the queue) and does not draw the frame until they are in
+  ([memory.md](memory.md#pages-kept-against-a-budget)).
 - `styk-wasm`: `EngineHandle` (commands and queries over wasm-bindgen),
   `Stage` (a wgpu surface on a canvas, edit frames and ghosts, prepared
   frames), `worker_run` (a worker's loop).

@@ -41,7 +41,9 @@ impl Prepared {
         let known = previous.as_ref().map_or(0, |previous| previous.prepared.doc.images.len().min(count));
         let cels: Vec<usize> = generation.assets.cels.keys().copied().filter(|cel| !previous.as_ref().is_some_and(|old| old.assets.cels.contains_key(cel))).collect();
         let mut tasks = TaskQueue::new();
-        for index in known..count {
+        // A document whose pictures the stage keeps a few pages at a time decodes them when a frame needs them.
+        let pictures = images::images_to_decode(&generation);
+        for index in known.min(pictures)..pictures {
             tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), images::Picture::Image(index)));
         }
         for cel in &cels {
@@ -58,8 +60,8 @@ impl Prepared {
         Self {
             previous: current,
             frames: Some(frames::Cache::new(0)),
-            images: Some(images::Store::for_publication(generation.lineage, count + cels.len())),
-            same_lineage, image_delta: count - known + cels.len(), generation, tasks,
+            images: Some(images::Store::for_publication(generation.lineage, pictures + cels.len())),
+            same_lineage, image_delta: pictures - known.min(pictures) + cels.len(), generation, tasks,
         }
     }
 
