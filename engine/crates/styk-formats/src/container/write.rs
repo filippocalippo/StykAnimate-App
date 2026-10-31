@@ -10,7 +10,7 @@ use std::sync::Arc;
 use styk_doc::json;
 use styk_doc::{Nums, Value, format_number};
 
-use super::{ContainerError, HEADER, Kind, LIFT_MIN_ARRAY, LIFT_MIN_STRING, MAX_BYTES, MAX_JSON_NUMBER_BYTES, MAX_SKELETON_BYTES, SECTION, pack_zlib, pack_zstd, sha256};
+use super::{ContainerError, HEADER, Kind, LIFT_MIN_ARRAY, LIFT_MIN_STRING, MAX_BYTES, MAX_JSON_NUMBER_BYTES, MAX_SKELETON_BYTES, SECTION, pack_zlib, pack_zstd, sha256, sha256_until};
 
 /// A document split into its JSON skeleton and binary sections.
 pub struct Lifted {
@@ -102,7 +102,17 @@ struct Lifter<'a> {
     upper_json: usize,
     /// What a reader allocates beyond the sections: 48 bytes per number, payload text.
     allocation: usize,
-    _documents: std::marker::PhantomData<&'a Value>,
+    /// Asked every [`CANCEL_EVERY`] values: a lift that is stopped writes nothing.
+    cancel: &'a dyn Fn() -> bool,
+    visited: u32,
+}
+
+/// Values lifted between two questions to the cancel: microseconds of work.
+const CANCEL_EVERY: u32 = 4096;
+
+/// The cancel of a lift nobody stops.
+fn never() -> bool {
+    false
 }
 
 /// The key sequences of pose channels that the document shares between channels (`internPoseSequences`), by the
@@ -272,6 +282,10 @@ impl Lifter<'_> {
     }
 
     fn value(&mut self, value: &Value, key: &str) -> Result<(), ContainerError> {
+        self.visited = self.visited.wrapping_add(1);
+        if self.visited % CANCEL_EVERY == 0 && (self.cancel)() {
+            return Err(ContainerError::Cancelled);
+        }
         match value {
             Value::Null => {
                 self.admit(4)?;
@@ -364,12 +378,22 @@ impl Lifter<'_> {
 /// bytes allocation) is written as a marker to its reserved range. The save path
 /// uses this for the original Pivot source, which the app has always stored first.
 pub fn lift(document: &Value, reserved: &[Arc<[u8]>]) -> Result<Lifted, ContainerError> {
-    lift_within(document, reserved, MAX_BYTES)
+    lift_until(document, reserved, &never)
+}
+
+/// [`lift`] on a worker that may be stopped: `cancel` is asked every few thousand values, and a lift it stops is
+/// [`ContainerError::Cancelled`].
+pub fn lift_until(document: &Value, reserved: &[Arc<[u8]>], cancel: &dyn Fn() -> bool) -> Result<Lifted, ContainerError> {
+    lift_checked(document, reserved, MAX_BYTES, cancel)
 }
 
 /// [`lift`] with another section limit (the materialization limit is four times it).
 /// Hosts with less memory than a desktop lower it; tests use it to reach the limits.
 pub fn lift_within(document: &Value, reserved: &[Arc<[u8]>], max_bytes: usize) -> Result<Lifted, ContainerError> {
+    lift_checked(document, reserved, max_bytes, &never)
+}
+
+fn lift_checked(document: &Value, reserved: &[Arc<[u8]>], max_bytes: usize, cancel: &dyn Fn() -> bool) -> Result<Lifted, ContainerError> {
     let mut lifter = Lifter {
         out: Vec::new(),
         arrays: Vec::new(),
@@ -384,7 +408,8 @@ pub fn lift_within(document: &Value, reserved: &[Arc<[u8]>], max_bytes: usize) -
         known_json: 0,
         upper_json: 0,
         allocation: 0,
-        _documents: std::marker::PhantomData,
+        cancel,
+        visited: 0,
     };
     let mut reserved_offsets = Vec::with_capacity(reserved.len());
     for bytes in reserved {
@@ -447,7 +472,8 @@ impl Default for ViewLifter {
             known_json: 0,
             upper_json: 0,
             allocation: 0,
-            _documents: std::marker::PhantomData,
+            cancel: &never,
+            visited: 0,
         })
     }
 }
@@ -489,29 +515,35 @@ impl ViewLifter {
 
 /// Assembles a version 2 container, compressing with zstd at level 3.
 pub fn encode_v2(lifted: &Lifted, kind: Kind) -> Result<Vec<u8>, ContainerError> {
-    encode_v2_with(&lifted.skeleton, &lifted.arrays, &lifted.payloads, kind, &mut |raw, _| pack_zstd(raw))
+    encode_v2_with(&lifted.skeleton, &lifted.arrays, &lifted.payloads, kind, &never, &mut |raw, _| Some(pack_zstd(raw)))
 }
 
 /// Assembles a version 2 container from its skeleton text and its two sections
 /// (numeric arrays, payloads). `pack` turns one block, given its bytes and their
-/// SHA-256, into the zstd frame to store: a fresh compression, or a frame the
-/// caller kept from compressing the same bytes before.
-pub fn encode_v2_with(skeleton: &[u8], arrays: &[u8], payloads: &[u8], kind: Kind, pack: &mut dyn FnMut(&[u8], &[u8; 32]) -> Vec<u8>) -> Result<Vec<u8>, ContainerError> {
+/// SHA-256, into the zstd frame to store (a fresh compression, or a frame the
+/// caller kept from compressing the same bytes before), or `None` when the caller stopped it. `cancel` is asked
+/// by the hashing every few megabytes, and a stop of either is [`ContainerError::Cancelled`].
+pub fn encode_v2_with(
+    skeleton: &[u8],
+    arrays: &[u8],
+    payloads: &[u8],
+    kind: Kind,
+    cancel: &dyn Fn() -> bool,
+    pack: &mut dyn FnMut(&[u8], &[u8; 32]) -> Option<Vec<u8>>,
+) -> Result<Vec<u8>, ContainerError> {
     let sections: [(u8, &[u8]); 2] = [(1, arrays), (2, payloads)];
     let raw_sections: usize = sections.iter().map(|(_, bytes)| bytes.len()).sum();
     if skeleton.len() > MAX_SKELETON_BYTES || sections.iter().any(|(_, bytes)| bytes.len() > MAX_BYTES) || skeleton.len() + raw_sections * 3 > MAX_BYTES * 4 {
         return Err(too_large("the skeleton or a section exceeds its limit"));
     }
-    let skeleton_digest = sha256(skeleton);
-    let skeleton_stored = pack(skeleton, &skeleton_digest);
-    let packed: Vec<(u8, &[u8], [u8; 32], Vec<u8>)> = sections
-        .iter()
-        .map(|&(section_kind, raw)| {
-            let digest = sha256(raw);
-            let stored = pack(raw, &digest);
-            (section_kind, raw, digest, stored)
-        })
-        .collect();
+    let skeleton_digest = sha256_until(skeleton, cancel).ok_or(ContainerError::Cancelled)?;
+    let skeleton_stored = pack(skeleton, &skeleton_digest).ok_or(ContainerError::Cancelled)?;
+    let mut packed: Vec<(u8, &[u8], [u8; 32], Vec<u8>)> = Vec::with_capacity(sections.len());
+    for &(section_kind, raw) in &sections {
+        let digest = sha256_until(raw, cancel).ok_or(ContainerError::Cancelled)?;
+        let stored = pack(raw, &digest).ok_or(ContainerError::Cancelled)?;
+        packed.push((section_kind, raw, digest, stored));
+    }
     let total = HEADER + 4 + skeleton_stored.len() + packed.len() * SECTION + packed.iter().map(|(_, _, _, stored)| stored.len()).sum::<usize>();
     if total > MAX_BYTES {
         return Err(ContainerError::FileTooLarge { size: total });

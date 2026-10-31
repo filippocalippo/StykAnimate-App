@@ -17,12 +17,15 @@
  */
 import {initSync, Previews} from './pkg/styk_engine.js';
 import {libraryPreviewMatte, LIBRARY_MATTES} from '../library-matte.mjs';
+import {inside, guarded} from './engine-guard.mjs';
 
 /** Side of a library preview and of the samples its backdrop is chosen from (styk_engine::thumbnails::library). */
 const SIZE = 320, SAMPLE = 40;
 /** How long a frame thumbnail waits for its frame and pictures (as the stage's thumbnails do). */
 const THUMBNAIL_WAIT_MS = 60000;
 
+/** The interface's claim on this worker (engine-guard.mjs): every call into the engine is made with it held. */
+let guard = null;
 let wasm = null, previews = null, canvas = null, flat = null, progress = null, releasing = false, running = Promise.resolve();
 /** Why library pictures are drawn on the CPU (no GPU device, or its canvas gives no pixels), or null. */
 let gpuRefusal = null;
@@ -31,12 +34,13 @@ let session = null;
 const cancelled = new Set();
 
 async function start(message) {
-  wasm ??= initSync({module: message.module, memory: message.memory, thread_stack_size: message.stack});
+  guard ??= message.guard ?? null;
+  wasm ??= inside(guard, () => initSync({module: message.module, memory: message.memory, thread_stack_size: message.stack}));
   progress ??= new Int32Array(message.memory.buffer, message.progress, 1);
   if (!previews) {
     try {
       canvas = new OffscreenCanvas(SIZE, SIZE);
-      const created = await Previews.create(canvas);
+      const created = guarded(guard, await inside(guard, () => Previews.create(canvas)));
       // Some setups give no pixels from a GPU canvas (Xvfb without ANGLE on Vulkan): check before any preview.
       created.probe();
       const bitmap = canvas.transferToImageBitmap(), sample = new OffscreenCanvas(1, 1), context = sample.getContext('2d', {willReadFrequently: true});
@@ -49,7 +53,7 @@ async function start(message) {
       // No GPU device whose pictures reach the page: the CPU rasterizer draws them.
       gpuRefusal = String(error?.message ?? error);
       canvas = null;
-      previews = Previews.create_cpu();
+      previews = guarded(guard, inside(guard, () => Previews.create_cpu()));
     }
   }
   return {started: true, backend: previews.backend(), cpu: previews.cpu(), gpuRefusal};
@@ -215,8 +219,8 @@ async function monitor({id, address, width, height, zoom, panX, panY, dpr = 1}) 
 async function operate(message) {
   if (message.operation === 'start') return start(message);
   if (!previews) {
-    if (message.operation === 'monitor' && wasm) Previews.forget_monitor(message.address);
-    if (['thumbnail', 'pose', 'composite'].includes(message.operation) && wasm) Previews.forget_engine(message.address);
+    if (message.operation === 'monitor' && wasm) inside(guard, () => Previews.forget_monitor(message.address));
+    if (['thumbnail', 'pose', 'composite'].includes(message.operation) && wasm) inside(guard, () => Previews.forget_engine(message.address));
     throw new Error('The preview worker has not started.');
   }
   if (['library-begin', 'library-frame', 'library-close'].includes(message.operation) && message.session !== session) return {refused: 'stale', message: 'another library preview is open'};
@@ -247,7 +251,7 @@ async function release() {
   if (canvas) canvas.width = canvas.height = 1;
   canvas = flat = null;
   // No call into the module may follow on this thread (wasm-bindgen's thread destructor).
-  try { wasm?.__wbindgen_thread_destroy(); } catch { /* never started */ }
+  try { inside(guard, () => wasm?.__wbindgen_thread_destroy()); } catch { /* never started, or ended by the interface */ }
   self.postMessage({released: true});
   self.close();
 }
@@ -258,8 +262,8 @@ self.addEventListener('message', ({data: message}) => {
   const run = running.then(() => {
     if (releasing) {
       // A thumbnail's engine address is consumed even when it is not drawn.
-      if (['thumbnail', 'pose', 'composite'].includes(message.operation) && wasm) try { Previews.forget_engine(message.address); } catch { /* the module is gone */ }
-      if (message.operation === 'monitor' && wasm) try { Previews.forget_monitor(message.address); } catch { /* the module is gone */ }
+      if (['thumbnail', 'pose', 'composite'].includes(message.operation) && wasm) try { inside(guard, () => Previews.forget_engine(message.address)); } catch { /* the module is gone */ }
+      if (message.operation === 'monitor' && wasm) try { inside(guard, () => Previews.forget_monitor(message.address)); } catch { /* the module is gone */ }
       throw new DOMException('The preview worker was released.', 'AbortError');
     }
     return operate(message);

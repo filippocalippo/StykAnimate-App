@@ -54,7 +54,7 @@ fn a_project_opens_into_the_lifted_form_and_saves_back_to_the_same_bytes() {
     let opened = files::open(&file, Kind::Styk, Rules::PROJECT).unwrap();
     assert_eq!(opened.version, 2);
     assert!(opened.materialized_bytes > opened.skeleton.len());
-    let saved = files::save(Kind::Styk, &opened.skeleton, &opened.sections[0], &opened.sections[1], &mut NoStore).unwrap();
+    let saved = files::save(Kind::Styk, &opened.skeleton, &opened.sections[0], &opened.sections[1], &mut NoStore, &|| false).unwrap();
     assert_eq!(saved.bytes, file, "an unchanged project saves to the bytes it was opened from");
     assert_eq!((saved.stats.hits, saved.stats.misses), (0, 3));
 }
@@ -91,13 +91,13 @@ fn a_figure_file_must_hold_one_pose_of_reusable_figures() {
     let error = files::open(&file, Kind::Stkz, Rules::PREVIEW).err().unwrap();
     assert_eq!((error.message_key, error.code, error.kind), ("errors.nativeContainer.theFigureMustBeSelfContained", Some("invalid_native_figure"), Some("stkz")));
     assert!(files::open(&file, Kind::Stkz, Rules::RAW).is_ok(), "raw reads the container only");
-    let saved = files::save(Kind::Stkz, figure.as_bytes(), &[], &[], &mut NoStore).err().unwrap();
+    let saved = files::save(Kind::Stkz, figure.as_bytes(), &[], &[], &mut NoStore, &|| false).err().unwrap();
     assert_eq!((saved.message_key, saved.code, saved.kind), ("errors.nativeContainer.theFigureMustBeSelfContained", Some("invalid_native_figure"), Some("stkz")));
     let movieclip = r#"{"figure_types":[{"figure_type_id":1}],"keyframes":[{"objects":[{"figure_type_id":1}]}]}"#;
-    let error = files::save(Kind::Stykmov, movieclip.as_bytes(), &[], &[], &mut NoStore).err().unwrap();
+    let error = files::save(Kind::Stykmov, movieclip.as_bytes(), &[], &[], &mut NoStore, &|| false).err().unwrap();
     assert_eq!((error.message_key, error.code), ("errors.nativeContainer.aStykmovFileMustContainOneMovieclip", Some("invalid_movieclip")));
-    assert!(files::save(Kind::Stkz, movieclip.as_bytes(), &[], &[], &mut NoStore).is_ok());
-    assert!(files::save(Kind::Styk, figure.as_bytes(), &[], &[], &mut NoStore).is_ok(), "a project is not a figure file");
+    assert!(files::save(Kind::Stkz, movieclip.as_bytes(), &[], &[], &mut NoStore, &|| false).is_ok());
+    assert!(files::save(Kind::Styk, figure.as_bytes(), &[], &[], &mut NoStore, &|| false).is_ok(), "a project is not a figure file");
 }
 
 #[test]
@@ -140,18 +140,18 @@ fn compressed_blocks_are_reused_only_for_the_same_bytes() {
     let opened = files::open(&project(), Kind::Styk, Rules::PROJECT).unwrap();
     let (skeleton, arrays, payloads) = (&opened.skeleton, &opened.sections[0], &opened.sections[1]);
     let mut store = Kept::default();
-    let first = files::save(Kind::Styk, skeleton, arrays, payloads, &mut store).unwrap();
+    let first = files::save(Kind::Styk, skeleton, arrays, payloads, &mut store, &|| false).unwrap();
     assert_eq!((first.stats.hits, first.stats.misses, store.0.len()), (0, 3, 3));
     assert_eq!(first.stats.container_raw_bytes, skeleton.len() + arrays.len() + payloads.len());
     assert!(store.0.keys().all(|key| key.starts_with("2:3:")));
-    let second = files::save(Kind::Styk, skeleton, arrays, payloads, &mut store).unwrap();
+    let second = files::save(Kind::Styk, skeleton, arrays, payloads, &mut store, &|| false).unwrap();
     assert_eq!(second.bytes, first.bytes);
     assert_eq!((second.stats.hits, second.stats.misses), (3, 0));
     assert_eq!(second.stats.raw_bytes_reused, first.stats.container_raw_bytes);
     // An edited array misses; the other two blocks are still found.
     let mut edited = arrays.clone();
     edited[0] ^= 1;
-    let third = files::save(Kind::Styk, skeleton, &edited, payloads, &mut store).unwrap();
+    let third = files::save(Kind::Styk, skeleton, &edited, payloads, &mut store, &|| false).unwrap();
     assert_eq!((third.stats.hits, third.stats.misses), (2, 1));
     assert_ne!(third.bytes, first.bytes);
     let reopened = files::open(&third.bytes, Kind::Styk, Rules::RAW).unwrap();
@@ -160,7 +160,7 @@ fn compressed_blocks_are_reused_only_for_the_same_bytes() {
 
 #[test]
 fn saving_refuses_what_the_format_cannot_hold() {
-    let error = files::save(Kind::Styk, b"{}", &vec![0; (256 << 20) + 1], &[], &mut NoStore).err().unwrap();
+    let error = files::save(Kind::Styk, b"{}", &vec![0; (256 << 20) + 1], &[], &mut NoStore, &|| false).err().unwrap();
     assert_eq!((error.message_key, error.code), ("errors.nativeContainer.theStykanimateDocumentExceedsTheUncompressedSizeLimit", Some("document_too_large")));
 }
 
@@ -239,4 +239,135 @@ fn a_string_that_looks_like_a_marker_is_only_a_marker_in_a_version_two_skeleton(
     let lifted = files::open(&wrapped, Kind::Styk, Rules::PROJECT).unwrap();
     assert!(lifted.markers);
     assert_eq!(lifted.skeleton, br#"{"literal":"S2E:S2B:f64:0:0:5"}"#);
+}
+
+/// A small deterministic generator.
+struct Noise(u64);
+impl Noise {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+}
+
+/// JSON text shaped like a project's skeleton: records of figures and frames with the same keys again and again, numbers that
+/// do not repeat, and whole records that come back far later (a figure held by several frames and clips).
+fn skeleton_shaped(length: usize) -> Vec<u8> {
+    let mut noise = Noise(0x2545_f491_4f6c_dd1d);
+    let mut out = Vec::with_capacity(length + 4096);
+    let mut records: Vec<(usize, usize)> = Vec::new();
+    out.extend_from_slice(b"{\"keyframes\":[");
+    while out.len() < length {
+        let start = out.len();
+        if !records.is_empty() && noise.below(5) == 0 {
+            // A record from far back, with a few numbers changed.
+            let (from, to) = records[noise.below(records.len() as u64) as usize];
+            let copy = out[from..to].to_vec();
+            out.extend_from_slice(&copy);
+            let at = out.len() - 40.min(copy.len());
+            out[at] = b'0' + noise.below(10) as u8;
+        } else {
+            let id = noise.below(1 << 20);
+            let text = format!(
+                "{{\"duration_raw\":{},\"object_slot\":{},\"unique_id\":{id},\"figure_type_id\":{},\"root_x\":{}.{:04},\"root_y\":{}.{:04},\"scale\":1,\"angles\":\"S2B:f32:0:{}:{}\",\"lengths\":\"S2B:f32:0:{}:{}\",\"len_flag\":1,\"bend_flag\":0,\"join\":null,\"_styk\":{{\"frameId\":\"frame-{}\",\"easing\":{{\"x1\":0.{},\"y1\":0.{}}}}}}}",
+                1 + noise.below(4), noise.below(8), noise.below(6), noise.below(900), noise.below(10000), noise.below(500), noise.below(10000),
+                noise.below(1 << 26), 30 + noise.below(30), noise.below(1 << 26), 30 + noise.below(30), noise.below(1 << 22), noise.below(1000), noise.below(1000)
+            );
+            out.extend_from_slice(text.as_bytes());
+        }
+        records.push((start, out.len()));
+        out.push(b',');
+    }
+    out.extend_from_slice(b"null]}");
+    out
+}
+
+/// Packed pose arrays: smooth angles (single precision), lengths that rarely change, whole frames that repeat after a long while.
+fn arrays_shaped(length: usize) -> Vec<u8> {
+    let mut noise = Noise(0x9e37_79b9_7f4a_7c15);
+    let segments = 60usize;
+    let lengths: Vec<f32> = (0..segments).map(|i| 20.0 + (i * 7 % 40) as f32 + noise.below(100) as f32 / 8.0).collect();
+    let mut out: Vec<u8> = Vec::with_capacity(length + 1024);
+    let mut frame = 0usize;
+    while out.len() < length {
+        if frame % 3000 == 2999 {
+            // A stretch from far back comes again.
+            let from = (noise.below((out.len() / 2) as u64) as usize / 4) * 4;
+            let copy = out[from..from + 720 * 40].to_vec();
+            out.extend_from_slice(&copy);
+        }
+        for (i, &len) in lengths.iter().enumerate() {
+            let angle = ((frame as f32) * 0.013 + i as f32 * 0.37).sin() * 1.5 + (noise.below(64) as f32) / 4096.0;
+            out.extend_from_slice(&angle.to_le_bytes());
+            out.extend_from_slice(&(if frame % 211 == 0 { len + 1.0 } else { len }).to_le_bytes());
+            out.extend_from_slice(&0f32.to_le_bytes());
+        }
+        frame += 1;
+    }
+    out
+}
+
+/// Picture-like payload bytes: runs and gradients with noise, rows that repeat, and a pattern that comes back megabytes later.
+fn payload_shaped(length: usize) -> Vec<u8> {
+    let mut noise = Noise(0xd6e8_feb8_6659_fd93);
+    let mut out: Vec<u8> = Vec::with_capacity(length + 8192);
+    while out.len() < length {
+        let row: Vec<u8> = (0..4096).map(|x| ((x / 16) as u8).wrapping_mul(3).wrapping_add(noise.below(4) as u8)).collect();
+        out.extend_from_slice(&row);
+        if noise.below(7) == 0 && out.len() > (3 << 20) {
+            let from = noise.below((out.len() - 8192) as u64) as usize;
+            let copy = out[from..from + 8192].to_vec();
+            out.extend_from_slice(&copy);
+        }
+    }
+    out
+}
+
+#[test]
+fn sections_shaped_like_real_ones_compress_to_the_frames_one_shot_compression_makes() {
+    // `encode_v2` compresses each block in one call; `files::save` must write the same frames, byte for byte, because a
+    // person's unchanged project has to save to the bytes it was opened from. A compressor fed in pieces, or with a small output
+    // buffer, writes other (valid) frames once the input passes a few megabytes of real structure: synthetic noise does not show it.
+    let skeleton = skeleton_shaped(16 << 20);
+    let arrays = arrays_shaped(24 << 20);
+    let payloads = payload_shaped(20 << 20);
+    let shapes: [(&str, &[u8], &[u8], &[u8]); 3] = [("skeleton", &skeleton, &[], &[]), ("arrays", b"{}", &arrays, &[]), ("payloads", b"{}", &[], &payloads)];
+    for (name, skeleton, arrays, payloads) in shapes {
+        let one_shot = encode_v2(&styk_formats::container::Lifted { skeleton: skeleton.to_vec(), arrays: arrays.to_vec(), payloads: payloads.to_vec(), reserved_offsets: Vec::new() }, Kind::Styk).unwrap();
+        let saved = files::save(Kind::Styk, skeleton, arrays, payloads, &mut NoStore, &|| false).unwrap().bytes;
+        assert!(saved == one_shot, "the {name} section: {} bytes saved, {} one-shot", saved.len(), one_shot.len());
+    }
+}
+
+#[test]
+fn a_save_asks_whether_to_stop_often_enough_and_stops_at_once() {
+    let (arrays, payloads) = (arrays_shaped(40 << 20), payload_shaped(6 << 20));
+    let asked = std::cell::Cell::new(0usize);
+    let saved = files::save(Kind::Styk, b"{}", &arrays, &payloads, &mut NoStore, &|| { asked.set(asked.get() + 1); false }).unwrap();
+    // Hashing asks every 4 MiB; compression, one call to the compressor for a block, is asked before and after each of the three.
+    let (hashing, compressing) = ((arrays.len() + payloads.len()).div_ceil(4 << 20), 6);
+    assert!(asked.get() >= hashing + compressing, "{} questions for {} MiB", asked.get(), (arrays.len() + payloads.len()) >> 20);
+    assert!(!saved.bytes.is_empty());
+    // Whichever question says stop, the save ends there with the code the callers read, and has asked nothing since.
+    for stop_at in [1, 2, hashing + 3, asked.get() - 1, asked.get()] {
+        let asked = std::cell::Cell::new(0usize);
+        let stopped = files::save(Kind::Styk, b"{}", &arrays, &payloads, &mut NoStore, &|| { asked.set(asked.get() + 1); asked.get() >= stop_at }).err().expect("stopped");
+        assert_eq!(stopped.code, Some(styk_formats::container::CANCELLED), "stopped at question {stop_at}");
+        assert_eq!(asked.get(), stop_at, "no question after the one that said stop");
+    }
+}
+
+#[test]
+fn a_lift_asks_whether_to_stop() {
+    let document = doc(&format!("{{\"items\":[{}]}}", (0..20_000).map(|i| format!("{{\"n\":{i}}}")).collect::<Vec<_>>().join(",")));
+    let asked = std::cell::Cell::new(0usize);
+    styk_formats::container::lift_until(&document, &[], &|| { asked.set(asked.get() + 1); false }).unwrap();
+    assert!(asked.get() >= 8, "{} questions for 40,000 values", asked.get());
+    let stopped = styk_formats::container::lift_until(&document, &[], &|| true).err().expect("stopped");
+    assert_eq!(stopped, styk_formats::container::ContainerError::Cancelled);
 }

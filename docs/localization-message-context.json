@@ -7681,25 +7681,25 @@
   },
   "desktop.fileStreams.errors.aFileChunkMustContainBetween1ByteAnd256KB": {
     "locations": [
-      "desktop/file-streams.cjs:71"
+      "desktop/file-streams.cjs:72"
     ],
     "context": "if (!bytes.byteLength || bytes.byteLength > this.maxChunkBytes) throw messageError(new Error(''), 'desktop.fileStreams.errors.aFileChunkMustContainBetween1ByteA"
   },
   "desktop.fileStreams.errors.aFilePatchMustContainBetween1ByteAnd256KB": {
     "locations": [
-      "desktop/file-streams.cjs:92"
+      "desktop/file-streams.cjs:93"
     ],
     "context": "if (!bytes.byteLength || bytes.byteLength > this.maxChunkBytes) throw messageError(new Error(''), 'desktop.fileStreams.errors.aFilePatchMustContainBetween1ByteA"
   },
   "desktop.fileStreams.errors.aFilePatchMustStayInsideTheWrittenRange": {
     "locations": [
-      "desktop/file-streams.cjs:93"
+      "desktop/file-streams.cjs:94"
     ],
     "context": "if (!Number.isSafeInteger(offset) || offset < 0 || offset + bytes.byteLength > job.position) throw messageError(new Error(''), 'desktop.fileStreams.errors.aFile"
   },
   "desktop.fileStreams.errors.aNativeApprovedDestinationIsRequired": {
     "locations": [
-      "desktop/file-streams.cjs:56",
+      "desktop/file-streams.cjs:57",
       "desktop/vfw-export-service.cjs:200",
       "desktop/video-export-service.cjs:839"
     ],
@@ -7707,100 +7707,101 @@
   },
   "desktop.fileStreams.errors.aNativeApprovedSourceIsRequired": {
     "locations": [
-      "desktop/file-streams.cjs:133"
+      "desktop/file-streams.cjs:137"
     ],
     "context": "if (typeof filename !== 'string' || !path.isAbsolute(filename)) throw messageError(new Error(''), 'desktop.fileStreams.errors.aNativeApprovedSourceIsRequired', "
   },
   "desktop.fileStreams.errors.eachFileChunkMustContainBinaryBytes": {
     "locations": [
-      "desktop/file-streams.cjs:70"
+      "desktop/file-streams.cjs:71"
     ],
     "context": "else throw messageError(new Error(''), 'desktop.fileStreams.errors.eachFileChunkMustContainBinaryBytes', {});"
   },
   "desktop.fileStreams.errors.eachFilePatchMustContainBinaryBytes": {
     "locations": [
-      "desktop/file-streams.cjs:91"
+      "desktop/file-streams.cjs:92"
     ],
     "context": "else throw messageError(new Error(''), 'desktop.fileStreams.errors.eachFilePatchMustContainBinaryBytes', {});"
   },
   "desktop.fileStreams.errors.theFileChunkCouldNotBeWritten": {
     "locations": [
-      "desktop/file-streams.cjs:77"
+      "desktop/file-streams.cjs:78"
     ],
     "context": "if (!result.bytesWritten) throw messageError(new Error(''), 'desktop.fileStreams.errors.theFileChunkCouldNotBeWritten', {});"
   },
   "desktop.fileStreams.errors.theFilePatchCouldNotBeWritten": {
     "locations": [
-      "desktop/file-streams.cjs:97"
+      "desktop/file-streams.cjs:98"
     ],
     "context": "if (!result.bytesWritten) throw messageError(new Error(''), 'desktop.fileStreams.errors.theFilePatchCouldNotBeWritten', {});"
   },
   "desktop.fileStreams.errors.theFileSizeIsInvalidOrExceedsThe256MBLimit": {
     "locations": [
-      "desktop/file-streams.cjs:21"
+      "desktop/file-streams.cjs:22"
     ],
     "context": "if (!Number.isSafeInteger(size) || size < 0 || size > this.maxBytes) throw messageError(new Error(''), 'desktop.fileStreams.errors.theFileSizeIsInvalidOrExceeds"
   },
   "desktop.fileStreams.errors.theFileTransferExceedsItsDeclaredSize": {
     "locations": [
-      "desktop/file-streams.cjs:72"
+      "desktop/file-streams.cjs:73"
     ],
     "context": "if (job.size !== null && job.position + bytes.byteLength > job.size) throw messageError(new Error(''), 'desktop.fileStreams.errors.theFileTransferExceedsItsDecl"
   },
   "desktop.fileStreams.errors.theFileTransferIsIncomplete": {
     "locations": [
-      "desktop/file-streams.cjs:106"
+      "desktop/file-streams.cjs:107"
     ],
     "context": "if (job.size !== null && job.position !== job.size) throw messageError(new Error(''), 'desktop.fileStreams.errors.theFileTransferIsIncomplete', {});"
   },
   "desktop.fileStreams.errors.theFileTransferWasCancelled": {
     "locations": [
-      "desktop/file-streams.cjs:108",
-      "desktop/file-streams.cjs:111"
+      "desktop/file-streams.cjs:109",
+      "desktop/file-streams.cjs:112",
+      "desktop/file-streams.cjs:122"
     ],
     "context": "if (job.cancelled) throw messageError(new Error(''), 'desktop.fileStreams.errors.theFileTransferWasCancelled', {});"
   },
   "desktop.fileStreams.errors.theRecoveryFileChangedDuringReading": {
     "locations": [
-      "desktop/file-streams.cjs:153"
+      "desktop/file-streams.cjs:157"
     ],
     "context": "if (!result.bytesRead) throw messageError(new Error(''), 'desktop.fileStreams.errors.theRecoveryFileChangedDuringReading', {});"
   },
   "desktop.fileStreams.errors.theRecoverySourceIsNotAFile": {
     "locations": [
-      "desktop/file-streams.cjs:140"
+      "desktop/file-streams.cjs:144"
     ],
     "context": "if (!stat.isFile()) throw messageError(new Error(''), 'desktop.fileStreams.errors.theRecoverySourceIsNotAFile', {});"
   },
   "desktop.fileStreams.errors.theStreamedFileExceedsThe16GBLimit": {
     "locations": [
-      "desktop/file-streams.cjs:73"
+      "desktop/file-streams.cjs:74"
     ],
     "context": "if (job.size === null && job.position + bytes.byteLength > this.maxStreamBytes) throw messageError(new Error(''), 'desktop.fileStreams.errors.theStreamedFileExc"
   },
   "desktop.fileStreams.errors.theStreamedFileSizeLimitIsInvalid": {
     "locations": [
-      "desktop/file-streams.cjs:25"
+      "desktop/file-streams.cjs:26"
     ],
     "context": "if (size !== null && size !== undefined && (!Number.isSafeInteger(size) || size < 0 || size > this.maxStreamBytes)) throw messageError(new Error(''), 'desktop.f"
   },
   "desktop.fileStreams.errors.thisFileTransferIsNoLongerActive": {
     "locations": [
-      "desktop/file-streams.cjs:45"
+      "desktop/file-streams.cjs:46"
     ],
     "context": "if (!job || job.mode !== mode || job.cancelled) throw messageError(new Error(''), 'desktop.fileStreams.errors.thisFileTransferIsNoLongerActive', {});"
   },
   "desktop.fileStreams.errors.tooManyFileTransfersAreActive": {
     "locations": [
-      "desktop/file-streams.cjs:35",
-      "desktop/file-streams.cjs:57",
-      "desktop/file-streams.cjs:134"
+      "desktop/file-streams.cjs:36",
+      "desktop/file-streams.cjs:58",
+      "desktop/file-streams.cjs:138"
     ],
     "context": "if (this.jobs.size >= this.maxSessions) throw messageError(new Error(''), 'desktop.fileStreams.errors.tooManyFileTransfersAreActive', {});"
   },
   "desktop.fileStreams.errors.waitForThePreviousFileChunkToFinish": {
     "locations": [
-      "desktop/file-streams.cjs:46"
+      "desktop/file-streams.cjs:47"
     ],
     "context": "if (job.busy) throw messageError(new Error(''), 'desktop.fileStreams.errors.waitForThePreviousFileChunkToFinish', {});"
   },
@@ -8156,7 +8157,7 @@
   "desktop.main.errors.recoveryDataIsEmpty": {
     "locations": [
       "desktop/main.cjs:601",
-      "desktop/recovery.cjs:110"
+      "desktop/recovery.cjs:111"
     ],
     "context": "if (!options.size) throw messageError(new Error(''), 'desktop.main.errors.recoveryDataIsEmpty', {});"
   },
@@ -8689,40 +8690,40 @@
   },
   "desktop.recovery.errors.recoveryDataIsNotValidBase64": {
     "locations": [
-      "desktop/recovery.cjs:108"
+      "desktop/recovery.cjs:109"
     ],
     "context": "if (options.data.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(options.data)) throw messageError(new Error(''), 'desktop.recovery.errors.recoveryDataIsNotValidBa"
   },
   "desktop.recovery.errors.recoveryDataMustBeBase64Text": {
     "locations": [
-      "desktop/recovery.cjs:106"
+      "desktop/recovery.cjs:107"
     ],
     "context": "if (!options || typeof options.data !== 'string') throw messageError(new Error(''), 'desktop.recovery.errors.recoveryDataMustBeBase64Text', {});"
   },
   "desktop.recovery.errors.recoveryExceedsThe256MBLimit": {
     "locations": [
-      "desktop/recovery.cjs:107",
-      "desktop/recovery.cjs:111"
+      "desktop/recovery.cjs:108",
+      "desktop/recovery.cjs:112"
     ],
     "context": "if (options.data.length > Math.ceil(this.maxBytes / 3) * 4) throw messageError(new Error(''), 'desktop.recovery.errors.recoveryExceedsThe256MBLimit', {});"
   },
   "desktop.recovery.errors.theRecoveryFileExceedsTheSizeLimit": {
     "locations": [
-      "desktop/recovery.cjs:129"
+      "desktop/recovery.cjs:130"
     ],
     "context": "if (bytes.length > this.maxBytes) throw messageError(new Error(''), 'desktop.recovery.errors.theRecoveryFileExceedsTheSizeLimit', {});"
   },
   "desktop.recovery.errors.theRecoveryFileIsEmptyOrExceedsTheSizeLimit": {
     "locations": [
-      "desktop/recovery.cjs:54",
-      "desktop/recovery.cjs:127"
+      "desktop/recovery.cjs:55",
+      "desktop/recovery.cjs:128"
     ],
     "context": "if (!stat.isFile() || !stat.size || stat.size > this.maxBytes) throw messageError(new Error(''), 'desktop.recovery.errors.theRecoveryFileIsEmptyOrExceedsTheSize"
   },
   "desktop.recovery.errors.thisRecoveryCopyIsNoLongerAvailable": {
     "locations": [
       "desktop/main.cjs:515",
-      "desktop/recovery.cjs:45"
+      "desktop/recovery.cjs:46"
     ],
     "context": "if (!record) throw messageError(new Error(''), 'desktop.recovery.errors.thisRecoveryCopyIsNoLongerAvailable', {});"
   },
@@ -12670,104 +12671,104 @@
   },
   "errors.documentExport.chooseAPivStkStykStkzOrStykmov": {
     "locations": [
-      "src/document-export.mjs:110"
+      "src/document-export.mjs:106"
     ],
     "context": "if (!['piv', 'stk', 'styk', 'stkz', 'stykmov'].includes(format)) throw messageError(new Error(''), \"errors.documentExport.chooseAPivStkStykStkzOrStykmov\", {});"
   },
   "errors.documentExport.documentExportFailed": {
     "locations": [
-      "src/document-export.mjs:165"
+      "src/document-export.mjs:161"
     ],
     "context": "const error = restoreMessageError((event.data.error?.message ? new Error(event.data.error?.message) : messageError(new Error(''), \"errors.documentExport.documen"
   },
   "errors.documentExport.documentExportTimedOut": {
     "locations": [
-      "src/document-export.mjs:194"
+      "src/document-export.mjs:190"
     ],
     "context": "const timer = this.timeoutMs > 0 ? setTimeout(() => fail(Object.assign(messageError(new Error(''), \"errors.documentExport.documentExportTimedOut\", {}), { teleme"
   },
   "errors.documentExport.exportRequiresAnEditableDocument": {
     "locations": [
-      "src/document-export.mjs:109"
+      "src/document-export.mjs:105"
     ],
     "context": "if (!report || typeof report !== 'object') throw messageError(new TypeError(''), \"errors.documentExport.exportRequiresAnEditableDocument\", {});"
   },
   "errors.documentExport.exportRequiresTheEditorRevision": {
     "locations": [
-      "src/document-export.mjs:111"
+      "src/document-export.mjs:107"
     ],
     "context": "if (ENGINE_FORMATS.has(format) && !Number.isSafeInteger(revision)) throw messageError(new TypeError(''), \"errors.documentExport.exportRequiresTheEditorRevision\""
   },
   "errors.documentExport.theDocumentExporterHasBeenDisposed": {
     "locations": [
-      "src/document-export.mjs:108"
+      "src/document-export.mjs:104"
     ],
     "context": "if (this.disposed) throw messageError(new Error(''), \"errors.documentExport.theDocumentExporterHasBeenDisposed\", {});"
   },
   "errors.documentExport.theDocumentExportWorkerStopped": {
     "locations": [
-      "src/document-export.mjs:158"
+      "src/document-export.mjs:154"
     ],
     "context": "const onError = event => { event.preventDefault(); fail(Object.assign((event.message ? new Error(event.message) : messageError(new Error(''), \"errors.documentEx"
   },
   "errors.documentExport.theDocumentSnapshotCouldNotBeTransferred": {
     "locations": [
-      "src/document-export.mjs:159"
+      "src/document-export.mjs:155"
     ],
     "context": "const onMessageError = () => fail(Object.assign(messageError(new Error(''), \"errors.documentExport.theDocumentSnapshotCouldNotBeTransferred\", {}), { telemetryCo"
   },
   "errors.documentExport.theEngineCannotMakeThisFileHere": {
     "locations": [
       "src/app.mjs:250",
-      "src/document-export.mjs:140"
+      "src/document-export.mjs:136"
     ],
     "context": "if (format !== 'styk' && !editor._shown?.active) throw Object.assign(messageError(new Error(''), \"errors.documentExport.theEngineCannotMakeThisFileHere\", {}), {"
   },
   "errors.documentExport.theFileServiceReturnedNoExportedDocument": {
     "locations": [
-      "src/document-export.mjs:223"
+      "src/document-export.mjs:218"
     ],
     "context": "if (!(result.blob instanceof Blob)) throw messageError(new Error(''), \"errors.documentExport.theFileServiceReturnedNoExportedDocument\", {});"
   },
   "errors.documentExportWorker.busy": {
     "locations": [
-      "src/document-export-worker.mjs:72"
+      "src/document-export-worker.mjs:73"
     ],
     "context": "if (running) { self.postMessage({id: message.id, ok: false, error: {message: 'The document export worker is busy.', messageKey:'errors.documentExportWorker.busy"
   },
   "errors.documentExportWorker.pivotCannotPreserveConnectorsSmartStretchOrOne": {
     "locations": [
-      "src/engine/engine-document-export.mjs:21"
+      "src/engine/engine-document-export.mjs:22"
     ],
     "context": "'errors.documentExportWorker.pivotCannotPreserveConnectorsSmartStretchOrOne',"
   },
   "errors.documentExportWorker.pivotCannotRetainTheseStickNodesShapesSave": {
     "locations": [
-      "src/engine/engine-document-export.mjs:22"
+      "src/engine/engine-document-export.mjs:23"
     ],
     "context": "'errors.documentExportWorker.pivotCannotRetainTheseStickNodesShapesSave',"
   },
   "errors.documentExportWorker.pivotFilesCannotPreserveVfxSaveAsStyk": {
     "locations": [
-      "src/engine/engine-document-export.mjs:20"
+      "src/engine/engine-document-export.mjs:21"
     ],
     "context": "'errors.documentExportWorker.pivotFilesCannotPreserveVfxSaveAsStyk',"
   },
   "errors.documentExportWorker.pivotFilesCannotRepresentTheseGradientFillsSave": {
     "locations": [
-      "src/engine/engine-document-export.mjs:24"
+      "src/engine/engine-document-export.mjs:25"
     ],
     "context": "'errors.documentExportWorker.pivotFilesCannotRepresentTheseGradientFillsSave',"
   },
   "errors.documentExportWorker.saveMovieclipsAsStykmovUseBreakApartTo": {
     "locations": [
-      "src/engine/engine-document-export.mjs:23"
+      "src/engine/engine-document-export.mjs:24"
     ],
     "context": "'errors.documentExportWorker.saveMovieclipsAsStykmovUseBreakApartTo',"
   },
   "errors.documentExportWorker.selectAMovieclipToExportAsStykmov": {
     "locations": [
-      "src/engine/engine-document-export.mjs:25"
+      "src/engine/engine-document-export.mjs:26"
     ],
     "context": "'errors.documentExportWorker.selectAMovieclipToExportAsStykmov',"
   },
@@ -12775,8 +12776,8 @@
     "locations": [
       "src/document-export-worker.mjs:33",
       "src/document-export-worker.mjs:44",
-      "src/document-export-worker.mjs:82",
-      "src/document-export.mjs:207"
+      "src/document-export-worker.mjs:84",
+      "src/document-export.mjs:202"
     ],
     "context": "if (!config.engine || !message.project) throw messageError(new Error(''), \"errors.documentExportWorker.theDocumentSnapshotWasNotInitialized\", {});"
   },
@@ -12797,7 +12798,7 @@
   },
   "errors.documentExportWorker.unknownDocumentExportOperation": {
     "locations": [
-      "src/document-export-worker.mjs:136"
+      "src/document-export-worker.mjs:138"
     ],
     "context": "} else throw messageError(new Error(''), \"errors.documentExportWorker.unknownDocumentExportOperation\", {});"
   },
@@ -13937,68 +13938,68 @@
   },
   "errors.exportFrameRenderer.anExportFrameCouldNotBeTransferred": {
     "locations": [
-      "src/engine/engine-export.mjs:163"
+      "src/engine/engine-export.mjs:157"
     ],
     "context": "if (current()) this._fail(Object.assign(messageError(new Error(''), 'errors.exportFrameRenderer.anExportFrameCouldNotBeTransferred', {}), {telemetryCode: 'snaps"
   },
   "errors.exportFrameRenderer.exportFramesMustBeRenderedSequentially": {
     "locations": [
-      "src/engine/engine-export.mjs:302"
+      "src/engine/engine-export.mjs:296"
     ],
     "context": "if (this.busy) throw messageError(new Error(''), 'errors.exportFrameRenderer.exportFramesMustBeRenderedSequentially', {});"
   },
   "errors.exportFrameRenderer.exportRendererRequestsMustRunSequentially": {
     "locations": [
-      "src/engine/engine-export.mjs:189"
+      "src/engine/engine-export.mjs:183"
     ],
     "context": "if (this.pending) return Promise.reject(messageError(new Error(''), 'errors.exportFrameRenderer.exportRendererRequestsMustRunSequentially', {}));"
   },
   "errors.exportFrameRenderer.exportRenderingFailed": {
     "locations": [
-      "src/engine/engine-export.mjs:90",
-      "src/engine/engine-export.mjs:150"
+      "src/engine/engine-export.mjs:84",
+      "src/engine/engine-export.mjs:144"
     ],
     "context": "return Object.assign(messageError(new Error(''), 'errors.exportFrameRenderer.exportRenderingFailed', {}), {cause: reason, code: 'engine_unavailable', telemetryC"
   },
   "errors.exportFrameRenderer.exportRenderingTimedOut": {
     "locations": [
-      "src/engine/engine-export.mjs:193"
+      "src/engine/engine-export.mjs:187"
     ],
     "context": "? setTimeout(() => this._fail(Object.assign(messageError(new Error(''), 'errors.exportFrameRenderer.exportRenderingTimedOut', {}), {telemetryCode: 'timeout', te"
   },
   "errors.exportFrameRenderer.loadTheAnimationBeforeExporting": {
     "locations": [
-      "src/engine/engine-export.mjs:301"
+      "src/engine/engine-export.mjs:295"
     ],
     "context": "if (!this.loaded) throw messageError(new Error(''), 'errors.exportFrameRenderer.loadTheAnimationBeforeExporting', {});"
   },
   "errors.exportFrameRenderer.theExportRendererReturnedAnIncompleteFrame": {
     "locations": [
-      "src/engine/engine-export.mjs:285"
+      "src/engine/engine-export.mjs:279"
     ],
     "context": "throw messageError(new Error(''), 'errors.exportFrameRenderer.theExportRendererReturnedAnIncompleteFrame', {});"
   },
   "errors.exportFrameRenderer.theExportRendererReturnedAnIncompleteNativeFrame": {
     "locations": [
-      "src/engine/engine-export.mjs:344"
+      "src/engine/engine-export.mjs:338"
     ],
     "context": "throw messageError(new Error(''), 'errors.exportFrameRenderer.theExportRendererReturnedAnIncompleteNativeFrame', {});"
   },
   "errors.exportFrameRenderer.theExportRendererReturnedNoPixelFrame": {
     "locations": [
-      "src/engine/engine-export.mjs:278"
+      "src/engine/engine-export.mjs:272"
     ],
     "context": "if (!result.bitmap) throw messageError(new Error(''), 'errors.exportFrameRenderer.theExportRendererReturnedNoPixelFrame', {});"
   },
   "errors.exportFrameRenderer.theExportRendererStopped": {
     "locations": [
-      "src/engine/engine-export.mjs:160"
+      "src/engine/engine-export.mjs:154"
     ],
     "context": "if (current()) this._fail(Object.assign(event.message ? new Error(event.message) : messageError(new Error(''), 'errors.exportFrameRenderer.theExportRendererStop"
   },
   "errors.exportFrameRenderer.waitForTheCurrentExportFrame": {
     "locations": [
-      "src/engine/engine-export.mjs:230"
+      "src/engine/engine-export.mjs:224"
     ],
     "context": "if (this.busy) throw messageError(new Error(''), 'errors.exportFrameRenderer.waitForTheCurrentExportFrame', {});"
   },
@@ -15654,7 +15655,7 @@
   },
   "errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming2": {
     "locations": [
-      "src/native-files.mjs:42"
+      "src/native-files.mjs:44"
     ],
     "context": "if (typeof desktop.beginRecoveryRead !== 'function') throw messageError(new Error(''), \"errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming2\", {});"
   },
@@ -15666,19 +15667,19 @@
   },
   "errors.nativeFiles.theRecoveryFileTransferWasIncomplete": {
     "locations": [
-      "src/native-files.mjs:64"
+      "src/native-files.mjs:66"
     ],
     "context": "if (received !== transfer.size) throw messageError(new Error(''), \"errors.nativeFiles.theRecoveryFileTransferWasIncomplete\", {});"
   },
   "errors.nativeFiles.theRecoveryTransferExceededItsDeclaredSize": {
     "locations": [
-      "src/native-files.mjs:59"
+      "src/native-files.mjs:61"
     ],
     "context": "if (received > transfer.size) throw messageError(new Error(''), \"errors.nativeFiles.theRecoveryTransferExceededItsDeclaredSize\", {});"
   },
   "errors.nativeFiles.theRecoveryTransferReturnedInvalidBytes": {
     "locations": [
-      "src/native-files.mjs:57"
+      "src/native-files.mjs:59"
     ],
     "context": "if (!(chunk.bytes instanceof ArrayBuffer)) throw messageError(new Error(''), \"errors.nativeFiles.theRecoveryTransferReturnedInvalidBytes\", {});"
   },
@@ -16000,13 +16001,13 @@
   },
   "errors.pivotExportMaterialize.pivotCannotPreserveConnectorsOrSmartStretchSave": {
     "locations": [
-      "src/engine/engine-document-export.mjs:27"
+      "src/engine/engine-document-export.mjs:28"
     ],
     "context": "'errors.pivotExportMaterialize.pivotCannotPreserveConnectorsOrSmartStretchSave',"
   },
   "errors.pivotExportMaterialize.pivotCannotPreserveOneSidedFillsSaveAs": {
     "locations": [
-      "src/engine/engine-document-export.mjs:26"
+      "src/engine/engine-document-export.mjs:27"
     ],
     "context": "'errors.pivotExportMaterialize.pivotCannotPreserveOneSidedFillsSaveAs',"
   },
