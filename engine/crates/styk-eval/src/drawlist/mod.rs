@@ -1385,7 +1385,22 @@ struct Open {
 /// Places the runs `range` of an encoded scene under `base` (the root, a ghost's
 /// group or the camera image), opening and closing the groups of movieclip
 /// owners and connected effect groups along the way.
-fn place(b: &mut Builder, scene: &Scene, encoded: &Encoded, range: (usize, usize), base: usize, hidden: &[bool], mut walker: Option<&mut generators::Walker<'_>>) {
+fn place(b: &mut Builder, scene: &Scene, encoded: &Encoded, range: (usize, usize), base: usize, hidden: &[bool], walker: Option<&mut generators::Walker<'_>>) {
+    // A frame with no effects drawn and no movieclip around the runs has no level to open or close: each object is placed under `base`
+    // as it is (the common frame of a drag, and every onion skin of it), without working out the levels of every run to find that out.
+    if walker.is_none() && !encoded.fx && (range.0..range.1).all(|k| scene.items[encoded.runs[k].0].chain == crate::geometry::NO_CHAIN) {
+        for k in range.0..range.1 {
+            if let Some(o) = encoded.objects[k].as_ref() {
+                b.object(base, o, false, o.raster);
+            }
+        }
+        return;
+    }
+    place_general(b, scene, encoded, range, base, hidden, walker);
+}
+
+/// [`place`] for any runs: the levels each run is nested in (movieclip owners, connected effect groups) are worked out and opened.
+fn place_general(b: &mut Builder, scene: &Scene, encoded: &Encoded, range: (usize, usize), base: usize, hidden: &[bool], mut walker: Option<&mut generators::Walker<'_>>) {
     let mut members = Memberships::default();
     let steps: Vec<Vec<Step<'_>>> = (range.0..range.1).map(|k| path(scene, &mut members, &scene.items[encoded.runs[k].0], hidden, encoded.fx)).collect();
     let steps_of = |k: usize| &steps[k - range.0];
@@ -1933,5 +1948,37 @@ mod tests {
         expected[radial as usize + 1] = [67.25, 51.5, 70.0, 80.0];
         out.translate([17.25, -8.5]);
         assert_eq!(out.paints, expected, "only gradient geometry moves; atlas references, stops and parameters stay unchanged");
+    }
+
+    /// A frame placed by the short way (no levels to open) is placed as the general walk places it, whatever the frame holds.
+    #[test]
+    fn the_short_way_of_placing_a_plain_frame_places_what_the_general_walk_does() {
+        use std::path::Path;
+        let mut short = 0;
+        for name in ["eval/follow-figures.json", "eval/color-transitions.json", "eval/sticknodes-sprites.json", "eval/movieclip-joined.json", "drawlist/painted-limbs.json", "spatial/rotated-drawings.json"] {
+            let doc = crate::open(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)).unwrap();
+            let assets = Assets::build(&doc);
+            let prepared = crate::prepare(doc);
+            for tick in [0.0, 3.0, 9.0] {
+                let frame = prepared.evaluate(tick);
+                let scene = crate::geometry::build(&prepared.doc, &frame);
+                let mut hidden = vec![false; scene.objects.len()];
+                for ghosts_hidden in [false, true] {
+                    if let Some(first) = hidden.first_mut() {
+                        *first = ghosts_hidden;
+                    }
+                    let encoded = encode_scene(&assets, None, &scene, &hidden, &[], None, false, true, None);
+                    let whole = (0, encoded.runs.len());
+                    let plain = !encoded.fx && (0..encoded.runs.len()).all(|k| scene.items[encoded.runs[k].0].chain == crate::geometry::NO_CHAIN);
+                    short += usize::from(plain);
+                    let (mut a, mut b) = (Builder::new(), Builder::new());
+                    place(&mut a, &scene, &encoded, whole, 0, &hidden, None);
+                    place_general(&mut b, &scene, &encoded, whole, 0, &hidden, None);
+                    let (a, b) = (a.finish(), b.finish());
+                    assert_eq!(format!("{:?}", (&a.0, &a.1, &a.2, &a.3, &a.4)), format!("{:?}", (&b.0, &b.1, &b.2, &b.3, &b.4)), "{name} tick {tick}");
+                }
+            }
+        }
+        assert!(short > 0, "some frame takes the short way");
     }
 }
