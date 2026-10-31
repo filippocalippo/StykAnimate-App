@@ -147,6 +147,15 @@ the soft copy of some picture; GPU process private bytes in MiB, the empty app's
 | 4 (default) | 61 / 111 / 291 | 28–47 | 1, 0, 78, 1 | 0, 0, 46, 1 | 842 | 753–774 |
 | 3 | 67 / 127 / 291 | 25–27 | 1, 0, 65, 1 | 0, 0, 58, 1 | not read | 784–808 |
 
+**Where a far jump's time goes** (release build, `tdd2`, 48 jumps across the animation, three runs each of 4 layers and the whole layout, probe
+slot beside other jobs): the first frame is drawn 27–42 ms (p50), 59–77 ms (p90) after the seek with 4 layers and 34–41, 65–70 with the whole
+layout, and 15–24 ms after a fast drag ends against 22–25. Nearly all of it is the first `render_edit` call, which evaluates the pose
+of the tick and encodes its draw list on the interface thread (10–60 ms for 263 figures, the same in both), after about 14 ms of editor work
+before the stage is asked; what the pictures add to the frame is `syncMs` ≤ 1.4, `readyMs` ≤ 0.4 and `hintMs` ≤ 0.2 (p95), with a draw 1 ms longer.
+A far jump draws soft at once; the sharpening redraws that follow (about ten a jump, one slice of a picture each) are not in the first frame.
+Before this was measured, the idle work that makes the table of what each tick draws advanced the engine's progress counter, which wakes every
+waiter, and the pictures of a frame drawn soft were uploaded whole inside whichever frame came next.
+
 Memory with the document open, settled, 3,497 MiB (whole layout) to 2,315 MiB (4 layers) for the whole app. 3 layers grow to 4 as
 soon as a frame draws from four pages (tdd2: the edit frame with onion skins); 4 is what 3 settles at. A texture whose
 last handle is dropped is not given back by the browser until it collects it: a sprite texture that was replaced
