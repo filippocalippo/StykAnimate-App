@@ -78,6 +78,8 @@ export function createStagePlayback({stage, maxTickets}) {
     return true;
   };
   const stats = {};
+  /** The last preparation statistics the engine answered with: it answers zeros while a worker holds its state. */
+  let lastFrames = null;
   const dropPackets = () => { packets.clear(); requested = []; packetGeneration = null; };
   const prunePackets = handle => {
     const generation = handle.generation();
@@ -150,7 +152,10 @@ export function createStagePlayback({stage, maxTickets}) {
     get stats() {
       const engine = side();
       if (!engine) return Object.assign(stats, {preparedFrames: 0, compileMs: 0, lastCompileMs: 0, pendingFrames: 0, bytes: 0, readyFrames: 0, hits: 0, misses: 0});
-      const frames = JSON.parse(engine.engine.handle.stats());
+      const read = JSON.parse(engine.engine.handle.stats());
+      // A busy answer would read as a document that prepares instantly, and a shorter start-up buffer for it.
+      if (!read.busy || !lastFrames) lastFrames = read;
+      const frames = lastFrames;
       return Object.assign(stats, {preparedFrames: frames.prepared, compileMs: frames.totalMs, lastCompileMs: frames.prepared ? frames.totalMs / frames.prepared : 0,
         pendingFrames: 0, bytes: frames.cachedBytes, readyFrames: frames.cached, hits: 0, misses: 0, engine: frames});
     },
@@ -158,7 +163,7 @@ export function createStagePlayback({stage, maxTickets}) {
     load(next, options = {}) {
       next = next?.document ?? next?.report ?? next;
       // The engine holds the document already; no worker gets a copy of it.
-      report = next; revision = options.revision;
+      report = next; revision = options.revision; lastFrames = null;
       setHidden(options);
       changed();
       return playback;

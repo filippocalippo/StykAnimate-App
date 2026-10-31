@@ -33,6 +33,19 @@ function playbackSide({maxFrames} = {}) {
     nextGeneration() { generation++; }, nextEpoch() { epoch++; }, publish(next) { revision = next; }, handle, engine: side.engine};
 }
 
+test('a busy statistics answer keeps the last reading, so start-up is not sized for a document that prepares instantly', () => {
+  const {playback, handle} = playbackSide();
+  const answers = [{prepared: 20, totalMs: 400, worstMs: 30, inline: 0, cached: 20, cachedBytes: 1000, imagesPending: 0, busy: false},
+    {prepared: 0, totalMs: 0, worstMs: 0, inline: 0, cached: 0, cachedBytes: 0, imagesPending: 0, busy: true}];
+  handle.stats = () => JSON.stringify(answers.shift() ?? {...answers[0], busy: true});
+  assert.equal(playback.stats.lastCompileMs, 20);
+  assert.equal(playback.stats.preparedFrames, 20);
+  const busy = playback.stats;
+  assert.equal(busy.lastCompileMs, 20, 'a busy engine does not read as free preparation');
+  assert.equal(busy.preparedFrames, 20);
+  assert.equal(busy.bytes, 1000);
+});
+
 test('fractional range requests retain Float64 samples and distinct ready packet metadata', async () => {
   const {playback, ready, requests} = playbackSide();
   playback.load({}, {revision: 1});
