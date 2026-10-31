@@ -1,6 +1,6 @@
-// What the page keeps in the browser lasts one launch (desktop/main.cjs): this starts the desktop app three times on one
-// profile, leaves local storage and an IndexedDB database behind in the first, and checks that neither is there when
-// the next starts. It guards the clearing against a Chromium that keeps its storage somewhere new.
+// What the page keeps in the browser (desktop/main.cjs): this starts the desktop app three times on one profile, leaves a
+// recent colour in local storage and an IndexedDB database behind, and checks that local storage is still there when the next
+// starts (the origin is stable) and that the temporary IndexedDB is not.
 //
 //   node scripts/smoke-storage.mjs
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -44,11 +44,11 @@ try {
   expect('A first launch starts with no storage', first.marker === null && !first.databases.includes('storage-smoke'));
   for (const launchNumber of [2, 3]) {
     const found = await launch(launchNumber === 2);
-    expect(`Local storage does not survive a restart (launch ${launchNumber})`, found.marker === null, String(found.marker));
+    expect(`Local storage survives a restart (launch ${launchNumber})`, found.marker === 'left behind', String(found.marker));
     expect(`IndexedDB does not survive a restart (launch ${launchNumber})`, !found.databases.includes('storage-smoke'), found.databases.join(', '));
   }
 } finally {
   await rm(profile, { recursive: true, force: true }).catch(() => {});
 }
 if (failures.length) { console.error(`\n${failures.length} check(s) failed:\n - ${failures.join('\n - ')}`); process.exitCode = 1; }
-else console.log('\nBrowser storage lasts one launch.');
+else console.log('\nLocal storage lasts; temporary browser storage does not.');
