@@ -23,6 +23,7 @@ What's new in each version of StykAnimate.
 - Ctrl-dragging a node that uses IK stretches it like any other node.
 - A calmer top bar: the menus are in the StykAnimate menu, and your open projects take their place.
 - Exports preserve effects and 3D artwork when No smoothing is selected.
+- Recent colors, personal palettes and your brush library are kept between launches on desktop.
 
 ### Fixed
 
