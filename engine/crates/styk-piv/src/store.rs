@@ -427,7 +427,7 @@ impl Store {
         let mut hasher = Sha256::new();
         hasher.update(kind.name().as_bytes());
         hasher.update([0u8]);
-        hasher.update(data);
+        styk_doc::digest::update(&mut hasher, data);
         if kind == Kind::Stk {
             hasher.update(name.as_bytes());
         }
@@ -583,7 +583,7 @@ impl Store {
         let mut hasher = Sha256::new();
         hasher.update(Kind::Piv.name().as_bytes());
         hasher.update([0u8]);
-        hasher.update(data);
+        styk_doc::digest::update(&mut hasher, data);
         let source_id = hex(&hasher.finalize());
         let found = match self.find_source(&source_id) {
             Some(found) => found,

@@ -9,4 +9,5 @@ publish.workspace = true
 [dependencies]
 ryu-js = "1"
 base64 = "0.22"
+sha2 = "0.10"
 thiserror = "2"
