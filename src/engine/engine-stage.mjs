@@ -257,14 +257,14 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     // Strokes, fills and floating selections not yet published are drawn from the tiles held live.
     side.live.invalidate = invalidate;
     side.live.sync(drawingResourcesFor(request.documentReport ?? request.report));
-    const {frame, geometry, source} = request, objects = frame.objects ?? [];
+    const {geometry, source} = request;
     if (source) {
       // The session publishes what it changed after the call; a frame asked for before that landed is drawn when the engine holds it.
       if (!stage.edit_session(source.session, source.view, source.motion)) notYet('the engine does not hold the document the session edits yet');
       // The poses the engine holds are the session's: the next frame sent as poses is sent whole.
       side.groups = []; side.count = -1; side.fields = null;
     } else {
-      const json = frameJSON(frame, geometry, side);
+      const json = frameJSON(request.frame, geometry, side);
       // An unchanged frame is not parsed again; the first frame and every changed one are.
       if (json !== null) { stage.edit_frame(json); side.frameSent = true; }
     }
@@ -273,9 +273,10 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     if (request.onions) stage.set_onions(request.onions.session, request.onions.view, request.onions.request);
     else stage.clear_onions();
     const sendMs = performance.now() - started;
+    // The slots of the figures not drawn and of the ones dragged. A frame the session draws is not copied for this: the engine says whose the slots are.
+    const uids = source ? stage.edit_uids() : (request.frame.objects ?? []).map(object => object.unique_id);
     const hidden = [], translations = [];
-    objects.forEach((object, slot) => {
-      const uid = object.unique_id;
+    uids.forEach((uid, slot) => {
       if (request.hiddenUids?.has(uid)) hidden.push(slot);
       const move = request.dragTranslations?.get?.(uid);
       if (move && (move.x || move.y)) translations.push(slot, move.x, move.y);

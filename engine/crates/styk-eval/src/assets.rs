@@ -545,8 +545,9 @@ pub fn decode_picture(doc: &Document, assets: &Assets, picture: Picture) -> Resu
     }
 }
 
-/// The most memory [`decode_image`] holds at once: the picture decoded at its own size (twice: the decoder keeps
-/// its own copy), then resized and bordered at the size of its atlas place (twice). Zero for an image without one.
+/// The most memory [`decode_image`] reserves: the picture decoded at its own size (twice: the decoder keeps its own
+/// copy), then resized and bordered at the size of its atlas place (twice). An upper bound: a picture at its atlas size
+/// in 8-bit RGB or RGBA holds its stored size alone. Zero for an image without one.
 pub fn decode_image_working_bytes(assets: &Assets, index: usize) -> usize {
     let Some(entry) = assets.atlas.get(index).filter(|entry| entry.valid) else { return 0 };
     let source = entry.source_w as usize * entry.source_h as usize * 4;
@@ -562,13 +563,11 @@ pub fn soft_rect(entry: &AtlasEntry) -> (u32, u32, u32, u32) {
     (x0, y0, x1 - x0 + 1, y1 - y0 + 1)
 }
 
-/// The most memory [`soften_image`] holds at once: the picture decoded at its own size (twice: the decoder keeps its
-/// own copy), and resized to its atlas place, and the soft copy. Zero for an image without a place.
+/// The most memory [`soften_image`] reserves: what decoding the picture takes ([`decode_image_working_bytes`]) and the
+/// soft copy. Zero for an image without a place.
 pub fn soften_working_bytes(assets: &Assets, index: usize) -> usize {
     let Some(entry) = assets.atlas.get(index).filter(|entry| entry.valid) else { return 0 };
-    let source = entry.source_w as usize * entry.source_h as usize * 4;
-    let stored = entry.w as usize * entry.h as usize * 4;
-    2 * source + stored + (entry.w as usize / SOFT_SCALE as usize + 2) * (entry.h as usize / SOFT_SCALE as usize + 2) * 4
+    decode_image_working_bytes(assets, index) + (entry.w as usize / SOFT_SCALE as usize + 2) * (entry.h as usize / SOFT_SCALE as usize + 2) * 4
 }
 
 /// The soft copy of image `index`: the picture's premultiplied pixels averaged over the `SOFT_SCALE` × `SOFT_SCALE`
@@ -577,22 +576,14 @@ pub fn soften_working_bytes(assets: &Assets, index: usize) -> usize {
 pub fn soften_image(doc: &Document, assets: &Assets, index: usize) -> Option<DecodedImage> {
     let data = doc.images.get(index)?;
     let entry = assets.atlas.get(index).filter(|entry| entry.valid)?;
-    let mut rgba = image::load_from_memory(&data.bytes).ok()?.to_rgba8();
-    if let Some(key) = data.color_key {
-        for pixel in rgba.pixels_mut() {
-            if pixel[0] == key[0] && pixel[1] == key[1] && pixel[2] == key[2] {
-                pixel[3] = 0;
-            }
-        }
-    }
-    if rgba.width() != entry.w || rgba.height() != entry.h {
-        rgba = image::imageops::resize(&rgba, entry.w, entry.h, image::imageops::FilterType::Triangle);
-    }
+    // The stored picture (premultiplied, with its gutter) is the only buffer of the picture's size: decoding it as
+    // [`decode_image`] does holds no more than a picture that is kept whole does.
+    let stored = stored_pixels(&data.bytes, data.color_key, (entry.w, entry.h))?;
     let (sx0, sy0, sw, sh) = soft_rect(entry);
     let mut out = Vec::new();
     out.try_reserve_exact((sw * sh * 4) as usize).ok()?;
     out.resize((sw * sh * 4) as usize, 0u8);
-    let source = rgba.as_raw();
+    let row = entry.w as usize + 2;
     for sy in 0..sh {
         // The rows of the picture in this block of the page.
         let top = ((sy0 + sy) * SOFT_SCALE).max(entry.y) - entry.y;
@@ -603,12 +594,11 @@ pub fn soften_image(doc: &Document, assets: &Assets, index: usize) -> Option<Dec
             let mut sum = [0u32; 4];
             for y in top..bottom {
                 for x in left..right {
-                    let at = ((y * entry.w + x) * 4) as usize;
-                    let a = source[at + 3] as u32;
-                    for k in 0..3 {
-                        sum[k] += (source[at + k] as u32 * a + 127) / 255;
+                    // One texel in for the gutter.
+                    let at = ((y as usize + 1) * row + x as usize + 1) * 4;
+                    for k in 0..4 {
+                        sum[k] += stored[at + k] as u32;
                     }
-                    sum[3] += a;
                 }
             }
             let n = ((bottom - top) * (right - left)).max(1);
@@ -626,43 +616,272 @@ pub fn soften_image(doc: &Document, assets: &Assets, index: usize) -> Option<Dec
 pub fn decode_image(doc: &Document, assets: &Assets, index: usize) -> Option<DecodedImage> {
     let data = doc.images.get(index)?;
     let entry = assets.atlas.get(index).filter(|entry| entry.valid)?;
-    let mut rgba = image::load_from_memory(&data.bytes).ok()?.to_rgba8();
-    if let Some(key) = data.color_key {
+    let rgba = stored_pixels(&data.bytes, data.color_key, (entry.w, entry.h))?;
+    Some(DecodedImage { index: index as u32, drawing: false, soft: false, width: entry.w + 2, height: entry.h + 2, rgba })
+}
+
+/// The stored pixels of an encoded picture of `size`: premultiplied RGBA with a one-pixel gutter that repeats its
+/// edges, the colour key made transparent, the picture resized when it is not that size already.
+///
+/// A picture the atlas keeps at its own size, in 8-bit RGB or RGBA (a PNG, a JPEG, a BMP, a GIF), is decoded into the
+/// end of its final buffer and bordered there ([`border_in_place`]), so the buffer of the stored size is the only
+/// one of that size that exists; decoding, converting and bordering made three (tdd2's 4K pictures, decoded two at a
+/// time, held 300 MiB more than the document while it opened). Any other picture takes the general path.
+fn stored_pixels(bytes: &[u8], color_key: Option<[u8; 3]>, size: (u32, u32)) -> Option<Vec<u8>> {
+    let (w, h) = (size.0 as usize, size.1 as usize);
+    let stored = (w + 2).checked_mul(h + 2)?.checked_mul(4)?;
+    // The one allocation of the picture's size that is not the decoder's: a failure is a picture that cannot be shown.
+    let mut out = Vec::new();
+    out.try_reserve_exact(stored).ok()?;
+    out.resize(stored, 0u8);
+    if let Some(channels) = read_into_tail(bytes, size, &mut out) {
+        border_in_place(&mut out, (w, h), channels, color_key);
+        return Some(out);
+    }
+    let mut rgba = image::load_from_memory(bytes).ok()?.into_rgba8();
+    if let Some(key) = color_key {
         for pixel in rgba.pixels_mut() {
             if pixel[0] == key[0] && pixel[1] == key[1] && pixel[2] == key[2] {
                 pixel[3] = 0;
             }
         }
     }
-    if rgba.width() != entry.w || rgba.height() != entry.h {
-        rgba = image::imageops::resize(&rgba, entry.w, entry.h, image::imageops::FilterType::Triangle);
+    let start = stored - w * h * 4;
+    if rgba.dimensions() == size {
+        out[start..].copy_from_slice(rgba.as_raw());
+    } else {
+        resize_triangle(rgba.as_raw(), rgba.dimensions(), size, &mut out[start..]);
     }
-    let (w, h) = (entry.w as usize, entry.h as usize);
+    drop(rgba);
+    border_in_place(&mut out, (w, h), 4, None);
+    Some(out)
+}
+
+/// `image::imageops::resize` with the triangle filter, result for result, for 8-bit RGBA: `from` is the decoded picture,
+/// `to` the pixels at `size`. The library resizes in two whole-picture passes with a float picture of the source's
+/// width and the new height between them (129 MiB for a 4096 x 2160 picture, on top of the picture and its resize);
+/// the passes are separable by row, so this does both for one output row at a time and the float row is the only
+/// intermediate. The weights, their order of summing and the rounding are the library's.
+fn resize_triangle(from: &[u8], (sw, sh): (u32, u32), (dw, dh): (u32, u32), to: &mut [u8]) {
+    // A picture with a zero side (a header that claims one) has nothing to sample: the library gives a blank picture.
+    if sw == 0 || sh == 0 {
+        to.fill(0);
+        return;
+    }
+    fn weights(source: u32, target: u32, at: u32) -> (usize, Vec<f32>) {
+        let ratio = source as f32 / target as f32;
+        let sratio = if ratio < 1.0 { 1.0 } else { ratio };
+        let support = sratio;
+        let center = (at as f32 + 0.5) * ratio;
+        let left = ((center - support).floor() as i64).clamp(0, source as i64 - 1);
+        let right = ((center + support).ceil() as i64).clamp(left + 1, source as i64);
+        let center = center - 0.5;
+        let mut weights = Vec::with_capacity((right - left) as usize);
+        let mut sum = 0.0f32;
+        for i in left..right {
+            let x = (i as f32 - center) / sratio;
+            let weight = if x.abs() < 1.0 { 1.0 - x.abs() } else { 0.0 };
+            weights.push(weight);
+            sum += weight;
+        }
+        for weight in weights.iter_mut() {
+            *weight /= sum;
+        }
+        (left as usize, weights)
+    }
+    let (sw, dw) = (sw as usize, dw as usize);
+    let across: Vec<(usize, Vec<f32>)> = (0..dw as u32).map(|x| weights(sw as u32, dw as u32, x)).collect();
+    let mut row = vec![0.0f32; sw * 4];
+    for y in 0..dh {
+        let (top, down) = weights(sh, dh, y);
+        for x in 0..sw {
+            let mut t = [0.0f32; 4];
+            for (i, w) in down.iter().enumerate() {
+                let at = ((top + i) * sw + x) * 4;
+                for channel in 0..4 {
+                    t[channel] += from[at + channel] as f32 * w;
+                }
+            }
+            row[x * 4..x * 4 + 4].copy_from_slice(&t);
+        }
+        for (x, (left, ws)) in across.iter().enumerate() {
+            let mut t = [0.0f32; 4];
+            for (i, w) in ws.iter().enumerate() {
+                let at = (left + i) * 4;
+                for channel in 0..4 {
+                    t[channel] += row[at + channel] * w;
+                }
+            }
+            let o = (y as usize * dw + x) * 4;
+            for channel in 0..4 {
+                let value = if t[channel] < 0.0 { 0.0 } else if t[channel] > 255.0 { 255.0 } else { t[channel] };
+                to[o + channel] = value.round() as u8;
+            }
+        }
+    }
+}
+
+/// Decodes `bytes` into the end of `out` (a buffer of the stored size) when the picture is 8-bit RGB or RGBA of
+/// exactly `size`: the channels it has. `None` leaves the picture to the general path.
+fn read_into_tail(bytes: &[u8], size: (u32, u32), out: &mut [u8]) -> Option<usize> {
+    use image::ImageDecoder;
+    let decoder = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?.into_decoder().ok()?;
+    let channels = match decoder.color_type() {
+        image::ColorType::Rgb8 => 3,
+        image::ColorType::Rgba8 => 4,
+        _ => return None,
+    };
+    let length = size.0 as usize * size.1 as usize * channels;
+    if decoder.dimensions() != size || decoder.total_bytes() != length as u64 {
+        return None;
+    }
+    let start = out.len().checked_sub(length)?;
+    decoder.read_image(&mut out[start..]).ok()?;
+    Some(channels)
+}
+
+/// Turns the `w` x `h` picture held in the last `w * h * channels` bytes of `out` into the stored picture that
+/// fills it: premultiplied RGBA with a one-pixel gutter that repeats the edges, the pixels of `color_key`
+/// transparent. Pixels are written in order and never reach a pixel still to be read: each stored row starts
+/// before the source row it reads (`4 * (w + 2)` against `channels * w` bytes a row), and the last stored rows,
+/// which read the last source row again, stay a pixel behind it.
+fn border_in_place(out: &mut [u8], (w, h): (usize, usize), channels: usize, color_key: Option<[u8; 3]>) {
     let (gw, gh) = (w + 2, h + 2);
-    // The one allocation of the picture's size that is not the decoder's: a failure is a picture that cannot be shown.
-    let mut out = Vec::new();
-    out.try_reserve_exact(gw * gh * 4).ok()?;
-    out.resize(gw * gh * 4, 0u8);
-    let source = rgba.as_raw();
+    let base = out.len() - w * h * channels;
     for gy in 0..gh {
         let sy = gy.saturating_sub(1).min(h - 1);
         for gx in 0..gw {
             let sx = gx.saturating_sub(1).min(w - 1);
-            let p = &source[(sy * w + sx) * 4..(sy * w + sx) * 4 + 4];
-            let a = p[3] as u32;
+            let s = base + (sy * w + sx) * channels;
+            let (r, g, b) = (out[s] as u32, out[s + 1] as u32, out[s + 2] as u32);
+            let keyed = color_key.is_some_and(|key| out[s] == key[0] && out[s + 1] == key[1] && out[s + 2] == key[2]);
+            let a = if keyed { 0 } else if channels == 4 { out[s + 3] as u32 } else { 255 };
             let o = (gy * gw + gx) * 4;
-            out[o] = ((p[0] as u32 * a + 127) / 255) as u8;
-            out[o + 1] = ((p[1] as u32 * a + 127) / 255) as u8;
-            out[o + 2] = ((p[2] as u32 * a + 127) / 255) as u8;
+            out[o] = ((r * a + 127) / 255) as u8;
+            out[o + 1] = ((g * a + 127) / 255) as u8;
+            out[o + 2] = ((b * a + 127) / 255) as u8;
             out[o + 3] = a as u8;
         }
     }
-    Some(DecodedImage { index: index as u32, drawing: false, soft: false, width: gw as u32, height: gh as u32, rgba: out })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pixels a picture stored before it was decoded into its final buffer: decode, convert, key, resize, then
+    /// border into a buffer of their own.
+    fn stored_reference(bytes: &[u8], color_key: Option<[u8; 3]>, size: (u32, u32)) -> Vec<u8> {
+        let mut rgba = image::load_from_memory(bytes).unwrap().to_rgba8();
+        if let Some(key) = color_key {
+            for pixel in rgba.pixels_mut() {
+                if pixel[0] == key[0] && pixel[1] == key[1] && pixel[2] == key[2] {
+                    pixel[3] = 0;
+                }
+            }
+        }
+        if rgba.width() != size.0 || rgba.height() != size.1 {
+            rgba = image::imageops::resize(&rgba, size.0, size.1, image::imageops::FilterType::Triangle);
+        }
+        let (w, h) = (size.0 as usize, size.1 as usize);
+        let (gw, gh) = (w + 2, h + 2);
+        let mut out = vec![0u8; gw * gh * 4];
+        let source = rgba.as_raw();
+        for gy in 0..gh {
+            let sy = gy.saturating_sub(1).min(h - 1);
+            for gx in 0..gw {
+                let sx = gx.saturating_sub(1).min(w - 1);
+                let p = &source[(sy * w + sx) * 4..(sy * w + sx) * 4 + 4];
+                let a = p[3] as u32;
+                let o = (gy * gw + gx) * 4;
+                out[o] = ((p[0] as u32 * a + 127) / 255) as u8;
+                out[o + 1] = ((p[1] as u32 * a + 127) / 255) as u8;
+                out[o + 2] = ((p[2] as u32 * a + 127) / 255) as u8;
+                out[o + 3] = a as u8;
+            }
+        }
+        out
+    }
+
+    /// Pixels with every alpha, and some of the colour key.
+    fn noise(count: usize, seed: u32) -> Vec<u8> {
+        let mut state = seed;
+        (0..count)
+            .map(|_| {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                match state >> 29 {
+                    0 => 0,
+                    1 => 255,
+                    _ => (state >> 16) as u8,
+                }
+            })
+            .collect()
+    }
+
+    fn encoded(pixels: Vec<u8>, size: (u32, u32), color: image::ExtendedColorType) -> Vec<u8> {
+        use image::ImageEncoder;
+        let mut bytes = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut bytes).write_image(&pixels, size.0, size.1, color).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn a_picture_decoded_into_its_final_buffer_is_the_picture_the_three_buffers_made() {
+        let sizes = [(1, 1), (1, 6), (6, 1), (2, 2), (3, 7), (8, 8), (33, 17), (64, 5)];
+        for (n, &size) in sizes.iter().enumerate() {
+            let count = size.0 as usize * size.1 as usize;
+            for (kind, channels, color) in [("rgb", 3, image::ExtendedColorType::Rgb8), ("rgba", 4, image::ExtendedColorType::Rgba8)] {
+                let mut pixels = noise(count * channels, n as u32 + 1);
+                // The key colour appears in the picture.
+                for pixel in pixels.chunks_mut(channels).step_by(3) {
+                    pixel[..3].copy_from_slice(&[10, 200, 30]);
+                }
+                let bytes = encoded(pixels, size, color);
+                for key in [None, Some([10, 200, 30]), Some([1, 2, 3])] {
+                    assert_eq!(stored_pixels(&bytes, key, size).unwrap(), stored_reference(&bytes, key, size), "{kind} {size:?} {key:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_resized_picture_is_the_library_resize_to_the_byte() {
+        for (from, to) in [((64, 48), (7, 5)), ((64, 48), (63, 49)), ((13, 29), (13, 3)), ((13, 29), (40, 29)), ((100, 7), (3, 7)), ((1, 1), (5, 4)), ((37, 41), (1, 2))] {
+            let pixels = noise(from.0 as usize * from.1 as usize * 4, from.0 * 31 + from.1);
+            let source = image::RgbaImage::from_raw(from.0, from.1, pixels).unwrap();
+            let library = image::imageops::resize(&source, to.0, to.1, image::imageops::FilterType::Triangle);
+            let mut ours = vec![0u8; to.0 as usize * to.1 as usize * 4];
+            resize_triangle(source.as_raw(), from, to, &mut ours);
+            assert_eq!(library.as_raw(), &ours, "{from:?} to {to:?}");
+        }
+    }
+
+    #[test]
+    fn a_picture_with_a_zero_side_is_blank_not_a_panic() {
+        // A 9 x 0 GIF: the atlas raises the side to 1 and takes a 9 x 1 place for it; the decoder gives nothing to sample.
+        let hex = "4749463839610900000082000052ccbd40cec80ac81ed6ba5ca05e44d107f900000000000021f904010000d8002c000000000900010000080d000308104040c00003000a0404003b";
+        let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap()).collect();
+        assert_eq!(bytes.len(), 72);
+        for key in [None, Some([0, 0, 0])] {
+            assert_eq!(stored_pixels(&bytes, key, (9, 1)).unwrap(), vec![0u8; 11 * 3 * 4], "{key:?}");
+        }
+    }
+
+    #[test]
+    fn pictures_that_are_not_8_bit_rgb_or_at_their_atlas_size_keep_their_stored_pixels() {
+        let size = (9, 5);
+        let count = size.0 as usize * size.1 as usize;
+        let grey = encoded(noise(count, 7), size, image::ExtendedColorType::L8);
+        let wide = encoded(noise(count * 8, 8), size, image::ExtendedColorType::Rgba16);
+        let rgba = encoded(noise(count * 4, 9), size, image::ExtendedColorType::Rgba8);
+        for bytes in [&grey, &wide] {
+            assert_eq!(stored_pixels(bytes, None, size).unwrap(), stored_reference(bytes, None, size), "decoded and converted");
+        }
+        for target in [(4, 3), (20, 11), (9, 2), (3, 5), (9, 11), (1, 1), (40, 1), (2, 40)] {
+            assert_eq!(stored_pixels(&rgba, Some([0, 0, 0]), target).unwrap(), stored_reference(&rgba, Some([0, 0, 0]), target), "resized to {target:?}");
+        }
+        assert!(stored_pixels(b"not a picture", None, size).is_none());
+    }
 
     #[test]
     fn drawing_padding_does_not_change_sprite_gutters_or_overlap_slots() {

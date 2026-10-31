@@ -12,7 +12,8 @@ const collect = vm.runInNewContext('gc');
 test('a geometry the interface replaced is not kept alive by the one that replaced it', async () => {
   let serial = 0;
   const shown = createShown({
-    ask: kind => kind === 'geometry' ? JSON.stringify({token: ++serial, full: true, count: 0, slots: [], warnings: []}) : 'null',
+    ask: () => 'null',
+    packet: () => Float64Array.of(++serial, 1, 0, 0, 0),
     source: () => null,
     report: () => ({figure_types: []}),
   });

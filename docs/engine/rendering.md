@@ -436,7 +436,9 @@ every such list with the list encoded whole.
 engine: the edit frame (the one the open document's session shows, `Stage::edit_session`: nothing crosses from
 the interface), onion skins (the poses the session plans, `Stage::set_onions`: [evaluation.md](evaluation.md#the-interfaces-views)) and prepared playback frames of every document
 ([D4](decisions/0004-strangler-gate.md), [Every document](#every-document)); no other
-renderer draws a frame. The WebGPU surface is configured with
+renderer draws a frame. A draw from the session needs neither the frame as poses nor the geometry: `request.frame` is read only by a draw that
+does not take the frame from the session, the figures not drawn and the ones dragged are named by slot from `Stage::edit_uids`, and the geometry
+(a read of the session) is read by the overlay. The WebGPU surface is configured with
 premultiplied alpha so the page shows through the pasteboard. Through the scene
 camera (prepared playback frames, and edit frames in the camera preview) the scene is
 seen through the shot (follow clips, camera-motion impulses) and parallax layers
