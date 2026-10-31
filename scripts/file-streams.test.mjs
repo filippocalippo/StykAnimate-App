@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -220,4 +220,52 @@ test('read operations require a live token rather than a filename', async t => {
   const session = await streams.beginRead(destination);
   await streams.closeRead(session.token);
   await rejection(() => streams.read(session.token));
+});
+
+/** Makes `rename` fail with `code` the first `failures` times it is called (always, for Infinity), then do what it does. */
+function failingRename(t, code, failures) {
+  const fsPromises = createRequire(import.meta.url)('node:fs/promises'), real = fsPromises.rename, calls = [];
+  fsPromises.rename = async (...args) => {
+    calls.push(args);
+    if (calls.length <= failures) throw Object.assign(new Error(`${code}: rename`), { code });
+    return real(...args);
+  };
+  t.after(() => { fsPromises.rename = real; });
+  return calls;
+}
+
+async function written(streams, destination, text = 'new') {
+  const session = await streams.beginWrite({ destination, size: text.length });
+  await streams.write(session.token, new TextEncoder().encode(text));
+  return session.token;
+}
+
+for (const code of ['EPERM', 'EACCES', 'EBUSY']) test(`a save whose rename is refused for a moment with ${code} still replaces the file`, async t => {
+  const { streams, destination } = await fixture(t);
+  await writeFile(destination, 'previous');
+  const token = await written(streams, destination), calls = failingRename(t, code, 3);
+  assert.equal((await streams.finish(token)).saved, true);
+  assert.equal(calls.length, 4, 'three refusals and the rename that went through');
+  assert.equal(await readFile(destination, 'utf8'), 'new');
+});
+
+test('a rename that keeps being refused fails after about a second, keeps the old file and removes the temporary file', async t => {
+  const { root, streams, destination } = await fixture(t);
+  await writeFile(destination, 'previous');
+  const token = await written(streams, destination), calls = failingRename(t, 'EPERM', Infinity), started = Date.now();
+  await assert.rejects(streams.finish(token), { code: 'EPERM' });
+  const elapsed = Date.now() - started;
+  assert.ok(calls.length > 3 && calls.length <= 8, `${calls.length} attempts`);
+  assert.ok(elapsed >= 500 && elapsed < 3000, `${elapsed} ms`);
+  assert.equal(await readFile(destination, 'utf8'), 'previous');
+  assert.deepEqual((await readdir(root)).filter(name => name !== 'animation.styk'), [], 'nothing is left beside the file');
+});
+
+test('a failure that is not a refusal of the moment is reported at once', async t => {
+  const { streams, destination } = await fixture(t);
+  await writeFile(destination, 'previous');
+  const token = await written(streams, destination), calls = failingRename(t, 'ENOSPC', Infinity);
+  await assert.rejects(streams.finish(token), { code: 'ENOSPC' });
+  assert.equal(calls.length, 1);
+  assert.equal(await readFile(destination, 'utf8'), 'previous');
 });

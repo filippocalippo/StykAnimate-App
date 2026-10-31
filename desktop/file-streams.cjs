@@ -5,6 +5,7 @@ const { messageError } = require('./localization.cjs');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { renameWithRetry } = require('./rename-retry.cjs');
 
 class FileStreams {
   constructor({ maxBytes = 256 * 1024 * 1024, maxStreamBytes = 16 * 1024 * 1024 * 1024, maxChunkBytes = 256 * 1024, maxSessions = 8, ttlMs = 120000, onCommitError = () => {} } = {}) {
@@ -111,7 +112,7 @@ class FileStreams {
       if (job.cancelled) throw messageError(new Error(''), 'desktop.fileStreams.errors.theFileTransferWasCancelled', {});
       try {
         if (job.exclusive) await fs.link(job.temporary, job.destination);
-        else await fs.rename(job.temporary, job.destination);
+        else await renameWithRetry(job.temporary, job.destination);
       } catch (error) {
         this.jobs.delete(token);
         clearTimeout(job.timer);
