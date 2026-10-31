@@ -13355,28 +13355,28 @@
   },
   "errors.drawingResources.aNewerDrawingWasRequested": {
     "locations": [
-      "src/drawing-resources.mjs:218"
+      "src/drawing-resources.mjs:220"
     ],
     "context": "if(this.decodeQueue.length>=2){const index=this.decodeQueue.findIndex(job=>!job.priority);if(index>=0)this.decodeQueue.splice(index,1)[0].reject(messageError(ne"
   },
   "errors.drawingResources.drawingChanged": {
     "locations": [
-      "src/drawing-resources.mjs:204"
+      "src/drawing-resources.mjs:206"
     ],
     "context": "if(this.disposed||e.disposed||generation!==this.generation)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingChanged\", {});"
   },
   "errors.drawingResources.drawingDocumentClosed": {
     "locations": [
-      "src/drawing-resources.mjs:192",
-      "src/drawing-resources.mjs:216",
-      "src/drawing-resources.mjs:348",
-      "src/drawing-resources.mjs:448"
+      "src/drawing-resources.mjs:194",
+      "src/drawing-resources.mjs:218",
+      "src/drawing-resources.mjs:350",
+      "src/drawing-resources.mjs:450"
     ],
     "context": "if(this.disposed)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingDocumentClosed\", {});"
   },
   "errors.drawingResources.drawingMemoryIsFullChoose1ResolutionOr": {
     "locations": [
-      "src/drawing-resources.mjs:137"
+      "src/drawing-resources.mjs:139"
     ],
     "context": "if(resident()+bytes>this.hardBudget)throw messageError(new Error(''), \"errors.drawingResources.drawingMemoryIsFullChoose1ResolutionOr\", {});"
   },
@@ -13395,8 +13395,8 @@
   },
   "errors.drawingResources.drawingPublicationCancelled": {
     "locations": [
-      "src/drawing-resources.mjs:354",
-      "src/drawing-resources.mjs:361"
+      "src/drawing-resources.mjs:356",
+      "src/drawing-resources.mjs:363"
     ],
     "context": "if(signal?.aborted)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingPublicationCancelled\", {});"
   },
@@ -13408,7 +13408,7 @@
   },
   "errors.drawingResources.drawingStrokeWorkerStopped": {
     "locations": [
-      "src/drawing-resources.mjs:30"
+      "src/drawing-resources.mjs:31"
     ],
     "context": "open(){if(!this.worker){this.worker=new Worker(new URL('./drawing-stroke-worker.mjs',import.meta.url),{type:'module',name:'StykAnimate drawing stroke'});this.wo"
   },
@@ -13438,19 +13438,19 @@
   },
   "errors.drawingResources.invalidDrawingMemoryReservation": {
     "locations": [
-      "src/drawing-resources.mjs:120"
+      "src/drawing-resources.mjs:122"
     ],
     "context": "if(!Number.isFinite(bytes)||bytes<0)throw messageError(new Error(''), \"errors.drawingResources.invalidDrawingMemoryReservation\", {});"
   },
   "errors.drawingResources.strokePixelsCouldNotBeTransferred": {
     "locations": [
-      "src/drawing-resources.mjs:30"
+      "src/drawing-resources.mjs:31"
     ],
     "context": "open(){if(!this.worker){this.worker=new Worker(new URL('./drawing-stroke-worker.mjs',import.meta.url),{type:'module',name:'StykAnimate drawing stroke'});this.wo"
   },
   "errors.drawingResources.theDrawingEncoderLostItsTileCacheTry": {
     "locations": [
-      "src/drawing-resources.mjs:419"
+      "src/drawing-resources.mjs:421"
     ],
     "context": "if(result.missing?.length)throw messageError(new Error(''), \"errors.drawingResources.theDrawingEncoderLostItsTileCacheTry\", {});"
   },
@@ -13799,8 +13799,8 @@
   "errors.editorLoad.importCancelled": {
     "locations": [
       "src/editor.mjs:169",
-      "src/engine/engine-open.mjs:34",
-      "src/engine/engine-open.mjs:130",
+      "src/engine/engine-open.mjs:37",
+      "src/engine/engine-open.mjs:134",
       "src/import-wire.mjs:110",
       "src/import-worker.mjs:26"
     ],
@@ -13808,7 +13808,7 @@
   },
   "errors.editorLoad.importTimeSlicesMustBeGreaterThanZero": {
     "locations": [
-      "src/engine/engine-open.mjs:128"
+      "src/engine/engine-open.mjs:132"
     ],
     "context": "if (!Number.isFinite(sliceMs) || sliceMs <= 0 || sliceMs > 16) throw messageError(new Error(''), 'errors.editorLoad.importTimeSlicesMustBeGreaterThanZero', {});"
   },
@@ -13820,7 +13820,7 @@
   },
   "errors.editorMovieclips.finishDrawingPublicationBeforeCreatingAMovieclip": {
     "locations": [
-      "src/engine/engine-owner.mjs:564"
+      "src/engine/engine-owner.mjs:565"
     ],
     "context": "if (name === 'createMovieclip' && drawingResourcesFor(editor.report)?.stats.unpublished) throw messageError(new Error(''), 'errors.editorMovieclips.finishDrawin"
   },
@@ -13838,7 +13838,7 @@
   },
   "errors.editorMovieclips.theSceneChangedWhileBakingTryAgain": {
     "locations": [
-      "src/engine/engine-owner.mjs:624"
+      "src/engine/engine-owner.mjs:625"
     ],
     "context": "if (editor.report !== report || editor.revision !== revision) throw messageError(new Error(''), 'errors.editorMovieclips.theSceneChangedWhileBakingTryAgain', {}"
   },
@@ -13883,14 +13883,14 @@
   },
   "errors.engineOwner.invalidValue": {
     "locations": [
-      "src/engine/engine-owner.mjs:858"
+      "src/engine/engine-owner.mjs:859"
     ],
     "context": "if (needed.some(name => !Object.hasOwn(values, name))) return Object.assign(messageError(new Error(''), 'errors.engineOwner.invalidValue', {}), {unnamed: error}"
   },
   "errors.engineOwner.notSupported": {
     "locations": [
       "src/engine/engine-owner.mjs:8",
-      "src/engine/engine-owner.mjs:874",
+      "src/engine/engine-owner.mjs:875",
       "src/native-property-edit.mjs:261"
     ],
     "context": "* or has no command for, raises the refusal (`errors.engineOwner.notSupported`, counted in `report.refused`) and changes nothing,"
@@ -14509,42 +14509,42 @@
   },
   "errors.importClient.chooseAProjectFromTheLibrary": {
     "locations": [
-      "src/import-client.mjs:321"
+      "src/import-client.mjs:308"
     ],
     "context": "if (typeof path !== 'string' || !path) throw messageError(new Error(''), \"errors.importClient.chooseAProjectFromTheLibrary\", {});"
   },
   "errors.importClient.chooseAStykanimatePivotOrStickNodesFile": {
     "locations": [
-      "src/import-client.mjs:229"
+      "src/import-client.mjs:216"
     ],
     "context": "throw messageError(new TypeError(''), \"errors.importClient.chooseAStykanimatePivotOrStickNodesFile\", {});"
   },
   "errors.importClient.chooseAStykProjectStkzFigureStykmovMovieclip": {
     "locations": [
-      "src/import-client.mjs:313"
+      "src/import-client.mjs:300"
     ],
     "context": "return Promise.reject(messageError(new Error(''), \"errors.importClient.chooseAStykProjectStkzFigureStykmovMovieclip\", {}));"
   },
   "errors.importClient.importSuperseded": {
     "locations": [
-      "src/import-client.mjs:235",
-      "src/import-client.mjs:307",
-      "src/import-client.mjs:323"
+      "src/import-client.mjs:222",
+      "src/import-client.mjs:294",
+      "src/import-client.mjs:310"
     ],
     "context": "if(generation!==this.cancelGeneration)throw messageError(new DOMException('', 'AbortError'), \"errors.importClient.importSuperseded\", {});"
   },
   "errors.importClient.theFileExceedsTheMibImportLimit": {
     "locations": [
-      "src/import-client.mjs:233"
+      "src/import-client.mjs:220"
     ],
     "context": "if (Number(file.size) > limit) throw Object.assign(messageError(new Error(''), \"errors.importClient.theFileExceedsTheMibImportLimit\", {value: limit / 1024 / 102"
   },
   "errors.importClient.theFileImporterHasBeenDisposed": {
     "locations": [
-      "src/import-client.mjs:189",
-      "src/import-client.mjs:227",
-      "src/import-client.mjs:320",
-      "src/import-client.mjs:337"
+      "src/import-client.mjs:176",
+      "src/import-client.mjs:214",
+      "src/import-client.mjs:307",
+      "src/import-client.mjs:324"
     ],
     "context": "if (this.disposed) return Promise.reject(messageError(new Error(''), \"errors.importClient.theFileImporterHasBeenDisposed\", {}));"
   },
@@ -14556,7 +14556,7 @@
   },
   "errors.importClient.theFileImportTimedOutTryOpeningA": {
     "locations": [
-      "src/import-client.mjs:199"
+      "src/import-client.mjs:186"
     ],
     "context": "const error = messageError(new Error(''), \"errors.importClient.theFileImportTimedOutTryOpeningA\", {});"
   },
@@ -14575,7 +14575,7 @@
   "errors.importClient.thisFileCouldNotBeImported": {
     "locations": [
       "src/import-client.mjs:85",
-      "src/import-client.mjs:191"
+      "src/import-client.mjs:178"
     ],
     "context": "const error = restoreMessageError((message.error?.message ? new Error(message.error?.message) : messageError(new Error(''), \"errors.importClient.thisFileCouldNo"
   },
@@ -14671,7 +14671,7 @@
   },
   "errors.importWorker.importFailed": {
     "locations": [
-      "src/import-client.mjs:327",
+      "src/import-client.mjs:314",
       "src/import-worker.mjs:47"
     ],
     "context": "const error=sample?.error?new Error(sample.error):messageError(new Error(''), 'errors.importWorker.importFailed', {status});"
@@ -15615,33 +15615,33 @@
   },
   "errors.nativeContainer.embeddedOriginalSourceFingerprintDoesNotMatch": {
     "locations": [
-      "src/import-client.mjs:264",
+      "src/import-client.mjs:251",
       "src/import-worker.mjs:157"
     ],
     "context": "if(await sha256(bytes)!==kept.sourceDescription.sha256)throw messageError(new Error(''), \"errors.nativeContainer.embeddedOriginalSourceFingerprintDoesNotMatch\","
   },
   "errors.nativeContainer.theStykanimateDocumentExceedsTheUncompressedSizeLimit": {
     "locations": [
-      "src/document-lift.mjs:489"
+      "src/document-lift.mjs:492"
     ],
     "context": "return Object.assign(messageError(new Error(''), \"errors.nativeContainer.theStykanimateDocumentExceedsTheUncompressedSizeLimit\", {}), {code: 'document_too_large"
   },
   "errors.nativeContainer.theStykanimateFileIsDamagedInvalidArraySection": {
     "locations": [
-      "src/document-lift.mjs:383"
+      "src/document-lift.mjs:384"
     ],
     "context": "throw messageError(new Error(''), \"errors.nativeContainer.theStykanimateFileIsDamagedInvalidArraySection\", {});"
   },
   "errors.nativeContainer.theStykanimateFileIsDamagedInvalidPayloadSection": {
     "locations": [
-      "src/document-lift.mjs:395"
+      "src/document-lift.mjs:396"
     ],
     "context": "throw messageError(new Error(''), \"errors.nativeContainer.theStykanimateFileIsDamagedInvalidPayloadSection\", {});"
   },
   "errors.nativeContainer.theStykanimateFileIsDamagedMalformedSectionMarker": {
     "locations": [
-      "src/document-lift.mjs:466",
-      "src/document-lift.mjs:470"
+      "src/document-lift.mjs:468",
+      "src/document-lift.mjs:472"
     ],
     "context": "if (!sequence) throw messageError(new Error(''), \"errors.nativeContainer.theStykanimateFileIsDamagedMalformedSectionMarker\", {});"
   },
@@ -35822,7 +35822,7 @@
   },
   "vfxChannels.enabled": {
     "locations": [
-      "src/engine/engine-owner.mjs:845",
+      "src/engine/engine-owner.mjs:846",
       "src/vfx-clip-inspector.mjs:64",
       "src/vfx-localization.mjs:9",
       "src/vfx.mjs:24"

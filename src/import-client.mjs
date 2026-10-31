@@ -132,19 +132,6 @@ export class ImportClient {
     this.activeSourceOwner = this.sourceOwners.get(owner) === 'owned' ? owner : null;
   }
 
-  /**
-   * Several projects stay open (project-tabs-host.mjs): the one leaving the front takes its original with it,
-   * and gets it back when it returns. A resting project's original is released only when the project closes.
-   */
-  detachSource() {
-    const owner = this.activeSourceOwner;
-    this.activeSourceOwner = null;
-    return owner;
-  }
-  attachSource(owner) {
-    this.activeSourceOwner = this.sourceOwners.get(owner) === 'owned' ? owner : null;
-  }
-
   /** Release an unaccepted result, or the accepted project being replaced. */
   async releaseSource(result,cancelled,jobId) {
     const ownerId = typeof result === 'string' ? result : result?.sourceOwner;
