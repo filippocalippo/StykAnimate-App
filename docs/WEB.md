@@ -48,7 +48,7 @@ and run the live checks after an authorized deployment.
 
 ## How it is built
 
-There is no bundler. The site is the desktop app's web resources (the file set
+There is no bundler in the browser build (the desktop app bundles its scripts, `docs/APP-START.md`). The site is the desktop app's web resources (the file set
 comes from the `web` filter in `package.json`, so the two builds cannot drift),
 which include the WebAssembly modules of the engine and of the Pivot codec in
 `src/engine/pkg/` (built by `node scripts/engine-build.mjs`; the web build stops when

@@ -34,11 +34,25 @@ function reject(response, cause) {
   response.end(answer.data);
 }
 
+/** Every file under `directory`, as slash-separated paths relative to it. */
+async function listFiles(directory, prefix='') {
+  const found = [];
+  for (const entry of await fs.readdir(path.join(directory,prefix),{withFileTypes:true})) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) found.push(...await listFiles(directory,relative));
+    else found.push(relative);
+  }
+  return found;
+}
+
 /** The web assets, read-only: packaged, resources/web; from source, the app folder (also `tests` and
- * `artifacts`, for the browser tests and `npm run serve`). Returns `asset(pathname, {method, ifNoneMatch})`,
- * which answers `{status, headers, body}` (a Buffer, or null for HEAD and 304) or throws the failure. */
-async function openAssets({appRoot, resourcesPath, packaged=false}={}) {
-  const root = await fs.realpath(packaged ? path.join(resourcesPath,'web') : appRoot);
+ * `artifacts`, for the browser tests and `npm run serve`). `bundleRoot` is the app's bundle (scripts/build-app.mjs):
+ * its files answer in place of the same paths of the web assets, so the page loads a few scripts instead of hundreds
+ * of modules. Returns `asset(pathname, {method, ifNoneMatch})`, which answers `{status, headers, body}` (a Buffer, or
+ * null for HEAD and 304) or throws the failure. */
+async function openAssets({appRoot, resourcesPath, packaged=false, bundleRoot=null}={}) {
+  const webRoot = await fs.realpath(packaged ? path.join(resourcesPath,'web') : appRoot);
+  const bundle = bundleRoot ? {root:await fs.realpath(bundleRoot), files:new Set(await listFiles(bundleRoot))} : null;
   return async function asset(pathname, {method='GET', ifNoneMatch=''}={}) {
     let relative;
     try { relative = decodeURIComponent(pathname).slice(1) || 'index.html'; }
@@ -50,6 +64,7 @@ async function openAssets({appRoot, resourcesPath, packaged=false}={}) {
       throw error(403,'resource_forbidden',"desktop.webHost.errors.resourceForbidden");
     const type = MIME.get(path.extname(relative).toLowerCase());
     if (!type) throw error(403,'resource_forbidden',"desktop.webHost.errors.resourceForbidden");
+    const root = bundle?.files.has(relative) ? bundle.root : webRoot;
     let target;
     try { target = await fs.realpath(path.join(root,relative)); }
     catch (cause) { if (cause.code==='ENOENT') throw error(404,'file_not_found',"desktop.webHost.errors.fileNotFound"); throw cause; }
@@ -82,8 +97,8 @@ function registerAppScheme(protocol) {
 
 /** Answers the app scheme from the web assets (see `openAssets`). Nothing else is reachable through it: only GET
  * and HEAD, only the host `app`, and `owns(url)` is how the main process recognises the editor page. */
-async function handleAppProtocol({protocol, appRoot, resourcesPath, packaged=false}={}) {
-  const asset = await openAssets({appRoot,resourcesPath,packaged});
+async function handleAppProtocol({protocol, appRoot, resourcesPath, packaged=false, bundleRoot=null}={}) {
+  const asset = await openAssets({appRoot,resourcesPath,packaged,bundleRoot});
   protocol.handle(APP_SCHEME, async request => {
     try {
       const url = new URL(request.url);

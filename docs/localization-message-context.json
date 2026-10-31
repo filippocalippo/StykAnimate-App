@@ -9572,55 +9572,55 @@
   },
   "desktop.webHost.errors.fileNotFound": {
     "locations": [
-      "desktop/web-host.cjs:55",
-      "desktop/web-host.cjs:60"
+      "desktop/web-host.cjs:70",
+      "desktop/web-host.cjs:75"
     ],
     "context": "catch (cause) { if (cause.code==='ENOENT') throw error(404,'file_not_found',\"desktop.webHost.errors.fileNotFound\"); throw cause; }"
   },
   "desktop.webHost.errors.hostForbidden": {
     "locations": [
-      "desktop/web-host.cjs:90",
-      "desktop/web-host.cjs:113",
-      "desktop/web-host.cjs:115"
+      "desktop/web-host.cjs:105",
+      "desktop/web-host.cjs:128",
+      "desktop/web-host.cjs:130"
     ],
     "context": "if (url.host !== APP_HOST) throw error(403,'host_forbidden',\"desktop.webHost.errors.hostForbidden\");"
   },
   "desktop.webHost.errors.invalidPath": {
     "locations": [
       "desktop/web-host.cjs:22",
-      "desktop/web-host.cjs:45"
+      "desktop/web-host.cjs:59"
     ],
     "context": "const known = cause instanceof URIError ? error(400,'invalid_path',\"desktop.webHost.errors.invalidPath\") : cause;"
   },
   "desktop.webHost.errors.invalidRequest": {
     "locations": [
-      "desktop/web-host.cjs:121"
+      "desktop/web-host.cjs:136"
     ],
     "context": "if (!request.url.startsWith('/') || request.url.startsWith('//')) throw error(400,'invalid_request',\"desktop.webHost.errors.invalidRequest\");"
   },
   "desktop.webHost.errors.originForbidden": {
     "locations": [
-      "desktop/web-host.cjs:119"
+      "desktop/web-host.cjs:134"
     ],
     "context": "throw error(403,'origin_forbidden',\"desktop.webHost.errors.originForbidden\");"
   },
   "desktop.webHost.errors.pathForbidden": {
     "locations": [
-      "desktop/web-host.cjs:56"
+      "desktop/web-host.cjs:71"
     ],
     "context": "if (!inside(root,target)) throw error(403,'path_forbidden',\"desktop.webHost.errors.pathForbidden\");"
   },
   "desktop.webHost.errors.resourceForbidden": {
     "locations": [
-      "desktop/web-host.cjs:50",
-      "desktop/web-host.cjs:52"
+      "desktop/web-host.cjs:64",
+      "desktop/web-host.cjs:66"
     ],
     "context": "throw error(403,'resource_forbidden',\"desktop.webHost.errors.resourceForbidden\");"
   },
   "desktop.webHost.errors.resourcesReadOnly": {
     "locations": [
-      "desktop/web-host.cjs:91",
-      "desktop/web-host.cjs:123"
+      "desktop/web-host.cjs:106",
+      "desktop/web-host.cjs:138"
     ],
     "context": "if (!['GET','HEAD'].includes(request.method)) throw error(405,'method_not_allowed',\"desktop.webHost.errors.resourcesReadOnly\");"
   },

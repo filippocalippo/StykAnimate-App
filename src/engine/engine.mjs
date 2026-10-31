@@ -26,15 +26,6 @@ function defaultWorkerCount(cores = globalThis.navigator?.hardwareConcurrency ||
 
 let loading = null;
 
-let adapter = null;
-/**
- * The browser's graphics adapter, asked for once (null where there is none): the one the stage will use, and what the
- * status line names. Asking takes most of a second in the browser's graphics process, so the page starts it early.
- */
-export function requestGraphicsAdapter() {
-  return adapter ??= (globalThis.navigator?.gpu?.requestAdapter?.({powerPreference: 'high-performance'}) ?? Promise.resolve(null)).catch(() => null);
-}
-
 /**
  * Loads the engine once per page.
  * @param {{workers?: number, deviceMemory?: number}} [options]

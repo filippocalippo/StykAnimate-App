@@ -886,7 +886,11 @@ async function start() {
   library = new LibraryStore(process.env.STYK_LIBRARY_DIR || path.join(app.getPath('documents'), 'StykAnimate', 'library'));
   // A temporarily unavailable Documents volume should not prevent animation work.
   void library.init().catch(error => console.warn('Library initialization:', error.message));
-  webHost = await handleAppProtocol({ protocol, appRoot: APP_ROOT, resourcesPath: process.resourcesPath, packaged: app.isPackaged });
+  // The packaged app ships its scripts bundled (scripts/build-app.mjs); from source the page loads the modules, unless
+  // STYK_BUNDLE_DIR names a bundle built with `npm run app:bundle`.
+  const packagedBundle = path.join(process.resourcesPath || '', 'bundle');
+  const bundleRoot = app.isPackaged ? (existsSync(packagedBundle) ? packagedBundle : null) : process.env.STYK_BUNDLE_DIR || null;
+  webHost = await handleAppProtocol({ protocol, appRoot: APP_ROOT, resourcesPath: process.resourcesPath, packaged: app.isPackaged, bundleRoot });
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
   // Each workspace owns a separate Chromium session directory. IndexedDB here is
