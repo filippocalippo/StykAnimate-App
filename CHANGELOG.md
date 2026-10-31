@@ -44,6 +44,9 @@ What's new in each version of StykAnimate.
 ### Performance
 
 - Large Pivot files open several times faster, and in the web app the first one no longer waits for a large download.
+- StykAnimate starts faster, and large projects save in a fraction of the time without pausing the app.
+- Large projects play without stutters, and artwork near the edge of the canvas no longer blinks during playback.
+- Dragging joints and undoing keep up better on large animations, and undoing a brush stroke no longer pauses.
 - Editing large animations and 3D figures is faster.
 - Exporting animations with effects, particles, 3D or many figures is several times faster.
 - Animations with particles, auras, beams, smoke or explosions play and edit more smoothly.
