@@ -786,3 +786,12 @@ fn a_parked_session_keeps_no_scene_and_shows_the_same_again() {
     let again = geometry(&mut session, None);
     assert_eq!(json(again.get("slots").unwrap()), json(before.get("slots").unwrap()));
 }
+
+#[test]
+fn a_session_has_counted_the_figures_of_its_frames_before_its_first_edit() {
+    for name in ["gestures-sheet", "rig-sheet", "startup-sheet", "channels-pose-sheet"] {
+        let (session, _) = tape(name);
+        let (counts, seen) = session.editor.uid_counts.as_ref().unwrap_or_else(|| panic!("{name}: the first commit would scan the document"));
+        assert!(!counts.is_empty() && seen.len() == counts.len(), "{name}: every figure of a pose is counted");
+    }
+}

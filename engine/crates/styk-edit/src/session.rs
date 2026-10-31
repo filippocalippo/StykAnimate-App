@@ -375,6 +375,9 @@ impl Session {
             editor.set_active_layer_id(active);
         }
         editor.set_sheet_selection(sheet_selection_of(&state));
+        // Which figures the frames hold is counted now, not by the first commit: it scans every pose of the document (tens of milliseconds
+        // on a dense one), which the first gesture of a session paid for as a freeze.
+        editor.ensure_counts();
         Ok(Session { editor })
     }
 
