@@ -772,22 +772,6 @@ fn the_groups_the_interface_holds_stay_those_of_a_whole_read_through_gestures_un
 }
 
 #[test]
-fn a_parked_session_keeps_no_scene_and_shows_the_same_again() {
-    let (mut session, _) = tape("channels-pose-sheet");
-    call(&mut session, "seek", "[11]");
-    let before = geometry(&mut session, None);
-    let shown = session.editor.shown_scene(false, crate::Flavor::Composed).unwrap().unwrap();
-    let held = std::sync::Arc::downgrade(&shown);
-    drop(shown);
-    assert!(held.upgrade().is_some(), "the session keeps the scene it showed");
-    session.release_scenes();
-    assert!(held.upgrade().is_none(), "a parked session keeps no scene");
-    // Back in front it makes them again, and the interface (which let go of what it held) reads what it read.
-    let again = geometry(&mut session, None);
-    assert_eq!(json(again.get("slots").unwrap()), json(before.get("slots").unwrap()));
-}
-
-#[test]
 fn a_session_has_counted_the_figures_of_its_frames_before_its_first_edit() {
     for name in ["gestures-sheet", "rig-sheet", "startup-sheet", "channels-pose-sheet"] {
         let (session, _) = tape(name);

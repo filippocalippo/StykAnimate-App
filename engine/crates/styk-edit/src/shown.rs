@@ -67,14 +67,6 @@ impl Scenes {
 }
 
 impl Editor {
-    /// Lets go of every frame, scene and build this editor keeps for showing its document: its session is parked (another project is in
-    /// front, or a movieclip is being edited inside it) and nothing reads them until it comes back, when they are made again.
-    pub fn release_scenes(&self) {
-        *self.shown.borrow_mut() = Default::default();
-        *self.onions.borrow_mut() = Default::default();
-        self.eval.borrow_mut().release_frames();
-    }
-
     /// The frame on show (the motion-path edit's display with `motion`; `None` where it shows nothing), typed and built, in the
     /// effects of `flavor`.
     pub fn shown_scene(&self, motion: bool, flavor: Flavor) -> Result<Option<Arc<ShownScene>>, EditError> {

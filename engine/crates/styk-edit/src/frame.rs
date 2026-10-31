@@ -48,12 +48,6 @@ impl Cache {
         self.latest_typed = same.then(|| Arc::new(EditFramePair { prepared: prepared.clone(), record: pair.record.clone(), frame: pair.frame.clone() }));
     }
 
-    /// Lets go of the evaluated frames and the typed frame kept, which are read again when the document is next shown.
-    pub(crate) fn release_frames(&mut self) {
-        self.frames.clear();
-        self.latest_typed = None;
-    }
-
     pub(crate) fn typed_worker(&self, report: &Value) -> Option<(&styk_eval::load::Loader, &Arc<Prepared>)> {
         if !self.report.as_ref().is_some_and(|cached| cached.same_node(report)) { return None; }
         Some((&self.loader, self.prepared.as_ref()?))
