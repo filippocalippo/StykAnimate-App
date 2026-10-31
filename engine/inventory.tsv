@@ -144,12 +144,12 @@ src/color-picker-magnifier.mjs	ui	-	stays
 src/color-picker.mjs	ui	-	stays	
 src/community-library.mjs	platform	-	stays	file, storage and network services
 src/connected-timeline.mjs	engine	styk-eval	removed	moved to tests/helpers/legacy-connected-timeline.mjs: only the legacy timeline projection of the tests used it (4378 bytes)
-src/container-cache.mjs	platform	styk-formats::files	stays	bounded cache of compressed blocks that outlives an export worker
+src/container-cache.mjs	platform	styk-formats::files	removed	the bounded cache of compressed blocks an export worker handed to its replacement; the engine writes the project and keeps no JavaScript cache (3200 bytes)
 src/content-hash.mjs	engine	styk-render::images	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/demo.mjs	engine	styk-edit	js	
 src/document-export-worker.mjs	engine	styk-formats::save	partial	Rust: container writing (checksums, zstd, framing, figure-file validation: styk-formats::files); Pivot and figure files are made by the engine on this worker (styk-edit/src/export, styk_engine::document_export); the JS still prepares the .styk container
 src/document-export.mjs	engine	styk-formats::save	js	save, portable figure/movieclip, Pivot materialization
-src/document-lift.mjs	engine	styk-formats::container	partial	Rust: container::lift writes the same skeleton and sections from a store document (461 corpus files, byte-identical), and container::ViewLifter hands a document to the editor in pieces; the JavaScript lift stays for saves while the editor holds the document as objects: an array's identity decides what is stored once
+src/document-lift.mjs	engine	styk-formats::container	partial	Rust: container::lift writes the skeleton and sections a save stores, and container::ViewLifter hands a document to the editor in pieces; what stays here is restoreLifted, which puts a skeleton the reader or the engine lifted back into the editor's objects
 src/document-normalize.mjs	engine	styk-formats::service	js	import/export transport
 src/document-save.mjs	platform	-	stays	file, storage and network services
 src/document-transport.mjs	engine	styk-formats::service	js	import/export transport
@@ -402,7 +402,7 @@ src/playback.mjs	engine	styk-engine::playback	removed	deleted: the engine prepar
 src/polygon-draft.mjs	engine	styk-edit	js	
 src/polygon-preview.mjs	engine	styk-eval::picking	js	handles, picking, snapping geometry (drawn by the JS overlay)
 src/pose-property-split.mjs	engine	styk-edit	removed	deleted: only the editor's authored pose and range bodies used it (6996 bytes)
-src/pose-sequence-storage.mjs	engine	styk-formats::container	js	
+src/pose-sequence-storage.mjs	engine	styk-edit	removed	packed pose channels for a save and expanded them on load; both are styk-edit (export::pose_sequences, load::frames)
 src/pose-sequences.mjs	engine	styk-formats::container	removed	Deleted with src/editor-load.mjs, its only caller: the engine interns pose sequences as it opens a document (styk-edit load)
 src/pose-snapshot.mjs	engine	styk-eval	removed	Deleted: the stored pose is styk_eval::records; the tests keep the recorded form in tests/support/pose-snapshot.mjs (3056 bytes)
 src/prepared-frames.mjs	engine	styk-render	removed	deleted: the engine uploads and draws its own prepared frames (styk-render)
@@ -618,3 +618,4 @@ src/web-offline.mjs	platform	-	stays	file, storage and network services
 src/web-support.js	ui	-	stays	
 src/yield-task.mjs	platform	-	stays	gives the browser its turn between slices of work (scheduler.yield, else a message)
 src/zlib-sync.mjs	engine	styk-formats::container	partial	Rust: inflate of drawing tiles (PNG decoder); deflate still JS
+src/lazy-payload.mjs	ui	-	stays	the editor view's picture fields: a getter that asks the engine for the text on first read (styk_doc::payload names it), and the copies that keep it unread

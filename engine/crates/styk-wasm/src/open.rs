@@ -84,6 +84,13 @@ impl EngineHandle {
         styk_engine::document::admit_copy(bytes).map_err(|error| js_error(error.to_json()))
     }
 
+    /// The text of a payload (a picture, a Pivot original) the read view names by token (`S2P:<token>`): its prefix and
+    /// the base64 of its bytes. An error once no document or history entry holds the payload any more.
+    pub fn payload_text(&self, token: f64) -> Result<String, JsError> {
+        let held = token >= 0.0 && token.fract() == 0.0 && token < 9007199254740992.0;
+        held.then(|| styk_doc::payload::text(token as u64)).flatten().ok_or_else(|| js_error("the payload is no longer held"))
+    }
+
     /// Asks a job to stop at its next checkpoint; its outcome is still taken (as a cancellation).
     pub fn cancel_open(&self, job: u32) {
         if let Some(job) = self.jobs.table.lock().unwrap_or_else(|e| e.into_inner()).get(&job) {

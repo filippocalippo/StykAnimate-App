@@ -205,3 +205,76 @@ fn an_animated_gradient_endpoint_makes_a_figure_type_for_each_color_it_has() {
     let end = items(variant.get("segments"))[0].path(&["secondary", "rgb"]).and_then(Value::numbers).unwrap();
     assert_eq!(end, vec![255.0, 255.0, 0.0]);
 }
+
+fn hold() -> Hold<'static> {
+    Hold { cancel: &|| false }
+}
+
+#[test]
+fn a_project_is_saved_with_its_metadata_and_without_the_editors_caches() {
+    let (document, _, _) = tape("startup-sheet");
+    let mut cached = document.clone();
+    let frame = cached.get("keyframes").unwrap().item(0).unwrap();
+    let mut object = frame.get("objects").unwrap().item(0).unwrap();
+    super::set(&mut object, "runtime_segments", parse("[1,2,3]"));
+    let mut frame = frame.clone();
+    super::set(&mut frame, "objects", Value::array(vec![object]));
+    super::set(&mut cached, "keyframes", Value::array(vec![frame]));
+    let saved = super::project_document(&cached, Some("Saved"), &hold()).unwrap();
+    assert_eq!(saved.path(&["_styk", "format"]).and_then(Value::as_str), Some("StykAnimate"));
+    assert_eq!(number(saved.get("_styk").unwrap(), "format_version"), Some(1.0));
+    assert_eq!(saved.path(&["_styk", "name"]).and_then(Value::as_str), Some("Saved"));
+    let objects = items(saved.get("keyframes").unwrap().item(0).unwrap().get("objects"));
+    assert!(objects.iter().all(|object| object.get("runtime_segments").is_none()), "the cache of the editor is not saved");
+    // The document the session holds is not changed by saving it; without a name it keeps its own.
+    assert!(cached.get("keyframes").unwrap().item(0).unwrap().get("objects").unwrap().item(0).unwrap().get("runtime_segments").is_some());
+    let unnamed = super::project_document(&document, None, &hold()).unwrap();
+    assert_eq!(unnamed.path(&["_styk", "name"]), document.path(&["_styk", "name"]));
+    let stopped = super::project_document(&document, Some("Saved"), &Hold { cancel: &|| true }).unwrap_err();
+    assert!(matches!(&stopped, EditError::Invalid(message) if message == CANCELLED), "{stopped:?}");
+}
+
+#[test]
+fn the_pose_channels_of_a_project_store_the_lists_they_share_once() {
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/channels/channels-pose.json");
+    let tree = crate::load::prepare_for_editor(parse(&std::fs::read_to_string(file).unwrap()), false).unwrap().report;
+    let saved = super::project_document(&tree, Some("Saved"), &hold()).unwrap();
+    let keys: Vec<String> = saved.get("_styk").and_then(Value::as_obj).map(|styk| styk.iter().map(|(key, _)| key.to_string()).collect()).unwrap_or_default();
+    let animation = saved.path(&["_styk", "animation"]).unwrap_or_else(|| panic!("the authored channels are saved: {keys:?}"));
+    let pose_channels = items(animation.get("channels")).iter().filter(|channel| channel.get("property").and_then(Value::as_str) == Some("pose")).count();
+    assert!(pose_channels > 0);
+    assert_eq!(number(animation, "version"), Some(2.0));
+    let sequences = items(animation.get("poseSequences")).len();
+    assert!(sequences >= 1 && sequences <= pose_channels);
+    assert!(items(animation.get("channels")).iter().filter(|channel| channel.get("property").and_then(Value::as_str) == Some("pose")).all(|channel| channel.path(&["keys", "sequence"]).is_some()), "every pose channel names its list");
+    assert!(tree.path(&["_styk", "animation", "channels"]).is_some_and(|channels| items(Some(channels))[0].get("keys").is_some_and(|keys| keys.elements().is_some())), "the document the session holds keeps its lists");
+}
+
+#[test]
+fn a_movieclip_being_edited_is_folded_into_the_project_it_was_entered_from() {
+    let (parent, _, _) = tape("startup-sheet");
+    let figures = items(parent.get("figure_types"));
+    let type_id = number(&figures[0], "figure_type_id").unwrap();
+    // The clip is entered from a figure that holds a movieclip of the same document, as after "Edit movieclip".
+    let mut asset = parse(r#"{"version":1,"duration":1,"sourceStart":0,"pivot":{"x":0,"y":0}}"#);
+    super::set(&mut asset, "document", parent.clone());
+    let mut styk = figures[0].get("_styk").and_then(Value::as_obj).cloned().unwrap_or_default();
+    styk.set("movieclip", asset);
+    let mut holder = figures[0].clone();
+    super::set(&mut holder, "_styk", Value::object(styk));
+    let mut project = parent.clone();
+    let mut list = figures.clone();
+    list[0] = holder;
+    super::set(&mut project, "figure_types", Value::array(list));
+    // The clip's document has since been edited and is longer.
+    let mut clip = parent.clone();
+    super::set(&mut clip, "canvas_width", Value::Num(1234.0));
+    let folded = super::fold_movieclip(&project, type_id, &clip).unwrap();
+    let definition = items(folded.get("figure_types")).into_iter().find(|figure| number(figure, "figure_type_id") == Some(type_id)).unwrap();
+    let movieclip = definition.path(&["_styk", "movieclip"]).unwrap();
+    assert!(movieclip.get("document").unwrap().same_node(&clip), "the definition holds the document as it stands");
+    assert_eq!(number(movieclip, "duration"), Some(total_ticks(&clip).max(1.0)));
+    assert_eq!(number(movieclip, "sourceStart"), Some(0.0), "the rest of the asset is kept");
+    assert_eq!(items(folded.get("figure_types")).len(), figures.len());
+    assert!(project.path(&["figure_types"]).and_then(|figures| figures.item(0)).unwrap().path(&["_styk", "movieclip", "document"]).unwrap().same_node(&parent), "the parent is not changed");
+}

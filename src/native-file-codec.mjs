@@ -4,15 +4,16 @@
  * Reading and writing the container (header and section checks, checksums, zstd, the
  * document rules, the size limits) is `styk-formats`, compiled into the codec module
  * (engine/crates/styk-codec-wasm, built into src/engine/pkg/ by scripts/engine-build.mjs).
- * The import and document-export workers each load the module and call it
- * here, off the interface thread; docs/engine/formats.md describes the split.
+ * The import worker loads the module and calls it here, off the interface thread;
+ * docs/engine/formats.md describes the split.
  *
- * What crosses is the lifted form (document-lift.mjs): a JSON skeleton and the byte sections
- * its markers name. An opened file is parsed and restored into the editor's object model; a save
- * hands the skeleton and sections the worker lifted from its document to the writer.
+ * What crosses on a read is the lifted form (document-lift.mjs): a JSON skeleton and the byte sections
+ * its markers name, parsed and restored into the editor's object model. The app does not save through
+ * this module: the engine writes the project its session holds (src/engine/engine-document-export.mjs).
+ * `save` makes a file from a document given as an object, for the tests and tools that need one to read.
  *
  *   const {document, version} = await nativeFileCodec.open(bytes, 'styk');
- *   const file = await nativeFileCodec.save(liftDocument(document), 'styk', {cache});   // Uint8Array
+ *   const file = await nativeFileCodec.save(document, 'styk');   // Uint8Array
  */
 import {messageError} from './localized-error.mjs';
 import {restoreLifted} from './document-lift.mjs';
@@ -22,7 +23,6 @@ const MODULE = new URL('./engine/pkg/styk_codec.js', import.meta.url);
 export const NATIVE_FILE_CODEC_RETAINED_BYTES = 128 * 1024 * 1024;
 
 const encoder = new TextEncoder(), decoder = new TextDecoder();
-const NO_BLOCKS = {get: () => undefined, put() {}};
 
 let loading = null;
 /** This thread's instance of the module, loaded by the first call. */
@@ -86,27 +86,18 @@ export const nativeFileCodec = {
   },
 
   /**
-   * Writes a version 2 container around a lifted document.
-   * @param {{skeleton: object, sections: {bytes: Uint8Array}[]}} lifted what liftDocument returns
-   * @param {'styk'|'stkz'|'stykmov'} kind a `.stkz` or `.stykmov` skeleton must be the self-contained figure
-   * @param {{cache?: object, stats?: object}} options `cache` (container-cache.mjs) supplies compressed
-   *   blocks written before; `stats` receives what it reused.
+   * Writes a version 2 container around a document (tests and tools; the app's saves are the engine's).
+   * @param {object} document its JSON is what is lifted into the skeleton and sections
+   * @param {'styk'|'stkz'|'stykmov'} kind a `.stkz` or `.stykmov` document must be the self-contained figure
    * @returns {Promise<Uint8Array>}
    */
-  async save(lifted, kind, {cache, stats} = {}) {
+  async save(document, kind) {
     const bindings = await module();
-    if (stats) Object.assign(stats, {hits: 0, misses: 0, rawBytesReused: 0, compressedBytesReused: 0});
-    const [arrays, payloads] = lifted.sections.map(section => section.bytes);
     let saved;
-    try { saved = bindings.saveNativeFile(kind, encoder.encode(JSON.stringify(lifted.skeleton)), arrays, payloads, cache ?? NO_BLOCKS); }
+    try { saved = bindings.saveNativeDocument(kind, encoder.encode(JSON.stringify(document))); }
     catch (failure) { throw asError(bindings, failure); }
     let file;
-    try {
-      file = saved.takeBytes();
-      if (stats) Object.assign(stats, {hits: saved.hits, misses: saved.misses, rawBytesReused: saved.rawBytesReused,
-        compressedBytesReused: saved.compressedBytesReused, cacheBytes: cache?.byteLength || 0, cacheEntries: cache?.size || 0,
-        container_raw_bytes: saved.containerRawBytes});
-    } finally { saved.free(); }
+    try { file = saved.takeBytes(); } finally { saved.free(); }
     trim(bindings);
     return file;
   },

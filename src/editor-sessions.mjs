@@ -1,5 +1,4 @@
 import {messageError} from './localized-error.mjs';
-import {editorMovieclipMethods} from './editor-movieclips.mjs';
 
 /**
  * Document sessions: one Editor keeps several open projects, one at a time.
@@ -86,16 +85,17 @@ export function sessionUnsaved(session) {
 }
 
 /**
- * A detached session's whole project and its name: the report itself, or with
- * the movieclips being edited folded into their parents, as a recovery copy of
- * the live editor stores it.
+ * The documents the movieclips of a project being edited were entered from, outermost first, and the movieclip of each
+ * that the next document is the document of: what a save folds in to store the whole project, as a recovery copy does
+ * (`DocumentExporter.export`). `undefined` when no movieclip is being edited. `holder` is the editor or a detached session.
  */
-export function sessionProject(session) {
-  return {
-    report: session._movieclipScopes?.length ? editorMovieclipMethods.movieclipProjectReport.call(session) : session.report,
-    name: session._movieclipScopes?.[0]?.parent.name ?? session.name,
-  };
+export function movieclipScopes(holder) {
+  const scopes = holder._movieclipScopes;
+  return scopes?.length ? {reports: scopes.map(scope => scope.parent.report), typeIds: scopes.map(scope => scope.typeId)} : undefined;
 }
+
+/** A detached session's project name: the project's own when a movieclip of it is being edited. */
+export const sessionProjectName = session => session._movieclipScopes?.[0]?.parent.name ?? session.name;
 
 /** True for a key the editor keeps across sessions (tests and movieclip scopes). */
 export const isSharedEditorKey = key => SHARED_KEYS.has(key);

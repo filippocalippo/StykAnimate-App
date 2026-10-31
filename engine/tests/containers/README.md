@@ -6,7 +6,8 @@ checkout and in CI, and library previews have a figure and movieclips to open
 `node engine/tools/container-fixtures.mjs` (`--list` names them, `--out <folder>` writes elsewhere); the
 output is byte-stable, so a regeneration that changes a file means the app's save path or a source
 document changed. Each is written from a document already in the repository by the app's save path
-(the document export worker, saving a figure or a clip from the engine's session of the document; the lift and the Rust writer for the shared arrays), and
+(the document export worker, saving from the engine's session of the document; `project-shared-arrays.styk` is the one
+kept as the JavaScript writer made it), and
 `npm run engine:parity` regenerates them, then opens and saves every one again against the Rust store
 (`engine/tools/container-parity.mjs`). The source documents are frozen fixtures.
 

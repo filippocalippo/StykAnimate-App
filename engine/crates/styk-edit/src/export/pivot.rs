@@ -137,7 +137,7 @@ fn without_native_sheet(report: &Value) -> Value {
 }
 
 /// `storedFrameReport(report)`: native Pivot saves stored keys, excluding an uncommitted Add-frame pose.
-fn stored_frame_report(report: &Value) -> Result<Value, EditError> {
+pub(super) fn stored_frame_report(report: &Value) -> Result<Value, EditError> {
     let Some(draft) = report.path(&["_styk", "simpleFrameDraft"]) else { return Ok(report.clone()) };
     validate_draft(report, draft)?;
     let mut styk = report.get("_styk").and_then(Value::as_obj).cloned().unwrap_or_default();

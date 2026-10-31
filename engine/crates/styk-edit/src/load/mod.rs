@@ -88,6 +88,11 @@ pub(crate) fn validate_layer_state(state: &Value) -> Result<(), EditError> {
     layer_state::validate(Some(state))
 }
 
+/// `validateMovieclipGraph(report)`: movieclips nest at most eight deep, a document holds at most 4096 assets, and each asset is valid.
+pub(crate) fn validate_movieclip_graph(report: &Value) -> Result<(), EditError> {
+    movieclip::graph(report)
+}
+
 /// `validateAnimationDocument(report)`: the authored channels of `report._styk.animation`.
 pub(crate) fn validate_animation(report: &Value) -> Result<(), EditError> {
     animation::validate_document(report)

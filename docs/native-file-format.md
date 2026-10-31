@@ -149,8 +149,8 @@ remain intact. The live project and its `.styk` save retain every original archi
 - `node tests/document-export-browser.mjs`
 - `node scripts/smoke-app-save.mjs`
 
-The app reads and writes containers with `styk-formats` (`styk_formats::files`) in the codec module,
-through `src/native-file-codec.mjs` ([engine/formats.md](engine/formats.md)); `native_format.py` is
+The app reads containers with `styk-formats` (`styk_formats::files`) in the codec module, through
+`src/native-file-codec.mjs`, and writes them from the engine's document (`styk_engine::save`; [engine/formats.md](engine/formats.md)); `native_format.py` is
 the reader of the Python codec, kept as the development test oracle.
 
 ## Project colors

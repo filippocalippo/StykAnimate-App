@@ -1,5 +1,6 @@
 import {messageError} from './localized-error.mjs';
 import {DrawingWorker} from './drawing-worker-client.mjs';
+import {putField} from './lazy-payload.mjs';
 
 import {DrawingPreviewCache} from './drawing-preview-cache.mjs';
 import {DrawingHistory} from './drawing-history.mjs';
@@ -87,8 +88,9 @@ export class DrawingResources {
     if(entry.external||d?.version!==2||published?.revision!==entry.revision)return;
     const asset=figure.image_assets[0],bounds=Object.hasOwn(published,'bounds')?published.bounds:d.bounds;
     if(asset.styk_tiles===(published.url||undefined)&&asset.data_url===EMPTY_PNG&&asset.width===1&&asset.height===1&&asset.display_width===1&&asset.display_height===1&&d.revision===entry.revision&&JSON.stringify(d.bounds??null)===JSON.stringify(bounds??null))return;
-    if(published.url)asset.styk_tiles=published.url;else delete asset.styk_tiles;
-    asset.data_url=EMPTY_PNG;asset.width=asset.height=asset.display_width=asset.display_height=1;
+    // A cel opened from a file holds its tiles as a lazy payload of the view (src/lazy-payload.mjs), which has no setter.
+    if(published.url)putField(asset,'styk_tiles',published.url);else delete asset.styk_tiles;
+    putField(asset,'data_url',EMPTY_PNG);asset.width=asset.height=asset.display_width=asset.display_height=1;
     d.revision=entry.revision;d.bounds=bounds?{...bounds}:null;
     // The definition changed in place: whoever holds a copy of the document (the engine's session) is told.
     this.onPublished(figure);

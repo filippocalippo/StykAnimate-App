@@ -153,6 +153,13 @@ impl EditSession {
         styk_doc::json::to_string(self.session().report())
     }
 
+    /// Hands the session's document, as it is now, over for a save on a worker (`save_project`): a token that names the
+    /// tree for as long as nobody saved or released it (`release_snapshot`). Copies nothing, and the session goes on
+    /// editing: what the save writes is the document of this moment.
+    pub fn snapshot(&self) -> f64 {
+        crate::document_export::snapshot(self.session().report().clone())
+    }
+
     /// The interface revision of the document the session started from.
     pub fn revision(&self) -> f64 {
         self.revision

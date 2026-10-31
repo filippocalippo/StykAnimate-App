@@ -1,37 +1,16 @@
 //! StykAnimate's own files (`.styk`, `.stkz`, `.stykmov`) for the app's workers.
 //!
-//! The import, library-preview and document-export workers load this module and
-//! call [`open_native_file`] and [`save_native_file`] directly, beside the Pivot
-//! codec's [`crate::PivotCodec`] (`docs/engine/formats.md`). The work is
-//! `styk_formats::files`; this is its binding: bytes in, bytes out, failures as a
-//! [`NativeFailure`] that carries the interface's message key.
+//! The import and library-preview workers load this module and call [`open_native_file`]
+//! directly, beside the Pivot codec's [`crate::PivotCodec`] (`docs/engine/formats.md`).
+//! The work is `styk_formats::files`; this is its binding: bytes in, bytes out, failures as a
+//! [`NativeFailure`] that carries the interface's message key. The app writes its files
+//! from the engine's document (`styk_engine::save`); [`save_native_document`] writes a
+//! document given as JSON, for the tests and tools that make files to read.
 
 use styk_formats::container::Kind;
-use styk_formats::files::{self, BlockStore, FileError, Rules};
+use styk_formats::container;
+use styk_formats::files::{self, FileError, NoStore, Rules};
 use wasm_bindgen::prelude::*;
-
-#[wasm_bindgen]
-extern "C" {
-    /// The caller's cache of compressed blocks: `get(key)` answers the bytes `put`
-    /// was given for that key (a `Uint8Array`), or nothing. `put` is given a view
-    /// of module memory that is only valid during the call, so it must copy.
-    pub type BlockCache;
-    #[wasm_bindgen(method)]
-    fn get(this: &BlockCache, key: &str) -> Option<Vec<u8>>;
-    #[wasm_bindgen(method)]
-    fn put(this: &BlockCache, key: &str, stored: &[u8]);
-}
-
-struct Blocks<'a>(&'a BlockCache);
-
-impl BlockStore for Blocks<'_> {
-    fn get(&mut self, key: &str) -> Option<Vec<u8>> {
-        self.0.get(key)
-    }
-    fn put(&mut self, key: &str, stored: &[u8]) {
-        self.0.put(key, stored);
-    }
-}
 
 /// Why a file could not be opened or saved. `messageKey` names the interface's
 /// message (`errors.nativeContainer.*`); `code` and `kind` are empty when the
@@ -140,11 +119,11 @@ pub fn open_native_file(bytes: &[u8], kind: &str, normalize: bool, verify_source
     Ok(OpenedFile { version: opened.version, markers: opened.markers, materialized_bytes: opened.materialized_bytes, skeleton: opened.skeleton, sections: opened.sections })
 }
 
-/// A container written, and what the cache of compressed blocks saved.
+/// A container written.
 #[wasm_bindgen]
 pub struct SavedFile {
     bytes: Vec<u8>,
-    stats: files::SaveStats,
+    raw_bytes: usize,
 }
 
 #[wasm_bindgen]
@@ -155,36 +134,19 @@ impl SavedFile {
         std::mem::take(&mut self.bytes)
     }
 
-    #[wasm_bindgen(getter)]
-    pub fn hits(&self) -> u32 {
-        self.stats.hits
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn misses(&self) -> u32 {
-        self.stats.misses
-    }
-
-    #[wasm_bindgen(getter, js_name = rawBytesReused)]
-    pub fn raw_bytes_reused(&self) -> f64 {
-        self.stats.raw_bytes_reused as f64
-    }
-
-    #[wasm_bindgen(getter, js_name = compressedBytesReused)]
-    pub fn compressed_bytes_reused(&self) -> f64 {
-        self.stats.compressed_bytes_reused as f64
-    }
-
+    /// The skeleton and both sections before compression.
     #[wasm_bindgen(getter, js_name = containerRawBytes)]
     pub fn container_raw_bytes(&self) -> f64 {
-        self.stats.container_raw_bytes as f64
+        self.raw_bytes as f64
     }
 }
 
-/// Writes a version 2 container of `kind` around a lifted document. `cache`
-/// supplies compressed blocks it has seen before and keeps the new ones.
-#[wasm_bindgen(js_name = saveNativeFile)]
-pub fn save_native_file(kind: &str, skeleton: &[u8], arrays: &[u8], payloads: &[u8], cache: &BlockCache) -> Result<SavedFile, NativeFailure> {
-    let saved = files::save(kind_named(kind)?, skeleton, arrays, payloads, &mut Blocks(cache))?;
-    Ok(SavedFile { bytes: saved.bytes, stats: saved.stats })
+/// Writes a version 2 container of `kind` around the document `json` holds, lifted as the app's writer lifts a
+/// document (`styk_formats::container::lift`). A `.stkz` or `.stykmov` must be the self-contained figure the file stores.
+#[wasm_bindgen(js_name = saveNativeDocument)]
+pub fn save_native_document(kind: &str, json: &[u8]) -> Result<SavedFile, NativeFailure> {
+    let document = styk_doc::json::parse(json).map_err(|error| NativeFailure::from(FileError::from(container::ContainerError::from(error))))?;
+    let lifted = container::lift(&document, &[]).map_err(|error| NativeFailure::from(FileError::from(error)))?;
+    let saved = files::save(kind_named(kind)?, &lifted.skeleton, &lifted.arrays, &lifted.payloads, &mut NoStore)?;
+    Ok(SavedFile { bytes: saved.bytes, raw_bytes: saved.stats.container_raw_bytes })
 }

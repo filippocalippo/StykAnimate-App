@@ -424,6 +424,11 @@ object's geometry (`Scene::built_in`, numbered across every memory). `EditScene`
 (`drawlist::EncodeMemory`), and `encode_composed_remembering` encodes only the objects whose build is not the one it kept; the list
 is the list encoded whole (`styk-eval/tests/build_memory.rs`). Only a plain frame is kept: nothing in it draws effects, 3D faces or
 text, no drawing cel is live, and an object being dragged is encoded afresh (its translation is applied after encoding).
+What the encoder keeps is judged by numbers, never by addresses: the assets by `Assets::id` (each `Assets::extended` is numbered) and a
+scene by its `Scene::stamp` (each build is numbered, and a built scene is never changed). The onion skins are kept the same way: a ghost
+is encoded once and drawn again while it is the same scene (stamp) under the same hidden slots, tint, effects setting and assets, so a
+gesture does not encode them at every step; none is kept while a drawing cel is live. `styk-eval/tests/build_memory_stale.rs` compares
+every such list with the list encoded whole.
 
 ## In the app
 

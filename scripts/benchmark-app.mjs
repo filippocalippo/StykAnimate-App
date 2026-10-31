@@ -151,25 +151,29 @@ async function install(page) {
     const W = 64, H = 40, c = new OffscreenCanvas(W, H), x = c.getContext('2d', {willReadFrequently: true});
     const raf = window.requestAnimationFrame.bind(window);
     let key = null;
-    B.grab = () => {
+    B.grab = (overlayLayer = document.querySelector('#overlay')) => {
       x.fillStyle = '#000'; x.fillRect(0, 0, W, H);
-      const stage = s().renderer?.canvas, overlay = document.querySelector('#overlay');
+      const stage = s().renderer?.canvas;
       if (stage) x.drawImage(stage, 0, 0, W, H);
-      if (overlay) x.drawImage(overlay, 0, 0, W, H);
+      if (overlayLayer) x.drawImage(overlayLayer, 0, 0, W, H);
       const d = x.getImageData(0, 0, W, H).data, lum = new Array(W * H);
       for (let i = 0; i < W * H; i++) lum[i] = (d[i * 4] * 3 + d[i * 4 + 1] * 6 + d[i * 4 + 2]) / 10 | 0;
       return lum;
     };
     window.requestAnimationFrame = cb => raf(t => {
       cb(t);
-      if (!B.sampling) return;
+      if (!B.sampling && !B.settling) return;
       const p = s().lastEditingPresentation, perf = window.styk.performance?.();
       const k = `${p?.at}|${perf?.presentation?.totalFrames}|${s().renderer?.engineStats?.frames}`;
       if (k === key) return;
       key = k;
       try {
+        // A WebGPU canvas holds its picture only until the frame is presented: a picture is read in the callback that drew it.
         const lum = B.grab();
-        B.samples.push({t: performance.now(), mark: B.mark, lum, tick: p?.tick ?? null});
+        if (B.settling) B.settled = lum;
+        if (!B.sampling) return;
+        const stats = s().renderer?.engineStats;
+        B.samples.push({t: performance.now(), mark: B.mark, lum, tick: e().tick, drawn: stats?.frames ?? null, redraws: stats?.pictureRedraws ?? null});
       } catch (error) { B.sampleError = String(error?.message ?? error); }
     });
     B.until = (test, timeout = 5000) => new Promise(resolve => {
@@ -419,41 +423,56 @@ function blockDiff(a, b) {
 }
 const spread = a => { let m = 0; for (const v of a) m += v; m /= a.length; let s = 0; for (const v of a) s += (v - m) ** 2; return Math.sqrt(s / a.length); };
 // Per 8x8 block of the 64x40 strip (40 blocks), so one figure blinking for a frame counts, not only the whole stage.
-function isBlink(a, b, c) {
+function blinkBlocks(a, b, c) {
   const blocks = (STRIP.W / STRIP.B) * (STRIP.H / STRIP.B), T = STRIP.T;
-  const ab = blockDiff(a, b), bc = blockDiff(b, c), ac = blockDiff(a, c);
-  let blink = false;
-  for (let k = 0; k < blocks && !blink; k++) blink = ab[k] > T && bc[k] > T && ac[k] < T / 3;
-  return blink;
+  const ab = blockDiff(a, b), bc = blockDiff(b, c), ac = blockDiff(a, c), hit = [];
+  for (let k = 0; k < blocks; k++) if (ab[k] > T && bc[k] > T && ac[k] < T / 3) hit.push(k);
+  return hit;
 }
+const isBlink = (a, b, c) => blinkBlocks(a, b, c).length > 0;
 const isBlank = (a, b, c) => spread(b) < 2 && spread(a) > 8 && spread(c) > 8;
 function flickerOf(samples, reference = null) {
   let transients = 0, blanks = 0, contentTransients = 0, contentBlanks = 0;
+  const blinks = [];
+  // A tick drawn twice whose second picture differs from the first: a blink of its own, with or without an A-B-A (scrub and playback only).
+  let redrawChanges = 0;
+  for (let i = 1; i < samples.length; i++) if (samples[i].tick === samples[i - 1].tick && blockDiff(samples[i - 1].lum, samples[i].lum).some(d => d > STRIP.T)) redrawChanges++;
   for (let i = 1; i < samples.length - 1; i++) {
     const a = samples[i - 1].lum, b = samples[i].lum, c = samples[i + 1].lum;
     const settled = reference ? [i - 1, i, i + 1].map(k => reference[samples[k].tick] ?? null) : null;
     const known = settled && settled.every(Boolean);
-    if (isBlink(a, b, c)) { transients++; if (known && isBlink(...settled)) contentTransients++; }
+    if (isBlink(a, b, c)) {
+      transients++;
+      const hit = blinkBlocks(a, b, c), own = known && isBlink(...settled);
+      if (own) contentTransients++;
+      if (blinks.length < 12) blinks.push({picture: i, ticks: [i - 1, i, i + 1].map(k => samples[k].tick), drawn: [i - 1, i, i + 1].map(k => samples[k].drawn ?? null), redraws: [i - 1, i, i + 1].map(k => samples[k].redraws ?? null), blocks: hit, content: Boolean(own)});
+    }
     if (isBlank(a, b, c)) { blanks++; if (known && isBlank(...settled)) contentBlanks++; }
   }
-  return {pictures: samples.length, transients, blanks, referenced: Boolean(reference),
+  return {pictures: samples.length, transients, blanks, referenced: Boolean(reference), blinks, redrawChanges,
     contentTransients: reference ? contentTransients : null, artifactTransients: transients - contentTransients,
     contentBlanks: reference ? contentBlanks : null, artifactBlanks: blanks - contentBlanks};
 }
 
-/** One picture per tick, taken after the tick has fully settled: shown, and nothing drawn or asked for during the last
- *  250 ms (pictures loaded, nothing pending). `onionsOff` matches playback, which shows no onion skins. The tick on
- *  show and the onion setting are restored. A tick that never settles has no picture. */
-async function settledPictures(ctx, ticks, {onionsOff = false} = {}) {
-  return ctx.page.evaluate(async ({ticks, onionsOff}) => {
+/** One picture per tick: the one the last draw of the tick gave, taken once the tick has fully settled (shown, and nothing
+ *  drawn or asked for during the last 250 ms: pictures loaded, nothing pending). It is read in the animation-frame callback
+ *  that drew it, as the raw pictures are: a WebGPU canvas holds nothing between frames, so reading it later gave a blank
+ *  stage. `onionsOff` matches playback, which shows no onion skins. The tick, the view and the onion setting on show are
+ *  restored. A tick that never settles, or that draws nothing, has no picture. */
+async function settledPictures(ctx, ticks, {onionsOff = false, view = null} = {}) {
+  return ctx.page.evaluate(async ({ticks, onionsOff, view}) => {
     const B = window.__bench, e = () => window.styk.editor, s = () => window.styk.state;
-    const wasSampling = B.sampling, home = e().tick;
-    B.sampling = false;
+    const wasSampling = B.sampling, home = e().tick, wasView = s().view;
+    if (view) s().view = {...view};
+    B.sampling = false; B.settling = true;
     if (onionsOff && s().onion) window.styk.actions['toggle-onion']();
     const tick = () => new Promise(r => requestAnimationFrame(r));
     const key = () => { const p = s().lastEditingPresentation; return `${p?.at}|${s().renderer?.engineStats?.frames}|${s().dirtyRender}`; };
     const out = {};
     for (const t of ticks) {
+      // Showing the tick already on show draws nothing: step away first so the tick is drawn.
+      if (e().tick === t) { const other = t === 0 ? 1 : t - 1; e().seek(other); await B.until(() => s().lastEditingPresentation?.tick === other, 3000); }
+      B.settled = null;
       e().seek(t);
       const deadline = performance.now() + 4000;
       await B.until(() => s().lastEditingPresentation?.tick === t, 3000);
@@ -462,19 +481,58 @@ async function settledPictures(ctx, ticks, {onionsOff = false} = {}) {
         await tick();
         const now = key();
         if (now !== last) { last = now; quietSince = performance.now(); }
-        else if (performance.now() - quietSince >= 250) { out[t] = B.grab(); break; }
+        else if (performance.now() - quietSince >= 250) { if (B.settled) out[t] = B.settled; break; }
       }
     }
     if (onionsOff && !s().onion) window.styk.actions['toggle-onion']();
     e().seek(home);
     await B.until(() => s().lastEditingPresentation?.tick === home, 3000);
-    B.sampling = wasSampling;
+    B.sampling = wasSampling; B.settling = false;
+    s().view = wasView;
     return out;
-  }, {ticks, onionsOff});
+  }, {ticks, onionsOff, view});
+}
+
+/** The pictures playback draws, for the ticks it showed, drawn again while paused with the same call at the view playback had:
+ *  each tick's prepared frame through the scene camera, clipped to the artboard, under the overlay playback left, taken once
+ *  the frame has all its pictures. Playback's own pictures are compared with these, so a camera move or a clip the paused
+ *  editing view does not show is not mistaken for an artifact. The tick and the view on show are restored. The old app has
+ *  no prepared frames to draw: it keeps the paused editing view without onion skins. */
+async function preparedPictures(ctx, ticks) {
+  return ctx.page.evaluate(async ticks => {
+    const B = window.__bench, e = () => window.styk.editor, s = () => window.styk.state, playback = window.styk.playback;
+    const wasSampling = B.sampling, home = e().tick, wasView = s().view;
+    s().view = {...B.playView};
+    B.sampling = false;
+    const frame = fn => new Promise(resolve => requestAnimationFrame(() => resolve(fn())));
+    const out = {};
+    for (const t of ticks) {
+      e().seek(t);
+      await playback.prepareRange([t]);
+      if (!await B.until(() => playback.has(t), 4000)) continue;
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const done = await frame(() => {
+          const renderer = s().renderer, packet = playback.get(t);
+          if (!packet || !renderer.renderPrepared(packet.key, {view: s().view, cameraEnabled: true})) return false;
+          if (renderer.engineSide.stage.pictures_pending()) return false;
+          out[t] = B.grab(B.playOverlay);
+          return true;
+        });
+        if (done) break;
+        await new Promise(r => setTimeout(r, 30));
+      }
+    }
+    e().seek(home);
+    await B.until(() => s().lastEditingPresentation?.tick === home, 3000);
+    B.sampling = wasSampling;
+    s().view = wasView;
+    return out;
+  }, ticks);
 }
 
 async function flickerPass(ctx) {
   const {page} = ctx;
+  const view = await page.evaluate(() => ({...window.styk.state.view}));
   await page.evaluate(() => { window.__bench.samples = []; window.__bench.sampling = true; });
   const out = {}, kept = {};
   const take = async (mark, fn) => {
@@ -488,7 +546,13 @@ async function flickerPass(ctx) {
   };
   const ticks = await page.evaluate(() => window.styk.editor.totalTicks);
   await take('flicker-scrub', () => page.evaluate(async n => { for (let t = 0; t < n; t++) { window.styk.editor.seek(t); await window.__bench.until(() => window.styk.state.lastEditingPresentation?.tick === t, 3000); } }, Math.min(60, ticks)));
-  await take('flicker-play', async () => { await page.evaluate(() => window.styk.actions.play()); await sleep(5000); await page.evaluate(() => { if (window.styk.state.playing) window.styk.actions.play(); }); });
+  await take('flicker-play', async () => {
+    await page.evaluate(() => window.styk.actions.play());
+    await sleep(5000);
+    // The view and the overlay playback shows, for the reference pictures (playback fits the view itself).
+    await page.evaluate(() => { const B = window.__bench, o = document.querySelector('#overlay'), c = new OffscreenCanvas(o.width, o.height); c.getContext('2d').drawImage(o, 0, 0); B.playOverlay = c; B.playView = {...window.styk.state.view}; });
+    await page.evaluate(() => { if (window.styk.state.playing) window.styk.actions.play(); });
+  });
   await take('flicker-idle', () => sleep(3000));
   await dismiss(page);
   const target = await dragTarget(page, 'pose');
@@ -499,11 +563,13 @@ async function flickerPass(ctx) {
   });
   out.sampleError = await page.evaluate(() => window.__bench.sampleError);
   // The settled reference comes after every raw pass, so it cannot warm anything they measure.
-  for (const [mark, onionsOff] of [['flicker-scrub', false], ['flicker-play', true]]) {
+  const prepared = await page.evaluate(() => Boolean(window.styk.state.renderer?.engineSide && window.styk.playback?.prepareRange));
+  for (const [mark, pictures, reference] of [['flicker-scrub', settledPictures, 'paused view'],
+    ['flicker-play', prepared ? (c, t) => preparedPictures(c, t) : (c, t, o) => settledPictures(c, t, {...o, onionsOff: true}), prepared ? 'paused, drawn as playback draws' : 'paused view, no onion skins']]) {
     if (!kept[mark]) continue;
     try {
       const wanted = [...new Set(kept[mark].map(sample => sample.tick).filter(tick => tick !== null))].sort((x, y) => x - y);
-      out[mark] = {...flickerOf(kept[mark], await settledPictures(ctx, wanted, {onionsOff})), reference: onionsOff ? 'paused view, no onion skins' : 'paused view'};
+      out[mark] = {...flickerOf(kept[mark], await pictures(ctx, wanted, {view})), reference};
     } catch (error) { out[mark].referenceError = String(error.message).slice(0, 200); }
   }
   await page.evaluate(() => { window.__bench.sampling = false; window.__bench.samples = []; });

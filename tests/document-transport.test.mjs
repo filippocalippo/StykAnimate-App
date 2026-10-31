@@ -28,14 +28,6 @@ test('opaque __proto__ keys stay own data properties without changing prototypes
   assert.deepEqual(result, original); assert.equal(Object.getPrototypeOf(result), Object.prototype); assert.equal({}.untouched, undefined);
 });
 
-test('optional runtime omission touches only decoded pose caches and keeps all other fields', () => {
-  const report = createDemo(); report.keyframes[0].objects[0].runtime_segments = [{ length: 99 }];
-  report.unknown = { runtime_segments: 'opaque field' }; report.figure_types[0].runtime_segments = 'figure annotation';
-  let result; for (const chunk of documentChunks(report, { omitRuntimeSegments: true })) result = applyDocumentChunk(result, structuredClone(chunk));
-  const expected = structuredClone(report); delete expected.keyframes[0].objects[0].runtime_segments;
-  assert.deepEqual(result, expected); assert.ok(report.keyframes[0].objects[0].runtime_segments);
-});
-
 test('optional native fields stay absent and malformed/out-of-order batches fail', () => {
   const original = { version: 5, figure_types: [], keyframes: [], opaque: null };
   let result; for (const chunk of documentChunks(original)) result = applyDocumentChunk(result, structuredClone(chunk));

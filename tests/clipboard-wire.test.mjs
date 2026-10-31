@@ -61,7 +61,7 @@ test('repeated poses compact both numeric storage and repeated key names', async
     scale:1,color_override_raw:0xffaabbcc,color_override_rgb:[204,187,170],color_override_mix:255,
     field28:0,transparency:0,opacity:1,len_flag:1,bend_flag:0,join:null,record_offset:i*10,record_end:i*10+9}));
   const report = {keyframes:[{objects}],figure_types:[]};
-  let estimate = 0; for (const chunk of documentChunks(report,{maxBytes:65536,omitRuntimeSegments:true})) estimate += chunk.header ? 64 : chunk.estimatedBytes;
+  let estimate = 0; for (const chunk of documentChunks(report,{maxBytes:65536})) estimate += chunk.header ? 64 : chunk.estimatedBytes;
   const {result,packed} = await roundTrip(report); assert.deepEqual(result,report);
   assert.ok(packed.encodedBytes < estimate / 3, `${packed.encodedBytes} must be less than a third of ${estimate}`);
   assert.ok(packed.residentBytes > packed.encodedBytes, 'Resident allocation and encoded transfer are separate quantities.');

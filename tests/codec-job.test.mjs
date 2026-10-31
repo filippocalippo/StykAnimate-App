@@ -4,6 +4,11 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {codecJob} from '../src/codec-job.mjs';
 import {DocumentExporter} from '../src/document-export.mjs';
 import {FakeCodecHost} from './support/codec-host.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
+import {createDemo} from '../src/demo.mjs';
+
+/** A document the engine owns: a .styk save is written from the snapshot of its session. */
+const project=()=>ownedEditorFor({demo:false},createDemo()).report;
 
 async function until(check){const deadline=Date.now()+5000;while(!check()){if(Date.now()>deadline)throw new Error('Worker did not reach export');await delay(5);}}
 
@@ -37,16 +42,19 @@ function exporter(t,onExport,options={}){
   const descriptor=Object.getOwnPropertyDescriptor(globalThis,'Worker');
   Object.defineProperty(globalThis,'Worker',{value:Worker,configurable:true});
   t.after(()=>{if(descriptor)Object.defineProperty(globalThis,'Worker',descriptor);else delete globalThis.Worker;});
-  const owner=new DocumentExporter({codecHost:host,timeoutMs:0,...options});
+  const owner=new DocumentExporter({codecHost:host,timeoutMs:0,engine:{join:{}},...options});
   t.after(()=>{owner.dispose();host.close();});return {owner,workers,host};
 }
 
 test('terminating a busy document worker still cancels its codec job',async t=>{
   const {owner,workers,host}=exporter(t,()=>{}),controller=new AbortController();
-  const pending=owner.export({figure_types:[],keyframes:[]},{format:'styk',signal:controller.signal});
+  const pending=owner.export(project(),{format:'styk',signal:controller.signal});
   pending.catch(()=>{});
   await until(()=>workers[0]?.messages.some(message=>message.operation==='export'));
   controller.abort();await assert.rejects(pending,{name:'AbortError'});owner.dispose();
+  // The worker joined the engine: it is told to give its thread back, and ended once it has.
+  assert.ok(workers[0].messages.some(message=>message.operation==='release'));
+  workers[0].dispatchEvent(new MessageEvent('message',{data:{released:true}}));
   assert.equal(workers[0].terminated,true);
   assert.deepEqual(host.cancelled,[workers[0].messages[0].options.jobId]);
   assert.equal(owner.jobs.size,0);
@@ -81,7 +89,7 @@ test('a completed document export does not cancel and a superseded result never 
     if(change)revision++;
     worker.reply(message,{ok:true,blob:new Blob(['native bytes'])});
   });
-  const report={figure_types:[],keyframes:[]};
+  const report=project();
   const result=await owner.export(report,{getRevision:()=>revision});assert.equal(await result.text(),'native bytes');
   assert.equal(host.cancelled.length,0);
   change=true;await assert.rejects(owner.export(report,{getRevision:()=>revision}),{name:'AbortError'});

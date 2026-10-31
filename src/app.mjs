@@ -65,7 +65,7 @@ import {createHome} from './home/home.mjs';
 import {createTutorials} from './tutorials/tutorials.mjs';
 import {installProjectTabs} from './shell/project-tabs-view.mjs';
 import {createProjectSwitcher} from './shell/project-switcher.mjs';
-import {sessionProject} from './editor-sessions.mjs';
+import {movieclipScopes, sessionProjectName} from './editor-sessions.mjs';
 import { PrivacyUI } from './privacy-ui.mjs';
 import { FeedbackUI } from './feedback-ui.mjs';
 import { UpdateUI } from './update-ui.mjs';
@@ -248,8 +248,9 @@ async function runDocumentExport(format, consume, { recovery = false, controller
     const drawingRevision=editor.revision;await drawingBarrier(editor.report,{signal:controller.signal});if(drawingRevision!==editor.revision)throw messageError(new DOMException('', 'AbortError'), "errors.app.theDrawingChangedDuringExport", {});
     // The engine makes Pivot and figure files from the document it holds: its session starts on the open document and takes what the editor changed.
     if (format !== 'styk' && !editor._shown?.active) throw Object.assign(messageError(new Error(''), "errors.documentExport.theEngineCannotMakeThisFileHere", {}), {telemetryCode: 'engine_failed', telemetryStage: 'prepare'});
-    const blob = await documentExporter.export(recovery ? editor.movieclipProjectReport() : editor.report, {
+    const blob = await documentExporter.export(editor.report, {
       format,
+      scopes: recovery ? movieclipScopes(editor) : undefined,
       name: recovery ? editor._movieclipScopes?.[0]?.parent.name ?? editor.name : editor.name,
       sourceId: state.sourceId,
       figureTypeId: editor.object?.figure_type_id,
@@ -1679,8 +1680,12 @@ function loop(now) {
       }
       if (next !== null) {
         const packet = playback.get(next);
-        if (!playStarted) playStartupFrames = Math.max(playStartupFrames, playbackStartupWindow(fps,
-          Math.max(playback.stats.lastCompileMs, playback.stats.compileMs / Math.max(1, playback.stats.preparedFrames)), navigator.hardwareConcurrency || 4));
+        if (!playStarted) {
+          // One read of the engine's statistics (each is a JSON answer), not one per field.
+          const { lastCompileMs, compileMs, preparedFrames } = playback.stats;
+          playStartupFrames = Math.max(playStartupFrames, playbackStartupWindow(fps,
+            Math.max(lastCompileMs, compileMs / Math.max(1, preparedFrames)), navigator.hardwareConcurrency || 4));
+        }
         const startupReady=playStarted || playback.bufferedAhead(next,playStartupFrames,range.end);
         if (packet && startupReady) {
           if (audioEngine.hasAudio && (!audioEngine.running || next < editor.tick || audioEngine.position > (next + 1.5) / fps))
@@ -1738,7 +1743,7 @@ function loop(now) {
           state.drag?.geometry ||
           keyboardHandleGesture?.geometry ||
           editor.geometry;
-      state.renderer.render({
+      const editingDrawn = state.renderer.render({
         vfxEnabled: state.vfxEnabled,
         report: drawingPreview?.report??editor.report,
         documentReport: editor.report,
@@ -1759,7 +1764,8 @@ function loop(now) {
       // This paint can start or cancel the last capture. Reconcile both
       // directions before yielding; cancellation may leave no further RAF.
       syncBackgroundInteraction(viewChanging);
-      state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
+      // What is presented is what was drawn: a frame the stage could not draw yet leaves the previous picture on show.
+      if (editingDrawn) state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
         sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
       overlayRender(geometry);
       drawingController?.overlayDraw(ctx);
@@ -3414,13 +3420,13 @@ function projectRefused(reason) {
  * rests, so the snapshot needs no revision checks and edits to the project in front do not interrupt it.
  */
 async function writeRestingRecovery(record, signal) {
-  const { report, name } = sessionProject(record.session), saved = record.state;
+  const { report } = record.session, name = sessionProjectName(record.session), saved = record.state;
   const controller = new AbortController(), job = { controller, recovery: true, resting: true };
   const abort = () => controller.abort();
   signal.addEventListener("abort", abort, { once: true });
   exportJobs.add(job);
   try {
-    const blob = await documentExporter.export(report, { format: "styk", name, sourceId: saved.sourceId, signal: controller.signal });
+    const blob = await documentExporter.export(report, { format: "styk", name, sourceId: saved.sourceId, scopes: movieclipScopes(record.session), signal: controller.signal });
     if (desktop) return await writeNativeBlob(desktop, blob, { recovery: true, name, signal: controller.signal, documentToken: saved.documentToken });
     return await browserRecovery.write(blob, name, controller.signal, record.id);
   } finally {

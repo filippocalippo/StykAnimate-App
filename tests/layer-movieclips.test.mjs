@@ -8,6 +8,9 @@ import {movieclipAsset,movieclipTime,playbackSettings,validateMovieclipGraph} fr
 import {timeline} from '../src/pivot/read-view.mjs';
 import {pivotDocument, figureDocument} from './support/engine-export.mjs';
 import {sceneAt} from './support/engine-geometry.mjs';
+import {openDocument} from './support/native-files.mjs';
+import {snapshotDocument} from '../src/engine/engine-owner.mjs';
+import {makeProjectFile} from '../src/engine/engine-document-export.mjs';
 
 const near=(a,b,tolerance=1e-9)=>assert.ok(Math.abs(a-b)<=tolerance,`${a} != ${b}`);
 
@@ -76,12 +79,17 @@ test('mirrored movieclips and their legacy export agree',()=>{
   const flat=pivotDocument(editor.report);assert.equal(sample(flat,0).drawables.length,before.length);
 });
 
-test('portable movieclip imports restart and shared editing recovery retains the root project',()=>{
+test('portable movieclip imports restart and shared editing recovery retains the root project',async()=>{
   const editor=layerEditor({propertyChannels:true});editor.select(1);const f=editor.createMovieclip({start:5,end:17});
   const portable=figureDocument(editor.report,{figureUid:editor.selectedUid,tick:5}),other=layerEditor();other.seek(10);other.importFigure(portable);
   assert.equal(other.object._stykMovieclip.clock,'presence');assert.equal(other.object._movieclipSample,0);assert.equal(other.figure._styk.movieclip.duration,12);
   const parent=editor.report;editor.enterMovieclip(f.figure_type_id);editor.select(1);editor.moveSelection(7,0);
-  const recovered=editor.movieclipProjectReport();assert.equal(recovered.keyframes.length,parent.keyframes.length);assert.equal(recovered.figure_types.at(-1)._styk.movieclip.document,editor.report);
+  // A recovery copy of the project stores the clip being edited inside the document it was entered from: the engine folds it in.
+  const file=makeProjectFile({join:null,cancelled:()=>false,request:{snapshots:[snapshotDocument(parent),snapshotDocument(editor.report)],scopes:[f.figure_type_id],name:'Recovery'}});
+  const recovered=await openDocument(file.bytes,'styk');assert.equal(recovered.keyframes.length,parent.keyframes.length);
+  const stored=recovered.figure_types.find(figure=>figure.figure_type_id===f.figure_type_id)._styk.movieclip;
+  assert.equal(stored.document.keyframes.length,editor.report.keyframes.length);assert.deepEqual(stored.document.keyframes[0].objects.map(o=>[o.root_x,o.root_y]),editor.report.keyframes[0].objects.map(o=>[o.root_x,o.root_y]));
+  assert.equal(stored.duration,Math.max(1,editor.totalTicks));
   const reopened=layerEditor({},structuredClone(recovered));assert.equal(reopened.totalTicks,timeline(parent).at(-1).start+timeline(parent).at(-1).count);
 });
 

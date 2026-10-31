@@ -211,7 +211,7 @@ impl Lifter<'_> {
             }
         }
         self.admit(json::string_bytes(text))?;
-        if text.starts_with("S2") && text.len() >= 4 && (matches!(text.as_bytes()[2], b'B' | b'S' | b'E' | b'D') || (self.sequences.is_some() && text.as_bytes()[2] == b'R')) && text.as_bytes()[3] == b':' {
+        if text.starts_with("S2") && text.len() >= 4 && (matches!(text.as_bytes()[2], b'B' | b'S' | b'E' | b'D') || (self.sequences.is_some() && matches!(text.as_bytes()[2], b'R' | b'P'))) && text.as_bytes()[3] == b':' {
             let mut escaped = String::with_capacity(text.len() + 4);
             escaped.push_str("S2E:");
             escaped.push_str(text);
@@ -300,17 +300,15 @@ impl Lifter<'_> {
                     self.payload_marker("", range);
                     return Ok(());
                 }
+                let liftable = styk_doc::payload::lifts(blob, key);
+                if liftable && self.sequences.is_some() {
+                    // The interface's view names the payload and asks for it when something reads it.
+                    let marker = format!("{}{}", styk_doc::payload::MARKER, styk_doc::payload::register(blob));
+                    self.admit(json::string_bytes(&marker))?;
+                    json::write_string(&marker, &mut self.out);
+                    return Ok(());
+                }
                 let prefix: &str = &blob.prefix;
-                let liftable = blob.text_len() >= LIFT_MIN_STRING
-                    && if key == "data_base64" || key == "source_base64" {
-                        prefix.is_empty()
-                    } else {
-                        (key == "data_url" || key == "styk_tiles")
-                            && prefix.starts_with("data:")
-                            && prefix.find(',') == Some(prefix.len() - 1)
-                            && prefix.len() - 1 > 5
-                            && prefix[..prefix.len() - 1].ends_with(";base64")
-                    };
                 if liftable {
                     self.payload(prefix, &blob.bytes)?;
                 } else {

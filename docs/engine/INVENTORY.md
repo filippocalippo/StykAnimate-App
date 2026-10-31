@@ -12,14 +12,14 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | Rust owner | Modules | Source at start | js | partial | ported | verified | removed | Covered by Rust | Partly covered | Deleted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `styk-doc` | 2 | 20 KiB | 1 | 1 | 0 | 0 | 0 | 0 % | 14 % | 0 % |
-| `styk-drawing` | 36 | 163 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
-| `styk-edit` | 92 | 598 KiB | 22 | 11 | 1 | 4 | 54 | 67 % | 9 % | 63 % |
+| `styk-drawing` | 36 | 163 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 24 % | 4 % |
+| `styk-edit` | 93 | 598 KiB | 22 | 11 | 1 | 4 | 55 | 67 % | 9 % | 63 % |
 | `styk-engine` | 24 | 31 KiB | 6 | 0 | 0 | 0 | 18 | 56 % | 0 % | 56 % |
 | `styk-eval` | 80 | 303 KiB | 10 | 32 | 2 | 2 | 34 | 32 % | 55 % | 19 % |
 | `styk-export` | 14 | 59 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
-| `styk-formats` | 56 | 741 KiB | 22 | 7 | 1 | 22 | 4 | 65 % | 11 % | 7 % |
+| `styk-formats` | 55 | 718 KiB | 21 | 7 | 1 | 22 | 4 | 67 % | 9 % | 7 % |
 | `styk-render` | 51 | 76 KiB | 4 | 1 | 0 | 0 | 46 | 35 % | 29 % | 35 % |
-| **Total** | 355 | 1990 KiB | 82 | 61 | 12 | 28 | 172 | 54 % | 19 % | 27 % |
+| **Total** | 355 | 1967 KiB | 81 | 61 | 12 | 28 | 173 | 54 % | 18 % | 27 % |
 
 ## Engine modules
 
@@ -144,6 +144,7 @@ Engine logic: ported to Rust.
 | `src/pivot-style-materialize.mjs` | `styk-edit` | removed | deleted: the figure types of animated instance styles are made by the engine (styk-edit/src/export/style.rs) |
 | `src/polygon-draft.mjs` | `styk-edit` | js |  |
 | `src/pose-property-split.mjs` | `styk-edit` | removed | deleted: only the editor's authored pose and range bodies used it (6996 bytes) |
+| `src/pose-sequence-storage.mjs` | `styk-edit` | removed | packed pose channels for a save and expanded them on load; both are styk-edit (export::pose_sequences, load::frames) |
 | `src/project-tabs.mjs` | `styk-edit` | js |  |
 | `src/range-figure-operations.mjs` | `styk-edit` | removed | deleted: only the editor's range command bodies used it; the session plans figure operations (styk-edit range_plan.rs) (34665 bytes) |
 | `src/rig-examples-3d.mjs` | `styk-edit` | js |  |
@@ -277,9 +278,8 @@ Engine logic: ported to Rust.
 | `src/audio-pcm.mjs` | `styk-export::audio` | js | audio model and offline mix |
 | `backend/native_format.py` | `styk-formats::container` | verified | the app opens and saves containers through styk-formats in the codec module (src/native-file-codec.mjs), as the codec service does for native documents; kept only as the development test oracle (not shipped) |
 | `src/base64.mjs` | `styk-formats::container` | ported | Rust: styk-doc JSON base64 |
-| `src/document-lift.mjs` | `styk-formats::container` | partial | Rust: container::lift writes the same skeleton and sections from a store document (461 corpus files, byte-identical), and container::ViewLifter hands a document to the editor in pieces; the JavaScript lift stays for saves while the editor holds the document as objects: an array's identity decides what is stored once |
+| `src/document-lift.mjs` | `styk-formats::container` | partial | Rust: container::lift writes the skeleton and sections a save stores, and container::ViewLifter hands a document to the editor in pieces; what stays here is restoreLifted, which puts a skeleton the reader or the engine lifted back into the editor's objects |
 | `src/native-container.mjs` | `styk-formats::container` | removed | read and wrote the containers in JavaScript; the workers open and save through styk-formats::files in the codec module (src/native-file-codec.mjs), and the lifting the mirror and saves need is src/document-lift.mjs (46226 bytes) |
-| `src/pose-sequence-storage.mjs` | `styk-formats::container` | js |  |
 | `src/pose-sequences.mjs` | `styk-formats::container` | removed | Deleted with src/editor-load.mjs, its only caller: the engine interns pose sequences as it opens a document (styk-edit load) |
 | `src/source-record.mjs` | `styk-formats::container` | js |  |
 | `src/zlib-sync.mjs` | `styk-formats::container` | partial | Rust: inflate of drawing tiles (PNG decoder); deflate still JS |
@@ -438,7 +438,7 @@ Browser, Electron or operating-system service: stays in JS (or native), driven b
 | `src/video-export.mjs` | `styk-export` | js | encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine |
 | `src/audio-engine.mjs` | `styk-export::audio` | js | Web Audio preview |
 | `src/audio-worker.mjs` | `styk-export::audio` | js | Web Audio preview |
-| `src/container-cache.mjs` | `styk-formats::files` | stays | bounded cache of compressed blocks that outlives an export worker |
+| `src/container-cache.mjs` | `styk-formats::files` | removed | the bounded cache of compressed blocks an export worker handed to its replacement; the engine writes the project and keeps no JavaScript cache (3200 bytes) |
 | `src/native-file-codec.mjs` | `styk-formats::files` | stays | loads the Rust container module in a worker and moves a file to and from the interface's object model |
 | `desktop/backend.cjs` | `styk-formats::service` | removed | started the Python codec sidecar; the desktop runs styk-codec-wasm in the page (6079 bytes) |
 
@@ -507,6 +507,7 @@ Interface: stays in JS.
 | `src/keyframe-easing-popover.mjs` |  | stays |  |
 | `src/keyframe-easing-view.mjs` |  | stays |  |
 | `src/layer-timeline.mjs` |  | stays |  |
+| `src/lazy-payload.mjs` |  | stays | the editor view's picture fields: a getter that asks the engine for the text on first read (styk_doc::payload names it), and the copies that keep it unread |
 | `src/library-drag.mjs` |  | stays |  |
 | `src/library-hover-preview.mjs` |  | stays |  |
 | `src/library-matte.mjs` |  | stays |  |

@@ -18,3 +18,4 @@ styk-draw = { path = "../styk-draw" }
 [dev-dependencies]
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
+sha2 = "0.10"

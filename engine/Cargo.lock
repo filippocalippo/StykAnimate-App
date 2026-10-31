@@ -1175,6 +1175,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "image",
+ "sha2",
  "styk-alloc",
  "styk-doc",
  "styk-draw",
