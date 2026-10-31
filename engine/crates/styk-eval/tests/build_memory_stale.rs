@@ -115,3 +115,46 @@ fn a_figure_that_joins_or_leaves_a_parent_is_encoded_again() {
     }
     assert!(exercised > 0);
 }
+
+/// A ghost is encoded once while it is the same scene under the same settings; any change of scene, hidden objects, tint, effects
+/// setting or assets gives the list encoded whole.
+#[test]
+fn a_ghost_encoded_before_is_not_shown_for_another() {
+    use styk_eval::drawlist::{Ghost, Layer};
+    let mut exercised = 0;
+    for name in FIXTURES {
+        let prepared = prepared(name);
+        let assets = Assets::build(&prepared.doc);
+        let other_assets = Assets::build(&prepared.doc);
+        assert_ne!(assets.id(), other_assets.id(), "assets built twice are told apart");
+        let frame = prepared.evaluate(0.0);
+        let Some(slot) = (0..frame.objects.len()).find(|&slot| !frame.objects[slot].angles.is_empty()) else { continue };
+        let current = geometry::build_shapes(&prepared.doc, &frame, None);
+        let ghost_a = geometry::build_shapes(&prepared.doc, &changed(&frame, slot, |o| o.root[0] += 31.0), None);
+        let ghost_b = geometry::build_shapes(&prepared.doc, &changed(&frame, slot, |o| o.scale *= 1.3), None);
+        assert_ne!(ghost_a.stamp.get(), ghost_b.stamp.get());
+        let layers: Vec<Layer> = (0..frame.objects.len() as u32).map(|slot| Layer::Ghost(0, slot)).chain((0..frame.objects.len() as u32).map(Layer::Current)).collect();
+        let hide_slot = [vec![false; frame.objects.len()], (0..frame.objects.len()).map(|at| at == slot).collect()];
+        let mut encoded = EncodeMemory::default();
+        // The same memory serves a run of frames whose ghost changes in one thing at a time.
+        let steps: [(&Scene, &[bool], Option<[u8; 3]>, bool, &Assets); 7] = [
+            (&ghost_a, &hide_slot[0], Some([200, 10, 10]), false, &assets),
+            (&ghost_a, &hide_slot[0], Some([200, 10, 10]), false, &assets),
+            (&ghost_b, &hide_slot[0], Some([200, 10, 10]), false, &assets),
+            (&ghost_b, &hide_slot[1], Some([200, 10, 10]), false, &assets),
+            (&ghost_b, &hide_slot[1], Some([10, 10, 200]), false, &assets),
+            (&ghost_b, &hide_slot[1], Some([10, 10, 200]), true, &assets),
+            (&ghost_b, &hide_slot[1], Some([10, 10, 200]), true, &other_assets),
+        ];
+        for (n, (scene, hidden, tint, bypass, assets)) in steps.into_iter().enumerate() {
+            let overrides = Overrides { bypass_effects: bypass, ..Default::default() };
+            let ghost = [Ghost { scene, opacity: 0.3, tint, hidden }];
+            let remembered = encode_composed_remembering(&prepared.doc, assets, &current, &overrides, &ghost, Some(&layers), &mut encoded);
+            let whole = encode_composed(&prepared.doc, assets, &current, &overrides, &ghost, Some(&layers));
+            assert_eq!(format!("{:?}", remembered.prims), format!("{:?}", whole.prims), "{name} step {n}: primitives");
+            assert_eq!(format!("{:?}", remembered.points), format!("{:?}", whole.points), "{name} step {n}: points");
+            exercised += 1;
+        }
+    }
+    assert!(exercised > 0);
+}

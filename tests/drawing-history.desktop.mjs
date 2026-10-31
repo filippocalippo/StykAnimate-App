@@ -31,13 +31,13 @@ try{
   const bytes=usage.usageBreakdown.find(entry=>entry.storageType==='indexeddb')?.usage??0;check('the desktop test actually wrote an IndexedDB cache',bytes>0);
   const closed=first.app.waitForEvent('close');await first.app.evaluate(({app})=>app.exit(0)).catch(()=>{});await closed;
   const second=await launch(),nextCdp=await second.page.context().newCDPSession(second.page),after=await nextCdp.send('Storage.getUsageAndQuota',{origin:saved.origin});
-  check('startup reclaims the previous origin\'s cache',after.usageBreakdown.every(entry=>entry.storageType!=='indexeddb'||entry.usage===0));
+  check('startup reclaims the previous launch\'s cache',after.usageBreakdown.every(entry=>entry.storageType!=='indexeddb'||entry.usage===0));
   const recovered=await second.page.evaluate(async()=>{
     const recovery=await stykDesktop.getRecovery(),{ImportClient}=await import('/src/import-client.mjs');
     const read=await new ImportClient().importFile(new File([Uint8Array.from(atob(recovery.data),c=>c.charCodeAt(0))],'history-recovery.styk'));styk.editor.load(read.document);
     const surface=await styk.drawing.owner.surface(styk.editor.drawingTarget().figure);
-    return {data:recovery.data,origin:location.origin,exact:surface.store.get(0,0).pixels.every((n,i)=>n===i%256)};
+    return {data:recovery.data,exact:surface.store.get(0,0).pixels.every((n,i)=>n===i%256)};
   });
-  check('native drawing recovery survives cache cleanup and a changed origin',recovered.data===saved.data&&recovered.origin!==saved.origin&&recovered.exact);
-  await writeFile(path.join(out,'desktop-result.json'),JSON.stringify({checks,cacheBytesBefore:bytes,history:saved.history,originChanged:recovered.origin!==saved.origin},null,2));
+  check('native drawing recovery survives cache cleanup and a restart',recovered.data===saved.data&&recovered.exact);
+  await writeFile(path.join(out,'desktop-result.json'),JSON.stringify({checks,cacheBytesBefore:bytes,history:saved.history},null,2));
 }finally{for(const app of applications)await app.evaluate(({app})=>app.exit(0)).catch(()=>{});}

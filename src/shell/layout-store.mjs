@@ -3,8 +3,8 @@ import {messageError} from '../localized-error.mjs';
  * Layout persistence: load once, then debounced, ordered, merge-on-write
  * saves over an injected `{read, write}` pair. On desktop that pair is the
  * existing workspace preferences IPC (`getWorkspacePreferences()` and
- * `setWorkspacePreferences()`; localStorage does not survive a restart there
- * because the origin changes per launch); in the browser it is localStorage.
+ * `setWorkspacePreferences()`; localStorage does not survive a restart there:
+ * the main process clears it at each launch); in the browser it is localStorage.
  *
  * - Nothing is written on load or when a layout is fitted to a small window;
  *   only update() schedules a save. The shell awaits load() first: updates

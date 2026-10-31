@@ -49,8 +49,11 @@ export function objectBounds(items, resources = {}) {
       // is never a raster source, so it must not be requested either: a lazy
       // request the render path never retains re-decodes and invalidates the
       // renderer every frame. A live store covers strokes still in flight.
-      const a = s.asset, v2 = s.fig?._styk?.drawing?.version === 2, image = v2 ? null : resources.image?.(resources.url?.(a));
+      const a = s.asset, v2 = s.fig?._styk?.drawing?.version === 2;
       const tiles = resources.drawing?.(s.fig)?.store?.bounds ?? drawingPixelBounds(s.fig);
+      // The picture is only asked for when nothing else gives its size: reading its URL reads the picture's whole text.
+      const sized = (tiles?.width ?? a.display_width) !== undefined && (tiles?.height ?? a.display_height) !== undefined;
+      const image = v2 || sized || (a.width && a.height) ? null : resources.image?.(resources.url?.(a));
       const width = tiles?.width ?? a.display_width ?? (image?.naturalWidth || a.width || a.pixel_width || 1), height = tiles?.height ?? a.display_height ?? (image?.naturalHeight || a.height || a.pixel_height || 1);
       const bx = tiles?.x ?? 0, by = tiles?.y ?? 0;
       const reverse = Boolean(s.seg.extra_u8_a ?? s.seg.extra?.[1]), mirror = Boolean(s.seg.extra_u8_b ?? s.seg.extra?.[2]) !== Boolean(s.obj.image_text_flags);

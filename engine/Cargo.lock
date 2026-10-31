@@ -1173,6 +1173,7 @@ dependencies = [
 name = "styk-engine"
 version = "0.1.0"
 dependencies = [
+ "sha2",
  "styk-alloc",
  "styk-doc",
  "styk-draw",

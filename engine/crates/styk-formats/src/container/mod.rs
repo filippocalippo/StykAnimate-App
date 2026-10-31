@@ -35,7 +35,7 @@ pub const MAX_MATERIALIZED_BYTES: usize = MAX_BYTES * 4;
 /// Arrays shorter than this stay in the skeleton.
 pub(crate) const LIFT_MIN_ARRAY: usize = 32;
 /// Strings shorter than this (in UTF-16 units) stay in the skeleton.
-pub(crate) const LIFT_MIN_STRING: usize = 64 * 1024;
+pub(crate) const LIFT_MIN_STRING: usize = styk_doc::payload::MIN_LEN;
 /// An upper bound of one number's JSON text.
 pub(crate) const MAX_JSON_NUMBER_BYTES: usize = 32;
 

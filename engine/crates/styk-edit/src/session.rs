@@ -120,12 +120,13 @@ fn project_fields_publication(before: &Value, report: &Value, event: &Value) -> 
 fn changed_figures(frame: &Value, previous: Option<&Value>, taken: Option<&HashSet<u32>>) -> Vec<Value> {
     let objects = frame.get("objects").and_then(Value::elements);
     let before = previous.and_then(|frame| frame.get("objects")).and_then(Value::elements);
+    // Only a gesture's draft asks which figures were not there before the call; its figures are found once, not once per figure.
+    let known: Option<HashSet<u32>> = before.as_ref().filter(|_| taken.is_some()).map(|objects| objects.iter().filter_map(|old| crate::record::uid(&old)).collect());
     objects.map(|objects| objects.iter().enumerate().filter_map(|(slot, figure)| {
         let uid = crate::record::uid(&figure)?;
         // Figures the gesture did not take do not change, except one added to its draft
         // meanwhile (drawn while posing), which was not in the draft before the call.
-        let added = before.is_some_and(|objects| !objects.iter().any(|old| crate::record::uid(&old) == Some(uid)));
-        if taken.is_some_and(|taken| !taken.contains(&uid)) && !added {
+        if taken.is_some_and(|taken| !taken.contains(&uid)) && !known.as_ref().is_some_and(|known| !known.contains(&uid)) {
             return None;
         }
         if before.and_then(|objects| objects.get(slot)).is_some_and(|old| crate::record::uid(&old) == Some(uid) && old.same_node(&figure)) {
@@ -953,7 +954,10 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     }
     // `patch: true`: what the call changed in the report, for the read view (D19).
     if view.get("patch") == Some(&Value::Bool(true)) {
-        answer.push(("patch", { let _scope = crate::prof::scope("patch::diff"); crate::patch::diff(&before, report) }));
+        let (ops, named) = { let _scope = crate::prof::scope("patch::diff"); crate::patch::for_view(crate::patch::diff(&before, report)) };
+        answer.push(("patch", ops));
+        // The patch names payloads (pictures) by token: the view asks for their text when something reads them.
+        if named { answer.push(("payloads", Value::Bool(true))); }
         answer.push(("revision", Value::Num(editor.revision as f64)));
         answer.push(("depths", Value::array(vec![Value::Num(editor.undo.len() as f64), Value::Num(editor.redo.len() as f64)])));
         // The pool's draws the call did not take, in order: the editor's next ones.

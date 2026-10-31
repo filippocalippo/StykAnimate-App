@@ -8,11 +8,11 @@
 // Without --out it regenerates engine/tests/containers/. Every file is written from a document that is
 // already in the repository (a recorded fixture, opened the way the app opens a project) by the app's
 // own save path: the document export worker (src/document-export-worker.mjs, run in a Node worker as the
-// integration tests run it) for the projects, and for the figure and the movieclips the same worker saving
-// from the engine's session of the document (as the app saves a figure or a clip); the lift and the Rust
-// writer (src/document-lift.mjs, src/native-file-codec.mjs) write the file with shared arrays, which the
-// worker's transport does not carry. The output is byte-stable: the container writer is deterministic and
-// the only generated input, a noise picture, comes from a fixed sequence. `scripts/engine-parity.mjs`
+// integration tests run it) saving from the engine's session of the document, as the app saves a project, a
+// figure or a clip. That the files come out as they are in the repository is the proof that the engine's writer
+// writes the bytes the JavaScript writer wrote. One file is kept as that writer made it: the arrays it shares
+// came from identities a document opened from JSON does not have. The output is byte-stable: the container
+// writer is deterministic and the only generated input, a noise picture, comes from a fixed sequence. `scripts/engine-parity.mjs`
 // (the "containers" stage) opens and saves every one of them again against the Rust store, and
 // `engine/tools/container-parity.mjs` is the check.
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
@@ -46,7 +46,7 @@ const {DocumentExporter} = await import(url('src/document-export.mjs'));
 const {Editor} = await import(url('src/editor.mjs'));
 const {installEngineOwner} = await import(url('src/engine/engine-owner.mjs'));
 const {FakeCodecHost} = await import(url('tests/support/codec-host.mjs'));
-const {openDocument, buildContainerV2} = await import(url('tests/support/native-files.mjs'));
+const {openDocument} = await import(url('tests/support/native-files.mjs'));
 const {buildContainerV1} = await import(url('tests/support/container-v1.mjs'));
 
 const fixtures = 'engine/crates/styk-eval/tests/fixtures';
@@ -77,33 +77,13 @@ function noisePng(width, height) {
     chunk('IDAT', deflateSync(rows, {level: 0})), chunk('IEND', Buffer.alloc(0))]);
 }
 
-/** Every numeric array of 32 values or more, equal ones replaced by one instance: the same document,
- * with arrays the file holds once (a movieclip that reuses a figure's mesh does this in a real project). */
-function shareEqualArrays(document) {
-  const first = new Map();
-  const walk = value => {
-    if (!value || typeof value !== 'object') return;
-    for (const key of Object.keys(value)) {
-      const child = value[key];
-      if (Array.isArray(child) && child.length >= 32 && child.every(v => typeof v === 'number')) {
-        const text = JSON.stringify(child);
-        if (first.has(text)) value[key] = first.get(text); else first.set(text, child);
-      } else walk(child);
-    }
-  };
-  walk(document);
-  return document;
-}
-
 /** What each file is written from, and what it covers. */
 const files = [
   // Version 2 with a numeric-array section: a spatial mesh's positions, bones and weights.
   {name: 'project-arrays.styk', async build({save}) { return save(await project(`${fixtures}/spatial/mesh-views.json`), {name: 'Mesh views'}); }},
-  // Version 2 with arrays stored once and named by several markers: a movieclip that holds the figure's mesh again.
-  {name: 'project-shared-arrays.styk', async build() {
-    const document = shareEqualArrays(await project(`${fixtures}/spatial/mesh-in-movieclip.json`));
-    return buildContainerV2(document, 'styk');
-  }},
+  // Version 2 with arrays stored once and named by several markers: a movieclip that holds the figure's mesh again. Kept
+  // as the JavaScript writer made it (from `spatial/mesh-in-movieclip.json`, equal arrays replaced by one instance).
+  {name: 'project-shared-arrays.styk'},
   // Version 2 with pose channels: stored pose-key sequences, referenced from several channels.
   {name: 'project-channels.styk', async build({save}) { return save(await project(`${fixtures}/channels/channels-pose.json`), {name: 'Pose channels'}); }},
   // Version 2 with a binary-payload section: one picture used by two backgrounds, stored once.
@@ -141,7 +121,7 @@ if (args.includes('--list')) { for (const file of files) console.log(file.name);
 
 const codecHost = new FakeCodecHost(), exporter = new DocumentExporter({codecHost, idleMs: 0});
 const owners = [];
-/** The editor the engine holds `document` in, as the app opens it: a figure or movieclip file is saved from the engine's session. */
+/** The editor the engine holds `document` in, as the app opens it: every file is saved from the engine's session. */
 function held(document) {
   const editor = new Editor({demo: false, propertyChannels: true, layerTimeline: Boolean(document._styk?.layerSheet)});
   editor.load(structuredClone(document));
@@ -151,13 +131,14 @@ function held(document) {
   return editor;
 }
 const save = async (document, {format = 'styk', ...options}) => {
-  const engineFormat = format === 'stkz' || format === 'stykmov', editor = engineFormat ? held(document) : null;
-  const blob = await exporter.export(editor ? editor.report : document, {format, ...options, ...(editor ? {revision: editor.revision} : {})});
+  const editor = held(document);
+  const blob = await exporter.export(editor.report, {format, ...options, revision: editor.revision});
   return new Uint8Array(await blob.arrayBuffer());
 };
 mkdirSync(out, {recursive: true});
 try {
   for (const file of files) {
+    if (!file.build) continue;
     const bytes = await file.build({save});
     writeFileSync(path.join(out, file.name), bytes);
     console.log(`${file.name}: ${bytes.length} bytes`);
