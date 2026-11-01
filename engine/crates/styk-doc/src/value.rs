@@ -1,7 +1,6 @@
 //! The tree: [`Value`] and its containers.
 
 use std::collections::HashMap;
-use std::hash::{BuildHasher, Hasher};
 use std::sync::{Arc, OnceLock};
 
 #[path = "retention.rs"]
@@ -103,74 +102,10 @@ impl Blob {
 pub struct Shape {
     keys: Box<[Arc<str>]>,
     /// Built on first lookup for wide objects; narrow ones scan.
-    index: OnceLock<HashMap<Arc<str>, u32, KeyHash>>,
+    index: OnceLock<HashMap<Arc<str>, u32>>,
 }
 
 const SCAN_KEYS: usize = 8;
-
-/// The hash of a key in a wide object's index: a multiply-and-fold over eight bytes at a time, seeded once per process. Looking
-/// a key up is most of what validating and converting a document does, and the standard hasher spends more on a short key than
-/// the lookup does; the seed keeps a file from choosing keys that collide.
-#[derive(Clone, Copy)]
-pub(crate) struct KeyHash(u64);
-
-impl Default for KeyHash {
-    fn default() -> Self {
-        static SEED: OnceLock<u64> = OnceLock::new();
-        KeyHash(*SEED.get_or_init(|| std::collections::hash_map::RandomState::new().build_hasher().finish() | 1))
-    }
-}
-
-pub(crate) struct KeyHasher(u64);
-
-const FOLD: u64 = 0x9e37_79b9_7f4a_7c15;
-
-impl KeyHasher {
-    #[inline]
-    fn fold(&mut self, word: u64) {
-        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(FOLD);
-    }
-}
-
-impl Hasher for KeyHasher {
-    #[inline]
-    fn write(&mut self, bytes: &[u8]) {
-        let mut words = bytes.chunks_exact(8);
-        for word in &mut words {
-            self.fold(u64::from_le_bytes(word.try_into().unwrap()));
-        }
-        let rest = words.remainder();
-        if !rest.is_empty() {
-            let mut last = [0u8; 8];
-            last[..rest.len()].copy_from_slice(rest);
-            self.fold(u64::from_le_bytes(last) ^ ((rest.len() as u64) << 56));
-        }
-    }
-
-    #[inline]
-    fn write_u8(&mut self, byte: u8) {
-        self.fold(byte as u64);
-    }
-
-    #[inline]
-    fn write_usize(&mut self, word: usize) {
-        self.fold(word as u64);
-    }
-
-    #[inline]
-    fn finish(&self) -> u64 {
-        // The high bits of a product are the well mixed ones; the table takes the low.
-        self.0 ^ (self.0 >> 32)
-    }
-}
-
-impl BuildHasher for KeyHash {
-    type Hasher = KeyHasher;
-
-    fn build_hasher(&self) -> KeyHasher {
-        KeyHasher(self.0)
-    }
-}
 
 impl Shape {
     pub fn new(keys: impl Into<Box<[Arc<str>]>>) -> Arc<Shape> {
