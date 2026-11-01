@@ -3671,7 +3671,7 @@ async function acceptNativeFileTracked(result) {
   pause();
   // A project's bytes go to the engine as they are; only a Stick Nodes archive needs a file to read twice.
   const decoded = result.bytes
-    ? await chooseSticknodesFile(/.(piv|styk|json)$/i.test(result.filename) ? {name: result.filename, size: result.bytes.byteLength, arrayBuffer: async () => result.bytes} : new File([result.bytes], result.filename))
+    ? await chooseSticknodesFile(/\.(piv|styk|json)$/i.test(result.filename) ? {name: result.filename, size: result.bytes.byteLength, arrayBuffer: async () => result.bytes} : new File([result.bytes], result.filename))
     : result;
   if(!decoded)return false;
   decoded.timings = { ...decoded.timings, ...result.timings };
