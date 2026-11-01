@@ -223,15 +223,23 @@ impl Residency {
 }
 
 impl Residency {
-    /// Gives `page` a layer of the pool for views that are not the frame on show: a free one, else the one of the least
-    /// recently used page that is not in `keep` (the pages of the view being loaded) and not on show, else (with `grow`) a new
-    /// one, which the texture must be given ([`Residency::layers`]). A page that is in the texture already, in any layer, is
-    /// not moved. The pool only ever has as many layers as the most pages one view needed at once, so it always has room for
-    /// the view being loaded, and what the frame on show holds is never touched.
+    /// Gives `page` a layer for a view that is not the frame on show: a free one (which the frame's loads may take back like any
+    /// other page's: it is not the pool's), else a pool layer, that of the least recently used page that is not in `keep` (the pages
+    /// **every picture of the view draws** are on, those already in the texture too: a view's own pages never take each other's
+    /// place) and not on show, else (with `grow`) a new pool layer, which the texture must be given ([`Residency::layers`]). A page
+    /// that is in the texture already, in any layer, is not moved. The pool only ever has as many layers as the most pages one view
+    /// needed at once, so it always has room for the view being loaded, and what the frame on show holds is never touched.
     pub fn acquire_spare(&mut self, page: u32, keep: &[u32], grow: bool) -> Acquired {
         let Some(slot) = self.pages.get(page as usize) else { return Acquired::Full };
         if let Some(layer) = slot.layer {
             return Acquired::Resident(layer);
+        }
+        if let Some(layer) = self.free.pop() {
+            let slot = &mut self.pages[page as usize];
+            slot.layer = Some(layer);
+            slot.used = self.clock;
+            self.loads += 1;
+            return Acquired::Given { layer, evicted: None };
         }
         let held = |layer: u32| self.pages.iter().position(|page| page.layer == Some(layer)).map(|index| index as u32);
         let choice = self
@@ -398,6 +406,59 @@ mod tests {
         residency.hold(&[8]);
         given(residency.acquire_spare(9, &[9], true));
         assert!(residency.layer_of(8).is_some(), "the frame holds page 8");
+    }
+
+    #[test]
+    fn a_view_never_takes_a_page_of_its_own_from_a_pool_layer() {
+        let mut residency = Residency::new(20, 2);
+        for page in 0..2 {
+            residency.touch(&[page]);
+            given(residency.acquire(page, &[], false));
+        }
+        residency.hold(&[0, 1]);
+        // A first view loads page 11 into a pool of one layer.
+        assert_eq!(given(residency.acquire_spare(11, &[11], true)).0, 2);
+        // A view that draws pages 11 and 14 asks for page 14 with both in `keep`, as the pages of every picture it draws: page 11 stays,
+        // the pool grows to two, and both pages are there however often it asks again.
+        let keep = [11, 14];
+        assert_eq!(given(residency.acquire_spare(14, &keep, true)).1, None);
+        assert_eq!((residency.layers(), residency.pool_layers()), (4, 2));
+        for _ in 0..3 {
+            assert!(matches!(residency.acquire_spare(11, &keep, true), Acquired::Resident(_)));
+            assert!(matches!(residency.acquire_spare(14, &keep, true), Acquired::Resident(_)));
+        }
+        assert!(residency.layer_of(11).is_some() && residency.layer_of(14).is_some(), "the view has both pages at once");
+        // With only the page it lacks in `keep`, page 11 would have been taken for page 14, and back again, for ever.
+        let mut swapped = Residency::new(20, 2);
+        for page in 0..2 {
+            swapped.touch(&[page]);
+            given(swapped.acquire(page, &[], false));
+        }
+        swapped.hold(&[0, 1]);
+        given(swapped.acquire_spare(11, &[11], true));
+        assert_eq!(given(swapped.acquire_spare(14, &[14], true)).1, Some(11), "what the fix prevents");
+    }
+
+    #[test]
+    fn a_free_layer_is_used_before_the_pool_grows_and_the_frame_takes_it_back_like_any_page() {
+        let mut residency = Residency::new(10, 4);
+        for page in 0..3 {
+            residency.touch(&[page]);
+            given(residency.acquire(page, &[], false));
+        }
+        residency.hold(&[0, 1, 2]);
+        // Three of four layers are in use: a view's page takes the fourth and the texture does not grow.
+        residency.touch(&[5]);
+        let view = given(residency.acquire_spare(5, &[5], true));
+        assert_eq!((view.1, residency.layers(), residency.pool_layers()), (None, 4, 0));
+        // The frame needs a page of its own: with the layers full, the view's page is the one that leaves (it is the least recently shown).
+        residency.touch(&[0, 1, 2]);
+        assert_eq!(given(residency.acquire(7, &[], false)), (view.0, Some(5)));
+        // A second view needing two pages with no free layer makes the pool.
+        let layers = residency.layers();
+        given(residency.acquire_spare(8, &[8, 9], true));
+        given(residency.acquire_spare(9, &[8, 9], true));
+        assert_eq!((residency.layers(), residency.pool_layers()), (layers + 2, 2));
     }
 
     #[test]

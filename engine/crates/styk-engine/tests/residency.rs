@@ -82,6 +82,26 @@ fn a_document_of_more_pages_than_the_texture_keeps_decodes_pictures_when_asked()
 }
 
 #[test]
+fn a_decode_asked_for_behind_the_queue_is_decoded_first_once_a_frame_waits_for_it() {
+    let engine = open(ATLAS_PAGES + 1);
+    let generation = engine.generation().unwrap();
+    while engine.step() {}
+    drop(engine.take_images(usize::MAX));
+    // Pictures 0, 1 and 2 are asked for behind the queue, as the ticks ahead are; a frame then waits for picture 2.
+    for picture in 0..3 {
+        engine.decode_images(&generation, &[picture], false);
+    }
+    engine.promote_images(&generation, &[2]);
+    assert!(engine.step());
+    let first = engine.take_images(usize::MAX);
+    assert_eq!(first.iter().map(|image| image.index).collect::<Vec<_>>(), vec![2], "the picture a frame waits for is decoded first");
+    while engine.step() {}
+    let mut rest: Vec<u32> = engine.take_images(usize::MAX).iter().map(|image| image.index).collect();
+    rest.sort_unstable();
+    assert_eq!(rest, vec![0, 1], "the others are still decoded, once each");
+}
+
+#[test]
 fn a_document_that_fits_the_texture_is_decoded_with_it() {
     let engine = open(2);
     let generation = engine.generation().unwrap();

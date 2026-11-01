@@ -127,13 +127,20 @@ impl Stage {
         if grow {
             keep.extend(Self::pages_of_pictures(generation, wanted));
         }
-        let (mut complete, mut given, mut decode) = (true, Vec::new(), Vec::new());
+        let (mut complete, mut given, mut decode, mut raise) = (true, Vec::new(), Vec::new(), Vec::new());
         for &picture in wanted {
             let Some(entry) = generation.assets.atlas.get(picture as usize).filter(|entry| entry.valid) else { continue };
             if !grow {
                 keep.push(entry.layer);
             }
-            if self.uploaded.has(entry) || self.loading.asked.contains_key(&picture) || self.loading.lost.contains(&picture) {
+            if self.uploaded.has(entry) || self.loading.lost.contains(&picture) {
+                continue;
+            }
+            if self.loading.asked.contains_key(&picture) {
+                // Asked for before, behind the queue (the ticks ahead, a thumbnail): a frame that waits for it now has it decoded first.
+                if urgent {
+                    raise.push(picture as usize);
+                }
                 continue;
             }
             if entry.layer >= styk_render::MAX_PAGES {
@@ -160,6 +167,7 @@ impl Stage {
         }
         let decode: Vec<usize> = decode.into_iter().map(|picture| picture as usize).collect();
         self.engine.decode_images(generation, &decode, urgent);
+        self.engine.promote_images(generation, &raise);
         complete
     }
 
@@ -237,9 +245,11 @@ impl Stage {
     /// texture takes a layer of the pool the frame on show never holds ([`Residency::acquire_spare`]), which grows by a layer
     /// when the view needs more pages at once than it has, and the engine decodes them behind everything else. The frame on
     /// show and the ticks loaded ahead of it keep their layers.
-    fn request_view_pictures(&mut self, generation: &Arc<Generation>, wanted: &[u32]) {
+    /// `drawn` is every picture the view draws, those already in the texture too: their pages are kept, so the pages of one
+    /// view never take each other's place.
+    fn request_view_pictures(&mut self, generation: &Arc<Generation>, wanted: &[u32], drawn: &[u32]) {
         let Some(residency) = self.residency.as_mut() else { return };
-        let keep = Self::pages_of_pictures(generation, wanted);
+        let keep = Self::pages_of_pictures(generation, drawn);
         let (mut given, mut decode) = (Vec::new(), Vec::new());
         for &picture in wanted {
             let Some(entry) = generation.assets.atlas.get(picture as usize).filter(|entry| entry.valid) else { continue };
@@ -275,14 +285,16 @@ impl Stage {
             return if self.engine.images_pending() == 0 { ViewPictures::Sharp } else { ViewPictures::Wait };
         }
         let index = self.place_index(generation);
-        let missing: Vec<u32> = styk_engine::pictures_of(list, &index)
-            .into_iter()
+        let drawn = styk_engine::pictures_of(list, &index);
+        let missing: Vec<u32> = drawn
+            .iter()
+            .copied()
             .filter(|&picture| generation.assets.atlas.get(picture as usize).is_some_and(|entry| entry.valid && !self.uploaded.has(entry)))
             .collect();
         if missing.is_empty() {
             return ViewPictures::Sharp;
         }
-        self.request_view_pictures(generation, &missing);
+        self.request_view_pictures(generation, &missing, &drawn);
         if let Some(residency) = self.residency.as_mut() {
             residency.touch(&Self::pages_of_pictures(generation, &missing));
         }

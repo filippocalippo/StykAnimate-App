@@ -144,7 +144,8 @@ document opens), and:
 - **The unit of residency is the page, the unit of loading the picture.** A page is given a layer when a picture on it is wanted;
   the page whose next use is the farthest (from the table below, else the least recently shown) leaves. The pictures a frame
   draws are decoded (`Engine::decode_images`, ahead of the queue, three at a time across the workers, `DEMAND_DECODES` times the picture
-  budget) and uploaded whole at once; the others a slice of 8 MiB a frame (a 4K picture goes in over eight frames,
+  budget; one asked for earlier behind the queue, as a tick ahead's or a thumbnail's, is moved ahead when a frame waits for it:
+  `Engine::promote_images`) and uploaded whole at once; the others a slice of 8 MiB a frame (a 4K picture goes in over eight frames,
   `Renderer::upload_rows`). The pages of the frame being drawn are never taken, so a frame that draws from more pages than there
   are layers makes the texture grow (once, by a copy: the budget is soft only in that case).
 - **A table of what each tick draws** (`Engine::request_picture_table`, `picture_table.rs`) is made on the workers when nothing
@@ -169,9 +170,12 @@ document opens), and:
   seconds) and asks again until the answer is `drawn`: a thumbnail that is kept is every picture sharp, so it is the pixels of a
   whole-layout draw. The sharp pictures are loaded in a **pool of layers of their own** (`Residency::acquire_spare`, `Stage::request_view_pictures`),
   made when a thumbnail first needs one, so a thumbnail gets its pictures whatever the stage's frame holds (when that is every
-  layer, the thumbnails would otherwise wait for the playhead to move): thumbnails take turns on it, the next one's pages taking the
-  place of the least recently used page that is not one of its own, and the pool is as large as the most pages one thumbnail needed
-  that were not in the texture already (a frame spread over three new pages makes three layers). Nothing of the frame on show or of the
+  layer, the thumbnails would otherwise wait for the playhead to move): a layer the texture has free is used first (the stage's
+  loads take it back like any page's, it is not the pool's), then thumbnails take turns on the pool, the next one's pages taking the
+  place of the least recently used page that is not one of its own (the pages of **every** picture the thumbnail draws, those sharp
+  already too: a thumbnail's pages never take each other's place, or a view of two pages would swap them for ever), and the pool is as
+  large as the most pages one thumbnail needed at once that were not in a layer already (a frame spread over three new pages makes
+  three layers). Nothing of the frame on show or of the
   ticks loaded ahead of it is ever taken for a view, and the stage's own loads never take a pool layer (a page of the pool the frame on
   show comes to draw from is used where it is). A person who never has a thumbnail drawn pays nothing; one who does pays one
   layer (64 MiB at 4,096²) for as long as the document is open. A picture without a soft copy yet waits for it (a picture that cannot be

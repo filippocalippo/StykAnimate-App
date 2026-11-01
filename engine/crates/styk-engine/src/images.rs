@@ -289,6 +289,22 @@ impl Engine {
         self.inner.state.notify_all();
     }
 
+    /// Moves the decodes of images `indices` that are queued already ahead of the rest of the queue: a frame waits for them now, and
+    /// they were asked for behind it, as pictures of the ticks ahead or of a thumbnail. A picture being decoded is on its way.
+    pub fn promote_images(&self, generation: &Arc<Generation>, indices: &[usize]) {
+        if indices.is_empty() { return }
+        let mut state = self.inner.state.lock();
+        if self.inner.stopping.load(std::sync::atomic::Ordering::SeqCst) || state.images.lineage != generation.lineage { return }
+        let wanted = |task: &crate::OrdinaryTask| matches!(task, crate::OrdinaryTask::Decode(queued, Picture::Image(index)) if queued.lineage == generation.lineage && indices.contains(index));
+        if !state.tasks.iter().any(wanted) { return }
+        let (mut front, mut rest) = (crate::TaskQueue::new(), crate::TaskQueue::new());
+        while let Some(task) = state.tasks.pop_front() {
+            if wanted(&task) { front.push_back(task) } else { rest.push_back(task) }
+        }
+        front.append(&mut rest);
+        state.tasks = front;
+    }
+
     /// Queues one coalesced preparation in the same ordinary worker queue.
     /// Pending counters change immediately, but dense task preparation/disposal
     /// never happens on the caller (a Stage may call this on the interface).
