@@ -27,8 +27,10 @@ fn bounds(p: &Prim) -> Option<[f64; 4]> {
     };
     Some(match p.kind & 255 {
         K_CAPSULE | K_BOX => {
+            // A square-capped stroke reaches further than a round-capped one: past a diagonal's corner (`box_reach`).
             let hw = f(p.b[0]).abs();
-            [f(p.a[0]).min(f(p.a[2])) - hw, f(p.a[1]).min(f(p.a[3])) - hw, f(p.a[0]).max(f(p.a[2])) + hw, f(p.a[1]).max(f(p.a[3])) + hw]
+            let pad = if p.kind & 255 == K_BOX { super::box_reach(hw) } else { hw };
+            [f(p.a[0]).min(f(p.a[2])) - pad, f(p.a[1]).min(f(p.a[3])) - pad, f(p.a[0]).max(f(p.a[2])) + pad, f(p.a[1]).max(f(p.a[3])) + pad]
         }
         K_ARC | K_RING => {
             let r = f(p.a[2]).abs() + f(p.a[3]).abs();
@@ -100,8 +102,13 @@ pub fn cull_outside(list: &mut DrawList, doc: &Document, camera: Option<&Camera>
         kept += u32::from(k);
     }
     before.push(kept);
+    // The leading root primitives that are background fills: counted among the primitives that stay, from where the root pass starts (the
+    // root is the last pass, after the deeper ones). Fills are never dropped, so the count is what it was.
+    if let Some(root) = list.passes.last() {
+        let end = (root.start + list.background_prims).min(root.end);
+        list.background_prims = before[end as usize] - before[root.start as usize];
+    }
     list.passes = list.passes.iter().map(|pass| Pass { depth: pass.depth, start: before[pass.start as usize], end: before[pass.end as usize] }).collect();
-    list.background_prims = before[list.background_prims as usize];
     let mut at = 0;
     list.prims.retain(|_| {
         at += 1;

@@ -246,7 +246,7 @@ impl<'a> Ctx<'a> {
                     self.arc(out, it, hw, color, paint);
                 } else {
                     let (s, e) = (it.start, it.end);
-                    let pad = if square { hw * std::f64::consts::SQRT_2 } else { hw };
+                    let pad = if square { box_reach(hw) } else { hw };
                     let b = [s[0].min(e[0]) - pad, s[1].min(e[1]) - pad, s[0].max(e[0]) + pad, s[1].max(e[1]) + pad];
                     let kind = if square { K_BOX } else { K_CAPSULE };
                     out.push(prim(kind, color, paint, [s[0], s[1], e[0], e[1]], [hw, 0.0, 0.0, 0.0], [0.0; 4]), b);
@@ -872,6 +872,12 @@ impl Out {
             self.bounds = [self.bounds[0] + dx, self.bounds[1] + dy, self.bounds[2] + dx, self.bounds[3] + dy];
         }
     }
+}
+
+/// How far a `K_BOX` stroke of half width `hw` reaches beyond the rectangle of its endpoints: the body extends `hw` past each endpoint along
+/// the stroke, so a corner reaches `hw·√2` on a diagonal. The encoder pads the primitive's bounds by it, and so does [`cull_outside`].
+pub(crate) fn box_reach(hw: f64) -> f64 {
+    hw * std::f64::consts::SQRT_2
 }
 
 /// Encodes a scene. Objects encode in parallel; groups are merged in order.
