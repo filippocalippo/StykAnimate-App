@@ -304,7 +304,7 @@ export class DrawingResources {
   apply(figure,changes,direction,prepared,options) {return this.applyEntry(this.entry(figure),figure,changes,direction,prepared,options);}
   /** Applies a commit's tiles to a cel's entry. `figure` is the document's definition of the cel, which takes the new revision and
    * bounds, or null while the document has none (a creation undone: the entry keeps the pixels for its redo). */
-  applyEntry(e,figure,changes,direction,prepared,{resident=false}={}) {
+  applyEntry(e,figure,changes,direction,prepared,{resident=false,bounds}={}) {
     const d=figure?drawingMetadata(figure):null;
     if(resident&&e.store){
       let dirty=null;
@@ -319,13 +319,14 @@ export class DrawingResources {
     if(e.store){
       // Pixels shared with a history record are adopted frozen (copy on write).
       if(plan)for(const t of plan.tiles){if(t.pixels){e.store.adopt(t.tx,t.ty,t.pixels,t.alphaBounds);if(t.shared)e.store.get(t.tx,t.ty).frozen=true;}else e.store.delete(t.tx,t.ty);}
-      else applyTileChanges(e.store,changes,direction);
+      else applyTileChanges(e.store,changes,direction,{share:true});
       e.store.prune();
     }
     else e.deferred.push({changes,direction});
     if(plan)prepared.consume(plan);
     e.revision++;if(d)d.revision=e.revision;
-    if(d?.version===2&&e.store)d.bounds=e.store.bounds?{...e.store.bounds}:null;
+    // A caller that knows the cel's bounds after the commit (a replay: the command holds them) says so instead of having them scanned for.
+    if(d?.version===2&&e.store)d.bounds=bounds!==undefined?(bounds?{...bounds}:null):e.store.bounds?{...e.store.bounds}:null;
     let dirty=null;for(const c of changes){const rect={x:c.tx*TILE,y:c.ty*TILE,width:TILE,height:TILE};dirty=dirty?{x:Math.min(dirty.x,rect.x),y:Math.min(dirty.y,rect.y),width:Math.max(dirty.x+dirty.width,rect.x+rect.width)-Math.min(dirty.x,rect.x),height:Math.max(dirty.y+dirty.height,rect.y+rect.height)-Math.min(dirty.y,rect.y)}:rect;}
     this.present(e,dirty);this.schedule();
   }

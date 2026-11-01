@@ -104,52 +104,110 @@ impl std::hash::Hasher for CoordHasher {
 /// The hash state of the maps and sets keyed by tile coordinates.
 pub type CoordBuild = std::hash::BuildHasherDefault<CoordHasher>;
 
+/// Texels across the half of a tile a child tile reduces to.
+const HALF: usize = TILE as usize / 2;
+
+/// One texel of a reduced tile from the 2×2 block of the tile below that it covers (`a` is the block's upper row of
+/// two texels, `b` its lower row): the alpha-weighted mean of the block, rounded half up, with the block's mean alpha.
+#[inline]
+fn reduce_block(a: &[u8], b: &[u8], texel: &mut [u8]) {
+    // Most of a stroke's tile is empty or opaque: an empty block is one comparison.
+    if u64::from_le_bytes(a.try_into().expect("eight bytes")) | u64::from_le_bytes(b.try_into().expect("eight bytes")) == 0 {
+        texel.fill(0);
+        return;
+    }
+    let pa = a[3] as u32 + a[7] as u32 + b[3] as u32 + b[7] as u32;
+    if pa == 0 {
+        texel.fill(0);
+        return;
+    }
+    if pa == 4 * 255 {
+        // Four opaque texels: (2 * 255 * sum + 1020) / 2040 is (sum + 2) / 4, without the division.
+        for c in 0..3 {
+            texel[c] = ((a[c] as u32 + a[4 + c] as u32 + b[c] as u32 + b[4 + c] as u32 + 2) / 4) as u8;
+        }
+        texel[3] = 255;
+        return;
+    }
+    for c in 0..3 {
+        let weighted = a[c] as u32 * a[3] as u32 + a[4 + c] as u32 * a[7] as u32 + b[c] as u32 * b[3] as u32 + b[4 + c] as u32 * b[7] as u32;
+        texel[c] = ((2 * weighted + pa) / (2 * pa)) as u8;
+    }
+    texel[3] = ((pa + 2) / 4) as u8;
+}
+
+/// The four tiles of the level below that a reduced tile covers, in quadrant order (upper left, upper right, lower left, lower right).
+fn children<'a, S: std::hash::BuildHasher>(below: &'a HashMap<(i32, i32), Vec<u8>, S>, tx: i32, ty: i32) -> [Option<&'a Vec<u8>>; 4] {
+    [below.get(&(2 * tx, 2 * ty)), below.get(&(2 * tx + 1, 2 * ty)), below.get(&(2 * tx, 2 * ty + 1)), below.get(&(2 * tx + 1, 2 * ty + 1))]
+}
+
 /// `downTile`: one level-`n + 1` tile from the four level-`n` tiles below it.
 /// Each output texel is the alpha-weighted mean of a 2×2 block, rounded half up,
 /// with the block's mean alpha. `None` when none of the four exists.
 pub(crate) fn down_tile<S: std::hash::BuildHasher>(below: &HashMap<(i32, i32), Vec<u8>, S>, tx: i32, ty: i32) -> Option<Vec<u8>> {
-    let subs = [below.get(&(2 * tx, 2 * ty)), below.get(&(2 * tx + 1, 2 * ty)), below.get(&(2 * tx, 2 * ty + 1)), below.get(&(2 * tx + 1, 2 * ty + 1))];
+    let subs = children(below, tx, ty);
     if subs.iter().all(Option::is_none) {
         return None;
     }
     let mut out = vec![0u8; TILE_BYTES];
-    let (t, h) = (TILE as usize, TILE as usize / 2);
-    let line = t * 4;
+    let (t, line) = (TILE as usize, TILE as usize * 4);
     for (q, sub) in subs.iter().enumerate() {
         let Some(sub) = sub else { continue };
-        let (ox, oy) = ((q & 1) * h, (q >> 1) * h);
-        for py in 0..h {
+        let (ox, oy) = ((q & 1) * HALF, (q >> 1) * HALF);
+        for py in 0..HALF {
             // Two source rows and the output row as slices: no index below is checked one texel at a time.
             let upper = &sub[2 * py * line..(2 * py + 1) * line];
             let lower = &sub[(2 * py + 1) * line..(2 * py + 2) * line];
-            let row = &mut out[((oy + py) * t + ox) * 4..][..h * 4];
+            let row = &mut out[((oy + py) * t + ox) * 4..][..HALF * 4];
             for (px, texel) in row.chunks_exact_mut(4).enumerate() {
-                let (a, b) = (&upper[px * 8..px * 8 + 8], &lower[px * 8..px * 8 + 8]);
-                // Most of a stroke's tile is empty or opaque: an empty block is one comparison.
-                if u64::from_le_bytes(a.try_into().expect("eight bytes")) | u64::from_le_bytes(b.try_into().expect("eight bytes")) == 0 {
-                    continue;
-                }
-                let pa = a[3] as u32 + a[7] as u32 + b[3] as u32 + b[7] as u32;
-                if pa == 0 {
-                    continue;
-                }
-                if pa == 4 * 255 {
-                    // Four opaque texels: (2 * 255 * sum + 1020) / 2040 is (sum + 2) / 4, without the division.
-                    for c in 0..3 {
-                        texel[c] = ((a[c] as u32 + a[4 + c] as u32 + b[c] as u32 + b[4 + c] as u32 + 2) / 4) as u8;
-                    }
-                    texel[3] = 255;
-                    continue;
-                }
-                for c in 0..3 {
-                    let weighted = a[c] as u32 * a[3] as u32 + a[4 + c] as u32 * a[7] as u32 + b[c] as u32 * b[3] as u32 + b[4 + c] as u32 * b[7] as u32;
-                    texel[c] = ((2 * weighted + pa) / (2 * pa)) as u8;
-                }
-                texel[3] = ((pa + 2) / 4) as u8;
+                reduce_block(&upper[px * 8..px * 8 + 8], &lower[px * 8..px * 8 + 8], texel);
             }
         }
     }
     Some(out)
+}
+
+/// The tile [`down_tile`] makes when only the texels of `rect` (`[x0, y0, x1, y1)` of the reduced tile) can differ from `previous`,
+/// the reduction before the tiles below changed: the other texels are `previous`'s, the texels of `rect` are made again.
+pub(crate) fn down_tile_patch<S: std::hash::BuildHasher>(below: &HashMap<(i32, i32), Vec<u8>, S>, tx: i32, ty: i32, previous: &[u8], rect: [usize; 4]) -> Vec<u8> {
+    let subs = children(below, tx, ty);
+    let mut out = previous.to_vec();
+    let (t, line) = (TILE as usize, TILE as usize * 4);
+    for y in rect[1]..rect[3] {
+        for x in rect[0]..rect[2] {
+            let texel = &mut out[(y * t + x) * 4..][..4];
+            match subs[(y / HALF) * 2 + x / HALF] {
+                None => texel.fill(0),
+                Some(sub) => {
+                    let (gx, gy) = (x % HALF, y % HALF);
+                    reduce_block(&sub[2 * gy * line + gx * 8..][..8], &sub[(2 * gy + 1) * line + gx * 8..][..8], texel);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The smallest rectangle `[x0, y0, x1, y1)` of texels outside which two versions of a tile are equal (`None`: a tile that is not
+/// there, transparent), or `None` when they are equal.
+pub(crate) fn changed_rect(before: Option<&[u8]>, after: Option<&[u8]>) -> Option<[usize; 4]> {
+    let (t, line) = (TILE as usize, TILE as usize * 4);
+    let zero = [0u8; TILE_BYTES];
+    let (before, after) = (before.unwrap_or(&zero), after.unwrap_or(&zero));
+    let mut rect: Option<[usize; 4]> = None;
+    for y in 0..t {
+        let (x, z) = (&before[y * line..(y + 1) * line], &after[y * line..(y + 1) * line]);
+        if x == z {
+            continue;
+        }
+        let first = x.iter().zip(z).position(|(p, q)| p != q).expect("the rows differ") / 4;
+        let last = x.iter().zip(z).rposition(|(p, q)| p != q).expect("the rows differ") / 4;
+        let rect = rect.get_or_insert([first, y, last + 1, y + 1]);
+        rect[0] = rect[0].min(first);
+        rect[2] = rect[2].max(last + 1);
+        rect[3] = y + 1;
+    }
+    rect
 }
 
 /// One drawn tile's slot contents: `(TILE + 2 * BORDER)²` straight-alpha RGBA
