@@ -441,7 +441,7 @@ text, no drawing cel is live, and an object being dragged is encoded afresh (its
 What the encoder keeps is judged by numbers, never by addresses: the assets by `Assets::id` (an `Assets::extended` that adds a picture, cel or glyph is numbered anew; one that adds nothing keeps the number, so a pose commit does not forget what was encoded) and a
 scene by its `Scene::stamp` (each build is numbered, and a built scene is never changed). The onion skins are kept the same way: a ghost
 is encoded once and drawn again while it is the same scene (stamp) under the same hidden slots, tint, effects setting and assets, so a
-gesture does not encode them at every step; none is kept while a drawing cel is live. `styk-eval/tests/build_memory_stale.rs` compares
+gesture does not encode them at every step, nor when the document is published anew by a commit or an undo and none of the ghost's objects changed (the stage keeps the ghost's scene, so the stamp is the same); none is kept while a drawing cel is live. `styk-eval/tests/build_memory_stale.rs` compares
 every such list with the list encoded whole.
 
 ## In the app

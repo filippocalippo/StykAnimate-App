@@ -17,7 +17,7 @@ use std::sync::Arc;
 use styk_doc::Value;
 use styk_eval::drawlist::{DrawList, EncodeMemory, Ghost, Overrides, encode_composed_remembering};
 use styk_eval::eval::Frame;
-use styk_eval::geometry::{BuildMemory, Scene, build_remembering_plain};
+use styk_eval::geometry::{BuildMemory, Scene, build_remembering_plain, build_remembering_plain_over};
 use styk_eval::load::Loader;
 use styk_eval::onion::{GhostPlace, compose};
 use styk_eval::vfx::generated::Batch;
@@ -35,6 +35,8 @@ struct Pose {
     frame: Arc<Frame>,
     /// Geometry of `frame`, built when first drawn.
     scene: Option<Arc<Scene>>,
+    /// The generation `scene` was built or confirmed for. A ghost's scene is kept across generations: see [`scene_of`].
+    built_for: u64,
     /// The draw counter when this pose was last shown.
     used: u64,
     /// `_cameraMotionTick`: the frame's time on the camera-motion clips, when it has any.
@@ -105,7 +107,7 @@ impl Pose {
     }
 
     fn shared(frame: Arc<Frame>, used: u64, times: Times) -> Pose {
-        Pose { frame, scene: None, used, motion_tick: times.motion, shot: None, vfx_tick: times.vfx, generators: None, record: None, prepared: None, memory: BuildMemory::default() }
+        Pose { frame, scene: None, built_for: 0, used, motion_tick: times.motion, shot: None, vfx_tick: times.vfx, generators: None, record: None, prepared: None, memory: BuildMemory::default() }
     }
 
     /// What the scene camera does to this pose, worked out once per document generation
@@ -130,6 +132,24 @@ impl Pose {
         self.shot = Some((generation.id, shot.clone()));
         Some(shot)
     }
+}
+
+/// The geometry of a pose for `generation`. A scene built for another generation is not built again when the build over what it kept finds
+/// every object, figure and scene-level input as they were: the scene stays (stamp and all), and what was made of it with it.
+fn scene_of(pose: &mut Pose, doc: &styk_eval::doc::Document, generation: u64) -> Arc<Scene> {
+    if let Some(scene) = pose.scene.as_ref().filter(|_| pose.built_for == generation) {
+        return scene.clone();
+    }
+    let scene = match pose.scene.take() {
+        Some(previous) => match build_remembering_plain_over(doc, &pose.frame, &mut pose.memory, &previous) {
+            Some(built) => Arc::new(built),
+            None => previous,
+        },
+        None => Arc::new(build_remembering_plain(doc, &pose.frame, &mut pose.memory)),
+    };
+    pose.scene = Some(scene.clone());
+    pose.built_for = generation;
+    scene
 }
 
 /// An edit frame, its onion skins, and what was last built from them. Owned by the thread that draws.
@@ -220,14 +240,11 @@ impl EditScene {
             self.lineage = generation.lineage;
         }
         if self.generation != generation.id {
-            // Figures may have changed: geometry is rebuilt from the kept poses.
+            // Figures may have changed: the displayed pose's geometry is rebuilt, and a ghost's checked against the new document when drawn.
             self.generation = generation.id;
             if let Some(pose) = &mut self.current {
                 pose.scene = None;
                 pose.generators = None;
-            }
-            for pose in self.ghosts.values_mut() {
-                pose.scene = None;
             }
         }
     }
@@ -273,6 +290,7 @@ impl EditScene {
         let times = Times { vfx: shown.times.0, motion: shown.times.1 };
         let mut pose = Pose::shared(shown.frame.clone(), self.draws, times);
         pose.scene = Some(shown.scene.clone());
+        pose.built_for = generation.id;
         self.current = Some(pose);
         true
     }
@@ -351,7 +369,7 @@ impl EditScene {
         self.camera_pending = None;
         self.draws += 1;
         let doc = &generation.prepared.doc;
-        let scene_of = |pose: &mut Pose| pose.scene.get_or_insert_with(|| Arc::new(build_remembering_plain(doc, &pose.frame, &mut pose.memory))).clone();
+        let scene_of = |pose: &mut Pose| scene_of(pose, doc, generation.id);
         let Some(current) = self.current.as_mut() else { return Ok(None) };
         let scene = scene_of(current);
         let hidden = flags(options.hidden, current.frame.objects.len());
