@@ -51,8 +51,14 @@ pub const PAGE_SLOTS: u32 = COLUMNS * COLUMNS;
 /// Pages live cels may use together (4,096² texels each, 64 MiB).
 pub const MAX_PAGES: u32 = 4;
 
-/// Frames after the last change to a live cel during which the cels count as changing ([`LiveCels::changing`]).
-pub const QUIET_FRAMES: u32 = 24;
+/// Milliseconds after the last change to a live cel during which a frame has no time to spare for pictures
+/// ([`LiveCels::picture_budget`]), and the ones after it during which a burst of them would still land on the frame a
+/// next stroke begins on.
+pub const CHANGING_MS: f64 = 250.0;
+pub const SETTLING_MS: f64 = 1500.0;
+/// The most decoded pictures a frame uploads in each of those periods.
+pub const CHANGING_PICTURE_BYTES: usize = 512 << 10;
+pub const SETTLING_PICTURE_BYTES: usize = 2 << 20;
 
 /// The slots are all in use: the interface drops cels it can do without and tries again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -360,8 +366,8 @@ pub struct LiveCels {
     pool: Pool,
     /// The levels written as tiles change; the others wait ([`LiveCels::set_resident`]).
     resident: Levels,
-    /// Frames drawn since a cel last changed.
-    quiet: u32,
+    /// When (the host's clock, milliseconds) a cel last changed.
+    changed_at: Option<f64>,
 }
 
 impl Default for LiveCels {
@@ -389,7 +395,7 @@ pub struct Stats {
 impl LiveCels {
     /// Live cels that write the levels in `resident` as tiles change.
     pub fn new(resident: Levels) -> Self {
-        LiveCels { cels: StdMap::new(), pool: Pool::default(), resident, quiet: QUIET_FRAMES }
+        LiveCels { cels: StdMap::new(), pool: Pool::default(), resident, changed_at: None }
     }
 
     /// Pages of the atlas the slots need after the document's own.
@@ -418,9 +424,6 @@ impl LiveCels {
     /// first update and stays hidden until [`LiveCels::show`]. The slots that change are marked for
     /// [`LiveCels::take_runs`]. On [`Full`] the cel is dropped whole, since a partial update would draw wrong.
     pub fn update(&mut self, id: &str, float: bool, changes: Vec<(Coord, Option<Vec<u8>>)>) -> Result<(), Full> {
-        if !changes.is_empty() {
-            self.quiet = 0;
-        }
         let cel = self.cels.entry(id.to_string()).or_default();
         let layer = if float { &mut cel.float } else { &mut cel.base };
         let result = layer.apply(&mut self.pool, self.resident, changes);
@@ -430,16 +433,22 @@ impl LiveCels {
         result
     }
 
-    /// A frame was drawn.
-    pub fn frame_drawn(&mut self) {
-        self.quiet = self.quiet.saturating_add(1);
+    /// A cel's tiles changed at `now` (the host's clock, milliseconds).
+    pub fn changed(&mut self, now: f64) {
+        self.changed_at = Some(now);
     }
 
-    /// Whether cels are held and one changed within the last [`QUIET_FRAMES`] frames: a stroke, an undo or a
-    /// move is being drawn from live tiles, and the frame has no time to spare for the published copies of those
-    /// pixels (the host uploads them in small slices until the cels are quiet).
-    pub fn changing(&self) -> bool {
-        !self.cels.is_empty() && self.quiet < QUIET_FRAMES
+    /// The most decoded pictures of the document a frame at `now` uploads, at most `full`. The published
+    /// copies of the pixels being drawn (the engine decodes every level of a cel again after each publication) are
+    /// not what the frame shows, and a burst of them lands on the frame a stroke may begin on: while a cel changed
+    /// a moment ago a frame takes a slice, and a smaller slice for a moment after. Time ends it, so a stage that
+    /// draws nothing, or a document whose cel is held after Draw was left, loads at `full` again by itself.
+    pub fn picture_budget(&self, now: f64, full: usize) -> usize {
+        match self.changed_at {
+            Some(at) if !self.cels.is_empty() && now - at < CHANGING_MS => CHANGING_PICTURE_BYTES.min(full),
+            Some(at) if !self.cels.is_empty() && now - at < CHANGING_MS + SETTLING_MS => SETTLING_PICTURE_BYTES.min(full),
+            _ => full,
+        }
     }
 
     /// Chooses the levels written as tiles change: those the next frame shows. Marks the slots

@@ -115,9 +115,10 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
   levels and the slot contents are built with a cheap hasher on the tile coordinates (`CoordHasher`) and row
   copies; a block of four opaque texels reduces without the division, and an empty block with one comparison.
 * The published pictures of a cel (the engine decodes every level of it again after each publication) are not what a
-  frame draws while its live tiles are shown, so while a live cel changed within the last 24 frames
-  (`LiveCels::changing`) a frame uploads at most 512 KiB of decoded pictures, 2 MiB while cels are held and quiet,
-  and 8 MiB when none is held (a document loading). The rest waits in the engine's queue.
+  frame draws while its live tiles are shown, so for 250 ms after a live cel changed
+  (`LiveCels::picture_budget`, from the clock, not from frames drawn) a frame uploads at most 512 KiB of decoded pictures,
+  2 MiB for the next 1.5 s, and 8 MiB after that or when no cel is held (a document loading, a jump, playback). The
+  rest waits in the engine's queue.
 * A frame draws one level of a cel (the shader keeps the level whose tiles are between half a pixel
   and one pixel on the screen) and blends in the level above, so only those are written as tiles
   change. Before each frame the stage reads the levels its list shows at the view's scale

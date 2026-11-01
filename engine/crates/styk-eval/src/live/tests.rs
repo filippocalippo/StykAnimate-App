@@ -524,21 +524,26 @@ fn a_neighbour_is_rewritten_only_when_the_edge_it_copies_changed() {
 }
 
 #[test]
-fn cels_count_as_changing_until_a_few_frames_pass_without_a_change() {
+fn the_picture_budget_follows_the_clock_and_returns_to_the_full_amount_by_itself() {
+    const FULL: usize = 8 << 20;
     let mut noise = Noise(8);
     let mut cels = LiveCels::default();
-    assert!(!cels.changing(), "nothing is held");
+    assert_eq!(cels.picture_budget(0.0, FULL), FULL, "nothing is held or has changed");
     update(&mut cels, "a", false, vec![((0, 0), Some(tile(&mut noise)))]).unwrap();
-    assert!(cels.changing());
-    for _ in 0..QUIET_FRAMES - 1 {
-        cels.frame_drawn();
-    }
-    assert!(cels.changing(), "the last frame of the window");
-    cels.frame_drawn();
-    assert!(!cels.changing(), "a quiet cel leaves the frame its whole upload budget");
-    // A call that changes nothing does not start the window; one that changes a tile does.
-    update(&mut cels, "a", false, Vec::new()).unwrap();
-    assert!(!cels.changing());
-    update(&mut cels, "a", false, vec![((1, 0), Some(tile(&mut noise)))]).unwrap();
-    assert!(cels.changing());
+    cels.changed(1000.0);
+    assert_eq!(cels.picture_budget(1000.0, FULL), CHANGING_PICTURE_BYTES, "a cel is changing");
+    assert_eq!(cels.picture_budget(1000.0 + CHANGING_MS - 1.0, FULL), CHANGING_PICTURE_BYTES);
+    assert_eq!(cels.picture_budget(1000.0 + CHANGING_MS, FULL), SETTLING_PICTURE_BYTES, "and then a moment of smaller bursts");
+    // No frame has to be drawn for it to end: the clock alone does.
+    assert_eq!(cels.picture_budget(1000.0 + CHANGING_MS + SETTLING_MS, FULL), FULL, "a held, quiet cel (Draw left, a jump, playback) loads at the full amount");
+    assert_eq!(cels.picture_budget(1.0e9, FULL), FULL);
+    // A cel that changes again starts over; a document that lets go of its cels is not slowed at all.
+    cels.changed(5000.0);
+    assert_eq!(cels.picture_budget(5100.0, FULL), CHANGING_PICTURE_BYTES);
+    cels.drop_cel("a");
+    assert_eq!(cels.picture_budget(5100.0, FULL), FULL);
+    // The caller's own limit is never raised.
+    cels.update("a", false, vec![((0, 0), Some(tile(&mut noise)))]).unwrap();
+    cels.changed(6000.0);
+    assert_eq!(cels.picture_budget(6000.0, 100), 100);
 }
