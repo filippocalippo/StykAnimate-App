@@ -235,6 +235,18 @@ fn a_project_is_saved_with_its_metadata_and_without_the_editors_caches() {
 }
 
 #[test]
+fn preparing_a_project_and_checking_its_scene_apart_is_projecting_it() {
+    // A save checks the scene beside the lift: the pieces make the document `project_document` makes, and the check is the same check.
+    let (document, _, _) = tape("startup-sheet");
+    let projected = super::prepare_project(&document, Some("Saved"), &hold()).unwrap();
+    super::check_scene(&projected.scene).unwrap();
+    let whole = super::project_document(&document, Some("Saved"), &hold()).unwrap();
+    assert_eq!(styk_doc::json::to_string(&projected.document), styk_doc::json::to_string(&whole));
+    let stopped = super::prepare_project(&document, Some("Saved"), &Hold { cancel: &|| true }).err().unwrap();
+    assert!(matches!(&stopped, EditError::Invalid(message) if message == CANCELLED), "{stopped:?}");
+}
+
+#[test]
 fn the_pose_channels_of_a_project_store_the_lists_they_share_once() {
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/channels/channels-pose.json");
     let tree = crate::load::prepare_for_editor(parse(&std::fs::read_to_string(file).unwrap()), false).unwrap().report;
