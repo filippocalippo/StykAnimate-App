@@ -63,6 +63,15 @@ Each is a name for `--only=`; `open` always runs in a document run.
   holds the interface thread, and `shown`, the time from the call until the stage shows the result (`lastEditingPresentation` at the document's
   revision). The first add of a document is the dearest (the layer sheet captures the poses of the animation); after its undo the next one captures
   them again, so every round measures that. Run it alone with `--only=frameEdit`.
+- **`movieclips`**: movieclips on the open document, with no `main` baseline (the goals in the summary are one frame blocked and a tenth of a second
+  shown). Three clips, each made, entered, left, placed and undone in the app's own editor calls: `selection` (the figures of the layer with the most figures, for one
+  second from the frame at 40 %), `large` (every figure, up to 600 frames) and `nested` (a clip inside a clip inside a clip, the outermost placed).
+  Per row, `blocked` is how long the call holds the interface thread, `shown` the time until the stage shows the result (a paint at the editor's
+  revision, as `frameEdit` reads it) and `longest` the longest task of the page meanwhile. The rows: `create`, `enter`, `leaveClean` (nothing edited,
+  so the project is untouched), `leaveEdited` (the clip's edit becomes one history entry of the project), `place` (another instance in the scene) and
+  the `Undo` and `Redo` of each; in `nested`, `enter1` to `enter3`, `createInner`, `leave3` to `leave1` and `placeNested`. `clip` gives a clip's frames,
+  objects and longest numeric array (a pose of 32 numbers or more is what makes sharing show in saved bytes). Everything is undone at the end.
+  Run it alone with `--only=movieclips`, and `--clips=selection,large,nested` picks the clips; it runs before `tabs`.
 - **`onion`**: onion skins on through the app's own action and settings (3 frames each side), then scrub, next-frame key and 5 s of playback as
   the existing steps measure them. The settings are put back.
 - **`timelineInspector`**: with the timeline and inspector on show and a figure selected, 10 s of playback. `playhead.delay` and

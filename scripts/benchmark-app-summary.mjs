@@ -19,6 +19,16 @@ const sum = (r, paths) => { const v = paths.map(p => get(r, p)); return v.every(
 const worst = (r, paths) => { const v = paths.map(p => get(r, p)).filter(Number.isFinite); return v.length ? Math.max(...v) : null; };
 const TYPES = ['browser', 'renderer', 'gpu', 'utility', 'other'];
 
+// The movieclip step's rows (`movieclips.scenarios.<clip>.<row>`): a clip made of a selection, a large one, and one nested three deep.
+const LIFE_ROWS = [['create', 'create'], ['createUndo', 'create, undone'], ['createRedo', 'create, redone'], ['enter', 'enter'], ['leaveClean', 'leave without an edit'],
+  ['leaveEdited', 'leave after an edit'], ['leaveEditedUndo', 'leave after an edit, undone'], ['leaveEditedRedo', 'leave after an edit, redone'],
+  ['place', 'place an instance'], ['placeUndo', 'place an instance, undone'], ['placeRedo', 'place an instance, redone']];
+const NESTED_ROWS = [['enter1', 'enter the outer clip'], ['createInner', 'create a clip inside it'], ['enter2', 'enter the middle clip'], ['enter3', 'enter the inner clip'],
+  ['leave3', 'leave the inner clip after an edit'], ['leave2', 'leave the middle clip'], ['leave1', 'leave the outer clip'], ['leave1Undo', 'leave the outer clip, undone'],
+  ['leave1Redo', 'leave the outer clip, redone'], ['placeNested', 'place the outer clip'], ['placeNestedUndo', 'place the outer clip, undone'], ['placeNestedRedo', 'place the outer clip, redone']];
+const CLIP_ROWS = [['selection', 'selected figure', LIFE_ROWS], ['large', 'large', LIFE_ROWS], ['nested', 'nested', NESTED_ROWS]];
+const clipWorst = (kind, scenarios) => r => worst(r, CLIP_ROWS.filter(([scenario]) => scenarios.includes(scenario)).flatMap(([scenario, , rows]) => rows.map(([row]) => `movieclips.scenarios.${scenario}.${row}.${kind}`)));
+
 // Rows of each file's table. The first group is what the baselines have always shown; the rest was added later.
 const DOC = [
   ['Startup to usable (ms)', 'startup.readyMs'],
@@ -105,6 +115,8 @@ const DOC = [
   ['Memory after switching tabs, settled (MiB)', 'tabs.settledMiB'],
   ['Export dialog usable (ms)', 'export.dialogMs'],
   ['Export 2 s of video (ms)', 'export.exportMs'],
+  ...CLIP_ROWS.flatMap(([scenario, clip, rows]) => rows.flatMap(([row, what]) => ['blocked', 'shown'].map(kind =>
+    [`Movieclip, ${clip}: ${what}, ${kind === 'blocked' ? 'interface blocked' : 'until shown'} (ms)`, `movieclips.scenarios.${scenario}.${row}.${kind}`]))),
   ...['browser', 'renderer', 'gpu', 'utility', 'other'].map(t => [`Memory after open, ${t} (MiB)`, `memoryDetail.snapshots.open.byType.${t}`]),
   ['Memory after open: renderer JS heap (MiB)', 'memoryDetail.snapshots.open.jsHeapUsedMiB'],
   ['Memory after open: engine WebAssembly memory (MiB)', 'memoryDetail.snapshots.open.wasmMiB'],
@@ -184,6 +196,10 @@ const TARGETS = [
   {name: 'Delete a frame: interface blocked (ms)', metric: 'frameEdit.remove.blocked.p50', target: 100, floor: 'better'},
   {name: 'Undo or redo of a frame edit: interface blocked (ms)', metric: r => worst(r, FRAME_UNDOS.map(n => `frameEdit.${n}.blocked.p50`)), target: 10, floor: 'notWorse'},
   {name: 'Undo or redo of a frame edit: until shown (ms)', metric: r => worst(r, FRAME_UNDOS.map(n => `frameEdit.${n}.shown.p50`)), target: 16, floor: 'notWorse'},
+  // The movieclip rows have no `main` baseline: the goals are the owner's "really fast", read as one frame blocked and a tenth of a second shown.
+  ...[['selection', 'a selected figure'], ['large', 'a large clip'], ['nested', 'a nested clip']].flatMap(([scenario, what]) => [
+    {name: `Movieclips, ${what}: interface blocked, slowest row (ms)`, metric: clipWorst('blocked', [scenario]), target: 16, floor: null},
+    {name: `Movieclips, ${what}: until shown, slowest row (ms)`, metric: clipWorst('shown', [scenario]), target: 100, floor: null}]),
   {name: 'Undo (ms)', metric: 'poseDrag.undoMs.p50', target: 10, floor: 'notWorse'},
   {name: 'Redo (ms)', metric: 'poseDrag.redoMs.p50', target: 10, floor: 'notWorse'},
   {name: 'Brush input→frame p95 (ms)', metric: 'draw.latency.p95', target: 7, floor: 'better', source: 'draw'},

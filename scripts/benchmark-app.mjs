@@ -22,6 +22,7 @@ const flags = new Set(args.filter(a => a.startsWith('--')));
 const only = args.find(a => a.startsWith('--only='))?.slice(7).split(',') ?? null;
 const option = name => args.find(a => a.startsWith(`--${name}=`))?.slice(name.length + 3) ?? null;
 const executable = option('executable') ? path.resolve(option('executable')) : null;
+const clipNames = option('clips')?.split(',') ?? null;
 const smallFile = option('small') ? path.resolve(option('small')) : null;
 const [label, rootArg, outArg, scenario, ...rest] = args.filter(a => !a.startsWith('--'));
 const root = path.resolve(rootArg), out = path.resolve(outArg);
@@ -82,6 +83,8 @@ async function launch({startupView = 'editor', seed = null, probe = null} = {}) 
     }
   })();
   const page = await app.firstWindow({timeout: 120000});
+  app.on('close', () => console.log('[app] closed'));
+  page.on('crash', () => console.log('[page] crashed'));
   const firstWindowMs = Date.now() - t0;
   const errors = [];
   page.on('pageerror', e => errors.push(String(e.message).slice(0, 300)));
@@ -741,6 +744,136 @@ async function frameEdits(ctx) {
   return Object.fromEntries(Object.entries(raw).map(([name, row]) => [name, {blocked: q(row.blocked), shown: q(row.shown), unanswered: row.shown.filter(v => v === null).length}]));
 }
 
+/**
+ * Movieclips on the open document, with no `main` baseline: create one from a selection, enter it, leave it with and without an edit,
+ * place an instance, and the undo and redo of each. Three clips: `selection` (the figures of the layer with the most figures, for a second of animation),
+ * `large` (every figure for up to 600 frames) and `nested` (a clip holding a clip holding a clip, the outermost placed). Per row,
+ * `blocked` is how long the call holds the interface thread and `shown` the time until the stage shows the result (a paint at the
+ * editor's revision, as `frameEdit` reads it); `longest` is the longest task of the page while the row ran. Each clip's `stats` gives its
+ * frames, the objects in them and its longest numeric array (a pose with 32 or more numbers is what makes sharing differences show).
+ * Everything is undone at the end. Run it alone with `--only=movieclips`.
+ */
+async function movieclipEdits(ctx) {
+  const {page} = ctx;
+  await heavyFrame(ctx);
+  await setMark(page, 'movieclips');
+  page.on('console', message => { if (message.text().startsWith('[movieclips]')) console.log(message.text()); });
+  const out = await page.evaluate(async clipNames => {
+    const B = window.__bench, editor = window.styk.editor, state = window.styk.state, timeline = [];
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const settle = async () => { await B.paints(); await sleep(250); };
+    const shown = t0 => B.until(() => { const p = state.lastEditingPresentation; return p && p.at > t0 && p.revision === editor.revision ? p : null; }, 20000);
+    /** One row: the call, how long it held the thread, how long until the stage showed it. Undo and redo may answer a promise. */
+    const measure = async (rows, name, call) => {
+      await settle();
+      const t0 = performance.now();
+      let value;
+      try { value = call(); } catch (error) { rows[name] = {error: String(error?.message ?? error).slice(0, 200)}; console.log(`[movieclips] ${name} refused after ${(performance.now() - t0).toFixed(0)} ms: ${rows[name].error}`); return undefined; }
+      const blocked = performance.now() - t0;
+      try { if (value && typeof value.then === 'function') value = await value; } catch (error) { rows[name] = {error: String(error?.message ?? error).slice(0, 200)}; return undefined; }
+      const p = await shown(t0), end = performance.now();
+      timeline.push({rows, name, t0, end});
+      rows[name] = {blocked: +blocked.toFixed(1), shown: p ? +(p.at - t0).toFixed(1) : null};
+      console.log(`[movieclips] ${name} blocked ${rows[name].blocked} shown ${rows[name].shown}`);
+      return value;
+    };
+    const run = async call => { await settle(); return call(); };
+    /** Selections to try, as a person would pick them: the figures of one layer, the layer with the most figures first (a clip is refused when other figures cross its figures in the stacking order), then every figure. */
+    const groups = () => {
+      const byLayer = new Map();
+      for (const o of editor.evaluatedFrame.objects) { const id = editor.layerForUid(o.unique_id); byLayer.set(id, [...(byLayer.get(id) ?? []), o.unique_id]); }
+      return [...[...byLayer.values()].sort((a, b) => b.length - a.length).slice(0, 6), []];
+    };
+    const stats = typeId => {
+      const clip = editor.report.figure_types.find(f => f.figure_type_id === typeId)?._styk?.movieclip, out = {frames: clip?.document?.keyframes?.length ?? null, objects: 0, longestArray: 0, nodes: 0};
+      const walk = value => {
+        if (value === null || typeof value !== 'object' || out.nodes > 4e6) return;
+        out.nodes++;
+        if (Array.isArray(value)) { if (value.length && value.every(v => typeof v === 'number')) out.longestArray = Math.max(out.longestArray, value.length); for (const v of value) walk(v); } else for (const v of Object.values(value)) walk(v);
+      };
+      for (const frame of clip?.document?.keyframes ?? []) out.objects += frame.objects?.length ?? 0;
+      walk(clip?.document);
+      return out;
+    };
+    /** The undo and redo of an edit, which leaves it done. */
+    const history = async (rows, name) => { await measure(rows, `${name}Undo`, () => editor.undo()); await measure(rows, `${name}Redo`, () => editor.redo()); };
+    const total = editor.totalTicks, fps = Math.max(1, Math.round(editor.report?.fps || 24)), start = editor.tick;
+    const result = {ticks: total, fps, scenarios: {}};
+    const scenario = async (name, build) => {
+      if (clipNames && !clipNames.includes(name)) return;
+      console.log(`[movieclips] ${name}`);
+      const rows = {};
+      result.scenarios[name] = rows;
+      try { await build(rows); }
+      catch (error) { rows.error = String(error?.message ?? error).slice(0, 300); }
+      while (editor._movieclipScopes?.length) { try { editor.leaveMovieclip({save: false}); } catch { break; } }
+      editor.select(null);
+    };
+    /** The clip's usual life: made, undone, redone, entered, left untouched, entered again, edited, left, undone, redone, placed, undone, redone. */
+    const life = async (rows, options, picks) => {
+      editor.seek(options.start); await B.paints();
+      let clip;
+      for (const pick of picks) {
+        editor.selectMany(pick);
+        clip = await measure(rows, 'create', () => editor.createMovieclip({name: 'Benchmark clip', replace: true, ...options, uids: pick}));
+        if (clip) { rows.figures = pick.length || 'all'; break; }
+      }
+      const typeId = clip?.figure_type_id;
+      if (typeId === undefined) return;
+      let depth = 1;
+      await history(rows, 'create');
+      await measure(rows, 'enter', () => editor.enterMovieclip(typeId));
+      await measure(rows, 'leaveClean', () => editor.leaveMovieclip());
+      await run(() => editor.enterMovieclip(typeId));
+      await run(() => { editor.select(editor.evaluatedFrame.objects[0].unique_id, -1); editor.moveSelection(25, 10); });
+      await measure(rows, 'leaveEdited', () => editor.leaveMovieclip()); depth++;
+      await history(rows, 'leaveEdited');
+      editor.seek(options.start); await B.paints(); editor.select(null);
+      await measure(rows, 'place', () => editor.addFigure(typeId)); depth++;
+      await history(rows, 'place');
+      rows.clip = stats(typeId);
+      for (; depth > 0; depth--) await run(() => editor.undo());
+    };
+    await scenario('selection', async rows => {
+      await life(rows, {start, end: Math.min(total, start + fps)}, groups());
+    });
+    await scenario('large', rows => life(rows, {start: 0, end: Math.min(total, 600)}, [[]]));
+    await scenario('nested', async rows => {
+      editor.seek(start); await B.paints();
+      let outer;
+      for (const pick of groups()) {
+        editor.selectMany(pick);
+        try { outer = await run(() => editor.createMovieclip({name: 'Outer', start, end: Math.min(total, start + fps), replace: true, uids: pick})); break; } catch { /* other figures cross them: the next selection */ }
+      }
+      let depth = 1;
+      await measure(rows, 'enter1', () => editor.enterMovieclip(outer.figure_type_id));
+      editor.select(null);
+      const middle = await measure(rows, 'createInner', () => editor.createMovieclip({name: 'Middle', start: 0, end: Math.min(editor.totalTicks, 12), replace: true}));
+      await measure(rows, 'enter2', () => editor.enterMovieclip(middle.figure_type_id));
+      editor.select(null);
+      const inner = await run(() => editor.createMovieclip({name: 'Inner', start: 0, end: Math.min(editor.totalTicks, 6), replace: true}));
+      await measure(rows, 'enter3', () => editor.enterMovieclip(inner.figure_type_id));
+      await run(() => { editor.select(editor.evaluatedFrame.objects[0].unique_id, -1); editor.moveSelection(25, 10); });
+      await measure(rows, 'leave3', () => editor.leaveMovieclip());
+      await measure(rows, 'leave2', () => editor.leaveMovieclip());
+      await measure(rows, 'leave1', () => editor.leaveMovieclip()); depth++;
+      await history(rows, 'leave1');
+      editor.seek(start); await B.paints(); editor.select(null);
+      await measure(rows, 'placeNested', () => editor.addFigure(outer.figure_type_id)); depth++;
+      await history(rows, 'placeNested');
+      rows.clip = stats(outer.figure_type_id);
+      for (; depth > 0; depth--) await run(() => editor.undo());
+    });
+    await settle();
+    // Long tasks reach the observer a little after they end: the settle above lets them arrive.
+    for (const {rows, name, t0, end} of timeline) if (rows[name] && !rows[name].error) rows[name].longest = Math.round(Math.max(0, ...B.longTasks.filter(x => x.start + x.dur >= t0 && x.start <= end).map(x => x.dur)));
+    return result;
+  }, clipNames);
+  await setMark(page, 'idle');
+  const st = await markStats(page, 'movieclips');
+  return {...out, longTasks: st.longTasks, longestTaskMs: Math.round(st.longestTaskMs)};
+}
+
 /** Onion skins on: through the app's own action and settings, then the scrub and playback of the existing steps. */
 async function onionOn(ctx) {
   const {page} = ctx;
@@ -1040,6 +1173,7 @@ async function docRun(run) {
     await step('timelineInspector', () => timelineInspector(ctx));
     await step('onion', () => onionOn(ctx));
     await step('export', () => exportVideo(ctx));
+    await step('movieclips', () => movieclipEdits(ctx));
     await step('tabs', () => switchTabs(ctx));
     result.memoryAfterNewSteps = memoryOf();
   } finally {
