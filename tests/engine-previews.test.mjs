@@ -56,6 +56,19 @@ test('a document the engine draws gets its thumbnails from the stage', async () 
   assert.equal(thumbnails.stats.engine.renders, 2);
 });
 
+test('a thumbnail drawn from soft copies resolves soft, and the sharp one that replaces it resolves true', async () => {
+  const answers = ['soft', 'soft', 'drawn'];
+  const {stage} = app({draw: () => answers.shift()});
+  const thumbnails = new EngineThumbnails(editor(), {stage: () => stage});
+  const card = canvas();
+  // A caller keeps a thumbnail only when it resolves true: the soft ones are drawn on the card and are not that.
+  assert.equal(await thumbnails.renderThumbnail(1, card, {tick: 10}), 'soft');
+  assert.equal(await thumbnails.renderThumbnail(1, card, {tick: 10}), 'soft');
+  assert.equal(await thumbnails.renderThumbnail(1, card, {tick: 10}), true);
+  assert.equal(thumbnails.stats.engine.soft, 2);
+  assert.equal(thumbnails.stats.engine.renders, 3);
+});
+
 test('refused documents and devices without a second canvas are not drawn', async () => {
   const target = editor();
   const {stage} = app();

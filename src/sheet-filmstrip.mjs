@@ -52,7 +52,7 @@ export class SheetFilmstrip {
     this.autoCardWidth=true;
     this.cards = new Map();
     this.previews = new Map();
-    this.bitmapCache=new Map();this.thumbnailStats={renders:0,hits:0,retries:0,invalidations:0};this.layerAppearance=layerAppearance(editor.report._styk?.layers);
+    this.bitmapCache=new Map();this.thumbnailStats={renders:0,soft:0,hits:0,retries:0,invalidations:0};this.layerAppearance=layerAppearance(editor.report._styk?.layers);
     this.queue = [];
     this.generation = 0;
     this.times = sheetKeyTimes(editor.report);
@@ -492,9 +492,11 @@ export class SheetFilmstrip {
         try {
           const done=await this.renderThumbnail?.(index,scratch,{tick,storedFrames:false,signal:abort.signal});
           if(done!==false&&!abort.signal.aborted&&item.generation===this.generation&&!this.disposed){
-            this.bitmapCache.set(item.index,scratch);while(this.bitmapCache.size>32){const key=this.bitmapCache.keys().next().value,old=this.bitmapCache.get(key);this.bitmapCache.delete(key);old.width=old.height=0;}
-            if(this.cards.get(item.index)===item.card){item.card._canvas.getContext('2d').drawImage(scratch,0,0);this.previews.set(item.index,this.generation);}
-            this.thumbnailStats.renders++;this.retryDelay=120;
+            // A thumbnail drawn from soft copies of pictures not in yet shows meanwhile, is neither cached nor counted as done, and is drawn again.
+            const soft=done==='soft';
+            if(!soft){this.bitmapCache.set(item.index,scratch);while(this.bitmapCache.size>32){const key=this.bitmapCache.keys().next().value,old=this.bitmapCache.get(key);this.bitmapCache.delete(key);old.width=old.height=0;}}
+            if(this.cards.get(item.index)===item.card){item.card._canvas.getContext('2d').drawImage(scratch,0,0);if(!soft)this.previews.set(item.index,this.generation);}
+            if(soft){this.thumbnailStats.soft++;this._retryThumbnails();}else{this.thumbnailStats.renders++;this.retryDelay=120;}
           }else if(!this.paused&&!this.disposed){this.thumbnailStats.retries++;this._retryThumbnails();}
         }catch(error){if(error.name!=='AbortError')this.onError?.(error);this._retryThumbnails();}
         finally{this.activeThumbnail=null;if(this.inflight===abort)this.inflight=null;}

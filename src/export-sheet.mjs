@@ -52,6 +52,9 @@ const QUALITY = Object.freeze([
   {value: 'high', label: interfaceText("exportSheet.max"), labelKey: "exportSheet.max", tip: interfaceText("exportSheet.higherQuality"), tipKey: "exportSheet.higherQuality", hint: interfaceText("exportSheet.theMostDetailWithALargerFileFor"), hintKey: "exportSheet.theMostDetailWithALargerFileFor"},
 ]);
 const STRIP_CELLS = 8;
+/** How often, and how long at most, a frame preview drawn from soft copies is drawn again (see renderSharp). */
+const SOFT_PREVIEW_RETRY_MS = 250;
+const SOFT_PREVIEW_RETRIES = 40;
 const progressTitle = () => interfaceText("exportSheet.exportingAnimation");
 
 const element = (tag, props = {}, ...children) => {
@@ -538,13 +541,24 @@ export function openExportSheet({context, preferences = null, defaultDither = fa
     stageWanted = Math.max(0, Math.min(totalFrames - 1, tick));
     void drainStage();
   }
+  /**
+   * A frame preview with pictures of its frame not loaded yet is drawn from their soft copies and resolves `'soft'`: it is drawn
+   * again until it is sharp (every picture in), a few seconds at most, while `wanted()` still asks for it.
+   */
+  async function renderSharp(tick, canvas, wanted = () => true) {
+    for (let attempt = 0; ; attempt++) {
+      const drawn = await preview.render(tick, canvas, {signal: previewAbort.signal}).catch(() => false);
+      if (drawn !== 'soft' || attempt >= SOFT_PREVIEW_RETRIES || previewAbort.signal.aborted || !wanted()) return drawn;
+      await new Promise(resolve => setTimeout(resolve, SOFT_PREVIEW_RETRY_MS));
+    }
+  }
   async function drainStage() {
     if (stageBusy) return;
     stageBusy = true;
     try {
       while (stageWanted !== null && stageWanted !== stageShown && !previewAbort.signal.aborted) {
         const tick = stageWanted;
-        const drawn = await preview.render(tick, stageCanvas, {signal: previewAbort.signal}).catch(() => false);
+        const drawn = await renderSharp(tick, stageCanvas, () => stageWanted === tick);
         if (!drawn) break;
         stageShown = tick;
       }
@@ -553,7 +567,7 @@ export function openExportSheet({context, preferences = null, defaultDither = fa
   async function renderStrip() {
     for (const entry of cells) {
       if (previewAbort.signal.aborted) return;
-      await preview.render(entry.tick, entry.canvas, {signal: previewAbort.signal}).catch(() => false);
+      await renderSharp(entry.tick, entry.canvas);
     }
   }
   const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));

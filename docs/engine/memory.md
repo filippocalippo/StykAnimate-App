@@ -161,11 +161,15 @@ document opens), and:
   written would be missing from the picture when its page is given a layer again.
 - **Where the soft copy is seen**: the stage's frame while a picture is not in, and its camera monitor (which shares the stage's
   textures and table, so while the stage waits it draws the soft copy, not a blank). Never in an export, a preview or a saved
-  file: those hold their own renderers, whole-layout ones. A frame thumbnail on the stage's device (`Stage::pictures_ready_for_view`)
-  draws a picture that is not in from its soft copy only when the soft copy has a texel for every pixel the picture covers on the
-  card along both of its axes (a streak stretched along one is loaded sharp) (`styk_engine::pictures_needing_sharp`: a 4K picture on a card of a few hundred pixels); a picture it cannot resolve is loaded
-  like the stage's own, and the texture grows once for it if no layer is free, so a thumbnail always finishes and the stage keeps its
-  frame (before, a thumbnail asked for every picture sharp, was refused a layer when the four were taken and requested nothing).
+  file: those hold their own renderers, whole-layout ones. A frame thumbnail on the stage's device
+  (`Stage::pictures_ready_for_view`) follows the same rule as a far jump, soft first, then sharp: it is drawn at once, a picture
+  that is not in the texture from its soft copy, and `render_thumbnail` answers 3 (`soft`) instead of 0; the interface shows it,
+  does not keep it (the filmstrip neither caches it nor marks the card painted, the export dialog's previews draw it again for a few
+  seconds) and asks again until the answer is `drawn`: a thumbnail that is kept is every picture sharp, so it is the pixels of a
+  whole-layout draw. The sharp pictures are asked for in spare layers only (free, or held by a page neither the frame on show
+  nor a tick loaded ahead of it draws from: `Residency::wanted_soon`); with none the thumbnail stays soft and asks again, and the
+  texture never grows for it, so a thumbnail never takes the stage's frame or its lookahead. A picture without a soft copy yet
+  waits for it (a picture that cannot be decoded is not waited for). A thumbnail drawn by the preview worker is always sharp.
 - **The table follows the layout**: `Renderer::sync_pictures` runs on every frame (`Stage::sync_atlas`) and makes the table (and the
   soft atlas) know every picture of the layout drawn, whatever the page count: a revision that appends a picture to a page that was
   there is a layout with one more picture, not one more page. The preview worker and the export device key their atlas by the

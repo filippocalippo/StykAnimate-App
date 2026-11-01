@@ -13,6 +13,17 @@ use styk_eval::drawlist::DrawList;
 
 use super::*;
 
+/// What [`Stage::pictures_ready_for_view`] found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ViewPictures {
+    /// Every picture is in the sprite texture (or cannot be had): the view is final.
+    Sharp,
+    /// Some pictures are drawn from their soft copies and asked for sharp.
+    Soft,
+    /// A picture has no soft copy yet: nothing to draw it from.
+    Wait,
+}
+
 /// Ticks after the one playback shows whose pictures are loaded ahead of it.
 const PLAY_AHEAD: u32 = 72;
 /// Ticks on each side of a tick the person went to (a jump, a drag) whose pictures are loaded.
@@ -222,32 +233,36 @@ impl Stage {
         None
     }
 
-    /// [`Stage::pictures_ready`] for a view that is not the stage's frame (a thumbnail drawn at `scale` pixels to a world
-    /// unit): a picture that is not in the sprite texture is drawn from its soft copy when that has a texel for every pixel
-    /// the picture covers on the card (a 4K picture on a card of a few hundred pixels), and has to be loaded otherwise
-    /// (a small picture); those are asked for like the stage's own, the pages of the frame on show kept, and the texture
-    /// grows for them if no layer is to be had, so a thumbnail always finishes and never takes the stage's frame.
-    pub(crate) fn pictures_ready_for_view(&mut self, generation: &Arc<Generation>, list: &DrawList, scale: f64) -> bool {
+    /// [`Stage::pictures_ready`] for a view that is not the stage's frame (a thumbnail). A picture that is not in the sprite
+    /// texture is drawn from its soft copy, so a thumbnail is never held up by the pictures of a far tick; the sharp pictures
+    /// are asked for in the layers nothing needs (the frame on show, the ticks loaded ahead of it): when there is none the
+    /// thumbnail stays as it is and the interface asks again. [`ViewPictures::Soft`] says it was drawn so, and is not
+    /// the thumbnail that is kept: it is drawn again until every picture is in.
+    pub(crate) fn pictures_ready_for_view(&mut self, generation: &Arc<Generation>, list: &DrawList) -> ViewPictures {
         if self.residency.is_none() {
-            return self.engine.images_pending() == 0;
+            return if self.engine.images_pending() == 0 { ViewPictures::Sharp } else { ViewPictures::Wait };
         }
         let index = self.place_index(generation);
-        let extents = styk_engine::picture_extents(list, &index);
-        let need = styk_engine::pictures_needing_sharp(
-            &extents,
-            &generation.assets,
-            scale,
-            |picture| self.loading.soft.contains(&picture),
-            |picture| generation.assets.atlas.get(picture as usize).is_some_and(|entry| self.uploaded.has(entry)),
-        );
-        if need.is_empty() {
-            return true;
+        let missing: Vec<u32> = styk_engine::pictures_of(list, &index)
+            .into_iter()
+            .filter(|&picture| generation.assets.atlas.get(picture as usize).is_some_and(|entry| entry.valid && !self.uploaded.has(entry)))
+            .collect();
+        if missing.is_empty() {
+            return ViewPictures::Sharp;
         }
-        self.request_pictures(generation, &need, &[], true, false);
+        let mut protect = self.shown_pages.clone();
+        if let Some(residency) = self.residency.as_ref() {
+            protect.extend(residency.wanted_soon());
+        }
+        self.request_pictures(generation, &missing, &protect, false, false);
         if let Some(residency) = self.residency.as_mut() {
-            residency.touch(&Self::pages_of_pictures(generation, &need));
+            residency.touch(&Self::pages_of_pictures(generation, &missing));
         }
-        self.pictures_in(generation, &need, true)
+        if !self.pictures_in(generation, &missing, false) {
+            return ViewPictures::Wait;
+        }
+        // Pictures that cannot be decoded are never sharper than they are.
+        if missing.iter().all(|picture| self.loading.lost.contains(picture)) { ViewPictures::Sharp } else { ViewPictures::Soft }
     }
 
     /// The frame about to be drawn was drawn: its pages are what is on show.

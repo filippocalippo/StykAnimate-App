@@ -434,9 +434,10 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
      * A frame thumbnail (engine-thumbnails.mjs): `tick` of the document at `revision`, on a
      * `width × height` card, drawn on the stage's device into a canvas of the thumbnails' own
      * and copied onto `target` (a 2D canvas of that size). The frame is prepared on the engine's
-     * workers and every picture reaches the atlas first; this waits for both on the engine's
-     * progress counter, never blocking (D7). Resolves `drawn`, `stale` (the engine holds another
-     * revision: ask again once it follows) or `refused` (a device that cannot present
+     * workers; this waits for it on the engine's progress counter, never blocking (D7). A picture that is not in
+     * the atlas yet is drawn from its soft copy and asked for sharp (docs/engine/memory.md): that thumbnail resolves
+     * `soft`, drawn but not the one to keep, and the caller asks again later. Resolves `drawn` (every picture
+     * sharp), `soft`, `stale` (the engine holds another revision: ask again once it follows) or `refused` (a device that cannot present
      * to a second canvas, WebGL2, or a canvas whose pictures do not reach the page); rejects with
      * an AbortError when `signal` aborts.
      */
@@ -461,13 +462,13 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
         if (prepared === 0) {
           const drawn = side.stage.render_thumbnail(revision, tick, width, height);
           if (drawn === 2) return 'stale';
-          if (drawn === 0) {
+          if (drawn === 0 || drawn === 3) {
             // In the same task: the canvas holds this picture only until the task ends.
             const context = target.getContext('2d');
             context.setTransform(1, 0, 0, 1, 0, 0);
             context.clearRect(0, 0, target.width, target.height);
             context.drawImage(side.thumbnailCanvas, 0, 0);
-            return 'drawn';
+            return drawn === 3 ? 'soft' : 'drawn';
           }
         }
         await engine.whenProgress(seen);

@@ -8,6 +8,7 @@ use styk_render::{Renderer, ViewParams, wgpu};
 use wasm_bindgen::prelude::*;
 
 mod pictures;
+pub(crate) use pictures::ViewPictures;
 
 use crate::engine::EngineHandle;
 use crate::js_error;
