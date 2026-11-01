@@ -221,6 +221,12 @@ impl EngineHandle {
         self.engine.note_worker_lost();
     }
 
+    /// Gives back the memory a save reserved under `token`, when the thread saving died without dropping it (the page saw the `error` event
+    /// of the export worker). Nothing if the save gave it back itself.
+    pub fn release_reservation(&self, token: f64) -> usize {
+        styk_alloc::release_named(token as u64)
+    }
+
     /// How many worker threads have been reported stopped.
     pub fn workers_lost(&self) -> u32 {
         self.engine.workers_lost()

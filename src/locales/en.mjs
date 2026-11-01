@@ -564,6 +564,7 @@ const messages = {
   "app.openingFile": "Opening file…",
   "app.decodingPivotFile": "Decoding Pivot file…",
   "app.saveCancelled": "Save cancelled",
+  "app.saveFailed": "Save failed",
   "app.saveCancelledTheProjectChanged": "Save cancelled · the project changed",
   "app.savingProject": "Saving project…",
   "app.recoveryCopyCouldNotBeWritten": "Recovery copy could not be written: {message}",

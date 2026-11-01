@@ -174,6 +174,11 @@ pub trait Host {
     /// Whether the save is stopped. Called on the thread that runs the save.
     fn cancelled(&self) -> bool;
 
+    /// How many threads [`Host::together`] may use at once, this one included.
+    fn threads(&self) -> usize {
+        1
+    }
+
     /// Milliseconds, for timings; a plain function so that any thread can call it. Zero by default.
     fn clock(&self) -> fn() -> f64 {
         || 0.0
@@ -185,6 +190,25 @@ pub trait Host {
         one_after_another(self, jobs, stop);
         Ok(())
     }
+
+    /// Starts `job` to run beside what the caller does next on a thread the host has to spare, and returns what waits for it: the
+    /// caller calls it before it depends on the job, and it runs the job itself if no thread has. Where the host has no thread to spare
+    /// the job runs when it is waited for.
+    fn start<'a>(&'a self, job: Job, stop: &Arc<AtomicBool>) -> Joiner<'a> {
+        start_when_waited_for(job, stop)
+    }
+}
+
+/// What waits for a job started with [`Host::start`].
+pub type Joiner<'a> = Box<dyn FnOnce() -> Result<(), JobsFailed> + 'a>;
+
+/// [`Host::start`] for a host with no thread to spare: the job runs when it is waited for.
+pub fn start_when_waited_for<'a>(job: Job, stop: &Arc<AtomicBool>) -> Joiner<'a> {
+    let stop = stop.clone();
+    Box::new(move || {
+        job(&|| stop.load(Ordering::Relaxed));
+        Ok(())
+    })
 }
 
 /// [`Host::together` ](Host::together) on the calling thread: each job in turn, none started once the host is stopped.

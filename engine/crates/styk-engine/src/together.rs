@@ -84,6 +84,32 @@ impl Slot {
 }
 
 impl Engine {
+    /// Starts `job` on a worker that is free, to run beside what the caller does next, and returns what waits for it: it runs the job
+    /// itself if no worker took it, and ends like [`Engine::run_together`] when the job panicked or a worker was lost meanwhile. The job
+    /// owns what it touches, so a caller that never waits for it (it failed first) leaves nothing dangling.
+    pub fn start_later<'a>(&'a self, job: Job, stop: &Arc<AtomicBool>, cancelled: &'a dyn Fn() -> bool) -> impl FnOnce() -> Result<(), JobsFailed> + 'a {
+        let lost_before = self.workers_lost();
+        let slot = Arc::new(Slot::new(job));
+        {
+            let (slot, stop) = (slot.clone(), stop.clone());
+            self.spawn(move |_| slot.run(&|| stop.load(Ordering::Relaxed)));
+        }
+        let stop = stop.clone();
+        move || {
+            let ask_here = || {
+                if !stop.load(Ordering::Relaxed) && cancelled() {
+                    stop.store(true, Ordering::Relaxed);
+                }
+                stop.load(Ordering::Relaxed)
+            };
+            slot.run(&ask_here);
+            slot.wait(&|| {
+                ask_here();
+                (self.workers_lost() != lost_before).then_some(JobsFailed::WorkerLost)
+            })
+        }
+    }
+
     /// Runs `jobs` side by side and returns when all are done. At most `helpers` workers take part (the others stay free for the frame on
     /// show, which waits behind a task); each takes the next job nobody has started, in the order given, until none is left. This thread
     /// does the same and, while it waits for a worker's job, asks `cancelled` and sets `stop` for the jobs on workers to see (they

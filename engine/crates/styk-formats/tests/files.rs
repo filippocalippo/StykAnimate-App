@@ -349,6 +349,10 @@ impl<F: Fn() -> bool> Host for Threads<F> {
         (self.0)()
     }
 
+    fn threads(&self) -> usize {
+        4
+    }
+
     fn together(&self, jobs: Vec<Job>, stop: &Arc<AtomicBool>) -> Result<(), JobsFailed> {
         if self.cancelled() {
             stop.store(true, Ordering::Relaxed);
@@ -426,4 +430,98 @@ fn a_save_whose_jobs_could_not_be_done_is_a_failed_save_with_its_own_code_and_no
         assert_eq!(error.code, Some("worker_failed"), "{failure:?}");
         assert_eq!(error.message_key, "errors.documentExport.documentExportFailed");
     }
+}
+
+
+/// A project-shaped document: a big array of records (the elements the lift cuts into pieces) with numeric arrays some records share,
+/// short arrays, pictures that repeat, strings that look like markers, and an original source held beside the array.
+fn big_document(records: usize, original: &Arc<[u8]>) -> styk_doc::Value {
+    use styk_doc::{Blob, Nums, Obj, Value};
+    let shared: Vec<Value> = (0..5).map(|k| Value::Nums(Arc::new(Nums::new(&(0..40).map(|i| (i * (k + 1)) as f64 * 0.5).collect::<Vec<_>>())))).collect();
+    let picture = |seed: usize| {
+        let bytes: Vec<u8> = (0..60_000usize).map(|i| (i * 31 + seed * 17 + (i >> 5)) as u8).collect();
+        Value::Blob(Arc::new(Blob { prefix: Arc::from("data:image/png;base64,"), bytes: Arc::from(bytes) }))
+    };
+    let pictures: Vec<Value> = (0..3).map(picture).collect();
+    let mut items = Vec::with_capacity(records);
+    for i in 0..records {
+        let mut object = Obj::new();
+        object.set("unique_id", Value::Num(i as f64));
+        object.set("angles", shared[i % 5].clone());
+        object.set("lengths", Value::Nums(Arc::new(Nums::new(&(0..40).map(|k| ((i * 40 + k) % 977) as f64 * 0.25).collect::<Vec<_>>()))));
+        object.set("short", Value::Nums(Arc::new(Nums::new(&[1.0, 2.5, i as f64]))));
+        object.set("name", Value::str(if i % 13 == 0 { "S2B:f32:0:0:3" } else { "plain" }));
+        object.set("ratio", Value::Num(i as f64 / 7.0));
+        object.set("weights", Value::Nums(Arc::new(Nums::new(&(0..33).map(|k| if k == 5 { f64::NAN } else { k as f64 }).collect::<Vec<_>>()))));
+        if i % 90 == 0 {
+            let mut asset = Obj::new();
+            asset.set("data_url", pictures[(i / 90) % 3].clone());
+            object.set("asset", Value::object(asset));
+        }
+        items.push(Value::object(object));
+    }
+    let mut source = Obj::new();
+    source.set("kind", Value::str("piv"));
+    source.set("source_base64", Value::Blob(Arc::new(Blob { prefix: Arc::from(""), bytes: original.clone() })));
+    let mut root = Obj::new();
+    root.set("version", Value::Num(5.0));
+    root.set("_stykSource", Value::object(source));
+    root.set("keyframes", Value::array(items));
+    root.set("backgrounds", Value::array((0..3).map(|k| { let mut b = Obj::new(); b.set("data_url", pictures[k].clone()); Value::object(b) }).collect()));
+    Value::object(root)
+}
+
+/// A host that has threads to spare in name only: the jobs run one after another, so the splicing is tested without a race.
+struct Pretending(usize);
+
+impl Host for Pretending {
+    fn cancelled(&self) -> bool {
+        false
+    }
+
+    fn threads(&self) -> usize {
+        self.0
+    }
+}
+
+#[test]
+fn a_document_lifted_in_pieces_is_the_document_lifted_whole() {
+    use styk_formats::container::{lift_together, lift_together_within, lift_within};
+    let original: Arc<[u8]> = Arc::from(vec![9u8; 5000]);
+    let document = big_document(700, &original);
+    let reserved = [original.clone()];
+    let whole = lift(&document, &reserved).unwrap();
+    assert!(whole.skeleton.len() > 100_000 && !whole.arrays.is_empty() && whole.payloads.len() > 100_000);
+    let hosts: Vec<(&str, Box<dyn Host>)> = vec![("pretending 4 threads", Box::new(Pretending(4))), ("pretending 3", Box::new(Pretending(3))), ("4 real threads", Box::new(Threads(|| false)))];
+    for (name, host) in &hosts {
+        let (parts, times) = lift_together(&document, &reserved, host.as_ref()).unwrap();
+        assert!(parts.skeleton == whole.skeleton, "{name}: skeleton");
+        assert!(parts.arrays == whole.arrays, "{name}: arrays");
+        assert!(parts.payloads == whole.payloads, "{name}: payloads");
+        assert_eq!(parts.reserved_offsets, whole.reserved_offsets, "{name}");
+        assert!(times.pieces_ms >= 0.0 && times.splice_ms >= 0.0, "{name}");
+    }
+    // A small document, or a host with one thread, lifts as it always did.
+    let small = big_document(10, &original);
+    assert!(lift_together(&small, &reserved, &Pretending(4)).unwrap().0.skeleton == lift(&small, &reserved).unwrap().skeleton);
+    assert!(lift_together(&document, &reserved, &Pretending(1)).unwrap().0.skeleton == whole.skeleton);
+    // The limits are the same limits: a document too large for its sections is refused either way.
+    let refused_whole = lift_within(&document, &reserved, 100_000).err().map(|e| e.code());
+    let refused_parts = lift_together_within(&document, &reserved, 100_000, &Pretending(4)).err().map(|e| e.code());
+    assert_eq!(refused_whole, Some(Some("document_too_large")));
+    assert_eq!(refused_parts, refused_whole);
+    // A stopped lift produces nothing.
+    assert_eq!(lift_together(&document, &reserved, &Threads(|| true)).err(), Some(styk_formats::container::ContainerError::Cancelled));
+}
+
+#[test]
+fn a_started_job_runs_when_it_is_waited_for_on_a_host_with_no_thread_to_spare() {
+    let ran = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = ran.clone();
+    let host = Pretending(1);
+    let stop = Arc::new(AtomicBool::new(false));
+    let waiting = host.start(Box::new(move |_| { counter.fetch_add(1, Ordering::Relaxed); }), &stop);
+    assert_eq!(ran.load(Ordering::Relaxed), 0, "nothing runs before it is waited for");
+    assert_eq!(waiting(), Ok(()));
+    assert_eq!(ran.load(Ordering::Relaxed), 1);
 }
