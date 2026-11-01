@@ -92,24 +92,27 @@ at once opening tdd2 (17.6 ms svr_uriel, 4.7 ms the large `.styk`; 79 ms in one 
   `peak_bytes()` is never below it. A free that reaches the counter before its allocation does leaves it negative for a moment, so it is read as signed.
   Large requests are refused against it as before (`refuses`, `LARGE_BYTES`, `reserve` are unchanged).
 
-Release builds, medians of 3 runs (`slot.mjs probe`, so the machine was not idle and the figures are directional), the same files and harness before and after:
+Release builds (`slot.mjs probe`, so the machine was running other work and every time below is directional; the opens vary by 40% from run to run). The counts, the waits and the
+memory do not depend on the load:
 
 | | before | after |
 | --- | ---: | ---: |
-| open of the large `.styk`, 0 / 2 / 3 / 6 helpers | 4,741 / 2,206 / 2,172 / 2,342 ms | 2,679 / 1,820 / 1,681 / 1,635 ms |
-| open tdd2 / svr_uriel (3 helpers) | 1,773 / 1,229 ms | 1,439 / 1,133 ms |
-| save of tdd2 / svr_uriel / the large `.styk` | 3,742 / 3,764 / 2,225 ms | 3,430 / 3,310 / 1,657 ms |
+| allocator lock, large `.styk` open, 3 helpers: calls / found held (counting build) | 7.8 M / 4.0 M | 570 k holds / 150 k |
+| wait per busy helper in that open (counting build) | 0.8–0.95 s | 25–70 ms |
+| worst wait of the interface thread, opening tdd2 / svr_uriel / the large `.styk` (counting build) | 35.9 / 17.6 / 4.7 ms | 4.0 / 0.03 / 2.4 ms |
+| interface thread finding the lock held during playback and save | up to 0.12% of its calls, 2.5 ms | never |
 | heap after the open: large `.styk` / tdd2 / svr_uriel | 443–475 / 445 / 303 MiB | 443 / 446 / 281 MiB |
 | live peak of the open: large `.styk` / tdd2 / svr_uriel | 290 / 345 / 236 MiB | 291 / 345 / 237 MiB |
 | playback, worst gap between shown frames (tdd2 / svr_uriel / large `.styk`) | 48.3 / 55.3 / 70.1 ms | 48.1 / 55.1 / 70.2 ms |
-| allocator lock, large `.styk` open, 3 helpers: holds / found held | 7.8 M calls / 4.0 M | 570 k holds / 150 k |
-| wait per busy helper in that open (counting build) | 0.8–0.95 s | 25–70 ms |
-| worst wait of the interface thread, opening tdd2 / svr_uriel / the large `.styk` | 35.9 / 17.6 / 4.7 ms | 4.0 / 0.03 / 2.4 ms |
-| interface thread finding the lock held during playback and save | up to 0.12% of its calls, 2.5 ms | never |
+| open with 3 helpers, median of 8 runs taken in turn, parent against new: large `.styk` / tdd2 | 3,366 / 2,385 ms | 3,042 / 2,084 ms |
 
-A single thread opens 1.8 times faster as well: a block from a list costs a few instructions where the heap's `malloc` and `free` cost about a hundred nanoseconds. The open still does not
-get faster beyond three helpers (1,681 against 1,635 ms): what is left of the lock is 25 to 70 ms of waiting for each helper, about 5% of the open, so the limit is the work that does not divide, not the allocator;
-the cap of three helpers (`MAX_OPEN_HELPERS`) stays. The playback figures did not move (frames are shown every display refresh; the allocator was not what limited them).
+An independent run in the app (median of several, quieter machine) measured tdd2 1,623 against 1,357 ms and the large `.styk` 2,655 against 1,778 ms. **With no helper the open is
+not faster**: in Node, opening the large `.styk` took 2.2–2.7 s on the parent and 2.2–3.1 s on the new allocator, with the same CPU time (a first measurement of 1.8 times came from runs of the two
+builds an hour apart on a machine whose load had changed); a single thread never met the lock, and `malloc` and `free` of one thread cost what a list does. What the caches remove
+is the waiting of the threads that share the heap. The open still gains nothing from more than three helpers: what is left of the lock is 25 to 70 ms of waiting for each
+helper, about 5% of the open, so the limit is the work that does not divide, not the allocator; the cap of three helpers (`MAX_OPEN_HELPERS`) stays. Batches of up to 64 blocks for the smallest
+sizes (the batch is a kilobyte of each size, at most 16 blocks) were tried, with the same bound on a cache to within 5 KiB: no consistent difference over 8 runs in turn, so the batch stays.
+Playback did not move (frames are shown every display refresh; the allocator was not what limited them).
 
 ## The renderer's private bytes
 
