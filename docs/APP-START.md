@@ -86,3 +86,33 @@ and with the link three times each (source, bundled source, `--packaged`). A lis
 
 Smokes that need the application's own state go through `window.styk` (for a language, `window.styk.loadLocale`), not through a module imported by URL, which on a bundled
 app is a second copy; `tests/app-bundle.test.mjs` lists the few imports that are fine.
+
+## What was tried against the stage's wait, without the CPU rasterization switch
+
+Quiet machine, a bundled source launch, fresh profile, median of five or six launches per row (stage ready, ms from the spawn). The machine's own display scale was 125 % for some runs; `--force-device-scale-factor` sets the scale named.
+
+| Change (injected before the first paint) | 1× | 2× |
+| --- | --- | --- |
+| none | 2,089 | 2,530 |
+| no `backdrop-filter` | 2,172 | 2,617 |
+| no shadows or filters | 2,234 | 2,670 |
+| none of those, and no radii or gradients | 2,318 | 2,634 |
+| none (a noisier run) | 3,280 | 3,010 |
+| side panels and title bar not painted (`content-visibility: hidden`) | 3,188 | 2,967 |
+| nothing painted until the stage is ready, then everything | 3,256 | 3,039 |
+| none (a third run) | 2,330 | 2,420 |
+| every 2D canvas a software canvas (`willReadFrequently`) | 2,195 | 2,817 |
+
+Nothing moves it: less to paint does not shorten the wait. A trace of the graphics process agrees (two launches each, 1×): with nothing painted its main thread still ran 1.57 s of
+`RasterDecoderImpl::DoEndRaster` tasks (1.39 s in the baseline), two of them about 0.33 s each and the first before any script runs. So those are not the visible page's content: they are
+the raster path's own first-use work (its context and shaders, cold) and the canvases' drawing. The stage's WebGPU commands (0.7 to 0.9 s of tasks) queue between them, and after
+`Stage.create` the same thread compiles the engine's primitive shader (0.48 to 0.60 s in `HandleDawnCommands`), which is what the first picture waits for: `styk.ready` is set before it,
+and the first-frame counter (`engineStats.frames`) counts frames submitted, not shown. Compiling it earlier would mean creating the same pipeline from the page's warm-up worker, a second copy of the renderer's
+pipeline description in JavaScript that Dawn's cache would only share if every detail matched; `createRenderPipelineAsync` is not offered by wgpu. Neither was done.
+
+Shader caches persist: after a launch the profile holds `GPUCache` (1.6 MB), `DawnGraphiteCache` (0.5 MB) and `DawnWebGPUCache` (5.6 MB), and the next launch of the same profile read them (the bare-window
+pipeline compile fell from 0.33 s to 3 to 5 ms). The stage's ready time on a reused profile was within the noise of a fresh one at both scales (1×: 2,029, 1,996, 2,417 against 2,089), so the cold part is
+not what holds the stage; Home as the first view (the default launch) gave 2.4 to 3.1 s at 1× and 2.4 to 2.7 s at 2×, the same range.
+
+What is left of the floor, in order: Electron to a window (about 0.45 s), the page and the engine to the application module (about 0.6 s with the bundle), then the stage, whose
+wait is the graphics process's one main thread working through two cold raster tasks, the adapter and device, and the pipeline compile, in that order, none of which JavaScript can reorder.
