@@ -65,3 +65,23 @@ test('desktop aggregation also retains later failures and validates a bounded up
   assert.equal(snapshot.operationContexts.find(row=>row.outcome==='failed').timing.count,1);
   assert.equal(snapshot.errors[0].code,'device_lost');assert.ok(JSON.stringify(snapshot).length<=32768);
 });
+
+test('a frame in a bundled script is reported as the module and source line it came from, and only for modules reports may name',()=>{
+  const stack=file=>line=>`Error: SECRET\n at f (styk-app://app/src/${file}:${line}:9)`;
+  const frames=(file,line)=>sanitizeError(Object.assign(new Error('SECRET'),{stack:stack(file)(line)}),'app').frames;
+  // chunk-A.mjs: engine-owner.mjs is bundled lines 100-150 (its lines 10-30, then from bundled line 110 its lines 40 on), a module that reports may not name is 151-200, editor.mjs 201-300.
+  globalThis.__stykFrames={'chunk-A.mjs':[['engine-owner.mjs',150,100,10,110,40],['editor.mjs',300,201,5]]};
+  try{
+    assert.deepEqual(frames('chunks/chunk-A.mjs',100),[{module:'engine-owner.mjs',line:10}]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',109),[{module:'engine-owner.mjs',line:19}]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',110),[{module:'engine-owner.mjs',line:40}]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',150),[{module:'engine-owner.mjs',line:80}]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',175),[],'a module reports may not name is dropped');
+    assert.deepEqual(frames('chunks/chunk-A.mjs',250),[{module:'editor.mjs',line:54}]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',99),[]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',301),[]);
+    assert.deepEqual(frames('engine/engine-stage.mjs',7),[{module:'engine-stage.mjs',line:7}],'a file without a table keeps its own name');
+    assert.deepEqual(frames('chunks/chunk-B.mjs',7),[],'an unknown chunk is not an allowed module');
+    assert.deepEqual(sanitizeError(Object.assign(new Error('SECRET'),{stack:stack('chunks/chunk-A.mjs')(120)}),'app').frames,sanitizeError(Object.assign(new Error('SECRET'),{stack:stack('engine/engine-owner.mjs')(50)}),'app').frames,'the same place has the same fingerprint, bundled or not');
+  }finally{delete globalThis.__stykFrames;}
+});

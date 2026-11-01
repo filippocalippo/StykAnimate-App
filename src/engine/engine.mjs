@@ -26,14 +26,16 @@ function defaultWorkerCount(cores = globalThis.navigator?.hardwareConcurrency ||
 
 let loading = null;
 
-let adapter = null;
+let adapterInfo = null;
 /**
- * The browser's graphics adapter, asked for once (null where there is none): the one the stage will use, and what the
- * status line names. Asking takes most of a second in the browser's graphics process, so the page starts it early.
+ * Records the promise of the graphics adapter's description (vendor, architecture, device) that the page's warm-up worker
+ * is fetching (engine-start.mjs): the stage names its adapter from it instead of asking the browser a third time, which
+ * took over half a second on a first launch.
  */
-export function requestGraphicsAdapter() {
-  return adapter ??= (globalThis.navigator?.gpu?.requestAdapter?.({powerPreference: 'high-performance'}) ?? Promise.resolve(null)).catch(() => null);
-}
+export function expectAdapterInfo(promise) { adapterInfo = promise; }
+
+/** That promise (it resolves to the description, or null where there is none), or null when no warm-up was started. */
+export const expectedAdapterInfo = () => adapterInfo;
 
 /**
  * Loads the engine once per page.

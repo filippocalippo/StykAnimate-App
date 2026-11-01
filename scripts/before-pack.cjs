@@ -41,5 +41,7 @@ module.exports = async function beforePack(context) {
       if (!item || item.sha256 !== hash(bytes) || item.bytes !== bytes.length) throw new Error(`Rebuild the ${arch} Windows codec helper before packaging.`);
     }
   }
+  // The page's scripts, bundled into build/app, which the package carries as resources/bundle (scripts/build-app.mjs).
+  await (await import('./build-app.mjs')).buildApp({root: appRoot});
   await require('./build-telemetry-info.cjs').buildTelemetryInfo(appRoot);
 };

@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -82,6 +82,41 @@ if (!snapshot) {
     if (hash(source) !== hash(packaged)) throw new Error(`Packaged Windows codec helper differs from its verified build: ${relative}`);
     manifest.push({path:relative,sha256:hash(packaged),bytes:packaged.length});
   }
+}
+// The page's scripts ship bundled (scripts/build-app.mjs) as resources/bundle, served in place of the modules among the web assets. A package
+// without it would run the modules without a word, so it is required, hashed, and (unless this is a baseline) equal to a fresh build of the source.
+const bundleRoot = path.join(resources, 'bundle');
+const bundleFiles = [];
+async function walkBundle(directory, prefix = '') {
+  let entries;
+  try { entries = await readdir(directory, { withFileTypes: true }); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  for (const entry of entries) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) await walkBundle(path.join(directory, entry.name), relative);
+    else bundleFiles.push(relative);
+  }
+}
+await walkBundle(bundleRoot);
+for (const required of ['index.html', 'src/app.mjs', 'src/frame-map.js', 'src/styles/app.css'])
+  if (!bundleFiles.includes(required)) throw new Error(`resources/bundle/${required} is missing: the package would run the unbundled modules. Run npm run pack.`);
+if (!snapshot) {
+  const { buildApp } = await import('./build-app.mjs');
+  // Inside the source tree, like the packaged build: the chunks' names depend on where the output is.
+  const fresh = path.join(appRoot, 'build', 'verify-bundle');
+  try {
+    await buildApp({ root: appRoot, output: fresh });
+    const expected = [];
+    const collect = async (directory, prefix = '') => { for (const entry of await readdir(directory, { withFileTypes: true })) { const relative = prefix ? `${prefix}/${entry.name}` : entry.name; if (entry.isDirectory()) await collect(path.join(directory, entry.name), relative); else expected.push(relative); } };
+    await collect(fresh);
+    const extra = bundleFiles.filter((name) => !expected.includes(name)), absent = expected.filter((name) => !bundleFiles.includes(name));
+    if (extra.length || absent.length) throw new Error(`The packaged bundle's files differ from a fresh build (extra: ${extra.slice(0, 3)}; missing: ${absent.slice(0, 3)}); run npm run pack.`);
+    for (const name of expected) if (hash(await readFile(path.join(fresh, name))) !== hash(await readFile(path.join(bundleRoot, name)))) throw new Error(`Packaged bundle file differs from a fresh build of the source: ${name}; run npm run pack.`);
+  } finally { await rm(fresh, { recursive: true, force: true }); }
+}
+for (const name of bundleFiles) {
+  const bytes = await readFile(path.join(bundleRoot, name));
+  manifest.push({ path: `bundle/${name}`, sha256: hash(bytes), bytes: bytes.length });
 }
 await mkdir(manifestDirectory, { recursive: true });
 manifest.push({ path: 'app.asar/package.json', sha256: hash(packagedMetadata), bytes: packagedMetadata.length });

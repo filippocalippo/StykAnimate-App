@@ -72,6 +72,15 @@ Each is a name for `--only=`; `open` always runs in a document run.
   about 2 s of the document in a temporary file, which is deleted.
 - **`tabs`**: a second project (the `--small` file, or a new project) opens in a tab, then ten switches to and fro: action → first paint of the other
   document, and memory afterwards.
+- **Start-up rows** (`startup` in every run; `empty.startup` and `home.startup` in the `free` runs). All three count from the moment the benchmark spawns the app:
+  `firstWindowMs` until Electron has a window, `readyMs` ("Startup to usable") until `window.styk` has its `editor` and `actions`, and `stageMs`
+  ("Startup to stage ready") until `window.styk.ready === true`. `readyMs` is true as soon as the application's module has run, which is before it builds
+  the shell and the stage, so it is the cost of loading and running the code. `stageMs` is when the app says it is ready: the shell exists and the drawing
+  surface has its graphics device, so the stage can draw. Both predicates are read in every checkout: `main` (the old app) sets `styk.ready` at the same
+  point, after its renderer is created and the first layout, so the two compare. Neither waits for the first drawn picture. `readyMs` keeps its definition, so earlier baselines stay comparable.
+- **Home: click on a project** (`home.openFromHome.ms`): in the `home` run, once the settled memory is read, a real click (CDP mouse) on the first of the 200
+  projects until Home is gone and the editor holds that project: what a person does first. The projects are small copies of one file, so it is the click
+  plus the open of a small project; the target and floor are the same as the other start rows until a number says otherwise.
 - **`home`**: the app launches with a library of 200 projects fabricated in its own temporary profile (copies of a small project the app saves
   itself, with a picture each), never the person's library. `homeUsableMs` is launch → every project listed; then the list scrolls.
 

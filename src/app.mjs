@@ -6013,6 +6013,8 @@ async function init() {
   refreshHotkeyHints(hotkeys);
   appLocalization.updatePlayback($("play-button"), state);
   window.styk.localization = appLocalization;
+  // The page's own message catalogs: a script that needs another language loads it through here, not through a second copy of the module.
+  window.styk.loadLocale = loadLocale;
   state.handles = state.settings.showHandles;
   state.loop = state.settings.loopPlayback;
   state.motionPaths = state.settings.motionPaths;
@@ -6267,6 +6269,8 @@ async function init() {
   markEditorReady();
   window.styk.telemetry = telemetry;
   window.styk.privacyUI = privacyUI;
+  // The listeners for what the main process pushes (the launch file, a stykanimate:// link's menu action) are all on: it sends what it kept (desktop/page-pushes.cjs).
+  desktop?.pageListening?.();
   updateNotice = new UpdateUI(desktop, { onRestart: () => actions['restart-update']() });
   queueStartupPrompts();
   void telemetryInit.then(() => telemetry.timing('startup_ms', performance.now()));

@@ -154,3 +154,39 @@ test('the app scheme refuses writes, other hosts, traversal and bad escapes, and
   assert.equal(f.host.owns('styk-app://app/'),true);assert.equal(f.host.owns('styk-app://app/src/x.mjs'),true);
   for(const url of ['styk-app://elsewhere/','http://app/','http://127.0.0.1:1/','https://example.test/','',undefined])assert.equal(f.host.owns(url),false,String(url));
 });
+
+test('a bundle answers in place of the web assets with the same paths, and everything else still comes from them',async t=>{
+  const f=await fixture(t),bundle=path.join(f.directory,'bundle');
+  await mkdir(path.join(bundle,'src','chunks'),{recursive:true});
+  await writeFile(path.join(bundle,'index.html'),'<h1>Bundled shell</h1>');
+  await writeFile(path.join(bundle,'src','chunks','chunk-A.mjs'),'export const bundled = true;');
+  await writeFile(path.join(bundle,'src','worker.mjs'),'export const bundledWorker = true;');
+  const handlers=new Map(),protocol={registerSchemesAsPrivileged(){},handle:(scheme,handler)=>handlers.set(scheme,handler)};
+  await hostModule.handleAppProtocol({protocol,appRoot:f.root,bundleRoot:bundle});
+  const fetch=pathname=>handlers.get('styk-app')(new Request(`styk-app://app${pathname}`));
+  assert.equal(await (await fetch('/')).text(),'<h1>Bundled shell</h1>');
+  assert.equal(await (await fetch('/src/worker.mjs')).text(),'export const bundledWorker = true;');
+  const chunk=await fetch('/src/chunks/chunk-A.mjs');
+  assert.equal(chunk.status,200);assert.equal(chunk.headers.get('cross-origin-embedder-policy'),'require-corp');
+  await mkdir(path.join(f.root,'assets'));await writeFile(path.join(f.root,'assets','icon.svg'),'<svg/>');
+  assert.equal(await (await fetch('/assets/icon.svg')).text(),'<svg/>');
+  assert.equal((await fetch('/src/chunks/missing.mjs')).status,404);
+  assert.equal((await fetch('/src/../secret.json')).status,403);
+});
+
+test('a bundle that is not there stops the host from starting rather than serving the modules unannounced',async t=>{
+  const f=await fixture(t);
+  const protocol={registerSchemesAsPrivileged(){},handle(){}};
+  await assert.rejects(hostModule.handleAppProtocol({protocol,appRoot:f.root,bundleRoot:path.join(f.directory,'no-bundle')}),{code:'ENOENT'});
+});
+
+test('a bundled file asked for in another case is never answered from the unbundled modules',async t=>{
+  const f=await fixture(t),bundle=path.join(f.directory,'bundle');
+  await mkdir(path.join(bundle,'src'),{recursive:true});
+  await writeFile(path.join(bundle,'src','worker.mjs'),'export const bundledWorker = true;');
+  const handlers=new Map(),protocol={registerSchemesAsPrivileged(){},handle:(scheme,handler)=>handlers.set(scheme,handler)};
+  await hostModule.handleAppProtocol({protocol,appRoot:f.root,bundleRoot:bundle});
+  const answer=await handlers.get('styk-app')(new Request('styk-app://app/src/Worker.mjs'));
+  // A case-insensitive file system finds the bundle's file; a case-sensitive one finds nothing. Neither may find the module.
+  assert.ok(!(await answer.text()).includes('export const ready'),'the source module must not answer');
+});

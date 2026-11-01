@@ -28,7 +28,7 @@ try {
     window.styk.workspace.float('vfx');
     window.styk.workspace.setTimelineSpan('stage');
     await window.styk.workspace.flushPreferences();
-    await (await import('/src/localization.mjs')).loadLocale('it'); window.styk.settingsUI.commit({locale:'it',theme:'dark'});
+    await window.styk.loadLocale('it'); window.styk.settingsUI.commit({locale:'it',theme:'dark'});
     await window.styk.settingsUI.flush();
     const snapshot = window.styk.workspace.preferences;
     const disk = await window.stykDesktop.getWorkspacePreferences();

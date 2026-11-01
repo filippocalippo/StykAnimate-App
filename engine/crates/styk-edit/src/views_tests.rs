@@ -382,3 +382,104 @@ fn the_range_of_a_drawing_layer_is_a_distance_in_ticks_whatever_the_counts() {
     assert_eq!(drawing_samples(&editor, &format!("{{{settings},\"onionRangeBefore\":5,\"onionRangeAfter\":3}}")).iter().map(|sample| sample.1).collect::<Vec<_>>(), vec![0.0, 8.0]);
     assert!(drawing_samples(&editor, &format!("{{{settings},\"onionRangeBefore\":4,\"onionRangeAfter\":2}}")).is_empty());
 }
+
+/// An allocator that keeps the block of one `Prepared` (the views of a document) when it is freed, where a test asks for it, and hands it
+/// to the next allocation of that size, so that a later generation of the views can be at the address of an earlier one that is gone.
+mod reusing {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    thread_local! {
+        pub static REUSING: Cell<bool> = const { Cell::new(false) };
+        /// The block to keep when it is freed.
+        pub static TARGET: Cell<*mut u8> = const { Cell::new(std::ptr::null_mut()) };
+        static FREED: Cell<*mut u8> = const { Cell::new(std::ptr::null_mut()) };
+    }
+
+    struct Reusing;
+
+    fn views(layout: Layout) -> bool {
+        layout.size() == std::mem::size_of::<styk_eval::eval::Prepared>() + 2 * std::mem::size_of::<usize>()
+            && layout.align() == std::mem::align_of::<styk_eval::eval::Prepared>().max(std::mem::align_of::<usize>())
+            && REUSING.try_with(Cell::get).unwrap_or(false)
+    }
+
+    unsafe impl GlobalAlloc for Reusing {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if views(layout) {
+                let freed = FREED.try_with(|freed| freed.replace(std::ptr::null_mut())).unwrap_or(std::ptr::null_mut());
+                if !freed.is_null() {
+                    return freed;
+                }
+            }
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            if views(layout) && TARGET.try_with(|target| target.get() == pointer).unwrap_or(false) && FREED.try_with(|freed| freed.get().is_null()).unwrap_or(false) {
+                let _ = FREED.try_with(|freed| freed.set(pointer));
+                return;
+            }
+            unsafe { System.dealloc(pointer, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: Reusing = Reusing;
+
+    /// Gives a block held back to the system.
+    pub fn release() {
+        let freed = FREED.with(|freed| freed.replace(std::ptr::null_mut()));
+        if !freed.is_null() {
+            let layout = Layout::from_size_align(std::mem::size_of::<styk_eval::eval::Prepared>() + 2 * std::mem::size_of::<usize>(), std::mem::align_of::<styk_eval::eval::Prepared>().max(std::mem::align_of::<usize>())).unwrap();
+            unsafe { System.dealloc(freed, layout) };
+        }
+    }
+}
+
+/// The document with a canvas `shift` wider: the follow path fits its figures to the canvas, so every width has a path of its own.
+fn moved(shift: f64) -> Value {
+    let mut report = document();
+    let width = report.get("canvas_width").and_then(Value::as_f64).unwrap();
+    report.make_obj().unwrap().set("canvas_width", Value::Num(width + shift));
+    report
+}
+
+#[test]
+fn a_followed_path_is_not_taken_for_the_one_of_a_document_whose_views_took_the_address_of_the_views_it_was_shaped_against() {
+    let clip = document().path(&["_styk", "cameraMotion", "clips"]).unwrap().item(0).unwrap();
+    let args = parse(&format!(r#"{{"clip":{},"ticks":[10,20,30]}}"#, styk_doc::json::to_string(&clip)));
+    let ask = |editor: &Editor| parse(&editor.interface_camera("cameraSamples", &args).unwrap()).numbers().unwrap();
+    let address = |editor: &Editor| std::sync::Arc::as_ptr(&editor.prepared().unwrap()) as usize;
+    reusing::REUSING.with(|reusing| reusing.set(true));
+    let mut editor = editor_at(0.0);
+    editor.report = moved(0.0);
+    let first = ask(&editor);
+    let shaped_against = address(&editor);
+    reusing::TARGET.with(|target| target.set(shaped_against as *mut u8));
+    // Documents are read and replaced, without the clip being asked for, until the views of one take the address the first's had.
+    let (mut shift, mut now) = (0.0, 0);
+    for _ in 0..64 {
+        shift += 100.0;
+        editor.report = moved(shift);
+        now = address(&editor);
+        if now == shaped_against {
+            break;
+        }
+    }
+    let after = ask(&editor);
+    reusing::REUSING.with(|reusing| reusing.set(false));
+    reusing::TARGET.with(|target| target.set(std::ptr::null_mut()));
+    reusing::release();
+    // Without this the test would say nothing; the allocator hands the block of the views that are gone to the next ones.
+    let mut alone = editor_at(0.0);
+    alone.report = moved(shift);
+    let wanted = ask(&alone);
+    assert_ne!(wanted, first, "the two documents are told apart by the path");
+    if now != shaped_against {
+        // The views that were shaped against are still held, so their block cannot be given to others: nothing to confuse.
+        assert_eq!(after, wanted);
+        return;
+    }
+    assert_eq!(after, wanted, "the path of the document read now, not the one of the document whose views had this address");
+}

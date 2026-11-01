@@ -6,7 +6,7 @@
 //!
 //! Read-only: the document does not change.
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use styk_doc::Value;
 use styk_eval::follow::Follow;
@@ -17,9 +17,10 @@ use crate::{EditError, Editor};
 /// What the views keep between reads.
 #[derive(Default)]
 pub(crate) struct Cache {
-    /// The follow clip last sampled: the document it was shaped against (the prepared views' identity), the clip as
-    /// text and its shaped path. A graph is drawn from many reads of one clip, and a slider drags it through many.
-    follow: Option<(usize, String, Option<Arc<Follow>>)>,
+    /// The follow clip last sampled: the document it was shaped against (the prepared views, held weakly so that a
+    /// generation nothing else uses is not kept alive, and told apart from a later one that took its address), the clip
+    /// as text and its shaped path. A graph is drawn from many reads of one clip, and a slider drags it through many.
+    follow: Option<(Weak<styk_eval::eval::Prepared>, String, Option<Arc<Follow>>)>,
 }
 
 impl Editor {
@@ -71,10 +72,9 @@ impl Editor {
     /// The follow path of `clip` through the document's figures, kept while it is the same clip of the same document.
     fn follow_of(&self, prepared: &Arc<styk_eval::eval::Prepared>, clip: styk_eval::doc::CameraMotionClip, source: Option<&Value>) -> Option<Arc<Follow>> {
         let text = source.map(styk_doc::json::to_string).unwrap_or_default();
-        let identity = Arc::as_ptr(prepared) as usize;
         let mut cache = self.camera_views.borrow_mut();
         if let Some((held, held_text, follow)) = &cache.follow
-            && *held == identity
+            && held.upgrade().is_some_and(|held| Arc::ptr_eq(&held, prepared))
             && *held_text == text
         {
             return follow.clone();
@@ -82,7 +82,7 @@ impl Editor {
         let mut doc = (*prepared.doc).clone();
         doc.camera_motion = vec![clip];
         let follow = Follow::new(&doc).map(Arc::new);
-        cache.follow = Some((identity, text, follow.clone()));
+        cache.follow = Some((Arc::downgrade(prepared), text, follow.clone()));
         follow
     }
 
