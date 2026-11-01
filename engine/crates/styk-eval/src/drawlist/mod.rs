@@ -911,8 +911,9 @@ pub enum Layer {
 }
 
 /// What encoding keeps of each object for the next frame of the same document: an object whose build the scene's memory kept
-/// ([`Scene::built_in`]) is encoded as it was. Only a plain frame is kept: nothing in it draws effects, 3D faces or text, no drawing
-/// cel is live and the object is not being dragged, so what an object is encoded as depends on its items alone.
+/// ([`Scene::built_in`]) is encoded as it was. Only a plain frame is kept: nothing in it draws effects, 3D faces or text and the object is not
+/// being dragged, so what an object is encoded as depends on its items alone. While drawing cels are held live, an object that draws
+/// a cel is encoded every frame (its tiles are the live slots, which change between frames) and the others are kept.
 #[derive(Default)]
 pub struct EncodeMemory {
     /// What the kept objects were encoded under: the atlas their pictures are placed in, whether effects are bypassed.
@@ -921,6 +922,13 @@ pub struct EncodeMemory {
     objects: std::collections::HashMap<u32, (u64, usize, Arc<ObjectOut>)>,
     /// The onion skins the last frame was drawn with, encoded: a ghost is the same scene every step of a gesture.
     ghosts: Vec<(GhostKey, Arc<Encoded>)>,
+}
+
+impl EncodeMemory {
+    /// How many objects are kept for the next frame.
+    pub fn kept(&self) -> usize {
+        self.objects.len()
+    }
 }
 
 /// What a ghost is encoded from: the scene (by its stamp), the assets its pictures are placed in, and the settings that change how it is encoded.
@@ -1189,7 +1197,7 @@ fn encode_scene(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidd
         Some(ObjectOut { opacity, outline_alpha, outline, items, nodes, figure, extents, has_fx, raster, single_drawing, bounds })
     };
     // Objects kept from the last frame are not encoded again; the others are, and are kept.
-    let plain = !measured && live.is_none() && tint.is_none() && scene.vfx.is_none() && scene.clip_vfx.iter().all(Option::is_none) && scene.built_in.len() == scene.objects.len();
+    let plain = !measured && tint.is_none() && scene.vfx.is_none() && scene.clip_vfx.iter().all(Option::is_none) && scene.built_in.len() == scene.objects.len();
     let Some(memory) = memory.filter(|_| plain) else {
         let objects = crate::par::map(&runs, 16, encode_run).into_iter().map(|out| out.map(Arc::new)).collect();
         return Encoded { runs, objects, of_slot, fx };
@@ -1204,7 +1212,13 @@ fn encode_scene(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidd
         let first = &scene.items[a];
         let moved = moved.get(first.slot as usize).copied().flatten().is_some();
         let build = scene.built_in[first.slot as usize];
-        (first.chain == crate::geometry::NO_CHAIN && !moved && build != 0 && !hidden.get(first.slot as usize).copied().unwrap_or(false)).then_some((first.slot, build, b - a))
+        // A cel the interface holds live is drawn from slots that change between frames: its object is never kept.
+        let live_cel = live.is_some()
+            && scene.items[a..b].iter().any(|it| {
+                let fig = &scene.figures[it.figure as usize];
+                it.kind == ItemKind::Image && fig.image(fig.segments[it.index as usize].asset).is_some_and(|asset| asset.cel.is_some())
+            });
+        (first.chain == crate::geometry::NO_CHAIN && !moved && build != 0 && !live_cel && !hidden.get(first.slot as usize).copied().unwrap_or(false)).then_some((first.slot, build, b - a))
     };
     let mut objects: Vec<Option<Arc<ObjectOut>>> = vec![None; runs.len()];
     let mut missing: Vec<usize> = Vec::new();
