@@ -10,6 +10,9 @@ use crate::{Engine, Generation, TaskQueue};
 
 pub use styk_eval::assets::DecodedImage;
 
+pub(crate) mod residency;
+pub use residency::{drawing_pages, has_place, images_on, on_demand, pictures_of, Acquired, PlaceIndex, Residency, ATLAS_PAGES};
+
 /// Which places of a sprite atlas hold their pixels: what a renderer that takes decoded
 /// images a slice at a time ([`Engine::take_images`]) has uploaded, so it can tell
 /// whether a frame it drew lacks some of its pictures and should be drawn again once
@@ -41,17 +44,25 @@ impl Uploaded {
         self.places.insert(place(layer, x, y));
     }
 
+    /// The pictures of the atlas page `layer` were taken away.
+    pub fn forget_page(&mut self, layer: u32) {
+        self.places.retain(|place| (place >> 32) as u32 != layer);
+    }
+
+    /// Whether the picture laid out at `entry` is in the atlas.
+    pub fn has(&self, entry: &AtlasEntry) -> bool {
+        self.places.contains(&place(entry.layer, entry.x, entry.y))
+    }
+
     /// How many pictures the atlas holds.
     pub fn len(&self) -> usize {
         self.places.len()
     }
 
-    /// `image` was written into the atlas `assets` lays out.
-    pub fn record(&mut self, assets: &Assets, image: &DecodedImage) {
+    /// `image` was written into the atlas `assets` lays out. Whether it was not there before.
+    pub fn record(&mut self, assets: &Assets, image: &DecodedImage) -> bool {
         let entry: Option<&AtlasEntry> = if image.drawing { assets.drawing.get(image.index as usize) } else { assets.atlas.get(image.index as usize) };
-        if let Some(e) = entry.filter(|e| e.valid) {
-            self.places.insert(place(e.layer, e.x, e.y));
-        }
+        entry.filter(|e| e.valid).is_some_and(|e| self.places.insert(place(e.layer, e.x, e.y)))
     }
 
     /// Whether `list` samples an atlas place that holds no pixels yet: a picture or a
@@ -67,10 +78,26 @@ impl Uploaded {
 
 pub(crate) use styk_eval::assets::Picture;
 
+/// What decoding image `index` of `generation`'s document is for: the image itself, or, when the pages of its pictures
+/// are kept a few at a time ([`Residency`]), only its soft copy (the stage asks for the picture when a frame needs it,
+/// [`Engine::decode_images`]).
+pub(crate) fn picture_of_image(generation: &Generation, atlas_pages: u32, index: usize) -> Picture {
+    if residency::on_demand(&generation.assets, atlas_pages) { Picture::Soft(index) } else { Picture::Image(index) }
+}
+
+fn pictures_to_decode(generation: &Generation) -> usize {
+    generation.prepared.doc.images.len() + generation.assets.cels.len()
+}
+
 /// The pixels decoding `picture` produces, as far as is known without decoding it.
 pub(crate) fn estimate(generation: &Generation, picture: Picture) -> usize {
     generation.assets.picture_bytes(picture)
 }
+
+/// How many pictures a document kept a few pages at a time decodes at once, in units of the picture budget: a frame
+/// waits for the pictures it needs, so they are decoded across the workers instead of one after another (a 4K picture
+/// is the budget by itself, and holds about four times that while it is decoded).
+const DEMAND_DECODES: usize = 3;
 
 #[derive(Default)]
 pub(crate) struct Store {
@@ -83,6 +110,8 @@ pub(crate) struct Store {
     inflight_bytes: usize,
     /// Pictures to decode that wait for the renderer to take some of the ready ones ([`Budgets::picture_bytes`]).
     parked: TaskQueue,
+    /// The stage asks for the pictures it needs ([`Engine::decode_images`]): they are decoded [`DEMAND_DECODES`] at a time.
+    demand: bool,
     epoch: u64,
     redecode_pending: bool,
     preparing: Option<DecodeScope>,
@@ -119,6 +148,7 @@ impl Store {
     /// under `budget`, or there are none (a picture larger than the budget is decoded alone). Counts it as
     /// being decoded when it may.
     pub(crate) fn admit_decode(&mut self, budget: usize, estimate: usize) -> bool {
+        let budget = if self.demand { budget.saturating_mul(DEMAND_DECODES) } else { budget };
         let held = self.ready_bytes + self.inflight_bytes;
         if held >= budget && held > 0 { return false }
         self.inflight_bytes += estimate;
@@ -161,7 +191,7 @@ impl Engine {
     pub(crate) fn decode_pixels(&self, generation: &Generation, picture: Picture) -> Vec<DecodedImage> {
         let before = match picture {
             Picture::Cel(cel) => generation.assets.cels.get(&cel).map(|(tiles, _)| (tiles.clone(), tiles.artwork_bounds())),
-            Picture::Image(_) => None,
+            Picture::Image(_) | Picture::Soft(_) => None,
         };
         match styk_eval::assets::decode_picture(&generation.prepared.doc, &generation.assets, picture) {
             Ok(decoded) => {
@@ -236,6 +266,45 @@ impl Engine {
         taken.into_iter().collect()
     }
 
+    /// Decodes pictures of `generation`'s document that a document kept a few pages at a time ([`Residency`]) needs:
+    /// images `indices`. `urgent` ones (a frame waits for them) go ahead of the queue, the others (the pictures of
+    /// the ticks ahead) behind it. Their pixels reach the renderer through [`Engine::take_images`] like the rest, under
+    /// the picture budget ([`DEMAND_DECODES`] times it, for a document kept this way).
+    pub fn decode_images(&self, generation: &Arc<Generation>, indices: &[usize], urgent: bool) {
+        if indices.is_empty() { return }
+        let mut job = crate::TaskQueue::new();
+        for &index in indices { job.push_back(crate::OrdinaryTask::Decode(generation.clone(), Picture::Image(index))); }
+        {
+            let mut state = self.inner.state.lock();
+            if self.inner.stopping.load(std::sync::atomic::Ordering::SeqCst) || state.images.lineage != generation.lineage { return }
+            state.images.remaining += indices.len();
+            state.images.demand = true;
+            if urgent {
+                job.append(&mut state.tasks);
+                std::mem::swap(&mut state.tasks, &mut job);
+            } else {
+                state.tasks.append(&mut job);
+            }
+        }
+        self.inner.state.notify_all();
+    }
+
+    /// Moves the decodes of images `indices` that are queued already ahead of the rest of the queue: a frame waits for them now, and
+    /// they were asked for behind it, as pictures of the ticks ahead or of a thumbnail. A picture being decoded is on its way.
+    pub fn promote_images(&self, generation: &Arc<Generation>, indices: &[usize]) {
+        if indices.is_empty() { return }
+        let mut state = self.inner.state.lock();
+        if self.inner.stopping.load(std::sync::atomic::Ordering::SeqCst) || state.images.lineage != generation.lineage { return }
+        let wanted = |task: &crate::OrdinaryTask| matches!(task, crate::OrdinaryTask::Decode(queued, Picture::Image(index)) if queued.lineage == generation.lineage && indices.contains(index));
+        if !state.tasks.iter().any(wanted) { return }
+        let (mut front, mut rest) = (crate::TaskQueue::new(), crate::TaskQueue::new());
+        while let Some(task) = state.tasks.pop_front() {
+            if wanted(&task) { front.push_back(task) } else { rest.push_back(task) }
+        }
+        front.append(&mut rest);
+        state.tasks = front;
+    }
+
     /// Queues one coalesced preparation in the same ordinary worker queue.
     /// Pending counters change immediately, but dense task preparation/disposal
     /// never happens on the caller (a Stage may call this on the interface).
@@ -246,7 +315,7 @@ impl Engine {
             let mut state = self.inner.state.lock();
             if self.inner.stopping.load(std::sync::atomic::Ordering::SeqCst) || state.images.redecode_pending { return }
             let Some(generation) = state.current.as_ref() else { return };
-            let mut fresh = Store::for_publication(generation.lineage, generation.prepared.doc.images.len() + generation.assets.cels.len());
+            let mut fresh = Store::for_publication(generation.lineage, pictures_to_decode(&generation));
             fresh.epoch = state.images.epoch.wrapping_add(1);
             fresh.redecode_pending = true;
             *job.front_mut().expect("prebuilt placeholder") = crate::OrdinaryTask::Redecode(DecodeScope { lineage: fresh.lineage, epoch: fresh.epoch });
@@ -269,12 +338,12 @@ impl Engine {
             };
             let mut tasks = crate::TaskQueue::new();
             for index in 0..generation.prepared.doc.images.len() {
-                tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), Picture::Image(index)));
+                tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), picture_of_image(&generation, self.atlas_pages(), index)));
             }
             for &cel in generation.assets.cels.keys() {
                 tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), Picture::Cel(cel)));
             }
-            let mut fresh = Store::for_publication(generation.lineage, generation.prepared.doc.images.len() + generation.assets.cels.len());
+            let mut fresh = Store::for_publication(generation.lineage, pictures_to_decode(&generation));
             fresh.epoch = epoch.wrapping_add(1);
             let retired = {
                 let mut state = self.inner.state.lock();

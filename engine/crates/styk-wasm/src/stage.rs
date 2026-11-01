@@ -7,6 +7,9 @@ use styk_engine::{Engine, Generation, Uploaded};
 use styk_render::{Renderer, ViewParams, wgpu};
 use wasm_bindgen::prelude::*;
 
+mod pictures;
+pub(crate) use pictures::ViewPictures;
+
 use crate::engine::EngineHandle;
 use crate::js_error;
 
@@ -76,6 +79,20 @@ pub struct Stage {
     /// The atlas places uploaded so far, and whether the last frame drawn lacked a
     /// picture ([`Stage::pictures_pending`]).
     uploaded: Uploaded,
+    /// The pages of the sprite layout in the sprite texture, for a document with more of them than it keeps
+    /// ([`styk_engine::Residency`]); none for a document whose texture is the layout's size.
+    residency: Option<styk_engine::Residency>,
+    /// The pictures asked of the engine for that document (`pictures.rs`).
+    loading: pictures::Loading,
+    /// The layout pages the frame on show draws.
+    shown_pages: Vec<u32>,
+    /// Milliseconds the last frame spent uploading pictures, and deciding whether its pictures are in.
+    sync_ms: f64,
+    ready_ms: f64,
+    /// Frames drawn with the soft copy of some picture (a document whose pages are kept a few at a time).
+    soft_frames: u64,
+    /// A picture being uploaded a few rows a frame, and the rows done.
+    partial: Option<(Arc<styk_engine::DecodedImage>, u32)>,
     pictures: u32,
     /// Bytes of pictures the last frame uploaded to the atlas.
     upload_bytes: usize,
@@ -197,6 +214,13 @@ impl Stage {
             live_pages: 0,
             live_shown: 0,
             uploaded: Uploaded::default(),
+            residency: None,
+            loading: Default::default(),
+            shown_pages: Vec::new(),
+            partial: None,
+            soft_frames: 0,
+            sync_ms: 0.0,
+            ready_ms: 0.0,
             pictures: PICTURES_COMPLETE,
             upload_bytes: 0,
             edit: EditScene::default(),
@@ -318,6 +342,7 @@ impl Stage {
         let drawn = self.draw(generation, &frame.list, if camera { frame.camera } else { None }, zoom, pan, clip_to_artboard)?;
         if drawn {
             self.shown = Shown::Prepared { generation: generation.id, tick: frame.tick, epoch: snapshot.epoch };
+            self.pictures_ahead(frame.tick);
         }
         Ok(drawn)
     }
@@ -413,6 +438,12 @@ impl Stage {
         if decoded > 0 || warming { PICTURES_DECODED } else if decoding > 0 { PICTURES_DECODING } else { PICTURES_COMPLETE }
     }
 
+    /// The picture on show is tick `tick`, which the person went to (a jump, a drag): a document whose pictures are kept a
+    /// few pages at a time loads those of the ticks around it, so the next one is in when it is asked for.
+    pub fn hint_tick(&mut self, tick: f64) {
+        self.pictures_near(tick);
+    }
+
     /// A cold followed pose is accepted but awaits the engine worker's shared path.
     pub fn camera_pending(&self) -> bool { self.edit.camera_pending().is_some() }
 
@@ -484,24 +515,70 @@ impl Stage {
 
     /// Lays the sprite atlas out for `generation` and uploads a slice of the pictures decoded
     /// since (the camera monitor and thumbnails sample the same atlas).
-    pub(crate) fn sync_images(&mut self, generation: &Generation) {
+    pub(crate) fn sync_images(&mut self, generation: &Arc<Generation>) {
         self.sync_atlas(generation);
         self.flush_live();
-        let images = self.engine.take_images(self.live.picture_budget(crate::clock(), IMAGE_UPLOAD_BYTES));
-        self.upload_bytes = images.iter().map(|image| image.rgba.len()).sum();
-        if !images.is_empty() {
-            self.renderer.upload_images(&generation.assets, images.iter().map(|image| &**image));
-            for image in &images {
-                self.uploaded.record(&generation.assets, image);
+        // A frame waiting for its pictures takes every one that is decoded; otherwise a slice a frame, and a picture
+        // larger than the slice goes in over several frames (a 4K picture is 64 MiB).
+        let waiting = self.loading.waiting();
+        // A slice a frame: smaller while a stroke is being drawn and just after (the interface thread has a frame to keep).
+        let slice = self.live.picture_budget(crate::clock(), IMAGE_UPLOAD_BYTES);
+        self.upload_bytes = 0;
+        // What this call uploads is in the table the shaders read from the next frame on.
+        let flush = |stage: &mut Stage| stage.renderer.flush_pictures();
+        if let Some((image, done)) = self.partial.take() {
+            if !self.has_place(&generation.assets, &image) {
+                return;
+            }
+            let rows = if waiting { image.height } else { (slice / (image.width as usize * 4)).max(1) as u32 };
+            self.renderer.upload_rows(&generation.assets, &image, done, rows);
+            self.upload_bytes = rows.min(image.height - done) as usize * image.width as usize * 4;
+            if done + rows < image.height {
+                self.partial = Some((image, done + rows));
+            } else {
+                self.picture_arrived(&generation.assets, &image);
+                flush(self);
+            }
+            return;
+        }
+        let images = self.engine.take_images(if waiting { usize::MAX } else { slice });
+        for image in images {
+            // A picture whose page left while it was decoded is dropped: it is decoded again when it is wanted.
+            if !self.has_place(&generation.assets, &image) {
+                continue;
+            }
+            let rows = (slice / (image.width as usize * 4)).max(1) as u32;
+            if waiting || image.height <= rows {
+                self.renderer.upload_rows(&generation.assets, &image, 0, image.height);
+                self.upload_bytes += image.rgba.len();
+                self.picture_arrived(&generation.assets, &image);
+            } else {
+                self.renderer.upload_rows(&generation.assets, &image, 0, rows);
+                self.upload_bytes += rows as usize * image.width as usize * 4;
+                self.partial = Some((image, rows));
             }
         }
+        flush(self);
     }
 
     /// Lays the sprite atlas out for `generation`, with room for the live drawing cels' slots.
-    fn sync_atlas(&mut self, generation: &Generation) {
+    fn sync_atlas(&mut self, generation: &Arc<Generation>) {
+        self.sync_atlas_layout(generation);
+        // A revision may have appended pictures to a page that was there: the table of pictures must know them.
+        if self.renderer.sync_pictures(&generation.assets) {
+            self.atlas_serial += 1;
+        }
+    }
+
+    /// The layout of the sprite texture for `generation`.
+    fn sync_atlas_layout(&mut self, generation: &Arc<Generation>) {
         let layout = (generation.lineage, generation.assets.pages);
         let live_pages = self.live.pages();
-        if self.atlas_of != Some(layout) {
+        if styk_engine::on_demand(&generation.assets, self.engine.atlas_pages()) {
+            return self.sync_atlas_resident(generation, live_pages);
+        }
+        if self.atlas_of != Some(layout) || self.residency.is_some() {
+            self.residency = None;
             // Another project, or more atlas pages than before: the texture is allocated
             // again and every image decoded so far is uploaded again by the engine.
             self.renderer.prepare_sprites_live(&generation.assets, live_pages);
@@ -567,6 +644,8 @@ impl Stage {
     /// through only while pictures of the document are still on their way.
     fn pictures_after(&self, list: &styk_eval::drawlist::DrawList) -> u32 {
         let (decoding, decoded) = self.engine.images_backlog();
+        // A picture uploaded a few rows a frame is on its way too.
+        let decoded = decoded + usize::from(self.partial.is_some());
         if decoding + decoded == 0 || !self.uploaded.lacks(list) {
             PICTURES_COMPLETE
         } else if decoded > 0 {
@@ -581,7 +660,13 @@ impl Stage {
         if self.lost.get().is_some() {
             return Ok(false);
         }
+        let started = crate::clock();
         self.sync_images(generation);
+        let synced = crate::clock();
+        // The picture on show stays until the pictures this frame draws are all in the sprite texture.
+        let ready = self.pictures_ready(generation, list).or_else(|| self.residency.is_none().then(Vec::new));
+        (self.sync_ms, self.ready_ms) = (synced - started, crate::clock() - synced);
+        let Some(pages) = ready else { return Ok(false) };
         let doc = &generation.prepared.doc;
         // The Draw view turns and mirrors about the artboard's centre, after the scene camera.
         let orientation = styk_eval::view::orientation(self.rotation, self.flip, [pan[0] + doc.canvas[0] as f64 * zoom / 2.0, pan[1] + doc.canvas[1] as f64 * zoom / 2.0]);
@@ -635,6 +720,8 @@ impl Stage {
         self.queue.submit([encoder.finish()]);
         self.queue.present(target);
         self.pictures = self.pictures_after(list);
+        self.soft_frames += u64::from(self.loading.placeholders() > 0);
+        self.pictures_shown(pages);
         Ok(true)
     }
 
@@ -712,10 +799,12 @@ impl Stage {
     pub fn stats(&self) -> String {
         let s = &self.renderer.stats;
         let (sprite_pages, sprite_bytes) = self.renderer.sprite_memory();
+        let (resident, loads, evictions) = self.residency_stats();
         format!(
-            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{}}}",
+            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3}}}",
             s.prims, s.groups, s.passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
-            sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled()
+            sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled(),
+            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms
         )
     }
 }

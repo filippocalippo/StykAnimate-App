@@ -35,14 +35,16 @@ struct Prepared {
 }
 
 impl Prepared {
-    fn new(generation: Arc<Generation>, current: Option<Arc<Generation>>) -> Self {
+    fn new(generation: Arc<Generation>, current: Option<Arc<Generation>>, atlas_pages: u32) -> Self {
         let previous = current.as_ref().filter(|previous| previous.lineage == generation.lineage);
         let count = generation.prepared.doc.images.len();
         let known = previous.as_ref().map_or(0, |previous| previous.prepared.doc.images.len().min(count));
         let cels: Vec<usize> = generation.assets.cels.keys().copied().filter(|cel| !previous.as_ref().is_some_and(|old| old.assets.cels.contains_key(cel))).collect();
         let mut tasks = TaskQueue::new();
+        // A document whose pictures the stage keeps a few pages at a time decodes their soft copies, and the pictures
+        // themselves when a frame needs them.
         for index in known..count {
-            tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), images::Picture::Image(index)));
+            tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), images::picture_of_image(&generation, atlas_pages, index)));
         }
         for cel in &cels {
             tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), images::Picture::Cel(*cel)));
@@ -105,7 +107,7 @@ impl Engine {
         let generation = Arc::new(generation);
         loop {
             let current = self.inner.state.lock().current.clone();
-            let mut prepared = Prepared::new(generation.clone(), current);
+            let mut prepared = Prepared::new(generation.clone(), current, self.atlas_pages());
             let retirement = {
                 let mut state = self.inner.state.lock();
                 prepared.current(&state).then(|| prepared.install(&mut state))
