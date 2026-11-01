@@ -45,6 +45,8 @@ mod isolation;
 #[cfg(feature = "gpu")]
 mod materials;
 #[cfg(feature = "gpu")]
+mod pictures;
+#[cfg(feature = "gpu")]
 mod pipeline;
 #[cfg(feature = "gpu")]
 mod present;
@@ -53,7 +55,7 @@ mod resources;
 mod view;
 
 #[cfg(feature = "gpu")]
-pub use images::{decode_images, DecodedImage};
+pub use images::{decode_images, DecodedImage, MAX_PAGES};
 #[cfg(feature = "gpu")]
 pub use present::read_frame;
 pub use view::{ViewParams, CAMERA_PREVIEW_LIMIT};
@@ -130,6 +132,9 @@ pub struct Renderer {
     pub(crate) bind0: Option<wgpu::BindGroup>,
     pub(crate) sprites: wgpu::Texture,
     pub(crate) sprite_view: wgpu::TextureView,
+    pub(crate) sprite_map: images::SpriteMap,
+    /// Which pictures of the layout are in the sprite texture, and the soft copies of the rest.
+    pub(crate) pictures: pictures::PictureState,
     pub(crate) sprite_bind: wgpu::BindGroup,
     /// The particle material atlas of generated effects, and its trilinear sampler.
     pub(crate) materials: materials::Materials,

@@ -14,7 +14,7 @@ fn drawing() -> Engine {
     engine
 }
 fn image(index: u32) -> Arc<DecodedImage> {
-    Arc::new(DecodedImage { index, drawing: true, width: 512, height: 512, rgba: vec![index as u8; 1024 * 1024] })
+    Arc::new(DecodedImage { index, drawing: true, soft: false, width: 512, height: 512, rgba: vec![index as u8; 1024 * 1024] })
 }
 fn pause_worker(engine: &Engine, nth: usize, work: impl FnOnce(Engine) + Send + 'static) -> (Arc<[Barrier; 2]>, std::thread::JoinHandle<()>) {
     let worker = engine.clone();
@@ -296,4 +296,17 @@ fn a_picture_the_memory_cannot_hold_is_not_decoded_and_the_engine_goes_on() {
     engine.redecode_images();
     while engine.step() {}
     assert!(engine.images_backlog().1 > 0, "the pictures are decoded once the memory is there");
+}
+
+#[test]
+fn pictures_a_frame_waits_for_are_decoded_several_at_a_time() {
+    let budget = 64 << 20;
+    let mut whole = Store::default();
+    assert!(whole.admit_decode(budget, budget));
+    assert!(!whole.admit_decode(budget, budget), "a document decoded whole decodes one 4K picture at a time");
+    let mut demanded = Store { demand: true, ..Store::default() };
+    for _ in 0..3 {
+        assert!(demanded.admit_decode(budget, budget));
+    }
+    assert!(!demanded.admit_decode(budget, budget), "the pictures a frame waits for are decoded three at a time, not more");
 }

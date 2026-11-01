@@ -595,7 +595,8 @@ impl Previews {
         // The pictures the list samples are held on the CPU (decoded again where the budget dropped them) ...
         pictures.images.ensure(list, &generation.prepared.doc, &generation.assets).map_err(js_error)?;
         if let Some(gpu) = self.gpu.as_mut() {
-            let layout = (generation.lineage, generation.assets.pages, 0);
+            // The pictures too: a revision may append some to a page that was there.
+            let layout = (generation.lineage, generation.assets.pages, generation.assets.atlas.len());
             if gpu.atlas != Some(layout) {
                 gpu.renderer.prepare_sprites(&generation.assets);
                 gpu.uploaded.clear();

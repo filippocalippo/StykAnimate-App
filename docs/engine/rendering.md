@@ -40,7 +40,7 @@ triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
 | `pipeline.rs` | the one WGSL pipeline (`prim.wgsl`) for every kind, bind layouts ([D8](decisions/0008-renderer-without-storage-buffers.md)) |
 | `frame.rs` | one frame: isolation layer passes by round and depth, each depth's effect stacks after its passes, then the frame pass (MSAA ×4, resolved once) |
 | `isolation.rs` | the layer atlas (8 pages of at least the frame's size, grown for larger effect layers, two for depth parity) and `plan_rounds`: layers that do not fit render in full-resolution rounds, the frame drawn between rounds |
-| `images.rs` | the sprite atlas (texture array of 4,096² pages laid out by `styk_eval::assets`: shelves, and the free space an earlier page left before a new page opens), uploads of decoded images and drawing tiles |
+| `images.rs`, `pictures.rs` | the sprite atlas (texture array of 4,096² pages laid out by `styk_eval::assets`: shelves, and the free space an earlier page left before a new page opens), uploads of decoded images (in bands of rows) and drawing tiles; the table that maps a layout page to its layer for drawing cel tiles, and the picture table (a hash table of which pictures are in the sprite texture, in which layer) with the soft atlas (a texel to 8 of the page's, 20 MiB for 116 large pictures) that a picture not in it is drawn from: a renderer holding the whole layout has every picture in, the stage's, for a document with more pages than it keeps, does not ([memory.md](memory.md#pages-kept-against-a-budget-soft-copies-in-their-place)) |
 | `resources.rs` | GPU record layouts, lookup tables in float textures, buffers |
 | `present.rs` | copy into the host's surface, read-back |
 | `view.rs` | world → output transform, artboard |
@@ -441,7 +441,7 @@ text, no drawing cel is live, and an object being dragged is encoded afresh (its
 What the encoder keeps is judged by numbers, never by addresses: the assets by `Assets::id` (an `Assets::extended` that adds a picture, cel or glyph is numbered anew; one that adds nothing keeps the number, so a pose commit does not forget what was encoded) and a
 scene by its `Scene::stamp` (each build is numbered, and a built scene is never changed). The onion skins are kept the same way: a ghost
 is encoded once and drawn again while it is the same scene (stamp) under the same hidden slots, tint, effects setting and assets, so a
-gesture does not encode them at every step; none is kept while a drawing cel is live. `styk-eval/tests/build_memory_stale.rs` compares
+gesture does not encode them at every step, nor when the document is published anew by a commit or an undo and none of the ghost's objects changed (the stage keeps the ghost's scene, so the stamp is the same); none is kept while a drawing cel is live. `styk-eval/tests/build_memory_stale.rs` compares
 every such list with the list encoded whole.
 
 ## In the app

@@ -230,3 +230,76 @@ fn the_splice_builds_the_scenes_it_always_built() {
     }
     assert!(GOLDEN.len() >= 2 * seen.len(), "every scene has its hash ({} of {})", GOLDEN.len(), 2 * seen.len());
 }
+
+/// A scene built over the one held, for a document published anew (`build_remembering_plain_over`): `None` only when the scene built
+/// whole is the scene already held, and the scene built whole otherwise.
+#[test]
+fn a_scene_over_the_one_held_is_kept_only_when_a_build_would_give_it() {
+    for name in FIXTURES {
+        let prepared = prepared(name);
+        let ticks = prepared.total_ticks.max(1);
+        let mut kept = 0;
+        for tick in (0..ticks).step_by(((ticks / 4).max(1)) as usize) {
+            let frame = prepared.evaluate(tick as f64);
+            let what = format!("{name} tick {tick}");
+            let held_of = |frame: &Frame| {
+                let mut memory = BuildMemory::default();
+                let held = geometry::build_remembering_plain(&prepared.doc, frame, &mut memory);
+                (memory, held)
+            };
+            // Nothing changed, and the document published anew with the same figures: the scene held is the scene.
+            let (mut memory, held) = held_of(&frame);
+            // (A movieclip instance joined to a figure is built every time: what it reads of its parent is not checked.)
+            match geometry::build_remembering_plain_over(&prepared.doc, &frame, &mut memory, &held) {
+                None => kept += 1,
+                Some(rebuilt) => same_scene(&rebuilt, &geometry::build(&prepared.doc, &frame), &format!("{what}: built again, though nothing changed")),
+            }
+            // A scene that is not the last the memory built is not kept.
+            let (mut memory, _) = held_of(&frame);
+            let other = geometry::build_remembering_plain(&prepared.doc, &frame, &mut BuildMemory::default());
+            same_scene(&geometry::build_remembering_plain_over(&prepared.doc, &frame, &mut memory, &other).expect("another scene is built over"), &geometry::build(&prepared.doc, &frame), &format!("{what}: another scene held"));
+            // One object turned.
+            if let Some(slot) = (0..frame.objects.len()).find(|&slot| !frame.objects[slot].angles.is_empty()) {
+                let next = turned(&frame, slot);
+                let (mut memory, held) = held_of(&frame);
+                let rebuilt = geometry::build_remembering_plain_over(&prepared.doc, &next, &mut memory, &held).expect("a turned object is built");
+                same_scene(&rebuilt, &geometry::build(&prepared.doc, &next), &format!("{what}: turned"));
+                assert_ne!(rebuilt.stamp.get(), held.stamp.get(), "{what}: a new scene is another scene");
+            }
+            // The objects drawn in another order, and the scene seen another way.
+            let mut reordered = frame.clone();
+            reordered.draw_order.reverse();
+            if reordered.draw_order != frame.draw_order {
+                let (mut memory, held) = held_of(&frame);
+                let rebuilt = geometry::build_remembering_plain_over(&prepared.doc, &reordered, &mut memory, &held).expect("another draw order is spliced");
+                same_scene(&rebuilt, &geometry::build(&prepared.doc, &reordered), &format!("{what}: reordered"));
+            }
+            let mut flagged = frame.clone();
+            flagged.export_vfx = vec![true; flagged.objects.len()];
+            if flagged.export_vfx != frame.export_vfx {
+                let (mut memory, held) = held_of(&frame);
+                let rebuilt = geometry::build_remembering_plain_over(&prepared.doc, &flagged, &mut memory, &held).expect("other export flags are spliced");
+                same_scene(&rebuilt, &geometry::build(&prepared.doc, &flagged), &format!("{what}: export flags"));
+            }
+            let mut moved = frame.clone();
+            moved.background_color = Some(0xff102030).filter(|color| Some(*color) != frame.background_color).or(Some(0xff010203));
+            let (mut memory, held) = held_of(&frame);
+            let rebuilt = geometry::build_remembering_plain_over(&prepared.doc, &moved, &mut memory, &held).expect("another background colour is spliced");
+            same_scene(&rebuilt, &geometry::build(&prepared.doc, &moved), &format!("{what}: background"));
+            // A figure the document now defines another way: every object that is drawn with it is built again.
+            let mut changed = (*prepared.doc).clone();
+            let used: Vec<u32> = frame.objects.iter().map(|object| object.figure).collect();
+            if let Some(at) = changed.figures.iter().position(|figure| used.contains(&figure.id) && !figure.segments.is_empty() && figure.movieclip.is_none()) {
+                let mut figure = (*changed.figures[at]).clone();
+                figure.segments[0].thickness += 3.0;
+                changed.figures[at] = Arc::new(figure);
+                let (mut memory, held) = held_of(&frame);
+                let rebuilt = geometry::build_remembering_plain_over(&changed, &frame, &mut memory, &held).expect("a figure defined another way is built again");
+                same_scene(&rebuilt, &geometry::build(&changed, &frame), &format!("{what}: figure"));
+            }
+        }
+        if name == "eval/follow-figures.json" {
+            assert!(kept > 0, "{name}: a frame of loose figures is kept");
+        }
+    }
+}

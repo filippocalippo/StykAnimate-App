@@ -290,6 +290,8 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       request.clipToCanvas !== false, new Uint32Array(hidden), new Float64Array(translations),
       Number.isFinite(request.editorBackgroundColor) ? request.editorBackgroundColor >>> 0 : -1);
     if (drawn) side.live.presented();
+    // The person went to this tick: a document whose pictures are kept a few pages at a time loads those around it.
+    if (Number.isFinite(request.tick) && request.tick !== side.hintedTick) { side.hintedTick = request.tick; const hinted = performance.now(); stage.hint_tick?.(request.tick); side.stats.hintMs = performance.now() - hinted; }
     Object.assign(side.stats, {frames: side.stats.frames + (drawn ? 1 : 0), lastSendMs: sendMs, lastDrawMs: performance.now() - started - sendMs});
     // Generated effects whose trails are still being sampled refine on the next frame
     // (6 ms of sampling a frame).
@@ -298,7 +300,8 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     side.stats.cameraPending = pendingCamera;
     // The pose is shown through a follow camera whose path a worker is still warming: drawn again when it is done.
     if (pendingCamera) side.engine.whenProgress(seen).then(() => { if (!destroyed) invalidate(); });
-    if (drawn || pendingCamera) awaitPictures(seen);
+    // A frame not drawn because pictures of its pages are still being loaded (the picture on show stays) is drawn once they are in.
+    if (drawn || pendingCamera || stage.pictures_pending?.()) awaitPictures(seen);
     // A surface that was being resized takes the frame on the next animation frame.
     else if (stage.surface_pending()) redrawSoon();
     // The previous picture stays visible while the shared follow path warms.
@@ -431,9 +434,10 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
      * A frame thumbnail (engine-thumbnails.mjs): `tick` of the document at `revision`, on a
      * `width × height` card, drawn on the stage's device into a canvas of the thumbnails' own
      * and copied onto `target` (a 2D canvas of that size). The frame is prepared on the engine's
-     * workers and every picture reaches the atlas first; this waits for both on the engine's
-     * progress counter, never blocking (D7). Resolves `drawn`, `stale` (the engine holds another
-     * revision: ask again once it follows) or `refused` (a device that cannot present
+     * workers; this waits for it on the engine's progress counter, never blocking (D7). A picture that is not in
+     * the atlas yet is drawn from its soft copy and asked for sharp (docs/engine/memory.md): that thumbnail resolves
+     * `soft`, drawn but not the one to keep, and the caller asks again later. Resolves `drawn` (every picture
+     * sharp), `soft`, `stale` (the engine holds another revision: ask again once it follows) or `refused` (a device that cannot present
      * to a second canvas, WebGL2, or a canvas whose pictures do not reach the page); rejects with
      * an AbortError when `signal` aborts.
      */
@@ -458,13 +462,13 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
         if (prepared === 0) {
           const drawn = side.stage.render_thumbnail(revision, tick, width, height);
           if (drawn === 2) return 'stale';
-          if (drawn === 0) {
+          if (drawn === 0 || drawn === 3) {
             // In the same task: the canvas holds this picture only until the task ends.
             const context = target.getContext('2d');
             context.setTransform(1, 0, 0, 1, 0, 0);
             context.clearRect(0, 0, target.width, target.height);
             context.drawImage(side.thumbnailCanvas, 0, 0);
-            return 'drawn';
+            return drawn === 3 ? 'soft' : 'drawn';
           }
         }
         await engine.whenProgress(seen);

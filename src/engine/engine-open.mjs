@@ -83,8 +83,8 @@ function openFailure(error) {
 }
 
 /**
- * The most other workers an open takes: the workers share one allocator, whose lock the open's many small allocations contend for (the
- * open of the large `.styk` read fastest with two or three helpers, and no faster with six).
+ * The most other workers an open takes: the open of the large `.styk` reads fastest with three helpers and no faster with six, the part
+ * that does not divide being what is left (the allocator's per-thread caches ended the waiting for its lock, docs/engine/memory.md).
  */
 const MAX_OPEN_HELPERS = 3;
 /** The other workers an open may use: it keeps one free for the frame on show of another document. */

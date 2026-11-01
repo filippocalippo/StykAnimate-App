@@ -54,6 +54,10 @@ pub struct Loader {
     keyframes: HashMap<usize, (Source, Arc<Keyframe>)>,
     /// Resolved style overlays by base figure (address; the figure is held) and overlay key.
     styled: HashMap<(usize, String), (Arc<Figure>, Arc<Figure>)>,
+    /// The figures (addresses, in order) the styles of the frames in `settled` were last resolved against, and those frames (by address; weakly,
+    /// so that an address names one frame while it is here): a frame found resolved against these figures is not looked at again.
+    settled_against: Vec<usize>,
+    settled: HashMap<usize, Weak<Keyframe>>,
     /// Effect clips by the address of the `vfxClips` record they were built from.
     vfx_clips: HashMap<usize, (Source, Option<Arc<crate::vfx::Clips>>)>,
     /// Property channels by the address of the animation record they were built from.
@@ -231,6 +235,8 @@ impl Loader {
             figures: HashMap::new(),
             keyframes: HashMap::new(),
             styled: HashMap::new(),
+            settled_against: Vec::new(),
+            settled: HashMap::new(),
             vfx_clips: HashMap::new(),
             animations: HashMap::new(),
             converted: Converted::default(),
@@ -1304,7 +1310,20 @@ impl Loader {
     /// figures that have not changed since is kept as it is.
     fn resolve_styles(&mut self, doc: &mut Document) {
         let figures: HashMap<u32, Arc<Figure>> = doc.figures.iter().map(|f| (f.id, f.clone())).collect();
+        // Frames resolved against the figures this document has are not looked at again: a published document has the figures of the one
+        // before it but for the ones an edit replaced, and nearly all of its frames are the same.
+        let against: Vec<usize> = doc.figures.iter().map(|f| Arc::as_ptr(f) as usize).collect();
+        let mut settled = std::mem::take(&mut self.settled);
+        if self.settled_against != against {
+            settled.clear();
+            self.settled_against = against;
+        }
+        settled.retain(|_, frame| frame.strong_count() > 0);
         let mut fix = |frame: &mut Arc<Keyframe>| {
+            let address = Arc::as_ptr(frame) as usize;
+            if settled.get(&address).is_some_and(|held| std::ptr::eq(held.as_ptr(), Arc::as_ptr(frame))) {
+                return;
+            }
             let stale = |object: &Arc<Object>| {
                 if object.style.is_none() && object.sticknodes_sprite.is_none() {
                     return false;
@@ -1316,14 +1335,16 @@ impl Loader {
                 }
             };
             if !frame.objects.iter().any(stale) {
+                settled.insert(address, Arc::downgrade(frame));
                 return;
             }
-            let frame = Arc::make_mut(frame);
-            for object in frame.objects.iter_mut() {
+            let resolved = Arc::make_mut(frame);
+            for object in resolved.objects.iter_mut() {
                 if let Some(base) = figures.get(&object.figure) {
                     self.styled_object(base, object);
                 }
             }
+            settled.insert(Arc::as_ptr(frame) as usize, Arc::downgrade(frame));
         };
         for k in doc.keyframes.iter_mut() {
             fix(k);
@@ -1331,6 +1352,7 @@ impl Loader {
         for k in doc.frame_sources.values_mut() {
             fix(k);
         }
+        self.settled = settled;
     }
 }
 

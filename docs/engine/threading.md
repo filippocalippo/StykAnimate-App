@@ -25,7 +25,12 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   atlas places it uploaded (`Uploaded`); a frame drawn while some picture it shows is
   still on its way is drawn again once it can be shown (`Stage::pictures_pending`:
   on the next frame for pictures decoded and waiting, else after the progress counter
-  advances; `waitForPictures` in `engine-stage.mjs`).
+  advances; `waitForPictures` in `engine-stage.mjs`). A document with more sprite pages than the stage's texture keeps
+  (`Engine::atlas_pages`) is not decoded whole: the workers make the soft copy of each picture as the document opens (`Picture::Soft`),
+  the stage asks for the pictures a frame draws (`Engine::decode_images`, ahead of the queue, three at a time) and for those of
+  the ticks playback and the person are about to reach (the table `Engine::picture_row` reads, made by `Engine::spawn_idle`
+  tasks that run after everything else), and draws a frame soft where a picture is not in yet
+  ([memory.md](memory.md#pages-kept-against-a-budget-soft-copies-in-their-place)).
 - `styk-wasm`: `EngineHandle` (commands and queries over wasm-bindgen),
   `Stage` (a wgpu surface on a canvas, edit frames and ghosts, prepared
   frames), `worker_run` (a worker's loop).
@@ -214,10 +219,15 @@ Measure it by opening a large Pivot file in Node (`engine-open.mjs`: the engine'
 read view) with and without the allocator, comparing CPU time as well as
 wall time: the cost of a grow rises with the machine's load.
 
+## The allocator's caches and lock
+
+The engine's threads share one heap. `styk-alloc` gives each thread a bounded cache of small blocks (at most 125 KiB, a few KiB in practice) behind a lock of its own that spins ([memory.md](memory.md#the-allocator-and-its-threads)). A thread that ends through `__wbindgen_thread_destroy` hands its cache back when it frees its thread-local block; a thread that is terminated or traps takes its cache with it (it stays
+allocated, as the rest of what that thread held does), and one that traps while it holds the lock leaves it held, as it did when the toolchain's allocator spun on it.
+
 ## Testing
 
 `cargo test -p styk-engine` (scheduler, opening and publishing documents, export frames prepared ahead, thumbnail frames never
-evaluated by the thread asking); `node --test tests/engine-export.test.mjs` (the export
+evaluated by the thread asking); `node --test tests/engine-allocator-threads.test.mjs` (threads on the allocator); `node --test tests/engine-export.test.mjs` (the export
 worker's start, release and fallbacks); `node --test tests/engine-previews.test.mjs`
 (the preview worker's queue, cancellation, failure and idle release);
 `engine/viewer/` (a bare page over the engine with `window.viewer` benchmarks);

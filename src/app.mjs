@@ -1736,6 +1736,7 @@ function loop(now) {
       const heldGeometry = drawingPreview?.geometry || motionDisplay()?.geometry || state.drag?.geometry || keyboardHandleGesture?.geometry;
       const source = drawingPreview ? null : editor._shown?.source(Boolean(motionDisplay())) ?? null;
       const editingDrawn = state.renderer.render({
+        tick: editor.tick,
         vfxEnabled: state.vfxEnabled,
         report: drawingPreview?.report??editor.report,
         documentReport: editor.report,

@@ -64,6 +64,56 @@ tree is built (tdd2: live 186 after the decode against a peak of 314, measured n
 queued (a thirtieth of the memory). The open's own temporaries are free space afterwards, which later work reuses, so the
 heap stays near the open's own peak (300) plus what the pictures add on top of the document.
 
+## The allocator and its threads
+
+Every thread of the engine (the interface, the preparation workers, a save's helpers) allocates from one heap behind one lock, and the
+toolchain's allocator takes that lock on every call and spins on it. Measured on 2026-11-01 with a counting lock in front of it (release build, `slot.mjs probe`, one
+run each, the open's phases on the large `.styk` with three helpers): **7.8 million allocator calls, 4.0 million of them finding the
+lock held; each busy helper waited 0.8 to 0.95 s of an open that took under 2.5 s**, and the interface thread waited up to 36 ms
+at once opening tdd2 (17.6 ms svr_uriel, 4.7 ms the large `.styk`; 79 ms in one run, with the machine busy). 98% of the calls are for 508 bytes or less
+(80% for 64 or less). Playback was not the problem (workers found the lock held on 1 to 2% of their calls, the interface on 0.1%).
+
+`styk-alloc` now keeps a cache of small blocks for each thread and puts a lock of its own behind it (`cache.rs`, `lock.rs`):
+
+- **Caches.** A request of up to 508 bytes is served from a list of the thread's own, one for each of 63 sizes (8 * k + 4 bytes: the room the
+  heap's chunks give, so a size wastes nothing the heap would not have). The heap's lock is taken once for a batch of 2 to 16 blocks to fill an
+  empty list or empty a full one (a list holds at most twice a batch before half of it goes back). A block belongs to no thread: its size comes with every
+  free, so a block freed by another thread than the one that made it joins the freeing thread's list. The cache of a thread holds at most
+  2.5 KiB of a size and **125 KiB in all (a few KiB in practice)**, in the thread's thread-local block. A thread that ends hands its lists back when it
+  frees that block (`__wbindgen_thread_destroy`, in `GrowAhead::dealloc`); a thread that is terminated or traps loses at most that,
+  which stays allocated like the rest of what the thread held ([threading.md](threading.md#when-an-engine-thread-traps)).
+  wasm-bindgen allocates a new thread's stack and thread-local block before the thread has a thread-local base, and frees them after setting it to an address no
+  memory has: the allocator reads the base (`llvm.wasm.tls.base`) and serves those calls from the heap directly.
+- **The lock.** The heap sits behind a lock of the engine's own, taken once for a batch and once for a growth of the memory (the toolchain's lock
+  inside is then never found held); a thread that finds it held spins (`spin_loop`, reading the word until it is free). The holds are short, and a lock that slept would need waking: wasm-bindgen runs a
+  module's start function on the first thread only, so only the interface thread could be told from the others by the module, and it must never block (D7) anyway.
+- **The count of live bytes** is kept for each thread and added to the shared counter in steps of 16 KiB (a request of 8 KiB or more at once), so that every call does not
+  write a cache line all the threads share. `live_bytes()` is exact for the thread that asks and short by at most that step for each of the others;
+  `peak_bytes()` is never below it. A free that reaches the counter before its allocation does leaves it negative for a moment, so it is read as signed.
+  Large requests are refused against it as before (`refuses`, `LARGE_BYTES`, `reserve` are unchanged).
+
+Release builds (`slot.mjs probe`, so the machine was running other work and every time below is directional; the opens vary by 40% from run to run). The counts, the waits and the
+memory do not depend on the load:
+
+| | before | after |
+| --- | ---: | ---: |
+| allocator lock, large `.styk` open, 3 helpers: calls / found held (counting build) | 7.8 M / 4.0 M | 570 k holds / 150 k |
+| wait per busy helper in that open (counting build) | 0.8–0.95 s | 25–70 ms |
+| worst wait of the interface thread, opening tdd2 / svr_uriel / the large `.styk` (counting build) | 35.9 / 17.6 / 4.7 ms | 4.0 / 0.03 / 2.4 ms |
+| interface thread finding the lock held during playback and save | up to 0.12% of its calls, 2.5 ms | never |
+| heap after the open: large `.styk` / tdd2 / svr_uriel | 443–475 / 445 / 303 MiB | 443 / 446 / 281 MiB |
+| live peak of the open: large `.styk` / tdd2 / svr_uriel | 290 / 345 / 236 MiB | 291 / 345 / 237 MiB |
+| playback, worst gap between shown frames (tdd2 / svr_uriel / large `.styk`) | 48.3 / 55.3 / 70.1 ms | 48.1 / 55.1 / 70.2 ms |
+| open with 3 helpers, median of 8 runs taken in turn, parent against new: large `.styk` / tdd2 | 3,366 / 2,385 ms | 3,042 / 2,084 ms |
+
+An independent run in the app (median of several, quieter machine) measured tdd2 1,623 against 1,357 ms and the large `.styk` 2,655 against 1,778 ms. **With no helper the open is
+not faster**: in Node, opening the large `.styk` took 2.2–2.7 s on the parent and 2.2–3.1 s on the new allocator, with the same CPU time (a first measurement of 1.8 times came from runs of the two
+builds an hour apart on a machine whose load had changed); a single thread never met the lock, and `malloc` and `free` of one thread cost what a list does. What the caches remove
+is the waiting of the threads that share the heap. The open still gains nothing from more than three helpers: what is left of the lock is 25 to 70 ms of waiting for each
+helper, about 5% of the open, so the limit is the work that does not divide, not the allocator; the cap of three helpers (`MAX_OPEN_HELPERS`) stays. Batches of up to 64 blocks for the smallest
+sizes (the batch is a kilobyte of each size, at most 16 blocks) were tried, with the same bound on a cache to within 5 KiB: no consistent difference over 8 runs in turn, so the batch stays.
+Playback did not move (frames are shown every display refresh; the allocator was not what limited them).
+
 ## The renderer's private bytes
 
 Measured 2026-11-01 on the renderer process (Electron's `Tab`, whose private bytes are the commit charge), dev build,
@@ -108,8 +158,7 @@ and svr_uriel through open, play and scrub, eight workers: a worker finds the lo
 waits 0.1 to 0.9 s in all over the session (waits up to 28 ms); the interface thread makes 8 to 11 million calls, finds the
 lock taken on 0.01 to 0.24 % of them, and waits 21 to 182 ms in all, 4.4 to 9.2 ms at the worst. The long waits are holders
 that were descheduled on a machine running other builds, not large allocations (the holder's request was under 1 MiB
-for all but the pictures'). Not acted on: per-thread caches would be a new allocator for a cost the interface thread
-barely pays, and the 7.7 to 11.4 million calls it makes during an open are the read view's, which goes away with it.
+for all but the pictures'). Not acted on at the time; the per-thread caches of "The allocator and its threads" above did it afterwards (the 7.7 to 11.4 million calls the interface thread made during an open were the read view's, which goes away with it).
 
 **The file of a project while its skeleton is read.** A `.styk` file is a skeleton of JSON text (147 MiB for
 testingupload.styk) and sections, stored in 35 MiB. The open now owns the file's bytes (`OpenSource::Owned`, as for Pivot
@@ -190,10 +239,109 @@ shelf of the current page in the best free space an earlier page left, before op
 (`styk_eval::assets::pack`; a layout within one page is unchanged). About 200 to 300 MiB of the GPU process is named by no counter, in every document (the empty app's 281–404 MiB is not itemised
 either); the layer and glyph targets grow with play.
 
-Left: pages are allocated for the whole layout while the pictures are uploaded over two seconds, and nothing is
-evicted; a picture resident only while frames use it (re-uploaded from its encoded bytes), or a smaller level of a picture
-shown small, would bring the atlas under the pictures a frame samples, at the cost of the rules for a picture that is
-not there yet (`Stage::pictures_pending`). A picture shown at 4K on a 4K display cannot be reduced.
+### Pages kept against a budget, soft copies in their place
+
+A document whose layout has more than `ATLAS_PAGES` (4) pages is not held whole (`styk_engine::Residency`,
+`styk-wasm/src/stage/pictures.rs`). Measured on tdd2 (`styk pages`: the layout's pages each frame draws from, over 589 ticks):
+one frame draws from at most 3 of its 20 pages (0.4 on average), and the 48 frames after one from 4.7 on average, 18 at most.
+The stage's sprite texture has `ATLAS_PAGES` layers (256 MiB; `Engine::atlas_pages`, `EngineHandle::set_atlas_pages` before a
+document opens), and:
+
+- **Every picture has a soft copy**, always resident: its premultiplied pixels averaged over the 8 × 8 blocks of its atlas page
+  (`styk_eval::assets::soften_image`, so it lines up with the picture wherever it lies) in a second array texture with the
+  same layout, one texel to 8 of the page's, 2 × 2 pages to a 1,024² layer (`soft_sprites` in prim.wgsl; 20 MiB for tdd2's 116
+  pictures). It is made as the document opens, on the workers, one picture at a time under the picture budget (the full
+  pixels are dropped as soon as the average is taken, so the module's high-water mark is that of decoding one picture),
+  by a `Picture::Soft` decode in place of the `Picture::Image` one a document held whole gets.
+- **The shader asks the picture table**, a hash table of one entry per picture (`PictureState` in `styk-render/src/pictures.rs`: corner,
+  page, layer + 1; the same hash and at most 16 probes in the shader and on the CPU, `picture_layer`), which layer of the sprite texture
+  holds the picture, and draws its soft copy where the answer is none. A picture is put in the table (`Renderer::set_picture`)
+  after its last pixel was uploaded, so the change from soft to sharp is one frame: it draws soft, then sharp, never blank
+  and never half a picture. A renderer that holds the whole layout (exports, previews, the CPU parity tests, a document of up
+  to `ATLAS_PAGES` pages) has every picture in the table at its own page's layer and never draws a soft copy. The soft atlas
+  and the table are one more texture and one more binding (D8: textures with `textureLoad` and the one sampler; D11: array
+  textures of two layers or more); WebGL2 ran this on software rendering.
+- **The unit of residency is the page, the unit of loading the picture.** A page is given a layer when a picture on it is wanted;
+  the page whose next use is the farthest (from the table below, else the least recently shown) leaves. The pictures a frame
+  draws are decoded (`Engine::decode_images`, ahead of the queue, three at a time across the workers, `DEMAND_DECODES` times the picture
+  budget; one asked for earlier behind the queue, as a tick ahead's or a thumbnail's, is moved ahead when a frame waits for it:
+  `Engine::promote_images`) and uploaded whole at once; the others a slice of 8 MiB a frame (a 4K picture goes in over eight frames,
+  `Renderer::upload_rows`). The pages of the frame being drawn are never taken, so a frame that draws from more pages than there
+  are layers makes the texture grow (once, by a copy: the budget is soft only in that case).
+- **A table of what each tick draws** (`Engine::request_picture_table`, `picture_table.rs`) is made on the workers when nothing
+  else waits (`Engine::spawn_idle`: after frames and pictures): each tick is evaluated and encoded as the stage's frame is
+  (culled to the artboard, so a picture only an off-artboard part draws is not one a layer is wanted for), and the
+  pictures its draw list names are kept. Playback loads the pictures of the next 72 ticks from it, nearest first
+  (`Stage::pictures_ahead`), and the interface tells the stage the tick the person went to (`Stage::hint_tick`, from
+  `engine-stage.mjs`) so the pictures of the 12 ticks on each side load too; the same rows say which pages are needed soonest, which
+  pages stay. A table belongs to one revision: an edit makes the next one when asked for.
+- **A frame draws when every picture it shows is in or has its soft copy**; the sharp pictures of a frame drawn soft are uploaded
+  whole as soon as they are decoded and the frame is drawn again (`pictures_pending`, `waitForPictures`). A picture without a soft
+  copy yet (a document just opened) makes the frame wait, the picture on show stays (the rule for pictures still on their way).
+  A picture that cannot be decoded is not waited for; one the engine refused for want of memory is asked for again three
+  times. Pixels of a picture whose page left while it was decoded are not written (`styk_engine::has_place`): the rows already
+  written would be missing from the picture when its page is given a layer again.
+- **Where the soft copy is seen**: the stage's frame while a picture is not in, and its camera monitor (which shares the stage's
+  textures and table, so while the stage waits it draws the soft copy, not a blank). Never in an export, a preview or a saved
+  file: those hold their own renderers, whole-layout ones. A frame thumbnail on the stage's device
+  (`Stage::pictures_ready_for_view`) follows the same rule as a far jump, soft first, then sharp: it is drawn at once, a picture
+  that is not in the texture from its soft copy, and `render_thumbnail` answers 3 (`soft`) instead of 0; the interface shows it,
+  does not keep it (the filmstrip neither caches it nor marks the card painted, the export dialog's previews draw it again for a few
+  seconds) and asks again until the answer is `drawn`: a thumbnail that is kept is every picture sharp, so it is the pixels of a
+  whole-layout draw. The sharp pictures are loaded in a **pool of layers of their own** (`Residency::acquire_spare`, `Stage::request_view_pictures`),
+  made when a thumbnail first needs one, so a thumbnail gets its pictures whatever the stage's frame holds (when that is every
+  layer, the thumbnails would otherwise wait for the playhead to move): a layer the texture has free is used first (the stage's
+  loads take it back like any page's, it is not the pool's), then thumbnails take turns on the pool, the next one's pages taking the
+  place of the least recently used page that is not one of its own (the pages of **every** picture the thumbnail draws, those sharp
+  already too: a thumbnail's pages never take each other's place, or a view of two pages would swap them for ever), and the pool is as
+  large as the most pages one thumbnail needed at once that were not in a layer already (a frame spread over three new pages makes
+  three layers). Nothing of the frame on show or of the
+  ticks loaded ahead of it is ever taken for a view, and the stage's own loads never take a pool layer (a page of the pool the frame on
+  show comes to draw from is used where it is). A person who never has a thumbnail drawn pays nothing; one who does pays one
+  layer (64 MiB at 4,096²) for as long as the document is open. A picture without a soft copy yet waits for it (a picture that cannot be
+  decoded is not waited for). A thumbnail drawn by the preview worker is always sharp.
+- **The table follows the layout**: `Renderer::sync_pictures` runs on every frame (`Stage::sync_atlas`) and makes the table (and the
+  soft atlas) know every picture of the layout drawn, whatever the page count: a revision that appends a picture to a page that was
+  there is a layout with one more picture, not one more page. The preview worker and the export device key their atlas by the
+  number of pictures too. A renderer holding the whole layout has the new picture in the table at its page's layer; a resident one
+  has it soft until its pixels are in.
+- **A layout of more than 1,024 pages** (`MAX_PAGES`, 64 GiB of pictures) has no row for the pages beyond: their pictures are not
+  loaded (counted as lost), the table has no entry for them and the shader draws nothing for them (never another page's picture).
+- Drawing cels' pages (decoded with the document) and the live drawing slots keep their layers for good.
+
+Measured on 2026-10-31 on tdd2 with release builds (one run each, an off-screen app run beside other agents' builds: directional;
+a jump is a seek to a far tick until the app paints it, a drag ends at the last tick, `soft` is the number of frames drawn with
+the soft copy of some picture; GPU process private bytes in MiB, the empty app's is 390–408):
+
+| atlas layers | jump to a drawn frame p50 / p90 / worst (ms) | drag end (ms) | playCold: late frames, over 100 ms, worst (ms), `soft` | playWarm: same | GPU settled | GPU after play |
+| --- | --- | --- | --- | --- | ---: | ---: |
+| whole layout (20 pages, no soft copies) | 36–44 / 74–84 / 232–243 | 22–39 | 1, 0, 65 | 0, 0, 49 | 1,946 | 1,782–1,784 |
+| 12 (least recently shown leaves) | 53 / 101 / 227 | 16–28 | 0, 0, 57, 0 | 0, 0, 52, 0 | 1,361 | 1,282–1,301 |
+| 6 | 52 / 100 / 233 | 22–33 | 0, 0, 62, 0 | 0, 0, 55, 0 | 975 | 911–921 |
+| 4 (default) | 61 / 111 / 291 | 28–47 | 1, 0, 78, 1 | 0, 0, 46, 1 | 842 | 753–774 |
+| 3 | 67 / 127 / 291 | 25–27 | 1, 0, 65, 1 | 0, 0, 58, 1 | not read | 784–808 |
+
+**Where a far jump's time goes** (release build, `tdd2`, 48 jumps across the animation, three runs each of 4 layers and the whole layout, probe
+slot beside other jobs): the first frame is drawn 27–42 ms (p50), 59–77 ms (p90) after the seek with 4 layers and 34–41, 65–70 with the whole
+layout, and 15–24 ms after a fast drag ends against 22–25. Nearly all of it is the first `render_edit` call, which evaluates the pose
+of the tick and encodes its draw list on the interface thread (10–60 ms for 263 figures, the same in both), after about 14 ms of editor work
+before the stage is asked; what the pictures add to the frame is `syncMs` ≤ 1.4, `readyMs` ≤ 0.4 and `hintMs` ≤ 0.2 (p95), with a draw 1 ms longer.
+A far jump draws soft at once; the sharpening redraws that follow (about ten a jump, one slice of a picture each) are not in the first frame.
+Before this was measured, the idle work that makes the table of what each tick draws advanced the engine's progress counter, which wakes every
+waiter, and the pictures of a frame drawn soft were uploaded whole inside whichever frame came next.
+
+Memory with the document open, settled, 3,497 MiB (whole layout) to 2,315 MiB (4 layers) for the whole app. 3 layers grow to 4 as
+soon as a frame draws from four pages (tdd2: the edit frame with onion skins); 4 is what 3 settles at. A texture whose
+last handle is dropped is not given back by the browser until it collects it: a sprite texture that was replaced
+(the growth above, another document) is `destroy`ed once its texels are copied (two growths once kept 960 MiB beyond the
+atlas). The 280 to 400 MiB of the GPU process that no counter names is in the empty app already (the stage's own
+allocations there are 12 MiB of targets); this change does not name it (hypothesis: the driver and the browser's device and
+pipelines).
+
+The whole layout's jump times are those of a document with every picture on the GPU. With soft copies a jump draws at once whatever
+the number of layers: the first frame after a far jump is soft (29 to 44 of the 48 jumps) and sharp a few frames later, when its
+pictures (100 to 300 ms of decoding a 4K picture, three at a time) are in. Before eviction chose the page needed farthest ahead
+(least recently shown first), 6 layers showed a soft picture in 11 of 241 frames of playback; with it, in none.
 
 ## When the memory cannot hold the work
 
@@ -243,7 +391,7 @@ refused only where the code asks fallibly (`try_reserve`: the picture buffers, t
 
 ## Tests
 
-`cargo test -p styk-alloc -p styk-engine -p styk-eval` (the picture budget in `images/tests.rs` and
+`cargo test -p styk-alloc` (the caches, the lock and the count, with threads), `tests/engine-allocator-threads.test.mjs` (real threads on the module's allocator: blocks freed by other threads, the heap grown together, threads ended the way the export worker ends), `cargo test -p styk-alloc -p styk-engine -p styk-eval` (the picture budget in `images/tests.rs` and
 `export.rs`, the refusals in `tests/open.rs`, the loader in `tests/incremental.rs`), and
 `tests/engine-memory.test.mjs`, `tests/engine-stage.test.mjs`; the bounded pictures of the CPU rasterizer in
 `styk-raster/tests/image_budget.rs`.
