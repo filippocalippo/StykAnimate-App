@@ -26,12 +26,12 @@ const ROW = {
 };
 const IDENTITY = {keyframes: row => row.id, figure_types: row => row.id};
 
-/** The row of a keyframe: its identity, background and colour override, and how many figures it holds (styk_edit::frame_row). */
+/** The row of a keyframe: its identity, background, colour override and length, and how many figures it holds (styk_edit::frame_row). */
 export function frameRow(frame) {
-  return {id: frame?._styk?.frameId ?? null, background: frame?.background_id ?? null, color: frame?._stykBackgroundColor ?? null, figures: frame?.objects?.length ?? 0};
+  return {id: frame?._styk?.frameId ?? null, background: frame?.background_id ?? null, color: frame?._stykBackgroundColor ?? null, duration: frame?.duration_raw ?? null, figures: frame?.objects?.length ?? 0};
 }
 
-/** What the interface shows of the stored frame at `index` of `frames` (its background, colour override and figure count), read without fetching the record. */
+/** What the interface shows of the stored frame at `index` of `frames` (its background, colour override, length and figure count), read without fetching the record. */
 export function frameSummary(frames, index) {
   const table = tableOf(frames);
   return table ? table.rowAt(index) : frameRow(frames[index]);

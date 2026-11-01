@@ -687,11 +687,11 @@ mod tests {
             table[0].make_obj().unwrap().set("d", Value::Num(5.0));
             table[1].make_obj().unwrap().set("d", Value::Num(6.0));
         }
-        assert_eq!(text(&for_lazy(diff(&before, &after), &after, &held)), r#"[{"p":["keyframes",0,"d"],"v":5},{"p":["keyframes",1],"lz":{"id":"f1","background":null,"color":null,"figures":0}}]"#);
+        assert_eq!(text(&for_lazy(diff(&before, &after), &after, &held)), r#"[{"p":["keyframes",0,"d"],"v":5},{"p":["keyframes",1],"lz":{"id":"f1","background":null,"color":null,"duration":null,"figures":0}}]"#);
         // A rebuild names the new records by their rows.
         let mut inserted = before.clone();
         inserted.make_obj().unwrap().get_mut("keyframes").unwrap().make_arr().unwrap().insert(1, parse(r#"{"_styk":{"frameId":"new"},"d":9}"#));
-        assert_eq!(text(&for_lazy(diff(&before, &inserted), &inserted, &held)), r#"[{"p":["keyframes"],"a":[0,{"lz":{"id":"new","background":null,"color":null,"figures":0}},1]}]"#);
+        assert_eq!(text(&for_lazy(diff(&before, &inserted), &inserted, &held)), r#"[{"p":["keyframes"],"a":[0,{"lz":{"id":"new","background":null,"color":null,"duration":null,"figures":0}},1]}]"#);
     }
 
     #[test]

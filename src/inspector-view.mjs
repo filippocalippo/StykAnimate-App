@@ -288,7 +288,7 @@ function frameDescriptor(editor, number) {
     ]};
   }
   return {kind: 'keyframe', target: {name: interfaceText('inspectorView.keyframe', {frame: (editor.frameIndex ?? 0) + 1}), nameKey:'inspectorView.keyframe', nameParams:{frame:(editor.frameIndex ?? 0) + 1}}, sections: [
-    {id: 'timing', title: interfaceText("inspectorView.timing"), titleKey: "inspectorView.timing", rows: [{kind: 'grid', rows: [number(interfaceText("inspectorView.duration"), 'duration', editor.frame.duration_raw ?? 1, 'ticks', {min: 0, max: 65535, labelKey: "inspectorView.duration", labelParams: {}})]}]},
+    {id: 'timing', title: interfaceText("inspectorView.timing"), titleKey: "inspectorView.timing", rows: [{kind: 'grid', rows: [number(interfaceText("inspectorView.duration"), 'duration', editor.frameSummary.duration ?? 1, 'ticks', {min: 0, max: 65535, labelKey: "inspectorView.duration", labelParams: {}})]}]},
   ]};
 }
 
@@ -310,7 +310,7 @@ function selectionDescriptor(editor, number, {bounds: b, selectionCount, range, 
   const opacities = new Set(objects.map(item => item.field28 || 0));
   const figureOf = item => resolveInstanceFigure(findFigureType(editor.report.figure_types, item.figure_type_id), item);
   const colours = new Set(objects.flatMap(item => figurePalette(editor.report, figureOf(item), item).map(entry => entry.color)));
-  const joined = objects.some(item => item.join) || editor.frame.objects.some(part => part.join && objects.some(item => item.object_slot === part.join.target_object_slot));
+  const joined = objects.some(item => item.join) || editor.selectionFrame.objects.some(part => part.join && objects.some(item => item.object_slot === part.join.target_object_slot));
   const align = [messageTuple(['left', 'align-left', interfaceText("inspectorView.alignLeft")], {2: {key: "inspectorView.alignLeft", params: {}}}), messageTuple(['center-x', 'align-horizontal-center', interfaceText("inspectorView.alignCenter")], {2: {key: "inspectorView.alignCenter", params: {}}}), messageTuple(['right', 'align-right', interfaceText("inspectorView.alignRight")], {2: {key: "inspectorView.alignRight", params: {}}}),
     messageTuple(['top', 'align-top', interfaceText("inspectorView.alignTop")], {2: {key: "inspectorView.alignTop", params: {}}}), messageTuple(['center-y', 'align-vertical-center', interfaceText("inspectorView.alignMiddle")], {2: {key: "inspectorView.alignMiddle", params: {}}}), messageTuple(['bottom', 'align-bottom', interfaceText("inspectorView.alignBottom")], {2: {key: "inspectorView.alignBottom", params: {}}})];
   return {kind: 'figures', target: {name: interfaceText('inspectorView.selectedFigures', {count: selectionCount}), nameKey:'inspectorView.selectedFigures', nameParams:{count:selectionCount}}, quick: {context: 'figures'}, scope, sections: [
@@ -374,7 +374,7 @@ function fillGroup(editor, figure, object, index, order) {
  * connection, the used colours and fills and the drawing sets are titled.
  */
 function figureDescriptor(editor, figure, number, {range, scope, drawingSets, spatial, order, builder, polygonPage, palettePage}) {
-  const report = editor.report, frame = editor.frame, object = editor.object;
+  const report = editor.report, frame = editor.selectionFrame, object = editor.object;
   // A joint index past the figure's segments shows the figure, without its colours.
   const whole = editor.selectedJoint < 0, palette = whole ? editor.figurePalette() : [], own = whole ? figurePalette(report, figure, object) : [];
   const kind = figure.segments.every(segment => segment.primitive_code === 5) ? 'text' : figure.segments.every(segment => segment.primitive_code === 2) ? 'image' : 'figure';

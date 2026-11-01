@@ -121,12 +121,13 @@ pub fn figure_row(figure: &Value) -> Value {
 }
 
 /// What the interface's read view knows of a keyframe without holding it (src/lazy-table.mjs `frameRow`): its `id` (`_styk.frameId`), `background` (`background_id`),
-/// colour override (`_stykBackgroundColor`) and how many `figures` it holds. A field the keyframe lacks is `null`.
+/// colour override (`_stykBackgroundColor`), `duration` (`duration_raw`) and how many `figures` it holds. A field the keyframe lacks is `null`.
 pub fn frame_row(frame: &Value) -> Value {
     let mut row = Obj::new();
     row.set("id", frame.path(&["_styk", "frameId"]).cloned().unwrap_or(Value::Null));
     row.set("background", frame.get("background_id").cloned().unwrap_or(Value::Null));
     row.set("color", frame.get("_stykBackgroundColor").cloned().unwrap_or(Value::Null));
+    row.set("duration", frame.get("duration_raw").cloned().unwrap_or(Value::Null));
     row.set("figures", Value::Num(frame.get("objects").and_then(Value::elements).map_or(0, |items| items.len()) as f64));
     Value::object(row)
 }
@@ -1296,8 +1297,8 @@ mod figure_row_tests {
     #[test]
     fn a_frame_row_says_what_the_inspector_shows_of_the_frame() {
         let row = |text: &str| styk_doc::json::to_string(&frame_row(&styk_doc::json::parse(text.as_bytes()).unwrap()));
-        assert_eq!(row(r#"{"_styk":{"frameId":"frame-3"},"background_id":2,"_stykBackgroundColor":4278190335,"objects":[{},{}]}"#), r#"{"id":"frame-3","background":2,"color":4278190335,"figures":2}"#);
-        assert_eq!(row(r#"{}"#), r#"{"id":null,"background":null,"color":null,"figures":0}"#);
+        assert_eq!(row(r#"{"_styk":{"frameId":"frame-3"},"background_id":2,"_stykBackgroundColor":4278190335,"duration_raw":3,"objects":[{},{}]}"#), r#"{"id":"frame-3","background":2,"color":4278190335,"duration":3,"figures":2}"#);
+        assert_eq!(row(r#"{}"#), r#"{"id":null,"background":null,"color":null,"duration":null,"figures":0}"#);
     }
 
     fn row(text: &str) -> String {

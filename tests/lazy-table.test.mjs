@@ -6,6 +6,7 @@ import {fetchedRecords, figureRow, frameRow, frameSummary, holdingAll, lazyKeyed
 import {drawingFigures, figureForCel, figureRows, findFigureType, hasDrawingFigures, movieclipFigures, nextFigureTypeId} from '../src/figure-types.mjs';
 import {createImageFigure} from '../src/media-authoring.mjs';
 import {createDrawingFigure} from '../src/drawing-model.mjs';
+import {inspectorDescriptor} from '../src/inspector-view.mjs';
 import {applyDocumentPatch} from '../src/engine/engine-patch.mjs';
 import {createFrame, createObject, emptyDocument} from '../src/demo.mjs';
 import {ownedEditorSync} from './support/owned-editor.mjs';
@@ -212,7 +213,7 @@ test('a patch names a record the view does not hold by its row, and the view fet
   const {from, array} = table(6);
   const root = {keyframes: array};
   array[1];
-  applyDocumentPatch(root, [{p: ['keyframes', 1], lz: {id: 'frame-1b', background: 0, color: null, figures: 1}}, {p: ['keyframes'], a: [0, {lz: {id: 'inserted', background: 0, color: null, figures: 1}}, 1, 2, 3, 4, 5]}]);
+  applyDocumentPatch(root, [{p: ['keyframes', 1], lz: {id: 'frame-1b', background: 0, color: null, duration: 1, figures: 1}}, {p: ['keyframes'], a: [0, {lz: {id: 'inserted', background: 0, color: null, duration: 1, figures: 1}}, 1, 2, 3, 4, 5]}]);
   assert.deepEqual(held(root.keyframes), [], 'the record replaced is given up, and the one the patch names is not read');
   const keyframes = tableOf(root.keyframes);
   assert.equal(keyframes.positionOf('inserted'), 1);
@@ -238,7 +239,7 @@ test('what the interface shows of the frame on show is read from the table, not 
   const {from, array} = table(5);
   from.records[3].background_id = 7; from.records[3]._stykBackgroundColor = 0xff112233;
   const rows = lazyTable('keyframes', 5, from.records.map(frameRow), from);
-  assert.deepEqual(frameSummary(rows, 3), {id: 'frame-3', background: 7, color: 0xff112233, figures: 1});
+  assert.deepEqual(frameSummary(rows, 3), {id: 'frame-3', background: 7, color: 0xff112233, duration: 1, figures: 1});
   assert.deepEqual(from.asked, [], 'no record was read');
   assert.deepEqual(frameSummary(from.records, 3), frameSummary(rows, 3), 'a plain array answers the same');
   void array;
@@ -258,4 +259,19 @@ test('playback and scrubbing read no keyframe: a seek that does not evaluate, th
   assert.deepEqual(reads, [], 'the frames passed were not fetched');
   assert.equal(editor.frame.objects.length, 1);
   assert.equal(reads.length, 1, 'the one read of a frame is the one asked for');
+});
+
+test('the inspector of the scene and of a figure reads no keyframe as the playhead moves', () => {
+  const document = emptyDocument(), figure = document.figure_types[0];
+  document.keyframes = Array.from({length: 80}, (_, index) => createFrame([createObject(figure, 1, 100 + index, 100)], 2));
+  const {editor} = ownedEditorSync({demo: false, layerTimeline: true}, document, {verify: false});
+  const records = tableOf(editor.report.keyframes).records, fetch = records.fetch.bind(records), reads = [];
+  records.fetch = (name, at) => { if (name === 'keyframes') reads.push(at); return fetch(name, at); };
+  editor.select(1);
+  for (let tick = 0; tick < 160; tick += 3) {
+    editor.seek(tick, {evaluate: false});
+    inspectorDescriptor({editor, selectionCount: 0});
+    inspectorDescriptor({editor, selectionCount: 1});
+  }
+  assert.deepEqual(reads, [], 'no keyframe was fetched for the inspector');
 });
