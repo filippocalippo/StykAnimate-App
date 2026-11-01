@@ -17,6 +17,12 @@ let registered = null;
 export function useEngine(engine) { registered = engine; }
 export function registeredEngine() { return registered; }
 
+/**
+ * Starts the engine's remaining workers when a person asks to open a file, so that they have joined by the time its bytes
+ * arrive (reading takes as long as starting them): the open shares its work with them.
+ */
+export function prepareOpen() { registered?.grow(); }
+
 function engineOf(engine) {
   const found = engine ?? registered;
   if (!found) throw new Error('The engine has not been loaded: register it with useEngine().');
@@ -43,7 +49,9 @@ function openFailure(error) {
   return failure;
 }
 
-const optionsText = ({layerTimeline = false} = {}) => JSON.stringify({layerTimeline: Boolean(layerTimeline)});
+/** The other workers an open may use: it keeps one free for the frame on show of another document. */
+const helpersOf = engine => Math.max(0, (engine.workers ?? 0) - 2);
+const optionsText = ({layerTimeline = false} = {}, helpers = 0) => JSON.stringify({layerTimeline: Boolean(layerTimeline), helpers});
 
 /** The views already built for documents that are about to be loaded (`attach`, `prepareLoad`). */
 const reads = new WeakMap();
@@ -200,7 +208,7 @@ export function openBytes(bytes, filename, {engine, layerTimeline, signal} = {})
   engine.grow();
   const refusal = memoryRefusal(engine, bytes.byteLength);
   if (refusal) return Promise.reject(refusal);
-  const job = engine.handle.open_document(bytesOf(bytes), filename, 'file', optionsText({layerTimeline}));
+  const job = engine.handle.open_document(bytesOf(bytes), filename, 'file', optionsText({layerTimeline}, helpersOf(engine)));
   return finish(engine, job, signal);
 }
 
@@ -215,7 +223,7 @@ export function openJson(document, name, {engine, layerTimeline, signal} = {}) {
   const text = jsonBytes(document), refusal = memoryRefusal(engine, text.byteLength);
   if (text.byteLength >= SMALL_JSON_BYTES) engine.grow();
   if (refusal) return Promise.reject(refusal);
-  const job = engine.handle.open_document(text, name ?? 'Untitled animation', 'json', optionsText({layerTimeline}));
+  const job = engine.handle.open_document(text, name ?? 'Untitled animation', 'json', optionsText({layerTimeline}, helpersOf(engine)));
   return finish(engine, job, signal);
 }
 

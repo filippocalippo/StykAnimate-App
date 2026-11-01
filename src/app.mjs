@@ -33,7 +33,7 @@ import { createStage } from "./engine/engine-stage.mjs";
 import { createStagePlayback } from "./engine/engine-playback.mjs";
 import { installEngineOwner } from "./engine/engine-owner.mjs";
 import { loadEngine } from "./engine/engine.mjs";
-import { useEngine } from "./engine/engine-open.mjs";
+import { useEngine, prepareOpen } from "./engine/engine-open.mjs";
 import { engineDocument } from "./engine/engine-document.mjs";
 import { engineComposite } from "./engine/engine-composite.mjs";
 import { markAppBounds } from "./engine/engine-edit-bounds.mjs";
@@ -3640,6 +3640,7 @@ async function importFilesTracked(files) {
 }
 async function openFile() {
   pause();
+  prepareOpen();
   if (desktop) {
     status({messageKey: "app.openingFile", messageParams: {}}, false, true);
     const result = await desktop.openFile();
@@ -3672,8 +3673,9 @@ async function acceptNativeFile(result) {
 }
 async function acceptNativeFileTracked(result) {
   pause();
+  // A project's bytes go to the engine as they are; only a Stick Nodes archive needs a file to read twice.
   const decoded = result.bytes
-    ? await chooseSticknodesFile(new File([result.bytes], result.filename))
+    ? await chooseSticknodesFile(/.(piv|styk|json)$/i.test(result.filename) ? {name: result.filename, size: result.bytes.byteLength, arrayBuffer: async () => result.bytes} : new File([result.bytes], result.filename))
     : result;
   if(!decoded)return false;
   decoded.timings = { ...decoded.timings, ...result.timings };

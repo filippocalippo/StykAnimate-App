@@ -89,6 +89,30 @@ draws of a cel that only a gesture's draft holds goes through `EngineHandle.set_
 `Engine::open` (bytes and an extension, no normalization) remains for the command-line tools and the
 Rust tests that open recorded documents as they are.
 
+### Sharing the open's work with the other workers
+
+The open job runs on one engine worker and may take the engine's other workers for the parts of the open that need nothing
+from one another (`styk_doc::fanout`: the interface passes `helpers`, how many it leaves to the open, in the open options; the
+interface asks for the workers as soon as a person asks to open a file, `prepareOpen`, so that they have joined when the bytes
+arrive). The crates that read, check and convert are given a `Fanout` and cut their work into tasks that own what they read
+(a record is a clone of an `Arc`); with `Sequential`, which the tools and tests pass, they run in order on one thread, and the
+document, the typed views and every refusal are the same whichever way they ran:
+
+- **A `.styk` skeleton** is unpacked beside its sections (each unpacked and checked by a task of its own), cut at the boundaries
+  of the records of its large arrays (`keyframes`, `figure_types`) by a scan that follows only quotes and brackets, and read in
+  pieces of whole records by every thread (`styk_doc::json::parse_pieces`). The skeleton's checksum is checked by another task
+  while the rest of the open goes on (`container::decode_deferred`, `Deferred::finish`): the open does not return before it has
+  been asked, and a skeleton that does not match is the file's error whatever else the open found. Anything that is not a plain
+  good file (a piece that does not read, a marker the file does not honour, a section that does not match) is read in order, as
+  before, because the errors of a damaged file come from reading it in order.
+- **A Pivot file's frames** are built from the inflated payload in pieces of whole frames (`Ctx::sharing`, `build_values`).
+- **The load's scene check** walks the frames in pieces and reports the first frame's refusal; **the typed views** of the
+  keyframes are converted in pieces and joined in order (their notes in the order of the records).
+
+The open's own thread takes part in every batch and runs any task a worker has not started, so an open never waits for a busy or
+missing worker. `tests/load_parallel.rs`, `tests/deferred.rs` and `tests/parallel.rs` compare the two ways on documents and on
+damaged copies of them.
+
 ## Exports of the document
 
 The files that cannot hold the editable document are made from the document the engine holds: Pivot animations and

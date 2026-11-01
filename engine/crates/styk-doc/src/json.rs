@@ -559,8 +559,13 @@ impl<'a> Parser<'a> {
                 _ => return Err(self.error("expected , or } in an object")),
             }
         }
+        Ok(self.build_object(keys, values, plain))
+    }
+
+    /// The object of the members read: `plain` when no key repeats and none is an array index, so that they stand in the order read.
+    fn build_object(&mut self, keys: Vec<Arc<str>>, values: Vec<Value>, plain: bool) -> Value {
         if !plain {
-            return Ok(Value::Obj(Arc::new(keys.into_iter().zip(values).collect())));
+            return Value::Obj(Arc::new(keys.into_iter().zip(values).collect()));
         }
         let identity: Vec<usize> = keys.iter().map(|k| Arc::as_ptr(k) as *const u8 as usize).collect();
         let shape = match self.shapes.get(&identity) {
@@ -571,9 +576,12 @@ impl<'a> Parser<'a> {
                 shape
             }
         };
-        Ok(Value::Obj(Arc::new(Obj::from_shape(shape, values))))
+        Value::Obj(Arc::new(Obj::from_shape(shape, values)))
     }
 }
+
+mod pieces;
+pub use pieces::{SharedHook, parse_pieces};
 
 /// Writes `value` as `JSON.stringify(value)` would.
 pub fn write(value: &Value, out: &mut Vec<u8>) {

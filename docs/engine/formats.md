@@ -72,6 +72,14 @@ writes a document given as JSON, for the tests and tools that make a file to rea
 engine reads exactly the document the editor imports. Both produce a tree that
 `styk_eval::from_value` turns into typed views.
 
+## Reading a container in pieces
+
+`container::decode_deferred` is `decode` with its work shared out (see [document.md](document.md#sharing-the-opens-work-with-the-other-workers)):
+sections unpacked and checked beside the skeleton's unpacking, the skeleton's SHA-256 on another thread while the skeleton is read
+in pieces of whole records (`styk_doc::json::parse_pieces`), markers resolved through one shared `Markers` (arrays and payloads the
+file names more than once stay one value). It returns the document and a `Deferred` whose `finish` gives the skeleton's checksum
+verdict. A file that is not a plain good one is decoded by `decode`, which is where every error comes from.
+
 ## Hashing large buffers on a cold module
 
 V8 runs WebAssembly in its baseline tier (Liftoff) first and moves a function to optimised code between calls: there is

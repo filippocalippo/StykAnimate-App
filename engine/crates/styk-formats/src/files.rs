@@ -127,6 +127,21 @@ pub fn open_document(bytes: &[u8], kind: Kind) -> Result<styk_doc::Value, FileEr
     Ok(document)
 }
 
+/// [`open_document`] with the container read on `fan`'s threads. The skeleton's checksum is still being checked when the document comes
+/// back: the caller must ask [`container::Deferred::finish`] before it believes the document, and prefer its error to any other.
+pub fn open_document_deferred(bytes: &[u8], kind: Kind, fan: &dyn styk_doc::fanout::Fanout) -> Result<(styk_doc::Value, container::Deferred), FileError> {
+    let (decoded, deferred) = container::decode_deferred(bytes, kind, fan)?;
+    let rules = native::normalize_decoded(decoded.document, kind).and_then(|document| native::verify_embedded_source(&document).map(|()| document));
+    match rules {
+        Ok(document) => Ok((document, deferred)),
+        // A damaged skeleton is the file's error before any of the document's.
+        Err(error) => {
+            deferred.finish(fan)?;
+            Err(error.into())
+        }
+    }
+}
+
 /// Whether the rules leave a checked document exactly as it is stored, verifying what they verify.
 /// `false` sends it down the path that builds the document.
 fn keeps_document(checked: &container::Checked, kind: Kind, rules: Rules) -> Result<bool, FileError> {

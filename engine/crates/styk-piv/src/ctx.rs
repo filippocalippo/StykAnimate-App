@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use styk_doc::fanout::{Fanout, Sequential};
 use styk_doc::{Obj, Shape, Value};
 
 use crate::error::{PyResult, cancelled};
@@ -12,11 +13,34 @@ use crate::error::{PyResult, cancelled};
 /// and stage boundaries where the Python codec called `work_control.checkpoint`.
 pub(crate) struct Ctx<'a> {
     cancel: &'a dyn Fn() -> bool,
+    /// Where pieces of a read that need nothing from one another run: the host's other threads, or this one.
+    fan: &'a dyn Fanout,
+    /// The inflated payload being read, when it is held in a form the pieces can share.
+    payload: Option<Arc<Vec<u8>>>,
 }
 
 impl<'a> Ctx<'a> {
     pub fn new(cancel: &'a dyn Fn() -> bool) -> Ctx<'a> {
-        Ctx { cancel }
+        Ctx { cancel, fan: &Sequential, payload: None }
+    }
+
+    /// A context that shares the read's work out on `fan`.
+    pub fn with_fan(cancel: &'a dyn Fn() -> bool, fan: &'a dyn Fanout) -> Ctx<'a> {
+        Ctx { cancel, fan, payload: None }
+    }
+
+    pub fn fan(&self) -> &'a dyn Fanout {
+        self.fan
+    }
+
+    /// This context for a read of `payload`, which its pieces may share.
+    pub fn sharing(&self, payload: Arc<Vec<u8>>) -> Ctx<'a> {
+        Ctx { cancel: self.cancel, fan: self.fan, payload: Some(payload) }
+    }
+
+    /// The shared payload, if `data` is exactly its bytes.
+    pub fn shared_payload(&self, data: &[u8]) -> Option<&Arc<Vec<u8>>> {
+        self.payload.as_ref().filter(|payload| std::ptr::eq(payload.as_ptr(), data.as_ptr()) && payload.len() == data.len())
     }
 
     /// Fails with the cancellation error once the host asked to stop.

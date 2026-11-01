@@ -351,7 +351,7 @@ pub(crate) fn read_frames(ctx: &Ctx<'_>, data: &[u8], start: usize, figures: &[F
         return Ok(Frames { durations, values: None, repairs: Vec::new(), end });
     }
     let repairs = recover_object_ids(&frames, &mut objects)?;
-    let values = build_values(ctx, data, &frames, &objects)?;
+    let values = build_values(ctx, data, frames, objects)?;
     Ok(Frames { durations, values: Some(values), repairs, end })
 }
 
@@ -417,7 +417,38 @@ fn nums_f32(bytes: &[u8], empty: &Value) -> Value {
     Value::Nums(Arc::new(Nums::F32(bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())))
 }
 
-fn build_values(ctx: &Ctx<'_>, data: &[u8], frames: &[FrameRecord], objects: &[ObjectRecord]) -> PyResult<Vec<Value>> {
+/// What every frame is built from besides its own bytes.
+struct Parts {
+    shapes: Shapes,
+    empty: Value,
+    /// Most objects have no colour override: their `[0, 0, 0]` is one shared array.
+    black: Value,
+}
+
+/// The frames as document values. The frames are built in pieces on the context's threads when the payload is shared with them
+/// (`Ctx::sharing`); a piece is a run of whole frames and they are joined in order, so the values are those of building them one after
+/// another.
+fn build_values(ctx: &Ctx<'_>, data: &[u8], frames: Vec<FrameRecord>, objects: Vec<ObjectRecord>) -> PyResult<Vec<Value>> {
+    let parts = parts();
+    let cuts = styk_doc::fanout::ranges(ctx.fan(), frames.len());
+    let Some(shared) = ctx.shared_payload(data).filter(|_| cuts.len() > 1) else {
+        return build_range(data, &frames, 0, &objects, &parts, &|| ctx.checkpoint());
+    };
+    let (frames, objects, parts) = (Arc::new(frames), Arc::new(objects), Arc::new(parts));
+    let jobs = cuts.into_iter().map(|cut| (shared.clone(), frames.clone(), objects.clone(), parts.clone(), cut)).collect();
+    let built = styk_doc::fanout::map(ctx.fan(), jobs, |(data, frames, objects, parts, cut): (Arc<Vec<u8>>, Arc<Vec<FrameRecord>>, Arc<Vec<ObjectRecord>>, Arc<Parts>, std::ops::Range<usize>)| {
+        build_range(&data, &frames[cut.clone()], cut.start, &objects, &parts, &|| Ok(()))
+    })
+    .map_err(|_| piv("A worker stopped while the frames were being read"))?;
+    ctx.checkpoint()?;
+    let mut out = Vec::with_capacity(built.iter().map(|piece| piece.as_ref().map_or(0, Vec::len)).sum());
+    for piece in built {
+        out.extend(piece?);
+    }
+    Ok(out)
+}
+
+fn parts() -> Parts {
     let object_keys = [
         "object_slot",
         "unique_id",
@@ -464,11 +495,17 @@ fn build_values(ctx: &Ctx<'_>, data: &[u8], frames: &[FrameRecord], objects: &[O
         ]),
     };
     let empty = Value::Arr(Arc::new(Vec::new()));
-    // Most objects have no colour override: their `[0, 0, 0]` is one shared array.
     let black = Value::Nums(Arc::new(Nums::F32(Box::new([0.0, 0.0, 0.0]))));
+    Parts { shapes, empty, black }
+}
+
+/// The values of `frames`, which are the frames from index `first` on; `objects` is the whole table the frames' object ranges index.
+fn build_range(data: &[u8], frames: &[FrameRecord], first: usize, objects: &[ObjectRecord], parts: &Parts, checkpoint: &dyn Fn() -> PyResult<()>) -> PyResult<Vec<Value>> {
+    let Parts { shapes, empty, black } = parts;
     let mut out = Vec::with_capacity(frames.len());
-    for (fi, frame) in frames.iter().enumerate() {
-        ctx.checkpoint()?;
+    for (at, frame) in frames.iter().enumerate() {
+        let fi = first + at;
+        checkpoint()?;
         let records = &objects[frame.objects.clone()];
         let mut items = Vec::with_capacity(records.len());
         for (oi, record) in records.iter().enumerate() {
@@ -494,7 +531,7 @@ fn build_values(ctx: &Ctx<'_>, data: &[u8], frames: &[FrameRecord], objects: &[O
             if let Some(flags) = record.media {
                 values.push(num(flags));
             }
-            values.push(nums_f64(&pose[..sc * 8], &empty));
+            values.push(nums_f64(&pose[..sc * 8], empty));
             values.push(num(f32_at(pose, sc * 8)));
             values.push(num(f32_at(pose, sc * 8 + 4)));
             values.push(if color & 0xff_ffff == 0 {
@@ -506,9 +543,9 @@ fn build_values(ctx: &Ctx<'_>, data: &[u8], frames: &[FrameRecord], objects: &[O
             values.push(num(record.transparency));
             values.push(num(1.0 - record.transparency as f64 / 255.0));
             values.push(num(record.len_flag));
-            values.push(nums_f32(lengths, &empty));
+            values.push(nums_f32(lengths, empty));
             values.push(num(record.bend_flag));
-            values.push(nums_f64(bends, &empty));
+            values.push(nums_f64(bends, empty));
             values.push(join);
             values.push(int(record.start));
             values.push(int(record.end));

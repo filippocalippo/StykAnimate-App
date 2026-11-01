@@ -55,7 +55,12 @@ fn cancel_ctx(cancel: &dyn Fn() -> bool) -> ctx::Ctx<'_> {
 /// calls it directly when a file is opened. `cancel` is polled between frames
 /// and records; once it returns `true` the call fails with `499 cancelled`.
 pub fn decode_document(bytes: &[u8], filename: &str, cancel: &dyn Fn() -> bool) -> Result<Decoded, CodecError> {
-    let ctx = cancel_ctx(cancel);
+    decode_document_with(bytes, filename, cancel, &styk_doc::fanout::Sequential)
+}
+
+/// [`decode_document`] with the building of the document's frames shared out on `fan`: the document is the same.
+pub fn decode_document_with(bytes: &[u8], filename: &str, cancel: &dyn Fn() -> bool, fan: &dyn styk_doc::fanout::Fanout) -> Result<Decoded, CodecError> {
+    let ctx = ctx::Ctx::with_fan(cancel, fan);
     let name = store::filename_only(filename)?;
     if bytes.is_empty() {
         return Err(error::api(400, "empty_file", "This file is empty.").into());

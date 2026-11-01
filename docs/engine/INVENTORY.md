@@ -19,7 +19,7 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | `styk-export` | 14 | 59 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
 | `styk-formats` | 55 | 717 KiB | 21 | 7 | 1 | 22 | 4 | 67 % | 9 % | 7 % |
 | `styk-render` | 51 | 76 KiB | 4 | 1 | 0 | 0 | 46 | 35 % | 29 % | 35 % |
-| **Total** | 355 | 1966 KiB | 81 | 61 | 12 | 28 | 173 | 54 % | 18 % | 27 % |
+| **Total** | 355 | 1967 KiB | 81 | 61 | 12 | 28 | 173 | 54 % | 18 % | 27 % |
 
 ## Engine modules
 

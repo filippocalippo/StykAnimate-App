@@ -34,15 +34,17 @@ pub(crate) struct Jobs {
     next: Arc<AtomicU32>,
 }
 
-fn options_of(text: &str) -> Result<OpenOptions, JsError> {
+/// The editor's options and how many of the engine's other workers the open may use (`helpers`).
+fn options_of(text: &str) -> Result<(OpenOptions, usize), JsError> {
     let options = json::parse(text.as_bytes()).map_err(js_error)?;
-    Ok(OpenOptions { layer_timeline: options.get("layerTimeline").is_some_and(Value::truthy) })
+    let helpers = options.get("helpers").and_then(Value::as_f64).filter(|count| *count >= 0.0 && *count < 64.0).map_or(0, |count| count as usize);
+    Ok((OpenOptions { layer_timeline: options.get("layerTimeline").is_some_and(Value::truthy) }, helpers))
 }
 
-fn run(engine: &Engine, bytes: &[u8], name: &str, source: &str, options: OpenOptions, cancel: &dyn Fn() -> bool) -> Result<Opened, OpenError> {
+fn run(engine: &Engine, bytes: &[u8], name: &str, source: &str, (options, helpers): (OpenOptions, usize), cancel: &dyn Fn() -> bool) -> Result<Opened, OpenError> {
     match source {
-        "json" => engine.open_document(OpenSource::Json { bytes, name }, options, cancel),
-        _ => engine.open_document(OpenSource::File { bytes, name }, options, cancel),
+        "json" => engine.open_document_with(OpenSource::Json { bytes, name }, options, cancel, helpers),
+        _ => engine.open_document_with(OpenSource::File { bytes, name }, options, cancel, helpers),
     }
 }
 
@@ -50,7 +52,7 @@ fn run(engine: &Engine, bytes: &[u8], name: &str, source: &str, options: OpenOpt
 impl EngineHandle {
     /// Starts opening a document on a worker and returns the job's number. `source` is `"file"` (the bytes of a
     /// file called `name`) or `"json"` (JSON text, shown under `name`); `options` is JSON (`layerTimeline`: the
-    /// editor gives every document a layer sheet). Watch the progress counter, then call
+    /// editor gives every document a layer sheet; `helpers`: how many other workers may take part). Watch the progress counter, then call
     /// [`EngineHandle::take_opened_document`].
     pub fn open_document(&self, bytes: Vec<u8>, name: String, source: String, options: &str) -> Result<u32, JsError> {
         let options = options_of(options)?;
@@ -116,8 +118,9 @@ impl EngineHandle {
     /// Opens a document on this thread and returns it: for small documents (a new one, a tutorial's), where
     /// the editor needs the document at once.
     pub fn open_document_now(&self, bytes: &[u8], name: &str, source: &str, options: &str) -> Result<OpenedDocument, JsError> {
-        let options = options_of(options)?;
-        match run(&self.engine, bytes, name, source, options, &|| false) {
+        // On this thread nothing may wait for a worker: the open takes none.
+        let (options, _) = options_of(options)?;
+        match run(&self.engine, bytes, name, source, (options, 0), &|| false) {
             Ok(opened) => Ok(OpenedDocument::new(self.engine.clone(), opened)),
             Err(error) => Err(js_error(error.to_json())),
         }
