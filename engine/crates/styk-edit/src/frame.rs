@@ -146,10 +146,14 @@ impl Editor {
     pub(crate) fn prepared(&self) -> Result<Arc<Prepared>, EditError> {
         let mut cache = self.eval.borrow_mut();
         if cache.prepared.is_none() || !cache.report.as_ref().is_some_and(|report| report.same_node(&self.report)) {
+            let scope = crate::prof::scope("frame::prepared.document");
             let document = cache.loader.document(&self.report, "").map_err(|error| EditError::Invalid(error.to_string()))?;
+            drop(scope);
             // The views of records the document and its history no longer hold go with them.
             cache.loader.release_unused();
+            let scope = crate::prof::scope("frame::prepared.views");
             let views = Arc::new(Prepared::new(Arc::new(document)));
+            drop(scope);
             cache.report = Some(self.report.clone());
             cache.frames.clear();
             cache.follow_views(&views);
@@ -166,6 +170,7 @@ impl Editor {
     }
 
     fn evaluated_mode(&self, tick: f64, clips: bool, editor_native: bool) -> Result<Value, EditError> {
+        let _scope = crate::prof::scope("frame::evaluated_mode");
         let editor_native = editor_native && !self.sheet();
         let prepared = self.prepared()?;
         if let Some((_, _, _, frame)) = self.eval.borrow().frames.iter().find(|(at, with, editor, _)| *at == tick.to_bits() && *with == clips && *editor == editor_native) {

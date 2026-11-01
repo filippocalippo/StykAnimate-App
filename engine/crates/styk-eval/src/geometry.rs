@@ -478,6 +478,16 @@ pub struct BuildMemory {
     slots: Vec<Option<Kept>>,
     measure: Option<(Measure, u32)>,
     serial: u64,
+    /// What the scene the last build returned was spliced of besides its objects, for [`build_remembering_plain_over`].
+    spliced: Option<Spliced>,
+}
+
+/// The inputs of the splice other than the objects' builds, and the stamp of the scene they gave.
+#[derive(Clone)]
+struct Spliced {
+    stamp: u64,
+    draw_order: Vec<u32>,
+    export_vfx: Vec<bool>,
 }
 
 impl BuildMemory {
@@ -487,6 +497,7 @@ impl BuildMemory {
         if self.slots.len() != count || self.measure != Some((measure, version)) {
             self.slots.clear();
             self.slots.resize_with(count, || None);
+            self.spliced = None;
             self.measure = Some((measure, version));
         }
     }
@@ -504,6 +515,26 @@ impl BuildMemory {
                 self.slots[slot] = None;
             }
         }
+    }
+
+    /// Whether `previous` is the scene the last build returned and a build of `frame` now (`scene`, before its splice, with its objects
+    /// numbered) would splice the same: the same builds in the same order, over the same figures and the same scene-level inputs.
+    fn spliced_as(&self, previous: &Scene, scene: &Scene, fig_of: &[u32], frame: &Frame) -> bool {
+        let Some(spliced) = self.spliced.as_ref().filter(|spliced| spliced.stamp != 0 && spliced.stamp == previous.stamp.get()) else { return false };
+        spliced.draw_order == frame.draw_order
+            && spliced.export_vfx == frame.export_vfx
+            && previous.built_in == scene.built_in
+            && previous.figure_of == fig_of
+            && previous.figures.len() == scene.figures.len()
+            && previous.figures.iter().zip(&scene.figures).all(|(a, b)| Arc::ptr_eq(a, b))
+            && previous.camera == scene.camera
+            && previous.background == scene.background
+            && previous.background_color == scene.background_color
+            && match (&previous.vfx, &scene.vfx) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            }
     }
 
     /// The number of the last build (builds are numbered in the order they end, across every memory).
@@ -1282,6 +1313,13 @@ pub fn build_remembering_plain(doc: &Document, frame: &Frame, memory: &mut Build
     build_filtered(doc, frame, None, Measure::Off, true, Some(memory))
 }
 
+/// [`build_remembering_plain`] of the frame `previous` was built of, for a document published anew: `None` when every object is the
+/// build the memory kept, and the figures, the draw order and what the splice reads of the frame are the ones `previous` was made of,
+/// so that the scene a build would give is `previous` itself (its stamp, and what was made of it, stay).
+pub fn build_remembering_plain_over(doc: &Document, frame: &Frame, memory: &mut BuildMemory, previous: &Scene) -> Option<Scene> {
+    build_core(doc, frame, None, Measure::Off, true, Some(memory), Some(previous))
+}
+
 /// Builds the scene for an evaluated frame.
 pub fn build(doc: &Document, frame: &Frame) -> Scene {
     build_filtered(doc, frame, None, Measure::Off, true, None)
@@ -1343,7 +1381,11 @@ fn build_only_with(doc: &Document, frame: &Frame, slots: &[usize], render_output
     build_filtered(doc, frame, Some(&needed), measure, render_output, None)
 }
 
-fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>) -> Scene {
+fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, memory: Option<&mut BuildMemory>) -> Scene {
+    build_core(doc, frame, needed, measure, render_output, memory, None).expect("a build without a previous scene gives a scene")
+}
+
+fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>, same_as: Option<&Scene>) -> Option<Scene> {
     let count = frame.objects.len();
     if let Some(memory) = memory.as_deref_mut() {
         memory.begin(count, measure, doc.version);
@@ -1497,9 +1539,13 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
             scene.warnings.push(format!("Cyclic join or unresolved target at object {i}"));
         }
     }
-    if let Some(memory) = memory {
+    if let Some(memory) = memory.as_deref_mut() {
+        let nothing_new = anew.is_empty();
         memory.finish(&built, anew);
         scene.built_in = (0..count).map(|slot| memory.built_in(slot)).collect();
+        if nothing_new && same_as.is_some_and(|previous| memory.spliced_as(previous, &scene, &fig_of, frame)) {
+            return None;
+        }
     }
     // Splice in draw order.
     let total_items: usize = built.iter().flatten().map(|b| b.items.len()).sum();
@@ -1588,5 +1634,8 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
     scene.figure_of = fig_of;
     scene.stamp = Stamp(STAMPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1);
     scene.account_buffers();
-    scene
+    if let Some(memory) = memory {
+        memory.spliced = Some(Spliced { stamp: scene.stamp.get(), draw_order: frame.draw_order.clone(), export_vfx: frame.export_vfx.clone() });
+    }
+    Some(scene)
 }
