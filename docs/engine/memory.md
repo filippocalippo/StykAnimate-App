@@ -64,6 +64,56 @@ tree is built (tdd2: live 186 after the decode against a peak of 314, measured n
 queued (a thirtieth of the memory). The open's own temporaries are free space afterwards, which later work reuses, so the
 heap stays near the open's own peak (300) plus what the pictures add on top of the document.
 
+## The allocator and its threads
+
+Every thread of the engine (the interface, the preparation workers, a save's helpers) allocates from one heap behind one lock, and the
+toolchain's allocator takes that lock on every call and spins on it. Measured on 2026-11-01 with a counting lock in front of it (release build, `slot.mjs probe`, one
+run each, the open's phases on the large `.styk` with three helpers): **7.8 million allocator calls, 4.0 million of them finding the
+lock held; each busy helper waited 0.8 to 0.95 s of an open that took under 2.5 s**, and the interface thread waited up to 36 ms
+at once opening tdd2 (17.6 ms svr_uriel, 4.7 ms the large `.styk`; 79 ms in one run, with the machine busy). 98% of the calls are for 508 bytes or less
+(80% for 64 or less). Playback was not the problem (workers found the lock held on 1 to 2% of their calls, the interface on 0.1%).
+
+`styk-alloc` now keeps a cache of small blocks for each thread and puts a lock of its own behind it (`cache.rs`, `lock.rs`):
+
+- **Caches.** A request of up to 508 bytes is served from a list of the thread's own, one for each of 63 sizes (8 * k + 4 bytes: the room the
+  heap's chunks give, so a size wastes nothing the heap would not have). The heap's lock is taken once for a batch of 2 to 16 blocks to fill an
+  empty list or empty a full one (a list holds at most twice a batch before half of it goes back). A block belongs to no thread: its size comes with every
+  free, so a block freed by another thread than the one that made it joins the freeing thread's list. The cache of a thread holds at most
+  2.5 KiB of a size and **125 KiB in all (a few KiB in practice)**, in the thread's thread-local block. A thread that ends hands its lists back when it
+  frees that block (`__wbindgen_thread_destroy`, in `GrowAhead::dealloc`); a thread that is terminated or traps loses at most that,
+  which stays allocated like the rest of what the thread held ([threading.md](threading.md#when-an-engine-thread-traps)).
+  wasm-bindgen allocates a new thread's stack and thread-local block before the thread has a thread-local base, and frees them after setting it to an address no
+  memory has: the allocator reads the base (`llvm.wasm.tls.base`) and serves those calls from the heap directly.
+- **The lock.** The heap sits behind a lock of the engine's own, taken once for a batch and once for a growth of the memory (the toolchain's lock
+  inside is then never found held); a thread that finds it held spins (`spin_loop`, reading the word until it is free). The holds are short, and a lock that slept would need waking: wasm-bindgen runs a
+  module's start function on the first thread only, so only the interface thread could be told from the others by the module, and it must never block (D7) anyway.
+- **The count of live bytes** is kept for each thread and added to the shared counter in steps of 16 KiB (a request of 8 KiB or more at once), so that every call does not
+  write a cache line all the threads share. `live_bytes()` is exact for the thread that asks and short by at most that step for each of the others;
+  `peak_bytes()` is never below it. A free that reaches the counter before its allocation does leaves it negative for a moment, so it is read as signed.
+  Large requests are refused against it as before (`refuses`, `LARGE_BYTES`, `reserve` are unchanged).
+
+Release builds (`slot.mjs probe`, so the machine was running other work and every time below is directional; the opens vary by 40% from run to run). The counts, the waits and the
+memory do not depend on the load:
+
+| | before | after |
+| --- | ---: | ---: |
+| allocator lock, large `.styk` open, 3 helpers: calls / found held (counting build) | 7.8 M / 4.0 M | 570 k holds / 150 k |
+| wait per busy helper in that open (counting build) | 0.8–0.95 s | 25–70 ms |
+| worst wait of the interface thread, opening tdd2 / svr_uriel / the large `.styk` (counting build) | 35.9 / 17.6 / 4.7 ms | 4.0 / 0.03 / 2.4 ms |
+| interface thread finding the lock held during playback and save | up to 0.12% of its calls, 2.5 ms | never |
+| heap after the open: large `.styk` / tdd2 / svr_uriel | 443–475 / 445 / 303 MiB | 443 / 446 / 281 MiB |
+| live peak of the open: large `.styk` / tdd2 / svr_uriel | 290 / 345 / 236 MiB | 291 / 345 / 237 MiB |
+| playback, worst gap between shown frames (tdd2 / svr_uriel / large `.styk`) | 48.3 / 55.3 / 70.1 ms | 48.1 / 55.1 / 70.2 ms |
+| open with 3 helpers, median of 8 runs taken in turn, parent against new: large `.styk` / tdd2 | 3,366 / 2,385 ms | 3,042 / 2,084 ms |
+
+An independent run in the app (median of several, quieter machine) measured tdd2 1,623 against 1,357 ms and the large `.styk` 2,655 against 1,778 ms. **With no helper the open is
+not faster**: in Node, opening the large `.styk` took 2.2–2.7 s on the parent and 2.2–3.1 s on the new allocator, with the same CPU time (a first measurement of 1.8 times came from runs of the two
+builds an hour apart on a machine whose load had changed); a single thread never met the lock, and `malloc` and `free` of one thread cost what a list does. What the caches remove
+is the waiting of the threads that share the heap. The open still gains nothing from more than three helpers: what is left of the lock is 25 to 70 ms of waiting for each
+helper, about 5% of the open, so the limit is the work that does not divide, not the allocator; the cap of three helpers (`MAX_OPEN_HELPERS`) stays. Batches of up to 64 blocks for the smallest
+sizes (the batch is a kilobyte of each size, at most 16 blocks) were tried, with the same bound on a cache to within 5 KiB: no consistent difference over 8 runs in turn, so the batch stays.
+Playback did not move (frames are shown every display refresh; the allocator was not what limited them).
+
 ## The renderer's private bytes
 
 Measured 2026-11-01 on the renderer process (Electron's `Tab`, whose private bytes are the commit charge), dev build,
@@ -97,8 +147,7 @@ and svr_uriel through open, play and scrub, eight workers: a worker finds the lo
 waits 0.1 to 0.9 s in all over the session (waits up to 28 ms); the interface thread makes 8 to 11 million calls, finds the
 lock taken on 0.01 to 0.24 % of them, and waits 21 to 182 ms in all, 4.4 to 9.2 ms at the worst. The long waits are holders
 that were descheduled on a machine running other builds, not large allocations (the holder's request was under 1 MiB
-for all but the pictures'). Not acted on: per-thread caches would be a new allocator for a cost the interface thread
-barely pays, and the 7.7 to 11.4 million calls it makes during an open are the read view's, which goes away with it.
+for all but the pictures'). Not acted on at the time; the per-thread caches of "The allocator and its threads" above did it afterwards (the 7.7 to 11.4 million calls the interface thread made during an open were the read view's, which goes away with it).
 
 **Work that is purely transient in an instance of its own.** For pictures it saves nothing: the decoded pixels are the
 result and must be in the engine's memory for the stage, and a decode now holds one buffer of the stored size. For the open
@@ -225,7 +274,7 @@ refused only where the code asks fallibly (`try_reserve`: the picture buffers, t
 
 ## Tests
 
-`cargo test -p styk-alloc -p styk-engine -p styk-eval` (the picture budget in `images/tests.rs` and
+`cargo test -p styk-alloc` (the caches, the lock and the count, with threads), `tests/engine-allocator-threads.test.mjs` (real threads on the module's allocator: blocks freed by other threads, the heap grown together, threads ended the way the export worker ends), `cargo test -p styk-alloc -p styk-engine -p styk-eval` (the picture budget in `images/tests.rs` and
 `export.rs`, the refusals in `tests/open.rs`, the loader in `tests/incremental.rs`), and
 `tests/engine-memory.test.mjs`, `tests/engine-stage.test.mjs`; the bounded pictures of the CPU rasterizer in
 `styk-raster/tests/image_budget.rs`.

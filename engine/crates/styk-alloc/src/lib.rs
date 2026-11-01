@@ -1,3 +1,4 @@
+#![cfg_attr(all(target_arch = "wasm32", target_feature = "atomics"), feature(link_llvm_intrinsics), allow(internal_features))]
 //! The allocator of the engine's WebAssembly modules.
 //!
 //! Rust's allocator on `wasm32-unknown-unknown` (dlmalloc) asks the host for more linear
@@ -14,6 +15,25 @@
 //! reaches the same size in a few dozen steps instead of tens of thousands, and ends at
 //! most one step larger than the document needs. A memory that cannot grow that far (its
 //! maximum, D14) is grown by the largest step that fits, down to what the allocation asked.
+//!
+//! # Threads
+//!
+//! The engine's threads share one memory and so one heap, whose lock the toolchain's allocator spins on. Opening a large document
+//! made seven million calls from four threads at once, half of them finding the lock held, and each helper thread spent a fifth to
+//! two fifths of the open waiting for it. Two things changed (measurements in `docs/engine/memory.md`):
+//!
+//! - **A cache of small blocks for each thread** ([`cache`]): requests of up to 508 bytes (98% of the calls) are served from a list the
+//!   thread owns, and the heap's lock is taken once for a batch of blocks to fill an empty list or empty a full one. A cache holds at
+//!   most about 2 KiB of each size (125 KiB for all 63 sizes of a thread, a few KiB in practice). Blocks freed by another thread than
+//!   the one that allocated them join the freeing thread's lists; a thread that ends gives its lists back when it frees its
+//!   thread-local block (`__wbindgen_thread_destroy`), and one that is terminated loses at most its lists, which stay allocated.
+//! - **Our own lock** ([`lock`]), taken once for a batch of blocks, and once more for a growth of the memory (the toolchain's own lock
+//!   inside stays free, since only one thread at a time reaches it). Waiting is spinning, on every thread: the holds are short, and a thread
+//!   that slept would have to be woken (the interface thread cannot sleep at all, D7).
+//!
+//! The bytes handed out are counted per thread and added to the shared counter in steps of 16 KiB, so that every call does not write
+//! one cache line all the threads share: [`live_bytes`] is exact for the thread that asks and short by at most that step for each of the
+//! others, and a request of 8 KiB or more is counted at once.
 //!
 //! # Running out of memory
 //!
@@ -34,6 +54,11 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[cfg(any(all(target_arch = "wasm32", target_feature = "atomics"), test))]
+mod cache;
+#[cfg(any(all(target_arch = "wasm32", target_feature = "atomics"), test))]
+mod lock;
+
 /// WebAssembly pages are 64 KiB.
 pub const PAGE_BYTES: usize = 64 * 1024;
 /// The least memory added in one step: 16 MiB.
@@ -52,7 +77,8 @@ pub fn grow_ahead_pages(current: usize) -> usize {
     (current / 8).clamp(MIN_AHEAD_PAGES, MAX_AHEAD_PAGES)
 }
 
-/// Bytes the allocator has handed out and not taken back (WebAssembly modules only).
+/// Bytes the allocator has handed out and not taken back (WebAssembly modules only). Threads add to it in steps and a free can arrive
+/// before the allocation it undoes, so it wraps: read it through [`live_bytes`].
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 /// The most bytes the host lets the module hold: the memory's maximum. Unset: no limit.
 static LIMIT: AtomicUsize = AtomicUsize::new(usize::MAX);
@@ -63,18 +89,26 @@ static RESERVED: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
 
 /// Bytes handed out and not freed yet, by the allocator of this module. Zero where the allocator does not count.
+#[cfg(target_arch = "wasm32")]
 pub fn live_bytes() -> usize {
-    LIVE.load(Ordering::Relaxed)
+    wasm::live()
+}
+
+/// Bytes handed out and not freed yet, by the allocator of this module. Zero where the allocator does not count.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn live_bytes() -> usize {
+    (LIVE.load(Ordering::Relaxed) as isize).max(0) as usize
 }
 
 /// The most bytes that were handed out at once since the module started or the last [`reset_peak`].
 pub fn peak_bytes() -> usize {
-    PEAK.load(Ordering::Relaxed)
+    // Threads publish their counts in steps, so the peak can lag what the calling thread holds.
+    PEAK.load(Ordering::Relaxed).max(live_bytes())
 }
 
 /// Starts measuring the peak again from what is handed out now.
 pub fn reset_peak() {
-    PEAK.store(LIVE.load(Ordering::Relaxed), Ordering::Relaxed);
+    PEAK.store(live_bytes(), Ordering::Relaxed);
 }
 
 /// Sets the memory the module may use: the maximum of the memory it was given. Once, when the engine starts.
@@ -238,115 +272,7 @@ fn refuses(size: usize, live: usize, limit: usize) -> bool {
 }
 
 #[cfg(target_arch = "wasm32")]
-mod wasm {
-    use super::{LIMIT, LIVE, PAGE_BYTES, PEAK, grow_ahead_pages, refuses};
-    use std::alloc::{GlobalAlloc, Layout, System};
-    use std::arch::wasm32::memory_size;
-    use std::sync::atomic::Ordering;
-
-    /// The standard allocator that grows the linear memory ahead of its needs and counts what it hands out.
-    ///
-    /// Install it with `#[global_allocator] static ALLOCATOR: styk_alloc::GrowAhead = styk_alloc::GrowAhead;`.
-    pub struct GrowAhead;
-
-    impl GrowAhead {
-        /// Called after an allocation: if the memory grew to satisfy it, claim the next step
-        /// now. The block is allocated from the standard allocator (which grows the memory
-        /// by exactly its size) and freed at once; dlmalloc keeps the pages as free space
-        /// and cannot give them back to WebAssembly, so they serve the allocations to come.
-        /// A step the memory cannot grow by is halved until one fits; below a page the
-        /// memory is at its maximum and the allocator carries on as it was.
-        #[inline]
-        unsafe fn after(before: usize) {
-            let now = memory_size::<0>();
-            if now == before {
-                return;
-            }
-            let mut pages = grow_ahead_pages(now);
-            while pages > 0 {
-                // SAFETY: a nonzero size with a valid power-of-two alignment; the block is freed with its own layout.
-                unsafe {
-                    let layout = Layout::from_size_align_unchecked(pages * PAGE_BYTES, 16);
-                    let block = System.alloc(layout);
-                    if !block.is_null() {
-                        System.dealloc(block, layout);
-                        return;
-                    }
-                }
-                pages /= 2;
-            }
-        }
-
-        /// `size` more bytes are handed out.
-        #[inline]
-        fn took(size: usize) {
-            let now = LIVE.fetch_add(size, Ordering::Relaxed) + size;
-            if now > PEAK.load(Ordering::Relaxed) {
-                PEAK.fetch_max(now, Ordering::Relaxed);
-            }
-        }
-
-        /// Whether a request for `size` more bytes is refused to keep the reserve.
-        #[inline]
-        fn refuses(size: usize) -> bool {
-            size >= super::LARGE_BYTES && refuses(size, LIVE.load(Ordering::Relaxed), LIMIT.load(Ordering::Relaxed))
-        }
-    }
-
-    unsafe impl GlobalAlloc for GrowAhead {
-        #[inline]
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            if Self::refuses(layout.size()) {
-                return std::ptr::null_mut();
-            }
-            let before = memory_size::<0>();
-            let pointer = unsafe { System.alloc(layout) };
-            if !pointer.is_null() {
-                Self::took(layout.size());
-            }
-            unsafe { Self::after(before) };
-            pointer
-        }
-
-        #[inline]
-        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-            if Self::refuses(layout.size()) {
-                return std::ptr::null_mut();
-            }
-            let before = memory_size::<0>();
-            let pointer = unsafe { System.alloc_zeroed(layout) };
-            if !pointer.is_null() {
-                Self::took(layout.size());
-            }
-            unsafe { Self::after(before) };
-            pointer
-        }
-
-        #[inline]
-        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-            LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
-            unsafe { System.dealloc(pointer, layout) }
-        }
-
-        #[inline]
-        unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            if new_size > layout.size() && Self::refuses(new_size - layout.size()) {
-                return std::ptr::null_mut();
-            }
-            let before = memory_size::<0>();
-            let moved = unsafe { System.realloc(pointer, layout, new_size) };
-            if !moved.is_null() {
-                if new_size >= layout.size() {
-                    Self::took(new_size - layout.size());
-                } else {
-                    LIVE.fetch_sub(layout.size() - new_size, Ordering::Relaxed);
-                }
-            }
-            unsafe { Self::after(before) };
-            moved
-        }
-    }
-}
+mod wasm;
 
 #[cfg(target_arch = "wasm32")]
 pub use wasm::GrowAhead;
@@ -428,6 +354,18 @@ mod tests {
             assert_eq!(release_named(9), 0);
             assert_eq!(reserved_bytes(), before);
         });
+    }
+
+    #[test]
+    fn a_free_counted_before_its_allocation_does_not_read_as_a_huge_count() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        // Another thread frees what this one allocated and has not yet added to the counter: the counter dips below zero for a moment.
+        LIVE.store(0usize.wrapping_sub(4096), Ordering::Relaxed);
+        assert_eq!(live_bytes(), 0);
+        reset_peak();
+        assert_eq!(peak_bytes(), 0);
+        LIVE.store(0, Ordering::Relaxed);
+        assert_eq!(live_bytes(), 0);
     }
 
     #[test]

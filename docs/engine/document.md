@@ -149,8 +149,8 @@ document, the typed views and every refusal are the same whichever way they ran:
 - **The load's scene check** walks the frames in pieces and reports the first frame's refusal; **the typed views** of the
   keyframes are converted in pieces and joined in order (their notes in the order of the records).
 
-The interface leaves the open at most three helpers: the workers share one allocator, whose lock the open's many small allocations contend
-for (the large `.styk` read fastest with two or three, and no faster with six). The open's own thread takes part in every batch and runs any task a worker has not started, so an open never waits for a busy or
+The interface leaves the open at most three helpers: the large `.styk` reads fastest with three, and no faster with six. (The workers share one allocator; its per-thread caches
+ended the time they spent waiting for its lock, [memory.md](memory.md#the-allocator-and-its-threads), and six still do not beat three: the rest is work that does not divide.) The open's own thread takes part in every batch and runs any task a worker has not started, so an open never waits for a busy or
 missing worker. What the interface needs to know of the opened document (`OpenedDocument.meta()`: the indexes, the rows of the lazy tables, the timeline) is
 made by the worker at the end of the open, not on the interface thread when it takes the result (it cost 60 to 150 ms there on the large
 projects). The open's phases (`decode`, `prepare`, `views`, `check`, and the marks the readers made) come back in it as `timings` and reach
