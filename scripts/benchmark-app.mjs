@@ -14,7 +14,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import {mkdtemp, mkdir, writeFile, rm} from 'node:fs/promises';
-import {existsSync, statSync} from 'node:fs';
+import {existsSync, readFileSync, statSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 
 const args = process.argv.slice(2);
@@ -22,6 +22,7 @@ const flags = new Set(args.filter(a => a.startsWith('--')));
 const only = args.find(a => a.startsWith('--only='))?.slice(7).split(',') ?? null;
 const option = name => args.find(a => a.startsWith(`--${name}=`))?.slice(name.length + 3) ?? null;
 const executable = option('executable') ? path.resolve(option('executable')) : null;
+const profileDir = option('profile') ? path.resolve(option('profile')) : null; // a CPU profile of the page's main thread for each movieclip row
 const clipNames = option('clips')?.split(',') ?? null;
 const smallFile = option('small') ? path.resolve(option('small')) : null;
 const [label, rootArg, outArg, scenario, ...rest] = args.filter(a => !a.startsWith('--'));
@@ -83,8 +84,14 @@ async function launch({startupView = 'editor', seed = null, probe = null} = {}) 
     }
   })();
   const page = await app.firstWindow({timeout: 120000});
+  // A renderer that dies says why (out of memory, a crash) to the main process only: it writes the reason to a file the run reads.
+  const gone = path.join(profile, 'render-process-gone.json');
+  await app.evaluate(({app}, file) => {
+    const note = (event, ...rest) => require('node:fs').appendFileSync(file, JSON.stringify(rest.at(-1)) + String.fromCharCode(10));
+    app.on('render-process-gone', note); app.on('child-process-gone', note);
+  }, gone);
   app.on('close', () => console.log('[app] closed'));
-  page.on('crash', () => console.log('[page] crashed'));
+  page.on('crash', () => console.log(`[page] crashed: ${existsSync(gone) ? readFileSync(gone, 'utf8').trim() : 'no reason given'}`));
   const firstWindowMs = Date.now() - t0;
   const errors = [];
   page.on('pageerror', e => errors.push(String(e.message).slice(0, 300)));
@@ -758,20 +765,28 @@ async function movieclipEdits(ctx) {
   await heavyFrame(ctx);
   await setMark(page, 'movieclips');
   page.on('console', message => { if (message.text().startsWith('[movieclips]')) console.log(message.text()); });
+  if (profileDir) {
+    await mkdir(profileDir, {recursive: true});
+    await page.exposeFunction('__profileStart', async () => { await ctx.cdp.send('Profiler.enable'); await ctx.cdp.send('Profiler.stop').catch(() => {}); await ctx.cdp.send('Profiler.setSamplingInterval', {interval: 100}); await ctx.cdp.send('Profiler.start'); });
+    await page.exposeFunction('__profileStop', async name => { const {profile} = await ctx.cdp.send('Profiler.stop'); await writeFile(path.join(profileDir, `${name}.cpuprofile`), JSON.stringify(profile)); });
+  }
   const out = await page.evaluate(async clipNames => {
     const B = window.__bench, editor = window.styk.editor, state = window.styk.state, timeline = [];
+    let current = '';
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const settle = async () => { await B.paints(); await sleep(250); };
     const shown = t0 => B.until(() => { const p = state.lastEditingPresentation; return p && p.at > t0 && p.revision === editor.revision ? p : null; }, 20000);
     /** One row: the call, how long it held the thread, how long until the stage showed it. Undo and redo may answer a promise. */
     const measure = async (rows, name, call) => {
       await settle();
+      if (window.__profileStart) await window.__profileStart();
       const t0 = performance.now();
       let value;
       try { value = call(); } catch (error) { rows[name] = {error: String(error?.message ?? error).slice(0, 200)}; console.log(`[movieclips] ${name} refused after ${(performance.now() - t0).toFixed(0)} ms: ${rows[name].error}`); return undefined; }
       const blocked = performance.now() - t0;
       try { if (value && typeof value.then === 'function') value = await value; } catch (error) { rows[name] = {error: String(error?.message ?? error).slice(0, 200)}; return undefined; }
       const p = await shown(t0), end = performance.now();
+      if (window.__profileStop) await window.__profileStop(`${current}-${name}`);
       timeline.push({rows, name, t0, end});
       rows[name] = {blocked: +blocked.toFixed(1), shown: p ? +(p.at - t0).toFixed(1) : null};
       console.log(`[movieclips] ${name} blocked ${rows[name].blocked} shown ${rows[name].shown}`);
@@ -802,6 +817,7 @@ async function movieclipEdits(ctx) {
     const scenario = async (name, build) => {
       if (clipNames && !clipNames.includes(name)) return;
       console.log(`[movieclips] ${name}`);
+      current = name;
       const rows = {};
       result.scenarios[name] = rows;
       try { await build(rows); }
