@@ -44,7 +44,7 @@ impl ItemKind {
 }
 
 /// One drawable primitive.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Item {
     pub slot: u32,
     pub kind: ItemKind,
@@ -1504,7 +1504,9 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
     // Splice in draw order.
     let total_items: usize = built.iter().flatten().map(|b| b.items.len()).sum();
     let total_points: usize = built.iter().flatten().map(|b| b.points.len()).sum();
+    let total_measured: usize = built.iter().flatten().map(|b| b.measured.len()).sum();
     scene.items.reserve(total_items);
+    scene.measured.reserve(total_measured);
     scene.points.reserve(total_points);
     for &slot in &frame.draw_order {
         // Read in place: a build the memory also holds is shared, and only the parts the scene owns are copied.
@@ -1552,17 +1554,19 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
                 else { pose.entries.iter().any(|(_, stack)| crate::vfx::active(stack).next().is_some()) }
             }) || frame.vfx.as_ref().and_then(|vfx| vfx.object(slot)).is_some_and(|vfx| !vfx.figure.is_empty() || vfx.attached.is_some() || !vfx.segments.is_empty())
         });
-        for it in &b.measured {
-            let mut it = it.clone();
+        // Copied whole, then the numbers that are offsets into the scene's buffers are moved.
+        let first = scene.measured.len();
+        scene.measured.extend_from_slice(&b.measured);
+        for it in &mut scene.measured[first..] {
             it.points = (it.points.0 + base, it.points.1 + base);
             it.depth = (it.depth.0 + depth_base, it.depth.1 + depth_base);
             if it.mesh != NO_MESH {
                 it.mesh += mesh_base;
             }
-            scene.measured.push(it);
         }
-        for it in &b.items {
-            let mut it = it.clone();
+        let first = scene.items.len();
+        scene.items.extend_from_slice(&b.items);
+        for it in &mut scene.items[first..] {
             it.export_vfx |= export_vfx;
             it.points = (it.points.0 + base, it.points.1 + base);
             it.depth = (it.depth.0 + depth_base, it.depth.1 + depth_base);
@@ -1578,7 +1582,6 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
             if it.transition != NO_TRANSITION {
                 it.transition += transition_base;
             }
-            scene.items.push(it);
         }
         scene.objects[slot as usize] = geometry;
     }
