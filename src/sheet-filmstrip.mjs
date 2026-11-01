@@ -496,7 +496,7 @@ export class SheetFilmstrip {
             const soft=done==='soft';
             if(!soft){this.bitmapCache.set(item.index,scratch);while(this.bitmapCache.size>32){const key=this.bitmapCache.keys().next().value,old=this.bitmapCache.get(key);this.bitmapCache.delete(key);old.width=old.height=0;}}
             if(this.cards.get(item.index)===item.card){item.card._canvas.getContext('2d').drawImage(scratch,0,0);if(!soft)this.previews.set(item.index,this.generation);}
-            if(soft){this.thumbnailStats.soft++;this._retryThumbnails();}else{this.thumbnailStats.renders++;this.retryDelay=120;}
+            if(soft){this.thumbnailStats.soft++;this.retryDelay=Math.min(this.retryDelay??120,250);this._retryThumbnails();}else{this.thumbnailStats.renders++;this.retryDelay=120;}
           }else if(!this.paused&&!this.disposed){this.thumbnailStats.retries++;this._retryThumbnails();}
         }catch(error){if(error.name!=='AbortError')this.onError?.(error);this._retryThumbnails();}
         finally{this.activeThumbnail=null;if(this.inflight===abort)this.inflight=null;}

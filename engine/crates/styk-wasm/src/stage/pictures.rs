@@ -233,11 +233,43 @@ impl Stage {
         None
     }
 
+    /// Asks for the pictures `wanted` of a view that is not the stage's frame (a thumbnail): each page that is not in the
+    /// texture takes a layer of the pool the frame on show never holds ([`Residency::acquire_spare`]), which grows by a layer
+    /// when the view needs more pages at once than it has, and the engine decodes them behind everything else. The frame on
+    /// show and the ticks loaded ahead of it keep their layers.
+    fn request_view_pictures(&mut self, generation: &Arc<Generation>, wanted: &[u32]) {
+        let Some(residency) = self.residency.as_mut() else { return };
+        let keep = Self::pages_of_pictures(generation, wanted);
+        let (mut given, mut decode) = (Vec::new(), Vec::new());
+        for &picture in wanted {
+            let Some(entry) = generation.assets.atlas.get(picture as usize).filter(|entry| entry.valid) else { continue };
+            if self.uploaded.has(entry) || self.loading.asked.contains_key(&picture) || self.loading.lost.contains(&picture) {
+                continue;
+            }
+            if entry.layer >= styk_render::MAX_PAGES {
+                self.loading.lost.insert(picture);
+                continue;
+            }
+            match residency.acquire_spare(entry.layer, &keep, true) {
+                Acquired::Resident(_) => {}
+                Acquired::Given { layer, evicted } => given.push((entry.layer, layer, evicted)),
+                Acquired::Full => continue,
+            }
+            decode.push(picture);
+        }
+        self.give_layers(generation, given);
+        for &picture in &decode {
+            *self.loading.asked.entry(picture).or_insert(0) += 1;
+        }
+        let decode: Vec<usize> = decode.into_iter().map(|picture| picture as usize).collect();
+        self.engine.decode_images(generation, &decode, false);
+    }
+
     /// [`Stage::pictures_ready`] for a view that is not the stage's frame (a thumbnail). A picture that is not in the sprite
     /// texture is drawn from its soft copy, so a thumbnail is never held up by the pictures of a far tick; the sharp pictures
-    /// are asked for in the layers nothing needs (the frame on show, the ticks loaded ahead of it): when there is none the
-    /// thumbnail stays as it is and the interface asks again. [`ViewPictures::Soft`] says it was drawn so, and is not
-    /// the thumbnail that is kept: it is drawn again until every picture is in.
+    /// are asked for in the thumbnails' pool of layers ([`Stage::request_view_pictures`]), so they always come, whatever the
+    /// frame on show holds. [`ViewPictures::Soft`] says it was drawn so, and is not the thumbnail that is kept: it is drawn
+    /// again until every picture is in.
     pub(crate) fn pictures_ready_for_view(&mut self, generation: &Arc<Generation>, list: &DrawList) -> ViewPictures {
         if self.residency.is_none() {
             return if self.engine.images_pending() == 0 { ViewPictures::Sharp } else { ViewPictures::Wait };
@@ -250,11 +282,7 @@ impl Stage {
         if missing.is_empty() {
             return ViewPictures::Sharp;
         }
-        let mut protect = self.shown_pages.clone();
-        if let Some(residency) = self.residency.as_ref() {
-            protect.extend(residency.wanted_soon());
-        }
-        self.request_pictures(generation, &missing, &protect, false, false);
+        self.request_view_pictures(generation, &missing);
         if let Some(residency) = self.residency.as_mut() {
             residency.touch(&Self::pages_of_pictures(generation, &missing));
         }

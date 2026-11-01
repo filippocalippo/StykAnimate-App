@@ -148,7 +148,8 @@ document opens), and:
   `Renderer::upload_rows`). The pages of the frame being drawn are never taken, so a frame that draws from more pages than there
   are layers makes the texture grow (once, by a copy: the budget is soft only in that case).
 - **A table of what each tick draws** (`Engine::request_picture_table`, `picture_table.rs`) is made on the workers when nothing
-  else waits (`Engine::spawn_idle`: after frames and pictures): each tick is evaluated and encoded as a frame is, and the
+  else waits (`Engine::spawn_idle`: after frames and pictures): each tick is evaluated and encoded as the stage's frame is
+  (culled to the artboard, so a picture only an off-artboard part draws is not one a layer is wanted for), and the
   pictures its draw list names are kept. Playback loads the pictures of the next 72 ticks from it, nearest first
   (`Stage::pictures_ahead`), and the interface tells the stage the tick the person went to (`Stage::hint_tick`, from
   `engine-stage.mjs`) so the pictures of the 12 ticks on each side load too; the same rows say which pages are needed soonest, which
@@ -166,10 +167,15 @@ document opens), and:
   that is not in the texture from its soft copy, and `render_thumbnail` answers 3 (`soft`) instead of 0; the interface shows it,
   does not keep it (the filmstrip neither caches it nor marks the card painted, the export dialog's previews draw it again for a few
   seconds) and asks again until the answer is `drawn`: a thumbnail that is kept is every picture sharp, so it is the pixels of a
-  whole-layout draw. The sharp pictures are asked for in spare layers only (free, or held by a page neither the frame on show
-  nor a tick loaded ahead of it draws from: `Residency::wanted_soon`); with none the thumbnail stays soft and asks again, and the
-  texture never grows for it, so a thumbnail never takes the stage's frame or its lookahead. A picture without a soft copy yet
-  waits for it (a picture that cannot be decoded is not waited for). A thumbnail drawn by the preview worker is always sharp.
+  whole-layout draw. The sharp pictures are loaded in a **pool of layers of their own** (`Residency::acquire_spare`, `Stage::request_view_pictures`),
+  made when a thumbnail first needs one, so a thumbnail gets its pictures whatever the stage's frame holds (when that is every
+  layer, the thumbnails would otherwise wait for the playhead to move): thumbnails take turns on it, the next one's pages taking the
+  place of the least recently used page that is not one of its own, and the pool is as large as the most pages one thumbnail needed
+  that were not in the texture already (a frame spread over three new pages makes three layers). Nothing of the frame on show or of the
+  ticks loaded ahead of it is ever taken for a view, and the stage's own loads never take a pool layer (a page of the pool the frame on
+  show comes to draw from is used where it is). A person who never has a thumbnail drawn pays nothing; one who does pays one
+  layer (64 MiB at 4,096²) for as long as the document is open. A picture without a soft copy yet waits for it (a picture that cannot be
+  decoded is not waited for). A thumbnail drawn by the preview worker is always sharp.
 - **The table follows the layout**: `Renderer::sync_pictures` runs on every frame (`Stage::sync_atlas`) and makes the table (and the
   soft atlas) know every picture of the layout drawn, whatever the page count: a revision that appends a picture to a page that was
   there is a layout with one more picture, not one more page. The preview worker and the export device key their atlas by the

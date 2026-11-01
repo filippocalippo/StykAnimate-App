@@ -120,6 +120,10 @@ pub struct Residency {
     clock: u64,
     /// Pages of the frame on show: nothing else's loading takes them.
     hold: Vec<u32>,
+    /// Layers kept for the views that are not the frame on show (thumbnails), made when one first needs one: the frame on show
+    /// and the ticks loaded ahead of it never take a page's place in them, and views never take a place of theirs
+    /// ([`Residency::acquire_spare`]).
+    pool: Vec<u32>,
     /// Pages given a layer, and pages that left for another, since the layout was laid out.
     pub loads: u64,
     pub evictions: u64,
@@ -128,7 +132,7 @@ pub struct Residency {
 impl Residency {
     /// A layout of `pages` pages (the live drawing pages included) and a texture of `budget` layers.
     pub fn new(pages: u32, budget: u32) -> Residency {
-        Residency { layers: budget, pages: vec![Page::default(); pages as usize], free: (0..budget).rev().collect(), clock: 0, hold: Vec::new(), loads: 0, evictions: 0 }
+        Residency { layers: budget, pages: vec![Page::default(); pages as usize], free: (0..budget).rev().collect(), clock: 0, hold: Vec::new(), pool: Vec::new(), loads: 0, evictions: 0 }
     }
 
     /// Layers the sprite texture needs now (at least two are allocated: the texture is an array, [D11](../../../docs/engine/decisions/0011-array-textures-two-layers.md)).
@@ -159,12 +163,6 @@ impl Residency {
         for (index, page) in self.pages.iter_mut().enumerate() {
             page.next = uses.get(&(index as u32)).copied().unwrap_or(u32::MAX);
         }
-    }
-
-    /// The pages in the texture that a tick near the one on show draws from ([`Residency::set_next_use`]): what loading ahead
-    /// for the frame on show has made room for. A load for a view that is not the frame (a thumbnail) leaves them alone.
-    pub fn wanted_soon(&self) -> Vec<u32> {
-        self.pages.iter().enumerate().filter(|(_, page)| page.layer.is_some() && page.next != u32::MAX).map(|(index, _)| index as u32).collect()
     }
 
     /// Stamps `pages` as shown now.
@@ -203,7 +201,7 @@ impl Residency {
             .pages
             .iter()
             .enumerate()
-            .filter(|(index, page)| page.layer.is_some() && !page.pinned && !protect.contains(&(*index as u32)) && !self.hold.contains(&(*index as u32)))
+            .filter(|(index, page)| page.layer.is_some_and(|layer| !self.pool.contains(&layer)) && !page.pinned && !protect.contains(&(*index as u32)) && !self.hold.contains(&(*index as u32)))
             .max_by(|(_, a), (_, b)| a.next.cmp(&b.next).then(b.used.cmp(&a.used)))
             .map(|(index, _)| index)
         {
@@ -221,6 +219,50 @@ impl Residency {
         slot.used = self.clock;
         self.loads += 1;
         Acquired::Given { layer, evicted }
+    }
+}
+
+impl Residency {
+    /// Gives `page` a layer of the pool for views that are not the frame on show: a free one, else the one of the least
+    /// recently used page that is not in `keep` (the pages of the view being loaded) and not on show, else (with `grow`) a new
+    /// one, which the texture must be given ([`Residency::layers`]). A page that is in the texture already, in any layer, is
+    /// not moved. The pool only ever has as many layers as the most pages one view needed at once, so it always has room for
+    /// the view being loaded, and what the frame on show holds is never touched.
+    pub fn acquire_spare(&mut self, page: u32, keep: &[u32], grow: bool) -> Acquired {
+        let Some(slot) = self.pages.get(page as usize) else { return Acquired::Full };
+        if let Some(layer) = slot.layer {
+            return Acquired::Resident(layer);
+        }
+        let held = |layer: u32| self.pages.iter().position(|page| page.layer == Some(layer)).map(|index| index as u32);
+        let choice = self
+            .pool
+            .iter()
+            .map(|&layer| (layer, held(layer)))
+            .filter(|(_, held)| held.is_none_or(|held| !keep.contains(&held) && !self.hold.contains(&held) && !self.pages[held as usize].pinned))
+            .min_by_key(|(_, held)| held.map_or(0, |held| self.pages[held as usize].used + 1));
+        let (layer, evicted) = match choice {
+            Some(choice) => choice,
+            None if grow => {
+                self.layers += 1;
+                self.pool.push(self.layers - 1);
+                (self.layers - 1, None)
+            }
+            None => return Acquired::Full,
+        };
+        if let Some(old) = evicted {
+            self.pages[old as usize].layer = None;
+            self.evictions += 1;
+        }
+        let slot = &mut self.pages[page as usize];
+        slot.layer = Some(layer);
+        slot.used = self.clock;
+        self.loads += 1;
+        Acquired::Given { layer, evicted }
+    }
+
+    /// How many layers the pool has.
+    pub fn pool_layers(&self) -> u32 {
+        self.pool.len() as u32
     }
 }
 
@@ -327,23 +369,35 @@ mod tests {
     }
 
     #[test]
-    fn a_load_that_protects_the_pages_wanted_soon_leaves_them_and_takes_a_spare_layer() {
-        let mut residency = Residency::new(10, 3);
-        for page in 0..3 {
+    fn views_that_are_not_the_frame_load_in_a_pool_of_their_own_the_frame_never_takes_from() {
+        let mut residency = Residency::new(10, 2);
+        for page in 0..2 {
             residency.touch(&[page]);
             given(residency.acquire(page, &[], false));
         }
-        // Page 0 is on show, page 1 is drawn by a tick two ahead; page 2 nothing needs.
-        residency.hold(&[0]);
-        residency.set_next_use(&[(1, 2)].into_iter().collect());
-        assert_eq!(residency.wanted_soon(), vec![1]);
-        let mut protect = vec![0];
-        protect.extend(residency.wanted_soon());
-        // A thumbnail's page takes page 2's layer, and with nothing spare it is refused: it never grows the texture or takes the others.
-        assert_eq!(given(residency.acquire(5, &protect, false)).1, Some(2));
-        protect.push(5);
-        assert_eq!(residency.acquire(6, &protect, false), Acquired::Full);
-        assert_eq!((residency.layer_of(0).is_some(), residency.layer_of(1).is_some(), residency.layers()), (true, true, 3));
+        // The frame on show holds both layers: nothing is spare, and a view of page 5 gets a layer of its own, once.
+        residency.hold(&[0, 1]);
+        assert_eq!(residency.acquire(5, &[], false), Acquired::Full);
+        let first = given(residency.acquire_spare(5, &[5], true));
+        assert_eq!((first.0, first.1, residency.layers(), residency.pool_layers()), (2, None, 3, 1));
+        // The next view's page takes that layer: it is not in the pool's keep, so page 5 leaves, and the texture does not grow.
+        let second = given(residency.acquire_spare(6, &[6], true));
+        assert_eq!((second.0, second.1, residency.layers()), (2, Some(5), 3));
+        assert_eq!(residency.layer_of(5), None);
+        // A page already in the texture is not moved, whichever layer it is in.
+        assert_eq!(residency.acquire_spare(0, &[0], true), Acquired::Resident(residency.layer_of(0).unwrap()));
+        // A view of two pages not in the texture needs two layers at once: the pool grows to that and stops.
+        given(residency.acquire_spare(7, &[7, 8], true));
+        given(residency.acquire_spare(8, &[7, 8], true));
+        assert_eq!((residency.layers(), residency.pool_layers()), (4, 2));
+        assert_eq!(residency.acquire_spare(9, &[7, 8, 9], false), Acquired::Full, "without growth a view whose layers are all kept is refused");
+        // The frame's own loads never take a pool layer, even with nothing else to give.
+        residency.hold(&[]);
+        assert_eq!(residency.acquire(3, &[0, 1], false), Acquired::Full);
+        // Neither does a view take the page of the frame on show, when the frame moves onto one in the pool.
+        residency.hold(&[8]);
+        given(residency.acquire_spare(9, &[9], true));
+        assert!(residency.layer_of(8).is_some(), "the frame holds page 8");
     }
 
     #[test]

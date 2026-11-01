@@ -56,7 +56,8 @@ impl Engine {
             if self.inner.stopping.load(std::sync::atomic::Ordering::SeqCst) || lock(&self.inner.picture_table).generation != generation.id {
                 return;
             }
-            let frame = crate::frames::produce(generation, tick as f64, &[], false, false, self.inner.clock);
+            // The frames the stage draws are culled to the artboard: a picture off it is not one a layer is wanted for.
+            let frame = crate::frames::produce(generation, tick as f64, &[], false, true, self.inner.clock);
             let row: Arc<[u32]> = pictures_of(&frame.list, index).into();
             let mut table = lock(&self.inner.picture_table);
             if table.generation == generation.id {
@@ -92,5 +93,26 @@ mod tests {
         let engine = Engine::new(|| 0.0, crate::Budgets::for_device(None));
         assert!(engine.picture_row(1, 0).is_none());
         assert_eq!(engine.picture_table_progress(1), (0, 0));
+    }
+
+    #[test]
+    fn the_table_names_the_pictures_the_stage_draws_and_not_the_ones_the_artboard_clips_away() {
+        // The sprites fixture on an artboard of 20 by 20: nearly everything its figures draw lies outside it.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/eval/sticknodes-sprites.json");
+        let text = std::fs::read_to_string(path).unwrap().replacen("\"canvas_width\":960", "\"canvas_width\":20", 1).replacen("\"canvas_height\":540", "\"canvas_height\":20", 1);
+        let engine = Engine::new(|| 0.0, crate::Budgets::for_device(None));
+        engine.open(text.as_bytes(), "json", "small artboard").unwrap();
+        let generation = engine.generation().unwrap();
+        let index = PlaceIndex::new(&generation.assets);
+        engine.request_picture_table(&generation);
+        while engine.step() {}
+        let (mut table, mut whole) = (0, 0);
+        for tick in 0..generation.playable_ticks() {
+            let drawn = pictures_of(&crate::frames::produce(&generation, tick as f64, &[], false, true, || 0.0).list, &index);
+            assert_eq!(engine.picture_row(generation.id, tick).unwrap().as_ref(), drawn.as_slice(), "tick {tick}: what the stage draws");
+            table += drawn.len();
+            whole += pictures_of(&crate::frames::produce(&generation, tick as f64, &[], false, false, || 0.0).list, &index).len();
+        }
+        assert!(whole > 0 && table < whole, "the artboard clips pictures away ({table} of {whole})");
     }
 }
