@@ -34,7 +34,7 @@ async function projectFile(message) {
   const cancelled = () => Boolean(message.cancel && Atomics.load(message.cancel, 0));
   const source = config.sourceId ? await fetchOriginalSource() : null;
   const made = makeProjectFile({join: config.engine.join, guard, cancelled, address: message.project.address, source: source?.bytes,
-    request: {snapshots: message.project.snapshots, scopes: message.project.scopes, helpers: message.project.helpers, name: config.name, source: source?.meta}});
+    request: {snapshots: message.project.snapshots, scopes: message.project.scopes, helpers: message.project.helpers, reservation: message.project.reservation, name: config.name, source: source?.meta}});
   timings.container_raw_bytes = made.rawBytes;
   timings.engine = made.timings;
   return made.bytes;

@@ -118,6 +118,14 @@ looked at again 5 s later (the `release` it was sent waits in its queue): the ca
 worker releases when the call returns. Promise continuations the engine runs after a GPU read-back settles (the export and preview
 workers) are not wrapped; they are short and run in the event loop, where the worker answers `release` between them.
 
+## When an engine thread traps
+
+WebAssembly aborts on a panic: the thread's wasm instance traps, no destructor runs, and the thread cannot report its own end. What follows, and what the engine does about it:
+
+- **A save's own thread** (the export worker). The page sees its `error` event and the save fails with the localized message of the failure (`errors.documentExport.theDocumentExportWorkerStopped`; the engine's own text, `unreachable`, is kept as the error's `cause` for the diagnostics). The memory the save had reserved was held by a guard that died with the thread's stack, so the save names its reservation (`styk_alloc::reserve_named`, a number the interface chose and sent with the save) and the page gives it back (`EngineHandle.release_reservation`); a reservation left to leak would refuse every later save and edit. The job a helper had is the next case. Whoever shows a failed save (`fail()` for every save a person asks for) says it; `performNativeSave` itself leaves the status line at "Save failed" and ends the busy task, so a caller that does not show it never leaves "Saving project…" on the screen.
+- **A helper of a save.** The page reports the thread (`worker_lost`), the save's wait ends with an error (`Engine::run_together`, above). Nothing can be done from outside for the memory that thread held: its stack and whatever it had allocated for the job (about 270 MiB after a helper trapped in the frames of tdd2) stay allocated to the end of the session. Nothing frees it, and nothing in the engine reads it.
+- **Other waiters on a dead worker are not handled.** A frame job on a thread that trapped leaves its tick in flight (`Storage.inflight`) until the next revision or grid change clears it, so that frame is never prepared in between; an image re-decode on one keeps `images.preparation_active()` true, which holds back ordinary tasks and frames (`frames/cache.rs`) until the preparation is cancelled. A small step through `workers_lost` would close both: when the count moves, clear `inflight` (and requeue the wanted ticks) and cancel the image preparation, under the state lock, with the epoch bumped so a late result of a live worker is refused. It needs a trapped thread to test against and is not done: a thread that traps inside the state lock leaves it locked, which nothing outside can undo.
+
 ## Prepared samples
 
 Fractional interface playback requests use `Engine::try_request_samples` and `frame_at`

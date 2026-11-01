@@ -17,6 +17,9 @@ async function yieldToInput() {
   else await new Promise(resolve => setTimeout(resolve, 0));
 }
 
+/** The names saves give the memory they reserve, one for each save of the page (engine `release_reservation`). */
+let reservations = 0;
+
 /** How many of the engine's preparation threads a save may borrow for its hashes and frames: at most three, and one always stays for
  * the frame on show (a save gets none from an engine with one thread or none). */
 export const lendableWorkers = engine => Math.min(3, Math.max(0, (engine?.workers ?? 0) - 1));
@@ -155,7 +158,16 @@ export class DocumentExporter {
     const backendJob = codecJob({host: this.codecHost ?? browserCodecHost()});
     let pending, failure, completed = false, postMax = 0, mainWork = 0, snapshots = [];
     const fail = error => { failure ??= error; backendJob.cancel(); pending?.reject(failure); pending = null; this._terminateWorker(); };
-    const onError = event => { event.preventDefault(); fail(Object.assign((event.message ? new Error(event.message) : messageError(new Error(''), "errors.documentExport.theDocumentExportWorkerStopped")), { telemetryCode: 'worker_failed', telemetryStage: 'serialize' })); };
+    // A worker that traps never gives back the memory its save reserved: the engine is told the name, and the person gets the localized
+    // message (what the engine said, `unreachable`, goes to the diagnostics as the cause).
+    let reservation = null;
+    const onError = event => {
+      event.preventDefault();
+      if (reservation !== null) engine.handle?.release_reservation?.(reservation);
+      const stopped = messageError(new Error(''), "errors.documentExport.theDocumentExportWorkerStopped");
+      if (event.message) stopped.cause = new Error(event.message);
+      fail(Object.assign(stopped, { telemetryCode: 'worker_failed', telemetryStage: 'serialize' }));
+    };
     const onMessageError = () => fail(Object.assign(messageError(new Error(''), "errors.documentExport.theDocumentSnapshotCouldNotBeTransferred", {}), { telemetryCode: 'snapshot_failed', telemetryStage: 'prepare' }));
     const onMessage = event => {
       if (!pending || pending.id !== event.data?.id) return;
@@ -206,7 +218,8 @@ export class DocumentExporter {
           throw messageError(new Error(''), "errors.documentExportWorker.theDocumentSnapshotWasNotInitialized", {});
         }
         // The save may take some of the engine's workers for its hashes and frames, but leaves at least one for the frame on show.
-        work = {project: {snapshots, scopes: scopes?.typeIds ?? [], address: engine.handle.address(), helpers: lendableWorkers(engine)}, cancel: cancelFlag};
+        reservation = ++reservations;
+        work = {project: {snapshots, scopes: scopes?.typeIds ?? [], address: engine.handle.address(), helpers: lendableWorkers(engine), reservation}, cancel: cancelFlag};
       } else {
         // The session publishes every change at the editor's revision; one still on its way is waited for briefly.
         for (let waited = 0; !holdsRevision(engine, revision); waited += 16) {

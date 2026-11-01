@@ -24,7 +24,7 @@ fn tree(path: &str) -> Value {
 }
 
 fn save(tree: &Value, name: Option<&str>, source: Option<Source>) -> Vec<u8> {
-    save_project(std::slice::from_ref(tree), &[], ProjectRequest { name: name.map(str::to_string), source }, &|| false).unwrap().bytes
+    save_project(std::slice::from_ref(tree), &[], ProjectRequest { name: name.map(str::to_string), source, reservation: None }, &|| false).unwrap().bytes
 }
 
 #[test]
@@ -74,13 +74,13 @@ fn the_pivot_original_is_stored_first_and_checked_on_reading() {
 #[test]
 fn a_stopped_save_writes_nothing_and_an_invalid_document_is_refused() {
     let tree = tree("engine/tests/edit/startup.document.json");
-    let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| true);
+    let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| true);
     assert!(matches!(stopped, Err(SaveError::Cancelled)), "{stopped:?}");
     let mut broken = tree.clone();
     broken.make_obj().unwrap().set("figure_types", Value::Num(3.0));
-    let refused = save_project(&[broken], &[], ProjectRequest { name: None, source: None }, &|| false);
+    let refused = save_project(&[broken], &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false);
     assert!(matches!(refused, Err(SaveError::Refused(_))), "{refused:?}");
-    let none = save_project(&[], &[], ProjectRequest { name: None, source: None }, &|| false);
+    let none = save_project(&[], &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false);
     assert!(matches!(none, Err(SaveError::Refused(_))), "{none:?}");
 }
 
@@ -117,14 +117,14 @@ fn a_save_stops_at_the_question_that_says_so_wherever_it_is_asked_and_writes_not
     // (hashing alone asks for every 4 MiB of a document of 32 MiB of numbers) and that a stop is obeyed by the very next question.
     let tree = heavy_tree(8 << 20);
     let asked = std::cell::Cell::new(0usize);
-    let saved = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| { asked.set(asked.get() + 1); false }).unwrap();
+    let saved = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| { asked.set(asked.get() + 1); false }).unwrap();
     let total = asked.get();
     assert!(saved.raw_bytes >= 32 << 20, "{} raw bytes", saved.raw_bytes);
     assert!(total >= 32 / 4 + 2, "{total} questions for {} MiB", saved.raw_bytes >> 20);
     // Stopped at the start, in the preparation, in the lift, while hashing and while compressing: the same answer.
     for stop_at in [1, 2, 5, total / 4, total / 2, total * 3 / 4, total - 1, total] {
         let asked = std::cell::Cell::new(0usize);
-        let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| { asked.set(asked.get() + 1); asked.get() >= stop_at });
+        let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| { asked.set(asked.get() + 1); asked.get() >= stop_at });
         assert!(matches!(stopped, Err(SaveError::Cancelled)), "stopped at question {stop_at} of {total}: {:?}", stopped.map(|written| written.bytes.len()));
         assert_eq!(asked.get(), stop_at, "nothing is asked, and no work is started, after the question that said stop");
     }
@@ -134,13 +134,13 @@ fn a_save_stops_at_the_question_that_says_so_wherever_it_is_asked_and_writes_not
 fn a_save_the_memory_cannot_hold_is_refused_before_it_starts() {
     let tree = tree("engine/tests/edit/startup.document.json");
     // The save reserves what its sections and the compressed file take; with the memory limited to 8 MiB it is refused whole.
-    let refused = styk_alloc::with_limit(8 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| false));
+    let refused = styk_alloc::with_limit(8 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false));
     assert!(matches!(refused, Err(SaveError::OutOfMemory(_))), "{refused:?}");
     // The same document saves when the memory is there, and a refused save changed nothing of it.
-    assert!(save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| false).is_ok());
+    assert!(save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false).is_ok());
     // The Pivot original counts twice: a document that fits alone does not fit with an original that takes most of the memory.
     let original = Source { record: Value::object(Obj::new()), bytes: vec![0; 100 << 20] };
-    let refused = styk_alloc::with_limit(256 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: Some(original) }, &|| false));
+    let refused = styk_alloc::with_limit(256 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: Some(original), reservation: None }, &|| false));
     assert!(matches!(refused, Err(SaveError::OutOfMemory(_))), "{:?}", refused.map(|written| written.bytes.len()));
 }
 
@@ -330,7 +330,7 @@ fn a_save_whose_worker_failed_is_a_failed_save_that_the_next_save_survives() {
         }
     }
     let tree = tree("engine/tests/edit/startup.document.json");
-    let request = || ProjectRequest { name: None, source: None };
+    let request = || ProjectRequest { name: None, source: None, reservation: None };
     let failed = save_project(std::slice::from_ref(&tree), &[], request(), &Failing);
     let Err(SaveError::File(error)) = failed else { panic!("{:?}", failed.map(|written| written.bytes.len())) };
     assert_eq!((error.code, error.message_key), (Some("worker_failed"), "errors.documentExport.documentExportFailed"));
@@ -343,7 +343,7 @@ fn a_save_whose_worker_failed_is_a_failed_save_that_the_next_save_survives() {
 fn a_save_on_the_workers_writes_the_bytes_of_a_save_on_one_thread_and_a_cancel_reaches_the_workers() {
     use styk_engine::save::EngineHost;
     let tree = heavy_tree(2 << 20);
-    let request = || ProjectRequest { name: Some("Side by side".into()), source: None };
+    let request = || ProjectRequest { name: Some("Side by side".into()), source: None, reservation: None };
     let alone = save_project(std::slice::from_ref(&tree), &[], request(), &|| false).unwrap();
     let pool = Workers::start(3);
     let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3 };
@@ -371,8 +371,20 @@ fn a_save_tells_where_its_time_went() {
         }
     }
     let tree = tree("engine/tests/edit/startup.document.json");
-    let written = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &Ticking).unwrap();
+    let written = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &Ticking).unwrap();
     let t = written.timings;
     assert!(t.prepare_ms > 0.0 && t.lift_ms > 0.0 && t.frames_ms > 0.0 && t.total_ms >= t.prepare_ms + t.lift_ms, "{t:?}");
     assert_eq!(t.frames.iter().map(|frame| frame.raw_bytes).sum::<usize>(), written.raw_bytes);
+}
+
+#[test]
+fn a_save_reserves_its_memory_under_the_name_it_is_given_and_gives_it_back_itself() {
+    let tree = tree("engine/tests/edit/startup.document.json");
+    let token = 4_100_001;
+    let request = || ProjectRequest { name: None, source: None, reservation: Some(token) };
+    assert!(save_project(std::slice::from_ref(&tree), &[], request(), &|| false).is_ok());
+    assert_eq!(styk_alloc::release_named(token), 0, "a finished save has nothing left for the host to release");
+    let stopped = save_project(std::slice::from_ref(&tree), &[], request(), &|| true);
+    assert!(matches!(stopped, Err(SaveError::Cancelled)));
+    assert_eq!(styk_alloc::release_named(token), 0, "nor a stopped one");
 }

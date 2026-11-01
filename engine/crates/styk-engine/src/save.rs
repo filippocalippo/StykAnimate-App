@@ -33,6 +33,9 @@ pub struct Source {
 
 /// What a project save writes.
 pub struct ProjectRequest {
+    /// A name for the save's reservation of memory, under which the interface releases it if the thread saving dies without dropping it
+    /// (`styk_alloc::release_named`).
+    pub reservation: Option<u64>,
     /// The name the file is saved under, which the document carries.
     pub name: Option<String>,
     /// The Pivot original of the project, when the interface holds it for the project (the document has no copy of its own).
@@ -164,7 +167,11 @@ pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, ho
     let Some(mut document) = trees.last().cloned() else { return Err(SaveError::Refused("errors.documentExportWorker.theDocumentSnapshotWasNotInitialized".into())) };
     debug_assert_eq!(scopes.len() + 1, trees.len(), "one movieclip per document it was entered from");
     let source = request.source.as_ref().map_or(0, |source| source.bytes.len());
-    let _memory = styk_alloc::reserve(working_bytes(source)).map_err(SaveError::OutOfMemory)?;
+    let _memory = match request.reservation {
+        Some(token) => styk_alloc::reserve_named(token, working_bytes(source)),
+        None => styk_alloc::reserve(working_bytes(source)),
+    }
+    .map_err(SaveError::OutOfMemory)?;
     let hold = Hold { cancel };
     for (parent, &type_id) in trees.iter().zip(scopes).rev() {
         document = fold_movieclip(parent, type_id, &document)?;

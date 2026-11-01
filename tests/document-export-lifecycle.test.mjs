@@ -155,6 +155,25 @@ for (const [threads, lent] of [[1, 0], [2, 1], [4, 3], [8, 3]]) test(`a save on 
   workers[0].finish(); await saving;
 });
 
+test('a save thread that traps gives back its memory by name, and the person reads the localized message, not the engine message', async t => {
+  const released = [], handle = {address: () => 0, release_reservation: token => released.push(token)};
+  const {workers, exporter} = environment(t, {engine: {handle, join: {}, workers: 4}});
+  const saving = exporter.export(project());
+  const rejected = assert.rejects(saving, error => error.messageKey === 'errors.documentExport.theDocumentExportWorkerStopped' && !/unreachable/.test(error.message) && /unreachable/.test(error.cause?.message ?? ''));
+  await until(() => workers[0]?.messages.at(-1)?.operation === 'export');
+  const {reservation} = workers[0].messages.at(-1).project;
+  assert.ok(Number.isInteger(reservation) && reservation > 0);
+  workers[0].dispatchEvent(Object.assign(new Event('error', {cancelable: true}), {message: 'RuntimeError: unreachable'}));
+  await rejected;
+  assert.deepEqual(released, [reservation], 'the engine was told which reservation to give back');
+  // A save that is cancelled, or fails in an ordinary way, leaves its reservation to the worker, which gives it back itself.
+  const next = exporter.export(project());
+  await until(() => workers[1]?.messages.at(-1)?.operation === 'export');
+  workers[1].finish(); await next;
+  assert.deepEqual(released, [reservation]);
+  assert.notEqual(workers[1].messages.at(-1).project.reservation, reservation, 'each save has a name of its own');
+});
+
 test('queued revision changes reject before snapshot and disposal cancels active and waiting requests', async t => {
   const {workers, exporter} = environment(t);
   const report = project(), first = exporter.export(report);
