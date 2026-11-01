@@ -254,7 +254,10 @@ export class ImportClient {
         keeping=kept=null;
       }
       const read=await opening.read({signal,onProgress});
-      return this._opened(read,opening,filename,{sourceId:kept?.sourceId??null,sourceOwner:kept?.sourceOwner,sourceBytes:bytes.byteLength,started,decoded});
+      const sourceBytes=bytes.byteLength;
+      // The engine has its own copy: this one is freed now, not whenever the page next collects (a 40 MB file stayed for seconds).
+      bytes.transfer?.(0);
+      return this._opened(read,opening,filename,{sourceId:kept?.sourceId??null,sourceOwner:kept?.sourceOwner,sourceBytes,started,decoded});
     } catch (error) {
       opening?.dispose();
       // What the codec kept, even if it is still being kept, is let go once it is done (a stopped open included).

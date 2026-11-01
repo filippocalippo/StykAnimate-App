@@ -232,6 +232,48 @@ fn the_interface_asks_before_it_copies_a_file_in() {
     assert!(styk_alloc::with_limit(64 << 20, || styk_engine::document::admit_copy(61 << 20)).is_err());
 }
 
+#[test]
+fn a_file_the_open_owns_opens_to_the_same_document() {
+    let engine = engine();
+    let folder = repo("engine/crates/styk-piv/tests/fixtures");
+    let mut compared = 0;
+    for entry in std::fs::read_dir(folder).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.ends_with(".piv") {
+            continue;
+        }
+        let bytes = std::fs::read(entry.path()).unwrap();
+        let by_reference = engine.open_document(OpenSource::File { bytes: &bytes, name: &name }, APP, &|| false);
+        let by_owner = engine.open_document(OpenSource::Owned { bytes: bytes.clone(), name: &name }, APP, &|| false);
+        match (by_reference, by_owner) {
+            (Ok(a), Ok(b)) => {
+                let (x, y) = (json::to_string(&a.tree), json::to_string(&b.tree));
+                if x != y {
+                    let at = x.bytes().zip(y.bytes()).position(|(p, q)| p != q).unwrap_or(x.len().min(y.len()));
+                    let around = |text: &str| text.chars().skip(at.saturating_sub(80)).take(200).collect::<String>();
+                    panic!("{name}: the trees differ at byte {at}
+ by reference: {}
+ by owner:     {}", around(&x), around(&y));
+                }
+                assert_eq!((a.kind, a.version, &a.name), (b.kind, b.version, &b.name), "{name}");
+            }
+            (Err(a), Err(b)) => assert_eq!(a.to_json(), b.to_json(), "{name}"),
+            (a, b) => panic!("{name}: by reference {}, by owner {}", a.is_ok(), b.is_ok()),
+        }
+        compared += 1;
+    }
+    assert!(compared >= 5, "{compared} Pivot fixtures compared");
+}
+
+#[test]
+fn the_frame_cache_is_a_sixteenth_of_the_memory_however_much_the_device_has() {
+    styk_alloc::with_limit(2 << 30, || {
+        let budgets = Budgets::for_device(Some(8.0));
+        assert_eq!(budgets.frame_cache_bytes, 120 << 20, "an 8 GiB device gets 120 MiB of a 2 GiB memory, not 240");
+        assert_eq!(Budgets::for_device(Some(2.0)).frame_cache_bytes, 48 << 20, "a small device keeps its smaller cache");
+    });
+}
+
 /// How an open ended, for the tests of stopping one: the document's name, or the code of the refusal.
 fn ended(result: Result<styk_engine::document::OpenedDocument, styk_engine::document::OpenError>) -> Result<String, Option<String>> {
     result.map(|opened| opened.name).map_err(|error| error.code)

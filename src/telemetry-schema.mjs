@@ -100,13 +100,29 @@ export function percentile(histogram, fraction = .95) {
 export function sanitizeEnvironment(value = {}) {
   return Object.fromEntries(Object.entries(ENV_ENUMS).map(([key, values]) => [key, values.includes(value[key]) ? value[key] : 'unknown']));
 }
+/**
+ * The module and line a stack frame reports. A bundled script (scripts/build-app.mjs) has a table in `globalThis.__stykFrames` of the
+ * lines of its file that came from each module a report may name, with the line each has in that module's source; a frame in such a file
+ * is read through it (a line from any other module is dropped). Source files and workers without a table are read by their own name.
+ */
+function reportedFrame(file, line) {
+  const runs = globalThis.__stykFrames?.[file];
+  if (!Array.isArray(runs)) return ERROR_MODULES.includes(file) ? { module: file, line: Math.min(1e6, line) } : null;
+  for (const [module, last, ...pairs] of runs) {
+    if (line > last || line < pairs[0]) continue;
+    let i = pairs.length - 2;
+    while (pairs[i] > line) i -= 2;
+    return ERROR_MODULES.includes(module) ? { module, line: Math.min(1e6, pairs[i + 1] + line - pairs[i]) } : null;
+  }
+  return null;
+}
 export function sanitizeError(error, operation = 'app', now = Date.now(), context = {}) {
   const type = ERROR_TYPES.includes(error?.name) ? error.name : 'Error';
   // Only our module basenames and line numbers; never error text or stack arguments.
   const forwarded = Array.isArray(error?.telemetryFrames) ? error.telemetryFrames.filter(frame=>ERROR_MODULES.includes(frame?.module)&&Number.isSafeInteger(frame.line)&&frame.line>=0&&frame.line<=1e6).map(frame=>({module:frame.module,line:frame.line})).slice(0,5) : [];
   const frames = forwarded.length ? forwarded : String(error?.stack || '').split('\n').slice(1, 12).map(line => {
     const match = line.match(/(?:\/|\\)([a-z][a-z0-9-]{0,70}\.(?:mjs|cjs)):(\d+):\d+/i);
-    return match && ERROR_MODULES.includes(match[1]) ? { module: match[1], line: Math.min(1e6, Number(match[2])) } : null;
+    return match ? reportedFrame(match[1], Number(match[2])) : null;
   }).filter(Boolean).slice(0, 5);
   const op = ERROR_OPERATIONS.includes(operation) ? operation : 'app';
   const aliases = { ENOSPC: 'disk_full', EACCES: 'permission_denied', EPERM: 'permission_denied', import_timeout: 'timeout', ETIMEDOUT: 'timeout',

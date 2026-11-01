@@ -94,10 +94,10 @@ impl Budgets {
     }
 
     /// Pictures waiting for the renderer may take a thirtieth of the memory the module may use (64 MiB of a
-    /// 2 GiB memory), and the frame cache an eighth (240 MiB), whatever the device claims to have. Where the
+    /// 2 GiB memory), and the frame cache a sixteenth (120 MiB), whatever the device claims to have. Where the
     /// module has no limit (native tools, tests) neither is a bound in practice.
     pub const PICTURE_SHARE: usize = 30;
-    pub const FRAME_CACHE_SHARE: usize = 8;
+    pub const FRAME_CACHE_SHARE: usize = 16;
 }
 
 /// One open document, immutable. A new one replaces it on every change.

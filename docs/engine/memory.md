@@ -113,6 +113,51 @@ get faster beyond three helpers (1,681 against 1,635 ms): what is left of the lo
 the cap of three helpers (`MAX_OPEN_HELPERS`) stays. The playback figures did not move (frames are shown every display refresh; the allocator was not what limited them).
 `engine.memory()` reports `lockHolds`, `lockContended` and `lockSleeps` (all threads, since the module started).
 
+## The renderer's private bytes
+
+Measured 2026-11-01 on the renderer process (Electron's `Tab`, whose private bytes are the commit charge), dev build,
+`slot.mjs` runs on a loaded machine, one launch each. The committed regions come from `VirtualQueryEx` on the renderer,
+the first bytes of each large region name what it holds (a zlib header is a Pivot file, `STYK` a native file, `STYKSRC1`
+the codec's record of an original); the heaps are `engine.memory()` and `performance.memory`; the codec's share is what
+ending its worker gave back. MiB.
+
+| tdd2, settled | before this chunk | what it is |
+| --- | ---: | --- |
+| the empty app | 187 | |
+| WebAssembly memory | 434 | 189 live; the rest is dead space the allocator keeps |
+| main-thread V8 heap | 229 | 87 after a collection: 142 of it was garbage waiting for one |
+| Pivot codec worker | ~160 | the 39 MiB original it leases, 95 MiB of wasm memory growing to hold the upload, its own heap |
+| two more copies of the file | 78 | the buffer the page read it into and the upload the worker was sent, until a collection |
+| six more engine workers | ~40 | 6 to 7 each, and 18 more in the wasm memory (stacks): they are needed to prepare frames in parallel |
+| compiled WebAssembly | ~4 | the module is compiled once for every thread: private executable memory goes from 5 to 9 |
+
+After freeing the copies as soon as they are copied (the page's buffer, the worker's upload, and in the web build the
+original the importer fetched back to read a fingerprint from), tdd2 settles at 1,004 and svr_uriel's codec worker is 99
+(20 original, 59 wasm memory). The desktop codec cannot end its worker: the original lives there as a lease, and the
+save fetches it from there (`/api/source`, which also decodes the project once to fingerprint it). Keeping the original
+in the document instead, as the web build does, was tried for the desktop and opened Pivot files 0.9 s (tdd2 4.4 -> 6.8 s)
+to 2.4 s later than the lease does, because the codec decodes the project again in a cold worker to compute the document
+fingerprint the saved file carries (`document_sha256`). The way out is to compute that fingerprint where the document
+already is: in the engine, from the decoded project, off the open's critical path or at the first save. The web build's
+codec worker ends two seconds after its last job (a worker started cold answers its first request in 30 to 70 ms).
+
+**The allocator lock** (`std`'s wasm allocator: one spinning lock for every thread). Timed with a gate in front of it, tdd2
+and svr_uriel through open, play and scrub, eight workers: a worker finds the lock taken on 5 to 40 % of its calls and
+waits 0.1 to 0.9 s in all over the session (waits up to 28 ms); the interface thread makes 8 to 11 million calls, finds the
+lock taken on 0.01 to 0.24 % of them, and waits 21 to 182 ms in all, 4.4 to 9.2 ms at the worst. The long waits are holders
+that were descheduled on a machine running other builds, not large allocations (the holder's request was under 1 MiB
+for all but the pictures'). Not acted on at the time; the per-thread caches of "The allocator and its threads" above did it afterwards (the 7.7 to 11.4 million calls the interface thread made during an open were the read view's, which goes away with it).
+
+**Work that is purely transient in an instance of its own.** For pictures it saves nothing: the decoded pixels are the
+result and must be in the engine's memory for the stage, and a decode now holds one buffer of the stored size. For the open
+it would keep the file, the payload and the tree under construction (about 140 MiB on tdd2, 39 + 100) out of the engine's
+memory, at the price of lifting the whole tree out of the other instance and rebuilding it piece by piece here
+(`handle.part` already takes 0.9 s to lift it for the interface) with the shared nodes of the pose sequences kept
+shared, and two copies of the tree in the renderer while it moves. The open's temporaries are already held for less time
+(the file is dropped once inflated, the payload gives back its spare capacity), and the memory they leave is reused by what
+follows, so the heap stays within about 30 MiB of the open's own peak (tdd2 304 against a live peak of 291) until the
+pictures arrive. Not done.
+
 ## What is bounded now
 
 - **Pictures** (`styk_engine::images`, `Budgets::picture_bytes`): a picture is decoded only while the
@@ -132,8 +177,12 @@ the cap of three helpers (`MAX_OPEN_HELPERS`) stays. The playback figures did no
   and the cache lacks. A frame is never short of a picture because of the budget: what it samples is kept while it
   is drawn. The preview worker's GPU device keeps the pictures it was given (`Gpu.uploaded`), so it asks the
   CPU only for the ones the device lacks; before, both kept every picture of the document.
-- **The frame cache** stays under an eighth of the memory (240 MiB of 2 GiB), whatever
-  `navigator.deviceMemory` says.
+- **The frame cache** stays under a sixteenth of the memory (120 MiB of 2 GiB), whatever
+  `navigator.deviceMemory` says. It keeps the frames just ahead of the playhead, so a cap only changes how far ahead
+  playback has frames waiting: svr_uriel played 14 s three times at each cap (a dev build, one app launch per cap):
+  stutters over 1.5 frames per play 0, 0, 1 at 240 MiB, 0, 1, 0 at 120, 1, 0, 0 at 60 (1, 1, 0 in a second launch), and 4, 1, 1 at
+  30 with buffering events; live memory after playing 420, 340, 280 and 250 MiB. 240 MiB held 193 MiB of frames and bought nothing
+  the 120 did not.
 - **Typed views** (`styk_eval::load::Loader`) are held by a weak reference to the record they were made from
   (`Source`), so they live exactly as long as something holds the record (the document, its history), whoever
   else caches views of it; `release_unused` runs after every conversion, the session's included.
@@ -193,6 +242,22 @@ when the memory cannot give it; reservations count against every other request.
 `engine.memory()` (`EngineHandle.memory`) reports the linear memory, the bytes handed out and their peak
 since `reset_memory_peak`, the reserved bytes, the ceiling, the pictures waiting and the frame cache.
 
+## Closing and reopening
+
+Measured 2026-11-01 (dev build, one launch each): tdd2, testingupload.styk and svr_uriel opened as three tabs, closed one
+by one, and opened again, three rounds. At the 2 GiB memory: live memory is 667 to 681 MiB with the three open and 16 MiB
+once they are closed, every round; the heap reaches 854 MiB in the first round and does not grow in the next two (the
+dead space is reused), no document is refused and nothing is raised. At a memory of 896 MiB (the same build with the
+maximum lowered): testingupload is refused in each round with `errors.engine.outOfMemory` ("There is not enough memory
+for this. Close other projects or save your work and restart StykAnimate."), tdd2 and svr_uriel open, close and open
+again, and the engine keeps working: no `unreachable`. An `unreachable` seen at 34144f6a with the same flow was not
+reproduced after the changes above; what ended the engine there was most likely an allocation the image decoder cannot
+refuse, made when the memory was full: a 4,096-wide picture's resize asked for 129 MiB in one block, on top of
+a decoder's own copies, and the memory grew in steps of up to 128 MiB near its maximum. The admission still counts
+bytes handed out, not the heap: with a heap full of dead, fragmented space a large request the allocator cannot serve is
+refused only where the code asks fallibly (`try_reserve`: the picture buffers, the file copy), and aborts elsewhere
+(the image library's own buffers, the inflate output of a Pivot file, the container's raw block). Left.
+
 ## Left
 
 - A parked tab keeps the typed views it was opened with (`Publisher.opened`), so a document edited far from its
@@ -200,6 +265,9 @@ since `reset_memory_peak`, the reserved bytes, the ceiling, the pictures waiting
   keep the last published views instead.
 - Undo and redo rebuild records the opened tree shares, and the tree after an undo of a movieclip edit of tdd2
   takes 62 MiB more than the opened one (unpacked pose arrays).
+- The desktop codec worker holds a Pivot project's original for the life of the project (about 100 to 160 MiB of the
+  renderer for a 21 to 39 MiB file; see "The renderer's private bytes"). Keeping the original in the document, as the
+  web build does, needs the document fingerprint computed without the codec's second decode, in the engine.
 - The history accounts an entry by the size of the records it replaces (100 MiB for one movieclip edit of
   testingupload.styk, 3 MiB of memory), so the byte limit retires older entries sooner than the memory needs.
 

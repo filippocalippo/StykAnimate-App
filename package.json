@@ -77,6 +77,7 @@
     "build:vfw": "node scripts/run-python.mjs scripts/build-vfw-bridge.py",
     "build:frame-scan": "node scripts/run-python.mjs scripts/build-frame-scan.py",
     "build:brand": "node scripts/build-brand-assets.mjs",
+    "app:bundle": "node scripts/build-app.mjs",
     "pack": "node scripts/engine-verify-pkg.mjs && electron-builder --dir",
     "verify:package": "node scripts/verify-package.mjs",
     "mark:release": "node scripts/mark-release.mjs",
@@ -98,6 +99,7 @@
   "devDependencies": {
     "electron": "39.8.10",
     "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
     "playwright": "1.63.0",
     "ws": "8.22.0"
   },
@@ -136,6 +138,13 @@
           "src/**/*",
           "assets/**/*",
           "vendor/**/*"
+        ]
+      },
+      {
+        "from": "build/app",
+        "to": "bundle",
+        "filter": [
+          "**/*"
         ]
       },
       {

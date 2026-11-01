@@ -254,11 +254,13 @@ impl Codec {
             ("GET", "/api/source") => {
                 let source_id = query_value(&query, "id", "");
                 let (source, meta) = self.store.source_record(ctx, &source_id)?;
+                // `meta=1`: the description alone, for a caller that holds the original already (it is not sent back to be thrown away).
+                let source: &[u8] = if query_value(&query, "meta", "") == "1" { &[] } else { &source };
                 let mut payload = Vec::with_capacity(12 + meta.len() + source.len());
                 payload.extend_from_slice(b"STYKSRC1");
                 payload.extend_from_slice(&(meta.len() as u32).to_le_bytes());
                 payload.extend_from_slice(&meta);
-                payload.extend_from_slice(&source);
+                payload.extend_from_slice(source);
                 Ok(Response { status: 200, headers: vec![header("Content-Type", "application/octet-stream")], body: payload })
             }
             ("POST", "/api/cancel") => Ok(Response { status: 204, headers: vec![header("Content-Type", "application/json")], body: Vec::new() }),

@@ -1928,7 +1928,8 @@ function pause() {
   state.playing = false;
   state.previewing = false;
   resetPreviewQuality();
-  editor.endFrameDraftPreview();
+  // A pause of a playhead at rest (every stepping key) has no preview to end: the engine's answer to the call is `false`, and the call costs a session round trip.
+  if (wasPlaying) editor.endFrameDraftPreview();
   thumbnailRenderer?.setPaused(document.hidden);
   timelineUI?.setPaused?.(document.hidden);
   state.buffering = false;
@@ -4433,13 +4434,13 @@ const actions = {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(0);
-    editor.seek(0);
+    editor.seek(0, { evaluate: false });
   },
   "previous-frame": () => {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(Math.max(0, timelineUI.selectedIndex - 1));
-    editor.seek(Math.max(0, editor.tick - 1));
+    editor.seek(Math.max(0, editor.tick - 1), { evaluate: false });
   },
   "next-frame": () => {
     pause();
@@ -4447,13 +4448,13 @@ const actions = {
       return timelineUI.selectFrame(
         Math.min(timelineUI.frameCount - 1, timelineUI.selectedIndex + 1),
       );
-    editor.seek(Math.min(editor.totalTicks - 1, editor.tick + 1));
+    editor.seek(Math.min(editor.totalTicks - 1, editor.tick + 1), { evaluate: false });
   },
   "last-frame": () => {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(timelineUI.frameCount - 1);
-    editor.seek(Math.max(0, editor.totalTicks - 1));
+    editor.seek(Math.max(0, editor.totalTicks - 1), { evaluate: false });
   },
   "previous-keyframe": () => { pause(); runTimelineHotkey(timelineUI, 'previous-keyframe'); },
   "next-keyframe": () => { pause(); runTimelineHotkey(timelineUI, 'next-keyframe'); },
@@ -6022,6 +6023,8 @@ async function init() {
   refreshHotkeyHints(hotkeys);
   appLocalization.updatePlayback($("play-button"), state);
   window.styk.localization = appLocalization;
+  // The page's own message catalogs: a script that needs another language loads it through here, not through a second copy of the module.
+  window.styk.loadLocale = loadLocale;
   state.handles = state.settings.showHandles;
   state.loop = state.settings.loopPlayback;
   state.motionPaths = state.settings.motionPaths;
@@ -6276,6 +6279,8 @@ async function init() {
   markEditorReady();
   window.styk.telemetry = telemetry;
   window.styk.privacyUI = privacyUI;
+  // The listeners for what the main process pushes (the launch file, a stykanimate:// link's menu action) are all on: it sends what it kept (desktop/page-pushes.cjs).
+  desktop?.pageListening?.();
   updateNotice = new UpdateUI(desktop, { onRestart: () => actions['restart-update']() });
   queueStartupPrompts();
   void telemetryInit.then(() => telemetry.timing('startup_ms', performance.now()));

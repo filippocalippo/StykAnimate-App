@@ -186,3 +186,33 @@ test('cancelling a job that never linked sets nothing and creates no worker', ()
   assert.equal(workers.length, 0);
   assert.throws(() => host.link('a'), {name: 'AbortError'});
 });
+
+test('the web build worker ends once no job has needed it for a moment, and the next job starts a fresh one', async () => {
+  const {host, workers} = fixture({limits: 'web', idleStopMs: 20});
+  host.register('a'); host.link('a'); host.release('a');
+  assert.equal(workers[0].terminated, false, 'a job may follow at once');
+  host.register('b');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(workers[0].terminated, false, 'a job that needs the worker keeps it');
+  host.link('b'); host.release('b');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(workers[0].terminated, true, 'its memory goes back to the browser');
+  host.register('c'); host.link('c');
+  assert.equal(workers.length, 2);
+});
+
+test('a worker that is busy is not ended for being idle', async () => {
+  const {host, workers} = fixture({limits: 'web', idleStopMs: 20});
+  host.register('a'); host.link('a');
+  workers[0].say({type: 'busy', jobId: 'a'});
+  host.release('a');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(workers[0].terminated, false);
+});
+
+test('the desktop codec keeps its worker: its leases live there', async () => {
+  const {host, workers} = fixture({idleStopMs: undefined});
+  host.register('a'); host.link('a'); host.release('a');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(workers[0].terminated, false);
+});
