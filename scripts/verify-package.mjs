@@ -1,5 +1,4 @@
-import { readdir, readFile, writeFile, mkdir, copyFile, mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
+import { readdir, readFile, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,7 +102,8 @@ for (const required of ['index.html', 'src/app.mjs', 'src/frame-map.js', 'src/st
   if (!bundleFiles.includes(required)) throw new Error(`resources/bundle/${required} is missing: the package would run the unbundled modules. Run npm run pack.`);
 if (!snapshot) {
   const { buildApp } = await import('./build-app.mjs');
-  const fresh = await mkdtemp(path.join(os.tmpdir(), 'styk-verify-bundle-'));
+  // Inside the source tree, like the packaged build: the chunks' names depend on where the output is.
+  const fresh = path.join(appRoot, 'build', 'verify-bundle');
   try {
     await buildApp({ root: appRoot, output: fresh });
     const expected = [];

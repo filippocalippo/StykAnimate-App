@@ -168,7 +168,8 @@ function launchFiles(metafile, entry) {
   return seen;
 }
 
-/** Builds the bundle. Needs the engine built (src/engine/pkg/styk_engine.js). */
+/** Builds the bundle. Needs the engine built (src/engine/pkg/styk_engine.js). The output belongs inside `root` (as build/app does): the same
+ * source builds the same files there, byte for byte, but the chunks' names change with where the output is. */
 export async function buildApp({ root = appRoot, output = path.join(root, 'build', 'app') } = {}) {
   const { build } = await import('esbuild');
   await rm(output, { recursive: true, force: true });
