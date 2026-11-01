@@ -71,7 +71,7 @@ Each is a name for `--only=`; `open` always runs in a document run.
   so the project is untouched), `leaveEdited` (the clip's edit becomes one history entry of the project), `place` (another instance in the scene) and
   the `Undo` and `Redo` of each; in `nested`, `enter1` to `enter3`, `createInner`, `leave3` to `leave1` and `placeNested`. `clip` gives a clip's frames,
   objects and longest numeric array (a pose of 32 numbers or more is what makes sharing show in saved bytes). Everything is undone at the end.
-  Run it alone with `--only=movieclips`, and `--clips=selection,large,nested` picks the clips; it runs before `tabs`.
+  Run it alone with `--only=movieclips`, and `--clips=selection,large,nested` picks the clips, `--profile=<dir>` writes a CPU profile of the page for each row (one `.cpuprofile` per clip and row), and a renderer that dies reports why. It runs before `tabs`.
 - **`onion`**: onion skins on through the app's own action and settings (3 frames each side), then scrub, next-frame key and 5 s of playback as
   the existing steps measure them. The settings are put back.
 - **`timelineInspector`**: with the timeline and inspector on show and a figure selected, 10 s of playback. `playhead.delay` and

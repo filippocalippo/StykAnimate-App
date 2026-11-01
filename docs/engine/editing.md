@@ -686,6 +686,18 @@ it on the editor, for every document.
   of a figure in that source, and the animation it retains, are edited with the figure (`Place::Retained`: a rig edit
   inside the clip changes them as it changes the clip's own poses, in the same `topology` entry). A clip on a native
   timeline (tools and tests) is edited by the editor. A project closed ends the sessions it holds, those of its clips too.
+  **Making a clip** (`createMovieclip`, `createEmptyMovieclip`): the definition a creation makes holds the scene it was made from, as
+  large as the project for a clip of every figure (196 MB of JSON for one measured project), so the call's answer carries the figure's row
+  (`styk_edit::figure_row`) and not the record, and the owner returns a handle (`madeFigure`) that reads the definition from the document
+  only when something asks for more than `figure_type_id` and `name`. Selecting the new instance reads none of it either
+  (`applyAnswer` reads the selected figure only for a selection of several segments). A clip's figures are replaced a layer's key at a
+  time (`Editor::replace_each_at`: the key's patches written together, the layer's membership worked out once from all of them) and the
+  frame record of a layer whose key replaces many figures is sampled from the two keys round the tick (`Records::sample`); both were
+  quadratic in the figures. `replace_each_at` of a list is `replace_at` called for each in turn (the last patch of a figure named twice wins).
+  **Limit, not fixed:** a clip of every figure of a large project still holds a second copy of the scene as values and as typed views
+  (about 500 to 900 MiB of the engine's 2 GiB for the projects measured, and the history entry keeps both), so entering it, undoing and
+  redoing it, or making another can run the engine out of memory (`errors.engine.outOfMemory`, or a trap when the allocation was not
+  asked for first).
   A movieclip made inside a clip retains the scene the outer clip retains cut down to its own figures (`prune_retained`: poses,
   effect clips and imported animation, down the chain of `movieclipSource` documents).
 - **Working frames.** The interface never starts one on a layer sheet. `disableFrameDrafts` (the

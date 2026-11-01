@@ -1,7 +1,7 @@
 // The movieclip commands the performance work changed (docs/engine/editing.md, "Movieclips"): a clip of many figures replaces each in
 // one pass, the figure a creation answers is read from the document only when asked for more than its name, and none of it changes
 // what is saved or what undo and redo give back. The saved bytes after each step of a scripted session are those the engine saved before
-// the change (tests/fixtures/movieclip-save-bytes.json, recorded at engine-rust 0ad32e9a with STYK_RECORD_MOVIECLIP_BYTES): a pose array of
+// the change (tests/fixtures/movieclip-save-bytes.json, recorded at engine-rust f381da75, before the change, with STYK_RECORD_MOVIECLIP_BYTES): a pose array of
 // 32 numbers or more that two records share is stored once, so a small document would not show a difference in how the clips share them.
 import test from 'node:test';
 import assert from 'node:assert/strict';
