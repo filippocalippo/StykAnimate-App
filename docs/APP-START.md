@@ -65,3 +65,14 @@ edges), 0.03 % by more than sixteen levels. Disabling accelerated 2D canvas chan
   editor it builds next opens its document in the engine. The body (about 90 ms) therefore starts after the WebAssembly is fetched, compiled and its
   threads have joined (about 0.2 s, during which the interface thread is idle): the one serialization left on the way to `ready`.
 - **`init()`'s synchronous block** (about 0.3 s: the shell, the timeline, the inspector, the first style and layout pass) holds the stage's continuations back by about 0.2 s.
+
+## Opening the file the app was launched with
+
+The main process sends it (`styk:file-opened`) as soon as the page has loaded. `src/app.mjs` waits for the engine at the top of its body, and a module that waits
+does not hold the load event back, so the message could arrive before the listener existed and be dropped. Bundled, the page loads sooner than the engine,
+and the file opened in 1 of 8 launches (0 to 2 of 6 in other runs); from source the window was narrower, which is why `smoke-home`'s "opening a file at launch" failed now and then.
+The listener is now registered before the wait, keeps what arrives, and hands it to the handler that opens it once the editor is ready (8 of 8 bundled, 6 of 6 from source).
+`stykanimate://privacy` and the other menu actions are sent at the same moment and registered late too; a launch link to them has the same exposure.
+
+Smokes that need the application's own state go through `window.styk` (for a language, `window.styk.loadLocale`), not through a module imported by URL, which on a bundled
+app is a second copy; `tests/app-bundle.test.mjs` lists the few imports that are fine.

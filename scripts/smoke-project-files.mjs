@@ -36,7 +36,7 @@ try {
   });
   const choose = (value) => app.evaluate((_electron, choice) => { globalThis.__saveChoices.push(choice); }, value);
   const count = () => app.evaluate(() => globalThis.__saveDialogCount);
-  await page.evaluate(async () => { await (await import('/src/localization.mjs')).loadLocale('it'); window.styk.settingsUI.commit({locale:'it'}); await window.styk.settingsUI.flush(); });
+  await page.evaluate(async () => { await window.styk.loadLocale('it'); window.styk.settingsUI.commit({locale:'it'}); await window.styk.settingsUI.flush(); });
   await page.evaluate(async () => {
     const response = await (async (path, init) => { const [{codecJob}, {codecRequest}] = await Promise.all([import('/src/codec-job.mjs'), import('/src/codec-request.mjs')]); const job = codecJob(); try { return await codecRequest(job.link().fields, path, init); } finally { job.finish(); } })('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ document: window.styk.editor.serialize(), format: 'styk' }) });
     if (!response.ok) throw new Error('Could not create a valid native project fixture.');

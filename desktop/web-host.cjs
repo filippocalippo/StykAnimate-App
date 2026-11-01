@@ -52,7 +52,8 @@ async function listFiles(directory, prefix='') {
  * null for HEAD and 304) or throws the failure. */
 async function openAssets({appRoot, resourcesPath, packaged=false, bundleRoot=null}={}) {
   const webRoot = await fs.realpath(packaged ? path.join(resourcesPath,'web') : appRoot);
-  const bundle = bundleRoot ? {root:await fs.realpath(bundleRoot), files:new Set(await listFiles(bundleRoot))} : null;
+  // Lower case: on a case-insensitive file system `/src/App.mjs` is the bundle's `src/app.mjs` too, and must not be served from the modules.
+  const bundle = bundleRoot ? {root:await fs.realpath(bundleRoot), files:new Set((await listFiles(bundleRoot)).map(file=>file.toLowerCase()))} : null;
   return async function asset(pathname, {method='GET', ifNoneMatch=''}={}) {
     let relative;
     try { relative = decodeURIComponent(pathname).slice(1) || 'index.html'; }
@@ -64,7 +65,7 @@ async function openAssets({appRoot, resourcesPath, packaged=false, bundleRoot=nu
       throw error(403,'resource_forbidden',"desktop.webHost.errors.resourceForbidden");
     const type = MIME.get(path.extname(relative).toLowerCase());
     if (!type) throw error(403,'resource_forbidden',"desktop.webHost.errors.resourceForbidden");
-    const root = bundle?.files.has(relative) ? bundle.root : webRoot;
+    const root = bundle?.files.has(relative.toLowerCase()) ? bundle.root : webRoot;
     let target;
     try { target = await fs.realpath(path.join(root,relative)); }
     catch (cause) { if (cause.code==='ENOENT') throw error(404,'file_not_found',"desktop.webHost.errors.fileNotFound"); throw cause; }

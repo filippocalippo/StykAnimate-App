@@ -148,3 +148,31 @@ test('a frame in a built script is reported as the module and source line it cam
   const worker = (await readFile(path.join(output, 'src/import-worker.mjs'), 'utf8')).split('\n');
   assert.ok(worker[0].startsWith('globalThis.__stykFrames=Object.assign(globalThis.__stykFrames??{},{"import-worker.mjs":'), worker[0].slice(0, 80));
 });
+
+/** The modules a page script imports by URL, as `src/x.mjs`. */
+function pageImports(text) {
+  const found = new Set();
+  for (let at = text.indexOf("import('/src/"); at >= 0; at = text.indexOf("import('/src/", at + 1)) {
+    const start = at + "import('/".length;
+    found.add(text.slice(start, text.indexOf("'", start)));
+  }
+  return found;
+}
+
+test('a smoke imports from the page only modules that are the same on a bundled app, or none the application keeps state in', async () => {
+  // Imported by URL, a module that is not a bundle entry is a second copy beside the application's own (the bundle has its own
+  // modules inside), so a smoke that changes or reads the application's state through one fails on a packaged app: use window.styk.
+  // These keep no state of the application's (pure functions, or classes made new for the script):
+  const separateCopyIsFine = new Set(['src/codec-job.mjs', 'src/codec-request.mjs', 'src/native-files.mjs', 'src/import-client.mjs', 'src/library-files.mjs', 'src/demo.mjs',
+    'src/theme.mjs' /* sets the document's attributes, which is what the smoke looks at */]);
+  const {page} = await appEntries(root);
+  const entries = new Set(Object.values(page));
+  let imports = 0;
+  for (const name of (await readdir(path.join(root, 'scripts'))).filter(name => name.startsWith('smoke-') && name.endsWith('.mjs'))) {
+    for (const module of pageImports(await readFile(path.join(root, 'scripts', name), 'utf8'))) {
+      imports++;
+      assert.ok(entries.has(module) || separateCopyIsFine.has(module), `${name} imports ${module} from the page: it is a second copy on a bundled app`);
+    }
+  }
+  assert.ok(imports >= 10, `found ${imports} imports`);
+});

@@ -179,3 +179,14 @@ test('a bundle that is not there stops the host from starting rather than servin
   const protocol={registerSchemesAsPrivileged(){},handle(){}};
   await assert.rejects(hostModule.handleAppProtocol({protocol,appRoot:f.root,bundleRoot:path.join(f.directory,'no-bundle')}),{code:'ENOENT'});
 });
+
+test('a bundled file asked for in another case is never answered from the unbundled modules',async t=>{
+  const f=await fixture(t),bundle=path.join(f.directory,'bundle');
+  await mkdir(path.join(bundle,'src'),{recursive:true});
+  await writeFile(path.join(bundle,'src','worker.mjs'),'export const bundledWorker = true;');
+  const handlers=new Map(),protocol={registerSchemesAsPrivileged(){},handle:(scheme,handler)=>handlers.set(scheme,handler)};
+  await hostModule.handleAppProtocol({protocol,appRoot:f.root,bundleRoot:bundle});
+  const answer=await handlers.get('styk-app')(new Request('styk-app://app/src/Worker.mjs'));
+  // A case-insensitive file system finds the bundle's file; a case-sensitive one finds nothing. Neither may find the module.
+  assert.ok(!(await answer.text()).includes('export const ready'),'the source module must not answer');
+});

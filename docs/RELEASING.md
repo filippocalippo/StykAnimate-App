@@ -55,6 +55,8 @@ npm run mark:release
 npm run release:verify -- "release/$releaseVersion" --platform=win32
 ```
 
+`verify:package` also requires the app's script bundle (`resources/bundle`) and compares it with a fresh build of the source, so run it on the checkout the package was built from, with the dev dependencies installed (`docs/DESKTOP-RELEASE.md`, `docs/APP-START.md`).
+
 Check each command's exit status and stop on failure; PowerShell does not automatically stop after a failed native command. Build and verify Linux on its own host as described in `docs/LINUX.md`. Combine its AppImage and `latest-linux.yml` with the four Windows assets in `release/<version>`, then run `npm run release:verify`. The default verification and publisher require both platforms.
 
 For a coordinated candidate, push the prepared source and run:
