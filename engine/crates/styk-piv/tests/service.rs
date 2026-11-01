@@ -145,6 +145,20 @@ fn a_lease_survives_cache_eviction_and_releases_idempotently() {
 }
 
 #[test]
+fn the_description_of_a_kept_original_can_be_asked_for_without_its_bytes() {
+    let mut service = Service::new();
+    let imported = service.import("blank.piv", &blank());
+    let id = str_at(&imported, "sourceId");
+    let whole = service.get(&format!("/api/source?id={id}"));
+    let described = service.get(&format!("/api/source?id={id}&meta=1"));
+    assert_eq!((whole.status, described.status), (200, 200));
+    let header = |body: &[u8]| 12 + u32::from_le_bytes(body[8..12].try_into().unwrap()) as usize;
+    assert_eq!(described.body.len(), header(&described.body), "no bytes after the description");
+    assert_eq!(described.body[..header(&described.body)], whole.body[..header(&whole.body)], "the same description");
+    assert_eq!(whole.body.len(), header(&whole.body) + blank().len());
+}
+
+#[test]
 fn lease_requests_are_validated() {
     let mut service = Service::new();
     let imported = service.import("blank.piv", &blank());

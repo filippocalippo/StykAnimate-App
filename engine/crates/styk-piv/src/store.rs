@@ -359,7 +359,7 @@ pub(crate) fn kind_of_name(name: &str) -> Kind {
 /// checks every import runs before the document may be edited.
 pub(crate) fn decode_upload(ctx: &Ctx<'_>, native: Option<&dyn NativeDocuments>, data: &[u8], name: &str, canonical_name: &str, kind: Kind, prefer_native: bool) -> PyResult<Imported> {
     let mut payload = None;
-    let mut document = match kind {
+    let document = match kind {
         Kind::Piv if prefer_native => {
             // `fast_decode.decode_for_native_wire`: validate the frames without
             // building them; duplicate object IDs select the complete decode.
@@ -382,6 +382,11 @@ pub(crate) fn decode_upload(ctx: &Ctx<'_>, native: Option<&dyn NativeDocuments>,
             native::unwrap_early_wrapper(reader.decode(data, name).map_err(native::native_error)?)?
         }
     };
+    finish_upload(ctx, document, payload, kind)
+}
+
+/// The checks every import runs on the document its reader produced, before it may be edited.
+pub(crate) fn finish_upload(ctx: &Ctx<'_>, mut document: Value, payload: Option<Vec<u8>>, kind: Kind) -> PyResult<Imported> {
     if !document.is_object() {
         return Err(api(400, "invalid_document", "Project data must be a JSON object."));
     }

@@ -708,3 +708,38 @@ fn missing_parents_and_cycles_are_refused() {
         assert_eq!(error.code, "invalid_project");
     }
 }
+
+// ---- a caller that gives the file up ------------------------------------------------
+
+/// `decode_document_owned` drops the file before the document is built; what it builds, and what it refuses, are the same.
+#[test]
+fn a_file_decoded_by_its_owner_gives_the_same_document_or_the_same_refusal() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut compared = 0;
+    for entry in std::fs::read_dir(&dir).expect("fixtures") {
+        let path = entry.expect("entry").path();
+        let name = path.file_name().expect("name").to_string_lossy().to_string();
+        if !(name.ends_with(".piv") || name.ends_with(".stk")) {
+            continue;
+        }
+        let bytes = std::fs::read(&path).expect("fixture");
+        let by_reference = decode_document(&bytes, &name, NEVER);
+        let by_owner = styk_piv::decode_document_owned(bytes.clone(), &name, NEVER);
+        match (by_reference, by_owner) {
+            (Ok(a), Ok(b)) => {
+                assert_eq!(styk_doc::json::to_string(&a.document), styk_doc::json::to_string(&b.document), "{name}: the document");
+                assert_eq!((a.kind, a.version, &a.filename), (b.kind, b.version, &b.filename), "{name}: what it says about itself");
+            }
+            (Err(a), Err(b)) => assert_eq!((a.status, a.code, a.message), (b.status, b.code, b.message), "{name}: the refusal"),
+            (a, b) => panic!("{name}: by reference {}, by owner {}", a.is_ok(), b.is_ok()),
+        }
+        compared += 1;
+    }
+    assert!(compared >= 8, "{compared} fixtures compared");
+    // Damaged and empty files are refused alike.
+    for bytes in [Vec::new(), vec![0x78, 0x9c, 1, 2, 3], vec![5u8, 0, 0], vec![9u8; 64]] {
+        let a = decode_document(&bytes, "x.piv", NEVER).expect_err("refused");
+        let b = styk_piv::decode_document_owned(bytes, "x.piv", NEVER).expect_err("refused");
+        assert_eq!((a.status, a.code, a.message), (b.status, b.code, b.message));
+    }
+}

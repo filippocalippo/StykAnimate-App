@@ -14,7 +14,7 @@ How the engine runs in the app (`engine/crates/styk-engine`,
 - Frame scheduler (`frames.rs`): the interface admits ticks with
   `try_request_samples`; workers evaluate and encode them (`FrameData`: draw
   list, camera, background). `Budgets::for_device` supplies the existing logical
-  eviction target (48–384 MiB by `navigator.deviceMemory`, and at most an eighth of the memory:
+  eviction target (48–384 MiB by `navigator.deviceMemory`, and at most a sixteenth of the memory:
   [memory.md](memory.md)); the protected playhead
   and separately retained payloads prevent treating it as a physical memory cap.
   Try hidden/effects setters advance the epoch; playback retries only its latest

@@ -32,6 +32,9 @@ pub struct OpenOptions {
 pub enum OpenSource<'a> {
     /// A file: its bytes and its name (the extension says what kind of file it is).
     File { bytes: &'a [u8], name: &'a str },
+    /// A file the open owns: a Pivot project's bytes are dropped as soon as they are inflated, before the document is built, so
+    /// the file is never held with the document under construction.
+    Owned { bytes: Vec<u8>, name: &'a str },
     /// A document as JSON text, and the name it is shown under.
     Json { bytes: &'a [u8], name: &'a str },
 }
@@ -208,38 +211,62 @@ fn extension(name: &str) -> &str {
     name.rsplit_once('.').map_or("", |(_, extension)| extension)
 }
 
+/// A file's document, what kind of file it was, its version and the name it is shown under.
+fn open_file(bytes: &[u8], name: &str, cancel: &dyn Fn() -> bool) -> Result<(Value, &'static str, f64, String), OpenError> {
+    let extension = extension(name).to_ascii_lowercase();
+    match extension.as_str() {
+        "piv" | "stk" => {
+            let decoded = styk_piv::decode_document(bytes, name, cancel).map_err(OpenError::from_codec)?;
+            Ok((decoded.document, decoded.kind, decoded.version, decoded.filename))
+        }
+        other => {
+            let Some(kind) = styk_formats::Kind::from_extension(other) else {
+                return Err(OpenError::decode("Choose a .styk project, .stykmov movieclip, .stkz figure, .piv, or .stk file."));
+            };
+            let document = styk_formats::files::open_document(bytes, kind).map_err(OpenError::from_file)?;
+            let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
+            Ok((document, kind.name(), version, name.to_string()))
+        }
+    }
+}
+
 impl Engine {
     /// Opens a document: decodes it, normalizes it as the editor's load does and builds its typed views. Runs
     /// on the calling thread, for as long as the document takes; `cancel` is polled where the Pivot reader
     /// checks (between frames).
     pub fn open_document(&self, source: OpenSource<'_>, options: OpenOptions, cancel: &dyn Fn() -> bool) -> Result<OpenedDocument, OpenError> {
         // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
-        let (OpenSource::File { bytes, .. } | OpenSource::Json { bytes, .. }) = &source;
+        let (OpenSource::File { bytes, .. } | OpenSource::Json { bytes, .. }) = &source else { return self.open_owned(source, options, cancel) };
         let _memory = styk_alloc::reserve(open_estimate(bytes.len())).map_err(OpenError::out_of_memory)?;
         let (document, kind, version, name) = match source {
-            OpenSource::File { bytes, name } => {
-                let extension = extension(name).to_ascii_lowercase();
-                match extension.as_str() {
-                    "piv" | "stk" => {
-                        let decoded = styk_piv::decode_document(bytes, name, cancel).map_err(OpenError::from_codec)?;
-                        (decoded.document, decoded.kind, decoded.version, decoded.filename)
-                    }
-                    other => {
-                        let Some(kind) = styk_formats::Kind::from_extension(other) else {
-                            return Err(OpenError::decode("Choose a .styk project, .stykmov movieclip, .stkz figure, .piv, or .stk file."));
-                        };
-                        let document = styk_formats::files::open_document(bytes, kind).map_err(OpenError::from_file)?;
-                        let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
-                        (document, kind.name(), version, name.to_string())
-                    }
-                }
-            }
+            OpenSource::File { bytes, name } => open_file(bytes, name, cancel)?,
             OpenSource::Json { bytes, name } => {
                 let document = styk_doc::json::parse(bytes).map_err(|_| OpenError::unreadable())?;
                 let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
                 (document, "json", version, name.to_string())
             }
+            OpenSource::Owned { .. } => unreachable!("an owned file is opened by open_owned"),
         };
+        self.prepare_opened(document, kind, version, name, options, cancel)
+    }
+
+    /// [`Engine::open_document`] of a file the open owns.
+    fn open_owned(&self, source: OpenSource<'_>, options: OpenOptions, cancel: &dyn Fn() -> bool) -> Result<OpenedDocument, OpenError> {
+        let OpenSource::Owned { bytes, name } = source else { unreachable!("only an owned file comes here") };
+        let _memory = styk_alloc::reserve(open_estimate(bytes.len())).map_err(OpenError::out_of_memory)?;
+        let extension = extension(name).to_ascii_lowercase();
+        let (document, kind, version, name) = match extension.as_str() {
+            "piv" | "stk" => {
+                let decoded = styk_piv::decode_document_owned(bytes, name, cancel).map_err(OpenError::from_codec)?;
+                (decoded.document, decoded.kind, decoded.version, decoded.filename)
+            }
+            _ => open_file(&bytes, name, cancel)?,
+        };
+        self.prepare_opened(document, kind, version, name, options, cancel)
+    }
+
+    /// Normalizes a decoded document as the editor's load does and builds its typed views.
+    fn prepare_opened(&self, document: Value, kind: &'static str, version: f64, name: String, options: OpenOptions, cancel: &dyn Fn() -> bool) -> Result<OpenedDocument, OpenError> {
         if cancel() {
             return Err(OpenError { code: Some("cancelled".into()), status: Some(499), ..OpenError::decode("The import was cancelled.") });
         }

@@ -70,6 +70,22 @@ pub fn decode_document(bytes: &[u8], filename: &str, cancel: &dyn Fn() -> bool) 
     Ok(Decoded { document: imported.document, kind: kind.name(), version, filename: name })
 }
 
+/// [`decode_document`] for a caller that has no use for the file afterwards. A Pivot project's file is dropped as soon as it has
+/// been inflated and fingerprinted, before the document is built, so the file and the document under construction are never held
+/// together; the result is the same. Any other kind decodes as `decode_document` does.
+pub fn decode_document_owned(bytes: Vec<u8>, filename: &str, cancel: &dyn Fn() -> bool) -> Result<Decoded, CodecError> {
+    let name = store::filename_only(filename)?;
+    let kind = store::kind_of_name(&name);
+    if bytes.is_empty() || kind != store::Kind::Piv {
+        return decode_document(&bytes, filename, cancel);
+    }
+    let ctx = cancel_ctx(cancel);
+    let document = piv::decode_piv_owned(&ctx, bytes, &name, piv::frames::FrameMode::Build)?.report;
+    let imported = store::finish_upload(&ctx, document, None, kind)?;
+    let version = imported.document.get("version").and_then(styk_doc::Value::as_f64).unwrap_or(5.0);
+    Ok(Decoded { document: imported.document, kind: kind.name(), version, filename: name })
+}
+
 /// Writes `document` as a Pivot 5 project.
 ///
 /// `source` is the file the document was decoded from, when there is one: its
