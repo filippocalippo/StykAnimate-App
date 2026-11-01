@@ -1,4 +1,4 @@
-#![cfg_attr(all(target_arch = "wasm32", target_feature = "atomics"), feature(link_llvm_intrinsics, stdarch_wasm_atomic_wait), allow(internal_features))]
+#![cfg_attr(all(target_arch = "wasm32", target_feature = "atomics"), feature(link_llvm_intrinsics), allow(internal_features))]
 //! The allocator of the engine's WebAssembly modules.
 //!
 //! Rust's allocator on `wasm32-unknown-unknown` (dlmalloc) asks the host for more linear
@@ -27,9 +27,9 @@
 //!   most about 2 KiB of each size (125 KiB for all 63 sizes of a thread, a few KiB in practice). Blocks freed by another thread than
 //!   the one that allocated them join the freeing thread's lists; a thread that ends gives its lists back when it frees its
 //!   thread-local block (`__wbindgen_thread_destroy`), and one that is terminated loses at most its lists, which stay allocated.
-//! - **A lock that sleeps** ([`lock`]): a thread that finds the lock held spins a few microseconds, then sleeps on it
-//!   (`memory.atomic.wait32`) instead of burning a core for as long as the holder takes (a holder in `memory.grow` or put to sleep by
-//!   the system takes milliseconds). The interface thread never sleeps (D7): [`this_thread_may_sleep`] is called by every other thread.
+//! - **Our own lock** ([`lock`]), taken once for a batch of blocks, and once more for a growth of the memory (the toolchain's own lock
+//!   inside stays free, since only one thread at a time reaches it). Waiting is spinning, on every thread: the holds are short, and a thread
+//!   that slept would have to be woken (the interface thread cannot sleep at all, D7).
 //!
 //! The bytes handed out are counted per thread and added to the shared counter in steps of 16 KiB, so that every call does not write
 //! one cache line all the threads share: [`live_bytes`] is exact for the thread that asks and short by at most that step for each of the
@@ -275,25 +275,7 @@ fn refuses(size: usize, live: usize, limit: usize) -> bool {
 mod wasm;
 
 #[cfg(target_arch = "wasm32")]
-pub use wasm::{GrowAhead, this_thread_may_sleep};
-
-/// How often the allocator's lock was taken, how often a thread found it held, and how often such a thread went to sleep on it, since
-/// the module started (all threads together; WebAssembly modules only, else zeros).
-#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-pub fn lock_counts() -> (usize, usize, usize) {
-    let (contended, slept) = lock::contention();
-    (wasm::holds(), contended, slept)
-}
-
-/// See the WebAssembly version.
-#[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
-pub fn lock_counts() -> (usize, usize, usize) {
-    (0, 0, 0)
-}
-
-/// Marks the calling thread as one that may sleep on the allocator's lock. Only WebAssembly modules have a lock.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn this_thread_may_sleep() {}
+pub use wasm::GrowAhead;
 
 #[cfg(test)]
 mod tests {

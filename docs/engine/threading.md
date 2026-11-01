@@ -216,8 +216,7 @@ wall time: the cost of a grow rises with the machine's load.
 
 ## The allocator's caches and lock
 
-The engine's threads share one heap. `styk-alloc` gives each thread a bounded cache of small blocks (at most 125 KiB, a few KiB in practice) and a lock that sleeps after a short spin, except on the interface thread, which only spins
-([memory.md](memory.md#the-allocator-and-its-threads)). A thread that ends through `__wbindgen_thread_destroy` hands its cache back when it frees its thread-local block; a thread that is terminated or traps takes its cache with it (it stays
+The engine's threads share one heap. `styk-alloc` gives each thread a bounded cache of small blocks (at most 125 KiB, a few KiB in practice) behind a lock of its own that spins ([memory.md](memory.md#the-allocator-and-its-threads)). A thread that ends through `__wbindgen_thread_destroy` hands its cache back when it frees its thread-local block; a thread that is terminated or traps takes its cache with it (it stays
 allocated, as the rest of what that thread held does), and one that traps while it holds the lock leaves it held, as it did when the toolchain's allocator spun on it.
 
 ## Testing

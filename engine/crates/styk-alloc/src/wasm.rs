@@ -75,12 +75,10 @@ mod thread {
         pub cache: ThreadCache,
         /// Bytes this thread has handed out less bytes it has taken back, not yet added to the shared counter.
         pub delta: Cell<isize>,
-        /// Whether this thread may sleep: the interface thread of a browser may not.
-        pub may_sleep: Cell<bool>,
     }
 
     thread_local! {
-        static LOCAL: Local = const { Local { cache: ThreadCache::new(), delta: Cell::new(0), may_sleep: Cell::new(false) } };
+        static LOCAL: Local = const { Local { cache: ThreadCache::new(), delta: Cell::new(0) } };
     }
 
     /// This thread's `__tls_base`, or 0 when it has none to use. `wasm-bindgen` starts a thread by allocating its stack and its
@@ -101,22 +99,13 @@ mod thread {
 
     #[inline]
     pub fn lock() {
-        LOCK.lock(|| with(|local| local.may_sleep.get()).unwrap_or(false));
+        LOCK.lock();
     }
 
     #[inline]
     pub fn unlock() {
         LOCK.unlock();
     }
-}
-
-/// How often the lock has been taken. Written only by the thread that holds it, so it is read and written, not added to.
-#[cfg(target_feature = "atomics")]
-static HOLDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-#[cfg(target_feature = "atomics")]
-pub fn holds() -> usize {
-    HOLDS.load(Ordering::Relaxed)
 }
 
 /// The lock held, the standard allocator at hand.
@@ -128,10 +117,7 @@ impl Held {
     #[inline]
     fn new() -> Held {
         #[cfg(target_feature = "atomics")]
-        {
-            thread::lock();
-            HOLDS.store(HOLDS.load(Ordering::Relaxed).wrapping_add(1), Ordering::Relaxed);
-        }
+        thread::lock();
         Held { before: memory_size::<0>() }
     }
 }
@@ -277,12 +263,6 @@ fn gave(size: usize) {
         return;
     }
     publish(-(size as isize));
-}
-
-/// Marks the calling thread as one that may sleep on the allocator's lock: every thread but the interface thread of a page.
-pub fn this_thread_may_sleep() {
-    #[cfg(target_feature = "atomics")]
-    thread::with(|local| local.may_sleep.set(true));
 }
 
 /// The standard allocator that grows the linear memory ahead of its needs, counts what it hands out, and keeps small blocks in

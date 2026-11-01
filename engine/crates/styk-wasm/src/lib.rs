@@ -53,12 +53,6 @@ pub(crate) fn clock() -> f64 {
 #[wasm_bindgen(start)]
 fn start() {
     std::panic::set_hook(Box::new(|info| console_error(&format!("StykAnimate engine panic: {info}"))));
-    // The allocator's lock lets a thread sleep while it waits, except the page's own thread, which must never block (D7): only a
-    // window has a `document`.
-    let on_page = js_sys::Reflect::has(&js_sys::global(), &JsValue::from_str("document")).unwrap_or(true);
-    if !on_page {
-        styk_alloc::this_thread_may_sleep();
-    }
 }
 
 /// Version of the command/query API. The JavaScript loader refuses a module

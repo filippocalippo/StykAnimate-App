@@ -73,7 +73,7 @@ lock held; each busy helper waited 0.8 to 0.95 s of an open that took under 2.5 
 at once opening tdd2 (17.6 ms svr_uriel, 4.7 ms the large `.styk`; 79 ms in one run, with the machine busy). 98% of the calls are for 508 bytes or less
 (80% for 64 or less). Playback was not the problem (workers found the lock held on 1 to 2% of their calls, the interface on 0.1%).
 
-`styk-alloc` now keeps a cache of small blocks for each thread and puts a lock that sleeps behind it (`cache.rs`, `lock.rs`):
+`styk-alloc` now keeps a cache of small blocks for each thread and puts a lock of its own behind it (`cache.rs`, `lock.rs`):
 
 - **Caches.** A request of up to 508 bytes is served from a list of the thread's own, one for each of 63 sizes (8 * k + 4 bytes: the room the
   heap's chunks give, so a size wastes nothing the heap would not have). The heap's lock is taken once for a batch of 2 to 16 blocks to fill an
@@ -84,10 +84,9 @@ at once opening tdd2 (17.6 ms svr_uriel, 4.7 ms the large `.styk`; 79 ms in one 
   which stays allocated like the rest of what the thread held ([threading.md](threading.md#when-an-engine-thread-traps)).
   wasm-bindgen allocates a new thread's stack and thread-local block before the thread has a thread-local base, and frees them after setting it to an address no
   memory has: the allocator reads the base (`llvm.wasm.tls.base`) and serves those calls from the heap directly.
-- **The lock.** A thread that finds it held spins for a few microseconds, then sleeps on it (`memory.atomic.wait32`) and is woken by the holder, instead of burning a core
-  for as long as the holder takes (a `memory.grow` of 16 to 32 MiB holds it for 1 to 3 ms). The interface thread never sleeps (D7): every thread whose scope has no `document` is marked as
-  one that may (`styk_alloc::this_thread_may_sleep`, at the module's start). In the runs below no thread ever slept (the holds are shorter than the spin);
-  the sleep is for a holder the system has put to sleep.
+- **The lock.** The heap sits behind a lock of the engine's own, taken once for a batch and once for a growth of the memory (the toolchain's lock
+  inside is then never found held); a thread that finds it held spins (`spin_loop`, reading the word until it is free). The holds are short, and a lock that slept would need waking: wasm-bindgen runs a
+  module's start function on the first thread only, so only the interface thread could be told from the others by the module, and it must never block (D7) anyway.
 - **The count of live bytes** is kept for each thread and added to the shared counter in steps of 16 KiB (a request of 8 KiB or more at once), so that every call does not
   write a cache line all the threads share. `live_bytes()` is exact for the thread that asks and short by at most that step for each of the others;
   `peak_bytes()` is never below it. A free that reaches the counter before its allocation does leaves it negative for a moment, so it is read as signed.
@@ -111,7 +110,6 @@ Release builds, medians of 3 runs (`slot.mjs probe`, so the machine was not idle
 A single thread opens 1.8 times faster as well: a block from a list costs a few instructions where the heap's `malloc` and `free` cost about a hundred nanoseconds. The open still does not
 get faster beyond three helpers (1,681 against 1,635 ms): what is left of the lock is 25 to 70 ms of waiting for each helper, about 5% of the open, so the limit is the work that does not divide, not the allocator;
 the cap of three helpers (`MAX_OPEN_HELPERS`) stays. The playback figures did not move (frames are shown every display refresh; the allocator was not what limited them).
-`engine.memory()` reports `lockHolds`, `lockContended` and `lockSleeps` (all threads, since the module started).
 
 ## The renderer's private bytes
 

@@ -233,7 +233,7 @@ mod tests {
         type Guard = Held<'static>;
 
         fn lock(&self) -> Held<'static> {
-            self.lock.lock(|| false);
+            self.lock.lock();
             self.holds.fetch_add(1, Relaxed);
             // SAFETY: the tests keep the heap alive (a local that outlives its guards, or an Arc) for as long as any guard.
             Held(unsafe { &*(&self.lock as *const Lock) })
@@ -419,12 +419,11 @@ mod tests {
         let lock = Arc::new(Lock::new());
         let counter = Arc::new(Counter(std::cell::UnsafeCell::new(0)));
         let threads: Vec<_> = (0..8)
-            .map(|id| {
+            .map(|_| {
                 let (lock, counter) = (lock.clone(), counter.clone());
                 std::thread::spawn(move || {
                     for _ in 0..50_000 {
-                        // Half the threads may sleep, half only spin (the interface thread).
-                        lock.lock(|| id % 2 == 0);
+                        lock.lock();
                         unsafe { *counter.0.get() += 1 };
                         lock.unlock();
                     }

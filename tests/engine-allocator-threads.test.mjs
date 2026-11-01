@@ -1,4 +1,4 @@
-// The engine's allocator keeps a cache of small blocks for each thread and a lock that sleeps (engine/crates/styk-alloc, docs/engine/memory.md):
+// The engine's allocator keeps a cache of small blocks for each thread behind a lock of its own (engine/crates/styk-alloc, docs/engine/memory.md):
 // real threads on the shared memory allocate, free each other's blocks, grow the heap together and end the way the export worker does
 // (`__wbindgen_thread_destroy`, which frees the thread's stack and thread-local block, the cache's home).
 import test from 'node:test';
@@ -13,8 +13,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WORKER = new URL('./support/allocator-thread.mjs', import.meta.url);
 const KIB = 1024;
 
+// `execArgv: []`: `npm test` runs with `--import` of a script that loads a private engine, which a worker would inherit and then not
+// join the shared memory.
 const start = ({module, memory, stack}) => new Promise((resolve, reject) => {
-  const worker = new Worker(WORKER, {workerData: {module, memory, stack}});
+  const worker = new Worker(WORKER, {workerData: {module, memory, stack}, execArgv: []});
   worker.once('message', () => resolve(worker));
   worker.once('error', reject);
 });
@@ -46,6 +48,4 @@ test('threads allocate, free one another\'s blocks and end without losing or cor
   assert.ok(Math.abs(after.liveBytes - before.liveBytes) < 256 * KIB, `live ${before.liveBytes} -> ${after.liveBytes}`);
   // Threads that came and went reuse the memory the first ones grew to.
   assert.ok(after.heapBytes - afterFirst.heapBytes < 64 * 1024 * KIB, `the heap grew by ${(after.heapBytes - afterFirst.heapBytes) / KIB / KIB} MiB over three more rounds`);
-  assert.ok(after.lockHolds > before.lockHolds, 'the lock was taken');
-  assert.ok(after.lockSleeps <= after.lockContended);
 });
