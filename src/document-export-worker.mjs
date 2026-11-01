@@ -33,9 +33,10 @@ async function projectFile(message) {
   if (!config.engine || !message.project) throw messageError(new Error(''), "errors.documentExportWorker.theDocumentSnapshotWasNotInitialized", {});
   const cancelled = () => Boolean(message.cancel && Atomics.load(message.cancel, 0));
   const source = config.sourceId ? await fetchOriginalSource() : null;
-  const made = makeProjectFile({join: config.engine.join, guard, cancelled, source: source?.bytes,
-    request: {snapshots: message.project.snapshots, scopes: message.project.scopes, name: config.name, source: source?.meta}});
+  const made = makeProjectFile({join: config.engine.join, guard, cancelled, address: message.project.address, source: source?.bytes,
+    request: {snapshots: message.project.snapshots, scopes: message.project.scopes, helpers: message.project.helpers, name: config.name, source: source?.meta}});
   timings.container_raw_bytes = made.rawBytes;
+  timings.engine = made.timings;
   return made.bytes;
 }
 

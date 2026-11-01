@@ -77,6 +77,7 @@ mod containers {
             NonFinite { .. } => "The StykAnimate document contains non-finite numbers.",
             Json(_) => return error.to_string(),
             Cancelled => "The write was cancelled.",
+            WorkerStopped => "A worker of the write stopped.",
         }
         .to_string()
     }

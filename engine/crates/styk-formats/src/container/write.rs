@@ -513,37 +513,48 @@ impl ViewLifter {
     }
 }
 
-/// Assembles a version 2 container, compressing with zstd at level 3.
-pub fn encode_v2(lifted: &Lifted, kind: Kind) -> Result<Vec<u8>, ContainerError> {
-    encode_v2_with(&lifted.skeleton, &lifted.arrays, &lifted.payloads, kind, &never, &mut |raw, _| Some(pack_zstd(raw)))
+/// One block of a container, ready to store: the SHA-256 of its bytes and the zstd frame they compress to.
+pub struct Frame {
+    pub digest: [u8; 32],
+    pub stored: Vec<u8>,
 }
 
-/// Assembles a version 2 container from its skeleton text and its two sections
-/// (numeric arrays, payloads). `pack` turns one block, given its bytes and their
-/// SHA-256, into the zstd frame to store (a fresh compression, or a frame the
-/// caller kept from compressing the same bytes before), or `None` when the caller stopped it. `cancel` is asked
-/// by the hashing every few megabytes, and a stop of either is [`ContainerError::Cancelled`].
-pub fn encode_v2_with(
-    skeleton: &[u8],
-    arrays: &[u8],
-    payloads: &[u8],
-    kind: Kind,
-    cancel: &dyn Fn() -> bool,
-    pack: &mut dyn FnMut(&[u8], &[u8; 32]) -> Option<Vec<u8>>,
-) -> Result<Vec<u8>, ContainerError> {
-    let sections: [(u8, &[u8]); 2] = [(1, arrays), (2, payloads)];
-    let raw_sections: usize = sections.iter().map(|(_, bytes)| bytes.len()).sum();
-    if skeleton.len() > MAX_SKELETON_BYTES || sections.iter().any(|(_, bytes)| bytes.len() > MAX_BYTES) || skeleton.len() + raw_sections * 3 > MAX_BYTES * 4 {
+/// Hashes and compresses one block: the digest, then the frame, one `zstd::bulk::compress` call at level 3 (a frame written any
+/// other way is another, valid frame, and an unchanged document must save to the bytes it was opened from). `cancel` is asked
+/// every few megabytes of hashing and before and after the compression.
+pub fn frame(raw: &[u8], cancel: &dyn Fn() -> bool) -> Result<Frame, ContainerError> {
+    let digest = sha256_until(raw, cancel).ok_or(ContainerError::Cancelled)?;
+    if cancel() {
+        return Err(ContainerError::Cancelled);
+    }
+    let stored = pack_zstd(raw);
+    if cancel() {
+        return Err(ContainerError::Cancelled);
+    }
+    Ok(Frame { digest, stored })
+}
+
+/// Assembles a version 2 container, compressing with zstd at level 3.
+pub fn encode_v2(lifted: &Lifted, kind: Kind) -> Result<Vec<u8>, ContainerError> {
+    encode_v2_with([lifted.skeleton.len(), lifted.arrays.len(), lifted.payloads.len()], kind, &mut || {
+        let never = || false;
+        Ok([frame(&lifted.skeleton, &never)?, frame(&lifted.arrays, &never)?, frame(&lifted.payloads, &never)?])
+    })
+}
+
+/// Assembles a version 2 container from the lengths of its skeleton text and its two sections (numeric arrays, payloads), whose
+/// blocks `frames` turns, in that order, into the frames to store: freshly hashed and compressed ([`frame`]), one after the other or side
+/// by side; the caller owns the blocks and decides, and a stop it reports is [`ContainerError::Cancelled`].
+pub fn encode_v2_with(lengths: [usize; 3], kind: Kind, frames: &mut dyn FnMut() -> Result<[Frame; 3], ContainerError>) -> Result<Vec<u8>, ContainerError> {
+    let [skeleton_len, arrays_len, payloads_len] = lengths;
+    let sections = [(1u8, arrays_len), (2u8, payloads_len)];
+    let raw_sections: usize = sections.iter().map(|(_, length)| length).sum();
+    if skeleton_len > MAX_SKELETON_BYTES || sections.iter().any(|(_, length)| *length > MAX_BYTES) || skeleton_len + raw_sections * 3 > MAX_BYTES * 4 {
         return Err(too_large("the skeleton or a section exceeds its limit"));
     }
-    let skeleton_digest = sha256_until(skeleton, cancel).ok_or(ContainerError::Cancelled)?;
-    let skeleton_stored = pack(skeleton, &skeleton_digest).ok_or(ContainerError::Cancelled)?;
-    let mut packed: Vec<(u8, &[u8], [u8; 32], Vec<u8>)> = Vec::with_capacity(sections.len());
-    for &(section_kind, raw) in &sections {
-        let digest = sha256_until(raw, cancel).ok_or(ContainerError::Cancelled)?;
-        let stored = pack(raw, &digest).ok_or(ContainerError::Cancelled)?;
-        packed.push((section_kind, raw, digest, stored));
-    }
+    let [skeleton_frame, arrays_frame, payloads_frame] = frames()?;
+    let (skeleton_digest, skeleton_stored) = (skeleton_frame.digest, skeleton_frame.stored);
+    let packed = [(1u8, arrays_len, arrays_frame.digest, arrays_frame.stored), (2u8, payloads_len, payloads_frame.digest, payloads_frame.stored)];
     let total = HEADER + 4 + skeleton_stored.len() + packed.len() * SECTION + packed.iter().map(|(_, _, _, stored)| stored.len()).sum::<usize>();
     if total > MAX_BYTES {
         return Err(ContainerError::FileTooLarge { size: total });
@@ -551,16 +562,16 @@ pub fn encode_v2_with(
     let mut out = Vec::with_capacity(total);
     out.extend_from_slice(kind.magic());
     out.extend_from_slice(&[2, 2, 0, 0]);
-    out.extend_from_slice(&(skeleton.len() as u64).to_le_bytes());
+    out.extend_from_slice(&(skeleton_len as u64).to_le_bytes());
     out.extend_from_slice(&(skeleton_stored.len() as u64).to_le_bytes());
     out.extend_from_slice(&skeleton_digest);
     out.extend_from_slice(&(packed.len() as u32).to_le_bytes());
     out.extend_from_slice(&skeleton_stored);
-    for (section_kind, raw, digest, stored) in &packed {
+    for (section_kind, raw_length, digest, stored) in &packed {
         let mut record = [0u8; SECTION];
         record[0] = *section_kind;
         record[1] = 2;
-        record[8..16].copy_from_slice(&(raw.len() as u64).to_le_bytes());
+        record[8..16].copy_from_slice(&(*raw_length as u64).to_le_bytes());
         record[16..24].copy_from_slice(&(stored.len() as u64).to_le_bytes());
         record[24..56].copy_from_slice(digest);
         out.extend_from_slice(&record);

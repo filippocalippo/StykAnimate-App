@@ -11,12 +11,35 @@ fn object(value: Option<&Value>) -> Obj {
     value.and_then(Value::as_obj).cloned().unwrap_or_default()
 }
 
+/// A document prepared for a save, and the document its scene is still to be checked on.
+pub struct Projected {
+    /// What the project file stores.
+    pub document: Value,
+    /// The document before its pose lists are stored once; [`check_scene`] checks it.
+    pub scene: Value,
+}
+
+/// The scene check of the load (`validateScene`): read-only, the slowest of the checks, and independent of everything that is done with
+/// the prepared document next, so a save runs it beside the lift. Its error is the save's.
+pub fn check_scene(scene: &Value) -> Result<(), EditError> {
+    crate::load::validate_scene(scene)
+}
+
 /// What a project file stores of `tree`: `_styk.format`, `format_version` and the `name` the file is saved under (kept as the
 /// document has it when there is none), no editor cache in the frames, the display aliases in line with their authoritative
 /// fields, and the pose channels' lists stored once each. The document must be one the editor would open: the authored
 /// channels, the movieclip graph and the scene are validated, in that order (a session's document passed them when it
 /// opened and its commands keep them, so this is the net under a document no command could break, not a repair).
 pub fn project_document(tree: &Value, name: Option<&str>, hold: &Hold<'_>) -> Result<Value, EditError> {
+    let projected = prepare_project(tree, name, hold)?;
+    check_scene(&projected.scene)?;
+    hold.check()?;
+    Ok(projected.document)
+}
+
+/// [`project_document`] without the scene check, which [`check_scene`] does (and which a save that checks it beside the
+/// lift must not forget: its error is the save's).
+pub fn prepare_project(tree: &Value, name: Option<&str>, hold: &Hold<'_>) -> Result<Projected, EditError> {
     let mut document = tree.clone();
     let mut styk = object(document.get("_styk"));
     styk.set("format", Value::str("StykAnimate"));
@@ -30,10 +53,8 @@ pub fn project_document(tree: &Value, name: Option<&str>, hold: &Hold<'_>) -> Re
     crate::load::validate_animation(&document)?;
     crate::load::validate_movieclip_graph(&document)?;
     hold.check()?;
-    let document = synchronize_derived(&document)?;
-    crate::load::validate_scene(&document)?;
-    hold.check()?;
-    Ok(pose_sequences::pack_pose_sequences(&document))
+    let scene = synchronize_derived(&document)?;
+    Ok(Projected { document: pose_sequences::pack_pose_sequences(&scene), scene })
 }
 
 /// `parent` with the definition of the movieclip `type_id` holding `clip` (its document as it stands) and the duration of its

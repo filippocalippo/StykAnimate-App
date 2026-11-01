@@ -17,9 +17,9 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | `styk-engine` | 24 | 31 KiB | 6 | 0 | 0 | 0 | 18 | 56 % | 0 % | 56 % |
 | `styk-eval` | 80 | 303 KiB | 10 | 32 | 2 | 2 | 34 | 32 % | 55 % | 19 % |
 | `styk-export` | 14 | 59 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
-| `styk-formats` | 55 | 718 KiB | 21 | 7 | 1 | 22 | 4 | 67 % | 9 % | 7 % |
+| `styk-formats` | 55 | 717 KiB | 21 | 7 | 1 | 22 | 4 | 67 % | 9 % | 7 % |
 | `styk-render` | 51 | 76 KiB | 4 | 1 | 0 | 0 | 46 | 35 % | 29 % | 35 % |
-| **Total** | 355 | 1967 KiB | 81 | 61 | 12 | 28 | 173 | 54 % | 18 % | 27 % |
+| **Total** | 355 | 1966 KiB | 81 | 61 | 12 | 28 | 173 | 54 % | 18 % | 27 % |
 
 ## Engine modules
 
@@ -406,6 +406,7 @@ Browser, Electron or operating-system service: stays in JS (or native), driven b
 | `desktop/recovery.cjs` |  | stays | Electron shell and services |
 | `desktop/release-history.cjs` |  | stays | Electron shell and services |
 | `desktop/release-links.cjs` |  | stays | Electron shell and services |
+| `desktop/rename-retry.cjs` |  | stays | Electron shell and services |
 | `desktop/samples.cjs` |  | stays | the desktop sample list and sample bytes, under the Python codec service's samples/open rules |
 | `desktop/shared-clipboard.cjs` |  | stays | Electron shell and services |
 | `desktop/support.cjs` |  | stays | Electron shell and services |
