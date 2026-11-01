@@ -5,8 +5,15 @@ import {messageError} from './localized-error.mjs';
 import {DRAWING_MAX_PIXELS} from './drawing-model.mjs';
 import {TILE,TILE_BYTES} from './drawing-tiles.mjs';
 import {lassoContains} from './drawing-lasso.mjs';
-export function applyTileChanges(store,changes,direction) {
-  for(const change of changes){const value=change[direction];if(value==null)store.delete(change.tx,change.ty);else store.set(change.tx,change.ty,value);}
+/** Puts a commit's `direction` tiles in `store`. `share`: a full tile of the commit's own record is adopted as it is and frozen (copy on write),
+ * where it is otherwise copied: the record keeps the pixels for the redo, and a tile nobody paints on never needs its own. */
+export function applyTileChanges(store,changes,direction,{share=false}={}) {
+  for(const change of changes){
+    const value=change[direction];
+    if(value==null)store.delete(change.tx,change.ty);
+    else if(share&&value instanceof Uint8ClampedArray&&value.byteLength===TILE_BYTES){store.adopt(change.tx,change.ty,value);store.get(change.tx,change.ty).frozen=true;}
+    else store.set(change.tx,change.ty,value);
+  }
 }
 export const pixelChangeBytes=tiles=>tiles.reduce((n,t)=>n+(t.before?.byteLength??0)+(t.after?.byteLength??0)+64,256);
 /** Bounding rect of every tile intersected by a pixel-space rect. */
