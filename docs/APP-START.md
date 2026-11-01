@@ -48,3 +48,17 @@ waited behind it. Windows therefore rasterizes the interface on the CPU (`deskto
 stage ready 1.8 s against 2.6 s (median of five interleaved launches; every pair faster), on a warm profile 1.5 to 1.8 s against 2.3 to 3.1 s.
 Pictures of Home and the editor differ from the GPU-rasterized ones in 15 to 21 % of their pixels by one level on average (text and gradient
 edges), 0.03 % by more than sixteen levels. Disabling accelerated 2D canvas changed nothing. The stage and the compositor stay on the GPU.
+
+## Measured and left alone
+
+- **Pipelines.** Creating the stage's pipelines and shader modules takes 0 ms at the call (the work is asynchronous); the engine's primitive shader
+  takes about 0.33 s to compile in a cold profile and 3 to 5 ms with the on-disk cache (\`DawnWebGPUCache\` in the profile, kept between launches), and the
+  first picture is drawn 10 to 20 ms after \`styk.ready\`: the compile overlaps the rest of the stage. Compiling with DXC instead of FXC
+  (\`--enable-dawn-features=use_dxc\`) changed it by about 20 ms.
+- **Detection request.** Leaving out wgpu's WebGPU detection request (emulated in the page) changed the stage's time by nothing.
+- **Yields in \`init()\`.** A macrotask yield after the shell and before the timeline mounts moved the stage's median 65 ms (noise-sized) and left ready where it was; events could then
+  run on a half-built interface, so it is not in.
+- **The engine before the application.** \`src/app.mjs\` awaits \`loadEngine()\` at the top of its body (\`useEngine(await loadEngine())\`), because the
+  editor it builds next opens its document in the engine. The body (about 90 ms) therefore starts after the WebAssembly is fetched, compiled and its
+  threads have joined (about 0.2 s, during which the interface thread is idle): the one serialization left on the way to \`ready\`.
+- **\`init()\`'s synchronous block** (about 0.3 s: the shell, the timeline, the inspector, the first style and layout pass) holds the stage's continuations back by about 0.2 s.
