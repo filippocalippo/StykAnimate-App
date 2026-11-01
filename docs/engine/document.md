@@ -57,7 +57,7 @@ The keyframes, the figure types and the retained pose sources are not part of th
 indexing, `map`, `find`, `slice`, `for...of`, spread, `JSON.stringify`, `structuredClone`) or an object, whose records the interface fetches
 from the session when something reads them (`EditSession.record` and `keyed_record`; until the session starts, `OpenedDocument.record`), each lifted
 on its own, whole, and restored like a piece. A record is the same object for as long as the table holds it; a table holds at most 64 keyframes,
-256 figure types and 64 sources, giving the least recently read back, and fetches it again, equal, when it is read again. The elements have no
+1024 figure types and 64 sources, giving the least recently read back. A record given back that something else still holds (a geometry, a selection, a cache keyed by it) is the same object when it is read again; only one nothing holds is fetched again, equal. The elements have no
 setters, as the lazy picture fields have none: the view is changed by patches, never in place.
 
 What a reader needs without the record is the table's own: its row, which the open sends in its metadata (`rows`) and the table keeps through

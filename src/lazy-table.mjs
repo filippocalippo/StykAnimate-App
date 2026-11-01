@@ -45,8 +45,8 @@ export function figureRow(figure) {
     segments: figure?.segment_count ?? figure?.segments?.length ?? null, pictures: Boolean(figure?.image_assets?.length || imageSegment)};
 }
 
-/** The records each table holds at once: a frame on show and the ones around it; the types a frame on show draws. */
-const LIMITS = {keyframes: 64, figure_types: 256, '_styk.frameSources': 64};
+/** The records each table holds at once: a frame on show and the ones around it; the types a frame on show draws (a document of a few hundred types keeps all it has drawn: scrubbing across it would otherwise fetch and rebuild what hangs on a definition at every seek). */
+const LIMITS = {keyframes: 64, figure_types: 1024, '_styk.frameSources': 64};
 
 /**
  * Makes the tables created from now hold at most `limit` records, and gives records back even in verify mode (a test of the cache's
