@@ -199,10 +199,26 @@ pub fn prepare_editor_load_with(document: Value, fan: &dyn Fanout) -> Result<Pre
 /// opening a project file does, every other load of a document (a figure file imported, a clipboard) refuses it as it always did.
 fn prepare_editor_load_inner(document: Value, fan: &dyn Fanout, mend: bool) -> Result<Prepared, EditError> {
     let mut report = or(get(Some(&document), "document"), or(get(Some(&document), "report"), Some(&document))).cloned().unwrap_or(Value::Null);
-    movieclip::graph(&report)?;
-    let indexes = prepare(&mut report, fan, mend)?;
+    // Retained scenes deeper than the graph allows are let go of, when mending: a project that was made too deep opens as one that is not.
+    let mut shallowed = 0;
+    if let Err(refusal) = movieclip::graph(&report) {
+        shallowed = if mend { movieclip::shallow(&mut report) } else { 0 };
+        if shallowed == 0 {
+            return Err(refusal);
+        }
+        movieclip::graph(&report)?;
+    }
+    let mut indexes = prepare(&mut report, fan, mend)?;
+    indexes.repairs += shallowed;
     let saved_draft = truthy(path(Some(&report), &["_styk", "simpleFrameDraft"]));
     Ok(Prepared { report, saved_draft, ..indexes })
+}
+
+/// What opening a document would make of it, mending what can be mended ([`prepare_editor_load_inner`] with `mend`): the check a save runs
+/// on the document it is about to write, so that no file is written that opening refuses. `repairs` of the answer counts what it mended;
+/// its `report` is the document as opening would hold it.
+pub fn prepare_to_check_openable(document: Value, fan: &dyn Fanout) -> Result<Prepared, EditError> {
+    prepare_editor_load_inner(document, fan, true)
 }
 
 /// What the app's editor does to a document it opens: [`prepare_editor_load`], then, when the editor has a

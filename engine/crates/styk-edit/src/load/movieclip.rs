@@ -5,6 +5,7 @@
 use styk_doc::Value;
 
 use super::js::*;
+use super::{child_mut, Step};
 use crate::EditError;
 
 /// `movieclipAsset(figure)`: the clip a figure definition holds.
@@ -257,4 +258,59 @@ pub(super) fn graph(report: &Value) -> Result<(), EditError> {
     }
     let mut assets = 0;
     visit(Some(report), 0, &mut assets)
+}
+
+/// The deepest a movieclip graph may run (`graph`): the root is level 0, and a clip's document and a retained scene each add one.
+const MAX_DEPTH: usize = 8;
+
+fn retained_scene(document: &Value) -> Option<&Value> {
+    path(Some(document), &["_styk", "movieclipSource", "document"]).filter(|source| source.truthy())
+}
+
+/// The deepest level of the graph below `document`, which is at `depth`.
+fn deepest(document: &Value, depth: usize) -> usize {
+    let mut deepest_level = depth;
+    if let Some(source) = retained_scene(document) {
+        deepest_level = deepest_level.max(deepest(source, depth + 1));
+    }
+    for figure in items(document.get("figure_types")) {
+        if let Some(clip) = get(asset(&figure), "document").filter(|clip| clip.truthy()) {
+            deepest_level = deepest_level.max(deepest(clip, depth + 1));
+        }
+    }
+    deepest_level
+}
+
+/// A project whose movieclips run deeper than the graph allows (a clip made of a clip again and again retains a scene at every level) is
+/// brought within it by letting go of the retained scenes, deepest first, only as many as it takes. A retained scene is what a clip was made
+/// from; the clip's own frames, which are what shows, are not touched. Returns how many scenes it let go of, none when the graph is
+/// as deep as it can be without them.
+pub(super) fn shallow(report: &mut Value) -> usize {
+    cut(report, 0)
+}
+
+fn cut(document: &mut Value, depth: usize) -> usize {
+    if deepest(document, depth) <= MAX_DEPTH {
+        return 0;
+    }
+    let mut dropped = 0;
+    if retained_scene(document).is_some_and(|source| deepest(source, depth + 1) > MAX_DEPTH) {
+        let steps = [Step::Key("_styk"), Step::Key("movieclipSource"), Step::Key("document")];
+        if let Some(source) = child_mut(document, &steps) {
+            dropped += cut(source, depth + 1);
+        }
+        if retained_scene(document).is_some_and(|source| deepest(source, depth + 1) > MAX_DEPTH) {
+            if let Some(styk) = child_mut(document, &[Step::Key("_styk")]).and_then(Value::make_obj) {
+                styk.remove("movieclipSource");
+                dropped += 1;
+            }
+        }
+    }
+    for index in 0..items(document.get("figure_types")).len() {
+        let steps = [Step::Key("figure_types"), Step::Slot(index), Step::Key("_styk"), Step::Key("movieclip"), Step::Key("document")];
+        if let Some(clip) = child_mut(document, &steps) {
+            dropped += cut(clip, depth + 1);
+        }
+    }
+    dropped
 }

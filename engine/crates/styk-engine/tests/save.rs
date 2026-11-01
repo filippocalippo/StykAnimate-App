@@ -72,14 +72,15 @@ fn the_pivot_original_is_stored_first_and_checked_on_reading() {
 }
 
 #[test]
-fn a_stopped_save_writes_nothing_and_an_invalid_document_is_refused() {
+fn a_stopped_save_writes_nothing_and_an_invalid_document_is_written_with_a_warning() {
     let tree = tree("engine/tests/edit/startup.document.json");
     let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| true);
     assert!(matches!(stopped, Err(SaveError::Cancelled)), "{stopped:?}");
     let mut broken = tree.clone();
     broken.make_obj().unwrap().set("figure_types", Value::Num(3.0));
-    let refused = save_project(&[broken], &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false);
-    assert!(matches!(refused, Err(SaveError::Refused(_))), "{refused:?}");
+    // What opening would refuse and nothing mends is still written (refusing leaves the person with nothing), and the save says so.
+    let written = save_project(&[broken], &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false).expect("written all the same");
+    assert!(written.warning.is_some(), "the save says what opening refuses");
     let none = save_project(&[], &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false);
     assert!(matches!(none, Err(SaveError::Refused(_))), "{none:?}");
 }

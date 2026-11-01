@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use styk_doc::{Blob, Value};
 use crate::Engine;
 use styk_edit::EditError;
-use styk_edit::export::{Hold, Projected, check_scene, fold_movieclip, prepare_project};
+use styk_edit::export::{Hold, Openable, Projected, check_openable, fold_movieclip, prepare_project};
 use styk_formats::Kind;
 use styk_formats::container::{self, ContainerError};
 use styk_formats::files::{self, FileError, FrameTimings, Host, Job, Joiner, JobsFailed};
@@ -49,6 +49,10 @@ pub struct Written {
     /// The skeleton and both sections before compression.
     pub raw_bytes: usize,
     pub timings: SaveTimings,
+    /// How many things the file's document had that opening would mend, mended in what was written (zero for a document that needed nothing).
+    pub repairs: usize,
+    /// What opening would still refuse of what was written, where no repair mends it (the message key of the refusal): the file is written all the same.
+    pub warning: Option<String>,
 }
 
 /// Where a save's time went, by the clock the caller gave (milliseconds; zero without one).
@@ -61,8 +65,9 @@ pub struct SaveTimings {
     /// Of the lift: waiting for the pieces side by side, and stitching them together (zero when the lift was not in pieces).
     pub lift_pieces_ms: f64,
     pub lift_splice_ms: f64,
-    /// The scene check, which runs beside the lift and the frames (its own duration).
-    pub scene_ms: f64,
+    /// The reader's check of the document (the scene, the layers, the animation and every movieclip and retained scene), which runs beside the lift
+    /// and the frames (its own duration).
+    pub check_ms: f64,
     /// Hashing and compressing the skeleton, the arrays section and the payloads section.
     pub frames: [FrameTimings; 3],
     /// From the first job started to the last done: the hashes beside the frames.
@@ -177,6 +182,11 @@ impl Host for EngineHost<'_> {
 /// The container of a project: `trees` are the documents of the movieclips being edited, outermost first, then the document
 /// in front; `scopes[i]` is the movieclip of `trees[i]` that `trees[i + 1]` is the document of. Each is a snapshot of a
 /// session's tree. `host` is asked whether to stop between the steps, and times them.
+///
+/// What is written is a file opening accepts. Beside the lift runs the reader's whole check of the document (`check_openable`, on every
+/// document the project holds): when opening would mend something, the document it would make is written instead and the answer says
+/// how much (`Written::repairs`); when opening would refuse something no repair mends, the file is written all the same, as refusing
+/// leaves the person with nothing, and the answer carries the reason (`Written::warning`).
 pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, host: &dyn Host) -> Result<Written, SaveError> {
     let clock = host.clock();
     let cancel = &|| host.cancelled();
@@ -196,49 +206,75 @@ pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, ho
     let projected = prepare_project(&document, request.name.as_deref(), &hold)?;
     // The tree it was made from is the session's; what this save holds of it goes now.
     drop(document);
-    let Projected { document: mut document, scene } = projected;
+    let Projected { document: mut document, scene, unmet } = projected;
     let prepared = clock();
-    let reserved: Vec<Arc<[u8]>> = match request.source {
-        Some(Source { record, bytes }) => {
-            let bytes: Arc<[u8]> = Arc::from(bytes);
-            let mut stored = record.as_obj().cloned().unwrap_or_default();
-            stored.set("source_base64", Value::Blob(Arc::new(Blob { prefix: Arc::from(""), bytes: bytes.clone() })));
-            let object = document.make_obj().ok_or_else(|| SaveError::Refused("errors.nativeContainer.projectDataMustBeAJsonObject".into()))?;
-            object.set("_stykSource", Value::object(stored));
-            vec![bytes]
-        }
-        None => Vec::new(),
+    // The Pivot original goes into the payload section first, and into every document this save writes.
+    let kept: Option<(Value, Arc<[u8]>)> = request.source.map(|Source { record, bytes }| (record, Arc::from(bytes)));
+    let reserved: Vec<Arc<[u8]>> = kept.iter().map(|(_, bytes)| bytes.clone()).collect();
+    let attach = |document: &mut Value| -> Result<(), SaveError> {
+        let Some((record, bytes)) = &kept else { return Ok(()) };
+        let mut stored = record.as_obj().cloned().unwrap_or_default();
+        stored.set("source_base64", Value::Blob(Arc::new(Blob { prefix: Arc::from(""), bytes: bytes.clone() })));
+        let object = document.make_obj().ok_or_else(|| SaveError::Refused("errors.nativeContainer.projectDataMustBeAJsonObject".into()))?;
+        object.set("_stykSource", Value::object(stored));
+        Ok(())
     };
-    let mut written = write(&document, Kind::Styk, &reserved, Some(scene), host)?;
+    attach(&mut document)?;
+    let (mut written, verdict) = write(&document, Kind::Styk, &reserved, Some(scene), host)?;
+    match verdict {
+        Some(Openable::Mended { document: mended, repairs }) => {
+            // The document opening would hold is prepared as a save prepares one (its pose lists stored once) and written instead.
+            drop(document);
+            let again = prepare_project(&mended, None, &hold)?;
+            drop(mended);
+            let mut document = again.document;
+            attach(&mut document)?;
+            let (mut second, _) = write(&document, Kind::Styk, &reserved, None, host)?;
+            second.repairs = repairs;
+            second.warning = again.unmet.as_ref().map(describe);
+            second.timings.check_ms = written.timings.check_ms;
+            written = second;
+        }
+        Some(Openable::Refused(refusal)) => written.warning = Some(describe(&refusal)),
+        Some(Openable::Sound) | None => written.warning = unmet.as_ref().map(describe),
+    }
     written.timings.prepare_ms = prepared - started;
     written.timings.total_ms = clock() - started;
     Ok(written)
 }
 
+/// What a refusal says, as the editor words it: the message key (with its values after a separator).
+fn describe(error: &EditError) -> String {
+    match error {
+        EditError::Invalid(message) => message.clone(),
+        EditError::Unported(feature) => format!("{feature} is not ported to the engine yet"),
+    }
+}
+
 /// The container of a figure file (`.stkz`, `.stykmov`) made of the document an export prepared.
 pub fn save_figure_file(document: &Value, kind: Kind, host: &dyn Host) -> Result<Written, SaveError> {
-    write(document, kind, &[], None, host)
+    write(document, kind, &[], None, host).map(|(written, _)| written)
 }
 
 /// Lifts `document` into the container's skeleton and sections and frames them. `scene` is the document the scene check of a project is still
 /// to be run on: it runs beside the lift, on another thread where the host has one, and its error is the save's.
-fn write(document: &Value, kind: Kind, reserved: &[Arc<[u8]>], scene: Option<Value>, host: &dyn Host) -> Result<Written, SaveError> {
+fn write(document: &Value, kind: Kind, reserved: &[Arc<[u8]>], scene: Option<Value>, host: &dyn Host) -> Result<(Written, Option<Openable>), SaveError> {
     if host.cancelled() {
         return Err(SaveError::Cancelled);
     }
     let clock = host.clock();
     let started = clock();
     // The jobs own what they use: a worker may still be running one when this returns early.
-    // The scene check only has to be done before the file is, and is the longest single job of the save: it starts first, on a thread the
-    // host has to spare, and runs beside the lift and the frames.
+    // The reader's check only has to be done before the file is, and is the longest single job of the save: it starts first, on a thread the
+    // host has to spare, and runs beside the lift and the frames. What it finds decides what the save writes (`save_project`).
     let stop = Arc::new(AtomicBool::new(false));
-    let checked: Arc<Mutex<Option<(Result<(), EditError>, f64)>>> = Arc::new(Mutex::new(None));
+    let checked: Arc<Mutex<Option<(Openable, f64)>>> = Arc::new(Mutex::new(None));
     let joiner = scene.map(|scene| {
         let checked = checked.clone();
         let job: Job = Box::new(move |_| {
             let begun = clock();
-            let result = check_scene(&scene);
-            *checked.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((result, clock() - begun));
+            let verdict = check_openable(&scene);
+            *checked.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((verdict, clock() - begun));
         });
         host.start(job, &stop)
     });
@@ -248,11 +284,12 @@ fn write(document: &Value, kind: Kind, reserved: &[Arc<[u8]>], scene: Option<Val
     if let Some(join) = joiner {
         join().map_err(|_| ContainerError::WorkerStopped)?;
     }
-    let mut scene_ms = 0.0;
-    if let Some((result, took)) = checked.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() {
-        result?;
-        scene_ms = took;
+    let mut check_ms = 0.0;
+    let mut verdict = None;
+    if let Some((answer, took)) = checked.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() {
+        verdict = Some(answer);
+        check_ms = took;
     }
-    let timings = SaveTimings { lift_ms: lifted_at - started, lift_pieces_ms: lift_times.pieces_ms, lift_splice_ms: lift_times.splice_ms, scene_ms, frames: saved.frames, frames_ms: saved.frames_ms, assemble_ms: clock() - lifted_at - saved.frames_ms, ..SaveTimings::default() };
-    Ok(Written { bytes: saved.bytes, raw_bytes: saved.stats.container_raw_bytes, timings })
+    let timings = SaveTimings { lift_ms: lifted_at - started, lift_pieces_ms: lift_times.pieces_ms, lift_splice_ms: lift_times.splice_ms, check_ms, frames: saved.frames, frames_ms: saved.frames_ms, assemble_ms: clock() - lifted_at - saved.frames_ms, ..SaveTimings::default() };
+    Ok((Written { bytes: saved.bytes, raw_bytes: saved.stats.container_raw_bytes, timings, repairs: 0, warning: None }, verdict))
 }

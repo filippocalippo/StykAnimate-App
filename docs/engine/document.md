@@ -213,7 +213,7 @@ the clip inside its parent as a recovery copy does. `prepare_project` prepares t
 validations, display aliases in line, pose sequences stored once), the Pivot original the codec holds is stored first in the payload
 section, and `styk_formats::container::lift` and `files::save` write the container. The work runs on a worker that joined the engine,
 reserves its working memory first (`errors.engine.outOfMemoryWhileSaving` when the memory cannot hold it: the project stays open and nothing was
-written), and lifts the document in pieces: the elements of its biggest top-level array (the keyframes, nearly all of a project) are serialised side by side in batches (`container::lift_together`; the pieces own clones of their elements), each piece leaving the choices that depend on what came before (where an array or a payload is stored, whether it was stored already) as holes that are settled in document order when the batch is spliced in, so the skeleton and the sections are the ones one thread writes, byte for byte; the scene check (`validateScene`, read-only, the longest single job of the save) is started first on a worker the machine can spare (`Host::start`, `Engine::start_later`, only where the interface says `aside`: five engine threads or more, so that the three lent for the hashes, the frames and the pieces of the lift, the one for the scene check and one for the frame on show are all different) and runs beside the lift and the frames, and the save waits for it before the file is made (`check_scene`; its error is the save's), and asks the cancel flag between the steps of the preparation, every few thousand values of the lift, every 4 MiB hashed,
+written), and lifts the document in pieces: the elements of its biggest top-level array (the keyframes, nearly all of a project) are serialised side by side in batches (`container::lift_together`; the pieces own clones of their elements), each piece leaving the choices that depend on what came before (where an array or a payload is stored, whether it was stored already) as holes that are settled in document order when the batch is spliced in, so the skeleton and the sections are the ones one thread writes, byte for byte; the reader's check of the document (`styk_edit::export::check_openable`, read-only, the longest single job of the save: the load's whole preparation of the document and of every movieclip and retained scene it holds, with the repairs opening makes, [below](#a-save-writes-what-opening-accepts)) is started first on a worker the machine can spare (`Host::start`, `Engine::start_later`, only where the interface says `aside`: five engine threads or more, so that the three lent for the hashes, the frames and the pieces of the lift, the one for the scene check and one for the frame on show are all different) and runs beside the lift and the frames, and the save waits for it before the file is made, and asks the cancel flag between the steps of the preparation, every few thousand values of the lift, every 4 MiB hashed,
 and before and after each of the three zstd frames. The three hashes and the three frames (in turn, so that only one frame's output buffer, the size of the worst case, is held at a time) are four
 independent jobs: the save thread and up to three of the engine's other workers (the interface passes `engine.workers - 1`, at most 3, so one stays free for the
 frame on show) take them largest first (`Host::together`, `Engine::run_together`: `'static` jobs that own their blocks, claimed by whoever starts them first, a panic or a lost worker ending the save with an error and nothing freed under a worker still running one; a
@@ -225,6 +225,27 @@ on real data (the test `sections_shaped_like_real_ones_compress_to_the_frames_on
 after the frame in progress; the interface does not wait for it and never ends the worker inside the engine
 ([threading](threading.md#ending-a-worker)). The session keeps editing while it runs. The saved bytes of an unchanged document are those the JavaScript writer wrote (`tests/save-references.test.mjs` and `engine/crates/styk-engine/tests/save.rs` compare every recorded file in `engine/tests/containers/`).
 Arrays the tree shares (a copied frame, a keyframe and the stored frame it came from) are stored once and named by one marker each time, as the former writer did for arrays the interface shared (an array is the node the tree holds, told apart by its address: a packed list of numbers, or an ordinary array that holds only numbers, as an edit leaves a list it unpacked; never a copy made for the moment of writing, whose address the next copy would take over: `tests/plain_arrays.rs` reuses it on purpose); a copy-like edit can therefore make a file with shared arrays where the former writer made separate ones. The former app reads a shared marker as one array, but its edits of a project with a layer sheet write a new stored frame instead of changing the one on show, so no other frame changes (checked in that app, opening such a file and posing a joint).
+
+### A save writes what opening accepts
+
+The writer used to check much less than the reader: the root's scene, the authored channels and the movieclip graph, where opening also checks every
+movieclip document and every scene a clip retains. A defect of the same class that nobody had found yet therefore ended in a file that opening
+refused. The check that runs beside the lift is now the reader's (`load::prepare_to_check_openable`, the open's own preparation with its
+repairs), on the document the save is about to write, and what it finds decides what is written:
+
+- **Nothing to mend:** the document is written as it is, so the bytes of every healthy document are what they were (`smoke-save-bytes`).
+- **What opening would mend:** the document opening would hold is prepared again as a save prepares one (its pose lists stored once) and written
+  instead, and the save says how much (`Written::repairs`; `repairs` of the save's timings; the app tells the person). The project in the
+  editor is not changed, so the next save mends it again. A project whose movieclips run deeper than the graph allows (a clip made of a clip
+  retains a scene at every level; the creation of one that would pass the limit is refused, so such a project is one made before that)
+  is brought within it by letting go of the retained scenes, deepest first and only as many as it takes (`load/movieclip.rs`, `shallow`):
+  a retained scene is what a clip was made from, and the clip's own frames, which are what shows, are not touched.
+- **What no repair mends:** the file is written all the same, because refusing leaves the person with nothing, and the save carries the reason
+  (`Written::warning`, the message key; `warning` of the timings), which the app shows with advice to keep the previous copy. The authored
+  channels and the movieclip graph, which a save refused before, are in this class now.
+
+The cost is the check's own: it runs on a worker beside the lift and the frames, so the save takes longer only where the check outlasts them
+(`check_ms` against `lift_ms` and `frames_ms` of the save's timings; the measurements are in the commit that made the change).
 
 ## Invariants
 
