@@ -2,12 +2,13 @@ import {messageError} from './localized-error.mjs';
 import {drawingResourcesFor} from './drawing-resources.mjs';
 import {movieclipAsset, isMovieclip} from './movieclips.mjs';
 import {storedFrameReport} from './pivot-frame-draft.mjs';
+import {findFigureType} from './figure-types.mjs';
 
 const clone=value=>structuredClone(value);
 export const editorMovieclipMethods={
   enterMovieclip(typeId=this.figure?.figure_type_id){
     if(drawingResourcesFor(this.report)?.stats.unpublished)throw messageError(new Error(''), "errors.editorMovieclips.finishDrawingPublicationBeforeEditingAMovieclip", {});
-    const figure=this.report.figure_types.find(f=>f.figure_type_id===typeId);if(!isMovieclip(figure))throw messageError(new Error(''), "errors.editorMovieclips.chooseAMovieclip", {});
+    const figure=findFigureType(this.report.figure_types, typeId);if(!isMovieclip(figure))throw messageError(new Error(''), "errors.editorMovieclips.chooseAMovieclip", {});
     if(movieclipAsset(figure).spatialMeshes)throw messageError(new Error(''), "errors.editorMovieclips.thisIsAnAttachedMeshPoseItsParent", {});
     if(this._drag)this.commitDrag();if(this._animationEdit)this.commitAnimationEdit();
     const scopes=this._movieclipScopes??[],parent={};
