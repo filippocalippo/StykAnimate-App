@@ -739,8 +739,9 @@ it on the editor, for every document.
 - **Bookkeeping.** Besides the calls, the owner tells the session what is not an edit (`styk-edit/src/owner.rs`): the limits of
   history and the numbering of revisions it starts from, `@markSaved`, `@touch` (the project marked changed outside a
   command: a new revision, no entry), `@publishCel(celId, definition)` (the encoded tiles, bounds and revision the interface's
-  drawing store attaches to a cel once it has published its pixels: a derived publication, the revision does not move) and the
-  weights of drawing commits (`@drawingBytes`, `@retractDrawing`).
+  drawing store attaches to a cel once it has published its pixels: a derived publication, the revision does not move),
+  `@celState(celId, {revision, bounds})` (the two members a commit or a replay changes in a cel's definition, without
+  the encoded tiles that `@publishCel` sends again) and the weights of drawing commits (`@drawingBytes`, `@retractDrawing`).
 - **Previews.** The sliders of a camera-motion clip and of a layer's parallax show their value while they move
   (`previewCameraMotion(id, patch)`, `previewLayerParallax(id, patch)`, `styk-edit/src/preview.rs`): the field is set in the
   session's document without an entry, and put back by `cancelDocumentPreview()` or by the next call that is not a preview or a

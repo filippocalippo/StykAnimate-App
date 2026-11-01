@@ -147,6 +147,14 @@ test('a worker that is inside the engine when its export is cancelled is not end
   assert.equal(workers[0].terminated, true);
 });
 
+for (const [threads, lent] of [[1, 0], [2, 1], [4, 3], [8, 3]]) test(`a save on an engine of ${threads} thread(s) is handed ${lent} of them to borrow`, async t => {
+  const {workers, exporter} = environment(t, {engine: {handle: registeredEngine().handle, join: {}, workers: threads}});
+  const saving = exporter.export(project());
+  await until(() => workers[0]?.messages.at(-1)?.operation === 'export');
+  assert.equal(workers[0].messages.at(-1).project.helpers, lent);
+  workers[0].finish(); await saving;
+});
+
 test('queued revision changes reject before snapshot and disposal cancels active and waiting requests', async t => {
   const {workers, exporter} = environment(t);
   const report = project(), first = exporter.export(report);

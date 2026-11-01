@@ -308,3 +308,32 @@ fn the_pixel_commits_of_a_grouped_edit_in_progress_are_named_for_its_abort() {
     assert_eq!(json(&query(&mut session, "drawingBatch", "[]")), "[]");
     assert_eq!(json(&query(&mut session, "drawingRefs", "[]")), r#"{"records":[7],"cels":["cel-test"]}"#);
 }
+
+#[test]
+fn a_cels_revision_and_bounds_follow_the_stores_without_its_definition() {
+    let mut session = session(48 * 1024 * 1024);
+    let (layer, key) = drawing_layer(&mut session);
+    ok(&call(&mut session, "commitDrawingPixels", &first_stroke(&layer, &key)));
+    let figure = |session: &Session| session.editor.report().get("figure_types").unwrap().elements().unwrap().iter().find(|f| f.path(&["_styk", "drawing", "celId"]).and_then(Value::as_str) == Some("cel-test")).unwrap();
+    let before = figure(&session);
+    let revision = session.editor.revision;
+    let answer = call(&mut session, "@celState", r#"["cel-test",{"revision":41,"bounds":{"x":3,"y":4,"width":5,"height":6}}]"#);
+    assert_eq!(ok(&answer).get("result"), Some(&Value::Bool(true)));
+    let after = figure(&session);
+    assert_eq!(json(after.path(&["_styk", "drawing", "revision"]).unwrap()), "41");
+    assert_eq!(json(after.path(&["_styk", "drawing", "bounds"]).unwrap()), r#"{"x":3,"y":4,"width":5,"height":6}"#);
+    // Nothing else of the definition moved, and the session's own revision did not.
+    let mut a = before.clone();
+    let mut b = after.clone();
+    for definition in [&mut a, &mut b] {
+        let drawing = definition.make_obj().unwrap().get_mut("_styk").unwrap().make_obj().unwrap().get_mut("drawing").unwrap().make_obj().unwrap();
+        drawing.set("revision", Value::Null);
+        drawing.set("bounds", Value::Null);
+    }
+    assert_eq!(json(&a), json(&b));
+    assert_eq!(session.editor.revision, revision);
+    // A bounds-free state leaves the bounds alone; a cel the document lost is nothing to follow.
+    ok(&call(&mut session, "@celState", r#"["cel-test",{"revision":42}]"#));
+    assert_eq!(json(figure(&session).path(&["_styk", "drawing", "bounds"]).unwrap()), r#"{"x":3,"y":4,"width":5,"height":6}"#);
+    assert_eq!(ok(&call(&mut session, "@celState", r#"["cel-gone",{"revision":1}]"#)).get("result"), Some(&Value::Bool(false)));
+}

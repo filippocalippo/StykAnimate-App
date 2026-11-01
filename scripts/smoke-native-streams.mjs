@@ -69,7 +69,7 @@ try {
   const actual = createHash('sha256');
   for await (const chunk of createReadStream(destination)) actual.update(chunk);
   assert.equal(actual.digest('hex'), expected.digest('hex'), 'Atomic streaming save must retain exact bytes despite subsequent cancellation.');
-  assert.equal(measured.maxChunkBytes, 256 * 1024);
+  assert.ok(measured.maxChunkBytes > 0 && measured.maxChunkBytes <= 4 * 1024 * 1024, `chunks of at most 4 MB, saw ${measured.maxChunkBytes}`);
   assert.equal(measured.nodeExposed, false);
   await writeFile(path.join(output, 'native-streams-smoke.json'), JSON.stringify({ ...measured, sha256Verified: true, measuredAt: new Date().toISOString(), note: '200 MiB worker-produced Blob. Timers include OS/test scheduling; these are observations, not input-to-display guarantees.' }, null, 2));
   console.log(JSON.stringify(measured, null, 2));

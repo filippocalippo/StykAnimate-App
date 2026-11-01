@@ -9,7 +9,7 @@
 
 use styk_formats::container::Kind;
 use styk_formats::container;
-use styk_formats::files::{self, FileError, NoStore, Rules};
+use styk_formats::files::{self, FileError, Rules};
 use wasm_bindgen::prelude::*;
 
 /// Why a file could not be opened or saved. `messageKey` names the interface's
@@ -147,6 +147,6 @@ impl SavedFile {
 pub fn save_native_document(kind: &str, json: &[u8]) -> Result<SavedFile, NativeFailure> {
     let document = styk_doc::json::parse(json).map_err(|error| NativeFailure::from(FileError::from(container::ContainerError::from(error))))?;
     let lifted = container::lift(&document, &[]).map_err(|error| NativeFailure::from(FileError::from(error)))?;
-    let saved = files::save(kind_named(kind)?, &lifted.skeleton, &lifted.arrays, &lifted.payloads, &mut NoStore, &|| false)?;
+    let saved = files::save(kind_named(kind)?, std::sync::Arc::new(lifted.skeleton), std::sync::Arc::new(lifted.arrays), std::sync::Arc::new(lifted.payloads), &|| false)?;
     Ok(SavedFile { bytes: saved.bytes, raw_bytes: saved.stats.container_raw_bytes })
 }
