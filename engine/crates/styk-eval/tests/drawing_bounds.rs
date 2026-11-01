@@ -17,7 +17,7 @@ fn png(ink: &[(u32, u32, u8)]) -> Arc<[u8]> {
 
 fn cel(tiles: Vec<(i32, i32, Arc<[u8]>)>, bounds: Option<[f64; 4]>) -> DrawingTiles {
     let levels = styk_eval::drawing::level_tiles(&tiles);
-    DrawingTiles { anchor: [0.0; 2], pixels_per_unit: 1.0, bounds, decoded_bounds: OnceLock::new(), tiles, levels }
+    DrawingTiles::new([0.0; 2], 1.0, bounds, tiles, levels)
 }
 
 #[test]

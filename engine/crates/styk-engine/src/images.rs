@@ -247,7 +247,7 @@ impl Engine {
         {
             let mut state = self.inner.state.lock();
             let retained = state.current.as_ref().is_some_and(|current| {
-                current.lineage == generation.lineage && current.assets.cels.contains_key(&(Arc::as_ptr(cel) as usize))
+                current.lineage == generation.lineage && current.assets.cels.contains_key(&cel.key())
             });
             if !retained {
                 return;

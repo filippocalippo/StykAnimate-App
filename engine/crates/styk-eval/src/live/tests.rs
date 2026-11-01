@@ -90,7 +90,7 @@ fn png(pixels: &[u8]) -> Arc<[u8]> {
 fn published(tiles: &HashMap<Coord, Vec<u8>>) -> (Vec<Vec<Coord>>, HashMap<(usize, Coord), Vec<u8>>) {
     let list: Vec<(i32, i32, Arc<[u8]>)> = tiles.iter().map(|(&(x, y), pixels)| (x, y, png(pixels))).collect();
     let levels = crate::drawing::level_tiles(&list);
-    let cel = DrawingTiles { anchor: [0.0; 2], pixels_per_unit: 1.0, bounds: None, decoded_bounds: Default::default(), tiles: list, levels };
+    let cel = DrawingTiles::new([0.0; 2], 1.0, None, list, levels);
     let mut slots = HashMap::new();
     for (level, index, rgba) in crate::drawing::decode_cel(&cel) {
         slots.insert((level as usize, cel.levels[level as usize][index as usize]), rgba);

@@ -189,9 +189,22 @@ pub struct DrawingTiles {
     pub tiles: Vec<(i32, i32, Arc<[u8]>)>,
     /// The tiles drawn at each display level 0–8 ([`crate::drawing::level_tiles`]).
     pub levels: Vec<Vec<(i32, i32)>>,
+    /// Which pixels these are: every view made from the same tile payload shares it, whatever else about the cel changed (its
+    /// bounds and revision change with every edit), so the atlas places a payload's tiles once ([`DrawingTiles::key`]).
+    pub identity: Arc<()>,
 }
 
 impl DrawingTiles {
+    /// A cel of its own pixels.
+    pub fn new(anchor: [f64; 2], pixels_per_unit: f64, bounds: Option<[f64; 4]>, tiles: Vec<(i32, i32, Arc<[u8]>)>, levels: Vec<Vec<(i32, i32)>>) -> DrawingTiles {
+        DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: OnceLock::new(), tiles, levels, identity: Arc::new(()) }
+    }
+
+    /// What the atlas and the engine's decoding know the cel's pixels by.
+    pub fn key(&self) -> usize {
+        Arc::as_ptr(&self.identity) as usize
+    }
+
     /// `presenter.store.bounds ?? drawingPixelBounds(figure)` in the editor.
     pub fn artwork_bounds(&self) -> Option<[f64; 4]> {
         self.decoded_bounds.get().copied().flatten().or(self.bounds)

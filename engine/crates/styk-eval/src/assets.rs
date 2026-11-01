@@ -54,8 +54,9 @@ pub struct Assets {
     pub glyph_strokes: HashMap<(usize, u32), (Arc<Glyph>, Arc<[[f32; 2]]>)>,
     /// Atlas slots of drawing cel tiles (64×64 texels each, plus their border).
     pub drawing: Vec<AtlasEntry>,
-    /// Per drawing cel, keyed by its address: the cel (held, so the address stays its
-    /// own) and its first slot at each display level.
+    /// Per drawing cel, keyed by its pixels' identity ([`DrawingTiles::key`]): the cel (held, so the key stays
+    /// its own) and its first slot at each display level. A cel whose bounds or revision changed with the same
+    /// pixels is the same entry.
     pub cels: HashMap<usize, (Arc<DrawingTiles>, Vec<u32>)>,
     /// Where the next image goes.
     cursor: Cursor,
@@ -178,10 +179,10 @@ impl Assets {
         // Drawing cels new in this revision get slots after everything placed before.
         let mut cels = Vec::new();
         collect_cels(doc, &mut cels);
-        cels.retain(|cel| !assets.cels.contains_key(&(Arc::as_ptr(cel) as usize)));
-        cels.dedup_by(|a, b| Arc::ptr_eq(a, b));
+        cels.retain(|cel| !assets.cels.contains_key(&cel.key()));
+        cels.dedup_by(|a, b| a.key() == b.key());
         for cel in cels {
-            if assets.cels.contains_key(&(Arc::as_ptr(&cel) as usize)) {
+            if assets.cels.contains_key(&cel.key()) {
                 continue;
             }
             let first = assets.drawing.len() as u32;
@@ -194,7 +195,7 @@ impl Assets {
             let sizes = vec![Some((crate::drawing::TILE, crate::drawing::TILE)); count as usize];
             assets.drawing.resize(assets.drawing.len() + count as usize, AtlasEntry::default());
             pack(&sizes, &mut assets.drawing[first as usize..], &mut assets.cursor, crate::drawing::BORDER);
-            assets.cels.insert(Arc::as_ptr(&cel) as usize, (cel, starts));
+            assets.cels.insert(cel.key(), (cel, starts));
         }
         assets.pages = if assets.cursor.used { assets.cursor.layer + 1 } else { 0 };
         let mut glyph_list: Vec<Arc<Glyph>> = Vec::new();
@@ -245,7 +246,7 @@ impl Assets {
 
     /// The first atlas slot of each display level of `cel`.
     pub fn cel_levels(&self, cel: &Arc<DrawingTiles>) -> Option<&[u32]> {
-        self.cels.get(&(Arc::as_ptr(cel) as usize)).map(|(_, starts)| starts.as_slice())
+        self.cels.get(&cel.key()).map(|(_, starts)| starts.as_slice())
     }
 
     pub fn image(&self, index: u32) -> Option<&AtlasEntry> {

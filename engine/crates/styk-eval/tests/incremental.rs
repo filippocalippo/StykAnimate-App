@@ -221,3 +221,40 @@ fn a_frame_kept_across_documents_is_resolved_against_the_figures_the_new_documen
     assert!(loader.restyle_frame(&mut frame, &first));
     assert_eq!(drawn(&frame), drawn(&Loader::new().edit_frame(&record, None, &Loader::new().document(&original, "p").unwrap()).unwrap()));
 }
+
+/// The cel of a drawing figure: its figure record changes with every edit (bounds, revision) and its tiles do not.
+#[test]
+fn a_cel_whose_bounds_changed_keeps_its_pixels_and_its_atlas_slots() {
+    use styk_eval::assets::Assets;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drawlist/drawing-cel.json");
+    let original = json::parse(&std::fs::read(path).unwrap()).unwrap();
+    let mut loader = Loader::new();
+    let first = loader.document(&original, "p").unwrap();
+    let assets = Assets::build(&first);
+    assert_eq!(assets.cels.len(), 1);
+    let cel = |document: &styk_eval::doc::Document| document.figures[0].images.iter().find_map(|image| image.tiles.clone()).expect("a cel");
+
+    // The figure's published bounds changed (an undo, a stroke): the record is a new one, the payload is the same node.
+    let mut edited = original.clone();
+    let figure = edited.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap();
+    let drawing = figure[0].make_obj().unwrap().get_mut("_styk").unwrap().make_obj().unwrap().get_mut("drawing").unwrap().make_obj().unwrap();
+    drawing.set("bounds", json::parse(br#"{"x":1,"y":2,"width":30,"height":40}"#).unwrap());
+    drawing.set("revision", Value::Num(41.0));
+    let second = loader.document(&edited, "p").unwrap();
+    assert_eq!(loader.converted.figures, 1, "the figure record was converted again");
+    let (before, after) = (cel(&first), cel(&second));
+    assert!(!Arc::ptr_eq(&before, &after), "a view of its own");
+    assert_eq!(before.key(), after.key(), "of the same pixels");
+    assert_eq!(after.bounds, Some([1.0, 2.0, 30.0, 40.0]), "with the bounds it was given");
+
+    // So the atlas places nothing again and the engine decodes nothing again.
+    let extended = assets.extended(&second);
+    assert_eq!((extended.drawing.len(), extended.cels.len(), extended.pages), (assets.drawing.len(), 1, assets.pages));
+    assert_eq!(extended.id(), assets.id(), "the same atlas");
+    assert!(extended.cel_levels(&after).is_some(), "and the new view finds its slots");
+
+    // A payload made anew (the same file read again) is other pixels.
+    let anew = json::parse(&std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drawlist/drawing-cel.json")).unwrap()).unwrap();
+    let third = loader.document(&anew, "p").unwrap();
+    assert_ne!(cel(&third).key(), before.key());
+}
