@@ -14,6 +14,10 @@
  * the CPU rasterizer from the same document (engine-previews.mjs): the same pixels by the
  * app-parity rule.
  *
+ * A thumbnail is drawn at once even when pictures of its frame are not in the stage's sprite texture: those are drawn from their
+ * soft copies and asked for sharp. `renderThumbnail` then resolves `'soft'` (drawn, but not the thumbnail to keep): a caller keeps
+ * a thumbnail only when it resolves `true`, shows a soft one meanwhile and asks again until it does.
+ *
  * A thumbnail the engine cannot draw (no worker threads, a frame outside the timeline, a
  * document the stage refuses, a preview worker that fails) resolves `false` with the reason
  * in `stats.engine.refusal`: the filmstrip shows no picture for it and asks again later.
@@ -52,7 +56,7 @@ export class EngineThumbnails {
     this.currentAbort = null;
     /** Why the last thumbnail was not drawn by the engine. */
     this.refusal = null;
-    this.engineStats = {renders: 0, cpu: 0, refused: 0, stale: 0, lastRenderMs: 0};
+    this.engineStats = {renders: 0, soft: 0, cpu: 0, refused: 0, stale: 0, lastRenderMs: 0};
     this.events = new AbortController();
     editor.addEventListener('change', event => this.invalidate(event.detail || {}), {signal: this.events.signal});
   }
@@ -172,14 +176,14 @@ export class EngineThumbnails {
       // The stage cannot draw thumbnails on this device: the preview worker draws them on the CPU.
       if (result === 'refused' && stageless()) result = await this._cpu(request, canvas, controller.signal);
       if (result === 'stale') { this.engineStats.stale++; return false; }
-      if (result !== 'drawn') {
+      if (result !== 'drawn' && result !== 'soft') {
         this.engineStats.refused++;
         return this._refuse(stageless() ? `the stage cannot draw thumbnails on this device (${this.cpuRefusal ?? 'the preview worker did not draw it'})` : 'the stage did not draw the thumbnail');
       }
       if (controller.signal.aborted || version !== this.version || this.paused) return false;
       this.refusal = null;
-      Object.assign(this.engineStats, {renders: this.engineStats.renders + 1, lastRenderMs: performance.now() - started});
-      return true;
+      Object.assign(this.engineStats, {renders: this.engineStats.renders + 1, soft: this.engineStats.soft + (result === 'soft'), lastRenderMs: performance.now() - started});
+      return result === 'soft' ? 'soft' : true;
     } catch (error) {
       if (error?.name === 'AbortError') return false;
       return this.disposed ? false : this._refuse(String(error?.message ?? error));
