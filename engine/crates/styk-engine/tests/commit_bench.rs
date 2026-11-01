@@ -99,7 +99,8 @@ fn the_frame_around_a_commit() {
     let _ = styk_edit::prof::take();
     let t = Instant::now();
     let r = session.call("commitDrag", "[]", &selected);
-    println!("commitDrag call {:.2} ms -> {}", ms(t), &r[..r.len().min(60)]);
+    println!("commitDrag call {:.2} ms, answer {} bytes -> {}", ms(t), r.len(), &r[..r.len().min(60)]);
+    if let Ok(value) = styk_doc::json::parse(r.as_bytes()) { if let Some(entries) = value.as_obj() { let mut sizes: Vec<(String, usize)> = entries.iter().map(|(k, v)| (k.to_string(), styk_doc::json::to_string(v).len())).collect(); sizes.sort_by_key(|(_, n)| std::cmp::Reverse(*n)); println!("    answer parts: {:?}", &sizes[..sizes.len().min(6)]); } }
     for (name, count, total) in styk_edit::prof::take().into_iter().take(14) { println!("    prof {name}: {count} x, {total:.2} ms"); }
     id += 1;
     let order_after = show(&mut session, &mut scene, &selected, id, "after commit", true);

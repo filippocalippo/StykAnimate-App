@@ -128,3 +128,64 @@ fn a_loader_takes_the_views_another_loader_made_of_the_keyframes() {
     taker.document(&edited, "p").unwrap();
     assert_eq!(taker.converted, Converted { figures: 0, keyframes: 1 });
 }
+
+/// `project()` with a style overlay on the figure of object 7 in every key.
+fn styled_project() -> Value {
+    let text = json::to_string(&project()).replace(r#""unique_id":7,"#, r#""unique_id":7,"_stykStyle":{"segments":{"1":{"thickness":29}}},"#);
+    json::parse(text.as_bytes()).unwrap()
+}
+
+/// Every object with a style holds the figure resolved against the document's own definition of its figure.
+fn resolved_against_the_document(document: &styk_eval::doc::Document) -> usize {
+    let mut styled = 0;
+    for frame in &document.keyframes {
+        for object in frame.objects.iter().filter(|object| object.style.is_some()) {
+            let base = document.figure(object.figure).expect("the figure exists");
+            let resolved = object.figure_override.as_ref().expect("a styled object is resolved");
+            assert!(resolved.base.as_ref().is_some_and(|b| Arc::ptr_eq(b, base)), "a style is resolved against the figure the document has");
+            styled += 1;
+        }
+    }
+    styled
+}
+
+/// Each object of each frame as the scene reads it (a frame's own tables print in no fixed order, so they are left out).
+fn what_is_drawn(document: &styk_eval::doc::Document) -> Vec<String> {
+    document.keyframes.iter().flat_map(|frame| frame.objects.iter().map(|object| format!("{} {:?} {:?} {:?}", object.uid, object.root, object.angles, object.figure_override))).collect()
+}
+
+#[test]
+fn styles_are_resolved_again_only_for_the_frames_that_need_it_and_still_resolve_against_the_figures_the_document_has() {
+    let mut loader = Loader::new();
+    let original = styled_project();
+    let first = loader.document(&original, "p").unwrap();
+    assert_eq!(resolved_against_the_document(&first), 3);
+
+    // A pose edit: the other frames are the views they were, resolved.
+    let mut edited = original.clone();
+    move_object(&mut edited, 1, 0, 99.0);
+    let second = loader.document(&edited, "p").unwrap();
+    assert_eq!(resolved_against_the_document(&second), 3);
+    assert!(Arc::ptr_eq(&first.keyframes[0], &second.keyframes[0]));
+    assert!(Arc::ptr_eq(&first.keyframes[2], &second.keyframes[2]));
+
+    // The same tree again, and again: nothing changes.
+    let third = loader.document(&edited, "p").unwrap();
+    assert!(Arc::ptr_eq(&second.keyframes[0], &third.keyframes[0]));
+    assert_eq!(resolved_against_the_document(&third), 3);
+
+    // A figure defined another way: every frame is resolved against it, whatever it had been resolved against.
+    let mut redefined = edited.clone();
+    let figures = redefined.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap();
+    figures[0].make_obj().unwrap().get_mut("segments").unwrap().make_arr().unwrap()[0].make_obj().unwrap().set("length", Value::Num(55.0));
+    let fourth = loader.document(&redefined, "p").unwrap();
+    assert_eq!(resolved_against_the_document(&fourth), 3);
+    assert!(!Arc::ptr_eq(&third.keyframes[0], &fourth.keyframes[0]), "a frame resolved against the old figure is resolved again");
+    // The loader gives what a loader that never saw the other documents gives.
+    let fresh = Loader::new().document(&redefined, "p").unwrap();
+    assert_eq!(what_is_drawn(&fourth), what_is_drawn(&fresh));
+    // And back to the earlier definition.
+    let fifth = loader.document(&edited, "p").unwrap();
+    assert_eq!(resolved_against_the_document(&fifth), 3);
+    assert_eq!(what_is_drawn(&fifth), what_is_drawn(&Loader::new().document(&edited, "p").unwrap()));
+}

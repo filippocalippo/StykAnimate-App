@@ -578,6 +578,7 @@ impl Editor {
         if transaction {
             candidates.extend(current.iter().filter_map(uid).filter(|u| !candidates.contains(u)).collect::<Vec<_>>());
         }
+        let scope = crate::prof::scope("commit::changed");
         let changed: Vec<u32> = candidates
             .into_iter()
             .filter(|&id| match (find(&old, id), find(&current, id)) {
@@ -586,6 +587,7 @@ impl Editor {
                 _ => true,
             })
             .collect();
+        drop(scope);
         let mut ids: Vec<String> = keyed_layers;
         for &id in &changed {
             let owner = self.owner(id)?;
@@ -633,13 +635,16 @@ impl Editor {
         let retain = !transaction && changed.iter().all(|&id| find(&old, id).is_some() && find(&current, id).is_some() && playback(&old, id) == playback(&current, id));
         let label = drag.label.clone();
         let selection = drag.before_selection.clone();
+        let scope = crate::prof::scope("commit::planner");
         let mut plan = self.planner(&ids)?;
+        drop(scope);
         // A new figure's layer is settled before any layer captures the frame.
         let counts = &self.uid_counts.as_ref().unwrap().0;
         for id in current.iter().filter_map(uid).filter(|id| !counts.contains_key(id)) {
             plan.assign(id, &self.owner(id)?);
         }
         let presence = |object: &Value| object.path(&["_stykMovieclip", "clock"]).and_then(Value::as_str) == Some("presence");
+        let scope = crate::prof::scope("commit::keys");
         for id in &ids {
             let keys = plan.keys(id);
             let end = num(&Value::object(plan.track(id).clone()), "end").unwrap_or(0.0);
@@ -705,6 +710,7 @@ impl Editor {
             let held = constant();
             plan.write(id, at, &after, Write { easing: Some(key.as_ref().unwrap_or(&held)), ..Write::default() })?;
         }
+        drop(scope);
         self.drag = None;
         self.authored = None;
         if let Some(start) = definitions_start
@@ -712,6 +718,7 @@ impl Editor {
         {
             plan.definitions = figures.split_off(start);
         }
+        let _scope = crate::prof::scope("commit::publish_geometry");
         self.publish_geometry(plan, &label, selection, retain.then_some(after), retain)
     }
 
