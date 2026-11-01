@@ -63,8 +63,11 @@ impl Editor {
         check()?;
         let (Some(drag), Some(_)) = (self.drag.as_ref(), self.authored.as_ref()) else { return Ok(false) };
         let before = drag.before.clone();
+        let scope = crate::prof::scope("commit::sync_origins");
         self.synchronize_origins(&before)?;
+        drop(scope);
         let (drag, edit) = (self.drag.as_ref().unwrap(), self.authored.as_ref().unwrap());
+        let scope = crate::prof::scope("commit::compare");
         let mut ids: Vec<u32> = drag.before.iter().filter_map(uid).collect();
         if edit.transaction {
             ids.extend(objects_of(&edit.frame).iter().filter_map(uid).filter(|u| !ids.contains(u)).collect::<Vec<_>>());
@@ -72,6 +75,7 @@ impl Editor {
         let after: Vec<Value> = objects_of(&edit.frame).into_iter().filter(|o| uid(o).is_some_and(|u| ids.contains(&u))).collect();
         // A gesture compares the figures it took; a command's draft, the whole frame.
         let unchanged = if edit.transaction { same(std::slice::from_ref(&edit.source), std::slice::from_ref(&edit.frame)) } else { same(&drag.before, &after) };
+        drop(scope);
         if unchanged && edit.key_at_playhead_layers.is_empty() {
             self.drag = None;
             self.authored = None;
@@ -87,7 +91,9 @@ impl Editor {
     }
 
     fn finish_authored_drag(&mut self, ids: &[u32], after: &[Value], check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<bool, EditError> {
+        let scope = crate::prof::scope("commit::validate");
         self.validate_spatial_joins()?;
+        drop(scope);
         // A pose stores where its joined figures sit as well as their joins.
         if after.iter().any(|o| join_target(o).is_some()) {
             let roots = self.roots_of(ids)?;
@@ -103,7 +109,9 @@ impl Editor {
             }
         }
         let before = self.drag.as_ref().map(|drag| drag.before.clone()).unwrap_or_default();
+        let scope = crate::prof::scope("commit::sync_origins");
         self.synchronize_origins(&before)?;
+        drop(scope);
         if self.sheet() { self.commit_sheet_pose() } else { self.commit_native_authored_drag_checked(check) }
     }
 
