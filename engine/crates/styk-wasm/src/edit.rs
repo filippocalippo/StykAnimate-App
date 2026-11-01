@@ -168,7 +168,7 @@ impl EditSession {
     /// tree for as long as nobody saved or released it (`release_snapshot`). Copies nothing, and the session goes on
     /// editing: what the save writes is the document of this moment.
     pub fn snapshot(&self) -> f64 {
-        crate::document_export::snapshot(self.session().report().clone())
+        crate::document_export::snapshot(self.session().report().clone(), self.publisher.as_ref().is_some_and(|publisher| publisher.opened.source.is_some()))
     }
 
     /// The interface revision of the document the session started from.

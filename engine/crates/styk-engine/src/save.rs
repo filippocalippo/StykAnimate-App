@@ -40,6 +40,10 @@ pub struct ProjectRequest {
     pub name: Option<String>,
     /// The Pivot original of the project, when the interface holds it for the project (the document has no copy of its own).
     pub source: Option<Source>,
+    /// The document was read from a Pivot file and carries its original (`_stykSource`): the save stores the original first in the payload
+    /// section and its record last in the root, as a save of a project opened from Pivot has always laid them out. A document read from a
+    /// project file is saved in the order it holds them in.
+    pub original_first: bool,
 }
 
 /// A container written.
@@ -183,7 +187,7 @@ pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, ho
     let started = clock();
     let Some(mut document) = trees.last().cloned() else { return Err(SaveError::Refused("errors.documentExportWorker.theDocumentSnapshotWasNotInitialized".into())) };
     debug_assert_eq!(scopes.len() + 1, trees.len(), "one movieclip per document it was entered from");
-    let source = request.source.as_ref().map_or(0, |source| source.bytes.len());
+    let source = request.source.as_ref().map_or_else(|| if request.original_first { carried_len(&document) } else { 0 }, |source| source.bytes.len());
     let _memory = match request.reservation {
         Some(token) => styk_alloc::reserve_named(token, working_bytes(source)),
         None => styk_alloc::reserve(working_bytes(source)),
@@ -207,12 +211,37 @@ pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, ho
             object.set("_stykSource", Value::object(stored));
             vec![bytes]
         }
+        // A project opened from Pivot carries its original in the document: it is stored where the app has always stored it.
+        None if request.original_first => carried_source(&mut document).into_iter().collect(),
         None => Vec::new(),
     };
     let mut written = write(&document, Kind::Styk, &reserved, Some(scene), host)?;
     written.timings.prepare_ms = prepared - started;
     written.timings.total_ms = clock() - started;
     Ok(written)
+}
+
+/// The bytes of the Pivot original a document carries (`_stykSource`), 0 when it carries none.
+fn carried_len(document: &Value) -> usize {
+    match document.get("_stykSource").and_then(|source| source.get("source_base64")) {
+        Some(Value::Blob(blob)) if blob.prefix.is_empty() => blob.bytes.len(),
+        _ => 0,
+    }
+}
+
+/// The Pivot original a document carries, made ready to be written as a save of a project whose original the interface held writes it:
+/// its record is the last member of the root, and the bytes come first in the payload section (the caller reserves them). `None` when the
+/// document carries no original as bytes.
+fn carried_source(document: &mut Value) -> Option<Arc<[u8]>> {
+    let object = document.make_obj()?;
+    let source = object.get("_stykSource")?.clone();
+    let bytes = match source.get("source_base64")? {
+        Value::Blob(blob) if blob.prefix.is_empty() => blob.bytes.clone(),
+        _ => return None,
+    };
+    object.remove("_stykSource");
+    object.set("_stykSource", source);
+    Some(bytes)
 }
 
 /// The container of a figure file (`.stkz`, `.stykmov`) made of the document an export prepared.

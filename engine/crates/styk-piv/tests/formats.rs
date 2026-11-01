@@ -743,3 +743,35 @@ fn a_file_decoded_by_its_owner_gives_the_same_document_or_the_same_refusal() {
         assert_eq!((a.status, a.code, a.message), (b.status, b.code, b.message));
     }
 }
+
+// ---- the description of an original ---------------------------------------------------
+
+/// What the engine says of the file a Pivot project was read from (its version, its SHA-256, the fingerprint of the document read
+/// from it) is what the codec recorded of the same file: the engine computes it so that the codec need not decode the project
+/// again, and a saved project carries the same description either way.
+#[test]
+fn the_description_of_an_original_is_what_the_codec_records() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut compared = 0;
+    for entry in std::fs::read_dir(&dir).expect("fixtures") {
+        let path = entry.expect("entry").path();
+        let name = path.file_name().expect("name").to_string_lossy().to_string();
+        if !name.ends_with(".piv") {
+            continue;
+        }
+        let bytes = std::fs::read(&path).expect("fixture");
+        let Ok(decoded) = decode_document(&bytes, &name, NEVER) else { continue };
+        let facts = decoded.source.as_ref().unwrap_or_else(|| panic!("{name}: a Pivot project describes its file"));
+        let mut service = Service::new();
+        let imported = service.import(&name, &bytes);
+        let (_, recorded) = service.source_record(&str_at(&imported, "sourceId"));
+        assert_eq!((str_at(&recorded, "kind"), number(&recorded, "version")), ("piv".to_string(), f64::from(facts.version)), "{name}: kind and version");
+        assert_eq!(str_at(&recorded, "sha256"), facts.sha256, "{name}: the file");
+        assert_eq!(str_at(&recorded, "document_sha256"), styk_piv::source_digest(&decoded.document).expect("fingerprint"), "{name}: the document read from it");
+        let owned = styk_piv::decode_document_owned(bytes.clone(), &name, NEVER, &styk_doc::fanout::Sequential).expect("owned");
+        let facts_owned = owned.source.expect("owned describes its file too");
+        assert_eq!((facts_owned.version, facts_owned.sha256), (facts.version, facts.sha256.clone()), "{name}: the same by ownership");
+        compared += 1;
+    }
+    assert!(compared >= 5, "{compared} Pivot fixtures compared");
+}

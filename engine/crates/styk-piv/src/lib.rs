@@ -42,6 +42,29 @@ pub struct Decoded {
     pub version: f64,
     /// The file name the service would report (directories and unsafe characters removed).
     pub filename: String,
+    /// What a Pivot project says about the file it was read from; `None` for any other kind.
+    pub source: Option<SourceFacts>,
+}
+
+/// The file a Pivot project was read from: its format version and the SHA-256 of its bytes. With [`source_digest`] of the document
+/// they are the description a saved project carries of its original (`_stykSource`).
+#[derive(Clone, Debug)]
+pub struct SourceFacts {
+    /// The version byte of the file's payload, 2 to 5.
+    pub version: u8,
+    /// The SHA-256 of the file, in lower-case hexadecimal.
+    pub sha256: String,
+}
+
+fn source_facts(document: &styk_doc::Value, version: u8) -> Option<SourceFacts> {
+    Some(SourceFacts { version, sha256: document.get("source_sha256")?.as_str()?.to_string() })
+}
+
+/// The fingerprint of a decoded Pivot document: what the codec records as `document_sha256`, the digest of the document as it was
+/// read from the file (`document_digest` of the decoded report, canonical, as decoded here).
+pub fn source_digest(document: &styk_doc::Value) -> Result<String, CodecError> {
+    let never = || false;
+    Ok(digest::document_digest(&ctx::Ctx::new(&never), document, true, pyjson::Origin::Decoded)?)
 }
 
 fn cancel_ctx(cancel: &dyn Fn() -> bool) -> ctx::Ctx<'_> {
@@ -72,7 +95,8 @@ pub fn decode_document_with(bytes: &[u8], filename: &str, cancel: &dyn Fn() -> b
     let native: Option<&dyn NativeDocuments> = None;
     let imported = store::decode_upload(&ctx, native, bytes, &name, &name, kind, false)?;
     let version = imported.document.get("version").and_then(styk_doc::Value::as_f64).unwrap_or(5.0);
-    Ok(Decoded { document: imported.document, kind: kind.name(), version, filename: name })
+    let source = (kind == store::Kind::Piv).then(|| piv::payload_version(bytes).ok().and_then(|version| source_facts(&imported.document, version))).flatten();
+    Ok(Decoded { document: imported.document, kind: kind.name(), version, filename: name, source })
 }
 
 /// [`decode_document`] for a caller that has no use for the file afterwards. A Pivot project's file is dropped as soon as it has
@@ -85,10 +109,12 @@ pub fn decode_document_owned(bytes: Vec<u8>, filename: &str, cancel: &dyn Fn() -
         return decode_document_with(&bytes, filename, cancel, fan);
     }
     let ctx = ctx::Ctx::with_fan(cancel, fan);
-    let document = piv::decode_piv_owned(&ctx, bytes, &name, piv::frames::FrameMode::Build)?.report;
-    let imported = store::finish_upload(&ctx, document, None, kind)?;
+    let decoded = piv::decode_piv_owned(&ctx, bytes, &name, piv::frames::FrameMode::Build)?;
+    let payload_version = decoded.version;
+    let imported = store::finish_upload(&ctx, decoded.report, None, kind)?;
     let version = imported.document.get("version").and_then(styk_doc::Value::as_f64).unwrap_or(5.0);
-    Ok(Decoded { document: imported.document, kind: kind.name(), version, filename: name })
+    let source = source_facts(&imported.document, payload_version);
+    Ok(Decoded { document: imported.document, kind: kind.name(), version, filename: name, source })
 }
 
 /// Writes `document` as a Pivot 5 project.

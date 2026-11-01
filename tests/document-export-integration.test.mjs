@@ -19,68 +19,19 @@ function environment(t, {codecHost = new FakeCodecHost(), ...options} = {}) {
   return exporter;
 }
 
-/** The codec answering a save whose original is gone (404) or was never binary (422). */
-function sourceService(sourceStatus) {
-  const calls = {source: 0, export: 0};
-  const codecHost = new FakeCodecHost(request => {
-    const path = request.path.split('?')[0];
-    if (request.method === 'GET' && path === '/api/source') {
-      calls.source++;
-      return {status: sourceStatus, headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code: sourceStatus === 422 ? 'no_source' : 'not_found'})};
-    }
-    if (request.method === 'POST' && path === '/api/export') {
-      calls.export++;
-      return {status: 410, headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code: 'source_expired', error: {message: 'The original source is unavailable.'}})};
-    }
-    return {status: 404};
-  });
-  return {codecHost, calls};
-}
-
 /** The document the engine owns, from which a `.styk` save is written. */
 const project = (document = createDemo()) => ownedEditorFor({demo: false}, document);
 
-test('a missing original source rejects native save without publishing a blob', {timeout: 15000}, async t => {
-  const service = sourceService(404), exporter = environment(t, {codecHost: service.codecHost, timeoutMs: 5000});
-  const editor = project(), before = structuredClone(editor.report);
-  let published;
-  await assert.rejects(async () => { published = await exporter.export(editor.report, {sourceId: 'missing-original'}); },
-    error => error.status === 404 && error.messageKey === 'errors.documentExportWorker.theOriginalSourceIsUnavailable');
-  assert.equal(published, undefined);
-  assert.deepEqual(service.calls, {source: 1, export: 0}, 'the native container is written locally; the codec only supplies the original');
-  assert.equal(exporter.lastTimings, null);
-  assert.equal(exporter.worker, null);
-  assert.deepEqual(editor.report, before, 'a failed save preserves the live editable document');
-});
-
-test('a valid no-binary-source response still saves locally without an export service fallback', {timeout: 15000}, async t => {
-  const service = sourceService(422), exporter = environment(t, {codecHost: service.codecHost, timeoutMs: 5000});
-  const editor = project(), before = structuredClone(editor.report);
-  const output = await exporter.export(editor.report, {sourceId: 'nonbinary-import'});
-  assert.ok(output instanceof Blob && output.size > 0);
-  const reopened = (await decodeDocument(new Uint8Array(await output.arrayBuffer()), 'styk')).document;
-  assert.equal(reopened._stykSource, undefined);
-  assert.equal(reopened.keyframes[0].objects[0].root_x, editor.report.keyframes[0].objects[0].root_x);
-  assert.deepEqual(service.calls, {source: 1, export: 0});
-  assert.deepEqual(editor.report, before);
-});
-
-test('the Pivot original the codec holds is stored first and the save is written by the engine, not from the document the interface reads', {timeout: 15000}, async t => {
+test('a project opened from Pivot saves with its original, which the document carries', {timeout: 15000}, async t => {
   const original = randomBytes(70000), digest = hash(original);
-  const codecHost = new FakeCodecHost(request => {
-    if (request.path.split('?')[0] !== '/api/source') return {status: 404};
-    const metadata = new TextEncoder().encode(JSON.stringify({kind: 'piv', version: 5, sha256: digest, document_sha256: 'a'.repeat(64), document_digest_version: 3}));
-    const record = new Uint8Array(12 + metadata.length + original.length);
-    record.set(new TextEncoder().encode('STYKSRC1')); new DataView(record.buffer).setUint32(8, metadata.length, true);
-    record.set(metadata, 12); record.set(original, 12 + metadata.length);
-    return {status: 200, headers: {'Content-Type': 'application/octet-stream'}, body: record.buffer};
-  });
-  const exporter = environment(t, {codecHost}), editor = project();
-  const output = await exporter.export(editor.report, {sourceId: 'a-pivot-project', name: 'From Pivot'});
+  const document = createDemo();
+  document._stykSource = {kind: 'piv', version: 5, sha256: digest, document_sha256: 'a'.repeat(64), document_digest_version: 3, source_base64: original.toString('base64')};
+  const exporter = environment(t), editor = project(document);
+  const output = await exporter.export(editor.report, {name: 'From Pivot'});
   const reopened = await openDocument(new Uint8Array(await output.arrayBuffer()), 'styk');
   assert.equal(reopened._styk.name, 'From Pivot');
-  assert.equal(hash(Buffer.from(reopened._stykSource.source_base64, 'base64')), digest);
-  assert.equal(reopened._stykSource.kind, 'piv');
+  assert.equal(hash(Buffer.from(reopened._stykSource.source_base64, 'base64')), digest, 'the original is in the file, byte for byte');
+  assert.deepEqual({...reopened._stykSource, source_base64: undefined}, {kind: 'piv', version: 5, sha256: digest, document_sha256: 'a'.repeat(64), document_digest_version: 3, source_base64: undefined});
 });
 
 test('a reused worker saves the same bytes again, and edits, unknown fields and pictures reopen as they were', async t => {

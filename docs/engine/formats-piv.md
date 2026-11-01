@@ -36,14 +36,17 @@ Every build runs it the same way: in a worker of the editor page.
   request over that port into a standard `Response`.
 - **Cancellation.** On a cross-origin isolated page (every host sends COOP/COEP) each job has
   an `Int32Array` over a `SharedArrayBuffer`: cancelling sets it, the codec sees it at its next
-  checkpoint and answers `499 cancelled`, and the worker keeps its cache and leases; requests
+  checkpoint and answers `499 cancelled`, and the worker keeps its cache; requests
   of that job still queued are answered `499` without running. Without isolation the busy
   worker is terminated and the next request starts a new one, unless other jobs wait on it.
 - **Profiles** (`codecProfile()` in `codec-web-host.mjs`). The web build (`<meta name="styk-codec"
   content="browser">`, or `?codec=browser`) uses `Limits::web()`, embeds each Pivot import's
   verified original in its document and announces the converter while it loads; the desktop
-  app and the development server use `Limits::desktop()` and keep originals leased in the
-  codec, as the desktop service did.
+  app and the development server use `Limits::desktop()`. Neither keeps an original in the codec
+  (the engine describes the file it opened and the document carries it); the Rust service still
+  answers the lease routes (`/api/source/keep`, `retain`, `release`) because the Python
+  service's recordings are replayed against it, and the app does not call them. The worker ends
+  two seconds after its last job on both profiles.
 - **Samples.** `/api/samples` and `/api/open` are not served by the codec. On the desktop the
   main process lists the `.piv`/`.stk` files beside a source checkout and reads one
   (`desktop/samples.cjs`, the rules of `ProjectStore.samples`, `safe_child` and `open`, with

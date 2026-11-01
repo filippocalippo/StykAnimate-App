@@ -17,7 +17,7 @@ import {messageError} from './localized-error.mjs';
  * page) and 'desktop' otherwise; the desktop app is always 'desktop'.
  * 'web' has the browser build's smaller limits, embeds an import's original in its
  * document and announces the converter's first download; 'desktop' has the desktop
- * limits and keeps originals in the codec's leases. */
+ * limits. A project's original is carried by its document in both. */
 export function codecProfile(scope = globalThis) {
   if (scope.stykDesktop) return 'desktop';
   const requested = new URLSearchParams(scope.location?.search ?? '').get('codec')
@@ -25,9 +25,9 @@ export function codecProfile(scope = globalThis) {
   return requested === 'browser' ? 'web' : 'desktop';
 }
 
-/** How long the web build's codec worker stays once no job needs it. It holds nothing between jobs (a Pivot project's original lives in
- * its document), but the memory of what it decoded cannot be given back to the browser: only ending the worker frees it. The desktop
- * codec keeps originals in leases the worker holds, so it never ends. */
+/** How long the codec worker stays once no job needs it. It holds nothing between jobs (a Pivot project's original lives in its
+ * document), but the memory of what it decoded cannot be given back: only ending the worker frees it (100 to 160 MiB of the
+ * renderer after opening a Pivot project). */
 const IDLE_STOP_MS = 2000;
 
 export class BrowserCodecHost {
@@ -43,7 +43,7 @@ export class BrowserCodecHost {
 
   constructor({createWorker = () => new Worker(new URL('./codec-web-worker.mjs', import.meta.url),
     {type: 'module', name: 'StykAnimate Pivot codec'}), limits = codecProfile(),
-  sharedCancel = globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer === 'function', idleStopMs = limits === 'web' ? IDLE_STOP_MS : 0} = {}) {
+  sharedCancel = globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer === 'function', idleStopMs = IDLE_STOP_MS} = {}) {
     this.#idleStopMs = idleStopMs;
     this.#createWorker = createWorker;
     this.#limits = limits === 'web' ? 'web' : 'desktop';

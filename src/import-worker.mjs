@@ -6,8 +6,6 @@ import {diagnosticDetails} from './telemetry-schema.mjs';
 import {NATIVE_FRAME_CONTENT_TYPE, unpackNativeFrameResponse} from './import-wire.mjs';
 import {nativeFileCodec} from './native-file-codec.mjs';
 import {codecRequest} from './codec-request.mjs';
-import {bytesToBase64} from './base64.mjs';
-import {decodeSourceRecord} from './source-record.mjs';
 const pending = new Map();
 const receipts = new Map();
 
@@ -51,36 +49,8 @@ function codecFailure(response, result) {
   return error;
 }
 
-/** Keeps the original of a Pivot project in the codec, leased to the owner, for saving the document the engine read from it. */
-async function keepSource(message, signal) {
-  if (!(message.bytes instanceof ArrayBuffer)) throw messageError(new Error(''), "errors.importWorker.theImporterDidNotReceiveTheCompleteFile", {});
-  const headers = {'Content-Type': 'application/octet-stream', 'X-Styk-Job-Id': message.jobId, 'X-Styk-Source-Owner': message.sourceOwner};
-  const response = await codecRequest(message, `/api/source/keep?filename=${encodeURIComponent(message.filename)}`, {method: 'POST', headers, body: message.bytes, signal}).catch(error => {
-    error.telemetryCode = 'backend_unavailable'; error.telemetryStage = 'request'; throw error;
-  });
-  let result;
-  try { result = JSON.parse(await response.text()); }
-  catch {
-    const error = messageError(new Error(''), 'errors.importWorker.serviceFailed', {status:response.status});
-    error.status = response.status; error.telemetryCode = 'backend_unavailable'; error.telemetryStage = 'request';
-    throw error;
-  }
-  if (!response.ok || result?.ok === false) throw codecFailure(response, result);
-  if (!message.embedSource) return result;
-  // The web build keeps no lease in the codec, which a page that is not cross-origin isolated restarts on
-  // cancellation: the project carries its original, which the page has, with the codec's description of it.
-  const sourceHeaders = {'X-Styk-Job-Id': message.jobId};
-  // Only the description: the page has the original, and the worker would keep a second copy of it until it was collected.
-  const record = await codecRequest(message, `/api/source?id=${encodeURIComponent(result.sourceId)}&meta=1`, {headers: sourceHeaders, signal});
-  if (!record.ok) throw Object.assign(messageError(new Error(''), 'errors.documentExportWorker.theFileServiceReturnedAnInvalidSourceRecord', {}), {status: record.status});
-  const source = decodeSourceRecord(await record.arrayBuffer(), {metadataOnly: true});
-  await codecRequest(message, '/api/source/release', {method: 'POST', headers: {...sourceHeaders, 'Content-Type': 'application/json'}, body: JSON.stringify({ownerId: result.sourceOwner}), signal});
-  return {ok: true, sourceId: null, filename: result.filename, kind: result.kind, version: result.version, sourceDescription: source.metadata};
-}
-
 async function importRequest(message, signal) {
   const started = performance.now();
-  if(message.operation==='keep')return keepSource(message, signal);
   if(message.operation==='import' && /\.(nodes|nodemc|stknds|zip)$/i.test(message.filename??'')){
     if(!(message.bytes instanceof ArrayBuffer))throw messageError(new Error(''), "errors.importWorker.theImporterDidNotReceiveTheCompleteFile", {});
     const {importStickNodes}=await import('./sticknodes/adapter.mjs');
@@ -88,7 +58,6 @@ async function importRequest(message, signal) {
   }
   const headers = {Accept: `${NATIVE_FRAME_CONTENT_TYPE}, application/json`};
   if (message.jobId) headers['X-Styk-Job-Id'] = message.jobId;
-  if (message.sourceOwner) headers['X-Styk-Source-Owner'] = message.sourceOwner;
   let path, body;
   if (message.operation === 'import') {
     if (!(message.bytes instanceof ArrayBuffer)) throw messageError(new Error(''), "errors.importWorker.theImporterDidNotReceiveTheCompleteFile", {});
@@ -143,27 +112,6 @@ async function importRequest(message, signal) {
   return result;
 }
 
-async function embedBrowserSource(result,message,signal) {
-  if (!message.embedSource || !result.sourceOwner || !result.sourceId) return;
-  // The web build keeps no lease in the codec, which a page that is not
-  // cross-origin isolated restarts on cancellation: the editable project
-  // carries its verified original before it is published to the page.
-  const headers = {'X-Styk-Job-Id':message.jobId};
-  const response = await codecRequest(message, `/api/source?id=${encodeURIComponent(result.sourceId)}`, {headers,signal});
-  if (!response.ok) throw Object.assign(messageError(new Error(''), 'errors.documentExportWorker.theFileServiceReturnedAnInvalidSourceRecord', {}), {status:response.status});
-  const source = decodeSourceRecord(await response.arrayBuffer());
-  // The fingerprint the codec recorded must match the bytes that crossed to this worker.
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', source.bytes));
-  if ([...digest].map(byte => byte.toString(16).padStart(2, '0')).join('') !== source.metadata.sha256)
-    throw messageError(new Error(''), "errors.nativeContainer.embeddedOriginalSourceFingerprintDoesNotMatch", {});
-  result.document._stykSource = {...source.metadata,source_base64:bytesToBase64(source.bytes)};
-  result.timings.document_bytes = Number(result.timings.document_bytes || 0) + result.document._stykSource.source_base64.length;
-  await codecRequest(message, '/api/source/release', {method:'POST',headers:{...headers,'Content-Type':'application/json'},
-    body:JSON.stringify({ownerId:result.sourceOwner}),signal});
-  result.sourceId = null;
-  delete result.sourceOwner;
-}
-
 self.addEventListener('message', event => {
   const message = event.data;
   if (!message || !Number.isInteger(message.id)) return;
@@ -179,7 +127,6 @@ self.addEventListener('message', event => {
   let stage = 'decode';
   importRequest(message, controller.signal).then(async result => {
     stage = 'prepare';
-    if (!controller.signal.aborted && message.operation === 'import') await embedBrowserSource(result,message,controller.signal);
     if (!controller.signal.aborted) await sendResult(message.id, result, controller.signal);
   }).catch(error => {
     if (!controller.signal.aborted) self.postMessage({id: message.id, ok: false, error: errorMessage(error, stage)});

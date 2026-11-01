@@ -253,7 +253,6 @@ async function runDocumentExport(format, consume, { recovery = false, controller
       format,
       scopes: recovery ? movieclipScopes(editor) : undefined,
       name: recovery ? editor._movieclipScopes?.[0]?.parent.name ?? editor.name : editor.name,
-      sourceId: state.sourceId,
       figureTypeId: editor.object?.figure_type_id,
       figureUid: editor.selectedUid,
       tick: editor.tick,
@@ -301,7 +300,6 @@ const state = {
   depthHeld: false,
   locked: new Set(),
   hidden: new Set(),
-  sourceId: null,
   documentToken: null,
   dirtyRender: true,
   drag: null,
@@ -3205,7 +3203,6 @@ async function acceptImport(
   name,
   { openToken, recoveryId } = {},
 ) {
-  try {
   let report = result.document ?? result.report ?? result;
   if (report.format === "stykanimate") report = report.document;
   const savedDraft = result.savedDraft ?? Boolean(report._styk?.simpleFrameDraft);
@@ -3232,8 +3229,6 @@ async function acceptImport(
         initialFrameIndex: kind === "piv" && !savedDraft ? "last" : 0,
       },
     ), {openToken, recoveryId})) return false;
-    state.sourceId = result.sourceId || null;
-    importer.adoptSource(result);
     state.hidden.clear();
     state.locked.clear();
     images.clear();
@@ -3248,9 +3243,6 @@ async function acceptImport(
   );
   warmPlayback({immediate:true});
   return true;
-  } finally {
-    if (result.sourceOwner !== importer.activeSourceOwner) void importer.releaseSource(result);
-  }
 }
 /**
  * Opens a project. `load(session)` publishes it in the editor: a load that takes the `session` options, which
@@ -3267,9 +3259,9 @@ async function openProject(load, { blank = false, openToken, recoveryId } = {}) 
     catch (error) { projects.failed(); throw error; }
     projects.opened({ blank });
     // The open document is a new project: nothing of the previous one in front applies to it.
-    state.documentToken = null; state.sourceId = null; state.lastImport = null; state.lastImportWarnings = [];
+    state.documentToken = null; state.lastImport = null; state.lastImportWarnings = [];
     lastSave = null; recoveredEpoch = -1; recoveryDeadline.reset(); state.recoveryBackoff = 1;
-    if (!beside) { importer.adoptSource(null); if (replaced) void desktop?.releaseDocument?.(replaced)?.catch(fail); }
+    if (!beside && replaced) void desktop?.releaseDocument?.(replaced)?.catch(fail);
     scheduleProjectPicture();
     if (desktop?.activateDocument) {
       // A launch-time file open races init()'s document activation; the file's
@@ -3355,7 +3347,7 @@ function captureProject() {
   return {
     view: { ...state.view }, fitted: isFittedView(),
     hidden: new Set(state.hidden), locked: new Set(state.locked),
-    documentToken: state.documentToken, sourceId: state.sourceId, sourceOwner: importer.detachSource(),
+    documentToken: state.documentToken,
     lastImport: state.lastImport, lastImportWarnings: state.lastImportWarnings, lastSave,
     recoveryCurrent: recoveredEpoch === saveMutationEpoch,
   };
@@ -3363,8 +3355,7 @@ function captureProject() {
 function restoreProject(saved) {
   state.view = saved.view;
   state.hidden = saved.hidden; state.locked = saved.locked;
-  state.documentToken = saved.documentToken; state.sourceId = saved.sourceId;
-  importer.attachSource(saved.sourceOwner);
+  state.documentToken = saved.documentToken;
   state.lastImport = saved.lastImport; state.lastImportWarnings = saved.lastImportWarnings; lastSave = saved.lastSave;
   // Saves follow the project in front. Sent now, in order, so no save can reach the desktop before it.
   if (saved.documentToken) void desktop?.selectDocument?.(saved.documentToken)?.catch(fail);
@@ -3388,7 +3379,7 @@ function projectShown(saved) {
 /** The last project closed: the window keeps a new, empty one in its place. */
 function blankProject() {
   editor.newDocument();
-  state.documentToken = null; state.sourceId = null; state.lastImport = null; state.lastImportWarnings = [];
+  state.documentToken = null; state.lastImport = null; state.lastImportWarnings = [];
   state.hidden.clear(); state.locked.clear();
   lastSave = null;
   if (desktop?.activateDocument) {
@@ -3404,7 +3395,6 @@ function releaseProject(record) {
     drawingResourcesFor(session.report)?.dispose();
     for (const scope of session._movieclipScopes ?? []) drawingResourcesFor(scope.parent.report)?.dispose();
   }
-  if (saved.sourceOwner) void importer.releaseSource(saved.sourceOwner);
   if (desktop) {
     if (saved.documentToken) void Promise.resolve(desktop.deleteRecovery?.({ documentToken: saved.documentToken })).catch(() => {})
       .then(() => desktop.releaseDocument?.(saved.documentToken)).catch(fail);
@@ -3425,7 +3415,7 @@ async function writeRestingRecovery(record, signal) {
   signal.addEventListener("abort", abort, { once: true });
   exportJobs.add(job);
   try {
-    const blob = await documentExporter.export(report, { format: "styk", name, sourceId: saved.sourceId, scopes: movieclipScopes(record.session), signal: controller.signal });
+    const blob = await documentExporter.export(report, { format: "styk", name, scopes: movieclipScopes(record.session), signal: controller.signal });
     if (desktop) return await writeNativeBlob(desktop, blob, { recovery: true, name, signal: controller.signal, documentToken: saved.documentToken });
     return await browserRecovery.write(blob, name, controller.signal, record.id);
   } finally {
@@ -3570,14 +3560,14 @@ async function importMediaFile(
 async function chooseSticknodesFile(file,isCurrent=()=>true) {
   const onProgress=p=>{if(isCurrent())status(`${p.phase || interfaceText("app.importing2")}…`,false,true);};
   const open={layerTimeline:editor.layerTimeline};
-  let result=await importer.importFile(file,{onProgress,open,project:/\.piv$/i.test(file.name)});
-  if(!isCurrent()){void importer.releaseSource(result);return null;}
+  let result=await importer.importFile(file,{onProgress,open});
+  if(!isCurrent())return null;
   if(result.kind==='sticknodes-archive'){
     const index=await dialogs.chooseSticknodesEntry(result.entries);
     if(index===null||!isCurrent())return null;
     result=await importer.importFile(file,{entryIndex:index,onProgress,open});
   }
-  if(!isCurrent()){void importer.releaseSource(result);return null;}
+  if(!isCurrent())return null;
   return result;
 }
 async function importFiles(files) {
@@ -3616,7 +3606,7 @@ async function importFilesTracked(files) {
         continue;
       }
       const result = await chooseSticknodesFile(file,()=>seq===importSequence);
-      if (!result || seq !== importSequence) { void importer.releaseSource(result); outcome = 'cancelled'; return false; }
+      if (!result || seq !== importSequence) { outcome = 'cancelled'; return false; }
       if (telemetry.consent.diagnostics) context.complexity = documentComplexity(result.document);
       telemetry.operation({ ...context, operation: 'import', stage: 'decode', outcome: 'succeeded' }, result.timings?.decode_ms);
       telemetry.performance.record('decode',result.timings?.decode_ms);
@@ -3683,7 +3673,7 @@ async function acceptNativeFileTracked(result) {
 async function openSample(path) {
   pause();
   status({messageKey: "app.decodingPivotFile", messageParams: {}}, false, true);
-  try { await acceptImport(await importer.openSample(path,{open:{layerTimeline:editor.layerTimeline},project:/\.piv$/i.test(path)})); } catch (error) { throw persistentFailure(error); }
+  try { await acceptImport(await importer.openSample(path,{open:{layerTimeline:editor.layerTimeline}})); } catch (error) { throw persistentFailure(error); }
 }
 function saveNative({ saveAs = false } = {}) {
   if (!manualSave.active) finishCurrentEdit();

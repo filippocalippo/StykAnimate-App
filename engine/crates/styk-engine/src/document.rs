@@ -217,6 +217,9 @@ pub struct OpenedDocument {
     pub version: f64,
     /// The typed views and image atlas of the tree.
     pub typed: Typed,
+    /// What a Pivot project says of its original (`_stykSource` without the file: kind, version, the SHA-256 of the file and of the
+    /// document read from it); the file is added by [`OpenedDocument::attach_source`]. `None` for any other kind of document.
+    pub source: Option<styk_doc::Obj>,
     /// Where the open's time went, in milliseconds by the engine's clock: `decode` (the file read into a document), `prepare` (the
     /// load's checks and normalization), `views` (the typed views), `check` (what was left of the skeleton's checksum when the
     /// rest was done).
@@ -291,12 +294,12 @@ fn steps(fan: &OpenFanout<'_>, began: f64) -> Vec<(&'static str, f64)> {
 
 /// A file's document, what kind of file it was, its version and the name it is shown under. A native file's skeleton checksum is left
 /// to `check`, to be asked for before the document is believed.
-fn read_file(bytes: &[u8], name: &str, cancel: &dyn Fn() -> bool, fan: &OpenFanout<'_>, check: &mut Option<styk_formats::container::Deferred>) -> Result<(Value, &'static str, f64, String), OpenError> {
+fn read_file(bytes: &[u8], name: &str, cancel: &dyn Fn() -> bool, fan: &OpenFanout<'_>, check: &mut Option<styk_formats::container::Deferred>) -> Result<Read, OpenError> {
     let extension = extension(name).to_ascii_lowercase();
     match extension.as_str() {
         "piv" | "stk" => {
             let decoded = styk_piv::decode_document_with(bytes, name, cancel, fan).map_err(OpenError::from_codec)?;
-            Ok((decoded.document, decoded.kind, decoded.version, decoded.filename))
+            Ok((decoded.document, decoded.kind, decoded.version, decoded.filename, decoded.source))
         }
         other => {
             let Some(kind) = styk_formats::Kind::from_extension(other) else {
@@ -306,9 +309,23 @@ fn read_file(bytes: &[u8], name: &str, cancel: &dyn Fn() -> bool, fan: &OpenFano
             let (document, deferred) = styk_formats::files::open_document_deferred(bytes, kind, fan).map_err(OpenError::from_file)?;
             *check = Some(deferred);
             let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
-            Ok((document, kind.name(), version, name.to_string()))
+            Ok((document, kind.name(), version, name.to_string(), None))
         }
     }
+}
+
+/// A file read: its document, what kind of file it was, its version, the name it is shown under, and what a Pivot project says of its file.
+type Read = (Value, &'static str, f64, String, Option<styk_piv::SourceFacts>);
+
+/// `_stykSource` without the file, in the order the codec wrote it: kind, version, the file's SHA-256, the document's, and the version of that digest.
+fn describe_source(facts: &styk_piv::SourceFacts, document_sha256: String) -> styk_doc::Obj {
+    let mut description = styk_doc::Obj::new();
+    description.set("kind", Value::str("piv"));
+    description.set("version", Value::Num(f64::from(facts.version)));
+    description.set("sha256", Value::str(&facts.sha256));
+    description.set("document_sha256", Value::str(&document_sha256));
+    description.set("document_digest_version", Value::Num(3.0));
+    description
 }
 
 /// The extension of a file name, lower case.
@@ -338,24 +355,38 @@ impl Engine {
         let _memory = styk_alloc::reserve(open_estimate(length)).map_err(OpenError::out_of_memory)?;
 
         let mut check = None;
-        let (document, kind, version, name) = match source {
+        let (document, kind, version, name, facts) = match source {
             OpenSource::File { bytes, name } => read_file(bytes, name, cancel, &fan, &mut check)?,
             OpenSource::Owned { bytes, name } => match extension(name).to_ascii_lowercase().as_str() {
                 "piv" | "stk" => {
                     let decoded = styk_piv::decode_document_owned(bytes, name, cancel, &fan).map_err(OpenError::from_codec)?;
-                    (decoded.document, decoded.kind, decoded.version, decoded.filename)
+                    (decoded.document, decoded.kind, decoded.version, decoded.filename, decoded.source)
                 }
                 _ => read_file(&bytes, name, cancel, &fan, &mut check)?,
             },
             OpenSource::Json { bytes, name } => {
                 let document = styk_doc::json::parse(bytes).map_err(|_| OpenError::unreadable())?;
                 let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
-                (document, "json", version, name.to_string())
+                (document, "json", version, name.to_string(), None)
             }
         };
         let decoded = self.now();
+        // A Pivot project's fingerprint (what the codec records of the document read from the file) is computed on a helper while the
+        // document is prepared: it holds the document as it was read, and the preparation copies what it changes.
+        let fingerprint = facts.map(|facts| {
+            let document = document.clone();
+            (facts, styk_doc::fanout::start(&fan, move || styk_piv::source_digest(&document).map_err(|error| error.message)))
+        });
         let opened = self.prepare_opened(document, kind, version, name, options, cancel, &fan);
         let prepared = self.now();
+        let source = match (fingerprint, &opened) {
+            (Some((facts, digest)), Ok(_)) => match digest.wait(&fan) {
+                Ok(Ok(document_sha256)) => Some(describe_source(&facts, document_sha256)),
+                Ok(Err(message)) => return Err(OpenError::decode(message)),
+                Err(_) => return Err(OpenError::worker_lost()),
+            },
+            _ => None,
+        };
         // A skeleton that does not match its checksum is the file's error, whatever became of the document read from it. A stopped
         // open does not wait for the check.
         match check {
@@ -365,6 +396,7 @@ impl Engine {
                     return Err(OpenError::cancelled());
                 }
                 opened.map(|mut opened| {
+                    opened.source = source;
                     opened.timings.insert(0, ("decode", decoded - began));
                     opened.timings.push(("check", self.now() - prepared));
                     opened.timings.extend(steps(&fan, began));
@@ -372,6 +404,7 @@ impl Engine {
                 })
             }
             _ => opened.map(|mut opened| {
+                opened.source = source;
                 opened.timings.insert(0, ("decode", decoded - began));
                 opened.timings.extend(steps(&fan, began));
                 opened
@@ -412,7 +445,7 @@ impl Engine {
         let lineage = self.inner.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let views = self.now() - prepared;
         let prepare = prepared - started;
-        Ok(OpenedDocument { tree: tree.clone(), indexes, name, kind, version, typed: Typed { tree, loader, prepared: prepared_views, assets, lineage }, timings: vec![("prepare", prepare), ("views", views)] })
+        Ok(OpenedDocument { tree: tree.clone(), indexes, name, kind, version, typed: Typed { tree, loader, prepared: prepared_views, assets, lineage }, source: None, timings: vec![("prepare", prepare), ("views", views)] })
     }
 
     /// Makes the document that `typed` belongs to the engine's document, at `revision`, with `tree` as it
@@ -580,15 +613,14 @@ impl OpenedDocument {
 }
 
 impl OpenedDocument {
-    /// Gives the document the Pivot file it was read from, as a saved native document carries its source
-    /// (`_stykSource`: the codec's description of the file and the file itself), so that saving it needs no
-    /// copy of the file anywhere else. `description` is an object; the file is added to it as `source_base64`.
-    pub fn attach_source(&mut self, description: &Value, file: Vec<u8>) -> Result<(), OpenError> {
-        let Some(description) = description.as_obj() else {
-            return Err(OpenError::decode("The description of the original source is not an object."));
+    /// Gives the document the Pivot file it was read from, as a saved native document carries its source (`_stykSource`: the
+    /// description the open made of the file, and the file itself), so that saving it needs no copy of the file anywhere else.
+    pub fn attach_source(&mut self, file: Arc<[u8]>) -> Result<(), OpenError> {
+        let Some(description) = &self.source else {
+            return Err(OpenError::decode("The document was not read from a Pivot file."));
         };
         let mut source = description.clone();
-        source.set("source_base64", Value::Blob(Arc::new(styk_doc::Blob { prefix: Arc::from(""), bytes: Arc::from(file) })));
+        source.set("source_base64", Value::Blob(Arc::new(styk_doc::Blob { prefix: Arc::from(""), bytes: file })));
         let mut root = self.tree.as_obj().cloned().ok_or_else(|| OpenError::decode("The document is not an object."))?;
         root.set("_stykSource", Value::object(source));
         self.tree = Value::object(root);

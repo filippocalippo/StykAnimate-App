@@ -115,12 +115,18 @@ export class Opening {
   get timings() { return this.meta.timings; }
   get lineage() { return this.meta.lineage; }
 
+  /** Whether the document was read from a Pivot file it can carry (`attachSource`). */
+  get hasSource() { return this.meta.source === true; }
+
   /** Gives the document the Pivot file it was read from, as a saved native document carries its source (`_stykSource`). */
-  attachSource(description, bytes) {
+  attachSource(bytes) {
     if (!this.handle) throw new Error('This opening has been released.');
     try {
       this.engine.handle.admit_copy(bytes.byteLength);
-      this.handle.attach_source(JSON.stringify(description), bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+      // Written once, where the document keeps it: no copy of it in the engine's memory first.
+      const at = this.handle.begin_source(bytes.byteLength);
+      new Uint8Array(this.engine.join.memory.buffer, at, bytes.byteLength).set(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+      this.handle.end_source();
     } catch (error) { throw openFailure(error); }
   }
 

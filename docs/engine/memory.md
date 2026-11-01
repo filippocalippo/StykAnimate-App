@@ -217,9 +217,6 @@ refused only where the code asks fallibly (`try_reserve`: the picture buffers, t
   keep the last published views instead.
 - Undo and redo rebuild records the opened tree shares, and the tree after an undo of a movieclip edit of tdd2
   takes 62 MiB more than the opened one (unpacked pose arrays).
-- The desktop codec worker holds a Pivot project's original for the life of the project (about 100 to 160 MiB of the
-  renderer for a 21 to 39 MiB file; see "The renderer's private bytes"). Keeping the original in the document, as the
-  web build does, needs the document fingerprint computed without the codec's second decode, in the engine.
 - The history accounts an entry by the size of the records it replaces (100 MiB for one movieclip edit of
   testingupload.styk, 3 MiB of memory), so the byte limit retires older entries sooner than the memory needs.
 

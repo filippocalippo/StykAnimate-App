@@ -70,7 +70,7 @@ test('worker rejection preserves diagnostics and does not discard a healthy work
 
 test('a sample is imported from the bytes the desktop read, under its own name',async t=>{
   const read=[],{workers,open}=environment(t,{readSample:path=>{read.push(path);return {ok:true,name:'sheep.stk',bytes:new Uint8Array([7,8,9]).subarray(1)};}});
-  const [pending]=await open('Pivot Animator v5/Figures/sheep.stk',{project:false});
+  const [pending]=await open('Pivot Animator v5/Figures/sheep.stk');
   assert.deepEqual(read,['Pivot Animator v5/Figures/sheep.stk']);
   const message=workers[0].messages[0];
   assert.equal(message.operation,'import');assert.equal(message.filename,'sheep.stk');
@@ -80,7 +80,7 @@ test('a sample is imported from the bytes the desktop read, under its own name',
 
 test('a sample the desktop refuses fails with the codec service\'s own answer and starts no import',async t=>{
   const {workers,client}=environment(t,{readSample:()=>({ok:false,status:404,code:'file_not_found',error:'This project file no longer exists.'})});
-  await assert.rejects(client.openSample('gone.piv',{project:true}),error=>error.message==='This project file no longer exists.'&&error.code==='file_not_found'&&
+  await assert.rejects(client.openSample('gone.piv'),error=>error.message==='This project file no longer exists.'&&error.code==='file_not_found'&&
     error.status===404&&error.telemetryCode==='backend_rejected'&&error.telemetryStage==='request');
-  assert.equal(workers[0].messages.length,0);assert.equal(client.sourceOwners.size,0);
+  assert.equal(workers[0].messages.length,0);
 });

@@ -111,7 +111,7 @@ export class DocumentExporter {
    * from (`reports`, outermost first) and the movieclip of each that the next document is the document of (`typeIds`): the
    * project is written with them folded in, as a recovery copy stores it.
    * @returns {Promise<Blob>} Native .styk/.stkz or Pivot .piv/.stk bytes. */
-  async export(report, {sourceId, format = 'styk', name, figureTypeId, figureUid, figureUids, tick, signal, getRevision, revision, scopes} = {}) {
+  async export(report, {format = 'styk', name, figureTypeId, figureUid, figureUids, tick, signal, getRevision, revision, scopes} = {}) {
     if (this.disposed) throw messageError(new Error(''), "errors.documentExport.theDocumentExporterHasBeenDisposed", {});
     if (!report || typeof report !== 'object') throw messageError(new TypeError(''), "errors.documentExport.exportRequiresAnEditableDocument", {});
     if (!['piv', 'stk', 'styk', 'stkz', 'stykmov'].includes(format)) throw messageError(new Error(''), "errors.documentExport.chooseAPivStkStykStkzOrStykmov", {});
@@ -129,7 +129,7 @@ export class DocumentExporter {
       acquired = true;
       await drawingBarrier(report,{signal});
       if(signal.aborted||getRevision&&getRevision()!==originalRevision)throw abortError('The document changed while preparing drawing pixels.');
-      return await this._export(report, {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, signal, getRevision, originalRevision, started, revision, scopes});
+      return await this._export(report, {format, name, figureTypeId, figureUid, figureUids, tick, signal, getRevision, originalRevision, started, revision, scopes});
     } catch (error) {
       if (acquired) this._terminateWorker();
       throw error;
@@ -139,7 +139,7 @@ export class DocumentExporter {
     }
   }
 
-  async _export(report, {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, signal, getRevision, originalRevision, started, revision, scopes}) {
+  async _export(report, {format, name, figureTypeId, figureUid, figureUids, tick, signal, getRevision, originalRevision, started, revision, scopes}) {
     // The engine makes every file on the worker: it joins the shared memory and is told, with the export, which engine and
     // revision, or which snapshots of sessions (and a flag, in that memory, that stops it). A page that is not cross-origin
     // isolated cannot share the memory with a worker (nor make the flag), so it makes no file.
@@ -221,7 +221,7 @@ export class DocumentExporter {
     const timer = this.timeoutMs > 0 ? setTimeout(() => fail(Object.assign(messageError(new Error(''), "errors.documentExport.documentExportTimedOut", {}), { telemetryCode: 'timeout', telemetryStage: 'serialize' })), this.timeoutMs) : null;
     try {
       const link = backendJob.link();
-      await request('start', {options: {sourceId, format, name, figureTypeId, figureUid, figureUids, tick, jobId: backendJob.id, engine: {join: engine.join}, guard: workerGuard(worker), ...link.fields}}, link.transfer);
+      await request('start', {options: {format, name, figureTypeId, figureUid, figureUids, tick, jobId: backendJob.id, engine: {join: engine.join}, guard: workerGuard(worker), ...link.fields}}, link.transfer);
       check();
       const snapshotStarted = performance.now();
       let work;

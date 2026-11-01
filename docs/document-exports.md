@@ -91,20 +91,11 @@ saving does not depend on the separate 256 MiB JSON response limit or construct
 a second complete normalized pose inventory. Fingerprint version 3 and its
 numeric/opaque-field semantics remain unchanged.
 
-Project imports lease their immutable original PIV/STK bytes separately from
-the decoded-document LRU, before returning the result. The lease pool is bounded
-to 16 owners and 384 MiB of unique original bytes. Replacement adopts the new
-owner after document loading succeeds, then releases the old owner; rejected,
-cancelled and failed imports release their temporary owner. Import-only library
-operations do not lease originals. Browser project imports embed validated
-original bytes before publication so codec-worker cancellation cannot discard
-the active project's provenance. Native projects remain self-contained.
-Only an explicit no-binary-source response (422) permits local native saving
-without a fetched archive. A missing endpoint/source (404/410) or another lookup
-failure takes the authoritative service fallback; it cannot silently omit the
-original. If the service cannot recover it, Save fails and retains unsaved work
-and the previous complete file. A desktop lease survives decoded-cache eviction,
-but not backend process loss before the first native save or recovery checkpoint.
+A project opened from a Pivot file carries the file's bytes in the document (`_stykSource`): the engine describes the file it read and
+the interface gives it the bytes once, so no copy of the original lives in the codec or the page, a save needs no fetch of it, and
+the codec worker ends when it has nothing to do. The save writes the original first in the payload section and its record last in the
+root, as saves of projects opened from Pivot have always laid it out. The codec's own source cache and its lease routes (the Python
+service's, replayed against its recordings) are no longer used by the app.
 
 PIV/STK export uses the same frame-at-a-time fingerprint for the submitted
 document. Older fingerprint versions keep their historical encoding. Validation

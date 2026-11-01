@@ -156,13 +156,14 @@ pub fn export_document(address: usize, revision: f64, request: &str, cancel: &js
 /// The documents sessions have handed over for a save, by token: a snapshot is the session's tree at one moment (an
 /// immutable copy-on-write handle, so taking one copies nothing and the session goes on editing). The registry lives in
 /// the shared memory, so the worker that saves finds what the interface thread took.
-static SNAPSHOTS: std::sync::Mutex<Vec<(u64, Value)>> = std::sync::Mutex::new(Vec::new());
+static SNAPSHOTS: std::sync::Mutex<Vec<(u64, Value, bool)>> = std::sync::Mutex::new(Vec::new());
 static NEXT_SNAPSHOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-/// Registers `tree` for [`save_project`]; the token names it until it is saved or [`release_snapshot`]d.
-pub(crate) fn snapshot(tree: Value) -> f64 {
+/// Registers `tree` for [`save_project`]; the token names it until it is saved or [`release_snapshot`]d. `from_pivot` says the document
+/// was read from a Pivot file and carries its original.
+pub(crate) fn snapshot(tree: Value, from_pivot: bool) -> f64 {
     let token = NEXT_SNAPSHOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    SNAPSHOTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((token, tree));
+    SNAPSHOTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((token, tree, from_pivot));
     token as f64
 }
 
@@ -171,18 +172,22 @@ pub(crate) fn snapshot(tree: Value) -> f64 {
 #[wasm_bindgen]
 pub fn release_snapshot(token: f64) {
     let mut held = SNAPSHOTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    held.retain(|(held_token, _)| *held_token as f64 != token);
+    held.retain(|(held_token, ..)| *held_token as f64 != token);
 }
 
-/// Takes the snapshots, in the order asked; the registry keeps none of them.
-fn take_snapshots(tokens: &[f64]) -> Option<Vec<Value>> {
+/// Takes the snapshots, in the order asked, and whether the first (the outermost document) was read from a Pivot file; the registry
+/// keeps none of them.
+fn take_snapshots(tokens: &[f64]) -> Option<(Vec<Value>, bool)> {
     let mut held = SNAPSHOTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut trees = Vec::with_capacity(tokens.len());
+    let mut from_pivot = false;
     for token in tokens {
-        let at = held.iter().position(|(held_token, _)| *held_token as f64 == *token)?;
-        trees.push(held.swap_remove(at).1);
+        let at = held.iter().position(|(held_token, ..)| *held_token as f64 == *token)?;
+        let (_, tree, pivot) = held.swap_remove(at);
+        from_pivot = from_pivot || (trees.is_empty() && pivot);
+        trees.push(tree);
     }
-    Some(trees)
+    Some((trees, from_pivot))
 }
 
 /// Writes the `.styk` container of the project the snapshots hold (`src/engine/engine-document-export.mjs`). `request` is
@@ -201,7 +206,7 @@ pub fn save_project(address: usize, request: &str, source: Option<Vec<u8>>, canc
     let numbers = |key: &str| request.get(key).and_then(Value::numbers).unwrap_or_default();
     let tokens = numbers("snapshots");
     let scopes = numbers("scopes");
-    let Some(trees) = take_snapshots(&tokens) else { return Err(error("AbortError", "The document was changed or closed before it was saved.", None, None)) };
+    let Some((trees, original_first)) = take_snapshots(&tokens) else { return Err(error("AbortError", "The document was changed or closed before it was saved.", None, None)) };
     if trees.is_empty() || scopes.len() + 1 != trees.len() {
         return Err(bad("the save names no document"));
     }
@@ -218,7 +223,7 @@ pub fn save_project(address: usize, request: &str, source: Option<Vec<u8>>, canc
         }
         cancelled.get()
     };
-    let written = styk_engine::save::save_project(&trees, &scopes, styk_engine::save::ProjectRequest { name, source, reservation }, &styk_engine::save::EngineHost { engine: engine.as_ref(), cancel: &stop, clock: crate::clock, helpers: request.get("helpers").and_then(Value::as_f64).map_or(0, |count| count as usize), aside: request.get("aside").is_some_and(Value::truthy) }).map_err(save_failure)?;
+    let written = styk_engine::save::save_project(&trees, &scopes, styk_engine::save::ProjectRequest { name, source, original_first, reservation }, &styk_engine::save::EngineHost { engine: engine.as_ref(), cancel: &stop, clock: crate::clock, helpers: request.get("helpers").and_then(Value::as_f64).map_or(0, |count| count as usize), aside: request.get("aside").is_some_and(Value::truthy) }).map_err(save_failure)?;
     let t = written.timings;
     let frames: Vec<String> = t.frames.iter().map(|f| format!("{{\"raw\":{},\"stored\":{},\"hash_ms\":{:.3},\"compress_ms\":{:.3}}}", f.raw_bytes, f.stored_bytes, f.hash_ms, f.compress_ms)).collect();
     let timings = format!("{{\"prepare_ms\":{:.3},\"lift_ms\":{:.3},\"lift_pieces_ms\":{:.3},\"lift_splice_ms\":{:.3},\"scene_ms\":{:.3},\"frames_ms\":{:.3},\"assemble_ms\":{:.3},\"total_ms\":{:.3},\"frames\":[{}]}}", t.prepare_ms, t.lift_ms, t.lift_pieces_ms, t.lift_splice_ms, t.scene_ms, t.frames_ms, t.assemble_ms, t.total_ms, frames.join(","));
