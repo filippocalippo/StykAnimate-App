@@ -972,7 +972,20 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     }
     // `patch: true`: what the call changed in the report, for the read view (D19).
     if view.get("patch") == Some(&Value::Bool(true)) {
-        let (ops, named) = { let _scope = crate::prof::scope("patch::diff"); crate::patch::for_view(crate::patch::diff(&before, report)) };
+        let (ops, named) = {
+            let _scope = crate::prof::scope("patch::diff");
+            let mut ops = crate::patch::diff(&before, report);
+            // A view that fetches the records of its tables on demand holds some of them: the others come whole.
+            if let Some(known) = crate::patch::known(&view) {
+                ops = crate::patch::for_lazy(ops, report, &known);
+                // Such a view cannot tell from the records it replaced which figures a pose gained or lost altogether: the session tells it.
+                let after = report.clone();
+                let (appeared, gone) = editor.layer_index.get_or_insert_with(Default::default).moved(&before, &after);
+                let uids = |list: Vec<u32>| Value::array(list.into_iter().map(|uid| Value::Num(uid as f64)).collect());
+                answer.push(("layerChanges", response_value(vec![("appeared", uids(appeared)), ("gone", uids(gone))])));
+            }
+            crate::patch::for_view(ops)
+        };
         answer.push(("patch", ops));
         // The patch names payloads (pictures) by token: the view asks for their text when something reads them.
         if named { answer.push(("payloads", Value::Bool(true))); }

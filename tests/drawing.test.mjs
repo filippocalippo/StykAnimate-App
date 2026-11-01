@@ -711,7 +711,7 @@ test('a load a pointer waits on overtakes queued background decodes and survives
   const {e,resources}=fixture();try{
     const figures=[];
     for(let i=0;i<6;i++){
-      const figure=createDrawingFigure({pixelsPerUnit:1,figureTypeId:200+i});figure._styk.drawing.celId=`cel-priority-${i}`;e.report.figure_types.push(figure);figures.push(figure);
+      const figure=createDrawingFigure({pixelsPerUnit:1,figureTypeId:200+i});figure._styk.drawing.celId=`cel-priority-${i}`;e.report.figure_types=[...e.report.figure_types,figure];figures.push(figure);
       const pixels=new Uint8ClampedArray(TILE_BYTES);pixels.set([i,0,0,255],0);resources.install(figure,[{tx:0,ty:0,pixels}]);
     }
     await resources.flush();for(const figure of figures)resources.entry(figure).store=null;
@@ -732,7 +732,7 @@ test('a displayed cel whose decode was superseded asks to be drawn again',async(
   const {e,resources}=fixture();try{
     const figures=[];
     for(let i=0;i<5;i++){
-      const figure=createDrawingFigure({pixelsPerUnit:1,figureTypeId:200+i});figure._styk.drawing.celId=`cel-shown-${i}`;e.report.figure_types.push(figure);figures.push(figure);
+      const figure=createDrawingFigure({pixelsPerUnit:1,figureTypeId:200+i});figure._styk.drawing.celId=`cel-shown-${i}`;e.report.figure_types=[...e.report.figure_types,figure];figures.push(figure);
       const pixels=new Uint8ClampedArray(TILE_BYTES);pixels.set([i,0,0,255],0);resources.install(figure,[{tx:0,ty:0,pixels}]);
     }
     await resources.flush();for(const figure of figures)resources.entry(figure).store=null;
@@ -752,7 +752,7 @@ test('a burst of surface requests keeps at most two decodes queued and decodes t
   const {e,resources}=fixture();try{
     const figures=[];
     for(let i=0;i<10;i++){
-      const figure=createDrawingFigure({pixelsPerUnit:1,figureTypeId:100+i});figure._styk.drawing.celId=`cel-burst-${i}`;e.report.figure_types.push(figure);figures.push(figure);
+      const figure=createDrawingFigure({pixelsPerUnit:1,figureTypeId:100+i});figure._styk.drawing.celId=`cel-burst-${i}`;e.report.figure_types=[...e.report.figure_types,figure];figures.push(figure);
       const pixels=new Uint8ClampedArray(TILE_BYTES);pixels.set([i,0,0,255],0);resources.install(figure,[{tx:0,ty:0,pixels}]);
     }
     await resources.flush();

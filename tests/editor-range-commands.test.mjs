@@ -16,7 +16,7 @@ function fixture({prepare = null, sheet = false} = {}) {
 }
 
 test('appearance range follows native identity through arbitrary slots and absent figures with one sparse undo', () => {
-  const editor = fixture(); let report = editor.report; report.keyframes[1].objects.reverse();
+  const editor = fixture(); let report = clone(editor.report); report.keyframes[1].objects.reverse();
   report.keyframes[1].objects.forEach((object, slot) => object.object_slot = slot);
   report.keyframes[2] = createFrame([report.keyframes[2].objects[1]], 1); editor.load(report); report = editor.report;
   editor.select(1); const before = clone(report), unchanged = report.keyframes[0].objects[1];

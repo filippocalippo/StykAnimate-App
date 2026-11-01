@@ -1,3 +1,4 @@
+import { figureRows } from './figure-types.mjs';
 import { complexityBucket, formatFamily, fpsBucket, sizeBucket } from './telemetry-schema.mjs';
 
 // An authored-segment estimate for the first keyframe, not raster complexity or a scan of the animation.
@@ -5,8 +6,9 @@ import { complexityBucket, formatFamily, fpsBucket, sizeBucket } from './telemet
 export function documentComplexity(report) {
   const figures = report?.figure_types, objects = report?.keyframes?.[0]?.objects;
   if (!Array.isArray(figures) || !Array.isArray(objects) || figures.length > 1024 || objects.length > 1024) return 'unknown';
-  if (figures.some(figure => !figure || !Array.isArray(figure.segments))) return 'unknown';
-  const sizes = new Map(figures.map(figure => [figure.figure_type_id, figure.segments.length]));
+  const rows = figureRows(figures);
+  if (rows.some(row => row.segments === null)) return 'unknown';
+  const sizes = new Map(rows.map(row => [row.id, row.segments]));
   let total = 0;
   for (const object of objects) {
     if (!object) return 'unknown';

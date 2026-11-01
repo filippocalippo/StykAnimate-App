@@ -16,6 +16,7 @@
 import {resolveInstanceFigure} from '../animation-style.mjs';
 import {isStatic} from '../pivot/read-view.mjs';
 import {isMovieclip} from '../movieclips.mjs';
+import {findFigureType} from '../figure-types.mjs';
 import {sticknodesDrawables, sticknodesSpriteAsset} from '../sticknodes/geometry.mjs';
 
 /** A number the session wrote, as JSON text gave it: not finite is `null`, and `-0` is `0` (`+ 0`), so the sign of a zero never reaches the interface's arithmetic. */
@@ -33,14 +34,8 @@ const rawAt = (w, at, n, index) => 3 * index + 2 < n && fin(w[at + 3 * index]) !
 /** A number as `fin` gives it, but not finite is NaN. */
 const real = value => Number.isFinite(value) ? value + 0 : NaN;
 
-const definitionsOf = new WeakMap();
-/** The figure definitions of a report by type id (a call the editor runs adds a definition to the table in place). */
-function definitions(report) {
-  const figures = report.figure_types ?? [];
-  let known = definitionsOf.get(figures);
-  if (!known || known.count !== figures.length) { known = {count: figures.length, map: new Map(figures.map(figure => [Number(figure.figure_type_id), figure]))}; definitionsOf.set(figures, known); }
-  return known.map;
-}
+/** The figure definitions of a report by type id: the ones the objects drawn use are the ones fetched. */
+const definitions = report => ({get: id => findFigureType(report.figure_types ?? [], id)});
 
 /** The image or text asset a segment draws (`segmentAt` in the editor's geometry). */
 function assetOf(fig, seg, obj) {
@@ -312,8 +307,8 @@ export function createShown(owner) {
      */
     previewGeometry(frame, figure, layerId, uid) {
       const words = owner.packet('previewGeometry', {frame, figure, uid, layerId});
-      const report = owner.report(), defs = new Map(definitions(report));
-      defs.set(Number(figure.figure_type_id), figure);
+      const report = owner.report(), held = definitions(report), added = Number(figure.figure_type_id);
+      const defs = {get: id => id === added ? figure : held.get(id)};
       const answer = groupsOf(words, frame, report, defs);
       if (!answer) return null;
       const objects = new Map();
