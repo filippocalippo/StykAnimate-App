@@ -210,6 +210,12 @@ impl EngineHandle {
         )
     }
 
+    /// Pages of a document's sprite layout the stage keeps in its texture at a time, for the documents opened from now on
+    /// (`styk_engine::ATLAS_PAGES` unless set): a document with more pages loads its pictures when frames need them.
+    pub fn set_atlas_pages(&self, pages: u32) {
+        self.engine.set_atlas_pages(pages);
+    }
+
     /// Starts measuring the most memory handed out at once from what is handed out now.
     pub fn reset_memory_peak(&self) {
         styk_alloc::reset_peak();
