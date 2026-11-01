@@ -37,7 +37,6 @@ import { audioState, audibleClips } from "./audio-model.mjs";
 import { workload } from "./telemetry-workload.mjs";
 import { sizeBucket } from "./telemetry-schema.mjs";
 import { openExportSink as openExportSinkRaw } from "./export-sink.mjs";
-import { materializeSimpleFrameDraftForPivot } from "./pivot-frame-draft.mjs";
 import { exportAnimation } from "./image-export.mjs";
 import { defaultGIFDither } from "./gif-options.mjs";
 import { createExportFrameRenderer, prewarmExportRenderer } from "./engine/engine-export.mjs";
@@ -166,10 +165,6 @@ export function createExportFlow(ctx) {
       vfw: request.format === "vfw" ? (sheet?.open ? sheet.vfwContext() : { available: false }) : undefined,
     };
   }
-  const playedReport = () =>
-    state.settings.timelineMode === "simple"
-      ? materializeSimpleFrameDraftForPivot(editor.report)
-      : editor.report;
   /** An editable file: .piv, .stk, .stkz, or .stykmov (the figure type of a selected movieclip). */
   async function exportPivot(type = "piv") {
     finishCurrentEdit();
@@ -324,7 +319,7 @@ export function createExportFlow(ctx) {
     finishCurrentEdit();
     // The options, frame count, rate, name and GIF repeat (the Loop setting) come from the request.
     const request = currentRequest(format),
-      report = playedReport(),
+      report = editor.report,
       { options, ticks, fps, filename, animation } = exportJob(request, jobContext(request, report));
     if ([...exportJobs].some(job => job.raster)) throw messageError(new Error(''), "errors.exportFlow.anExportIsAlreadyRunningWaitForIt", {});
     // Streamed exports pick their destination up front, then write while encoding.
@@ -372,7 +367,7 @@ export function createExportFlow(ctx) {
     // encoded (sound with a browser encoder, a VFW codec still being checked)
     // throws here with the reason, before a file is chosen.
     const request = currentRequest(format),
-      report = playedReport(),
+      report = editor.report,
       plan = exportJob(request, jobContext(request, report)),
       { options, ticks, fps, extension, filename, includeAudio } = plan;
     const encode = { vfw: encodeVfwVideo, webcodecs: format === "mp4" ? encodeMP4 : encodeWebM, native: encodeNativeVideo }[plan.encoder];

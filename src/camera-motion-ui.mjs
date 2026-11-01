@@ -9,6 +9,7 @@ import {CameraMotionGraph,motionGraphView} from './camera-motion-graph.mjs';
 import {cameraMonitorVisible} from './camera-monitor.mjs';
 import {placement} from './engine/engine-pictures.mjs';
 import {icon} from './icons.mjs';
+import {findFigureType} from './figure-types.mjs';
 const esc=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const symbols={follow:'person',shake:'activity',handheld:'camera',wobble:'rotate',impact:'center',pulse:'zoom-in'};
 /** What each preset does, in the words the gallery and the card use. */
@@ -31,7 +32,7 @@ function slider(clip,key,label,soft,disabled,hint='', _messages = {}){
 }
 function figureName(editor,uid){
   const object=editor.selectionFrame.objects.find(o=>o.unique_id===uid)??editor.evaluatedFrame.objects.find(o=>o.unique_id===uid);
-  return object?editor.report.figure_types.find(f=>f.figure_type_id===object.figure_type_id)?.name||`Figure ${uid}`:null;
+  return object?findFigureType(editor.report.figure_types, object.figure_type_id)?.name||`Figure ${uid}`:null;
 }
 const followSummary=(editor,clip)=>clip.targets.map(t=>figureName(editor,t.uid)??interfaceText("cameraMotionUi.missingFigure")).join(', ');
 function gallery(locked,compact){

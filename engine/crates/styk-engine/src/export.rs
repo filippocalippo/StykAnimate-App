@@ -78,7 +78,7 @@ fn prepare_pending(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Sh
             if ended.load(Ordering::Relaxed) {
                 return;
             }
-            let data = produce(&generation, tick as f64, &[], true, clock);
+            let data = produce(&generation, tick as f64, &[], true, false, clock);
             let mut state = state.lock();
             if ended.load(Ordering::Relaxed) || epoch != state.epoch {
                 return;
@@ -283,7 +283,7 @@ impl ExportFrames {
         if tick >= self.ticks() {
             return None;
         }
-        let data = Arc::new(produce(&self.generation, tick as f64, &[], true, self.engine.inner.clock));
+        let data = Arc::new(produce(&self.generation, tick as f64, &[], true, false, self.engine.inner.clock));
         let state = self.state.lock();
         (state.epoch == epoch && state.images_left == 0).then_some(data)
     }

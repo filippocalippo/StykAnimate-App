@@ -22,6 +22,7 @@ import {drawingMetadata} from '../drawing-model.mjs';
 import {drawingResourcesFor} from '../drawing-resources.mjs';
 import {pixelChangeBytes} from '../drawing-pixels.mjs';
 import {TILE_BYTES} from '../drawing-tiles.mjs';
+import {figureForCel} from '../figure-types.mjs';
 
 /** The editor's calls that carry a cel's pixels: the session records them as entries, this module applies the pixels. */
 export const DRAWING_COMMITS = new Set(['commitDrawingPixels', 'resampleDrawing']);
@@ -43,7 +44,7 @@ const missing = () => messageError(new Error(''), 'errors.editorDrawing.theDrawi
  */
 export function createOwnedDrawings(editor, host) {
   const resources = () => drawingResourcesFor(editor.report);
-  const figureOf = celId => editor.report.figure_types.find(figure => drawingMetadata(figure)?.celId === celId) ?? null;
+  const figureOf = celId => figureForCel(editor.report.figure_types, celId) ?? null;
   /** What the session's history refers to by name: the pixel commits of the entry an undo (or redo) applies next, in the order it applies them. */
   const steps = redo => {
     const live = host.live();

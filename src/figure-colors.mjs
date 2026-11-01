@@ -3,6 +3,7 @@ import {messageError} from './localized-error.mjs';
 import {resolveInstanceFigure, polygonIdentity, meshPaletteColor} from './animation-style.mjs';
 import {segmentPaint, parseColor, hexColor} from './paint.mjs';
 import {color, mixColor} from './pivot/read-view.mjs';
+import {findFigureType} from './figure-types.mjs';
 
 const usesSegmentColors = (report, figure, object) => report.version >= 5 || figure?._styk?.colorMode === 'segments' || object?._styk?.colorMode === 'segments';
 export function displayedColor(report, figure, object, rgb) {
@@ -34,7 +35,7 @@ export function figurePalette(report, figure, object) {
 export function attachedFigurePalette(report, frame, uid) {
   const objects=frame.objects, start=objects.findIndex(object=>object.unique_id===uid);
   if(start<0)return [];
-  const children=new Map(), figures=new Map(report.figure_types.map(figure=>[figure.figure_type_id,figure]));
+  const children=new Map(), figures={get:id=>findFigureType(report.figure_types,id)};
   objects.forEach((object,slot)=>{
     const parent=object.join?.target_object_slot;
     if(parent===undefined)return;

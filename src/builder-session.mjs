@@ -26,6 +26,7 @@ import {t as interfaceText} from './localization.mjs';
  */
 import {isMovieclip} from './movieclips.mjs';
 import {drawingMetadata, isDrawingLayer} from './drawing-model.mjs';
+import {findFigureType, figureRows} from './figure-types.mjs';
 
 const clone = value => structuredClone(value);
 
@@ -46,7 +47,7 @@ export class BuilderSession {
     this.documentToken = editor._documentToken;
     this.baselineRevision = editor.revision;
     this.preexistingUids = new Set(editor.selectionFrame.objects.map(object => object.unique_id));
-    this.preexistingTypeIds = new Set(editor.report.figure_types.map(figure => figure.figure_type_id));
+    this.preexistingTypeIds = new Set(figureRows(editor.report.figure_types).map(row => row.id));
     const object = editor.object, figure = editor.figure;
     const editableLayer = layer => layer?.kind === 'layer' && layer.visible && !layer.locked && !isDrawingLayer(layer);
     const selectedLayer = object && editor.getLayer(editor.layerForUid(object.unique_id));
@@ -70,7 +71,7 @@ export class BuilderSession {
    * bound instance is currently on screen or selected. */
   get figure() {
     return this.typeId === null ? null :
-      this.editor.report.figure_types.find(figure => figure.figure_type_id === this.typeId) ?? null;
+      findFigureType(this.editor.report.figure_types, this.typeId) ?? null;
   }
   /** UIDs of bound-figure instances in the current selection frame. Lazily
    * rebuilt whenever the frame's object array changes identity. */
@@ -163,7 +164,7 @@ export class BuilderSession {
         editor.replaceFigureDefinition(this.typeId, clone(this.baselineFigure), {label: interfaceText("builderSession.discardFigureEdits"), labelKey: "builderSession.discardFigureEdits"});
       return;
     }
-    if (this.typeId === null || !editor.report.figure_types.some(figure => figure.figure_type_id === this.typeId)) return;
+    if (this.typeId === null || findFigureType(editor.report.figure_types, this.typeId) === undefined) return;
     this._removeCreatedFigure(this.typeId);
   }
   /** The creation of the figure left the history: its instances in every frame and its definition go, as one entry of the engine. */

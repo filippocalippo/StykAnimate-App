@@ -55,7 +55,9 @@ pub(crate) fn hidden_slots(generation: &Generation, frame: &styk_eval::eval::Fra
         .collect()
 }
 
-pub(crate) fn produce(generation: &Generation, tick: f64, hidden_uids: &[u32], effects: bool, clock: Clock) -> FrameData {
+/// A frame's draw list. `cull`: the frame is for the screen, where it is drawn clipped to the artboard, so what lies outside the artboard
+/// is left out ([`styk_eval::drawlist::cull_outside`]); an export keeps the whole list (its bytes do not change).
+pub(crate) fn produce(generation: &Generation, tick: f64, hidden_uids: &[u32], effects: bool, cull: bool, clock: Clock) -> FrameData {
     let started = clock();
     let prepared = &generation.prepared;
     let frame = prepared.evaluate(tick);
@@ -73,7 +75,11 @@ pub(crate) fn produce(generation: &Generation, tick: f64, hidden_uids: &[u32], e
         batch.offset(|uid| Some(parallax.of_uid(layers, uid)));
     }
     let overrides = Overrides { hidden: &hidden, translations: &translations, bypass_effects: !effects, generators: batch.as_ref(), ..Default::default() };
-    let list = Arc::new(encode_with(&prepared.doc, &generation.assets, &scene, &overrides));
+    let mut list = encode_with(&prepared.doc, &generation.assets, &scene, &overrides);
+    if cull {
+        styk_eval::drawlist::cull_outside(&mut list, &prepared.doc, scene.camera.as_ref());
+    }
+    let list = Arc::new(list);
     FrameData {
         generation: generation.id,
         tick,
