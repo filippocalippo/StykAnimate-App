@@ -42,7 +42,7 @@ Each is a name for `--only=`; `open` always runs in a document run.
 
 | Scenario | Steps |
 | --- | --- |
-| `doc <file>` | `idle`, `playCold`, `playWarm`, `scrub`, `jump`, `step`, `poseDrag`, `moveDrag`, `flicker`, `save` (needs `--save`), then `draws`, `zoomPan`, `select`, `timelineInspector`, `onion`, `export`, `tabs` |
+| `doc <file>` | `idle`, `playCold`, `playWarm`, `scrub`, `jump`, `step`, `poseDrag`, `moveDrag`, `flicker`, `save` (needs `--save`), then `draws`, `zoomPan`, `select`, `frameEdit`, `timelineInspector`, `onion`, `export`, `tabs` |
 | `draw` | the brush run |
 | `free` | `empty` (the app after startup with no document, memory by process type), `home` (a Home with 200 projects) |
 
@@ -58,6 +58,11 @@ Each is a name for `--only=`; `open` always runs in a document run.
 - **`zoomPan`**: 90 real Ctrl+wheel events at 120 Hz in and out, then a 90-move middle-button pan, on the frame at 40 % of the animation.
   Input → paint percentiles, frames per second and the worst gap between the page's frames (the UI freeze).
 - **`select`**: a click on a figure's origin, pointer press → the paint after the selection changed, ten times.
+- **`frameEdit`**: at 40 % of the animation, add a frame after the current one and delete one, each with its undo and redo, three rounds, the
+  edits undone at the end. Per edit (`add`, `addUndo`, `addRedo`, `remove`, `removeUndo`, `removeRedo`): `blocked`, how long the call
+  holds the interface thread, and `shown`, the time from the call until the stage shows the result (`lastEditingPresentation` at the document's
+  revision). The first add of a document is the dearest (the layer sheet captures the poses of the animation); after its undo the next one captures
+  them again, so every round measures that. Run it alone with `--only=frameEdit`.
 - **`onion`**: onion skins on through the app's own action and settings (3 frames each side), then scrub, next-frame key and 5 s of playback as
   the existing steps measure them. The settings are put back.
 - **`timelineInspector`**: with the timeline and inspector on show and a figure selected, 10 s of playback. `playhead.delay` and

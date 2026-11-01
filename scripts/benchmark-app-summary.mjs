@@ -74,6 +74,18 @@ const DOC = [
   ['Pan (drag): worst UI freeze (ms)', 'zoomPan.pan.uiFrameGaps.max'],
   ['Select click: input→paint p50 (ms)', 'select.latency.p50'],
   ['Select click: input→paint p95 (ms)', 'select.latency.p95'],
+  ['Add a frame: interface blocked p50 (ms)', 'frameEdit.add.blocked.p50'],
+  ['Add a frame: until shown p50 (ms)', 'frameEdit.add.shown.p50'],
+  ['Add a frame, undone: interface blocked p50 (ms)', 'frameEdit.addUndo.blocked.p50'],
+  ['Add a frame, undone: until shown p50 (ms)', 'frameEdit.addUndo.shown.p50'],
+  ['Add a frame, redone: interface blocked p50 (ms)', 'frameEdit.addRedo.blocked.p50'],
+  ['Add a frame, redone: until shown p50 (ms)', 'frameEdit.addRedo.shown.p50'],
+  ['Delete a frame: interface blocked p50 (ms)', 'frameEdit.remove.blocked.p50'],
+  ['Delete a frame: until shown p50 (ms)', 'frameEdit.remove.shown.p50'],
+  ['Delete a frame, undone: interface blocked p50 (ms)', 'frameEdit.removeUndo.blocked.p50'],
+  ['Delete a frame, undone: until shown p50 (ms)', 'frameEdit.removeUndo.shown.p50'],
+  ['Delete a frame, redone: interface blocked p50 (ms)', 'frameEdit.removeRedo.blocked.p50'],
+  ['Delete a frame, redone: until shown p50 (ms)', 'frameEdit.removeRedo.shown.p50'],
   ['Onion skins: scrub p50 (ms)', 'onion.scrub.latency.p50'],
   ['Onion skins: scrub p95 (ms)', 'onion.scrub.latency.p95'],
   ['Onion skins: scrub longest task (ms)', 'onion.scrub.longestTaskMs'],
@@ -137,6 +149,7 @@ const value = (r, m, context = {}) => typeof m === 'function' ? m(r, context) : 
 // 'better' better than the base, 'notWorse' within 5% of the base (noise), or null.
 // files: which files the row applies to (a part of the file name); absent = every file. source: 'doc' (default), 'draw' or 'free'.
 const REFRESH = 7;
+const FRAME_UNDOS = ['addUndo', 'addRedo', 'removeUndo', 'removeRedo'];
 const TARGETS = [
   {name: 'App start until usable (ms)', metric: 'startup.readyMs', target: 1000, floor: 'x3'},
   {name: 'Open tdd2 (ms)', metric: 'open.openMs', target: 1000, floor: 'x3', files: ['tdd2']},
@@ -160,6 +173,11 @@ const TARGETS = [
   {name: 'Joint drag frames per second', metric: 'poseDrag.paintsPerSec.p50', target: 115, higher: true, floor: 'atLeast'},
   {name: 'Worst UI freeze during a drag (ms)', metric: r => worst(r, ['poseDrag.uiFrameGaps.max', 'moveDrag.uiFrameGaps.max']), target: 16, floor: 'atLeast'},
   {name: 'Drag release → committed (ms)', metric: 'poseDrag.commitMs.p50', target: 10, floor: 'atLeast'},
+  {name: 'Add a frame: interface blocked (ms)', metric: 'frameEdit.add.blocked.p50', target: 100, floor: 'better'},
+  {name: 'Add a frame: until shown (ms)', metric: 'frameEdit.add.shown.p50', target: 100, floor: 'better'},
+  {name: 'Delete a frame: interface blocked (ms)', metric: 'frameEdit.remove.blocked.p50', target: 100, floor: 'better'},
+  {name: 'Undo or redo of a frame edit: interface blocked (ms)', metric: r => worst(r, FRAME_UNDOS.map(n => `frameEdit.${n}.blocked.p50`)), target: 10, floor: 'notWorse'},
+  {name: 'Undo or redo of a frame edit: until shown (ms)', metric: r => worst(r, FRAME_UNDOS.map(n => `frameEdit.${n}.shown.p50`)), target: 16, floor: 'notWorse'},
   {name: 'Undo (ms)', metric: 'poseDrag.undoMs.p50', target: 10, floor: 'notWorse'},
   {name: 'Redo (ms)', metric: 'poseDrag.redoMs.p50', target: 10, floor: 'notWorse'},
   {name: 'Brush input→frame p95 (ms)', metric: 'draw.latency.p95', target: 7, floor: 'better', source: 'draw'},

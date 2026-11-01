@@ -98,7 +98,13 @@ an untouched picture lazy when it copies or rebuilds the record around it. The r
 picture no document or history entry holds any more answers with an error, so naming a payload never keeps a
 deleted picture alive. A picture an edit adds (a string in the session's tree) reaches the view as the string.
 The drawing store is the one writer of the view's cels: it attaches a cel's published tiles to its definition in
-place and tells the session (`@publishCel`), replacing a lazy field through `putField`. The Pivot original of a project
+place and tells the session (`@publishCel`), replacing a lazy field through `putField`. This is the one known write to the view
+in place, and it stays: the record goes to the session in the same call (a cel's revision and bounds, which the store also changes in
+place on a commit or a replay, go as `@celState`), so a record the table gives back and fetches again has what was written, and the save
+writes the session's tiles. Replacing the record by a patch instead (a copy the session answers with) was tried and left every holder of the
+old `figure` reference stale: each `entry(figure)` call on one replaced the table's record again, and five drawing tests that read the figure
+after a publication failed. Moving the write needs the drawing store to ask for a cel's definition by its id each time (`figureForCel`) rather
+than hold it. Verify mode compares the whole view, so it still sees a write the session was not told of. The Pivot original of a project
 stays with the codec for saving (`/api/source/keep`, leased to the project, sent while the engine decodes); the web build embeds it in
 the document instead (`OpenedDocument.attach_source`).
 
