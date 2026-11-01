@@ -153,6 +153,17 @@ impl EditSession {
         styk_doc::json::to_string(self.session().report())
     }
 
+    /// Record `index` of the table `table` (`keyframes`, `figure_types`) of the session's document, lifted on its own for the
+    /// interface's read view, which fetches its records when something reads them.
+    pub fn record(&self, table: &str, index: u32) -> Result<crate::open::ViewPart, JsError> {
+        crate::open::lift_record(self.session().report(), table, index)
+    }
+
+    /// The record under `key` of the table of records by key `table` (`_styk.frameSources`) of the session's document, lifted on its own.
+    pub fn keyed_record(&self, table: &str, key: &str) -> Result<crate::open::ViewPart, JsError> {
+        crate::open::lift_keyed_record(self.session().report(), table, key)
+    }
+
     /// Hands the session's document, as it is now, over for a save on a worker (`save_project`): a token that names the
     /// tree for as long as nobody saved or released it (`release_snapshot`). Copies nothing, and the session goes on
     /// editing: what the save writes is the document of this moment.

@@ -47,10 +47,44 @@ each value replaced by values of the wrong kind or removed.
 
 The editor's read view is built from the opened tree once, in pieces
 (`OpenedDocument.part`, `Opening.read` in `engine-open.mjs`): the document without the contents of
-its tables, then each figure, keyframe, background, retained pose source and audio recording, lifted as a
+its tables, then each background and audio recording, lifted as a
 file lifts them (`container::ViewLifter`: arrays and images the tree shares are written once and named by
 the same marker, so the read view shares them and a save lifts the same bytes) and restored by
 `restoreLifted`. The interface thread restores in slices of 4 ms.
+
+The keyframes, the figure types and the retained pose sources are not part of that building. `report.keyframes` and `report.figure_types` are lazy tables
+(`src/lazy-table.mjs`), and `report._styk.frameSources` a lazy table of records by key: to their readers an array (`Array.isArray`, `length`,
+indexing, `map`, `find`, `slice`, `for...of`, spread, `JSON.stringify`, `structuredClone`) or an object, whose records the interface fetches
+from the session when something reads them (`EditSession.record` and `keyed_record`; until the session starts, `OpenedDocument.record`), each lifted
+on its own, whole, and restored like a piece. A record is the same object for as long as the table holds it; a table holds at most 64 keyframes,
+256 figure types and 64 sources, giving the least recently read back, and fetches it again, equal, when it is read again. The elements have no
+setters, as the lazy picture fields have none: the view is changed by patches, never in place.
+
+What a reader needs without the record is the table's own: its row, which the open sends in its metadata (`rows`) and the table keeps through
+patches. A keyframe's row is its identity (`getFrameById` and the pose sources are found without fetching the others); a figure type's is
+`{id, name, cel, kind, segments, pictures}` (`styk_edit::figure_row`, mirrored by `figureRow`: a test holds the two to the same rows). The
+readers go through `src/figure-types.mjs`: `findFigureType` fetches the type asked for and no other, and the lists of the figure library,
+the drawing cels, the next free id, the movieclips and the telemetry's and the GIF defaults' questions are answered from the rows, fetching only
+the types they then show. The timeline rows (`timeline`, `styk_edit::timeline_rows`) are sent with the open for the first frame. A reader that
+walks every record of a table fetches every record (and sees the table give the first ones back as it goes): none does on an interactive path,
+and the tests that read the whole view do it inside `holdingAll`. What still does: the validators of a document the interface exports
+or imports (`validateScene`, `validateAnimationDocument`, `serialize`) and a stored frame draft being saved on leaving a movieclip (`storedFrameReport`).
+
+How patches keep a lazy view in step: the call's view names the records each table holds (`lazy`:
+`fetchedRecords`), and the session never sends a record the view does not hold (`styk_edit::patch::for_lazy`). A change inside one
+it does not hold, and any record a patch sets or inserts, comes as the record's row (`{p, lz: row}`, `{lz: row}` among the refs of an
+array rebuild `a`): the view keeps the place and the row and fetches the record when it is read. A table of records by key comes as keys
+alone (`{p, lz: [key, …]}` for the table, `{p, lz: 1}` for an entry, `[key, null, 1]` among the entries of a rebuild `o`). So an
+edit that captures the poses of a whole animation answers with their names (duplicating a frame of a 590-frame scene: 16 MB of
+sources before, 16 KB now), and undoing and redoing a pose key no longer carries it. A table a patch rebuilds keeps the records it holds
+and the places of those it does not (a record not fetched is the session's at its place, and every unfetched record is equal to the
+session's: verify mode checks the held ones). A copy the interface makes to show a variation of the document (a motion-path edit's virtual
+report, a drawing's first stroke) holds records the session does not have and gives none back. The table a patch replaces is retired: its records are still read, but one it never fetched raises, as
+it can no longer say which document state it was. Such an answer also carries `layerChanges`, the figures that began to appear in a
+pose and those that no pose holds any more, which updates the editor's layer index without the replaced records (a view cannot tell what it never
+held). The session keeps the counts behind it (`patch::LayerIndex`), moved by the poses a call changed, found by node, so the cost follows the
+change and the answer stays a few bytes; verify mode counts the figures again from the whole document and compares. A patch the
+session makes over its own document (a motion-path edit's virtual report) fetches the record it changes and leaves the table in use.
 
 The pictures and originals the tree holds as bytes (a `Blob` in `data_base64`, `data_url`, `styk_tiles` or `source_base64`
 of 64 K characters or more) are not part of the view's text: the piece names each by a token (`S2P:<token>`,

@@ -196,6 +196,25 @@ pub struct ViewPart {
     payloads_base: f64,
 }
 
+impl From<styk_formats::container::ViewPart> for ViewPart {
+    fn from(part: styk_formats::container::ViewPart) -> ViewPart {
+        ViewPart { skeleton: String::from_utf8_lossy(&part.skeleton).into_owned(), sequences: String::from_utf8_lossy(&part.sequences).into_owned(), arrays: part.arrays, arrays_base: part.arrays_base as f64, payloads: part.payloads, payloads_base: part.payloads_base as f64 }
+    }
+}
+
+/// Record `index` of the table `table` of `tree`, lifted on its own (`OpenedDocument::record`, `EditSession::record`).
+pub(crate) fn lift_record(tree: &Value, table: &str, index: u32) -> Result<ViewPart, JsError> {
+    let record = tree.get(table).and_then(Value::elements).and_then(|records| records.get(index as usize)).ok_or_else(|| js_error("no such document entry"))?;
+    ViewLifter::new().part(&record, "").map(ViewPart::from).map_err(js_error)
+}
+
+/// The record under `key` of the table of records by key at `table` (the path with dots: `_styk.frameSources`), lifted on its own.
+pub(crate) fn lift_keyed_record(tree: &Value, table: &str, key: &str) -> Result<ViewPart, JsError> {
+    let path: Vec<&str> = table.split('.').collect();
+    let record = tree.path(&path).and_then(|records| records.get(key)).ok_or_else(|| js_error("no such document entry"))?;
+    ViewLifter::new().part(record, "").map(ViewPart::from).map_err(js_error)
+}
+
 #[wasm_bindgen]
 impl ViewPart {
     /// The JSON text of the record, with markers (`S2B:…`, `S2D:…`) where arrays and images moved out.
@@ -262,6 +281,15 @@ impl OpenedDocument {
             })
             .collect();
         out.set("splits", Value::array(splits));
+        // What the view knows of its lazy tables without fetching a record (`LAZY_TABLES`): the row of each record (its identity, for a keyframe), and the
+        // timeline the keyframes make.
+        let tree = &opened.tree;
+        let column = |table: &str, id: &dyn Fn(&Value) -> Value| Value::array(tree.get(table).and_then(Value::elements).map(|records| records.iter().map(|record| id(&record)).collect()).unwrap_or_default());
+        let mut rows = Obj::new();
+        rows.set("keyframes", column("keyframes", &styk_edit::frame_row));
+        rows.set("figure_types", column("figure_types", &styk_edit::figure_row));
+        out.set("rows", Value::object(rows));
+        out.set("timeline", Value::array(styk_edit::timeline_rows(tree).into_iter().map(|(start, count)| Value::array(vec![Value::Num(start), Value::Num(count)])).collect()));
         json::to_string(&Value::object(out))
     }
 
@@ -282,8 +310,18 @@ impl OpenedDocument {
             let entry = entry.ok_or_else(|| js_error("no such document entry"))?;
             self.lifter.borrow_mut().part(&entry, "")
         };
-        let part = lifted.map_err(js_error)?;
-        Ok(ViewPart { skeleton: String::from_utf8_lossy(&part.skeleton).into_owned(), sequences: String::from_utf8_lossy(&part.sequences).into_owned(), arrays: part.arrays, arrays_base: part.arrays_base as f64, payloads: part.payloads, payloads_base: part.payloads_base as f64 })
+        lifted.map(ViewPart::from).map_err(js_error)
+    }
+
+    /// Record `index` of the table `table` of the document (`keyframes`, `figure_types`), lifted on its own: the piece is whole
+    /// (nothing is shared with the pieces asked for before), for a view that fetches its records when something reads them.
+    pub fn record(&self, table: &str, index: u32) -> Result<ViewPart, JsError> {
+        lift_record(&self.opened().tree, table, index)
+    }
+
+    /// The record under `key` of the table of records by key `table` (`_styk.frameSources`), lifted on its own.
+    pub fn keyed_record(&self, table: &str, key: &str) -> Result<ViewPart, JsError> {
+        lift_keyed_record(&self.opened().tree, table, key)
     }
 
     /// Gives the document the Pivot file it was read from (`description`: the codec's JSON description of it), so
