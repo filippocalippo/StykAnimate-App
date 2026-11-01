@@ -10,7 +10,7 @@ watching: the first is what the scoreboard reports, the second is when drawing i
 1. **Process to window** (`desktop/main.cjs`): Electron starts, `start()` reads the preferences, serves the app (`desktop/web-host.cjs`) and creates the window.
 2. **Window to the page**: the page loads from the privileged scheme `styk-app://app`, which the main process answers itself (no sockets).
    Chromium's renderer main thread pays a fixed cost per request, so the number of requests matters more than their size.
-3. **The scripts**: the packaged app serves the application as a bundle (below): about a dozen files at launch. From source the page loads about 370 modules
+3. **The scripts and styles**: the packaged app serves the application as a bundle (below): about a dozen files at launch. From source the page loads about 370 modules
    and 92 stylesheets, which is slower to start and exists so that tests and development see the sources.
 4. **`init()`** (`src/app.mjs`): settings, locale, the shell, then the stage (`createRenderer`), which waits for the graphics process.
 
@@ -23,8 +23,10 @@ watching: the first is what the scoreboard reports, the second is when drawing i
 - Every `src/**/*-worker.mjs` is a self-contained bundle at its own path, so `new Worker(new URL('./x-worker.mjs', import.meta.url))` finds it.
   `tests/app-bundle.test.mjs` fails when a worker the application starts is not an entry.
 - `import.meta.url` becomes the module's own URL (`/src/...` on the page's origin) because modules locate their neighbours with it (the engine's WebAssembly, the codec glue).
+- The stylesheet (`src/styles/app.css` and the ninety-odd files it imports) is one file; its fonts and images stay files of the web assets, with their `url()`s rewritten to resolve from the bundled sheet.
+  Scripts wait for the page's stylesheets, so those requests held back the first script (paired probe runs: ready about 240 ms sooner with the sheet bundled, on top of the scripts). The sheet is not minified: custom properties keep their text.
 - `index.html` is the source page with its `modulepreload` links replaced by the bundle's launch files, so the fetches start while the head is parsed.
-- Everything else stays unbundled and is served from the web assets: the stylesheets, fonts, WebAssembly and its glue (`src/engine/pkg/`, loaded by URL),
+- Everything else stays unbundled and is served from the web assets: the stylesheets loaded later by a module (`support-bridge.css`), fonts, WebAssembly and its glue (`src/engine/pkg/`, loaded by URL),
   and the modules the main process reads (`src/localization.mjs` and its neighbours, `src/telemetry-schema.mjs`).
 
 The overlay is `resources/bundle` in a packaged app (`before-pack.cjs` builds it, `package.json` ships it); `desktop/main.cjs` hands it to the web host. From source,

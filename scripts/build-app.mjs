@@ -19,6 +19,8 @@ const TARGET = 'chrome142';
  * (the benchmark reads the engine's memory) meets the application's engine rather than a second copy. */
 const PAGE_ENTRIES = ['src/app.mjs', 'src/engine/engine-start.mjs', 'src/engine/engine.mjs'];
 /** The entries the page loads at launch: their static imports are preloaded. */
+/** The one stylesheet index.html links. */
+const STYLESHEET = 'src/styles/app.css';
 const LAUNCH_ENTRIES = ['src/app.mjs', 'src/engine/engine-start.mjs'];
 
 async function* walk(directory) {
@@ -56,6 +58,20 @@ function importMetaUrl(root) {
         if (!text.includes('import.meta.url')) return null;
         const url = `(self.location.origin+${JSON.stringify(`/${relative.split(path.sep).join('/')}`)})`;
         return { contents: text.replaceAll('import.meta.url', url), loader: 'js' };
+      });
+    },
+  };
+}
+
+/** The stylesheet imports its ninety-odd files with `@import`; bundled, it is one request. Fonts and images stay files of
+ * the web assets, and their `url()`s are rewritten to be right from the bundled sheet's own place. */
+function stylesheetAssets(root, sheet) {
+  return {
+    name: 'stylesheet-assets',
+    setup(build) {
+      build.onResolve({ filter: /.(woff2?|ttf|svg|png|jpe?g|webp|gif)$/i }, ({ path: url, resolveDir }) => {
+        const target = path.resolve(resolveDir, url);
+        return { path: path.relative(path.dirname(sheet), target).split(path.sep).join('/'), external: true };
       });
     },
   };
@@ -103,17 +119,20 @@ export async function buildApp({ root = appRoot, output = path.join(root, 'build
     metafile: true,
     logLevel: 'warning',
   };
-  const [result, workers] = await Promise.all([
+  const sheet = path.join(root, STYLESHEET);
+  const [result, workers] = (await Promise.all([
     build({ ...options, entryPoints: entries.page, splitting: true, chunkNames: 'src/chunks/[name]-[hash]' }),
     build({ ...options, entryPoints: entries.workers }),
-  ]);
+    build({ absWorkingDir: root, entryPoints: { [STYLESHEET.slice(0, -'.css'.length)]: STYLESHEET }, outdir: options.outdir, bundle: true, target: TARGET,
+      plugins: [stylesheetAssets(root, sheet)], logLevel: 'warning' }),
+  ]));
   // The metafile names files relative to the working directory.
   const prefix = `${path.relative(root, output).split(path.sep).join('/')}/`;
   const preloads = new Set();
   for (const entry of LAUNCH_ENTRIES) for (const file of launchFiles(result.metafile, prefix + entry)) preloads.add(`./${file.slice(prefix.length)}`);
   const html = bundledIndex(await readFile(path.join(root, 'index.html'), 'utf8'), [...preloads].sort());
   await writeFile(path.join(output, 'index.html'), html);
-  return { output, files: Object.keys(result.metafile.outputs).length + Object.keys(workers.metafile.outputs).length + 1, preloads: [...preloads].sort() };
+  return { output, files: Object.keys(result.metafile.outputs).length + Object.keys(workers.metafile.outputs).length + 2, preloads: [...preloads].sort() };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

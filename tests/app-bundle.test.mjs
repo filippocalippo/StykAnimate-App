@@ -66,3 +66,16 @@ test('the bundle holds the page, its workers and the chunks they share, and refe
   // Modules find their neighbours by their own path: nothing may be left asking the bundle's file for it.
   for (const file of [...Object.values(page), ...Object.values(workers)]) assert.ok(!(await readFile(path.join(output, file), 'utf8')).includes('import.meta.url'), `${file} has no import.meta.url`);
 });
+
+test('the bundled stylesheet is one file whose fonts and images are found from where it is served', async t => {
+  const output = await mkdtemp(path.join(os.tmpdir(), 'styk-bundle-css-'));
+  t.after(() => rm(output, {recursive: true, force: true}));
+  await buildApp({root, output});
+  const css = await readFile(path.join(output, 'src/styles/app.css'), 'utf8');
+  assert.ok(!/@import/.test(css), 'no @import is left to fetch');
+  assert.match(css, /@layer\s+legacy,\s*reset,\s*tokens,\s*base,\s*layout,\s*components,\s*features,\s*states,\s*utilities\s*;/);
+  assert.match(css, /@layer legacy\s*\{/);
+  const urls = [...css.matchAll(/url\(\s*(["']?)([^)"']+)\1\s*\)/g)].map(match => match[2]).filter(url => !/^(data:|#|https?:)/.test(url));
+  assert.ok(urls.some(url => url.endsWith('.woff2')), 'the fonts are referenced');
+  for (const url of urls) assert.ok((await stat(path.resolve(root, 'src/styles', url))).isFile(), `${url} exists from src/styles/`);
+});
