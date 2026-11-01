@@ -1,0 +1,60 @@
+//! A document whose frame joins name no figure opens, mended from the nearest frame whose joins resolve, and says so
+//! (`Prepared::repairs`); a document that resolves is left exactly as the file holds it.
+
+use styk_doc::Value;
+use styk_edit::load::prepare_for_editor;
+
+fn read(path: &str) -> Value {
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    styk_doc::json::parse(&std::fs::read(folder.join(path)).unwrap()).unwrap()
+}
+
+fn at<'a>(value: &'a mut Value, key: &str) -> &'a mut Value { value.make_obj().unwrap().get_mut(key).unwrap() }
+
+/// The joins of the figures of frame `frame`, as (identity, parent identity).
+fn parents(document: &Value, frame: usize) -> Vec<(f64, Option<f64>)> {
+    let frames = document.get("keyframes").and_then(Value::elements).unwrap();
+    let frame = frames.get(frame).unwrap();
+    let objects: Vec<Value> = frame.get("objects").and_then(Value::elements).unwrap().iter().collect();
+    objects
+        .iter()
+        .map(|o| {
+            let parent = o.get("join").filter(|j| j.truthy()).and_then(|j| j.get("target_object_slot")).and_then(Value::as_f64).and_then(|s| objects.get(s as usize)).and_then(|p| p.get("unique_id")).and_then(Value::as_f64);
+            (o.get("unique_id").and_then(Value::as_f64).unwrap(), parent)
+        })
+        .collect()
+}
+
+/// `camera-chain`: three figures, the second joined to the first and the third to the second, in both its frames; the first frame's joins
+/// are given the shapes a badly cut scene left: one without a slot, one joined to itself.
+fn damaged() -> Value {
+    let mut document = read("tests/edit/camera-chain.document.json");
+    let frames = at(&mut document, "keyframes").make_arr().unwrap();
+    let objects = at(&mut frames[0], "objects").make_arr().unwrap();
+    at(&mut objects[1], "join").make_obj().unwrap().remove("target_object_slot");
+    at(&mut objects[1], "join").make_obj().unwrap().remove("target_unique_id");
+    at(&mut objects[2], "join").make_obj().unwrap().set("target_object_slot", Value::Num(2.0));
+    at(&mut objects[2], "join").make_obj().unwrap().remove("target_unique_id");
+    document
+}
+
+#[test]
+fn a_frame_whose_joins_name_no_figure_takes_the_joins_of_the_nearest_frame_that_resolves() {
+    let healthy = read("tests/edit/camera-chain.document.json");
+    let wanted = parents(&healthy, 0);
+    assert!(wanted.iter().any(|(_, parent)| parent.is_some()), "the fixture joins figures");
+    assert!(prepare_for_editor(damaged(), false).is_ok(), "the damaged document opens");
+    let opened = prepare_for_editor(damaged(), false).unwrap();
+    assert_eq!(opened.repairs, 1, "one frame was mended");
+    assert_eq!(parents(&opened.report, 0), wanted, "the first frame joins the figures its neighbour joins");
+    assert_eq!(parents(&opened.report, 1), parents(&healthy, 1), "the frame that resolved is as it was");
+}
+
+#[test]
+fn a_document_whose_joins_resolve_opens_as_it_is() {
+    let healthy = read("tests/edit/camera-chain.document.json");
+    let opened = prepare_for_editor(healthy.clone(), false).unwrap();
+    assert_eq!(opened.repairs, 0);
+    assert_eq!(parents(&opened.report, 0), parents(&healthy, 0));
+    assert_eq!(parents(&opened.report, 1), parents(&healthy, 1));
+}

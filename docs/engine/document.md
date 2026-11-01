@@ -45,6 +45,18 @@ codec's own message and status for a Pivot file it cannot read, `cancelled` for 
 the load panics on a damaged document: `styk-edit/tests/load_robust.rs` loads every edit fixture with
 each value replaced by values of the wrong kind or removed.
 
+A document the load would refuse for damage that older builds wrote is mended instead, once, and only then: a document whose frames and
+replacements all resolve is never touched, and `Prepared::repairs` (`repairs` of the open's metadata, `Opening.repairs`, which the app says
+with a notice) counts what was mended. Two kinds are known. The layer sheet of a movieclip's retained scene (`_styk.movieclipSource`)
+named a frame replacement (`movieclipPatches`) for a figure that scene's poses no longer held, because the clip was made beside a
+movieclip placed over frames of the timeline and cut the poses down without the sheet: a replacement whose pose is missing is dropped and
+one by a missing figure becomes a replacement by nothing (`layer_state::repair_patches`). And a frame of a movieclip whose joins named no
+figure (a slot that is not there, a figure joined to itself, a ring) takes the joins its nearest frame that resolves has, by figure
+identity (`load/joins.rs`, only for a document the scene check refused for a join). Creating a movieclip no longer writes either:
+`movieclip_commands::prune_patches` cuts the sheet's replacements down with the poses, and `cut_frame` unjoins a figure whose parent
+the cut scene does not keep. `scripts/smoke-movieclip-save.mjs` makes movieclips by seeded gestures in the real app and opens what each
+way of saving wrote.
+
 The editor's read view is built from the opened tree once, in pieces
 (`OpenedDocument.part`, `Opening.read` in `engine-open.mjs`): the document without the contents of
 its tables, then each background and audio recording, lifted as a

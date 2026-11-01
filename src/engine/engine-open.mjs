@@ -111,6 +111,8 @@ export class Opening {
   get version() { return this.meta.version; }
   /** Whether the document stored a frame draft when it was opened. */
   get savedDraft() { return this.meta.savedDraft; }
+  /** How many things the load mended so that the document opens (a file saved by a build that wrote what it could not read back); 0 for a document that needed nothing. */
+  get repairs() { return this.meta.repairs; }
   /** Where the engine's open spent its time (ms): decode, prepare, views, check. */
   get timings() { return this.meta.timings; }
   get lineage() { return this.meta.lineage; }

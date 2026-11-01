@@ -18,6 +18,7 @@ mod animation;
 mod drawings;
 mod figure;
 mod frames;
+mod joins;
 mod js;
 mod layer_state;
 mod legacy;
@@ -117,6 +118,9 @@ pub struct Prepared {
     pub tracks: Vec<Track>,
     /// Whether the document stored a frame draft (`_styk.simpleFrameDraft`) when it was opened.
     pub saved_draft: bool,
+    /// How many things the load mended so that the document opens, in it and in the movieclips it holds ([`layer_state::repair_patches`]).
+    /// Zero for every document that needed nothing: its tree is as the file holds it.
+    pub repairs: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -188,9 +192,15 @@ pub fn prepare_editor_load(document: Value) -> Result<Prepared, EditError> {
 
 /// [`prepare_editor_load`] with the checks that can run side by side given to `fan`: the result and the refusal are the same.
 pub fn prepare_editor_load_with(document: Value, fan: &dyn Fanout) -> Result<Prepared, EditError> {
+    prepare_editor_load_inner(document, fan, false)
+}
+
+/// [`prepare_editor_load_with`], mending what older builds wrote when `mend` ([`layer_state::repair_patches`], [`joins::repair_joins`]): only
+/// opening a project file does, every other load of a document (a figure file imported, a clipboard) refuses it as it always did.
+fn prepare_editor_load_inner(document: Value, fan: &dyn Fanout, mend: bool) -> Result<Prepared, EditError> {
     let mut report = or(get(Some(&document), "document"), or(get(Some(&document), "report"), Some(&document))).cloned().unwrap_or(Value::Null);
     movieclip::graph(&report)?;
-    let indexes = prepare(&mut report, fan)?;
+    let indexes = prepare(&mut report, fan, mend)?;
     let saved_draft = truthy(path(Some(&report), &["_styk", "simpleFrameDraft"]));
     Ok(Prepared { report, saved_draft, ..indexes })
 }
@@ -203,7 +213,7 @@ pub fn prepare_for_editor(document: Value, layer_timeline: bool) -> Result<Prepa
 
 /// [`prepare_for_editor`] with the checks that can run side by side given to `fan`.
 pub fn prepare_for_editor_with(document: Value, layer_timeline: bool, fan: &dyn Fanout) -> Result<Prepared, EditError> {
-    let mut prepared = prepare_editor_load_with(document, fan)?;
+    let mut prepared = prepare_editor_load_inner(document, fan, true)?;
     if layer_timeline {
         sheet::initialize(&mut prepared.report)?;
     }
@@ -227,15 +237,15 @@ fn child_mut<'a>(root: &'a mut Value, steps: &[Step]) -> Option<&'a mut Value> {
     Some(at)
 }
 
-/// Runs `prepare` on the document at `steps` of `report`, in place.
-fn prepare_child(report: &mut Value, steps: &[Step], fan: &dyn Fanout) -> Result<(), EditError> {
-    let Some(slot) = child_mut(report, steps) else { return Ok(()) };
+/// Runs `prepare` on the document at `steps` of `report`, in place, and says how many things it mended.
+fn prepare_child(report: &mut Value, steps: &[Step], fan: &dyn Fanout, mend: bool) -> Result<usize, EditError> {
+    let Some(slot) = child_mut(report, steps) else { return Ok(0) };
     let mut nested = slot.clone();
-    prepare(&mut nested, fan)?;
+    let repairs = prepare(&mut nested, fan, mend)?.repairs;
     if let Some(slot) = child_mut(report, steps) {
         *slot = nested;
     }
-    Ok(())
+    Ok(repairs)
 }
 
 fn empty_frame() -> Value {
@@ -274,14 +284,25 @@ fn next_uid_after(next: f64, uid: f64) -> f64 {
 }
 
 /// `prepareEditorLoadSteps` on a document that has passed the movieclip graph check.
-fn prepare(report: &mut Value, fan: &dyn Fanout) -> Result<Prepared, EditError> {
+fn prepare(report: &mut Value, fan: &dyn Fanout, mend: bool) -> Result<Prepared, EditError> {
     frames::expand_pose_sequences(report)?;
     // Pivot permits a zero-key animation. One private editable working pose stands for it.
     let empty = is_array(report.get("keyframes")) && len(report.get("keyframes")) == 0;
     if empty {
         report.make_obj().ok_or_else(|| refuse(TYPE_ERROR))?.set("keyframes", Value::array(vec![empty_frame()]));
     }
-    scene::validate_scene(report, None, fan)?;
+    // A frame whose joins name no figure is mended from its neighbour's, once, for a document the check refuses for them; a document that
+    // passes is never touched.
+    let mut repaired = 0;
+    if let Err(refusal) = scene::validate_scene(report, None, fan) {
+        let joins = matches!(&refusal, EditError::Invalid(key) if key == TYPE_ERROR || key == "errors.model.joinPointsToAMissingFigureOrHandle" || key == "errors.editorSelection.figuresContainACyclicJoin");
+        let mended = if mend && joins { joins::repair_joins(report) } else { 0 };
+        if mended == 0 {
+            return Err(refusal);
+        }
+        repaired += mended;
+        scene::validate_scene(report, None, fan)?;
+    }
     drawings::validate(report)?;
     let audio = path(Some(report), &["_styk", "audio"]);
     if truthy(audio) {
@@ -295,7 +316,7 @@ fn prepare(report: &mut Value, fan: &dyn Fanout) -> Result<Prepared, EditError> 
     if let Some(mut source) = inherited_source(report) {
         let had_styk = truthy(path(Some(report), &["_styk", "movieclipSource", "document", "_styk"]));
         let had_frames = len(path(Some(report), &["_styk", "movieclipSource", "document", "keyframes"])) > 0;
-        prepare(&mut source, fan)?;
+        repaired += prepare(&mut source, fan, mend)?.repairs;
         let figures = source.get("figure_types").cloned();
         if let Some(figures) = figures {
             report.make_obj().unwrap().set("figure_types", figures);
@@ -317,20 +338,23 @@ fn prepare(report: &mut Value, fan: &dyn Fanout) -> Result<Prepared, EditError> 
     } else if truthy(path(Some(report), &["_styk", "movieclipSource"])) && !missing(path(Some(report), &["_styk", "movieclipSource", "document"])) {
         let descriptor = path(Some(report), &["_styk", "movieclipSource"]);
         if truthy(get(descriptor, "document")) {
-            prepare_child(report, &[Step::Key("_styk"), Step::Key("movieclipSource"), Step::Key("document")], fan)?;
+            repaired += prepare_child(report, &[Step::Key("_styk"), Step::Key("movieclipSource"), Step::Key("document")], fan, mend)?;
         }
     }
     if !assets_prepared {
         let figures = items(report.get("figure_types"));
         for (index, figure) in figures.iter().enumerate() {
             if truthy(movieclip::asset(figure)) {
-                prepare_child(report, &[Step::Key("figure_types"), Step::Slot(index), Step::Key("_styk"), Step::Key("movieclip"), Step::Key("document")], fan)?;
+                repaired += prepare_child(report, &[Step::Key("figure_types"), Step::Slot(index), Step::Key("_styk"), Step::Key("movieclip"), Step::Key("document")], fan, mend)?;
             }
         }
     }
     layer_state::ensure(report)?;
     layer_state::validate(path(Some(report), &["_styk", "layers"]))?;
     animation::validate_document(report)?;
+    if mend {
+        repaired += layer_state::repair_patches(report);
+    }
     layer_state::validate_sheet(report)?;
     let legacy = path(Some(report), &["_styk", "layerSheet", "legacyAnimation"]);
     if truthy(legacy) {
@@ -387,7 +411,9 @@ fn prepare(report: &mut Value, fan: &dyn Fanout) -> Result<Prepared, EditError> 
         stand_in.set("_styk", Value::object(styk));
         animation::validate_document(&Value::object(stand_in))?;
     }
-    index(report, sources, next_frame_identity)
+    let mut prepared = index(report, sources, next_frame_identity)?;
+    prepared.repairs = repaired;
+    Ok(prepared)
 }
 
 /// The indexes of a validated document, and the frame identities its keyframes lack.
@@ -472,5 +498,6 @@ fn index(report: &mut Value, sources: Vec<Value>, mut next_frame_identity: f64) 
         figure_names: names,
         tracks,
         saved_draft: false,
+        repairs: 0,
     })
 }

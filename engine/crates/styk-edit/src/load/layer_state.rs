@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use styk_doc::{Obj, Value};
 
 use super::animation::key_easing;
+use super::{child_mut, Step};
 use super::js::*;
 use crate::EditError;
 
@@ -198,6 +199,59 @@ pub(super) fn layer_of(report: &Value, uid: f64) -> Option<String> {
     let key = number_text(uid);
     let assigned = get(get(state, "assignments"), &key);
     text(if has_own(get(state, "assignments"), &key) { assigned } else { get(state, "defaultLayerId") }).map(str::to_string)
+}
+
+/// The frame replacements (`movieclipPatches`) of a layer sheet that its pose sources cannot supply, mended so the document opens: a
+/// replacement whose pose source is not there is dropped, and one by a figure its pose source does not hold becomes a replacement by
+/// nothing. A movieclip made beside another that was placed over frames kept its scene's sheet whole while cutting that scene's poses
+/// down to the clip's figures, and the file it was saved in was refused here. Nothing else is changed: a sheet whose replacements are
+/// all supplied is left as it is, untouched. Returns how many replacements were mended.
+pub(super) fn repair_patches(report: &mut Value) -> usize {
+    let mut edits: Vec<(String, usize, Vec<Value>)> = Vec::new();
+    let mut mended = 0;
+    {
+        let Some(tracks) = path(Some(report), &["_styk", "layerSheet", "tracks"]) else { return 0 };
+        let sources = Sources::new(report);
+        for (id, track) in entries(Some(tracks)) {
+            for (index, key) in items(get(Some(track), "keys")).iter().enumerate() {
+                let patches = items(key.get("movieclipPatches"));
+                let mut next = Vec::with_capacity(patches.len());
+                let mut changed = false;
+                for patch in patches {
+                    let Some(frame) = sources.frame(get(Some(&patch), "frameId")) else {
+                        changed = true;
+                        mended += 1;
+                        continue;
+                    };
+                    let replacement = get(Some(&patch), "replacementUid");
+                    if !missing(replacement) && !items(frame.get("objects")).iter().any(|o| o.get("unique_id") == replacement) {
+                        let mut fixed = patch.clone();
+                        if let Some(object) = fixed.make_obj() {
+                            object.remove("replacementUid");
+                        }
+                        next.push(fixed);
+                        changed = true;
+                        mended += 1;
+                        continue;
+                    }
+                    next.push(patch);
+                }
+                if changed {
+                    edits.push((id.to_string(), index, next));
+                }
+            }
+        }
+    }
+    for (id, index, patches) in edits {
+        let steps = [Step::Key("_styk"), Step::Key("layerSheet"), Step::Key("tracks"), Step::Key(&id), Step::Key("keys"), Step::Slot(index)];
+        let Some(key) = child_mut(report, &steps).and_then(Value::make_obj) else { continue };
+        if patches.is_empty() {
+            key.remove("movieclipPatches");
+        } else {
+            key.set("movieclipPatches", Value::array(patches));
+        }
+    }
+    mended
 }
 
 /// `validateLayerSheet(report)` and the pose-source lookup it needs.

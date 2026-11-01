@@ -284,7 +284,7 @@ export class ImportClient {
   _opened(read,opening,filename,{sourceId,sourceOwner,sourceBytes,started,decoded}) {
     const now=performance.now();
     attachRead(read.report,read);
-    return {ok:true,sourceId,...(sourceOwner?{sourceOwner}:{}),filename,kind:opening.kind,version:opening.version,savedDraft:opening.savedDraft,document:read.report,
+    return {ok:true,sourceId,...(sourceOwner?{sourceOwner}:{}),filename,kind:opening.kind,version:opening.version,savedDraft:opening.savedDraft,repairs:opening.repairs,document:read.report,
       timings:{engine:opening.timings,decode_ms:+(decoded-started).toFixed(3),cache_hit:false,total_ms:+(now-started).toFixed(3),source_bytes:sourceBytes,
         read_ms:+(now-decoded).toFixed(3),transport:'engine-open'}};
   }

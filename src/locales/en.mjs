@@ -570,6 +570,7 @@ const messages = {
   "app.recoveryCopyCouldNotBeWritten": "Recovery copy could not be written: {message}",
   "app.closeAProjectToOpenAnother": "Close a project to open another. {count} can be open at once.",
   "app.waitForTheSaveOrTheOpeningFileToFinish": "Wait for the save or the opening file to finish.",
+  "app.openedAfterMendingTheProject": "This project was saved with damaged movieclip data. It opened after {count} repairs, so check your movieclips before saving over it.",
   "app.savedACopyNewerChangesAreStillUnsaved": "Saved a copy · newer changes are still unsaved",
   "app.projectSaved": "Project saved",
   "app.editText": "Edit text",

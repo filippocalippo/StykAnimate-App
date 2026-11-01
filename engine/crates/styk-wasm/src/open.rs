@@ -150,6 +150,7 @@ fn build_meta(opened: &Opened) -> String {
     out.set("version", Value::Num(opened.version));
     out.set("lineage", Value::Num(opened.lineage() as f64));
     out.set("savedDraft", Value::Bool(opened.indexes.saved_draft));
+    out.set("repairs", Value::Num(opened.indexes.repairs as f64));
     out.set("indexes", opened.indexes.indexes());
     let mut timings = Obj::new();
     for (phase, ms) in &opened.timings {
@@ -311,7 +312,7 @@ impl ViewPart {
 #[wasm_bindgen]
 impl OpenedDocument {
     /// What the interface needs to know before it reads the document, as JSON: its `name`, `kind`, `version`,
-    /// the `lineage` of its generations, whether it stored a frame draft (`savedDraft`), the `indexes` the editor
+    /// the `lineage` of its generations, whether it stored a frame draft (`savedDraft`), how many things the load mended (`repairs`), the `indexes` the editor
     /// adopts (next identities, figures per layer, tracks) and the `splits` its view arrives in
     /// (`path`, and `count` of an array or `keys` of an object).
     pub fn meta(&self) -> String {
