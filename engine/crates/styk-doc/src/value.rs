@@ -112,7 +112,7 @@ const SCAN_KEYS: usize = 8;
 /// a key up is most of what validating and converting a document does, and the standard hasher spends more on a short key than
 /// the lookup does; the seed keeps a file from choosing keys that collide.
 #[derive(Clone, Copy)]
-struct KeyHash(u64);
+pub(crate) struct KeyHash(u64);
 
 impl Default for KeyHash {
     fn default() -> Self {
@@ -121,7 +121,7 @@ impl Default for KeyHash {
     }
 }
 
-struct KeyHasher(u64);
+pub(crate) struct KeyHasher(u64);
 
 const FOLD: u64 = 0x9e37_79b9_7f4a_7c15;
 
@@ -150,6 +150,11 @@ impl Hasher for KeyHasher {
     #[inline]
     fn write_u8(&mut self, byte: u8) {
         self.fold(byte as u64);
+    }
+
+    #[inline]
+    fn write_usize(&mut self, word: usize) {
+        self.fold(word as u64);
     }
 
     #[inline]

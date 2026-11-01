@@ -80,8 +80,13 @@ function openFailure(error) {
   return failure;
 }
 
+/**
+ * The most other workers an open takes: the workers share one allocator, whose lock the open's many small allocations contend for (the
+ * open of the large `.styk` read fastest with two or three helpers, and no faster with six).
+ */
+const MAX_OPEN_HELPERS = 3;
 /** The other workers an open may use: it keeps one free for the frame on show of another document. */
-const helpersOf = engine => Math.max(0, (engine.workers ?? 0) - 2);
+const helpersOf = engine => Math.min(MAX_OPEN_HELPERS, Math.max(0, (engine.workers ?? 0) - 2));
 const optionsText = ({layerTimeline = false} = {}, helpers = 0) => JSON.stringify({layerTimeline: Boolean(layerTimeline), helpers});
 
 /** The views already built for documents that are about to be loaded (`attach`, `prepareLoad`). */
@@ -104,6 +109,8 @@ export class Opening {
   get version() { return this.meta.version; }
   /** Whether the document stored a frame draft when it was opened. */
   get savedDraft() { return this.meta.savedDraft; }
+  /** Where the engine's open spent its time (ms): decode, prepare, views, check. */
+  get timings() { return this.meta.timings; }
   get lineage() { return this.meta.lineage; }
 
   /** Gives the document the Pivot file it was read from, as a saved native document carries its source (`_stykSource`). */

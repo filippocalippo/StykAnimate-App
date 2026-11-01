@@ -101,6 +101,7 @@ pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(De
         })
         .collect();
     let Ok(skeleton) = unpack(codec, &bytes[skeleton], raw, &|| "skeleton".to_string()) else { return inline() };
+    fan.mark("skeleton unpacked");
     let skeleton = Arc::new(skeleton);
     let hashed = {
         let skeleton = skeleton.clone();
@@ -113,12 +114,14 @@ pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(De
             _ => return inline(),
         }
     }
+    fan.mark("sections unpacked");
     let sections: Arc<[(u8, Vec<u8>)]> = sections.into();
     let skeleton_bytes = skeleton.len();
     let shared = Arc::new(SharedMarkers(std::sync::Mutex::new(Markers::new(sections.clone(), skeleton_bytes))));
     let hook: Arc<dyn json::SharedHook> = shared.clone();
     let pieces = json::parse_pieces(&skeleton, &hook, fan).filter(|document| shared.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_sound(document));
     drop(hook);
+    fan.mark("skeleton read");
     let document = match pieces {
         Some(document) => document,
         // Not in pieces, or not a document the pieces vouch for: the checks and the errors are those of reading in order.

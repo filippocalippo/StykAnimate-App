@@ -143,8 +143,14 @@ document, the typed views and every refusal are the same whichever way they ran:
 - **The load's scene check** walks the frames in pieces and reports the first frame's refusal; **the typed views** of the
   keyframes are converted in pieces and joined in order (their notes in the order of the records).
 
-The open's own thread takes part in every batch and runs any task a worker has not started, so an open never waits for a busy or
-missing worker. `tests/load_parallel.rs`, `tests/deferred.rs` and `tests/parallel.rs` compare the two ways on documents and on
+The interface leaves the open at most three helpers: the workers share one allocator, whose lock the open's many small allocations contend
+for (the large `.styk` read fastest with two or three, and no faster with six). The open's own thread takes part in every batch and runs any task a worker has not started, so an open never waits for a busy or
+missing worker. What the interface needs to know of the opened document (`OpenedDocument.meta()`: the indexes, the rows of the lazy tables, the timeline) is
+made by the worker at the end of the open, not on the interface thread when it takes the result (it cost 60 to 150 ms there on the large
+projects). The open's phases (`decode`, `prepare`, `views`, `check`, and the marks the readers made) come back in it as `timings` and reach
+the import's `timings.engine`.
+
+`tests/load_parallel.rs`, `tests/deferred.rs` and `tests/parallel.rs` compare the two ways on documents and on
 damaged copies of them.
 
 ## Exports of the document

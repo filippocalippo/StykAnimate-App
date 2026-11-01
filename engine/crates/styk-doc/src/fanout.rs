@@ -39,6 +39,9 @@ pub trait Fanout {
         Err(task)
     }
 
+    /// Notes that the work reached `phase`, for the host to time. Nothing by default.
+    fn mark(&self, _phase: &'static str) {}
+
     /// Whether a thread that was given a task by [`Fanout::spawn`] is known to have stopped before it ended.
     fn lost(&self) -> bool {
         false

@@ -76,10 +76,12 @@ pub(crate) fn decode_piv_bytes<'a>(ctx: &Ctx<'_>, source: &'a [u8], source_path:
     if version == 5 && mode == FrameMode::Build && ctx.fan().threads() > 1 {
         // The frames are built in pieces that share the payload; it is handed back as it was.
         let Cow::Owned(inflated) = payload else { return decode_v5(ctx, source, source_path, mode, payload, version) };
+        ctx.fan().mark("inflated");
         let shared = std::sync::Arc::new(inflated);
         let sharing = ctx.sharing(shared.clone());
         let mut decoded = v5::decode(&sharing, &shared, source.len(), source_path, mode)?;
         drop(sharing);
+        ctx.fan().mark("frames built");
         if let Some(object) = decoded.report.make_obj() {
             object.set("source_sha256", text(&v5::sha256_hex(source)));
         }

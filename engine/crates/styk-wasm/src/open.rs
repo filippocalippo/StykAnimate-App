@@ -24,7 +24,8 @@ use crate::js_error;
 /// A job the interface started, until it takes the outcome.
 pub(crate) struct Job {
     cancelled: Arc<AtomicBool>,
-    outcome: Option<Result<Opened, OpenError>>,
+    /// The document, and the text of its `meta()`, which the worker made so that the interface does not.
+    outcome: Option<Result<(Opened, String), OpenError>>,
 }
 
 /// The jobs of a handle, by number.
@@ -61,7 +62,10 @@ impl EngineHandle {
         let cancelled = Arc::new(AtomicBool::new(false));
         jobs.table.lock().unwrap_or_else(|e| e.into_inner()).insert(id, Job { cancelled: cancelled.clone(), outcome: None });
         self.engine.spawn(move |engine| {
-            let outcome = run(engine, &bytes, &name, &source, options, &|| cancelled.load(Ordering::Relaxed));
+            let outcome = run(engine, &bytes, &name, &source, options, &|| cancelled.load(Ordering::Relaxed)).map(|opened| {
+                let meta = build_meta(&opened);
+                (opened, meta)
+            });
             drop(bytes);
             let mut table = jobs.table.lock().unwrap_or_else(|e| e.into_inner());
             // A job nobody wants any more (cancelled and forgotten) is dropped here, on the worker.
@@ -109,7 +113,7 @@ impl EngineHandle {
             return if table.contains_key(&job) { Ok(None) } else { Err(js_error("no such open job")) };
         }
         match table.remove(&job).and_then(|entry| entry.outcome) {
-            Some(Ok(opened)) => Ok(Some(OpenedDocument::new(self.engine.clone(), opened))),
+            Some(Ok((opened, meta))) => Ok(Some(OpenedDocument::new(self.engine.clone(), opened, Some(meta)))),
             Some(Err(error)) => Err(js_error(error.to_json())),
             None => Ok(None),
         }
@@ -121,7 +125,7 @@ impl EngineHandle {
         // On this thread nothing may wait for a worker: the open takes none.
         let (options, _) = options_of(options)?;
         match run(&self.engine, bytes, name, source, (options, 0), &|| false) {
-            Ok(opened) => Ok(OpenedDocument::new(self.engine.clone(), opened)),
+            Ok(opened) => Ok(OpenedDocument::new(self.engine.clone(), opened, None)),
             Err(error) => Err(js_error(error.to_json())),
         }
     }
@@ -131,6 +135,45 @@ impl EngineHandle {
 /// entry at a time, after the rest of the document.
 const SPLITS: [&[&str]; 5] = [&["figure_types"], &["keyframes"], &["backgrounds"], &["_styk", "frameSources"], &["_styk", "audio", "assets"]];
 
+/// The text of an opened document's `meta()`.
+fn build_meta(opened: &Opened) -> String {
+    let mut out = Obj::new();
+    out.set("name", Value::str(&opened.name));
+    out.set("kind", Value::str(opened.kind));
+    out.set("version", Value::Num(opened.version));
+    out.set("lineage", Value::Num(opened.lineage() as f64));
+    out.set("savedDraft", Value::Bool(opened.indexes.saved_draft));
+    out.set("indexes", opened.indexes.indexes());
+    let mut timings = Obj::new();
+    for (phase, ms) in &opened.timings {
+        timings.set(phase, Value::Num((ms * 10.0).round() / 10.0));
+    }
+    out.set("timings", Value::object(timings));
+    let splits: Vec<Value> = splits_of(opened)
+        .into_iter()
+        .map(|(_, path, value)| {
+            let mut split = Obj::new();
+            split.set("path", Value::array(path.iter().map(|key| Value::str(key)).collect()));
+            match &value {
+                Value::Obj(object) => split.set("keys", Value::array(object.keys().map(|key| Value::str(key)).collect())),
+                other => split.set("count", Value::Num(other.array_len().unwrap_or(0) as f64)),
+            }
+            Value::object(split)
+        })
+        .collect();
+    out.set("splits", Value::array(splits));
+    // What the view knows of its lazy tables without fetching a record (`LAZY_TABLES`): the row of each record (its identity, for a keyframe), and the
+    // timeline the keyframes make.
+    let tree = &opened.tree;
+    let column = |table: &str, id: &dyn Fn(&Value) -> Value| Value::array(tree.get(table).and_then(Value::elements).map(|records| records.iter().map(|record| id(&record)).collect()).unwrap_or_default());
+    let mut rows = Obj::new();
+    rows.set("keyframes", column("keyframes", &styk_edit::frame_row));
+    rows.set("figure_types", column("figure_types", &styk_edit::figure_row));
+    out.set("rows", Value::object(rows));
+    out.set("timeline", Value::array(styk_edit::timeline_rows(tree).into_iter().map(|(start, count)| Value::array(vec![Value::Num(start), Value::Num(count)])).collect()));
+    json::to_string(&Value::object(out))
+}
+
 /// An opened document, until the editor has built its view and a session has started from it.
 #[wasm_bindgen]
 pub struct OpenedDocument {
@@ -138,6 +181,8 @@ pub struct OpenedDocument {
     /// Taken out only when the opening is released ([`Drop`]).
     opened: Option<Arc<Opened>>,
     lifter: RefCell<ViewLifter>,
+    /// The text of `meta()` when the worker that opened the document made it.
+    meta: RefCell<Option<String>>,
 }
 
 /// An opened document can be hundreds of megabytes: the last owner drops it on an engine worker, never on the
@@ -151,8 +196,8 @@ impl Drop for OpenedDocument {
 }
 
 impl OpenedDocument {
-    fn new(engine: Engine, opened: Opened) -> OpenedDocument {
-        OpenedDocument { engine, opened: Some(Arc::new(opened)), lifter: RefCell::new(ViewLifter::new()) }
+    fn new(engine: Engine, opened: Opened, meta: Option<String>) -> OpenedDocument {
+        OpenedDocument { engine, opened: Some(Arc::new(opened)), lifter: RefCell::new(ViewLifter::new()), meta: RefCell::new(meta) }
     }
 
     fn opened(&self) -> &Arc<Opened> {
@@ -161,8 +206,12 @@ impl OpenedDocument {
 
     /// The splits the document has, in order, with how many entries each holds.
     fn splits(&self) -> Vec<(usize, &'static [&'static str], Value)> {
-        SPLITS.iter().enumerate().filter_map(|(at, path)| self.opened().tree.path(path).filter(|value| matches!(value, Value::Arr(_) | Value::Nums(_) | Value::Obj(_))).map(|value| (at, *path, value.clone()))).collect()
+        splits_of(self.opened())
     }
+}
+
+fn splits_of(opened: &Opened) -> Vec<(usize, &'static [&'static str], Value)> {
+    SPLITS.iter().enumerate().filter_map(|(at, path)| opened.tree.path(path).filter(|value| matches!(value, Value::Arr(_) | Value::Nums(_) | Value::Obj(_))).map(|value| (at, *path, value.clone()))).collect()
 }
 
 /// `value` with the entry at `path` replaced by `empty` (where the path leads).
@@ -259,38 +308,11 @@ impl OpenedDocument {
     /// adopts (next identities, figures per layer, tracks) and the `splits` its view arrives in
     /// (`path`, and `count` of an array or `keys` of an object).
     pub fn meta(&self) -> String {
-        let opened = self.opened();
-        let mut out = Obj::new();
-        out.set("name", Value::str(&opened.name));
-        out.set("kind", Value::str(opened.kind));
-        out.set("version", Value::Num(opened.version));
-        out.set("lineage", Value::Num(opened.lineage() as f64));
-        out.set("savedDraft", Value::Bool(opened.indexes.saved_draft));
-        out.set("indexes", opened.indexes.indexes());
-        let splits: Vec<Value> = self
-            .splits()
-            .into_iter()
-            .map(|(_, path, value)| {
-                let mut split = Obj::new();
-                split.set("path", Value::array(path.iter().map(|key| Value::str(key)).collect()));
-                match &value {
-                    Value::Obj(object) => split.set("keys", Value::array(object.keys().map(|key| Value::str(key)).collect())),
-                    other => split.set("count", Value::Num(other.array_len().unwrap_or(0) as f64)),
-                }
-                Value::object(split)
-            })
-            .collect();
-        out.set("splits", Value::array(splits));
-        // What the view knows of its lazy tables without fetching a record (`LAZY_TABLES`): the row of each record (its identity, for a keyframe), and the
-        // timeline the keyframes make.
-        let tree = &opened.tree;
-        let column = |table: &str, id: &dyn Fn(&Value) -> Value| Value::array(tree.get(table).and_then(Value::elements).map(|records| records.iter().map(|record| id(&record)).collect()).unwrap_or_default());
-        let mut rows = Obj::new();
-        rows.set("keyframes", column("keyframes", &styk_edit::frame_row));
-        rows.set("figure_types", column("figure_types", &styk_edit::figure_row));
-        out.set("rows", Value::object(rows));
-        out.set("timeline", Value::array(styk_edit::timeline_rows(tree).into_iter().map(|(start, count)| Value::array(vec![Value::Num(start), Value::Num(count)])).collect()));
-        json::to_string(&Value::object(out))
+        // The worker that opened the document made it; one opened on this thread makes it now.
+        if let Some(text) = self.meta.borrow().as_ref() {
+            return text.clone();
+        }
+        build_meta(self.opened())
     }
 
     /// A piece of the document: `split` -1 is the document without the contents of its splits, `split` n

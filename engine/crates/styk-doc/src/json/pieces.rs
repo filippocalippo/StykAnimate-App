@@ -8,7 +8,6 @@
 //! read, a hook refuses a string, the text is not one this scan understands) it gives nothing, and the caller reads the text in
 //! order, which is where the errors of a damaged file come from: the same ones, at the same places, as without this.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::fanout::{self, Fanout};
@@ -103,7 +102,7 @@ pub fn parse_pieces(text: &Arc<Vec<u8>>, hook: &Arc<dyn SharedHook>, fan: &dyn F
     }
     let bytes: &[u8] = text;
     let mut asked = Shared(&**hook);
-    let mut parser = Parser { text: bytes, at: 0, keys: HashMap::new(), shapes: HashMap::new(), scratch: String::new(), hook: &mut asked };
+    let mut parser = Parser::new(bytes, &mut asked);
     if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
         parser.at = 3;
     }
@@ -203,7 +202,7 @@ fn cut(found: &[(usize, usize)], threads: usize) -> Vec<std::ops::Range<usize>> 
 /// The records in `range` of the text, separated by commas; `None` if the range is anything else.
 fn read_records(text: &Arc<Vec<u8>>, hook: &Arc<dyn SharedHook>, range: std::ops::Range<usize>) -> Option<Vec<Value>> {
     let mut asked = Shared(&**hook);
-    let mut parser = Parser { text: &text[range.clone()], at: 0, keys: HashMap::new(), shapes: HashMap::new(), scratch: String::new(), hook: &mut asked };
+    let mut parser = Parser::new(&text[range.clone()], &mut asked);
     let mut records = Vec::new();
     loop {
         // The array is at depth 1, its records at 2.
