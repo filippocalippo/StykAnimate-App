@@ -314,7 +314,11 @@ impl Editor {
         {
             return Ok(set.clone());
         }
+        let _whole = crate::prof::scope("onions::set");
+        let scope = crate::prof::scope("onions::prepared");
         let prepared = self.prepared()?;
+        drop(scope);
+        let scope = crate::prof::scope("onions::candidates");
         let timeline = rows(&self.report);
         let total = total_ticks(&timeline);
         let sheet = self.report.path(&["_styk", "layerSheet"]).is_some();
@@ -329,13 +333,17 @@ impl Editor {
         if candidates.len() > MAX_GHOSTS {
             candidates.drain(..candidates.len() - MAX_GHOSTS);
         }
+        drop(scope);
         let (drawing, invisible) = self.layer_flags();
         let layers: Option<Value> = self.report.path(&["_styk", "layers"]).cloned();
         let layer_of = |uid: u32| crate::frame::layer_of(layers.as_ref(), uid);
         let mut records = None;
         let mut ghosts = Vec::with_capacity(candidates.len());
         for candidate in candidates {
+            let scope = crate::prof::scope("onions::evaluate");
             let record = self.ghost_record(cache, &mut records, &prepared, candidate.tick)?;
+            drop(scope);
+            let _scope = crate::prof::scope("onions::hidden");
             let objects: Vec<Value> = record.get("objects").and_then(Value::elements).map(|objects| objects.iter().collect()).unwrap_or_default();
             // The scope, with the figures joined to the selected ones when asked.
             let included: Option<HashSet<u32>> = settings.selected_only.then(|| {
