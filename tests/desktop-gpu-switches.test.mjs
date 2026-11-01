@@ -22,9 +22,9 @@ test('macOS keeps Chromium defaults', () => {
   assert.deepEqual(gpuSwitches({platform: 'darwin', env: {}}), {switches: [], features: [], ozone: null});
 });
 
-test('Windows rasterizes the interface on the CPU, unless STYK_GPU_RASTER=1', () => {
+test('Windows rasterizes the interface on the CPU, and no other platform is changed for it', () => {
   assert.deepEqual(gpuSwitches({platform: 'win32', env: {}}), {switches: ['disable-gpu-rasterization'], features: [], ozone: null});
-  assert.deepEqual(gpuSwitches({platform: 'win32', env: {STYK_GPU_RASTER: '1'}}).switches, []);
+  for (const platform of ['darwin', 'linux']) assert.ok(!gpuSwitches({platform, env: {}}).switches.includes('disable-gpu-rasterization'));
 });
 
 test('STYK_GPU_UNSAFE=1 still forces the opt-in on every platform', () => {
