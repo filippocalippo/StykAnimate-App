@@ -13240,20 +13240,20 @@
   },
   "errors.drawingPixels.combinedSelectionExceedsThe16MegapixelMaskLimit": {
     "locations": [
-      "src/drawing-pixels.mjs:41"
+      "src/drawing-pixels.mjs:48"
     ],
     "context": "if(width*height>DRAWING_MAX_PIXELS)throw messageError(new Error(''), \"errors.drawingPixels.combinedSelectionExceedsThe16MegapixelMaskLimit\", {});"
   },
   "errors.drawingPixels.invalidFilterBounds": {
     "locations": [
-      "src/drawing-pixels.mjs:72",
+      "src/drawing-pixels.mjs:79",
       "src/engine/engine-drawing-worker.mjs:140"
     ],
     "context": "if(!bounds||![bounds.x,bounds.y,bounds.width,bounds.height,bounds.x+bounds.width,bounds.y+bounds.height].every(Number.isSafeInteger)||bounds.width<1||bounds.hei"
   },
   "errors.drawingPixels.invertedSelectionExceedsThe16MegapixelMaskLimit": {
     "locations": [
-      "src/drawing-pixels.mjs:48"
+      "src/drawing-pixels.mjs:55"
     ],
     "context": "if(bounds.width*bounds.height>DRAWING_MAX_PIXELS)throw messageError(new Error(''), \"errors.drawingPixels.invertedSelectionExceedsThe16MegapixelMaskLimit\", {});"
   },
@@ -13377,8 +13377,8 @@
     "locations": [
       "src/drawing-resources.mjs:195",
       "src/drawing-resources.mjs:219",
-      "src/drawing-resources.mjs:351",
-      "src/drawing-resources.mjs:453"
+      "src/drawing-resources.mjs:352",
+      "src/drawing-resources.mjs:454"
     ],
     "context": "if(this.disposed)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingDocumentClosed\", {});"
   },
@@ -13403,8 +13403,8 @@
   },
   "errors.drawingResources.drawingPublicationCancelled": {
     "locations": [
-      "src/drawing-resources.mjs:357",
-      "src/drawing-resources.mjs:364"
+      "src/drawing-resources.mjs:358",
+      "src/drawing-resources.mjs:365"
     ],
     "context": "if(signal?.aborted)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingPublicationCancelled\", {});"
   },
@@ -13458,7 +13458,7 @@
   },
   "errors.drawingResources.theDrawingEncoderLostItsTileCacheTry": {
     "locations": [
-      "src/drawing-resources.mjs:422"
+      "src/drawing-resources.mjs:423"
     ],
     "context": "if(result.missing?.length)throw messageError(new Error(''), \"errors.drawingResources.theDrawingEncoderLostItsTileCacheTry\", {});"
   },
