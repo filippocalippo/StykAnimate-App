@@ -83,11 +83,19 @@ impl Deferred {
 /// The document is the one [`decode`] gives, and so is every error once `Deferred::finish` has been asked (it must be, whatever
 /// happens to the document, before the open is believed): anything that is not a good file is decoded in order, as [`decode`] does.
 pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(Decoded, Deferred), ContainerError> {
-    let inline = || decode(bytes, kind).map(|decoded| (decoded, Deferred::done()));
+    decode_deferred_owned(bytes.to_vec(), kind, fan)
+}
+
+/// [`decode_deferred`] for a caller that has no use for the file afterwards. The sections' tasks share the file instead of copying
+/// what they unpack, and the file is let go as soon as the skeleton and the sections are unpacked: a project's file (35 MB for one
+/// whose skeleton is 147 MB of text) is not held while the skeleton is read into a tree, which is when the memory is fullest.
+pub fn decode_deferred_owned(bytes: Vec<u8>, kind: Kind, fan: &dyn Fanout) -> Result<(Decoded, Deferred), ContainerError> {
+    let bytes = Arc::new(bytes);
+    let inline = || decode(&bytes, kind).map(|decoded| (decoded, Deferred::done()));
     if fan.threads() <= 1 {
         return inline();
     }
-    let Ok(Layout::Sections { codec, raw, digest, skeleton, records }) = layout(bytes, kind) else { return inline() };
+    let Ok(Layout::Sections { codec, raw, digest, skeleton, records }) = layout(&bytes, kind) else { return inline() };
     // A small skeleton is read faster than it is shared out.
     if raw < PIECES_FROM_BYTES {
         return inline();
@@ -100,11 +108,11 @@ pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(De
         .into_iter()
         .enumerate()
         .map(|(index, record)| {
-            let stored = bytes[record.offset..record.offset + record.stored].to_vec();
-            styk_doc::fanout::start(fan, move || unpack_section(index, &record, &stored))
+            let file = bytes.clone();
+            styk_doc::fanout::start(fan, move || unpack_section(index, &record, &file[record.offset..record.offset + record.stored]))
         })
         .collect();
-    let Ok(skeleton) = unpack(codec, &bytes[skeleton], raw, &|| "skeleton".to_string()) else { return inline() };
+    let Ok(skeleton) = unpack(codec, &bytes[skeleton.clone()], raw, &|| "skeleton".to_string()) else { return inline() };
     fan.mark("skeleton unpacked");
     let skeleton = Arc::new(skeleton);
     let mut sections = Vec::with_capacity(started.len());
@@ -115,6 +123,8 @@ pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(De
         }
     }
     fan.mark("sections unpacked");
+    // Everything the file held is unpacked, and no task holds it any more.
+    drop(bytes);
     // The sections are done, so their workers are free for the long check of the skeleton, which runs beside the rest of the open.
     let hashed = {
         let skeleton = skeleton.clone();

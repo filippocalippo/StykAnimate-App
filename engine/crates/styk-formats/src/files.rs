@@ -142,6 +142,19 @@ pub fn open_document_deferred(bytes: &[u8], kind: Kind, fan: &dyn styk_doc::fano
     }
 }
 
+/// [`open_document_deferred`] for a caller that has no use for the file afterwards: it is let go once the container is unpacked.
+pub fn open_document_deferred_owned(bytes: Vec<u8>, kind: Kind, fan: &dyn styk_doc::fanout::Fanout) -> Result<(styk_doc::Value, container::Deferred), FileError> {
+    let (decoded, deferred) = container::decode_deferred_owned(bytes, kind, fan)?;
+    let rules = native::normalize_decoded(decoded.document, kind).and_then(|document| native::verify_embedded_source(&document).map(|()| document));
+    match rules {
+        Ok(document) => Ok((document, deferred)),
+        Err(error) => {
+            deferred.finish(fan)?;
+            Err(error.into())
+        }
+    }
+}
+
 /// Whether the rules leave a checked document exactly as it is stored, verifying what they verify.
 /// `false` sends it down the path that builds the document.
 fn keeps_document(checked: &container::Checked, kind: Kind, rules: Rules) -> Result<bool, FileError> {

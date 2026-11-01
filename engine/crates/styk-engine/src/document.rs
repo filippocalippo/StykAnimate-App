@@ -362,7 +362,16 @@ impl Engine {
                     let decoded = styk_piv::decode_document_owned(bytes, name, cancel, &fan).map_err(OpenError::from_codec)?;
                     (decoded.document, decoded.kind, decoded.version, decoded.filename, decoded.source)
                 }
-                _ => read_file(&bytes, name, cancel, &fan, &mut check)?,
+                other => match styk_formats::Kind::from_extension(other) {
+                    Some(kind) => {
+                        // The file is let go once the container is unpacked, before the skeleton is read into a tree.
+                        let (document, deferred) = styk_formats::files::open_document_deferred_owned(bytes, kind, &fan).map_err(OpenError::from_file)?;
+                        check = Some(deferred);
+                        let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
+                        (document, kind.name(), version, name.to_string(), None)
+                    }
+                    None => read_file(&bytes, name, cancel, &fan, &mut check)?,
+                },
             },
             OpenSource::Json { bytes, name } => {
                 let document = styk_doc::json::parse(bytes).map_err(|_| OpenError::unreadable())?;

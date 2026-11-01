@@ -83,14 +83,18 @@ ending its worker gave back. MiB.
 | compiled WebAssembly | ~4 | the module is compiled once for every thread: private executable memory goes from 5 to 9 |
 
 After freeing the copies as soon as they are copied (the page's buffer, the worker's upload, and in the web build the
-original the importer fetched back to read a fingerprint from), tdd2 settles at 1,004 and svr_uriel's codec worker is 99
-(20 original, 59 wasm memory). The desktop codec cannot end its worker: the original lives there as a lease, and the
-save fetches it from there (`/api/source`, which also decodes the project once to fingerprint it). Keeping the original
-in the document instead, as the web build does, was tried for the desktop and opened Pivot files 0.9 s (tdd2 4.4 -> 6.8 s)
-to 2.4 s later than the lease does, because the codec decodes the project again in a cold worker to compute the document
-fingerprint the saved file carries (`document_sha256`). The way out is to compute that fingerprint where the document
-already is: in the engine, from the decoded project, off the open's critical path or at the first save. The web build's
-codec worker ends two seconds after its last job (a worker started cold answers its first request in 30 to 70 ms).
+original the importer fetched back to read a fingerprint from), tdd2 settled at 1,004 and svr_uriel's codec worker was 99
+(20 original, 59 wasm memory). What kept the desktop worker alive was the original it leased, and what kept the original
+there was the document fingerprint the saved file carries (`document_sha256`): the codec decoded the project again in a
+cold worker to compute it (0.9 to 2.4 s more to open). The engine now computes it from the document it has just read, on a
+helper beside the rest of the open (`styk_piv::source_digest`), and describes the file (version, SHA-256) from the facts
+the reader already has; the interface gives the engine the file once, written into the memory the document keeps it in
+(`begin_source`, `end_source`: a `Vec<u8>` argument would hold it three times at the memory's fullest). The document carries
+the original, the codec keeps nothing, and its worker ends two seconds after its last job on both profiles (a worker
+started cold answers its first request in 30 to 70 ms). Dev build, one launch each, a loaded machine (directional):
+ending the codec worker gave back 15 MiB on tdd2, 2 on svr_uriel and 14 on testingupload.styk (it gave 160, 100 and 0
+before); tdd2 opens in 2.8 to 3.7 s, as it did with the lease. The bytes a save writes are unchanged: the four trusted
+files save to the hashes they always did.
 
 **The allocator lock** (`std`'s wasm allocator: one spinning lock for every thread). Timed with a gate in front of it, tdd2
 and svr_uriel through open, play and scrub, eight workers: a worker finds the lock taken on 5 to 40 % of its calls and
@@ -99,6 +103,16 @@ lock taken on 0.01 to 0.24 % of them, and waits 21 to 182 ms in all, 4.4 to 9.2 
 that were descheduled on a machine running other builds, not large allocations (the holder's request was under 1 MiB
 for all but the pictures'). Not acted on: per-thread caches would be a new allocator for a cost the interface thread
 barely pays, and the 7.7 to 11.4 million calls it makes during an open are the read view's, which goes away with it.
+
+**The file of a project while its skeleton is read.** A `.styk` file is a skeleton of JSON text (147 MiB for
+testingupload.styk) and sections, stored in 35 MiB. The open now owns the file's bytes (`OpenSource::Owned`, as for Pivot
+files), the sections' tasks borrow it instead of copying what they unpack, and it is let go as soon as the skeleton and the
+sections are unpacked (`decode_deferred_owned`), before the skeleton is read into a tree, which is when the memory is
+fullest. The heap of testingupload settles at 413 MiB against 475 for the same build without it (two launches each; the
+renderer's private bytes 611 to 636 against 668 to 676), live memory unchanged. The 147 MiB skeleton itself stays whole
+while it is parsed: reading it in pieces needs the parser to take the skeleton by segments (a JSON value that spans one
+is the difficulty: the container's checksum and the parallel sections are laid out for a whole skeleton), and would take
+the open's peak from skeleton plus tree to tree plus one segment, 100 to 140 MiB less. Not done.
 
 **Work that is purely transient in an instance of its own.** For pictures it saves nothing: the decoded pixels are the
 result and must be in the engine's memory for the stage, and a decode now holds one buffer of the stored size. For the open

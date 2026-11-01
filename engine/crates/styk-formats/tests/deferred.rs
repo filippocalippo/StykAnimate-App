@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use styk_doc::fanout::{Fanout, Sequential, StdThreads};
 use styk_doc::{Blob, Obj, Value, json};
-use styk_formats::container::{ContainerError, Kind, decode, decode_deferred, encode_v2, lift};
+use styk_formats::container::{ContainerError, Kind, decode, decode_deferred, decode_deferred_owned, encode_v2, lift};
 
 /// A project of `frames` keyframes, each with a pose array that is stored in a section and one that is shared between frames,
 /// and a picture: big enough to be shared out (the skeleton is over a megabyte).
@@ -40,9 +40,11 @@ fn in_order(bytes: &[u8]) -> Result<String, ContainerError> {
 }
 
 fn deferred(bytes: &[u8], fan: &dyn Fanout) -> Result<String, ContainerError> {
-    let (decoded, check) = decode_deferred(bytes, Kind::Styk, fan)?;
-    check.finish(fan)?;
-    Ok(json::to_string(&decoded.document))
+    let borrowed = decode_deferred(bytes, Kind::Styk, fan).and_then(|(decoded, check)| check.finish(fan).map(|()| json::to_string(&decoded.document)));
+    // A file the read owns (and lets go of once it is unpacked) reads to the same document, or fails with the same error.
+    let owned = decode_deferred_owned(bytes.to_vec(), Kind::Styk, fan).and_then(|(decoded, check)| check.finish(fan).map(|()| json::to_string(&decoded.document)));
+    assert_eq!(owned, borrowed, "an owned file reads as a borrowed one");
+    borrowed
 }
 
 #[test]
