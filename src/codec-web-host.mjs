@@ -25,8 +25,15 @@ export function codecProfile(scope = globalThis) {
   return requested === 'browser' ? 'web' : 'desktop';
 }
 
+/** How long the web build's codec worker stays once no job needs it. It holds nothing between jobs (a Pivot project's original lives in
+ * its document), but the memory of what it decoded cannot be given back to the browser: only ending the worker frees it. The desktop
+ * codec keeps originals in leases the worker holds, so it never ends. */
+const IDLE_STOP_MS = 2000;
+
 export class BrowserCodecHost {
   #worker = null;
+  #idle = null;
+  #idleStopMs;
   #jobs = new Map();   // job id -> {worker its requests were sent to (null until it links), cancellation flag}
   #busyJob = null;
   #listeners = new Set();
@@ -36,7 +43,8 @@ export class BrowserCodecHost {
 
   constructor({createWorker = () => new Worker(new URL('./codec-web-worker.mjs', import.meta.url),
     {type: 'module', name: 'StykAnimate Pivot codec'}), limits = codecProfile(),
-  sharedCancel = globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer === 'function'} = {}) {
+  sharedCancel = globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer === 'function', idleStopMs = limits === 'web' ? IDLE_STOP_MS : 0} = {}) {
+    this.#idleStopMs = idleStopMs;
     this.#createWorker = createWorker;
     this.#limits = limits === 'web' ? 'web' : 'desktop';
     this.#sharedCancel = sharedCancel;
@@ -46,7 +54,7 @@ export class BrowserCodecHost {
   subscribe(listener) { this.#listeners.add(listener); return () => this.#listeners.delete(listener); }
   #emit(status) { for (const listener of this.#listeners) listener(status); }
 
-  register(jobId) { this.#jobs.set(jobId, {worker: null, flag: null}); }
+  register(jobId) { clearTimeout(this.#idle); this.#idle = null; this.#jobs.set(jobId, {worker: null, flag: null}); }
 
   /** A port for the worker running this job. Loading the codec waits for its first request. */
   link(jobId) {
@@ -62,12 +70,25 @@ export class BrowserCodecHost {
 
   release(jobId) {
     if (this.#jobs.delete(jobId)) this.#worker?.postMessage({type: 'release', jobId});
+    this.#stopWhenIdle();
+  }
+
+  /** Ends the worker once no job has needed it for a moment; the next job starts a fresh one. */
+  #stopWhenIdle() {
+    clearTimeout(this.#idle);
+    this.#idle = null;
+    if (!this.#idleStopMs || !this.#worker || this.#jobs.size) return;
+    this.#idle = setTimeout(() => {
+      this.#idle = null;
+      if (!this.#jobs.size && !this.#busyJob) this.#stop('idle');
+    }, this.#idleStopMs);
   }
 
   cancel(jobId) {
     const job = this.#jobs.get(jobId);
     if (!job) return;
     this.#jobs.delete(jobId);
+    this.#stopWhenIdle();
     // Seen by the codec at once, even while it is busy with this job's request.
     if (job.flag) Atomics.store(job.flag, 0, 1);
     if (!this.#worker) return;
@@ -81,7 +102,7 @@ export class BrowserCodecHost {
     if (this.#busyJob === jobId && !othersWaiting) this.#stop('cancelled');
   }
 
-  dispose() { this.#jobs.clear(); this.#stop('disposed'); this.#listeners.clear(); }
+  dispose() { this.#jobs.clear(); clearTimeout(this.#idle); this.#idle = null; this.#stop('disposed'); this.#listeners.clear(); }
 
   #ensure() {
     if (this.#worker) return this.#worker;

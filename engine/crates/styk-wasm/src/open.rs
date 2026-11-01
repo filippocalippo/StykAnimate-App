@@ -49,6 +49,14 @@ fn run(engine: &Engine, bytes: &[u8], name: &str, source: &str, (options, helper
     }
 }
 
+/// [`run`] for a job that owns the bytes it was given: a file's copy is dropped as soon as the reader is done with it.
+fn run_owned(engine: &Engine, bytes: Vec<u8>, name: &str, source: &str, (options, helpers): (OpenOptions, usize), cancel: &dyn Fn() -> bool) -> Result<Opened, OpenError> {
+    match source {
+        "json" => engine.open_document_with(OpenSource::Json { bytes: &bytes, name }, options, cancel, helpers),
+        _ => engine.open_document_with(OpenSource::Owned { bytes, name }, options, cancel, helpers),
+    }
+}
+
 #[wasm_bindgen]
 impl EngineHandle {
     /// Starts opening a document on a worker and returns the job's number. `source` is `"file"` (the bytes of a
@@ -62,11 +70,10 @@ impl EngineHandle {
         let cancelled = Arc::new(AtomicBool::new(false));
         jobs.table.lock().unwrap_or_else(|e| e.into_inner()).insert(id, Job { cancelled: cancelled.clone(), outcome: None });
         self.engine.spawn(move |engine| {
-            let outcome = run(engine, &bytes, &name, &source, options, &|| cancelled.load(Ordering::Relaxed)).map(|opened| {
+            let outcome = run_owned(engine, bytes, &name, &source, options, &|| cancelled.load(Ordering::Relaxed)).map(|opened| {
                 let meta = build_meta(&opened);
                 (opened, meta)
             });
-            drop(bytes);
             let mut table = jobs.table.lock().unwrap_or_else(|e| e.into_inner());
             // A job nobody wants any more (cancelled and forgotten) is dropped here, on the worker.
             if let Some(job) = table.get_mut(&id) {

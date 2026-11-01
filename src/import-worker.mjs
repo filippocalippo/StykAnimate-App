@@ -70,9 +70,10 @@ async function keepSource(message, signal) {
   // The web build keeps no lease in the codec, which a page that is not cross-origin isolated restarts on
   // cancellation: the project carries its original, which the page has, with the codec's description of it.
   const sourceHeaders = {'X-Styk-Job-Id': message.jobId};
-  const record = await codecRequest(message, `/api/source?id=${encodeURIComponent(result.sourceId)}`, {headers: sourceHeaders, signal});
+  // Only the description: the page has the original, and the worker would keep a second copy of it until it was collected.
+  const record = await codecRequest(message, `/api/source?id=${encodeURIComponent(result.sourceId)}&meta=1`, {headers: sourceHeaders, signal});
   if (!record.ok) throw Object.assign(messageError(new Error(''), 'errors.documentExportWorker.theFileServiceReturnedAnInvalidSourceRecord', {}), {status: record.status});
-  const source = decodeSourceRecord(await record.arrayBuffer());
+  const source = decodeSourceRecord(await record.arrayBuffer(), {metadataOnly: true});
   await codecRequest(message, '/api/source/release', {method: 'POST', headers: {...sourceHeaders, 'Content-Type': 'application/json'}, body: JSON.stringify({ownerId: result.sourceOwner}), signal});
   return {ok: true, sourceId: null, filename: result.filename, kind: result.kind, version: result.version, sourceDescription: source.metadata};
 }

@@ -92,3 +92,22 @@ test('a desktop project keeps its original in the codec\'s lease: no source requ
   assert.equal(message.result.sourceId,sourceId);assert.equal(message.result.sourceOwner,owner);
   assert.equal(message.result.document._stykSource,undefined);
 });
+
+test('the web build asks the codec for the description of a kept original, not for the original it already holds',async t=>{
+  const task=await worker(t),{port1,port2}=new MessageChannel(),requests=[];
+  t.after(()=>{port1.close();port2.close();});
+  port2.on('message',message=>{
+    requests.push(message.path);
+    if(message.path.startsWith('/api/source/keep'))response(port2,message.id,200,{ok:true,kind:'piv',version:5,filename:'project.piv',sourceId,sourceOwner:owner});
+    else if(message.path.startsWith('/api/source?')){
+      // The record of `meta=1`: the description and no bytes.
+      const full=record();response(port2,message.id,200,full.subarray(0,full.length-original.length));
+    }else if(message.path==='/api/source/release')response(port2,message.id,204,new Uint8Array());
+    else throw new Error(`Unexpected request ${message.path}`);
+  });
+  task.send({id:1,operation:'keep',filename:'project.piv',bytes:original.slice().buffer,embedSource:true,
+    sourceOwner:owner,jobId:'c'.repeat(32),codecPort:port1});
+  const message=await task.result;assert.equal(message.ok,true);
+  assert.deepEqual(requests,['/api/source/keep?filename=project.piv',`/api/source?id=${sourceId}&meta=1`,'/api/source/release']);
+  assert.deepEqual(message.result.sourceDescription,metadata);
+});

@@ -33,7 +33,14 @@ export function createCodecShell({engine, post, yieldToEvents = () => new Promis
     if (!queue.some((item) => item.jobId === jobId) && !ports.has(jobId)) skipped.delete(jobId);
   };
 
-  function reply(port, id, {status, headers, body}) {
+  /** A request's body was copied into the codec's memory: the copy the message brought goes now, not at the worker's next collection
+ * (an upload of a 40 MB project stayed in the worker for as long as it took to be collected). */
+function freeBody(body) {
+  const buffer = body instanceof ArrayBuffer ? body : body?.buffer;
+  if (buffer instanceof ArrayBuffer && !buffer.detached) buffer.transfer?.(0);
+}
+
+function reply(port, id, {status, headers, body}) {
     try { port.postMessage({id, status, headers, body: body.buffer}, [body.buffer]); }
     catch { /* The job released this port while the request ran. */ }
   }
@@ -52,6 +59,7 @@ export function createCodecShell({engine, post, yieldToEvents = () => new Promis
         }
         post({type: 'busy', jobId});
         const result = await engine.handle({method: request.method, path: request.path, headers: request.headers, body: request.body, cancel});
+        freeBody(request.body);
         post({type: 'idle'});
         reply(port, request.id, result);
       }
