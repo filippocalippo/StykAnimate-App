@@ -155,7 +155,7 @@ export class EngineThumbnails {
     try {
       const editor = this.editor, report = editor.report, revision = editor.revision;
       const tick = options.tick ?? editor.timeline?.[index]?.start;
-      if (!Number.isInteger(tick) || !report.keyframes?.[index]) return this._refuse('a frame outside the timeline');
+      if (!Number.isInteger(tick) || !Number.isInteger(index) || !(index >= 0 && index < (report.keyframes?.length ?? 0))) return this._refuse('a frame outside the timeline');
       // Published drawing strokes are what thumbnails show (as the JavaScript worker waits for them).
       await drawingBarrier(report, {signal: controller.signal});
       check();

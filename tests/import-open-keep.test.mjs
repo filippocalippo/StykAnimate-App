@@ -7,7 +7,7 @@ import {FakeCodecHost} from './support/codec-host.mjs';
 
 // A Pivot project's original goes to the codec at the same time as the engine reads the file: the open does not
 // wait for it, and whichever side fails or is cancelled leaves nothing leased.
-const META = JSON.stringify({name: 'a', kind: 'piv', version: 5, savedDraft: false, lineage: 1, splits: [],
+const META = JSON.stringify({name: 'a', kind: 'piv', version: 5, savedDraft: false, lineage: 1, splits: [], rows: {}, timeline: [],
   indexes: {nextFrameIdentity: 1, nextUid: 1, layerUidCounts: [], layerSeenUids: [], layerGroups: []}});
 
 /** An engine whose open finishes when the test says so. */

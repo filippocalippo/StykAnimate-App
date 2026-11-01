@@ -48,7 +48,7 @@ test('drawing on an empty selection creates a native figure at the pointer in on
 
 test('playback seek may update timeline state without evaluating the sampled frame', () => {
   const editor = open(), revision = editor.revision;
-  const frame = editor.seek(3, {evaluate: false}); assert.equal(frame, editor.frame); assert.equal(editor.tick, 3);
+  assert.equal(editor.seek(3, {evaluate: false}), undefined, 'a seek that does not evaluate reads no frame'); assert.equal(editor.tick, 3);
   assert.equal(editor._evaluated, null); assert.equal(editor.revision, revision);
 });
 

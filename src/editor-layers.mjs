@@ -10,11 +10,11 @@ const cancelled = options => {
 export const editorLayerMethods = {
   _initializeLayers() {
     const state = ensureLayerState(this.report); validateLayerState(state);
-    this._layerUidCounts = new Map(); this._layerSeenUids = new Set(); this._layerGroups = new Map(state.order.map(id => [id, new Set()]));
+    const present = new Set(); this._layerSeenUids = new Set(); this._layerGroups = new Map(state.order.map(id => [id, new Set()]));
     for (const frame of [...this.report.keyframes, ...Object.values(this.report._styk.frameSources ?? {})]) for (const object of frame.objects) {
-      const uid = object.unique_id; this._layerUidCounts.set(uid, (this._layerUidCounts.get(uid) ?? 0) + 1); this._layerSeenUids.add(uid);
+      const uid = object.unique_id; present.add(uid); this._layerSeenUids.add(uid);
     }
-    for (const uid of this._layerUidCounts.keys()) this._layerGroups.get(layerIdForUid(this.report, uid)).add(uid);
+    for (const uid of present) this._layerGroups.get(layerIdForUid(this.report, uid)).add(uid);
     this._layerRevision = (this._layerRevision ?? 0) + 1; this._layerDescriptors = null; this._layerUidArrays = new Map();
   },
   getLayers() {

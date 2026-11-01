@@ -12,6 +12,7 @@ import {poseChoiceGroups} from './rig-pose-choices.mjs';
 import {rigControlIsDetail,rigDetailsShown,setRigDetailsShown} from './rig-control-details.mjs';
 import {propertyToggle} from './property-toggle.mjs';
 import {createSpatialGizmo,drawRotationGizmo,startRotationGizmo,rotateGizmo} from './spatial-gizmo.mjs';
+import {findFigureType} from './figure-types.mjs';
 const DEG=180/Math.PI,esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
 const modes=new WeakMap();
@@ -141,7 +142,7 @@ export function installSpatialControls({editor,root,refresh,guard}){
   else if(t.id==='spatial-pin'){withLimb(()=>editor.setNodeIK({pinned:t.checked}));refresh();}
   else if(t.id==='spatial-stretch'){withLimb(()=>editor.setNodeIK({allowStretch:t.checked}));refresh();}
   else if(t.matches('[data-spatial-depth]')){withLimb(()=>editor.setSpatialIKTarget({depth:t.valueAsNumber}));refresh();}
-  else if(t.dataset.drawingUid){const uid=Number(t.dataset.drawingUid),object=editor.selectionFrame.objects.find(o=>o.unique_id===uid),asset=editor.report.figure_types.find(f=>f.figure_type_id===object?.figure_type_id)?._styk?.movieclip;
+  else if(t.dataset.drawingUid){const uid=Number(t.dataset.drawingUid),object=editor.selectionFrame.objects.find(o=>o.unique_id===uid),asset=findFigureType(editor.report.figure_types, object?.figure_type_id)?._styk?.movieclip;
    if(asset?.drawingSets){const prior=drawingSelection(asset,object),group=t.hasAttribute('data-drawing-group')?Number(t.value):prior.group,view=t.hasAttribute('data-drawing-view')?Number(t.value):Math.min(prior.view,asset.drawingSets[group].views.length-1);editor.setMovieclipDrawing(uid,group,view);refresh();}}
 
  }));
