@@ -46,7 +46,7 @@ use styk_eval::assets::Assets;
 use styk_eval::eval::Prepared;
 
 pub use frames::{FrameAdmission, FrameData, FrameMetadata, FrameSnapshot, FrameStats, GenerationHeader};
-pub use images::{drawing_pages, has_place, images_on, on_demand, picture_widths, pictures_needing_sharp, pictures_of, soft_resolves, Acquired, DecodedImage, PlaceIndex, Residency, Uploaded, ATLAS_PAGES};
+pub use images::{drawing_pages, has_place, images_on, on_demand, picture_extents, pictures_needing_sharp, pictures_of, soft_resolves, Acquired, DecodedImage, PlaceIndex, Residency, Uploaded, ATLAS_PAGES};
 use sync::Shared;
 
 type Task = Box<dyn FnOnce(&Engine) + Send>;

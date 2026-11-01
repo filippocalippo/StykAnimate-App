@@ -232,9 +232,9 @@ impl Stage {
             return self.engine.images_pending() == 0;
         }
         let index = self.place_index(generation);
-        let widths = styk_engine::picture_widths(list, &index);
+        let extents = styk_engine::picture_extents(list, &index);
         let need = styk_engine::pictures_needing_sharp(
-            &widths,
+            &extents,
             &generation.assets,
             scale,
             |picture| self.loading.soft.contains(&picture),

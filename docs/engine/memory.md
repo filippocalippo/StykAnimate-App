@@ -163,7 +163,7 @@ document opens), and:
   textures and table, so while the stage waits it draws the soft copy, not a blank). Never in an export, a preview or a saved
   file: those hold their own renderers, whole-layout ones. A frame thumbnail on the stage's device (`Stage::pictures_ready_for_view`)
   draws a picture that is not in from its soft copy only when the soft copy has a texel for every pixel the picture covers on the
-  card (`styk_engine::pictures_needing_sharp`: a 4K picture on a card of a few hundred pixels); a picture it cannot resolve is loaded
+  card along both of its axes (a streak stretched along one is loaded sharp) (`styk_engine::pictures_needing_sharp`: a 4K picture on a card of a few hundred pixels); a picture it cannot resolve is loaded
   like the stage's own, and the texture grows once for it if no layer is free, so a thumbnail always finishes and the stage keeps its
   frame (before, a thumbnail asked for every picture sharp, was refused a layer when the four were taken and requested nothing).
 - **The table follows the layout**: `Renderer::sync_pictures` runs on every frame (`Stage::sync_atlas`) and makes the table (and the
