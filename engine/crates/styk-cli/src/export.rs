@@ -3,7 +3,10 @@
 //! app's path where no GPU device is available).
 //!
 //!   styk export <file> <tick | first-last> <out.png | folder> [--size WxH] [--smoothing edges|none|sprites]
-//!               [--matte] [--tile N] [--cpu] [--repeat N]
+//!               [--matte] [--tile N] [--cpu] [--repeat N] [--verify N]
+//!
+//! `--verify N` draws the whole range N times in a row and reports every frame whose pixels differ from the first pass (the same
+//! input must give the same bytes); the exit code is 1 when any does.
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -97,6 +100,10 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
     if folder {
         std::fs::create_dir_all(out).map_err(|e| format!("{out}: {e}"))?;
     }
+    let verify = option(rest, "--verify").and_then(|n| n.parse::<usize>().ok()).unwrap_or(0);
+    if verify > 0 {
+        return verify_runs(&frames, doc, (first, last), matte, verify, &mut gpu, &mut cpu_export);
+    }
     let (mut evaluate, mut draw) = (Vec::new(), Vec::new());
     for tick in first..=last {
         for round in 0..repeat {
@@ -133,4 +140,37 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
         stats.unwrap_or_default()
     );
     Ok(())
+}
+
+/// Draws ticks `range` `runs` times and compares each frame with the first pass, by hash.
+fn verify_runs(frames: &styk_engine::export::ExportFrames, doc: &styk_eval::doc::Document, range: (u32, u32), matte: bool, runs: usize, gpu: &mut Option<GpuExport>, cpu: &mut Option<CpuExport>) -> Result<(), String> {
+    use std::hash::{Hash, Hasher};
+    let mut first: Vec<(u64, Vec<u8>)> = Vec::new();
+    let mut differing = 0;
+    for run in 0..runs {
+        for tick in range.0..=range.1 {
+            let frame = frames.take(tick).ok_or("no frame")?;
+            let pixels = match (gpu.as_mut(), cpu.as_mut()) {
+                (Some(exporter), _) => exporter.frame_blocking(doc, &frame.list, frame.camera.as_ref(), matte)?,
+                (None, Some(exporter)) => exporter.frame(doc, &frame.list, frame.camera.as_ref(), matte)?,
+                (None, None) => unreachable!("one renderer is set up"),
+            };
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            pixels.hash(&mut hasher);
+            let hash = hasher.finish();
+            if run == 0 {
+                first.push((hash, pixels));
+                continue;
+            }
+            let (expected, reference) = &first[(tick - range.0) as usize];
+            if *expected != hash {
+                differing += 1;
+                let changed = reference.chunks_exact(4).zip(pixels.chunks_exact(4)).filter(|(a, b)| a != b).count();
+                let largest = reference.iter().zip(&pixels).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+                println!("run {run} tick {tick}: {changed} pixels differ from the first pass, by {largest} levels at most");
+            }
+        }
+    }
+    println!("{} frames x {runs} runs: {differing} differing frames", range.1 - range.0 + 1);
+    if differing > 0 { Err("the export is not deterministic".into()) } else { Ok(()) }
 }

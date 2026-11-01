@@ -986,7 +986,9 @@ edges fill no glyph mask); `cargo test -p styk-export --test svg` (plain artwork
 vector form as one picture); `node --test tests/engine-export.test.mjs` (the worker's protocol, the
 retry ladder, cancellation, warming, vector exports); `tests/svg-export.browser.mjs` (the SVG decoded in
 the browser against the engine's own pixels); `styk export <file>
-<ticks> <out> [--size WxH] [--smoothing edges|none|sprites] [--tile N] [--cpu]`.
+<ticks> <out> [--size WxH] [--smoothing edges|none|sprites] [--tile N] [--cpu] [--verify N]`
+(`--verify N` draws the range N times in a row and fails when a frame differs from the first pass: native wgpu gave
+the same bytes in 3,200 renders of tdd2 ticks 183-186 where the browser's WebGPU differs in about 1 in 25).
 
 `cargo test -p styk-raster` (the target's samples, the rasterization rules, effect windows
 against per-pixel shading; strokes covered by distance, no seams between adjacent triangles,
