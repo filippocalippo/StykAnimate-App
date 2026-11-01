@@ -22,7 +22,7 @@ mod write;
 
 
 pub use read::{Checked, Decoded, Parts, check, decode, decode_parts, member_value, parse_lifted, parse_lifted_owned, parse_lifted_owned_within, parse_lifted_owned_admitted_within, LiftedAdmitted};
-pub use write::{Frame, Lifted, ViewLifter, ViewPart, encode_v1, encode_v2, encode_v2_with, frame, lift, lift_until, lift_within};
+pub use write::{Frame, LiftTimes, Lifted, ViewLifter, ViewPart, encode_v1, encode_v2, encode_v2_with, frame, lift, lift_together, lift_together_within, lift_until, lift_within};
 
 pub(crate) const HEADER: usize = 56;
 pub(crate) const SECTION: usize = 64;

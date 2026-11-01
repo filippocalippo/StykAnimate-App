@@ -3763,7 +3763,7 @@ async function performNativeSave({saveAs}) {
       }
       // Whoever shows the failure (fail(), for every save a person asks for) says what happened; until then the line must not go on
       // saying the project is being saved, nor the busy task go on spinning.
-      logActivity({messageKey: "app.saveFailed", messageParams: {}}, true);
+      status({messageKey: "app.saveFailed", messageParams: {}});
       throw error;
     }
     if (saved) {

@@ -35,7 +35,7 @@ impl DocumentExport {
         self.made.raw_bytes
     }
 
-    /// Where a project save's time went: JSON `{prepare_ms, lift_ms, scene_ms, stage_ms, frames_ms, assemble_ms, total_ms, frames: [{raw, stored, hash_ms, compress_ms}, …]}`
+    /// Where a project save's time went: JSON `{prepare_ms, lift_ms, lift_pieces_ms, lift_splice_ms, scene_ms, frames_ms, assemble_ms, total_ms, frames: [{raw, stored, hash_ms, compress_ms}, …]}`
     /// (the skeleton, the arrays section, the payloads section), or an empty string.
     pub fn timings(&self) -> String {
         self.timings.clone()
@@ -221,6 +221,6 @@ pub fn save_project(address: usize, request: &str, source: Option<Vec<u8>>, canc
     let written = styk_engine::save::save_project(&trees, &scopes, styk_engine::save::ProjectRequest { name, source, reservation }, &styk_engine::save::EngineHost { engine: engine.as_ref(), cancel: &stop, clock: crate::clock, helpers: request.get("helpers").and_then(Value::as_f64).map_or(0, |count| count as usize) }).map_err(save_failure)?;
     let t = written.timings;
     let frames: Vec<String> = t.frames.iter().map(|f| format!("{{\"raw\":{},\"stored\":{},\"hash_ms\":{:.3},\"compress_ms\":{:.3}}}", f.raw_bytes, f.stored_bytes, f.hash_ms, f.compress_ms)).collect();
-    let timings = format!("{{\"prepare_ms\":{:.3},\"lift_ms\":{:.3},\"scene_ms\":{:.3},\"stage_ms\":{:.3},\"frames_ms\":{:.3},\"assemble_ms\":{:.3},\"total_ms\":{:.3},\"frames\":[{}]}}", t.prepare_ms, t.lift_ms, t.scene_ms, t.stage_ms, t.frames_ms, t.assemble_ms, t.total_ms, frames.join(","));
+    let timings = format!("{{\"prepare_ms\":{:.3},\"lift_ms\":{:.3},\"lift_pieces_ms\":{:.3},\"lift_splice_ms\":{:.3},\"scene_ms\":{:.3},\"frames_ms\":{:.3},\"assemble_ms\":{:.3},\"total_ms\":{:.3},\"frames\":[{}]}}", t.prepare_ms, t.lift_ms, t.lift_pieces_ms, t.lift_splice_ms, t.scene_ms, t.frames_ms, t.assemble_ms, t.total_ms, frames.join(","));
     Ok(DocumentExport { made: Made { raw_bytes: written.raw_bytes, bytes: written.bytes, figure_type_id: None, drawings: false }, timings })
 }
