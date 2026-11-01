@@ -304,10 +304,18 @@ pub(super) fn validate_scene(report: &Value, frames: Option<&[Value]>, fan: &dyn
 /// where the host has the threads; the object count a frame is held to is the one the frames before it make, so the refusal
 /// is the same whichever way they ran.
 fn check_frames(context: &Arc<Context>, frames: &[Value], objects_before: usize, fan: &dyn Fanout) -> Result<(), EditError> {
+    if fan.cancelled() {
+        return fail(CANCELLED);
+    }
     let cuts = fanout::ranges(fan, frames.len());
     if cuts.len() <= 1 {
         let mut total = objects_before;
-        return frames.iter().try_for_each(|frame| check_frame(context, frame, &mut total));
+        return frames.iter().try_for_each(|frame| {
+            if fan.cancelled() {
+                return fail(CANCELLED);
+            }
+            check_frame(context, frame, &mut total)
+        });
     }
     let mut starts = Vec::with_capacity(cuts.len());
     let mut total = objects_before;
@@ -329,7 +337,7 @@ fn check_frames(context: &Arc<Context>, frames: &[Value], objects_before: usize,
     );
     match refusals {
         Ok(refusals) => refusals.into_iter().flatten().next().map_or(Ok(()), Err),
-        Err(_) => fail("errors.engine.outOfMemory"),
+        Err(_) => fail(WORKER_LOST),
     }
 }
 

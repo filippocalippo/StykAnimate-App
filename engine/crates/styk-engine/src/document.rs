@@ -138,8 +138,20 @@ impl OpenError {
         OpenError { key: Some(error.message_key.into()), params, code: error.code.map(str::to_string), ..OpenError::decode(error.detail) }
     }
 
+    /// The open was stopped.
+    fn cancelled() -> OpenError {
+        OpenError { code: Some("cancelled".into()), status: Some(499), ..OpenError::decode("The import was cancelled.") }
+    }
+
+    /// A worker that had a piece of the open stopped, so the open cannot be trusted to have seen the whole document.
+    fn worker_lost() -> OpenError {
+        OpenError { key: Some("errors.importClient.theFileImporterStoppedUnexpectedly".into()), code: Some("worker_failed".into()), ..OpenError::decode("A worker of the engine stopped while the document was being opened.") }
+    }
+
     fn from_edit(error: styk_edit::EditError) -> OpenError {
         match error {
+            styk_edit::EditError::Invalid(text) if text == styk_edit::load::CANCELLED => OpenError { stage: OpenStage::Prepare, ..OpenError::cancelled() },
+            styk_edit::EditError::Invalid(text) if text == styk_edit::load::WORKER_LOST => OpenError { stage: OpenStage::Prepare, ..OpenError::worker_lost() },
             styk_edit::EditError::Invalid(text) if text == styk_edit::load::TYPE_ERROR => OpenError { stage: OpenStage::Prepare, ..OpenError::unreadable() },
             styk_edit::EditError::Invalid(text) if text.starts_with("errors.") => OpenError { key: Some(text.clone()), stage: OpenStage::Prepare, ..OpenError::decode(text) },
             other => OpenError { stage: OpenStage::Prepare, ..OpenError::decode(other.to_string()) },
@@ -215,6 +227,8 @@ struct OpenFanout<'a> {
     helpers: usize,
     /// How many workers had stopped when the open began.
     lost_before: u32,
+    /// The tasks given to other workers by [`Fanout::spawn`] that have not ended: never more than `helpers`.
+    spawned: Arc<std::sync::atomic::AtomicUsize>,
     /// The phases the readers marked, with the time each was reached.
     marks: std::sync::Mutex<Vec<(&'static str, f64)>>,
 }
@@ -224,12 +238,30 @@ impl Fanout for OpenFanout<'_> {
         self.helpers + 1
     }
 
+    /// Gives `task` to another worker unless `helpers` of them hold the open's tasks already: the open never takes every worker, so the
+    /// frame on show of another document is prepared meanwhile. A task that is handed back runs on the open's own thread.
     fn spawn(&self, task: Task) -> Result<(), Task> {
-        if self.helpers == 0 {
+        use std::sync::atomic::Ordering;
+        if self.spawned.fetch_add(1, Ordering::SeqCst) >= self.helpers {
+            self.spawned.fetch_sub(1, Ordering::SeqCst);
             return Err(task);
         }
-        self.engine.spawn(move |_| task());
+        struct Ended(Arc<std::sync::atomic::AtomicUsize>);
+        impl Drop for Ended {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let ended = Ended(self.spawned.clone());
+        self.engine.spawn(move |_| {
+            let _ended = ended;
+            task()
+        });
         Ok(())
+    }
+
+    fn cancelled(&self) -> bool {
+        (self.cancel)()
     }
 
     fn lost(&self) -> bool {
@@ -243,7 +275,9 @@ impl Fanout for OpenFanout<'_> {
     fn run(&self, tasks: Vec<Task>) -> Result<(), Failed> {
         let jobs: Vec<styk_formats::files::Job> = tasks.into_iter().map(|task| Box::new(move |_: &dyn Fn() -> bool| task()) as styk_formats::files::Job).collect();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        self.engine.run_together(jobs, &stop, self.cancel, self.helpers).map_err(|_| Failed)
+        // The workers that hold a task of the open already (the skeleton's checksum) are not asked again.
+        let helpers = self.helpers.saturating_sub(self.spawned.load(std::sync::atomic::Ordering::SeqCst));
+        self.engine.run_together(jobs, &stop, self.cancel, helpers).map_err(|_| Failed)
     }
 }
 
@@ -268,7 +302,7 @@ impl Engine {
     /// [`Engine::open_document`] with up to `helpers` of the engine's other workers reading, checking and converting the
     /// document's records beside this thread. The document is the same whatever `helpers` is; so is the refusal.
     pub fn open_document_with(&self, source: OpenSource<'_>, options: OpenOptions, cancel: &dyn Fn() -> bool, helpers: usize) -> Result<OpenedDocument, OpenError> {
-        let fan = OpenFanout { engine: self, cancel, helpers, lost_before: self.workers_lost(), marks: Default::default() };
+        let fan = OpenFanout { engine: self, cancel, helpers, lost_before: self.workers_lost(), marks: Default::default(), spawned: Default::default() };
         let began = self.now();
         fan.mark("started");
         // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
@@ -309,6 +343,9 @@ impl Engine {
         match check {
             Some(check) if !opened.as_ref().is_err_and(|error| error.code.as_deref() == Some("cancelled")) => {
                 check.finish(&fan).map_err(|error| OpenError::from_file(styk_formats::files::FileError::from(error)))?;
+                if cancel() {
+                    return Err(OpenError::cancelled());
+                }
                 opened.map(|mut opened| {
                     opened.timings.insert(0, ("decode", decoded - began));
                     opened.timings.push(("check", self.now() - prepared));
@@ -328,15 +365,30 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     fn prepare_opened(&self, document: Value, kind: &'static str, version: f64, name: String, options: OpenOptions, cancel: &dyn Fn() -> bool, fan: &OpenFanout<'_>) -> Result<OpenedDocument, OpenError> {
         if cancel() {
-            return Err(OpenError { code: Some("cancelled".into()), status: Some(499), ..OpenError::decode("The import was cancelled.") });
+            return Err(OpenError::cancelled());
         }
         let started = self.now();
         let mut indexes = styk_edit::load::prepare_for_editor_with(document, options.layer_timeline, fan).map_err(OpenError::from_edit)?;
         let prepared = self.now();
+        if cancel() {
+            return Err(OpenError::cancelled());
+        }
         let tree = std::mem::replace(&mut indexes.report, Value::Null);
         let shown = tree.path(&["_styk", "name"]).and_then(Value::as_str).unwrap_or("").to_string();
         let mut loader = Loader::new();
-        let converted = loader.document_with(&tree, &shown, fan).map_err(|error| OpenError { stage: OpenStage::Prepare, ..OpenError::decode(error.to_string()) })?;
+        let converted = loader.document_with(&tree, &shown, fan).map_err(|error| {
+            // A load that was stopped, or whose worker was lost, says so rather than what it found on the way.
+            if cancel() {
+                OpenError::cancelled()
+            } else if fan.lost() {
+                OpenError::worker_lost()
+            } else {
+                OpenError { stage: OpenStage::Prepare, ..OpenError::decode(error.to_string()) }
+            }
+        })?;
+        if cancel() {
+            return Err(OpenError::cancelled());
+        }
         let assets = Arc::new(Assets::build(&converted));
         let prepared_views = Arc::new(Prepared::new(Arc::new(converted)));
         let lineage = self.inner.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

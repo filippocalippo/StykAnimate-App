@@ -65,7 +65,8 @@ impl Deferred {
     }
 
     /// Waits for the check. A skeleton whose checksum is not the file's is the file's error, whatever came of the document built
-    /// from it: [`decode`] never builds a document from one.
+    /// from it: [`decode`] never builds a document from one. A check that was lost (its worker stopped) has verified nothing: the
+    /// open is refused, never accepted.
     pub fn finish(self, fan: &dyn Fanout) -> Result<(), ContainerError> {
         match self.check {
             None => Ok(()),
@@ -91,6 +92,9 @@ pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(De
     if raw < PIECES_FROM_BYTES {
         return inline();
     }
+    if fan.cancelled() {
+        return Err(ContainerError::Cancelled);
+    }
     // The sections are unpacked and checked beside the skeleton's unpacking; they own the bytes they read.
     let started: Vec<_> = records
         .into_iter()
@@ -103,10 +107,6 @@ pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(De
     let Ok(skeleton) = unpack(codec, &bytes[skeleton], raw, &|| "skeleton".to_string()) else { return inline() };
     fan.mark("skeleton unpacked");
     let skeleton = Arc::new(skeleton);
-    let hashed = {
-        let skeleton = skeleton.clone();
-        styk_doc::fanout::start(fan, move || sha256(&skeleton))
-    };
     let mut sections = Vec::with_capacity(started.len());
     for section in started {
         match section.wait(fan) {
@@ -115,6 +115,14 @@ pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(De
         }
     }
     fan.mark("sections unpacked");
+    // The sections are done, so their workers are free for the long check of the skeleton, which runs beside the rest of the open.
+    let hashed = {
+        let skeleton = skeleton.clone();
+        styk_doc::fanout::start(fan, move || sha256(&skeleton))
+    };
+    if fan.cancelled() {
+        return Err(ContainerError::Cancelled);
+    }
     let sections: Arc<[(u8, Vec<u8>)]> = sections.into();
     let skeleton_bytes = skeleton.len();
     let shared = Arc::new(SharedMarkers(std::sync::Mutex::new(Markers::new(sections.clone(), skeleton_bytes))));
@@ -122,12 +130,15 @@ pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(De
     let pieces = json::parse_pieces(&skeleton, &hook, fan).filter(|document| shared.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_sound(document));
     drop(hook);
     fan.mark("skeleton read");
+    if fan.cancelled() {
+        return Err(ContainerError::Cancelled);
+    }
     let document = match pieces {
         Some(document) => document,
         // Not in pieces, or not a document the pieces vouch for: the checks and the errors are those of reading in order.
         None => {
             drop(shared);
-            if hashed.wait(fan).is_ok_and(|found| found != digest) {
+            if skeleton_digest(hashed, &skeleton, fan) != digest {
                 return Err(ContainerError::Checksum { what: "skeleton".to_string() });
             }
             let mut markers = Markers::new(sections, skeleton_bytes);
@@ -143,6 +154,12 @@ pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(De
         }
     };
     Ok((Decoded { document, version: 2, skeleton_bytes }, Deferred { check: Some(hashed), expected: digest }))
+}
+
+/// The skeleton's digest from the task that was started for it, or, when that task was lost, worked out here: a digest nobody has
+/// verified is not a digest that matched.
+fn skeleton_digest(started: styk_doc::fanout::Started<[u8; 32]>, skeleton: &[u8], fan: &dyn Fanout) -> [u8; 32] {
+    started.wait(fan).unwrap_or_else(|_| sha256(skeleton))
 }
 
 /// [`Markers`] that more than one thread may ask.
@@ -626,5 +643,29 @@ impl<S: AsRef<[(u8, Vec<u8>)]>> StringHook for Markers<S> {
             b'E' => Some(Ok(Value::str(rest))),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use styk_doc::fanout::{StdThreads, start};
+
+    #[test]
+    fn a_lost_check_is_worked_out_in_place_not_taken_for_a_match() {
+        let skeleton = b"{\"keyframes\":[]}".to_vec();
+        let fan = StdThreads(2);
+        // The task ends without a result, as one whose worker stopped does.
+        let lost = start(&fan, || -> [u8; 32] { panic!("the worker that had the check stopped") });
+        assert_eq!(skeleton_digest(lost, &skeleton, &fan), sha256(&skeleton), "the digest of the skeleton, worked out here");
+        let kept = start(&fan, {
+            let skeleton = skeleton.clone();
+            move || sha256(&skeleton)
+        });
+        assert_eq!(skeleton_digest(kept, &skeleton, &fan), sha256(&skeleton));
+        // A check whose result never came is an open refused, not accepted.
+        let lost = start(&fan, || -> [u8; 32] { panic!("lost") });
+        let deferred = Deferred { check: Some(lost), expected: sha256(&skeleton) };
+        assert_eq!(deferred.finish(&fan), Err(ContainerError::WorkerStopped));
     }
 }
