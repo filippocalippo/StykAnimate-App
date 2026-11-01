@@ -50,8 +50,10 @@ function restorePart(part, sections, shared) {
  * Where the records of a lazy table come from: the opening's tree until its session starts, then the session's, which is the document
  * from then on. A record is lifted on its own, whole (nothing is shared with the ones fetched before).
  */
-class Records {
+export class Records {
   constructor(holder) { this.holder = holder; }
+  /** The document is closed: `holder` (its session, or the opening) is freed, and no record can be fetched from it any more. */
+  close(holder) { if (this.holder === holder) this.holder = null; }
   /** The record at `index` of an array table, or under `key` of a table of records by key. */
   fetch(table, at) {
     if (!this.holder) throw new Error('The document is closed: its records can no longer be read.');

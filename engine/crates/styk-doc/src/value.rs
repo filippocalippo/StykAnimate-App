@@ -221,6 +221,66 @@ impl Obj {
         }
     }
 
+    /// Sets each of `entries` in turn, as `object[key] = value` does, making the keys of the result once: a key is found or added in a single
+    /// pass over the object, not by copying and indexing the whole key list for each new one (a table of hundreds of pose sources gets one
+    /// new key for each source a command captured).
+    pub fn set_all<K: AsRef<str>>(&mut self, entries: impl IntoIterator<Item = (K, Value)>) {
+        let mut added: Vec<(Arc<str>, Value)> = Vec::new();
+        let mut added_at: HashMap<Arc<str>, usize> = HashMap::new();
+        for (key, value) in entries {
+            let key = key.as_ref();
+            if let Some(i) = self.shape.position(key) {
+                self.values[i] = value;
+            } else if let Some(&at) = added_at.get(key) {
+                added[at].1 = value;
+            } else {
+                let key: Arc<str> = Arc::from(key);
+                added_at.insert(key.clone(), added.len());
+                added.push((key, value));
+            }
+        }
+        if added.is_empty() {
+            return;
+        }
+        // The keys are in the order JavaScript enumerates them: the integer keys ascending, then the others as they were added.
+        let leading = self.shape.keys.iter().take_while(|key| index_key(key).is_some()).count();
+        let (mut integers, others): (Vec<(Arc<str>, Value)>, Vec<(Arc<str>, Value)>) = added.into_iter().partition(|(key, _)| index_key(key).is_some());
+        integers.sort_by_key(|(key, _)| index_key(key));
+        let keys = std::mem::replace(&mut self.shape, Shape::empty()).keys.to_vec();
+        let values = std::mem::take(&mut self.values);
+        let mut existing: Vec<(Arc<str>, Value)> = keys.into_iter().zip(values).collect();
+        let rest = existing.split_off(leading);
+        let mut merged: Vec<(Arc<str>, Value)> = Vec::with_capacity(existing.len() + integers.len() + rest.len() + others.len());
+        let (mut old, mut new) = (existing.into_iter().peekable(), integers.into_iter().peekable());
+        loop {
+            let take_old = match (old.peek(), new.peek()) {
+                (Some((a, _)), Some((b, _))) => index_key(a) <= index_key(b),
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (None, None) => break,
+            };
+            merged.push(if take_old { old.next() } else { new.next() }.expect("peeked"));
+        }
+        merged.extend(rest);
+        merged.extend(others);
+        let (keys, values): (Vec<Arc<str>>, Vec<Value>) = merged.into_iter().unzip();
+        self.shape = Shape::new(keys);
+        self.values = values;
+    }
+
+    /// Removes each of `keys` (as `delete object[key]` does), making the keys of the result once.
+    pub fn remove_all<'a>(&mut self, keys: impl IntoIterator<Item = &'a str>) {
+        let gone: std::collections::HashSet<usize> = keys.into_iter().filter_map(|key| self.shape.position(key)).collect();
+        if gone.is_empty() {
+            return;
+        }
+        let kept: Vec<usize> = (0..self.values.len()).filter(|at| !gone.contains(at)).collect();
+        let keys: Vec<Arc<str>> = kept.iter().map(|&at| self.shape.keys[at].clone()).collect();
+        let values: Vec<Value> = kept.iter().map(|&at| self.values[at].clone()).collect();
+        self.shape = Shape::new(keys);
+        self.values = values;
+    }
+
     /// Removes `key` (as `delete object[key]` does), returning its value.
     pub fn remove(&mut self, key: &str) -> Option<Value> {
         let i = self.shape.position(key)?;
@@ -243,6 +303,28 @@ impl FromIterator<(Arc<str>, Value)> for Obj {
 }
 
 impl Value {
+    /// The value as a document parsed from text has it: no packed array shared with another place. A tree edited copy-on-write shares the
+    /// arrays its records have in common, and the writer stores an array of 32 numbers or more that two places share once, so the file of
+    /// a document that came by its nodes differs from the file of the same document that came as text. Only what holds an array is copied.
+    pub fn unshared(&self) -> Value {
+        self.unshared_arrays().unwrap_or_else(|| self.clone())
+    }
+
+    fn unshared_arrays(&self) -> Option<Value> {
+        match self {
+            Value::Nums(numbers) => Some(Value::Nums(Arc::new((**numbers).clone()))),
+            Value::Arr(items) => {
+                let copies: Vec<Option<Value>> = items.iter().map(Value::unshared_arrays).collect();
+                copies.iter().any(Option::is_some).then(|| Value::Arr(Arc::new(items.iter().zip(copies).map(|(item, copy)| copy.unwrap_or_else(|| item.clone())).collect())))
+            }
+            Value::Obj(object) => {
+                let copies: Vec<Option<Value>> = object.values().iter().map(Value::unshared_arrays).collect();
+                copies.iter().any(Option::is_some).then(|| Value::Obj(Arc::new(Obj::from_shape(object.shape().clone(), object.values().iter().zip(copies).map(|(item, copy)| copy.unwrap_or_else(|| item.clone())).collect()))))
+            }
+            _ => None,
+        }
+    }
+
     pub fn str(text: &str) -> Value {
         Value::Str(Arc::from(text))
     }
@@ -606,9 +688,89 @@ mod tests {
     }
 
     #[test]
+    fn an_unshared_tree_has_each_packed_array_to_itself() {
+        let pose = Value::nums(&(0..40).map(f64::from).collect::<Vec<_>>());
+        let small = Value::nums(&[1.0, 2.0]);
+        let plain = Value::object([(Arc::from("name"), Value::str("n"))].into_iter().collect());
+        let tree = Value::Arr(Arc::new(vec![
+            Value::object([(Arc::from("pose"), pose.clone()), (Arc::from("again"), pose.clone())].into_iter().collect()),
+            Value::Arr(Arc::new(vec![pose.clone(), small.clone(), plain.clone()])),
+            plain.clone(),
+        ]));
+        let copy = tree.unshared();
+        assert_eq!(copy, tree);
+        let arrays = |value: &Value| -> Vec<Arc<Nums>> {
+            let (first, second) = (value.as_arr().unwrap()[0].as_obj().unwrap(), value.as_arr().unwrap()[1].as_arr().unwrap());
+            [first.get("pose"), first.get("again"), Some(&second[0])].into_iter().flatten().filter_map(|v| if let Value::Nums(n) = v { Some(n.clone()) } else { None }).collect()
+        };
+        let (before, after) = (arrays(&tree), arrays(&copy));
+        assert!(Arc::ptr_eq(&before[0], &before[1]) && Arc::ptr_eq(&before[0], &before[2]));
+        assert!(!Arc::ptr_eq(&after[0], &after[1]) && !Arc::ptr_eq(&after[0], &after[2]) && !Arc::ptr_eq(&after[1], &after[2]));
+        // What holds no array is the same node, not a copy.
+        assert!(copy.as_arr().unwrap()[2].same_node(&plain));
+    }
+
+    #[test]
+    fn keys_chosen_to_collide_in_a_fast_hash_do_not_slow_a_lookup() {
+        // A file picks the keys of an object. Sixteen ASCII bytes per key, the second word chosen so the multiply-and-rotate hash of
+        // [`crate::fast::FastHasher`] reaches the same state for every key: they would all land in one bucket of a map using it.
+        let seed = crate::fast::SEED;
+        let mut keys: Vec<Arc<str>> = Vec::new();
+        let mut counter = 0u64;
+        while keys.len() < 24_000 {
+            counter += 1;
+            // Four free ASCII bytes, the other four fixed: no two keys alike.
+            let first = 0x2020_2020_0000_0000u64 | (counter & 0x7f) | ((counter >> 7 & 0x7f) << 8) | ((counter >> 14 & 0x7f) << 16) | ((counter >> 21 & 0x7f) << 24);
+            let state = first.wrapping_mul(seed);
+            let second = state.rotate_left(5);
+            let (a, b) = (first.to_le_bytes(), second.to_le_bytes());
+            if a.iter().chain(b.iter()).all(u8::is_ascii) {
+                let bytes: Vec<u8> = a.iter().chain(b.iter()).copied().collect();
+                keys.push(Arc::from(std::str::from_utf8(&bytes).unwrap()));
+            }
+        }
+        let shape = Shape::new(keys.clone());
+        let started = std::time::Instant::now();
+        assert!(keys.iter().enumerate().all(|(at, key)| shape.position(key) == Some(at)));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
+    }
+
+    #[test]
     fn a_blob_equals_the_string_it_stands_for() {
         let blob = Value::Blob(Arc::new(Blob { prefix: Arc::from("data:x;base64,"), bytes: Arc::from(&b"hi!"[..]) }));
         assert_eq!(blob, Value::str("data:x;base64,aGkh"));
         assert_eq!(blob.text().unwrap(), "data:x;base64,aGkh");
+    }
+}
+
+#[cfg(test)]
+mod bulk_tests {
+    use super::*;
+
+    fn text(object: &Obj) -> String {
+        object.iter().map(|(key, value)| format!("{key}={}", value.as_f64().unwrap_or(f64::NAN))).collect::<Vec<_>>().join(",")
+    }
+
+    #[test]
+    fn setting_and_removing_many_keys_is_setting_and_removing_them_one_by_one() {
+        let mut start = Obj::new();
+        for (key, value) in [("b", 1.0), ("a", 2.0), ("7", 3.0), ("3", 4.0), ("c", 5.0)] { start.set(key, Value::Num(value)); }
+        let entries = [("z", 10.0), ("a", 11.0), ("5", 12.0), ("z", 13.0), ("10", 14.0), ("0", 15.0), ("y", 16.0)];
+        let mut one_by_one = start.clone();
+        for (key, value) in entries { one_by_one.set(key, Value::Num(value)); }
+        let mut at_once = start.clone();
+        at_once.set_all(entries.iter().map(|(key, value)| (*key, Value::Num(*value))));
+        assert_eq!(text(&at_once), text(&one_by_one));
+        assert_eq!(text(&at_once), "0=15,3=4,5=12,7=3,10=14,b=1,a=11,c=5,z=13,y=16");
+        assert_eq!(at_once.get("y").and_then(Value::as_f64), Some(16.0));
+        let gone = ["a", "7", "missing", "z"];
+        for key in gone { one_by_one.remove(key); }
+        at_once.remove_all(gone);
+        assert_eq!(text(&at_once), text(&one_by_one));
+        assert_eq!(text(&at_once), "0=15,3=4,5=12,10=14,b=1,c=5,y=16");
+        let mut wide = Obj::new();
+        wide.set_all((0..1000).map(|n| (format!("key{n}"), Value::Num(n as f64))));
+        assert_eq!(wide.len(), 1000);
+        assert_eq!(wide.get("key731").and_then(Value::as_f64), Some(731.0));
     }
 }
