@@ -46,11 +46,17 @@ Marks across a launch (bundled app, fresh profile, a quiet machine; page millise
 three calls to the browser (`requestAdapter` for the detection wgpu does, `requestAdapter` and `requestDevice`) took 0.7 s, 0.4 s and 0.08 s, but the same calls in a bare window
 take 0.15 s, 0 s and 0.05 s, and leaving out the detection request changed nothing. The graphics process's one main thread was busy: a trace showed it
 rasterizing the interface (`RasterDecoderImpl::DoEndRaster`, 0.36 s and then 0.41 s, compiling shaders on a cold cache) while the stage's WebGPU commands
-waited behind it. Windows therefore rasterizes the interface on the CPU (`desktop/gpu-switches.cjs`; deleting the switch is the way back). Everything here was measured on Windows 11 (Ryzen 5 5500, RTX 4070 SUPER, Electron 39, a bundled
-source launch on a fresh and on a reused profile) and nothing on macOS or Linux, which keep Chromium's choice:
-stage ready 1.8 s against 2.6 s (median of five interleaved launches; every pair faster), on a warm profile 1.5 to 1.8 s against 2.3 to 3.1 s.
-Pictures of Home and the editor differ from the GPU-rasterized ones in 15 to 21 % of their pixels by one level on average (text and gradient
-edges), 0.03 % by more than sixteen levels. Disabling accelerated 2D canvas changed nothing. The stage and the compositor stay on the GPU.
+waited behind it.
+
+**Rasterizing the interface on the CPU (`--disable-gpu-rasterization`) was tried and is not in.** On Windows 11 (Ryzen 5 5500, RTX 4070 SUPER, Electron 39, a
+bundled source launch, fresh and reused profile, 1× display scale) it made the stage ready at 1.8 s against 2.6 s (median of five interleaved launches; every pair faster; 1.5 to 1.8
+against 2.3 to 3.1 s on a warm profile) and changed 15 to 21 % of the pixels of Home and the editor by one level on average. A review then ran tdd2 for 7 s of
+playback at 24 fps at **2× display scale**: with the switch 22, 17 and 12 stutters, worst frame interval 85 to 98 ms, and the renderer's raster threads at 16 to 21 s of CPU;
+without it 0 stutters, 48 ms. At 1×, 1.25× and 1.5× there was no difference. 200 % is a common scale on Windows and a window moves between displays, so a scale-dependent
+choice is not an option, and 0.8 s of start is not worth a stutter on such a machine. Do not try it again without the 2× playback numbers above.
+
+**A side finding from it:** 16 to 21 s of raster CPU in 7 s of playback at 2× means the interface repaints a great deal during playback. GPU rasterization hides that cost; it is
+real work either way: on the renderer's raster threads with the switch, on the graphics process otherwise, where the stage's commands wait. Less repainting would help both.
 
 ## Measured and left alone
 
@@ -66,13 +72,17 @@ edges), 0.03 % by more than sixteen levels. Disabling accelerated 2D canvas chan
   threads have joined (about 0.2 s, during which the interface thread is idle): the one serialization left on the way to `ready`.
 - **`init()`'s synchronous block** (about 0.3 s: the shell, the timeline, the inspector, the first style and layout pass) holds the stage's continuations back by about 0.2 s.
 
-## Opening the file the app was launched with
+## What the main process pushes at startup
 
-The main process sends it (`styk:file-opened`) as soon as the page has loaded. `src/app.mjs` waits for the engine at the top of its body, and a module that waits
-does not hold the load event back, so the message could arrive before the listener existed and be dropped. Bundled, the page loads sooner than the engine,
-and the file opened in 1 of 8 launches (0 to 2 of 6 in other runs); from source the window was narrower, which is why `smoke-home`'s "opening a file at launch" failed now and then.
-The listener is now registered before the wait, keeps what arrives, and hands it to the handler that opens it once the editor is ready (8 of 8 bundled, 6 of 6 from source).
-`stykanimate://privacy` and the other menu actions are sent at the same moment and registered late too; a launch link to them has the same exposure.
+The main process sends the file the app was launched with, a `stykanimate://` link's menu action (`privacy`) and the menu's own actions as soon as the page has loaded. `src/app.mjs`
+waits for the engine at the top of its body, and a module that waits does not hold the load event back, so the listeners could be registered after the message: it was dropped
+and the file or the link silently did nothing. Bundled, the page loads sooner than the engine: launching with a file opened it in 1 of 8 launches, and `stykanimate://privacy`
+opened the privacy settings in 0 of 3 (it is also why `smoke-home`'s "opening a file at launch" failed now and then from source, where the window is narrower).
+
+Everything the main process pushes now goes through one queue (`desktop/page-pushes.cjs`): it is kept, in order, until the page says its listeners are on
+(`desktop.pageListening()`, called when `init()` has registered them and the editor is ready, `styk:page-listening`), and kept again when the page loads again.
+`tests/page-pushes.test.mjs` fails if the main process sends one of these channels to the page directly, and `scripts/smoke-launch-link.mjs` launches the app with a file
+and with the link three times each (source, bundled source, `--packaged`). A listener for a new push needs no early registration: it is registered where the others are.
 
 Smokes that need the application's own state go through `window.styk` (for a language, `window.styk.loadLocale`), not through a module imported by URL, which on a bundled
 app is a second copy; `tests/app-bundle.test.mjs` lists the few imports that are fine.

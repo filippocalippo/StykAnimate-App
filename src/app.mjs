@@ -192,12 +192,6 @@ const $ = (id) => document.getElementById(id),
           "'": "&#39;",
         })[c],
     );
-// A file the app was launched with is sent as soon as the page has loaded, which can be before the rest of this module has run (it waits for
-// the engine just below, and a module that waits does not hold the load event back). This listener is on from the start, keeps what arrives,
-// and hands it to the one registered with the other desktop listeners, once the editor is ready.
-let openFileListener = null;
-const earlyOpenedFiles = [];
-window.stykDesktop?.onOpenFile?.((result) => (openFileListener ? openFileListener(result) : earlyOpenedFiles.push(result)));
 // The engine opens every document (src/engine/engine-open.mjs): it loads before the first one.
 useEngine(await loadEngine());
 const editor = new Editor({ demo: false, propertyChannels: true, layerTimeline: true }).newDocument(),
@@ -5833,9 +5827,7 @@ if (desktop) {
       if (!$("dialog").open) return actions[action]?.();
     }),
   );
-  // A file the app was launched with can arrive while init() is still building the editor: it opens once that is done.
-  openFileListener = guarded(async (result) => { await editorReady; return acceptNativeFile(result); });
-  for (const result of earlyOpenedFiles.splice(0)) openFileListener(result);
+  desktop.onOpenFile?.(guarded(acceptNativeFile));
 }
 window.addEventListener("pagehide", event => { if (!event.persisted) importer.dispose(); });
 window.addEventListener("pagehide", event => { if (!event.persisted) browserRecovery?.dispose(); });
@@ -6287,6 +6279,8 @@ async function init() {
   markEditorReady();
   window.styk.telemetry = telemetry;
   window.styk.privacyUI = privacyUI;
+  // The listeners for what the main process pushes (the launch file, a stykanimate:// link's menu action) are all on: it sends what it kept (desktop/page-pushes.cjs).
+  desktop?.pageListening?.();
   updateNotice = new UpdateUI(desktop, { onRestart: () => actions['restart-update']() });
   queueStartupPrompts();
   void telemetryInit.then(() => telemetry.timing('startup_ms', performance.now()));

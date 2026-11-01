@@ -11,6 +11,7 @@ const { registerAppScheme, handleAppProtocol } = require('./web-host.cjs');
 const { applyGpuSwitches, relaunchOnX11 } = require('./gpu-switches.cjs');
 const { RecoveryStore, atomicWrite } = require('./recovery.cjs');
 const { FileStreams } = require('./file-streams.cjs');
+const { PagePushes } = require('./page-pushes.cjs');
 const { SharedClipboard } = require('./shared-clipboard.cjs');
 const { workspaceDirectory } = require('./workspace-instance.cjs');
 const { spawn } = require('node:child_process');
@@ -64,7 +65,8 @@ let telemetryClosed = false;
 let updates;
 let startupShown = false;
 let traceRunning = false;
-let pageLoaded = false;
+// What the main process sends to the page on its own waits here until the page's listeners are on (desktop/page-pushes.cjs).
+const pushes = new PagePushes((channel, args) => { if (window && !window.isDestroyed()) window.webContents.send(channel, ...args); });
 let pendingProtocol = process.argv.find(value => /^stykanimate:\/\//i.test(value));
 // A public library link (stykanimate://library/<id>) waits here until the
 // workspace takes it, so a link that starts the app is not lost during startup.
@@ -75,10 +77,10 @@ function handleProtocol(value) {
     if (url.protocol !== 'stykanimate:' || url.username || url.password || url.search || url.hash || url.port) return false;
     const root = ['', '/'].includes(url.pathname), asset = /^\/([^/]+)\/?$/.exec(url.pathname)?.[1];
     if (!(root && ['open', 'privacy', 'library'].includes(url.hostname)) && !(url.hostname === 'library' && isPublicId(asset))) return false;
-    if (!window || !pageLoaded) { pendingProtocol = value; return true; }
+    if (!window) { pendingProtocol = value; return true; }
     if (window.isMinimized()) window.restore(); window.show(); window.focus();
     if (url.hostname === 'privacy') sendAction('privacy');
-    if (url.hostname === 'library') { publicLibraryLink = asset ?? ''; window.webContents.send('styk:public-library-link'); }
+    if (url.hostname === 'library') { publicLibraryLink = asset ?? ''; pushes.send('styk:public-library-link'); }
     return true;
   } catch { return false; }
 }
@@ -160,7 +162,7 @@ function handle(channel, listener) {
 
 function sendAction(action) {
   if (!window || window.isDestroyed()) return;
-  window.webContents.send('styk:menu-action', action);
+  pushes.send('styk:menu-action', action);
 }
 
 function windowState() {
@@ -244,15 +246,12 @@ async function rememberRecent(file) {
 }
 
 async function queueOpenFile(file) {
-  if (!window || !webHost || !pageLoaded) { pendingFiles.push(file); return; }
-  try { window.webContents.send('styk:file-opened', await readImportFile(file)); }
+  if (!window || !webHost) { pendingFiles.push(file); return; }
+  try { pushes.send('styk:file-opened', await readImportFile(file)); }
   catch (error) { dialog.showErrorBox(t('desktop.main.unableToOpenFile'), error.message); }
 }
 
-// loadURL resolves around did-finish-load while webContents.isLoading() may
-// still report true, so opens queued here must be flushed by the load events
-// rather than a one-shot drain. did-finish-load also guarantees the renderer's
-// module scripts ran, so its onOpenFile/menu-action listeners are registered.
+// Opens and links that came before the window existed go to the page once it does; the page's listeners may not be on yet, which `pushes` waits for.
 async function flushPendingOpens() {
   if (pendingProtocol) { const value = pendingProtocol; pendingProtocol = null; handleProtocol(value); }
   const files = pendingFiles.splice(0);
@@ -387,6 +386,8 @@ function registerIpc() {
     return library.saveBytes({folder: typeof options?.folder === 'string' ? options.folder : '', name: item.name, extension, kind: item.kind, thumbnail: options?.thumbnail, bytes});
   });
   handle('styk:public-library-page', (event, id) => { trusted(event); return shell.openExternal(publicLibrary.pageFor(id)); });
+  // The page's listeners for what the main process pushes are on: everything held until now goes out.
+  handle('styk:page-listening', event => { trusted(event); pushes.listen(); return true; });
   handle('styk:public-library-link', event => { trusted(event); const id = publicLibraryLink; publicLibraryLink = null; return id; });
   recentFiles = new RecentFiles({directory: app.getPath('userData'), limit: 20});
   handle('styk:recent-list', event => { trusted(event); return recentFiles.list(); });
@@ -813,7 +814,7 @@ async function createWindow(storageCleared = Promise.resolve()) {
   }
   window.webContents.on('render-process-gone', (_event, details) => {
     if (details.reason === 'clean-exit' || quitting) return;
-    rendererFailed = true; pageLoaded = false;
+    rendererFailed = true; pushes.reset();
     telemetry?.error('RendererCrash', 'renderer', 'renderer_crashes');
     // One bounded, local diagnostic survives even when optional telemetry is
     // disabled. It contains no document contents or user identifiers.
@@ -842,12 +843,12 @@ async function createWindow(storageCleared = Promise.resolve()) {
   });
   window.on('closed', () => { window = null; });
   window.once('ready-to-show', () => backgroundWindow ? window.showInactive() : window.show());
-  window.webContents.on('did-start-loading', () => { pageLoaded = false; });
+  window.webContents.on('did-start-loading', () => { pushes.reset(); });
   // A page that loads again opens its own documents; the previous page's cannot be written any more.
   window.webContents.on('did-start-navigation', (event, _url, inPlace, mainFrame) => {
     if ((event.isMainFrame ?? mainFrame) && !(event.isSameDocument ?? inPlace)) projectFiles.clear();
   });
-  window.webContents.on('did-finish-load', () => { rendererFailed = false; pageLoaded = true; void flushPendingOpens(); });
+  window.webContents.on('did-finish-load', () => { rendererFailed = false; });
   await storageCleared;
   await window.loadURL(webHost.origin);
   if (process.env.STYK_DEVTOOLS === '1') window.webContents.openDevTools({ mode: 'detach' });

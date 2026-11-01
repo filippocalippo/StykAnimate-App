@@ -928,7 +928,7 @@ async function openFirstProject(page) {
     if (!box) return {error: 'no project card'};
     const started = Date.now();
     await page.mouse.click(box.x, box.y);
-    const shown = await page.waitForFunction(() => window.styk.home.shown === false && /^Project d+/.test(window.styk.editor.name ?? ''), null, {timeout: 30000, polling: 10}).then(() => true, () => false);
+    const shown = await page.waitForFunction(() => window.styk.home.shown === false && /^Project \d+/.test(window.styk.editor.name ?? ''), null, {timeout: 30000, polling: 10}).then(() => true, () => false);
     return shown ? {ms: Date.now() - started} : {error: 'the project did not open'};
   } catch (error) { return {error: String(error.message).slice(0, 200)}; }
 }
