@@ -33,21 +33,28 @@ fn a_frame_lacks_its_drawing_cel_until_every_tile_is_uploaded() {
     let (decoding, decoded) = engine.images_backlog();
     assert_eq!(decoding, 0);
     assert!(decoded > 1, "a cel is many tiles");
-    // One tile at a time, as a frame's upload budget allows: the frame lacks the cel until the last.
-    let mut taken = 0;
+    // One tile at a time, as a frame's upload budget allows: the frame lacks the cel until the last tile it draws. A frame is drawn clipped
+    // to the artboard and names only the tiles that reach it, so a cel larger than the artboard has tiles the frame never needs.
+    let (mut taken, mut complete) = (0, None);
     loop {
         let slice = engine.take_images(1);
         if slice.is_empty() {
             break;
         }
-        assert!(uploaded.lacks(&list), "{taken} of {decoded} tiles uploaded");
         for image in &slice {
             uploaded.record(&generation.assets, image);
         }
         taken += slice.len();
+        match (uploaded.lacks(&list), complete) {
+            (false, None) => complete = Some(taken),
+            (true, Some(at)) => panic!("the frame lacked nothing after {at} tiles and lacks a picture after {taken}"),
+            _ => {}
+        }
     }
     assert_eq!(taken, decoded);
     assert_eq!(engine.images_backlog(), (0, 0));
+    let complete = complete.expect("every tile the frame draws is there");
+    assert!(complete > 1 && complete <= decoded, "the frame lacks the cel until the last tile it draws ({complete} of {decoded} tiles)");
     assert!(!uploaded.lacks(&list), "every tile of every level is there");
     // A new atlas holds nothing.
     uploaded.clear();

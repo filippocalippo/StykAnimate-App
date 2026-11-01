@@ -42,7 +42,7 @@ function exporter(t,onExport,options={}){
   const descriptor=Object.getOwnPropertyDescriptor(globalThis,'Worker');
   Object.defineProperty(globalThis,'Worker',{value:Worker,configurable:true});
   t.after(()=>{if(descriptor)Object.defineProperty(globalThis,'Worker',descriptor);else delete globalThis.Worker;});
-  const owner=new DocumentExporter({codecHost:host,timeoutMs:0,engine:{join:{}},...options});
+  const owner=new DocumentExporter({codecHost:host,timeoutMs:0,engine:{join:{},handle:{address:()=>0}},...options});
   t.after(()=>{owner.dispose();host.close();});return {owner,workers,host};
 }
 

@@ -7,7 +7,9 @@
 //! - `@touch()` marks the document changed outside a command (`editor.dirty = true`): a new revision without a history entry;
 //! - `@publishCel(celId, definition)` gives the session the cel definition the interface's drawing store finished (the
 //!   encoded tiles, bounds and revision it attaches once it published the pixels): a derived publication, not an edit, so the
-//!   revision does not move. The pixel commits themselves are `drawing_pixels.rs`.
+//!   revision does not move. The pixel commits themselves are `drawing_pixels.rs`;
+//! - `@celState(celId, {revision, bounds})` gives the session the two fields a commit or a replay changes in a cel's definition
+//!   without publishing it. The definition carries the encoded tiles, hundreds of kilobytes, which `@publishCel` sends again.
 
 use styk_doc::Value;
 
@@ -43,6 +45,24 @@ impl Editor {
     pub(crate) fn mark_changed(&mut self) -> Result<Value, EditError> {
         self.revision_serial += 1;
         self.revision = self.revision_serial;
+        Ok(Value::Bool(true))
+    }
+
+    /// `@celState(celId, {revision, bounds})`: the cel's revision and bounds (the members present) as the drawing store has them.
+    pub(crate) fn cel_state(&mut self, args: &[Value]) -> Result<Value, EditError> {
+        let cel = args.first().and_then(Value::as_str).ok_or_else(|| invalid("celNeedsAnIdentity"))?;
+        let state = args.get(1).filter(|state| state.is_object()).ok_or_else(|| invalid("celNeedsAState"))?;
+        let celled = |figure: &Value| figure.path(&["_styk", "drawing", "celId"]).and_then(Value::as_str) == Some(cel);
+        let Some(index) = self.report.get("figure_types").and_then(Value::elements).and_then(|figures| figures.iter().position(|figure| celled(&figure))) else {
+            return Ok(Value::Bool(false));
+        };
+        let figures = self.report.make_obj().and_then(|report| report.get_mut("figure_types")).and_then(Value::make_arr).ok_or_else(|| invalid("celNeedsADocument"))?;
+        let drawing = figures[index].make_obj().and_then(|figure| figure.get_mut("_styk")).and_then(Value::make_obj).and_then(|styk| styk.get_mut("drawing")).and_then(Value::make_obj).ok_or_else(|| invalid("celNeedsADefinition"))?;
+        for key in ["revision", "bounds"] {
+            if let Some(value) = state.get(key) {
+                drawing.set(key, value.clone());
+            }
+        }
         Ok(Value::Bool(true))
     }
 

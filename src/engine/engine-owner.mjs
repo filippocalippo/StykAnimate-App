@@ -30,6 +30,7 @@
  */
 import {applyDocumentPatch} from './engine-patch.mjs';
 import {payloadText} from './engine-open.mjs';
+import {fetchedRecords, holdAllRecords, holdingAll, recordsOf} from '../lazy-table.mjs';
 import {messageError} from '../localized-error.mjs';
 import {validationLabel} from '../validation-labels.mjs';
 import {motionParameterMessages} from '../camera-motion-localization.mjs';
@@ -45,6 +46,7 @@ import {createShown} from './engine-shown.mjs';
 import {createClipboards} from './engine-clipboards.mjs';
 import {SESSION_COMMANDS, VIEW_CALLS} from './engine-commands.mjs';
 import {yieldLoadTask} from '../yield-task.mjs';
+import {drawingFigures} from '../figure-types.mjs';
 
 /** How many values of each kind a call that draws many identities is handed. */
 const MANY_DRAWS = 512;
@@ -110,6 +112,8 @@ export const snapshotDocument = document => handovers.get(document)?.(document);
  */
 export function installEngineOwner(editor, {start = openingSession, verify = false, draws = null, detached = false} = {}) {
   const report = {calls: 0, native: 0, refused: {}, errors: 0, verified: 0};
+  // Verify mode compares the whole view with the session's document: no record is given back, so none written in place is lost before it.
+  const keepRecords = verify ? holdAllRecords() : null;
   let session = null, document = null, history = null, spare = [];
   /** How many `movieclipBatch` operations the owner is running: the session records them as one entry. */
   let batches = 0;
@@ -117,7 +121,9 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   const view = () => ({tick: editor.tick, frameIndex: editor.frameIndex, selectedUid: editor.selectedUid ?? null, selectedUids: [...(editor.selectedUids ?? [])], layerFocusLock: editor.layerFocusLock(), // the layers Focus and lock leaves free: the session locks the rest for the call
     selectedJoint: editor.selectedJoint ?? -1, activeLayerId: editor.activeLayerId, autoKey: Boolean(editor.autoKey), audioRipple: Boolean(editor.audioRipple),
     sheetSelection: editor._sheetSelection ? {id: editor._sheetSelection.id, contents: Boolean(editor._sheetSelection.contents)} : null,
-    ...selectionMetadata(editor._selectionState())});
+    ...selectionMetadata(editor._selectionState()),
+    // The records of its tables the read view holds: the session sends a change inside any other whole, and the layer counts it moved.
+    lazy: fetchedRecords(editor.report)});
 
   // --- what the interface reads of the frame on show ----------------------------------
   /** How many answers are being applied: the session is the editor's source of truth meanwhile, so a read does not tell it
@@ -151,7 +157,8 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
 
   const check = () => {
     if (!verify || !session) return;
-    const engine = session.report_json(), view = JSON.stringify(editor.report);
+    // The tables give no record back meanwhile: a record changed in place and then given back would not show.
+    const engine = session.report_json(), view = holdingAll(() => JSON.stringify(editor.report));
     if (engine !== view) {
       let at = 0; while (engine[at] === view[at]) at++;
       throw new Error(`The engine's document differs from the read view at ${at}: engine …${engine.slice(Math.max(0, at - 60), at + 60)}… view …${view.slice(Math.max(0, at - 60), at + 60)}…`);
@@ -168,13 +175,15 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   };
 
   // --- answers ------------------------------------------------------------------------
-  /** The pose records and layer state before a patch, to update the layer index from. */
-  const posesBefore = () => ({frames: editor.report.keyframes, sources: editor.report._styk?.frameSources, layers: editor.report._styk?.layers});
-  /** Updates what the editor derives from the records a patch replaced: the layer index
-   * from the poses that changed (by identity), frame and type indices, caches. */
-  const refresh = (patch, before) => {
+  /** The layer state before a patch, to update the layer index from. */
+  const posesBefore = () => ({layers: editor.report._styk?.layers});
+  /** Updates what the editor derives from the records a patch replaced: the layer index from the figures the session says
+   * the poses gained and lost altogether (`changes`: the view cannot tell from the records it replaced, it holds some of them), frame and
+   * type indices, caches. */
+  const refresh = (patch, before, changes) => {
     const touched = new Set(patch.map(op => op.p[0] ?? '*'));
-    const index = editor._layerUidCounts && before && !touched.has('*') ? before : null;
+    if (!changes) throw new Error('The session answered a patch without the figures it moved.');
+    const index = editor._layerGroups ? before : null;
     if (!index) {
       // Counted again from the document, figures seen before kept.
       const seen = editor._layerSeenUids, revision = editor._layerRevision;
@@ -183,42 +192,31 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
       editor._layerRevision = revision;
       if (seen) for (const uid of seen) editor._layerSeenUids.add(uid);
     } else {
-      const counts = editor._layerUidCounts, groups = editor._layerGroups, report = editor.report;
-      const delta = new Map(), crossed = [];
-      const count = (records, sign) => { for (const record of records) for (const object of record?.objects ?? []) delta.set(object.unique_id, (delta.get(object.unique_id) ?? 0) + sign); };
-      const compare = (old, next) => {
-        if (old === next) return;
-        const previous = new Set(old ?? []), current = new Set(next ?? []);
-        count([...previous].filter(record => !current.has(record)), -1);
-        count([...current].filter(record => !previous.has(record)), 1);
-      };
-      compare(index.frames, report.keyframes);
-      if (index.sources !== report._styk?.frameSources) compare(Object.values(index.sources ?? {}), Object.values(report._styk?.frameSources ?? {}));
-      for (const [uid, amount] of delta) {
-        if (!amount) continue;
-        const previous = counts.get(uid) ?? 0, next = previous + amount;
-        if (next > 0) { counts.set(uid, next); editor._layerSeenUids.add(uid); } else counts.delete(uid);
-        if ((previous > 0) !== (next > 0)) crossed.push(uid);
-      }
+      const groups = editor._layerGroups, report = editor.report;
+      for (const uid of changes.appeared) editor._layerSeenUids.add(uid);
       if (index.layers !== report._styk?.layers) {
         // Assignments or layers changed: every figure regrouped.
+        const present = new Set(changes.appeared);
+        for (const members of groups.values()) for (const uid of members) present.add(uid);
+        for (const uid of changes.gone) present.delete(uid);
         const state = report._styk.layers;
         editor._layerGroups = new Map(state.order.map(id => [id, new Set()]));
-        for (const uid of counts.keys()) editor._layerGroups.get(layerIdForUid(report, uid))?.add(uid);
-      } else for (const uid of crossed) {
-        const layer = groups.get(layerIdForUid(report, uid));
-        if (counts.has(uid)) layer?.add(uid); else for (const members of groups.values()) members.delete(uid);
+        for (const uid of present) editor._layerGroups.get(layerIdForUid(report, uid))?.add(uid);
+      } else {
+        for (const uid of changes.appeared) groups.get(layerIdForUid(report, uid))?.add(uid);
+        for (const uid of changes.gone) for (const members of groups.values()) members.delete(uid);
       }
     }
     if (verify && index) {
       // The incremental index equals one counted again from the document.
-      const counts = new Map(editor._layerUidCounts), groups = new Map([...editor._layerGroups].map(([id, members]) => [id, [...members].sort((a, b) => a - b)]));
+      const groups = new Map([...editor._layerGroups].map(([id, members]) => [id, [...members].sort((a, b) => a - b)]));
       const seen = editor._layerSeenUids, revision = editor._layerRevision;
-      editor._initializeLayers();
+      // Counting the document reads every record: the tables give none back meanwhile, or a record written in place could be given back before the comparison.
+      holdingAll(() => editor._initializeLayers());
       editor._layerRevision = revision; for (const uid of seen) editor._layerSeenUids.add(uid);
       const sorted = map => JSON.stringify([...map].sort(([a], [b]) => String(a).localeCompare(String(b))));
       const fresh = new Map([...editor._layerGroups].map(([id, members]) => [id, [...members].sort((a, b) => a - b)]));
-      if (sorted(counts) !== sorted(editor._layerUidCounts) || sorted(groups) !== sorted(fresh)) throw new Error('The layer index after a patch differs from one counted from the document.');
+      if (sorted(groups) !== sorted(fresh)) throw new Error('The layer index after a patch differs from one counted from the document.');
     }
     if (touched.has('keyframes') || touched.has('*')) invalidateFrameIndex(editor.report);
     editor._layerDescriptors = null; editor._layerUidArrays = new Map();
@@ -228,7 +226,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     if (patch && answer.patch?.length) {
       const before = posesBefore(), layers = new Set(Object.keys(editor.report._styk?.layers?.byId ?? {}));
       applyDocumentPatch(editor.report, answer.patch, answer.payloads ? payloadText : null);
-      refresh(answer.patch, before);
+      refresh(answer.patch, before, answer.layerChanges);
       // A layer a call creates joins the layer focus the editor holds (the session left it free as it made it).
       editor._includeCreatedLayersInFocus(Object.keys(editor.report._styk?.layers?.byId ?? {}).filter(id => !layers.has(id)));
       editor._invalidate({timing: true});
@@ -397,7 +395,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
         if (!this.ops.length) return editor.report;
         if (built?.document !== editor.report || built.ops !== this.ops) {
           const report = {...editor.report};
-          applyDocumentPatch(report, this.ops);
+          applyDocumentPatch(report, this.ops, null, {strict: false});
           built = {document: editor.report, ops: this.ops, report};
         }
         return built.report;
@@ -487,15 +485,15 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   const readClipboard = (holder, kind) => JSON.parse(holder.query('clipboard', JSON.stringify([kind]), 'null')).v;
   /** Frees a session that is closed. The clipboards read what they keep in it first (a copied audio clip's recording) and name
    * it no more, so a freed session is never called. Every session of a closed project or a left movieclip ends here. */
-  const end = ended => {
-    try { clipboards.surrender(ended, readClipboard); } finally { ended.free(); }
+  const end = (ended, closed) => {
+    try { clipboards.surrender(ended, readClipboard); } finally { recordsOf(closed)?.close(ended); ended.free(); }
   };
   /** Ends the session of a document that is closed (or a movieclip that is left), whether it is the open one or parked. */
   const forget = closed => {
     let ended = null;
     if (document === closed) { ended = session; session = null; document = null; }
     else { ended = parked.get(closed)?.session; parked.delete(closed); }
-    if (ended) end(ended);
+    if (ended) end(ended, closed);
   };
   /** The token of the tree the session of document `held` holds, the open one or a parked one. */
   const handOver = held => (document === held ? session : parked.get(held)?.session)?.snapshot();
@@ -533,7 +531,8 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
       activate();
       check();
     } catch (error) {
-      const failed = session; session = null; document = null;
+      const failed = session, failedDocument = document; session = null; document = null;
+      recordsOf(failedDocument)?.close(failed);
       failed.free();
       report.broken = String(error.message ?? error);
       return null;
@@ -558,7 +557,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   };
   /** The cels a call copied take the pixels of the cels they copy: the interface holds the pixels, not the session. */
   const forkDrawings = forks => {
-    const cels = new Map(editor.report.figure_types.filter(drawingMetadata).map(figure => [drawingMetadata(figure).celId, figure]));
+    const cels = new Map(drawingFigures(editor.report.figure_types).map(figure => [drawingMetadata(figure).celId, figure]));
     for (const [from, to] of forks) {
       const old = cels.get(from), copy = cels.get(to);
       if (old && copy) editor.drawingResources.fork(old, copy);
@@ -571,7 +570,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     return unsupported(name, reason);
   };
   /** `drawing`: the pixel step of a drawing commit (engine-owner-drawing.mjs): it runs once the answer is adopted, before the events. */
-  const callSession = (name, args, drawing = null) => {
+  const callSession = (name, args, drawing = null, clipSession = null) => {
     const live = ensure();
     if (!live) throw refuse(name, 'no engine session runs this document');
     if (ENDS_EDIT[name] && !editor[ENDS_EDIT[name]]) { report.calls++; report.native++; return false; }
@@ -585,16 +584,18 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
       if (handed.status === 'error') throw failure(handed.error, handed.errorParams);
       if (handed.status !== 'ok') throw new Error(`The engine did not take the ${kind} clipboard: ${handed.reason}`);
     }, readClipboard);
-    const payload = sessionPayload(args);
+    // A document of another session crosses as that session's tree: its place among the arguments is empty here.
+    const payload = sessionPayload(clipSession ? args.map((value, at) => at === 1 ? null : value) : args);
     if (payload === null) throw refuse(name, 'arguments that are not plain data');
     report.calls++;
     // A paste says how often the figures were pasted, which sets where the next paste lands.
     const pastes = name === 'pasteSelection' ? {figureClipboardPastes: true} : {};
     const encoded = payload.encoded ? {encoded: true} : {};
     const viewText = more => JSON.stringify({...view(), patch: true, changesOnly: true, draws: pool(more), drawPool: true, ...pastes, ...encoded});
-    let text = live.call(name, payload.text, viewText());
+    const run = more => clipSession ? live.call_with_document(name, payload.text, viewText(more), clipSession) : live.call(name, payload.text, viewText(more));
+    let text = run();
     // A call that makes more identities than the pool holds (rippling the audio cuts many clips) changed nothing: it asks again with enough.
-    if (text.includes('"unported"') && JSON.parse(text).reason?.startsWith('a call that draws more than the pool')) text = live.call(name, payload.text, viewText(MANY_DRAWS));
+    if (text.includes('"unported"') && JSON.parse(text).reason?.startsWith('a call that draws more than the pool')) text = run(MANY_DRAWS);
     const answer = JSON.parse(text);
     // Draws the call did not take come first next time, so identities follow one sequence.
     spare = [];
@@ -706,7 +707,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
       check();
     },
     // Cel definitions changed in place (revision, bounds): the session's copies follow at once.
-    synced(figures) { for (const figure of figures) editor._drawingPublished(figure); },
+    synced(figures) { for (const figure of figures) editor._drawingState(figure); },
   });
   /** A call retired a history entry that referred to drawings: the store lets go of what no entry refers to, once the call has ended. */
   let collecting = false;
@@ -745,10 +746,14 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   // Entering a movieclip loads its document, which gets its session as any document does (the 'document' event below);
   // leaving it gives the clip's edit to the session of the document it was in, and ends the clip's own.
   const leaveMovieclip = editor.leaveMovieclip;
+  /** The clip being left and its session: its edit is given to the parent's session as the tree the clip's session holds. */
+  let leaving = null;
   layer.leaveMovieclip = function owned(...args) {
     const clip = editor.report;
+    leaving = {report: clip, session: document === clip ? session : parked.get(clip)?.session};
     try { return leaveMovieclip.apply(this, args); }
     finally {
+      leaving = null;
       // Once left (a leave that fails stays in the clip) the clip's session is of no use any more.
       if (editor.report !== clip) forget(clip);
     }
@@ -760,7 +765,10 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     if (discarded) for (const closed of [detached.report, ...(detached._movieclipScopes ?? []).map(scope => scope.parent.report)]) forget(closed);
     return discarded;
   };
-  layer._publishMovieclipEdit = function owned(...args) { return callSession('publishMovieclipEdit', args); };
+  layer._publishMovieclipEdit = function owned(...args) {
+    const clip = leaving?.session && args[1] === leaving.report ? leaving.session : null;
+    return callSession('publishMovieclipEdit', args, null, clip);
+  };
   layer.markSaved = function owned(...args) {
     const result = originalMarkSaved.apply(this, args);
     if (session && document === editor.report) { send('@markSaved', []); history.dirty = false; }
@@ -771,6 +779,16 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     const celId = drawingMetadata(figure)?.celId;
     if (!session || document !== editor.report || !celId) return;
     send('@publishCel', [celId, figure]);
+    check();
+  };
+  // A commit or a replay changed a cel's revision and bounds in place: the session's copy follows without the encoded tiles of the definition.
+  layer._drawingState = function owned(figure) {
+    const d = drawingMetadata(figure), celId = d?.celId;
+    if (!session || document !== editor.report || !celId) return;
+    const state = {};
+    if (d.revision !== undefined) state.revision = d.revision;
+    if (Object.hasOwn(d, 'bounds')) state.bounds = d.bounds ?? null;
+    send('@celState', [celId, state]);
     check();
   };
   // The drawing store keeps the pixels the session's history refers to.
@@ -813,11 +831,12 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   /** How many sessions the owner holds: the open document's, and those of the documents open beside it or a movieclip is entered from. */
   report.sessions = () => (session ? 1 : 0) + parked.size;
   report.release = () => {
+    keepRecords?.();
     // The clipboards let go of the sessions first: none names one that is freed.
     clipboards.release();
-    const ended = [session, ...[...parked.values()].map(value => value.session)];
+    const ended = [[session, document], ...[...parked].map(([held, value]) => [value.session, held])];
     session = null; document = null; parked.clear();
-    for (const value of ended) value?.free();
+    for (const [value, held] of ended) { if (value) recordsOf(held)?.close(value); value?.free(); }
     shown.release(); editor._shown = null;
   };
   // The editor reads the frame on show, its geometry and its timeline from the session.

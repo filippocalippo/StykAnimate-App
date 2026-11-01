@@ -30,6 +30,7 @@ import {openMenu,menuFor} from './ui/ui-menu.mjs';
 
 import {ROW,HEADER,sheetRowLayout,shortSheet} from './timeline-rows.mjs';
 import {TOUCH_ZOOM,timelineTouchMethods} from './touch/timeline-scrubber.mjs';
+import {findFigureType} from './figure-types.mjs';
 
 /** The tall tier's content row and ruler (timeline-rows.mjs holds the whole row geometry: 24px Camera and Scene,
  * 28px rows and a 24px ruler at the short tier). */
@@ -228,7 +229,8 @@ export class Timeline{
     if(anchor===undefined){const tick=Math.floor(this.editor.tick)+.5,x=tick*old-this._offsetX();anchor=this._touch()||x<0||x>this.width?this.width/2:x;center=tick;}
     else center=(this._offsetX()+anchor)/old;
     this.pxPerTick=clamp(Number(value)||14,range.min,range.max);this.header?.setZoom(this.pxPerTick);this._extent();this._scrollToX(center*this.pxPerTick-anchor);this.audio?.update();}
-  setPaused(value){const resumed=this.paused&&!value;this.paused=value;this.update(Boolean(resumed));if(resumed)this._centerSoon();}
+  /** A pause that changes nothing asks for no frame: a stepping key calls it before the seek, and a frame it asked for would run before the stage's own. */
+  setPaused(value){if(this.paused===value)return;const resumed=this.paused&&!value;this.paused=value;this.update(Boolean(resumed));if(resumed)this._centerSoon();}
   update(dirty=true){
     this.dirty||=dirty;if(this.disposed||this.raf)return;
     this.raf=requestAnimationFrame(()=>{this._flushScrub();if(this.dirty){this.dirty=false;this._paint();}this._syncPlayhead();this.raf=null;
@@ -390,7 +392,7 @@ export class Timeline{
           ctx.beginPath();ctx.roundRect(Math.max(-6,left),top,Math.max(1,Math.min(w+6,right)-Math.max(-6,left)),height,5);
           if(!blank){ctx.fillStyle=c.cel;ctx.fill();}
           ctx.lineWidth=current?1.5:1;ctx.strokeStyle=current?c['accent-line']:c['cel-line'];ctx.stroke();
-          if(!blank&&right-left>34){const source=key.value?.frameId&&this.editor.getFrameById(key.value.frameId),object=source?.objects.find(o=>this.editor.layerForUid(o.unique_id)===layer.id),figure=object&&this.editor.report.figure_types.find(f=>f.figure_type_id===object.figure_type_id);if(figure&&drawingMetadata(figure)){const thumb=this.editor.drawingResources.thumbnail(figure,()=>{if(!this.disposed)this.update();});if(thumb){const width=Math.min(40,right-left-24);if(width>8)ctx.drawImage(thumb,left+16,top+2,width,height-4);}}}
+          if(!blank&&right-left>34){const source=key.value?.frameId&&this.editor.getFrameById(key.value.frameId),object=source?.objects.find(o=>this.editor.layerForUid(o.unique_id)===layer.id),figure=object&&findFigureType(this.editor.report.figure_types, object.figure_type_id);if(figure&&drawingMetadata(figure)){const thumb=this.editor.drawingResources.thumbnail(figure,()=>{if(!this.disposed)this.update();});if(thumb){const width=Math.min(40,right-left-24);if(width>8)ctx.drawImage(thumb,left+16,top+2,width,height-4);}}}
         }
         this._paintSelection(ctx,layer,y,size,sx);
       }

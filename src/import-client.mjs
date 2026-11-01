@@ -3,7 +3,7 @@ import {restoreMessageError, messageError} from './localized-error.mjs';
 /** File I/O boundary: bytes transfer to a worker; JSON parsing stays off the UI. */
 import { applyDocumentChunk } from './document-transport.mjs';
 import {materializeNativeFrames} from './import-wire.mjs';
-import {attachRead, openBytes, openJson} from './engine/engine-open.mjs';
+import {attachRead, openBytes, openJson, prepareOpen} from './engine/engine-open.mjs';
 import {codecJob} from './codec-job.mjs';
 import {codecRequest} from './codec-request.mjs';
 import {browserCodecHost, codecProfile} from './codec-web-host.mjs';
@@ -218,6 +218,7 @@ export class ImportClient {
     const native = /\.(styk|stkz|stykmov|json)$/i.test(file.name);
     const limit = (native ? 256 : 128) * 1024 * 1024;
     if (Number(file.size) > limit) throw Object.assign(messageError(new Error(''), "errors.importClient.theFileExceedsTheMibImportLimit", {value: limit / 1024 / 1024}), { telemetryCode: 'file_too_large', telemetryStage: 'prepare' });
+    prepareOpen();
     const generation=this.cancelGeneration,bytes = await file.arrayBuffer();
     if(generation!==this.cancelGeneration)throw messageError(new DOMException('', 'AbortError'), "errors.importClient.importSuperseded", {});
     return this._import(file.name,bytes,{entryIndex,onProgress,project,open});
@@ -284,7 +285,7 @@ export class ImportClient {
     const now=performance.now();
     attachRead(read.report,read);
     return {ok:true,sourceId,...(sourceOwner?{sourceOwner}:{}),filename,kind:opening.kind,version:opening.version,savedDraft:opening.savedDraft,document:read.report,
-      timings:{decode_ms:+(decoded-started).toFixed(3),cache_hit:false,total_ms:+(now-started).toFixed(3),source_bytes:sourceBytes,
+      timings:{engine:opening.timings,decode_ms:+(decoded-started).toFixed(3),cache_hit:false,total_ms:+(now-started).toFixed(3),source_bytes:sourceBytes,
         read_ms:+(now-decoded).toFixed(3),transport:'engine-open'}};
   }
 
@@ -309,6 +310,7 @@ export class ImportClient {
   async openSample(path,{project=false,open=null}={}) {
     if (this.disposed) throw messageError(new Error(''), "errors.importClient.theFileImporterHasBeenDisposed", {});
     if (typeof path !== 'string' || !path) throw messageError(new Error(''), "errors.importClient.chooseAProjectFromTheLibrary", {});
+    prepareOpen();
     const generation=this.cancelGeneration,sample=await this.readSample(path);
     if(generation!==this.cancelGeneration)throw messageError(new DOMException('', 'AbortError'), "errors.importClient.importSuperseded", {});
     if (!sample?.ok) {

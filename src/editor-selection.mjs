@@ -4,6 +4,7 @@ import {figureFocusLocked} from './editor-layer-focus.mjs';
 import {figurePalette, attachedFigurePalette} from './figure-colors.mjs';
 import {isMovieclip} from './movieclips.mjs';
 import {drawingMetadata} from './drawing-model.mjs';
+import {findFigureType} from './figure-types.mjs';
 
 const validIds = (uids, existing) => new Set([...uids].filter(uid => existing.has(uid)));
 
@@ -44,7 +45,7 @@ export const editorSelectionMethods = {
   selectPolygon(uid, index) {
     if (figureFocusLocked(this.report, uid)) return false;
     const object = this.selectionFrame.objects.find(object => object.unique_id === uid);
-    const figure = this.report.figure_types.find(figure => figure.figure_type_id === object?.figure_type_id);
+    const figure = findFigureType(this.report.figure_types, object?.figure_type_id);
     const polygon = figure?.polyfills?.[index];if(!polygon)return false;
     this.select(uid,-1);
     this._polygonSelection={uid,index,id:polygon.polyfill_id,typeId:figure.figure_type_id};
@@ -55,7 +56,7 @@ export const editorSelectionMethods = {
     if (figureFocusLocked(this.report, uid)) return false;
     this._polygonSelection = null;
     const object = this.selectionFrame.objects.find(object => object.unique_id === uid);
-    const figure = this.report.figure_types.find(figure => figure.figure_type_id === object?.figure_type_id);
+    const figure = findFigureType(this.report.figure_types, object?.figure_type_id);
     const id = figure?.segments[joint]?.segment_id;
     if (id === undefined) return false;
     const ids = new Set(uid === this.selectedUid ? this.selectedSegmentIds : []);
@@ -71,7 +72,7 @@ export const editorSelectionMethods = {
     if (figureFocusLocked(this.report, uid)) return false;
     this._segmentSelection = null;
     const objects = this.selectionFrame.objects, slot = objects.findIndex(o => o.unique_id === uid);
-    const figure = this.report.figure_types.find(f => f.figure_type_id === objects[slot]?.figure_type_id);
+    const figure = findFigureType(this.report.figure_types, objects[slot]?.figure_type_id);
     if (!figure?.segments[joint]) return false;
     const handles = new Set(segmentBranchIndices(figure.segments, figure.segments[joint].segment_id).map(i => figure.segments[i].segment_id));
     const slots = new Set([slot]), children = new Map();

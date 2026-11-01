@@ -19,6 +19,8 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub struct DocumentExport {
     made: Made,
+    /// Where a save's time went, as JSON (`save_project`); empty for the other exports.
+    timings: String,
 }
 
 #[wasm_bindgen]
@@ -31,6 +33,12 @@ impl DocumentExport {
     /// What the container held before compression (a container output), else the length of the bytes.
     pub fn raw_bytes(&self) -> usize {
         self.made.raw_bytes
+    }
+
+    /// Where a project save's time went: JSON `{prepare_ms, lift_ms, lift_pieces_ms, lift_splice_ms, scene_ms, frames_ms, assemble_ms, total_ms, frames: [{raw, stored, hash_ms, compress_ms}, …]}`
+    /// (the skeleton, the arrays section, the payloads section), or an empty string.
+    pub fn timings(&self) -> String {
+        self.timings.clone()
     }
 
     pub fn length(&self) -> usize {
@@ -142,7 +150,7 @@ pub fn export_document(address: usize, revision: f64, request: &str, cancel: &js
         cancelled.get()
     };
     let made = engine.export_document(revision as u64, &Request { format, name, figure }, &output, &stop).map_err(refusal)?;
-    Ok(DocumentExport { made })
+    Ok(DocumentExport { made, timings: String::new() })
 }
 
 /// The documents sessions have handed over for a save, by token: a snapshot is the session's tree at one moment (an
@@ -180,10 +188,15 @@ fn take_snapshots(tokens: &[f64]) -> Option<Vec<Value>> {
 /// Writes the `.styk` container of the project the snapshots hold (`src/engine/engine-document-export.mjs`). `request` is
 /// JSON: `snapshots` (tokens of [`crate::edit::EditSession::snapshot`], outermost document first, the document in front last),
 /// `scopes` (for each document but the last, the movieclip type the next one is the document of), `name`, and `source`: the
-/// record of the Pivot original the interface holds for the project, whose bytes are `source`. `cancel()` answers whether the
-/// save is stopped. Nothing is written anywhere: the answer is the file's bytes.
+/// record of the Pivot original the interface holds for the project, whose bytes are `source`. `address` is a fresh
+/// [`crate::engine::EngineHandle::address`] (consumed), whose workers the save may use for the hashes and frames it can make side by side, or 0;
+/// `helpers` in the request is how many of them (the interface leaves some free), `aside` whether one more may run the scene check beside the rest, and `reservation` a name for the memory the save
+/// reserves, which the interface releases ([`crate::engine::EngineHandle::release_reservation`]) if this thread traps.
+/// `cancel()` answers whether the save is stopped. Nothing is written anywhere: the answer is the file's bytes.
 #[wasm_bindgen]
-pub fn save_project(request: &str, source: Option<Vec<u8>>, cancel: &js_sys::Function) -> Result<DocumentExport, JsError> {
+pub fn save_project(address: usize, request: &str, source: Option<Vec<u8>>, cancel: &js_sys::Function) -> Result<DocumentExport, JsError> {
+    // SAFETY: `address` is 0 or was produced by `EngineHandle::address` in this memory and is used once; the engine lends the save its other workers.
+    let engine = (address != 0).then(|| unsafe { *Box::from_raw(address as *mut Engine) });
     let request = json::parse(request.as_bytes()).map_err(|why| bad(&why.to_string()))?;
     let numbers = |key: &str| request.get(key).and_then(Value::numbers).unwrap_or_default();
     let tokens = numbers("snapshots");
@@ -197,6 +210,7 @@ pub fn save_project(request: &str, source: Option<Vec<u8>>, cancel: &js_sys::Fun
         _ => None,
     };
     let name = request.get("name").and_then(Value::as_str).map(str::to_string);
+    let reservation = request.get("reservation").and_then(Value::as_f64).map(|token| token as u64);
     let cancelled = Cell::new(false);
     let stop = || {
         if !cancelled.get() {
@@ -204,6 +218,9 @@ pub fn save_project(request: &str, source: Option<Vec<u8>>, cancel: &js_sys::Fun
         }
         cancelled.get()
     };
-    let written = styk_engine::save::save_project(&trees, &scopes, styk_engine::save::ProjectRequest { name, source }, &stop).map_err(save_failure)?;
-    Ok(DocumentExport { made: Made { raw_bytes: written.raw_bytes, bytes: written.bytes, figure_type_id: None, drawings: false } })
+    let written = styk_engine::save::save_project(&trees, &scopes, styk_engine::save::ProjectRequest { name, source, reservation }, &styk_engine::save::EngineHost { engine: engine.as_ref(), cancel: &stop, clock: crate::clock, helpers: request.get("helpers").and_then(Value::as_f64).map_or(0, |count| count as usize), aside: request.get("aside").is_some_and(Value::truthy) }).map_err(save_failure)?;
+    let t = written.timings;
+    let frames: Vec<String> = t.frames.iter().map(|f| format!("{{\"raw\":{},\"stored\":{},\"hash_ms\":{:.3},\"compress_ms\":{:.3}}}", f.raw_bytes, f.stored_bytes, f.hash_ms, f.compress_ms)).collect();
+    let timings = format!("{{\"prepare_ms\":{:.3},\"lift_ms\":{:.3},\"lift_pieces_ms\":{:.3},\"lift_splice_ms\":{:.3},\"scene_ms\":{:.3},\"frames_ms\":{:.3},\"assemble_ms\":{:.3},\"total_ms\":{:.3},\"frames\":[{}]}}", t.prepare_ms, t.lift_ms, t.lift_pieces_ms, t.lift_splice_ms, t.scene_ms, t.frames_ms, t.assemble_ms, t.total_ms, frames.join(","));
+    Ok(DocumentExport { made: Made { raw_bytes: written.raw_bytes, bytes: written.bytes, figure_type_id: None, drawings: false }, timings })
 }

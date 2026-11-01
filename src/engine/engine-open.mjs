@@ -9,6 +9,7 @@
  * the same tree (`startSession`). Nothing here validates or normalizes a document.
  */
 import {restoreLifted} from '../document-lift.mjs';
+import {lazyKeyedTable, lazyTable, useRecords} from '../lazy-table.mjs';
 import {messageError, restoreMessageError} from '../localized-error.mjs';
 import {yieldLoadTask} from '../yield-task.mjs';
 
@@ -16,6 +17,12 @@ import {yieldLoadTask} from '../yield-task.mjs';
 let registered = null;
 export function useEngine(engine) { registered = engine; }
 export function registeredEngine() { return registered; }
+
+/**
+ * Starts the engine's remaining workers when a person asks to open a file, so that they have joined by the time its bytes
+ * arrive (reading takes as long as starting them): the open shares its work with them.
+ */
+export function prepareOpen() { registered?.grow(); }
 
 function engineOf(engine) {
   const found = engine ?? registered;
@@ -28,6 +35,38 @@ export const payloadText = token => engineOf().handle.payload_text(token);
 
 const EMPTY = new Uint8Array(0);
 const encoder = new TextEncoder();
+
+/** The tables of the read view whose records are fetched when something reads them (src/lazy-table.mjs). */
+const LAZY_TABLES = new Set(['keyframes', 'figure_types']);
+/** The tables of records by key that are fetched the same way (a split's path joined with dots). */
+const LAZY_KEYED = new Set(['_styk.frameSources']);
+
+/** A piece of the document (an `OpenedDocument.part` or `record`) as the view holds it. `shared`: the arrays that pieces asked for before define. */
+function restorePart(part, sections, shared) {
+  const skeleton = JSON.parse(part.skeleton);
+  sections[0] = {bytes: part.arrays, base: part.arrays_base};
+  sections[1] = {bytes: part.payloads, base: part.payloads_base};
+  // Sequences the piece defines come first: its skeleton and later pieces name them.
+  if (part.sequences) for (const {id, v} of JSON.parse(part.sequences)) shared.set(`S2R:${id}`, restoreLifted(v, sections, shared));
+  part.free();
+  return restoreLifted(skeleton, sections, shared, payloadText);
+}
+
+/**
+ * Where the records of a lazy table come from: the opening's tree until its session starts, then the session's, which is the document
+ * from then on. A record is lifted on its own, whole (nothing is shared with the ones fetched before).
+ */
+export class Records {
+  constructor(holder) { this.holder = holder; }
+  /** The document is closed: `holder` (its session, or the opening) is freed, and no record can be fetched from it any more. */
+  close(holder) { if (this.holder === holder) this.holder = null; }
+  /** The record at `index` of an array table, or under `key` of a table of records by key. */
+  fetch(table, at) {
+    if (!this.holder) throw new Error('The document is closed: its records can no longer be read.');
+    const part = typeof at === 'string' ? this.holder.keyed_record(table, at) : this.holder.record(table, at);
+    return restorePart(part, [{bytes: EMPTY, base: 0}, {bytes: EMPTY, base: 0}], new Map());
+  }
+}
 
 /** The error an open raised, as the interface words it: a message key with its parameters where there is one. */
 function openFailure(error) {
@@ -43,7 +82,14 @@ function openFailure(error) {
   return failure;
 }
 
-const optionsText = ({layerTimeline = false} = {}) => JSON.stringify({layerTimeline: Boolean(layerTimeline)});
+/**
+ * The most other workers an open takes: the workers share one allocator, whose lock the open's many small allocations contend for (the
+ * open of the large `.styk` read fastest with two or three helpers, and no faster with six).
+ */
+const MAX_OPEN_HELPERS = 3;
+/** The other workers an open may use: it keeps one free for the frame on show of another document. */
+const helpersOf = engine => Math.min(MAX_OPEN_HELPERS, Math.max(0, (engine.workers ?? 0) - 2));
+const optionsText = ({layerTimeline = false} = {}, helpers = 0) => JSON.stringify({layerTimeline: Boolean(layerTimeline), helpers});
 
 /** The views already built for documents that are about to be loaded (`attach`, `prepareLoad`). */
 const reads = new WeakMap();
@@ -58,12 +104,15 @@ export class Opening {
     this.engine = engine;
     this.handle = handle;
     this.meta = JSON.parse(handle.meta());
+    this.records = new Records(handle);
   }
   get name() { return this.meta.name; }
   get kind() { return this.meta.kind; }
   get version() { return this.meta.version; }
   /** Whether the document stored a frame draft when it was opened. */
   get savedDraft() { return this.meta.savedDraft; }
+  /** Where the engine's open spent its time (ms): decode, prepare, views, check. */
+  get timings() { return this.meta.timings; }
   get lineage() { return this.meta.lineage; }
 
   /** Gives the document the Pivot file it was read from, as a saved native document carries its source (`_stykSource`). */
@@ -79,21 +128,25 @@ export class Opening {
   * readSteps() {
     const {handle, meta} = this, shared = new Map(), sections = [{bytes: EMPTY, base: 0}, {bytes: EMPTY, base: 0}];
     if (!handle) throw new Error('This opening has been released.');
-    const restore = part => {
-      const skeleton = JSON.parse(part.skeleton);
-      sections[0] = {bytes: part.arrays, base: part.arrays_base};
-      sections[1] = {bytes: part.payloads, base: part.payloads_base};
-      // Sequences the piece defines come first: its skeleton and later pieces name them.
-      if (part.sequences) for (const {id, v} of JSON.parse(part.sequences)) shared.set(`S2R:${id}`, restoreLifted(v, sections, shared));
-      part.free();
-      return restoreLifted(skeleton, sections, shared, payloadText);
-    };
+    const restore = part => restorePart(part, sections, shared);
     const report = restore(handle.part(-1, 0));
     let work = 0;
     for (let at = 0; at < meta.splits.length; at++) {
       const split = meta.splits[at];
       let container = report;
-      for (const key of split.path) container = container[key];
+      for (const key of split.path.slice(0, -1)) container = container[key];
+      const name = split.path.at(-1);
+      if (split.count !== undefined && split.path.length === 1 && LAZY_TABLES.has(name)) {
+        container[name] = lazyTable(name, split.count, meta.rows?.[name], this.records);
+        yield {phase: 'reading', checked: ++work};
+        continue;
+      }
+      if (split.keys && LAZY_KEYED.has(split.path.join('.'))) {
+        container[name] = lazyKeyedTable(split.path.join('.'), split.keys, this.records);
+        yield {phase: 'reading', checked: ++work};
+        continue;
+      }
+      container = container[name];
       if (split.keys) {
         for (let index = 0; index < split.keys.length; index++) {
           const key = split.keys[index], value = restore(handle.part(at, index));
@@ -109,10 +162,13 @@ export class Opening {
       }
     }
     const indexes = meta.indexes;
+    useRecords(report, this.records);
     return {
       report, opening: this, nextFrameIdentity: indexes.nextFrameIdentity, nextUid: indexes.nextUid,
-      layerUidCounts: new Map(indexes.layerUidCounts), layerSeenUids: new Set(indexes.layerSeenUids),
+      layerSeenUids: new Set(indexes.layerSeenUids),
       layerGroups: new Map(indexes.layerGroups.map(([id, uids]) => [id, new Set(uids)])),
+      // Where each keyframe starts, as the engine's timeline has it.
+      timeline: meta.timeline.map(([start, count], index) => ({index, start, count})),
     };
   }
 
@@ -159,11 +215,14 @@ export class Opening {
     if (!this.handle) throw new Error('This opening has been released.');
     const session = this.handle.start_session(JSON.stringify(state));
     this.dispose();
+    // The records the view has yet to fetch are the session's from now on.
+    this.records.holder = session;
     return session;
   }
 
   /** Lets the engine drop the opened document, unless a session keeps it. */
   dispose() {
+    if (this.records.holder === this.handle) this.records.holder = null;
     this.handle?.free();
     this.handle = null;
   }
@@ -200,7 +259,7 @@ export function openBytes(bytes, filename, {engine, layerTimeline, signal} = {})
   engine.grow();
   const refusal = memoryRefusal(engine, bytes.byteLength);
   if (refusal) return Promise.reject(refusal);
-  const job = engine.handle.open_document(bytesOf(bytes), filename, 'file', optionsText({layerTimeline}));
+  const job = engine.handle.open_document(bytesOf(bytes), filename, 'file', optionsText({layerTimeline}, helpersOf(engine)));
   return finish(engine, job, signal);
 }
 
@@ -215,7 +274,7 @@ export function openJson(document, name, {engine, layerTimeline, signal} = {}) {
   const text = jsonBytes(document), refusal = memoryRefusal(engine, text.byteLength);
   if (text.byteLength >= SMALL_JSON_BYTES) engine.grow();
   if (refusal) return Promise.reject(refusal);
-  const job = engine.handle.open_document(text, name ?? 'Untitled animation', 'json', optionsText({layerTimeline}));
+  const job = engine.handle.open_document(text, name ?? 'Untitled animation', 'json', optionsText({layerTimeline}, helpersOf(engine)));
   return finish(engine, job, signal);
 }
 

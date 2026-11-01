@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use styk_doc::fanout::{Failed, Fanout, Task};
 use styk_doc::{Obj, Value};
 use styk_eval::assets::Assets;
 use styk_eval::eval::Prepared;
@@ -140,8 +141,20 @@ impl OpenError {
         OpenError { key: Some(error.message_key.into()), params, code: error.code.map(str::to_string), ..OpenError::decode(error.detail) }
     }
 
+    /// The open was stopped.
+    fn cancelled() -> OpenError {
+        OpenError { code: Some("cancelled".into()), status: Some(499), ..OpenError::decode("The import was cancelled.") }
+    }
+
+    /// A worker that had a piece of the open stopped, so the open cannot be trusted to have seen the whole document.
+    fn worker_lost() -> OpenError {
+        OpenError { key: Some("errors.importClient.theFileImporterStoppedUnexpectedly".into()), code: Some("worker_failed".into()), ..OpenError::decode("A worker of the engine stopped while the document was being opened.") }
+    }
+
     fn from_edit(error: styk_edit::EditError) -> OpenError {
         match error {
+            styk_edit::EditError::Invalid(text) if text == styk_edit::load::CANCELLED => OpenError { stage: OpenStage::Prepare, ..OpenError::cancelled() },
+            styk_edit::EditError::Invalid(text) if text == styk_edit::load::WORKER_LOST => OpenError { stage: OpenStage::Prepare, ..OpenError::worker_lost() },
             styk_edit::EditError::Invalid(text) if text == styk_edit::load::TYPE_ERROR => OpenError { stage: OpenStage::Prepare, ..OpenError::unreadable() },
             styk_edit::EditError::Invalid(text) if text.starts_with("errors.") => OpenError { key: Some(text.clone()), stage: OpenStage::Prepare, ..OpenError::decode(text) },
             other => OpenError { stage: OpenStage::Prepare, ..OpenError::decode(other.to_string()) },
@@ -204,6 +217,98 @@ pub struct OpenedDocument {
     pub version: f64,
     /// The typed views and image atlas of the tree.
     pub typed: Typed,
+    /// Where the open's time went, in milliseconds by the engine's clock: `decode` (the file read into a document), `prepare` (the
+    /// load's checks and normalization), `views` (the typed views), `check` (what was left of the skeleton's checksum when the
+    /// rest was done).
+    pub timings: Vec<(&'static str, f64)>,
+}
+
+/// The engine's workers as the open's [`Fanout`]: the open's own thread and up to `helpers` others take the tasks.
+struct OpenFanout<'a> {
+    engine: &'a Engine,
+    cancel: &'a dyn Fn() -> bool,
+    helpers: usize,
+    /// How many workers had stopped when the open began.
+    lost_before: u32,
+    /// The tasks given to other workers by [`Fanout::spawn`] that have not ended: never more than `helpers`.
+    spawned: Arc<std::sync::atomic::AtomicUsize>,
+    /// The phases the readers marked, with the time each was reached.
+    marks: std::sync::Mutex<Vec<(&'static str, f64)>>,
+}
+
+impl Fanout for OpenFanout<'_> {
+    fn threads(&self) -> usize {
+        self.helpers + 1
+    }
+
+    /// Gives `task` to another worker unless `helpers` of them hold the open's tasks already: the open never takes every worker, so the
+    /// frame on show of another document is prepared meanwhile. A task that is handed back runs on the open's own thread.
+    fn spawn(&self, task: Task) -> Result<(), Task> {
+        use std::sync::atomic::Ordering;
+        if self.spawned.fetch_add(1, Ordering::SeqCst) >= self.helpers {
+            self.spawned.fetch_sub(1, Ordering::SeqCst);
+            return Err(task);
+        }
+        struct Ended(Arc<std::sync::atomic::AtomicUsize>);
+        impl Drop for Ended {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let ended = Ended(self.spawned.clone());
+        self.engine.spawn(move |_| {
+            let _ended = ended;
+            task()
+        });
+        Ok(())
+    }
+
+    fn cancelled(&self) -> bool {
+        (self.cancel)()
+    }
+
+    fn lost(&self) -> bool {
+        self.engine.workers_lost() != self.lost_before
+    }
+
+    fn mark(&self, phase: &'static str) {
+        self.marks.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((phase, self.engine.now()));
+    }
+
+    fn run(&self, tasks: Vec<Task>) -> Result<(), Failed> {
+        let jobs: Vec<styk_formats::files::Job> = tasks.into_iter().map(|task| Box::new(move |_: &dyn Fn() -> bool| task()) as styk_formats::files::Job).collect();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // The workers that hold a task of the open already (the skeleton's checksum) are not asked again.
+        let helpers = self.helpers.saturating_sub(self.spawned.load(std::sync::atomic::Ordering::SeqCst));
+        self.engine.run_together(jobs, &stop, self.cancel, helpers).map_err(|_| Failed)
+    }
+}
+
+/// The phases the readers marked, as the time from the start of the open to each.
+fn steps(fan: &OpenFanout<'_>, began: f64) -> Vec<(&'static str, f64)> {
+    fan.marks.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().map(|(phase, at)| (*phase, at - began)).collect()
+}
+
+/// A file's document, what kind of file it was, its version and the name it is shown under. A native file's skeleton checksum is left
+/// to `check`, to be asked for before the document is believed.
+fn read_file(bytes: &[u8], name: &str, cancel: &dyn Fn() -> bool, fan: &OpenFanout<'_>, check: &mut Option<styk_formats::container::Deferred>) -> Result<(Value, &'static str, f64, String), OpenError> {
+    let extension = extension(name).to_ascii_lowercase();
+    match extension.as_str() {
+        "piv" | "stk" => {
+            let decoded = styk_piv::decode_document_with(bytes, name, cancel, fan).map_err(OpenError::from_codec)?;
+            Ok((decoded.document, decoded.kind, decoded.version, decoded.filename))
+        }
+        other => {
+            let Some(kind) = styk_formats::Kind::from_extension(other) else {
+                return Err(OpenError::decode("Choose a .styk project, .stykmov movieclip, .stkz figure, .piv, or .stk file."));
+            };
+            // The skeleton's checksum is checked beside the rest of the open: see [`styk_formats::container::decode_deferred`].
+            let (document, deferred) = styk_formats::files::open_document_deferred(bytes, kind, fan).map_err(OpenError::from_file)?;
+            *check = Some(deferred);
+            let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
+            Ok((document, kind.name(), version, name.to_string()))
+        }
+    }
 }
 
 /// The extension of a file name, lower case.
@@ -211,74 +316,103 @@ fn extension(name: &str) -> &str {
     name.rsplit_once('.').map_or("", |(_, extension)| extension)
 }
 
-/// A file's document, what kind of file it was, its version and the name it is shown under.
-fn open_file(bytes: &[u8], name: &str, cancel: &dyn Fn() -> bool) -> Result<(Value, &'static str, f64, String), OpenError> {
-    let extension = extension(name).to_ascii_lowercase();
-    match extension.as_str() {
-        "piv" | "stk" => {
-            let decoded = styk_piv::decode_document(bytes, name, cancel).map_err(OpenError::from_codec)?;
-            Ok((decoded.document, decoded.kind, decoded.version, decoded.filename))
-        }
-        other => {
-            let Some(kind) = styk_formats::Kind::from_extension(other) else {
-                return Err(OpenError::decode("Choose a .styk project, .stykmov movieclip, .stkz figure, .piv, or .stk file."));
-            };
-            let document = styk_formats::files::open_document(bytes, kind).map_err(OpenError::from_file)?;
-            let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
-            Ok((document, kind.name(), version, name.to_string()))
-        }
-    }
-}
-
 impl Engine {
     /// Opens a document: decodes it, normalizes it as the editor's load does and builds its typed views. Runs
     /// on the calling thread, for as long as the document takes; `cancel` is polled where the Pivot reader
     /// checks (between frames).
     pub fn open_document(&self, source: OpenSource<'_>, options: OpenOptions, cancel: &dyn Fn() -> bool) -> Result<OpenedDocument, OpenError> {
+        self.open_document_with(source, options, cancel, 0)
+    }
+
+    /// [`Engine::open_document`] with up to `helpers` of the engine's other workers reading, checking and converting the
+    /// document's records beside this thread. The document is the same whatever `helpers` is; so is the refusal.
+    pub fn open_document_with(&self, source: OpenSource<'_>, options: OpenOptions, cancel: &dyn Fn() -> bool, helpers: usize) -> Result<OpenedDocument, OpenError> {
+        let fan = OpenFanout { engine: self, cancel, helpers, lost_before: self.workers_lost(), marks: Default::default(), spawned: Default::default() };
+        let began = self.now();
+        fan.mark("started");
         // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
-        let (OpenSource::File { bytes, .. } | OpenSource::Json { bytes, .. }) = &source else { return self.open_owned(source, options, cancel) };
-        let _memory = styk_alloc::reserve(open_estimate(bytes.len())).map_err(OpenError::out_of_memory)?;
+        let length = match &source {
+            OpenSource::File { bytes, .. } | OpenSource::Json { bytes, .. } => bytes.len(),
+            OpenSource::Owned { bytes, .. } => bytes.len(),
+        };
+        let _memory = styk_alloc::reserve(open_estimate(length)).map_err(OpenError::out_of_memory)?;
+
+        let mut check = None;
         let (document, kind, version, name) = match source {
-            OpenSource::File { bytes, name } => open_file(bytes, name, cancel)?,
+            OpenSource::File { bytes, name } => read_file(bytes, name, cancel, &fan, &mut check)?,
+            OpenSource::Owned { bytes, name } => match extension(name).to_ascii_lowercase().as_str() {
+                "piv" | "stk" => {
+                    let decoded = styk_piv::decode_document_owned(bytes, name, cancel, &fan).map_err(OpenError::from_codec)?;
+                    (decoded.document, decoded.kind, decoded.version, decoded.filename)
+                }
+                _ => read_file(&bytes, name, cancel, &fan, &mut check)?,
+            },
             OpenSource::Json { bytes, name } => {
                 let document = styk_doc::json::parse(bytes).map_err(|_| OpenError::unreadable())?;
                 let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
                 (document, "json", version, name.to_string())
             }
-            OpenSource::Owned { .. } => unreachable!("an owned file is opened by open_owned"),
         };
-        self.prepare_opened(document, kind, version, name, options, cancel)
-    }
-
-    /// [`Engine::open_document`] of a file the open owns.
-    fn open_owned(&self, source: OpenSource<'_>, options: OpenOptions, cancel: &dyn Fn() -> bool) -> Result<OpenedDocument, OpenError> {
-        let OpenSource::Owned { bytes, name } = source else { unreachable!("only an owned file comes here") };
-        let _memory = styk_alloc::reserve(open_estimate(bytes.len())).map_err(OpenError::out_of_memory)?;
-        let extension = extension(name).to_ascii_lowercase();
-        let (document, kind, version, name) = match extension.as_str() {
-            "piv" | "stk" => {
-                let decoded = styk_piv::decode_document_owned(bytes, name, cancel).map_err(OpenError::from_codec)?;
-                (decoded.document, decoded.kind, decoded.version, decoded.filename)
+        let decoded = self.now();
+        let opened = self.prepare_opened(document, kind, version, name, options, cancel, &fan);
+        let prepared = self.now();
+        // A skeleton that does not match its checksum is the file's error, whatever became of the document read from it. A stopped
+        // open does not wait for the check.
+        match check {
+            Some(check) if !opened.as_ref().is_err_and(|error| error.code.as_deref() == Some("cancelled")) => {
+                check.finish(&fan).map_err(|error| OpenError::from_file(styk_formats::files::FileError::from(error)))?;
+                if cancel() {
+                    return Err(OpenError::cancelled());
+                }
+                opened.map(|mut opened| {
+                    opened.timings.insert(0, ("decode", decoded - began));
+                    opened.timings.push(("check", self.now() - prepared));
+                    opened.timings.extend(steps(&fan, began));
+                    opened
+                })
             }
-            _ => open_file(&bytes, name, cancel)?,
-        };
-        self.prepare_opened(document, kind, version, name, options, cancel)
+            _ => opened.map(|mut opened| {
+                opened.timings.insert(0, ("decode", decoded - began));
+                opened.timings.extend(steps(&fan, began));
+                opened
+            }),
+        }
     }
 
-    /// Normalizes a decoded document as the editor's load does and builds its typed views.
-    fn prepare_opened(&self, document: Value, kind: &'static str, version: f64, name: String, options: OpenOptions, cancel: &dyn Fn() -> bool) -> Result<OpenedDocument, OpenError> {
+    /// The tail of an open: the document read, normalized and made into typed views.
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_opened(&self, document: Value, kind: &'static str, version: f64, name: String, options: OpenOptions, cancel: &dyn Fn() -> bool, fan: &OpenFanout<'_>) -> Result<OpenedDocument, OpenError> {
         if cancel() {
-            return Err(OpenError { code: Some("cancelled".into()), status: Some(499), ..OpenError::decode("The import was cancelled.") });
+            return Err(OpenError::cancelled());
         }
-        let mut indexes = styk_edit::load::prepare_for_editor(document, options.layer_timeline).map_err(OpenError::from_edit)?;
+        let started = self.now();
+        let mut indexes = styk_edit::load::prepare_for_editor_with(document, options.layer_timeline, fan).map_err(OpenError::from_edit)?;
+        let prepared = self.now();
+        if cancel() {
+            return Err(OpenError::cancelled());
+        }
         let tree = std::mem::replace(&mut indexes.report, Value::Null);
         let shown = tree.path(&["_styk", "name"]).and_then(Value::as_str).unwrap_or("").to_string();
         let mut loader = Loader::new();
-        let converted = loader.document(&tree, &shown).map_err(|error| OpenError { stage: OpenStage::Prepare, ..OpenError::decode(error.to_string()) })?;
+        let converted = loader.document_with(&tree, &shown, fan).map_err(|error| {
+            // A load that was stopped, or whose worker was lost, says so rather than what it found on the way.
+            if cancel() {
+                OpenError::cancelled()
+            } else if fan.lost() {
+                OpenError::worker_lost()
+            } else {
+                OpenError { stage: OpenStage::Prepare, ..OpenError::decode(error.to_string()) }
+            }
+        })?;
+        if cancel() {
+            return Err(OpenError::cancelled());
+        }
         let assets = Arc::new(Assets::build(&converted));
-        let prepared = Arc::new(Prepared::new(Arc::new(converted)));
+        let prepared_views = Arc::new(Prepared::new(Arc::new(converted)));
         let lineage = self.inner.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Ok(OpenedDocument { tree: tree.clone(), indexes, name, kind, version, typed: Typed { tree, loader, prepared, assets, lineage } })
+        let views = self.now() - prepared;
+        let prepare = prepared - started;
+        Ok(OpenedDocument { tree: tree.clone(), indexes, name, kind, version, typed: Typed { tree, loader, prepared: prepared_views, assets, lineage }, timings: vec![("prepare", prepare), ("views", views)] })
     }
 
     /// Makes the document that `typed` belongs to the engine's document, at `revision`, with `tree` as it

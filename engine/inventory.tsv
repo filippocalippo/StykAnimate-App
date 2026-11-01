@@ -47,6 +47,7 @@ desktop/appimage-updater.cjs	platform	-	stays	Electron shell and services
 desktop/audio-service.cjs	platform	-	stays	Electron shell and services
 desktop/backend.cjs	platform	styk-formats::service	removed	started the Python codec sidecar; the desktop runs styk-codec-wasm in the page (6079 bytes)
 desktop/file-streams.cjs	platform	-	stays	Electron shell and services
+desktop/rename-retry.cjs	platform	-	stays	Electron shell and services
 desktop/font-service.cjs	platform	-	stays	Electron shell and services
 desktop/gpu-switches.cjs	platform	-	stays	Electron shell and services
 desktop/library-store.cjs	platform	-	stays	Electron shell and services

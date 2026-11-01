@@ -8,6 +8,47 @@ use super::*;
 use crate::doc::DrawingTiles;
 use styk_draw::{DrawList, F_DRAWING, K_IMAGE};
 
+/// One slot's contents as a test sees a write: a cell of a run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Upload {
+    page: u32,
+    x: u32,
+    y: u32,
+    rgba: Vec<u8>,
+}
+
+/// The cells of runs, `(x, y)` being the corner of each tile itself.
+fn cells_of(runs: Vec<Run>) -> Vec<Upload> {
+    let mut cells = Vec::new();
+    for run in runs {
+        let row = (CELL * 4) as usize;
+        for cell in 0..run.cells as usize {
+            let mut rgba = Vec::new();
+            for line in 0..CELL as usize {
+                let start = (line * run.cells as usize + cell) * row;
+                rgba.extend_from_slice(&run.rgba[start..start + row]);
+            }
+            cells.push(Upload { page: run.page, x: run.x + BORDER + cell as u32 * CELL, y: run.y + BORDER, rgba });
+        }
+    }
+    cells
+}
+
+fn update(cels: &mut LiveCels, id: &str, float: bool, changes: Vec<(Coord, Option<Vec<u8>>)>) -> Result<Vec<Upload>, Full> {
+    cels.update(id, float, changes)?;
+    Ok(cells_of(cels.take_runs()))
+}
+
+fn set_resident(cels: &mut LiveCels, levels: Levels) -> Vec<Upload> {
+    cels.set_resident(levels);
+    cells_of(cels.take_runs())
+}
+
+fn rewrite_all(cels: &mut LiveCels) -> Vec<Upload> {
+    cels.rewrite_all();
+    cells_of(cels.take_runs())
+}
+
 /// A deterministic stream of numbers.
 struct Noise(u64);
 impl Noise {
@@ -95,7 +136,7 @@ fn a_live_cel_fills_the_slots_the_published_cel_would() {
     }
     let mut cels = LiveCels::default();
     let mut atlas = Atlas::default();
-    atlas.write(cels.update("a", false, tiles.iter().map(|(&c, p)| (c, Some(p.clone()))).collect()).unwrap());
+    atlas.write(update(&mut cels, "a", false, tiles.iter().map(|(&c, p)| (c, Some(p.clone()))).collect()).unwrap());
     matches_published(&cels, &atlas, "a", &tiles);
     assert_eq!(cels.stats().tiles, tiles.len());
     assert_eq!(cels.pages(), 1);
@@ -128,7 +169,7 @@ fn updates_in_pieces_end_where_one_update_would() {
                 }
             }
         }
-        atlas.write(cels.update("a", false, changes).unwrap());
+        atlas.write(update(&mut cels, "a", false, changes).unwrap());
         if !tiles.is_empty() {
             matches_published(&cels, &atlas, "a", &tiles);
         }
@@ -141,16 +182,16 @@ fn a_tile_written_again_with_the_same_pixels_uploads_nothing() {
     let mut noise = Noise(3);
     let pixels = tile(&mut noise);
     let mut cels = LiveCels::default();
-    assert!(!cels.update("a", false, vec![((0, 0), Some(pixels.clone()))]).unwrap().is_empty());
-    assert!(cels.update("a", false, vec![((0, 0), Some(pixels))]).unwrap().is_empty());
+    assert!(!update(&mut cels, "a", false, vec![((0, 0), Some(pixels.clone()))]).unwrap().is_empty());
+    assert!(update(&mut cels, "a", false, vec![((0, 0), Some(pixels))]).unwrap().is_empty());
 }
 
 #[test]
 fn a_changed_tile_rewrites_its_neighbours_borders_at_every_level() {
     let mut noise = Noise(5);
     let mut cels = LiveCels::default();
-    cels.update("a", false, vec![((0, 0), Some(tile(&mut noise))), ((1, 0), Some(tile(&mut noise)))]).unwrap();
-    let uploads = cels.update("a", false, vec![((1, 0), Some(tile(&mut noise)))]).unwrap();
+    update(&mut cels, "a", false, vec![((0, 0), Some(tile(&mut noise))), ((1, 0), Some(tile(&mut noise)))]).unwrap();
+    let uploads = update(&mut cels, "a", false, vec![((1, 0), Some(tile(&mut noise)))]).unwrap();
     assert!(uploads.len() > 9, "{} slots rewritten", uploads.len());
     let distinct: HashSet<_> = uploads.iter().map(|u| (u.page, u.x, u.y)).collect();
     assert_eq!(distinct.len(), uploads.len(), "a slot is written once");
@@ -162,13 +203,13 @@ fn released_slots_are_reused_and_a_full_pool_drops_the_cel() {
     let mut noise = Noise(9);
     // One isolated tile draws its nine neighbourhood at each of nine levels: 81 slots.
     let mut cels = LiveCels { pool: Pool { capacity: 40, ..Pool::default() }, ..LiveCels::default() };
-    assert_eq!(cels.update("a", false, vec![((0, 0), Some(tile(&mut noise)))]), Err(Full));
+    assert_eq!(update(&mut cels, "a", false, vec![((0, 0), Some(tile(&mut noise)))]), Err(Full));
     assert!(cels.get("a").is_none(), "a cel that does not fit is dropped whole");
     let mut cels = LiveCels { pool: Pool { capacity: 100, ..Pool::default() }, ..LiveCels::default() };
-    cels.update("a", false, vec![((0, 0), Some(tile(&mut noise)))]).unwrap();
+    update(&mut cels, "a", false, vec![((0, 0), Some(tile(&mut noise)))]).unwrap();
     assert_eq!(cels.stats().slots, 81);
     // Moving the tile far away frees the old slots and takes them again.
-    cels.update("a", false, vec![((0, 0), None), ((100, 100), Some(tile(&mut noise)))]).unwrap();
+    update(&mut cels, "a", false, vec![((0, 0), None), ((100, 100), Some(tile(&mut noise)))]).unwrap();
     assert_eq!(cels.stats().slots, 81);
     assert_eq!(cels.pages(), 1);
     cels.drop_cel("a");
@@ -179,8 +220,8 @@ fn released_slots_are_reused_and_a_full_pool_drops_the_cel() {
 fn the_floating_selection_has_its_own_layer_and_goes_with_the_cel() {
     let mut noise = Noise(13);
     let mut cels = LiveCels::default();
-    cels.update("a", false, vec![((0, 0), Some(tile(&mut noise)))]).unwrap();
-    cels.update("a", true, vec![((2, 2), Some(tile(&mut noise)))]).unwrap();
+    update(&mut cels, "a", false, vec![((0, 0), Some(tile(&mut noise)))]).unwrap();
+    update(&mut cels, "a", true, vec![((2, 2), Some(tile(&mut noise)))]).unwrap();
     cels.show("a", true, true);
     let cel = cels.get("a").unwrap();
     assert!(cel.show_base && cel.show_float);
@@ -199,9 +240,9 @@ fn every_slot_is_written_again_after_the_atlas_is_allocated_anew() {
     let mut cels = LiveCels::default();
     let mut atlas = Atlas::default();
     let tiles: HashMap<Coord, Vec<u8>> = [(0, 0), (1, 2), (-3, 1)].into_iter().map(|c| (c, tile(&mut noise))).collect();
-    atlas.write(cels.update("a", false, tiles.iter().map(|(&c, p)| (c, Some(p.clone()))).collect()).unwrap());
+    atlas.write(update(&mut cels, "a", false, tiles.iter().map(|(&c, p)| (c, Some(p.clone()))).collect()).unwrap());
     let mut fresh = Atlas::default();
-    fresh.write(cels.uploads());
+    fresh.write(rewrite_all(&mut cels));
     assert!(atlas.0 == fresh.0);
     matches_published(&cels, &fresh, "a", &tiles);
 }
@@ -253,9 +294,9 @@ fn only_the_resident_levels_are_written_and_the_others_arrive_exact_when_called_
     let mut full = Atlas::default();
     let mut writes = (0, 0);
     edit_rounds(&mut noise, 30, &mut tiles, |changes| {
-        let uploads = lazy.update("a", false, changes.clone()).unwrap();
+        let uploads = update(&mut lazy, "a", false, changes.clone()).unwrap();
         assert_eq!(levels_written(&lazy.get("a").unwrap().base, &uploads) & !0b11, 0, "a level that is not resident was written");
-        let all = every.update("a", false, changes).unwrap();
+        let all = update(&mut every, "a", false, changes).unwrap();
         writes = (writes.0 + uploads.len(), writes.1 + all.len());
         atlas.write(uploads);
         full.write(all);
@@ -270,7 +311,7 @@ fn only_the_resident_levels_are_written_and_the_others_arrive_exact_when_called_
         }
     }
     // A view that calls for more levels gets them, equal to the published decode's.
-    let more = lazy.set_resident(ALL_LEVELS & !(1 << 3));
+    let more = set_resident(&mut lazy, ALL_LEVELS & !(1 << 3));
     assert_eq!(levels_written(&lazy.get("a").unwrap().base, &more) & (1 << 3), 0, "level 3 was not asked for");
     atlas.write(more);
     let (levels, expected) = published(&tiles);
@@ -284,9 +325,9 @@ fn only_the_resident_levels_are_written_and_the_others_arrive_exact_when_called_
         }
     }
     // Level 3 arrives when asked for, and nothing is stale after.
-    atlas.write(lazy.set_resident(ALL_LEVELS));
+    atlas.write(set_resident(&mut lazy, ALL_LEVELS));
     matches_published(&lazy, &atlas, "a", &tiles);
-    assert!(lazy.set_resident(0).is_empty() && lazy.set_resident(ALL_LEVELS).is_empty());
+    assert!(set_resident(&mut lazy, 0).is_empty() && set_resident(&mut lazy, ALL_LEVELS).is_empty());
 }
 
 #[test]
@@ -296,10 +337,10 @@ fn a_level_that_came_late_holds_what_later_edits_changed() {
     let mut cels = LiveCels::new(0b1);
     let mut atlas = Atlas::default();
     // Levels left stale while tiles come and go and slots are reused, then asked for in turn.
-    edit_rounds(&mut noise, 12, &mut tiles, |changes| atlas.write(cels.update("a", false, changes).unwrap()));
-    atlas.write(cels.set_resident(0b11));
-    edit_rounds(&mut noise, 12, &mut tiles, |changes| atlas.write(cels.update("a", false, changes).unwrap()));
-    atlas.write(cels.set_resident(0b1111));
+    edit_rounds(&mut noise, 12, &mut tiles, |changes| atlas.write(update(&mut cels, "a", false, changes).unwrap()));
+    atlas.write(set_resident(&mut cels, 0b11));
+    edit_rounds(&mut noise, 12, &mut tiles, |changes| atlas.write(update(&mut cels, "a", false, changes).unwrap()));
+    atlas.write(set_resident(&mut cels, 0b1111));
     if !tiles.is_empty() {
         let view = LiveView { cels: &cels, base: 3 };
         let layer = &cels.get("a").unwrap().base;
@@ -317,12 +358,12 @@ fn a_new_atlas_gets_the_resident_levels_at_once_and_the_others_when_called_for()
     let mut noise = Noise(31);
     let tiles: HashMap<Coord, Vec<u8>> = [(0, 0), (1, 2), (-3, 1), (4, 4)].into_iter().map(|c| (c, tile(&mut noise))).collect();
     let mut cels = LiveCels::new(0b11);
-    cels.update("a", false, tiles.iter().map(|(&c, p)| (c, Some(p.clone()))).collect()).unwrap();
+    update(&mut cels, "a", false, tiles.iter().map(|(&c, p)| (c, Some(p.clone()))).collect()).unwrap();
     let mut fresh = Atlas::default();
-    let uploads = cels.uploads();
+    let uploads = rewrite_all(&mut cels);
     assert_eq!(levels_written(&cels.get("a").unwrap().base, &uploads) & !0b11, 0);
     fresh.write(uploads);
-    fresh.write(cels.set_resident(ALL_LEVELS));
+    fresh.write(set_resident(&mut cels, ALL_LEVELS));
     matches_published(&cels, &fresh, "a", &tiles);
 }
 
@@ -349,44 +390,36 @@ fn the_levels_shown_follow_the_scale_and_ask_for_the_level_above() {
     assert_eq!(at(0.5) & 0b111, 0b111);
 }
 
-/// The texels a set of runs leaves in a page, by cell.
-fn written_by_runs(runs: &[Run]) -> HashMap<(u32, u32, u32), Vec<u8>> {
-    let mut cells = HashMap::new();
-    for run in runs {
-        let row = (CELL * 4) as usize;
-        for cell in 0..run.cells as usize {
-            let mut rgba = Vec::new();
-            for line in 0..CELL as usize {
-                let start = (line * run.cells as usize + cell) * row;
-                rgba.extend_from_slice(&run.rgba[start..start + row]);
-            }
-            cells.insert((run.page, run.x + BORDER + cell as u32 * CELL, run.y + BORDER), rgba);
-        }
-    }
-    cells
-}
-
 #[test]
-fn coalesced_writes_leave_the_texels_of_the_uploads_in_order() {
+fn slots_built_once_for_a_frame_leave_the_texels_of_writing_after_every_call() {
     let mut noise = Noise(5);
     let mut tiles: HashMap<Coord, Vec<u8>> = HashMap::new();
-    let mut cels = LiveCels::default();
-    let mut one_by_one = Atlas::default();
-    let mut batched = Vec::new();
-    let mut single = 0;
+    let mut eager = LiveCels::default();
+    let mut deferred = LiveCels::default();
+    let mut every_call = Atlas::default();
+    let mut written = 0;
     edit_rounds(&mut noise, 40, &mut tiles, |changes| {
-        let uploads = cels.update("a", false, changes).unwrap();
-        single += uploads.len();
-        batched.extend(uploads.clone());
-        one_by_one.write(uploads);
+        let uploads = update(&mut eager, "a", false, changes.clone()).unwrap();
+        written += uploads.len();
+        every_call.write(uploads);
+        // The slots are freed, taken again and rewritten across the calls; nothing is built until the frame.
+        deferred.update("a", false, changes).unwrap();
     });
-    let runs = coalesce(batched);
-    let written = written_by_runs(&runs);
-    assert!(written == one_by_one.0, "the runs write what the uploads wrote, the last write of a slot winning");
-    let cells: u32 = runs.iter().map(|run| run.cells).sum();
-    assert_eq!(cells as usize, written.len(), "a slot is written once");
-    assert!((cells as usize) < single, "the slots rewritten by several calls are written once ({cells} of {single})");
-    assert!(runs.len() < cells as usize, "neighbours in a row are one write ({} for {cells} slots)", runs.len());
+    let runs = deferred.take_runs();
+    let mut frame = Atlas::default();
+    let cells = cells_of(runs.clone());
+    let slots = cells.len();
+    frame.write(cells);
+    // Every slot a call ever wrote and still holds is as the calls left it; a slot given back may hold anything.
+    let held = |cels: &LiveCels| -> HashSet<(u32, u32, u32)> {
+        let layer = &cels.get("a").unwrap().base;
+        (0..=MAX_LEVEL as usize).flat_map(|level| layer.drawn(level).iter().map(move |&coord| (level, coord))).map(|(level, coord)| place(layer.slot(level, coord).unwrap())).collect()
+    };
+    for key in held(&deferred) {
+        assert!(frame.0.get(&key) == every_call.0.get(&key), "slot {key:?} was built from the pixels as they were last");
+    }
+    assert!(slots < written, "a slot several calls changed is built once ({slots} of {written})");
+    assert!(runs.len() < slots, "neighbours in a row are one write ({} for {slots} slots)", runs.len());
 }
 
 #[test]
@@ -395,14 +428,15 @@ fn slots_given_back_are_taken_lowest_first_and_a_row_becomes_one_write() {
     let mut cels = LiveCels::default();
     // A row of six tiles: its slots are side by side in the page.
     let row: Vec<(Coord, Option<Vec<u8>>)> = (0..6).map(|x| ((x, 0), Some(tile(&mut noise)))).collect();
-    let runs = coalesce(cels.update("a", false, row).unwrap());
+    cels.update("a", false, row).unwrap();
+    let runs = cels.take_runs();
     let widest = runs.iter().map(|run| run.cells).max().unwrap();
     assert!(widest >= 8, "a row of tiles with their halos is written as a run ({widest} cells)");
     // Removing them and drawing others again takes the same low slots, not scattered ones.
     let before = cels.stats().slots;
-    cels.update("a", false, (0..6).map(|x| ((x, 0), None)).collect()).unwrap();
+    update(&mut cels, "a", false, (0..6).map(|x| ((x, 0), None)).collect()).unwrap();
     assert_eq!(cels.stats().slots, 0);
-    cels.update("a", false, (10..16).map(|x| ((x, 7), Some(tile(&mut noise)))).collect()).unwrap();
+    update(&mut cels, "a", false, (10..16).map(|x| ((x, 7), Some(tile(&mut noise)))).collect()).unwrap();
     assert_eq!(cels.stats().slots, before);
     assert_eq!(cels.pages(), 1, "the slots given back are used before new pages");
 }
@@ -457,5 +491,197 @@ fn reduced_tiles_equal_the_formula_for_opaque_translucent_and_empty_texels() {
     let fast: HashMap<Coord, Vec<u8>, CoordBuild> = below.iter().map(|(c, p)| (*c, p.clone())).collect();
     for coord in [(0, 0), (1, 0), (-1, -1), (0, -1)] {
         assert_eq!(crate::drawing::down_tile(&fast, coord.0, coord.1), reduced_by_the_formula(&below, coord.0, coord.1), "reduced tile {coord:?}");
+    }
+}
+
+#[test]
+fn a_neighbour_is_rewritten_only_when_the_edge_it_copies_changed() {
+    let mut noise = Noise(31);
+    let mut cels = LiveCels::default();
+    let base = tile(&mut noise);
+    update(&mut cels, "a", false, vec![((0, 0), Some(base.clone()))]).unwrap();
+    let level0 = |cels: &LiveCels, written: &[Upload], at: Coord| {
+        let (page, x, y) = place(cels.get("a").unwrap().base.slot(0, at).expect("a drawn tile has a slot"));
+        written.iter().any(|u| (u.page, u.x, u.y) == (page, x, y))
+    };
+    let texel = |x: usize, y: usize| (y * TILE as usize + x) * 4;
+    // A texel well inside the tile: its own slot only (at level 0).
+    let mut inside = base.clone();
+    inside[texel(30, 30)..texel(30, 30) + 4].copy_from_slice(&[9, 8, 7, 255]);
+    let written = update(&mut cels, "a", false, vec![((0, 0), Some(inside.clone()))]).unwrap();
+    assert!(level0(&cels, &written, (0, 0)));
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            assert!((dx, dy) == (0, 0) || !level0(&cels, &written, (dx, dy)), "the neighbour at ({dx}, {dy}) holds nothing of that texel");
+        }
+    }
+    // A texel on the right edge: the tile to its right copies it, the others do not.
+    let mut edge = inside.clone();
+    edge[texel(63, 30)..texel(63, 30) + 4].copy_from_slice(&[1, 2, 3, 255]);
+    let written = update(&mut cels, "a", false, vec![((0, 0), Some(edge))]).unwrap();
+    assert!(level0(&cels, &written, (0, 0)) && level0(&cels, &written, (1, 0)));
+    assert!(!level0(&cels, &written, (-1, 0)) && !level0(&cels, &written, (0, 1)) && !level0(&cels, &written, (1, 1)), "only the neighbour beside that edge changes");
+}
+
+#[test]
+fn the_picture_budget_follows_the_clock_and_returns_to_the_full_amount_by_itself() {
+    const FULL: usize = 8 << 20;
+    let mut noise = Noise(8);
+    let mut cels = LiveCels::default();
+    assert_eq!(cels.picture_budget(0.0, FULL), FULL, "nothing is held or has changed");
+    update(&mut cels, "a", false, vec![((0, 0), Some(tile(&mut noise)))]).unwrap();
+    cels.changed(1000.0);
+    assert_eq!(cels.picture_budget(1000.0, FULL), CHANGING_PICTURE_BYTES, "a cel is changing");
+    assert_eq!(cels.picture_budget(1000.0 + CHANGING_MS - 1.0, FULL), CHANGING_PICTURE_BYTES);
+    assert_eq!(cels.picture_budget(1000.0 + CHANGING_MS, FULL), SETTLING_PICTURE_BYTES, "and then a moment of smaller bursts");
+    // No frame has to be drawn for it to end: the clock alone does.
+    assert_eq!(cels.picture_budget(1000.0 + CHANGING_MS + SETTLING_MS, FULL), FULL, "a held, quiet cel (Draw left, a jump, playback) loads at the full amount");
+    assert_eq!(cels.picture_budget(1.0e9, FULL), FULL);
+    // A cel that changes again starts over; a document that lets go of its cels is not slowed at all.
+    cels.changed(5000.0);
+    assert_eq!(cels.picture_budget(5100.0, FULL), CHANGING_PICTURE_BYTES);
+    cels.drop_cel("a");
+    assert_eq!(cels.picture_budget(5100.0, FULL), FULL);
+    // The caller's own limit is never raised.
+    cels.update("a", false, vec![((0, 0), Some(tile(&mut noise)))]).unwrap();
+    cels.changed(6000.0);
+    assert_eq!(cels.picture_budget(6000.0, 100), 100);
+}
+
+/// A copy of `pixels` with a `size` × `size` block at `(x, y)` painted: opaque, translucent or cleared.
+fn dabbed(pixels: &[u8], x: usize, y: usize, size: usize, noise: &mut Noise) -> Vec<u8> {
+    let mut out = pixels.to_vec();
+    let (t, kind) = (TILE as usize, noise.next() % 3);
+    let color = [noise.next() as u8, noise.next() as u8, noise.next() as u8, match kind { 0 => 255, 1 => 1 + (noise.next() % 254) as u8, _ => 0 }];
+    for row in y..(y + size).min(t) {
+        for column in x..(x + size).min(t) {
+            out[(row * t + column) * 4..][..4].copy_from_slice(&color);
+        }
+    }
+    out
+}
+
+#[test]
+fn small_edits_leave_every_level_as_the_published_decode_makes_it() {
+    let mut noise = Noise(64);
+    let mut tiles: HashMap<Coord, Vec<u8>> = HashMap::new();
+    let mut cels = LiveCels::default();
+    let mut atlas = Atlas::default();
+    let first: Vec<(Coord, Option<Vec<u8>>)> = [(0, 0), (1, 0), (0, 1), (1, 1), (-1, 0), (2, 3), (5, 5)].into_iter().map(|c| (c, Some(tile(&mut noise)))).collect();
+    for (coord, pixels) in &first {
+        tiles.insert(*coord, pixels.clone().unwrap());
+    }
+    atlas.write(update(&mut cels, "a", false, first).unwrap());
+    matches_published(&cels, &atlas, "a", &tiles);
+    for round in 0..60 {
+        let coord = [(0, 0), (1, 0), (0, 1), (1, 1), (-1, 0), (2, 3), (5, 5), (3, 3)][(noise.next() % 8) as usize];
+        let (x, y, size) = ((noise.next() % 64) as usize, (noise.next() % 64) as usize, 1 + (noise.next() % 9) as usize);
+        let changes = match (tiles.get(&coord), noise.next() % 9) {
+            (Some(_), 0) => {
+                tiles.remove(&coord);
+                vec![(coord, None)]
+            }
+            (Some(pixels), _) => {
+                let next = dabbed(pixels, x, y, size, &mut noise);
+                tiles.insert(coord, next.clone());
+                vec![(coord, Some(next))]
+            }
+            (None, _) => {
+                let next = dabbed(&vec![0u8; TILE_BYTES], x, y, size, &mut noise);
+                tiles.insert(coord, next.clone());
+                vec![(coord, Some(next))]
+            }
+        };
+        atlas.write(update(&mut cels, "a", false, changes).unwrap());
+        if tiles.values().any(|pixels| visible(pixels)) {
+            matches_published(&cels, &atlas, "a", &tiles.iter().filter(|(_, pixels)| visible(pixels)).map(|(c, p)| (*c, p.clone())).collect());
+        }
+        let _ = round;
+    }
+}
+
+#[test]
+fn a_reduction_made_again_only_where_the_tiles_below_changed_equals_the_whole_one() {
+    use crate::drawing::{changed_rect, down_tile, down_tile_patch};
+    let mut noise = Noise(90);
+    for trial in 0..40 {
+        let mut below: HashMap<Coord, Vec<u8>> = HashMap::new();
+        for coord in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            if noise.next() % 4 != 0 {
+                below.insert(coord, tile(&mut noise));
+            }
+        }
+        if below.is_empty() {
+            continue;
+        }
+        let previous = down_tile(&below, 0, 0).expect("a child exists");
+        // One child changes in a small block (or is removed, or appears).
+        let coord = [(0, 0), (1, 0), (0, 1), (1, 1)][(noise.next() % 4) as usize];
+        let before = below.get(&coord).cloned();
+        let after = match (noise.next() % 6, &before) {
+            (0, Some(_)) => None,
+            (_, Some(pixels)) => Some(dabbed(pixels, (noise.next() % 64) as usize, (noise.next() % 64) as usize, 1 + (noise.next() % 12) as usize, &mut noise)),
+            (_, None) => Some(dabbed(&vec![0u8; TILE_BYTES], (noise.next() % 64) as usize, (noise.next() % 64) as usize, 1 + (noise.next() % 12) as usize, &mut noise)),
+        };
+        match &after {
+            Some(pixels) => below.insert(coord, pixels.clone()),
+            None => below.remove(&coord),
+        };
+        let Some([x0, y0, x1, y1]) = changed_rect(before.as_deref(), after.as_deref()) else { continue };
+        let (ox, oy) = ((coord.0 as usize) * 32, (coord.1 as usize) * 32);
+        let rect = [ox + x0 / 2, oy + y0 / 2, ox + x1.div_ceil(2), oy + y1.div_ceil(2)];
+        let whole = down_tile(&below, 0, 0);
+        let patched = down_tile_patch(&below, 0, 0, &previous, rect);
+        assert!(whole.as_deref() == Some(patched.as_slice()) || (whole.is_none() && patched.iter().all(|&byte| byte == 0)), "trial {trial}: the patched reduction equals the whole one");
+    }
+}
+
+#[test]
+fn warming_the_levels_beside_the_shown_ones_in_slices_leaves_a_zoom_nothing_to_write() {
+    let mut noise = Noise(17);
+    let mut tiles: HashMap<Coord, Vec<u8>> = HashMap::new();
+    let mut cels = LiveCels::new(0b11);
+    let mut atlas = Atlas::default();
+    edit_rounds(&mut noise, 20, &mut tiles, |changes| atlas.write(update(&mut cels, "a", false, changes).unwrap()));
+    // The cel was edited while only levels 0 and 1 were written: the others hold what they held.
+    assert_eq!(cels.warm(0, 100), 0, "nothing is shown, nothing is beside it");
+    let mut left = usize::MAX;
+    let mut slices = 0;
+    let mut written = 0;
+    while left > 0 {
+        left = cels.warm(0b11, 40);
+        let runs = cells_of(cels.take_runs());
+        assert!(runs.len() <= 40, "a slice is at most what it was asked for");
+        written += runs.len();
+        atlas.write(runs);
+        slices += 1;
+        assert!(slices < 500);
+    }
+    assert!(slices > 1 && written > 0, "the stale slots took several slices ({slices}, {written} slots)");
+    // Level 2 is beside the shown levels and now current: a zoom to it writes nothing.
+    assert!(set_resident(&mut cels, 0b111).is_empty(), "nothing is left stale at the level the view zooms to");
+    // And whatever is finally resident, every level is as the published decode makes it.
+    atlas.write(set_resident(&mut cels, ALL_LEVELS));
+    if !tiles.is_empty() {
+        matches_published(&cels, &atlas, "a", &tiles);
+    }
+}
+
+#[test]
+fn a_warmed_level_is_written_again_when_its_tiles_change_and_it_is_not_shown() {
+    let mut noise = Noise(18);
+    let mut cels = LiveCels::new(0b1);
+    let mut atlas = Atlas::default();
+    let mut tiles: HashMap<Coord, Vec<u8>> = HashMap::new();
+    edit_rounds(&mut noise, 8, &mut tiles, |changes| atlas.write(update(&mut cels, "a", false, changes).unwrap()));
+    while cels.warm(0b1, 1000) > 0 {
+        atlas.write(cells_of(cels.take_runs()));
+    }
+    atlas.write(cells_of(cels.take_runs()));
+    edit_rounds(&mut noise, 8, &mut tiles, |changes| atlas.write(update(&mut cels, "a", false, changes).unwrap()));
+    // Levels changed after the warm-up are stale again, and arrive when called for.
+    atlas.write(set_resident(&mut cels, ALL_LEVELS));
+    if !tiles.is_empty() {
+        matches_published(&cels, &atlas, "a", &tiles);
     }
 }

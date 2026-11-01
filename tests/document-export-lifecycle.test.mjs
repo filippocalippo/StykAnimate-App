@@ -147,6 +147,61 @@ test('a worker that is inside the engine when its export is cancelled is not end
   assert.equal(workers[0].terminated, true);
 });
 
+for (const [threads, lent] of [[1, 0], [2, 1], [4, 3], [8, 3]]) test(`a save on an engine of ${threads} thread(s) is handed ${lent} of them to borrow`, async t => {
+  const {workers, exporter} = environment(t, {engine: {handle: registeredEngine().handle, join: {}, workers: threads}});
+  const saving = exporter.export(project());
+  await until(() => workers[0]?.messages.at(-1)?.operation === 'export');
+  assert.equal(workers[0].messages.at(-1).project.helpers, lent);
+  workers[0].finish(); await saving;
+});
+
+test('a save thread that traps gives back its memory by name, and the person reads the localized message, not the engine message', async t => {
+  const released = [], handle = {address: () => 0, release_reservation: token => released.push(token)};
+  const {workers, exporter} = environment(t, {engine: {handle, join: {}, workers: 4}});
+  const saving = exporter.export(project());
+  const rejected = assert.rejects(saving, error => error.messageKey === 'errors.documentExport.theDocumentExportWorkerStopped' && !/unreachable/.test(error.message) && /unreachable/.test(error.cause?.message ?? ''));
+  await until(() => workers[0]?.messages.at(-1)?.operation === 'export');
+  const {reservation} = workers[0].messages.at(-1).project;
+  assert.ok(Number.isInteger(reservation) && reservation > 0);
+  workers[0].dispatchEvent(Object.assign(new Event('error', {cancelable: true}), {message: 'RuntimeError: unreachable'}));
+  await rejected;
+  assert.deepEqual(released, [reservation], 'the engine was told which reservation to give back');
+  // A save that is cancelled, or fails in an ordinary way, leaves its reservation to the worker, which gives it back itself.
+  const next = exporter.export(project());
+  await until(() => workers[1]?.messages.at(-1)?.operation === 'export');
+  workers[1].finish(); await next;
+  assert.deepEqual(released, [reservation]);
+  assert.notEqual(workers[1].messages.at(-1).project.reservation, reservation, 'each save has a name of its own');
+});
+
+test('a save the worker reports as cut off by a trap gives its memory back; one the engine refused has nothing left to give, and naming it again is harmless', async t => {
+  for (const trapped of [true, false]) {
+    const released = [], handle = {address: () => 0, release_reservation: token => released.push(token)};
+    const {workers, exporter} = environment(t, {engine: {handle, join: {}, workers: 4}});
+    const saving = exporter.export(project());
+    const rejected = assert.rejects(saving, error => trapped
+      ? error.messageKey === 'errors.documentExport.theDocumentExportWorkerStopped' && /unreachable/.test(error.cause?.message)
+      : /The engine refused this/.test(error.message) && !error.cause);
+    await until(() => workers[0]?.messages.at(-1)?.operation === 'export');
+    const {reservation} = workers[0].messages.at(-1).project;
+    workers[0].reply(workers[0].messages.at(-1).id, {ok: false, error: {message: trapped ? 'unreachable' : 'The engine refused this.', trapped}});
+    await rejected;
+    assert.deepEqual(released, [reservation], trapped ? 'a trap never dropped its reservation' : 'harmless: the refusal dropped it');
+    exporter.dispose();
+  }
+});
+
+test('a save that is cancelled leaves its reservation to the worker that is still finishing it', async t => {
+  const released = [], handle = {address: () => 0, release_reservation: token => released.push(token)};
+  const {workers, exporter} = environment(t, {engine: {handle, join: {}, workers: 4}});
+  const controller = new AbortController(), saving = exporter.export(project(), {signal: controller.signal});
+  const rejected = assert.rejects(saving, {name: 'AbortError'});
+  await until(() => workers[0]?.messages.at(-1)?.operation === 'export');
+  controller.abort();
+  await rejected;
+  assert.deepEqual(released, [], 'the worker has not stopped using it');
+});
+
 test('queued revision changes reject before snapshot and disposal cancels active and waiting requests', async t => {
   const {workers, exporter} = environment(t);
   const report = project(), first = exporter.export(report);

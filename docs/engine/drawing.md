@@ -58,7 +58,8 @@ weight the interface measured. `src/engine/engine-owner-drawing.mjs` is the inte
   names the record the history is about to make (for the first stroke on a blank exposure or on a v1 cel it writes the
   cel's definition and key into the layer sheet in the same entry; the call carries the cel's figure and object, not
   its pixels), then the tiles apply to the store, the history tracks the record, and the cel's definition (revision,
-  bounds) is sent to the session (`@publishCel`), all before the call's events reach the interface. A commit the session
+  bounds) is sent to the session (`@celState`: those two members, not the definition with its encoded tiles, which
+  only a publication sends again with `@publishCel`), all before the call's events reach the interface. A commit the session
   refuses leaves no record; the pixels stay with the caller. A commit whose tiles the store cannot apply after the
   session recorded the entry is taken back (`@retractDrawing`: the entry, with the cel it created, leaves the history
   as the last entry; the redo branch its recording dropped stays dropped) and the record's identity is not used
@@ -69,7 +70,7 @@ weight the interface measured. `src/engine/engine-owner-drawing.mjs` is the inte
   group and reverts its document and history.
 * **Undo and redo**: the session names the pixel commits of the entry on top (`drawingReplay`: cel and record, in the
   order it applies them). The interface pins and loads those records (a cold record comes from the disk), prepares large
-  replacements (over 4 MiB, about 256 tiles; a stroke is about a hundred) in the pixel worker, and applies smaller ones in the step itself (about 13 µs a tile on the interface thread), so a stroke's undo never waits behind a publication in that worker, checks nothing changed meanwhile (document, revision, cancellation), and only then
+  replacements (over 4 MiB, about 256 tiles; a stroke is about a hundred) in the pixel worker, and applies smaller ones in the step itself (about 13 µs a tile on the interface thread; the store adopts the record's buffers and freezes them instead of copying them, and the bounds the command holds are not scanned for again), so a stroke's undo never waits behind a publication in that worker, checks nothing changed meanwhile (document, revision, cancellation), and only then
   runs the session's undo or redo and applies the tiles in the same synchronous step. A failed read, a cancelled replay
   or an intervening edit changes neither the pixels nor the history. A cel the undo removed (a creation undone) keeps
   its pixels in the store for the redo.
@@ -106,12 +107,20 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
   shows. The tiles are raw straight-alpha RGBA, 16 KiB each; the engine reduces them to levels 1
   to 8 as the published path does (`down_tile`, with the same filter on empty tiles), builds each
   drawn tile's slot with its border texels (`bordered`) and writes only the slots a change reaches:
-  the tile, the tiles around it and the parents that cover it, at the levels the view shows. The slots
-  a call changes wait for the next frame (`Stage::flush_live`, before the frame's pictures): the calls of one
-  frame rewrite the same neighbourhoods, so they are written once, the last contents of a slot winning, and slots
-  side by side in a page row are one write (`styk_eval::live::coalesce`). The reduced levels and the slot
-  contents are built with a cheap hasher on the tile coordinates (`CoordHasher`) and row copies; a block of four
-  opaque texels reduces without the division.
+  the tile and the parents that cover it, and a neighbour (or the parent's) only when the two-texel edge it copies
+  from the tile differs from before, at the levels the view shows. A call only marks those slots; the frame builds
+  each marked slot once, from the pixels as they are then, straight into the rectangle that holds the slots side by
+  side in a page row (`LiveCels::take_runs`, written by `Stage::flush_live` before the frame's pictures), so the
+  calls of one frame, which touch the same neighbourhoods, cost one build and one write per run. The reduced
+  levels and the slot contents are built with a cheap hasher on the tile coordinates (`CoordHasher`) and row
+  copies; a block of four opaque texels reduces without the division, and an empty block with one comparison. A reduced
+  tile whose children changed only in part is made again only there (`down_tile_patch`: the rectangle where the children's
+  texels differ from before, mapped to the parent, the rest kept), so a stroke's dabs cost the area they paint at every level.
+* The published pictures of a cel (the engine decodes every level of it again after each publication) are not what a
+  frame draws while its live tiles are shown, so for 250 ms after a live cel changed
+  (`LiveCels::picture_budget`, from the clock, not from frames drawn) a frame uploads at most 512 KiB of decoded pictures,
+  2 MiB for the next 1.5 s, and 8 MiB after that or when no cel is held (a document loading, a jump, playback). The
+  rest waits in the engine's queue.
 * A frame draws one level of a cel (the shader keeps the level whose tiles are between half a pixel
   and one pixel on the screen) and blends in the level above, so only those are written as tiles
   change. Before each frame the stage reads the levels its list shows at the view's scale
@@ -122,7 +131,10 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
   pixels at once). A new atlas is written at the resident levels the same way. A frame whose list
   shows no live tile leaves the choice alone, so a cel registering over several frames is not
   written all at once when it is shown. Before the first frame the levels are the cel's own and the
-  one above (`FIRST_LEVELS`).
+  one above (`FIRST_LEVELS`). While the stage is idle (`Stage::upload_pictures`, which the interface calls in slices
+  after a frame) the stale slots of the levels beside the ones on show are written 64 at a time (`LiveCels::warm`, nearest
+  level first, never while a cel changed in the last 250 ms), so the zoom that calls for one of them finds little left to
+  write; a change at a level that is not shown makes its slots stale again.
 * The slots are pages of the sprite atlas after the document's own (`PAGE_SLOTS` = 3,600 slots a
   page, at most four pages; a slot given back is the next one taken, lowest first, so a cel's rows stay together). A texture of more layers is allocated by copying the old one on the
   GPU (`Renderer::grow_sprites`): the document's pictures are not decoded again. A document that

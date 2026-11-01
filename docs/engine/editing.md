@@ -680,7 +680,9 @@ it on the editor, for every document.
   a third session. Leaving it frees the clip's session and the parent's takes the edit as one `Edit movieclip` entry
   (`publishMovieclipEdit(typeId, document, duration)`: the definition of the clip takes the document edited and its duration,
   one `movieclip-definition` entry), which undoes and redoes with the parent's other entries; a clip left without saving or
-  unchanged leaves none. The clip's document keeps the source its figures were captured from (`movieclipSource`): the poses
+  unchanged leaves none. The document crosses as the tree the clip's session holds (`EditSession.call_with_document`: the owner leaves
+  the argument's place empty), not as JSON the interface reads out of its view: leaving a clip of 590 frames of 150 figures took 233 ms
+  that way (dev build) and reads none of the clip's records now. The tree is taken as text would give it (`Value::unshared`): the clip's records share the pose arrays they have in common, and the file writer stores an array of 32 numbers or more that two places share once, so the shared tree would save to other bytes than the same document read from text (`tests/lazy-table.test.mjs`, saved bytes after leaving). A clip with a stored frame draft still crosses as JSON. The clip's document keeps the source its figures were captured from (`movieclipSource`): the poses
   of a figure in that source, and the animation it retains, are edited with the figure (`Place::Retained`: a rig edit
   inside the clip changes them as it changes the clip's own poses, in the same `topology` entry). A clip on a native
   timeline (tools and tests) is edited by the editor. A project closed ends the sessions it holds, those of its clips too.
@@ -739,8 +741,9 @@ it on the editor, for every document.
 - **Bookkeeping.** Besides the calls, the owner tells the session what is not an edit (`styk-edit/src/owner.rs`): the limits of
   history and the numbering of revisions it starts from, `@markSaved`, `@touch` (the project marked changed outside a
   command: a new revision, no entry), `@publishCel(celId, definition)` (the encoded tiles, bounds and revision the interface's
-  drawing store attaches to a cel once it has published its pixels: a derived publication, the revision does not move) and the
-  weights of drawing commits (`@drawingBytes`, `@retractDrawing`).
+  drawing store attaches to a cel once it has published its pixels: a derived publication, the revision does not move),
+  `@celState(celId, {revision, bounds})` (the two members a commit or a replay changes in a cel's definition, without
+  the encoded tiles that `@publishCel` sends again) and the weights of drawing commits (`@drawingBytes`, `@retractDrawing`).
 - **Previews.** The sliders of a camera-motion clip and of a layer's parallax show their value while they move
   (`previewCameraMotion(id, patch)`, `previewLayerParallax(id, patch)`, `styk-edit/src/preview.rs`): the field is set in the
   session's document without an entry, and put back by `cancelDocumentPreview()` or by the next call that is not a preview or a

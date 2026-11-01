@@ -222,7 +222,8 @@ async function readImportFile(file) {
   // The renderer transfers these compact source bytes to its import worker.
   // Expanded JSON is never parsed or transported through Electron main.
   return {
-    bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    // A file this large owns its buffer: sent as it is, not copied.
+    bytes: bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes.buffer : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
     filename: path.basename(file),
     nativePath: file,
     openToken: projectFiles.rememberOpen(path.resolve(file)),

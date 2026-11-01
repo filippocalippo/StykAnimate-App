@@ -98,6 +98,45 @@ use std::sync::Arc;
 
 use styk_doc::{Obj, Value};
 
+/// What the interface's read view knows of a figure type without holding it (src/lazy-table.mjs `figureRow`): `id`, `name`, the drawing
+/// `cel` it carries, its `kind` (`Movieclip`, `Text`, `Image` or `Figure`, as the figure library classifies it), its `segments` count and
+/// whether it draws `pictures`. A field the figure lacks is `null`, a segment count included.
+pub fn figure_row(figure: &Value) -> Value {
+    let present = |key: &str| figure.get(key).cloned().unwrap_or(Value::Null);
+    let has = |key: &str| figure.get(key).and_then(Value::elements).is_some_and(|items| !items.is_empty());
+    let segments = figure.get("segments").and_then(Value::elements);
+    let kind = if figure.path(&["_styk", "movieclip"]).is_some_and(Value::truthy) { "Movieclip" } else if has("text_assets") { "Text" } else if has("image_assets") { "Image" } else { "Figure" };
+    let count = match figure.get("segment_count") { Some(Value::Null) | None => segments.map_or(Value::Null, |items| Value::Num(items.len() as f64)), Some(other) => other.clone() };
+    let image_segment = segments.is_some_and(|items| items.iter().any(|segment| {
+        segment.get("segment_type").and_then(Value::as_str) == Some("image") || segment.get("segment_kind").and_then(Value::as_str) == Some("image") || segment.get("primitive_code").and_then(Value::as_f64) == Some(2.0)
+    }));
+    let mut row = Obj::new();
+    row.set("id", present("figure_type_id"));
+    row.set("name", present("name"));
+    row.set("cel", figure.path(&["_styk", "drawing", "celId"]).cloned().unwrap_or(Value::Null));
+    row.set("kind", Value::str(kind));
+    row.set("segments", count);
+    row.set("pictures", Value::Bool(has("image_assets") || image_segment));
+    Value::object(row)
+}
+
+/// What the interface's read view knows of a keyframe without holding it (src/lazy-table.mjs `frameRow`): its `id` (`_styk.frameId`), `background` (`background_id`),
+/// colour override (`_stykBackgroundColor`), `duration` (`duration_raw`) and how many `figures` it holds. A field the keyframe lacks is `null`.
+pub fn frame_row(frame: &Value) -> Value {
+    let mut row = Obj::new();
+    row.set("id", frame.path(&["_styk", "frameId"]).cloned().unwrap_or(Value::Null));
+    row.set("background", frame.get("background_id").cloned().unwrap_or(Value::Null));
+    row.set("color", frame.get("_stykBackgroundColor").cloned().unwrap_or(Value::Null));
+    row.set("duration", frame.get("duration_raw").cloned().unwrap_or(Value::Null));
+    row.set("figures", Value::Num(frame.get("objects").and_then(Value::elements).map_or(0, |items| items.len()) as f64));
+    Value::object(row)
+}
+
+/// The timeline of a document (`editor.timeline`): where each row starts and how many ticks it lasts.
+pub fn timeline_rows(report: &Value) -> Vec<(f64, f64)> {
+    timeline::rows(report).into_iter().map(|row| (row.start, row.count)).collect()
+}
+
 pub use history::{Command, CommandKind, HistoryLimits};
 pub use frame::FrameSlice;
 pub use onion_skins::{Ghost, OnionSet, MAX_GHOSTS};
@@ -273,6 +312,8 @@ pub struct Editor {
     /// (`_layerUidCounts`), and every figure seen so far (`_layerSeenUids`). Read
     /// from the document when first needed, then kept with every command.
     pub(crate) uid_counts: Option<(HashMap<u32, i64>, std::collections::HashSet<u32>)>,
+    /// How many poses hold each figure, as the read view's layer index needs it (`patch::LayerIndex`); kept by the answers of calls whose view is lazy.
+    pub(crate) layer_index: Option<patch::LayerIndex>,
     /// `auto_key` of [`Options`], which the app may change between calls.
     pub(crate) auto_key: bool,
     /// Pose sources this session captured, in order (`_generatedFrameSources`).
@@ -432,6 +473,7 @@ impl Editor {
             next_frame_identity,
             next_uid: 1,
             uid_counts: None,
+            layer_index: None,
             auto_key: options.auto_key,
             generated_sources: Vec::new(),
             pending_source_layer_changes: Vec::new(),
@@ -805,6 +847,7 @@ impl Editor {
             "@markSaved" => return self.mark_saved(),
             "@touch" => return self.mark_changed(),
             "@publishCel" => return self.publish_cel(args),
+            "@celState" => return self.cel_state(args),
             "@drawingBytes" => return self.set_pixels_bytes(args),
             "@retractDrawing" => return self.retract_pixels(args),
             "@setClipboard" => return self.set_clipboard(args),
@@ -1247,3 +1290,27 @@ mod interface_tests;
 
 #[cfg(test)]
 mod views_tests;
+
+#[cfg(test)]
+mod figure_row_tests {
+    use super::*;
+
+    #[test]
+    fn a_frame_row_says_what_the_inspector_shows_of_the_frame() {
+        let row = |text: &str| styk_doc::json::to_string(&frame_row(&styk_doc::json::parse(text.as_bytes()).unwrap()));
+        assert_eq!(row(r#"{"_styk":{"frameId":"frame-3"},"background_id":2,"_stykBackgroundColor":4278190335,"duration_raw":3,"objects":[{},{}]}"#), r#"{"id":"frame-3","background":2,"color":4278190335,"duration":3,"figures":2}"#);
+        assert_eq!(row(r#"{}"#), r#"{"id":null,"background":null,"color":null,"duration":null,"figures":0}"#);
+    }
+
+    fn row(text: &str) -> String {
+        styk_doc::json::to_string(&figure_row(&styk_doc::json::parse(text.as_bytes()).unwrap()))
+    }
+
+    #[test]
+    fn a_figure_row_says_what_the_library_lists() {
+        assert_eq!(row(r#"{"figure_type_id":3,"name":"Walker","segments":[{},{}]}"#), r#"{"id":3,"name":"Walker","cel":null,"kind":"Figure","segments":2,"pictures":false}"#);
+        assert_eq!(row(r#"{"figure_type_id":4,"segment_count":7,"segments":[],"image_assets":[{}],"_styk":{"drawing":{"celId":"cel-1"}}}"#), r#"{"id":4,"name":null,"cel":"cel-1","kind":"Image","segments":7,"pictures":true}"#);
+        assert_eq!(row(r#"{"figure_type_id":5,"text_assets":[{}],"image_assets":[{}],"_styk":{"movieclip":{}}}"#), r#"{"id":5,"name":null,"cel":null,"kind":"Movieclip","segments":null,"pictures":true}"#);
+        assert_eq!(row(r#"{"figure_type_id":6,"text_assets":[{}],"segments":[{"segment_type":"image"}]}"#), r#"{"id":6,"name":null,"cel":null,"kind":"Text","segments":1,"pictures":true}"#);
+    }
+}

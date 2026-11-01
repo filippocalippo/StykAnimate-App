@@ -55,7 +55,12 @@ fn cancel_ctx(cancel: &dyn Fn() -> bool) -> ctx::Ctx<'_> {
 /// calls it directly when a file is opened. `cancel` is polled between frames
 /// and records; once it returns `true` the call fails with `499 cancelled`.
 pub fn decode_document(bytes: &[u8], filename: &str, cancel: &dyn Fn() -> bool) -> Result<Decoded, CodecError> {
-    let ctx = cancel_ctx(cancel);
+    decode_document_with(bytes, filename, cancel, &styk_doc::fanout::Sequential)
+}
+
+/// [`decode_document`] with the building of the document's frames shared out on `fan`: the document is the same.
+pub fn decode_document_with(bytes: &[u8], filename: &str, cancel: &dyn Fn() -> bool, fan: &dyn styk_doc::fanout::Fanout) -> Result<Decoded, CodecError> {
+    let ctx = ctx::Ctx::with_fan(cancel, fan);
     let name = store::filename_only(filename)?;
     if bytes.is_empty() {
         return Err(error::api(400, "empty_file", "This file is empty.").into());
@@ -73,13 +78,13 @@ pub fn decode_document(bytes: &[u8], filename: &str, cancel: &dyn Fn() -> bool) 
 /// [`decode_document`] for a caller that has no use for the file afterwards. A Pivot project's file is dropped as soon as it has
 /// been inflated and fingerprinted, before the document is built, so the file and the document under construction are never held
 /// together; the result is the same. Any other kind decodes as `decode_document` does.
-pub fn decode_document_owned(bytes: Vec<u8>, filename: &str, cancel: &dyn Fn() -> bool) -> Result<Decoded, CodecError> {
+pub fn decode_document_owned(bytes: Vec<u8>, filename: &str, cancel: &dyn Fn() -> bool, fan: &dyn styk_doc::fanout::Fanout) -> Result<Decoded, CodecError> {
     let name = store::filename_only(filename)?;
     let kind = store::kind_of_name(&name);
     if bytes.is_empty() || kind != store::Kind::Piv {
-        return decode_document(&bytes, filename, cancel);
+        return decode_document_with(&bytes, filename, cancel, fan);
     }
-    let ctx = cancel_ctx(cancel);
+    let ctx = ctx::Ctx::with_fan(cancel, fan);
     let document = piv::decode_piv_owned(&ctx, bytes, &name, piv::frames::FrameMode::Build)?.report;
     let imported = store::finish_upload(&ctx, document, None, kind)?;
     let version = imported.document.get("version").and_then(styk_doc::Value::as_f64).unwrap_or(5.0);

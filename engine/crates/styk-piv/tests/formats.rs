@@ -724,7 +724,7 @@ fn a_file_decoded_by_its_owner_gives_the_same_document_or_the_same_refusal() {
         }
         let bytes = std::fs::read(&path).expect("fixture");
         let by_reference = decode_document(&bytes, &name, NEVER);
-        let by_owner = styk_piv::decode_document_owned(bytes.clone(), &name, NEVER);
+        let by_owner = styk_piv::decode_document_owned(bytes.clone(), &name, NEVER, &styk_doc::fanout::Sequential);
         match (by_reference, by_owner) {
             (Ok(a), Ok(b)) => {
                 assert_eq!(styk_doc::json::to_string(&a.document), styk_doc::json::to_string(&b.document), "{name}: the document");
@@ -739,7 +739,7 @@ fn a_file_decoded_by_its_owner_gives_the_same_document_or_the_same_refusal() {
     // Damaged and empty files are refused alike.
     for bytes in [Vec::new(), vec![0x78, 0x9c, 1, 2, 3], vec![5u8, 0, 0], vec![9u8; 64]] {
         let a = decode_document(&bytes, "x.piv", NEVER).expect_err("refused");
-        let b = styk_piv::decode_document_owned(bytes, "x.piv", NEVER).expect_err("refused");
+        let b = styk_piv::decode_document_owned(bytes, "x.piv", NEVER, &styk_doc::fanout::Sequential).expect_err("refused");
         assert_eq!((a.status, a.code, a.message), (b.status, b.code, b.message));
     }
 }

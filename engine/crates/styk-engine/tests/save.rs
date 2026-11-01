@@ -24,7 +24,7 @@ fn tree(path: &str) -> Value {
 }
 
 fn save(tree: &Value, name: Option<&str>, source: Option<Source>) -> Vec<u8> {
-    save_project(std::slice::from_ref(tree), &[], ProjectRequest { name: name.map(str::to_string), source }, &|| false).unwrap().bytes
+    save_project(std::slice::from_ref(tree), &[], ProjectRequest { name: name.map(str::to_string), source, reservation: None }, &|| false).unwrap().bytes
 }
 
 #[test]
@@ -74,13 +74,13 @@ fn the_pivot_original_is_stored_first_and_checked_on_reading() {
 #[test]
 fn a_stopped_save_writes_nothing_and_an_invalid_document_is_refused() {
     let tree = tree("engine/tests/edit/startup.document.json");
-    let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| true);
+    let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| true);
     assert!(matches!(stopped, Err(SaveError::Cancelled)), "{stopped:?}");
     let mut broken = tree.clone();
     broken.make_obj().unwrap().set("figure_types", Value::Num(3.0));
-    let refused = save_project(&[broken], &[], ProjectRequest { name: None, source: None }, &|| false);
+    let refused = save_project(&[broken], &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false);
     assert!(matches!(refused, Err(SaveError::Refused(_))), "{refused:?}");
-    let none = save_project(&[], &[], ProjectRequest { name: None, source: None }, &|| false);
+    let none = save_project(&[], &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false);
     assert!(matches!(none, Err(SaveError::Refused(_))), "{none:?}");
 }
 
@@ -117,14 +117,14 @@ fn a_save_stops_at_the_question_that_says_so_wherever_it_is_asked_and_writes_not
     // (hashing alone asks for every 4 MiB of a document of 32 MiB of numbers) and that a stop is obeyed by the very next question.
     let tree = heavy_tree(8 << 20);
     let asked = std::cell::Cell::new(0usize);
-    let saved = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| { asked.set(asked.get() + 1); false }).unwrap();
+    let saved = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| { asked.set(asked.get() + 1); false }).unwrap();
     let total = asked.get();
     assert!(saved.raw_bytes >= 32 << 20, "{} raw bytes", saved.raw_bytes);
     assert!(total >= 32 / 4 + 2, "{total} questions for {} MiB", saved.raw_bytes >> 20);
     // Stopped at the start, in the preparation, in the lift, while hashing and while compressing: the same answer.
     for stop_at in [1, 2, 5, total / 4, total / 2, total * 3 / 4, total - 1, total] {
         let asked = std::cell::Cell::new(0usize);
-        let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| { asked.set(asked.get() + 1); asked.get() >= stop_at });
+        let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| { asked.set(asked.get() + 1); asked.get() >= stop_at });
         assert!(matches!(stopped, Err(SaveError::Cancelled)), "stopped at question {stop_at} of {total}: {:?}", stopped.map(|written| written.bytes.len()));
         assert_eq!(asked.get(), stop_at, "nothing is asked, and no work is started, after the question that said stop");
     }
@@ -134,13 +134,13 @@ fn a_save_stops_at_the_question_that_says_so_wherever_it_is_asked_and_writes_not
 fn a_save_the_memory_cannot_hold_is_refused_before_it_starts() {
     let tree = tree("engine/tests/edit/startup.document.json");
     // The save reserves what its sections and the compressed file take; with the memory limited to 8 MiB it is refused whole.
-    let refused = styk_alloc::with_limit(8 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| false));
+    let refused = styk_alloc::with_limit(8 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false));
     assert!(matches!(refused, Err(SaveError::OutOfMemory(_))), "{refused:?}");
     // The same document saves when the memory is there, and a refused save changed nothing of it.
-    assert!(save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None }, &|| false).is_ok());
+    assert!(save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false).is_ok());
     // The Pivot original counts twice: a document that fits alone does not fit with an original that takes most of the memory.
     let original = Source { record: Value::object(Obj::new()), bytes: vec![0; 100 << 20] };
-    let refused = styk_alloc::with_limit(256 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: Some(original) }, &|| false));
+    let refused = styk_alloc::with_limit(256 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: Some(original), reservation: None }, &|| false));
     assert!(matches!(refused, Err(SaveError::OutOfMemory(_))), "{:?}", refused.map(|written| written.bytes.len()));
 }
 
@@ -169,4 +169,307 @@ fn every_recorded_project_opens_and_saves_to_its_own_bytes() {
         checked.push(name);
     }
     assert!(checked.contains(&"project-shared-arrays.styk".to_string()) && checked.len() >= 5, "{checked:?}");
+}
+
+/// An engine with `workers` threads running its background work, stopped and joined when dropped.
+struct Workers {
+    engine: Engine,
+    threads: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl Workers {
+    fn start(workers: usize) -> Workers {
+        let engine = Engine::new(|| 0.0, Budgets::for_device(None));
+        let threads = (0..workers).map(|_| { let engine = engine.clone(); std::thread::spawn(move || engine.work()) }).collect();
+        Workers { engine, threads }
+    }
+}
+
+impl Drop for Workers {
+    fn drop(&mut self) {
+        self.engine.stop();
+        for thread in self.threads.drain(..) {
+            let _ = thread.join();
+        }
+    }
+}
+
+#[test]
+fn jobs_run_side_by_side_on_the_workers_and_the_caller_takes_what_no_worker_started() {
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicBool;
+    for workers in [0usize, 3] {
+        let pool = Workers::start(workers);
+        let ran: Arc<Mutex<Vec<std::thread::ThreadId>>> = Arc::new(Mutex::new(Vec::new()));
+        let jobs: Vec<styk_formats::files::Job> = (0..6)
+            .map(|_| {
+                let ran = ran.clone();
+                Box::new(move |_: &dyn Fn() -> bool| {
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                    ran.lock().unwrap().push(std::thread::current().id());
+                }) as styk_formats::files::Job
+            })
+            .collect();
+        let started = std::time::Instant::now();
+        pool.engine.run_together(jobs, &Arc::new(AtomicBool::new(false)), &|| false, 3).unwrap();
+        let ids = ran.lock().unwrap().clone();
+        assert_eq!(ids.len(), 6, "every job ran before run_together returned ({workers} workers)");
+        let distinct: std::collections::HashSet<_> = ids.iter().collect();
+        if workers == 0 {
+            assert_eq!(distinct.len(), 1, "no workers: the caller ran them all");
+        } else {
+            assert!(distinct.len() > 1, "{workers} workers took part");
+            assert!(started.elapsed() < std::time::Duration::from_millis(330), "side by side, not one after another: {:?}", started.elapsed());
+        }
+    }
+}
+
+/// A job that holds some bytes of its own, sleeps, then checks them and says so.
+fn slow_reader(data: Arc<Vec<u8>>, started: Arc<std::sync::atomic::AtomicBool>, verdict: Arc<std::sync::Mutex<Option<bool>>>) -> styk_formats::files::Job {
+    Box::new(move |_| {
+        started.store(true, std::sync::atomic::Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        // Read after the caller has long returned, and dropped everything it held: the bytes are this job's own.
+        *verdict.lock().unwrap() = Some(data.iter().all(|byte| *byte == 0xA5));
+    })
+}
+
+#[test]
+fn a_caller_that_fails_while_a_worker_is_in_a_job_leaves_the_worker_nothing_that_is_freed() {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use styk_formats::files::JobsFailed;
+    // The probe of the review: the job the caller runs panics while a worker is in another one. The jobs own their bytes, so the worker
+    // reads valid memory, and run_together comes back with the failure instead of unwinding past a borrowed frame.
+    let pool = Workers::start(3);
+    for round in 0..12 {
+        let started = Arc::new(AtomicBool::new(false));
+        let verdict = Arc::new(Mutex::new(None));
+        let data = Arc::new(vec![0xA5u8; 1 << 20]);
+        let waiting = started.clone();
+        let panicking: styk_formats::files::Job = Box::new(move |_| {
+            while !waiting.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+            panic!("the job of the caller fails");
+        });
+        let result = pool.engine.run_together(vec![slow_reader(data.clone(), started.clone(), verdict.clone()), panicking], &Arc::new(AtomicBool::new(false)), &|| false, 3);
+        assert_eq!(result, Err(JobsFailed::Panicked), "round {round}");
+        drop(data);
+        let seen = (0..100).find_map(|_| { std::thread::sleep(std::time::Duration::from_millis(30)); *verdict.lock().unwrap() });
+        assert_eq!(seen, Some(true), "round {round}: the worker's job finished on bytes that were still there");
+    }
+}
+
+#[test]
+fn a_job_that_panics_on_a_worker_ends_the_wait_with_an_error_and_the_next_run_works() {
+    use std::sync::atomic::AtomicBool;
+    use styk_formats::files::JobsFailed;
+    let pool = Workers::start(3);
+    let slow: styk_formats::files::Job = Box::new(|_| std::thread::sleep(std::time::Duration::from_millis(150)));
+    let boom: styk_formats::files::Job = Box::new(|_| panic!("the job fails"));
+    let started = std::time::Instant::now();
+    let result = pool.engine.run_together(vec![slow, boom], &Arc::new(AtomicBool::new(false)), &|| false, 3);
+    assert_eq!(result, Err(JobsFailed::Panicked));
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "it did not wait for ever: {:?}", started.elapsed());
+    let fine: Vec<styk_formats::files::Job> = (0..4).map(|_| Box::new(|_: &dyn Fn() -> bool| {}) as styk_formats::files::Job).collect();
+    assert_eq!(pool.engine.run_together(fine, &Arc::new(AtomicBool::new(false)), &|| false, 3), Ok(()), "the next run works");
+}
+
+#[test]
+fn a_worker_reported_lost_ends_the_wait_for_its_job() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use styk_formats::files::JobsFailed;
+    // A thread that traps cannot say so: the host reports it (the page saw the worker's error event), and the job it had never ends.
+    let pool = Workers::start(3);
+    let release = Arc::new(AtomicBool::new(false));
+    let caller = std::thread::current().id();
+    let stuck: styk_formats::files::Job = {
+        let release = release.clone();
+        Box::new(move |_| {
+            if std::thread::current().id() == caller {
+                return;
+            }
+            while !release.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        })
+    };
+    let busy: styk_formats::files::Job = Box::new(|_| std::thread::sleep(std::time::Duration::from_millis(100)));
+    let engine = pool.engine.clone();
+    let reporter = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        engine.note_worker_lost();
+    });
+    let started = std::time::Instant::now();
+    let result = pool.engine.run_together(vec![busy, stuck], &Arc::new(AtomicBool::new(false)), &|| false, 3);
+    reporter.join().unwrap();
+    release.store(true, Ordering::SeqCst);
+    // The caller ran `busy`; a worker took `stuck` almost surely, and then the wait ended with the report. (If the caller ran both, nothing
+    // was lost to wait for.)
+    if result.is_err() {
+        assert_eq!(result, Err(JobsFailed::WorkerLost));
+        assert!(started.elapsed() < std::time::Duration::from_secs(3), "{:?}", started.elapsed());
+        assert_eq!(pool.engine.workers_lost(), 1);
+    }
+    let fine: Vec<styk_formats::files::Job> = (0..3).map(|_| Box::new(|_: &dyn Fn() -> bool| {}) as styk_formats::files::Job).collect();
+    assert_eq!(pool.engine.run_together(fine, &Arc::new(AtomicBool::new(false)), &|| false, 3), Ok(()), "the report is about that wait: the next save works");
+}
+
+#[test]
+fn a_save_whose_worker_failed_is_a_failed_save_that_the_next_save_survives() {
+    use styk_engine::save::EngineHost;
+    use styk_formats::files::JobsFailed;
+    struct Failing;
+    impl styk_formats::files::Host for Failing {
+        fn cancelled(&self) -> bool {
+            false
+        }
+        fn together(&self, _jobs: Vec<styk_formats::files::Job>, _stop: &Arc<std::sync::atomic::AtomicBool>) -> Result<(), JobsFailed> {
+            Err(JobsFailed::WorkerLost)
+        }
+    }
+    let tree = tree("engine/tests/edit/startup.document.json");
+    let request = || ProjectRequest { name: None, source: None, reservation: None };
+    let failed = save_project(std::slice::from_ref(&tree), &[], request(), &Failing);
+    let Err(SaveError::File(error)) = failed else { panic!("{:?}", failed.map(|written| written.bytes.len())) };
+    assert_eq!((error.code, error.message_key), (Some("worker_failed"), "errors.documentExport.documentExportFailed"));
+    let pool = Workers::start(2);
+    let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 2, aside: false };
+    assert!(save_project(std::slice::from_ref(&tree), &[], request(), &host).is_ok(), "the tree is untouched by a failed save: it saves");
+}
+
+#[test]
+fn a_save_on_the_workers_writes_the_bytes_of_a_save_on_one_thread_and_a_cancel_reaches_the_workers() {
+    use styk_engine::save::EngineHost;
+    let tree = heavy_tree(2 << 20);
+    let request = || ProjectRequest { name: Some("Side by side".into()), source: None, reservation: None };
+    let alone = save_project(std::slice::from_ref(&tree), &[], request(), &|| false).unwrap();
+    let pool = Workers::start(3);
+    let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3, aside: false };
+    let together = save_project(std::slice::from_ref(&tree), &[], request(), &host).unwrap();
+    assert!(together.bytes == alone.bytes, "{} bytes on workers, {} on one thread", together.bytes.len(), alone.bytes.len());
+    // Stopped once the preparation is over (it asks four times in the preparation): the jobs on the workers end without a container.
+    let asked = std::cell::Cell::new(0usize);
+    let stopping = EngineHost { engine: Some(&pool.engine), cancel: &|| { asked.set(asked.get() + 1); asked.get() > 4 }, clock: || 0.0, helpers: 3, aside: false };
+    let stopped = save_project(std::slice::from_ref(&tree), &[], request(), &stopping);
+    assert!(matches!(stopped, Err(SaveError::Cancelled)), "{:?}", stopped.map(|written| written.bytes.len()));
+}
+
+#[test]
+fn a_save_tells_where_its_time_went() {
+    struct Ticking;
+    impl styk_formats::files::Host for Ticking {
+        fn cancelled(&self) -> bool {
+            false
+        }
+        fn clock(&self) -> fn() -> f64 {
+            || {
+                thread_local!(static NOW: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) });
+                NOW.with(|now| { now.set(now.get() + 1.0); now.get() })
+            }
+        }
+    }
+    let tree = tree("engine/tests/edit/startup.document.json");
+    let written = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &Ticking).unwrap();
+    let t = written.timings;
+    assert!(t.prepare_ms > 0.0 && t.lift_ms > 0.0 && t.frames_ms > 0.0 && t.total_ms >= t.prepare_ms + t.lift_ms, "{t:?}");
+    assert_eq!(t.frames.iter().map(|frame| frame.raw_bytes).sum::<usize>(), written.raw_bytes);
+}
+
+#[test]
+fn a_save_reserves_its_memory_under_the_name_it_is_given_and_gives_it_back_itself() {
+    let tree = tree("engine/tests/edit/startup.document.json");
+    let token = 4_100_001;
+    let request = || ProjectRequest { name: None, source: None, reservation: Some(token) };
+    assert!(save_project(std::slice::from_ref(&tree), &[], request(), &|| false).is_ok());
+    assert_eq!(styk_alloc::release_named(token), 0, "a finished save has nothing left for the host to release");
+    let stopped = save_project(std::slice::from_ref(&tree), &[], request(), &|| true);
+    assert!(matches!(stopped, Err(SaveError::Cancelled)));
+    assert_eq!(styk_alloc::release_named(token), 0, "nor a stopped one");
+}
+
+
+#[test]
+fn a_project_with_a_big_array_is_lifted_in_pieces_on_the_workers_into_the_same_bytes() {
+    use styk_engine::save::EngineHost;
+    let mut tree = heavy_tree(1 << 16);
+    let records: Vec<Value> = (0..300)
+        .map(|i| {
+            let mut record = Obj::new();
+            record.set("n", Value::Num(i as f64));
+            record.set("v", Value::Nums(Arc::new(Nums::new(&(0..40).map(|k| (i + k) as f64 * 0.5).collect::<Vec<_>>()))));
+            Value::object(record)
+        })
+        .collect();
+    tree.make_obj().unwrap().set("padding", Value::array(records));
+    let request = || ProjectRequest { name: Some("In pieces".into()), source: None, reservation: None };
+    let alone = save_project(std::slice::from_ref(&tree), &[], request(), &|| false).unwrap();
+    let pool = Workers::start(3);
+    let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3, aside: false };
+    let in_pieces = save_project(std::slice::from_ref(&tree), &[], request(), &host).unwrap();
+    assert!(in_pieces.bytes == alone.bytes, "{} bytes in pieces, {} whole", in_pieces.bytes.len(), alone.bytes.len());
+    // A stop at any question of a save in pieces, the batches of the lift included, is a stop and writes nothing.
+    for stop_at in [3, 5, 8, 12] {
+        let asked = std::cell::Cell::new(0usize);
+        let stopping = EngineHost { engine: Some(&pool.engine), cancel: &|| { asked.set(asked.get() + 1); asked.get() >= stop_at }, clock: || 0.0, helpers: 3, aside: false };
+        let stopped = save_project(std::slice::from_ref(&tree), &[], request(), &stopping);
+        assert!(matches!(stopped, Err(SaveError::Cancelled)) || stopped.is_ok(), "stopped at question {stop_at}: {:?}", stopped.as_ref().map(|written| written.bytes.len()));
+    }
+}
+
+#[test]
+fn a_started_job_runs_beside_the_caller_on_a_worker_or_on_the_caller_when_it_is_waited_for() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use styk_formats::files::JobsFailed;
+    for workers in [0usize, 3] {
+        let pool = Workers::start(workers);
+        let on = Arc::new(std::sync::Mutex::new(None));
+        let (slot, caller) = (on.clone(), std::thread::current().id());
+        let ran = Arc::new(AtomicUsize::new(0));
+        let counter = ran.clone();
+        let job: styk_formats::files::Job = Box::new(move |_| {
+            *slot.lock().unwrap() = Some(std::thread::current().id());
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+        let cancel = || false;
+        let waiting = pool.engine.start_later(job, &Arc::new(AtomicBool::new(false)), &cancel);
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert_eq!(waiting(), Ok(()));
+        assert_eq!(ran.load(Ordering::SeqCst), 1, "it ran once");
+        let thread = on.lock().unwrap().expect("it ran");
+        assert_eq!(thread == caller, workers == 0, "{workers} workers: on a worker when there is one, else on the caller at the wait");
+    }
+    // A job that panics, or a worker reported lost, ends the wait with the error.
+    let pool = Workers::start(2);
+    let boom: styk_formats::files::Job = Box::new(|_| panic!("the job fails"));
+    let cancel = || false;
+    let waiting = pool.engine.start_later(boom, &Arc::new(AtomicBool::new(false)), &cancel);
+    assert_eq!(waiting(), Err(JobsFailed::Panicked));
+}
+
+#[test]
+fn the_scene_check_starts_on_a_worker_only_where_the_interface_lends_one_aside() {
+    use std::sync::atomic::AtomicBool;
+    use styk_engine::save::EngineHost;
+    use styk_formats::files::Host;
+    let pool = Workers::start(3);
+    for aside in [false, true] {
+        let ran_on = Arc::new(std::sync::Mutex::new(None));
+        let (slot, caller) = (ran_on.clone(), std::thread::current().id());
+        let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3, aside };
+        let job: styk_formats::files::Job = Box::new(move |_| *slot.lock().unwrap() = Some(std::thread::current().id()));
+        let waiting = host.start(job, &Arc::new(AtomicBool::new(false)));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let before_wait = *ran_on.lock().unwrap();
+        waiting().unwrap();
+        let after_wait = ran_on.lock().unwrap().expect("it ran");
+        if aside {
+            assert!(before_wait.is_some_and(|thread| thread != caller), "a worker took it while the caller did something else");
+        } else {
+            assert_eq!(before_wait, None, "nothing ran before the wait");
+            assert_eq!(after_wait, caller, "it ran on the caller, when it was waited for");
+        }
+    }
 }

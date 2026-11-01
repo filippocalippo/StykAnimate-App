@@ -273,3 +273,48 @@ fn the_frame_cache_is_a_sixteenth_of_the_memory_however_much_the_device_has() {
         assert_eq!(Budgets::for_device(Some(2.0)).frame_cache_bytes, 48 << 20, "a small device keeps its smaller cache");
     });
 }
+
+/// How an open ended, for the tests of stopping one: the document's name, or the code of the refusal.
+fn ended(result: Result<styk_engine::document::OpenedDocument, styk_engine::document::OpenError>) -> Result<String, Option<String>> {
+    result.map(|opened| opened.name).map_err(|error| error.code)
+}
+
+#[test]
+fn an_open_is_stopped_between_its_steps_not_only_before_the_first() {
+    let engine = engine();
+    for (name, bytes) in [
+        ("startup", std::fs::read(repo("engine/tests/edit/startup.document.json")).unwrap()),
+        ("project", std::fs::read(repo("engine/tests/containers/project-arrays.styk")).unwrap()),
+    ] {
+        let source = |bytes: &'static [u8]| if name == "project" { OpenSource::File { bytes, name: "project.styk" } } else { OpenSource::Json { bytes, name: "Untitled" } };
+        let bytes: &'static [u8] = Box::leak(bytes.into_boxed_slice());
+        // How often the open asks whether to stop.
+        let asked = std::cell::Cell::new(0usize);
+        let counting = || {
+            asked.set(asked.get() + 1);
+            false
+        };
+        let finished = ended(engine.open_document(source(bytes), APP, &counting)).unwrap();
+        let polls = asked.get();
+        assert!(polls >= 4, "{name}: the open asked {polls} times; it asks before it prepares, after, after the views and at the end");
+        // Stopped at each of those questions, it ends stopped, never as an open that finished.
+        for stop_at in 1..=polls {
+            let asked = std::cell::Cell::new(0usize);
+            let stopping = || {
+                asked.set(asked.get() + 1);
+                asked.get() >= stop_at
+            };
+            assert_eq!(ended(engine.open_document(source(bytes), APP, &stopping)), Err(Some("cancelled".to_string())), "{name}: stopped at question {stop_at} of {polls}");
+        }
+        assert!(!finished.is_empty(), "{name}: an open that is not stopped finishes");
+        // With helpers and without, the same.
+        for helpers in [0, 3] {
+            let asked = std::cell::Cell::new(0usize);
+            let stopping = || {
+                asked.set(asked.get() + 1);
+                asked.get() >= polls
+            };
+            assert_eq!(ended(engine.open_document_with(source(bytes), APP, &stopping, helpers)), Err(Some("cancelled".to_string())), "{name}: {helpers} helpers");
+        }
+    }
+}
