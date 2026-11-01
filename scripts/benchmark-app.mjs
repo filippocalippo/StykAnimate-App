@@ -87,7 +87,12 @@ async function launch({startupView = 'editor', seed = null, probe = null} = {}) 
   page.on('pageerror', e => errors.push(String(e.message).slice(0, 300)));
   await page.waitForFunction(() => window.styk?.ready === true || Boolean(window.styk?.editor && window.styk?.actions), null, {timeout: 120000, polling: 20});
   const readyMs = Date.now() - t0;
+  // `styk.ready` is set once the stage exists and the app has declared itself ready (main sets it at the same point after its
+  // renderer): the time the readyMs predicate does not reach, because it is true as soon as the application module has run.
+  // Watched from here, beside the probe, so neither delays the other's reading.
+  const stage = page.waitForFunction(() => window.styk?.ready === true, null, {timeout: 120000, polling: 20}).then(() => Date.now() - t0, () => null);
   const probeMs = probe ? await probe(page).then(() => Date.now() - t0, () => null) : null;
+  const stageMs = await stage;
   // The startup prompt queue opens the release notes (and on a first run the privacy prompt) a moment after ready.
   await page.waitForSelector('dialog.release-splash[open]', {timeout: 10000}).catch(() => {});
   await dismiss(page);
@@ -103,7 +108,7 @@ async function launch({startupView = 'editor', seed = null, probe = null} = {}) 
     await sleep(500);
     await rm(profile, {recursive: true, force: true}).catch(() => {});
   };
-  return {app, page, cdp, memory, errors, startup: {firstWindowMs, readyMs}, probeMs, profile, close};
+  return {app, page, cdp, memory, errors, startup: {firstWindowMs, readyMs, stageMs}, probeMs, profile, close};
 }
 
 /** Memory by process type (the last sample), the renderer's JS heap and the engine's WebAssembly memory right now.
@@ -879,6 +884,19 @@ async function projectPicture() {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', head), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
+/** What a person does first on Home: a real click on the first project, until its document is the one on show (Home gone, the
+ *  editor named after the file). The library's projects are small copies of one file, so this is the click and the open of a small project. */
+async function openFirstProject(page) {
+  try {
+    const box = await page.evaluate(() => { const r = document.querySelector('.home-project')?.getBoundingClientRect(); return r ? {x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 60)} : null; });
+    if (!box) return {error: 'no project card'};
+    const started = Date.now();
+    await page.mouse.click(box.x, box.y);
+    const shown = await page.waitForFunction(() => window.styk.home.shown === false && /^Project d+/.test(window.styk.editor.name ?? ''), null, {timeout: 30000, polling: 10}).then(() => true, () => false);
+    return shown ? {ms: Date.now() - started} : {error: 'the project did not open'};
+  } catch (error) { return {error: String(error.message).slice(0, 200)}; }
+}
+
 /** Home with a library of `count` projects, fabricated in the run's own temporary profile (never the person's library):
  *  copies of the small project the startup document saves as, with a picture each. Time to a usable Home, then the
  *  gaps between frames while the list scrolls. */
@@ -892,10 +910,10 @@ async function homeWithProjects(count = 200) {
     const small = path.join(work, 'seed.styk');
     try {
       await seed.app.evaluate(({dialog}, f) => { dialog.showSaveDialog = async () => ({canceled: false, filePath: f}); dialog.showMessageBox = async () => ({response: 0, checkboxChecked: false}); }, small);
-      await seed.page.evaluate(() => { window.styk.actions['save-as'](); });
+      const saved = await seed.page.evaluate(() => Promise.resolve(window.styk.actions['save-as']()).then(value => ({value: String(value)}), error => ({error: String(error?.message ?? error)}))).catch(error => ({error: String(error.message).slice(0, 200)}));
       for (let i = 0; i < 100 && !existsSync(small); i++) await sleep(100);
+      if (!existsSync(small)) return {error: `the small project was not saved (${JSON.stringify(saved)})`};
     } finally { await seed.close(); }
-    if (!existsSync(small)) return {error: 'the small project was not saved'};
     const picture = await projectPicture(), projects = [];
     await mkdir(path.join(work, 'projects'), {recursive: true});
     for (let i = 0; i < count; i++) {
@@ -939,6 +957,7 @@ async function homeWithProjects(count = 200) {
       }
       result.settledMiB = (ctx.memory.samples.filter(s => s[2] === 'home').map(s => s[1])).at(-1) ?? null;
       result.byType = roundTypes(ctx.memory.lastTypes ?? {});
+      result.openFromHome = await openFirstProject(ctx.page);
     } finally {
       result.errors = ctx.errors.slice(0, 20);
       await ctx.close();

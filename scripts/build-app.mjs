@@ -15,10 +15,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** Electron 39's Chromium. */
 const TARGET = 'chrome142';
-/** Loaded by the page, by URL, and kept as separate entries: `engine.mjs` so that a script importing it from the page
- * (the benchmark reads the engine's memory) meets the application's engine rather than a second copy. */
-const PAGE_ENTRIES = ['src/app.mjs', 'src/engine/engine-start.mjs', 'src/engine/engine.mjs'];
-/** The entries the page loads at launch: their static imports are preloaded. */
+/** Loaded by the page, by URL, and kept as separate entries. The modules the benchmark imports from the page (it reads the engine's memory and
+ * patches `PlaybackMetrics`) are entries so that it meets the application's module and not a second copy; tests/app-bundle.test.mjs keeps
+ * the list in step with scripts/benchmark-app.mjs. */
+const PAGE_ENTRIES = ['src/app.mjs', 'src/engine/engine-start.mjs', 'src/engine/engine.mjs', 'src/playback-metrics.mjs', 'src/canvas-interactions.mjs', 'src/renderer-geometry.mjs'];
 /** The one stylesheet index.html links. */
 const STYLESHEET = 'src/styles/app.css';
 const LAUNCH_ENTRIES = ['src/app.mjs', 'src/engine/engine-start.mjs'];

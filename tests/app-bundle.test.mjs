@@ -28,6 +28,13 @@ test('every worker the application starts is an entry of the bundle, at the path
   for (const worker of started) assert.ok(entries.has(worker), `${worker} is a bundle entry`);
 });
 
+test('the modules the benchmark imports from the page are bundle entries, so it meets the running application, not a second copy', async () => {
+  const {page} = await appEntries(root);
+  const imported = [...(await readFile(path.join(root, 'scripts/benchmark-app.mjs'), 'utf8')).matchAll(/import\('\/(src\/[^']+\.mjs)'\)/g)].map(match => match[1]);
+  assert.ok(imported.length >= 4, `found ${imported.length} imports`);
+  for (const file of imported) assert.ok(Object.values(page).includes(file), `${file} is a page entry`);
+});
+
 test('the bundled page preloads the bundle where the page preloaded the modules', () => {
   const html = [
     '<head>',

@@ -22,6 +22,7 @@ const TYPES = ['browser', 'renderer', 'gpu', 'utility', 'other'];
 // Rows of each file's table. The first group is what the baselines have always shown; the rest was added later.
 const DOC = [
   ['Startup to usable (ms)', 'startup.readyMs'],
+  ['Startup to stage ready (ms)', 'startup.stageMs'],
   ['Open file (ms)', 'open.openMs'],
   ['Memory after open, settled (MiB)', 'open.settledMiB'],
   ['Memory peak, whole session (MiB)', 'memory.peakMiB'],
@@ -118,11 +119,14 @@ const DRAW = [
 const FREE = [
   ['Startup to window (ms)', 'empty.startup.firstWindowMs'],
   ['Startup to usable (ms)', 'empty.startup.readyMs'],
+  ['Startup to stage ready (ms)', 'empty.startup.stageMs'],
   ['Empty app memory, settled (MiB)', 'empty.medianMiB'],
   ...TYPES.map(t => [`Empty app memory, ${t} (MiB)`, `empty.byType.${t}`]),
   ['Empty app: renderer JS heap (MiB)', 'empty.detail.jsHeapUsedMiB'],
   ['Empty app: engine WebAssembly memory (MiB)', 'empty.detail.wasmMiB'],
   ['Home with 200 projects: usable (ms)', 'home.homeUsableMs'],
+  ['Home: stage ready (ms)', 'home.startup.stageMs'],
+  ['Home: click on a project until it is open (ms)', 'home.openFromHome.ms'],
   ['Home: projects listed', 'home.listed'],
   ['Home: list scroll worst frame gap (ms)', 'home.scroll.uiFrameGaps.max'],
   ['Home: list scroll frame gap p95 (ms)', 'home.scroll.uiFrameGaps.p95'],
@@ -139,6 +143,8 @@ const value = (r, m, context = {}) => typeof m === 'function' ? m(r, context) : 
 const REFRESH = 7;
 const TARGETS = [
   {name: 'App start until usable (ms)', metric: 'startup.readyMs', target: 1000, floor: 'x3'},
+  {name: 'App start until the stage is ready (ms)', metric: 'startup.stageMs', target: 1000, floor: 'x3'},
+  {name: 'Home: click on a project until it is open (ms)', metric: 'home.openFromHome.ms', target: 1000, floor: 'x3', source: 'free'},
   {name: 'Open tdd2 (ms)', metric: 'open.openMs', target: 1000, floor: 'x3', files: ['tdd2']},
   {name: 'Open svr_uriel (ms)', metric: 'open.openMs', target: 600, floor: 'x3', files: ['svr_uriel']},
   {name: 'Open testingupload.styk (ms)', metric: 'open.openMs', target: 800, floor: 'x3', files: ['testingupload']},
