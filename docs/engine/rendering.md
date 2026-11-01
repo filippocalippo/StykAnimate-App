@@ -416,6 +416,20 @@ square root, then 417–422 ms against 553–568 ms without it, interleaved at l
 WebAssembly engine module grew by 109 KiB (7,980,628 → 8,092,410 bytes without wasm-opt, the
 build before this work against this one).
 
+## Prepared frames leave out what the artboard clips
+
+A frame prepared for the screen (playback, previews, the camera monitor: `frames::produce` with `cull`) is always drawn clipped to the artboard,
+through the scene camera or without it. A dense frame can hold hundreds of thousands of primitives wholly outside it (the outline triangles
+of a glyph far larger than the canvas; tick 207 of one benchmark document is 374,699 primitives, 24 MB, 90% outside), whose upload took
+14 to 18 ms of the interface thread. `drawlist::cull_outside` drops, on the worker that prepares the frame, the primitives of the kinds
+whose reach is known (strokes, arcs, discs, triangles, images) that lie outside both views of the artboard by more than a margin
+(64 canvas units or a tenth of the canvas). A list with effects, generated effects or depth-tested faces keeps what it has; fills, composites,
+glyph masks and polylines are never dropped; groups, paints and points are untouched and the passes follow the primitives that stay. Exports keep
+the whole list (their bytes do not change). `styk-raster/tests/cull.rs` states that the culled list draws the pictures of the whole one
+(figures shifted wholly and partly outside, with and without a camera, at several zooms and pans); the margin makes that exact for any view
+that leaves the artboard more than a few pixels wide. A frame names only the pictures it draws, so a drawing cel larger than the artboard is
+waited for tile by tile only as far as it reaches. `styk prims <file> [tick…]` lists what a frame is made of and what the cull leaves out.
+
 ## Encoding over the last frame
 
 A gesture changes a few objects of a frame of hundreds. The edit frame is the session's `ShownScene`
