@@ -54,6 +54,7 @@ function failure(error) {
  * `figureUids`, `tick`, `output` (`document`, `container` for the figure file as it is stored, or `codec` for the body of the
  * codec's export request, with `sourceId`).
  * `address` is a fresh `engine.handle.address()`; `cancelled()` says whether the export is stopped.
+ * `address` is a fresh `engine.handle.address()` (consumed) whose workers the save may use, or 0.
  * `join` is null where the caller is a thread of the engine already (the tests, which run it in-process). `guard` is the worker's
  * (src/engine/engine-guard.mjs): the call is made with it held, so the interface cannot end the worker inside the engine.
  * @returns {{bytes: Uint8Array, figureTypeId: (number|undefined), drawings: boolean, rawBytes: number}}
@@ -73,14 +74,15 @@ export function makeExportDocument({join, address, revision, request, cancelled,
  * by the call), `scopes` (the movieclip type each document but the last was entered from), `name`, and `source`, the record
  * of the Pivot original the interface holds for the project, whose bytes are `source`.
  * `join` is null where the caller is a thread of the engine already (the tests, which run it in-process).
- * @returns {{bytes: Uint8Array, rawBytes: number}}
+ * @returns {{bytes: Uint8Array, rawBytes: number, timings: object}} `timings`: where the save's time went in the engine (`prepare_ms`,
+ * `lift_ms`, `assemble_ms`, `total_ms`, and for the skeleton, the arrays section and the payloads section `{raw, stored, hash_ms, compress_ms, reused}`).
  */
-export function makeProjectFile({join, request, source, cancelled, guard}) {
+export function makeProjectFile({join, request, source, cancelled, guard, address = 0}) {
   return inside(guard, () => {
     if (join) joinEngine(join);
     let made;
-    try { made = save_project(JSON.stringify(request), source, cancelled); } catch (error) { throw failure(error); }
-    try { return {bytes: made.bytes(), rawBytes: made.raw_bytes()}; } finally { made.free(); }
+    try { made = save_project(address, JSON.stringify(request), source, cancelled); } catch (error) { throw failure(error); }
+    try { return {bytes: made.bytes(), rawBytes: made.raw_bytes(), timings: JSON.parse(made.timings() || 'null')}; } finally { made.free(); }
   });
 }
 

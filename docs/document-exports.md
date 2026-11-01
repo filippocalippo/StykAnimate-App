@@ -55,7 +55,7 @@ running in a worker of the editor page (`src/codec-web-worker.mjs`); it answers 
 service did, over the worker's message ports, with the same responses and actionable error statuses
 ([engine/formats-piv.md](engine/formats-piv.md)). Missing display aliases remain absent so an untouched STK or legacy document does
 not become a semantic edit merely from normalization. A Blob returns to the renderer without JSON or base64 conversion. Use the
-native Blob streaming helper to save it through Electron; browser downloads and IndexedDB can consume the Blob directly.
+native Blob streaming helper to save it through Electron (chunks of up to 4 MB, the next one read from the Blob while the last is written, to the staged file that replaces the destination atomically); browser downloads and IndexedDB can consume the Blob directly.
 
 A save stopped by the cancel flag (a flag in shared memory, asked between the steps and every few megabytes of hashing and compression) writes nothing; the snapshot it did not
 take is released (`release_snapshot`). The writer works on the snapshot, so an edit made while it runs does not enter the file;
