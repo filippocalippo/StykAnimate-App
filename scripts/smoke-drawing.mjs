@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import zlib from 'node:zlib';
 // Desktop drawing smoke: paint with real input in the Electron app (brush,
 // smudge, shapes, gradient, selection + filter), save natively, restart the
 // process, reopen the file and compare every cel pixel-for-pixel.
@@ -10,11 +11,17 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const output=path.join(root,'artifacts','drawing-desktop'),profile=path.join(output,`profile-${Date.now()}`),file=path.join(output,`drawing-${Date.now()}.styk`);
 await mkdir(profile,{recursive:true});
 await writeFile(path.join(profile,'telemetry-state.json'),JSON.stringify({decided:true,consent:{analytics:false,diagnostics:false,policyVersion:'2026-09-10',updatedAt:Date.now()}}));
+// The pixels of a PNG the page was captured as (8-bit RGB or RGBA): what the stage really shows, not what the cel holds.
+const decodePng=buffer=>{let at=8,width=0,height=0,type=0;const data=[];while(at<buffer.length){const length=buffer.readUInt32BE(at),kind=buffer.toString('ascii',at+4,at+8);if(kind==='IHDR'){width=buffer.readUInt32BE(at+8);height=buffer.readUInt32BE(at+12);type=buffer[at+17];}if(kind==='IDAT')data.push(buffer.subarray(at+8,at+8+length));at+=12+length;}
+  const bpp=type===6?4:3,raw=zlib.inflateSync(Buffer.concat(data)),stride=width*bpp,out=Buffer.alloc(height*stride);
+  for(let y=0;y<height;y++){const filter=raw[y*(stride+1)];for(let x=0;x<stride;x++){const v=raw[y*(stride+1)+1+x],a=x>=bpp?out[y*stride+x-bpp]:0,b=y?out[(y-1)*stride+x]:0,c=x>=bpp&&y?out[(y-1)*stride+x-bpp]:0;
+    const p=a+b-c,pa=Math.abs(p-a),pb=Math.abs(p-b),pc=Math.abs(p-c);out[y*stride+x]=(v+(filter===0?0:filter===1?a:filter===2?b:filter===3?(a+b>>1):(pa<=pb&&pa<=pc?a:pb<=pc?b:c)))&255;}}
+  return {width,height,bpp,data:out};};
 const checks=[],errors=[];
 const check=(name,value=true)=>{assert.ok(value,name);checks.push(name);console.log('PASS',name);};
 let app;
 const launch=async()=>{
-  app=await electron.launch({args:[root],cwd:root,timeout:45000,env:{...process.env,STYK_USER_DATA_DIR:profile,STYK_LIBRARY_DIR:path.join(profile,'library')}});
+  app=await electron.launch({args:[root],cwd:root,timeout:45000,env:{...process.env,STYK_USER_DATA_DIR:profile,STYK_LIBRARY_DIR:path.join(profile,'library'),STYK_BACKGROUND_WINDOW:'1'}});
   app.process().stderr.on('data',data=>process.stderr.write(data));
   await app.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});dialog.showMessageBox=async()=>({response:1});},file);
   const page=await app.firstWindow();page.on('pageerror',error=>errors.push(error.message));
@@ -36,10 +43,22 @@ try{
   const box=await page.locator('#viewport').boundingBox(),cx=box.x+box.width/2,cy=box.y+box.height/2;
   const stroke=async points=>{await page.mouse.move(points[0].x,points[0].y);await page.mouse.down();for(const p of points.slice(1))await page.mouse.move(p.x,p.y,{steps:5});await page.mouse.up();await page.waitForFunction(()=>!styk.drawing.gesture&&!styk.drawing.loading);};
   const alphaAt=(x,y)=>page.evaluate(({x,y})=>{const d=styk.drawing,t=styk.editor.drawingTarget();if(!t.figure)return 0;const p=d.pixel({clientX:x,clientY:y},t);return d.owner.entry(t.figure).store.pixel(Math.floor(p.x),Math.floor(p.y))[3];},{x,y});
+  // Dark pixels in a square of the page the stage draws in: the ink as the person sees it.
+  // (A whole-page capture: a capture of a small clip of a window can leave out what the graphics device draws.)
+  // The stage as the person sees it: a capture of the page (in device pixels: the page may be scaled). A window that is not on
+  // show composites a frame some time after the stage drew it, so a capture is taken again until a square of the page differs
+  // from `base` (a capture taken before the change) in more than `enough` pixels, at most 6 s: a stage that never draws the
+  // change is told from one that is slow.
+  const stage=async()=>decodePng(await page.screenshot());
+  const changedAt=async(base,x,y,enough=40)=>{const scale=await page.evaluate(()=>devicePixelRatio);let n=0;for(const started=Date.now();;){const now=await stage();n=0;for(let j=Math.max(0,Math.round(y*scale)-12);j<Math.min(now.height,Math.round(y*scale)+12);j++)for(let i=Math.max(0,Math.round(x*scale)-12);i<Math.min(now.width,Math.round(x*scale)+12);i++){const at=(j*now.width+i)*now.bpp;if(Math.abs(now.data[at]-base.data[at])+Math.abs(now.data[at+1]-base.data[at+1])+Math.abs(now.data[at+2]-base.data[at+2])>60)n++;}if(n>enough||Date.now()-started>6000)return n;await page.waitForTimeout(250);}};
   // Brush strokes through real pointer input.
   await page.locator('[data-tool="drawing-brush"]').click();await page.locator('[data-draw-preset="ink"]').click();
+  const blank=await stage();
   await stroke([{x:cx-300,y:cy},{x:cx,y:cy-40},{x:cx+300,y:cy}]);
   check('a brush stroke paints in the desktop app',await alphaAt(cx,cy-40)===255||await alphaAt(cx,cy-38)===255);
+  await page.waitForTimeout(400);
+  const inked=await changedAt(blank,cx,cy-40);
+  check(`the stage shows the brush stroke (${inked} pixels of 576 changed where it was painted)`,inked>40);
   await page.locator('[data-draw-preset="blender"]').click();await stroke([{x:cx-100,y:cy-27},{x:cx-100,y:cy+40}]);
   check('the smudge brush drags paint',await alphaAt(cx-100,cy+25)>0);
   await page.keyboard.press('u');await page.evaluate(()=>Object.assign(styk.drawing.settings,{shapeKind:'ellipse',shapeFill:true,color:'#d04020',opacity:1}));
@@ -82,8 +101,12 @@ try{
   await onStage('redo');
   // Second frame with its own drawing.
   await page.locator('[data-tool="drawing-brush"]').click();await page.locator('[data-draw-preset="ink"]').click();await page.evaluate(()=>styk.drawing.action('next-blank'));await page.waitForTimeout(200);
+  const nothingYet=await stage();
   await stroke([{x:cx-200,y:cy-150},{x:cx+200,y:cy+150}]);
   await onStage('the first stroke of a new frame');
+  // The stage, not the cel: a new cel's live page must be mapped for its tiles to be read (a document with pages of pictures
+  // already, or a texture with room already, once left it out and the stroke never showed).
+  check('the stage shows the first stroke of a new cel',await changedAt(nothingYet,cx-100,cy-75)>40);
   // A turned and mirrored view: strokes, an erase and its undo are drawn by the stage in the right place.
   await page.evaluate(()=>{styk.drawing.propertySet('draw-viewAngle',35);styk.drawing.action('flip-view');});await page.waitForTimeout(300);
   check('the Draw view is turned and mirrored',await page.evaluate(()=>Math.abs(styk.state.view.rotation-35*Math.PI/180)<1e-6&&styk.state.view.flip===true));

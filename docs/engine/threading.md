@@ -25,7 +25,12 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   atlas places it uploaded (`Uploaded`); a frame drawn while some picture it shows is
   still on its way is drawn again once it can be shown (`Stage::pictures_pending`:
   on the next frame for pictures decoded and waiting, else after the progress counter
-  advances; `waitForPictures` in `engine-stage.mjs`).
+  advances; `waitForPictures` in `engine-stage.mjs`). A document with more sprite pages than the stage's texture keeps
+  (`Engine::atlas_pages`) is not decoded whole: the workers make the soft copy of each picture as the document opens (`Picture::Soft`),
+  the stage asks for the pictures a frame draws (`Engine::decode_images`, ahead of the queue, three at a time) and for those of
+  the ticks playback and the person are about to reach (the table `Engine::picture_row` reads, made by `Engine::spawn_idle`
+  tasks that run after everything else), and draws a frame soft where a picture is not in yet
+  ([memory.md](memory.md#pages-kept-against-a-budget-soft-copies-in-their-place)).
 - `styk-wasm`: `EngineHandle` (commands and queries over wasm-bindgen),
   `Stage` (a wgpu surface on a canvas, edit frames and ghosts, prepared
   frames), `worker_run` (a worker's loop).

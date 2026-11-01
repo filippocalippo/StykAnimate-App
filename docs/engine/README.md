@@ -25,6 +25,13 @@ Commands: `npm run engine:build`, `npm run engine:test` (seconds once built),
 (one benchmark run; `scripts/engine-bench-matrix.sh` for rounds) and
 `npm run engine:bench:summary <label>`.
 
+Native measurements of an interaction, by phase (a measurement, not a check; they print and assert nothing about speed):
+`styk stepbench <file> <tick> [steps]` times a drag step (build, encode and place, with onion skins);
+`STYK_BENCH_DOC=<file> STYK_BENCH_TICK=<tick> cargo test --release -p styk-engine --test commit_bench -- --ignored --nocapture`
+times a pose drag, its commit, an undo and a redo as the stage shows them (the session call, the frame and the onion skins after it, the
+draw), with `STYK_EDIT_PROFILE=1` adding where the session call spends its time (`styk_edit::prof`). `styk prims <file> [tick…]` lists
+what a frame is made of.
+
 ## Fixtures
 
 The JavaScript engine is no longer the oracle. What it produced while it was is kept as **frozen

@@ -218,10 +218,109 @@ shelf of the current page in the best free space an earlier page left, before op
 (`styk_eval::assets::pack`; a layout within one page is unchanged). About 200 to 300 MiB of the GPU process is named by no counter, in every document (the empty app's 281–404 MiB is not itemised
 either); the layer and glyph targets grow with play.
 
-Left: pages are allocated for the whole layout while the pictures are uploaded over two seconds, and nothing is
-evicted; a picture resident only while frames use it (re-uploaded from its encoded bytes), or a smaller level of a picture
-shown small, would bring the atlas under the pictures a frame samples, at the cost of the rules for a picture that is
-not there yet (`Stage::pictures_pending`). A picture shown at 4K on a 4K display cannot be reduced.
+### Pages kept against a budget, soft copies in their place
+
+A document whose layout has more than `ATLAS_PAGES` (4) pages is not held whole (`styk_engine::Residency`,
+`styk-wasm/src/stage/pictures.rs`). Measured on tdd2 (`styk pages`: the layout's pages each frame draws from, over 589 ticks):
+one frame draws from at most 3 of its 20 pages (0.4 on average), and the 48 frames after one from 4.7 on average, 18 at most.
+The stage's sprite texture has `ATLAS_PAGES` layers (256 MiB; `Engine::atlas_pages`, `EngineHandle::set_atlas_pages` before a
+document opens), and:
+
+- **Every picture has a soft copy**, always resident: its premultiplied pixels averaged over the 8 × 8 blocks of its atlas page
+  (`styk_eval::assets::soften_image`, so it lines up with the picture wherever it lies) in a second array texture with the
+  same layout, one texel to 8 of the page's, 2 × 2 pages to a 1,024² layer (`soft_sprites` in prim.wgsl; 20 MiB for tdd2's 116
+  pictures). It is made as the document opens, on the workers, one picture at a time under the picture budget (the full
+  pixels are dropped as soon as the average is taken, so the module's high-water mark is that of decoding one picture),
+  by a `Picture::Soft` decode in place of the `Picture::Image` one a document held whole gets.
+- **The shader asks the picture table**, a hash table of one entry per picture (`PictureState` in `styk-render/src/pictures.rs`: corner,
+  page, layer + 1; the same hash and at most 16 probes in the shader and on the CPU, `picture_layer`), which layer of the sprite texture
+  holds the picture, and draws its soft copy where the answer is none. A picture is put in the table (`Renderer::set_picture`)
+  after its last pixel was uploaded, so the change from soft to sharp is one frame: it draws soft, then sharp, never blank
+  and never half a picture. A renderer that holds the whole layout (exports, previews, the CPU parity tests, a document of up
+  to `ATLAS_PAGES` pages) has every picture in the table at its own page's layer and never draws a soft copy. The soft atlas
+  and the table are one more texture and one more binding (D8: textures with `textureLoad` and the one sampler; D11: array
+  textures of two layers or more); WebGL2 ran this on software rendering.
+- **The unit of residency is the page, the unit of loading the picture.** A page is given a layer when a picture on it is wanted;
+  the page whose next use is the farthest (from the table below, else the least recently shown) leaves. The pictures a frame
+  draws are decoded (`Engine::decode_images`, ahead of the queue, three at a time across the workers, `DEMAND_DECODES` times the picture
+  budget; one asked for earlier behind the queue, as a tick ahead's or a thumbnail's, is moved ahead when a frame waits for it:
+  `Engine::promote_images`) and uploaded whole at once; the others a slice of 8 MiB a frame (a 4K picture goes in over eight frames,
+  `Renderer::upload_rows`). The pages of the frame being drawn are never taken, so a frame that draws from more pages than there
+  are layers makes the texture grow (once, by a copy: the budget is soft only in that case).
+- **A table of what each tick draws** (`Engine::request_picture_table`, `picture_table.rs`) is made on the workers when nothing
+  else waits (`Engine::spawn_idle`: after frames and pictures): each tick is evaluated and encoded as the stage's frame is
+  (culled to the artboard, so a picture only an off-artboard part draws is not one a layer is wanted for), and the
+  pictures its draw list names are kept. Playback loads the pictures of the next 72 ticks from it, nearest first
+  (`Stage::pictures_ahead`), and the interface tells the stage the tick the person went to (`Stage::hint_tick`, from
+  `engine-stage.mjs`) so the pictures of the 12 ticks on each side load too; the same rows say which pages are needed soonest, which
+  pages stay. A table belongs to one revision: an edit makes the next one when asked for.
+- **A frame draws when every picture it shows is in or has its soft copy**; the sharp pictures of a frame drawn soft are uploaded
+  whole as soon as they are decoded and the frame is drawn again (`pictures_pending`, `waitForPictures`). A picture without a soft
+  copy yet (a document just opened) makes the frame wait, the picture on show stays (the rule for pictures still on their way).
+  A picture that cannot be decoded is not waited for; one the engine refused for want of memory is asked for again three
+  times. Pixels of a picture whose page left while it was decoded are not written (`styk_engine::has_place`): the rows already
+  written would be missing from the picture when its page is given a layer again.
+- **Where the soft copy is seen**: the stage's frame while a picture is not in, and its camera monitor (which shares the stage's
+  textures and table, so while the stage waits it draws the soft copy, not a blank). Never in an export, a preview or a saved
+  file: those hold their own renderers, whole-layout ones. A frame thumbnail on the stage's device
+  (`Stage::pictures_ready_for_view`) follows the same rule as a far jump, soft first, then sharp: it is drawn at once, a picture
+  that is not in the texture from its soft copy, and `render_thumbnail` answers 3 (`soft`) instead of 0; the interface shows it,
+  does not keep it (the filmstrip neither caches it nor marks the card painted, the export dialog's previews draw it again for a few
+  seconds) and asks again until the answer is `drawn`: a thumbnail that is kept is every picture sharp, so it is the pixels of a
+  whole-layout draw. The sharp pictures are loaded in a **pool of layers of their own** (`Residency::acquire_spare`, `Stage::request_view_pictures`),
+  made when a thumbnail first needs one, so a thumbnail gets its pictures whatever the stage's frame holds (when that is every
+  layer, the thumbnails would otherwise wait for the playhead to move): a layer the texture has free is used first (the stage's
+  loads take it back like any page's, it is not the pool's), then thumbnails take turns on the pool, the next one's pages taking the
+  place of the least recently used page that is not one of its own (the pages of **every** picture the thumbnail draws, those sharp
+  already too: a thumbnail's pages never take each other's place, or a view of two pages would swap them for ever), and the pool is as
+  large as the most pages one thumbnail needed at once that were not in a layer already (a frame spread over three new pages makes
+  three layers). Nothing of the frame on show or of the
+  ticks loaded ahead of it is ever taken for a view, and the stage's own loads never take a pool layer (a page of the pool the frame on
+  show comes to draw from is used where it is). A person who never has a thumbnail drawn pays nothing; one who does pays one
+  layer (64 MiB at 4,096²) for as long as the document is open. A picture without a soft copy yet waits for it (a picture that cannot be
+  decoded is not waited for). A thumbnail drawn by the preview worker is always sharp.
+- **The table follows the layout**: `Renderer::sync_pictures` runs on every frame (`Stage::sync_atlas`) and makes the table (and the
+  soft atlas) know every picture of the layout drawn, whatever the page count: a revision that appends a picture to a page that was
+  there is a layout with one more picture, not one more page. The preview worker and the export device key their atlas by the
+  number of pictures too. A renderer holding the whole layout has the new picture in the table at its page's layer; a resident one
+  has it soft until its pixels are in.
+- **A layout of more than 1,024 pages** (`MAX_PAGES`, 64 GiB of pictures) has no row for the pages beyond: their pictures are not
+  loaded (counted as lost), the table has no entry for them and the shader draws nothing for them (never another page's picture).
+- Drawing cels' pages (decoded with the document) and the live drawing slots keep their layers for good.
+
+Measured on 2026-10-31 on tdd2 with release builds (one run each, an off-screen app run beside other agents' builds: directional;
+a jump is a seek to a far tick until the app paints it, a drag ends at the last tick, `soft` is the number of frames drawn with
+the soft copy of some picture; GPU process private bytes in MiB, the empty app's is 390–408):
+
+| atlas layers | jump to a drawn frame p50 / p90 / worst (ms) | drag end (ms) | playCold: late frames, over 100 ms, worst (ms), `soft` | playWarm: same | GPU settled | GPU after play |
+| --- | --- | --- | --- | --- | ---: | ---: |
+| whole layout (20 pages, no soft copies) | 36–44 / 74–84 / 232–243 | 22–39 | 1, 0, 65 | 0, 0, 49 | 1,946 | 1,782–1,784 |
+| 12 (least recently shown leaves) | 53 / 101 / 227 | 16–28 | 0, 0, 57, 0 | 0, 0, 52, 0 | 1,361 | 1,282–1,301 |
+| 6 | 52 / 100 / 233 | 22–33 | 0, 0, 62, 0 | 0, 0, 55, 0 | 975 | 911–921 |
+| 4 (default) | 61 / 111 / 291 | 28–47 | 1, 0, 78, 1 | 0, 0, 46, 1 | 842 | 753–774 |
+| 3 | 67 / 127 / 291 | 25–27 | 1, 0, 65, 1 | 0, 0, 58, 1 | not read | 784–808 |
+
+**Where a far jump's time goes** (release build, `tdd2`, 48 jumps across the animation, three runs each of 4 layers and the whole layout, probe
+slot beside other jobs): the first frame is drawn 27–42 ms (p50), 59–77 ms (p90) after the seek with 4 layers and 34–41, 65–70 with the whole
+layout, and 15–24 ms after a fast drag ends against 22–25. Nearly all of it is the first `render_edit` call, which evaluates the pose
+of the tick and encodes its draw list on the interface thread (10–60 ms for 263 figures, the same in both), after about 14 ms of editor work
+before the stage is asked; what the pictures add to the frame is `syncMs` ≤ 1.4, `readyMs` ≤ 0.4 and `hintMs` ≤ 0.2 (p95), with a draw 1 ms longer.
+A far jump draws soft at once; the sharpening redraws that follow (about ten a jump, one slice of a picture each) are not in the first frame.
+Before this was measured, the idle work that makes the table of what each tick draws advanced the engine's progress counter, which wakes every
+waiter, and the pictures of a frame drawn soft were uploaded whole inside whichever frame came next.
+
+Memory with the document open, settled, 3,497 MiB (whole layout) to 2,315 MiB (4 layers) for the whole app. 3 layers grow to 4 as
+soon as a frame draws from four pages (tdd2: the edit frame with onion skins); 4 is what 3 settles at. A texture whose
+last handle is dropped is not given back by the browser until it collects it: a sprite texture that was replaced
+(the growth above, another document) is `destroy`ed once its texels are copied (two growths once kept 960 MiB beyond the
+atlas). The 280 to 400 MiB of the GPU process that no counter names is in the empty app already (the stage's own
+allocations there are 12 MiB of targets); this change does not name it (hypothesis: the driver and the browser's device and
+pipelines).
+
+The whole layout's jump times are those of a document with every picture on the GPU. With soft copies a jump draws at once whatever
+the number of layers: the first frame after a far jump is soft (29 to 44 of the 48 jumps) and sharp a few frames later, when its
+pictures (100 to 300 ms of decoding a 4K picture, three at a time) are in. Before eviction chose the page needed farthest ahead
+(least recently shown first), 6 layers showed a soft picture in 11 of 241 frames of playback; with it, in none.
 
 ## When the memory cannot hold the work
 
