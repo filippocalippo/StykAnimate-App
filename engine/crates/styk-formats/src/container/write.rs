@@ -90,8 +90,10 @@ struct Lifter<'a> {
     /// Bytes of each section already handed out ([`ViewLifter`]); markers name absolute offsets.
     arrays_base: usize,
     payloads_base: usize,
-    /// Arrays already stored, by identity: an array shared by several records is stored once.
-    seen_arrays: HashMap<*const Nums, (String, usize)>,
+    /// Arrays already stored, by identity: an array shared by several records is stored once. The identity is the address of the array
+    /// the document holds (a packed `Nums`, or an ordinary array of numbers), which lives as long as the document does: never the address of
+    /// something made here for a moment, that the next one made would take over.
+    seen_arrays: HashMap<usize, (String, usize)>,
     /// Payloads already stored, by content.
     seen_payloads: HashMap<Arc<[u8]>, (usize, usize)>,
     /// Payloads the caller reserved at the start of the payload section, by identity.
@@ -117,6 +119,8 @@ struct Lifter<'a> {
 enum Hole {
     /// A numeric array that is stored in the arrays section (or named by the marker of the copy stored before).
     Array(Arc<Nums>),
+    /// The same for an ordinary array that holds only numbers.
+    Plain(Arc<Vec<Value>>),
     /// A payload (an image or an original source) and the text before its base64 (empty for a bare string).
     Payload { prefix: String, bytes: Arc<[u8]> },
 }
@@ -206,6 +210,7 @@ impl Lifter<'_> {
             at = position;
             match hole {
                 Hole::Array(numbers) => self.numbers(&numbers)?,
+                Hole::Plain(items) => self.plain_numbers(&items)?,
                 Hole::Payload { prefix, bytes } => self.payload(&prefix, &bytes)?,
             }
         }
@@ -304,7 +309,20 @@ impl Lifter<'_> {
     }
 
     fn numbers(&mut self, numbers: &Arc<Nums>) -> Result<(), ContainerError> {
-        if let Some((marker, upper)) = self.seen_arrays.get(&Arc::as_ptr(numbers)) {
+        self.numbers_at(Arc::as_ptr(numbers) as usize, numbers, || Hole::Array(numbers.clone()))
+    }
+
+    /// An ordinary array that holds only numbers (a packed one that was unpacked to be edited) follows the numeric rules: it is stored as
+    /// the numbers of a packed array are, and it is told apart from the others by its own address, as the arrays of the JavaScript writer
+    /// were by theirs. The packed copy made here to write its numbers is gone before the next array is written, so its address says nothing.
+    fn plain_numbers(&mut self, items: &Arc<Vec<Value>>) -> Result<(), ContainerError> {
+        let packed = Nums::new(&items.iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>());
+        self.numbers_at(Arc::as_ptr(items) as usize, &packed, || Hole::Plain(items.clone()))
+    }
+
+    /// Stores `numbers`, the array that the document holds at `identity`; `hole` is what a piece leaves for the splice to settle in order.
+    fn numbers_at(&mut self, identity: usize, numbers: &Nums, hole: impl FnOnce() -> Hole) -> Result<(), ContainerError> {
+        if let Some((marker, upper)) = self.seen_arrays.get(&identity) {
             let (marker, upper) = (marker.clone(), *upper);
             self.admit_estimate(upper);
             json::write_string(&marker, &mut self.out);
@@ -329,7 +347,7 @@ impl Lifter<'_> {
             return Ok(());
         };
         if let Some(holes) = &mut self.holes {
-            holes.push((self.out.len(), Hole::Array(numbers.clone())));
+            holes.push((self.out.len(), hole()));
             return Ok(());
         }
         let upper = 2 + (count - 1) + count * MAX_JSON_NUMBER_BYTES;
@@ -352,7 +370,7 @@ impl Lifter<'_> {
         self.check_allocation()?;
         let marker = format!("S2B:{name}:0:{offset}:{count}");
         json::write_string(&marker, &mut self.out);
-        self.seen_arrays.insert(Arc::as_ptr(numbers), (marker, upper));
+        self.seen_arrays.insert(identity, (marker, upper));
         Ok(())
     }
 
@@ -410,8 +428,7 @@ impl Lifter<'_> {
             Value::Arr(items) => {
                 // An unpacked array that happens to hold only numbers follows the numeric rules.
                 if items.len() >= LIFT_MIN_ARRAY && items.iter().all(|v| matches!(v, Value::Num(_))) {
-                    let packed = Arc::new(Nums::new(&items.iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>()));
-                    return self.numbers(&packed);
+                    return self.plain_numbers(items);
                 }
                 self.admit(2 + items.len().saturating_sub(1))?;
                 self.out.push(b'[');
