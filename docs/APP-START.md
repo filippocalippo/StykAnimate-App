@@ -37,3 +37,14 @@ A change in a module reaches a packaged app through the bundle: a script that lo
 needs the module as an entry (`PAGE_ENTRIES` in `scripts/build-app.mjs`), or it gets its own copy.
 
 Identifiers are minified, so a stack trace from a packaged app names minified functions; build with `npm run app:bundle` and read the source for a position.
+
+## The stage's wait for the graphics process
+
+Marks across a launch (bundled app, fresh profile, a quiet machine; page milliseconds) put the stage's creation at about 0.55 s and its end at about 1.9 s. Its
+three calls to the browser (`requestAdapter` for the detection wgpu does, `requestAdapter` and `requestDevice`) took 0.7 s, 0.4 s and 0.08 s, but the same calls in a bare window
+take 0.15 s, 0 s and 0.05 s, and leaving out the detection request changed nothing. The graphics process's one main thread was busy: a trace showed it
+rasterizing the interface (`RasterDecoderImpl::DoEndRaster`, 0.36 s and then 0.41 s, compiling shaders on a cold cache) while the stage's WebGPU commands
+waited behind it. Windows therefore rasterizes the interface on the CPU (`desktop/gpu-switches.cjs`; `STYK_GPU_RASTER=1` restores Chromium's choice):
+stage ready 1.8 s against 2.6 s (median of five interleaved launches; every pair faster), on a warm profile 1.5 to 1.8 s against 2.3 to 3.1 s.
+Pictures of Home and the editor differ from the GPU-rasterized ones in 15 to 21 % of their pixels by one level on average (text and gradient
+edges), 0.03 % by more than sixteen levels. Disabling accelerated 2D canvas changed nothing. The stage and the compositor stay on the GPU.

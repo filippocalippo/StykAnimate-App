@@ -18,12 +18,17 @@ test('Linux opts in to WebGPU through Vulkan without any environment variable', 
   assert.deepEqual(gpuSwitches({platform: 'linux', env: {}}), {switches: ['enable-unsafe-webgpu'], features: ['Vulkan'], ozone: null});
 });
 
-test('Windows and macOS keep Chromium defaults', () => {
-  for (const platform of ['win32', 'darwin']) assert.deepEqual(gpuSwitches({platform, env: {}}), {switches: [], features: [], ozone: null});
+test('macOS keeps Chromium defaults', () => {
+  assert.deepEqual(gpuSwitches({platform: 'darwin', env: {}}), {switches: [], features: [], ozone: null});
+});
+
+test('Windows rasterizes the interface on the CPU, unless STYK_GPU_RASTER=1', () => {
+  assert.deepEqual(gpuSwitches({platform: 'win32', env: {}}), {switches: ['disable-gpu-rasterization'], features: [], ozone: null});
+  assert.deepEqual(gpuSwitches({platform: 'win32', env: {STYK_GPU_RASTER: '1'}}).switches, []);
 });
 
 test('STYK_GPU_UNSAFE=1 still forces the opt-in on every platform', () => {
-  assert.deepEqual(gpuSwitches({platform: 'win32', env: {STYK_GPU_UNSAFE: '1'}}), {switches: ['enable-unsafe-webgpu'], features: [], ozone: null});
+  assert.deepEqual(gpuSwitches({platform: 'win32', env: {STYK_GPU_UNSAFE: '1'}}), {switches: ['enable-unsafe-webgpu', 'disable-gpu-rasterization'], features: [], ozone: null});
   assert.deepEqual(gpuSwitches({platform: 'darwin', env: {STYK_GPU_UNSAFE: '1'}}).switches, ['enable-unsafe-webgpu']);
 });
 
@@ -47,9 +52,12 @@ test('the command line receives the switches and merges user features instead of
 });
 
 test('nothing is appended where no switch is needed', () => {
+  const mac = commandLine();
+  applyGpuSwitches(mac, {platform: 'darwin', env: {}});
+  assert.equal(mac.values.size, 0);
   const windows = commandLine();
   applyGpuSwitches(windows, {platform: 'win32', env: {}});
-  assert.equal(windows.values.size, 0);
+  assert.deepEqual([...windows.values.keys()], ['disable-gpu-rasterization']);
 });
 
 test('a Wayland session runs through XWayland, because Chromium cannot present Vulkan on Wayland', () => {

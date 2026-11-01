@@ -15,6 +15,12 @@
 // Chromium's own driver allowlist untouched everywhere (useful when diagnosing
 // a driver problem).
 
+// Windows draws the interface on the CPU. Rasterizing the page on the graphics process compiles its shaders on the first launch
+// of a profile, and that work and the stage's WebGPU device share the process's one main thread: the stage was ready
+// 0.5 to 1.1 s sooner with the interface rasterized on the CPU (docs/APP-START.md), on a warm shader cache too. The stage itself,
+// the compositor and canvas drawing stay on the GPU. STYK_GPU_RASTER=1 brings Chromium's choice back.
+const CPU_RASTER_PLATFORMS = ['win32'];
+
 const LINUX_FEATURES = ['Vulkan'];
 
 // Chromium's Wayland surface cannot present Vulkan-backed content: with the
@@ -35,9 +41,10 @@ function gpuSwitches({ platform = process.platform, env = process.env } = {}) {
   const forced = env.STYK_GPU_UNSAFE;
   if (forced === '0') return { switches: [], features: [], ozone: null };
   const enable = forced === '1' || platform === 'linux';
+  const cpuRaster = CPU_RASTER_PLATFORMS.includes(platform) && env.STYK_GPU_RASTER !== '1';
   const features = platform === 'linux' ? [...LINUX_FEATURES] : [];
   return {
-    switches: enable ? ['enable-unsafe-webgpu'] : [],
+    switches: [...(enable ? ['enable-unsafe-webgpu'] : []), ...(cpuRaster ? ['disable-gpu-rasterization'] : [])],
     features,
     ozone: ozonePlatform({ platform, env, features }),
   };
