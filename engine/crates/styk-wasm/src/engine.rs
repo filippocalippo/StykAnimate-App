@@ -192,21 +192,27 @@ impl EngineHandle {
     /// allocator), `peakBytes` (the most at once since the last [`EngineHandle::reset_memory_peak`]),
     /// `reservedBytes` (set aside by work in progress), `ceilingBytes` (what requests may reach before they are
     /// refused), and what the engine holds of it: `imagesReadyBytes` (decoded pictures waiting for the
-    /// renderer), `frameCacheBytes`, and `picturesRefused` (pictures not decoded for want of memory).
+    /// renderer), `frameCacheBytes`, and `picturesRefused` (pictures not decoded for want of memory); and the allocator's lock since the
+    /// module started: `lockHolds` (times it was taken), `lockContended` (times a thread found it held) and `lockSleeps` (of those, the
+    /// times the thread went to sleep on it).
     pub fn memory(&self) -> String {
         #[cfg(target_arch = "wasm32")]
         let heap = std::arch::wasm32::memory_size::<0>() * styk_alloc::PAGE_BYTES;
         #[cfg(not(target_arch = "wasm32"))]
         let heap = 0;
+        let locks = styk_alloc::lock_counts();
         format!(
-            "{{\"heapBytes\":{heap},\"liveBytes\":{},\"peakBytes\":{},\"reservedBytes\":{},\"ceilingBytes\":{},\"picturesRefused\":{},\"imagesReadyBytes\":{},\"frameCacheBytes\":{}}}",
+            "{{\"heapBytes\":{heap},\"liveBytes\":{},\"peakBytes\":{},\"reservedBytes\":{},\"ceilingBytes\":{},\"picturesRefused\":{},\"imagesReadyBytes\":{},\"frameCacheBytes\":{},\"lockHolds\":{},\"lockContended\":{},\"lockSleeps\":{}}}",
             styk_alloc::live_bytes(),
             styk_alloc::peak_bytes(),
             styk_alloc::reserved_bytes(),
             styk_alloc::ceiling(),
             self.engine.pictures_refused(),
             self.engine.try_images_ready_bytes().map_or(-1, |bytes| bytes as i64),
-            self.engine.try_frame_stats().map_or(-1, |stats| stats.cached_bytes as i64)
+            self.engine.try_frame_stats().map_or(-1, |stats| stats.cached_bytes as i64),
+            locks.0,
+            locks.1,
+            locks.2
         )
     }
 
