@@ -36,7 +36,9 @@ A bundle named by `STYK_BUNDLE_DIR` that is missing stops the app from starting.
 A change in a module reaches a packaged app through the bundle: a script that loads source modules by URL and shares state with the application (as the benchmark does for the engine)
 needs the module as an entry (`PAGE_ENTRIES` in `scripts/build-app.mjs`), or it gets its own copy.
 
-Identifiers are minified, so a stack trace from a packaged app names minified functions; build with `npm run app:bundle` and read the source for a position.
+The scripts are not minified: five interleaved runs each gave the same ready time (1,100 ms against 1,095) and DOMContentLoaded (374 against 405 ms) for 1.5 MB less, and a stack trace keeps its function names. esbuild keeps legal comments at the end of a script, and a vendored library's licence header is turned into one, so opentype.js's MIT notice stays in the bundle beside `vendor/text/opentype.LICENSE` and `THIRD_PARTY_NOTICES.md`, which ship with the web assets.
+
+**Crash reports.** `sanitizeError` (`src/telemetry-schema.mjs`) names only allowlisted module basenames and lines. Bundled, a frame would be `chunk-HASH.mjs:LINE`, which is not on the list, or `app.mjs` at a line of the bundle. The build therefore reads each script's source map once (`frameTable` in `scripts/build-app.mjs`), writes the lines that came from allowlisted modules as `[module, last line, bundle line, source line, ...]` runs, and deletes the maps. The page loads the tables as a classic script (`src/frame-map.js`) before any module; a worker has its own at the start of its first line. A frame is then reported as the module and its source line, as it would be unbundled.
 
 ## The stage's wait for the graphics process
 
