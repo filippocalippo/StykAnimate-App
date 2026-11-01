@@ -12628,7 +12628,7 @@
   },
   "errors.codecWebHost.theCodecJobWasCancelled": {
     "locations": [
-      "src/codec-web-host.mjs:54"
+      "src/codec-web-host.mjs:62"
     ],
     "context": "if (!job) throw messageError(new DOMException('', 'AbortError'), \"errors.codecWebHost.theCodecJobWasCancelled\", {});"
   },
@@ -12790,8 +12790,8 @@
   "errors.documentExportWorker.theFileServiceReturnedAnInvalidSourceRecord": {
     "locations": [
       "src/import-client.mjs:97",
-      "src/import-worker.mjs:74",
-      "src/import-worker.mjs:152",
+      "src/import-worker.mjs:75",
+      "src/import-worker.mjs:153",
       "src/source-record.mjs:5"
     ],
     "context": "request.reject(messageError(new Error(''), 'errors.documentExportWorker.theFileServiceReturnedAnInvalidSourceRecord', {}));"
@@ -14517,7 +14517,7 @@
   },
   "errors.importClient.chooseAProjectFromTheLibrary": {
     "locations": [
-      "src/import-client.mjs:309"
+      "src/import-client.mjs:312"
     ],
     "context": "if (typeof path !== 'string' || !path) throw messageError(new Error(''), \"errors.importClient.chooseAProjectFromTheLibrary\", {});"
   },
@@ -14529,15 +14529,15 @@
   },
   "errors.importClient.chooseAStykProjectStkzFigureStykmovMovieclip": {
     "locations": [
-      "src/import-client.mjs:301"
+      "src/import-client.mjs:304"
     ],
     "context": "return Promise.reject(messageError(new Error(''), \"errors.importClient.chooseAStykProjectStkzFigureStykmovMovieclip\", {}));"
   },
   "errors.importClient.importSuperseded": {
     "locations": [
       "src/import-client.mjs:223",
-      "src/import-client.mjs:295",
-      "src/import-client.mjs:312"
+      "src/import-client.mjs:298",
+      "src/import-client.mjs:315"
     ],
     "context": "if(generation!==this.cancelGeneration)throw messageError(new DOMException('', 'AbortError'), \"errors.importClient.importSuperseded\", {});"
   },
@@ -14551,8 +14551,8 @@
     "locations": [
       "src/import-client.mjs:176",
       "src/import-client.mjs:214",
-      "src/import-client.mjs:308",
-      "src/import-client.mjs:326"
+      "src/import-client.mjs:311",
+      "src/import-client.mjs:329"
     ],
     "context": "if (this.disposed) return Promise.reject(messageError(new Error(''), \"errors.importClient.theFileImporterHasBeenDisposed\", {}));"
   },
@@ -14679,7 +14679,7 @@
   },
   "errors.importWorker.importFailed": {
     "locations": [
-      "src/import-client.mjs:316",
+      "src/import-client.mjs:319",
       "src/import-worker.mjs:47"
     ],
     "context": "const error=sample?.error?new Error(sample.error):messageError(new Error(''), 'errors.importWorker.importFailed', {status});"
@@ -14687,39 +14687,39 @@
   "errors.importWorker.serviceFailed": {
     "locations": [
       "src/import-worker.mjs:64",
-      "src/import-worker.mjs:129"
+      "src/import-worker.mjs:130"
     ],
     "context": "const error = messageError(new Error(''), 'errors.importWorker.serviceFailed', {status:response.status});"
   },
   "errors.importWorker.theFileServiceReturnedNoEditableDocument": {
     "locations": [
-      "src/import-worker.mjs:135"
+      "src/import-worker.mjs:136"
     ],
     "context": "if (!result || typeof result !== 'object' || !result.document) throw messageError(new Error(''), \"errors.importWorker.theFileServiceReturnedNoEditableDocument\","
   },
   "errors.importWorker.theImportedFileNeedsAFilename": {
     "locations": [
-      "src/import-worker.mjs:94"
+      "src/import-worker.mjs:95"
     ],
     "context": "if (typeof message.filename !== 'string') throw messageError(new Error(''), \"errors.importWorker.theImportedFileNeedsAFilename\", {});"
   },
   "errors.importWorker.theImporterDidNotReceiveTheCompleteFile": {
     "locations": [
       "src/import-worker.mjs:56",
-      "src/import-worker.mjs:84",
-      "src/import-worker.mjs:93"
+      "src/import-worker.mjs:85",
+      "src/import-worker.mjs:94"
     ],
     "context": "if (!(message.bytes instanceof ArrayBuffer)) throw messageError(new Error(''), \"errors.importWorker.theImporterDidNotReceiveTheCompleteFile\", {});"
   },
   "errors.importWorker.unknownImportOperation": {
     "locations": [
-      "src/import-worker.mjs:112"
+      "src/import-worker.mjs:113"
     ],
     "context": "} else throw messageError(new Error(''), \"errors.importWorker.unknownImportOperation\", {});"
   },
   "errors.importWorker.unreadableProject": {
     "locations": [
-      "src/import-worker.mjs:129"
+      "src/import-worker.mjs:130"
     ],
     "context": "const error = messageError(new Error(''), response.ok ? 'errors.importWorker.unreadableProject' : 'errors.importWorker.serviceFailed', {status:response.status})"
   },
@@ -15624,7 +15624,7 @@
   "errors.nativeContainer.embeddedOriginalSourceFingerprintDoesNotMatch": {
     "locations": [
       "src/import-client.mjs:252",
-      "src/import-worker.mjs:157"
+      "src/import-worker.mjs:158"
     ],
     "context": "if(await sha256(bytes)!==kept.sourceDescription.sha256)throw messageError(new Error(''), \"errors.nativeContainer.embeddedOriginalSourceFingerprintDoesNotMatch\","
   },
