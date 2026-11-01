@@ -114,6 +114,8 @@ contextBridge.exposeInMainWorld('stykDesktop', Object.freeze({
   savePublicLibraryAsset: options => ipcRenderer.invoke('styk:public-library-save', options),
   openPublicLibraryPage: id => ipcRenderer.invoke('styk:public-library-page', id),
   takePublicLibraryLink: () => ipcRenderer.invoke('styk:public-library-link'),
+  // The page's listeners for what the main process pushes (menu actions, the launch file) are on.
+  pageListening: () => ipcRenderer.invoke('styk:page-listening'),
   onPublicLibraryLink: callback => subscribe('styk:public-library-link', callback),
   getWorkspacePreferences: () => ipcRenderer.invoke('styk:workspace-preferences-get'),
   setWorkspacePreferences: (preferences) => ipcRenderer.invoke('styk:workspace-preferences-set', preferences),

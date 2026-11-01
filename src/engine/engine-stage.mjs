@@ -13,7 +13,7 @@
  * poses (only the objects whose geometry the editor rebuilt since the last frame): the first stroke on a blank
  * exposure, whose new cel the session does not hold yet. The onion skins are the session's as well.
  */
-import {loadEngine} from './engine.mjs';
+import {loadEngine, expectedAdapterInfo} from './engine.mjs';
 import {holdsRevision} from './engine-open.mjs';
 import {engineTicket} from './engine-playback.mjs';
 import {failEngine, engineRefusal} from './engine-failure.mjs';
@@ -123,7 +123,7 @@ export function uploadRemainingPictures(side, schedule = setTimeout) {
  */
 async function adapterName(stage) {
   try {
-    const info = (await globalThis.navigator?.gpu?.requestAdapter?.())?.info;
+    const info = (await expectedAdapterInfo()) ?? (await globalThis.navigator?.gpu?.requestAdapter?.())?.info;
     const name = [info?.vendor, info?.architecture, info?.device].filter(Boolean).join(' · ');
     if (name) return name;
   } catch { /* the engine's own name will do */ }
