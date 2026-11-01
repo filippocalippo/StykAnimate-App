@@ -13,6 +13,7 @@ import {showTimelineMenu} from './timeline-menu.mjs';
 import {clipsPlaying} from './vfx-clip-views.mjs';
 import {isGeneratorType} from './vfx-registry.mjs';
 import {savePresetFromClip} from './vfx-preset-ui.mjs';
+import {findFigureType} from './figure-types.mjs';
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clipNameMessage=c=>c.name||{messageKey:effectMessages[c.effects[0]?.type]?.nameKey||'vfxClipInspector.effects'};
@@ -32,7 +33,7 @@ export function filterVfxClips(editor,clips,{view='playhead',tick=0,selected=nul
 
 /** A beam aims at a stage point or locks onto a node picked on the stage. */
 function aimLabel(editor,p){
- const object=editor.evaluatedFrame?.objects.find(o=>o.unique_id===p.aimUid),figure=object&&editor.report.figure_types?.find(f=>f.figure_type_id===object.figure_type_id);
+ const object=editor.evaluatedFrame?.objects.find(o=>o.unique_id===p.aimUid),figure=object&&findFigureType(editor.report.figure_types, object.figure_type_id);
  return {messageKey:'vfxChannels.aimTarget',messageParams:{figure:figure?.name||{messageKey:'vfxChannels.figure',messageParams:{id:p.aimUid}},node:p.aimHandle?{messageKey:'vfxChannels.node',messageParams:{id:p.aimHandle}}:{messageKey:'vfxChannels.origin'}}};
 }
 function aimRow(host,clip,effect,locked){

@@ -1,6 +1,7 @@
 import {messageError} from './localized-error.mjs';
 import {DrawingWorker} from './drawing-worker-client.mjs';
 import {putField} from './lazy-payload.mjs';
+import {drawingFigures,figureForCel,figureRows,movieclipFigures} from './figure-types.mjs';
 
 import {DrawingPreviewCache} from './drawing-preview-cache.mjs';
 import {DrawingHistory} from './drawing-history.mjs';
@@ -21,7 +22,7 @@ export const entryUnpublished=entry=>Boolean(entry.store||entry.deferred?.length
 export async function drawingBarrier(report,options={}) {
   await owners.get(report)?.flush(options);
   const seen=options.seen??new Set();if(seen.has(report))return;seen.add(report);
-  for(let i=0;i<(report.figure_types?.length??0);i++){const figure=report.figure_types[i];if(figure._styk?.movieclip?.document)await drawingBarrier(figure._styk.movieclip.document,{...options,seen});}
+  for(const figure of movieclipFigures(report.figure_types)){if(figure._styk?.movieclip?.document)await drawingBarrier(figure._styk.movieclip.document,{...options,seen});}
   if(report._styk?.movieclipSource?.document)await drawingBarrier(report._styk.movieclipSource.document,{...options,seen});
 }
 /** Persistent stroke worker handle: one per DrawingResources so a heavy encode
@@ -75,7 +76,7 @@ export class DrawingResources {
       this.entries.delete(d.celId);this.surfaceVersion++;entry=null;
     }
     if(!entry){
-      external??=presentation&&!this.report.figure_types.some(f=>drawingMetadata(f)?.celId===d.celId);
+      external??=presentation&&figureForCel(this.report.figure_types,d.celId)===undefined;
       entry={id:d.celId,store:null,revision:d.revision,published:null,loading:null,decodeError:null,pinned:false,used:performance.now(),stamp:0,deferred:[],levels:null,levelsUsed:0,owner:this,
         ...(external?{external:true,sourceRevision:d.revision,sourceUrl:url}:{})};
       this.entries.set(d.celId,entry);
@@ -187,7 +188,7 @@ export class DrawingResources {
     for(const t of tiles??[]){const pixels=owned&&t.pixels instanceof Uint8ClampedArray?t.pixels:new Uint8ClampedArray(t.pixels);if(owned)store.adopt(t.tx,t.ty,pixels,t.alphaBounds);else store.set(t.tx,t.ty,pixels);}
     e.store=store;e.deferred=[];e.published=null;e.revision=drawingMetadata(figure).revision;e.stamp++;e.decodeError=null;e.levels=null;e.levelKnown=null;this.dropScratch(e);this.surfaceVersion++;this.residentMemory();this.onChange();this.schedule();return e;
   }
-  discard(figure){const id=drawingMetadata(figure)?.celId,e=this.entries.get(id);if(!e||this.report.figure_types.some(f=>drawingMetadata(f)?.celId===id))return;e.disposed=true;this.dropScratch(e);e.store=null;e.levels=null;e.levelKnown=null;this.entries.delete(id);this.residentMemory();this.surfaceVersion++;this.onChange();}
+  discard(figure){const id=drawingMetadata(figure)?.celId,e=this.entries.get(id);if(!e||figureForCel(this.report.figure_types,id)!==undefined)return;e.disposed=true;this.dropScratch(e);e.store=null;e.levels=null;e.levelKnown=null;this.entries.delete(id);this.residentMemory();this.surfaceVersion++;this.onChange();}
   /** `priority` marks a load a pointer is waiting on: it overtakes queued
    * display and prefetch decodes and is never superseded by them. */
   async surface(figure,{priority=false}={}) {
@@ -200,7 +201,7 @@ export class DrawingResources {
       const d=drawingMetadata(figure);
       // Deferred history starts at the owner's published base, even if an
       // asset-only undo/redo restored an older definition snapshot.
-      const live=this.report.figure_types.find(f=>drawingMetadata(f)?.celId===d.celId)??figure,asset=live.image_assets[0];
+      const live=figureForCel(this.report.figure_types,d.celId)??figure,asset=live.image_assets[0];
       const url=e.published?e.published.url:asset.styk_tiles;
       const result=await this.decode(e,()=>(d.version===1?this.decodeWorker.request('decode-legacy',{url:asset.data_url,crop:d.crop}):url?this.decodeTiles(url):Promise.resolve({tiles:[]})),priority);
       if(this.disposed||e.disposed||generation!==this.generation)throw messageError(new DOMException('', 'AbortError'), "errors.drawingResources.drawingChanged", {});
@@ -303,7 +304,7 @@ export class DrawingResources {
   apply(figure,changes,direction,prepared,options) {return this.applyEntry(this.entry(figure),figure,changes,direction,prepared,options);}
   /** Applies a commit's tiles to a cel's entry. `figure` is the document's definition of the cel, which takes the new revision and
    * bounds, or null while the document has none (a creation undone: the entry keeps the pixels for its redo). */
-  applyEntry(e,figure,changes,direction,prepared,{resident=false}={}) {
+  applyEntry(e,figure,changes,direction,prepared,{resident=false,bounds}={}) {
     const d=figure?drawingMetadata(figure):null;
     if(resident&&e.store){
       let dirty=null;
@@ -318,13 +319,14 @@ export class DrawingResources {
     if(e.store){
       // Pixels shared with a history record are adopted frozen (copy on write).
       if(plan)for(const t of plan.tiles){if(t.pixels){e.store.adopt(t.tx,t.ty,t.pixels,t.alphaBounds);if(t.shared)e.store.get(t.tx,t.ty).frozen=true;}else e.store.delete(t.tx,t.ty);}
-      else applyTileChanges(e.store,changes,direction);
+      else applyTileChanges(e.store,changes,direction,{share:true});
       e.store.prune();
     }
     else e.deferred.push({changes,direction});
     if(plan)prepared.consume(plan);
     e.revision++;if(d)d.revision=e.revision;
-    if(d?.version===2&&e.store)d.bounds=e.store.bounds?{...e.store.bounds}:null;
+    // A caller that knows the cel's bounds after the commit (a replay: the command holds them) says so instead of having them scanned for.
+    if(d?.version===2&&e.store)d.bounds=bounds!==undefined?(bounds?{...bounds}:null):e.store.bounds?{...e.store.bounds}:null;
     let dirty=null;for(const c of changes){const rect={x:c.tx*TILE,y:c.ty*TILE,width:TILE,height:TILE};dirty=dirty?{x:Math.min(dirty.x,rect.x),y:Math.min(dirty.y,rect.y),width:Math.max(dirty.x+dirty.width,rect.x+rect.width)-Math.min(dirty.x,rect.x),height:Math.max(dirty.y+dirty.height,rect.y+rect.height)-Math.min(dirty.y,rect.y)}:rect;}
     this.present(e,dirty);this.schedule();
   }
@@ -350,11 +352,11 @@ export class DrawingResources {
     if(this.disposed)throw messageError(new DOMException('', 'AbortError'), "errors.drawingResources.drawingDocumentClosed", {});
     if(this.encoding){await this.encoding;return this.flush({signal});}
     clearTimeout(this.timer);this.timer=null;
-    for(const figure of this.report.figure_types){const entry=this.entries.get(drawingMetadata(figure)?.celId);if(entry)this.restorePublication(entry,figure);}
-    const e=[...this.entries.values()].find(e=>!e.pinned&&e.published?.revision!==e.revision&&this.report.figure_types.some(f=>drawingMetadata(f)?.celId===e.id));
+    for(const figure of drawingFigures(this.report.figure_types)){const entry=this.entries.get(drawingMetadata(figure)?.celId);if(entry)this.restorePublication(entry,figure);}
+    const e=[...this.entries.values()].find(e=>!e.pinned&&e.published?.revision!==e.revision&&figureForCel(this.report.figure_types,e.id)!==undefined);
     if(!e){this.trim();return;}
     if(signal?.aborted)throw messageError(new DOMException('', 'AbortError'), "errors.drawingResources.drawingPublicationCancelled", {});
-    if(!e.store){const figure=this.report.figure_types.find(f=>drawingMetadata(f)?.celId===e.id);if(!figure)return;await this.surface(figure);return this.flush({signal});}
+    if(!e.store){const figure=figureForCel(this.report.figure_types,e.id);if(!figure)return;await this.surface(figure);return this.flush({signal});}
     const revision=e.revision,generation=this.generation,reservation={};
     // Register the job before reserving its transfers: reserve() can itself
     // request publication. No pixel copying runs inside the editor commit.
@@ -426,7 +428,7 @@ export class DrawingResources {
       this.lastEncode={encoded,reused:tiles.length-encoded};
       // This is derived publication, never a semantic editor edit.
       e.published={revision,url:tiles.length?result.blobUrl:null,bounds:e.store.bounds?{...e.store.bounds}:null};e.failed=null;
-      const figure=this.report.figure_types.find(f=>drawingMetadata(f)?.celId===e.id);
+      const figure=figureForCel(this.report.figure_types,e.id);
       if(figure)this.restorePublication(e,figure);
       this.surfaceVersion++;this.onChange();
     });
@@ -443,7 +445,9 @@ export class DrawingResources {
   collect(retained=new Set()) {
     // Cels drawn inside movieclip definitions render in this document too.
     const reachable=new Set(),visit=(figures,seen)=>{for(const f of figures??[]){reachable.add(drawingMetadata(f)?.celId);const doc=f._styk?.movieclip?.document;if(doc&&!seen.has(doc)){seen.add(doc);visit(doc.figure_types,seen);}}};
-    visit(this.report.figure_types,new Set());
+    const seen=new Set();
+    for(const row of figureRows(this.report.figure_types))reachable.add(row.cel??undefined);
+    for(const f of movieclipFigures(this.report.figure_types)){const doc=f._styk?.movieclip?.document;if(doc&&!seen.has(doc)){seen.add(doc);visit(doc.figure_types,seen);}}
     for(const [id,e] of this.entries)if(!reachable.has(id)&&!retained.has(id)&&!e.pinned){e.disposed=true;this.dropScratch(e);e.store=null;e.levels=null;e.levelKnown=null;this.entries.delete(id);}
     this.residentMemory();
   }

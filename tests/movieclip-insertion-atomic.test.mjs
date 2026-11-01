@@ -16,7 +16,7 @@ const snapshot = e => ({document: reportJSON(e), selection: structuredClone(e._s
   revision: e.revision, serial: e._revisionSerial, saved: e._savedRevision, layerRevision: e.layerRevision,
   identity: e._nextFrameIdentity, uid: e._nextUid,
   undo: structuredClone(e._undo), redo: structuredClone(e._redo), sources: e.report._styk.frameSources, drag: structuredClone(e._drag),
-  counts: [...e._layerUidCounts], seen: [...e._layerSeenUids]});
+  groups: [...e._layerGroups].map(([id, members]) => [id, [...members]]), seen: [...e._layerSeenUids]});
 const reopen = e => new Editor({demo: false}).load(JSON.parse(JSON.stringify(e.serialize())));
 test('fractional native library insertion preserves save, history and counters', () => {
   const {editor: e, typeId} = native();

@@ -1,4 +1,5 @@
 import {messageError} from './localized-error.mjs';
+import {findFigureType} from './figure-types.mjs';
 /** Perspective is a final projection of the existing spatial pose. IK targets
  * remain in scene coordinates, before projection, in every saved document. */
 const cameraDefaults = Object.freeze({strength: 0, distance: 600});
@@ -6,7 +7,7 @@ const shapeDefaults = Object.freeze({width: 1, taper: 0});
 export const spatialCamera = object => ({...cameraDefaults, centerX:object?.root_x??0, centerY:object?.root_y??0, ...object?._stykSpatial?.camera});
 export const spatialShape = (object, id) => ({...shapeDefaults, ...object?._stykSpatial?.shape?.[id]});
 function projectedDrawing(objects,object,figures){
-  const parent=objects[object.join?.target_object_slot],figure=id=>figures?.find(f=>f.figure_type_id===id);
+  const parent=objects[object.join?.target_object_slot],figure=id=>findFigureType(figures,id);
   const asset=figure(object.figure_type_id)?._styk?.movieclip;
   return Boolean((asset?.drawingRotation||asset?.spatialMeshes)&&figure(parent?.figure_type_id)?.segments.some(s=>s.segment_id===object.join.target_handle_id&&s._stykRig?.spatial?.origin));
 }

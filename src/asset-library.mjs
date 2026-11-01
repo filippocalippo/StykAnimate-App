@@ -7,6 +7,8 @@ import { emptyDocument, createObject, createFrame } from "./demo.mjs";
 import { engineDocumentPicture, placement } from "./engine/engine-pictures.mjs";
 import {movieclipAssetFigures} from './movieclips.mjs';
 import {drawingMetadata} from './drawing-model.mjs';
+import {figureRows} from './figure-types.mjs';
+import {figureRow} from './lazy-table.mjs';
 
 const ROW_HEIGHT = 74;
 const THUMB_SIZE = 54;
@@ -15,10 +17,9 @@ const MAX_POLYGONS = 128;
 const MAX_IMAGE_PIXELS = 2 * 1024 * 1024;
 const MAX_TOTAL_IMAGE_PIXELS = 4 * 1024 * 1024;
 const MAX_PATH_CHARS = 160000;
-const nameMessage=figure=>figure.name||{messageKey:'assetLibrary.figureNumber',messageParams:{id:String(figure.figure_type_id)}};
-const nameOf=figure=>String(figure.name||interfaceText('assetLibrary.figureNumber',{id:String(figure.figure_type_id)}));
+const nameMessage=row=>row.name||{messageKey:'assetLibrary.figureNumber',messageParams:{id:String(row.id)}};
+const nameOf=row=>String(row.name||interfaceText('assetLibrary.figureNumber',{id:String(row.id)}));
 // Canonical preview kinds never depend on the interface language.
-const kindOf=figure=>figure._styk?.movieclip?'Movieclip':figure.text_assets?.length?'Text':figure.image_assets?.length?'Image':'Figure';
 const kindMessage=kind=>({messageKey:{Movieclip:'assetLibrary.movieclip',Text:'inspectorView.text',Image:'assetLibrary.image',Figure:'assetLibrary.figure'}[kind]});
 const escapeHTML = (value) =>
   String(value).replace(
@@ -151,14 +152,16 @@ export class AssetLibrary {
         this.activeIndex = -1;
       }
       this.figures = figures;
-      this.records = figures.map((figure) => ({
-        figure,
-        id: String(figure.figure_type_id),
-        name: nameOf(figure),
-        kind: kindOf(figure),
-        segmentCount: figure.segment_count ?? figure.segments?.length ?? 0,
+      // The list is the rows the table keeps of its figures (src/figure-types.mjs): a figure is fetched when a row needs it.
+      this.records = figureRows(figures).map((row, index) => ({
+        row,
+        get figure() { return figures[index]; },
+        id: String(row.id),
+        name: nameOf(row),
+        kind: row.kind,
+        segmentCount: row.segments ?? 0,
         search:
-          `${nameOf(figure)} ${figure.figure_type_id} ${kindOf(figure)}`.toLocaleLowerCase(),
+          `${nameOf(row)} ${row.id} ${row.kind}`.toLocaleLowerCase(),
       }));
       this.byId = new Map(this.records.map((record) => [record.id, record]));
       for (const [id, preview] of this.previews) {
@@ -246,11 +249,11 @@ export class AssetLibrary {
       row.dataset.index = String(index);
       row.setAttribute("aria-posinset", String(index + 1));
       row.setAttribute("aria-setsize", String(this.filtered.length));
-      localizedAttribute(row, "aria-label", "assetLibrary.add", {name:nameMessage(record.figure),value:kindMessage(record.kind),id:record.id});
+      localizedAttribute(row, "aria-label", "assetLibrary.add", {name:nameMessage(record.row),value:kindMessage(record.kind),id:record.id});
       row.setAttribute("aria-selected", String(record.id === this.selectedId));
       row.tabIndex = index === this.activeIndex ? 0 : -1;
-      localizedAttribute(row, "title", "assetLibrary.add2", {name:nameMessage(record.figure),id:record.id});
-      const name=row.querySelector(".styk-asset-name");if(record.figure.name){clearTranslation(name);name.textContent=record.name;}else localizedText(name,"assetLibrary.figureNumber",{id:record.id});
+      localizedAttribute(row, "title", "assetLibrary.add2", {name:nameMessage(record.row),id:record.id});
+      const name=row.querySelector(".styk-asset-name");if(record.row.name){clearTranslation(name);name.textContent=record.name;}else localizedText(name,"assetLibrary.figureNumber",{id:record.id});
       localizedText(row.querySelector('.styk-asset-detail'), 'counts.segments', {count: record.segmentCount});
       const target = row.querySelector(".styk-asset-preview");
       const cached = this.previews.get(record.id);
@@ -405,11 +408,12 @@ export class AssetLibrary {
     this.busy = true;
     const generation = this.generation,
       start = performance.now();
+    const figure = record.figure;
     try {
-      const preview = await this.makePreview(record.figure, generation);
+      const preview = await this.makePreview(figure, generation);
       if (this.disposed || !this.visible || generation !== this.generation)
         return;
-      this.previews.set(record.id, { figure: record.figure, ...preview });
+      this.previews.set(record.id, { figure, ...preview });
       while (this.previews.size > this.maxPreviews)
         this.previews.delete(this.previews.keys().next().value);
       const target = this.rows
@@ -424,9 +428,9 @@ export class AssetLibrary {
         generation === this.generation &&
         !this.disposed
       ) {
-        const element = this.fallback(record.figure, interfaceText("assetLibrary.previewUnavailable"));
+        const element = this.fallback(figure, interfaceText("assetLibrary.previewUnavailable"));
         this.previews.set(record.id, {
-          figure: record.figure,
+          figure,
           element,
           bytes: 0,
           fallback: true,
@@ -452,7 +456,7 @@ export class AssetLibrary {
 
   fallback(figure, reason) {
     const span = document.createElement("span");
-    const kind = kindOf(figure);
+    const kind = figureRow(figure).kind;
     span.className = "styk-asset-fallback";
     span.title = reason;
     localizedMarkup(span, `${icon(kind === "Text" ? "text" : kind === "Image" ? "image" : "nodes")}<small ${messageAttributes(kindMessage(kind).messageKey)}>${escapeHTML(interfaceText(kindMessage(kind).messageKey))}</small>`);

@@ -21,7 +21,7 @@ use styk_edit::EditError;
 use styk_edit::export::{Hold, Projected, check_scene, fold_movieclip, prepare_project};
 use styk_formats::Kind;
 use styk_formats::container::{self, ContainerError};
-use styk_formats::files::{self, FileError, FrameTimings, Host, Job, JobsFailed};
+use styk_formats::files::{self, FileError, FrameTimings, Host, Job, Joiner, JobsFailed};
 
 /// The original file of a project opened from Pivot (`_stykSource`): the codec's description of it and its bytes, which
 /// the container stores first in its payload section.
@@ -33,6 +33,9 @@ pub struct Source {
 
 /// What a project save writes.
 pub struct ProjectRequest {
+    /// A name for the save's reservation of memory, under which the interface releases it if the thread saving dies without dropping it
+    /// (`styk_alloc::release_named`).
+    pub reservation: Option<u64>,
     /// The name the file is saved under, which the document carries.
     pub name: Option<String>,
     /// The Pivot original of the project, when the interface holds it for the project (the document has no copy of its own).
@@ -53,12 +56,13 @@ pub struct Written {
 pub struct SaveTimings {
     /// Preparing the document: folding movieclips, the checks, display aliases, pose sequences stored once (the scene check apart, which runs beside the lift).
     pub prepare_ms: f64,
-    /// Lifting it into the skeleton and the two sections (beside the scene check).
+    /// Lifting it into the skeleton and the two sections: the elements of the biggest array in pieces side by side.
     pub lift_ms: f64,
-    /// The scene check, which runs beside the lift.
+    /// Of the lift: waiting for the pieces side by side, and stitching them together (zero when the lift was not in pieces).
+    pub lift_pieces_ms: f64,
+    pub lift_splice_ms: f64,
+    /// The scene check, which runs beside the lift and the frames (its own duration).
     pub scene_ms: f64,
-    /// From the start of the lift to the end of the scene check beside it, whichever is later.
-    pub stage_ms: f64,
     /// Hashing and compressing the skeleton, the arrays section and the payloads section.
     pub frames: [FrameTimings; 3],
     /// From the first job started to the last done: the hashes beside the frames.
@@ -132,6 +136,9 @@ pub struct EngineHost<'a> {
     pub clock: fn() -> f64,
     /// How many of the engine's workers the save may take (the rest stay free for the frame on show).
     pub helpers: usize,
+    /// Whether one more worker, besides the helpers, may run the scene check beside the lift and the frames (the interface says so only when
+    /// that still leaves a worker free for the frame on show).
+    pub aside: bool,
 }
 
 impl Host for EngineHost<'_> {
@@ -141,6 +148,19 @@ impl Host for EngineHost<'_> {
 
     fn clock(&self) -> fn() -> f64 {
         self.clock
+    }
+
+    fn start<'a>(&'a self, job: Job, stop: &Arc<AtomicBool>) -> Joiner<'a> {
+        match self.engine {
+            // One of the engine's workers for the job, besides the ones the hashes, the frames and the pieces of the lift take, and one left
+            // for the frame on show: the interface says whether the machine has the threads for that (`aside`).
+            Some(engine) if self.aside => Box::new(engine.start_later(job, stop, self.cancel)),
+            _ => files::start_when_waited_for(job, stop),
+        }
+    }
+
+    fn threads(&self) -> usize {
+        if self.engine.is_some() { self.helpers + 1 } else { 1 }
     }
 
     fn together(&self, jobs: Vec<Job>, stop: &Arc<AtomicBool>) -> Result<(), JobsFailed> {
@@ -164,7 +184,11 @@ pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, ho
     let Some(mut document) = trees.last().cloned() else { return Err(SaveError::Refused("errors.documentExportWorker.theDocumentSnapshotWasNotInitialized".into())) };
     debug_assert_eq!(scopes.len() + 1, trees.len(), "one movieclip per document it was entered from");
     let source = request.source.as_ref().map_or(0, |source| source.bytes.len());
-    let _memory = styk_alloc::reserve(working_bytes(source)).map_err(SaveError::OutOfMemory)?;
+    let _memory = match request.reservation {
+        Some(token) => styk_alloc::reserve_named(token, working_bytes(source)),
+        None => styk_alloc::reserve(working_bytes(source)),
+    }
+    .map_err(SaveError::OutOfMemory)?;
     let hold = Hold { cancel };
     for (parent, &type_id) in trees.iter().zip(scopes).rev() {
         document = fold_movieclip(parent, type_id, &document)?;
@@ -205,39 +229,30 @@ fn write(document: &Value, kind: Kind, reserved: &[Arc<[u8]>], scene: Option<Val
     let clock = host.clock();
     let started = clock();
     // The jobs own what they use: a worker may still be running one when this returns early.
+    // The scene check only has to be done before the file is, and is the longest single job of the save: it starts first, on a thread the
+    // host has to spare, and runs beside the lift and the frames.
     let stop = Arc::new(AtomicBool::new(false));
-    let lifted: Arc<Mutex<Option<(Result<container::Lifted, ContainerError>, f64)>>> = Arc::new(Mutex::new(None));
     let checked: Arc<Mutex<Option<(Result<(), EditError>, f64)>>> = Arc::new(Mutex::new(None));
-    let mut jobs: Vec<Job> = Vec::with_capacity(2);
-    {
-        let (document, reserved, lifted) = (document.clone(), reserved.to_vec(), lifted.clone());
-        jobs.push(Box::new(move |stop_now| {
-            let begun = clock();
-            let result = container::lift_until(&document, &reserved, stop_now);
-            *lifted.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((result, clock() - begun));
-        }));
-    }
-    if let Some(scene) = scene {
+    let joiner = scene.map(|scene| {
         let checked = checked.clone();
-        jobs.push(Box::new(move |_| {
+        let job: Job = Box::new(move |_| {
             let begun = clock();
             let result = check_scene(&scene);
             *checked.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((result, clock() - begun));
-        }));
-    }
-    host.together(jobs, &stop).map_err(|_| ContainerError::WorkerStopped)?;
+        });
+        host.start(job, &stop)
+    });
+    let (lifted, lift_times) = container::lift_together(document, reserved, host)?;
     let lifted_at = clock();
-    if stop.load(std::sync::atomic::Ordering::Relaxed) {
-        return Err(SaveError::Cancelled);
+    let saved = files::save(kind, Arc::new(lifted.skeleton), Arc::new(lifted.arrays), Arc::new(lifted.payloads), host)?;
+    if let Some(join) = joiner {
+        join().map_err(|_| ContainerError::WorkerStopped)?;
     }
     let mut scene_ms = 0.0;
     if let Some((result, took)) = checked.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() {
         result?;
         scene_ms = took;
     }
-    let Some((lifted_result, lift_ms)) = lifted.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() else { return Err(SaveError::Cancelled) };
-    let lifted_document = lifted_result?;
-    let saved = files::save(kind, Arc::new(lifted_document.skeleton), Arc::new(lifted_document.arrays), Arc::new(lifted_document.payloads), host)?;
-    let timings = SaveTimings { lift_ms, scene_ms, stage_ms: lifted_at - started, frames: saved.frames, frames_ms: saved.frames_ms, assemble_ms: clock() - lifted_at - saved.frames_ms, ..SaveTimings::default() };
+    let timings = SaveTimings { lift_ms: lifted_at - started, lift_pieces_ms: lift_times.pieces_ms, lift_splice_ms: lift_times.splice_ms, scene_ms, frames: saved.frames, frames_ms: saved.frames_ms, assemble_ms: clock() - lifted_at - saved.frames_ms, ..SaveTimings::default() };
     Ok(Written { bytes: saved.bytes, raw_bytes: saved.stats.container_raw_bytes, timings })
 }

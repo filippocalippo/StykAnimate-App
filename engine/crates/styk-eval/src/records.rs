@@ -1396,6 +1396,12 @@ pub fn snapshot_pose_frame_of(frame: &Value, uids: Option<&[f64]>) -> Value {
         .iter()
         .enumerate()
         .map(|(index, &slot)| {
+            // A figure that keeps its slot and carries nothing to drop or renumber is the same record: the pose shares it, as a copy of it would.
+            if all[slot].as_obj().is_some_and(|object| !object.contains("runtime_segments") && !object.contains("_movieclipSample") && !object.get("join").is_some_and(Value::truthy))
+                && num(&all[slot], "object_slot") == Some(index as f64)
+            {
+                return all[slot].clone();
+            }
             let mut out = all[slot].as_obj().cloned().unwrap_or_default();
             out.remove("runtime_segments");
             out.remove("_movieclipSample");
@@ -1547,5 +1553,25 @@ mod degrade_tests {
         assert!(mismatched.same_node(&stacks));
         // A pose with no next pose keeps its stacks as well.
         assert!(vfx_record(&stacks, None, Some(&empty), Some(&empty)).same_node(&stacks));
+    }
+}
+
+#[cfg(test)]
+mod snapshot_sharing_tests {
+    use super::*;
+
+    #[test]
+    fn a_snapshot_shares_the_figures_it_changes_nothing_of() {
+        let frame = styk_doc::json::parse(br#"{"objects":[{"unique_id":1,"object_slot":0},{"unique_id":2,"object_slot":1,"join":{"target_object_slot":0}},{"unique_id":3,"object_slot":2,"runtime_segments":[1]},{"unique_id":4,"object_slot":9}]}"#).unwrap();
+        let all = items(frame.get("objects"));
+        let whole = snapshot_pose_frame_of(&frame, None);
+        let objects = items(whole.get("objects"));
+        assert!(objects[0].same_node(&all[0]), "a figure in its slot with nothing to drop is the same record");
+        for (at, why) in [(1, "a joined figure is rebuilt"), (2, "a figure with a runtime cache is rebuilt"), (3, "a figure in another slot is renumbered")] {
+            assert!(!objects[at].same_node(&all[at]), "{why}");
+        }
+        assert_eq!(styk_doc::json::to_string(&objects[1]), r#"{"unique_id":2,"object_slot":1,"join":{"target_object_slot":0}}"#);
+        assert_eq!(styk_doc::json::to_string(&objects[2]), r#"{"unique_id":3,"object_slot":2}"#);
+        assert_eq!(styk_doc::json::to_string(&objects[3]), r#"{"unique_id":4,"object_slot":3}"#);
     }
 }

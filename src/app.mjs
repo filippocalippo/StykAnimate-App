@@ -33,7 +33,7 @@ import { createStage } from "./engine/engine-stage.mjs";
 import { createStagePlayback } from "./engine/engine-playback.mjs";
 import { installEngineOwner } from "./engine/engine-owner.mjs";
 import { loadEngine } from "./engine/engine.mjs";
-import { useEngine } from "./engine/engine-open.mjs";
+import { useEngine, prepareOpen } from "./engine/engine-open.mjs";
 import { engineDocument } from "./engine/engine-document.mjs";
 import { engineComposite } from "./engine/engine-composite.mjs";
 import { markAppBounds } from "./engine/engine-edit-bounds.mjs";
@@ -177,6 +177,7 @@ import {
   gradientAngleFromBackground,
   inverseCameraScale,
 } from "./pivot/background.mjs";
+import {findFigureType, figureRows} from './figure-types.mjs';
 
 const $ = (id) => document.getElementById(id),
   esc = (v) =>
@@ -482,8 +483,8 @@ function bandSession() {
 }
 /** The scene's background as the crumb's chip shows it: the frame's colour override, else its background. */
 function sceneBackground() {
-  const frame = editor.frame, background = editor.report.backgrounds?.find((item) => item.background_id === frame?.background_id);
-  const override = frame?._stykBackgroundColor;
+  const frame = editor.frameSummary, background = editor.report.backgrounds?.find((item) => item.background_id === frame.background);
+  const override = frame.color ?? undefined;
   const paint = backgroundPaint(override === undefined ? background : { kind: 2, color: override });
   return { css: paintCSS(paint), label: paint.type === "solid" ? hexColor(paint.stops[0].color).toUpperCase() : interfaceText('app.valueValue1Gradient', {value: {messageKey: 'colorPicker.' + paint.type}, value1: ''}) };
 }
@@ -647,9 +648,7 @@ function nameOf(o) {
   if (nameRevision !== editor.revision || nameReport !== editor.report) {
     nameRevision = editor.revision;
     nameReport = editor.report;
-    nameMap = new Map(
-      editor.report.figure_types.map((f) => [f.figure_type_id, f.name]),
-    );
+    nameMap = new Map(figureRows(editor.report.figure_types).map((row) => [row.id, row.name]));
   }
   return nameMap.get(o?.figure_type_id) || `Figure ${o?.unique_id ?? ""}`;
 }
@@ -767,9 +766,7 @@ function reconcileSelectedSegmentTrack(
   const object = editor.selectionFrame.objects.find(
     (object) => object.unique_id === target.uid,
   );
-  const figure = editor.report.figure_types.find(
-    (figure) => figure.figure_type_id === target.figureTypeId,
-  );
+  const figure = findFigureType(editor.report.figure_types, target.figureTypeId);
   const index =
     object?.figure_type_id === target.figureTypeId
       ? (figure?.segments?.findIndex(
@@ -1995,7 +1992,7 @@ function updateUI() {
 }
 /** The scene's size and the figure count. (#selection-summary is the shell's: studio-shell writes the scope there.) */
 function updateStatus() {
-  localizedText($("object-count"), 'counts.figures', {count: editor.frame.objects.length});
+  localizedText($("object-count"), 'counts.figures', {count: editor.frameSummary.figures});
 }
 function renderLayers() {
   if ($("layer-count"))
@@ -2537,8 +2534,7 @@ overlay.addEventListener(
             parent = point;
             joint =
               hit.g.fig?.segments?.findIndex((s) => s.segment_id === id) ??
-              editor.report.figure_types
-                .find((f) => f.figure_type_id === hit.g.obj.figure_type_id)
+              findFigureType(editor.report.figure_types, hit.g.obj.figure_type_id)
                 .segments.findIndex((s) => s.segment_id === id);
           }
         }
@@ -3641,6 +3637,7 @@ async function importFilesTracked(files) {
 }
 async function openFile() {
   pause();
+  prepareOpen();
   if (desktop) {
     status({messageKey: "app.openingFile", messageParams: {}}, false, true);
     const result = await desktop.openFile();
@@ -3673,8 +3670,9 @@ async function acceptNativeFile(result) {
 }
 async function acceptNativeFileTracked(result) {
   pause();
+  // A project's bytes go to the engine as they are; only a Stick Nodes archive needs a file to read twice.
   const decoded = result.bytes
-    ? await chooseSticknodesFile(new File([result.bytes], result.filename))
+    ? await chooseSticknodesFile(/\.(piv|styk|json)$/i.test(result.filename) ? {name: result.filename, size: result.bytes.byteLength, arrayBuffer: async () => result.bytes} : new File([result.bytes], result.filename))
     : result;
   if(!decoded)return false;
   decoded.timings = { ...decoded.timings, ...result.timings };
@@ -3762,6 +3760,9 @@ async function performNativeSave({saveAs}) {
         status({messageKey: "app.saveCancelled", messageParams: {}});
         return false;
       }
+      // Whoever shows the failure (fail(), for every save a person asks for) says what happened; until then the line must not go on
+      // saying the project is being saved, nor the busy task go on spinning.
+      status({messageKey: "app.saveFailed", messageParams: {}});
       throw error;
     }
     if (saved) {
@@ -5385,9 +5386,9 @@ const projectProvider = {
         ranges: match.ranges, run: () => { selectTrack({ id: layer.id, target: { kind: "layer", id: layer.id } }); timelineUI?.selectTrack?.(layer.id); } });
     }
     if (context?.mode !== "draw") {
-      const figures = new Map(editor.report.figure_types.map((figure) => [figure.figure_type_id, figure]));
+      const names = new Map(figureRows(editor.report.figure_types).map((row) => [row.id, row.name]));
       for (const object of editor.selectionFrame?.objects ?? []) {
-        const figure = figures.get(object.figure_type_id), name = figure?.name;
+        const name = names.get(object.figure_type_id);
         const match = name && fuzzyMatch(query, name);
         if (!match) continue;
         const layer = editor.getLayer(editor.layerForUid(object.unique_id))?.name ?? "";

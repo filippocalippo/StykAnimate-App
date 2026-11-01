@@ -3,7 +3,10 @@
 
 use std::collections::HashMap;
 
+use std::sync::Arc;
+
 use styk_doc::Value;
+use styk_doc::fanout::{self, Fanout};
 
 use super::figure::{self, OriginMetadata};
 use super::js::*;
@@ -49,8 +52,8 @@ pub(super) fn spatial_joins(frame: &Value, figures: &[Value]) -> Result<(), Edit
 }
 
 /// The identities of a document's figure types: `Map<figure_type_id, figure>` in the order of the table.
-struct Types<'a> {
-    figures: Vec<&'a Value>,
+struct Types {
+    figures: Vec<Value>,
     by_id: HashMap<u64, usize>,
 }
 
@@ -58,23 +61,26 @@ fn id_key(value: f64) -> u64 {
     if value == 0.0 { 0.0f64.to_bits() } else { value.to_bits() }
 }
 
-impl Types<'_> {
+impl Types {
     fn get(&self, id: V) -> Option<&Value> {
-        num(id).and_then(|n| self.by_id.get(&id_key(n))).map(|i| self.figures[*i])
+        num(id).and_then(|n| self.by_id.get(&id_key(n))).map(|i| &self.figures[*i])
     }
 }
 
-/// The checks of one frame's objects and ordering, against the figure table.
-struct Context<'a> {
-    report: &'a Value,
-    types: &'a Types<'a>,
-    handles: &'a HashMap<u64, Handles>,
-    origins: &'a HashMap<u64, OriginMetadata>,
+/// What the checks of one frame's objects and ordering read besides the frame: the figure table and what was worked out from it.
+/// Owned and shared, because the frames are checked side by side.
+struct Context {
+    report: Value,
+    types: Types,
+    handles: HashMap<u64, Handles>,
+    origins: HashMap<u64, OriginMetadata>,
+    continuation_types: NumberSet,
+    figures: Vec<Value>,
 }
 
 /// `validateSceneSteps(report)` on `frames`: the report's own keyframes, or the pose sources and draft
 /// baseline the load checks the same way (`{...report, keyframes}`).
-pub(super) fn validate_scene(report: &Value, frames: Option<&[Value]>) -> Result<(), EditError> {
+pub(super) fn validate_scene(report: &Value, frames: Option<&[Value]>, fan: &dyn Fanout) -> Result<(), EditError> {
     if !report.is_object() || !matches!(num(report.get("version")), Some(v) if [2.0, 3.0, 4.0, 5.0].contains(&v)) {
         return fail("errors.model.expectedADecodedPivot25Scene");
     }
@@ -106,14 +112,14 @@ pub(super) fn validate_scene(report: &Value, frames: Option<&[Value]>) -> Result
     let mut types = Types { figures: Vec::with_capacity(figures.len()), by_id: HashMap::new() };
     let mut handles: HashMap<u64, Handles> = HashMap::new();
     let mut origins: HashMap<u64, OriginMetadata> = HashMap::new();
-    let (mut total_segments, mut total_objects) = (0usize, 0usize);
+    let mut total_segments = 0usize;
     for fig in &figures {
         let id = prop(Some(fig), "figure_type_id")?;
         if !integer(id) || types.by_id.contains_key(&id_key(num(id).unwrap())) || !is_array(fig.get("segments")) {
             return fail("errors.model.invalidOrRepeatedFigureType");
         }
         types.by_id.insert(id_key(num(id).unwrap()), types.figures.len());
-        types.figures.push(fig);
+        types.figures.push(fig.clone());
         let segments = items(fig.get("segments"));
         if segments.len() > 30000 {
             return fail("errors.editorBuilderBranch.aNativePivotFigureSupportsAtMost30");
@@ -192,55 +198,8 @@ pub(super) fn validate_scene(report: &Value, frames: Option<&[Value]>) -> Result
             continuation_types.insert(num(fig.get("figure_type_id")).unwrap());
         }
     }
-    let context = Context { report, types: &types, handles: &handles, origins: &origins };
-    for frame in frames {
-        let f = Some(frame);
-        object::vfx_owner(f)?;
-        movieclip::continuations(f, &continuation_types)?;
-        for step in movieclip::steps(frame) {
-            movieclip::playback(get(Some(&step), "playback"))?;
-        }
-        if !frame.is_object() || !is_array(frame.get("objects")) || !integer_in(frame.get("duration_raw"), 0.0, 65535.0) {
-            return fail("errors.model.invalidKeyframeObjectsOrDuration");
-        }
-        let objects = items(frame.get("objects"));
-        total_objects += objects.len();
-        spatial_joins(frame, &figures)?;
-        if total_objects > 2_000_000 {
-            return fail("errors.model.sceneExceedsTheTwoMillionObjectLimit");
-        }
-        frame_objects(&context, frame, &objects)?;
-        let order = frame.get("object_draw_order");
-        if truthy(order) {
-            let listed = items(order);
-            let mut seen = NumberSet::default();
-            let unique = listed.iter().all(|v| match v {
-                Value::Num(n) => seen.insert(*n),
-                _ => true,
-            });
-            // `new Set(order).size !== order.length` also counts non-number entries as distinct values.
-            if !is_array(order) || len(order) != objects.len() || !unique || !listed.iter().all(|v| integer_in(Some(v), 0.0, objects.len() as f64 - 1.0)) {
-                return fail("errors.model.invalidFigureLayerOrder");
-            }
-        }
-        let camera = frame.get("camera");
-        if truthy(camera) && !truthy(get(camera, "is_default")) {
-            for key in ["x", "y", "scale"] {
-                float32(get(camera, key))?;
-            }
-            if num(get(camera, "scale")).is_some_and(|s| s <= 0.0) {
-                return fail("errors.editorCamera.cameraScaleMustBePositive");
-            }
-            let inverse = fround(1.0 / fround(num(get(camera, "scale")).unwrap_or(1.0)));
-            if !inverse.is_finite() || inverse <= 0.0 {
-                return fail("errors.background.cameraScaleExceedsTheNativeRenderingRange");
-            }
-            let angle = get(camera, "angle_rad");
-            if !missing(angle) {
-                finite_number(angle)?;
-            }
-        }
-    }
+    let context = Arc::new(Context { report: report.clone(), types, handles, origins, continuation_types, figures: figures.clone() });
+    check_frames(&context, frames, 0, fan)?;
     for fig in &figures {
         let style = path(Some(fig), &["segment_decode", "global_style"]);
         if truthy(style) {
@@ -267,7 +226,7 @@ pub(super) fn validate_scene(report: &Value, frames: Option<&[Value]>) -> Result
                 bounded_integer(u30, 0.0, 255.0)?;
             }
         }
-        let own_handles = &handles[&id_key(num(fig.get("figure_type_id")).unwrap())];
+        let own_handles = &context.handles[&id_key(num(fig.get("figure_type_id")).unwrap())];
         let polyfills = fig.get("polyfills");
         for poly in if truthy(polyfills) { items(polyfills) } else { Vec::new() } {
             if truthy(poly.get("_stykSurface")) {
@@ -341,6 +300,98 @@ pub(super) fn validate_scene(report: &Value, frames: Option<&[Value]>) -> Result
     Ok(())
 }
 
+/// The checks of every frame of the scene, in order: the first refusal is the first frame's. Frames are checked side by side
+/// where the host has the threads; the object count a frame is held to is the one the frames before it make, so the refusal
+/// is the same whichever way they ran.
+fn check_frames(context: &Arc<Context>, frames: &[Value], objects_before: usize, fan: &dyn Fanout) -> Result<(), EditError> {
+    if fan.cancelled() {
+        return fail(CANCELLED);
+    }
+    let cuts = fanout::ranges(fan, frames.len());
+    if cuts.len() <= 1 {
+        let mut total = objects_before;
+        return frames.iter().try_for_each(|frame| {
+            if fan.cancelled() {
+                return fail(CANCELLED);
+            }
+            check_frame(context, frame, &mut total)
+        });
+    }
+    let mut starts = Vec::with_capacity(cuts.len());
+    let mut total = objects_before;
+    let mut next_cut = 0;
+    for (index, frame) in frames.iter().enumerate() {
+        if next_cut < cuts.len() && index == cuts[next_cut].start {
+            starts.push(total);
+            next_cut += 1;
+        }
+        total += frame.get("objects").and_then(Value::array_len).unwrap_or(0);
+    }
+    let refusals = fanout::map(
+        fan,
+        cuts.iter().zip(starts).map(|(cut, before)| (context.clone(), frames[cut.clone()].to_vec(), before)).collect(),
+        |(context, frames, before): (Arc<Context>, Vec<Value>, usize)| {
+            let mut total = before;
+            frames.iter().try_for_each(|frame| check_frame(&context, frame, &mut total)).err()
+        },
+    );
+    match refusals {
+        Ok(refusals) => refusals.into_iter().flatten().next().map_or(Ok(()), Err),
+        Err(_) => fail(WORKER_LOST),
+    }
+}
+
+/// One frame of the walk over the scene; `total_objects` is the number of objects of the frames before it, and this one once checked in.
+fn check_frame(context: &Context, frame: &Value, total_objects: &mut usize) -> Result<(), EditError> {
+    let f = Some(frame);
+    object::vfx_owner(f)?;
+    movieclip::continuations(f, &context.continuation_types)?;
+    for step in movieclip::steps(frame) {
+        movieclip::playback(get(Some(&step), "playback"))?;
+    }
+    if !frame.is_object() || !is_array(frame.get("objects")) || !integer_in(frame.get("duration_raw"), 0.0, 65535.0) {
+        return fail("errors.model.invalidKeyframeObjectsOrDuration");
+    }
+    let objects = items(frame.get("objects"));
+    *total_objects += objects.len();
+    spatial_joins(frame, &context.figures)?;
+    if *total_objects > 2_000_000 {
+        return fail("errors.model.sceneExceedsTheTwoMillionObjectLimit");
+    }
+    frame_objects(context, frame, &objects)?;
+    let order = frame.get("object_draw_order");
+    if truthy(order) {
+        let listed = items(order);
+        let mut seen = NumberSet::default();
+        let unique = listed.iter().all(|v| match v {
+            Value::Num(n) => seen.insert(*n),
+            _ => true,
+        });
+        // `new Set(order).size !== order.length` also counts non-number entries as distinct values.
+        if !is_array(order) || len(order) != objects.len() || !unique || !listed.iter().all(|v| integer_in(Some(v), 0.0, objects.len() as f64 - 1.0)) {
+            return fail("errors.model.invalidFigureLayerOrder");
+        }
+    }
+    let camera = frame.get("camera");
+    if truthy(camera) && !truthy(get(camera, "is_default")) {
+        for key in ["x", "y", "scale"] {
+            float32(get(camera, key))?;
+        }
+        if num(get(camera, "scale")).is_some_and(|s| s <= 0.0) {
+            return fail("errors.editorCamera.cameraScaleMustBePositive");
+        }
+        let inverse = fround(1.0 / fround(num(get(camera, "scale")).unwrap_or(1.0)));
+        if !inverse.is_finite() || inverse <= 0.0 {
+            return fail("errors.background.cameraScaleExceedsTheNativeRenderingRange");
+        }
+        let angle = get(camera, "angle_rad");
+        if !missing(angle) {
+            finite_number(angle)?;
+        }
+    }
+    Ok(())
+}
+
 /// One frame's objects: identities, poses, animation origins and joins, then the join graph.
 fn frame_objects(context: &Context, frame: &Value, objects: &[Value]) -> Result<(), EditError> {
     let mut uids = NumberSet::default();
@@ -350,7 +401,7 @@ fn frame_objects(context: &Context, frame: &Value, objects: &[Value]) -> Result<
             return fail("errors.model.unknownFigureOrRepeatedObjectIdentity");
         };
         uids.insert(num(o.get("unique_id")).unwrap());
-        object::object_pose(context.report, o, fig)?;
+        object::object_pose(&context.report, o, fig)?;
         let clip = o.get("_stykMovieclip");
         if truthy(clip) {
             movieclip::playback(clip)?;

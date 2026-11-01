@@ -73,6 +73,21 @@ pub(crate) struct Decoded<'a> {
 pub(crate) fn decode_piv_bytes<'a>(ctx: &Ctx<'_>, source: &'a [u8], source_path: &str, mode: FrameMode) -> PyResult<Decoded<'a>> {
     let (payload, _) = unpack_source(source)?;
     let version = Reader::new(&payload).u8()?;
+    if version == 5 && mode == FrameMode::Build && ctx.fan().threads() > 1 {
+        // The frames are built in pieces that share the payload; it is handed back as it was.
+        let Cow::Owned(inflated) = payload else { return decode_v5(ctx, source, source_path, mode, payload, version) };
+        ctx.fan().mark("inflated");
+        let shared = std::sync::Arc::new(inflated);
+        let sharing = ctx.sharing(shared.clone());
+        let mut decoded = v5::decode(&sharing, &shared, source.len(), source_path, mode)?;
+        drop(sharing);
+        ctx.fan().mark("frames built");
+        if let Some(object) = decoded.report.make_obj() {
+            object.set("source_sha256", text(&v5::sha256_hex(source)));
+        }
+        let payload = std::sync::Arc::try_unwrap(shared).unwrap_or_else(|shared| (*shared).clone());
+        return Ok(Decoded { report: decoded.report, version, payload: Cow::Owned(payload) });
+    }
     if version != 5 {
         let mut report = legacy::decode_legacy_payload(ctx, &payload, source_path)?;
         if let Some(object) = report.make_obj() {
@@ -86,6 +101,10 @@ pub(crate) fn decode_piv_bytes<'a>(ctx: &Ctx<'_>, source: &'a [u8], source_path:
         }
         return Ok(Decoded { report, version, payload });
     }
+    decode_v5(ctx, source, source_path, mode, payload, version)
+}
+
+fn decode_v5<'a>(ctx: &Ctx<'_>, source: &'a [u8], source_path: &str, mode: FrameMode, payload: Cow<'a, [u8]>, version: u8) -> PyResult<Decoded<'a>> {
     let mut decoded = v5::decode(ctx, &payload, source.len(), source_path, mode)?;
     if let Some(object) = decoded.report.make_obj() {
         object.set("source_sha256", text(&v5::sha256_hex(source)));

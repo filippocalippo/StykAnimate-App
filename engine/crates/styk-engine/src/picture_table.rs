@@ -56,7 +56,7 @@ impl Engine {
             if self.inner.stopping.load(std::sync::atomic::Ordering::SeqCst) || lock(&self.inner.picture_table).generation != generation.id {
                 return;
             }
-            let frame = crate::frames::produce(generation, tick as f64, &[], false, self.inner.clock);
+            let frame = crate::frames::produce(generation, tick as f64, &[], false, false, self.inner.clock);
             let row: Arc<[u32]> = pictures_of(&frame.list, index).into();
             let mut table = lock(&self.inner.picture_table);
             if table.generation == generation.id {

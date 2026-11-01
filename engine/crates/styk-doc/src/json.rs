@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 
+use crate::fast::FastMap;
 use crate::value::{Nums, Obj, Shape, Value, index_key};
 use crate::{JsonError, format_number};
 
@@ -38,7 +39,7 @@ pub fn parse(text: &[u8]) -> Result<Value, JsonError> {
 
 /// Reads JSON text, passing every string value through `hook`.
 pub fn parse_with(text: &[u8], hook: &mut dyn StringHook) -> Result<Value, JsonError> {
-    let mut parser = Parser { text, at: 0, keys: HashMap::new(), shapes: HashMap::new(), scratch: String::new(), hook };
+    let mut parser = Parser::new(text, hook);
     // A leading byte-order mark is tolerated, as the app's own readers do before parsing.
     if text.starts_with(&[0xef, 0xbb, 0xbf]) {
         parser.at = 3;
@@ -68,7 +69,7 @@ pub fn scan(text: &[u8]) -> Result<Option<Vec<Member>>, JsonError> {
 /// [`scan`], passing every string value through `hook` as [`parse_with`] does. An error from the
 /// hook ends the scan; the values it returns are dropped, so a hook that only checks builds nothing.
 pub fn scan_with(text: &[u8], hook: &mut dyn StringHook) -> Result<Option<Vec<Member>>, JsonError> {
-    let mut parser = Parser { text, at: 0, keys: HashMap::new(), shapes: HashMap::new(), scratch: String::new(), hook };
+    let mut parser = Parser::new(text, hook);
     if text.starts_with(&[0xef, 0xbb, 0xbf]) {
         parser.at = 3;
     }
@@ -89,15 +90,26 @@ pub fn scan_with(text: &[u8], hook: &mut dyn StringHook) -> Result<Option<Vec<Me
 struct Parser<'a> {
     text: &'a [u8],
     at: usize,
-    /// One allocation per distinct key in the document.
+    /// One allocation per distinct key in the document. The keys are the file's: a standard map, whose hash a file cannot aim at
+    /// (`crate::fast`).
     keys: HashMap<&'a [u8], Arc<str>>,
-    /// One key list per distinct object layout, found by the addresses of its interned keys.
-    shapes: HashMap<Vec<usize>, Arc<Shape>>,
+    /// One key list per distinct object layout, found by the addresses of its interned keys: addresses the parser made, not the file.
+    shapes: FastMap<Vec<usize>, Arc<Shape>>,
     scratch: String,
     hook: &'a mut dyn StringHook,
+    /// The keys of the objects being read, innermost last: an object takes the keys from where it began to the end.
+    key_stack: Vec<Arc<str>>,
+    /// The addresses of an object's keys, for finding its shape.
+    identity: Vec<usize>,
+    /// The shape of the last object read at each depth: the next one at that depth is most often the same.
+    hints: Vec<Option<Arc<Shape>>>,
 }
 
 impl<'a> Parser<'a> {
+    fn new(text: &'a [u8], hook: &'a mut dyn StringHook) -> Parser<'a> {
+        Parser { text, at: 0, keys: HashMap::default(), shapes: HashMap::default(), scratch: String::new(), hook, key_stack: Vec::new(), identity: Vec::new(), hints: Vec::new() }
+    }
+
     fn error(&self, message: &'static str) -> JsonError {
         JsonError::Syntax { offset: self.at, message }
     }
@@ -501,21 +513,30 @@ impl<'a> Parser<'a> {
     }
 
     fn key(&mut self) -> Result<Arc<str>, JsonError> {
+        self.key_interned(None).map(|(key, _)| key)
+    }
+
+    /// A key, and whether it is the one allocation every occurrence of its text shares (a key with escapes is not interned). `expected`
+    /// is the interned key an object of the layout read last has at this place: a key with its text is it, found without hashing.
+    fn key_interned(&mut self, expected: Option<&Arc<str>>) -> Result<(Arc<str>, bool), JsonError> {
         if self.text.get(self.at) != Some(&b'"') {
             return Err(self.error("expected a key"));
         }
         let (start, end, escaped) = self.string_span()?;
         if escaped {
             self.unescape(start, end)?;
-            return Ok(Arc::from(self.scratch.as_str()));
+            return Ok((Arc::from(self.scratch.as_str()), false));
         }
         let bytes = &self.text[start..end];
+        if let Some(key) = expected.filter(|key| key.as_bytes() == bytes) {
+            return Ok((key.clone(), true));
+        }
         if let Some(key) = self.keys.get(bytes) {
-            return Ok(key.clone());
+            return Ok((key.clone(), true));
         }
         let key: Arc<str> = Arc::from(std::str::from_utf8(bytes).map_err(|_| self.error("invalid UTF-8 in a key"))?);
         self.keys.insert(bytes, key.clone());
-        Ok(key)
+        Ok((key, true))
     }
 
     fn object(&mut self, depth: usize) -> Result<Value, JsonError> {
@@ -524,16 +545,26 @@ impl<'a> Parser<'a> {
         }
         self.at += 1;
         self.space();
-        let mut keys: Vec<Arc<str>> = Vec::new();
-        let mut values: Vec<Value> = Vec::new();
-        // Duplicate or integer-like keys need JavaScript's ordering rules: rebuild through `Obj::set`.
-        let mut plain = true;
         if self.text.get(self.at) == Some(&b'}') {
             self.at += 1;
             return Ok(Value::Obj(Arc::new(Obj::new())));
         }
+        if self.hints.len() <= depth {
+            self.hints.resize(depth + 1, None);
+        }
+        let hint = self.hints[depth].clone();
+        let base = self.key_stack.len();
+        let mut values: Vec<Value> = Vec::with_capacity(hint.as_ref().map_or(4, |shape| shape.keys().len()));
+        // Duplicate or integer-like keys need JavaScript's ordering rules: rebuild through `Obj::set`.
+        let mut plain = true;
+        // While the keys are those of the last object read at this depth they are a plain layout: nothing to check.
+        let mut on_hint = hint.is_some();
+        // A key with escapes is not interned, so equal text no longer means the same allocation.
+        let mut escaped = false;
         loop {
-            let key = self.key()?;
+            let at = self.key_stack.len() - base;
+            let expected = if on_hint { hint.as_ref().and_then(|shape| shape.keys().get(at)) } else { None };
+            let (key, interned) = self.key_interned(expected)?;
             self.space();
             if self.text.get(self.at) != Some(&b':') {
                 return Err(self.error("expected : after a key"));
@@ -541,10 +572,16 @@ impl<'a> Parser<'a> {
             self.at += 1;
             self.space();
             let value = self.value(depth + 1)?;
-            if plain && (key.as_bytes().first().is_some_and(u8::is_ascii_digit) && index_key(&key).is_some() || keys.iter().any(|k| Arc::ptr_eq(k, &key) || **k == *key)) {
-                plain = false;
+            escaped |= !interned;
+            on_hint = on_hint && hint.as_ref().is_some_and(|shape| shape.keys().get(at).is_some_and(|known| Arc::ptr_eq(known, &key)));
+            if plain && !on_hint {
+                let earlier = &self.key_stack[base..];
+                let repeats = if escaped { earlier.iter().any(|k| **k == *key) } else { earlier.iter().any(|k| Arc::ptr_eq(k, &key)) };
+                if key.as_bytes().first().is_some_and(u8::is_ascii_digit) && index_key(&key).is_some() || repeats {
+                    plain = false;
+                }
             }
-            keys.push(key);
+            self.key_stack.push(key);
             values.push(value);
             self.space();
             match self.text.get(self.at) {
@@ -556,11 +593,42 @@ impl<'a> Parser<'a> {
                     self.at += 1;
                     break;
                 }
-                _ => return Err(self.error("expected , or } in an object")),
+                _ => {
+                    self.key_stack.truncate(base);
+                    return Err(self.error("expected , or } in an object"));
+                }
             }
         }
+        let count = self.key_stack.len() - base;
         if !plain {
+            let keys: Vec<Arc<str>> = self.key_stack.drain(base..).collect();
             return Ok(Value::Obj(Arc::new(keys.into_iter().zip(values).collect())));
+        }
+        let shape = match hint.filter(|shape| on_hint && shape.keys().len() == count) {
+            Some(shape) => shape,
+            None => {
+                self.identity.clear();
+                self.identity.extend(self.key_stack[base..].iter().map(|k| Arc::as_ptr(k) as *const u8 as usize));
+                match self.shapes.get(self.identity.as_slice()) {
+                    Some(shape) => shape.clone(),
+                    None => {
+                        let shape = Shape::new(self.key_stack[base..].to_vec());
+                        self.shapes.insert(self.identity.clone(), shape.clone());
+                        shape
+                    }
+                }
+            }
+        };
+        self.key_stack.truncate(base);
+        // A layout with a key spelled with escapes is not a hint: its key is not the one allocation of its text.
+        self.hints[depth] = (!escaped).then(|| shape.clone());
+        Ok(Value::Obj(Arc::new(Obj::from_shape(shape, values))))
+    }
+
+    /// The object of the members read: `plain` when no key repeats and none is an array index, so that they stand in the order read.
+    fn build_object(&mut self, keys: Vec<Arc<str>>, values: Vec<Value>, plain: bool) -> Value {
+        if !plain {
+            return Value::Obj(Arc::new(keys.into_iter().zip(values).collect()));
         }
         let identity: Vec<usize> = keys.iter().map(|k| Arc::as_ptr(k) as *const u8 as usize).collect();
         let shape = match self.shapes.get(&identity) {
@@ -571,9 +639,12 @@ impl<'a> Parser<'a> {
                 shape
             }
         };
-        Ok(Value::Obj(Arc::new(Obj::from_shape(shape, values))))
+        Value::Obj(Arc::new(Obj::from_shape(shape, values)))
     }
 }
+
+mod pieces;
+pub use pieces::{SharedHook, parse_pieces};
 
 /// Writes `value` as `JSON.stringify(value)` would.
 pub fn write(value: &Value, out: &mut Vec<u8>) {
@@ -635,7 +706,7 @@ pub fn write_numbers(numbers: &Nums, out: &mut Vec<u8>) {
     out.push(b']');
 }
 
-/// Writes a quoted string with `JSON.stringify`'s escapes: `"` and `\`, the short
+/// Writes a quoted string with `JSON.stringify`'s escapes: `"` and ``, the short
 /// forms for backspace, form feed, newline, return and tab, `\u00xx` for other
 /// control characters, and everything else as it is.
 pub fn write_string(text: &str, out: &mut Vec<u8>) {
@@ -689,6 +760,42 @@ pub fn utf16_units(value: &Value) -> usize {
     }
 }
 
+/// How many entries the lengths of recently counted fractional numbers are kept in (a direct-mapped table, per thread).
+const SEEN_LENGTHS: usize = 4096;
+
+thread_local! {
+    /// `(bits, length)` of numbers whose text was counted lately. An animation repeats its numbers (a joint that does not move, a position held
+    /// across frames): about two in three fractional numbers of a dense scene were counted already, and formatting one is most of the cost.
+    static SEEN: std::cell::RefCell<Vec<(u64, u8)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The length of `n` as JSON writes it. A whole number of up to fifteen digits is its digits (and a sign); a fractional one is formatted, unless
+/// its length was counted lately.
+fn number_units(n: f64, scratch: &mut Vec<u8>) -> usize {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        let whole = n.abs() as u64;
+        let digits = if whole == 0 { 1 } else { whole.ilog10() as usize + 1 };
+        return digits + usize::from(n < 0.0 && whole != 0);
+    }
+    let bits = n.to_bits();
+    let slot = (bits.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 52) as usize % SEEN_LENGTHS;
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.is_empty() {
+            seen.resize(SEEN_LENGTHS, (0, 0));
+        }
+        let (held, length) = seen[slot];
+        if length != 0 && held == bits {
+            return length as usize;
+        }
+        scratch.clear();
+        format_number(n, scratch);
+        // A number's text is at most 25 characters; a table slot with length 0 is empty.
+        seen[slot] = (bits, scratch.len() as u8);
+        scratch.len()
+    })
+}
+
 /// The same JSON weight owner, with cooperative cancellation/stale/progress
 /// checks during a dense single string or numeric array as well as containers.
 /// The caller owns the worker and its cancellation contract. Checks run before
@@ -710,6 +817,15 @@ pub fn utf16_units_checked<E>(
         pending: &mut usize,
         check: &mut impl FnMut() -> Result<(), E>,
     ) -> Result<usize, E> {
+        // Plain printable ASCII (nearly every key and name) is its length: counted at once, the checks as often as one character at a time would.
+        if text.bytes().all(|byte| (0x20..0x7f).contains(&byte) && byte != b'"' && byte != b'\\') {
+            *pending += text.len();
+            while *pending >= 4096 {
+                *pending -= 4096;
+                check()?;
+            }
+            return Ok(text.len() + 2);
+        }
         let mut units = 2;
         for character in text.chars() {
             touch(pending, check)?;
@@ -732,11 +848,7 @@ pub fn utf16_units_checked<E>(
             Value::Null => 4,
             Value::Bool(true) => 4,
             Value::Bool(false) => 5,
-            Value::Num(n) => {
-                number.clear();
-                format_number(*n, number);
-                number.len()
-            }
+            Value::Num(n) => number_units(*n, number),
             Value::Str(text) => string(text, pending, check)?,
             Value::Blob(blob) => {
                 string(&blob.prefix, pending, check)? + blob.bytes.len().div_ceil(3) * 4
@@ -745,9 +857,7 @@ pub fn utf16_units_checked<E>(
                 let mut units = 2 + numbers.len().saturating_sub(1);
                 for n in numbers.iter() {
                     touch(pending, check)?;
-                    number.clear();
-                    format_number(n, number);
-                    units += number.len();
+                    units += number_units(n, number);
                 }
                 units
             }
@@ -787,6 +897,49 @@ pub fn base64_strict(text: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_weight_of_a_number_is_the_length_of_its_text() {
+        use crate::{Nums, Value};
+        let numbers = [0.0, -0.0, 1.0, -1.0, 9.0, 10.0, 99999.0, -123456.0, 1e14, 999999999999999.0, 1e15, -1e15, 1e21, 0.5, -0.25, 1.0 / 3.0, f64::NAN, f64::INFINITY, 4294967295.0, 123456789012345.0];
+        for n in numbers {
+            assert_eq!(utf16_units(&Value::Num(n)), to_string(&Value::Num(n)).len(), "{n}");
+        }
+        let list = Value::array(numbers.iter().map(|n| Value::Num(*n)).collect());
+        assert_eq!(utf16_units(&list), to_string(&list).len());
+        let packed = Value::Nums(std::sync::Arc::new(Nums::F64(numbers.to_vec().into())));
+        assert_eq!(utf16_units(&packed), to_string(&packed).len());
+    }
+
+    #[test]
+    fn the_weight_of_a_string_is_the_length_of_its_text() {
+        use crate::Value;
+        let long_plain = "key".repeat(5000);
+        let long_escaped = "a\"b\\c\n".repeat(2000);
+        let texts = ["", "x", "figure_type_id", "a\"b", "back\\slash", "tab\tand\nnewline", "\u{1}\u{1f}", "é ü", "日本語", "😀", "\u{7f}", long_plain.as_str(), long_escaped.as_str()];
+        for text in texts {
+            let value = Value::str(text);
+            assert_eq!(utf16_units(&value), to_string(&value).encode_utf16().count(), "{text:?}");
+        }
+        let mut object = crate::Obj::new();
+        for text in texts { object.set(text, Value::str(text)); }
+        let value = Value::object(object);
+        assert_eq!(utf16_units(&value), to_string(&value).encode_utf16().count());
+    }
+
+    #[test]
+    fn the_weight_of_numbers_counted_before_is_still_the_length_of_their_text() {
+        use crate::{Nums, Value};
+        // Many different fractions (the table of lengths seen lately is far smaller), each seen again later, in two orders.
+        let mut state = 0x1234_5678_9abc_def0_u64;
+        let mut next = || { state ^= state << 13; state ^= state >> 7; state ^= state << 17; state };
+        let numbers: Vec<f64> = (0..30_000).map(|n| match n % 3 { 0 => (next() % 1_000_000) as f64 / 997.0, 1 => f32::from_bits((next() >> 33) as u32 & 0x7f7f_ffff) as f64, _ => -((next() % 10_000) as f64) / 64.0 }).collect();
+        let twice: Vec<f64> = numbers.iter().chain(numbers.iter().rev()).copied().collect();
+        let packed = Value::Nums(std::sync::Arc::new(Nums::F64(twice.clone().into())));
+        assert_eq!(utf16_units(&packed), to_string(&packed).len());
+        let list = Value::array(twice.iter().map(|n| Value::Num(*n)).collect());
+        assert_eq!(utf16_units(&list), to_string(&list).len());
+    }
+
     use super::*;
 
     fn round_trip(text: &str) {
@@ -966,5 +1119,20 @@ mod tests {
         }
         assert!(scan_with(br#"{"a":["ok","bad"]}"#, &mut Refuse).is_err());
         assert!(scan_with(br#"{"a":["ok","fine"]}"#, &mut Refuse).is_ok());
+    }
+
+    /// What `JSON.parse` gives, as `JSON.stringify` writes it, for objects whose keys repeat, are array indexes, are spelled with
+    /// escapes, or follow the layout of the object before them for a while.
+    #[test]
+    fn objects_read_after_a_similar_one_keep_javascripts_keys() {
+        for (text, expected) in [
+            (r#"[{"a":1,"b":2},{"a":1,"b":2,"c":3},{"a":1},{"a":1,"b":2},{"b":1,"a":2},{"a":1,"a":2},{"a":1,"b":2}]"#, r#"[{"a":1,"b":2},{"a":1,"b":2,"c":3},{"a":1},{"a":1,"b":2},{"b":1,"a":2},{"a":2},{"a":1,"b":2}]"#),
+            (r#"[{"x":1,"y":2},{"x":1,"2":5,"y":3},{"x":1,"y":2}]"#, r#"[{"x":1,"y":2},{"2":5,"x":1,"y":3},{"x":1,"y":2}]"#),
+            (r#"[{"a":1,"b":2},{"a":1,"a":9},{"a":1,"b":2,"b":7}]"#, r#"[{"a":1,"b":2},{"a":9},{"a":1,"b":7}]"#),
+            (r#"[{"k":{"a":1},"j":{"a":1,"b":2}},{"k":{"a":1,"b":2},"j":{"a":1}},{"k":{"a":1},"j":{"a":1,"b":2}}]"#, r#"[{"k":{"a":1},"j":{"a":1,"b":2}},{"k":{"a":1,"b":2},"j":{"a":1}},{"k":{"a":1},"j":{"a":1,"b":2}}]"#),
+            (r#"{"a":{"a":{"a":{}}},"b":[{"a":1},{"a":1,"a":2}]}"#, r#"{"a":{"a":{"a":{}}},"b":[{"a":1},{"a":2}]}"#),
+        ] {
+            assert_eq!(to_string(&parse(text.as_bytes()).unwrap()), expected, "{text}");
+        }
     }
 }

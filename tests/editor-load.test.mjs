@@ -28,7 +28,9 @@ test('New publishes its starter figure once with clean history and first-edit un
 });
 
 test('cooperative import publishes once with identical validated poses, UID/layer indices and initial frame',async()=>{
+  // The keyframes are read when something asks; the tables that are read at the open (here the backgrounds) are what the slices cut.
   const report=fixture(),editor=open({demo:false}),before=state(editor),events=[];let yields=0;
+  report.backgrounds=Array.from({length:30},(_,i)=>({background_id:i+1,kind:2,color:0xff203040+i,name:`Background ${i}`}));
   editor.addEventListener('change',event=>events.push({kind:event.detail.kind,index:editor.frameIndex,tick:editor.tick}));
   await editor.loadAsync(report,'Imported.piv',{sliceMs:.1,initialFrameIndex:'last',yieldControl:async()=>{
     yields++;assert.deepEqual(state(editor),before);assert.equal(events.length,0);
@@ -36,7 +38,7 @@ test('cooperative import publishes once with identical validated poses, UID/laye
   const sync=new Editor({demo:false}).load(clone(report),'Imported.piv',{initialFrameIndex:'last'});
   assert(yields>1);assert.deepEqual(editor.report,sync.report);
   assert.equal(editor.frameIndex,49);assert.equal(editor.tick,147);assert.equal(editor.selectedUid,1);
-  assert.deepEqual(editor._layerUidCounts,sync._layerUidCounts);assert.deepEqual(editor.layers,sync.layers);
+  assert.deepEqual(editor._layerGroups,sync._layerGroups);assert.deepEqual(editor._layerSeenUids,sync._layerSeenUids);assert.deepEqual(editor.layers,sync.layers);
   assert.equal(editor._nextUid,81);assert.equal(editor._nextFrameIdentity,51);
   assert.deepEqual(events,[{kind:'document',index:49,tick:147}]);
   assert(editor.lastLoadTimings.slices>1);assert(Number.isFinite(editor.lastLoadTimings.commitMs));

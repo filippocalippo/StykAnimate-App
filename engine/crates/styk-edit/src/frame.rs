@@ -137,6 +137,8 @@ impl Editor {
         if !held { cache.frames.clear(); }
         cache.report = Some(report.clone());
         cache.follow_views(&prepared);
+        // The engine converted the document: this session's next conversion starts from those views, not from nothing.
+        cache.loader.adopt_views(report, &prepared.doc);
         cache.prepared = Some(prepared);
     }
 

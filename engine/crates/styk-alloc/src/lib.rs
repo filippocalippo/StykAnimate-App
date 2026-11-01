@@ -153,6 +153,30 @@ pub fn admit(bytes: usize) -> Result<(), OutOfMemory> {
 #[derive(Debug)]
 pub struct Reservation {
     bytes: usize,
+    /// The name the work gave it ([`reserve_named`]), under which the host can give it back if the work dies without dropping it.
+    token: Option<u64>,
+}
+
+/// The reservations that carry a name, by name: whoever takes one out gives its bytes back (the work that ends, or the host that
+/// saw the thread die; never both).
+static NAMED: std::sync::Mutex<Vec<(u64, usize)>> = std::sync::Mutex::new(Vec::new());
+
+fn take_named(token: u64) -> Option<usize> {
+    let mut named = NAMED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let at = named.iter().position(|(held, _)| *held == token)?;
+    Some(named.swap_remove(at).1)
+}
+
+/// Gives back the bytes of the reservation named `token` if its work has not already (a thread that traps never drops what it held, and
+/// the host, which sees its `error`, calls this). Returns the bytes released, zero when there was nothing to release.
+pub fn release_named(token: u64) -> usize {
+    match take_named(token) {
+        Some(bytes) => {
+            RESERVED.fetch_sub(bytes, Ordering::Relaxed);
+            bytes
+        }
+        None => 0,
+    }
 }
 
 impl Reservation {
@@ -164,13 +188,31 @@ impl Reservation {
 
 impl Drop for Reservation {
     fn drop(&mut self) {
-        RESERVED.fetch_sub(self.bytes, Ordering::Relaxed);
+        match self.token {
+            // Given back already by the host when its thread was lost: nothing is subtracted twice.
+            Some(token) => {
+                release_named(token);
+            }
+            None => {
+                RESERVED.fetch_sub(self.bytes, Ordering::Relaxed);
+            }
+        }
     }
 }
 
 /// Sets `bytes` aside for work that is about to allocate about that much, in pieces nothing can refuse: the
 /// work holds the reservation until it is done and goes without when the module cannot give it.
 pub fn reserve(bytes: usize) -> Result<Reservation, OutOfMemory> {
+    reserve_as(bytes, None)
+}
+
+/// [`reserve`] under a name the host can release ([`release_named`]) if the thread holding the reservation dies without dropping it.
+/// Names are the host's to keep apart.
+pub fn reserve_named(token: u64, bytes: usize) -> Result<Reservation, OutOfMemory> {
+    reserve_as(bytes, Some(token))
+}
+
+fn reserve_as(bytes: usize, token: Option<u64>) -> Result<Reservation, OutOfMemory> {
     let mut reserved = RESERVED.load(Ordering::Relaxed);
     loop {
         let available = ceiling().saturating_sub(live_bytes()).saturating_sub(reserved);
@@ -178,7 +220,12 @@ pub fn reserve(bytes: usize) -> Result<Reservation, OutOfMemory> {
             return Err(OutOfMemory { requested: bytes, available });
         }
         match RESERVED.compare_exchange_weak(reserved, reserved + bytes, Ordering::Relaxed, Ordering::Relaxed) {
-            Ok(_) => return Ok(Reservation { bytes }),
+            Ok(_) => {
+                if let Some(token) = token {
+                    NAMED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((token, bytes));
+                }
+                return Ok(Reservation { bytes, token });
+            }
             Err(now) => reserved = now,
         }
     }
@@ -357,6 +404,29 @@ mod tests {
             drop(first);
             assert_eq!(headroom(), 40 << 20, "dropping a reservation gives its bytes back");
             drop(second);
+        });
+    }
+
+    #[test]
+    fn a_reservation_of_a_thread_that_died_is_given_back_by_its_name_and_only_once() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        with_limit(64 << 20, || {
+            let before = reserved_bytes();
+            // A thread that traps never drops its reservation: forgetting it is the same.
+            std::mem::forget(reserve_named(7, 30 << 20).unwrap());
+            assert_eq!(reserved_bytes(), before + (30 << 20));
+            assert_eq!(release_named(7), 30 << 20);
+            assert_eq!(reserved_bytes(), before, "the host gave it back");
+            assert_eq!(release_named(7), 0, "and gives nothing back twice");
+            // A reservation released by its name and then dropped subtracts once, and one dropped first is not released again.
+            let late = reserve_named(8, 10 << 20).unwrap();
+            assert_eq!(release_named(8), 10 << 20);
+            drop(late);
+            assert_eq!(reserved_bytes(), before);
+            let done = reserve_named(9, 10 << 20).unwrap();
+            drop(done);
+            assert_eq!(release_named(9), 0);
+            assert_eq!(reserved_bytes(), before);
         });
     }
 

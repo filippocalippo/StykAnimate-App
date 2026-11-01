@@ -28,6 +28,7 @@ import { icon } from "./icons.mjs";
 import { createDialog } from "./ui/ui-dialog.mjs";
 import { installRovingFocus } from "./ui/roving-focus.mjs";
 import { kitText } from "./ui/ui-strings.mjs";
+import {findFigureType} from './figure-types.mjs';
 
 export function createAppDialogs(ctx) {
   const {
@@ -187,9 +188,7 @@ export function createAppDialogs(ctx) {
           .reduce(
             (n, o) =>
               n +
-              (editor.report.figure_types.find(
-                (f) => f.figure_type_id === o.figure_type_id,
-              )?.segments.length || 0),
+              (findFigureType(editor.report.figure_types, o.figure_type_id)?.segments.length || 0),
             0,
           )),
       ], {0: {key: "appDialogs.currentSceneSegments", params: {}}}),

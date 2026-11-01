@@ -1,7 +1,6 @@
 import {validationLabel} from "./validation-labels.mjs";
 import {messageError} from './localized-error.mjs';
 import {editorSpatialMethods} from './editor-spatial.mjs';
-import {timeline} from './pivot/read-view.mjs';
 import {validateScene, syncDerived} from './pivot/model.mjs';
 import {resolveJoinSelection} from './pivot/structure.mjs';
 import {createDemo, emptyDocument, defaultFigure} from './demo.mjs';
@@ -17,20 +16,22 @@ import {invalidateFrameIndex} from './frame-ids.mjs';
 import {editorVfxMethods} from './editor-vfx.mjs';
 import {editorHandleCommandMethods} from './editor-handle-commands.mjs';
 import {prepareLoad, prepareLoadNow} from './engine/engine-open.mjs';
+import {frameRow, frameSummary} from './lazy-table.mjs';
 import {editorMovieclipMethods} from './editor-movieclips.mjs';
 import {editorLayerSheetMethods} from './editor-layer-sheet.mjs';
 import {validateLayerSheet} from './layer-sheet.mjs';
 import {editorDrawingMethods} from './editor-drawing.mjs';
 import {DrawingResources,drawingResourcesFor} from './drawing-resources.mjs';
 import {editorSessionMethods} from './editor-sessions.mjs';
+import {findFigureType} from './figure-types.mjs';
 
 const clone = value => structuredClone(value);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const finite = (value, label) => { if (!Number.isFinite(value)) throw messageError(new Error(''), "errors.editorCamera.mustBeFinite", {label: validationLabel(label)}); return value; };
-function initialLoadState(report,{initialFrameIndex=0,initialTick}={}){
+function initialLoadState(report,rows,{initialFrameIndex=0,initialTick}={}){
   let frameIndex=initialFrameIndex==='last'?report.keyframes.length-1:clamp(Math.trunc(finite(initialFrameIndex,'Initial frame')),0,report.keyframes.length-1);
   if(initialTick!==undefined)finite(initialTick,'Initial tick');
-  const rows=timeline(report),last=rows.at(-1),total=last?last.start+last.count:0;
+  const last=rows.at(-1),total=last?last.start+last.count:0;
   const tick=initialTick===undefined?rows[frameIndex]?.start??0:clamp(initialTick,0,Math.max(0,total-1));
   if(initialTick!==undefined){let low=0,high=rows.length-1;while(low<high){const mid=Math.ceil((low+high)/2);if(rows[mid].start<=tick)low=mid;else high=mid-1;}frameIndex=low;}
   return {frameIndex,tick,timeline:rows,animation:report._styk?.animation};
@@ -55,6 +56,8 @@ export class Editor extends EventTarget {
     this.load(demo ? createDemo() : emptyDocument());
   }
   get frame() { return this._authoredPoseEdit?.frame ?? this.report.keyframes[this.frameIndex]; }
+  /** What the interface shows of the stored frame on show: its background, colour override and figure count. A tick of playback or scrubbing asks this, not for the record. */
+  get frameSummary() { return this._authoredPoseEdit ? frameRow(this._authoredPoseEdit.frame) : frameSummary(this.report.keyframes, this.frameIndex); }
   get selectionFrame() { return this._authoredPoseEdit?.frame ?? this.evaluatedFrame; }
   get selectedUid() {
     if (!this.selectedUids?.has(this._selectedUid)) this._selectedUid = [...(this.selectedUids ?? [])].at(-1) ?? null;
@@ -77,7 +80,7 @@ export class Editor extends EventTarget {
   // With nothing selected there is nothing to look up: the frame on show is not built for it (the library reads this on every tick of playback).
   get selectedObjects() { return this.selectedUids?.size ? this.selectionFrame?.objects.filter(o => this.selectedUids.has(o.unique_id)) ?? [] : []; }
   get object() { return this.selectionFrame?.objects.find(o => o.unique_id === this.selectedUid) ?? this.selectedObjects.at(-1) ?? null; }
-  get figure() { const typeId = this.object?.figure_type_id; return this.report.figure_types.find(f => f.figure_type_id === typeId) ?? null; }
+  get figure() { const typeId = this.object?.figure_type_id; return findFigureType(this.report.figure_types, typeId) ?? null; }
   get selectedSlot() { return this.selectionFrame?.objects.findIndex(o => o.unique_id === this.selectedUid) ?? -1; }
   get timeline() {
     const animation = this.report._styk?.animation;
@@ -179,7 +182,7 @@ export class Editor extends EventTarget {
   _publishLoadedReport(prepared, name, {initialFrameIndex=0, initialTick, preserveDrawingResources=false, onDetach} = {}) {
     const {report} = prepared;
     if (name !== undefined && name !== null && typeof name !== 'string') throw messageError(new Error(''), "errors.editor.theDocumentNameMustBeText", {});
-    const initial=initialLoadState(report,{initialFrameIndex,initialTick}),index=initial.frameIndex;
+    const initial=initialLoadState(report,prepared.timeline,{initialFrameIndex,initialTick}),index=initial.frameIndex;
     const started = performance.now();
     // The open document stays open beside the loaded one (editor-sessions.mjs): its owner receives it whole.
     if(onDetach)this.handOverDocument(onDetach);
@@ -196,7 +199,7 @@ export class Editor extends EventTarget {
     this._animationEdit = null; this._authoredPoseEdit = null;
     this._revision = this._savedRevision = ++this._revisionSerial;
     this._nextUid = prepared.nextUid; this._nextFrameIdentity = prepared.nextFrameIdentity;
-    this._layerUidCounts = prepared.layerUidCounts; this._layerSeenUids = prepared.layerSeenUids; this._layerGroups = prepared.layerGroups;
+    this._layerSeenUids = prepared.layerSeenUids; this._layerGroups = prepared.layerGroups;
     this._layerRevision = (this._layerRevision ?? 0) + 1; this._layerDescriptors = null; this._layerUidArrays = new Map();
     this._invalidate({timing: true}); invalidateFrameIndex(report);
     this.tick=initial.tick;this._timeline=initial.timeline;this._timelineAnimation=initial.animation;this._timelineEndTick=animationEndTick({_styk:{animation:initial.animation}});
@@ -242,7 +245,7 @@ export class Editor extends EventTarget {
     const nextTick = clamp(finite(tick, 'Timeline tick'), 0, allowBeyondEnd ? 10000000 : Math.max(0, this.totalTicks - 1));
     let low = 0, high = this.timeline.length - 1;
     while (low < high) { const mid = Math.ceil((low + high) / 2); if (this.timeline[mid].start <= nextTick) low = mid; else high = mid - 1; }
-    this.tick = nextTick; this.frameIndex = low; this._invalidate(); this._emit('seek'); return evaluate ? this.evaluatedFrame : this.frame;
+    this.tick = nextTick; this.frameIndex = low; this._invalidate(); this._emit('seek'); return evaluate ? this.evaluatedFrame : undefined;
   }
 
 

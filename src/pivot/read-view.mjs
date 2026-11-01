@@ -5,6 +5,7 @@
  * interface reads it through `src/engine/engine-shown.mjs`.
  */
 import {animationEndTick} from '../animation-channels.mjs';
+import {tableOf} from '../lazy-table.mjs';
 
 export const shortest = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -65,6 +66,9 @@ export function poseSourceFrame(report, id) {
   const retained = sources && Object.hasOwn(sources, id) ? sources[id] : null;
   if (retained) return retained;
   const frames = report.keyframes || [];
+  // A table of the read view knows the identity of every record without fetching them (the last one with an identity names it).
+  const table = tableOf(frames);
+  if (table) { const at = table.positionOf(id, true); return at < 0 ? null : frames[at]; }
   let index = sourceIndices.get(report);
   const candidate = index?.ids.get(id);
   if (!index || index.frames !== frames || index.length !== frames.length ||
