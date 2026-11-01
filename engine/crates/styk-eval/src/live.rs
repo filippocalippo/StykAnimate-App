@@ -161,6 +161,29 @@ fn facing_differs(before: Option<&[u8]>, after: Option<&[u8]>, dx: i32, dy: i32)
     })
 }
 
+/// The texels of a whole tile as a rectangle `[x0, y0, x1, y1)`.
+const WHOLE: [usize; 4] = [0, 0, TILE as usize, TILE as usize];
+
+/// A tile that changed in an update: what it held before (`None`: nothing) and the rectangle of texels that may differ
+/// from it now.
+struct Dirt {
+    before: Option<Vec<u8>>,
+    rect: [usize; 4],
+}
+
+/// Notes that the tile at `coord` changed. A tile changed twice in one update keeps what it held first.
+fn note(dirty: &mut HashMap<Coord, Dirt>, coord: Coord, before: Option<Vec<u8>>, rect: [usize; 4]) {
+    match dirty.entry(coord) {
+        std::collections::hash_map::Entry::Occupied(mut held) => {
+            let held = held.get_mut();
+            held.rect = [held.rect[0].min(rect[0]), held.rect[1].min(rect[1]), held.rect[2].max(rect[2]), held.rect[3].max(rect[3])];
+        }
+        std::collections::hash_map::Entry::Vacant(slot) => {
+            slot.insert(Dirt { before, rect });
+        }
+    }
+}
+
 fn visible(pixels: &[u8]) -> bool {
     pixels.chunks_exact(4).any(|texel| texel[3] != 0)
 }
@@ -223,53 +246,53 @@ impl Layer {
             self.stale = (0..=MAX_LEVEL).map(|_| HashSet::default()).collect();
         }
         // The tiles that changed at each level, with what each held before (`None`: nothing).
-        let mut dirty: Vec<HashMap<Coord, Option<Vec<u8>>>> = vec![HashMap::default()];
+        let mut dirty: Vec<HashMap<Coord, Dirt>> = vec![HashMap::default()];
         let mut membership = false;
         for (coord, pixels) in changes {
             match pixels.filter(|pixels| pixels.len() == TILE_BYTES && visible(pixels)) {
                 Some(pixels) => {
                     if self.level0.get(&coord) != Some(&pixels) {
+                        let rect = changed_rect(self.level0.get(&coord).map(Vec::as_slice), Some(pixels.as_slice())).unwrap_or(WHOLE);
                         let before = self.level0.insert(coord, pixels);
                         membership |= before.is_none();
-                        dirty[0].entry(coord).or_insert(before);
+                        note(&mut dirty[0], coord, before, rect);
                     }
                 }
                 None => {
                     if let Some(before) = self.level0.remove(&coord) {
                         membership = true;
-                        dirty[0].entry(coord).or_insert(Some(before));
+                        let rect = changed_rect(Some(before.as_slice()), None).unwrap_or(WHOLE);
+                        note(&mut dirty[0], coord, Some(before), rect);
                     }
                 }
             }
         }
         // Reduced tiles: only the parents of a tile that changed can change.
         for n in 1..=MAX_LEVEL as usize {
-            // The part of each parent its changed children reach (in the parent's texels), the union of what changed in them.
-            let mut parents: HashMap<Coord, Option<[usize; 4]>> = HashMap::default();
-            for (&(x, y), before) in &dirty[n - 1] {
-                let parent = (x.div_euclid(2), y.div_euclid(2));
-                let rect = changed_rect(before.as_deref(), self.level(n - 1).get(&(x, y)).map(Vec::as_slice)).map(|[x0, y0, x1, y1]| {
-                    let (ox, oy) = ((x.rem_euclid(2) as usize) * (TILE as usize / 2), (y.rem_euclid(2) as usize) * (TILE as usize / 2));
-                    [ox + x0 / 2, oy + y0 / 2, ox + x1.div_ceil(2), oy + y1.div_ceil(2)]
-                });
-                let union = parents.entry(parent).or_insert(None);
-                *union = match (*union, rect) {
-                    (Some(a), Some(b)) => Some([a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]),
-                    (a, b) => a.or(b),
-                };
+            // The part of each parent its changed children reach (in the parent's texels): the union of what may differ in them.
+            let mut parents: HashMap<Coord, [usize; 4]> = HashMap::default();
+            for (&(x, y), dirt) in &dirty[n - 1] {
+                let [x0, y0, x1, y1] = dirt.rect;
+                let (ox, oy) = ((x.rem_euclid(2) as usize) * (TILE as usize / 2), (y.rem_euclid(2) as usize) * (TILE as usize / 2));
+                let rect = [ox + x0 / 2, oy + y0 / 2, ox + x1.div_ceil(2), oy + y1.div_ceil(2)];
+                parents
+                    .entry((x.div_euclid(2), y.div_euclid(2)))
+                    .and_modify(|union| *union = [union[0].min(rect[0]), union[1].min(rect[1]), union[2].max(rect[2]), union[3].max(rect[3])])
+                    .or_insert(rect);
             }
-            let fresh: Vec<(Coord, Option<Vec<u8>>)> = parents
+            // A parent made again only where its children changed may differ from what it held only there; one made whole, anywhere.
+            let fresh: Vec<(Coord, Option<Vec<u8>>, [usize; 4])> = parents
                 .into_iter()
                 .map(|((x, y), rect)| {
-                    let reduced = match (self.reduced[n - 1].get(&(x, y)), rect) {
-                        (Some(previous), Some(rect)) => Some(down_tile_patch(self.level(n - 1), x, y, previous, rect)),
-                        _ => down_tile(self.level(n - 1), x, y),
+                    let (reduced, may_differ) = match self.reduced[n - 1].get(&(x, y)) {
+                        Some(previous) => (Some(down_tile_patch(self.level(n - 1), x, y, previous, rect)), rect),
+                        None => (down_tile(self.level(n - 1), x, y), WHOLE),
                     };
-                    ((x, y), reduced.filter(|tile| visible(tile)))
+                    ((x, y), reduced.filter(|tile| visible(tile)), may_differ)
                 })
                 .collect();
             let mut changed = HashMap::default();
-            for (coord, tile) in fresh {
+            for (coord, tile, rect) in fresh {
                 if self.reduced[n - 1].get(&coord) == tile.as_ref() {
                     continue;
                 }
@@ -277,7 +300,7 @@ impl Layer {
                     Some(tile) => self.reduced[n - 1].insert(coord, tile),
                     None => self.reduced[n - 1].remove(&coord),
                 };
-                changed.insert(coord, before);
+                changed.insert(coord, Dirt { before, rect });
             }
             dirty.push(changed);
         }
@@ -308,7 +331,8 @@ impl Layer {
         }
         for n in 0..=MAX_LEVEL as usize {
             let mut want = std::mem::take(&mut fresh[n]);
-            for (&(x, y), before) in &dirty[n] {
+            for (&(x, y), dirt) in &dirty[n] {
+                let before = &dirt.before;
                 want.insert((x, y));
                 // A neighbour's border holds this tile's facing edge: it is written again only when that edge changed.
                 let after = self.level(n).get(&(x, y)).map(Vec::as_slice);
