@@ -785,6 +785,9 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
             // their complete figure/frame data in the answer serves no purpose.
             // (A paste or a duplicate that made nothing answers an empty list, which the facade cannot read from its document.)
             let adopted_view = changes_only && matches!(method, "duplicateFigure" | "addFigure" | "importFigure" | "pasteSelection" | "duplicateSelection" | "sheetAppendFrame") && result.array_len() != Some(0);
+            // A clip's definition holds the scene it was made from (hundreds of megabytes for a large project): the view that fetches
+            // its records on demand gets the row and reads the record when something asks for more than its identity.
+            let result = if changes_only && matches!(method, "createMovieclip" | "createEmptyMovieclip") && result.is_object() { crate::figure_row(&result) } else { result };
             answer.push(("result", if adopted_view { Value::Null } else { result }));
         }
         Err(EditError::Unported(what)) => {

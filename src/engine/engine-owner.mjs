@@ -30,7 +30,7 @@
  */
 import {applyDocumentPatch} from './engine-patch.mjs';
 import {payloadText} from './engine-open.mjs';
-import {fetchedRecords, holdAllRecords, holdingAll, recordsOf} from '../lazy-table.mjs';
+import {fetchedRecords, holdAllRecords, holdingAll, recordsOf, tableOf} from '../lazy-table.mjs';
 import {messageError} from '../localized-error.mjs';
 import {validationLabel} from '../validation-labels.mjs';
 import {motionParameterMessages} from '../camera-motion-localization.mjs';
@@ -251,8 +251,9 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
         editor.selectedUids = new Set(state.selectedUids); editor._selectedUid = state.selectedUid; editor.selectedJoint = state.selectedJoint;
         editor._branchSelection = metadata.branch ? {...metadata.branch} : null;
         editor._polygonSelection = metadata.polygonSelection ? {...metadata.polygonSelection} : null;
-        const active = editor.figure?.segments[editor.selectedJoint]?.segment_id;
         const ids = new Set(metadata.segmentIds ?? []);
+        // The selected figure's definition is read only for a selection of several segments: a clip's is as large as the project it was made from.
+        const active = ids.size > 1 ? editor.figure?.segments[editor.selectedJoint]?.segment_id : undefined;
         editor._segmentSelection = ids.size > 1 && ids.has(active) ? {uid: editor.selectedUid, active, ids} : null;
       }
     }
@@ -459,12 +460,32 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     if (!events.length) return;
     for (const {kind, frameIndex, tick, ...detail} of events) editor._emit(kind, kind === 'seek' ? {} : detail);
   };
+  /**
+   * The figure a movieclip creation made, as the editor returns it. A clip's definition holds the scene it was made from, as large as the
+   * project, so the answer carries its row (identity and name) and the record is read from the document only if the caller asks for more.
+   */
+  const madeFigure = row => {
+    const identity = {figure_type_id: row.id, name: row.name};
+    let record;
+    const definition = () => {
+      if (record) return record;
+      const figures = editor.report.figure_types, at = tableOf(figures)?.positionOf(row.id, true) ?? figures.findLastIndex(figure => figure.figure_type_id === row.id);
+      return record = at >= 0 ? figures[at] : identity;
+    };
+    return new Proxy(identity, {
+      get: (target, key) => Object.hasOwn(target, key) ? target[key] : Reflect.get(definition(), key),
+      has: (target, key) => key in definition() || key in target,
+      ownKeys: () => Reflect.ownKeys(definition()),
+      getOwnPropertyDescriptor: (target, key) => { const own = Reflect.getOwnPropertyDescriptor(definition(), key); return own && {...own, configurable: true}; },
+    });
+  };
   /** What a call returns when its answer is a view the editor holds. */
   const resultOf = (name, answer) => {
     if (['duplicateFigure', 'addFigure', 'importFigure'].includes(name)) return editor.object;
     // What was pasted is what is selected, unless nothing was (the session answers an empty list then).
     if (name === 'pasteSelection' || name === 'duplicateSelection') return answer.result?.length === 0 ? [] : editor.selectedObjects;
     if (name === 'sheetAppendFrame') return editor.evaluatedFrame;
+    if ((name === 'createMovieclip' || name === 'createEmptyMovieclip') && answer.result?.id !== undefined) return madeFigure(answer.result);
     // The timeline's copy answers with the clipboard it filled, which the answer carried (the filmstrip and the shared clipboard take it as done).
     if (name === 'sheetCopyFrames') return editor._sheetClipboard;
     if (name === 'beginAnimationEdit') return editor._animationEdit;

@@ -18,7 +18,7 @@
 mod channels;
 pub mod paint;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use styk_doc::{Obj, Value};
@@ -822,24 +822,57 @@ impl<'a> Records<'a> {
         // of the frame being replaced: the typed evaluator's result for this layer.
         let typed = self.prepared.layer_frame(id, tick);
         let root_of = |uid: f64| typed.as_ref().and_then(|frame| frame.objects.iter().find(|o| o.uid as f64 == uid)).map(|o| o.root);
+        // The figures the next key replaces too, and the pose source each key shows for a figure (the first patch naming it): a layer
+        // that replaces many figures would otherwise read every key's patches again for each of them.
+        let continuing: HashSet<u64> = next.map(|n| items(n.get("movieclipPatches")).iter().filter_map(|other| num(other, "uid")).filter(|uid| !uid.is_nan()).map(f64::to_bits).collect()).unwrap_or_default();
+        let mut shown_at: Option<Vec<HashMap<u64, Option<Value>>>> = None;
+        let mut sorted: Option<(Vec<usize>, Vec<f64>)> = None;
         for patch in &patches {
             let removed = num(patch, "uid").unwrap_or(f64::NAN);
-            let continues = next.is_some_and(|n| items(n.get("movieclipPatches")).iter().any(|other| num(other, "uid") == Some(removed)));
+            let continues = !removed.is_nan() && continuing.contains(&removed.to_bits());
             let replacement = if continues && !held {
                 // Consecutive replacements of one movieclip tween like any pose track.
-                let mapped: Vec<Value> = keys
-                    .iter()
-                    .map(|entry| {
-                        let frame_id = items(entry.get("movieclipPatches")).iter().find(|other| num(other, "uid") == Some(removed)).and_then(|other| other.get("frameId").cloned());
-                        let mut value = Obj::new();
-                        value.set("frameId", frame_id.unwrap_or(Value::Null));
-                        let mut entry = entry.as_obj().cloned().unwrap_or_default();
-                        entry.set("value", Value::object(value));
-                        Value::object(entry)
-                    })
-                    .collect();
+                let shown_at = shown_at.get_or_insert_with(|| {
+                    keys.iter()
+                        .map(|entry| {
+                            let mut frame_ids: HashMap<u64, Option<Value>> = HashMap::new();
+                            for other in items(entry.get("movieclipPatches")) {
+                                if let Some(uid) = num(&other, "uid").filter(|uid| !uid.is_nan()) {
+                                    frame_ids.entry(uid.to_bits()).or_insert_with(|| other.get("frameId").cloned());
+                                }
+                            }
+                            frame_ids
+                        })
+                        .collect()
+                });
                 let Some(seq) = self.prepared.patch_track(id, removed as u32) else { return Err(Error::Invalid(format!("no replacement track for {removed} on {id}"))) };
-                self.sample_keys(seq, &mapped, false, tick, None)?
+                // `sample_keys` of the keys as this figure's own track has them (each key showing the pose source it names for the figure), read
+                // at the two keys round `tick`: the order of the keys is the track's whoever the figure is, so it is worked out once.
+                let (order, ticks) = sorted.get_or_insert_with(|| {
+                    let hidden = |k: &Value| truthy(k.get("hidden"));
+                    let mut order: Vec<usize> = (0..keys.len()).collect();
+                    order.sort_by(|&a, &b| num(&keys[a], "tick").unwrap_or(0.0).total_cmp(&num(&keys[b], "tick").unwrap_or(0.0)).then((hidden(&keys[b]) as u8).cmp(&(hidden(&keys[a]) as u8))));
+                    let ticks = order.iter().map(|&k| num(&keys[k], "tick").unwrap_or(0.0)).collect();
+                    (order, ticks)
+                });
+                if ticks.is_empty() || tick < ticks[0] {
+                    None
+                } else {
+                    let low = ticks.partition_point(|&t| t <= tick) - 1;
+                    let fraction = match ticks.get(low + 1) {
+                        Some(&next) if next > ticks[low] => ((tick - ticks[low]) / (next - ticks[low])).clamp(0.0, 1.0),
+                        _ => 0.0,
+                    };
+                    let entry_at = |i: usize| -> Result<Option<Value>, Error> {
+                        let Some(&k) = order.get(i) else { return Ok(None) };
+                        let mut value = Obj::new();
+                        value.set("frameId", shown_at[k].get(&removed.to_bits()).cloned().flatten().unwrap_or(Value::Null));
+                        let mut entry = keys[k].as_obj().cloned().unwrap_or_default();
+                        entry.set("value", Value::object(value));
+                        self.virtual_frame(&[Value::object(entry)], 0, false)
+                    };
+                    Some(self.interval(seq, &entry_at, low, fraction, None)?)
+                }
             } else {
                 patch.get("frameId").and_then(Value::as_str).and_then(|frame_id| self.source(frame_id))
             };

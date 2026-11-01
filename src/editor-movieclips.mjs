@@ -4,7 +4,6 @@ import {movieclipAsset, isMovieclip} from './movieclips.mjs';
 import {storedFrameReport} from './pivot-frame-draft.mjs';
 import {findFigureType} from './figure-types.mjs';
 
-const clone=value=>structuredClone(value);
 export const editorMovieclipMethods={
   enterMovieclip(typeId=this.figure?.figure_type_id){
     if(drawingResourcesFor(this.report)?.stats.unpublished)throw messageError(new Error(''), "errors.editorMovieclips.finishDrawingPublicationBeforeEditingAMovieclip", {});
@@ -13,8 +12,8 @@ export const editorMovieclipMethods={
     if(this._drag)this.commitDrag();if(this._animationEdit)this.commitAnimationEdit();
     const scopes=this._movieclipScopes??[],parent={};
     for(const key of Object.keys(this))if(key!=='_movieclipScopes')parent[key]=this[key];
-    const document=clone(movieclipAsset(figure).document);
-    this.load(document,figure.name,{preserveDrawingResources:true});this._movieclipScopes=[...scopes,{parent,typeId,name:figure.name}];
+    // The engine opens the clip's document from its text and builds the view itself: the clip's own record is not changed, so it is not copied first.
+    this.load(movieclipAsset(figure).document,figure.name,{preserveDrawingResources:true});this._movieclipScopes=[...scopes,{parent,typeId,name:figure.name}];
     this._emit('movieclip-scope',{structural:true,timing:true});return this;
   },
   leaveMovieclip({save=true}={}){

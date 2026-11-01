@@ -674,23 +674,33 @@ impl Editor {
                         continue;
                     }
                     let original = editor.evaluated(*t, false)?;
+                    // The figures of the frame by identity, and the continuations it carries, read once for all the clip's figures.
+                    let mut shown: HashMap<u32, Value> = HashMap::new();
+                    for object in objects_of(&original) {
+                        if let Some(u) = uid(&object) {
+                            shown.entry(u).or_insert(object);
+                        }
+                    }
+                    let continuations = crate::sheet::continuations(&original);
+                    let until = times.get(i + 1).copied().unwrap_or(actual_end).min(plan.end(&id));
+                    let mut frames = Vec::with_capacity(uids.len());
                     for u in &uids {
                         let mut frame = create_frame(if *u == anchor && !own_layer { std::slice::from_ref(&instance) } else { &[] }).as_obj().cloned().unwrap();
-                        let original_object = objects_of(&original).into_iter().find(|o| uid(o) == Some(*u));
-                        let step = original_object
-                            .as_ref()
+                        let step = shown
+                            .get(u)
                             .filter(|o| uses_presence(o))
                             .map(|o| object(&[("uid", Value::Num(*u as f64)), ("typeId", o.get("figure_type_id").cloned().unwrap()), ("playback", o.get("_stykMovieclip").cloned().unwrap())]))
-                            .or_else(|| crate::sheet::continuations(&original).into_iter().find(|s| num(s, "uid") == Some(*u as f64)));
+                            .or_else(|| continuations.iter().find(|s| num(s, "uid") == Some(*u as f64)).cloned());
                         if let Some(step) = step {
                             set_continuations(&mut frame, vec![step]);
                         }
                         let frame = Value::object(frame);
                         let signature = styk_doc::json::to_string(&Value::array(vec![Value::str(&id), frame.clone()]));
                         let frame_id = captures.entry(signature).or_insert_with(|| plan.capture(&frame, &id).get("frameId").cloned().unwrap()).clone();
-                        let until = times.get(i + 1).copied().unwrap_or(actual_end).min(plan.end(&id));
-                        editor.replace_at(&mut plan, &id, *t, *u, &frame, Some(("frameId", frame_id)), until)?;
+                        frames.push((*u, frame, frame_id));
                     }
+                    let replacements: Vec<crate::sheet::Replacement<'_>> = frames.iter().map(|(u, frame, frame_id)| crate::sheet::Replacement { uid: *u, frame, extra: Some(("frameId", frame_id.clone())) }).collect();
+                    editor.replace_each_at(&mut plan, &id, *t, &replacements, until)?;
                 }
             }
             editor.publish(plan, "Create movieclip", editor.selection_state(), None)?;
