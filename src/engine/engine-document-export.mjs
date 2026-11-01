@@ -36,10 +36,20 @@ function joinEngine(join) {
 /** A value an engine refusal names: text as it is, a field label translated. */
 const parameter = value => value && typeof value === 'object' && '@label' in value ? validationLabel(value['@label']) : value;
 
-/** The error for what the engine raised: its message is JSON (`{name, message, messageKey, messageParams}`). */
+/**
+ * The error for what the engine raised: its message is JSON (`{name, message, messageKey, messageParams}`). Anything else that comes out
+ * of a call into the engine is not a failure the engine reported but a thread that was cut off in the middle of its work: a trap (the
+ * `unreachable` of a panic, an out-of-bounds access), or a JavaScript exception thrown through its frames. Nothing in those frames ran its
+ * destructors, so a reservation of memory they held is still held: the error is marked `trapped` and whoever receives it gives the
+ * reservation back (a failure the engine reported has dropped its own, and giving back twice is harmless).
+ */
 function failure(error) {
   let data;
-  try { data = JSON.parse(error?.message); } catch { return error; }
+  try { data = JSON.parse(error?.message); } catch { data = null; }
+  if (!data || typeof data !== 'object') {
+    if (error && typeof error === 'object') error.trapped = true;
+    return error;
+  }
   if (data?.name === 'AbortError') return new DOMException(String(data.message ?? 'The export was cancelled.'), 'AbortError');
   const params = Object.fromEntries(Object.entries(data?.messageParams ?? {}).map(([name, value]) => [name, parameter(value)]));
   const result = data?.messageKey ? messageError(new Error(String(data.message)), data.messageKey, params) : new Error(String(data?.message ?? error.message));

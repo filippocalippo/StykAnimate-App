@@ -33,7 +33,7 @@ import { createStage } from "./engine/engine-stage.mjs";
 import { createStagePlayback } from "./engine/engine-playback.mjs";
 import { installEngineOwner } from "./engine/engine-owner.mjs";
 import { loadEngine } from "./engine/engine.mjs";
-import { useEngine } from "./engine/engine-open.mjs";
+import { useEngine, prepareOpen } from "./engine/engine-open.mjs";
 import { engineDocument } from "./engine/engine-document.mjs";
 import { engineComposite } from "./engine/engine-composite.mjs";
 import { markAppBounds } from "./engine/engine-edit-bounds.mjs";
@@ -1934,7 +1934,8 @@ function pause() {
   state.playing = false;
   state.previewing = false;
   resetPreviewQuality();
-  editor.endFrameDraftPreview();
+  // A pause of a playhead at rest (every stepping key) has no preview to end: the engine's answer to the call is `false`, and the call costs a session round trip.
+  if (wasPlaying) editor.endFrameDraftPreview();
   thumbnailRenderer?.setPaused(document.hidden);
   timelineUI?.setPaused?.(document.hidden);
   state.buffering = false;
@@ -3642,6 +3643,7 @@ async function importFilesTracked(files) {
 }
 async function openFile() {
   pause();
+  prepareOpen();
   if (desktop) {
     status({messageKey: "app.openingFile", messageParams: {}}, false, true);
     const result = await desktop.openFile();
@@ -3674,8 +3676,9 @@ async function acceptNativeFile(result) {
 }
 async function acceptNativeFileTracked(result) {
   pause();
+  // A project's bytes go to the engine as they are; only a Stick Nodes archive needs a file to read twice.
   const decoded = result.bytes
-    ? await chooseSticknodesFile(new File([result.bytes], result.filename))
+    ? await chooseSticknodesFile(/\.(piv|styk|json)$/i.test(result.filename) ? {name: result.filename, size: result.bytes.byteLength, arrayBuffer: async () => result.bytes} : new File([result.bytes], result.filename))
     : result;
   if(!decoded)return false;
   decoded.timings = { ...decoded.timings, ...result.timings };
@@ -3763,6 +3766,9 @@ async function performNativeSave({saveAs}) {
         status({messageKey: "app.saveCancelled", messageParams: {}});
         return false;
       }
+      // Whoever shows the failure (fail(), for every save a person asks for) says what happened; until then the line must not go on
+      // saying the project is being saved, nor the busy task go on spinning.
+      status({messageKey: "app.saveFailed", messageParams: {}});
       throw error;
     }
     if (saved) {
@@ -4434,13 +4440,13 @@ const actions = {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(0);
-    editor.seek(0);
+    editor.seek(0, { evaluate: false });
   },
   "previous-frame": () => {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(Math.max(0, timelineUI.selectedIndex - 1));
-    editor.seek(Math.max(0, editor.tick - 1));
+    editor.seek(Math.max(0, editor.tick - 1), { evaluate: false });
   },
   "next-frame": () => {
     pause();
@@ -4448,13 +4454,13 @@ const actions = {
       return timelineUI.selectFrame(
         Math.min(timelineUI.frameCount - 1, timelineUI.selectedIndex + 1),
       );
-    editor.seek(Math.min(editor.totalTicks - 1, editor.tick + 1));
+    editor.seek(Math.min(editor.totalTicks - 1, editor.tick + 1), { evaluate: false });
   },
   "last-frame": () => {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(timelineUI.frameCount - 1);
-    editor.seek(Math.max(0, editor.totalTicks - 1));
+    editor.seek(Math.max(0, editor.totalTicks - 1), { evaluate: false });
   },
   "previous-keyframe": () => { pause(); runTimelineHotkey(timelineUI, 'previous-keyframe'); },
   "next-keyframe": () => { pause(); runTimelineHotkey(timelineUI, 'next-keyframe'); },

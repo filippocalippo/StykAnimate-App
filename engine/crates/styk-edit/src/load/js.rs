@@ -16,6 +16,12 @@ pub(super) type V<'a> = Option<&'a Value>;
 /// load refuses the document without a message key.
 pub const TYPE_ERROR: &str = "TypeError";
 
+/// The refusal of a load that was stopped (its host asked to cancel between two of its steps).
+pub const CANCELLED: &str = "Cancelled";
+
+/// The refusal of a load whose pieces were not all done because a worker that had one stopped.
+pub const WORKER_LOST: &str = "WorkerLost";
+
 /// `String(n)` for a number: its JSON spelling.
 pub(super) fn number_text(n: f64) -> String {
     styk_doc::json::to_string(&Value::Num(n))

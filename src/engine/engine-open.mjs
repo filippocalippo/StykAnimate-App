@@ -18,6 +18,12 @@ let registered = null;
 export function useEngine(engine) { registered = engine; }
 export function registeredEngine() { return registered; }
 
+/**
+ * Starts the engine's remaining workers when a person asks to open a file, so that they have joined by the time its bytes
+ * arrive (reading takes as long as starting them): the open shares its work with them.
+ */
+export function prepareOpen() { registered?.grow(); }
+
 function engineOf(engine) {
   const found = engine ?? registered;
   if (!found) throw new Error('The engine has not been loaded: register it with useEngine().');
@@ -50,8 +56,10 @@ function restorePart(part, sections, shared) {
  * Where the records of a lazy table come from: the opening's tree until its session starts, then the session's, which is the document
  * from then on. A record is lifted on its own, whole (nothing is shared with the ones fetched before).
  */
-class Records {
+export class Records {
   constructor(holder) { this.holder = holder; }
+  /** The document is closed: `holder` (its session, or the opening) is freed, and no record can be fetched from it any more. */
+  close(holder) { if (this.holder === holder) this.holder = null; }
   /** The record at `index` of an array table, or under `key` of a table of records by key. */
   fetch(table, at) {
     if (!this.holder) throw new Error('The document is closed: its records can no longer be read.');
@@ -74,7 +82,14 @@ function openFailure(error) {
   return failure;
 }
 
-const optionsText = ({layerTimeline = false} = {}) => JSON.stringify({layerTimeline: Boolean(layerTimeline)});
+/**
+ * The most other workers an open takes: the workers share one allocator, whose lock the open's many small allocations contend for (the
+ * open of the large `.styk` read fastest with two or three helpers, and no faster with six).
+ */
+const MAX_OPEN_HELPERS = 3;
+/** The other workers an open may use: it keeps one free for the frame on show of another document. */
+const helpersOf = engine => Math.min(MAX_OPEN_HELPERS, Math.max(0, (engine.workers ?? 0) - 2));
+const optionsText = ({layerTimeline = false} = {}, helpers = 0) => JSON.stringify({layerTimeline: Boolean(layerTimeline), helpers});
 
 /** The views already built for documents that are about to be loaded (`attach`, `prepareLoad`). */
 const reads = new WeakMap();
@@ -96,6 +111,8 @@ export class Opening {
   get version() { return this.meta.version; }
   /** Whether the document stored a frame draft when it was opened. */
   get savedDraft() { return this.meta.savedDraft; }
+  /** Where the engine's open spent its time (ms): decode, prepare, views, check. */
+  get timings() { return this.meta.timings; }
   get lineage() { return this.meta.lineage; }
 
   /** Gives the document the Pivot file it was read from, as a saved native document carries its source (`_stykSource`). */
@@ -242,7 +259,7 @@ export function openBytes(bytes, filename, {engine, layerTimeline, signal} = {})
   engine.grow();
   const refusal = memoryRefusal(engine, bytes.byteLength);
   if (refusal) return Promise.reject(refusal);
-  const job = engine.handle.open_document(bytesOf(bytes), filename, 'file', optionsText({layerTimeline}));
+  const job = engine.handle.open_document(bytesOf(bytes), filename, 'file', optionsText({layerTimeline}, helpersOf(engine)));
   return finish(engine, job, signal);
 }
 
@@ -257,7 +274,7 @@ export function openJson(document, name, {engine, layerTimeline, signal} = {}) {
   const text = jsonBytes(document), refusal = memoryRefusal(engine, text.byteLength);
   if (text.byteLength >= SMALL_JSON_BYTES) engine.grow();
   if (refusal) return Promise.reject(refusal);
-  const job = engine.handle.open_document(text, name ?? 'Untitled animation', 'json', optionsText({layerTimeline}));
+  const job = engine.handle.open_document(text, name ?? 'Untitled animation', 'json', optionsText({layerTimeline}, helpersOf(engine)));
   return finish(engine, job, signal);
 }
 

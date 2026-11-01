@@ -34,7 +34,7 @@ async function projectFile(message) {
   const cancelled = () => Boolean(message.cancel && Atomics.load(message.cancel, 0));
   const source = config.sourceId ? await fetchOriginalSource() : null;
   const made = makeProjectFile({join: config.engine.join, guard, cancelled, address: message.project.address, source: source?.bytes,
-    request: {snapshots: message.project.snapshots, scopes: message.project.scopes, helpers: message.project.helpers, name: config.name, source: source?.meta}});
+    request: {snapshots: message.project.snapshots, scopes: message.project.scopes, helpers: message.project.helpers, aside: message.project.aside, reservation: message.project.reservation, name: config.name, source: source?.meta}});
   timings.container_raw_bytes = made.rawBytes;
   timings.engine = made.timings;
   return made.bytes;
@@ -141,7 +141,7 @@ self.addEventListener('message', async event => {
     config?.codecPort?.close();
     config = null;
     self.postMessage({id: message.id, ok: false, error: {message: error?.message || String(error), ...errorMessageData(error),
-      code: error?.code, status: error?.status, name: error?.name,
+      code: error?.code, status: error?.status, name: error?.name, trapped: error?.trapped === true,
       ...diagnosticDetails(error,stage,stage === 'validate' ? 'invalid_document' : stage === 'serialize' ? 'serialize_failed' : stage === 'request' ? 'backend_unavailable' : 'snapshot_failed')}});
   } finally { running = false; }
 });

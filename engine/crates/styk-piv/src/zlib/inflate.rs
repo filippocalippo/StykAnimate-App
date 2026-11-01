@@ -276,10 +276,93 @@ fn fixed_tables() -> (Table, Table) {
     (lit, dist)
 }
 
+/// The longest match a length code stands for.
+const LONGEST_MATCH: usize = 258;
+
+/// Decodes symbols from `bits` into `out` for as long as every one is a literal or a match that is plainly good and both the input
+/// and the room under `limit` are far enough from their ends that neither can matter, and stops at the first symbol that is anything
+/// else (the end of the block, a code that stands for nothing, a distance too far back, the edge of the input or of the limit) before
+/// taking it. What it leaves is exactly what decoding the same symbols one at a time leaves, so the symbol it stopped at is decoded by
+/// the careful loop, which is where every error and every edge case is decided.
+fn fast_symbols(bits: &mut Bits, out: &mut Vec<u8>, lit: &Table, dist: &Table, limit: usize) {
+    let input = bits.input;
+    let (mut hold, mut n, mut pos) = (bits.hold, bits.n, bits.pos);
+    let (lit_root, dist_root) = (lit.root, dist.root);
+    let (lit_mask, dist_mask) = ((1u64 << lit_root) - 1, (1u64 << dist_root) - 1);
+    loop {
+        // A refill reads eight bytes; a symbol of either kind takes at most 48 bits of the 56 it leaves.
+        if pos + 8 > input.len() || out.len() + LONGEST_MATCH > limit {
+            break;
+        }
+        if out.capacity() - out.len() < LONGEST_MATCH {
+            out.reserve(LONGEST_MATCH.max(out.len()));
+        }
+        hold |= u64::from_le_bytes(input[pos..pos + 8].try_into().unwrap()) << n;
+        pos += ((63 - n) >> 3) as usize;
+        n |= 56;
+        let mut entry = lit.entries[(hold & lit_mask) as usize];
+        let mut used = entry.bits as u32;
+        if entry.op & LINK != 0 {
+            entry = lit.entries[entry.val as usize + ((hold >> lit_root) & ((1u64 << (entry.op & !LINK)) - 1)) as usize];
+            used = lit_root + entry.bits as u32;
+        }
+        if entry.op == 0 {
+            hold >>= used;
+            n -= used;
+            out.push(entry.val as u8);
+            continue;
+        }
+        if entry.op & (END | BAD) != 0 {
+            break;
+        }
+        let mut length = entry.val as usize;
+        let mut rest = hold >> used;
+        let extra = (entry.op & 15) as u32;
+        length += (rest & ((1u64 << extra) - 1)) as usize;
+        rest >>= extra;
+        let mut d = dist.entries[(rest & dist_mask) as usize];
+        let mut dist_used = d.bits as u32;
+        if d.op & LINK != 0 {
+            d = dist.entries[d.val as usize + ((rest >> dist_root) & ((1u64 << (d.op & !LINK)) - 1)) as usize];
+            dist_used = dist_root + d.bits as u32;
+        }
+        if d.op & BAD != 0 {
+            break;
+        }
+        rest >>= dist_used;
+        let dist_extra = (d.op & 15) as u32;
+        let distance = d.val as usize + (rest & ((1u64 << dist_extra) - 1)) as usize;
+        rest >>= dist_extra;
+        if distance > out.len() {
+            break;
+        }
+        n -= used + extra + dist_used + dist_extra;
+        hold = rest;
+        let start = out.len() - distance;
+        if distance >= length {
+            out.extend_from_within(start..start + length);
+        } else if distance == 1 {
+            let byte = out[start];
+            out.resize(out.len() + length, byte);
+        } else {
+            for offset in 0..length {
+                let byte = out[start + offset];
+                out.push(byte);
+            }
+        }
+    }
+    (bits.hold, bits.n, bits.pos) = (hold, n, pos);
+}
+
 /// Inflates a zlib stream, producing at most `limit` bytes.
 ///
 /// `Err` carries the text of the `zlib.error` Python raises for the same input.
 pub(crate) fn inflate(input: &[u8], limit: usize) -> Result<Inflated, String> {
+    inflate_with(input, limit, true)
+}
+
+/// [`inflate`], with or without the fast path through the plain symbols (the tests compare the two).
+fn inflate_with(input: &[u8], limit: usize, fast: bool) -> Result<Inflated, String> {
     let mut out: Vec<u8> = Vec::with_capacity(limit.min((input.len().saturating_mul(3)).max(1024)));
     let truncated = |data: Vec<u8>| Ok(Inflated { data, end: StreamEnd::Truncated });
     if input.len() < 2 {
@@ -417,6 +500,9 @@ pub(crate) fn inflate(input: &[u8], limit: usize) -> Result<Inflated, String> {
                     (&lit, &dist)
                 };
                 loop {
+                    if fast {
+                        fast_symbols(&mut bits, &mut out, lit_table, dist_table, limit);
+                    }
                     bits.refill();
                     let Some((entry, used)) = lit_table.lookup(bits.hold, bits.n) else {
                         return truncated(out);
@@ -499,4 +585,70 @@ pub(crate) fn inflate(input: &[u8], limit: usize) -> Result<Inflated, String> {
         return Err(data_error("incorrect data check"));
     }
     Ok(Inflated { data: out, end: StreamEnd::Complete { consumed: at + 4 } })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::zlib::compress;
+
+    struct Random(u64);
+
+    impl Random {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 >> 24
+        }
+    }
+
+    /// What a read of a stream comes to, as something comparable.
+    fn outcome(input: &[u8], limit: usize, fast: bool) -> Result<(Vec<u8>, StreamEnd), String> {
+        inflate_with(input, limit, fast).map(|inflated| (inflated.data, inflated.end))
+    }
+
+    /// Data of the kinds files hold: poses (repeating doubles), runs, text, and noise.
+    fn samples() -> Vec<Vec<u8>> {
+        let mut random = Random(7);
+        let poses: Vec<u8> = (0..60_000u32).flat_map(|i| (((i % 97) as f64) * 0.125 + (i / 4000) as f64).to_le_bytes()).collect();
+        let runs: Vec<u8> = (0..50_000u32).map(|i| if (i / 300) % 2 == 0 { 0 } else { (i / 300) as u8 }).collect();
+        let text: Vec<u8> = "the quick brown fox jumps over the lazy dog; ".repeat(2000).into_bytes();
+        let noise: Vec<u8> = (0..30_000).map(|_| random.next() as u8).collect();
+        let mixed: Vec<u8> = [&poses[..20_000], &noise[..5000], &runs[..9000], &text[..7000], &noise[5000..9000], &poses[20_000..]].concat();
+        vec![Vec::new(), vec![7], poses, runs, text, noise, mixed]
+    }
+
+    #[test]
+    fn the_fast_path_reads_every_stream_as_the_careful_loop_reads_it() {
+        let mut random = Random(99);
+        let mut compared = 0usize;
+        for data in samples() {
+            let stream = compress(&data);
+            assert_eq!(outcome(&stream, usize::MAX, true), outcome(&stream, usize::MAX, false), "a good stream");
+            assert_eq!(outcome(&stream, usize::MAX, true).unwrap().0, data);
+            // Limits that cut the output at, before and after the end, and streams cut short or damaged anywhere.
+            for limit in [0, 1, 257, 258, 259, 1000, data.len().saturating_sub(1), data.len(), data.len() + 1] {
+                assert_eq!(outcome(&stream, limit, true), outcome(&stream, limit, false), "limit {limit}");
+                compared += 1;
+            }
+            for _ in 0..60 {
+                let cut = random.next() as usize % (stream.len() + 1);
+                assert_eq!(outcome(&stream[..cut], usize::MAX, true), outcome(&stream[..cut], usize::MAX, false), "cut at {cut} of {}", stream.len());
+                let mut damaged = stream.clone();
+                for _ in 0..1 + random.next() % 3 {
+                    let at = random.next() as usize % damaged.len();
+                    damaged[at] ^= 1 << (random.next() % 8);
+                }
+                assert_eq!(outcome(&damaged, usize::MAX, true), outcome(&damaged, usize::MAX, false), "damaged");
+                compared += 2;
+            }
+        }
+        assert!(compared > 700);
+    }
+
+    #[test]
+    fn a_distance_past_the_start_is_the_careful_loops_error() {
+        // A fixed-Huffman block whose first symbol is a match at distance 1 with nothing before it.
+        let stream = [0x78, 0x9c, 0x03, 0x02, 0x00, 0x00, 0x00, 0xff, 0xff];
+        assert_eq!(outcome(&stream, usize::MAX, true), outcome(&stream, usize::MAX, false));
+    }
 }

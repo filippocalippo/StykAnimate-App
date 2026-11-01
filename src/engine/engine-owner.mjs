@@ -30,7 +30,7 @@
  */
 import {applyDocumentPatch} from './engine-patch.mjs';
 import {payloadText} from './engine-open.mjs';
-import {fetchedRecords, holdAllRecords, holdingAll} from '../lazy-table.mjs';
+import {fetchedRecords, holdAllRecords, holdingAll, recordsOf} from '../lazy-table.mjs';
 import {messageError} from '../localized-error.mjs';
 import {validationLabel} from '../validation-labels.mjs';
 import {motionParameterMessages} from '../camera-motion-localization.mjs';
@@ -485,15 +485,15 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   const readClipboard = (holder, kind) => JSON.parse(holder.query('clipboard', JSON.stringify([kind]), 'null')).v;
   /** Frees a session that is closed. The clipboards read what they keep in it first (a copied audio clip's recording) and name
    * it no more, so a freed session is never called. Every session of a closed project or a left movieclip ends here. */
-  const end = ended => {
-    try { clipboards.surrender(ended, readClipboard); } finally { ended.free(); }
+  const end = (ended, closed) => {
+    try { clipboards.surrender(ended, readClipboard); } finally { recordsOf(closed)?.close(ended); ended.free(); }
   };
   /** Ends the session of a document that is closed (or a movieclip that is left), whether it is the open one or parked. */
   const forget = closed => {
     let ended = null;
     if (document === closed) { ended = session; session = null; document = null; }
     else { ended = parked.get(closed)?.session; parked.delete(closed); }
-    if (ended) end(ended);
+    if (ended) end(ended, closed);
   };
   /** The token of the tree the session of document `held` holds, the open one or a parked one. */
   const handOver = held => (document === held ? session : parked.get(held)?.session)?.snapshot();
@@ -531,7 +531,8 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
       activate();
       check();
     } catch (error) {
-      const failed = session; session = null; document = null;
+      const failed = session, failedDocument = document; session = null; document = null;
+      recordsOf(failedDocument)?.close(failed);
       failed.free();
       report.broken = String(error.message ?? error);
       return null;
@@ -569,7 +570,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     return unsupported(name, reason);
   };
   /** `drawing`: the pixel step of a drawing commit (engine-owner-drawing.mjs): it runs once the answer is adopted, before the events. */
-  const callSession = (name, args, drawing = null) => {
+  const callSession = (name, args, drawing = null, clipSession = null) => {
     const live = ensure();
     if (!live) throw refuse(name, 'no engine session runs this document');
     if (ENDS_EDIT[name] && !editor[ENDS_EDIT[name]]) { report.calls++; report.native++; return false; }
@@ -583,16 +584,18 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
       if (handed.status === 'error') throw failure(handed.error, handed.errorParams);
       if (handed.status !== 'ok') throw new Error(`The engine did not take the ${kind} clipboard: ${handed.reason}`);
     }, readClipboard);
-    const payload = sessionPayload(args);
+    // A document of another session crosses as that session's tree: its place among the arguments is empty here.
+    const payload = sessionPayload(clipSession ? args.map((value, at) => at === 1 ? null : value) : args);
     if (payload === null) throw refuse(name, 'arguments that are not plain data');
     report.calls++;
     // A paste says how often the figures were pasted, which sets where the next paste lands.
     const pastes = name === 'pasteSelection' ? {figureClipboardPastes: true} : {};
     const encoded = payload.encoded ? {encoded: true} : {};
     const viewText = more => JSON.stringify({...view(), patch: true, changesOnly: true, draws: pool(more), drawPool: true, ...pastes, ...encoded});
-    let text = live.call(name, payload.text, viewText());
+    const run = more => clipSession ? live.call_with_document(name, payload.text, viewText(more), clipSession) : live.call(name, payload.text, viewText(more));
+    let text = run();
     // A call that makes more identities than the pool holds (rippling the audio cuts many clips) changed nothing: it asks again with enough.
-    if (text.includes('"unported"') && JSON.parse(text).reason?.startsWith('a call that draws more than the pool')) text = live.call(name, payload.text, viewText(MANY_DRAWS));
+    if (text.includes('"unported"') && JSON.parse(text).reason?.startsWith('a call that draws more than the pool')) text = run(MANY_DRAWS);
     const answer = JSON.parse(text);
     // Draws the call did not take come first next time, so identities follow one sequence.
     spare = [];
@@ -743,10 +746,14 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   // Entering a movieclip loads its document, which gets its session as any document does (the 'document' event below);
   // leaving it gives the clip's edit to the session of the document it was in, and ends the clip's own.
   const leaveMovieclip = editor.leaveMovieclip;
+  /** The clip being left and its session: its edit is given to the parent's session as the tree the clip's session holds. */
+  let leaving = null;
   layer.leaveMovieclip = function owned(...args) {
     const clip = editor.report;
+    leaving = {report: clip, session: document === clip ? session : parked.get(clip)?.session};
     try { return leaveMovieclip.apply(this, args); }
     finally {
+      leaving = null;
       // Once left (a leave that fails stays in the clip) the clip's session is of no use any more.
       if (editor.report !== clip) forget(clip);
     }
@@ -758,7 +765,10 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     if (discarded) for (const closed of [detached.report, ...(detached._movieclipScopes ?? []).map(scope => scope.parent.report)]) forget(closed);
     return discarded;
   };
-  layer._publishMovieclipEdit = function owned(...args) { return callSession('publishMovieclipEdit', args); };
+  layer._publishMovieclipEdit = function owned(...args) {
+    const clip = leaving?.session && args[1] === leaving.report ? leaving.session : null;
+    return callSession('publishMovieclipEdit', args, null, clip);
+  };
   layer.markSaved = function owned(...args) {
     const result = originalMarkSaved.apply(this, args);
     if (session && document === editor.report) { send('@markSaved', []); history.dirty = false; }
@@ -824,9 +834,9 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     keepRecords?.();
     // The clipboards let go of the sessions first: none names one that is freed.
     clipboards.release();
-    const ended = [session, ...[...parked.values()].map(value => value.session)];
+    const ended = [[session, document], ...[...parked].map(([held, value]) => [value.session, held])];
     session = null; document = null; parked.clear();
-    for (const value of ended) value?.free();
+    for (const [value, held] of ended) { if (value) recordsOf(held)?.close(value); value?.free(); }
     shown.release(); editor._shown = null;
   };
   // The editor reads the frame on show, its geometry and its timeline from the session.

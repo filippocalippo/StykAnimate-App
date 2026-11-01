@@ -1,5 +1,6 @@
 //! Document tree → typed [`Document`]: the views evaluation reads.
 
+use styk_doc::fanout::{self, Fanout, Sequential};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
@@ -170,6 +171,11 @@ pub fn easing(v: Option<&Value>) -> Option<Easing> {
     Some(Easing { mode, bezier })
 }
 
+/// The numbers of an array value, shared.
+fn numbers_of(v: Option<&Value>) -> Option<Arc<[f64]>> {
+    Some(v?.numbers()?.into())
+}
+
 pub fn paint(v: Option<&Value>) -> Option<Arc<Paint>> {
     let v = v?;
     let stops: Vec<PaintStop> = v
@@ -269,14 +275,17 @@ impl Loader {
         None
     }
 
-    fn numbers(&self, v: Option<&Value>) -> Option<Arc<[f64]>> {
-        Some(v?.numbers()?.into())
-    }
 
     /// The typed views of `d`, reusing those of records unchanged since the last call.
     pub fn document(&mut self, d: &Value, name: &str) -> Result<Document, Error> {
+        self.document_with(d, name, &Sequential)
+    }
+
+    /// The document, with the keyframes that have no view yet converted side by side on `fan`: the views, the notes and the
+    /// refusal are those of converting them in order.
+    pub fn document_with(&mut self, d: &Value, name: &str, fan: &dyn Fanout) -> Result<Document, Error> {
         self.converted = Converted::default();
-        let mut document = self.nested_document(d, name)?;
+        let mut document = self.nested_document(d, name, fan)?;
         document.images = self.images.clone();
         // Each distinct note once, and a bounded number of them however many revisions are read.
         let mut notes: Vec<String> = Vec::new();
@@ -294,7 +303,7 @@ impl Loader {
     }
 
     /// One document of the tree: the project, or a movieclip's own.
-    fn nested_document(&mut self, d: &Value, name: &str) -> Result<Document, Error> {
+    fn nested_document(&mut self, d: &Value, name: &str, fan: &dyn Fanout) -> Result<Document, Error> {
         let version = int(d, "version").unwrap_or(5) as u32;
         if !(2..=5).contains(&version) {
             return Err(Error::Format(format!("Expected a decoded Pivot 2-5 scene, found version {version}")));
@@ -311,13 +320,10 @@ impl Loader {
         for f in d.get("figure_types").and_then(Value::as_arr).into_iter().flatten() {
             figures.push(self.cached_figure(f, version)?);
         }
-        let mut keyframes = Vec::new();
+        let records: &[Value] = d.get("keyframes").and_then(Value::as_arr).unwrap_or_default();
+        let keyframes = self.keyframes_of(records, fan)?;
         // Where each frame's record is: its resolved styles are kept there for the next read.
-        let mut addresses: Vec<Option<usize>> = Vec::new();
-        for k in d.get("keyframes").and_then(Value::as_arr).into_iter().flatten() {
-            keyframes.push(self.cached_keyframe(k)?);
-            addresses.push(node_address(k));
-        }
+        let addresses: Vec<Option<usize>> = records.iter().map(node_address).collect();
         let mut backgrounds = Vec::new();
         for b in d.get("backgrounds").and_then(Value::as_arr).into_iter().flatten() {
             backgrounds.push(self.background(b));
@@ -368,7 +374,7 @@ impl Loader {
                         d.get("figure_types").cloned().unwrap_or(Value::Null),
                     );
                 }
-                let document = Arc::new(self.nested_document(&Value::object(retained), name)?);
+                let document = Arc::new(self.nested_document(&Value::object(retained), name, fan)?);
                 let ticks = d
                     .get("keyframes")
                     .and_then(Value::as_arr)
@@ -465,6 +471,52 @@ impl Loader {
         animation
     }
 
+    /// The views of `records`, in order: the cached ones as they are, the others converted (side by side when there are enough of
+    /// them), cached, and their notes taken in the order of the records.
+    fn keyframes_of(&mut self, records: &[Value], fan: &dyn Fanout) -> Result<Vec<Arc<Keyframe>>, Error> {
+        let mut known: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let missing: Vec<usize> = (0..records.len()).filter(|&at| node_address(&records[at]).is_none_or(|address| !self.keyframes.contains_key(&address) && known.insert(address))).collect();
+        if fan.cancelled() {
+            return Err(Error::Format("the load was cancelled".into()));
+        }
+        let cuts = fanout::ranges(fan, missing.len());
+        if cuts.len() <= 1 {
+            return records.iter().map(|k| self.cached_keyframe(k)).collect();
+        }
+        // Each piece converts its records with notes of its own; they are joined below in the order the records have.
+        let pieces: Vec<Vec<Value>> = cuts.iter().map(|cut| missing[cut.clone()].iter().map(|&at| records[at].clone()).collect()).collect();
+        let converted = fanout::map(fan, pieces, |piece: Vec<Value>| {
+            let mut notes = Vec::new();
+            let frames: Vec<Result<Keyframe, Error>> = piece.iter().map(|k| Self::keyframe_in(&mut notes, k)).collect();
+            (frames, notes)
+        })
+        .map_err(|_| Error::Format("a worker stopped while the document was being read".into()))?;
+        let mut made: HashMap<usize, Arc<Keyframe>> = HashMap::new();
+        let mut at = 0;
+        for (frames, notes) in converted {
+            // A piece's notes are those of the records it converted; a refusal ends the walk where converting in order would have.
+            for frame in frames {
+                made.insert(missing[at], Arc::new(frame?));
+                at += 1;
+            }
+            self.notes.extend(notes);
+        }
+        let mut views = Vec::with_capacity(records.len());
+        for (index, k) in records.iter().enumerate() {
+            match made.remove(&index) {
+                Some(frame) => {
+                    self.converted.keyframes += 1;
+                    if let Some(address) = node_address(k) {
+                        self.keyframes.insert(address, (Source::of(k), frame.clone()));
+                    }
+                    views.push(frame);
+                }
+                None => views.push(self.cached_keyframe(k)?),
+            }
+        }
+        Ok(views)
+    }
+
     fn cached_keyframe(&mut self, k: &Value) -> Result<Arc<Keyframe>, Error> {
         if let Some(address) = node_address(k) {
             if let Some((_, frame)) = self.keyframes.get(&address) {
@@ -476,6 +528,25 @@ impl Loader {
             return Ok(frame);
         }
         Ok(Arc::new(self.keyframe(k)?))
+    }
+
+    /// Takes the views of the keyframes and pose sources of `report` that another loader made (`doc` is the document it made of `report`), so
+    /// that the next document this loader converts does not make them anew. A record already viewed keeps its view. Both loaders are the same
+    /// converter: a record's view does not depend on which made it.
+    pub fn adopt_views(&mut self, report: &Value, doc: &Document) {
+        let mut take = |record: &Value, typed: &Arc<Keyframe>| {
+            if let Some(address) = node_address(record) {
+                self.keyframes.entry(address).or_insert_with(|| (Source::of(record), typed.clone()));
+            }
+        };
+        if let Some(records) = report.get("keyframes").and_then(Value::elements) {
+            for (record, typed) in records.iter().zip(&doc.keyframes) { take(&record, typed); }
+        }
+        if let Some(Value::Obj(sources)) = report.path(&["_styk", "frameSources"]) {
+            for (id, record) in sources.iter() {
+                if let Some(typed) = doc.frame_sources.get(id) { take(record, typed); }
+            }
+        }
     }
 
     /// How many typed records the loader holds: figures, keyframes, effect clips, animations and styled figures.
@@ -697,7 +768,7 @@ impl Loader {
 
     fn movieclip(&mut self, m: &Value) -> Result<Option<Arc<Movieclip>>, Error> {
         let Some(doc) = m.get("document").filter(|v| v.is_object()) else { return Ok(None) };
-        let document = Arc::new(self.nested_document(doc, "movieclip")?);
+        let document = Arc::new(self.nested_document(doc, "movieclip", &Sequential)?);
         // Attached meshes: one per local frame. An invalid one leaves the clip without meshes.
         let meshes = m.get("spatialMeshes").and_then(Value::elements).and_then(|meshes| {
             let parsed: Option<Vec<Arc<crate::spatial::ClipMesh>>> = meshes.iter().map(|mesh| crate::spatial::ClipMesh::parse(&mesh).map(Arc::new)).collect();
@@ -735,11 +806,11 @@ impl Loader {
         })))
     }
 
-    fn object(&mut self, o: &Value) -> Option<Object> {
-        self.object_reusing_ik(o, None)
+    fn object(notes: &mut Vec<String>, o: &Value) -> Option<Object> {
+        Self::object_reusing_ik(notes, o, None)
     }
 
-    fn object_reusing_ik(&mut self, o: &Value, previous: Option<(&Value, &Object)>) -> Option<Object> {
+    fn object_reusing_ik(notes: &mut Vec<String>, o: &Value, previous: Option<(&Value, &Object)>) -> Option<Object> {
         let uid = int(o, "unique_id")? as u32;
         let figure = int(o, "figure_type_id")? as u32;
         if let Some(object) = previous.and_then(|(raw, typed)| {
@@ -779,7 +850,7 @@ impl Loader {
                 _ => return None,
             }
             let mut object = typed.clone();
-            if changed[0] { object.angles = self.numbers(o.get("angles")).unwrap_or_else(|| Arc::from(Vec::new())); }
+            if changed[0] { object.angles = numbers_of(o.get("angles")).unwrap_or_else(|| Arc::from(Vec::new())); }
             if changed[1] { object.root[0] = num(o, "root_x").unwrap_or(0.0); }
             if changed[2] { object.root[1] = num(o, "root_y").unwrap_or(0.0); }
             if changed[3] { object.scale = num(o, "scale").unwrap_or(1.0); }
@@ -789,8 +860,8 @@ impl Loader {
             object.figure_override = None;
             Some(object)
         }) { return Some(object); }
-        let lengths = if truthy(o.get("len_flag")) { self.numbers(o.get("lengths")) } else { None };
-        let bends = if truthy(o.get("bend_flag")) { self.numbers(o.get("bends")) } else { None };
+        let lengths = if truthy(o.get("len_flag")) { numbers_of(o.get("lengths")) } else { None };
+        let bends = if truthy(o.get("bend_flag")) { numbers_of(o.get("bends")) } else { None };
         let join = o.get("join").filter(|j| j.is_object()).and_then(|j| {
             Some(Join { slot: int(j, "target_object_slot")? as u32, handle: int(j, "target_handle_id").unwrap_or(0) as u32 })
         });
@@ -803,7 +874,7 @@ impl Loader {
             Some(Arc::new(sprite))
         });
         if o.get("_sticknodesSprite").is_some() && sticknodes_sprite.is_none() {
-            self.notes.push(format!("object {uid}: a Stick Nodes sprite without a finite ratio and pivot is drawn unstretched"));
+            notes.push(format!("object {uid}: a Stick Nodes sprite without a finite ratio and pivot is drawn unstretched"));
         }
         let movieclip = o.get("_stykMovieclip").filter(|v| v.is_object()).map(playback);
         Some(Object {
@@ -814,7 +885,7 @@ impl Loader {
             color: num(o, "color_override_raw").unwrap_or(0.0) as i64 as u32,
             transparency: num(o, "field28").or_else(|| num(o, "transparency")).unwrap_or(0.0),
             image_text_flags: truthy(o.get("image_text_flags")),
-            angles: self.numbers(o.get("angles")).unwrap_or_else(|| Arc::from(Vec::new())),
+            angles: numbers_of(o.get("angles")).unwrap_or_else(|| Arc::from(Vec::new())),
             lengths,
             bends,
             join,
@@ -841,9 +912,9 @@ impl Loader {
                 let stacks = typed.vfx.as_ref()?;
                 if !warning_free_vfx(value, stacks) { return None; }
                 Some(stacks.clone())
-            }).or_else(|| crate::vfx::parse::stacks(o.get("_stykVfx"), &mut self.notes)),
+            }).or_else(|| crate::vfx::parse::stacks(o.get("_stykVfx"), &mut *notes)),
             vfx_scope: o.get("_stykVfxScope").and_then(Value::as_f64) == Some(1.0),
-            vfx_connected: o.get("_vfxConnectedEffects").map(|v| Arc::from(crate::vfx::parse::stack(v, &mut self.notes))),
+            vfx_connected: o.get("_vfxConnectedEffects").map(|v| Arc::from(crate::vfx::parse::stack(v, &mut *notes))),
             spatial: o.get("_stykSpatial").and_then(crate::spatial::parse_pose).map(Arc::new),
             sticknodes_sprite,
             origin: o.get("_stykAnimationOrigin").and_then(crate::origin::parse_pose).map(Arc::new),
@@ -854,15 +925,21 @@ impl Loader {
     }
 
     pub fn keyframe(&mut self, k: &Value) -> Result<Keyframe, Error> {
+        Self::keyframe_in(&mut self.notes, k)
+    }
+
+    /// The typed view of a keyframe record, noting what it cannot draw in `notes`: it reads nothing else of the loader, so keyframes
+    /// are converted side by side (`Loader::document_with`).
+    fn keyframe_in(notes: &mut Vec<String>, k: &Value) -> Result<Keyframe, Error> {
         let objects: Vec<Arc<Object>> = k
             .get("objects")
             .and_then(Value::as_arr)
             .into_iter()
             .flatten()
-            .filter_map(|o| self.object(o))
+            .filter_map(|o| Self::object(notes, o))
             .map(Arc::new)
             .collect();
-        let vfx = crate::vfx::parse::stacks(k.get("_stykVfx"), &mut self.notes);
+        let vfx = crate::vfx::parse::stacks(k.get("_stykVfx"), notes);
         Ok(Self::keyframe_of(k, objects, vfx))
     }
 
@@ -904,7 +981,7 @@ impl Loader {
             }
             let prior = previous_items.and_then(|old| old.get(slot)).zip(previous.and_then(|frame| frame.objects.get(slot)))
                 .map(|(raw, typed)| (raw, typed.as_ref()));
-            let mut object = self.object_reusing_ik(item, prior).ok_or_else(|| Error::Format(format!("object {slot} of the edit frame has no identity or figure")))?;
+            let mut object = Self::object_reusing_ik(&mut self.notes, item, prior).ok_or_else(|| Error::Format(format!("object {slot} of the edit frame has no identity or figure")))?;
             // The editor has already chosen each clip's local time.
             object.clip_time = match item.get("_movieclipSample") {
                 Some(Value::Num(time)) => Some(*time),

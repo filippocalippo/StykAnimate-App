@@ -65,10 +65,10 @@ export function createOwnedDrawings(editor, host) {
       const command = commands[index], figure = figureOf(step.celId), entry = figure ? store.entry(figure) : store.entries.get(step.celId);
       // The document may have lost the cel with this very entry (a creation undone): its store keeps the pixels for the redo.
       if (!entry) throw missing();
-      store.applyEntry(entry, figure, command.tiles, direction, prepared);
-      const d = figure && drawingMetadata(figure);
+      const d = figure && drawingMetadata(figure), bounds = d?.version === 2 ? command[`${direction}Bounds`] ?? null : undefined;
+      store.applyEntry(entry, figure, command.tiles, direction, prepared, {bounds});
       if (d) {
-        if (d.version === 2) d.bounds = command[`${direction}Bounds`] ?? null;
+        if (d.version === 2) d.bounds = bounds;
         changed.push(figure);
       }
     });

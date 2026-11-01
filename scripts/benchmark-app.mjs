@@ -705,6 +705,42 @@ async function selectClick(ctx, repeats = 10) {
   return {repeats, latency: q(lat), failed: failed.length, hits: selected === target.uid, uid: target.uid};
 }
 
+/**
+ * Frame-count edits at 40 % of the animation: add a frame after the current one and delete one, each with its undo and redo, three rounds.
+ * Per edit: `blocked`, how long the call holds the interface thread, and `shown`, the time until the stage shows the result. The edits are
+ * undone before the step ends. Both applications have the editor calls; `main` runs them in JavaScript.
+ */
+async function frameEdits(ctx) {
+  const {page} = ctx;
+  const raw = await page.evaluate(async () => {
+    const B = window.__bench, editor = window.styk.editor, state = window.styk.state, rows = {};
+    const ids = editor.layers.map(layer => layer.id);
+    editor.seek(Math.floor(editor.totalTicks * .4)); await B.paints();
+    const run = async (name, edit, record = true) => {
+      const t0 = performance.now(); edit(); const blocked = performance.now() - t0;
+      const shown = await B.until(() => { const p = state.lastEditingPresentation; return p && p.at > t0 && p.revision === editor.revision ? p : null; }, 15000);
+      if (!record) return;
+      const row = rows[name] ??= {blocked: [], shown: []};
+      row.blocked.push(blocked); row.shown.push(shown ? shown.at - t0 : null);
+    };
+    for (let round = 0; round < 3; round++) {
+      const at = editor.tick;
+      await run('add', () => editor.sheetDuplicateFrameAfter());
+      await run('addUndo', () => editor.undo());
+      await run('addRedo', () => editor.redo());
+      await run('addRestore', () => editor.undo(), false);
+      editor.seek(at); await B.paints();
+      await run('remove', () => editor.sheetRemoveFrames(ids, editor.tick, editor.tick));
+      await run('removeUndo', () => editor.undo());
+      await run('removeRedo', () => editor.redo());
+      await run('removeRestore', () => editor.undo(), false);
+      editor.seek(at); await B.paints();
+    }
+    return rows;
+  });
+  return Object.fromEntries(Object.entries(raw).map(([name, row]) => [name, {blocked: q(row.blocked), shown: q(row.shown), unanswered: row.shown.filter(v => v === null).length}]));
+}
+
 /** Onion skins on: through the app's own action and settings, then the scrub and playback of the existing steps. */
 async function onionOn(ctx) {
   const {page} = ctx;
@@ -1000,6 +1036,7 @@ async function docRun(run) {
     await step('draws', () => drawsPerFrame(ctx));
     await step('zoomPan', () => zoomPan(ctx));
     await step('select', () => selectClick(ctx));
+    await step('frameEdit', () => frameEdits(ctx));
     await step('timelineInspector', () => timelineInspector(ctx));
     await step('onion', () => onionOn(ctx));
     await step('export', () => exportVideo(ctx));

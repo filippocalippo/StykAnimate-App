@@ -57,7 +57,7 @@ The keyframes, the figure types and the retained pose sources are not part of th
 indexing, `map`, `find`, `slice`, `for...of`, spread, `JSON.stringify`, `structuredClone`) or an object, whose records the interface fetches
 from the session when something reads them (`EditSession.record` and `keyed_record`; until the session starts, `OpenedDocument.record`), each lifted
 on its own, whole, and restored like a piece. A record is the same object for as long as the table holds it; a table holds at most 64 keyframes,
-256 figure types and 64 sources, giving the least recently read back, and fetches it again, equal, when it is read again. The elements have no
+1024 figure types and 64 sources, giving the least recently read back. A record given back that something else still holds (a geometry, a selection, a cache keyed by it) is the same object when it is read again; only one nothing holds is fetched again, equal. The elements have no
 setters, as the lazy picture fields have none: the view is changed by patches, never in place.
 
 What a reader needs without the record is the table's own: its row, which the open sends in its metadata (`rows`) and the table keeps through
@@ -98,7 +98,13 @@ an untouched picture lazy when it copies or rebuilds the record around it. The r
 picture no document or history entry holds any more answers with an error, so naming a payload never keeps a
 deleted picture alive. A picture an edit adds (a string in the session's tree) reaches the view as the string.
 The drawing store is the one writer of the view's cels: it attaches a cel's published tiles to its definition in
-place and tells the session (`@publishCel`), replacing a lazy field through `putField`. The Pivot original of a project
+place and tells the session (`@publishCel`), replacing a lazy field through `putField`. This is the one known write to the view
+in place, and it stays: the record goes to the session in the same call (a cel's revision and bounds, which the store also changes in
+place on a commit or a replay, go as `@celState`), so a record the table gives back and fetches again has what was written, and the save
+writes the session's tiles. Replacing the record by a patch instead (a copy the session answers with) was tried and left every holder of the
+old `figure` reference stale: each `entry(figure)` call on one replaced the table's record again, and five drawing tests that read the figure
+after a publication failed. Moving the write needs the drawing store to ask for a cel's definition by its id each time (`figureForCel`) rather
+than hold it. Verify mode compares the whole view, so it still sees a write the session was not told of. The Pivot original of a project
 stays with the codec for saving (`/api/source/keep`, leased to the project, sent while the engine decodes); the web build embeds it in
 the document instead (`OpenedDocument.attach_source`).
 
@@ -122,6 +128,36 @@ draws of a cel that only a gesture's draft holds goes through `EngineHandle.set_
 
 `Engine::open` (bytes and an extension, no normalization) remains for the command-line tools and the
 Rust tests that open recorded documents as they are.
+
+### Sharing the open's work with the other workers
+
+The open job runs on one engine worker and may take the engine's other workers for the parts of the open that need nothing
+from one another (`styk_doc::fanout`: the interface passes `helpers`, how many it leaves to the open, in the open options; the
+interface asks for the workers as soon as a person asks to open a file, `prepareOpen`, so that they have joined when the bytes
+arrive). The crates that read, check and convert are given a `Fanout` and cut their work into tasks that own what they read
+(a record is a clone of an `Arc`); with `Sequential`, which the tools and tests pass, they run in order on one thread, and the
+document, the typed views and every refusal are the same whichever way they ran:
+
+- **A `.styk` skeleton** is unpacked beside its sections (each unpacked and checked by a task of its own), cut at the boundaries
+  of the records of its large arrays (`keyframes`, `figure_types`) by a scan that follows only quotes and brackets, and read in
+  pieces of whole records by every thread (`styk_doc::json::parse_pieces`). The skeleton's checksum is checked by another task
+  while the rest of the open goes on (`container::decode_deferred`, `Deferred::finish`): the open does not return before it has
+  been asked, and a skeleton that does not match is the file's error whatever else the open found. Anything that is not a plain
+  good file (a piece that does not read, a marker the file does not honour, a section that does not match) is read in order, as
+  before, because the errors of a damaged file come from reading it in order.
+- **A Pivot file's frames** are built from the inflated payload in pieces of whole frames (`Ctx::sharing`, `build_values`).
+- **The load's scene check** walks the frames in pieces and reports the first frame's refusal; **the typed views** of the
+  keyframes are converted in pieces and joined in order (their notes in the order of the records).
+
+The interface leaves the open at most three helpers: the workers share one allocator, whose lock the open's many small allocations contend
+for (the large `.styk` read fastest with two or three, and no faster with six). The open's own thread takes part in every batch and runs any task a worker has not started, so an open never waits for a busy or
+missing worker. What the interface needs to know of the opened document (`OpenedDocument.meta()`: the indexes, the rows of the lazy tables, the timeline) is
+made by the worker at the end of the open, not on the interface thread when it takes the result (it cost 60 to 150 ms there on the large
+projects). The open's phases (`decode`, `prepare`, `views`, `check`, and the marks the readers made) come back in it as `timings` and reach
+the import's `timings.engine`.
+
+`tests/load_parallel.rs`, `tests/deferred.rs` and `tests/parallel.rs` compare the two ways on documents and on
+damaged copies of them.
 
 ## Exports of the document
 
@@ -162,7 +198,7 @@ the clip inside its parent as a recovery copy does. `prepare_project` prepares t
 validations, display aliases in line, pose sequences stored once), the Pivot original the codec holds is stored first in the payload
 section, and `styk_formats::container::lift` and `files::save` write the container. The work runs on a worker that joined the engine,
 reserves its working memory first (`errors.engine.outOfMemoryWhileSaving` when the memory cannot hold it: the project stays open and nothing was
-written), and runs the scene check (`validateScene`, the slowest of the checks and read-only) beside the lift (`check_scene`; its error is the save's), and asks the cancel flag between the steps of the preparation, every few thousand values of the lift, every 4 MiB hashed,
+written), and lifts the document in pieces: the elements of its biggest top-level array (the keyframes, nearly all of a project) are serialised side by side in batches (`container::lift_together`; the pieces own clones of their elements), each piece leaving the choices that depend on what came before (where an array or a payload is stored, whether it was stored already) as holes that are settled in document order when the batch is spliced in, so the skeleton and the sections are the ones one thread writes, byte for byte; the scene check (`validateScene`, read-only, the longest single job of the save) is started first on a worker the machine can spare (`Host::start`, `Engine::start_later`, only where the interface says `aside`: five engine threads or more, so that the three lent for the hashes, the frames and the pieces of the lift, the one for the scene check and one for the frame on show are all different) and runs beside the lift and the frames, and the save waits for it before the file is made (`check_scene`; its error is the save's), and asks the cancel flag between the steps of the preparation, every few thousand values of the lift, every 4 MiB hashed,
 and before and after each of the three zstd frames. The three hashes and the three frames (in turn, so that only one frame's output buffer, the size of the worst case, is held at a time) are four
 independent jobs: the save thread and up to three of the engine's other workers (the interface passes `engine.workers - 1`, at most 3, so one stays free for the
 frame on show) take them largest first (`Host::together`, `Engine::run_together`: `'static` jobs that own their blocks, claimed by whoever starts them first, a panic or a lost worker ending the save with an error and nothing freed under a worker still running one; a
@@ -173,7 +209,7 @@ document must be those the former writer wrote: a compressor fed in pieces, or w
 on real data (the test `sections_shaped_like_real_ones_compress_to_the_frames_one_shot_compression_makes`). A cancel therefore takes effect
 after the frame in progress; the interface does not wait for it and never ends the worker inside the engine
 ([threading](threading.md#ending-a-worker)). The session keeps editing while it runs. The saved bytes of an unchanged document are those the JavaScript writer wrote (`tests/save-references.test.mjs` and `engine/crates/styk-engine/tests/save.rs` compare every recorded file in `engine/tests/containers/`).
-Arrays the tree shares (a copied frame, a keyframe and the stored frame it came from) are stored once and named by one marker each time, as the former writer did for arrays the interface shared; a copy-like edit can therefore make a file with shared arrays where the former writer made separate ones. The former app reads a shared marker as one array, but its edits of a project with a layer sheet write a new stored frame instead of changing the one on show, so no other frame changes (checked in that app, opening such a file and posing a joint).
+Arrays the tree shares (a copied frame, a keyframe and the stored frame it came from) are stored once and named by one marker each time, as the former writer did for arrays the interface shared (an array is the node the tree holds, told apart by its address: a packed list of numbers, or an ordinary array that holds only numbers, as an edit leaves a list it unpacked; never a copy made for the moment of writing, whose address the next copy would take over: `tests/plain_arrays.rs` reuses it on purpose); a copy-like edit can therefore make a file with shared arrays where the former writer made separate ones. The former app reads a shared marker as one array, but its edits of a project with a layer sheet write a new stored frame instead of changing the one on show, so no other frame changes (checked in that app, opening such a file and posing a joint).
 
 ## Invariants
 

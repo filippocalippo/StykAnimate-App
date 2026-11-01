@@ -81,6 +81,7 @@ test('recovery deletion failure cannot reject or undo a committed Save', async (
 test('failed native writing leaves work dirty and permits a later retry', async () => {
   const a = app(); a.hooks.write = async () => {throw new Error('Write failed');};
   await assert.rejects(a.saveNative(), /Write failed/); assert.equal(a.editor.dirty, true); assert.equal(a.calls.committed, 0);
+  assert.equal(a.calls.statuses.at(-1)?.messageKey, 'app.saveFailed', 'the line no longer says the project is being saved');
   a.hooks.write = async () => {}; assert.equal(await a.saveNative(), true);
 });
 

@@ -519,13 +519,13 @@ impl Editor {
             return Ok(false);
         }
         self.ensure_counts();
+        // In the order the figures are met; a figure is found by a map (a command that captures every pose of an animation names thousands).
         let mut delta: Vec<(u32, i64)> = Vec::new();
+        let mut place: styk_doc::fast::FastMap<u32, usize> = Default::default();
         for (frames, sign) in [(previous, -1), (next, 1)] {
             for id in frames.iter().flat_map(objects_of).filter_map(|o| uid(&o)) {
-                match delta.iter_mut().find(|(known, _)| *known == id) {
-                    Some((_, amount)) => *amount += sign,
-                    None => delta.push((id, sign)),
-                }
+                let slot = *place.entry(id).or_insert_with(|| { delta.push((id, 0)); delta.len() - 1 });
+                delta[slot].1 += sign;
             }
         }
         let mut changed = false;
@@ -1046,11 +1046,8 @@ impl Editor {
         let definition = definitions.is_some();
         self.set_sheet(&after, &after_layers);
         if !plan.sources.is_empty() {
-            let sources = self.sources_mut();
-            for (id, source) in &plan.sources {
-                check()?;
-                sources.set(id, source.clone());
-            }
+            check()?;
+            self.sources_mut().set_all(plan.sources.iter().map(|(id, source)| (id.as_str(), source.clone())));
         }
         self.next_frame_identity = plan.next_frame;
         self.retained = retained;
@@ -1233,13 +1230,9 @@ impl Editor {
         // `_applyFrameSourceChanges`: the command's captures exist after it, not before.
         if !sources.is_empty() {
             let table = self.sources_mut();
-            for (id, source) in sources {
-                match direction {
-                    Direction::After => table.set(id, source.clone()),
-                    Direction::Before => {
-                        table.remove(id);
-                    }
-                }
+            match direction {
+                Direction::After => table.set_all(sources.iter().map(|(id, source)| (id.as_str(), source.clone()))),
+                Direction::Before => table.remove_all(sources.iter().map(|(id, _)| id.as_str())),
             }
             if direction == Direction::Before && table.is_empty() {
                 self.styk_mut().and_then(|styk| styk.remove("frameSources"));
