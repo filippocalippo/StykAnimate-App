@@ -13807,8 +13807,8 @@
   "errors.editorLoad.importCancelled": {
     "locations": [
       "src/editor.mjs:173",
-      "src/engine/engine-open.mjs:68",
-      "src/engine/engine-open.mjs:173",
+      "src/engine/engine-open.mjs:70",
+      "src/engine/engine-open.mjs:175",
       "src/import-wire.mjs:110",
       "src/import-worker.mjs:26"
     ],
@@ -13816,7 +13816,7 @@
   },
   "errors.editorLoad.importTimeSlicesMustBeGreaterThanZero": {
     "locations": [
-      "src/engine/engine-open.mjs:171"
+      "src/engine/engine-open.mjs:173"
     ],
     "context": "if (!Number.isFinite(sliceMs) || sliceMs <= 0 || sliceMs > 16) throw messageError(new Error(''), 'errors.editorLoad.importTimeSlicesMustBeGreaterThanZero', {});"
   },
@@ -13828,7 +13828,7 @@
   },
   "errors.editorMovieclips.finishDrawingPublicationBeforeCreatingAMovieclip": {
     "locations": [
-      "src/engine/engine-owner.mjs:579"
+      "src/engine/engine-owner.mjs:580"
     ],
     "context": "if (name === 'createMovieclip' && drawingResourcesFor(editor.report)?.stats.unpublished) throw messageError(new Error(''), 'errors.editorMovieclips.finishDrawin"
   },
@@ -13846,7 +13846,7 @@
   },
   "errors.editorMovieclips.theSceneChangedWhileBakingTryAgain": {
     "locations": [
-      "src/engine/engine-owner.mjs:639"
+      "src/engine/engine-owner.mjs:642"
     ],
     "context": "if (editor.report !== report || editor.revision !== revision) throw messageError(new Error(''), 'errors.editorMovieclips.theSceneChangedWhileBakingTryAgain', {}"
   },
@@ -13891,14 +13891,14 @@
   },
   "errors.engineOwner.invalidValue": {
     "locations": [
-      "src/engine/engine-owner.mjs:884"
+      "src/engine/engine-owner.mjs:894"
     ],
     "context": "if (needed.some(name => !Object.hasOwn(values, name))) return Object.assign(messageError(new Error(''), 'errors.engineOwner.invalidValue', {}), {unnamed: error}"
   },
   "errors.engineOwner.notSupported": {
     "locations": [
       "src/engine/engine-owner.mjs:8",
-      "src/engine/engine-owner.mjs:900",
+      "src/engine/engine-owner.mjs:910",
       "src/native-property-edit.mjs:261"
     ],
     "context": "* or has no command for, raises the refusal (`errors.engineOwner.notSupported`, counted in `report.refused`) and changes nothing,"
@@ -35806,7 +35806,7 @@
   },
   "vfxChannels.enabled": {
     "locations": [
-      "src/engine/engine-owner.mjs:871",
+      "src/engine/engine-owner.mjs:881",
       "src/vfx-clip-inspector.mjs:65",
       "src/vfx-localization.mjs:9",
       "src/vfx.mjs:24"
