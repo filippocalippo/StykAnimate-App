@@ -1929,7 +1929,8 @@ function pause() {
   state.playing = false;
   state.previewing = false;
   resetPreviewQuality();
-  editor.endFrameDraftPreview();
+  // A pause of a playhead at rest (every stepping key) has no preview to end: the engine's answer to the call is `false`, and the call costs a session round trip.
+  if (wasPlaying) editor.endFrameDraftPreview();
   thumbnailRenderer?.setPaused(document.hidden);
   timelineUI?.setPaused?.(document.hidden);
   state.buffering = false;
@@ -4434,13 +4435,13 @@ const actions = {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(0);
-    editor.seek(0);
+    editor.seek(0, { evaluate: false });
   },
   "previous-frame": () => {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(Math.max(0, timelineUI.selectedIndex - 1));
-    editor.seek(Math.max(0, editor.tick - 1));
+    editor.seek(Math.max(0, editor.tick - 1), { evaluate: false });
   },
   "next-frame": () => {
     pause();
@@ -4448,13 +4449,13 @@ const actions = {
       return timelineUI.selectFrame(
         Math.min(timelineUI.frameCount - 1, timelineUI.selectedIndex + 1),
       );
-    editor.seek(Math.min(editor.totalTicks - 1, editor.tick + 1));
+    editor.seek(Math.min(editor.totalTicks - 1, editor.tick + 1), { evaluate: false });
   },
   "last-frame": () => {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(timelineUI.frameCount - 1);
-    editor.seek(Math.max(0, editor.totalTicks - 1));
+    editor.seek(Math.max(0, editor.totalTicks - 1), { evaluate: false });
   },
   "previous-keyframe": () => { pause(); runTimelineHotkey(timelineUI, 'previous-keyframe'); },
   "next-keyframe": () => { pause(); runTimelineHotkey(timelineUI, 'next-keyframe'); },

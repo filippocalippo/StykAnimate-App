@@ -229,7 +229,8 @@ export class Timeline{
     if(anchor===undefined){const tick=Math.floor(this.editor.tick)+.5,x=tick*old-this._offsetX();anchor=this._touch()||x<0||x>this.width?this.width/2:x;center=tick;}
     else center=(this._offsetX()+anchor)/old;
     this.pxPerTick=clamp(Number(value)||14,range.min,range.max);this.header?.setZoom(this.pxPerTick);this._extent();this._scrollToX(center*this.pxPerTick-anchor);this.audio?.update();}
-  setPaused(value){const resumed=this.paused&&!value;this.paused=value;this.update(Boolean(resumed));if(resumed)this._centerSoon();}
+  /** A pause that changes nothing asks for no frame: a stepping key calls it before the seek, and a frame it asked for would run before the stage's own. */
+  setPaused(value){if(this.paused===value)return;const resumed=this.paused&&!value;this.paused=value;this.update(Boolean(resumed));if(resumed)this._centerSoon();}
   update(dirty=true){
     this.dirty||=dirty;if(this.disposed||this.raf)return;
     this.raf=requestAnimationFrame(()=>{this._flushScrub();if(this.dirty){this.dirty=false;this._paint();}this._syncPlayhead();this.raf=null;
