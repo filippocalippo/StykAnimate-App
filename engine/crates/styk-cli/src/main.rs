@@ -15,6 +15,7 @@
 //!   styk records <folder> [--write]       the evaluated frame as records against a recording of the JS editor's
 //!   styk export <file> <tick|a-b> <out>   export frames as the app's engine exports them, timed
 //!                                         (see export.rs for the options; --cpu: styk-raster)
+//!   styk prims <file> [tick…]            what a frame's draw list is made of, and how much lies outside the artboard
 //!   styk raster-parity <file>…            styk-raster against styk-render on the same draw lists,
 //!                                         by the app-parity rule D13 (see raster_parity.rs)
 
@@ -28,6 +29,7 @@ use styk_eval::geometry::build;
 mod container;
 mod export;
 mod load;
+mod prims;
 mod raster_parity;
 
 fn main() {
@@ -60,6 +62,7 @@ fn main() {
         Some("diff") if args.len() >= 4 => diff(&args[1], &args[2], &args[3], &args[4..]),
         Some("export") if args.len() >= 4 => export::export(&args[1], &args[2], &args[3], &args[4..]),
         Some("raster-parity") if args.len() >= 2 => raster_parity::run(&args[1..]),
+        Some("prims") if args.len() >= 2 => prims::run(&args[1..]),
         _ => {
             eprintln!("usage: styk info <file> | compare <file> <reference.json> [--verbose] | bench <file> [--frames N] | render <file> <tick> <out.png> [--size WxH] [--zoom Z] [--center X,Y] [--no-clip] [--neutral] [--after T] | gpubench <file> <tick> [--no-effects] | layers <file> <tick> [--all] | edit-replay [--worker [--max-source-bytes N]] <reference.json>... | edit-replay --live-worker <session.json> <returns.json>...");
             2
