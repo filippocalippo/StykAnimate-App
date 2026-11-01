@@ -31,7 +31,7 @@ use styk_draw::{DrawList, F_DRAWING, K_IMAGE};
 
 use crate::assets::{AtlasEntry, PAGE};
 pub use crate::drawing::TILE_BYTES;
-use crate::drawing::{bordered, bordered_into, down_tile, CoordBuild, BORDER, MAX_LEVEL, TILE};
+use crate::drawing::{bordered, bordered_into, changed_rect, down_tile, down_tile_patch, CoordBuild, BORDER, MAX_LEVEL, TILE};
 
 /// Maps and sets keyed by tile coordinates or slots.
 type HashMap<K, V> = StdMap<K, V, CoordBuild>;
@@ -51,8 +51,14 @@ pub const PAGE_SLOTS: u32 = COLUMNS * COLUMNS;
 /// Pages live cels may use together (4,096² texels each, 64 MiB).
 pub const MAX_PAGES: u32 = 4;
 
-/// Frames after the last change to a live cel during which the cels count as changing ([`LiveCels::changing`]).
-pub const QUIET_FRAMES: u32 = 24;
+/// Milliseconds after the last change to a live cel during which a frame has no time to spare for pictures
+/// ([`LiveCels::picture_budget`]), and the ones after it during which a burst of them would still land on the frame a
+/// next stroke begins on.
+pub const CHANGING_MS: f64 = 250.0;
+pub const SETTLING_MS: f64 = 1500.0;
+/// The most decoded pictures a frame uploads in each of those periods.
+pub const CHANGING_PICTURE_BYTES: usize = 512 << 10;
+pub const SETTLING_PICTURE_BYTES: usize = 2 << 20;
 
 /// The slots are all in use: the interface drops cels it can do without and tries again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,6 +161,29 @@ fn facing_differs(before: Option<&[u8]>, after: Option<&[u8]>, dx: i32, dy: i32)
     })
 }
 
+/// The texels of a whole tile as a rectangle `[x0, y0, x1, y1)`.
+const WHOLE: [usize; 4] = [0, 0, TILE as usize, TILE as usize];
+
+/// A tile that changed in an update: what it held before (`None`: nothing) and the rectangle of texels that may differ
+/// from it now.
+struct Dirt {
+    before: Option<Vec<u8>>,
+    rect: [usize; 4],
+}
+
+/// Notes that the tile at `coord` changed. A tile changed twice in one update keeps what it held first.
+fn note(dirty: &mut HashMap<Coord, Dirt>, coord: Coord, before: Option<Vec<u8>>, rect: [usize; 4]) {
+    match dirty.entry(coord) {
+        std::collections::hash_map::Entry::Occupied(mut held) => {
+            let held = held.get_mut();
+            held.rect = [held.rect[0].min(rect[0]), held.rect[1].min(rect[1]), held.rect[2].max(rect[2]), held.rect[3].max(rect[3])];
+        }
+        std::collections::hash_map::Entry::Vacant(slot) => {
+            slot.insert(Dirt { before, rect });
+        }
+    }
+}
+
 fn visible(pixels: &[u8]) -> bool {
     pixels.chunks_exact(4).any(|texel| texel[3] != 0)
 }
@@ -217,32 +246,53 @@ impl Layer {
             self.stale = (0..=MAX_LEVEL).map(|_| HashSet::default()).collect();
         }
         // The tiles that changed at each level, with what each held before (`None`: nothing).
-        let mut dirty: Vec<HashMap<Coord, Option<Vec<u8>>>> = vec![HashMap::default()];
+        let mut dirty: Vec<HashMap<Coord, Dirt>> = vec![HashMap::default()];
         let mut membership = false;
         for (coord, pixels) in changes {
             match pixels.filter(|pixels| pixels.len() == TILE_BYTES && visible(pixels)) {
                 Some(pixels) => {
                     if self.level0.get(&coord) != Some(&pixels) {
+                        let rect = changed_rect(self.level0.get(&coord).map(Vec::as_slice), Some(pixels.as_slice())).unwrap_or(WHOLE);
                         let before = self.level0.insert(coord, pixels);
                         membership |= before.is_none();
-                        dirty[0].entry(coord).or_insert(before);
+                        note(&mut dirty[0], coord, before, rect);
                     }
                 }
                 None => {
                     if let Some(before) = self.level0.remove(&coord) {
                         membership = true;
-                        dirty[0].entry(coord).or_insert(Some(before));
+                        let rect = changed_rect(Some(before.as_slice()), None).unwrap_or(WHOLE);
+                        note(&mut dirty[0], coord, Some(before), rect);
                     }
                 }
             }
         }
         // Reduced tiles: only the parents of a tile that changed can change.
         for n in 1..=MAX_LEVEL as usize {
-            let parents: HashSet<Coord> = dirty[n - 1].keys().map(|&(x, y)| (x.div_euclid(2), y.div_euclid(2))).collect();
-            let fresh: Vec<(Coord, Option<Vec<u8>>)> =
-                parents.into_iter().map(|(x, y)| ((x, y), down_tile(self.level(n - 1), x, y).filter(|tile| visible(tile)))).collect();
+            // The part of each parent its changed children reach (in the parent's texels): the union of what may differ in them.
+            let mut parents: HashMap<Coord, [usize; 4]> = HashMap::default();
+            for (&(x, y), dirt) in &dirty[n - 1] {
+                let [x0, y0, x1, y1] = dirt.rect;
+                let (ox, oy) = ((x.rem_euclid(2) as usize) * (TILE as usize / 2), (y.rem_euclid(2) as usize) * (TILE as usize / 2));
+                let rect = [ox + x0 / 2, oy + y0 / 2, ox + x1.div_ceil(2), oy + y1.div_ceil(2)];
+                parents
+                    .entry((x.div_euclid(2), y.div_euclid(2)))
+                    .and_modify(|union| *union = [union[0].min(rect[0]), union[1].min(rect[1]), union[2].max(rect[2]), union[3].max(rect[3])])
+                    .or_insert(rect);
+            }
+            // A parent made again only where its children changed may differ from what it held only there; one made whole, anywhere.
+            let fresh: Vec<(Coord, Option<Vec<u8>>, [usize; 4])> = parents
+                .into_iter()
+                .map(|((x, y), rect)| {
+                    let (reduced, may_differ) = match self.reduced[n - 1].get(&(x, y)) {
+                        Some(previous) => (Some(down_tile_patch(self.level(n - 1), x, y, previous, rect)), rect),
+                        None => (down_tile(self.level(n - 1), x, y), WHOLE),
+                    };
+                    ((x, y), reduced.filter(|tile| visible(tile)), may_differ)
+                })
+                .collect();
             let mut changed = HashMap::default();
-            for (coord, tile) in fresh {
+            for (coord, tile, rect) in fresh {
                 if self.reduced[n - 1].get(&coord) == tile.as_ref() {
                     continue;
                 }
@@ -250,7 +300,7 @@ impl Layer {
                     Some(tile) => self.reduced[n - 1].insert(coord, tile),
                     None => self.reduced[n - 1].remove(&coord),
                 };
-                changed.insert(coord, before);
+                changed.insert(coord, Dirt { before, rect });
             }
             dirty.push(changed);
         }
@@ -281,7 +331,8 @@ impl Layer {
         }
         for n in 0..=MAX_LEVEL as usize {
             let mut want = std::mem::take(&mut fresh[n]);
-            for (&(x, y), before) in &dirty[n] {
+            for (&(x, y), dirt) in &dirty[n] {
+                let before = &dirt.before;
                 want.insert((x, y));
                 // A neighbour's border holds this tile's facing edge: it is written again only when that edge changed.
                 let after = self.level(n).get(&(x, y)).map(Vec::as_slice);
@@ -317,6 +368,25 @@ impl Layer {
                 }
             }
         }
+    }
+
+    /// Marks up to `limit` of the stale slots of the level `n` to write; returns how many were marked.
+    fn warm(&mut self, n: usize, limit: usize) -> usize {
+        let coords: Vec<Coord> = self.stale[n].iter().take(limit).copied().collect();
+        let mut marked = 0;
+        for coord in coords {
+            self.stale[n].remove(&coord);
+            if let Some(&slot) = self.slots[n].get(&coord) {
+                self.pending.insert(slot, (n, coord));
+                marked += 1;
+            }
+        }
+        marked
+    }
+
+    /// Stale slots at the levels in `levels`.
+    fn stale_in(&self, levels: Levels) -> usize {
+        self.stale.iter().enumerate().filter(|(n, _)| levels >> n & 1 == 1).map(|(_, set)| set.len()).sum()
     }
 
     /// Marks every slot of the levels in `resident` to write (the atlas was allocated again); every
@@ -360,8 +430,8 @@ pub struct LiveCels {
     pool: Pool,
     /// The levels written as tiles change; the others wait ([`LiveCels::set_resident`]).
     resident: Levels,
-    /// Frames drawn since a cel last changed.
-    quiet: u32,
+    /// When (the host's clock, milliseconds) a cel last changed.
+    changed_at: Option<f64>,
 }
 
 impl Default for LiveCels {
@@ -389,7 +459,7 @@ pub struct Stats {
 impl LiveCels {
     /// Live cels that write the levels in `resident` as tiles change.
     pub fn new(resident: Levels) -> Self {
-        LiveCels { cels: StdMap::new(), pool: Pool::default(), resident, quiet: QUIET_FRAMES }
+        LiveCels { cels: StdMap::new(), pool: Pool::default(), resident, changed_at: None }
     }
 
     /// Pages of the atlas the slots need after the document's own.
@@ -418,9 +488,6 @@ impl LiveCels {
     /// first update and stays hidden until [`LiveCels::show`]. The slots that change are marked for
     /// [`LiveCels::take_runs`]. On [`Full`] the cel is dropped whole, since a partial update would draw wrong.
     pub fn update(&mut self, id: &str, float: bool, changes: Vec<(Coord, Option<Vec<u8>>)>) -> Result<(), Full> {
-        if !changes.is_empty() {
-            self.quiet = 0;
-        }
         let cel = self.cels.entry(id.to_string()).or_default();
         let layer = if float { &mut cel.float } else { &mut cel.base };
         let result = layer.apply(&mut self.pool, self.resident, changes);
@@ -430,16 +497,53 @@ impl LiveCels {
         result
     }
 
-    /// A frame was drawn.
-    pub fn frame_drawn(&mut self) {
-        self.quiet = self.quiet.saturating_add(1);
+    /// A cel's tiles changed at `now` (the host's clock, milliseconds).
+    pub fn changed(&mut self, now: f64) {
+        self.changed_at = Some(now);
     }
 
-    /// Whether cels are held and one changed within the last [`QUIET_FRAMES`] frames: a stroke, an undo or a
-    /// move is being drawn from live tiles, and the frame has no time to spare for the published copies of those
-    /// pixels (the host uploads them in small slices until the cels are quiet).
-    pub fn changing(&self) -> bool {
-        !self.cels.is_empty() && self.quiet < QUIET_FRAMES
+    /// The most decoded pictures of the document a frame at `now` uploads, at most `full`. The published
+    /// copies of the pixels being drawn (the engine decodes every level of a cel again after each publication) are
+    /// not what the frame shows, and a burst of them lands on the frame a stroke may begin on: while a cel changed
+    /// a moment ago a frame takes a slice, and a smaller slice for a moment after. Time ends it, so a stage that
+    /// draws nothing, or a document whose cel is held after Draw was left, loads at `full` again by itself.
+    pub fn picture_budget(&self, now: f64, full: usize) -> usize {
+        match self.changed_at {
+            Some(at) if !self.cels.is_empty() && now - at < CHANGING_MS => CHANGING_PICTURE_BYTES.min(full),
+            Some(at) if !self.cels.is_empty() && now - at < CHANGING_MS + SETTLING_MS => SETTLING_PICTURE_BYTES.min(full),
+            _ => full,
+        }
+    }
+
+    /// Whether a cel changed within the last [`CHANGING_MS`] (at `now`, the host's clock): a stroke, an undo or a move is
+    /// being drawn, and nothing that can wait should take the frame's time.
+    pub fn changing(&self, now: f64) -> bool {
+        !self.cels.is_empty() && self.changed_at.is_some_and(|at| now - at < CHANGING_MS)
+    }
+
+    /// Writes up to `slots` of the stale slots of the levels beside the ones `shown`, nearest first, and returns how many
+    /// stale slots are left at those levels. A level that is not drawn is not written as its tiles change; when the view
+    /// zooms to it the slots changed since are written before the frame, all at once. Called in the quiet of an idle
+    /// stage, a slice at a time, it leaves a zoom next to nothing to write: the writes change no pixel a frame shows.
+    pub fn warm(&mut self, shown: Levels, slots: usize) -> usize {
+        if shown == 0 {
+            return 0;
+        }
+        let (low, high) = (shown.trailing_zeros() as usize, 15 - shown.leading_zeros() as usize);
+        let mut order: Vec<usize> = (0..=MAX_LEVEL as usize).filter(|n| shown >> n & 1 == 0).collect();
+        order.sort_by_key(|&n| if n < low { low - n } else { n - high });
+        let mut budget = slots;
+        for n in order {
+            for cel in self.cels.values_mut() {
+                for layer in [&mut cel.base, &mut cel.float] {
+                    if budget > 0 && n < layer.stale.len() {
+                        budget -= layer.warm(n, budget);
+                    }
+                }
+            }
+        }
+        let beside = ALL_LEVELS & !shown;
+        self.cels.values().map(|cel| cel.base.stale_in(beside) + cel.float.stale_in(beside)).sum()
     }
 
     /// Chooses the levels written as tiles change: those the next frame shows. Marks the slots

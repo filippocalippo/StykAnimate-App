@@ -478,6 +478,25 @@ impl Loader {
         Ok(Arc::new(self.keyframe(k)?))
     }
 
+    /// Takes the views of the keyframes and pose sources of `report` that another loader made (`doc` is the document it made of `report`), so
+    /// that the next document this loader converts does not make them anew. A record already viewed keeps its view. Both loaders are the same
+    /// converter: a record's view does not depend on which made it.
+    pub fn adopt_views(&mut self, report: &Value, doc: &Document) {
+        let mut take = |record: &Value, typed: &Arc<Keyframe>| {
+            if let Some(address) = node_address(record) {
+                self.keyframes.entry(address).or_insert_with(|| (Source::of(record), typed.clone()));
+            }
+        };
+        if let Some(records) = report.get("keyframes").and_then(Value::elements) {
+            for (record, typed) in records.iter().zip(&doc.keyframes) { take(&record, typed); }
+        }
+        if let Some(Value::Obj(sources)) = report.path(&["_styk", "frameSources"]) {
+            for (id, record) in sources.iter() {
+                if let Some(typed) = doc.frame_sources.get(id) { take(record, typed); }
+            }
+        }
+    }
+
     /// How many typed records the loader holds: figures, keyframes, effect clips, animations and styled figures.
     pub fn cached_records(&self) -> [usize; 5] {
         [self.figures.len(), self.keyframes.len(), self.vfx_clips.len(), self.animations.len(), self.styled.len()]

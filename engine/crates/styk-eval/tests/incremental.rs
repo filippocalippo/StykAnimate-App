@@ -110,3 +110,21 @@ fn views_of_a_dropped_revision_are_released_whoever_else_caches_them() {
     assert_eq!(session[0], 2, "the two figures of the live revision");
     assert_eq!(session[1], 3, "its three keyframes: the replaced one went with the dropped revision");
 }
+
+#[test]
+fn a_loader_takes_the_views_another_loader_made_of_the_keyframes() {
+    let report = project();
+    let mut maker = Loader::new();
+    let made = maker.document(&report, "p").unwrap();
+    let mut taker = Loader::new();
+    taker.adopt_views(&report, &made);
+    let again = taker.document(&report, "p").unwrap();
+    // Only the figures are made anew; the keyframes are the views the other loader made.
+    assert_eq!(taker.converted, Converted { figures: 2, keyframes: 0 });
+    assert!(Arc::ptr_eq(&made.keyframes[1], &again.keyframes[1]));
+    // An edit converts the one keyframe it replaced.
+    let mut edited = report.clone();
+    move_object(&mut edited, 2, 0, 7.0);
+    taker.document(&edited, "p").unwrap();
+    assert_eq!(taker.converted, Converted { figures: 0, keyframes: 1 });
+}

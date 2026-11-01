@@ -14,13 +14,8 @@ use crate::js_error;
 /// sprites fills its atlas over a few frames instead of stalling one.
 const IMAGE_UPLOAD_BYTES: usize = 8 << 20;
 
-/// The same while live drawing cels are changing: the published pictures decoded from the pixels being drawn (every
-/// level of the cel, megabytes after an undo) are not what the frame shows, and uploading them at once took 20 to 70 ms.
-const LIVE_IMAGE_UPLOAD_BYTES: usize = 512 << 10;
-
-/// And while live cels are held but quiet (a drawing session between strokes): a burst of the full amount stalls the
-/// frame a stroke may begin on, as a stroke's undo found 10 ms bursts a moment after it.
-const HELD_IMAGE_UPLOAD_BYTES: usize = 2 << 20;
+/// Stale slots of the levels beside the ones on show written in each idle slice (about a megabyte of texels).
+const LIVE_WARM_SLOTS: usize = 64;
 
 /// The live drawing levels written before a frame has shown which it needs: the cel's own
 /// pixels and the level above (a view that fits the artboard on screen).
@@ -76,6 +71,8 @@ pub struct Stage {
     /// Their slots are written for the levels a frame shows ([`Stage::show_live_levels`]).
     pub(crate) live: styk_eval::live::LiveCels,
     live_pages: u32,
+    /// The levels the last frame that drew live tiles showed ([`Stage::warm_live`] writes the ones beside them while idle).
+    live_shown: styk_eval::live::Levels,
     /// The atlas places uploaded so far, and whether the last frame drawn lacked a
     /// picture ([`Stage::pictures_pending`]).
     uploaded: Uploaded,
@@ -198,6 +195,7 @@ impl Stage {
             atlas_serial: 0,
             live: styk_eval::live::LiveCels::new(FIRST_LEVELS),
             live_pages: 0,
+            live_shown: 0,
             uploaded: Uploaded::default(),
             pictures: PICTURES_COMPLETE,
             upload_bytes: 0,
@@ -410,8 +408,9 @@ impl Stage {
         }
         let Some(generation) = self.engine.generation() else { return PICTURES_COMPLETE };
         self.sync_images(&generation);
+        let warming = self.warm_live();
         let (decoding, decoded) = self.engine.images_backlog();
-        if decoded > 0 { PICTURES_DECODED } else if decoding > 0 { PICTURES_DECODING } else { PICTURES_COMPLETE }
+        if decoded > 0 || warming { PICTURES_DECODED } else if decoding > 0 { PICTURES_DECODING } else { PICTURES_COMPLETE }
     }
 
     /// A cold followed pose is accepted but awaits the engine worker's shared path.
@@ -488,14 +487,7 @@ impl Stage {
     pub(crate) fn sync_images(&mut self, generation: &Generation) {
         self.sync_atlas(generation);
         self.flush_live();
-        let budget = if self.live.changing() {
-            LIVE_IMAGE_UPLOAD_BYTES
-        } else if !self.live.is_empty() {
-            HELD_IMAGE_UPLOAD_BYTES
-        } else {
-            IMAGE_UPLOAD_BYTES
-        };
-        let images = self.engine.take_images(budget);
+        let images = self.engine.take_images(self.live.picture_budget(crate::clock(), IMAGE_UPLOAD_BYTES));
         self.upload_bytes = images.iter().map(|image| image.rgba.len()).sum();
         if !images.is_empty() {
             self.renderer.upload_images(&generation.assets, images.iter().map(|image| &**image));
@@ -540,9 +532,21 @@ impl Stage {
         }
         let levels = styk_eval::live::shown_levels(list, generation.assets.pages, (matrix[0] * matrix[3] - matrix[1] * matrix[2]).abs().sqrt());
         if levels != 0 {
+            self.live_shown = levels;
             self.live.set_resident(levels);
             self.flush_live();
         }
+    }
+
+    /// While the stage is idle: a slice of the stale slots of the levels beside the ones on show is written, so a zoom
+    /// does not write a whole level at once. True while more are left.
+    fn warm_live(&mut self) -> bool {
+        if self.live.changing(crate::clock()) {
+            return false;
+        }
+        let left = self.live.warm(self.live_shown, LIVE_WARM_SLOTS);
+        self.flush_live();
+        left > 0
     }
 
     /// Writes the live slots the cels marked since the last frame into the atlas laid out for the document
@@ -578,7 +582,6 @@ impl Stage {
             return Ok(false);
         }
         self.sync_images(generation);
-        self.live.frame_drawn();
         let doc = &generation.prepared.doc;
         // The Draw view turns and mirrors about the artboard's centre, after the scene camera.
         let orientation = styk_eval::view::orientation(self.rotation, self.flip, [pan[0] + doc.canvas[0] as f64 * zoom / 2.0, pan[1] + doc.canvas[1] as f64 * zoom / 2.0]);
@@ -655,7 +658,11 @@ impl Stage {
             })
             .collect();
         changes.extend(removed.chunks_exact(2).map(|pair| ((pair[0], pair[1]), None)));
+        let changed = !changes.is_empty();
         self.live.update(id, float, changes).map_err(|_| js_error("the live drawing slots are full"))?;
+        if changed {
+            self.live.changed(crate::clock());
+        }
         self.sync_atlas(&generation);
         Ok(())
     }

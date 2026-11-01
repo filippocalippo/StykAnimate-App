@@ -57,7 +57,7 @@ The keyframes, the figure types and the retained pose sources are not part of th
 indexing, `map`, `find`, `slice`, `for...of`, spread, `JSON.stringify`, `structuredClone`) or an object, whose records the interface fetches
 from the session when something reads them (`EditSession.record` and `keyed_record`; until the session starts, `OpenedDocument.record`), each lifted
 on its own, whole, and restored like a piece. A record is the same object for as long as the table holds it; a table holds at most 64 keyframes,
-256 figure types and 64 sources, giving the least recently read back, and fetches it again, equal, when it is read again. The elements have no
+1024 figure types and 64 sources, giving the least recently read back. A record given back that something else still holds (a geometry, a selection, a cache keyed by it) is the same object when it is read again; only one nothing holds is fetched again, equal. The elements have no
 setters, as the lazy picture fields have none: the view is changed by patches, never in place.
 
 What a reader needs without the record is the table's own: its row, which the open sends in its metadata (`rows`) and the table keeps through
@@ -98,7 +98,13 @@ an untouched picture lazy when it copies or rebuilds the record around it. The r
 picture no document or history entry holds any more answers with an error, so naming a payload never keeps a
 deleted picture alive. A picture an edit adds (a string in the session's tree) reaches the view as the string.
 The drawing store is the one writer of the view's cels: it attaches a cel's published tiles to its definition in
-place and tells the session (`@publishCel`), replacing a lazy field through `putField`. The Pivot original of a project
+place and tells the session (`@publishCel`), replacing a lazy field through `putField`. This is the one known write to the view
+in place, and it stays: the record goes to the session in the same call (a cel's revision and bounds, which the store also changes in
+place on a commit or a replay, go as `@celState`), so a record the table gives back and fetches again has what was written, and the save
+writes the session's tiles. Replacing the record by a patch instead (a copy the session answers with) was tried and left every holder of the
+old `figure` reference stale: each `entry(figure)` call on one replaced the table's record again, and five drawing tests that read the figure
+after a publication failed. Moving the write needs the drawing store to ask for a cel's definition by its id each time (`figureForCel`) rather
+than hold it. Verify mode compares the whole view, so it still sees a write the session was not told of. The Pivot original of a project
 stays with the codec for saving (`/api/source/keep`, leased to the project, sent while the engine decodes); the web build embeds it in
 the document instead (`OpenedDocument.attach_source`).
 

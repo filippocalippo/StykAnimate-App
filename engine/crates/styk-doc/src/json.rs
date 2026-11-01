@@ -689,6 +689,42 @@ pub fn utf16_units(value: &Value) -> usize {
     }
 }
 
+/// How many entries the lengths of recently counted fractional numbers are kept in (a direct-mapped table, per thread).
+const SEEN_LENGTHS: usize = 4096;
+
+thread_local! {
+    /// `(bits, length)` of numbers whose text was counted lately. An animation repeats its numbers (a joint that does not move, a position held
+    /// across frames): about two in three fractional numbers of a dense scene were counted already, and formatting one is most of the cost.
+    static SEEN: std::cell::RefCell<Vec<(u64, u8)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The length of `n` as JSON writes it. A whole number of up to fifteen digits is its digits (and a sign); a fractional one is formatted, unless
+/// its length was counted lately.
+fn number_units(n: f64, scratch: &mut Vec<u8>) -> usize {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        let whole = n.abs() as u64;
+        let digits = if whole == 0 { 1 } else { whole.ilog10() as usize + 1 };
+        return digits + usize::from(n < 0.0 && whole != 0);
+    }
+    let bits = n.to_bits();
+    let slot = (bits.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 52) as usize % SEEN_LENGTHS;
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.is_empty() {
+            seen.resize(SEEN_LENGTHS, (0, 0));
+        }
+        let (held, length) = seen[slot];
+        if length != 0 && held == bits {
+            return length as usize;
+        }
+        scratch.clear();
+        format_number(n, scratch);
+        // A number's text is at most 25 characters; a table slot with length 0 is empty.
+        seen[slot] = (bits, scratch.len() as u8);
+        scratch.len()
+    })
+}
+
 /// The same JSON weight owner, with cooperative cancellation/stale/progress
 /// checks during a dense single string or numeric array as well as containers.
 /// The caller owns the worker and its cancellation contract. Checks run before
@@ -710,6 +746,15 @@ pub fn utf16_units_checked<E>(
         pending: &mut usize,
         check: &mut impl FnMut() -> Result<(), E>,
     ) -> Result<usize, E> {
+        // Plain printable ASCII (nearly every key and name) is its length: counted at once, the checks as often as one character at a time would.
+        if text.bytes().all(|byte| (0x20..0x7f).contains(&byte) && byte != b'"' && byte != b'\\') {
+            *pending += text.len();
+            while *pending >= 4096 {
+                *pending -= 4096;
+                check()?;
+            }
+            return Ok(text.len() + 2);
+        }
         let mut units = 2;
         for character in text.chars() {
             touch(pending, check)?;
@@ -732,11 +777,7 @@ pub fn utf16_units_checked<E>(
             Value::Null => 4,
             Value::Bool(true) => 4,
             Value::Bool(false) => 5,
-            Value::Num(n) => {
-                number.clear();
-                format_number(*n, number);
-                number.len()
-            }
+            Value::Num(n) => number_units(*n, number),
             Value::Str(text) => string(text, pending, check)?,
             Value::Blob(blob) => {
                 string(&blob.prefix, pending, check)? + blob.bytes.len().div_ceil(3) * 4
@@ -745,9 +786,7 @@ pub fn utf16_units_checked<E>(
                 let mut units = 2 + numbers.len().saturating_sub(1);
                 for n in numbers.iter() {
                     touch(pending, check)?;
-                    number.clear();
-                    format_number(n, number);
-                    units += number.len();
+                    units += number_units(n, number);
                 }
                 units
             }
@@ -787,6 +826,49 @@ pub fn base64_strict(text: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_weight_of_a_number_is_the_length_of_its_text() {
+        use crate::{Nums, Value};
+        let numbers = [0.0, -0.0, 1.0, -1.0, 9.0, 10.0, 99999.0, -123456.0, 1e14, 999999999999999.0, 1e15, -1e15, 1e21, 0.5, -0.25, 1.0 / 3.0, f64::NAN, f64::INFINITY, 4294967295.0, 123456789012345.0];
+        for n in numbers {
+            assert_eq!(utf16_units(&Value::Num(n)), to_string(&Value::Num(n)).len(), "{n}");
+        }
+        let list = Value::array(numbers.iter().map(|n| Value::Num(*n)).collect());
+        assert_eq!(utf16_units(&list), to_string(&list).len());
+        let packed = Value::Nums(std::sync::Arc::new(Nums::F64(numbers.to_vec().into())));
+        assert_eq!(utf16_units(&packed), to_string(&packed).len());
+    }
+
+    #[test]
+    fn the_weight_of_a_string_is_the_length_of_its_text() {
+        use crate::Value;
+        let long_plain = "key".repeat(5000);
+        let long_escaped = "a\"b\\c\n".repeat(2000);
+        let texts = ["", "x", "figure_type_id", "a\"b", "back\\slash", "tab\tand\nnewline", "\u{1}\u{1f}", "é ü", "日本語", "😀", "\u{7f}", long_plain.as_str(), long_escaped.as_str()];
+        for text in texts {
+            let value = Value::str(text);
+            assert_eq!(utf16_units(&value), to_string(&value).encode_utf16().count(), "{text:?}");
+        }
+        let mut object = crate::Obj::new();
+        for text in texts { object.set(text, Value::str(text)); }
+        let value = Value::object(object);
+        assert_eq!(utf16_units(&value), to_string(&value).encode_utf16().count());
+    }
+
+    #[test]
+    fn the_weight_of_numbers_counted_before_is_still_the_length_of_their_text() {
+        use crate::{Nums, Value};
+        // Many different fractions (the table of lengths seen lately is far smaller), each seen again later, in two orders.
+        let mut state = 0x1234_5678_9abc_def0_u64;
+        let mut next = || { state ^= state << 13; state ^= state >> 7; state ^= state << 17; state };
+        let numbers: Vec<f64> = (0..30_000).map(|n| match n % 3 { 0 => (next() % 1_000_000) as f64 / 997.0, 1 => f32::from_bits((next() >> 33) as u32 & 0x7f7f_ffff) as f64, _ => -((next() % 10_000) as f64) / 64.0 }).collect();
+        let twice: Vec<f64> = numbers.iter().chain(numbers.iter().rev()).copied().collect();
+        let packed = Value::Nums(std::sync::Arc::new(Nums::F64(twice.clone().into())));
+        assert_eq!(utf16_units(&packed), to_string(&packed).len());
+        let list = Value::array(twice.iter().map(|n| Value::Num(*n)).collect());
+        assert_eq!(utf16_units(&list), to_string(&list).len());
+    }
+
     use super::*;
 
     fn round_trip(text: &str) {
