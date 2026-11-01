@@ -209,7 +209,7 @@ impl Renderer {
             self.prims = buffer(&self.device, "styk prims", need.next_power_of_two(), wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
         }
         if !prims.is_empty() {
-            self.queue.write_buffer(&self.prims, 0, bytemuck::cast_slice(prims));
+            resources::write_buffer(&self.device, &self.queue, &self.prims, 0, bytemuck::cast_slice(prims));
         }
         let mut rebind = self.bind0.is_none();
         rebind |= self.paints.write(&self.device, &self.queue, bytemuck::cast_slice(&list.paints));

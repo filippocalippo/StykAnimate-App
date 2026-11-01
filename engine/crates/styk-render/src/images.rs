@@ -4,7 +4,7 @@
 use styk_eval::assets::{Assets, PAGE};
 use styk_eval::doc::Document;
 
-use crate::resources::array_texture;
+use crate::resources::{array_texture, staging, submit_staged, write_texture};
 use crate::Renderer;
 
 pub use styk_eval::assets::DecodedImage;
@@ -96,10 +96,13 @@ impl Renderer {
     pub fn upload_live(&mut self, base: u32, runs: &[styk_eval::live::Run]) {
         for run in runs {
             let width = run.cells * styk_eval::live::CELL;
-            self.queue.write_texture(
+            write_texture(
+                &self.device,
+                &self.queue,
                 wgpu::TexelCopyTextureInfo { texture: &self.sprites, mip_level: 0, origin: wgpu::Origin3d { x: run.x, y: run.y, z: base + run.page }, aspect: wgpu::TextureAspect::All },
                 &run.rgba,
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(styk_eval::live::CELL) },
+                width * 4,
+                styk_eval::live::CELL,
                 wgpu::Extent3d { width, height: styk_eval::live::CELL, depth_or_array_layers: 1 },
             );
         }
@@ -115,33 +118,78 @@ impl Renderer {
     }
 
     /// Uploads decoded images into the atlas prepared by [`prepare_sprites`].
+    ///
+    /// The pixels go through staging buffers this renderer fills itself and copies from on the GPU, not through
+    /// `Queue::write_texture`: a browser's `writeTexture` from the engine's shared memory left a picture of the atlas
+    /// with rows of another's bytes in about two of five exports of tdd2 (an export of the same document twice did not give
+    /// the same frames; docs/engine/rendering.md, Exports). Native adapters never showed it.
     pub fn upload_images<'a>(&mut self, assets: &Assets, images: impl IntoIterator<Item = &'a DecodedImage>) {
         if assets.pages == 0 {
             return;
         }
+        let mut batch: Vec<(&DecodedImage, [u32; 3], u64)> = Vec::new();
+        let mut bytes = 0u64;
         for img in images {
             let entry = if img.drawing { assets.drawing.get(img.index as usize) } else { assets.atlas.get(img.index as usize) };
             let Some(e) = entry.filter(|e| e.valid) else { continue };
+            if img.width == 0 || img.height == 0 {
+                continue;
+            }
             let border = if img.drawing { styk_eval::drawing::BORDER } else { 1 };
-            self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.sprites,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d { x: e.x - border, y: e.y - border, z: e.layer },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &img.rgba,
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(img.width * 4), rows_per_image: Some(img.height) },
+            let size = staged_stride(img.width) as u64 * img.height as u64;
+            if !batch.is_empty() && bytes + size > STAGING_BYTES {
+                self.copy_staged(&batch, bytes);
+                batch.clear();
+                bytes = 0;
+            }
+            batch.push((img, [e.x - border, e.y - border, e.layer], bytes));
+            bytes += size;
+        }
+        if !batch.is_empty() {
+            self.copy_staged(&batch, bytes);
+        }
+    }
+
+    /// Copies `batch` (pictures, the atlas place of each and where its rows start in the staging buffer) into the atlas
+    /// through one staging buffer of `bytes`, given back once the GPU has finished with it.
+    fn copy_staged(&self, batch: &[(&DecodedImage, [u32; 3], u64)], bytes: u64) {
+        let source = staging(&self.device, bytes);
+        {
+            let mut mapped = source.slice(..).get_mapped_range_mut().expect("a buffer made mapped is mapped");
+            for &(img, _, offset) in batch {
+                let (row, stride) = (img.width as usize * 4, staged_stride(img.width) as usize);
+                for (y, pixels) in img.rgba.chunks_exact(row).enumerate() {
+                    let at = offset as usize + y * stride;
+                    mapped.slice(at..at + row).copy_from_slice(pixels);
+                }
+            }
+        }
+        source.unmap();
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("styk picture upload") });
+        for &(img, [x, y, layer], offset) in batch {
+            encoder.copy_buffer_to_texture(
+                wgpu::TexelCopyBufferInfo { buffer: &source, layout: wgpu::TexelCopyBufferLayout { offset, bytes_per_row: Some(staged_stride(img.width)), rows_per_image: Some(img.height) } },
+                wgpu::TexelCopyTextureInfo { texture: &self.sprites, mip_level: 0, origin: wgpu::Origin3d { x, y, z: layer }, aspect: wgpu::TextureAspect::All },
                 wgpu::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 },
             );
         }
+        submit_staged(&self.queue, encoder, source);
     }
 
 }
 
+/// Bytes a picture's row takes in a staging buffer (a copy's rows start at multiples of 256).
+fn staged_stride(width: u32) -> u32 {
+    (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
+}
+
+/// Pictures a staging buffer holds at most (one picture at least).
+const STAGING_BYTES: u64 = 64 << 20;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use styk_eval::assets::AtlasEntry;
 
     /// Whether writing to `texture` is refused because it was destroyed.
     fn refused(renderer: &Renderer, texture: &wgpu::Texture) -> bool {
@@ -153,6 +201,60 @@ mod tests {
             wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
         );
         pollster::block_on(scope.pop()).is_some()
+    }
+
+    /// The RGBA of a rectangle of the sprite atlas's page `layer`, read back from the GPU.
+    fn read_atlas(renderer: &Renderer, layer: u32, x: u32, y: u32, width: u32, height: u32) -> Vec<u8> {
+        let stride = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor { label: None, size: stride as u64 * height as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let mut encoder = renderer.device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { texture: &renderer.sprites, mip_level: 0, origin: wgpu::Origin3d { x, y, z: layer }, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(height) } },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        renderer.queue.submit([encoder.finish()]);
+        buffer.slice(..).map_async(wgpu::MapMode::Read, |result| result.expect("mapped"));
+        renderer.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
+        let mapped = buffer.slice(..).get_mapped_range().expect("mapped range");
+        (0..height as usize).flat_map(|row| mapped[row * stride as usize..row * stride as usize + width as usize * 4].to_vec()).collect()
+    }
+
+    fn picture(index: u32, drawing: bool, width: u32, height: u32, seed: u8) -> DecodedImage {
+        let rgba = (0..width * height * 4).map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed)).collect();
+        DecodedImage { index, drawing, width, height, rgba }
+    }
+
+    /// Pictures land in their atlas places row for row, whatever their width (rows are padded to 256 bytes in the staging
+    /// buffer), with the gutter or border outside the place, across more than one staging buffer, and leave their
+    /// neighbours' texels alone.
+    #[test]
+    fn uploaded_pictures_land_in_their_places_row_for_row() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
+        let mut renderer = Renderer::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+        let mut assets = assets(2);
+        let place = |layer, x, y, w, h| AtlasEntry { layer, x, y, w, h, source_w: w, source_h: h, valid: true };
+        // Images keep a one-texel gutter around the place, drawing cels a border of BORDER.
+        assets.atlas = vec![place(0, 11, 13, 3, 2), place(1, 40, 8, 69, 5)];
+        assets.drawing = vec![place(0, 100, 50, 7, 6)];
+        let border = styk_eval::drawing::BORDER;
+        let pictures = [picture(0, false, 5, 4, 1), picture(1, false, 71, 7, 2), picture(0, true, 7 + 2 * border, 6 + 2 * border, 3)];
+        renderer.prepare_sprites(&assets);
+        renderer.upload_images(&assets, pictures.iter());
+        for (picture, (layer, x, y)) in pictures.iter().zip([(0, 10, 12), (1, 39, 7), (0, 100 - border, 50 - border)]) {
+            assert_eq!(read_atlas(&renderer, layer, x, y, picture.width, picture.height), picture.rgba, "picture {} (drawing: {})", picture.index, picture.drawing);
+        }
+        assert!(read_atlas(&renderer, 0, 9, 12, 1, 4).iter().all(|b| *b == 0), "the texels beside a picture are untouched");
+        // A second call, as a document's later pictures arrive.
+        let later = picture(1, false, 33, 9, 9);
+        renderer.upload_images(&assets, [&later]);
+        assert_eq!(read_atlas(&renderer, 1, 39, 7, 33, 9), later.rgba);
+        assert_eq!(read_atlas(&renderer, 0, 10, 12, 5, 4), pictures[0].rgba, "an earlier picture is kept");
     }
 
     fn assets(pages: u32) -> Assets {

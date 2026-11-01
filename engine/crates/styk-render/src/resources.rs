@@ -116,10 +116,13 @@ impl Table {
         // The last row is padded: a texture write covers whole rows.
         let whole = data.len() / row_bytes * row_bytes;
         let copy = |bytes: &[u8], y: u32, height: u32| {
-            queue.write_texture(
+            write_texture(
+                device,
+                queue,
                 wgpu::TexelCopyTextureInfo { texture: &self.texture, mip_level: 0, origin: wgpu::Origin3d { x: 0, y, z: 0 }, aspect: wgpu::TextureAspect::All },
                 bytes,
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row_bytes as u32), rows_per_image: Some(height) },
+                row_bytes as u32,
+                height,
                 wgpu::Extent3d { width: TABLE_WIDTH, height, depth_or_array_layers: 1 },
             );
         };
@@ -134,6 +137,86 @@ impl Table {
         }
         replaced
     }
+}
+
+/// Writes of at least this many bytes go through a staging buffer ([`write_buffer`], [`write_texture`]).
+const STAGED_FROM: usize = 64 << 10;
+
+/// A buffer of `size` bytes (a multiple of 4) the CPU fills now, to be copied from on the GPU.
+pub(crate) fn staging(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor { label: Some("styk staging"), size, usage: wgpu::BufferUsages::COPY_SRC, mapped_at_creation: true })
+}
+
+thread_local! {
+    /// Staging buffers the GPU may still read, each with the flag its queue sets once it has finished with them.
+    static RETIRING: std::cell::RefCell<Vec<(std::sync::Arc<std::sync::atomic::AtomicBool>, wgpu::Buffer)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Gives back the staging buffers the GPU has finished with (WebGPU frees a buffer on `destroy`, not when its last handle is
+/// dropped). Called with every staged write and every frame, on the thread that made them.
+pub(crate) fn retire_staging() {
+    RETIRING.with(|retiring| {
+        retiring.borrow_mut().retain(|(done, buffer)| {
+            let finished = done.load(std::sync::atomic::Ordering::Acquire);
+            if finished {
+                buffer.destroy();
+            }
+            !finished
+        });
+    });
+}
+
+/// Submits `encoder`, whose copies read `source`, and keeps `source` until the GPU has finished with it ([`retire_staging`]).
+pub(crate) fn submit_staged(queue: &wgpu::Queue, encoder: wgpu::CommandEncoder, source: wgpu::Buffer) {
+    queue.submit([encoder.finish()]);
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = done.clone();
+    queue.on_submitted_work_done(move || flag.store(true, std::sync::atomic::Ordering::Release));
+    retire_staging();
+    RETIRING.with(|retiring| retiring.borrow_mut().push((done, source)));
+}
+
+/// `Queue::write_buffer`, except that a large write is copied on the GPU from a staging buffer this fills itself.
+///
+/// A browser's `writeBuffer` and `writeTexture` from the engine's shared memory sometimes leave part of a large write
+/// out: an export of the same document did not always give the same frames, with pictures drawn from rows of other
+/// bytes (docs/engine/rendering.md, Exports). Native adapters never showed it.
+pub(crate) fn write_buffer(device: &wgpu::Device, queue: &wgpu::Queue, buffer: &wgpu::Buffer, offset: u64, data: &[u8]) {
+    let size = data.len().next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT as usize) as u64;
+    if data.len() < STAGED_FROM || offset % wgpu::COPY_BUFFER_ALIGNMENT != 0 || offset + size > buffer.size() {
+        queue.write_buffer(buffer, offset, data);
+        return;
+    }
+    let source = staging(device, size);
+    source.slice(..).get_mapped_range_mut().expect("a buffer made mapped is mapped").slice(..data.len()).copy_from_slice(data);
+    source.unmap();
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("styk staged write") });
+    encoder.copy_buffer_to_buffer(&source, 0, buffer, offset, size);
+    submit_staged(queue, encoder, source);
+}
+
+/// `Queue::write_texture` of `rows` rows of `row_bytes` bytes (`data`), staged as [`write_buffer`] stages.
+pub(crate) fn write_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: wgpu::TexelCopyTextureInfo<'_>, data: &[u8], row_bytes: u32, rows: u32, extent: wgpu::Extent3d) {
+    if data.len() < STAGED_FROM {
+        queue.write_texture(texture, data, wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row_bytes), rows_per_image: Some(rows) }, extent);
+        return;
+    }
+    let stride = row_bytes.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let source = staging(device, stride as u64 * rows as u64);
+    {
+        let mut mapped = source.slice(..).get_mapped_range_mut().expect("a buffer made mapped is mapped");
+        for (y, row) in data.chunks_exact(row_bytes as usize).enumerate() {
+            mapped.slice(y * stride as usize..y * stride as usize + row_bytes as usize).copy_from_slice(row);
+        }
+    }
+    source.unmap();
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("styk staged write") });
+    encoder.copy_buffer_to_texture(
+        wgpu::TexelCopyBufferInfo { buffer: &source, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(rows) } },
+        texture,
+        extent,
+    );
+    submit_staged(queue, encoder, source);
 }
 
 pub(crate) fn texture_entry(binding: u32, dimension: wgpu::TextureViewDimension) -> wgpu::BindGroupLayoutEntry {

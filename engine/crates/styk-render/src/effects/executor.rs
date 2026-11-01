@@ -178,7 +178,7 @@ impl Executor {
                 let o = i * UNIFORM_STRIDE as usize;
                 bytes[o..o + UNIFORM_SIZE as usize].copy_from_slice(bytemuck::bytes_of(record));
             }
-            queue.write_buffer(&self.uniforms, 0, &bytes);
+            crate::resources::write_buffer(device, queue, &self.uniforms, 0, &bytes);
         }
     }
 

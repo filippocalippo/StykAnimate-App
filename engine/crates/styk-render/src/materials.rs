@@ -81,7 +81,9 @@ impl Renderer {
                 continue;
             }
             for (mip, level) in atlas::row(row as usize).levels.iter().enumerate() {
-                self.queue.write_texture(
+                crate::resources::write_texture(
+                    &self.device,
+                    &self.queue,
                     wgpu::TexelCopyTextureInfo {
                         texture: &self.materials.texture,
                         mip_level: mip as u32,
@@ -89,7 +91,8 @@ impl Renderer {
                         aspect: wgpu::TextureAspect::All,
                     },
                     &level.data,
-                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(level.width as u32 * 2), rows_per_image: Some(level.height as u32) },
+                    level.width as u32 * 2,
+                    level.height as u32,
                     wgpu::Extent3d { width: level.width as u32, height: level.height as u32, depth_or_array_layers: 1 },
                 );
             }
