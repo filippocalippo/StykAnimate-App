@@ -147,6 +147,21 @@ impl Residency {
         }
     }
 
+    /// The layout gained document pages before the live ones: the `count` live pages that began at page `from` now begin at
+    /// `to` (greater), with the layers they hold and their pins. The pages they leave have no layer.
+    pub fn move_pages(&mut self, from: u32, to: u32, count: u32) {
+        let (from, to, count) = (from as usize, to as usize, count as usize);
+        if to <= from || count == 0 {
+            return;
+        }
+        if self.pages.len() < to + count {
+            self.pages.resize(to + count, Page::default());
+        }
+        for k in (0..count).rev() {
+            self.pages[to + k] = std::mem::take(&mut self.pages[from + k]);
+        }
+    }
+
     pub fn layer_of(&self, page: u32) -> Option<u32> {
         self.pages.get(page as usize).and_then(|page| page.layer)
     }
@@ -304,6 +319,28 @@ mod tests {
         assert_eq!(residency.layer_of(2), Some(first.0));
         assert_eq!(residency.resident(), 2);
         assert_eq!((residency.loads, residency.evictions), (3, 1));
+    }
+
+    #[test]
+    fn live_pages_keep_their_layers_when_document_pages_are_added_before_them() {
+        // Two document pages, a live page (2) holding layer 1; a third document page arrives and the live page becomes page 3.
+        let mut residency = Residency::new(3, 3);
+        let (document, _) = given(residency.acquire(0, &[], false));
+        let (live, _) = given(residency.acquire(2, &[], false));
+        residency.pin(2);
+        residency.extend(4);
+        residency.move_pages(2, 3, 1);
+        assert_eq!(residency.layer_of(3), Some(live), "the live page kept its layer");
+        assert_eq!(residency.layer_of(2), None, "the page it left has none");
+        assert_eq!(residency.layer_of(0), Some(document));
+        // It is still pinned: no page takes its layer.
+        residency.touch(&[1]);
+        let (layer, evicted) = given(residency.acquire(1, &[], false));
+        assert_ne!(layer, live);
+        assert_eq!(evicted, None);
+        let (other, evicted) = given(residency.acquire(2, &[], false));
+        assert_ne!(other, live);
+        assert!(evicted.is_none() || evicted == Some(0) || evicted == Some(1));
     }
 
     #[test]

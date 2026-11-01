@@ -411,6 +411,41 @@ impl Stage {
             self.atlas_of = Some(layout);
             return;
         }
+        let appended = self.residency.is_some() && self.atlas_of.is_some_and(|(lineage, before)| lineage == layout.0 && before < pages) && live_pages >= self.live_pages && self.live_pages > 0;
+        if appended {
+            // Document pages were appended before the live ones (the first stroke on a blank exposure adds the cel's page): the
+            // live pages keep their layers and the tiles in them, and the new pages are given layers beside them.
+            let before = self.atlas_of.map_or(0, |(_, before)| before);
+            self.uploaded.move_pages(before, pages, self.live_pages);
+            if let Some(residency) = self.residency.as_mut() {
+                residency.extend(pages + live_pages);
+                residency.move_pages(before, pages, self.live_pages);
+            }
+            for k in 0..self.live_pages {
+                if let Some(layer) = self.residency.as_ref().and_then(|residency| residency.layer_of(pages + k)) {
+                    self.renderer.map_sprite_page(pages + k, Some(layer));
+                }
+            }
+            for page in before..(pages.min(before + self.live_pages)) {
+                if self.residency.as_ref().is_some_and(|residency| residency.layer_of(page).is_none()) {
+                    self.renderer.map_sprite_page(page, None);
+                }
+            }
+            self.renderer.flush_sprite_map();
+            let pinned: Vec<u32> = { let mut pinned: Vec<u32> = styk_engine::drawing_pages(&generation.assets).into_iter().collect(); pinned.sort_unstable(); pinned };
+            self.live_pages = live_pages.max(self.live_pages);
+            self.atlas_of = Some(layout);
+            self.atlas_serial += 1;
+            let without: Vec<u32> = pinned.into_iter().filter(|page| self.residency.as_ref().is_some_and(|residency| residency.layer_of(*page).is_none())).collect();
+            for page in without {
+                self.pin_page(generation, page);
+            }
+            for page in pages + self.live_pages..pages + live_pages {
+                self.pin_page(generation, page);
+            }
+            self.live_pages = live_pages;
+            return;
+        }
         if self.residency.is_some() && self.atlas_of == Some(layout) && live_pages > self.live_pages {
             // More live slots: their pages are given layers beside the ones held.
             if let Some(residency) = self.residency.as_mut() {
