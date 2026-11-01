@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use styk_doc::fanout::Fanout;
 use styk_doc::json::{self, Member, StringHook};
 use styk_doc::{Blob, JsonError, Nums, Value};
 
@@ -32,7 +33,7 @@ pub fn decode(bytes: &[u8], kind: Kind) -> Result<Decoded, ContainerError> {
     let parts = decode_parts(bytes, kind)?;
     let skeleton_bytes = parts.skeleton.len();
     if parts.version < 2 {
-        return Ok(Decoded { document: parse_text(&parts.skeleton, None)?, version: parts.version, skeleton_bytes });
+        return Ok(Decoded { document: parse_text::<&[(u8, Vec<u8>)]>(&parts.skeleton, None)?, version: parts.version, skeleton_bytes });
     }
     let mut markers = Markers::new(&parts.sections, parts.skeleton.len());
     let parsed = parse_text(&parts.skeleton, Some(&mut markers));
@@ -47,6 +48,121 @@ pub fn decode(bytes: &[u8], kind: Kind) -> Result<Decoded, ContainerError> {
         return Err(ContainerError::MaterializedTooLarge);
     }
     Ok(Decoded { document, version: 2, skeleton_bytes })
+}
+
+/// The smallest skeleton that decode_deferred shares out.
+const PIECES_FROM_BYTES: usize = 1 << 20;
+
+/// The check of a skeleton's checksum that [`decode_deferred`] left running beside the rest of the open.
+pub struct Deferred {
+    check: Option<styk_doc::fanout::Started<[u8; 32]>>,
+    expected: [u8; 32],
+}
+
+impl Deferred {
+    fn done() -> Deferred {
+        Deferred { check: None, expected: [0; 32] }
+    }
+
+    /// Waits for the check. A skeleton whose checksum is not the file's is the file's error, whatever came of the document built
+    /// from it: [`decode`] never builds a document from one.
+    pub fn finish(self, fan: &dyn Fanout) -> Result<(), ContainerError> {
+        match self.check {
+            None => Ok(()),
+            Some(check) => match check.wait(fan) {
+                Ok(digest) if digest == self.expected => Ok(()),
+                Ok(_) => Err(ContainerError::Checksum { what: "skeleton".to_string() }),
+                Err(_) => Err(ContainerError::WorkerStopped),
+            },
+        }
+    }
+}
+
+/// [`decode`] with its work shared out on `fan`: the skeleton is read in pieces by every thread while another checks its checksum.
+/// The document is the one [`decode`] gives, and so is every error once `Deferred::finish` has been asked (it must be, whatever
+/// happens to the document, before the open is believed): anything that is not a good file is decoded in order, as [`decode`] does.
+pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(Decoded, Deferred), ContainerError> {
+    let inline = || decode(bytes, kind).map(|decoded| (decoded, Deferred::done()));
+    if fan.threads() <= 1 {
+        return inline();
+    }
+    let Ok(Layout::Sections { codec, raw, digest, skeleton, records }) = layout(bytes, kind) else { return inline() };
+    // A small skeleton is read faster than it is shared out.
+    if raw < PIECES_FROM_BYTES {
+        return inline();
+    }
+    // The sections are unpacked and checked beside the skeleton's unpacking; they own the bytes they read.
+    let started: Vec<_> = records
+        .into_iter()
+        .enumerate()
+        .map(|(index, record)| {
+            let stored = bytes[record.offset..record.offset + record.stored].to_vec();
+            styk_doc::fanout::start(fan, move || unpack_section(index, &record, &stored))
+        })
+        .collect();
+    let Ok(skeleton) = unpack(codec, &bytes[skeleton], raw, &|| "skeleton".to_string()) else { return inline() };
+    fan.mark("skeleton unpacked");
+    let skeleton = Arc::new(skeleton);
+    let hashed = {
+        let skeleton = skeleton.clone();
+        styk_doc::fanout::start(fan, move || sha256(&skeleton))
+    };
+    let mut sections = Vec::with_capacity(started.len());
+    for section in started {
+        match section.wait(fan) {
+            Ok(Ok(section)) => sections.push(section),
+            _ => return inline(),
+        }
+    }
+    fan.mark("sections unpacked");
+    let sections: Arc<[(u8, Vec<u8>)]> = sections.into();
+    let skeleton_bytes = skeleton.len();
+    let shared = Arc::new(SharedMarkers(std::sync::Mutex::new(Markers::new(sections.clone(), skeleton_bytes))));
+    let hook: Arc<dyn json::SharedHook> = shared.clone();
+    let pieces = json::parse_pieces(&skeleton, &hook, fan).filter(|document| shared.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_sound(document));
+    drop(hook);
+    fan.mark("skeleton read");
+    let document = match pieces {
+        Some(document) => document,
+        // Not in pieces, or not a document the pieces vouch for: the checks and the errors are those of reading in order.
+        None => {
+            drop(shared);
+            if hashed.wait(fan).is_ok_and(|found| found != digest) {
+                return Err(ContainerError::Checksum { what: "skeleton".to_string() });
+            }
+            let mut markers = Markers::new(sections, skeleton_bytes);
+            let parsed = parse_text(&skeleton, Some(&mut markers));
+            if let Some(error) = markers.error.take() {
+                return Err(error);
+            }
+            let document = parsed?;
+            if markers.materialized_upper > MAX_MATERIALIZED_BYTES && json_length(&document) > MAX_MATERIALIZED_BYTES {
+                return Err(ContainerError::MaterializedTooLarge);
+            }
+            return Ok((Decoded { document, version: 2, skeleton_bytes }, Deferred::done()));
+        }
+    };
+    Ok((Decoded { document, version: 2, skeleton_bytes }, Deferred { check: Some(hashed), expected: digest }))
+}
+
+/// [`Markers`] that more than one thread may ask.
+struct SharedMarkers(std::sync::Mutex<Markers<Arc<[(u8, Vec<u8>)]>>>);
+
+impl json::SharedHook for SharedMarkers {
+    fn string(&self, text: &str) -> Option<Result<Value, JsonError>> {
+        // Every marker starts with "S2" and a colon at index 3; the strings that do not are most of them.
+        if text.len() < 4 || !text.starts_with("S2") || text.as_bytes()[3] != b':' {
+            return None;
+        }
+        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).string(text)
+    }
+}
+
+impl<S: AsRef<[(u8, Vec<u8>)]>> Markers<S> {
+    /// Whether the markers read so far were all good and a document of this size is within the limit that [`decode`] holds it to.
+    fn is_sound(&self, document: &Value) -> bool {
+        self.error.is_none() && (self.materialized_upper <= MAX_MATERIALIZED_BYTES || json_length(document) <= MAX_MATERIALIZED_BYTES)
+    }
 }
 
 /// A container that has been read, verified and scanned, with no document built from it.
@@ -146,8 +262,28 @@ fn parse_lifted_sections(skeleton: &[u8], sections: [(u8, Vec<u8>); 2], material
     Ok(LiftedAdmitted { document, retained_bytes: markers.allocation.max(markers.materialized_upper) })
 }
 
-/// Verifies a container and returns its uncompressed pieces without building a document.
-pub fn decode_parts(bytes: &[u8], kind: Kind) -> Result<Parts, ContainerError> {
+/// A section as the file lists it.
+struct Record {
+    kind: u8,
+    codec: Codec,
+    raw: usize,
+    stored: usize,
+    offset: usize,
+    digest: [u8; 32],
+}
+
+/// How a container is laid out, checked against the file's length and limits, and nothing unpacked yet.
+enum Layout {
+    /// A plain JSON project (version 0).
+    Plain,
+    /// One zlib block: the document.
+    Document { codec: Codec, raw: usize, digest: [u8; 32] },
+    /// A skeleton and sections.
+    Sections { codec: Codec, raw: usize, digest: [u8; 32], skeleton: std::ops::Range<usize>, records: Vec<Record> },
+}
+
+/// Reads the header of a container and the table of its sections, with every check that needs no unpacking.
+fn layout(bytes: &[u8], kind: Kind) -> Result<Layout, ContainerError> {
     if bytes.len() > MAX_BYTES {
         return Err(ContainerError::FileTooLarge { size: bytes.len() });
     }
@@ -156,7 +292,7 @@ pub fn decode_parts(bytes: &[u8], kind: Kind) -> Result<Parts, ContainerError> {
         // byte-order mark or whitespace.
         let lead = bytes.iter().position(|b| !matches!(b, 0xef | 0xbb | 0xbf | b' ' | b'\t' | b'\r' | b'\n'));
         if lead.is_some_and(|at| bytes[at] == b'{') {
-            return Ok(Parts { version: 0, skeleton: bytes.to_vec(), sections: Vec::new() });
+            return Ok(Layout::Plain);
         }
     }
     if bytes.len() < HEADER {
@@ -185,17 +321,13 @@ pub fn decode_parts(bytes: &[u8], kind: Kind) -> Result<Parts, ContainerError> {
         return Err(ContainerError::DeclaredTooLarge { what: "document", size: raw });
     }
     let (raw, stored) = (raw as usize, stored as usize);
-    let digest = &bytes[24..56];
+    let digest: [u8; 32] = bytes[24..56].try_into().unwrap();
 
     if version == 1 {
         if HEADER + stored != bytes.len() {
             return Err(ContainerError::LengthMismatch("a payload length that does not match the file"));
         }
-        let payload = unpack(codec, &bytes[HEADER..], raw, &|| "document".to_string())?;
-        if sha256(&payload) != digest {
-            return Err(ContainerError::Checksum { what: "document".to_string() });
-        }
-        return Ok(Parts { version: 1, skeleton: payload, sections: Vec::new() });
+        return Ok(Layout::Document { codec, raw, digest });
     }
 
     if bytes.len() < HEADER + 4 {
@@ -205,14 +337,6 @@ pub fn decode_parts(bytes: &[u8], kind: Kind) -> Result<Parts, ContainerError> {
     let skeleton_end = HEADER + 4 + stored;
     if count > 64 || skeleton_end + count * SECTION > bytes.len() {
         return Err(ContainerError::Truncated("no room for the skeleton and the section table"));
-    }
-    struct Record {
-        kind: u8,
-        codec: Codec,
-        raw: usize,
-        stored: usize,
-        offset: usize,
-        digest: [u8; 32],
     }
     let mut records = Vec::with_capacity(count);
     let mut position = skeleton_end + count * SECTION;
@@ -252,20 +376,42 @@ pub fn decode_parts(bytes: &[u8], kind: Kind) -> Result<Parts, ContainerError> {
     if expected > MAX_MATERIALIZED_BYTES as u64 {
         return Err(ContainerError::DeclaredTooLarge { what: "document with its sections", size: expected });
     }
-    let skeleton = unpack(codec, &bytes[HEADER + 4..skeleton_end], raw, &|| "skeleton".to_string())?;
-    if sha256(&skeleton) != digest {
-        return Err(ContainerError::Checksum { what: "skeleton".to_string() });
+    Ok(Layout::Sections { codec, raw, digest, skeleton: HEADER + 4..skeleton_end, records })
+}
+
+/// A section unpacked and checked against its checksum.
+fn unpack_section(index: usize, record: &Record, stored: &[u8]) -> Result<(u8, Vec<u8>), ContainerError> {
+    let name = || format!("section {index}");
+    let payload = unpack(record.codec, stored, record.raw, &name)?;
+    if sha256(&payload) != record.digest {
+        return Err(ContainerError::Checksum { what: name() });
     }
-    let mut sections = Vec::with_capacity(count);
-    for (index, record) in records.iter().enumerate() {
-        let name = || format!("section {index}");
-        let payload = unpack(record.codec, &bytes[record.offset..record.offset + record.stored], record.raw, &name)?;
-        if sha256(&payload) != record.digest {
-            return Err(ContainerError::Checksum { what: name() });
+    Ok((record.kind, payload))
+}
+
+/// Verifies a container and returns its uncompressed pieces without building a document.
+pub fn decode_parts(bytes: &[u8], kind: Kind) -> Result<Parts, ContainerError> {
+    match layout(bytes, kind)? {
+        Layout::Plain => Ok(Parts { version: 0, skeleton: bytes.to_vec(), sections: Vec::new() }),
+        Layout::Document { codec, raw, digest } => {
+            let payload = unpack(codec, &bytes[HEADER..], raw, &|| "document".to_string())?;
+            if sha256(&payload) != digest {
+                return Err(ContainerError::Checksum { what: "document".to_string() });
+            }
+            Ok(Parts { version: 1, skeleton: payload, sections: Vec::new() })
         }
-        sections.push((record.kind, payload));
+        Layout::Sections { codec, raw, digest, skeleton, records } => {
+            let skeleton = unpack(codec, &bytes[skeleton], raw, &|| "skeleton".to_string())?;
+            if sha256(&skeleton) != digest {
+                return Err(ContainerError::Checksum { what: "skeleton".to_string() });
+            }
+            let mut sections = Vec::with_capacity(records.len());
+            for (index, record) in records.iter().enumerate() {
+                sections.push(unpack_section(index, record, &bytes[record.offset..record.offset + record.stored])?);
+            }
+            Ok(Parts { version: 2, skeleton, sections })
+        }
     }
-    Ok(Parts { version: 2, skeleton, sections })
 }
 
 fn u64_at(bytes: &[u8], at: usize) -> u64 {
@@ -274,7 +420,7 @@ fn u64_at(bytes: &[u8], at: usize) -> u64 {
 
 /// Parses the JSON text. Bytes that are not UTF-8 are replaced, as the browser's
 /// text decoder replaced them before parsing.
-fn parse_text(text: &[u8], markers: Option<&mut Markers<'_>>) -> Result<Value, ContainerError> {
+fn parse_text<S: AsRef<[(u8, Vec<u8>)]>>(text: &[u8], markers: Option<&mut Markers<S>>) -> Result<Value, ContainerError> {
     let lossy;
     let text = match std::str::from_utf8(text) {
         Ok(_) => text,
@@ -298,8 +444,8 @@ fn json_length(value: &Value) -> usize {
 }
 
 /// Turns marker strings into the values they stand for while the tree is built.
-struct Markers<'a> {
-    sections: &'a [(u8, Vec<u8>)],
+struct Markers<S: AsRef<[(u8, Vec<u8>)]>> {
+    sections: S,
     /// One array per distinct marker text (equal markers are the same array), with its length.
     arrays: HashMap<String, (Value, usize)>,
     /// Whether to build the arrays and payloads the markers name. A checking pass (see [`check`])
@@ -317,14 +463,15 @@ struct Markers<'a> {
     error: Option<ContainerError>,
 }
 
-impl<'a> Markers<'a> {
-    fn new(sections: &'a [(u8, Vec<u8>)], skeleton_bytes: usize) -> Self {
+impl<S: AsRef<[(u8, Vec<u8>)]>> Markers<S> {
+    fn new(sections: S, skeleton_bytes: usize) -> Self {
+        let allocation = sections.as_ref().iter().map(|(_, bytes)| bytes.len()).sum();
         Markers {
             sections,
             arrays: HashMap::new(),
             build: true,
             payloads: HashMap::new(),
-            allocation: sections.iter().map(|(_, bytes)| bytes.len()).sum(),
+            allocation,
             materialized_upper: skeleton_bytes,
             materialization_limit: MAX_MATERIALIZED_BYTES,
             error: None,
@@ -337,11 +484,12 @@ impl<'a> Markers<'a> {
         Some(Err(JsonError::Syntax { offset: 0, message: "invalid section marker" }))
     }
 
-    fn admit_allocation(&mut self, bytes: usize) -> Result<(), ContainerError> {
-        if bytes > self.materialization_limit.saturating_sub(self.allocation) {
+    /// Charges `bytes` to the allocation, or refuses them. Takes the fields it needs, not `self`: the section being read is borrowed.
+    fn admit(allocation: &mut usize, limit: usize, bytes: usize) -> Result<(), ContainerError> {
+        if bytes > limit.saturating_sub(*allocation) {
             return Err(ContainerError::MaterializedTooLarge);
         }
-        self.allocation += bytes;
+        *allocation += bytes;
         Ok(())
     }
 
@@ -356,14 +504,14 @@ impl<'a> Markers<'a> {
         };
         let [section, offset, count] = [safe_integer(fields[1]), safe_integer(fields[2]), safe_integer(fields[3])];
         let (Some(section), Some(offset), Some(count)) = (section, offset, count) else { return Err(invalid()) };
-        let bytes = match self.sections.get(section) {
+        let bytes = match self.sections.as_ref().get(section) {
             Some((1, bytes)) => bytes.as_slice(),
             _ => return Err(invalid()),
         };
         if offset % width != 0 || offset > bytes.len() || count > (bytes.len() - offset) / width {
             return Err(invalid());
         }
-        self.admit_allocation(count.saturating_mul(48))?;
+        Self::admit(&mut self.allocation, self.materialization_limit, count.saturating_mul(48))?;
         let data = &bytes[offset..offset + count * width];
         let non_finite = || ContainerError::NonFinite { marker: text.to_string() };
         if !self.build {
@@ -401,7 +549,7 @@ impl<'a> Markers<'a> {
         let invalid = || ContainerError::InvalidPayloadSection { marker: text.to_string() };
         let [section, offset, count] = [safe_integer(fields[0]), safe_integer(fields[1]), safe_integer(fields[2])];
         let (Some(section), Some(offset), Some(count)) = (section, offset, count) else { return Err(invalid()) };
-        let bytes = match self.sections.get(section) {
+        let bytes = match self.sections.as_ref().get(section) {
             Some((2, bytes)) => bytes.as_slice(),
             _ => return Err(invalid()),
         };
@@ -409,7 +557,7 @@ impl<'a> Markers<'a> {
             return Err(invalid());
         }
         let encoded = count.div_ceil(3) * 4;
-        self.admit_allocation(encoded)?;
+        Self::admit(&mut self.allocation, self.materialization_limit, encoded)?;
         self.materialized_upper = self.materialized_upper.saturating_add(encoded);
         if !self.build {
             return Ok(Value::Null);
@@ -431,7 +579,7 @@ fn digits(text: &str) -> bool {
     !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())
 }
 
-impl StringHook for Markers<'_> {
+impl<S: AsRef<[(u8, Vec<u8>)]>> StringHook for Markers<S> {
     fn string(&mut self, text: &str) -> Option<Result<Value, JsonError>> {
         // Every marker starts with "S2" and a colon at index 3.
         if text.len() < 4 || !text.starts_with("S2") || text.as_bytes()[3] != b':' {

@@ -26,6 +26,7 @@ mod object;
 mod scene;
 mod sheet;
 
+use styk_doc::fanout::{Fanout, Sequential};
 use styk_doc::{Obj, Value};
 
 use self::js::*;
@@ -43,7 +44,7 @@ pub(crate) fn validate_definitions(report: &Value, definitions: &[Value]) -> Res
     source.set("figure_types", Value::array(definitions.to_vec()));
     source.set("backgrounds", Value::array(Vec::new()));
     source.set("keyframes", Value::array(vec![crate::sheet::create_frame(&[])]));
-    scene::validate_scene(&Value::object(source), None)
+    scene::validate_scene(&Value::object(source), None, &Sequential)
 }
 
 /// `validateScene({...report, figure_types: [], backgrounds: [background], keyframes: [createFrame([])]})`: whether
@@ -56,7 +57,7 @@ pub(crate) fn validate_background(report: &Value, background: &Value) -> Result<
     source.set("figure_types", Value::array(Vec::new()));
     source.set("backgrounds", Value::array(vec![background.clone()]));
     source.set("keyframes", Value::array(vec![crate::sheet::create_frame(&[])]));
-    scene::validate_scene(&Value::object(source), None)
+    scene::validate_scene(&Value::object(source), None, &Sequential)
 }
 
 /// What `validateScene` checks of a figure definition beyond its hierarchy and rig, for the edits that change one:
@@ -80,7 +81,7 @@ pub(crate) fn validate_surface(polygon: &Value, handles: &[f64]) -> Result<(), E
 
 /// `validateScene(report)`: the figure definitions, backgrounds and frames of a document.
 pub(crate) fn validate_scene(report: &Value) -> Result<(), EditError> {
-    scene::validate_scene(report, None)
+    scene::validate_scene(report, None, &Sequential)
 }
 
 /// `validateLayerState(state)`.
@@ -182,9 +183,14 @@ impl Prepared {
 
 /// `prepareEditorLoad(document)`: the report is `document.document ?? document.report ?? document`.
 pub fn prepare_editor_load(document: Value) -> Result<Prepared, EditError> {
+    prepare_editor_load_with(document, &Sequential)
+}
+
+/// [`prepare_editor_load`] with the checks that can run side by side given to `fan`: the result and the refusal are the same.
+pub fn prepare_editor_load_with(document: Value, fan: &dyn Fanout) -> Result<Prepared, EditError> {
     let mut report = or(get(Some(&document), "document"), or(get(Some(&document), "report"), Some(&document))).cloned().unwrap_or(Value::Null);
     movieclip::graph(&report)?;
-    let indexes = prepare(&mut report)?;
+    let indexes = prepare(&mut report, fan)?;
     let saved_draft = truthy(path(Some(&report), &["_styk", "simpleFrameDraft"]));
     Ok(Prepared { report, saved_draft, ..indexes })
 }
@@ -192,7 +198,12 @@ pub fn prepare_editor_load(document: Value) -> Result<Prepared, EditError> {
 /// What the app's editor does to a document it opens: [`prepare_editor_load`], then, when the editor has a
 /// layer timeline, the layer sheet it gives every document (`initializeLayerSheet`).
 pub fn prepare_for_editor(document: Value, layer_timeline: bool) -> Result<Prepared, EditError> {
-    let mut prepared = prepare_editor_load(document)?;
+    prepare_for_editor_with(document, layer_timeline, &Sequential)
+}
+
+/// [`prepare_for_editor`] with the checks that can run side by side given to `fan`.
+pub fn prepare_for_editor_with(document: Value, layer_timeline: bool, fan: &dyn Fanout) -> Result<Prepared, EditError> {
+    let mut prepared = prepare_editor_load_with(document, fan)?;
     if layer_timeline {
         sheet::initialize(&mut prepared.report)?;
     }
@@ -217,10 +228,10 @@ fn child_mut<'a>(root: &'a mut Value, steps: &[Step]) -> Option<&'a mut Value> {
 }
 
 /// Runs `prepare` on the document at `steps` of `report`, in place.
-fn prepare_child(report: &mut Value, steps: &[Step]) -> Result<(), EditError> {
+fn prepare_child(report: &mut Value, steps: &[Step], fan: &dyn Fanout) -> Result<(), EditError> {
     let Some(slot) = child_mut(report, steps) else { return Ok(()) };
     let mut nested = slot.clone();
-    prepare(&mut nested)?;
+    prepare(&mut nested, fan)?;
     if let Some(slot) = child_mut(report, steps) {
         *slot = nested;
     }
@@ -263,14 +274,14 @@ fn next_uid_after(next: f64, uid: f64) -> f64 {
 }
 
 /// `prepareEditorLoadSteps` on a document that has passed the movieclip graph check.
-fn prepare(report: &mut Value) -> Result<Prepared, EditError> {
+fn prepare(report: &mut Value, fan: &dyn Fanout) -> Result<Prepared, EditError> {
     frames::expand_pose_sequences(report)?;
     // Pivot permits a zero-key animation. One private editable working pose stands for it.
     let empty = is_array(report.get("keyframes")) && len(report.get("keyframes")) == 0;
     if empty {
         report.make_obj().ok_or_else(|| refuse(TYPE_ERROR))?.set("keyframes", Value::array(vec![empty_frame()]));
     }
-    scene::validate_scene(report, None)?;
+    scene::validate_scene(report, None, fan)?;
     drawings::validate(report)?;
     let audio = path(Some(report), &["_styk", "audio"]);
     if truthy(audio) {
@@ -284,7 +295,7 @@ fn prepare(report: &mut Value) -> Result<Prepared, EditError> {
     if let Some(mut source) = inherited_source(report) {
         let had_styk = truthy(path(Some(report), &["_styk", "movieclipSource", "document", "_styk"]));
         let had_frames = len(path(Some(report), &["_styk", "movieclipSource", "document", "keyframes"])) > 0;
-        prepare(&mut source)?;
+        prepare(&mut source, fan)?;
         let figures = source.get("figure_types").cloned();
         if let Some(figures) = figures {
             report.make_obj().unwrap().set("figure_types", figures);
@@ -306,14 +317,14 @@ fn prepare(report: &mut Value) -> Result<Prepared, EditError> {
     } else if truthy(path(Some(report), &["_styk", "movieclipSource"])) && !missing(path(Some(report), &["_styk", "movieclipSource", "document"])) {
         let descriptor = path(Some(report), &["_styk", "movieclipSource"]);
         if truthy(get(descriptor, "document")) {
-            prepare_child(report, &[Step::Key("_styk"), Step::Key("movieclipSource"), Step::Key("document")])?;
+            prepare_child(report, &[Step::Key("_styk"), Step::Key("movieclipSource"), Step::Key("document")], fan)?;
         }
     }
     if !assets_prepared {
         let figures = items(report.get("figure_types"));
         for (index, figure) in figures.iter().enumerate() {
             if truthy(movieclip::asset(figure)) {
-                prepare_child(report, &[Step::Key("figure_types"), Step::Slot(index), Step::Key("_styk"), Step::Key("movieclip"), Step::Key("document")])?;
+                prepare_child(report, &[Step::Key("figure_types"), Step::Slot(index), Step::Key("_styk"), Step::Key("movieclip"), Step::Key("document")], fan)?;
             }
         }
     }
@@ -363,11 +374,11 @@ fn prepare(report: &mut Value) -> Result<Prepared, EditError> {
     frames::validate_simple_frame_draft(report)?;
     let sources: Vec<Value> = entries(path(Some(report), &["_styk", "frameSources"])).into_iter().map(|(_, frame)| frame.clone()).collect();
     if !sources.is_empty() {
-        scene::validate_scene(report, Some(&sources))?;
+        scene::validate_scene(report, Some(&sources), fan)?;
     }
     let draft = path(Some(report), &["_styk", "simpleFrameDraft"]);
     if truthy(get(draft, "baseline")) {
-        scene::validate_scene(report, Some(&[get(draft, "baseline").unwrap().clone()]))?;
+        scene::validate_scene(report, Some(&[get(draft, "baseline").unwrap().clone()]), fan)?;
     }
     if has_own(draft, "animationBaseline") {
         let mut styk = report.get("_styk").and_then(Value::as_obj).cloned().unwrap_or_default();

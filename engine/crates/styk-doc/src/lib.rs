@@ -20,6 +20,7 @@
 //! file format hashes and stores.
 
 pub mod digest;
+pub mod fanout;
 pub mod fast;
 pub mod json;
 mod number;
