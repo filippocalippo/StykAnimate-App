@@ -22,8 +22,8 @@ function standInStage(behaviour = {}) {
     device_lost: () => behaviour.lost?.() ?? '',
     max_texture: () => 4096,
     edit_uids: () => behaviour.uids ?? [],
-    refining: () => false, camera_pending: () => false, pictures_pending: () => 0, surface_pending: () => behaviour.pending?.() ?? false,
-    ...Object.fromEntries(['resize', 'set_effects', 'set_canvas_drawing', 'set_view_orientation', 'set_multisampled', 'edit_frame', 'set_onions', 'clear_onions', 'lose_device', 'free']
+    refining: () => false, camera_pending: () => false, pictures_pending: () => behaviour.pictures_pending?.() ?? 0, surface_pending: () => behaviour.pending?.() ?? false,
+    ...Object.fromEntries(['resize', 'set_effects', 'set_canvas_drawing', 'set_view_orientation', 'set_multisampled', 'edit_frame', 'set_onions', 'clear_onions', 'lose_device', 'free', 'hint_tick']
       .map(name => [name, record(name)])),
     // The session's frame is taken once the engine holds the session's document (`false` until then).
     edit_session: (...args) => { calls.push(['edit_session', ...args]); return behaviour.edit_session ? behaviour.edit_session(...args) : true; },
@@ -331,6 +331,32 @@ test('a stage prepared ahead of its owner is taken once, and a failed start reac
   const failing = stageHandoff(() => Promise.reject(new Error('no device')));
   failing.prepare(canvas);
   await assert.rejects(failing.take(canvas), /no device/);
+});
+
+test('a frame the engine does not draw while its pictures are loaded is drawn again once the engine finishes something', async () => {
+  // A document kept a few sprite pages at a time: the picture on show stays until the pages the frame draws are in.
+  let pending = 2, progressed = 0;
+  const {renderer, progress, engine, events} = await open({pictures_pending: () => pending, render_edit: () => pending === 0});
+  engine.progressSeen = () => progressed;
+  const before = events.invalidations;
+  assert.equal(renderer.render(request()), false);
+  await Promise.resolve();
+  assert.ok(progress.length > 0, 'it waits on the engine, not on a timer');
+  pending = 0; progressed = 1;
+  progress.at(-1)();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(events.invalidations > before, 'the frame is asked for again');
+  renderer.destroy();
+});
+
+test('the tick the person went to is told to the engine once, so the pictures around it are loaded', async () => {
+  const {renderer, stage} = await open();
+  renderer.render(request({tick: 5}));
+  renderer.render(request({tick: 5}));
+  renderer.render(request({tick: 6}));
+  renderer.render(request());
+  assert.deepEqual(stage.calls.filter(([name]) => name === 'hint_tick'), [['hint_tick', 5], ['hint_tick', 6]]);
+  renderer.destroy();
 });
 
 test('the slots of the figures not drawn and dragged come from the engine, and a draw from the session reads no frame', async () => {

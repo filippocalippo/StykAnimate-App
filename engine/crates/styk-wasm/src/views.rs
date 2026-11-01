@@ -25,7 +25,7 @@ use styk_render::{DrawingGrid, Renderer, ViewParams, wgpu};
 use wasm_bindgen::prelude::*;
 
 use crate::js_error;
-use crate::stage::{Shown, Stage};
+use crate::stage::{Shown, Stage, ViewPictures};
 
 /// One canvas drawn on the stage's device by a renderer of its own.
 struct Aux {
@@ -88,6 +88,8 @@ pub(crate) struct Views {
 const READY: u32 = 0;
 const WAIT: u32 = 1;
 const STALE: u32 = 2;
+/// [`Stage::render_thumbnail`] drew it from the soft copies of some pictures: show it, and ask again for the sharp one.
+const SOFT: u32 = 3;
 
 /// Clears a canvas's current picture to opaque magenta, the colour the interface looks for to
 /// tell that a GPU canvas's pixels reach the page here (`probe` in engine-stage.mjs and the
@@ -351,7 +353,8 @@ impl Stage {
     /// Draws the thumbnail of `tick` of `revision` on a `width × height` card into the
     /// thumbnails' canvas. 0: drawn; 1: its frame or some of the document's pictures are not
     /// ready yet (they are uploaded as they come: wait for the engine's progress, then ask
-    /// again); 2: the engine holds another revision.
+    /// again); 2: the engine holds another revision; 3: drawn, with the soft copies of
+    /// pictures that are not in the sprite texture yet (it is not the thumbnail to keep: ask again later).
     pub fn render_thumbnail(&mut self, revision: f64, tick: u32, width: u32, height: u32) -> Result<u32, JsError> {
         if !(1..=MAX_SIDE).contains(&width) || !(1..=MAX_SIDE).contains(&height) {
             return Err(js_error(format!("Thumbnails are 1 to {MAX_SIDE} pixels a side ({width}×{height} asked).")));
@@ -367,10 +370,11 @@ impl Stage {
         let generation = frames.generation().clone();
         // A thumbnail never shows a frame without its pictures: they reach the atlas first.
         self.sync_images(&generation);
-        if self.engine.images_pending() > 0 {
+        let framing = card(&generation.prepared.doc, frame.camera.as_ref(), width, height);
+        let pictures = self.pictures_ready_for_view(&generation, &frame.list);
+        if pictures == ViewPictures::Wait {
             return Ok(WAIT);
         }
-        let framing = card(&generation.prepared.doc, frame.camera.as_ref(), width, height);
         let mut thumbnails = self.views.thumbnails.take().expect("checked above");
         let drawn = thumbnails.draw(self, &frame.list, &view_of(framing, CARD), width, height, DrawingGrid::Destination);
         self.views.thumbnails = Some(thumbnails);
@@ -378,7 +382,11 @@ impl Stage {
             // Drawn: its place among the frames prepared ahead is free again.
             let _ = self.views.frames.as_ref().and_then(|frames| frames.take(tick));
         }
-        Ok(if drawn { READY } else { WAIT })
+        Ok(match (drawn, pictures) {
+            (false, _) => WAIT,
+            (true, ViewPictures::Soft) => SOFT,
+            (true, _) => READY,
+        })
     }
 
     /// Releases the thumbnails' canvas, renderer and pinned frames.

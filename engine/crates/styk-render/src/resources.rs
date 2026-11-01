@@ -219,6 +219,16 @@ pub(crate) fn write_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture:
     submit_staged(queue, encoder, source);
 }
 
+/// A table of unsigned integers (the pictures' hash table), read with `textureLoad`.
+pub(crate) fn uint_table_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Uint, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+        count: None,
+    }
+}
+
 pub(crate) fn texture_entry(binding: u32, dimension: wgpu::TextureViewDimension) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,

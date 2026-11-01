@@ -36,8 +36,8 @@ pub struct GpuExport {
     /// Where drawn tiles are copied for reading: `stride` bytes a row (256-byte aligned).
     readbacks: Vec<wgpu::Buffer>,
     stride: u32,
-    /// The document lineage and page count the sprite atlas is laid out for.
-    atlas: Option<(u64, u32)>,
+    /// The document lineage, page count and picture count the sprite atlas is laid out for.
+    atlas: Option<(u64, u32, usize)>,
     /// The last resolved tile, straight RGBA.
     resolved: Vec<u8>,
 }
@@ -90,7 +90,7 @@ impl GpuExport {
     /// identity across revisions). Returns whether the atlas was allocated anew, in which case
     /// every image must be uploaded again.
     pub fn prepare_sprites(&mut self, lineage: u64, assets: &Assets) -> bool {
-        let layout = (lineage, assets.pages);
+        let layout = (lineage, assets.pages, assets.atlas.len());
         if self.atlas == Some(layout) {
             return false;
         }
