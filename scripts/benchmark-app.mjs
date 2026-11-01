@@ -884,11 +884,11 @@ async function projectPicture() {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', head), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-/** What a person does first on Home: a real click on the first project, until its document is the one on show (Home gone, the
+/** What a person does first on Home: a real click on the first project's open button, until its document is the one on show (Home gone, the
  *  editor named after the file). The library's projects are small copies of one file, so this is the click and the open of a small project. */
 async function openFirstProject(page) {
   try {
-    const box = await page.evaluate(() => { const r = document.querySelector('.home-project')?.getBoundingClientRect(); return r ? {x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 60)} : null; });
+    const box = await page.evaluate(() => { const r = document.querySelector('.home-project .home-project-open')?.getBoundingClientRect(); return r ? {x: r.left + r.width / 2, y: r.top + r.height / 2} : null; });
     if (!box) return {error: 'no project card'};
     const started = Date.now();
     await page.mouse.click(box.x, box.y);

@@ -345,3 +345,21 @@ test('the slots of the figures not drawn and dragged come from the engine, and a
   assert.equal(read, 0, 'the frame as poses was not made for a draw the session answers');
   renderer.destroy();
 });
+
+test('the stage names its adapter from the warm-up worker\'s description, and asks the browser only when it has none', async () => {
+  let asked = 0;
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {gpu: {requestAdapter: async () => { asked++; return {info: {vendor: 'asked', architecture: '', device: ''}}; }}}});
+  const {expectAdapterInfo} = await import('../src/engine/engine.mjs');
+  try {
+    expectAdapterInfo(Promise.resolve({vendor: 'nvidia', architecture: 'ada', device: 'rtx'}));
+    assert.equal((await open()).renderer.stats.adapter, 'nvidia · ada · rtx');
+    assert.equal(asked, 0);
+    expectAdapterInfo(Promise.resolve(null));
+    assert.equal((await open()).renderer.stats.adapter, 'asked');
+    assert.equal(asked, 1);
+  } finally {
+    expectAdapterInfo(null);
+    if (original) Object.defineProperty(globalThis, 'navigator', original); else delete globalThis.navigator;
+  }
+});
