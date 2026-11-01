@@ -8,7 +8,7 @@ const { randomUUID } = require('node:crypto');
 const { renameWithRetry } = require('./rename-retry.cjs');
 
 class FileStreams {
-  constructor({ maxBytes = 256 * 1024 * 1024, maxStreamBytes = 16 * 1024 * 1024 * 1024, maxChunkBytes = 256 * 1024, maxSessions = 8, ttlMs = 120000, onCommitError = () => {} } = {}) {
+  constructor({ maxBytes = 256 * 1024 * 1024, maxStreamBytes = 16 * 1024 * 1024 * 1024, maxChunkBytes = 4 * 1024 * 1024, maxSessions = 8, ttlMs = 120000, onCommitError = () => {} } = {}) {
     this.maxBytes = maxBytes;
     this.maxStreamBytes = maxStreamBytes;
     this.maxChunkBytes = maxChunkBytes;

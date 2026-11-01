@@ -395,6 +395,7 @@ let drawingController, timelineUI, timelineHost,
   importSequence = 0,
   canvasPointerId = null,
   inspectorDisclosureOwner = null,
+  drawnInspectorHtml = null,
   spritePlacementDialog,
   spriteImportController;
 // Settles once the editor is ready (styk.ready): work that can wait, such as the band's first measurement, waits for it.
@@ -2037,7 +2038,7 @@ function renderProperties() {
       ].map((element) => element.dataset.polygonIndex)
     : [];
   const range = rangeFrames(true);
-  updateInspectorDOM($("inspector"), inspectorView({
+  const inspectorHtml = inspectorView({
     editor,
     tab: state.inspectorTab,
     drawing: drawingController,
@@ -2054,7 +2055,11 @@ function renderProperties() {
     applyRange: state.applyRange,
     polygonPage: state.polygonPage || 0,
     palettePage: state.palettePage || 0,
-  }), {preserveDisclosure});
+  });
+  // Draw builds the same brush panel after every undo and stroke: markup the panel already shows is not parsed and reconciled again.
+  if (!(drawingController?.active && inspectorHtml === drawnInspectorHtml && !$("inspector").contains(document.activeElement)))
+    updateInspectorDOM($("inspector"), inspectorHtml, {preserveDisclosure});
+  drawnInspectorHtml = drawingController?.active ? inspectorHtml : null;
   drawingController?.active && drawingController.paintPreview($("inspector"));
   cameraMotionControls?.sync();
   refreshHotkeyHints(hotkeys, $('inspector'));

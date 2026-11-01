@@ -101,8 +101,10 @@ async function load({workers = defaultWorkerCount(), deviceMemory = globalThis.n
   /** Starts one more preparation thread; resolves when it has joined the engine. */
   const spawn = () => new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./engine-worker.mjs', import.meta.url), {type: 'module', name: 'styk-engine'});
-    worker.onmessage = () => resolve();
-    worker.onerror = event => reject(new Error(`An engine worker failed to start: ${event.message}`));
+    let ready = false;
+    worker.onmessage = () => { ready = true; resolve(); };
+    // A thread that traps cannot say so itself: the engine is told, and what waits for a job on it (a save) gives up.
+    worker.onerror = event => { if (ready) handle.worker_lost(); else reject(new Error(`An engine worker failed to start: ${event.message}`)); };
     worker.postMessage({module, memory, address: handle.address(), stack: WORKER_STACK_BYTES});
     pool.push(worker);
   });

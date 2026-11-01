@@ -38,14 +38,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub const PAGE_BYTES: usize = 64 * 1024;
 /// The least memory added in one step: 16 MiB.
 const MIN_AHEAD_PAGES: usize = 256;
-/// The most memory added in one step: 128 MiB.
-const MAX_AHEAD_PAGES: usize = 2048;
+/// The most memory added in one step: 32 MiB. Every page of a step is committed in the browser's accounting whether or
+/// the module touches it or not, so the tail a step leaves unused is memory the app pays for: 32 MiB at most, where
+/// 128 MiB steps left up to a hundred megabytes of a large document's memory dead.
+const MAX_AHEAD_PAGES: usize = 512;
 /// Requests of this size or more are refused when they would reach into the reserve: 256 KiB.
 pub const LARGE_BYTES: usize = 256 * 1024;
 
 /// How many pages to add ahead of the allocator when a memory of `current` pages had to
-/// grow: an eighth of the memory, between 16 and 128 MiB, so the number of steps stays
-/// logarithmic while the unused tail stays small next to a large document.
+/// grow: an eighth of the memory, between 16 and 32 MiB, so the number of steps stays
+/// small (about seventy for the largest memory, a millisecond or two each) while the unused tail stays small.
 pub fn grow_ahead_pages(current: usize) -> usize {
     (current / 8).clamp(MIN_AHEAD_PAGES, MAX_AHEAD_PAGES)
 }
@@ -313,8 +315,9 @@ mod tests {
     fn steps_scale_with_the_memory_between_the_bounds() {
         assert_eq!(grow_ahead_pages(0), MIN_AHEAD_PAGES);
         assert_eq!(grow_ahead_pages(1024), MIN_AHEAD_PAGES, "a 64 MiB memory still grows 16 MiB at a time");
-        assert_eq!(grow_ahead_pages(8192), 1024, "a 512 MiB memory grows by 64 MiB");
-        assert_eq!(grow_ahead_pages(32768), MAX_AHEAD_PAGES, "a 2 GiB memory grows by 128 MiB");
+        assert_eq!(grow_ahead_pages(2048), 256, "a 128 MiB memory grows by 16 MiB");
+        assert_eq!(grow_ahead_pages(8192), MAX_AHEAD_PAGES, "a 512 MiB memory grows by 32 MiB");
+        assert_eq!(grow_ahead_pages(32768), MAX_AHEAD_PAGES, "a 2 GiB memory grows by 32 MiB");
         assert_eq!(grow_ahead_pages(usize::MAX), MAX_AHEAD_PAGES);
     }
 
@@ -325,7 +328,7 @@ mod tests {
             pages += grow_ahead_pages(pages);
             steps += 1;
         }
-        assert!(steps < 60, "{steps} steps to reach 1.5 GiB");
+        assert!(steps < 70, "{steps} steps to reach 1.5 GiB");
     }
 
     #[test]

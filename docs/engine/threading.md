@@ -63,7 +63,9 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   flag in shared memory for cancellation between the ticks it bakes or the steps it takes (see
   [document.md](document.md#exports-of-the-document)). It is never terminated while it is inside the engine (see "Ending a worker"):
   the interface raises the flag and sends `release`, the worker finishes the call it is in, gives its thread back
-  (`__wbindgen_thread_destroy`) and closes. A save that is cancelled drops the result; a compression that takes a while after the
+  (`__wbindgen_thread_destroy`) and closes. A project save also lends the work of its three hashes and three frames to up to three of the engine's other workers as ordinary tasks
+  (`Engine::run_together`: whoever starts a job first owns it, and the save thread runs what no worker has started, so a save never waits
+  for a worker that does not come); the preparation workers keep at least one thread free. A job owns everything it touches (`'static`; the blocks are `Arc`s): a worker may still be running one when the save has returned, whether it failed, was stopped, or lost its own thread (WebAssembly aborts on a panic, and `__wbindgen_thread_destroy` gives the stack back), and nothing it reads or writes may be freed meanwhile. A job that panics (where panics unwind) is caught and the wait ends with `JobsFailed::Panicked`; a thread that traps cannot say so, so the page reports the `error` event of an engine thread (`EngineHandle.worker_lost`, `engine.mjs`) and the wait, which looks every 25 ms, ends with `JobsFailed::WorkerLost`. Either is a failed save with the code `worker_failed` (`errors.documentExport.documentExportFailed`): the previous file and the unsaved work are untouched and the next save works. A save that is cancelled drops the result; a compression that takes a while after the
   cancel costs only CPU, and the next save gets a worker of its own at once. The flag is raised on every path that ends the worker.
 - The preview worker (`src/engine/engine-preview-worker.mjs`, one per page,
   `engine-previews.mjs`; see [rendering.md](rendering.md#thumbnails-library-previews-and-the-camera-monitor)):
@@ -189,13 +191,15 @@ module spent most of its CPU time in `dlmalloc::sys::System::alloc` (the functio
 
 `engine/crates/styk-alloc` is the global allocator of the engine module (`styk-wasm`) and the
 codec module (`styk-codec-wasm`): the standard allocator, and whenever it had to grow the
-memory it grows it further in one step (an eighth of the memory, between 16 and 128 MiB) and
+memory it grows it further in one step (an eighth of the memory, between 16 and 32 MiB) and
 returns the extra pages to the allocator's free space. A step the memory cannot take (the
 shared memory's maximum, [D14](decisions/0014-shared-memory-maximum.md)) is halved until one
 fits. Near the maximum this can refuse a later large request that the standard allocator
 would have met, within one step of the ceiling (not seen on any document). Allocation results, and so documents and
 bytes, are unchanged; the memory ends at most one step larger than the document needs, in pages
-that are committed but untouched (opening tdd2 uriel nemesis: engine memory 1,071 to 1,183 MiB). The drawing module keeps the standard allocator: its memory
+that are committed but untouched, which the browser counts as the app's memory (Electron's private bytes are the commit
+charge): steps of up to 128 MiB left that much dead at the top of a large document's memory, and 32 MiB reach the
+largest memory in about seventy steps of a millisecond or two each. The drawing module keeps the standard allocator: its memory
 grows in few, large steps.
 
 Measure it by opening a large Pivot file in Node (`engine-open.mjs`: the engine's open job and the
