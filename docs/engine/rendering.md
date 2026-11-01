@@ -442,7 +442,9 @@ What the encoder keeps is judged by numbers, never by addresses: the assets by `
 scene by its `Scene::stamp` (each build is numbered, and a built scene is never changed). The onion skins are kept the same way: a ghost
 is encoded once and drawn again while it is the same scene (stamp) under the same hidden slots, tint, effects setting and assets, so a
 gesture does not encode them at every step, nor when the document is published anew by a commit or an undo and none of the ghost's objects changed (the stage keeps the ghost's scene, so the stamp is the same); none is kept while a drawing cel is live. `styk-eval/tests/build_memory_stale.rs` compares
-every such list with the list encoded whole.
+every such list with the list encoded whole. A pose kept for an onion skin is also brought to each new document before it is drawn: its styled
+objects are resolved again against a figure that was redefined (`Loader::restyle_frame`; `styk-engine/tests/ghost_scenarios.rs` draws every
+step of the recorded editing scenarios with a kept stage and a fresh one and compares them).
 
 ## In the app
 

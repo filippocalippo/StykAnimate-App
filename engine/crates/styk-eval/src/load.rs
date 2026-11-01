@@ -1306,6 +1306,26 @@ impl Loader {
         true
     }
 
+    /// A frame converted against an earlier document, brought to `doc`: an object whose style overlay or Stick Nodes sprite was resolved
+    /// against a figure that `doc` defines another way is resolved again, as converting its record against `doc` would. Whether any was. A
+    /// frame kept across documents (an onion skin's pose, which is kept while its record is the same) must pass through here, or it draws
+    /// the figures it was resolved against.
+    pub fn restyle_frame(&mut self, frame: &mut Arc<crate::eval::Frame>, doc: &Document) -> bool {
+        let stale = |object: &Arc<Object>| {
+            (object.style.is_some() || object.sticknodes_sprite.is_some())
+                && doc.figure(object.figure).is_some_and(|base| !object.figure_override.as_ref().is_some_and(|resolved| resolved.base.as_ref().is_some_and(|b| Arc::ptr_eq(b, base))))
+        };
+        if !frame.objects.iter().any(stale) {
+            return false;
+        }
+        for object in Arc::make_mut(frame).objects.iter_mut() {
+            if let Some(base) = doc.figure(object.figure) {
+                self.styled_object(base, object);
+            }
+        }
+        true
+    }
+
     /// Resolves the style overlays of every frame of `doc`. A frame resolved against
     /// figures that have not changed since is kept as it is.
     fn resolve_styles(&mut self, doc: &mut Document) {
