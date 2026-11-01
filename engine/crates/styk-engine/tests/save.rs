@@ -335,7 +335,7 @@ fn a_save_whose_worker_failed_is_a_failed_save_that_the_next_save_survives() {
     let Err(SaveError::File(error)) = failed else { panic!("{:?}", failed.map(|written| written.bytes.len())) };
     assert_eq!((error.code, error.message_key), (Some("worker_failed"), "errors.documentExport.documentExportFailed"));
     let pool = Workers::start(2);
-    let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 2 };
+    let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 2, aside: false };
     assert!(save_project(std::slice::from_ref(&tree), &[], request(), &host).is_ok(), "the tree is untouched by a failed save: it saves");
 }
 
@@ -346,12 +346,12 @@ fn a_save_on_the_workers_writes_the_bytes_of_a_save_on_one_thread_and_a_cancel_r
     let request = || ProjectRequest { name: Some("Side by side".into()), source: None, reservation: None };
     let alone = save_project(std::slice::from_ref(&tree), &[], request(), &|| false).unwrap();
     let pool = Workers::start(3);
-    let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3 };
+    let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3, aside: false };
     let together = save_project(std::slice::from_ref(&tree), &[], request(), &host).unwrap();
     assert!(together.bytes == alone.bytes, "{} bytes on workers, {} on one thread", together.bytes.len(), alone.bytes.len());
     // Stopped once the preparation is over (it asks four times in the preparation): the jobs on the workers end without a container.
     let asked = std::cell::Cell::new(0usize);
-    let stopping = EngineHost { engine: Some(&pool.engine), cancel: &|| { asked.set(asked.get() + 1); asked.get() > 4 }, clock: || 0.0, helpers: 3 };
+    let stopping = EngineHost { engine: Some(&pool.engine), cancel: &|| { asked.set(asked.get() + 1); asked.get() > 4 }, clock: || 0.0, helpers: 3, aside: false };
     let stopped = save_project(std::slice::from_ref(&tree), &[], request(), &stopping);
     assert!(matches!(stopped, Err(SaveError::Cancelled)), "{:?}", stopped.map(|written| written.bytes.len()));
 }
@@ -406,13 +406,13 @@ fn a_project_with_a_big_array_is_lifted_in_pieces_on_the_workers_into_the_same_b
     let request = || ProjectRequest { name: Some("In pieces".into()), source: None, reservation: None };
     let alone = save_project(std::slice::from_ref(&tree), &[], request(), &|| false).unwrap();
     let pool = Workers::start(3);
-    let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3 };
+    let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3, aside: false };
     let in_pieces = save_project(std::slice::from_ref(&tree), &[], request(), &host).unwrap();
     assert!(in_pieces.bytes == alone.bytes, "{} bytes in pieces, {} whole", in_pieces.bytes.len(), alone.bytes.len());
     // A stop at any question of a save in pieces, the batches of the lift included, is a stop and writes nothing.
     for stop_at in [3, 5, 8, 12] {
         let asked = std::cell::Cell::new(0usize);
-        let stopping = EngineHost { engine: Some(&pool.engine), cancel: &|| { asked.set(asked.get() + 1); asked.get() >= stop_at }, clock: || 0.0, helpers: 3 };
+        let stopping = EngineHost { engine: Some(&pool.engine), cancel: &|| { asked.set(asked.get() + 1); asked.get() >= stop_at }, clock: || 0.0, helpers: 3, aside: false };
         let stopped = save_project(std::slice::from_ref(&tree), &[], request(), &stopping);
         assert!(matches!(stopped, Err(SaveError::Cancelled)) || stopped.is_ok(), "stopped at question {stop_at}: {:?}", stopped.as_ref().map(|written| written.bytes.len()));
     }
@@ -447,4 +447,29 @@ fn a_started_job_runs_beside_the_caller_on_a_worker_or_on_the_caller_when_it_is_
     let cancel = || false;
     let waiting = pool.engine.start_later(boom, &Arc::new(AtomicBool::new(false)), &cancel);
     assert_eq!(waiting(), Err(JobsFailed::Panicked));
+}
+
+#[test]
+fn the_scene_check_starts_on_a_worker_only_where_the_interface_lends_one_aside() {
+    use std::sync::atomic::AtomicBool;
+    use styk_engine::save::EngineHost;
+    use styk_formats::files::Host;
+    let pool = Workers::start(3);
+    for aside in [false, true] {
+        let ran_on = Arc::new(std::sync::Mutex::new(None));
+        let (slot, caller) = (ran_on.clone(), std::thread::current().id());
+        let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3, aside };
+        let job: styk_formats::files::Job = Box::new(move |_| *slot.lock().unwrap() = Some(std::thread::current().id()));
+        let waiting = host.start(job, &Arc::new(AtomicBool::new(false)));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let before_wait = *ran_on.lock().unwrap();
+        waiting().unwrap();
+        let after_wait = ran_on.lock().unwrap().expect("it ran");
+        if aside {
+            assert!(before_wait.is_some_and(|thread| thread != caller), "a worker took it while the caller did something else");
+        } else {
+            assert_eq!(before_wait, None, "nothing ran before the wait");
+            assert_eq!(after_wait, caller, "it ran on the caller, when it was waited for");
+        }
+    }
 }

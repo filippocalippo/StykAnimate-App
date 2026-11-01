@@ -12677,62 +12677,62 @@
   },
   "errors.documentExport.chooseAPivStkStykStkzOrStykmov": {
     "locations": [
-      "src/document-export.mjs:113"
+      "src/document-export.mjs:117"
     ],
     "context": "if (!['piv', 'stk', 'styk', 'stkz', 'stykmov'].includes(format)) throw messageError(new Error(''), \"errors.documentExport.chooseAPivStkStykStkzOrStykmov\", {});"
   },
   "errors.documentExport.documentExportFailed": {
     "locations": [
-      "src/document-export.mjs:177"
+      "src/document-export.mjs:192"
     ],
     "context": "const error = restoreMessageError((event.data.error?.message ? new Error(event.data.error?.message) : messageError(new Error(''), \"errors.documentExport.documen"
   },
   "errors.documentExport.documentExportTimedOut": {
     "locations": [
-      "src/document-export.mjs:206"
+      "src/document-export.mjs:221"
     ],
     "context": "const timer = this.timeoutMs > 0 ? setTimeout(() => fail(Object.assign(messageError(new Error(''), \"errors.documentExport.documentExportTimedOut\", {}), { teleme"
   },
   "errors.documentExport.exportRequiresAnEditableDocument": {
     "locations": [
-      "src/document-export.mjs:112"
+      "src/document-export.mjs:116"
     ],
     "context": "if (!report || typeof report !== 'object') throw messageError(new TypeError(''), \"errors.documentExport.exportRequiresAnEditableDocument\", {});"
   },
   "errors.documentExport.exportRequiresTheEditorRevision": {
     "locations": [
-      "src/document-export.mjs:114"
+      "src/document-export.mjs:118"
     ],
     "context": "if (ENGINE_FORMATS.has(format) && !Number.isSafeInteger(revision)) throw messageError(new TypeError(''), \"errors.documentExport.exportRequiresTheEditorRevision\""
   },
   "errors.documentExport.theDocumentExporterHasBeenDisposed": {
     "locations": [
-      "src/document-export.mjs:111"
+      "src/document-export.mjs:115"
     ],
     "context": "if (this.disposed) throw messageError(new Error(''), \"errors.documentExport.theDocumentExporterHasBeenDisposed\", {});"
   },
   "errors.documentExport.theDocumentExportWorkerStopped": {
     "locations": [
-      "src/document-export.mjs:167"
+      "src/document-export.mjs:171"
     ],
     "context": "const stopped = messageError(new Error(''), \"errors.documentExport.theDocumentExportWorkerStopped\");"
   },
   "errors.documentExport.theDocumentSnapshotCouldNotBeTransferred": {
     "locations": [
-      "src/document-export.mjs:171"
+      "src/document-export.mjs:180"
     ],
     "context": "const onMessageError = () => fail(Object.assign(messageError(new Error(''), \"errors.documentExport.theDocumentSnapshotCouldNotBeTransferred\", {}), { telemetryCo"
   },
   "errors.documentExport.theEngineCannotMakeThisFileHere": {
     "locations": [
       "src/app.mjs:251",
-      "src/document-export.mjs:143"
+      "src/document-export.mjs:147"
     ],
     "context": "if (format !== 'styk' && !editor._shown?.active) throw Object.assign(messageError(new Error(''), \"errors.documentExport.theEngineCannotMakeThisFileHere\", {}), {"
   },
   "errors.documentExport.theFileServiceReturnedNoExportedDocument": {
     "locations": [
-      "src/document-export.mjs:236"
+      "src/document-export.mjs:251"
     ],
     "context": "if (!(result.blob instanceof Blob)) throw messageError(new Error(''), \"errors.documentExport.theFileServiceReturnedNoExportedDocument\", {});"
   },
@@ -12783,7 +12783,7 @@
       "src/document-export-worker.mjs:33",
       "src/document-export-worker.mjs:45",
       "src/document-export-worker.mjs:85",
-      "src/document-export.mjs:218"
+      "src/document-export.mjs:233"
     ],
     "context": "if (!config.engine || !message.project) throw messageError(new Error(''), \"errors.documentExportWorker.theDocumentSnapshotWasNotInitialized\", {});"
   },

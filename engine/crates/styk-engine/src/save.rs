@@ -136,6 +136,9 @@ pub struct EngineHost<'a> {
     pub clock: fn() -> f64,
     /// How many of the engine's workers the save may take (the rest stay free for the frame on show).
     pub helpers: usize,
+    /// Whether one more worker, besides the helpers, may run the scene check beside the lift and the frames (the interface says so only when
+    /// that still leaves a worker free for the frame on show).
+    pub aside: bool,
 }
 
 impl Host for EngineHost<'_> {
@@ -150,8 +153,8 @@ impl Host for EngineHost<'_> {
     fn start<'a>(&'a self, job: Job, stop: &Arc<AtomicBool>) -> Joiner<'a> {
         match self.engine {
             // One of the engine's workers for the job, besides the ones the hashes, the frames and the pieces of the lift take, and one left
-            // for the frame on show: only a machine with threads to spare lends it.
-            Some(engine) if self.helpers >= 3 => Box::new(engine.start_later(job, stop, self.cancel)),
+            // for the frame on show: the interface says whether the machine has the threads for that (`aside`).
+            Some(engine) if self.aside => Box::new(engine.start_later(job, stop, self.cancel)),
             _ => files::start_when_waited_for(job, stop),
         }
     }

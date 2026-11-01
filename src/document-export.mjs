@@ -24,6 +24,10 @@ let reservations = 0;
  * the frame on show (a save gets none from an engine with one thread or none). */
 export const lendableWorkers = engine => Math.min(3, Math.max(0, (engine?.workers ?? 0) - 1));
 
+/** Whether a save may also start its scene check on a thread of its own, besides the ones it lends for the hashes, the frames and the pieces
+ * of the lift: only when that still leaves one free for the frame on show (five threads or more). */
+export const lendsSceneWorker = engine => lendableWorkers(engine) === 3 && (engine?.workers ?? 0) - 1 >= 4;
+
 /** Document exports on a worker that joined the engine, and codec requests.
  * Callers must abort on every document mutation, including uncommitted gestures.
  * getRevision catches committed edits before the work starts and before returning data.
@@ -159,21 +163,32 @@ export class DocumentExporter {
     let pending, failure, completed = false, postMax = 0, mainWork = 0, snapshots = [];
     const fail = error => { failure ??= error; backendJob.cancel(); pending?.reject(failure); pending = null; this._terminateWorker(); };
     // A worker that traps never gives back the memory its save reserved: the engine is told the name, and the person gets the localized
-    // message (what the engine said, `unreachable`, goes to the diagnostics as the cause).
+    // message (what the engine said, `unreachable`, goes to the diagnostics as the cause). A trap reaches the page as the reply of the
+    // worker's own catch (`trapped`), or, when it is not caught, as the worker's `error` event.
     let reservation = null;
+    const giveBackMemory = () => { if (reservation !== null) engine.handle?.release_reservation?.(reservation); };
+    const stoppedError = cause => {
+      const stopped = messageError(new Error(''), "errors.documentExport.theDocumentExportWorkerStopped");
+      if (cause) stopped.cause = cause instanceof Error ? cause : new Error(String(cause));
+      return Object.assign(stopped, { telemetryCode: 'worker_failed', telemetryStage: 'serialize' });
+    };
     const onError = event => {
       event.preventDefault();
-      if (reservation !== null) engine.handle?.release_reservation?.(reservation);
-      const stopped = messageError(new Error(''), "errors.documentExport.theDocumentExportWorkerStopped");
-      if (event.message) stopped.cause = new Error(event.message);
-      fail(Object.assign(stopped, { telemetryCode: 'worker_failed', telemetryStage: 'serialize' }));
+      giveBackMemory();
+      fail(stoppedError(event.message));
     };
     const onMessageError = () => fail(Object.assign(messageError(new Error(''), "errors.documentExport.theDocumentSnapshotCouldNotBeTransferred", {}), { telemetryCode: 'snapshot_failed', telemetryStage: 'prepare' }));
     const onMessage = event => {
       if (!pending || pending.id !== event.data?.id) return;
       const request = pending; pending = null;
       if (event.data.ok) request.resolve(event.data);
-      else {
+      else if (event.data.error?.trapped) {
+        // Cut off in the middle of the engine's work: its reservation was never dropped.
+        giveBackMemory();
+        request.reject(stoppedError(event.data.error.message));
+      } else {
+        // The call has returned, so its reservation is dropped or given back already; naming it again is harmless.
+        giveBackMemory();
         const error = restoreMessageError((event.data.error?.message ? new Error(event.data.error?.message) : messageError(new Error(''), "errors.documentExport.documentExportFailed")), event.data.error);
         error.code = event.data.error?.code; error.status = event.data.error?.status;
         error.telemetryCode = event.data.error?.telemetryCode; error.telemetryStage = event.data.error?.telemetryStage;
@@ -219,7 +234,7 @@ export class DocumentExporter {
         }
         // The save may take some of the engine's workers for its hashes and frames, but leaves at least one for the frame on show.
         reservation = ++reservations;
-        work = {project: {snapshots, scopes: scopes?.typeIds ?? [], address: engine.handle.address(), helpers: lendableWorkers(engine), reservation}, cancel: cancelFlag};
+        work = {project: {snapshots, scopes: scopes?.typeIds ?? [], address: engine.handle.address(), helpers: lendableWorkers(engine), aside: lendsSceneWorker(engine), reservation}, cancel: cancelFlag};
       } else {
         // The session publishes every change at the editor's revision; one still on its way is waited for briefly.
         for (let waited = 0; !holdsRevision(engine, revision); waited += 16) {
