@@ -1,11 +1,12 @@
-//! A fast hasher for the maps the engine keeps by object key or by figure id. Their keys are short strings and small integers the engine
-//! chooses (never an attacker's), where the standard hasher's SipHash costs more than the lookup it serves: every `Obj::get` of an object
-//! with more than a few keys went through it. Fx hashing (the multiply-and-rotate of rustc's own maps).
+//! A fast hasher for maps whose keys the engine makes: small integers (figure ids), addresses of nodes, tile coordinates. It is Fx hashing (the
+//! multiply-and-rotate of rustc's own maps) with a final mix, and it is not safe for a key that can come from a file: someone who knows it can
+//! build keys that all hash alike, and a map of them takes quadratic time. **Strings of a document (object keys, names, ids a file chooses) go
+//! in a standard `HashMap`**, whose SipHash does not have that weakness (`Shape::index` does; a parser that keys by what it reads should too).
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 
-const SEED: u64 = 0x51_7c_c1_b7_27_22_0a_95;
+pub(crate) const SEED: u64 = 0x51_7c_c1_b7_27_22_0a_95;
 
 #[derive(Default, Clone, Copy)]
 pub struct FastHasher(u64);
@@ -41,8 +42,15 @@ impl Hasher for FastHasher {
     #[inline]
     fn write_usize(&mut self, value: usize) { self.add(value as u64); }
 
+    /// The state mixed once more: the multiplication leaves the low bits of keys that are multiples of a power of two (page-aligned addresses)
+    /// unchanged, and a table indexes by them.
     #[inline]
-    fn finish(&self) -> u64 { self.0 }
+    fn finish(&self) -> u64 {
+        let mut mixed = self.0;
+        mixed ^= mixed >> 32;
+        mixed = mixed.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        mixed ^ (mixed >> 29)
+    }
 }
 
 pub type FastBuild = BuildHasherDefault<FastHasher>;
@@ -52,6 +60,15 @@ pub type FastSet<K> = HashSet<K, FastBuild>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keys_a_power_of_two_apart_do_not_all_collide() {
+        // Addresses of nodes, four kilobytes apart: the multiplication alone leaves their low bits equal.
+        let started = std::time::Instant::now();
+        let map: FastMap<usize, u32> = (0..300_000usize).map(|n| (0x1000_0000 + n * 4096, n as u32)).collect();
+        assert!((0..300_000usize).all(|n| map.get(&(0x1000_0000 + n * 4096)) == Some(&(n as u32))));
+        assert!(started.elapsed() < std::time::Duration::from_secs(3), "page-aligned keys took {:?}", started.elapsed());
+    }
 
     #[test]
     fn a_fast_map_finds_what_it_holds() {

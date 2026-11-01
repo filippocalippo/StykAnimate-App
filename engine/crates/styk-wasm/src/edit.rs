@@ -226,7 +226,8 @@ impl EditSession {
     pub fn call_with_document(&mut self, method: &str, args: &str, view: &str, document: &EditSession) -> String {
         let (Ok(mut args), Ok(view)) = (json::parse(args.as_bytes()), json::parse(view.as_bytes())) else { return "{\"status\":\"error\",\"error\":\"the call's arguments are not JSON\"}".to_string() };
         let Some(mut list) = args.elements().map(|items| items.iter().collect::<Vec<Value>>()).filter(|items| items.len() >= 2) else { return "{\"status\":\"error\",\"error\":\"a call with a document takes it as its second argument\"}".to_string() };
-        list[1] = document.session().report().clone();
+        // The tree as text would give it: a pose array the clip's records share is one array in each place it sits, as a file saves it.
+        list[1] = document.session().report().unshared();
         args = Value::array(list);
         let Ok(_working) = styk_alloc::reserve(CALL_WORKING_BYTES.max(self.working[0])) else { return out_of_memory_answer() };
         styk_alloc::reset_peak();

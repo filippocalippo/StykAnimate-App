@@ -1,14 +1,18 @@
 // The read view's lazy tables (src/lazy-table.mjs): an array to its readers whose records come from the session when read, held
 // in a bounded cache, and kept in step with the session by its patches (src/engine/engine-patch.mjs).
 import test from 'node:test';
+import v8 from 'node:v8';
+import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import {fetchedRecords, figureRow, frameRow, frameSummary, holdingAll, lazyKeyedTable, lazyTable, limitRecords, tableOf, useRecords} from '../src/lazy-table.mjs';
 import {drawingFigures, figureForCel, figureRows, findFigureType, hasDrawingFigures, movieclipFigures, nextFigureTypeId} from '../src/figure-types.mjs';
 import {createImageFigure} from '../src/media-authoring.mjs';
 import {createDrawingFigure} from '../src/drawing-model.mjs';
+import {snapshotDocument} from '../src/engine/engine-owner.mjs';
+import {makeProjectFile} from '../src/engine/engine-document-export.mjs';
 import {inspectorDescriptor} from '../src/inspector-view.mjs';
 import {applyDocumentPatch} from '../src/engine/engine-patch.mjs';
-import {createFrame, createObject, emptyDocument} from '../src/demo.mjs';
+import {createFrame, createObject, defaultFigure, emptyDocument} from '../src/demo.mjs';
 import {ownedEditorSync} from './support/owned-editor.mjs';
 import './support/engine-node.mjs';
 
@@ -63,6 +67,33 @@ test('a table finds a record by its identity without fetching the others', () =>
   assert.equal(tableOf(root.keyframes).positionOf('frame-41'), 7, 'the first with an identity');
   assert.equal(tableOf(root.keyframes).positionOf('frame-41', true), 41, 'the last with an identity');
   assert.equal(from.asked.length, 0);
+});
+
+test('a table the document no longer has throws on a record it gave back, whether or not anything still holds that record', () => {
+  v8.setFlagsFromString('--expose-gc');
+  const collect = vm.runInNewContext('gc');
+  const {array} = table(20, 4);
+  const root = {keyframes: array};
+  let remembered = array[0];
+  for (let index = 1; index < 20; index++) array[index];
+  assert.ok(!held(array).includes(0), 'the first record was given back');
+  applyDocumentPatch(root, [{p: ['keyframes'], a: [...Array(20).keys(), {v: {_styk: {frameId: 'inserted'}, objects: []}}]}]);
+  assert.ok(tableOf(array).retired);
+  assert.throws(() => array[0], /changed since/, 'a record something else holds');
+  remembered = null;
+  collect(); collect();
+  assert.throws(() => array[0], /changed since/, 'a record collected');
+  assert.throws(() => array[1], /changed since/, 'a record given back');
+  assert.equal(root.keyframes[0]._styk.frameId, 'frame-0', 'the table in use still has them');
+  const keys = Array.from({length: 80}, (_, index) => `k${index}`);
+  const keyed = lazyKeyedTable('_styk.frameSources', keys, {fetch: (name, key) => ({key})});
+  let first = keyed.k0;
+  for (const key of keys.slice(1)) keyed[key];
+  tableOf(keyed).retired = true;
+  assert.throws(() => keyed.k0, /changed since/, 'a keyed record something else holds');
+  first = null;
+  collect(); collect();
+  assert.throws(() => keyed.k0, /changed since/, 'a keyed record collected');
 });
 
 test('a patch changes the records the view holds, replaces one it does not, and rebuilds the table around those it keeps', () => {
@@ -299,6 +330,41 @@ test('leaving a movieclip gives the parent the tree the clip\'s session holds, a
   assert.equal(now(), before, 'undone to the document before');
   while (editor._redo.length) editor.redo();
   assert.equal(now(), edited, 'redone to the clip as it was edited');
+});
+
+/** The bytes the project file of `editor`'s document has now. */
+const savedBytes = editor => Buffer.from(makeProjectFile({join: null, cancelled: () => false, request: {snapshots: [snapshotDocument(editor.report)], scopes: [], name: 'Saved'}}).bytes);
+
+test('leaving a movieclip saves the same bytes as the document opened again from its text, however many pose arrays its frames share', () => {
+  const document = emptyDocument(), figure = document.figure_types[0];
+  for (let id = 11; id < 71; id++) figure.segments.push({...figure.segments[2], segment_id: id, parent_id: 1, z_order: id});
+  figure.segment_count = figure.segments.length;
+  document.keyframes = Array.from({length: 6}, (_, index) => createFrame([createObject(figure, 1, 100 + index, 100), createObject(figure, 2, 300 + index, 100)], 1));
+  assert.ok(document.keyframes[0].objects[0].angles.length >= 32);
+  const {editor, owner} = ownedEditorSync({demo: false, layerTimeline: true, propertyChannels: true}, document, {verify: false});
+  const reopened = () => ownedEditorSync({demo: false, layerTimeline: true, propertyChannels: true}, JSON.parse(owner.session().report_json()), {verify: false}).editor;
+  const edit = () => {
+    editor.sheetDuplicateFrameAfter();
+    editor.sheetDuplicateFrameAfter();
+    editor.sheetInsertFrames(editor.layers.map(layer => layer.id), editor.tick, 2);
+    editor.select(editor.evaluatedFrame.objects[0].unique_id, -1);
+    editor.moveSelection(25, 10);
+  };
+  editor.select(1);
+  const clip = editor.createMovieclip({start: 0, end: 4});
+  editor.enterMovieclip(clip.figure_type_id);
+  edit();
+  editor.leaveMovieclip();
+  assert.deepEqual(savedBytes(editor), savedBytes(reopened()), 'the clip as the parent took it saves as the document would from text');
+  // A clip inside a clip, left twice.
+  editor.enterMovieclip(clip.figure_type_id);
+  editor.select(1);
+  const inner = editor.createMovieclip({start: 0, end: 3});
+  editor.enterMovieclip(inner.figure_type_id);
+  edit();
+  editor.leaveMovieclip();
+  editor.leaveMovieclip();
+  assert.deepEqual(savedBytes(editor), savedBytes(reopened()), 'a clip left from inside a clip');
 });
 
 test("a drawing cel's published tiles are the session's, so they survive its record being given back", () => {

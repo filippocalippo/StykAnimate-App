@@ -682,7 +682,7 @@ it on the editor, for every document.
   one `movieclip-definition` entry), which undoes and redoes with the parent's other entries; a clip left without saving or
   unchanged leaves none. The document crosses as the tree the clip's session holds (`EditSession.call_with_document`: the owner leaves
   the argument's place empty), not as JSON the interface reads out of its view: leaving a clip of 590 frames of 150 figures took 233 ms
-  that way (dev build) and reads none of the clip's records now. A clip with a stored frame draft still crosses as JSON. The clip's document keeps the source its figures were captured from (`movieclipSource`): the poses
+  that way (dev build) and reads none of the clip's records now. The tree is taken as text would give it (`Value::unshared`): the clip's records share the pose arrays they have in common, and the file writer stores an array of 32 numbers or more that two places share once, so the shared tree would save to other bytes than the same document read from text (`tests/lazy-table.test.mjs`, saved bytes after leaving). A clip with a stored frame draft still crosses as JSON. The clip's document keeps the source its figures were captured from (`movieclipSource`): the poses
   of a figure in that source, and the animation it retains, are edited with the figure (`Place::Retained`: a rig edit
   inside the clip changes them as it changes the clip's own poses, in the same `topology` entry). A clip on a native
   timeline (tools and tests) is edited by the editor. A project closed ends the sessions it holds, those of its clips too.

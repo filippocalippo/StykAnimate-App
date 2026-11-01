@@ -102,10 +102,10 @@ class Table {
   read(index) {
     const slot = this.slots[index];
     if (slot.record === undefined) {
+      // A table the document no longer has fails here whatever the collector has done: a record given back never comes back through it.
+      if (this.retired) throw new Error(`The document changed since this ${this.name} table was read: read it again from the document.`);
       // A record given back that something else still holds is the record: the same object, so what is keyed by it stays valid.
-      const revived = slot.weak?.deref();
-      if (revived === undefined && this.retired) throw new Error(`The document changed since this ${this.name} table was read: read it again from the document.`);
-      slot.record = revived ?? this.records.fetch(this.name, index);
+      slot.record = slot.weak?.deref() ?? this.records.fetch(this.name, index);
       slot.weak = undefined;
       this.held++;
       if (this.held > this.limit) { if (holding === 0) this.release(slot); else overfull.add(this); }
@@ -240,9 +240,8 @@ class KeyedTable {
   read(key) {
     const slot = this.slots.get(key);
     if (slot.record === undefined) {
-      const revived = slot.weak?.deref();
-      if (revived === undefined && this.retired) throw new Error(`The document changed since this ${this.name} table was read: read it again from the document.`);
-      slot.record = revived ?? this.records.fetch(this.name, key);
+      if (this.retired) throw new Error(`The document changed since this ${this.name} table was read: read it again from the document.`);
+      slot.record = slot.weak?.deref() ?? this.records.fetch(this.name, key);
       slot.weak = undefined;
       this.held++;
       if (this.held > this.limit) { if (holding === 0) this.release(slot); else overfull.add(this); }
