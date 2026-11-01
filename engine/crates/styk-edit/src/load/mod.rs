@@ -32,7 +32,7 @@ use styk_doc::{Obj, Value};
 use self::js::*;
 use crate::EditError;
 
-pub use self::js::TYPE_ERROR;
+pub use self::js::{CANCELLED, TYPE_ERROR, WORKER_LOST};
 pub(crate) use self::object::{object_pose as validate_object_pose, spatial_pose};
 pub(crate) use self::scene::projected_drawing;
 pub(crate) use self::sheet::initialize as initialize_layer_sheet;

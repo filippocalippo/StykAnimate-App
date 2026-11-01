@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 
-use crate::value::{KeyHash, Nums, Obj, Shape, Value, index_key};
+use crate::fast::FastMap;
+use crate::value::{Nums, Obj, Shape, Value, index_key};
 use crate::{JsonError, format_number};
 
 /// How deep arrays and objects may nest. Movieclips nest documents; sixteen
@@ -89,10 +90,11 @@ pub fn scan_with(text: &[u8], hook: &mut dyn StringHook) -> Result<Option<Vec<Me
 struct Parser<'a> {
     text: &'a [u8],
     at: usize,
-    /// One allocation per distinct key in the document.
-    keys: HashMap<&'a [u8], Arc<str>, KeyHash>,
-    /// One key list per distinct object layout, found by the addresses of its interned keys.
-    shapes: HashMap<Vec<usize>, Arc<Shape>, KeyHash>,
+    /// One allocation per distinct key in the document. The keys are the file's: a standard map, whose hash a file cannot aim at
+    /// (`crate::fast`).
+    keys: HashMap<&'a [u8], Arc<str>>,
+    /// One key list per distinct object layout, found by the addresses of its interned keys: addresses the parser made, not the file.
+    shapes: FastMap<Vec<usize>, Arc<Shape>>,
     scratch: String,
     hook: &'a mut dyn StringHook,
     /// The keys of the objects being read, innermost last: an object takes the keys from where it began to the end.
@@ -511,11 +513,12 @@ impl<'a> Parser<'a> {
     }
 
     fn key(&mut self) -> Result<Arc<str>, JsonError> {
-        self.key_interned().map(|(key, _)| key)
+        self.key_interned(None).map(|(key, _)| key)
     }
 
-    /// A key, and whether it is the one allocation every occurrence of its text shares (a key with escapes is not interned).
-    fn key_interned(&mut self) -> Result<(Arc<str>, bool), JsonError> {
+    /// A key, and whether it is the one allocation every occurrence of its text shares (a key with escapes is not interned). `expected`
+    /// is the interned key an object of the layout read last has at this place: a key with its text is it, found without hashing.
+    fn key_interned(&mut self, expected: Option<&Arc<str>>) -> Result<(Arc<str>, bool), JsonError> {
         if self.text.get(self.at) != Some(&b'"') {
             return Err(self.error("expected a key"));
         }
@@ -525,6 +528,9 @@ impl<'a> Parser<'a> {
             return Ok((Arc::from(self.scratch.as_str()), false));
         }
         let bytes = &self.text[start..end];
+        if let Some(key) = expected.filter(|key| key.as_bytes() == bytes) {
+            return Ok((key.clone(), true));
+        }
         if let Some(key) = self.keys.get(bytes) {
             return Ok((key.clone(), true));
         }
@@ -556,7 +562,9 @@ impl<'a> Parser<'a> {
         // A key with escapes is not interned, so equal text no longer means the same allocation.
         let mut escaped = false;
         loop {
-            let (key, interned) = self.key_interned()?;
+            let at = self.key_stack.len() - base;
+            let expected = if on_hint { hint.as_ref().and_then(|shape| shape.keys().get(at)) } else { None };
+            let (key, interned) = self.key_interned(expected)?;
             self.space();
             if self.text.get(self.at) != Some(&b':') {
                 return Err(self.error("expected : after a key"));
@@ -565,7 +573,6 @@ impl<'a> Parser<'a> {
             self.space();
             let value = self.value(depth + 1)?;
             escaped |= !interned;
-            let at = self.key_stack.len() - base;
             on_hint = on_hint && hint.as_ref().is_some_and(|shape| shape.keys().get(at).is_some_and(|known| Arc::ptr_eq(known, &key)));
             if plain && !on_hint {
                 let earlier = &self.key_stack[base..];
@@ -613,7 +620,8 @@ impl<'a> Parser<'a> {
             }
         };
         self.key_stack.truncate(base);
-        self.hints[depth] = Some(shape.clone());
+        // A layout with a key spelled with escapes is not a hint: its key is not the one allocation of its text.
+        self.hints[depth] = (!escaped).then(|| shape.clone());
         Ok(Value::Obj(Arc::new(Obj::from_shape(shape, values))))
     }
 

@@ -39,6 +39,11 @@ pub trait Fanout {
         Err(task)
     }
 
+    /// Whether the work is stopped (an open that was cancelled): readers ask between their steps and end with their own refusal.
+    fn cancelled(&self) -> bool {
+        false
+    }
+
     /// Notes that the work reached `phase`, for the host to time. Nothing by default.
     fn mark(&self, _phase: &'static str) {}
 

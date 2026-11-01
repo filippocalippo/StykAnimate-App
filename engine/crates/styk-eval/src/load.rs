@@ -476,6 +476,9 @@ impl Loader {
     fn keyframes_of(&mut self, records: &[Value], fan: &dyn Fanout) -> Result<Vec<Arc<Keyframe>>, Error> {
         let mut known: std::collections::HashSet<usize> = std::collections::HashSet::new();
         let missing: Vec<usize> = (0..records.len()).filter(|&at| node_address(&records[at]).is_none_or(|address| !self.keyframes.contains_key(&address) && known.insert(address))).collect();
+        if fan.cancelled() {
+            return Err(Error::Format("the load was cancelled".into()));
+        }
         let cuts = fanout::ranges(fan, missing.len());
         if cuts.len() <= 1 {
             return records.iter().map(|k| self.cached_keyframe(k)).collect();
