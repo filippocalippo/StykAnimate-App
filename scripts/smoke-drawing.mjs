@@ -44,13 +44,21 @@ try{
   const stroke=async points=>{await page.mouse.move(points[0].x,points[0].y);await page.mouse.down();for(const p of points.slice(1))await page.mouse.move(p.x,p.y,{steps:5});await page.mouse.up();await page.waitForFunction(()=>!styk.drawing.gesture&&!styk.drawing.loading);};
   const alphaAt=(x,y)=>page.evaluate(({x,y})=>{const d=styk.drawing,t=styk.editor.drawingTarget();if(!t.figure)return 0;const p=d.pixel({clientX:x,clientY:y},t);return d.owner.entry(t.figure).store.pixel(Math.floor(p.x),Math.floor(p.y))[3];},{x,y});
   // Dark pixels in a square of the page the stage draws in: the ink as the person sees it.
-  const darkAt=async(x,y)=>{const {data,bpp}=decodePng(await page.screenshot({clip:{x:Math.round(x-12),y:Math.round(y-12),width:24,height:24}}));let n=0;for(let i=0;i<data.length;i+=bpp)if(data[i]+data[i+1]+data[i+2]<150)n++;return n;};
+  // (A whole-page capture: a capture of a small clip of a window can leave out what the graphics device draws.)
+  // The stage as the person sees it: a capture of the page (in device pixels: the page may be scaled). A window that is not on
+  // show composites a frame some time after the stage drew it, so a capture is taken again until a square of the page differs
+  // from `base` (a capture taken before the change) in more than `enough` pixels, at most 6 s: a stage that never draws the
+  // change is told from one that is slow.
+  const stage=async()=>decodePng(await page.screenshot());
+  const changedAt=async(base,x,y,enough=40)=>{const scale=await page.evaluate(()=>devicePixelRatio);let n=0;for(const started=Date.now();;){const now=await stage();n=0;for(let j=Math.max(0,Math.round(y*scale)-12);j<Math.min(now.height,Math.round(y*scale)+12);j++)for(let i=Math.max(0,Math.round(x*scale)-12);i<Math.min(now.width,Math.round(x*scale)+12);i++){const at=(j*now.width+i)*now.bpp;if(Math.abs(now.data[at]-base.data[at])+Math.abs(now.data[at+1]-base.data[at+1])+Math.abs(now.data[at+2]-base.data[at+2])>60)n++;}if(n>enough||Date.now()-started>6000)return n;await page.waitForTimeout(250);}};
   // Brush strokes through real pointer input.
   await page.locator('[data-tool="drawing-brush"]').click();await page.locator('[data-draw-preset="ink"]').click();
+  const blank=await stage();
   await stroke([{x:cx-300,y:cy},{x:cx,y:cy-40},{x:cx+300,y:cy}]);
   check('a brush stroke paints in the desktop app',await alphaAt(cx,cy-40)===255||await alphaAt(cx,cy-38)===255);
   await page.waitForTimeout(400);
-  check('the stage shows the brush stroke',await darkAt(cx,cy-40)>40);
+  const inked=await changedAt(blank,cx,cy-40);
+  check(`the stage shows the brush stroke (${inked} pixels of 576 changed where it was painted)`,inked>40);
   await page.locator('[data-draw-preset="blender"]').click();await stroke([{x:cx-100,y:cy-27},{x:cx-100,y:cy+40}]);
   check('the smudge brush drags paint',await alphaAt(cx-100,cy+25)>0);
   await page.keyboard.press('u');await page.evaluate(()=>Object.assign(styk.drawing.settings,{shapeKind:'ellipse',shapeFill:true,color:'#d04020',opacity:1}));
@@ -93,12 +101,12 @@ try{
   await onStage('redo');
   // Second frame with its own drawing.
   await page.locator('[data-tool="drawing-brush"]').click();await page.locator('[data-draw-preset="ink"]').click();await page.evaluate(()=>styk.drawing.action('next-blank'));await page.waitForTimeout(200);
-  const nothingYet=await darkAt(cx-100,cy-75);
+  const nothingYet=await stage();
   await stroke([{x:cx-200,y:cy-150},{x:cx+200,y:cy+150}]);
   await onStage('the first stroke of a new frame');
   // The stage, not the cel: a new cel's live page must be mapped for its tiles to be read (a document with pages of pictures
   // already, or a texture with room already, once left it out and the stroke never showed).
-  check('the stage shows the first stroke of a new cel',await darkAt(cx-100,cy-75)>nothingYet+40);
+  check('the stage shows the first stroke of a new cel',await changedAt(nothingYet,cx-100,cy-75)>40);
   // A turned and mirrored view: strokes, an erase and its undo are drawn by the stage in the right place.
   await page.evaluate(()=>{styk.drawing.propertySet('draw-viewAngle',35);styk.drawing.action('flip-view');});await page.waitForTimeout(300);
   check('the Draw view is turned and mirrored',await page.evaluate(()=>Math.abs(styk.state.view.rotation-35*Math.PI/180)<1e-6&&styk.state.view.flip===true));
