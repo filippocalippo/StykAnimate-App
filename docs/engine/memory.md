@@ -96,6 +96,13 @@ ending the codec worker gave back 15 MiB on tdd2, 2 on svr_uriel and 14 on testi
 before); tdd2 opens in 2.8 to 3.7 s, as it did with the lease. The bytes a save writes are unchanged: the four trusted
 files save to the hashes they always did.
 
+The Rust codec's lease routes (`/api/source/keep`, `retain`, `release`, `GET /api/source`, and the source cache and lease code
+behind them in `styk-piv/src/store.rs`) are not leftovers. The app no longer calls them, but the codec is held to the answers of the
+Python service it replaced: `engine/tools/piv/oracle.py` records those routes and the retained-bytes limits, `styk-piv replay`
+(`engine/crates/styk-piv/tests/parity.rs`, `engine:parity`) requires identical answers, and `styk-piv`'s own service tests state them. Removing
+them means re-recording the oracle's tapes, which are frozen, so they stay until the oracle itself is retired. The app's side of the lease is
+gone (`sourceOwners`, `adoptSource`, `detachSource`, `attachSource`, `/api/source/retain` in the import client).
+
 **The allocator lock** (`std`'s wasm allocator: one spinning lock for every thread). Timed with a gate in front of it, tdd2
 and svr_uriel through open, play and scrub, eight workers: a worker finds the lock taken on 5 to 40 % of its calls and
 waits 0.1 to 0.9 s in all over the session (waits up to 28 ms); the interface thread makes 8 to 11 million calls, finds the

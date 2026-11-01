@@ -192,14 +192,14 @@ fn take_snapshots(tokens: &[f64]) -> Option<(Vec<Value>, bool)> {
 
 /// Writes the `.styk` container of the project the snapshots hold (`src/engine/engine-document-export.mjs`). `request` is
 /// JSON: `snapshots` (tokens of [`crate::edit::EditSession::snapshot`], outermost document first, the document in front last),
-/// `scopes` (for each document but the last, the movieclip type the next one is the document of), `name`, and `source`: the
-/// record of the Pivot original the interface holds for the project, whose bytes are `source`. `address` is a fresh
+/// `scopes` (for each document but the last, the movieclip type the next one is the document of) and `name`. A project
+/// opened from Pivot carries its original in the document (`_stykSource`). `address` is a fresh
 /// [`crate::engine::EngineHandle::address`] (consumed), whose workers the save may use for the hashes and frames it can make side by side, or 0;
 /// `helpers` in the request is how many of them (the interface leaves some free), `aside` whether one more may run the scene check beside the rest, and `reservation` a name for the memory the save
 /// reserves, which the interface releases ([`crate::engine::EngineHandle::release_reservation`]) if this thread traps.
 /// `cancel()` answers whether the save is stopped. Nothing is written anywhere: the answer is the file's bytes.
 #[wasm_bindgen]
-pub fn save_project(address: usize, request: &str, source: Option<Vec<u8>>, cancel: &js_sys::Function) -> Result<DocumentExport, JsError> {
+pub fn save_project(address: usize, request: &str, cancel: &js_sys::Function) -> Result<DocumentExport, JsError> {
     // SAFETY: `address` is 0 or was produced by `EngineHandle::address` in this memory and is used once; the engine lends the save its other workers.
     let engine = (address != 0).then(|| unsafe { *Box::from_raw(address as *mut Engine) });
     let request = json::parse(request.as_bytes()).map_err(|why| bad(&why.to_string()))?;
@@ -210,10 +210,6 @@ pub fn save_project(address: usize, request: &str, source: Option<Vec<u8>>, canc
     if trees.is_empty() || scopes.len() + 1 != trees.len() {
         return Err(bad("the save names no document"));
     }
-    let source = match (source, request.get("source")) {
-        (Some(bytes), Some(record)) => Some(styk_engine::save::Source { record: record.clone(), bytes }),
-        _ => None,
-    };
     let name = request.get("name").and_then(Value::as_str).map(str::to_string);
     let reservation = request.get("reservation").and_then(Value::as_f64).map(|token| token as u64);
     let cancelled = Cell::new(false);
@@ -223,7 +219,7 @@ pub fn save_project(address: usize, request: &str, source: Option<Vec<u8>>, canc
         }
         cancelled.get()
     };
-    let written = styk_engine::save::save_project(&trees, &scopes, styk_engine::save::ProjectRequest { name, source, original_first, reservation }, &styk_engine::save::EngineHost { engine: engine.as_ref(), cancel: &stop, clock: crate::clock, helpers: request.get("helpers").and_then(Value::as_f64).map_or(0, |count| count as usize), aside: request.get("aside").is_some_and(Value::truthy) }).map_err(save_failure)?;
+    let written = styk_engine::save::save_project(&trees, &scopes, styk_engine::save::ProjectRequest { name, original_first, reservation }, &styk_engine::save::EngineHost { engine: engine.as_ref(), cancel: &stop, clock: crate::clock, helpers: request.get("helpers").and_then(Value::as_f64).map_or(0, |count| count as usize), aside: request.get("aside").is_some_and(Value::truthy) }).map_err(save_failure)?;
     let t = written.timings;
     let frames: Vec<String> = t.frames.iter().map(|f| format!("{{\"raw\":{},\"stored\":{},\"hash_ms\":{:.3},\"compress_ms\":{:.3}}}", f.raw_bytes, f.stored_bytes, f.hash_ms, f.compress_ms)).collect();
     let timings = format!("{{\"prepare_ms\":{:.3},\"lift_ms\":{:.3},\"lift_pieces_ms\":{:.3},\"lift_splice_ms\":{:.3},\"scene_ms\":{:.3},\"frames_ms\":{:.3},\"assemble_ms\":{:.3},\"total_ms\":{:.3},\"frames\":[{}]}}", t.prepare_ms, t.lift_ms, t.lift_pieces_ms, t.lift_splice_ms, t.scene_ms, t.frames_ms, t.assemble_ms, t.total_ms, frames.join(","));

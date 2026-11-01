@@ -66,10 +66,10 @@ try {
     check(JSON.stringify(restored.document._styk.animation) === originalChannels, 'STYK changed sparse authored keys.');
     const sourceFiles = [];
     for (const name of ['Pivot Animator v5/Animations/tween_NY_day-night.piv', 'Pivot Animator v5/Animations/text_bike.piv', 'Pivot Animator v5/Animations/Legacy/sprite_demo.piv']) {
-      const opened = await importer.openSample(name), sourceEditor = styk.editor.load(opened.document);
+      const opened = await importer.openSample(name, {open: {layerTimeline: true}}), sourceEditor = styk.editor.load(opened.document);
       sourceEditor.addAnimationKeys([{target: {kind: 'camera'}, property: 'x', tick: 0, value: 23},
         {target: {kind: 'scene'}, property: 'color', tick: 0, value: 0xffbada55}]);
-      const saved = await exporter.export(sourceEditor.report, {sourceId: opened.sourceId, format: 'piv', revision: sourceEditor.revision}), timings = {...exporter.lastTimings};
+      const saved = await exporter.export(sourceEditor.report, {format: 'piv', revision: sourceEditor.revision}), timings = {...exporter.lastTimings};
       const checked = (await importer.importFile(new File([saved], 'source-edited.piv'))).document;
       check(checked.keyframes[0].camera.x === 23, `Source-backed export lost camera edit for ${name}.`);
       check(checked.backgrounds.find(bg => bg.background_id === checked.keyframes[0].background_id)?.color === 0xffbada55, `Source-backed export lost scene color for ${name}.`);

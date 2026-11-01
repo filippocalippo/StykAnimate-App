@@ -81,17 +81,17 @@ export function makeExportDocument({join, address, revision, request, cancelled,
 /**
  * The `.styk` container of a project, written by the engine from the documents sessions handed over. `request`:
  * `snapshots` (tokens of `EditSession.snapshot()`, the outermost movieclip scope first, the document in front last, consumed
- * by the call), `scopes` (the movieclip type each document but the last was entered from) and `name`. `source`, when the
- * document does not carry its Pivot original (`_stykSource`), is the original's bytes and `request.source` its record.
+ * by the call), `scopes` (the movieclip type each document but the last was entered from) and `name`. A project opened from
+ * Pivot carries its original in the document (`_stykSource`).
  * `join` is null where the caller is a thread of the engine already (the tests, which run it in-process).
  * @returns {{bytes: Uint8Array, rawBytes: number, timings: object}} `timings`: where the save's time went in the engine (`prepare_ms`,
  * `lift_ms`, `assemble_ms`, `total_ms`, and for the skeleton, the arrays section and the payloads section `{raw, stored, hash_ms, compress_ms, reused}`).
  */
-export function makeProjectFile({join, request, source, cancelled, guard, address = 0}) {
+export function makeProjectFile({join, request, cancelled, guard, address = 0}) {
   return inside(guard, () => {
     if (join) joinEngine(join);
     let made;
-    try { made = save_project(address, JSON.stringify(request), source, cancelled); } catch (error) { throw failure(error); }
+    try { made = save_project(address, JSON.stringify(request), cancelled); } catch (error) { throw failure(error); }
     try { return {bytes: made.bytes(), rawBytes: made.raw_bytes(), timings: JSON.parse(made.timings() || 'null')}; } finally { made.free(); }
   });
 }

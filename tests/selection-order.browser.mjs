@@ -112,7 +112,7 @@ try {
     const expected = e.evaluatedFrame.object_draw_order_unique_ids, tick = e.tick, result = [];
     try {
       for (const format of ['styk', 'piv']) {
-        const blob = await exporter.export(e.report, {sourceId: styk.state.sourceId, format, name: 'selection-order', revision: e.revision});
+        const blob = await exporter.export(e.report, {format, name: 'selection-order', revision: e.revision});
         const imported = await importer.importFile(new File([blob], `selection-order.${format}`));
         const reopened = pageEditor({demo: false, layerTimeline: true}).load(imported.document); reopened.seek(tick);
         if (JSON.stringify(reopened.evaluatedFrame.object_draw_order_unique_ids) !== JSON.stringify(expected))

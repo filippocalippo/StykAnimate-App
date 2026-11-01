@@ -15,21 +15,13 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-use styk_doc::{Blob, Value};
+use styk_doc::Value;
 use crate::Engine;
 use styk_edit::EditError;
 use styk_edit::export::{Hold, Projected, check_scene, fold_movieclip, prepare_project};
 use styk_formats::Kind;
 use styk_formats::container::{self, ContainerError};
 use styk_formats::files::{self, FileError, FrameTimings, Host, Job, Joiner, JobsFailed};
-
-/// The original file of a project opened from Pivot (`_stykSource`): the codec's description of it and its bytes, which
-/// the container stores first in its payload section.
-pub struct Source {
-    /// The record the file keeps beside the bytes (`kind`, `version`, `sha256`, …).
-    pub record: Value,
-    pub bytes: Vec<u8>,
-}
 
 /// What a project save writes.
 pub struct ProjectRequest {
@@ -38,8 +30,6 @@ pub struct ProjectRequest {
     pub reservation: Option<u64>,
     /// The name the file is saved under, which the document carries.
     pub name: Option<String>,
-    /// The Pivot original of the project, when the interface holds it for the project (the document has no copy of its own).
-    pub source: Option<Source>,
     /// The document was read from a Pivot file and carries its original (`_stykSource`): the save stores the original first in the payload
     /// section and its record last in the root, as a save of a project opened from Pivot has always laid them out. A document read from a
     /// project file is saved in the order it holds them in.
@@ -187,7 +177,7 @@ pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, ho
     let started = clock();
     let Some(mut document) = trees.last().cloned() else { return Err(SaveError::Refused("errors.documentExportWorker.theDocumentSnapshotWasNotInitialized".into())) };
     debug_assert_eq!(scopes.len() + 1, trees.len(), "one movieclip per document it was entered from");
-    let source = request.source.as_ref().map_or_else(|| if request.original_first { carried_len(&document) } else { 0 }, |source| source.bytes.len());
+    let source = if request.original_first { carried_len(&document) } else { 0 };
     let _memory = match request.reservation {
         Some(token) => styk_alloc::reserve_named(token, working_bytes(source)),
         None => styk_alloc::reserve(working_bytes(source)),
@@ -202,19 +192,8 @@ pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, ho
     drop(document);
     let Projected { document: mut document, scene } = projected;
     let prepared = clock();
-    let reserved: Vec<Arc<[u8]>> = match request.source {
-        Some(Source { record, bytes }) => {
-            let bytes: Arc<[u8]> = Arc::from(bytes);
-            let mut stored = record.as_obj().cloned().unwrap_or_default();
-            stored.set("source_base64", Value::Blob(Arc::new(Blob { prefix: Arc::from(""), bytes: bytes.clone() })));
-            let object = document.make_obj().ok_or_else(|| SaveError::Refused("errors.nativeContainer.projectDataMustBeAJsonObject".into()))?;
-            object.set("_stykSource", Value::object(stored));
-            vec![bytes]
-        }
-        // A project opened from Pivot carries its original in the document: it is stored where the app has always stored it.
-        None if request.original_first => carried_source(&mut document).into_iter().collect(),
-        None => Vec::new(),
-    };
+    // A project opened from Pivot carries its original in the document: it is stored where the app has always stored it.
+    let reserved: Vec<Arc<[u8]>> = if request.original_first { carried_source(&mut document).into_iter().collect() } else { Vec::new() };
     let mut written = write(&document, Kind::Styk, &reserved, Some(scene), host)?;
     written.timings.prepare_ms = prepared - started;
     written.timings.total_ms = clock() - started;

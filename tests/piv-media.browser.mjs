@@ -46,7 +46,7 @@ try {
         const {DocumentExporter}=await import('/src/document-export.mjs');
         const exporter=new DocumentExporter({timeoutMs:240000});
         try {
-          const blob=await exporter.export(styk.editor.report,{sourceId:styk.state.sourceId,format:'styk',name:styk.editor.name});
+          const blob=await exporter.export(styk.editor.report,{format:'styk',name:styk.editor.name});
           window.savedTestBlob=blob;
           return {bytes:blob.size,timings:exporter.lastTimings};
         } finally {exporter.dispose();}

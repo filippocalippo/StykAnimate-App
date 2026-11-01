@@ -41,7 +41,7 @@ try {
     const serialized = scene;
     const exportFile = async format => {
       const response = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({document: serialized, sourceId: null, format, figureTypeId: sprite.figure_type_id})});
+        body: JSON.stringify({document: serialized, format, figureTypeId: sprite.figure_type_id})});
       assert(response.ok, `${format} export failed: ${await response.clone().text()}`);
       const bytes = await response.arrayBuffer();
       const imported = await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=media.${format}`, {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: bytes});

@@ -95,7 +95,7 @@ try {
     };
     const exportFile = async (format, figureTypeId) => {
       const response = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({document, format, sourceId: null, figureTypeId})});
+        body: JSON.stringify({document, format, figureTypeId})});
       if (!response.ok) throw new Error(`${format} export failed: ${await response.text()}`);
       const bytes = await response.arrayBuffer();
       const imported = await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=text-authoring.${format}`, {method: 'POST',

@@ -44,7 +44,7 @@ try {
       if (!editor._shown.active) throw new Error('The engine did not take the document.');
       return editor;
     };
-    window.enginePart = (editor, imported, format, name) => ({sourceId: imported.sourceId, format, name, revision: editor.revision});
+    window.enginePart = (editor, format, name) => ({format, name, revision: editor.revision});
     window.hash = async blob => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))]
       .map(n => n.toString(16).padStart(2, '0')).join('');
   });
@@ -52,11 +52,11 @@ try {
   for (const fixture of fixtures) {
     await page.locator('#fixture').setInputFiles(fixture.filename);
     const result = await page.evaluate(async original => {
-      const imported = await importer.importFile(document.querySelector('#fixture').files[0]);
+      const imported = await importer.importFile(document.querySelector('#fixture').files[0], {open: {layerTimeline: true}});
       window.current = imported;
       // A figure file opened in an editor is exported by the engine as its figures again: the bytes are the codec's own encoding of them.
       const figureFile = original.format === 'stk', reference = figureFile ? JSON.stringify((await importer.importFile(document.querySelector('#fixture').files[0])).document) : null;
-      const editor = openInEngine(imported), identities = editor.report.keyframes.map(frame => frame._styk?.frameId);
+      const editor = window.currentEditor = openInEngine(imported), identities = editor.report.keyframes.map(frame => frame._styk?.frameId);
       // Opening the document is not the export: its task ends before the measurement starts.
       await new Promise(resolve => setTimeout(resolve, 100));
       let active = true, previous = performance.now(), maxGap = 0;
@@ -64,7 +64,7 @@ try {
       observer.observe({type: 'longtask', buffered: false});
       function tick(now) { maxGap = Math.max(maxGap, now - previous); previous = now; if (active) requestAnimationFrame(tick); }
       requestAnimationFrame(tick);
-      const output = await exporter.export(editor.report, enginePart(editor, imported, original.format, original.name));
+      const output = await exporter.export(editor.report, enginePart(editor, original.format, original.name));
       const timings = {...exporter.lastTimings};
       const service = timings.service_ms;
       if (!service || !Number.isSafeInteger(timings.request_bytes) || timings.request_bytes <= 0 ||
@@ -91,7 +91,7 @@ try {
       }
       if (editor.report.keyframes.some((frame, index) => frame._styk?.frameId !== identities[index]))
         throw new Error('Pivot export mutated editable frame identities.');
-      const native = await exporter.export(imported.document, {sourceId: imported.sourceId, format: 'styk', name: original.name});
+      const native = await exporter.export(editor.report, {format: 'styk', name: original.name});
       window.nativeFiles.push({original: figureFile ? {...original, bytes: output.size, sha256} : original, blob: native});
       return {name: original.name, bytes: output.size, sha256, nativeBytes: native.size,
         timings, nativeTimings: {...exporter.lastTimings}, longTasks: tasks, maxAnimationFrameGapMs: maxGap};
@@ -103,45 +103,44 @@ try {
   const behavior = await page.evaluate(async () => {
     const cancelled = new AbortController(); cancelled.abort();
     let before = false, during = false, revision = false;
-    try { await exporter.export(current.document, {signal: cancelled.signal}); } catch (error) { before = error.name === 'AbortError'; }
+    const heldReport = currentEditor.report;
+    // The engine writes the file from the document it holds, so the document is not sent in pieces: the points to cancel at are the request
+    // for the file and the revision the editor has when it is made.
+    const piv = {format: 'piv', revision: currentEditor.revision};
+    try { await exporter.export(heldReport, {...piv, signal: cancelled.signal}); } catch (error) { before = error.name === 'AbortError'; }
     const mid = new AbortController();
     const originalPostMessage = Worker.prototype.postMessage;
-    let snapshotHook = () => mid.abort(), exportHook = null;
+    let exportHook = () => mid.abort();
     Worker.prototype.postMessage = function (message, ...args) {
       const result = originalPostMessage.call(this, message, ...args);
-      if (message.operation === 'chunk') snapshotHook?.();
       if (message.operation === 'export') exportHook?.();
       return result;
     };
-    const ongoing = exporter.export(current.document, {signal: mid.signal});
+    const ongoing = exporter.export(heldReport, {...piv, signal: mid.signal});
     try { await ongoing; } catch (error) { during = error.name === 'AbortError'; }
     let rev = 1;
-    snapshotHook = () => rev++;
-    const changed = exporter.export(current.document, {getRevision: () => rev});
+    exportHook = () => rev++;
+    const changed = exporter.export(heldReport, {...piv, getRevision: () => rev});
     try { await changed; } catch (error) { revision = error.name === 'AbortError'; }
-    snapshotHook = null;
+    exportHook = null;
     // A Pivot export cancelled while the engine works raises the flag it polls, the worker gives its thread back, and the next export joins again.
-    const engineEditor = openInEngine(current), engineCancel = new AbortController();
+    const engineEditor = currentEditor, engineCancel = new AbortController();
     exportHook = () => engineCancel.abort();
     let engineAborted = false;
-    try { await exporter.export(engineEditor.report, {...enginePart(engineEditor, current, 'piv', 'cancelled'), signal: engineCancel.signal}); } catch (error) { engineAborted = error.name === 'AbortError'; }
+    try { await exporter.export(engineEditor.report, {...enginePart(engineEditor, 'piv', 'cancelled'), signal: engineCancel.signal}); } catch (error) { engineAborted = error.name === 'AbortError'; }
     exportHook = null;
-    const afterCancel = await exporter.export(engineEditor.report, enginePart(engineEditor, current, 'piv', 'again'));
+    const afterCancel = await exporter.export(engineEditor.report, enginePart(engineEditor, 'piv', 'again'));
     if (!engineAborted || !(afterCancel.size > 0)) throw new Error(`Engine export cancellation failed: ${JSON.stringify({engineAborted, size: afterCancel.size})}`);
     Worker.prototype.postMessage = originalPostMessage;
     const small = await importer.importFile(document.querySelector('#fixture').files[0]);
-    let expired = false;
-    try { const editor = openInEngine(small); await exporter.export(editor.report, enginePart(editor, {sourceId: 'missing-source'}, 'piv')); }
-    catch (error) { expired = error.code === 'source_expired' && error.status === 410; }
-    if (!expired) throw new Error('Worker export lost the actionable expired-source error.');
     small.document.keyframes[0].objects[0].root_x += .25;
     const expected = small.document.keyframes[0].objects[0].root_x;
     small.document.custom_opaque_asset = {bytes: 'a'.repeat(800000), exact: ['01', null, true, {fraction: .125}]};
-    const native = await exporter.export(small.document, {sourceId: small.sourceId, format: 'styk', name: 'Worker edited'});
+    const native = await exporter.export(openInEngine(small).report, {format: 'styk', name: 'Worker edited'});
     window.editedNative = {blob: native, expected};
     if (!before || !during || !revision) throw new Error(`Cancellation failed: ${JSON.stringify({before, during, revision})}`);
     return {preAborted: before, midSnapshotAborted: during, changedRevisionAborted: revision, engineExportCancelled: engineAborted,
-      reusedAfterCancellation: true, expiredSourceErrorPreserved: expired};
+      reusedAfterCancellation: true};
   });
   // Restart the codec: its worker and everything it cached are gone, as when the codec service restarted.
   await page.evaluate(async () => (await import('/src/codec-web-host.mjs')).browserCodecHost().dispose());
@@ -150,7 +149,7 @@ try {
     for (const {original, blob} of nativeFiles) {
       const reopened = await importer.importFile(new File([blob], 'restored.styk'));
       const editor = openInEngine(reopened);
-      const output = await exporter.export(editor.report, enginePart(editor, reopened, original.format));
+      const output = await exporter.export(editor.report, enginePart(editor, original.format));
       const sha256 = await hash(output);
       if (output.size !== original.bytes || sha256 !== original.sha256) throw new Error(`${original.name} lost native restart fidelity (${output.size} bytes).`);
       results.push({name: original.name, bytes: output.size, sha256});
@@ -160,7 +159,7 @@ try {
     if (reopened.document.custom_opaque_asset?.bytes !== 'a'.repeat(800000) || reopened.document.custom_opaque_asset.exact[3].fraction !== .125)
       throw new Error('Worker snapshot lost unknown nested metadata or a large string.');
     const editor = openInEngine(reopened);
-    const edited = await exporter.export(editor.report, enginePart(editor, reopened, 'piv'));
+    const edited = await exporter.export(editor.report, enginePart(editor, 'piv'));
     const checked = await importer.importFile(new File([edited], 'edited.piv'));
     if (checked.document.keyframes[0].objects[0].root_x !== editedNative.expected) throw new Error('Worker export lost a real fractional edit.');
     exporter.dispose(); importer.dispose();
