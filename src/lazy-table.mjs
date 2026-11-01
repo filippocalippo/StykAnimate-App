@@ -48,6 +48,18 @@ export function figureRow(figure) {
 /** The records each table holds at once: a frame on show and the ones around it; the types a frame on show draws. */
 const LIMITS = {keyframes: 64, figure_types: 256, '_styk.frameSources': 64};
 
+/**
+ * Makes the tables created from now hold at most `limit` records, and gives records back even in verify mode (a test of the cache's
+ * eviction: `holdAllRecords` would defeat it); the returned function puts things back.
+ */
+export function limitRecords(limit) {
+  const before = {...LIMITS};
+  for (const name of Object.keys(LIMITS)) LIMITS[name] = limit;
+  evictingTests++;
+  return () => { Object.assign(LIMITS, before); evictingTests--; };
+}
+let evictingTests = 0;
+
 const tables = new WeakMap();
 /** The table behind `array`, or undefined for an ordinary array. */
 export const tableOf = array => tables.get(array);
@@ -60,6 +72,7 @@ const overfull = new Set();
  * view with the session's document, and a record written in place that the table gave back before the comparison would not show.
  */
 export function holdAllRecords() {
+  if (evictingTests) return () => {};
   holding++;
   let held = true;
   return () => { if (held) { held = false; if (--holding === 0) trim(); } };
@@ -89,8 +102,11 @@ class Table {
   read(index) {
     const slot = this.slots[index];
     if (slot.record === undefined) {
-      if (this.retired) throw new Error(`The document changed since this ${this.name} table was read: read it again from the document.`);
-      slot.record = this.records.fetch(this.name, index);
+      // A record given back that something else still holds is the record: the same object, so what is keyed by it stays valid.
+      const revived = slot.weak?.deref();
+      if (revived === undefined && this.retired) throw new Error(`The document changed since this ${this.name} table was read: read it again from the document.`);
+      slot.record = revived ?? this.records.fetch(this.name, index);
+      slot.weak = undefined;
       this.held++;
       if (this.held > this.limit) { if (holding === 0) this.release(slot); else overfull.add(this); }
     }
@@ -112,6 +128,7 @@ class Table {
     for (const slot of held) {
       if (this.held <= this.limit * 0.75) break;
       slot.row = ROW[this.name](slot.record);
+      slot.weak = new WeakRef(slot.record);
       slot.record = undefined; this.held--;
     }
   }
@@ -143,7 +160,7 @@ class Table {
     const slot = this.slots[index];
     if (!slot) throw new Error(`The document patch sets ${this.name}[${index}], which the table does not have.`);
     if (slot.record !== undefined) this.held--;
-    slot.record = undefined; slot.row = row; slot.used = 0; this.positions = null;
+    slot.record = undefined; slot.weak = undefined; slot.row = row; slot.used = 0; this.positions = null;
   }
 
   /** The row of the record at `index`, without fetching it. */
@@ -223,8 +240,10 @@ class KeyedTable {
   read(key) {
     const slot = this.slots.get(key);
     if (slot.record === undefined) {
-      if (this.retired) throw new Error(`The document changed since this ${this.name} table was read: read it again from the document.`);
-      slot.record = this.records.fetch(this.name, key);
+      const revived = slot.weak?.deref();
+      if (revived === undefined && this.retired) throw new Error(`The document changed since this ${this.name} table was read: read it again from the document.`);
+      slot.record = revived ?? this.records.fetch(this.name, key);
+      slot.weak = undefined;
       this.held++;
       if (this.held > this.limit) { if (holding === 0) this.release(slot); else overfull.add(this); }
     }
@@ -243,6 +262,7 @@ class KeyedTable {
     const held = [...this.slots.values()].filter(slot => slot.record !== undefined && slot !== keep).sort((a, b) => a.used - b.used);
     for (const slot of held) {
       if (this.held <= this.limit * 0.75) break;
+      slot.weak = new WeakRef(slot.record);
       slot.record = undefined; this.held--;
     }
   }
@@ -283,7 +303,7 @@ class KeyedTable {
   setUnfetched(key, ignored) {
     void ignored;
     const slot = this.slots.get(key);
-    if (slot) { if (slot.record !== undefined) this.held--; slot.record = undefined; return; }
+    if (slot) { if (slot.record !== undefined) this.held--; slot.record = undefined; slot.weak = undefined; return; }
     this.slots.set(key, {record: undefined, used: 0});
     Object.defineProperty(this.array, key, {enumerable: true, configurable: true, get: () => this.read(key)});
   }

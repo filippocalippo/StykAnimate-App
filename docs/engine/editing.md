@@ -680,7 +680,9 @@ it on the editor, for every document.
   a third session. Leaving it frees the clip's session and the parent's takes the edit as one `Edit movieclip` entry
   (`publishMovieclipEdit(typeId, document, duration)`: the definition of the clip takes the document edited and its duration,
   one `movieclip-definition` entry), which undoes and redoes with the parent's other entries; a clip left without saving or
-  unchanged leaves none. The clip's document keeps the source its figures were captured from (`movieclipSource`): the poses
+  unchanged leaves none. The document crosses as the tree the clip's session holds (`EditSession.call_with_document`: the owner leaves
+  the argument's place empty), not as JSON the interface reads out of its view: leaving a clip of 590 frames of 150 figures took 233 ms
+  that way (dev build) and reads none of the clip's records now. A clip with a stored frame draft still crosses as JSON. The clip's document keeps the source its figures were captured from (`movieclipSource`): the poses
   of a figure in that source, and the animation it retains, are edited with the figure (`Place::Retained`: a rig edit
   inside the clip changes them as it changes the clip's own poses, in the same `topology` entry). A clip on a native
   timeline (tools and tests) is edited by the editor. A project closed ends the sessions it holds, those of its clips too.

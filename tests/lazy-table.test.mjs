@@ -2,7 +2,7 @@
 // in a bounded cache, and kept in step with the session by its patches (src/engine/engine-patch.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fetchedRecords, figureRow, frameRow, frameSummary, holdingAll, lazyKeyedTable, lazyTable, tableOf, useRecords} from '../src/lazy-table.mjs';
+import {fetchedRecords, figureRow, frameRow, frameSummary, holdingAll, lazyKeyedTable, lazyTable, limitRecords, tableOf, useRecords} from '../src/lazy-table.mjs';
 import {drawingFigures, figureForCel, figureRows, findFigureType, hasDrawingFigures, movieclipFigures, nextFigureTypeId} from '../src/figure-types.mjs';
 import {createImageFigure} from '../src/media-authoring.mjs';
 import {createDrawingFigure} from '../src/drawing-model.mjs';
@@ -274,4 +274,60 @@ test('the inspector of the scene and of a figure reads no keyframe as the playhe
     inspectorDescriptor({editor, selectionCount: 1});
   }
   assert.deepEqual(reads, [], 'no keyframe was fetched for the inspector');
+});
+
+test('leaving a movieclip gives the parent the tree the clip\'s session holds, and reads none of the clip\'s records', () => {
+  const document = emptyDocument(), figure = document.figure_types[0];
+  document.keyframes = Array.from({length: 120}, (_, index) => createFrame(Array.from({length: 4}, (_, slot) => createObject(figure, slot + 1, index + slot * 10, 100)), 1));
+  const {editor, owner} = ownedEditorSync({demo: false, layerTimeline: true, propertyChannels: true}, document, {verify: false});
+  const parent = editor.report, now = () => holdingAll(() => JSON.stringify(editor.report)), before = now();
+  editor.select(1);
+  const clip = editor.createMovieclip({start: 0, end: 100});
+  const afterCreate = now();
+  editor.enterMovieclip(clip.figure_type_id);
+  editor.select(editor.evaluatedFrame.objects[0].unique_id, -1);
+  editor.moveSelection(25, 10);
+  const records = tableOf(editor.report.keyframes).records, fetch = records.fetch.bind(records), reads = [];
+  records.fetch = (name, at) => { if (name === 'keyframes') reads.push(at); return fetch(name, at); };
+  editor.leaveMovieclip();
+  assert.equal(editor.report, parent, 'back in the document the clip was entered from');
+  assert.deepEqual(reads, [], 'the clip\'s records were not read to give its edit to the parent');
+  assert.equal(now(), owner.session().report_json(), 'the parent holds the clip as it was edited');
+  const edited = now();
+  assert.notEqual(edited, afterCreate);
+  while (editor._undo.length) editor.undo();
+  assert.equal(now(), before, 'undone to the document before');
+  while (editor._redo.length) editor.redo();
+  assert.equal(now(), edited, 'redone to the clip as it was edited');
+});
+
+test("a drawing cel's published tiles are the session's, so they survive its record being given back", () => {
+  const restore = limitRecords(2);
+  try {
+    const document = emptyDocument();
+    document.figure_types.push(createDrawingFigure({figureTypeId: 5}), ...[6, 7, 8].map(id => ({...document.figure_types[0], figure_type_id: id})));
+    const {editor, owner} = ownedEditorSync({demo: false, layerTimeline: true}, document, {verify: false});
+    const figures = editor.report.figure_types, resources = editor.drawingResources;
+    const url = `data:application/octet-stream;base64,${'QUJD'.repeat(100)}`;
+    try {
+      const entry = resources.entry(findFigureType(figures, 5));
+      entry.published = {revision: 3, url, bounds: {x: 0, y: 0, width: 64, height: 32}}; entry.revision = 3;
+      resources.restorePublication(entry, findFigureType(figures, 5));
+      for (const id of [6, 7, 8, 1, 6, 7, 8, 1]) findFigureType(editor.report.figure_types, id);
+      assert.ok(owner.session().report_json().includes(url), 'the session holds the tiles');
+      assert.equal(JSON.parse(owner.session().report_json()).figure_types.find(figure => figure.figure_type_id === 5).image_assets[0].styk_tiles, url);
+      assert.equal(findFigureType(editor.report.figure_types, 5).image_assets[0].styk_tiles, url, 'and the view reads them whether it holds the record or fetches it');
+    } finally { resources.dispose(); }
+  } finally { restore(); }
+});
+
+test('a read after the document is closed says so', () => {
+  const document = emptyDocument(), figure = document.figure_types[0];
+  document.keyframes = Array.from({length: 20}, (_, index) => createFrame([createObject(figure, 1, index, 100)], 1));
+  const {editor, owner} = ownedEditorSync({demo: false, layerTimeline: true}, document, {verify: false});
+  const keyframes = editor.report.keyframes;
+  assert.ok(keyframes[3], 'read while the document is open');
+  owner.release();
+  assert.throws(() => keyframes[15], /document is closed/);
+  assert.ok(keyframes[3], 'a record the view still holds is read');
 });

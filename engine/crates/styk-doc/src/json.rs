@@ -689,6 +689,18 @@ pub fn utf16_units(value: &Value) -> usize {
     }
 }
 
+/// The length of `n` as JSON writes it. A whole number of up to fifteen digits is its digits (and a sign); anything else is formatted.
+fn number_units(n: f64, scratch: &mut Vec<u8>) -> usize {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        let whole = n.abs() as u64;
+        let digits = if whole == 0 { 1 } else { whole.ilog10() as usize + 1 };
+        return digits + usize::from(n < 0.0 && whole != 0);
+    }
+    scratch.clear();
+    format_number(n, scratch);
+    scratch.len()
+}
+
 /// The same JSON weight owner, with cooperative cancellation/stale/progress
 /// checks during a dense single string or numeric array as well as containers.
 /// The caller owns the worker and its cancellation contract. Checks run before
@@ -732,11 +744,7 @@ pub fn utf16_units_checked<E>(
             Value::Null => 4,
             Value::Bool(true) => 4,
             Value::Bool(false) => 5,
-            Value::Num(n) => {
-                number.clear();
-                format_number(*n, number);
-                number.len()
-            }
+            Value::Num(n) => number_units(*n, number),
             Value::Str(text) => string(text, pending, check)?,
             Value::Blob(blob) => {
                 string(&blob.prefix, pending, check)? + blob.bytes.len().div_ceil(3) * 4
@@ -745,9 +753,7 @@ pub fn utf16_units_checked<E>(
                 let mut units = 2 + numbers.len().saturating_sub(1);
                 for n in numbers.iter() {
                     touch(pending, check)?;
-                    number.clear();
-                    format_number(n, number);
-                    units += number.len();
+                    units += number_units(n, number);
                 }
                 units
             }
@@ -787,6 +793,19 @@ pub fn base64_strict(text: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_weight_of_a_number_is_the_length_of_its_text() {
+        use crate::{Nums, Value};
+        let numbers = [0.0, -0.0, 1.0, -1.0, 9.0, 10.0, 99999.0, -123456.0, 1e14, 999999999999999.0, 1e15, -1e15, 1e21, 0.5, -0.25, 1.0 / 3.0, f64::NAN, f64::INFINITY, 4294967295.0, 123456789012345.0];
+        for n in numbers {
+            assert_eq!(utf16_units(&Value::Num(n)), to_string(&Value::Num(n)).len(), "{n}");
+        }
+        let list = Value::array(numbers.iter().map(|n| Value::Num(*n)).collect());
+        assert_eq!(utf16_units(&list), to_string(&list).len());
+        let packed = Value::Nums(std::sync::Arc::new(Nums::F64(numbers.to_vec().into())));
+        assert_eq!(utf16_units(&packed), to_string(&packed).len());
+    }
+
     use super::*;
 
     fn round_trip(text: &str) {

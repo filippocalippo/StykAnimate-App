@@ -192,7 +192,7 @@ pub fn unfetch_entries(ops: Value, known: &Known) -> Value {
 /// the poses that changed.
 pub fn pose_changes(before: &Value, after: &Value) -> Vec<(u32, i64)> {
     let mut poses: Vec<(Value, i64)> = Vec::new();
-    let mut at: HashMap<usize, usize> = HashMap::new();
+    let mut at: styk_doc::fast::FastMap<usize, usize> = Default::default();
     let tables = |root: &Value| -> (Option<Value>, Option<Value>) { (root.get("keyframes").cloned(), root.path(&["_styk", "frameSources"]).cloned()) };
     let (old, new) = (tables(before), tables(after));
     let same = |a: &Option<Value>, b: &Option<Value>| match (a, b) { (Some(a), Some(b)) => a.same_node(b), (None, None) => true, _ => false };
@@ -215,7 +215,7 @@ pub fn pose_changes(before: &Value, after: &Value) -> Vec<(u32, i64)> {
         count(b, 1);
     }
     let mut deltas: Vec<(u32, i64)> = Vec::new();
-    let mut place: HashMap<u32, usize> = HashMap::new();
+    let mut place: styk_doc::fast::FastMap<u32, usize> = Default::default();
     for (record, net) in poses.iter().filter(|(_, net)| *net != 0) {
         let Some(objects) = record.get("objects").and_then(Value::elements) else { continue };
         for object in objects.iter() {
@@ -236,7 +236,7 @@ pub fn pose_changes(before: &Value, after: &Value) -> Vec<(u32, i64)> {
 pub struct LayerIndex {
     keyframes: Option<Value>,
     sources: Option<Value>,
-    counts: HashMap<u32, i64>,
+    counts: styk_doc::fast::FastMap<u32, i64>,
 }
 
 impl LayerIndex {

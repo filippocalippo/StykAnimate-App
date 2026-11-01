@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use styk_doc::Value;
+use styk_doc::{Value, json};
 use styk_engine::Engine;
 use styk_engine::document::OpenedDocument;
 use wasm_bindgen::prelude::*;
@@ -217,6 +217,24 @@ impl EditSession {
         // What this call took (and whatever the workers took meanwhile) is what the next may need.
         let took = styk_alloc::peak_bytes().saturating_sub(began);
         self.working[kind] = self.working[kind].max((took + took / 4).min(styk_alloc::ceiling() / 2));
+        answer
+    }
+
+    /// [`EditSession::call`] of a command whose second argument is the document of another session: `args` has a placeholder there, and
+    /// the document is `document`'s, as it is now. Leaving a movieclip gives the clip the session of its own edited to the session of the
+    /// document it was entered from (`publishMovieclipEdit`), the tree handed over as it stands, not as JSON.
+    pub fn call_with_document(&mut self, method: &str, args: &str, view: &str, document: &EditSession) -> String {
+        let (Ok(mut args), Ok(view)) = (json::parse(args.as_bytes()), json::parse(view.as_bytes())) else { return "{\"status\":\"error\",\"error\":\"the call's arguments are not JSON\"}".to_string() };
+        let Some(mut list) = args.elements().map(|items| items.iter().collect::<Vec<Value>>()).filter(|items| items.len() >= 2) else { return "{\"status\":\"error\",\"error\":\"a call with a document takes it as its second argument\"}".to_string() };
+        list[1] = document.session().report().clone();
+        args = Value::array(list);
+        let Ok(_working) = styk_alloc::reserve(CALL_WORKING_BYTES.max(self.working[0])) else { return out_of_memory_answer() };
+        styk_alloc::reset_peak();
+        let began = styk_alloc::live_bytes();
+        let answer = json::to_string(&self.session.as_mut().expect("a session is open until it is dropped").call_values(method, &args, &view));
+        self.publish();
+        let took = styk_alloc::peak_bytes().saturating_sub(began);
+        self.working[0] = self.working[0].max((took + took / 4).min(styk_alloc::ceiling() / 2));
         answer
     }
 }
