@@ -190,3 +190,15 @@ test('a flag that is not an Int32Array is ignored, never trusted', async () => {
   await until(() => a.reply(1), 'its reply');
   assert.equal(a.reply(1).status, 200);
 });
+
+test('an upload is freed once the codec has copied it into its memory', async () => {
+  let received = null;
+  const shell = createCodecShell({engine: {handle: async request => { received = request.body; return ok('kept'); }}, post: () => {}});
+  const a = job(shell, 'a');
+  a.port = null;
+  const channel = channels.at(-1);
+  channel.port1.postMessage({id: 1, method: 'POST', path: '/api/source/keep', headers: {}, body: new Uint8Array(4096).fill(7)});
+  await until(() => a.reply(1), 'the reply');
+  assert.ok(received, 'the engine saw the upload');
+  assert.equal(received.byteLength, 0, 'the message\'s copy of it is gone');
+});

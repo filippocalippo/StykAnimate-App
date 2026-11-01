@@ -111,3 +111,17 @@ test('cancelling stops the open and releases the original, kept or not yet kept'
   await nextTask(); await client.sourceRelease;
   assert.deepEqual(released(), [keep.sourceOwner]);
 });
+
+test('the page lets go of the file once the engine has its own copy', async t => {
+  const {client, engine, workers} = environment(t);
+  const bytes = new Uint8Array(1024).buffer;
+  client.readSample = () => ({ok: true, name: 'a.piv', bytes: new Uint8Array(bytes)});
+  const pending = client.openSample('a.piv', {project: true, open: {layerTimeline: false}});
+  await nextTask(); await nextTask();
+  const [keep] = workers[0].messages;
+  workers[0].reply(keep, {sourceId: 'source', sourceOwner: keep.sourceOwner});
+  engine.finish({});
+  const result = await pending;
+  assert.equal(result.timings.source_bytes, 1024, 'the size is reported');
+  assert.equal(bytes.byteLength, 0, 'the buffer the page read the file into is freed');
+});
