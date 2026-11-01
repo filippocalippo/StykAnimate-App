@@ -189,3 +189,35 @@ fn styles_are_resolved_again_only_for_the_frames_that_need_it_and_still_resolve_
     assert_eq!(resolved_against_the_document(&fifth), 3);
     assert_eq!(what_is_drawn(&fifth), what_is_drawn(&Loader::new().document(&edited, "p").unwrap()));
 }
+
+#[test]
+fn a_frame_kept_across_documents_is_resolved_against_the_figures_the_new_document_has() {
+    let mut loader = Loader::new();
+    let original = styled_project();
+    let record = original.get("keyframes").and_then(|frames| frames.item(0)).expect("a keyframe record");
+    let first = loader.document(&original, "p").unwrap();
+    let mut frame = Arc::new(loader.edit_frame(&record, None, &first).unwrap());
+    assert!(!loader.restyle_frame(&mut frame, &first), "a frame converted against the document is resolved");
+
+    // The figure is defined another way: the frame is resolved against it, and is the frame its record converts to.
+    let mut redefined = original.clone();
+    let figures = redefined.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap();
+    figures[0].make_obj().unwrap().get_mut("segments").unwrap().make_arr().unwrap()[0].make_obj().unwrap().set("length", Value::Num(55.0));
+    let second = loader.document(&redefined, "p").unwrap();
+    let before = frame.clone();
+    assert!(loader.restyle_frame(&mut frame, &second), "the figure it was resolved against is not the document's");
+    assert!(Arc::ptr_eq(&before, &frame) == false && before.objects.iter().any(|o| o.style.is_some()), "the held frame is not changed under whoever holds it");
+    let styled: Vec<_> = frame.objects.iter().filter(|object| object.style.is_some()).collect();
+    assert_eq!(styled.len(), 1);
+    for object in styled {
+        let resolved = object.figure_override.as_ref().expect("resolved");
+        assert!(resolved.base.as_ref().is_some_and(|b| Arc::ptr_eq(b, second.figure(object.figure).unwrap())), "resolved against the figure the document has");
+    }
+    let fresh = Loader::new().edit_frame(&record, None, &Loader::new().document(&redefined, "p").unwrap()).unwrap();
+    let drawn = |frame: &styk_eval::eval::Frame| frame.objects.iter().map(|object| format!("{} {:?} {:?}", object.uid, object.angles, object.figure_override)).collect::<Vec<_>>();
+    assert_eq!(drawn(&frame), drawn(&fresh));
+    assert!(!loader.restyle_frame(&mut frame, &second), "and once is enough");
+    // Back to the first definition.
+    assert!(loader.restyle_frame(&mut frame, &first));
+    assert_eq!(drawn(&frame), drawn(&Loader::new().edit_frame(&record, None, &Loader::new().document(&original, "p").unwrap()).unwrap()));
+}

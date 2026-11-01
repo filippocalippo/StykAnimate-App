@@ -28,6 +28,7 @@ What's new in each version of StykAnimate.
 ### Fixed
 
 - Moving a figure shows its new position immediately.
+- Onion skins of styled figures no longer show an old shape after you change the figure’s settings, such as an angle lock.
 - Repeated pastes keep the expected spacing between copied figures.
 - Pasting segment settings no longer fails after changing the selected segment.
 - Undoing a timeline change made of several steps keeps your selection and shows the right frame.
