@@ -45,5 +45,5 @@ fn making_a_movieclip_of_a_movieclip_again_and_again_stops_before_the_project_ca
     };
     assert!(made >= 2, "clips nest a few levels before the limit: {made}");
     let message = styk_doc::json::to_string(&refusal);
-    assert!(message.contains("movieclipsContainACycleOrExceedEightNested"), "{message}");
+    assert!(message.contains("movieclipsNestAtMostEightLevelsDeep"), "{message}");
 }

@@ -614,6 +614,7 @@ fn apply_view(editor: &mut Editor, view: &Value) -> Result<(), EditError> {
     editor.sync_selection_metadata(view)?;
     editor.set_auto_key(flag(view, "autoKey"));
     editor.audio_ripple = flag(view, "audioRipple");
+    editor.outer_depth = number(view, "outerDepth").unwrap_or(0.0).max(0.0) as usize;
     // Focus and lock: the layers outside the focus are locked for this call (the focus is the interface's, never the document's).
     editor.set_layer_focus_lock_of(view);
     // Selecting changes the active layer without a new revision of the document.

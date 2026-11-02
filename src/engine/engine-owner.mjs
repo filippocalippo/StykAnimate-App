@@ -120,6 +120,8 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
 
   const view = () => ({tick: editor.tick, frameIndex: editor.frameIndex, selectedUid: editor.selectedUid ?? null, selectedUids: [...(editor.selectedUids ?? [])], layerFocusLock: editor.layerFocusLock(), // the layers Focus and lock leaves free: the session locks the rest for the call
     selectedJoint: editor.selectedJoint ?? -1, activeLayerId: editor.activeLayerId, autoKey: Boolean(editor.autoKey), audioRipple: Boolean(editor.audioRipple),
+    // How many movieclips the document is inside of: the movieclips it makes nest that much deeper in the project (the limit is the project's).
+    outerDepth: editor._movieclipScopes?.length ?? 0,
     sheetSelection: editor._sheetSelection ? {id: editor._sheetSelection.id, contents: Boolean(editor._sheetSelection.contents)} : null,
     ...selectionMetadata(editor._selectionState()),
     // The records of its tables the read view holds: the session sends a change inside any other whole, and the layer counts it moved.

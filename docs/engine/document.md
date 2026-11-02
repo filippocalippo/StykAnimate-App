@@ -245,7 +245,7 @@ repairs), on the document the save is about to write, and what it finds decides 
   channels and the movieclip graph, which a save refused before, are in this class now.
 
 The cost is the check's own: it runs on a worker beside the lift and the frames, so the save takes longer only where the check outlasts them
-(`check_ms` against `lift_ms` and `frames_ms` of the save's timings; the measurements are in the commit that made the change).
+(`check_ms` against `lift_ms` and `frames_ms` of the save's timings). Measured in the app on two large projects, release builds, Save As six times each (medians, other jobs running on the machine, so the sizes of the differences are directional): the check took 764 ms before (the scene check alone) and 680 ms now on the larger Pivot project (lift 546 ms, frames 1055 ms), and 1578 ms before and 1473 ms now on the larger native project (lift 908 ms, frames 1609 ms); the whole save, as the engine times it, 3123 and 2000 ms on the first and 3205 and 3151 ms on the second, and the wall time of the app's Save As 5110 and 5109 ms, 4084 and 4430 ms. The check already outlasted the lift on the second project and still ends before the frames do, so nothing waits for it; the saved bytes of the four recorded healthy documents are identical.
 
 ## Invariants
 

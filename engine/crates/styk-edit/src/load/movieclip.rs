@@ -223,7 +223,7 @@ pub(super) fn graph(report: &Value) -> Result<(), EditError> {
             return fail("errors.movieclips.invalidMovieclipDocument");
         }
         if depth > 8 {
-            return fail("errors.movieclips.movieclipsContainACycleOrExceedEightNested");
+            return fail("errors.movieclips.movieclipsNestAtMostEightLevelsDeep");
         }
         let source = path(document, &["_styk", "movieclipSource", "document"]);
         if truthy(source) {
@@ -261,14 +261,14 @@ pub(super) fn graph(report: &Value) -> Result<(), EditError> {
 }
 
 /// The deepest a movieclip graph may run (`graph`): the root is level 0, and a clip's document and a retained scene each add one.
-const MAX_DEPTH: usize = 8;
+pub(super) const MAX_DEPTH: usize = 8;
 
 fn retained_scene(document: &Value) -> Option<&Value> {
     path(Some(document), &["_styk", "movieclipSource", "document"]).filter(|source| source.truthy())
 }
 
 /// The deepest level of the graph below `document`, which is at `depth`.
-fn deepest(document: &Value, depth: usize) -> usize {
+pub(super) fn deepest(document: &Value, depth: usize) -> usize {
     let mut deepest_level = depth;
     if let Some(source) = retained_scene(document) {
         deepest_level = deepest_level.max(deepest(source, depth + 1));

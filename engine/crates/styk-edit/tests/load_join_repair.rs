@@ -58,3 +58,30 @@ fn a_document_whose_joins_resolve_opens_as_it_is() {
     assert_eq!(parents(&opened.report, 0), parents(&healthy, 0));
     assert_eq!(parents(&opened.report, 1), parents(&healthy, 1));
 }
+
+/// `camera-follow-figures` keeps five poses in `_styk.frameSources` (what a layer sheet retains, and what the scene of a movieclip keeps), one of
+/// them with a figure joined to another. The join is given the shape a badly cut scene left: it names a slot that is not there.
+fn with_a_damaged_retained_pose() -> Value {
+    let mut document = read("tests/edit/camera-follow-figures.document.json");
+    let sources = at(at(&mut document, "_styk"), "frameSources").make_obj().unwrap();
+    let ids: Vec<String> = sources.keys().map(|id| id.to_string()).collect();
+    let mut damaged = 0;
+    for id in ids {
+        let objects = at(sources.get_mut(&id).unwrap(), "objects").make_arr().unwrap();
+        for object in objects.iter_mut().filter(|o| o.get("join").is_some_and(Value::truthy)) {
+            at(object, "join").make_obj().unwrap().set("target_object_slot", Value::Num(99.0));
+            damaged += 1;
+        }
+    }
+    assert!(damaged > 0, "the fixture retains a pose with a joined figure");
+    document
+}
+
+#[test]
+fn a_retained_pose_whose_join_names_no_figure_opens_mended() {
+    let damaged = with_a_damaged_retained_pose();
+    assert!(styk_edit::load::prepare_editor_load(damaged.clone()).is_err(), "opening without mending refuses it");
+    let opened = prepare_for_editor(damaged, true).expect("the project opens");
+    assert_eq!(opened.repairs, 1, "the pose was mended");
+    assert_eq!(prepare_for_editor(opened.report, true).unwrap().repairs, 0, "what opening wrote needs no mending");
+}

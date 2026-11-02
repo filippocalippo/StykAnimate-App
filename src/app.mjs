@@ -3240,7 +3240,12 @@ async function acceptImport(
     images.clear();
     fit();
   }
-  if (result.repairs) notify(interfaceText("app.openedAfterMendingTheProject", {count: result.repairs}), "app.openedAfterMendingTheProject", {count: result.repairs});
+  // A repair is made in memory: the project is marked as having unsaved changes (no history entry), so that the next save writes the file mended
+  // and a close or a crash does not leave the damaged one as the only copy. Autosave follows the mark like any other change.
+  if (result.repairs) {
+    editor.dirty = true;
+    notify(interfaceText("app.openedAfterMendingTheProject", {count: result.repairs}), "app.openedAfterMendingTheProject", {count: result.repairs});
+  }
   state.lastImportWarnings = [...(result.warnings || report._styk?.sticknodes?.warnings || []), ...(report.import_warnings || [])];
   if(state.lastImportWarnings.length)dialogs.showImportNotes(state.lastImportWarnings, {pivot: Boolean(report.import_warnings?.length),report});
   state.lastImport = result.timings || null;

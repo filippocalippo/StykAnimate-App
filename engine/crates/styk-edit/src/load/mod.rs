@@ -90,6 +90,12 @@ pub(crate) fn validate_layer_state(state: &Value) -> Result<(), EditError> {
     layer_state::validate(Some(state))
 }
 
+/// How many levels the movieclip graph below `document` runs (its own movieclips and the scenes they retain), and how many it may.
+pub(crate) fn movieclip_levels(document: &Value) -> usize {
+    movieclip::deepest(document, 0)
+}
+pub(crate) const MOVIECLIP_MAX_LEVELS: usize = movieclip::MAX_DEPTH;
+
 /// `validateMovieclipGraph(report)`: movieclips nest at most eight deep, a document holds at most 4096 assets, and each asset is valid.
 pub(crate) fn validate_movieclip_graph(report: &Value) -> Result<(), EditError> {
     movieclip::graph(report)
@@ -309,15 +315,26 @@ fn prepare(report: &mut Value, fan: &dyn Fanout, mend: bool) -> Result<Prepared,
     }
     // A frame whose joins name no figure is mended from its neighbour's, once, for a document the check refuses for them; a document that
     // passes is never touched.
+    // The poses a layer sheet retains (`_styk.frameSources`) are checked the same way, but an error of theirs that is not a join waits for
+    // its place below.
     let mut repaired = 0;
-    if let Err(refusal) = scene::validate_scene(report, None, fan) {
-        let joins = matches!(&refusal, EditError::Invalid(key) if key == TYPE_ERROR || key == "errors.model.joinPointsToAMissingFigureOrHandle" || key == "errors.editorSelection.figuresContainACyclicJoin");
-        let mended = if mend && joins { joins::repair_joins(report) } else { 0 };
+    let join_refusal = |refusal: &EditError| matches!(refusal, EditError::Invalid(key) if key == TYPE_ERROR || key == "errors.model.joinPointsToAMissingFigureOrHandle" || key == "errors.editorSelection.figuresContainACyclicJoin");
+    let retained = |report: &Value| -> Vec<Value> { entries(path(Some(report), &["_styk", "frameSources"])).into_iter().map(|(_, frame)| frame.clone()).collect() };
+    let early = |report: &Value| -> Result<(), EditError> {
+        scene::validate_scene(report, None, fan)?;
+        let sources = retained(report);
+        match if sources.is_empty() { Ok(()) } else { scene::validate_scene(report, Some(&sources), fan) } {
+            Err(refusal) if join_refusal(&refusal) => Err(refusal),
+            _ => Ok(()),
+        }
+    };
+    if let Err(refusal) = early(report) {
+        let mended = if mend && join_refusal(&refusal) { joins::repair_joins(report) } else { 0 };
         if mended == 0 {
             return Err(refusal);
         }
         repaired += mended;
-        scene::validate_scene(report, None, fan)?;
+        early(report)?;
     }
     drawings::validate(report)?;
     let audio = path(Some(report), &["_styk", "audio"]);

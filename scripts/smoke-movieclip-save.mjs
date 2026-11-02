@@ -360,8 +360,10 @@ try {
         await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Restore'), null, {timeout: 20000, polling: 100});
         await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Restore').click());
         await page.waitForFunction(token => window.styk.state.documentToken !== token && !window.styk.state.importing, token, {timeout: 60000, polling: 100});
+        // The app marks the restored project as having unsaved changes once it has opened it.
+        const marked = await page.waitForFunction(() => window.styk.editor.dirty, null, {timeout: 10000, polling: 50}).then(() => true, () => false);
         const restored = await page.evaluate(() => ({dirty: window.styk.editor.dirty, figures: window.styk.editor.report.figure_types.length}));
-        if (!restored.dirty) fail('kill', 'restore', 'the restored project is not marked as having unsaved changes');
+        if (!marked) fail('kill', 'restore', 'the restored project is not marked as having unsaved changes');
         summary.restored = restored;
         // The restored project has no file yet: saving it gives it one.
         const target = file('restored');
