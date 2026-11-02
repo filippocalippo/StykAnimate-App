@@ -200,14 +200,26 @@ pub(crate) fn changed_rect(before: Option<&[u8]>, after: Option<&[u8]>) -> Optio
         if x == z {
             continue;
         }
-        let first = x.iter().zip(z).position(|(p, q)| p != q).expect("the rows differ") / 4;
-        let last = x.iter().zip(z).rposition(|(p, q)| p != q).expect("the rows differ") / 4;
+        let (first, last) = (first_difference(x, z) / 4, last_difference(x, z) / 4);
         let rect = rect.get_or_insert([first, y, last + 1, y + 1]);
         rect[0] = rect[0].min(first);
         rect[2] = rect[2].max(last + 1);
         rect[3] = y + 1;
     }
     rect
+}
+
+/// The first byte at which two equal-length rows differ (they do): groups of four texels are compared as slices first, which compile to wide compares.
+fn first_difference(x: &[u8], z: &[u8]) -> usize {
+    let at = (0..x.len()).step_by(16).find(|&i| x[i..(i + 16).min(x.len())] != z[i..(i + 16).min(z.len())]).expect("the rows differ");
+    (at..x.len()).find(|&i| x[i] != z[i]).expect("the rows differ")
+}
+
+/// The last byte at which two equal-length rows differ (they do).
+fn last_difference(x: &[u8], z: &[u8]) -> usize {
+    let end = x.len();
+    let at = (0..end).step_by(16).rev().find(|&i| x[i..(i + 16).min(end)] != z[i..(i + 16).min(end)]).expect("the rows differ");
+    (at..(at + 16).min(end)).rev().find(|&i| x[i] != z[i]).expect("the rows differ")
 }
 
 /// One drawn tile's slot contents: `(TILE + 2 * BORDER)²` straight-alpha RGBA
@@ -348,6 +360,42 @@ mod tests {
                 let i = (y * side + x) * 4;
                 assert_eq!(&slot[i..i + 4], &[62 + x as u8, 62 + y as u8, 120, 255], "slot ({x}, {y})");
             }
+        }
+    }
+
+    /// The rectangle the pixels that differ lie in, texel by texel.
+    fn changed_rect_by_texel(before: Option<&[u8]>, after: Option<&[u8]>) -> Option<[usize; 4]> {
+        let zero = vec![0u8; TILE_BYTES];
+        let (before, after) = (before.unwrap_or(&zero), after.unwrap_or(&zero));
+        let mut rect: Option<[usize; 4]> = None;
+        for (i, (p, q)) in before.chunks_exact(4).zip(after.chunks_exact(4)).enumerate() {
+            if p != q {
+                let (x, y) = (i % TILE as usize, i / TILE as usize);
+                let r = rect.get_or_insert([x, y, x + 1, y + 1]);
+                *r = [r[0].min(x), r[1].min(y), r[2].max(x + 1), r[3].max(y + 1)];
+            }
+        }
+        rect
+    }
+
+    #[test]
+    fn the_changed_rectangle_is_the_one_texel_by_texel_comparison_finds() {
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move |n: usize| { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; (seed % n as u64) as usize };
+        let base = tile(|x, y| [x as u8, y as u8, 7, 255]);
+        assert_eq!(changed_rect(Some(&base), Some(&base)), None);
+        for round in 0..400 {
+            let mut other = base.clone();
+            // A few texels changed anywhere: one, two in a row, a corner, an edge, a scatter.
+            let count = [1, 2, 3, 9, 40][round % 5];
+            for _ in 0..count {
+                let (x, y) = if round % 7 == 0 { (next(2) * 63, next(2) * 63) } else { (next(64), next(64)) };
+                let i = (y * 64 + x) * 4;
+                other[i + next(4)] ^= 1 + next(255) as u8;
+            }
+            assert_eq!(changed_rect(Some(&base), Some(&other)), changed_rect_by_texel(Some(&base), Some(&other)), "round {round}");
+            assert_eq!(changed_rect(None, Some(&other)), changed_rect_by_texel(None, Some(&other)));
+            assert_eq!(changed_rect(Some(&other), None), changed_rect_by_texel(Some(&other), None));
         }
     }
 }
