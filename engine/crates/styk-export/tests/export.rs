@@ -235,3 +235,85 @@ fn video_without_alpha_is_over_black() {
         }
     }
 }
+
+/// The draw lists (and cameras) of ticks `0..=last` of `path`, each evaluated once.
+fn lists(path: &str, last: u32) -> Vec<(std::sync::Arc<styk_draw::DrawList>, Option<styk_eval::doc::Camera>)> {
+    let (_engine, frames) = open(path);
+    (0..=last.min(frames.ticks() - 1)).map(|tick| { let frame = frames.take(tick).unwrap(); (frame.list.clone(), frame.camera) }).collect()
+}
+
+/// `order` (indexes into `lists`) drawn in turn by one exporter, as an export draws its frames: the pixels and the bytes of the effect
+/// slots after each.
+fn draw_in_turn(gpu: &Gpu, path: &str, settings: Settings, lists: &[(std::sync::Arc<styk_draw::DrawList>, Option<styk_eval::doc::Camera>)], order: &[usize]) -> Vec<(Vec<u8>, u64)> {
+    // Opened afresh: an export takes the decoded pictures once.
+    let (_engine, frames) = open(path);
+    let generation = frames.generation().clone();
+    let mut exporter = GpuExport::new(&gpu.device, &gpu.queue, settings, styk_export::TILE_SIDE);
+    exporter.prepare_sprites(generation.lineage, &generation.assets);
+    let images = frames.take_images(usize::MAX);
+    exporter.upload_images(&generation.assets, images.iter().map(|image| &**image));
+    order
+        .iter()
+        .map(|&index| {
+            let (list, camera) = &lists[index];
+            let pixels = exporter.frame_blocking(&generation.prepared.doc, list, camera.as_ref(), false).unwrap();
+            (pixels, exporter.stats().effect_bytes)
+        })
+        .collect()
+}
+
+/// A frame must be the same whatever was drawn before it. The renderer used to keep the layer pages and effect slots at the
+/// largest size any earlier frame had needed, and the effect passes address the slots by texel: a frame after a larger one
+/// moved the last bit of the positions they sample, and some pixels by one level. Now each frame's sizes are its own. The same
+/// draw lists are drawn alone, after the largest frame and after every frame before them.
+#[test]
+fn a_frame_is_the_same_alone_and_after_the_frames_before_it() {
+    let Some(gpu) = gpu() else {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    };
+    for (path, last) in [
+        ("engine/crates/styk-eval/tests/fixtures/generators/explosions.json", 14u32),
+        ("engine/crates/styk-eval/tests/fixtures/vfx/scene-clips.json", 10),
+        ("engine/crates/styk-eval/tests/fixtures/vfx/generators.json", 10),
+        ("engine/crates/styk-eval/tests/fixtures/generators/auras.json", 10),
+    ] {
+        let lists = lists(path, last);
+        let settings = Settings::new(640, 360, Smoothing::Edges, MAX_PIXELS).unwrap();
+        let every: Vec<usize> = (0..lists.len()).collect();
+        let together = draw_in_turn(&gpu, path, settings, &lists, &every);
+        let alone: Vec<(Vec<u8>, u64)> = every.iter().map(|&index| draw_in_turn(&gpu, path, settings, &lists, &[index]).remove(0)).collect();
+        let biggest = (0..alone.len()).max_by_key(|&i| alone[i].1).unwrap();
+        for &index in &every {
+            let after_biggest = draw_in_turn(&gpu, path, settings, &lists, &[biggest, index]).remove(1);
+            // A frame without effects leaves the slots as they were; one with effects has the size its own effects ask for.
+            if alone[index].1 > 0 && lists[index].0.layers.iter().any(|layer| layer.effects.is_some()) {
+                assert_eq!(after_biggest.1, alone[index].1, "{path}: tick {index} has effect slots of its own size after tick {biggest}");
+            }
+            let (count, largest) = differing(&alone[index].0, &after_biggest.0);
+            assert_eq!(count, 0, "{path}: tick {index} differs from the frame drawn alone in {count} pixels, by up to {largest}, after tick {biggest}");
+            let (count, largest) = differing(&alone[index].0, &together[index].0);
+            assert_eq!(count, 0, "{path}: tick {index} differs from the frame drawn alone in {count} pixels, by up to {largest}, after the ticks before it");
+        }
+    }
+}
+
+/// Evaluation, not drawing: the draw list of a tick after the ticks before it against its draw list in a fresh engine.
+/// Printed, not asserted: what it finds is in the notes of docs/engine/rendering.md.
+#[test]
+fn probe_evaluation_history() {
+    for (path, last) in [
+        ("engine/crates/styk-eval/tests/fixtures/generators/explosions.json", 14u32),
+        ("engine/crates/styk-eval/tests/fixtures/vfx/scene-clips.json", 10),
+        ("engine/crates/styk-eval/tests/fixtures/vfx/generators.json", 10),
+        ("engine/crates/styk-eval/tests/fixtures/generators/auras.json", 10),
+    ] {
+        let text = |frame: &styk_engine::FrameData| format!("{:?}{:?}", frame.list, frame.camera);
+        let (_e, after) = open(path);
+        let last = last.min(after.ticks() - 1);
+        let sequential: Vec<String> = (0..=last).map(|tick| text(&after.take(tick).unwrap())).collect();
+        let (_e2, fresh) = open(path);
+        let differ: Vec<u32> = (0..=last).filter(|&tick| text(&fresh.take(tick).unwrap()) != sequential[tick as usize]).collect();
+        eprintln!("PROBE {path}: draw lists that differ between a fresh engine and one that evaluated the ticks before: {differ:?}");
+    }
+}

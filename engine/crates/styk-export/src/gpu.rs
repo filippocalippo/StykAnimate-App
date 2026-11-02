@@ -61,7 +61,9 @@ impl GpuExport {
         let readbacks = (0..slots)
             .map(|_| device.create_buffer(&wgpu::BufferDescriptor { label: Some("styk export read-back"), size: bytes, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false }))
             .collect();
-        let renderer = renderer.filter(|r| r.edges() == settings.smoothing.edges()).unwrap_or_else(|| Renderer::with_edges(device, queue, wgpu::TextureFormat::Rgba8Unorm, settings.smoothing.edges()));
+        let mut renderer = renderer.filter(|r| r.edges() == settings.smoothing.edges()).unwrap_or_else(|| Renderer::with_edges(device, queue, wgpu::TextureFormat::Rgba8Unorm, settings.smoothing.edges()));
+        // A frame is the same whatever was drawn before it (the sizes of the layer pages and effect slots follow the frame alone).
+        renderer.set_exact_sizes(true);
         GpuExport { device: device.clone(), queue: queue.clone(), renderer, settings, tiles, readbacks, stride, atlas: None, resolved: Vec::new() }
     }
 

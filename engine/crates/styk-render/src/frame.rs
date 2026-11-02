@@ -241,7 +241,7 @@ impl Renderer {
             self.page = size;
             self.page_small = 0;
         }
-        self.page = [self.page[0].max(wanted[0]), self.page[1].max(wanted[1])];
+        self.page = if self.exact_sizes { wanted } else { [self.page[0].max(wanted[0]), self.page[1].max(wanted[1])] };
         let page = self.page;
         let rounds = plan_rounds(&list, &sizes, page);
         let mut slots: Vec<Option<Slot>> = vec![None; n];
@@ -264,7 +264,8 @@ impl Renderer {
         // Effect runs: recorded now (their uniforms are written once), encoded after their depth's layer pass.
         let mut work: Vec<Work> = Vec::new();
         if list.layers.iter().any(|layer| layer.effects.is_some()) {
-            let executor = self.executor.get_or_insert_with(|| Executor::new(&self.device));
+            let exact = self.exact_sizes;
+            let executor = self.executor.get_or_insert_with(|| { let mut executor = Executor::new(&self.device); executor.set_exact(exact); executor });
             executor.begin();
             let mut biggest = [0u32, 0u32];
             for (r, round) in rounds.iter().enumerate() {

@@ -159,6 +159,8 @@ pub struct Renderer {
     pub(crate) page_frame: [u32; 2],
     /// Frames in a row whose layers all fit pages of the frame's size.
     pub(crate) page_small: u32,
+    /// Sizes that depend on the frame alone ([`Renderer::set_exact_sizes`]).
+    pub(crate) exact_sizes: bool,
     /// Effect passes, created with the first frame that filters.
     pub(crate) executor: Option<effects::executor::Executor>,
     /// Depth runs (docs/engine/spatial.md): the pipelines and multisampled depth
@@ -187,6 +189,17 @@ impl Renderer {
     /// Selects the portable pixel-grid policy for eligible filtered drawings.
     /// The current draw list, decoded images and raster caches stay shared.
     pub fn set_drawing_grid(&mut self, grid: DrawingGrid) { self.drawing_grid = grid; }
+
+    /// Sizes the layer pages and the effect slots by each frame alone, not by the largest frame drawn before. The shaders
+    /// address them by normalized position, so a page kept from a larger frame moves the last bit of those positions and
+    /// a pixel here and there by one level: with kept sizes a frame depends on the frames drawn before it. The stage keeps
+    /// them (growing and shrinking textures is the cost); an export is the same frame whatever was drawn before.
+    pub fn set_exact_sizes(&mut self, exact: bool) {
+        self.exact_sizes = exact;
+        if let Some(executor) = &mut self.executor {
+            executor.set_exact(exact);
+        }
+    }
 
     /// Rotates and mirrors the workspace view: `orientation` maps the neutral view's screen pixels
     /// to the shown ones (the editor rotates the Draw view about the artboard's centre and mirrors
