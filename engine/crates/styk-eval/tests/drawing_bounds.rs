@@ -1,6 +1,6 @@
 //! Ink bounds are derived from decoded pixels without changing published data.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use image::ImageEncoder;
 use styk_eval::doc::DrawingTiles;

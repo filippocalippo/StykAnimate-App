@@ -106,7 +106,7 @@ impl Images {
 
     /// Adds a decoded image (`styk_eval::assets::decode_image` / `decode_cel`), copied.
     pub fn add(&mut self, assets: &Assets, image: &DecodedImage) {
-        self.add_shared(assets, Arc::new(DecodedImage { index: image.index, drawing: image.drawing, soft: image.soft, width: image.width, height: image.height, rgba: image.rgba.clone() }));
+        self.add_shared(assets, Arc::new(DecodedImage { index: image.index, drawing: image.drawing, soft: image.soft, width: image.width, height: image.height, rgba: image.rgba.clone(), placement: image.placement }));
     }
 
     /// Adds a decoded image the engine already holds. Over the budget, the least recently used are dropped.

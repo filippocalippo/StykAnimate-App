@@ -14,7 +14,7 @@ fn drawing() -> Engine {
     engine
 }
 fn image(index: u32) -> Arc<DecodedImage> {
-    Arc::new(DecodedImage { index, drawing: true, soft: false, width: 512, height: 512, rgba: vec![index as u8; 1024 * 1024] })
+    Arc::new(DecodedImage { index, drawing: true, soft: false, width: 512, height: 512, rgba: vec![index as u8; 1024 * 1024], placement: 0 })
 }
 fn pause_worker(engine: &Engine, nth: usize, work: impl FnOnce(Engine) + Send + 'static) -> (Arc<[Barrier; 2]>, std::thread::JoinHandle<()>) {
     let worker = engine.clone();
@@ -323,4 +323,48 @@ fn live_pages_that_move_keep_what_was_written_to_them() {
     assert_eq!(held, [place(0, 6, 7), place(2, 2, 3), place(3, 4, 5)].into_iter().collect());
     uploaded.move_pages(3, 3, 1);
     assert_eq!(uploaded.len(), 3, "a page that stays is not touched");
+}
+
+#[test]
+fn a_tile_decoded_for_a_placement_given_up_is_dropped_and_one_for_the_placement_held_is_taken() {
+    let engine = drawing();
+    let generation = engine.generation().unwrap();
+    let key = *generation.assets.cels.keys().next().unwrap();
+    let serial = generation.assets.placement(key);
+    assert_ne!(serial, 0);
+    let tile = |placement| Arc::new(DecodedImage { index: 0, drawing: true, soft: false, width: 68, height: 68, rgba: vec![1; 68 * 68 * 4], placement });
+    {
+        let mut state = engine.inner.state.lock();
+        state.images.ready.push_back(tile(serial + 1000));
+        state.images.ready.push_back(tile(serial));
+        state.images.ready.push_back(tile(serial + 1000));
+        state.images.ready_bytes = 3 * 68 * 68 * 4;
+    }
+    let taken = engine.take_images(usize::MAX);
+    assert_eq!(taken.iter().map(|image| image.placement).collect::<Vec<_>>(), vec![serial], "only the placement the document holds");
+    let state = engine.inner.state.lock();
+    assert_eq!((state.images.ready.len(), state.images.ready_bytes), (0, 0), "the stale tiles are gone, and are not counted");
+}
+
+#[test]
+fn a_cel_the_document_replaced_is_not_decoded_and_does_not_hold_the_pictures_pending_back() {
+    let engine = drawing();
+    let generation = engine.generation().unwrap();
+    let key = *generation.assets.cels.keys().next().unwrap();
+    // The document in front places no cel: the one decoded for `generation` was replaced.
+    let replaced = Arc::new(Generation { id: generation.id + 1, lineage: generation.lineage, revision: generation.revision + 1, prepared: generation.prepared.clone(), assets: Arc::new(Assets::default()), open_ms: 0.0, anchors: None });
+    {
+        let mut state = engine.inner.state.lock();
+        state.current = Some(replaced);
+        state.images.remaining = 1;
+    }
+    engine.decode_picture(&generation, Picture::Cel(key));
+    assert_eq!(engine.images_backlog(), (0, 0), "nothing decoded, nothing left to wait for");
+    // The document that still places it has it decoded.
+    engine.inner.state.lock().current = Some(generation.clone());
+    engine.inner.state.lock().images.remaining = 1;
+    engine.decode_picture(&generation, Picture::Cel(key));
+    let (left, decoded) = engine.images_backlog();
+    assert_eq!(left, 0);
+    assert!(decoded > 0, "the cel the document places is decoded");
 }

@@ -103,6 +103,14 @@ fn pictures_to_decode(generation: &Generation) -> usize {
     generation.prepared.doc.images.len() + generation.assets.cels.len()
 }
 
+/// Whether `picture` is a drawing cel that the engine's document does not place as `generation` did: it was replaced, and its slots
+/// are another cel's or free.
+fn superseded(state: &crate::State, generation: &Generation, picture: Picture) -> bool {
+    let Picture::Cel(cel) = picture else { return false };
+    let placement = generation.assets.placement(cel);
+    placement != 0 && !state.current.as_ref().is_some_and(|current| current.lineage == generation.lineage && current.assets.holds_placement(placement))
+}
+
 /// The pixels decoding `picture` produces, as far as is known without decoding it.
 pub(crate) fn estimate(generation: &Generation, picture: Picture) -> usize {
     generation.assets.picture_bytes(picture)
@@ -229,6 +237,12 @@ impl Engine {
         let epoch = {
             let mut state = self.inner.state.lock();
             if state.images.lineage != generation.lineage { state.images.finish_decode(estimate); return }
+            // A cel the document has replaced since gave its slots to the next: nothing is decoded for it.
+            if superseded(&state, generation, picture) {
+                state.images.finish_decode(estimate);
+                state.images.remaining = state.images.remaining.saturating_sub(1);
+                return;
+            }
             state.images.epoch
         };
         let mut ready: std::collections::LinkedList<_> = self.decode_pixels(generation, picture).into_iter().map(Arc::new).collect();
@@ -237,6 +251,7 @@ impl Engine {
         state.images.finish_decode(estimate);
         if state.images.lineage != generation.lineage || state.images.epoch != epoch { return }
         state.images.remaining = state.images.remaining.saturating_sub(1);
+        if superseded(&state, generation, picture) { return }
         state.images.ready_bytes += bytes;
         state.images.ready.append(&mut ready);
     }
@@ -261,10 +276,18 @@ impl Engine {
     /// (at least one image), so one frame never uploads more than it can afford.
     pub fn take_images(&self, max_bytes: usize) -> Vec<Arc<DecodedImage>> {
         let mut taken = std::collections::LinkedList::new();
+        let mut stale = std::collections::LinkedList::new();
         let mut bytes = 0;
         let released = {
             let mut state = self.inner.state.lock();
             while let Some(image) = state.images.ready.back() {
+                // The tile of a cel whose slots another cel was given since it was decoded would overwrite that cel's: it is dropped.
+                if image.placement != 0 && !state.current.as_ref().is_some_and(|current| current.assets.holds_placement(image.placement)) {
+                    state.images.ready_bytes = state.images.ready_bytes.saturating_sub(image.rgba.len());
+                    let tail = state.images.ready.len() - 1;
+                    stale.append(&mut state.images.ready.split_off(tail));
+                    continue;
+                }
                 if !taken.is_empty() && image.rgba.len() > max_bytes.saturating_sub(bytes) { break }
                 bytes += image.rgba.len();
                 let tail = state.images.ready.len() - 1;
@@ -277,6 +300,7 @@ impl Engine {
         // Pictures that waited for room are decoded now.
         if released { self.inner.state.notify_all(); }
         // Node disposal and output allocation happen after the shared lock.
+        drop(stale);
         taken.into_iter().collect()
     }
 

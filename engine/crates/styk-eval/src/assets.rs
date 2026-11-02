@@ -2,7 +2,7 @@
 //! the GPU sprite atlas (computed from image headers, so encoding never waits
 //! for pixel decoding) and triangulated glyph outlines.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor as Cursor2;
 use std::sync::Arc;
 
@@ -58,6 +58,12 @@ pub struct Assets {
     /// its own) and its first slot at each display level. A cel whose bounds or revision changed with the same
     /// pixels is the same entry.
     pub cels: HashMap<usize, (Arc<DrawingTiles>, Vec<u32>)>,
+    /// The slots of [`Assets::drawing`] each placed cel holds (by its key), one block per display level, and the number of its placement.
+    placements: HashMap<usize, Placement>,
+    /// The numbers of the placements in `placements`.
+    serials: HashSet<u64>,
+    /// Blocks of slots no cel holds: a cel the document no longer has gave them back, the cels placed after it are given them first.
+    free: Vec<(u32, u32)>,
     /// Where the next image goes.
     cursor: Cursor,
     /// Finer tessellations of glyphs drawn large ([`Assets::glyph_at`]), made when first
@@ -68,6 +74,16 @@ pub struct Assets {
     /// 0 for assets that were not built.
     id: u64,
 }
+
+/// Where a cel's tiles are: a block of `(first slot, slots)` for each display level, and a number no other placement ever had.
+#[derive(Clone)]
+struct Placement {
+    serial: u64,
+    blocks: Vec<(u32, u32)>,
+}
+
+/// Numbers the placements of cels.
+static NEXT_PLACEMENT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Numbers the assets [`Assets::extended`] makes.
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -176,25 +192,38 @@ impl Assets {
         let sizes: Vec<Option<(u32, u32)>> = crate::par::map(&doc.images[known..], 8, dimensions);
         assets.atlas.resize(doc.images.len(), AtlasEntry::default());
         pack(&sizes, &mut assets.atlas[known..], &mut assets.cursor, GUTTER);
-        // Drawing cels new in this revision get slots after everything placed before.
+        // Drawing cels the document no longer has (the edit that replaced them was published before this one) give their slots back.
         let mut cels = Vec::new();
         collect_cels(doc, &mut cels);
+        let wanted: HashSet<usize> = cels.iter().map(|cel| cel.key()).collect();
+        let gone: Vec<usize> = assets.cels.keys().copied().filter(|key| !wanted.contains(key)).collect();
+        for key in &gone {
+            assets.cels.remove(key);
+            if let Some(placement) = assets.placements.remove(key) {
+                assets.serials.remove(&placement.serial);
+                assets.free.extend(placement.blocks.into_iter().filter(|(_, count)| *count > 0));
+            }
+        }
+        assets.coalesce_free();
+        // Drawing cels new in this revision are given the slots given back, then slots after everything placed before.
         cels.retain(|cel| !assets.cels.contains_key(&cel.key()));
         cels.dedup_by(|a, b| a.key() == b.key());
+        let placed = !cels.is_empty() || !gone.is_empty();
         for cel in cels {
             if assets.cels.contains_key(&cel.key()) {
                 continue;
             }
-            let first = assets.drawing.len() as u32;
             let mut starts = Vec::with_capacity(cel.levels.len());
-            let mut count = 0u32;
+            let mut blocks = Vec::with_capacity(cel.levels.len());
             for level in &cel.levels {
-                starts.push(first + count);
-                count += level.len() as u32;
+                let count = level.len() as u32;
+                let first = assets.take_slots(count);
+                starts.push(first);
+                blocks.push((first, count));
             }
-            let sizes = vec![Some((crate::drawing::TILE, crate::drawing::TILE)); count as usize];
-            assets.drawing.resize(assets.drawing.len() + count as usize, AtlasEntry::default());
-            pack(&sizes, &mut assets.drawing[first as usize..], &mut assets.cursor, crate::drawing::BORDER);
+            let serial = NEXT_PLACEMENT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            assets.serials.insert(serial);
+            assets.placements.insert(cel.key(), Placement { serial, blocks });
             assets.cels.insert(cel.key(), (cel, starts));
         }
         assets.pages = if assets.cursor.used { assets.cursor.layer + 1 } else { 0 };
@@ -213,7 +242,7 @@ impl Assets {
         for (glyph, width, triangles) in crate::par::map(&outlined, 8, |(g, w)| (g.clone(), *w, stroke(&g.path, *w))) {
             assets.glyph_strokes.insert((Arc::as_ptr(&glyph) as usize, width.to_bits()), (glyph, triangles));
         }
-        if self.id == 0 || held != (assets.atlas.len(), assets.drawing.len(), assets.cels.len(), assets.glyphs.len(), assets.glyph_strokes.len()) {
+        if self.id == 0 || placed || held != (assets.atlas.len(), assets.drawing.len(), assets.cels.len(), assets.glyphs.len(), assets.glyph_strokes.len()) {
             assets.id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
         assets
@@ -242,6 +271,52 @@ impl Assets {
         }
         let address = Arc::as_ptr(glyph) as usize;
         self.glyphs.contains_key(&address).then(|| self.fine.get(glyph, (address, u32::MAX, level), || tessellate_at(&glyph.path, level_tolerance(level))))
+    }
+
+    /// `count` slots of [`Assets::drawing`] for one display level of a cel: the smallest block given back that holds them, else new ones
+    /// packed after everything placed. The first of them.
+    fn take_slots(&mut self, count: u32) -> u32 {
+        if count == 0 {
+            return self.drawing.len() as u32;
+        }
+        let best = self.free.iter().enumerate().filter(|(_, (_, room))| *room >= count).min_by_key(|(_, (_, room))| *room).map(|(at, _)| at);
+        if let Some(at) = best {
+            let (first, room) = self.free[at];
+            if room == count {
+                self.free.swap_remove(at);
+            } else {
+                self.free[at] = (first + count, room - count);
+            }
+            return first;
+        }
+        let first = self.drawing.len() as u32;
+        let sizes = vec![Some((crate::drawing::TILE, crate::drawing::TILE)); count as usize];
+        self.drawing.resize(self.drawing.len() + count as usize, AtlasEntry::default());
+        pack(&sizes, &mut self.drawing[first as usize..], &mut self.cursor, crate::drawing::BORDER);
+        first
+    }
+
+    /// Joins the blocks given back that follow each other.
+    fn coalesce_free(&mut self) {
+        self.free.sort_unstable();
+        let mut joined: Vec<(u32, u32)> = Vec::with_capacity(self.free.len());
+        for &(first, count) in &self.free {
+            match joined.last_mut() {
+                Some((before, room)) if *before + *room == first => *room += count,
+                _ => joined.push((first, count)),
+            }
+        }
+        self.free = joined;
+    }
+
+    /// The number of the placement of the cel with key `cel` (0 when it has none): the tiles decoded for it carry it ([`DecodedImage::placement`]).
+    pub fn placement(&self, cel: usize) -> u64 {
+        self.placements.get(&cel).map_or(0, |placement| placement.serial)
+    }
+
+    /// Whether the placement numbered `serial` is still the place of a cel: the slots a tile decoded for it names are that cel's.
+    pub fn holds_placement(&self, serial: u64) -> bool {
+        self.serials.contains(&serial)
     }
 
     /// The first atlas slot of each display level of `cel`.
@@ -489,15 +564,19 @@ pub struct DecodedImage {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+    /// The placement ([`Assets::placement`]) of the drawing cel the tile is of, 0 for a picture. A cel the document replaced gives its
+    /// slots to the next, so a tile decoded for the one before must not be written once they are: the engine drops those.
+    pub placement: u64,
 }
 
 /// Decodes a drawing cel into its atlas slots (every level, see [`crate::drawing`]).
 pub fn decode_cel(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<DecodedImage> {
     let Some(starts) = assets.cel_levels(cel) else { return Vec::new() };
+    let placement = assets.placement(cel.key());
     let side = crate::drawing::TILE + 2 * crate::drawing::BORDER;
     crate::drawing::decode_cel(cel)
         .into_iter()
-        .map(|(level, index, rgba)| DecodedImage { index: starts[level as usize] + index, drawing: true, soft: false, width: side, height: side, rgba })
+        .map(|(level, index, rgba)| DecodedImage { index: starts[level as usize] + index, drawing: true, soft: false, width: side, height: side, rgba, placement })
         .collect()
 }
 
@@ -609,7 +688,7 @@ pub fn soften_image(doc: &Document, assets: &Assets, index: usize) -> Option<Dec
             }
         }
     }
-    Some(DecodedImage { index: index as u32, drawing: false, soft: true, width: sw, height: sh, rgba: out })
+    Some(DecodedImage { index: index as u32, drawing: false, soft: true, width: sw, height: sh, rgba: out, placement: 0 })
 }
 
 /// Decodes image `index` of `doc` for the atlas `assets` laid out. `None` when the
@@ -618,7 +697,7 @@ pub fn decode_image(doc: &Document, assets: &Assets, index: usize) -> Option<Dec
     let data = doc.images.get(index)?;
     let entry = assets.atlas.get(index).filter(|entry| entry.valid)?;
     let rgba = stored_pixels(&data.bytes, data.color_key, (entry.w, entry.h))?;
-    Some(DecodedImage { index: index as u32, drawing: false, soft: false, width: entry.w + 2, height: entry.h + 2, rgba })
+    Some(DecodedImage { index: index as u32, drawing: false, soft: false, width: entry.w + 2, height: entry.h + 2, rgba, placement: 0 })
 }
 
 /// The stored pixels of an encoded picture of `size`: premultiplied RGBA with a one-pixel gutter that repeats its

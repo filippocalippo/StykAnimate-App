@@ -144,6 +144,12 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
   for another project. The texture of the live pages is allocated when the drawing workspace opens
   (`Stage::live_cel_reserve`), not at the first stroke. When the slots are used up the engine
   drops the cel and the interface lets go of published ones before trying again.
+* The slots of a published cel (`Assets::drawing`) are given back when the document no longer has the cel: the edit that replaced it
+  is published, `Assets::extended` frees the blocks of its levels, and the cel placed in the same call takes them (smallest block
+  that fits per level, adjacent blocks joined), so a long session of strokes keeps the atlas at the size of the cel instead of
+  growing by a whole cel with every publication. Each placement has a number; the tiles decoded for it carry it
+  (`DecodedImage::placement`), and the engine drops a decode, and tiles waiting to be taken, whose placement the document in front no
+  longer holds (`Engine::take_images`, `decode_picture`): they would write over the cel that has the slots now.
 * A live cel draws what the published cel of the same pixels draws: the same quads, levels,
   parent records and tile order (`styk-eval/tests/drawing.rs`, `live/tests.rs`: every slot
   equals the published decode's, built in pieces, with removals). Only the atlas places differ.

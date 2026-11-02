@@ -258,3 +258,89 @@ fn a_cel_whose_bounds_changed_keeps_its_pixels_and_its_atlas_slots() {
     let third = loader.document(&anew, "p").unwrap();
     assert_ne!(cel(&third).key(), before.key());
 }
+
+/// The cels of a drawing document, replaced by every edit: the one that is replaced gives its slots to the one that replaces it.
+#[test]
+fn a_cel_the_document_replaced_gives_its_slots_to_the_next_and_the_atlas_stops_growing() {
+    use styk_eval::assets::{Assets, decode_cel};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drawlist/drawing-cel.json");
+    let cel = |document: &styk_eval::doc::Document| document.figures[0].images.iter().find_map(|image| image.tiles.clone()).expect("a cel");
+    let mut loader = Loader::new();
+    let first = loader.document(&json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
+    let mut assets = Assets::build(&first);
+    let (slots, pages, starts) = (assets.drawing.len(), assets.pages, assets.cel_levels(&cel(&first)).unwrap().to_vec());
+    let mut before = (cel(&first), assets.id());
+    let mut serials = vec![assets.placement(before.0.key())];
+    assert_ne!(serials[0], 0);
+    let indices = |assets: &Assets, tiles: &Arc<styk_eval::doc::DrawingTiles>| decode_cel(assets, tiles).iter().map(|image| image.index).collect::<Vec<_>>();
+    let first_indices = indices(&assets, &before.0);
+    for round in 0..6 {
+        // The same file read again: other pixels, the same shape.
+        let next = loader.document(&json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
+        assets = assets.extended(&next);
+        let tiles = cel(&next);
+        assert_ne!(tiles.key(), before.0.key(), "round {round}: other pixels");
+        assert_eq!((assets.drawing.len(), assets.pages), (slots, pages), "round {round}: the atlas did not grow");
+        assert_eq!(assets.cels.len(), 1, "round {round}: the replaced cel is gone");
+        assert_eq!(assets.cel_levels(&tiles).unwrap(), starts.as_slice(), "round {round}: it is in the slots of the one before");
+        assert_ne!(assets.id(), before.1, "round {round}: assets that place something are numbered anew");
+        let serial = assets.placement(tiles.key());
+        assert!(!serials.contains(&serial), "round {round}: a placement of its own");
+        assert!(serials.iter().all(|old| !assets.holds_placement(*old)), "round {round}: the placements before it are over");
+        let decoded = decode_cel(&assets, &tiles);
+        assert!(decoded.iter().all(|image| image.placement == serial));
+        assert_eq!(indices(&assets, &tiles), first_indices);
+        serials.push(serial);
+        before = (tiles, assets.id());
+    }
+}
+
+/// A cel that gained tiles needs more slots than the one it replaces held: it keeps those and takes new ones for the rest, and no two
+/// levels of it share a slot.
+#[test]
+fn a_cel_that_gained_tiles_is_given_the_slots_of_its_predecessor_and_new_ones_for_the_rest() {
+    use styk_eval::assets::Assets;
+    use styk_eval::doc::DrawingTiles;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drawlist/drawing-cel.json");
+    let mut loader = Loader::new();
+    let mut document = loader.document(&json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
+    let old = document.figures[0].images.iter().find_map(|image| image.tiles.clone()).expect("a cel");
+    let assets = Assets::build(&document);
+    let held: u32 = old.levels.iter().map(|level| level.len() as u32).sum();
+    // The same cel with three more tiles at its first level and one fewer at its last.
+    let mut levels = old.levels.clone();
+    levels[0].extend([(1000, 1000), (1001, 1000), (1002, 1000)]);
+    levels.last_mut().unwrap().pop();
+    let gained = Arc::new(DrawingTiles::new(old.anchor, old.pixels_per_unit, old.bounds, old.tiles.clone(), levels.clone()));
+    let figure = Arc::make_mut(&mut document.figures[0]);
+    for image in figure.images.iter_mut() {
+        if image.tiles.is_some() {
+            image.tiles = Some(gained.clone());
+        }
+    }
+    let extended = assets.extended(&document);
+    let starts = extended.cel_levels(&gained).expect("placed").to_vec();
+    let mut taken: Vec<u32> = Vec::new();
+    for (level, &start) in levels.iter().zip(&starts) {
+        taken.extend(start..start + level.len() as u32);
+    }
+    let total = taken.len();
+    taken.sort_unstable();
+    taken.dedup();
+    assert_eq!(taken.len(), total, "no two tiles share a slot");
+    assert!(taken.iter().all(|slot| (*slot as usize) < extended.drawing.len() && extended.drawing[*slot as usize].valid), "every slot has a place");
+    // The slots that did not fit the last level are new, and nothing more: a cel of the same shape after it needs none.
+    let widest = levels.iter().map(Vec::len).max().unwrap() as u32;
+    assert!(extended.drawing.len() as u32 <= assets.drawing.len() as u32 + widest, "{} slots for {} held, one level too big for the room", extended.drawing.len(), held);
+    assert_eq!(extended.cels.len(), 1);
+    let again = Arc::new(DrawingTiles::new(old.anchor, old.pixels_per_unit, old.bounds, old.tiles.clone(), levels));
+    let figure = Arc::make_mut(&mut document.figures[0]);
+    for image in figure.images.iter_mut() {
+        if image.tiles.is_some() {
+            image.tiles = Some(again.clone());
+        }
+    }
+    let third = extended.extended(&document);
+    assert_eq!(third.drawing.len(), extended.drawing.len(), "the next cel of that shape takes the slots given back");
+    assert_eq!(third.cels.len(), 1);
+}
