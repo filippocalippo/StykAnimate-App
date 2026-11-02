@@ -136,10 +136,13 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
   level first, never while a cel changed in the last 250 ms), so the zoom that calls for one of them finds little left to
   write; a change at a level that is not shown makes its slots stale again.
 * The slots are pages of the sprite atlas after the document's own (`PAGE_SLOTS` = 3,600 slots a
-  page, at most four pages; a slot given back is the next one taken, lowest first, so a cel's rows stay together). A texture of more layers is allocated by copying the old one on the
-  GPU (`Renderer::grow_sprites`): the document's pictures are not decoded again. A document that
-  gains an atlas page (a publication) allocates the atlas anew as it always did and writes the
-  live slots again from the engine's copy of their tiles. When the slots are used up the engine
+  page, at most four pages; a slot given back is the next one taken, lowest first, so a cel's rows stay together). The page map (`SpriteMap`: page of the layout to layer of the texture) lets
+  the live pages keep their layers when the document's layout grows before them: a document that gains pages (the first
+  stroke on a blank exposure adds the cel's) leaves the texture, its pictures and the live tiles as they are, gives the new
+  pages free layers and moves the live pages in the map only (`Renderer::extend_sprites`, `Residency::move_pages`,
+  `Uploaded::move_pages`); the texture is copied into a larger one only when it has no free layer, and allocated anew only
+  for another project. The texture of the live pages is allocated when the drawing workspace opens
+  (`Stage::live_cel_reserve`), not at the first stroke. When the slots are used up the engine
   drops the cel and the interface lets go of published ones before trying again.
 * A live cel draws what the published cel of the same pixels draws: the same quads, levels,
   parent records and tile order (`styk-eval/tests/drawing.rs`, `live/tests.rs`: every slot

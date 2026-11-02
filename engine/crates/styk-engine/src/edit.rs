@@ -242,6 +242,15 @@ impl EditScene {
         if self.generation != generation.id {
             // Figures may have changed: the displayed pose's geometry is rebuilt, and a ghost's checked against the new document when drawn.
             self.generation = generation.id;
+            // A ghost is kept while its record is the same, but the figures its styled objects were resolved against may not be the document's now.
+            let loader = self.loader.as_mut().expect("follow() made the loader");
+            for pose in self.ghosts.values_mut() {
+                loader.restyle_frame(&mut pose.frame, &generation.prepared.doc);
+                // The objects now agree with this document, which is what the next pose of the tick shares them with.
+                if pose.prepared.is_some() {
+                    pose.prepared = Some(generation.prepared.clone());
+                }
+            }
             if let Some(pose) = &mut self.current {
                 pose.scene = None;
                 pose.generators = None;

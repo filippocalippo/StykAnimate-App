@@ -310,3 +310,17 @@ fn pictures_a_frame_waits_for_are_decoded_several_at_a_time() {
     }
     assert!(!demanded.admit_decode(budget, budget), "the pictures a frame waits for are decoded three at a time, not more");
 }
+
+#[test]
+fn live_pages_that_move_keep_what_was_written_to_them() {
+    let mut uploaded = Uploaded::default();
+    uploaded.mark(1, 2, 3);
+    uploaded.mark(2, 4, 5);
+    uploaded.mark(0, 6, 7);
+    // Two live pages that began at page 1 begin at page 2 now.
+    uploaded.move_pages(1, 2, 2);
+    let held: std::collections::HashSet<u64> = uploaded.places.clone();
+    assert_eq!(held, [place(0, 6, 7), place(2, 2, 3), place(3, 4, 5)].into_iter().collect());
+    uploaded.move_pages(3, 3, 1);
+    assert_eq!(uploaded.len(), 3, "a page that stays is not touched");
+}

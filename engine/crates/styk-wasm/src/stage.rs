@@ -577,6 +577,18 @@ impl Stage {
         if styk_engine::on_demand(&generation.assets, self.engine.atlas_pages()) {
             return self.sync_atlas_resident(generation, live_pages);
         }
+        let appended = self.residency.is_none() && self.renderer.holds_pages() && self.atlas_of.is_some_and(|(lineage, before)| lineage == layout.0 && before <= generation.assets.pages) && live_pages >= self.live_pages;
+        if appended && self.atlas_of != Some(layout) {
+            // Pictures are only ever appended: the pages that are in stay in their layers, the live cels' tiles with them. The
+            // new pages take free layers, and the live pages (which follow the document's) are moved in the page map only.
+            let before = self.atlas_of.map_or(0, |(_, before)| before);
+            self.renderer.extend_sprites(before, self.live_pages, layout.1, live_pages);
+            self.uploaded.move_pages(before, layout.1, self.live_pages);
+            self.live_pages = live_pages;
+            self.atlas_serial += 1;
+            self.atlas_of = Some(layout);
+            return;
+        }
         if self.atlas_of != Some(layout) || self.residency.is_some() {
             self.residency = None;
             // Another project, or more atlas pages than before: the texture is allocated
@@ -594,7 +606,11 @@ impl Stage {
             self.flush_live();
         } else if live_pages > self.live_pages {
             // More live slots than pages: the texture grows and keeps what it holds.
-            self.renderer.grow_sprites(&generation.assets, live_pages);
+            if self.renderer.holds_pages() {
+                self.renderer.extend_sprites(layout.1, self.live_pages, layout.1, live_pages);
+            } else {
+                self.renderer.grow_sprites(&generation.assets, live_pages);
+            }
             self.live_pages = live_pages;
             self.atlas_serial += 1;
         }
@@ -750,6 +766,15 @@ impl Stage {
         if changed {
             self.live.changed(crate::clock());
         }
+        self.sync_atlas(&generation);
+        Ok(())
+    }
+
+    /// Makes room in the sprite atlas for the live cels' first page now: the texture is allocated when the drawing workspace
+    /// opens, not at the first stroke (a first page of tiles, then, only takes a free layer: `Renderer::extend_sprites`).
+    pub fn live_cel_reserve(&mut self) -> Result<(), JsError> {
+        let generation = self.engine.generation().ok_or_else(|| js_error("no document is open"))?;
+        self.live.reserve();
         self.sync_atlas(&generation);
         Ok(())
     }

@@ -317,7 +317,7 @@ export class DrawingController {
   }
   /** The wet ink canvas, made when Draw opens so the first stroke does not pay for its layout. */
   wetInk(){return this.wet??=new WetInk(this.viewport,this.overlay);}
-  enter(){if(this.active)return;this.beforeEdit();this.prior={handles:this.state.handles,tool:this.state.tool,rotation:this.state.view.rotation??0,flip:Boolean(this.state.view.flip),documentToken:this.editor._documentToken,layerId:this.editor.activeLayerId,uid:this.editor.selectedUid,joint:this.editor.selectedJoint};this.active=true;this.state.handles=false;this.state.tool='drawing-brush';this.state.drawing=true;this.cursor=null;this.bind();this.wetInk();
+  enter(){if(this.active)return;this.beforeEdit();this.prior={handles:this.state.handles,tool:this.state.tool,rotation:this.state.view.rotation??0,flip:Boolean(this.state.view.flip),documentToken:this.editor._documentToken,layerId:this.editor.activeLayerId,uid:this.editor.selectedUid,joint:this.editor.selectedJoint};this.active=true;this.state.handles=false;this.state.tool='drawing-brush';this.state.drawing=true;this.cursor=null;this.bind();this.wetInk();this.state.renderer?.prepareDrawing?.();
     const layers=this.editor.layers.filter(layer=>isDrawingLayer(layer)&&!layer.locked&&layer.visible),target=layers.find(l=>l.id===this.editor.activeLayerId)||layers.find(l=>l.id===this.lastLayer)||layers.at(-1);if(target){this.editor.selectSheetLayer(target.id);this.state.selectedTrackId=target.id;}this.sync();this.prepareVisible();this.onUI();this.onRender();}
   exit(){
     if(!this.active)return;
