@@ -26,7 +26,7 @@ const LIFE_ROWS = [['create', 'create'], ['createUndo', 'create, undone'], ['cre
 const NESTED_ROWS = [['enter1', 'enter the outer clip'], ['createInner', 'create a clip inside it'], ['enter2', 'enter the middle clip'], ['enter3', 'enter the inner clip'],
   ['leave3', 'leave the inner clip after an edit'], ['leave2', 'leave the middle clip'], ['leave1', 'leave the outer clip'], ['leave1Undo', 'leave the outer clip, undone'],
   ['leave1Redo', 'leave the outer clip, redone'], ['placeNested', 'place the outer clip'], ['placeNestedUndo', 'place the outer clip, undone'], ['placeNestedRedo', 'place the outer clip, redone']];
-const CLIP_ROWS = [['selection', 'selected figure', LIFE_ROWS], ['large', 'large', LIFE_ROWS], ['nested', 'nested', NESTED_ROWS]];
+const CLIP_ROWS = [['selection', 'selected figure', LIFE_ROWS], ['large', 'large', LIFE_ROWS], ['everything', 'every figure', LIFE_ROWS], ['nested', 'nested', NESTED_ROWS]];
 const clipWorst = (kind, scenarios) => r => worst(r, CLIP_ROWS.filter(([scenario]) => scenarios.includes(scenario)).flatMap(([scenario, , rows]) => rows.map(([row]) => `movieclips.scenarios.${scenario}.${row}.${kind}`)));
 
 // Rows of each file's table. The first group is what the baselines have always shown; the rest was added later.
@@ -197,7 +197,7 @@ const TARGETS = [
   {name: 'Undo or redo of a frame edit: interface blocked (ms)', metric: r => worst(r, FRAME_UNDOS.map(n => `frameEdit.${n}.blocked.p50`)), target: 10, floor: 'notWorse'},
   {name: 'Undo or redo of a frame edit: until shown (ms)', metric: r => worst(r, FRAME_UNDOS.map(n => `frameEdit.${n}.shown.p50`)), target: 16, floor: 'notWorse'},
   // The movieclip rows have no `main` baseline: the goals are the owner's "really fast", read as one frame blocked and a tenth of a second shown.
-  ...[['selection', 'a selected figure'], ['large', 'a large clip'], ['nested', 'a nested clip']].flatMap(([scenario, what]) => [
+  ...[['selection', 'a selected figure'], ['large', 'a large clip'], ['everything', 'a clip of every figure'], ['nested', 'a nested clip']].flatMap(([scenario, what]) => [
     {name: `Movieclips, ${what}: interface blocked, slowest row (ms)`, metric: clipWorst('blocked', [scenario]), target: 16, floor: null},
     {name: `Movieclips, ${what}: until shown, slowest row (ms)`, metric: clipWorst('shown', [scenario]), target: 100, floor: null}]),
   {name: 'Undo (ms)', metric: 'poseDrag.undoMs.p50', target: 10, floor: 'notWorse'},
