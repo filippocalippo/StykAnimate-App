@@ -31,7 +31,7 @@ const {_electron: electron} = await import(pathToFileURL(path.join(root, 'tests/
 const profile = await mkdtemp(path.join(os.tmpdir(), 'styk-mcsave-'));
 const folder = path.join(profile, 'files');
 await import('node:fs/promises').then(fs => fs.mkdir(folder, {recursive: true}));
-const pageErrors = [], failures = [], log = [], summary = {seed, steps, big, blank, saves: 0, opened: 0};
+const pageErrors = [], consoleMessages = [], failures = [], log = [], summary = {seed, steps, big, blank, saves: 0, opened: 0};
 let app, page, pid, serial = 0;
 
 async function launch() {
@@ -40,7 +40,10 @@ async function launch() {
   app = await electron.launch({args: [root], cwd: root, env, timeout: 120000, executablePath: path.join(root, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron')});
   pid = app.process().pid;
   page = await app.firstWindow({timeout: 120000});
+  await page.addInitScript(() => { Error.stackTraceLimit = 80; });
   page.on('pageerror', error => pageErrors.push(String(error?.stack ?? error?.message ?? error).slice(0, cap)));
+  // The first message of the engine's panic hook says what went wrong before every later call reports a borrowed object.
+  page.on('console', message => { if (['error', 'warning'].includes(message.type()) && consoleMessages.length < 12) consoleMessages.push(`${message.type()}: ${message.text().slice(0, cap)}`); });
   // A native prompt would hold the run for ever: every dialog is answered here.
   await app.evaluate(({dialog}) => {
     globalThis.__save = {next: null, hold: false, release: null, count: 0}; globalThis.__open = null; globalThis.__close = 2;
@@ -64,8 +67,35 @@ async function stop() {
 }
 const kill = () => { try { execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], {stdio: 'ignore'}); } catch { /* gone */ } app = null; };
 
+/** STYK_TRACE_WASM: every method of the engine's `EditSession` and `Stage` is wrapped to log the first calls that throw and any call made while
+ * another of the same object is still running, with their stacks (`window.__wasmTrace`). */
+async function traceWasm() {
+  if (!process.env.STYK_TRACE_WASM) return;
+  await page.evaluate(async () => {
+    const module = await import('styk-app://app/src/engine/pkg/styk_engine.js');
+    const log = window.__wasmTrace = [];
+    const running = new Map();
+    for (const name of ['EditSession', 'Stage']) {
+      const proto = module[name]?.prototype; if (!proto) continue;
+      for (const method of Object.getOwnPropertyNames(proto)) {
+        const original = proto[method];
+        if (method === 'constructor' || method === 'free' || typeof original !== 'function') continue;
+        proto[method] = function (...args) {
+          const entered = running.get(this.__wbg_ptr);
+          if (entered && log.length < 8) log.push({kind: 're-entered', method: name + '.' + method, while: entered.method, stack: new Error().stack.split(String.fromCharCode(10)).filter(line => !/wasm-function/.test(line)).slice(0, 14).join(' / ')});
+          running.set(this.__wbg_ptr, {method: name + '.' + method});
+          try { return original.apply(this, args); }
+          catch (error) { if (log.length < 8) log.push({kind: 'threw', method: name + '.' + method, message: String(error?.message ?? error).slice(0, 200), stack: String(error?.stack ?? '').split(String.fromCharCode(10)).map(line => line.replace(/styk-app:[/][/]app[/]src[/]engine[/]pkg[/]/, '').replace(/ [(]src.*$/, '').replace(/ at /, '')).slice(0, log.length ? 12 : 40).join(' / ').slice(0, 6000)}); throw error; }
+          finally { running.delete(this.__wbg_ptr); }
+        };
+      }
+    }
+  });
+}
+
 /** The gestures, run in the page on the app's own editor, drawn from the seed. */
 async function install(prepare = true) {
+  await traceWasm();
   await page.evaluate(({seed, big, blank}) => {
     const {editor} = window.styk;
     let s = seed >>> 0;
@@ -131,6 +161,11 @@ async function install(prepare = true) {
       },
       step() { const name = pick(table); try { const d = gestures[name](); return `${name}${d === undefined || d === null ? '' : ' ' + d}`; } catch (error) { return `${name}!refused ${String(error?.message ?? error).slice(0, 40)}`; } },
       depth: () => editor._movieclipScopes?.length ?? 0,
+      nesting() {
+        const level = (doc, at) => { let deepest = at; const source = doc._styk?.movieclipSource?.document; if (source) deepest = Math.max(deepest, level(source, at + 1)); for (const f of doc.figure_types ?? []) if (f._styk?.movieclip) deepest = Math.max(deepest, level(f._styk.movieclip.document, at + 1)); return deepest; };
+        const root = editor._movieclipScopes?.[0]?.parent.report ?? editor.report;
+        return level(root, 0);
+      },
       leaveAll() { while (editor._movieclipScopes?.length) editor.leaveMovieclip(); },
       edit() { gestures.move(); return editor.dirty; },
       canonical() {
@@ -152,6 +187,23 @@ async function install(prepare = true) {
     if (blank) await page.waitForFunction(token => window.styk.state.documentToken !== token, token, {timeout: 30000, polling: 100}).catch(() => {});
     await sleep(1000);
   }
+}
+
+/** Exceptions thrown and caught inside the page while `work` runs, through the debugger (STYK_CDP_EXCEPTIONS): which are the first to say what went wrong
+ * before the engine reports an object in use. */
+async function caughtDuring(work) {
+  if (!process.env.STYK_CDP_EXCEPTIONS) return work();
+  const cdp = await page.context().newCDPSession(page);
+  const seen = summary.exceptions = [];
+  await cdp.send('Debugger.enable');
+  cdp.on('Debugger.paused', async event => {
+    try {
+      const text = String(event.data?.description ?? event.data?.value ?? '').split(String.fromCharCode(10))[0].slice(0, 240);
+      if (seen.length < 10 && !/powerPreference/.test(text)) seen.push({reason: event.reason, text, frames: event.callFrames.slice(0, 6).map(frame => `${frame.functionName || '(anonymous)'} ${frame.url.slice(frame.url.lastIndexOf('/') + 1)}:${frame.location.lineNumber}`)});
+    } finally { await cdp.send('Debugger.resume').catch(() => {}); }
+  });
+  await cdp.send('Debugger.setPauseOnExceptions', {state: 'all'});
+  try { return await work(); } finally { await cdp.send('Debugger.setPauseOnExceptions', {state: 'none'}).catch(() => {}); await cdp.send('Debugger.disable').catch(() => {}); }
 }
 
 const diff = (a, b) => {
@@ -273,7 +325,7 @@ try {
   await launch();
   await install();
   const rng = (() => { let s = (seed * 7919) >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();
-  const checks = ['save', 'save-as', 'save', 'recovery', 'parked', 'cancelled', 'during'];
+  const checks = process.env.STYK_ONLY ? process.env.STYK_ONLY.split(',') : ['save', 'save-as', 'save', 'recovery', 'parked', 'cancelled', 'during'];
   for (let i = 1; i <= steps && !failures.length; i++) {
     log.push(await page.evaluate(() => window.__fz.step()));
     if (i % every === 0) {
@@ -294,12 +346,48 @@ try {
     const recovery = await newestRecovery(since);
     if (recovery) {
       await sleep(1500);
+      summary.atKill = await page.evaluate(() => ({nesting: window.__fz.nesting(), depth: window.__fz.depth()})).catch(() => null);
+      summary.recoveryBytes = statSync(recovery).size;
       kill();
       // What the killed process left, before the next launch decides about it.
       const copy = file('killed'); copyFileSync(recovery, copy);
       await launch(); await install(false);
       await sleep(4000); // the launch looks at the recovery copy the kill left before anything else is opened
-      try { await reopen(copy); summary.opened++; } catch (error) { fail('kill', 'open', error.message); }
+      // What a person does: the offer of the unsaved work is answered with Restore (STYK_NO_RESTORE opens the copy as a file at once instead).
+      if (!process.env.STYK_NO_RESTORE) try {
+        const token = await page.evaluate(() => window.styk.state.documentToken);
+        // Pressed in the page: a notice over the button would stop a click that checks what is in front of it.
+        await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Restore'), null, {timeout: 20000, polling: 100});
+        await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Restore').click());
+        await page.waitForFunction(token => window.styk.state.documentToken !== token && !window.styk.state.importing, token, {timeout: 60000, polling: 100});
+        const restored = await page.evaluate(() => ({dirty: window.styk.editor.dirty, figures: window.styk.editor.report.figure_types.length}));
+        if (!restored.dirty) fail('kill', 'restore', 'the restored project is not marked as having unsaved changes');
+        summary.restored = restored;
+        // The restored project has no file yet: saving it gives it one.
+        const target = file('restored');
+        await app.evaluate((_e, f) => { globalThis.__save.next = f; }, target);
+        await page.evaluate(() => window.styk.actions['save-as']());
+        for (let i = 0; i < 300 && !existsSync(target); i++) await sleep(100);
+        await waitSaved();
+        const again = await reopen(target); summary.opened++; await closeOpened();
+        void again;
+      } catch (error) {
+        const shown = await page.evaluate(() => [...document.querySelectorAll('button')].map(b => b.textContent.trim()).filter(Boolean).slice(0, 12).join(' | ')).catch(() => '');
+        fail('kill', 'restore', `${error.message.split('\n')[0]} (buttons: ${shown})`);
+      }
+      try { await caughtDuring(() => reopen(copy)); summary.opened++; }
+      catch (error) {
+        fail('kill', 'open', error.message);
+        // What the person is left with: the status line, the notices and whether the project can still be saved.
+        summary.screen = await page.evaluate(async () => {
+          const texts = [...document.querySelectorAll('[role=alert],[role=status],.toast,.styk-toast')].map(e => e.textContent.trim()).filter(Boolean);
+          let snapshot = 'not asked';
+          try { const session = window.styk.editor._shown ?? null; snapshot = session ? 'a session is shown' : 'no session shown'; } catch (e) { snapshot = String(e.message).slice(0, 80); }
+          let saved = 'not tried';
+          try { window.styk.editor.select(1, -1); saved = 'an edit call answered'; } catch (e) { saved = String(e.message).slice(0, 120); }
+          return {status: document.getElementById('status')?.textContent, notices: texts.slice(0, 4), snapshot, saved};
+        }).catch(error => ({error: String(error.message).slice(0, 120)}));
+      }
     } else fail('kill', 'missing', 'no recovery copy was written before the kill');
   }
   if (!failures.length) {
@@ -334,7 +422,9 @@ try {
     }
   }
   summary.failures = failures.slice(0, 3);
-  if (pageErrors.length) summary.pageErrors = pageErrors.slice(0, 3);
+  if (pageErrors.length) summary.pageErrors = [pageErrors[0], ...(pageErrors.length > 1 ? [`and ${pageErrors.length - 1} more`] : [])];
+  if (consoleMessages.length && failures.length) summary.console = consoleMessages;
+  if (process.env.STYK_TRACE_WASM) summary.wasmTrace = await page.evaluate(() => window.__wasmTrace ?? null).catch(() => null);
   if (failures.length) summary.tail = log.slice(-12);
   console.log(JSON.stringify(summary, null, quiet() ? 0 : 1));
 } catch (error) {
