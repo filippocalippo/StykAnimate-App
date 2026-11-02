@@ -122,7 +122,7 @@ The session that edits the document starts from the same tree and typed views
 editor publishes it. `EditSession.activate(revision)` makes its document the engine's
 (`Engine::activate`): the stage draws it, playback and exports read it. Every call that changes the
 document publishes the new tree at the session's revision (`Engine::publish_tree`): copy-on-write
-sharing means only the records the call replaced are converted again. Revisions are unique across the
+sharing means only the records the call replaced are converted again: the loader keeps the typed view of each figure, pose, layer-sheet track and animation by the record it was made from, a pose says once whether it has effects (`Keyframe::has_vfx`, found when the pose is built), and the styles of the poses are resolved again only against a figure that was redefined. A replay of the recorded scenarios checks after every step, undo and redo included, that the document kept this way is the one a loader that never saw the others makes (`styk-edit/src/rebuild_check.rs`). Revisions are unique across the
 documents of one editor, so `holdsRevision` (the document identity the engine reports) says whether the
 engine holds a given document at a given state; the stage never brings the engine up to date itself.
 A document in a background tab keeps its session; coming to the front activates it again.

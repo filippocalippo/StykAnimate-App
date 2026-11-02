@@ -60,6 +60,8 @@ pub struct Loader {
     settled: HashMap<usize, Weak<Keyframe>>,
     /// Effect clips by the address of the `vfxClips` record they were built from.
     vfx_clips: HashMap<usize, (Source, Option<Arc<crate::vfx::Clips>>)>,
+    /// Layer sheet tracks by the address of the track record they were built from.
+    tracks: HashMap<usize, (Source, Arc<SheetTrack>)>,
     /// Property channels by the address of the animation record they were built from.
     animations: HashMap<usize, (Source, Option<Arc<crate::channels::Animation>>)>,
     /// Records converted (not reused) by the last [`Loader::document`] call.
@@ -235,6 +237,7 @@ impl Loader {
             figures: HashMap::new(),
             keyframes: HashMap::new(),
             styled: HashMap::new(),
+            tracks: HashMap::new(),
             settled_against: Vec::new(),
             settled: HashMap::new(),
             vfx_clips: HashMap::new(),
@@ -567,6 +570,7 @@ impl Loader {
         self.keyframes.retain(|_, (source, _)| source.held());
         self.vfx_clips.retain(|_, (source, _)| source.held());
         self.animations.retain(|_, (source, _)| source.held());
+        self.tracks.retain(|_, (source, _)| source.held());
         self.image_of.retain(|_, (payload, _)| payload.held());
         let live: std::collections::HashSet<usize> = self.figures.values().map(|(_, figure)| Arc::as_ptr(figure) as usize).collect();
         self.styled.retain(|(base, _), _| live.contains(base));
@@ -1068,6 +1072,7 @@ impl Loader {
                 .filter_map(|c| Some((int(c, "uid")? as u32, playback(c.get("playback")?))))
                 .collect(),
             vfx,
+            has_vfx: false,
         };
         frame.reindex();
         frame
@@ -1100,42 +1105,59 @@ impl Loader {
         let mut tracks = HashMap::new();
         if let Some(Value::Obj(map)) = s.get("tracks") {
             for (id, t) in map.iter() {
-                let keys = t
-                    .get("keys")
-                    .and_then(Value::as_arr)
-                    .into_iter()
-                    .flatten()
-                    .map(|k| SheetKey {
-                        tick: int(k, "tick").unwrap_or(0) as u32,
-                        easing: if k.get("interpolation").is_some() { easing(Some(k)) } else { None },
-                        hidden: truthy(k.get("hidden")),
-                        patch_only: truthy(k.get("patchOnly")),
-                        value: match num(k, "sourceTick") {
-                            Some(t) => SheetValue::SourceTick(t),
-                            None => SheetValue::Frame(
-                                k.get("value").and_then(|v| v.get("frameId")).and_then(Value::as_str).map(Arc::from),
-                            ),
-                        },
-                        movieclip_patches: k
-                            .get("movieclipPatches")
-                            .and_then(Value::as_arr)
-                            .into_iter()
-                            .flatten()
-                            .filter_map(|p| {
-                                Some(MovieclipPatch {
-                                    uid: int(p, "uid")? as u32,
-                                    frame_id: Arc::from(p.get("frameId")?.as_str()?),
-                                    replacement_uid: int(p, "replacementUid").map(|v| v as u32),
-                                    order_index: int(p, "orderIndex").map(|v| v as u32),
-                                })
-                            })
-                            .collect(),
-                    })
-                    .collect();
-                tracks.insert(id.to_string(), Arc::new(SheetTrack { end: int(t, "end").unwrap_or(0) as u32, keys }));
+                tracks.insert(id.to_string(), self.sheet_track(t));
             }
         }
         LayerSheet { duration: int(s, "duration").unwrap_or(1).max(1) as u32, tracks }
+    }
+
+    /// One track of a layer sheet, reused while its record is the one it was made from: a pose on one layer replaces that layer's track and no other.
+    fn sheet_track(&mut self, t: &Value) -> Arc<SheetTrack> {
+        let address = node_address(t);
+        if let Some((_, track)) = address.and_then(|address| self.tracks.get(&address)) {
+            return track.clone();
+        }
+        let track = Arc::new(Self::convert_sheet_track(t));
+        if let Some(address) = address {
+            self.tracks.insert(address, (Source::of(t), track.clone()));
+        }
+        track
+    }
+
+    fn convert_sheet_track(t: &Value) -> SheetTrack {
+        let keys = t
+            .get("keys")
+            .and_then(Value::as_arr)
+            .into_iter()
+            .flatten()
+            .map(|k| SheetKey {
+                tick: int(k, "tick").unwrap_or(0) as u32,
+                easing: if k.get("interpolation").is_some() { easing(Some(k)) } else { None },
+                hidden: truthy(k.get("hidden")),
+                patch_only: truthy(k.get("patchOnly")),
+                value: match num(k, "sourceTick") {
+                    Some(t) => SheetValue::SourceTick(t),
+                    None => SheetValue::Frame(
+                        k.get("value").and_then(|v| v.get("frameId")).and_then(Value::as_str).map(Arc::from),
+                    ),
+                },
+                movieclip_patches: k
+                    .get("movieclipPatches")
+                    .and_then(Value::as_arr)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|p| {
+                        Some(MovieclipPatch {
+                            uid: int(p, "uid")? as u32,
+                            frame_id: Arc::from(p.get("frameId")?.as_str()?),
+                            replacement_uid: int(p, "replacementUid").map(|v| v as u32),
+                            order_index: int(p, "orderIndex").map(|v| v as u32),
+                        })
+                    })
+                    .collect(),
+            })
+            .collect();
+        SheetTrack { end: int(t, "end").unwrap_or(0) as u32, keys }
     }
 }
 

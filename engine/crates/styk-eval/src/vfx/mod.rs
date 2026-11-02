@@ -149,5 +149,5 @@ pub fn document_has_vfx(doc: &Document) -> bool {
 /// Whether evaluating `doc` itself can produce effects: clips, or stacks on
 /// its poses. Movieclips are checked through their own prepared documents.
 pub(crate) fn has_own_vfx(doc: &Document) -> bool {
-    doc.vfx_clips.is_some() || doc.keyframes.iter().chain(doc.frame_sources.values()).any(|frame| frame.vfx.is_some() || frame.objects.iter().any(|object| object.vfx.is_some()))
+    doc.vfx_clips.is_some() || doc.keyframes.iter().chain(doc.frame_sources.values()).any(|frame| frame.has_vfx)
 }
