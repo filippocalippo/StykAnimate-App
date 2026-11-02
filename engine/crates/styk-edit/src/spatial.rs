@@ -182,14 +182,18 @@ impl Editor {
             let Some(join) = object.get("join").filter(|join| join.truthy()) else { continue };
             let strength = |value: &Value| value.path(&["_stykSpatial", "camera", "strength"]).is_some_and(Value::truthy);
             let parent = join.get("target_object_slot").and_then(Value::as_f64).and_then(|slot| objects.get(slot as usize));
-            let projected_drawing = parent.is_some_and(|parent| {
-                let figure = self.figure_value(object);
-                let drawing = figure.path(&["_styk", "movieclip"]).is_some_and(|asset| asset.get("drawingRotation").is_some_and(Value::truthy) || asset.get("spatialMeshes").is_some_and(Value::truthy));
-                drawing && self.figure_value(parent).get("segments").and_then(Value::elements).is_some_and(|segments| {
-                    segments.iter().any(|segment| segment.get("segment_id") == join.get("target_handle_id") && segment.path(&["_stykRig", "spatial", "origin"]).is_some_and(Value::truthy))
+            // A drawing attached to a spatial bone is judged only when the parent has perspective: finding the figures of the two (a search of
+            // the definitions each) is the cost of this check on a frame of many joined figures, and nearly none has perspective.
+            let projected_drawing = || {
+                parent.is_some_and(|parent| {
+                    let figure = self.figure_value(object);
+                    let drawing = figure.path(&["_styk", "movieclip"]).is_some_and(|asset| asset.get("drawingRotation").is_some_and(Value::truthy) || asset.get("spatialMeshes").is_some_and(Value::truthy));
+                    drawing && self.figure_value(parent).get("segments").and_then(Value::elements).is_some_and(|segments| {
+                        segments.iter().any(|segment| segment.get("segment_id") == join.get("target_handle_id") && segment.path(&["_stykRig", "spatial", "origin"]).is_some_and(Value::truthy))
+                    })
                 })
-            });
-            if strength(object) || parent.is_some_and(strength) && !projected_drawing {
+            };
+            if strength(object) || (parent.is_some_and(strength) && !projected_drawing()) {
                 return Err(EditError::Invalid("errors.spatialProjection.perspectiveRequiresASingleSpatialFigureOrA".into()));
             }
         }

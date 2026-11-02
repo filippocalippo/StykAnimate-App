@@ -48,7 +48,7 @@ fn the_frame_around_a_commit() {
         if print { for (name, count, total) in styk_edit::prof::take().into_iter().take(8) { println!("      show prof {name}: {count} x, {total:.2} ms"); } }
         let set = session.onions(view, REQUEST).unwrap();
         let t2 = Instant::now();
-        if print { for (name, count, total) in styk_edit::prof::take().into_iter().take(8) { println!("      onions prof {name}: {count} x, {total:.2} ms"); } }
+        if print { for (name, count, total) in styk_edit::prof::take().into_iter().take(12) { println!("      onions prof {name}: {count} x, {total:.2} ms"); } }
         let generation = generation_of(&shown.prepared, id);
         assert!(scene.update_shown(&generation, &shown));
         let ghosts: Vec<(u32, Value, f64, Option<[u8; 3]>)> = set.ghosts.iter().enumerate().map(|(at, g)| (at as u32, g.record.clone(), g.opacity, g.tint)).collect();
@@ -101,7 +101,7 @@ fn the_frame_around_a_commit() {
     let r = session.call("commitDrag", "[]", &selected);
     println!("commitDrag call {:.2} ms, answer {} bytes -> {}", ms(t), r.len(), &r[..r.len().min(60)]);
     if let Ok(value) = styk_doc::json::parse(r.as_bytes()) { if let Some(entries) = value.as_obj() { let mut sizes: Vec<(String, usize)> = entries.iter().map(|(k, v)| (k.to_string(), styk_doc::json::to_string(v).len())).collect(); sizes.sort_by_key(|(_, n)| std::cmp::Reverse(*n)); println!("    answer parts: {:?}", &sizes[..sizes.len().min(6)]); } }
-    for (name, count, total) in styk_edit::prof::take().into_iter().take(14) { println!("    prof {name}: {count} x, {total:.2} ms"); }
+    for (name, count, total) in styk_edit::prof::take().into_iter().take(26) { println!("    prof {name}: {count} x, {total:.2} ms"); }
     id += 1;
     let order_after = show(&mut session, &mut scene, &selected, id, "after commit", true);
     id += 1;

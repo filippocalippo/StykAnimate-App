@@ -563,7 +563,10 @@ impl Editor {
 
     /// `_commitSheetPose(edit, drag)`: keys the draft on every layer whose figures changed.
     pub(crate) fn commit_sheet_pose(&mut self) -> Result<bool, EditError> {
+        let _whole = crate::prof::scope("commit::sheet_pose");
+        let scope = crate::prof::scope("commit::counts");
         self.ensure_counts();
+        drop(scope);
         let (Some(edit), Some(drag)) = (self.authored.as_ref(), self.drag.as_ref()) else { return Ok(false) };
         let transaction = edit.transaction;
         let definitions_start = edit.definitions_start;
