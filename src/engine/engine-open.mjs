@@ -312,6 +312,22 @@ export async function prepareLoad(document, {layerTimeline, signal, onProgress, 
   catch (error) { opening.dispose(); throw error; }
 }
 
+/**
+ * Opens movieclip `typeId` of the project `session` holds, on this thread, from the project's tree (no text of it is made or read), and gives the
+ * view the editor adopts as the document it loads: `{document, name}`. A refusal is the error `openFailure` words.
+ */
+export function openMovieclipNow(session, typeId, {engine, layerTimeline} = {}) {
+  engine = engineOf(engine);
+  let opening;
+  try { opening = new Opening(engine, engine.handle.open_movieclip(session, typeId, optionsText({layerTimeline}))); }
+  catch (error) { throw openFailure(error); }
+  try {
+    const read = opening.readNow();
+    attachRead(read.report, read);
+    return {document: read.report, name: opening.name};
+  } catch (error) { opening.dispose(); throw error; }
+}
+
 /** [`prepareLoad`] at once, on this thread. */
 export function prepareLoadNow(document, {layerTimeline} = {}) {
   const report = reportOf(document), read = reads.get(report);

@@ -1,5 +1,6 @@
 //! Editing calls as JavaScript sees them (docs/engine/editing.md).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use styk_doc::{Value, json};
@@ -19,6 +20,12 @@ const CALL_WORKING_BYTES: usize = 64 << 20;
 /// document at the peak of undoing a movieclip edit of a 40 MiB Pivot file). A session asks for the most any of its
 /// calls has taken, once it knows it.
 const HISTORY_WORKING_BYTES: usize = 256 << 20;
+
+/// Whether the module can take about `bytes` more: what a command that copies much of the document asks before it begins
+/// (`styk_edit::session::Session::set_memory_gate`).
+fn can_take(bytes: usize) -> bool {
+    styk_alloc::admit(bytes).is_ok()
+}
 
 /// The answer to a call the engine refuses for want of memory, in the shape of an error the session raised.
 fn out_of_memory_answer() -> String {
@@ -46,9 +53,13 @@ pub struct EditSession {
     session: Option<styk_edit::session::Session>,
     revision: f64,
     publisher: Option<Publisher>,
-    /// The most memory one call of this session has taken beyond what it held when it began (and a quarter more): of
-    /// an edit, and of an undo or a redo.
-    working: [usize; 2],
+    /// The most memory a call of each kind has taken in this session beyond what it held when it began (and a quarter more), by the
+    /// call's name: what the next call of that name may need. (One number for every edit made a move wait for the memory a clip once took.)
+    working: HashMap<String, usize>,
+    /// What the call that made each entry of the history took beyond what the document held, for the undo stack and the redo stack: a redo of
+    /// an entry builds what its call built, so it is refused, nothing changed, when the module cannot take as much (a clip of every figure
+    /// of a large project took about a gigabyte, and its redo trapped the module).
+    costs: styk_edit::EntryCosts,
 }
 
 /// A closed session's document and history can be hundreds of megabytes: they are dropped on an engine
@@ -80,11 +91,25 @@ impl EditSession {
     /// A session that publishes into `engine` the document `opened` was made from.
     pub(crate) fn publishing(mut session: styk_edit::session::Session, engine: Engine, opened: Arc<OpenedDocument>) -> EditSession {
         session.set_clock(crate::clock);
-        EditSession { session: Some(session), revision: 0.0, publisher: Some(Publisher { engine, opened, published: None, error: None }), working: [0; 2] }
+        session.set_memory_gate(can_take);
+        EditSession { session: Some(session), revision: 0.0, publisher: Some(Publisher { engine, opened, published: None, error: None }), working: HashMap::new(), costs: Default::default() }
     }
 
     fn session(&self) -> &styk_edit::session::Session {
         self.session.as_ref().expect("a session is open until it is dropped")
+    }
+
+    /// The document of movieclip `type_id` of the session's project, as text would give it, and its name; or the message that says why not.
+    pub(crate) fn movieclip_document(&self, type_id: f64) -> Result<(Value, String), &'static str> {
+        let report = self.session().report();
+        let figure = report.get("figure_types").and_then(Value::elements).and_then(|figures| figures.iter().find(|figure| figure.get("figure_type_id").and_then(Value::as_f64) == Some(type_id)));
+        let asset = figure.as_ref().and_then(|figure| figure.path(&["_styk", "movieclip"])).filter(|asset| asset.is_object()).ok_or("errors.editorMovieclips.chooseAMovieclip")?;
+        if asset.get("spatialMeshes").is_some_and(Value::truthy) {
+            return Err("errors.editorMovieclips.thisIsAnAttachedMeshPoseItsParent");
+        }
+        let document = asset.get("document").filter(|document| document.is_object()).ok_or("errors.editorMovieclips.chooseAMovieclip")?;
+        let name = figure.as_ref().and_then(|figure| figure.get("name")).and_then(Value::as_str).unwrap_or("").to_string();
+        Ok((document.unshared(), name))
     }
 
     /// Publishes the session's tree when a call changed it or moved its revision (a document marked as
@@ -123,14 +148,17 @@ impl EditSession {
         let tree = styk_doc::json::parse(document.as_bytes()).map_err(js_error)?;
         let mut session = styk_edit::session::Session::start(tree, state).map_err(js_error)?;
         session.set_clock(crate::clock);
-        Ok(EditSession { session: Some(session), revision, publisher: None, working: [0; 2] })
+        session.set_memory_gate(can_take);
+        Ok(EditSession { session: Some(session), revision, publisher: None, working: HashMap::new(), costs: Default::default() })
     }
 
     /// Makes the session's document the engine's document at `revision` (the editor's revision counter),
     /// as it is now: the stage draws it, playback and exports read it, and every call that changes it
     /// publishes the change. Answers `{generation, revision, ms}` as JSON.
     pub fn activate(&mut self, revision: f64) -> Result<String, JsError> {
-        let _working = styk_alloc::reserve(CALL_WORKING_BYTES.max(self.working[0])).map_err(|error| js_error(styk_engine::document::OpenError::out_of_memory(error).to_json()))?;
+        let _working = styk_alloc::reserve(CALL_WORKING_BYTES.max(self.working.get("@activate").copied().unwrap_or(0))).map_err(|error| js_error(styk_engine::document::OpenError::out_of_memory(error).to_json()))?;
+        styk_alloc::reset_peak();
+        let began = styk_alloc::live_bytes();
         let tree = self.session().report().clone();
         let Some(publisher) = &mut self.publisher else { return Err(js_error("this session has no document to publish")) };
         let done = publisher.engine.activate(&publisher.opened.typed, &tree, revision as u64).map_err(|error| js_error(error.to_json()))?;
@@ -140,6 +168,9 @@ impl EditSession {
         }
         publisher.published = Some((tree, revision as u64));
         publisher.error = None;
+        let took = styk_alloc::peak_bytes().saturating_sub(began);
+        let learned = self.working.entry("@activate".to_string()).or_default();
+        *learned = (*learned).max((took + took / 4).min(styk_alloc::ceiling() / 2));
         Ok(format!("{{\"generation\":{},\"revision\":{},\"ms\":{:.3}}}", done.generation, done.revision, done.ms))
     }
 
@@ -208,15 +239,22 @@ impl EditSession {
     /// in the view, unchanged COW figures and sheet fields are omitted (the app's owned
     /// adoption path); default responses stay complete for shadow comparison.
     pub fn call(&mut self, method: &str, args: &str, view: &str) -> String {
-        let (kind, base) = if matches!(method, "undo" | "redo") { (1, HISTORY_WORKING_BYTES) } else { (0, CALL_WORKING_BYTES) };
-        let Ok(_working) = styk_alloc::reserve(base.max(self.working[kind])) else { return out_of_memory_answer() };
+        let base = if matches!(method, "undo" | "redo") { HISTORY_WORKING_BYTES } else { CALL_WORKING_BYTES };
+        // A redo needs what the call it redoes took.
+        let redoing = if method == "redo" { self.costs.redo() } else { 0 };
+        let Ok(_working) = styk_alloc::reserve(base.max(self.working.get(method).copied().unwrap_or(0)).max(redoing)) else { return out_of_memory_answer() };
         styk_alloc::reset_peak();
         let began = styk_alloc::live_bytes();
+        let depths = self.session().history_depths();
         let answer = self.session.as_mut().expect("a session is open until it is dropped").call(method, args, view);
         self.publish();
         // What this call took (and whatever the workers took meanwhile) is what the next may need.
         let took = styk_alloc::peak_bytes().saturating_sub(began);
-        self.working[kind] = self.working[kind].max((took + took / 4).min(styk_alloc::ceiling() / 2));
+        let wanted = (took + took / 4).min(styk_alloc::ceiling() / 2);
+        let learned = self.working.entry(method.to_string()).or_default();
+        *learned = (*learned).max(wanted);
+        let after = self.session().history_depths();
+        self.costs.note(method, depths, after, wanted);
         answer
     }
 
@@ -229,13 +267,18 @@ impl EditSession {
         // The tree as text would give it: a pose array the clip's records share is one array in each place it sits, as a file saves it.
         list[1] = document.session().report().unshared();
         args = Value::array(list);
-        let Ok(_working) = styk_alloc::reserve(CALL_WORKING_BYTES.max(self.working[0])) else { return out_of_memory_answer() };
+        let Ok(_working) = styk_alloc::reserve(CALL_WORKING_BYTES.max(self.working.get(method).copied().unwrap_or(0))) else { return out_of_memory_answer() };
         styk_alloc::reset_peak();
         let began = styk_alloc::live_bytes();
+        let depths = self.session().history_depths();
         let answer = json::to_string(&self.session.as_mut().expect("a session is open until it is dropped").call_values(method, &args, &view));
         self.publish();
         let took = styk_alloc::peak_bytes().saturating_sub(began);
-        self.working[0] = self.working[0].max((took + took / 4).min(styk_alloc::ceiling() / 2));
+        let wanted = (took + took / 4).min(styk_alloc::ceiling() / 2);
+        let learned = self.working.entry(method.to_string()).or_default();
+        *learned = (*learned).max(wanted);
+        let after = self.session().history_depths();
+        self.costs.note(method, depths, after, wanted);
         answer
     }
 }
