@@ -69,6 +69,8 @@ pub struct Assets {
     /// Finer tessellations of glyphs drawn large ([`Assets::glyph_at`]), made when first
     /// drawn and shared by the revisions of one document.
     fine: Arc<FineGlyphs>,
+    /// Triangles of filled polygons, shared like `fine` by the revisions of one document ([`Assets::fill`]).
+    fills: Arc<FillMemory>,
     /// Which assets these are: an [`Assets::extended`] that adds something is numbered anew, unlike the address it lives at (an address is
     /// reused once the assets are dropped); one that adds nothing places everything where the assets before it did and keeps the number.
     /// 0 for assets that were not built.
@@ -150,6 +152,47 @@ impl FineGlyphs {
         }
         *bytes += size;
         map.insert(key, (glyph.clone(), triangles.clone()));
+        triangles
+    }
+}
+
+/// Triangles of the concave polygons figures fill, by the polygon: the points of a polygon come out the same every frame the figure
+/// does not move, and tessellating them is most of what encoding a frame of such figures costs.
+#[derive(Default)]
+struct FillMemory {
+    map: std::sync::Mutex<(HashMap<Box<[[u32; 2]]>, Arc<[[f32; 2]]>>, usize)>,
+}
+
+/// Bytes of triangles (and of the polygons that name them) kept per document; beyond, the memory starts over.
+const FILL_BUDGET: usize = 16 << 20;
+
+impl FillMemory {
+    /// The triangles of the polygon with these points (as `f32` bits), or `make()`'s, stored. The tessellation runs without the lock: two
+    /// threads may both make one, and the first stored is kept. The lock is spun for, never waited on (D7).
+    fn get(&self, points: &[[u32; 2]], make: impl FnOnce() -> Arc<[[f32; 2]]>) -> Arc<[[f32; 2]]> {
+        let lock = || loop {
+            match self.map.try_lock() {
+                Ok(guard) => return guard,
+                Err(std::sync::TryLockError::Poisoned(poisoned)) => return poisoned.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => std::hint::spin_loop(),
+            }
+        };
+        if let Some(kept) = lock().0.get(points) {
+            return kept.clone();
+        }
+        let triangles = make();
+        let mut guard = lock();
+        let (map, bytes) = &mut *guard;
+        if let Some(kept) = map.get(points) {
+            return kept.clone();
+        }
+        let size = std::mem::size_of_val(&*triangles) + std::mem::size_of_val(points);
+        if *bytes + size > FILL_BUDGET {
+            map.clear();
+            *bytes = 0;
+        }
+        *bytes += size;
+        map.insert(points.into(), triangles.clone());
         triangles
     }
 }
@@ -317,6 +360,21 @@ impl Assets {
     /// Whether the placement numbered `serial` is still the place of a cel: the slots a tile decoded for it names are that cel's.
     pub fn holds_placement(&self, serial: u64) -> bool {
         self.serials.contains(&serial)
+    }
+
+    /// The triangles of the concave polygon `points` filled even-odd (what [`triangulate`] makes of it at tolerance 0.05), kept for the frames
+    /// that draw the same polygon again.
+    pub fn fill(&self, points: &[[f64; 2]]) -> Arc<[[f32; 2]]> {
+        let key: Vec<[u32; 2]> = points.iter().map(|p| [(p[0] as f32).to_bits(), (p[1] as f32).to_bits()]).collect();
+        self.fills.get(&key, || {
+            let mut builder = lyon_path::Path::builder();
+            builder.begin(lyon_path::math::point(points[0][0] as f32, points[0][1] as f32));
+            for p in &points[1..] {
+                builder.line_to(lyon_path::math::point(p[0] as f32, p[1] as f32));
+            }
+            builder.end(true);
+            triangulate(&builder.build(), FillRule::EvenOdd, 0.05)
+        })
     }
 
     /// The first atlas slot of each display level of `cel`.
