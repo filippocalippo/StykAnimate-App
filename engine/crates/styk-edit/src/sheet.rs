@@ -151,6 +151,13 @@ pub(crate) struct Plan {
     pub(crate) figures: Value,
 }
 
+/// A figure shown as `frame` in place of figure `uid` (`Editor::replace_each_at`); `extra` is a field of its patch (`frameId` names the pose source, else the frame is captured).
+pub(crate) struct Replacement<'a> {
+    pub uid: u32,
+    pub frame: &'a Value,
+    pub extra: Option<(&'a str, Value)>,
+}
+
 impl Plan {
     /// Whether the figure definition `type_id` (the document's or one the command adds) is a drawing cel.
     fn is_drawing(&self, type_id: Option<f64>) -> bool {
@@ -832,6 +839,16 @@ impl Editor {
     /// key there, a replacement-only key made where there is none), the replacements in force
     /// before restored at `end`.
     pub(crate) fn replace_at(&self, plan: &mut Plan, id: &str, tick: f64, replaced: u32, frame: &Value, extra: Option<(&str, Value)>, end: f64) -> Result<(), EditError> {
+        self.replace_each_at(plan, id, tick, &[Replacement { uid: replaced, frame, extra }], end)
+    }
+
+    /// `replace_at` for several figures of the layer at one tick, as if called for each in turn: the key and its patches are
+    /// read and written once, and the layer's membership (whether it shows anything there) is worked out once, from all the
+    /// patches. A clip of many figures makes one replacement for each, and working the membership out after every one is quadratic in them.
+    pub(crate) fn replace_each_at(&self, plan: &mut Plan, id: &str, tick: f64, replacements: &[Replacement<'_>], end: f64) -> Result<(), EditError> {
+        if replacements.is_empty() {
+            return Ok(());
+        }
         if tick.fract() != 0.0 || !(0.0..MAX_SHEET_TICKS).contains(&tick) {
             return Err(EditError::Invalid("errors.editorLayerSheet.chooseAValidWholeFrame".into()));
         }
@@ -872,28 +889,41 @@ impl Editor {
                 plan.set_keys(id, keys);
             }
         }
-        let frame_id = match &extra {
-            Some(("frameId", frame_id)) => frame_id.clone(),
-            _ => plan.capture(frame, id).get("frameId").cloned().unwrap_or(Value::Null),
-        };
         let at = boundary(self, plan, tick)?;
-        let mut patches: Vec<Value> = previous.into_iter().filter(|p| num(p, "uid") != Some(replaced as f64)).collect();
-        let mut patch = Obj::new();
-        patch.set("uid", Value::Num(replaced as f64));
-        patch.set("frameId", frame_id);
-        if let Some((key, value)) = extra.filter(|(key, _)| *key != "frameId") {
-            patch.set(key, value);
+        // A figure replaced again later in the list keeps only its last patch, as repeated calls would leave it.
+        let last: std::collections::HashMap<u32, usize> = replacements.iter().enumerate().map(|(at, r)| (r.uid, at)).collect();
+        let mut patches: Vec<Value> = previous.into_iter().filter(|p| !num(p, "uid").is_some_and(|u| u >= 0.0 && u.fract() == 0.0 && u <= f64::from(u32::MAX) && last.contains_key(&(u as u32)))).collect();
+        for (at, Replacement { uid: replaced, frame, extra }) in replacements.iter().enumerate() {
+            let frame_id = match extra {
+                Some(("frameId", frame_id)) => frame_id.clone(),
+                _ => plan.capture(frame, id).get("frameId").cloned().unwrap_or(Value::Null),
+            };
+            if last[replaced] != at {
+                continue;
+            }
+            let mut patch = Obj::new();
+            patch.set("uid", Value::Num(*replaced as f64));
+            patch.set("frameId", frame_id);
+            if let Some((key, value)) = extra.as_ref().filter(|(key, _)| *key != "frameId") {
+                patch.set(key, value.clone());
+            }
+            patches.push(Value::object(patch));
         }
-        patches.push(Value::object(patch));
         // Whether the layer shows anything there once the replacements are in force.
         let mut members: Vec<u32> = objects_of(&self.evaluated(tick, false)?).iter().filter_map(uid).filter(|u| self.layer_of(*u) == id).collect();
+        // The figures each pose source shows, read once however many patches name it.
+        let mut shown: std::collections::HashMap<&str, Vec<u32>> = std::collections::HashMap::new();
         for patch in &patches {
             let removed = num(patch, "uid").map(|u| u as u32);
             members.retain(|u| Some(*u) != removed);
-            let source = patch.get("frameId").and_then(Value::as_str).and_then(|frame| plan.captured(frame).cloned().or_else(|| self.frame_by_id(frame)));
-            for added in source.map(|s| objects_of(&s)).unwrap_or_default().iter().filter_map(uid) {
-                if !members.contains(&added) {
-                    members.push(added);
+            let Some(frame) = patch.get("frameId").and_then(Value::as_str) else { continue };
+            let added = shown.entry(frame).or_insert_with(|| {
+                let source = plan.captured(frame).cloned().or_else(|| self.frame_by_id(frame));
+                source.map(|s| objects_of(&s)).unwrap_or_default().iter().filter_map(uid).collect()
+            });
+            for added in added.iter() {
+                if !members.contains(added) {
+                    members.push(*added);
                 }
             }
         }

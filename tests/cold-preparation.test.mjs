@@ -7,7 +7,9 @@ import {ownedEditorFor} from './support/owned-editor.mjs';
 
 function clipFixture(){
   const editor=ownedEditorFor();editor.select(1);
-  const figure=editor.createMovieclip({start:0,end:20,replace:false});
+  // The creation answers the definition lazily; the test works on the record the document holds.
+  const made=editor.createMovieclip({start:0,end:20,replace:false});
+  const figure=editor.report.figure_types.find(type=>type.figure_type_id===made.figure_type_id);
   return {editor,figure};
 }
 function transport(report,options){
