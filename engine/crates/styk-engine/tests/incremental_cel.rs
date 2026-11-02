@@ -81,7 +81,7 @@ fn an_export_that_keeps_an_earlier_generations_pictures_is_given_the_cel_that_re
     let assets = engine.generation().unwrap().assets.clone();
     let after = cel(&engine);
     assert!(assets.cel_dirty(after.key()).is_some_and(|dirty| dirty.iter().flatten().all(|dirty| !dirty)), "the atlas of the document writes none of it");
-    let frames = engine.export_frames(0).unwrap();
+    let frames = engine.export_frames(2).unwrap();
     frames.decode_images_since(Some(&earlier));
     while engine.step() {}
     let images = frames.take_images(usize::MAX);
