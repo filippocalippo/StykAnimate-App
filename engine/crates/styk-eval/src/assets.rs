@@ -165,10 +165,15 @@ impl FineGlyphs {
 #[derive(Default)]
 struct FillMemory {
     map: std::sync::Mutex<(HashMap<Box<[[u32; 2]]>, Arc<[[f32; 2]]>>, usize)>,
+    /// How many polygons were tessellated.
+    made: std::sync::atomic::AtomicUsize,
 }
 
-/// Bytes of triangles (and of the polygons that name them) kept per document; beyond, the memory starts over.
-const FILL_BUDGET: usize = 16 << 20;
+/// Bytes the memory may hold per document, counted as it holds them: the triangles, the polygon that names them, and what a table entry and
+/// an `Arc` cost besides; beyond, the memory starts over.
+const FILL_BUDGET: usize = 4 << 20;
+/// What an entry costs beyond its triangles and its polygon: the table's slot and hash, the key's box, the triangles' `Arc` counts.
+const FILL_ENTRY_OVERHEAD: usize = 96;
 
 impl FillMemory {
     /// The triangles of the polygon with these points (as `f32` bits), or `make()`'s, stored. The tessellation runs without the lock: two
@@ -185,12 +190,13 @@ impl FillMemory {
             return kept.clone();
         }
         let triangles = make();
+        self.made.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut guard = lock();
         let (map, bytes) = &mut *guard;
         if let Some(kept) = map.get(points) {
             return kept.clone();
         }
-        let size = std::mem::size_of_val(&*triangles) + std::mem::size_of_val(points);
+        let size = std::mem::size_of_val(&*triangles) + std::mem::size_of_val(points) + FILL_ENTRY_OVERHEAD;
         if *bytes + size > FILL_BUDGET {
             map.clear();
             *bytes = 0;
@@ -401,6 +407,11 @@ impl Assets {
     /// Whether the placement numbered `serial` is still the place of a cel: the slots a tile decoded for it names are that cel's.
     pub fn holds_placement(&self, serial: u64) -> bool {
         self.serials.contains(&serial)
+    }
+
+    /// How many concave polygons were tessellated for these assets and the revisions after them (the rest were kept).
+    pub fn fills_made(&self) -> usize {
+        self.fills.made.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The triangles of the concave polygon `points` filled even-odd (what [`triangulate`] makes of it at tolerance 0.05), kept for the frames

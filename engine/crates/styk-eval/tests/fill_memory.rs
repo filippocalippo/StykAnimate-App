@@ -32,3 +32,26 @@ fn a_polygon_drawn_again_is_not_tessellated_again_and_a_moved_one_is() {
     assert!(!Arc::ptr_eq(&first, &moved), "another polygon: its own triangles");
     assert_eq!(&*moved, &*triangulate(&path(&arrow(1.5)), FillRule::EvenOdd, 0.05));
 }
+
+/// A frame drawn again is not tessellated again: the call site of the polygons of the documents goes through the memory.
+#[test]
+fn the_concave_polygons_of_a_frame_are_tessellated_once_however_often_it_is_encoded() {
+    use styk_eval::drawlist::{encode_composed, Overrides};
+    let mut tessellated = 0;
+    for name in ["rig/curved-connector-polygon.json", "picking-construction/sticknodes.json"] {
+        let doc = styk_eval::open(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)).expect("fixture");
+        let prepared = styk_eval::prepare(doc);
+        let assets = Assets::build(&prepared.doc);
+        let encode = |tick: f64| {
+            let scene = styk_eval::geometry::build(&prepared.doc, &prepared.evaluate(tick));
+            encode_composed(&prepared.doc, &assets, &scene, &Overrides::default(), &[], None).prims.len()
+        };
+        let first: Vec<usize> = [0.0, 3.0].into_iter().map(encode).collect();
+        let made = assets.fills_made();
+        let again: Vec<usize> = [0.0, 3.0].into_iter().map(encode).collect();
+        assert_eq!(assets.fills_made(), made, "{name}: the frames again tessellate nothing");
+        assert_eq!(first, again, "{name}: and are the same frames");
+        tessellated += made;
+    }
+    assert!(tessellated > 0, "the documents have concave polygons to tessellate");
+}
