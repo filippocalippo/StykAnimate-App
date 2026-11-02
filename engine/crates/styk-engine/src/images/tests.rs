@@ -368,3 +368,42 @@ fn a_cel_the_document_replaced_is_not_decoded_and_does_not_hold_the_pictures_pen
     assert_eq!(left, 0);
     assert!(decoded > 0, "the cel the document places is decoded");
 }
+
+#[test]
+fn a_frame_that_draws_the_slots_a_replaced_cel_gave_waits_until_the_new_tiles_are_all_in() {
+    use styk_draw::{DrawList, Prim, K_IMAGE};
+    use styk_eval::assets::{decode_cel, Assets};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/drawlist/drawing-cel.json");
+    let mut loader = styk_eval::load::Loader::new();
+    let first = loader.document(&styk_doc::json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
+    let cel = |document: &styk_eval::doc::Document| document.figures[0].images.iter().find_map(|image| image.tiles.clone()).unwrap();
+    let assets = Assets::build(&first);
+    let mut uploaded = Uploaded::default();
+    uploaded.observe(&assets);
+    for image in decode_cel(&assets, &cel(&first)) {
+        uploaded.record(&assets, &image);
+    }
+    let sampling = |assets: &Assets, tiles: &Arc<styk_eval::doc::DrawingTiles>| {
+        let entry = assets.drawing[assets.cel_levels(tiles).unwrap()[0] as usize];
+        DrawList { prims: vec![Prim { kind: K_IMAGE, group: 0, color: 0, paint: 0, a: [0.0; 4], b: [0.0, 0.0, entry.layer as f32, 0.0], c: entry.uv() }], ..Default::default() }
+    };
+    assert!(!uploaded.lacks(&sampling(&assets, &cel(&first))) && !uploaded.refilling_in(&sampling(&assets, &cel(&first))), "the cel placed first is in");
+    // The same file read again: the next cel, in the slots of the one before.
+    let next = loader.document(&styk_doc::json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
+    let replaced = assets.extended(&next);
+    uploaded.observe(&replaced);
+    let list = sampling(&replaced, &cel(&next));
+    assert!(uploaded.refilling_in(&list), "its slots hold the old cel's pixels");
+    assert!(uploaded.lacks(&list));
+    let tiles = decode_cel(&replaced, &cel(&next));
+    let sampled = replaced.cel_levels(&cel(&next)).unwrap()[0];
+    for image in tiles.iter().filter(|image| image.index != sampled) {
+        uploaded.record(&replaced, image);
+    }
+    assert!(uploaded.refilling_in(&list), "the tile the frame draws is still the old cel's");
+    uploaded.record(&replaced, tiles.iter().find(|image| image.index == sampled).expect("the tile is decoded"));
+    assert!(!uploaded.refilling_in(&list) && !uploaded.lacks(&list), "every tile in: the frame is drawn");
+    // Assets seen again, or a cel that is not new, refill nothing.
+    uploaded.observe(&replaced);
+    assert!(!uploaded.refilling_in(&list));
+}

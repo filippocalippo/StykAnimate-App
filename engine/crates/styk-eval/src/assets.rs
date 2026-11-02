@@ -357,6 +357,11 @@ impl Assets {
         self.placements.get(&cel).map_or(0, |placement| placement.serial)
     }
 
+    /// Every placement of a cel: its number and the blocks of slots of [`Assets::drawing`] it holds, one per display level.
+    pub fn placements(&self) -> impl Iterator<Item = (u64, &[(u32, u32)])> {
+        self.placements.values().map(|placement| (placement.serial, placement.blocks.as_slice()))
+    }
+
     /// Whether the placement numbered `serial` is still the place of a cel: the slots a tile decoded for it names are that cel's.
     pub fn holds_placement(&self, serial: u64) -> bool {
         self.serials.contains(&serial)

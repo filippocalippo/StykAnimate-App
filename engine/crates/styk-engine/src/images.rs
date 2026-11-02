@@ -20,6 +20,13 @@ pub use residency::{drawing_pages, has_place, images_on, on_demand, pictures_of,
 #[derive(Default)]
 pub struct Uploaded {
     places: HashSet<u64>,
+    /// Places of cels the document replaced since the atlas was laid out, which the new cel was given (a replaced cel's slots go to the
+    /// next, [`Assets::extended`]): what they hold is the old cel's until the new one's tiles are in, so a frame that draws them waits.
+    refilling: HashSet<u64>,
+    /// The numbers of the placements seen ([`Assets::placement`]), the assets they were seen in, and whether any assets were seen before.
+    seen: HashSet<u64>,
+    assets: u64,
+    primed: bool,
 }
 
 /// An atlas place by its page and corner (the gutter excluded), as records name it.
@@ -37,6 +44,47 @@ impl Uploaded {
     /// The atlas was allocated again: it holds nothing.
     pub fn clear(&mut self) {
         self.places.clear();
+        self.refilling.clear();
+        self.seen.clear();
+        self.assets = 0;
+        self.primed = false;
+    }
+
+    /// The atlas `assets` lays out is the document in front: the cels it placed since the last assets seen (the document replaced
+    /// the cels before them) are to be written, so their places hold no pixels until their tiles are in ([`Uploaded::refilling_in`]).
+    /// The first assets seen after the atlas was allocated are not new: nothing was there before them.
+    pub fn observe(&mut self, assets: &Assets) {
+        if self.assets == assets.id() && self.primed {
+            return;
+        }
+        self.assets = assets.id();
+        for (serial, blocks) in assets.placements() {
+            if !self.seen.insert(serial) || !self.primed {
+                continue;
+            }
+            for &(first, count) in blocks {
+                for slot in first..first + count {
+                    if let Some(entry) = assets.drawing.get(slot as usize).filter(|entry| entry.valid) {
+                        let at = place(entry.layer, entry.x, entry.y);
+                        self.places.remove(&at);
+                        self.refilling.insert(at);
+                    }
+                }
+            }
+        }
+        self.seen.retain(|serial| assets.holds_placement(*serial));
+        self.primed = true;
+    }
+
+    /// Whether `list` draws a place that is being refilled with the pixels of the cel that replaced the one it held: a frame that drew
+    /// it now would show the old cel's tiles among the new cel's.
+    pub fn refilling_in(&self, list: &DrawList) -> bool {
+        !self.refilling.is_empty()
+            && list.prims.iter().any(|p| match p.kind & 255 {
+                K_IMAGE => self.refilling.contains(&record_place(p.b[2], p.c[0], p.c[1])),
+                K_BG_IMAGE => self.refilling.contains(&record_place(p.a[2], p.c[0], p.c[1])),
+                _ => false,
+            })
     }
 
     /// A live drawing slot was written at the corner `(x, y)` of page `layer`.
@@ -76,7 +124,11 @@ impl Uploaded {
     /// `image` was written into the atlas `assets` lays out. Whether it was not there before.
     pub fn record(&mut self, assets: &Assets, image: &DecodedImage) -> bool {
         let entry: Option<&AtlasEntry> = if image.drawing { assets.drawing.get(image.index as usize) } else { assets.atlas.get(image.index as usize) };
-        entry.filter(|e| e.valid).is_some_and(|e| self.places.insert(place(e.layer, e.x, e.y)))
+        entry.filter(|e| e.valid).is_some_and(|e| {
+            let at = place(e.layer, e.x, e.y);
+            self.refilling.remove(&at);
+            self.places.insert(at)
+        })
     }
 
     /// Whether `list` samples an atlas place that holds no pixels yet: a picture or a
