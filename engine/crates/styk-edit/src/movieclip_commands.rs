@@ -921,7 +921,10 @@ impl Editor {
                         vec![]
                     };
                     set_continuations(&mut frame, steps);
-                    editor.replace_at(&mut plan, &layer, tick, previous, &Value::object(frame), None, tick + 1.0)?;
+                    // The figures were posed with an animation origin whose pivot the frame they are added to places.
+                    let mut posed = Value::object(frame);
+                    editor.synchronize_origin_frame(&mut posed, &objects_of(&at), true)?;
+                    editor.replace_at(&mut plan, &layer, tick, previous, &posed, None, tick + 1.0)?;
                     replaced = true;
                 }
             }

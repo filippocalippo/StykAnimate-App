@@ -54,3 +54,18 @@ fn a_movieclip_made_of_a_figure_a_project_assigned_to_a_drawing_layer_keeps_it_o
     assert_eq!(made.get("status").and_then(Value::as_str), Some("ok"), "{made:?}");
     prepare_for_editor(session.report().clone(), true).expect("the project opens after it is saved");
 }
+
+/// A figure with an animation origin, broken out of a movieclip, is posed with one in the poses the layer sheet retains: they were left
+/// without the pivot's position, and the file saved afterwards was refused when it opened (`errors.animationOriginValidation…mustBeFinite`).
+#[test]
+fn figures_with_an_animation_origin_broken_out_of_a_movieclip_open_in_the_saved_file() {
+    let mut session = Session::start(read("tests/edit/origin-future-rig-joined-sheet.document.json"), STATE).unwrap();
+    let made = call(&mut session, "createMovieclip", r#"[{"start":0,"end":4}]"#, &[1, 2], "layer-1");
+    assert_eq!(made.get("status").and_then(Value::as_str), Some("ok"), "{made:?}");
+    let clip: Vec<u32> = made.path(&["state", "selectedUids"]).and_then(Value::elements).map(|e| e.iter().filter_map(|v| v.as_f64()).map(|n| n as u32).collect()).unwrap_or_default();
+    assert!(!clip.is_empty(), "the clip is selected: {made:?}");
+    let broken = call(&mut session, "breakApartMovieclip", "[]", &clip, "layer-1");
+    assert_eq!(broken.get("status").and_then(Value::as_str), Some("ok"), "{broken:?}");
+    let opened = prepare_for_editor(session.report().clone(), true).expect("the project opens after it is saved");
+    assert_eq!(opened.repairs, 0, "nothing needed mending");
+}
