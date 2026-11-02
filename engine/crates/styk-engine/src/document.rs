@@ -235,8 +235,8 @@ pub struct OpenedDocument {
     /// What a Pivot project says of its original (`_stykSource` without the file: kind, version, the SHA-256 of the file and of the
     /// document read from it); the file is added by [`OpenedDocument::attach_source`]. `None` for any other kind of document.
     pub source: Option<styk_doc::Obj>,
-    /// A save stores the document's Pivot original (`_stykSource`) first in the payload section: the document was read from a Pivot file,
-    /// or from a project file that keeps it so. A project file that keeps it elsewhere is saved in the order it has.
+    /// A save stores the document's Pivot original (`_stykSource`) first in the payload section: the document was read from a Pivot file.
+    /// A project file that carries one keeps the order its file had.
     pub original_first: bool,
     /// Where the open's time went, in milliseconds by the engine's clock: `decode` (the file read into a document), `prepare` (the
     /// load's checks and normalization), `views` (the typed views), `check` (what was left of the skeleton's checksum when the
@@ -403,7 +403,6 @@ impl Engine {
         });
         let opened = self.prepare_opened(document, kind, version, name, options, cancel, &fan);
         let prepared = self.now();
-        let stored_first = check.as_ref().is_some_and(styk_formats::container::Deferred::original_first);
         let source = match (fingerprint, &opened) {
             (Some((facts, digest)), Ok(_)) => match digest.wait(&fan) {
                 Ok(Ok(document_sha256)) => Some(describe_source(&facts, document_sha256)),
@@ -412,7 +411,7 @@ impl Engine {
             },
             _ => None,
         };
-        let original_first = source.is_some() || stored_first;
+        let original_first = source.is_some();
         // A skeleton that does not match its checksum is the file's error, whatever became of the document read from it. A stopped
         // open does not wait for the check.
         match check {

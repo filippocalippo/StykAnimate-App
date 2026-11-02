@@ -84,7 +84,6 @@ fn the_pivot_original_is_stored_first_and_checked_on_reading() {
     let checked = container::check(&bytes, Kind::Styk).unwrap();
     let payloads = &checked.parts.sections.iter().find(|(kind, _)| *kind == 2).unwrap().1;
     assert!(payloads.starts_with(&original), "the original opens the payload section, as the app has always stored it");
-    assert!(container::decode(&bytes, Kind::Styk).unwrap().original_first, "the file says so");
     // A fingerprint that names other bytes is refused when the file is read.
     let bad = save_opened_from_pivot(&carrying(&tree, &original, &"0".repeat(64)), None);
     assert!(files::open_document(&bad, Kind::Styk).is_err());
@@ -120,17 +119,6 @@ fn a_document_read_from_a_project_file_is_saved_in_the_order_it_holds_its_origin
     let kept = save(&tree, Some("Opened"));
     let moved = save_opened_from_pivot(&tree, Some("Opened"));
     assert_ne!(kept, moved, "the original comes first only for a document read from Pivot");
-    // The file says which it keeps, and a project opened from either saves again to the bytes it was read from.
-    assert!(!container::decode(&kept, Kind::Styk).unwrap().original_first);
-    assert!(container::decode(&moved, Kind::Styk).unwrap().original_first);
-    let engine = Engine::new(|| 0.0, Budgets::for_device(None));
-    for (bytes, first) in [(&kept, false), (&moved, true)] {
-        let opened = engine.open_document(OpenSource::File { bytes, name: "Opened.styk" }, OpenOptions { layer_timeline: false }, &|| false).unwrap();
-        assert_eq!(opened.original_first, first);
-        let request = ProjectRequest { name: None, original_first: opened.original_first, reservation: None };
-        let again = save_project(std::slice::from_ref(&opened.tree), &[], request, &|| false).unwrap().bytes;
-        assert_eq!(&again, bytes, "an unchanged project saves to the bytes it was read from");
-    }
     // The same parts, whichever order the file keeps them in.
     let (kept, moved) = (files::open_document(&kept, Kind::Styk).unwrap(), files::open_document(&moved, Kind::Styk).unwrap());
     for key in ["data_base64", "_stykSource"] {

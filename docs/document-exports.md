@@ -98,6 +98,21 @@ root, as saves of projects opened from Pivot have always laid it out. The codec'
 service's, replayed against its recordings) are no longer used by the app. A Pivot export sends the codec the document's JSON and then the original's
 bytes (not a base64 string of them inside the JSON), so a project of 90 MB exports as a project of 40 does.
 
+## A project saved again
+
+A project saved from a Pivot file stores the Pivot original first in the payload section and its record last in the root. Opened again from
+that `.styk` and saved without a change, it is saved in the order the document holds its parts in, which puts the original after the pictures:
+the same document and the same parts, with the payloads in another order, so not the same bytes (the stored size differs too: for
+`testingupload.styk`, 36,275,006 bytes in the file and 36,046,971 saved again). This is how a save has always behaved, and it is stable after that:
+saving that file again, with the same name, gives the same bytes. The recorded hash of the byte gate (`scripts/smoke-save-bytes.mjs`) is that of this
+saved-again file. A project's name is the file's name when it is saved from a file, so two files with different names differ in one field.
+
+A way to make the saved-again file the file it was read from exists and is not applied: the skeleton of a project saved from Pivot says where its
+original is (`"source_base64":"S2S:1:0:…"` at the end of the root), the open can read that and set `ProjectRequest.original_first`, and a project opened
+from such a file is then saved in the same layout. Checked on Ayame, svr_uriel, tdd2 and `testingupload.styk` (everything equal to the file but its name),
+at the price of the recorded hash of `testingupload.styk` changing (`f2c2507f18f7…` to `8142f08a46be…`). It is on the branch
+`t3/resave-keeps-layout`; applying it is a decision about that hash.
+
 PIV/STK export uses the same frame-at-a-time fingerprint for the submitted
 document. Older fingerprint versions keep their historical encoding. Validation
 and hashing still visit the complete document; streaming bounds the temporary

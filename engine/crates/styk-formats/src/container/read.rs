@@ -17,20 +17,6 @@ pub struct Decoded {
     pub version: u8,
     /// Length of the JSON the file stores (the skeleton, for version 2).
     pub skeleton_bytes: usize,
-    /// The file keeps its Pivot original first in its payload section ([`original_first`]).
-    pub original_first: bool,
-}
-
-/// Whether a project's skeleton is laid out as the save of a project opened from Pivot writes it: the Pivot original
-/// (`_stykSource.source_base64`) at the start of the payload section, and its record the last member of the root. Such a file is saved
-/// again in the same layout; any other keeps the order it has.
-pub fn original_first(skeleton: &[u8]) -> bool {
-    const MARKER: &[u8] = b"\"source_base64\":\"S2S:1:0:";
-    let tail = &skeleton[skeleton.len().saturating_sub(1 << 16)..];
-    let Some(at) = tail.windows(MARKER.len()).position(|window| window == MARKER) else { return false };
-    // What follows is the rest of the record (strings and numbers) and the end of the root: nothing opens, and nothing but those two close.
-    let after = &tail[at + MARKER.len()..];
-    after.ends_with(b"}}") && !after.contains(&b'{') && after.iter().filter(|&&byte| byte == b'}').count() == 2
 }
 
 /// What opening a project container takes beyond its file, from the sizes its header and section table state (nothing is unpacked):
@@ -56,7 +42,7 @@ pub fn decode(bytes: &[u8], kind: Kind) -> Result<Decoded, ContainerError> {
     let parts = decode_parts(bytes, kind)?;
     let skeleton_bytes = parts.skeleton.len();
     if parts.version < 2 {
-        return Ok(Decoded { document: parse_text::<&[(u8, Vec<u8>)]>(&parts.skeleton, None)?, version: parts.version, skeleton_bytes, original_first: false });
+        return Ok(Decoded { document: parse_text::<&[(u8, Vec<u8>)]>(&parts.skeleton, None)?, version: parts.version, skeleton_bytes });
     }
     let mut markers = Markers::new(&parts.sections, parts.skeleton.len());
     let parsed = parse_text(&parts.skeleton, Some(&mut markers));
@@ -70,7 +56,7 @@ pub fn decode(bytes: &[u8], kind: Kind) -> Result<Decoded, ContainerError> {
     if markers.materialized_upper > MAX_MATERIALIZED_BYTES && json_length(&document) > MAX_MATERIALIZED_BYTES {
         return Err(ContainerError::MaterializedTooLarge);
     }
-    Ok(Decoded { document, version: 2, skeleton_bytes, original_first: original_first(&parts.skeleton) })
+    Ok(Decoded { document, version: 2, skeleton_bytes })
 }
 
 /// The smallest skeleton that decode_deferred shares out.
@@ -80,17 +66,11 @@ const PIECES_FROM_BYTES: usize = 1 << 20;
 pub struct Deferred {
     check: Option<styk_doc::fanout::Started<[u8; 32]>>,
     expected: [u8; 32],
-    original_first: bool,
 }
 
 impl Deferred {
-    fn done(original_first: bool) -> Deferred {
-        Deferred { check: None, expected: [0; 32], original_first }
-    }
-
-    /// The file keeps its Pivot original first in its payload section, as the save of a project opened from Pivot writes it.
-    pub fn original_first(&self) -> bool {
-        self.original_first
+    fn done() -> Deferred {
+        Deferred { check: None, expected: [0; 32] }
     }
 
     /// Waits for the check. A skeleton whose checksum is not the file's is the file's error, whatever came of the document built
@@ -120,10 +100,7 @@ pub fn decode_deferred(bytes: &[u8], kind: Kind, fan: &dyn Fanout) -> Result<(De
 /// whose skeleton is 147 MB of text) is not held while the skeleton is read into a tree, which is when the memory is fullest.
 pub fn decode_deferred_owned(bytes: Vec<u8>, kind: Kind, fan: &dyn Fanout) -> Result<(Decoded, Deferred), ContainerError> {
     let bytes = Arc::new(bytes);
-    let inline = || decode(&bytes, kind).map(|decoded| {
-        let first = decoded.original_first;
-        (decoded, Deferred::done(first))
-    });
+    let inline = || decode(&bytes, kind).map(|decoded| (decoded, Deferred::done()));
     if fan.threads() <= 1 {
         return inline();
     }
@@ -167,7 +144,6 @@ pub fn decode_deferred_owned(bytes: Vec<u8>, kind: Kind, fan: &dyn Fanout) -> Re
     }
     let sections: Arc<[(u8, Vec<u8>)]> = sections.into();
     let skeleton_bytes = skeleton.len();
-    let first = original_first(&skeleton);
     let shared = Arc::new(SharedMarkers(std::sync::Mutex::new(Markers::new(sections.clone(), skeleton_bytes))));
     let hook: Arc<dyn json::SharedHook> = shared.clone();
     let pieces = json::parse_pieces(&skeleton, &hook, fan).filter(|document| shared.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_sound(document));
@@ -193,10 +169,10 @@ pub fn decode_deferred_owned(bytes: Vec<u8>, kind: Kind, fan: &dyn Fanout) -> Re
             if markers.materialized_upper > MAX_MATERIALIZED_BYTES && json_length(&document) > MAX_MATERIALIZED_BYTES {
                 return Err(ContainerError::MaterializedTooLarge);
             }
-            return Ok((Decoded { document, version: 2, skeleton_bytes, original_first: first }, Deferred::done(first)));
+            return Ok((Decoded { document, version: 2, skeleton_bytes }, Deferred::done()));
         }
     };
-    Ok((Decoded { document, version: 2, skeleton_bytes, original_first: first }, Deferred { check: Some(hashed), expected: digest, original_first: first }))
+    Ok((Decoded { document, version: 2, skeleton_bytes }, Deferred { check: Some(hashed), expected: digest }))
 }
 
 /// The skeleton's digest from the task that was started for it, or, when that task was lost, worked out here: a digest nobody has
@@ -708,7 +684,7 @@ mod tests {
         assert_eq!(skeleton_digest(kept, &skeleton, &fan), sha256(&skeleton));
         // A check whose result never came is an open refused, not accepted.
         let lost = start(&fan, || -> [u8; 32] { panic!("lost") });
-        let deferred = Deferred { check: Some(lost), expected: sha256(&skeleton), original_first: false };
+        let deferred = Deferred { check: Some(lost), expected: sha256(&skeleton) };
         assert_eq!(deferred.finish(&fan), Err(ContainerError::WorkerStopped));
     }
 }
