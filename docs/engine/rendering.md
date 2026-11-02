@@ -1003,21 +1003,21 @@ ahead), came out byte-identical in the last run; an earlier run on the same buil
 ### Pictures of a long document
 
 A document whose layout has more than `styk_engine::ATLAS_PAGES` (four) pages of 4,096² texels (64 MiB each) is not held whole by its
-export (`styk_export::resident`, `ExportFrames::decode_cels` and `request_pictures`). The drawing cels' pages stay for good, as the stage's
-do; every other page is given one of at most eight layers (`KEPT_LAYERS`; the texture starts with two and doubles up to that, and grows past
-it only for a frame that draws from more pages) when a picture on it is needed: the engine decodes the pictures of the frame about to be drawn
+export (`styk_export::resident`, `ExportFrames::decode_cels`, `request_pictures` and `request_cels`). Every page, a drawing cel's too, is given one of at most eight layers (`KEPT_LAYERS`; the texture starts with two and doubles up to that, and grows past
+it only for a frame that draws from more pages) when a picture or a cel on it is needed (a cel is loaded whole, every display level of it: the shader blends in the level above): the engine decodes the pictures and cels of the frame about to be drawn
 and, ahead of them, of the next six, and the page shown longest ago leaves when another is wanted (`styk_engine::Residency`).
-**A frame is drawn only when every picture it shows is in the texture and in the picture table** (`ExportRenderer::pictures_ready`, which the
+**A frame is drawn only when every picture and every cel it shows is in the texture (and a picture in the picture table)** (`ExportRenderer::pictures_ready`, which the
 worker waits on before it draws a frame, one drawn ahead included): there is no soft atlas, a frame whose pictures are not in waits, and one
 drawn short of a picture is impossible. A picture the engine cannot decode is not waited for. The frames are the whole layout's to the byte
 (the hashes of 40 frames of tdd2 and 41 of the user file at 4320×2160, the whole layout against the resident one, are equal; the Rust
 test draws three fixtures both ways). Measured 2026-11-02, release engine, on a machine other jobs were using (directional): a PNG of
 one frame of tdd2 at 4K took 0.6–1.0 s in two runs (a third took 14.7 s, which nothing measured explains) instead of 2.0–2.4, and added 0.3 GiB instead of 1.7 (the frame draws from no picture: its first
 frame no longer waits for the 20 pages); a whole-file MP4 of tdd2 (589 frames, eight layers, 46 page loads, 38 evictions) ran at 122–134 ms a
-frame, as before, with the GPU process +1.3 GiB instead of +1.5 and the whole tree +2.3 GiB instead of +2.5 (ffmpeg is 0.85 of it). What it
-does not reduce: the user file has no pictures but sixteen pages of drawing cels, which stay (1 GiB), so its image export added 2.9 GiB and its
-video 2.9 (the GPU process +3.1 GiB: the cels' atlas, the effect slots and layer pages at 4K, the read-back slots, the device). The targets
-of 1 GiB for an image and 1.5 GiB for a video were met for the image of tdd2 only. Not done: cel pages are not paged; the page budget is a
+frame, as before, with the GPU process +1.3 GiB instead of +1.5 and the whole tree +2.3 GiB instead of +2.5 (ffmpeg is 0.85 of it). Cels paged the same way (2026-11-02, same machine, release): the user file has no pictures but sixteen pages of drawing cels; its frames
+use four at a time, so an export keeps four layers instead of eighteen, and the frames are the same to the byte (40 frames of tdd2 and 41 of the user file at 4320×2160,
+hashes equal to the build that pinned the sixteen pages; determinism smoke on the user file: 15 ticks, 4 runs, no difference). Added by a 4K PNG of the user file: 0.36 GiB (was 1.9);
+by its whole-file video: 2.1 GiB (was 2.7), the encoder 0.55 of it; tdd2 unchanged (image +0.37, video +1.8 with the encoder at 0.83). The 1.5 GiB video target is not met: what remains is
+the effect slots and layer pages at 4K, the read-back slots and the encoder. Not done: the page budget is a
 constant (eight) rather than from the document's table of what each tick draws (`Residency::set_next_use`).
 
 **A frame that depends on what was drawn before** (found and closed for what the fixtures and the user file show). The verifier saw tick 5

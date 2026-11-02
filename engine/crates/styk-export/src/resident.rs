@@ -1,28 +1,30 @@
 //! An export of a document with more pages than a few: the sprite layers it needs, not the layout.
 //!
-//! The layout gives every picture of a document a place on a 4,096² page (`styk_eval::assets`), 64 MiB a page, and a long
-//! document has twenty of them. An export used to decode every picture and keep every page on its device for as long as it
-//! ran: a first frame that waited for all of them, and a gigabyte or two of GPU memory for a video of any length. Here the
-//! export keeps a few layers of the sprite texture ([`KEPT_LAYERS`], [`styk_engine::Residency`]) and asks the engine for a
-//! frame's pictures when that frame is the next to draw, and for the pictures of the frames after it ahead of them; the
-//! page that was shown longest ago leaves when another is wanted.
+//! The layout gives every picture and every tile of a drawing cel of a document a place on a 4,096² page
+//! (`styk_eval::assets`), 64 MiB a page, and a long document has twenty of them. An export used to decode everything and keep
+//! every page on its device for as long as it ran: a first frame that waited for all of it, and a gigabyte or two of GPU memory
+//! for a video of any length. Here the export keeps a few layers of the sprite texture ([`KEPT_LAYERS`],
+//! [`styk_engine::Residency`]) and asks the engine for what a frame draws when that frame is the next to draw, and for what the
+//! frames after it draw ahead of them; the page that was shown longest ago leaves when another is wanted. What a frame draws is
+//! its pictures and its drawing cels (a cel is loaded whole, every display level of it, because the shader picks the level and
+//! blends in the tile one level up).
 //!
-//! **A frame is drawn only when every picture it shows is sharp in the texture** ([`Resident::ready`]): an export never
-//! draws a soft copy (the soft atlas is not even made), and a frame whose pictures are not in yet waits. A page that
-//! has no layer for a frame that needs it makes the texture grow by a layer, so a frame is never drawn short of a picture.
-//! A picture the engine could not decode is not waited for, as when the whole layout was decoded.
+//! **A frame is drawn only when everything it shows is sharp in the texture** ([`Resident::ready`]): an export never draws a
+//! soft copy (the soft atlas is not even made), and a frame whose pictures or cels are not in yet waits. A page that has no
+//! layer for a frame that needs it makes the texture grow by a layer, so a frame is never drawn short of a picture. A picture
+//! the engine could not decode is not waited for, as when the whole layout was decoded.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use styk_draw::DrawList;
+use styk_draw::{DrawList, F_DRAWING, K_IMAGE};
 use styk_engine::export::ExportFrames;
-use styk_engine::{drawing_pages, images_on, pictures_of, Acquired, Generation, PlaceIndex, Residency};
-use styk_eval::assets::Assets;
+use styk_engine::{images_on, pictures_of, Acquired, Generation, PlaceIndex, Residency};
+use styk_eval::assets::{Assets, PAGE};
 
 use crate::gpu::GpuExport;
 
-/// Pages of the layout (64 MiB each) the export keeps in the sprite texture besides the drawing cels' pages: the working
-/// set of playback measured on tdd2 needed six (docs/engine/memory.md), and a frame that draws from more makes the texture grow.
+/// Pages of the layout (64 MiB each) the export keeps in the sprite texture: the working set of playback measured on tdd2 needed
+/// six (docs/engine/memory.md), and a frame that draws from more makes the texture grow.
 pub const KEPT_LAYERS: u32 = 8;
 /// Ticks after the frame being drawn whose pictures are loaded ahead of it, as many as the export prepares ahead.
 const LOOK_AHEAD: u32 = 6;
@@ -34,49 +36,119 @@ pub fn wanted(assets: &Assets) -> bool {
     styk_engine::on_demand(assets, styk_engine::ATLAS_PAGES)
 }
 
-/// Which pages of the layout are in the sprite texture of an export, and which pictures in them.
+/// An atlas place by its page and corner, as a draw-list record names it.
+fn place(layer: u32, x: u32, y: u32) -> u64 {
+    (layer as u64) << 32 | (y as u64) << 16 | x as u64
+}
+
+/// The drawing cels of the document: which cel each tile slot belongs to and which pages a cel's tiles are on.
+struct Cels {
+    /// The slot of each tile (`Assets::drawing`) by its place.
+    slots: HashMap<u64, u32>,
+    /// The cel each slot belongs to (`usize::MAX`: none).
+    owner: Vec<usize>,
+    /// The pages of each cel, ascending.
+    pages: HashMap<usize, Vec<u32>>,
+    /// The cels with tiles on each page.
+    on_page: HashMap<u32, Vec<usize>>,
+}
+
+impl Cels {
+    fn new(assets: &Assets) -> Cels {
+        let mut cels = Cels { slots: HashMap::new(), owner: vec![usize::MAX; assets.drawing.len()], pages: HashMap::new(), on_page: HashMap::new() };
+        for (index, entry) in assets.drawing.iter().enumerate().filter(|(_, entry)| entry.valid) {
+            cels.slots.insert(place(entry.layer, entry.x, entry.y), index as u32);
+        }
+        for (&cel, (tiles, starts)) in &assets.cels {
+            let mut pages: Vec<u32> = Vec::new();
+            for (level, drawn) in tiles.levels.iter().enumerate() {
+                let Some(&start) = starts.get(level) else { continue };
+                for i in 0..drawn.len() {
+                    let slot = start as usize + i;
+                    if let Some(owner) = cels.owner.get_mut(slot) {
+                        *owner = cel;
+                    }
+                    if let Some(entry) = assets.drawing.get(slot).filter(|entry| entry.valid) {
+                        pages.push(entry.layer);
+                    }
+                }
+            }
+            pages.sort_unstable();
+            pages.dedup();
+            for &page in &pages {
+                cels.on_page.entry(page).or_default().push(cel);
+            }
+            cels.pages.insert(cel, pages);
+        }
+        cels
+    }
+
+    /// The cels whose tiles `list` draws, ascending.
+    fn of(&self, list: &DrawList) -> Vec<usize> {
+        let page = PAGE as f32;
+        let mut cels: Vec<usize> = Vec::new();
+        let mut last = usize::MAX;
+        for prim in &list.prims {
+            if prim.kind & 255 != K_IMAGE || prim.kind & F_DRAWING == 0 {
+                continue;
+            }
+            let at = place(prim.b[2] as u32, (prim.c[0] * page).round() as u32, (prim.c[1] * page).round() as u32);
+            let Some(&slot) = self.slots.get(&at) else { continue };
+            let cel = self.owner[slot as usize];
+            if cel != usize::MAX && cel != last && !cels.contains(&cel) {
+                cels.push(cel);
+            }
+            last = cel;
+        }
+        cels.sort_unstable();
+        cels
+    }
+}
+
+/// Which pages of the layout are in the sprite texture of an export, and which pictures and cels in them.
 pub struct Resident {
     residency: Residency,
     index: PlaceIndex,
+    cels: Cels,
     /// Pictures (indices into the document's images) whose pixels are in the texture and in the picture table.
     uploaded: HashSet<u32>,
     /// Pictures asked of the engine and not in yet.
     asked: HashSet<u32>,
     /// Pictures the engine could not decode: not waited for.
     lost: HashSet<u32>,
+    /// Drawing cels with every tile in the texture.
+    cels_in: HashSet<usize>,
+    /// Drawing cels asked for and not in yet.
+    cels_asked: HashSet<usize>,
+    /// Tiles of the cels asked for that are in the texture, by cel (a set: a tile asked for twice counts once).
+    cel_got: HashMap<usize, HashSet<u32>>,
+    /// Tiles the engine will have sent of the cels it has decoded, by cel.
+    cel_expected: HashMap<usize, usize>,
 }
 
 impl Resident {
-    /// Lays `gpu`'s sprite texture out for the document `frames` exports: two layers, the drawing cels' pages mapped for good and
-    /// the cels asked for. The engine decodes nothing else until a frame needs it.
+    /// Lays `gpu`'s sprite texture out for the document `frames` exports: two layers, none of the document's pages mapped. The
+    /// engine decodes the drawing cels once, for the bounds every frame is made from, and nothing else until a frame needs it.
     pub fn begin(gpu: &mut GpuExport, frames: &ExportFrames) -> Resident {
         let generation = frames.generation().clone();
         let assets = &generation.assets;
-        let mut cels: Vec<u32> = drawing_pages(assets).into_iter().collect();
-        cels.sort_unstable();
         gpu.prepare_sprites_resident(generation.lineage, assets);
-        // The drawing cels' pages stay for good: their layers are made at once, not by a chain of copies as the texture grows.
-        if cels.len() as u32 > 0 {
-            gpu.grow_sprite_layers(cels.len() as u32 + 2);
-        }
-        let mut resident = Resident {
-            residency: Residency::new(assets.pages, KEPT_LAYERS + cels.len() as u32),
+        frames.decode_cels();
+        Resident {
+            residency: Residency::new(assets.pages, KEPT_LAYERS),
             index: PlaceIndex::new(assets),
+            cels: Cels::new(assets),
             uploaded: HashSet::new(),
             asked: HashSet::new(),
             lost: HashSet::new(),
-        };
-        for page in cels {
-            if let Acquired::Given { layer, evicted } = resident.residency.acquire(page, &[], true) {
-                resident.give(gpu, assets, vec![(page, layer, evicted)]);
-            }
-            resident.residency.pin(page);
+            cels_in: HashSet::new(),
+            cels_asked: HashSet::new(),
+            cel_got: HashMap::new(),
+            cel_expected: HashMap::new(),
         }
-        frames.decode_cels();
-        resident
     }
 
-    /// Maps the pages the residency just gave layers; the pictures of the pages that left are no longer in.
+    /// Maps the pages the residency just gave layers; the pictures and cels of the pages that left are no longer in.
     fn give(&mut self, gpu: &mut GpuExport, assets: &Assets, given: Vec<(u32, u32, Option<u32>)>) {
         for (page, layer, evicted) in given {
             let have = gpu.sprite_layers();
@@ -91,14 +163,21 @@ impl Resident {
                     self.uploaded.remove(&(picture as u32));
                     self.asked.remove(&(picture as u32));
                 }
+                for cel in self.cels.on_page.get(&old).into_iter().flatten() {
+                    self.cels_in.remove(cel);
+                    self.cels_asked.remove(cel);
+                    self.cel_got.remove(cel);
+                    self.cel_expected.remove(cel);
+                }
             }
             gpu.map_page(page, Some(layer));
         }
         gpu.flush_sprites();
     }
 
-    /// Puts the pictures the engine has decoded since into the texture (a picture whose page left in the meantime is dropped
-    /// and asked for again when a frame needs it). Returns the drawing cels still to be decoded, which frames wait for.
+    /// Puts the pictures and cel tiles the engine has decoded since into the texture (what lost its page in the meantime is dropped
+    /// and asked for again when a frame needs it). Returns the drawing cels still to be decoded for their bounds, which frames wait
+    /// for.
     pub fn upload(&mut self, gpu: &mut GpuExport, frames: &ExportFrames, max_bytes: usize) -> usize {
         let generation = frames.generation().clone();
         let assets = &generation.assets;
@@ -108,7 +187,14 @@ impl Resident {
                 continue;
             }
             if image.drawing {
+                // A tile of a cel asked for; one of a cel nobody asked for (or that lost its page since) is let go.
+                let cel = self.cels.owner.get(image.index as usize).copied().unwrap_or(usize::MAX);
+                if !self.cels_asked.contains(&cel) {
+                    continue;
+                }
+                self.cel_got.entry(cel).or_default().insert(image.index);
                 gpu.upload_images(assets, [&*image]);
+                any = true;
                 continue;
             }
             let Some(entry) = assets.atlas.get(image.index as usize).filter(|entry| entry.valid) else { continue };
@@ -122,19 +208,34 @@ impl Resident {
             self.asked.remove(&image.index);
             any = true;
         }
+        for (cel, count) in frames.take_landed_cels() {
+            if self.cels_asked.contains(&cel) {
+                self.cel_expected.insert(cel, count);
+            }
+        }
+        // A cel is in when every tile of it that was to come has been put in the texture and every page of it still has its layer.
+        let done: Vec<usize> = self.cel_expected.iter().filter(|(cel, expected)| self.cel_got.get(*cel).map_or(0, HashSet::len) >= **expected).map(|(&cel, _)| cel).collect();
+        for cel in done {
+            self.cel_expected.remove(&cel);
+            self.cel_got.remove(&cel);
+            self.cels_asked.remove(&cel);
+            if self.cels.pages.get(&cel).map_or(true, |pages| pages.iter().all(|&page| self.residency.layer_of(page).is_some())) {
+                self.cels_in.insert(cel);
+            }
+        }
         if any {
             gpu.flush_sprites();
         }
         frames.images_left()
     }
 
-    /// Gives the pages of `wanted` layers and asks the engine for the pictures that are not in or on their way. `keep` holds the
-    /// pages nothing may take a layer from, and gains the pages of `wanted`. Without `grow`, a page that finds no layer to take ends
-    /// the call (false).
-    fn load(&mut self, gpu: &mut GpuExport, frames: &ExportFrames, generation: &Generation, wanted: &[u32], keep: &mut Vec<u32>, grow: bool) -> bool {
+    /// Gives the pages of `wanted` pictures and `cels` layers and asks the engine for what is not in or on its way. `keep` holds the
+    /// pages nothing may take a layer from, and gains the pages of everything wanted. Without `grow`, a page that finds no layer to
+    /// take ends the call (false).
+    fn load(&mut self, gpu: &mut GpuExport, frames: &ExportFrames, generation: &Generation, wanted: &[u32], cels: &[usize], keep: &mut Vec<u32>, grow: bool) -> bool {
         let assets = &generation.assets;
-        let (mut given, mut request, mut complete) = (Vec::new(), Vec::new(), true);
-        for &picture in wanted {
+        let (mut given, mut request, mut request_cels, mut complete) = (Vec::new(), Vec::new(), Vec::new(), true);
+        'pictures: for &picture in wanted {
             let Some(entry) = assets.atlas.get(picture as usize).filter(|entry| entry.valid) else { continue };
             if entry.layer >= styk_render::MAX_PAGES {
                 self.lost.insert(picture);
@@ -151,39 +252,80 @@ impl Resident {
                 Acquired::Given { layer, evicted } => given.push((entry.layer, layer, evicted)),
                 Acquired::Full => {
                     complete = false;
-                    break;
+                    break 'pictures;
                 }
             }
             self.asked.insert(picture);
             request.push(picture);
         }
+        'cels: for &cel in cels {
+            if !complete {
+                break;
+            }
+            let pages = self.cels.pages.get(&cel).cloned().unwrap_or_default();
+            for &page in &pages {
+                if !keep.contains(&page) {
+                    keep.push(page);
+                }
+            }
+            if self.cels_in.contains(&cel) || self.cels_asked.contains(&cel) {
+                continue;
+            }
+            for &page in &pages {
+                if page >= styk_render::MAX_PAGES {
+                    continue;
+                }
+                match self.residency.acquire(page, keep, grow) {
+                    Acquired::Resident(_) => {}
+                    Acquired::Given { layer, evicted } => given.push((page, layer, evicted)),
+                    Acquired::Full => {
+                        complete = false;
+                        break 'cels;
+                    }
+                }
+            }
+            self.cels_asked.insert(cel);
+            request_cels.push(cel);
+        }
         self.give(gpu, assets, given);
         if !request.is_empty() {
             frames.request_pictures(&request);
         }
+        if !request_cels.is_empty() {
+            frames.request_cels(&request_cels);
+        }
         complete
     }
 
-    /// Whether every picture of `list`, the frame about to be drawn, is sharp in the texture. What is missing is asked for (and
-    /// given pages, the texture growing if it must); the pictures of the frames after `tick`, up to `last`, are asked for ahead
-    /// of them, as far as pages are free or were shown longest ago. The caller waits for the engine's progress and asks again.
+    /// The pages of the pictures and cels a frame draws.
+    fn pages_of(&self, assets: &Assets, wanted: &[u32], cels: &[usize]) -> Vec<u32> {
+        let mut pages: Vec<u32> = wanted.iter().filter_map(|&picture| assets.atlas.get(picture as usize).filter(|entry| entry.valid).map(|entry| entry.layer)).collect();
+        pages.extend(cels.iter().flat_map(|cel| self.cels.pages.get(cel).into_iter().flatten().copied()));
+        pages.sort_unstable();
+        pages.dedup();
+        pages
+    }
+
+    /// Whether every picture and cel of `list`, the frame about to be drawn, is sharp in the texture. What is missing is asked for (and
+    /// given pages, the texture growing if it must); what the frames after `tick`, up to `last`, draw is asked for ahead of them, as
+    /// far as pages are free or were shown longest ago. The caller waits for the engine's progress and asks again.
     pub fn ready(&mut self, gpu: &mut GpuExport, frames: &ExportFrames, list: &DrawList, tick: Option<u32>, last: u32) -> bool {
         self.upload(gpu, frames, UPLOAD_BYTES);
         let generation = frames.generation().clone();
         let assets = &generation.assets;
         let wanted = pictures_of(list, &self.index);
-        let mut pages: Vec<u32> = wanted.iter().filter_map(|&picture| assets.atlas.get(picture as usize).filter(|entry| entry.valid).map(|entry| entry.layer)).collect();
-        pages.sort_unstable();
-        pages.dedup();
+        let cels = self.cels.of(list);
+        let pages = self.pages_of(assets, &wanted, &cels);
         self.residency.touch(&pages);
         self.residency.hold(&pages);
         let mut keep = pages.clone();
-        self.load(gpu, frames, &generation, &wanted, &mut keep, true);
+        self.load(gpu, frames, &generation, &wanted, &cels, &mut keep, true);
         let missing = |this: &Resident| {
             wanted.iter().any(|picture| assets.atlas.get(*picture as usize).is_some_and(|entry| entry.valid) && !this.uploaded.contains(picture) && !this.lost.contains(picture))
+                || cels.iter().any(|cel| !this.cels_in.contains(cel))
         };
         if missing(self) && frames.pictures_in_flight() == 0 {
-            // Asked for, and nothing on its way: the engine could not decode them.
+            // Asked for, and nothing on its way: the engine could not decode the pictures.
             for &picture in &wanted {
                 if self.asked.remove(&picture) {
                     self.lost.insert(picture);
@@ -194,7 +336,8 @@ impl Resident {
             for next in tick + 1..=last.min(tick.saturating_add(LOOK_AHEAD)) {
                 let Some(frame) = frames.ready(next) else { break };
                 let ahead = pictures_of(&frame.list, &self.index);
-                if !self.load(gpu, frames, &generation, &ahead, &mut keep, false) {
+                let ahead_cels = self.cels.of(&frame.list);
+                if !self.load(gpu, frames, &generation, &ahead, &ahead_cels, &mut keep, false) {
                     break;
                 }
             }

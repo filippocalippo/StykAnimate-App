@@ -33,13 +33,15 @@ const DECODERS: usize = 8;
 enum Todo {
     Image(usize),
     Cel(usize),
+    /// A drawing cel decoded for what decoding it does to the document (its artwork bounds, which frames need), its pixels let go.
+    Bounds(usize),
 }
 
 impl Todo {
     fn picture(self) -> crate::images::Picture {
         match self {
             Todo::Image(index) => crate::images::Picture::Image(index),
-            Todo::Cel(cel) => crate::images::Picture::Cel(cel),
+            Todo::Cel(cel) | Todo::Bounds(cel) => crate::images::Picture::Cel(cel),
         }
     }
 }
@@ -64,6 +66,8 @@ struct State {
     /// which a frame waits for, and `pictures_left` the pictures asked for, which only the frame that draws them waits for.
     resident: bool,
     pictures_left: usize,
+    /// Drawing cels asked for ([`ExportFrames::request_cels`]) that landed, and how many images each came with.
+    landed_cels: Vec<(usize, usize)>,
 }
 
 /// Starts the bounded set of requested frames once their resource rectangles
@@ -119,26 +123,31 @@ fn start_decoders(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Sha
                 return;
             }
             let decoded = engine.decode_pixels(&generation, todo.picture());
-            pictures_ready(engine, &generation, &state, &ended, epoch, estimate, matches!(todo, Todo::Cel(_)), decoded);
+            pictures_ready(engine, &generation, &state, &ended, epoch, estimate, todo, decoded);
         });
     }
 }
 
-fn pictures_ready(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Shared<State>>, ended: &Arc<AtomicBool>, epoch: u64, estimate: usize, cel: bool, images: Vec<DecodedImage>) {
+fn pictures_ready(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Shared<State>>, ended: &Arc<AtomicBool>, epoch: u64, estimate: usize, todo: Todo, images: Vec<DecodedImage>) {
     {
         let mut state = state.lock();
         if ended.load(Ordering::Relaxed) || epoch != state.epoch {
             return;
         }
-        if state.resident && !cel {
+        if state.resident && matches!(todo, Todo::Image(_) | Todo::Cel(_)) {
             state.pictures_left = state.pictures_left.saturating_sub(1);
         } else {
             state.images_left = state.images_left.saturating_sub(1);
         }
         state.decoding = state.decoding.saturating_sub(1);
         state.decoding_bytes = state.decoding_bytes.saturating_sub(estimate);
-        state.image_bytes += images.iter().map(|image| image.rgba.len()).sum::<usize>();
-        state.images.extend(images.into_iter().map(Arc::new));
+        if let (true, Todo::Cel(cel)) = (state.resident, todo) {
+            state.landed_cels.push((cel, images.len()));
+        }
+        if !matches!(todo, Todo::Bounds(_)) {
+            state.image_bytes += images.iter().map(|image| image.rgba.len()).sum::<usize>();
+            state.images.extend(images.into_iter().map(Arc::new));
+        }
     }
     start_decoders(engine, generation, state, ended);
     prepare_pending(engine, generation, state, ended);
@@ -226,12 +235,13 @@ impl ExportFrames {
         prepare_pending(&self.engine, generation, &self.state, &self.ended);
     }
 
-    /// Decodes the drawing cels of the document only, and makes this export one that asks for the rest as its frames need them
-    /// ([`ExportFrames::request_pictures`]): the pictures of a long document are not all in memory at once. A frame waits for the
-    /// cels (their rectangles are not known before they are decoded) and for nothing else here.
+    /// Makes this export one that asks for its pictures and its drawing cels as its frames need them
+    /// ([`ExportFrames::request_pictures`], [`ExportFrames::request_cels`]): those of a long document are not all in memory at once.
+    /// The cels are decoded once now, for what decoding does to the document (their artwork bounds, which every frame is made from),
+    /// and their pixels let go; a frame waits for that and for nothing else here.
     pub fn decode_cels(&self) {
         let generation = &self.generation;
-        let todo: VecDeque<Todo> = generation.assets.cels.keys().copied().map(Todo::Cel).collect();
+        let todo: VecDeque<Todo> = generation.assets.cels.keys().copied().map(Todo::Bounds).collect();
         {
             let mut state = self.state.lock();
             let remaining = todo.len();
@@ -245,6 +255,7 @@ impl ExportFrames {
             state.resident = true;
             state.images_left = remaining;
             state.pictures_left = 0;
+            state.landed_cels.clear();
             state.todo = todo;
             state.images.clear();
             state.image_bytes = 0;
@@ -266,6 +277,24 @@ impl ExportFrames {
             }
         }
         start_decoders(&self.engine, &self.generation, &self.state, &self.ended);
+    }
+
+    /// Asks the engine's workers for the drawing cels `cels` (keys of the document's cels; each once): their images land in
+    /// [`ExportFrames::take_images`], and [`ExportFrames::take_landed_cels`] says how many each came with.
+    pub fn request_cels(&self, cels: &[usize]) {
+        {
+            let mut state = self.state.lock();
+            for &cel in cels {
+                state.todo.push_back(Todo::Cel(cel));
+                state.pictures_left += 1;
+            }
+        }
+        start_decoders(&self.engine, &self.generation, &self.state, &self.ended);
+    }
+
+    /// The cels asked for that have been decoded since the last call, each with the number of images it came with.
+    pub fn take_landed_cels(&self) -> Vec<(usize, usize)> {
+        std::mem::take(&mut self.state.lock().landed_cels)
     }
 
     /// Pictures asked for that are being decoded or wait to be taken (an export that asks for them: [`ExportFrames::decode_cels`]).
@@ -449,6 +478,32 @@ mod tests {
         while engine.step() {}
         let landed = frames.take_images(usize::MAX);
         assert_eq!(landed.iter().filter(|image| !image.drawing && !image.soft && image.index == picture).count(), 1);
+        assert_eq!(frames.pictures_in_flight(), 0);
+    }
+
+    /// A cel is decoded once up front for its bounds and its pixels let go; a cel asked for lands with its images and says how many.
+    #[test]
+    fn a_resident_export_lets_go_of_the_cels_it_decodes_up_front_and_gets_one_when_it_asks() {
+        let engine = Engine::new(clock, Budgets::for_device(None));
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/drawlist/drawing-cel.json");
+        engine.open(&std::fs::read(file).unwrap(), "json", "pictures").unwrap();
+        while engine.step() {}
+        let _ = engine.take_images(usize::MAX);
+        let frames = engine.export_frames(0).unwrap();
+        let cel = *frames.generation().assets.cels.keys().next().expect("the fixture has a cel");
+        frames.decode_cels();
+        while engine.step() {}
+        assert_eq!(frames.images_left(), 0, "the cel was decoded for its bounds");
+        assert!(frames.take_images(usize::MAX).is_empty(), "and its pixels were not kept");
+        assert!(frames.take_landed_cels().is_empty(), "nobody asked for it");
+        frames.request_cels(&[cel]);
+        assert_eq!(frames.pictures_in_flight(), 1);
+        while engine.step() {}
+        let landed = frames.take_landed_cels();
+        let images = frames.take_images(usize::MAX);
+        assert_eq!(landed.len(), 1);
+        assert_eq!(landed[0].0, cel);
+        assert!(landed[0].1 > 0 && images.len() == landed[0].1 && images.iter().all(|image| image.drawing));
         assert_eq!(frames.pictures_in_flight(), 0);
     }
 }
