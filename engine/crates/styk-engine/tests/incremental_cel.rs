@@ -43,6 +43,9 @@ fn a_cel_published_again_with_the_same_tiles_writes_none_of_them_once_the_atlas_
     engine.publish_tree(opened.lineage(), republished(&opened.tree), 2).unwrap().expect("the document is the engine's");
     let after = cel(&engine);
     assert!(!Arc::ptr_eq(&before, &after), "the payload was made anew");
+    // How the atlas is written does not touch the document: the cel's data, which is what a save writes, is the data published.
+    assert_eq!(before.tiles, after.tiles, "the cel's tiles are the document's, byte for byte");
+    assert_eq!(before.levels, after.levels);
     let assets = engine.generation().unwrap().assets.clone();
     assert_eq!(assets.cel_slots(&after).unwrap(), slots.as_slice(), "every tile is in the slot it was in");
     assert!(assets.cel_dirty(after.key()).expect("it inherits").iter().flatten().all(|dirty| !dirty), "none of them is written again");
