@@ -153,6 +153,17 @@ Python service it replaced: `engine/tools/piv/oracle.py` records those routes an
 them means re-recording the oracle's tapes, which are frozen, so they stay until the oracle itself is retired. The app's side of the lease is
 gone (`sourceOwners`, `adoptSource`, `detachSource`, `attachSource`, `/api/source/retain` in the import client).
 
+**Opening a Pivot file (what is reserved).** The estimate by the file's size (16 bytes per byte) is wrong in both directions for a Pivot file, which
+is a zlib stream: a project of 120 MB of pictures stored as they were inflates to about what it is, and the measured peaks are 5 to 6 bytes per byte
+of what is inflated (tdd2: 345 MiB for 54 MiB inflated from 39; svr_uriel: 236 for 42 from 21). So when the estimate by size refuses a `.piv` or `.stk`, the
+open inflates it once into a window of 32 KiB, counts the bytes and keeps none (a look at the cancel flag for every megabyte, on the worker that is
+opening; about a quarter of a second for 40 MB), and refuses only if 8 bytes per inflated byte do not fit either, with the same message. Before this a
+padded Ayame of 122 MB (2 MB of project, the rest noise) was refused with 16 x 122 = 1.9 GB asked of 2 GiB; it opens. A file whose estimate by size fits is
+not counted, and one that compresses far better than its size says (20 MB that inflates to 400) still takes the estimate by size: the open's allocations that
+cannot be refused are covered by the loss of the worker it ends with (`finish` in `engine-open.mjs`). `scripts/smoke-padded-pivot.mjs` opens such a file in
+the app, exports it unchanged and edited, saves it as a project and opens that. The opened padded Ayame exports unchanged (the file again, byte for byte) and saves as a project at 122 and 133 MB; its export edited works to
+about 115 MB, where the document the codec is sent (JSON, 256 MiB at most) holds the padding twice over, as a project's pictures are (`data_base64` and `data_url`).
+
 **The allocator lock** (`std`'s wasm allocator: one spinning lock for every thread). Timed with a gate in front of it, tdd2
 and svr_uriel through open, play and scrub, eight workers: a worker finds the lock taken on 5 to 40 % of its calls and
 waits 0.1 to 0.9 s in all over the session (waits up to 28 ms); the interface thread makes 8 to 11 million calls, finds the
@@ -355,7 +366,7 @@ when the memory cannot give it; reservations count against every other request.
 
 | Work | Reserves | Refusal |
 | --- | --- | --- |
-| Opening a file or text (`Engine::open_document`) | 16 bytes per byte, at least 96 MiB (measured peaks: 7 to 14 bytes per byte for documents of 4 to 41 MiB); for a project container, what its parts take (three times the skeleton's text, twice each section: `container::open_cost`, from the sizes in its header), never more than 16 bytes per byte | the open error `errors.engine.outOfMemory` (`code` `out_of_memory`); the interface asks first (`admit_open`: the copy of the file and the least an open takes, and the one block the copy needs), because copying a file into the module cannot be refused; the open then reserves the rest |
+| Opening a file or text (`Engine::open_document`) | 16 bytes per byte, at least 96 MiB (measured peaks: 7 to 14 bytes per byte for documents of 4 to 41 MiB); for a project container, what its parts take (three times the skeleton's text, twice each section: `container::open_cost`, from the sizes in its header), never more than 16 bytes per byte; for a Pivot file that size refuses, 8 bytes per byte of what it inflates to, counted first (`inflated_size`: a window of 32 KiB, nothing kept, cancellable) | the open error `errors.engine.outOfMemory` (`code` `out_of_memory`); the interface asks first (`admit_open`: the copy of the file and the least an open takes, and the one block the copy needs), because copying a file into the module cannot be refused; the open then reserves the rest |
 | Decoding a picture or a drawing cel | the decoded size twice and the bordered size twice (`decode_image_working_bytes`); three times the cel | the picture is not shown, like one that cannot be decoded (`picturesRefused` in `engine.memory()`) |
 | Decoding a picture again for a frame (`Images::ensure`) | as above | the frame is not drawn (a thumbnail or pose is refused, a CPU export stops with the message) |
 | An editing call, and activating a session | 64 MiB (an undo or a redo: 256 MiB), or the most any call of the session has taken beyond what it held when it began, a quarter more (measured on tdd2: a pose or a movieclip edit 2 MiB, undoing a movieclip edit 380 MiB at its peak) | the answer `{status: 'error', error: 'errors.engine.outOfMemory'}`; the document is unchanged |

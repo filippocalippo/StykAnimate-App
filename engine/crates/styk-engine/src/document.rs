@@ -120,6 +120,69 @@ pub fn open_estimate(file_bytes: usize) -> usize {
     file_bytes.saturating_mul(OPEN_BYTES_PER_BYTE).max(OPEN_MINIMUM_BYTES)
 }
 
+/// What opening a Pivot file takes beyond the file, per byte of the payload it inflates to, at most. Measured at the peak of opening
+/// (2026-11-01, the private documents): 5.7 for a file of 39 MiB that inflates to 54, 5.2 for 21 MiB that inflates to 42.
+pub const PIVOT_OPEN_BYTES_PER_INFLATED_BYTE: usize = 8;
+
+/// The size of the payload a Pivot file inflates to, counted by inflating it and keeping nothing: a window of 32 KiB, the input as it
+/// is, and a look at `cancel` for every megabyte. `None` for a stream that does not inflate (the open says why) or an open that was
+/// cancelled. A payload that is not compressed (a version byte first) is the file.
+fn inflated_size(file: &[u8], cancel: &dyn Fn() -> bool) -> Option<usize> {
+    use miniz_oxide::inflate::TINFLStatus;
+    use miniz_oxide::inflate::core::{DecompressorOxide, TINFL_LZ_DICT_SIZE, decompress, inflate_flags};
+    if file.first().is_some_and(|version| (1..=5).contains(version)) {
+        return Some(file.len());
+    }
+    let mut state = Box::new(DecompressorOxide::new());
+    let mut window = vec![0u8; TINFL_LZ_DICT_SIZE];
+    let flags = inflate_flags::TINFL_FLAG_PARSE_ZLIB_HEADER | inflate_flags::TINFL_FLAG_IGNORE_ADLER32;
+    let (mut read, mut at, mut total, mut checked) = (0usize, 0usize, 0usize, 0usize);
+    loop {
+        let (status, used, written) = decompress(&mut state, &file[read..], &mut window, at, flags);
+        read += used;
+        total = total.saturating_add(written);
+        at = (at + written) & (TINFL_LZ_DICT_SIZE - 1);
+        if total - checked >= 1 << 20 {
+            checked = total;
+            if cancel() {
+                return None;
+            }
+        }
+        match status {
+            TINFLStatus::Done => return Some(total),
+            TINFLStatus::HasMoreOutput => {}
+            _ => return None,
+        }
+    }
+}
+
+/// The reservation the open of `source` makes before it starts. A Pivot file's size says little of what it opens to (a project of
+/// 120 MB of pictures stored as they were needs a tenth of what 16 times its size says, and a compressed one needs more of it), so a Pivot
+/// file the estimate by size refuses is asked what it inflates to, and refused only when that does not fit either.
+fn reserve_for_open(source: &OpenSource<'_>, cancel: &dyn Fn() -> bool) -> Result<styk_alloc::Reservation, OpenError> {
+    let estimate = open_estimate_of(source);
+    let refused = match styk_alloc::reserve(estimate) {
+        Ok(reservation) => return Ok(reservation),
+        Err(refused) => refused,
+    };
+    let (bytes, name): (&[u8], &str) = match source {
+        OpenSource::File { bytes, name } => (bytes, name),
+        OpenSource::Owned { bytes, name } => (bytes.as_slice(), name),
+        OpenSource::Json { .. } => return Err(OpenError::out_of_memory(refused)),
+    };
+    if !matches!(extension(name).to_ascii_lowercase().as_str(), "piv" | "stk") {
+        return Err(OpenError::out_of_memory(refused));
+    }
+    let counted = inflated_size(bytes, cancel);
+    if cancel() {
+        return Err(OpenError::cancelled());
+    }
+    match counted.map(|size| size.saturating_mul(PIVOT_OPEN_BYTES_PER_INFLATED_BYTE).max(OPEN_MINIMUM_BYTES)) {
+        Some(real) if real < estimate => styk_alloc::reserve(real).map_err(OpenError::out_of_memory),
+        _ => Err(OpenError::out_of_memory(refused)),
+    }
+}
+
 /// What opening `source` may take, for the reservation that precedes the open: [`open_estimate`] of the file, or for a project
 /// container (which states how large its parts are) what its parts take, never more than the file's estimate.
 fn open_estimate_of(source: &OpenSource<'_>) -> usize {
@@ -367,7 +430,7 @@ impl Engine {
         fan.mark("started");
         // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
         // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
-        let _memory = styk_alloc::reserve(open_estimate_of(&source)).map_err(OpenError::out_of_memory)?;
+        let _memory = reserve_for_open(&source, cancel)?;
 
         let mut check = None;
         let (document, kind, version, name, facts) = match source {
@@ -652,5 +715,52 @@ impl OpenedDocument {
         root.set("_stykSource", Value::object(source));
         self.tree = Value::object(root);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod inflate_tests {
+    use super::inflated_size;
+    use miniz_oxide::deflate::compress_to_vec_zlib;
+
+    fn sample(length: usize, seed: u64) -> Vec<u8> {
+        let mut state = seed | 1;
+        (0..length)
+            .map(|at| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                // Runs and noise, so that matches reach back across the window.
+                if at % 5000 < 3000 { (at % 251) as u8 } else { (state >> 24) as u8 }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_size_counted_is_the_size_inflated_whatever_the_level_and_the_length() {
+        for length in [0, 1, 4096, 32767, 32768, 32769, 100_000, 3_000_000] {
+            let data = sample(length, 7 + length as u64);
+            for level in [0, 1, 6, 9] {
+                let packed = compress_to_vec_zlib(&data, level);
+                assert_eq!(inflated_size(&packed, &|| false), Some(length), "{length} bytes at level {level}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_payload_that_is_not_compressed_is_the_file_and_a_broken_stream_is_nothing() {
+        assert_eq!(inflated_size(&[5, 1, 2, 3], &|| false), Some(4));
+        let mut packed = compress_to_vec_zlib(&sample(100_000, 3), 6);
+        packed.truncate(packed.len() / 2);
+        assert_eq!(inflated_size(&packed, &|| false), None);
+        assert_eq!(inflated_size(b"\x78\x9cnot a stream at all", &|| false), None);
+    }
+
+    #[test]
+    fn counting_stops_when_the_open_is_cancelled() {
+        let packed = compress_to_vec_zlib(&sample(5_000_000, 11), 0);
+        let asked = std::cell::Cell::new(0);
+        assert_eq!(inflated_size(&packed, &|| { asked.set(asked.get() + 1); asked.get() > 2 }), None);
+        assert!(asked.get() <= 3, "it looked every megabyte and stopped at once");
     }
 }

@@ -1175,6 +1175,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "image",
+ "miniz_oxide 0.9.1",
  "sha2",
  "styk-alloc",
  "styk-doc",
