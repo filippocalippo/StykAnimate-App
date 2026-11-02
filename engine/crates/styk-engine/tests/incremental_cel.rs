@@ -68,3 +68,23 @@ fn a_cel_published_while_the_one_before_is_not_in_the_atlas_is_written_whole() {
     let tiles: usize = assets.cel_slots(&after).unwrap().iter().map(Vec::len).sum();
     assert_eq!(images.iter().filter(|image| image.drawing).count(), tiles, "every tile of the cel is written");
 }
+
+/// An export that keeps the pictures of an earlier generation at their atlas places is given the whole of a cel that replaced one: the
+/// places are the old cel's until it writes them, whatever the document's own atlas leaves unwritten.
+#[test]
+fn an_export_that_keeps_an_earlier_generations_pictures_is_given_the_cel_that_replaced_a_cel_whole() {
+    let (engine, opened) = opened();
+    while engine.step() {}
+    engine.take_images(usize::MAX);
+    let earlier = engine.generation().unwrap();
+    engine.publish_tree(opened.lineage(), republished(&opened.tree), 2).unwrap().expect("the document is the engine's");
+    let assets = engine.generation().unwrap().assets.clone();
+    let after = cel(&engine);
+    assert!(assets.cel_dirty(after.key()).is_some_and(|dirty| dirty.iter().flatten().all(|dirty| !dirty)), "the atlas of the document writes none of it");
+    let frames = engine.export_frames(0).unwrap();
+    frames.decode_images_since(Some(&earlier));
+    while engine.step() {}
+    let images = frames.take_images(usize::MAX);
+    let tiles: usize = assets.cel_slots(&after).unwrap().iter().map(Vec::len).sum();
+    assert_eq!(images.iter().filter(|image| image.drawing).count(), tiles, "every tile of the new cel is decoded for the export");
+}

@@ -407,3 +407,55 @@ fn a_frame_that_draws_the_slots_a_replaced_cel_gave_waits_until_the_new_tiles_ar
     uploaded.observe(&replaced);
     assert!(!uploaded.refilling_in(&list));
 }
+
+#[test]
+fn a_cel_that_keeps_the_slots_of_the_tiles_it_shares_marks_only_the_slots_it_writes_as_being_refilled() {
+    use styk_draw::{DrawList, Prim, K_IMAGE};
+    use styk_eval::assets::{decode_cel_changed, Assets};
+    use styk_eval::doc::DrawingTiles;
+    let png = |value: u8| -> Arc<[u8]> {
+        let image = image::RgbaImage::from_pixel(64, 64, image::Rgba([value, 0, 0, 255]));
+        let mut bytes = Vec::new();
+        image.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+        bytes.into()
+    };
+    let cel = |tiles: Vec<(i32, i32, Arc<[u8]>)>| {
+        let levels = styk_eval::drawing::level_tiles(&tiles);
+        Arc::new(DrawingTiles::new([0.0; 2], 1.0, None, tiles, levels))
+    };
+    let document_of = |tiles: &Arc<DrawingTiles>| {
+        let mut doc = styk_eval::open(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/drawlist/drawing-cel.json")).unwrap();
+        for image in Arc::make_mut(&mut doc.figures[0]).images.iter_mut().filter(|image| image.tiles.is_some()) {
+            image.tiles = Some(tiles.clone());
+        }
+        doc
+    };
+    // Two tiles far apart (their level-0 neighbourhoods do not touch); the second is painted again by the next cel.
+    let (kept, old_second) = (png(10), png(20));
+    let before = cel(vec![(0, 0, kept.clone()), (50, 50, old_second)]);
+    let after = cel(vec![(0, 0, kept), (50, 50, png(30))]);
+    let (first_doc, next_doc) = (document_of(&before), document_of(&after));
+    let a = Assets::build(&first_doc);
+    let mut uploaded = Uploaded::default();
+    uploaded.observe(&a);
+    for image in decode_cel_changed(&a, &before) {
+        uploaded.record(&a, &image);
+    }
+    // The old cel's decode left its ink for the next.
+    assert!(before.tile_ink.get().is_some());
+    let b = a.extended_inheriting(&next_doc, true);
+    uploaded.observe(&b);
+    let list = |coord: (i32, i32)| {
+        let at = after.levels[0].binary_search_by_key(&(coord.1, coord.0), |&(x, y)| (y, x)).unwrap();
+        let entry = b.drawing[b.cel_slots(&after).unwrap()[0][at] as usize];
+        DrawList { prims: vec![Prim { kind: K_IMAGE, group: 0, color: 0, paint: 0, a: [0.0; 4], b: [0.0, 0.0, entry.layer as f32, 0.0], c: entry.uv() }], ..Default::default() }
+    };
+    assert!(!uploaded.refilling_in(&list((0, 0))) && !uploaded.lacks(&list((0, 0))), "the tile it shares is in its slot: a frame that draws it is drawn");
+    assert!(uploaded.refilling_in(&list((50, 50))) && uploaded.lacks(&list((50, 50))), "the tile it paints again holds the old cel's pixels until it is written");
+    let written = decode_cel_changed(&b, &after);
+    assert!(written.iter().all(|image| image.placement == b.placement(after.key())));
+    for image in &written {
+        uploaded.record(&b, image);
+    }
+    assert!(!uploaded.refilling_in(&list((50, 50))) && !uploaded.lacks(&list((50, 50))));
+}

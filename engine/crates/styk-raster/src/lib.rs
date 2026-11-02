@@ -196,6 +196,13 @@ impl Images {
         for &place in &places {
             let held = if place.0 { self.tiles.get_mut(&place.1) } else { self.sprites.get_mut(&place.1) };
             match held {
+                // A tile of a cel the document replaced: its slot is another cel's now (`Assets::extended`), and what is held is the old cel's.
+                Some(held) if place.0 && held.image.placement != 0 && !assets.holds_placement(held.image.placement) => {
+                    if let Some(old) = self.tiles.remove(&place.1) {
+                        self.bytes -= old.image.rgba.len();
+                    }
+                    missing.push(place);
+                }
                 Some(held) => held.used = clock,
                 None if !self.failed.contains(&place) => missing.push(place),
                 None => {}
@@ -264,6 +271,28 @@ impl Images {
 
     pub(crate) fn tile(&self, key: (u32, u32, u32)) -> Option<Texture<'_>> {
         self.tiles.get(&key).map(|held| Images::texture(&held.image, true))
+    }
+}
+
+/// What a device holds of the pictures of an atlas, by place: the placement ([`DecodedImage::placement`]) of the tile written there, 0 for a sprite.
+/// A place is lacking when it holds nothing, or the tile of a cel that no longer has the slot.
+#[derive(Default)]
+pub struct Uploads(HashMap<Place, u64>);
+
+impl Uploads {
+    /// The device was allocated again, or the atlas laid out anew: it holds nothing.
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// The pictures of `places` that `images` holds and the device does not hold as they are now.
+    pub fn lacking<'a>(&self, places: impl IntoIterator<Item = Place>, images: &'a Images) -> Vec<(Place, &'a Arc<DecodedImage>)> {
+        places.into_iter().filter_map(|place| images.get(place).map(|image| (place, image))).filter(|(place, image)| self.0.get(place) != Some(&image.placement)).collect()
+    }
+
+    /// `images` were written to the device.
+    pub fn record<'a>(&mut self, written: impl IntoIterator<Item = (Place, &'a Arc<DecodedImage>)>) {
+        self.0.extend(written.into_iter().map(|(place, image)| (place, image.placement)));
     }
 }
 
