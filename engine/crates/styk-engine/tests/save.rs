@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use styk_doc::{Nums, Obj, Value, json};
 use styk_engine::document::{OpenOptions, OpenSource};
-use styk_engine::save::{ProjectRequest, SaveError, Source, save_figure_file, save_project};
+use styk_engine::save::{ProjectRequest, SaveError, save_figure_file, save_project};
 use styk_engine::{Budgets, Engine};
 use styk_formats::container;
 use styk_formats::{Kind, files};
@@ -23,14 +23,19 @@ fn tree(path: &str) -> Value {
     engine.open_document(OpenSource::Json { bytes: &text, name: "Untitled" }, OpenOptions { layer_timeline: true }, &|| false).unwrap().tree
 }
 
-fn save(tree: &Value, name: Option<&str>, source: Option<Source>) -> Vec<u8> {
-    save_project(std::slice::from_ref(tree), &[], ProjectRequest { name: name.map(str::to_string), source, reservation: None }, &|| false).unwrap().bytes
+fn save(tree: &Value, name: Option<&str>) -> Vec<u8> {
+    save_project(std::slice::from_ref(tree), &[], ProjectRequest { name: name.map(str::to_string), original_first: false, reservation: None }, &|| false).unwrap().bytes
+}
+
+/// [`save`] of a document read from a Pivot file, which carries its original.
+fn save_opened_from_pivot(tree: &Value, name: Option<&str>) -> Vec<u8> {
+    save_project(std::slice::from_ref(tree), &[], ProjectRequest { name: name.map(str::to_string), original_first: true, reservation: None }, &|| false).unwrap().bytes
 }
 
 #[test]
 fn a_project_reads_back_as_the_document_it_was_saved_from() {
     let tree = tree("engine/tests/edit/startup.document.json");
-    let bytes = save(&tree, Some("Saved"), None);
+    let bytes = save(&tree, Some("Saved"));
     let reopened = files::open_document(&bytes, Kind::Styk).unwrap();
     assert_eq!(reopened.path(&["_styk", "format"]).and_then(Value::as_str), Some("StykAnimate"));
     assert_eq!(reopened.path(&["_styk", "format_version"]).and_then(Value::as_f64), Some(1.0));
@@ -44,18 +49,33 @@ fn a_project_reads_back_as_the_document_it_was_saved_from() {
     expected.make_obj().unwrap().set("_styk", Value::object(styk));
     assert_eq!(json::to_string(&reopened), json::to_string(&expected));
     // The same document saves to the same bytes.
-    assert_eq!(save(&tree, Some("Saved"), None), bytes);
+    assert_eq!(save(&tree, Some("Saved")), bytes);
+}
+
+/// The document of a project opened from Pivot: `tree` carrying `original` as the engine holds it (`_stykSource`, its record last in
+/// the root), described by a record with `sha256` as given.
+fn carrying(tree: &Value, original: &[u8], sha256: &str) -> Value {
+    let mut record = Obj::new();
+    record.set("kind", Value::str("piv"));
+    record.set("version", Value::Num(5.0));
+    record.set("sha256", Value::str(sha256));
+    record.set("document_sha256", Value::str(&"b".repeat(64)));
+    record.set("document_digest_version", Value::Num(3.0));
+    record.set("source_base64", Value::Blob(Arc::new(styk_doc::Blob { prefix: Arc::from(""), bytes: Arc::from(original) })));
+    let mut carried = tree.clone();
+    carried.make_obj().unwrap().set("_stykSource", Value::object(record));
+    carried
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[test]
 fn the_pivot_original_is_stored_first_and_checked_on_reading() {
     let tree = tree("engine/tests/edit/startup.document.json");
     let original: Vec<u8> = (0..100_000u32).map(|i| (i * 7 % 251) as u8).collect();
-    let digest: String = Sha256::digest(&original).iter().map(|byte| format!("{byte:02x}")).collect();
-    let mut record = Obj::new();
-    record.set("kind", Value::str("piv"));
-    record.set("sha256", Value::str(&digest));
-    let bytes = save(&tree, None, Some(Source { record: Value::object(record), bytes: original.clone() }));
+    let bytes = save_opened_from_pivot(&carrying(&tree, &original, &sha256(&original)), None);
     let opened = files::open_document(&bytes, Kind::Styk).expect("the fingerprint matches the stored original");
     let source = opened.get("_stykSource").unwrap();
     assert_eq!(source.get("kind").and_then(Value::as_str), Some("piv"));
@@ -65,22 +85,57 @@ fn the_pivot_original_is_stored_first_and_checked_on_reading() {
     let payloads = &checked.parts.sections.iter().find(|(kind, _)| *kind == 2).unwrap().1;
     assert!(payloads.starts_with(&original), "the original opens the payload section, as the app has always stored it");
     // A fingerprint that names other bytes is refused when the file is read.
-    let mut wrong = Obj::new();
-    wrong.set("sha256", Value::str(&"0".repeat(64)));
-    let bad = save(&tree, None, Some(Source { record: Value::object(wrong), bytes: original }));
+    let bad = save_opened_from_pivot(&carrying(&tree, &original, &"0".repeat(64)), None);
     assert!(files::open_document(&bad, Kind::Styk).is_err());
+}
+
+#[test]
+fn a_document_that_carries_its_original_saves_the_same_wherever_its_record_sits_in_the_root() {
+    let tree = tree("engine/tests/edit/startup.document.json");
+    let original: Vec<u8> = (0..100_000u32).map(|i| (i * 7 % 251) as u8).collect();
+    let last = carrying(&tree, &original, &sha256(&original));
+    // The same record, first in the root.
+    let mut rest = Obj::new();
+    rest.set("_stykSource", last.get("_stykSource").unwrap().clone());
+    for (key, value) in last.as_obj().unwrap().iter().filter(|(key, _)| &***key != "_stykSource") {
+        rest.set(key, value.clone());
+    }
+    let first = Value::object(rest);
+    let bytes = save_opened_from_pivot(&last, Some("Opened"));
+    assert_eq!(save_opened_from_pivot(&first, Some("Opened")), bytes, "the record's place in the document does not change the file");
+    let reopened = files::open_document(&bytes, Kind::Styk).unwrap();
+    assert_eq!(reopened.as_obj().unwrap().iter().last().map(|(key, _)| key.to_string()), Some("_stykSource".to_string()), "its record is the last member of the root");
+}
+
+#[test]
+fn a_document_read_from_a_project_file_is_saved_in_the_order_it_holds_its_original_in() {
+    // A project file stores its original wherever it was stored; only a document read from Pivot has it moved first in the payloads.
+    let tree = tree("engine/tests/edit/startup.document.json");
+    let picture: Vec<u8> = (0..100_000u32).map(|i| (i * 13 % 247) as u8).collect();
+    let original: Vec<u8> = (0..100_000u32).map(|i| (i * 7 % 251) as u8).collect();
+    let mut tree = carrying(&tree, &original, &sha256(&original));
+    let root = tree.make_obj().unwrap();
+    root.set("data_base64", Value::Blob(Arc::new(styk_doc::Blob { prefix: Arc::from(""), bytes: Arc::from(picture) })));
+    let kept = save(&tree, Some("Opened"));
+    let moved = save_opened_from_pivot(&tree, Some("Opened"));
+    assert_ne!(kept, moved, "the original comes first only for a document read from Pivot");
+    // The same parts, whichever order the file keeps them in.
+    let (kept, moved) = (files::open_document(&kept, Kind::Styk).unwrap(), files::open_document(&moved, Kind::Styk).unwrap());
+    for key in ["data_base64", "_stykSource"] {
+        assert_eq!(json::to_string(kept.get(key).unwrap()), json::to_string(moved.get(key).unwrap()), "{key}");
+    }
 }
 
 #[test]
 fn a_stopped_save_writes_nothing_and_an_invalid_document_is_refused() {
     let tree = tree("engine/tests/edit/startup.document.json");
-    let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| true);
+    let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, original_first: false, reservation: None }, &|| true);
     assert!(matches!(stopped, Err(SaveError::Cancelled)), "{stopped:?}");
     let mut broken = tree.clone();
     broken.make_obj().unwrap().set("figure_types", Value::Num(3.0));
-    let refused = save_project(&[broken], &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false);
+    let refused = save_project(&[broken], &[], ProjectRequest { name: None, original_first: false, reservation: None }, &|| false);
     assert!(matches!(refused, Err(SaveError::Refused(_))), "{refused:?}");
-    let none = save_project(&[], &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false);
+    let none = save_project(&[], &[], ProjectRequest { name: None, original_first: false, reservation: None }, &|| false);
     assert!(matches!(none, Err(SaveError::Refused(_))), "{none:?}");
 }
 
@@ -117,14 +172,14 @@ fn a_save_stops_at_the_question_that_says_so_wherever_it_is_asked_and_writes_not
     // (hashing alone asks for every 4 MiB of a document of 32 MiB of numbers) and that a stop is obeyed by the very next question.
     let tree = heavy_tree(8 << 20);
     let asked = std::cell::Cell::new(0usize);
-    let saved = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| { asked.set(asked.get() + 1); false }).unwrap();
+    let saved = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, original_first: false, reservation: None }, &|| { asked.set(asked.get() + 1); false }).unwrap();
     let total = asked.get();
     assert!(saved.raw_bytes >= 32 << 20, "{} raw bytes", saved.raw_bytes);
     assert!(total >= 32 / 4 + 2, "{total} questions for {} MiB", saved.raw_bytes >> 20);
     // Stopped at the start, in the preparation, in the lift, while hashing and while compressing: the same answer.
     for stop_at in [1, 2, 5, total / 4, total / 2, total * 3 / 4, total - 1, total] {
         let asked = std::cell::Cell::new(0usize);
-        let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| { asked.set(asked.get() + 1); asked.get() >= stop_at });
+        let stopped = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, original_first: false, reservation: None }, &|| { asked.set(asked.get() + 1); asked.get() >= stop_at });
         assert!(matches!(stopped, Err(SaveError::Cancelled)), "stopped at question {stop_at} of {total}: {:?}", stopped.map(|written| written.bytes.len()));
         assert_eq!(asked.get(), stop_at, "nothing is asked, and no work is started, after the question that said stop");
     }
@@ -134,13 +189,13 @@ fn a_save_stops_at_the_question_that_says_so_wherever_it_is_asked_and_writes_not
 fn a_save_the_memory_cannot_hold_is_refused_before_it_starts() {
     let tree = tree("engine/tests/edit/startup.document.json");
     // The save reserves what its sections and the compressed file take; with the memory limited to 8 MiB it is refused whole.
-    let refused = styk_alloc::with_limit(8 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false));
+    let refused = styk_alloc::with_limit(8 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, original_first: false, reservation: None }, &|| false));
     assert!(matches!(refused, Err(SaveError::OutOfMemory(_))), "{refused:?}");
     // The same document saves when the memory is there, and a refused save changed nothing of it.
-    assert!(save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &|| false).is_ok());
+    assert!(save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, original_first: false, reservation: None }, &|| false).is_ok());
     // The Pivot original counts twice: a document that fits alone does not fit with an original that takes most of the memory.
-    let original = Source { record: Value::object(Obj::new()), bytes: vec![0; 100 << 20] };
-    let refused = styk_alloc::with_limit(256 << 20, || save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: Some(original), reservation: None }, &|| false));
+    let carried = carrying(&tree, &vec![0; 100 << 20], &"0".repeat(64));
+    let refused = styk_alloc::with_limit(256 << 20, || save_project(std::slice::from_ref(&carried), &[], ProjectRequest { name: None, original_first: true, reservation: None }, &|| false));
     assert!(matches!(refused, Err(SaveError::OutOfMemory(_))), "{:?}", refused.map(|written| written.bytes.len()));
 }
 
@@ -164,7 +219,7 @@ fn every_recorded_project_opens_and_saves_to_its_own_bytes() {
             let engine = Engine::new(|| 0.0, Budgets::for_device(None));
             engine.open_document(OpenSource::File { bytes: &recorded, name: &name }, OpenOptions { layer_timeline: false }, &|| false).unwrap().tree
         };
-        let saved = save(&tree, None, None);
+        let saved = save(&tree, None);
         assert!(saved == recorded, "{name}: {} bytes saved, {} recorded", saved.len(), recorded.len());
         checked.push(name);
     }
@@ -330,7 +385,7 @@ fn a_save_whose_worker_failed_is_a_failed_save_that_the_next_save_survives() {
         }
     }
     let tree = tree("engine/tests/edit/startup.document.json");
-    let request = || ProjectRequest { name: None, source: None, reservation: None };
+    let request = || ProjectRequest { name: None, original_first: false, reservation: None };
     let failed = save_project(std::slice::from_ref(&tree), &[], request(), &Failing);
     let Err(SaveError::File(error)) = failed else { panic!("{:?}", failed.map(|written| written.bytes.len())) };
     assert_eq!((error.code, error.message_key), (Some("worker_failed"), "errors.documentExport.documentExportFailed"));
@@ -343,7 +398,7 @@ fn a_save_whose_worker_failed_is_a_failed_save_that_the_next_save_survives() {
 fn a_save_on_the_workers_writes_the_bytes_of_a_save_on_one_thread_and_a_cancel_reaches_the_workers() {
     use styk_engine::save::EngineHost;
     let tree = heavy_tree(2 << 20);
-    let request = || ProjectRequest { name: Some("Side by side".into()), source: None, reservation: None };
+    let request = || ProjectRequest { name: Some("Side by side".into()), original_first: false, reservation: None };
     let alone = save_project(std::slice::from_ref(&tree), &[], request(), &|| false).unwrap();
     let pool = Workers::start(3);
     let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3, aside: false };
@@ -371,7 +426,7 @@ fn a_save_tells_where_its_time_went() {
         }
     }
     let tree = tree("engine/tests/edit/startup.document.json");
-    let written = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, source: None, reservation: None }, &Ticking).unwrap();
+    let written = save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, original_first: false, reservation: None }, &Ticking).unwrap();
     let t = written.timings;
     assert!(t.prepare_ms > 0.0 && t.lift_ms > 0.0 && t.frames_ms > 0.0 && t.total_ms >= t.prepare_ms + t.lift_ms, "{t:?}");
     assert_eq!(t.frames.iter().map(|frame| frame.raw_bytes).sum::<usize>(), written.raw_bytes);
@@ -381,7 +436,7 @@ fn a_save_tells_where_its_time_went() {
 fn a_save_reserves_its_memory_under_the_name_it_is_given_and_gives_it_back_itself() {
     let tree = tree("engine/tests/edit/startup.document.json");
     let token = 4_100_001;
-    let request = || ProjectRequest { name: None, source: None, reservation: Some(token) };
+    let request = || ProjectRequest { name: None, original_first: false, reservation: Some(token) };
     assert!(save_project(std::slice::from_ref(&tree), &[], request(), &|| false).is_ok());
     assert_eq!(styk_alloc::release_named(token), 0, "a finished save has nothing left for the host to release");
     let stopped = save_project(std::slice::from_ref(&tree), &[], request(), &|| true);
@@ -403,7 +458,7 @@ fn a_project_with_a_big_array_is_lifted_in_pieces_on_the_workers_into_the_same_b
         })
         .collect();
     tree.make_obj().unwrap().set("padding", Value::array(records));
-    let request = || ProjectRequest { name: Some("In pieces".into()), source: None, reservation: None };
+    let request = || ProjectRequest { name: Some("In pieces".into()), original_first: false, reservation: None };
     let alone = save_project(std::slice::from_ref(&tree), &[], request(), &|| false).unwrap();
     let pool = Workers::start(3);
     let host = EngineHost { engine: Some(&pool.engine), cancel: &|| false, clock: || 0.0, helpers: 3, aside: false };

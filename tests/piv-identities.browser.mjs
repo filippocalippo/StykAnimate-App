@@ -79,10 +79,10 @@ try {
           let blob;
           if (format === 'piv') {
             const response = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method:'POST', headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({document, sourceId:styk.state.sourceId, format})});
+              body:JSON.stringify({document, format})});
             if (!response.ok) throw new Error(await response.text());
             blob = await response.blob();
-          } else blob = await exporter.export(document, {sourceId: styk.state.sourceId, format, name:'identity-regression'});
+          } else blob = await exporter.export((await import('/tests/support/page-editor.mjs')).pageEditor({demo:false,layerTimeline:true}).load(document).report, {format, name:'identity-regression'});
           const restored = await importer.importFile(new File([blob], `restored.${format}`));
           if (JSON.stringify(summary(restored.document)) !== expected) throw new Error(`${format} roundtrip lost recovered content`);
         }

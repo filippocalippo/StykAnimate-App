@@ -97,7 +97,9 @@ const OPEN_MINIMUM_BYTES: usize = 96 << 20;
 /// reserves what it needs ([`open_estimate`]). The interface asks before it copies a file in, because the copy itself
 /// cannot be refused.
 pub fn admit_open(file_bytes: usize) -> Result<(), OpenError> {
-    styk_alloc::admit(file_bytes.saturating_add(open_estimate(file_bytes))).map_err(OpenError::out_of_memory)?;
+    // Only the copy and the least an open takes: what the open itself needs is reserved by the open, which knows more than the size
+    // of the file (a project states the size of its parts), and refuses with the same message.
+    styk_alloc::admit(file_bytes.saturating_add(OPEN_MINIMUM_BYTES)).map_err(OpenError::out_of_memory)?;
     block(file_bytes)
 }
 
@@ -116,6 +118,82 @@ fn block(bytes: usize) -> Result<(), OpenError> {
 /// What opening a document of `file_bytes` bytes may take, for the reservation that precedes the open.
 pub fn open_estimate(file_bytes: usize) -> usize {
     file_bytes.saturating_mul(OPEN_BYTES_PER_BYTE).max(OPEN_MINIMUM_BYTES)
+}
+
+/// What opening a Pivot file takes beyond the file, per byte of the payload it inflates to, at most. Measured at the peak of opening
+/// (2026-11-01, the private documents): 5.7 for a file of 39 MiB that inflates to 54, 5.2 for 21 MiB that inflates to 42.
+pub const PIVOT_OPEN_BYTES_PER_INFLATED_BYTE: usize = 8;
+
+/// The size of the payload a Pivot file inflates to, counted by inflating it and keeping nothing: a window of 32 KiB, the input as it
+/// is, and a look at `cancel` for every megabyte. `None` for a stream that does not inflate (the open says why) or an open that was
+/// cancelled. A payload that is not compressed (a version byte first) is the file.
+fn inflated_size(file: &[u8], cancel: &dyn Fn() -> bool) -> Option<usize> {
+    use miniz_oxide::inflate::TINFLStatus;
+    use miniz_oxide::inflate::core::{DecompressorOxide, TINFL_LZ_DICT_SIZE, decompress, inflate_flags};
+    if file.first().is_some_and(|version| (1..=5).contains(version)) {
+        return Some(file.len());
+    }
+    let mut state = Box::new(DecompressorOxide::new());
+    let mut window = vec![0u8; TINFL_LZ_DICT_SIZE];
+    let flags = inflate_flags::TINFL_FLAG_PARSE_ZLIB_HEADER | inflate_flags::TINFL_FLAG_IGNORE_ADLER32;
+    let (mut read, mut at, mut total, mut checked) = (0usize, 0usize, 0usize, 0usize);
+    loop {
+        let (status, used, written) = decompress(&mut state, &file[read..], &mut window, at, flags);
+        read += used;
+        total = total.saturating_add(written);
+        at = (at + written) & (TINFL_LZ_DICT_SIZE - 1);
+        if total - checked >= 1 << 20 {
+            checked = total;
+            if cancel() {
+                return None;
+            }
+        }
+        match status {
+            TINFLStatus::Done => return Some(total),
+            TINFLStatus::HasMoreOutput => {}
+            _ => return None,
+        }
+    }
+}
+
+/// The reservation the open of `source` makes before it starts. A Pivot file's size says little of what it opens to (a project of
+/// 120 MB of pictures stored as they were needs a tenth of what 16 times its size says, and a compressed one needs more of it), so a Pivot
+/// file the estimate by size refuses is asked what it inflates to, and refused only when that does not fit either.
+fn reserve_for_open(source: &OpenSource<'_>, cancel: &dyn Fn() -> bool) -> Result<styk_alloc::Reservation, OpenError> {
+    let estimate = open_estimate_of(source);
+    let refused = match styk_alloc::reserve(estimate) {
+        Ok(reservation) => return Ok(reservation),
+        Err(refused) => refused,
+    };
+    let (bytes, name): (&[u8], &str) = match source {
+        OpenSource::File { bytes, name } => (bytes, name),
+        OpenSource::Owned { bytes, name } => (bytes.as_slice(), name),
+        OpenSource::Json { .. } => return Err(OpenError::out_of_memory(refused)),
+    };
+    if !matches!(extension(name).to_ascii_lowercase().as_str(), "piv" | "stk") {
+        return Err(OpenError::out_of_memory(refused));
+    }
+    let counted = inflated_size(bytes, cancel);
+    if cancel() {
+        return Err(OpenError::cancelled());
+    }
+    match counted.map(|size| size.saturating_mul(PIVOT_OPEN_BYTES_PER_INFLATED_BYTE).max(OPEN_MINIMUM_BYTES)) {
+        Some(real) if real < estimate => styk_alloc::reserve(real).map_err(OpenError::out_of_memory),
+        _ => Err(OpenError::out_of_memory(refused)),
+    }
+}
+
+/// What opening `source` may take, for the reservation that precedes the open: [`open_estimate`] of the file, or for a project
+/// container (which states how large its parts are) what its parts take, never more than the file's estimate.
+fn open_estimate_of(source: &OpenSource<'_>) -> usize {
+    let (bytes, name): (&[u8], &str) = match source {
+        OpenSource::File { bytes, name } => (bytes, name),
+        OpenSource::Owned { bytes, name } => (bytes.as_slice(), name),
+        OpenSource::Json { bytes, .. } => return open_estimate(bytes.len()),
+    };
+    let by_size = open_estimate(bytes.len());
+    let Some(kind) = styk_formats::Kind::from_extension(&extension(name).to_ascii_lowercase()) else { return by_size };
+    styk_formats::container::open_cost(bytes, kind).map_or(by_size, |cost| cost.clamp(OPEN_MINIMUM_BYTES, by_size))
 }
 
 impl OpenError {
@@ -217,6 +295,12 @@ pub struct OpenedDocument {
     pub version: f64,
     /// The typed views and image atlas of the tree.
     pub typed: Typed,
+    /// What a Pivot project says of its original (`_stykSource` without the file: kind, version, the SHA-256 of the file and of the
+    /// document read from it); the file is added by [`OpenedDocument::attach_source`]. `None` for any other kind of document.
+    pub source: Option<styk_doc::Obj>,
+    /// A save stores the document's Pivot original (`_stykSource`) first in the payload section: the document was read from a Pivot file.
+    /// A project file that carries one keeps the order its file had.
+    pub original_first: bool,
     /// Where the open's time went, in milliseconds by the engine's clock: `decode` (the file read into a document), `prepare` (the
     /// load's checks and normalization), `views` (the typed views), `check` (what was left of the skeleton's checksum when the
     /// rest was done).
@@ -291,12 +375,12 @@ fn steps(fan: &OpenFanout<'_>, began: f64) -> Vec<(&'static str, f64)> {
 
 /// A file's document, what kind of file it was, its version and the name it is shown under. A native file's skeleton checksum is left
 /// to `check`, to be asked for before the document is believed.
-fn read_file(bytes: &[u8], name: &str, cancel: &dyn Fn() -> bool, fan: &OpenFanout<'_>, check: &mut Option<styk_formats::container::Deferred>) -> Result<(Value, &'static str, f64, String), OpenError> {
+fn read_file(bytes: &[u8], name: &str, cancel: &dyn Fn() -> bool, fan: &OpenFanout<'_>, check: &mut Option<styk_formats::container::Deferred>) -> Result<Read, OpenError> {
     let extension = extension(name).to_ascii_lowercase();
     match extension.as_str() {
         "piv" | "stk" => {
             let decoded = styk_piv::decode_document_with(bytes, name, cancel, fan).map_err(OpenError::from_codec)?;
-            Ok((decoded.document, decoded.kind, decoded.version, decoded.filename))
+            Ok((decoded.document, decoded.kind, decoded.version, decoded.filename, decoded.source))
         }
         other => {
             let Some(kind) = styk_formats::Kind::from_extension(other) else {
@@ -306,9 +390,23 @@ fn read_file(bytes: &[u8], name: &str, cancel: &dyn Fn() -> bool, fan: &OpenFano
             let (document, deferred) = styk_formats::files::open_document_deferred(bytes, kind, fan).map_err(OpenError::from_file)?;
             *check = Some(deferred);
             let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
-            Ok((document, kind.name(), version, name.to_string()))
+            Ok((document, kind.name(), version, name.to_string(), None))
         }
     }
+}
+
+/// A file read: its document, what kind of file it was, its version, the name it is shown under, and what a Pivot project says of its file.
+type Read = (Value, &'static str, f64, String, Option<styk_piv::SourceFacts>);
+
+/// `_stykSource` without the file, in the order the codec wrote it: kind, version, the file's SHA-256, the document's, and the version of that digest.
+fn describe_source(facts: &styk_piv::SourceFacts, document_sha256: String) -> styk_doc::Obj {
+    let mut description = styk_doc::Obj::new();
+    description.set("kind", Value::str("piv"));
+    description.set("version", Value::Num(f64::from(facts.version)));
+    description.set("sha256", Value::str(&facts.sha256));
+    description.set("document_sha256", Value::str(&document_sha256));
+    description.set("document_digest_version", Value::Num(3.0));
+    description
 }
 
 /// The extension of a file name, lower case.
@@ -331,31 +429,52 @@ impl Engine {
         let began = self.now();
         fan.mark("started");
         // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
-        let length = match &source {
-            OpenSource::File { bytes, .. } | OpenSource::Json { bytes, .. } => bytes.len(),
-            OpenSource::Owned { bytes, .. } => bytes.len(),
-        };
-        let _memory = styk_alloc::reserve(open_estimate(length)).map_err(OpenError::out_of_memory)?;
+        // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
+        let _memory = reserve_for_open(&source, cancel)?;
 
         let mut check = None;
-        let (document, kind, version, name) = match source {
+        let (document, kind, version, name, facts) = match source {
             OpenSource::File { bytes, name } => read_file(bytes, name, cancel, &fan, &mut check)?,
             OpenSource::Owned { bytes, name } => match extension(name).to_ascii_lowercase().as_str() {
                 "piv" | "stk" => {
                     let decoded = styk_piv::decode_document_owned(bytes, name, cancel, &fan).map_err(OpenError::from_codec)?;
-                    (decoded.document, decoded.kind, decoded.version, decoded.filename)
+                    (decoded.document, decoded.kind, decoded.version, decoded.filename, decoded.source)
                 }
-                _ => read_file(&bytes, name, cancel, &fan, &mut check)?,
+                other => match styk_formats::Kind::from_extension(other) {
+                    Some(kind) => {
+                        // The file is let go once the container is unpacked, before the skeleton is read into a tree.
+                        let (document, deferred) = styk_formats::files::open_document_deferred_owned(bytes, kind, &fan).map_err(OpenError::from_file)?;
+                        check = Some(deferred);
+                        let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
+                        (document, kind.name(), version, name.to_string(), None)
+                    }
+                    None => read_file(&bytes, name, cancel, &fan, &mut check)?,
+                },
             },
             OpenSource::Json { bytes, name } => {
                 let document = styk_doc::json::parse(bytes).map_err(|_| OpenError::unreadable())?;
                 let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
-                (document, "json", version, name.to_string())
+                (document, "json", version, name.to_string(), None)
             }
         };
         let decoded = self.now();
+        // A Pivot project's fingerprint (what the codec records of the document read from the file) is computed on a helper while the
+        // document is prepared: it holds the document as it was read, and the preparation copies what it changes.
+        let fingerprint = facts.map(|facts| {
+            let document = document.clone();
+            (facts, styk_doc::fanout::start(&fan, move || styk_piv::source_digest(&document).map_err(|error| error.message)))
+        });
         let opened = self.prepare_opened(document, kind, version, name, options, cancel, &fan);
         let prepared = self.now();
+        let source = match (fingerprint, &opened) {
+            (Some((facts, digest)), Ok(_)) => match digest.wait(&fan) {
+                Ok(Ok(document_sha256)) => Some(describe_source(&facts, document_sha256)),
+                Ok(Err(message)) => return Err(OpenError::decode(message)),
+                Err(_) => return Err(OpenError::worker_lost()),
+            },
+            _ => None,
+        };
+        let original_first = source.is_some();
         // A skeleton that does not match its checksum is the file's error, whatever became of the document read from it. A stopped
         // open does not wait for the check.
         match check {
@@ -365,6 +484,8 @@ impl Engine {
                     return Err(OpenError::cancelled());
                 }
                 opened.map(|mut opened| {
+                    opened.source = source;
+                    opened.original_first = original_first;
                     opened.timings.insert(0, ("decode", decoded - began));
                     opened.timings.push(("check", self.now() - prepared));
                     opened.timings.extend(steps(&fan, began));
@@ -372,6 +493,8 @@ impl Engine {
                 })
             }
             _ => opened.map(|mut opened| {
+                opened.source = source;
+                opened.original_first = original_first;
                 opened.timings.insert(0, ("decode", decoded - began));
                 opened.timings.extend(steps(&fan, began));
                 opened
@@ -412,7 +535,7 @@ impl Engine {
         let lineage = self.inner.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let views = self.now() - prepared;
         let prepare = prepared - started;
-        Ok(OpenedDocument { tree: tree.clone(), indexes, name, kind, version, typed: Typed { tree, loader, prepared: prepared_views, assets, lineage }, timings: vec![("prepare", prepare), ("views", views)] })
+        Ok(OpenedDocument { tree: tree.clone(), indexes, name, kind, version, typed: Typed { tree, loader, prepared: prepared_views, assets, lineage }, source: None, original_first: false, timings: vec![("prepare", prepare), ("views", views)] })
     }
 
     /// Makes the document that `typed` belongs to the engine's document, at `revision`, with `tree` as it
@@ -580,18 +703,64 @@ impl OpenedDocument {
 }
 
 impl OpenedDocument {
-    /// Gives the document the Pivot file it was read from, as a saved native document carries its source
-    /// (`_stykSource`: the codec's description of the file and the file itself), so that saving it needs no
-    /// copy of the file anywhere else. `description` is an object; the file is added to it as `source_base64`.
-    pub fn attach_source(&mut self, description: &Value, file: Vec<u8>) -> Result<(), OpenError> {
-        let Some(description) = description.as_obj() else {
-            return Err(OpenError::decode("The description of the original source is not an object."));
+    /// Gives the document the Pivot file it was read from, as a saved native document carries its source (`_stykSource`: the
+    /// description the open made of the file, and the file itself), so that saving it needs no copy of the file anywhere else.
+    pub fn attach_source(&mut self, file: Arc<[u8]>) -> Result<(), OpenError> {
+        let Some(description) = &self.source else {
+            return Err(OpenError::decode("The document was not read from a Pivot file."));
         };
         let mut source = description.clone();
-        source.set("source_base64", Value::Blob(Arc::new(styk_doc::Blob { prefix: Arc::from(""), bytes: Arc::from(file) })));
+        source.set("source_base64", Value::Blob(Arc::new(styk_doc::Blob { prefix: Arc::from(""), bytes: file })));
         let mut root = self.tree.as_obj().cloned().ok_or_else(|| OpenError::decode("The document is not an object."))?;
         root.set("_stykSource", Value::object(source));
         self.tree = Value::object(root);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod inflate_tests {
+    use super::inflated_size;
+    use miniz_oxide::deflate::compress_to_vec_zlib;
+
+    fn sample(length: usize, seed: u64) -> Vec<u8> {
+        let mut state = seed | 1;
+        (0..length)
+            .map(|at| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                // Runs and noise, so that matches reach back across the window.
+                if at % 5000 < 3000 { (at % 251) as u8 } else { (state >> 24) as u8 }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_size_counted_is_the_size_inflated_whatever_the_level_and_the_length() {
+        for length in [0, 1, 4096, 32767, 32768, 32769, 100_000, 3_000_000] {
+            let data = sample(length, 7 + length as u64);
+            for level in [0, 1, 6, 9] {
+                let packed = compress_to_vec_zlib(&data, level);
+                assert_eq!(inflated_size(&packed, &|| false), Some(length), "{length} bytes at level {level}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_payload_that_is_not_compressed_is_the_file_and_a_broken_stream_is_nothing() {
+        assert_eq!(inflated_size(&[5, 1, 2, 3], &|| false), Some(4));
+        let mut packed = compress_to_vec_zlib(&sample(100_000, 3), 6);
+        packed.truncate(packed.len() / 2);
+        assert_eq!(inflated_size(&packed, &|| false), None);
+        assert_eq!(inflated_size(b"\x78\x9cnot a stream at all", &|| false), None);
+    }
+
+    #[test]
+    fn counting_stops_when_the_open_is_cancelled() {
+        let packed = compress_to_vec_zlib(&sample(5_000_000, 11), 0);
+        let asked = std::cell::Cell::new(0);
+        assert_eq!(inflated_size(&packed, &|| { asked.set(asked.get() + 1); asked.get() > 2 }), None);
+        assert!(asked.get() <= 3, "it looked every megabyte and stopped at once");
     }
 }

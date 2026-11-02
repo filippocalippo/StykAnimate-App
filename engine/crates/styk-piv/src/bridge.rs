@@ -295,11 +295,19 @@ pub(crate) fn source_bytes(document: &Value) -> PyResult<Option<Arc<[u8]>>> {
         }
         _ => return Err(piv("Invalid embedded original source")),
     };
-    let recorded = py::get(metadata, "sha256")?;
+    checked_source(Some(metadata), source).map(Some)
+}
+
+/// The original Pivot file a request gives apart from its document, checked against the SHA-256 the document's `_stykSource` records.
+pub(crate) fn checked_source(metadata: Option<&Value>, source: Arc<[u8]>) -> PyResult<Arc<[u8]>> {
+    let recorded = match metadata {
+        Some(metadata) => py::get(metadata, "sha256")?,
+        None => None,
+    };
     if recorded.and_then(Value::as_str) != Some(sha256_hex(&source).as_str()) {
         return Err(piv("Embedded original source fingerprint does not match"));
     }
-    Ok(Some(source))
+    Ok(source)
 }
 
 /// `server.compact_media_aliases`: a decoded figure lists its media twice

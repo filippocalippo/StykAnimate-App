@@ -133,14 +133,38 @@ ending its worker gave back. MiB.
 | compiled WebAssembly | ~4 | the module is compiled once for every thread: private executable memory goes from 5 to 9 |
 
 After freeing the copies as soon as they are copied (the page's buffer, the worker's upload, and in the web build the
-original the importer fetched back to read a fingerprint from), tdd2 settles at 1,004 and svr_uriel's codec worker is 99
-(20 original, 59 wasm memory). The desktop codec cannot end its worker: the original lives there as a lease, and the
-save fetches it from there (`/api/source`, which also decodes the project once to fingerprint it). Keeping the original
-in the document instead, as the web build does, was tried for the desktop and opened Pivot files 0.9 s (tdd2 4.4 -> 6.8 s)
-to 2.4 s later than the lease does, because the codec decodes the project again in a cold worker to compute the document
-fingerprint the saved file carries (`document_sha256`). The way out is to compute that fingerprint where the document
-already is: in the engine, from the decoded project, off the open's critical path or at the first save. The web build's
-codec worker ends two seconds after its last job (a worker started cold answers its first request in 30 to 70 ms).
+original the importer fetched back to read a fingerprint from), tdd2 settled at 1,004 and svr_uriel's codec worker was 99
+(20 original, 59 wasm memory). What kept the desktop worker alive was the original it leased, and what kept the original
+there was the document fingerprint the saved file carries (`document_sha256`): the codec decoded the project again in a
+cold worker to compute it (0.9 to 2.4 s more to open). The engine now computes it from the document it has just read, on a
+helper beside the rest of the open (`styk_piv::source_digest`), and describes the file (version, SHA-256) from the facts
+the reader already has; the interface gives the engine the file once, written into the memory the document keeps it in
+(`begin_source`, `end_source`: a `Vec<u8>` argument would hold it three times at the memory's fullest). The document carries
+the original, the codec keeps nothing, and its worker ends two seconds after its last job on both profiles (a worker
+started cold answers its first request in 30 to 70 ms). Dev build, one launch each, a loaded machine (directional):
+ending the codec worker gave back 15 MiB on tdd2, 2 on svr_uriel and 14 on testingupload.styk (it gave 160, 100 and 0
+before); tdd2 opens in 2.8 to 3.7 s, as it did with the lease. The bytes a save writes are unchanged: the four trusted
+files save to the hashes they always did.
+
+The Rust codec's lease routes (`/api/source/keep`, `retain`, `release`, `GET /api/source`, and the source cache and lease code
+behind them in `styk-piv/src/store.rs`) are not leftovers. The app no longer calls them, but the codec is held to the answers of the
+Python service it replaced: `engine/tools/piv/oracle.py` records those routes and the retained-bytes limits, `styk-piv replay`
+(`engine/crates/styk-piv/tests/parity.rs`, `engine:parity`) requires identical answers, and `styk-piv`'s own service tests state them. Removing
+them means re-recording the oracle's tapes, which are frozen, so they stay until the oracle itself is retired. The app's side of the lease is
+gone (`sourceOwners`, `adoptSource`, `detachSource`, `attachSource`, `/api/source/retain` in the import client).
+
+**Opening a Pivot file (what is reserved).** The estimate by the file's size (16 bytes per byte) is wrong in both directions for a Pivot file, which
+is a zlib stream: a project of 120 MB of pictures stored as they were inflates to about what it is, and the measured peaks are 5 to 6 bytes per byte
+of what is inflated (tdd2: 345 MiB for 54 MiB inflated from 39; svr_uriel: 236 for 42 from 21). So when the estimate by size refuses a `.piv` or `.stk`, the
+open inflates it once into a window of 32 KiB, counts the bytes and keeps none (a look at the cancel flag for every megabyte, on the worker that is
+opening; about a quarter of a second for 40 MB), and refuses only if 8 bytes per inflated byte do not fit either, with the same message. Before this a
+padded Ayame of 122 MB (2 MB of project, the rest noise) was refused with 16 x 122 = 1.9 GB asked of 2 GiB; it opens. A file whose estimate by size fits is
+not counted, and one that compresses far better than its size says (20 MB that inflates to 400) still takes the estimate by size: the open's allocations that
+cannot be refused are covered by the loss of the worker it ends with (`finish` in `engine-open.mjs`). `scripts/smoke-padded-pivot.mjs` opens such a file in
+the app, exports it unchanged and edited, saves it as a project and opens that. The opened padded Ayame exports unchanged (the file again, byte for byte), saves as a project and opens that again at 100 and 122 MB (release build), and
+exports edited at 100. The document the codec is sent for a Pivot export is JSON of at most 256 MiB, and it holds the padding twice over, as a project's pictures are
+(`data_base64` and `data_url`): at 122 MB it is 265 MB of 268, and at 133 MB the export, edited or not, is refused with "The request exceeds the configured size
+limit" while the project opens (as it did with the codec holding the original: the document is the same).
 
 **The allocator lock** (`std`'s wasm allocator: one spinning lock for every thread). Timed with a gate in front of it, tdd2
 and svr_uriel through open, play and scrub, eight workers: a worker finds the lock taken on 5 to 40 % of its calls and
@@ -148,6 +172,16 @@ waits 0.1 to 0.9 s in all over the session (waits up to 28 ms); the interface th
 lock taken on 0.01 to 0.24 % of them, and waits 21 to 182 ms in all, 4.4 to 9.2 ms at the worst. The long waits are holders
 that were descheduled on a machine running other builds, not large allocations (the holder's request was under 1 MiB
 for all but the pictures'). Not acted on at the time; the per-thread caches of "The allocator and its threads" above did it afterwards (the 7.7 to 11.4 million calls the interface thread made during an open were the read view's, which goes away with it).
+
+**The file of a project while its skeleton is read.** A `.styk` file is a skeleton of JSON text (147 MiB for
+testingupload.styk) and sections, stored in 35 MiB. The open now owns the file's bytes (`OpenSource::Owned`, as for Pivot
+files), the sections' tasks borrow it instead of copying what they unpack, and it is let go as soon as the skeleton and the
+sections are unpacked (`decode_deferred_owned`), before the skeleton is read into a tree, which is when the memory is
+fullest. The heap of testingupload settles at 413 MiB against 475 for the same build without it (two launches each; the
+renderer's private bytes 611 to 636 against 668 to 676), live memory unchanged. The 147 MiB skeleton itself stays whole
+while it is parsed: reading it in pieces needs the parser to take the skeleton by segments (a JSON value that spans one
+is the difficulty: the container's checksum and the parallel sections are laid out for a whole skeleton), and would take
+the open's peak from skeleton plus tree to tree plus one segment, 100 to 140 MiB less. Not done.
 
 **Work that is purely transient in an instance of its own.** For pictures it saves nothing: the decoded pixels are the
 result and must be in the engine's memory for the stage, and a decode now holds one buffer of the stored size. For the open
@@ -334,7 +368,7 @@ when the memory cannot give it; reservations count against every other request.
 
 | Work | Reserves | Refusal |
 | --- | --- | --- |
-| Opening a file or text (`Engine::open_document`) | 16 bytes per byte, at least 96 MiB (measured peaks: 7 to 14 bytes per byte for documents of 4 to 41 MiB) | the open error `errors.engine.outOfMemory` (`code` `out_of_memory`); the interface asks first (`admit_open`, which also tries the one block the copy of the file needs), because copying a file into the module cannot be refused |
+| Opening a file or text (`Engine::open_document`) | 16 bytes per byte, at least 96 MiB (measured peaks: 7 to 14 bytes per byte for documents of 4 to 41 MiB); for a project container, what its parts take (three times the skeleton's text, twice each section: `container::open_cost`, from the sizes in its header), never more than 16 bytes per byte; for a Pivot file that size refuses, 8 bytes per byte of what it inflates to, counted first (`inflated_size`: a window of 32 KiB, nothing kept, cancellable) | the open error `errors.engine.outOfMemory` (`code` `out_of_memory`); the interface asks first (`admit_open`: the copy of the file and the least an open takes, and the one block the copy needs), because copying a file into the module cannot be refused; the open then reserves the rest |
 | Decoding a picture or a drawing cel | the decoded size twice and the bordered size twice (`decode_image_working_bytes`); three times the cel | the picture is not shown, like one that cannot be decoded (`picturesRefused` in `engine.memory()`) |
 | Decoding a picture again for a frame (`Images::ensure`) | as above | the frame is not drawn (a thumbnail or pose is refused, a CPU export stops with the message) |
 | An editing call, and activating a session | 64 MiB (an undo or a redo: 256 MiB), or the most any call of the session has taken beyond what it held when it began, a quarter more (measured on tdd2: a pose or a movieclip edit 2 MiB, undoing a movieclip edit 380 MiB at its peak) | the answer `{status: 'error', error: 'errors.engine.outOfMemory'}`; the document is unchanged |
@@ -365,9 +399,6 @@ refused only where the code asks fallibly (`try_reserve`: the picture buffers, t
   keep the last published views instead.
 - Undo and redo rebuild records the opened tree shares, and the tree after an undo of a movieclip edit of tdd2
   takes 62 MiB more than the opened one (unpacked pose arrays).
-- The desktop codec worker holds a Pivot project's original for the life of the project (about 100 to 160 MiB of the
-  renderer for a 21 to 39 MiB file; see "The renderer's private bytes"). Keeping the original in the document, as the
-  web build does, needs the document fingerprint computed without the codec's second decode, in the engine.
 - The history accounts an entry by the size of the records it replaces (100 MiB for one movieclip edit of
   testingupload.styk, 3 MiB of memory), so the byte limit retires older entries sooner than the memory needs.
 

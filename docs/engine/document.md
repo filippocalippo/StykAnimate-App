@@ -105,8 +105,17 @@ writes the session's tiles. Replacing the record by a patch instead (a copy the 
 old `figure` reference stale: each `entry(figure)` call on one replaced the table's record again, and five drawing tests that read the figure
 after a publication failed. Moving the write needs the drawing store to ask for a cel's definition by its id each time (`figureForCel`) rather
 than hold it. Verify mode compares the whole view, so it still sees a write the session was not told of. The Pivot original of a project
-stays with the codec for saving (`/api/source/keep`, leased to the project, sent while the engine decodes); the web build embeds it in
-the document instead (`OpenedDocument.attach_source`).
+is carried by the document (`_stykSource`): the open describes the file it read (its version, its SHA-256 and the fingerprint of the document
+read from it, which a helper computes beside the preparation, `OpenedDocument.source`) and the interface gives the engine the file once
+(`OpenedDocument.attach_source`). The codec keeps nothing of it, so the codec worker is not needed to open a project and a saved project
+writes the original where it has always stored it, first in the payload section and its record last in the root
+(`styk_engine::save::carried_source`, for a document read from a Pivot file: `ProjectRequest.original_first`; a document read from a project file is
+saved in the order its file had, which is what the save has always done: see "A project saved again" in [document-exports.md](../document-exports.md)).
+
+The Pivot export (`.piv`, `.stk`) is made by the codec from the document the engine prepares. The request does not carry the original as a base64
+string in the document's JSON (a third more than the file, built, sent and parsed, and over the codec's limit for a request at 90 MB): the engine
+writes the JSON of the document without the string and then the bytes of the original (`Output::CodecRequest`, `styk_piv::service::FRAMED_EXPORT`:
+four bytes of the JSON's length, the JSON, the original), and the codec checks the original against the SHA-256 the record states.
 
 The session that edits the document starts from the same tree and typed views
 (`OpenedDocument.start_session`; nothing is converted again) and is the document's from the moment the

@@ -54,7 +54,7 @@ try {
     const document = scene;
     const exportImport = async (format, figureTypeId) => {
       const exported = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({document, format, sourceId: null, figureTypeId})});
+        body: JSON.stringify({document, format, figureTypeId})});
       if (!exported.ok) throw new Error(`${format} export: ${await exported.text()}`);
       const bytes = await exported.arrayBuffer();
       const imported = await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=native-text-edited.${format}`, {method: 'POST',

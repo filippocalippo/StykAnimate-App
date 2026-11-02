@@ -28,6 +28,6 @@ The subsequent source-stable actual Electron Akane diagnostic measured 2224.2 ms
 
 Opening a project does not use this transport. The engine reads the file (or the document's JSON) on its own workers,
 normalizes it as the editor's load does and keeps it; the editor receives a read view of it in slices
-([engine/document.md](engine/document.md#opening-a-document)). The codec keeps the original of a Pivot file only to save it again
-(`/api/source/keep`; the web build embeds it in the document). The transport above serves the imports that are not
+([engine/document.md](engine/document.md#opening-a-document)). A Pivot file's original is carried by the document
+(`_stykSource`, given to the engine once the open has described it); the codec keeps nothing of it. The transport above serves the imports that are not
 opened as projects, such as a figure taken from a library file.

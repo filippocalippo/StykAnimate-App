@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use common::*;
 use styk_doc::{Nums, Value};
-use styk_piv::{decode_document, encode_piv, encode_stk};
+use styk_piv::{Limits, decode_document, encode_piv, encode_stk};
 
 const NEVER: &dyn Fn() -> bool = &|| false;
 
@@ -597,6 +597,60 @@ fn a_native_save_of_an_upgrade_keeps_the_original_and_the_edits() {
     }
 }
 
+/// The export request the app makes: the JSON of the document without its original, four bytes of that JSON's length before it, and the
+/// original after it.
+fn framed(document: &Value, original: &[u8]) -> Vec<u8> {
+    let mut document = document.clone();
+    remove(&mut document, "_stykSource/source_base64");
+    let json = text(&object(&[("document", document), ("format", string("piv"))]));
+    let mut body = (json.len() as u32).to_le_bytes().to_vec();
+    body.extend_from_slice(&json);
+    body.extend_from_slice(original);
+    body
+}
+
+#[test]
+fn an_export_that_gives_the_original_apart_is_the_export_that_embeds_it() {
+    const FRAMED: &str = "application/vnd.stykanimate.export";
+    for name in ["legacy-v2.piv", "legacy-v3.piv", "legacy-v4.piv"] {
+        let Upgrade { mut service, imported, modern, source, .. } = upgraded(name);
+        let native = service.export(&modern, Some(&str_at(&imported, "sourceId")), "styk").body;
+        let mut service = Service::new();
+        let document = at(&service.import("upgraded.styk", &native), "document");
+        let embedded = service.export(&document, None, "piv");
+        assert_eq!(embedded.status, 200, "{name}");
+        // Unchanged and edited, the original given apart makes the bytes the embedded original makes.
+        let apart = service.call("POST", "/api/export", &[("Content-Type", FRAMED)], &framed(&document, &source));
+        assert_eq!(apart.status, 200, "{name}: {}", String::from_utf8_lossy(&apart.body));
+        assert_eq!(apart.body, embedded.body, "{name}");
+        // A request that gives no bytes after its JSON is the request of a document that holds its original itself.
+        let mut whole = text(&object(&[("document", document.clone()), ("format", string("piv"))]));
+        let mut empty = (whole.len() as u32).to_le_bytes().to_vec();
+        empty.append(&mut whole);
+        let alone = service.call("POST", "/api/export", &[("Content-Type", FRAMED)], &empty);
+        assert_eq!(alone.body, embedded.body, "{name}");
+        // Bytes that are not the original the document records are refused, as a corrupt embedded original is.
+        let mut other = source.clone();
+        other[0] ^= 1;
+        let refused = service.call("POST", "/api/export", &[("Content-Type", FRAMED)], &framed(&document, &other));
+        assert_eq!(refused.status, 422, "{name}");
+        // A request cut short is refused, not read past its end.
+        let cut = framed(&document, &source);
+        assert_eq!(service.call("POST", "/api/export", &[("Content-Type", FRAMED)], &cut[..3]).status, 400);
+        assert_eq!(service.call("POST", "/api/export", &[("Content-Type", FRAMED)], &cut[..cut.len() - source.len() - 1]).status, 400);
+    }
+}
+
+#[test]
+fn an_original_over_the_limit_is_refused_wherever_the_request_carries_it() {
+    const FRAMED: &str = "application/vnd.stykanimate.export";
+    let Upgrade { mut service, imported, modern, source, .. } = upgraded("legacy-v2.piv");
+    let native = service.export(&modern, Some(&str_at(&imported, "sourceId")), "styk").body;
+    let mut service = Service::with(Limits { max_source: source.len() - 1, ..Limits::desktop() });
+    let document = at(&service.import("upgraded.styk", &native), "document");
+    assert_eq!(service.call("POST", "/api/export", &[("Content-Type", FRAMED)], &framed(&document, &source)).status, 413);
+}
+
 #[test]
 fn the_embedded_version_cannot_choose_the_wrong_writer() {
     let Upgrade { mut service, imported, modern, .. } = upgraded("legacy-v3.piv");
@@ -742,4 +796,36 @@ fn a_file_decoded_by_its_owner_gives_the_same_document_or_the_same_refusal() {
         let b = styk_piv::decode_document_owned(bytes, "x.piv", NEVER, &styk_doc::fanout::Sequential).expect_err("refused");
         assert_eq!((a.status, a.code, a.message), (b.status, b.code, b.message));
     }
+}
+
+// ---- the description of an original ---------------------------------------------------
+
+/// What the engine says of the file a Pivot project was read from (its version, its SHA-256, the fingerprint of the document read
+/// from it) is what the codec recorded of the same file: the engine computes it so that the codec need not decode the project
+/// again, and a saved project carries the same description either way.
+#[test]
+fn the_description_of_an_original_is_what_the_codec_records() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut compared = 0;
+    for entry in std::fs::read_dir(&dir).expect("fixtures") {
+        let path = entry.expect("entry").path();
+        let name = path.file_name().expect("name").to_string_lossy().to_string();
+        if !name.ends_with(".piv") {
+            continue;
+        }
+        let bytes = std::fs::read(&path).expect("fixture");
+        let Ok(decoded) = decode_document(&bytes, &name, NEVER) else { continue };
+        let facts = decoded.source.as_ref().unwrap_or_else(|| panic!("{name}: a Pivot project describes its file"));
+        let mut service = Service::new();
+        let imported = service.import(&name, &bytes);
+        let (_, recorded) = service.source_record(&str_at(&imported, "sourceId"));
+        assert_eq!((str_at(&recorded, "kind"), number(&recorded, "version")), ("piv".to_string(), f64::from(facts.version)), "{name}: kind and version");
+        assert_eq!(str_at(&recorded, "sha256"), facts.sha256, "{name}: the file");
+        assert_eq!(str_at(&recorded, "document_sha256"), styk_piv::source_digest(&decoded.document).expect("fingerprint"), "{name}: the document read from it");
+        let owned = styk_piv::decode_document_owned(bytes.clone(), &name, NEVER, &styk_doc::fanout::Sequential).expect("owned");
+        let facts_owned = owned.source.expect("owned describes its file too");
+        assert_eq!((facts_owned.version, facts_owned.sha256), (facts.version, facts.sha256.clone()), "{name}: the same by ownership");
+        compared += 1;
+    }
+    assert!(compared >= 5, "{compared} Pivot fixtures compared");
 }

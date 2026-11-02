@@ -29,7 +29,7 @@ try {
     for (const [name, bytes] of Object.entries(files)) {
       const imported = await importer.importFile(new File([bytes], name));
       opened[name] = {kind: imported.kind, transport: imported.timings.transport, figures: imported.document.figure_types.length,
-        frames: imported.document.keyframes.length, source: imported.sourceId};
+        frames: imported.document.keyframes.length};
     }
     importer.dispose();
     const exporter = new DocumentExporter();

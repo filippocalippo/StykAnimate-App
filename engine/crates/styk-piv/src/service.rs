@@ -4,6 +4,8 @@
 //! and returns what it would have written: the same routes, size rules, cache
 //! and lease semantics, and the same JSON error bodies as the Python service.
 
+use std::sync::Arc;
+
 use styk_doc::Value;
 
 use crate::ctx::Ctx;
@@ -254,13 +256,11 @@ impl Codec {
             ("GET", "/api/source") => {
                 let source_id = query_value(&query, "id", "");
                 let (source, meta) = self.store.source_record(ctx, &source_id)?;
-                // `meta=1`: the description alone, for a caller that holds the original already (it is not sent back to be thrown away).
-                let source: &[u8] = if query_value(&query, "meta", "") == "1" { &[] } else { &source };
                 let mut payload = Vec::with_capacity(12 + meta.len() + source.len());
                 payload.extend_from_slice(b"STYKSRC1");
                 payload.extend_from_slice(&(meta.len() as u32).to_le_bytes());
                 payload.extend_from_slice(&meta);
-                payload.extend_from_slice(source);
+                payload.extend_from_slice(&source);
                 Ok(Response { status: 200, headers: vec![header("Content-Type", "application/octet-stream")], body: payload })
             }
             ("POST", "/api/cancel") => Ok(Response { status: 204, headers: vec![header("Content-Type", "application/json")], body: Vec::new() }),
@@ -283,16 +283,28 @@ impl Codec {
             }
             ("POST", "/api/export") => {
                 let started = self.store.clock.as_ref().map_or(0.0, |clock| clock());
-                if body.len() > self.limits.max_document {
+                // The request is JSON, or (`FRAMED_EXPORT`) the JSON of a document that carries its Pivot original and then the original's
+                // bytes themselves: a base64 string of the whole file inside the JSON is a third of the file again, in the request and in memory.
+                let (json, original) = if header_value("content-type").is_some_and(|kind| kind.starts_with(FRAMED_EXPORT)) {
+                    let (json, original) = split_export_frame(body)?;
+                    if original.len() > self.limits.max_source {
+                        return Err(too_large());
+                    }
+                    // No bytes after the JSON: the document holds its original itself, or has none.
+                    (json, (!original.is_empty()).then(|| Arc::<[u8]>::from(original)))
+                } else {
+                    (body, None)
+                };
+                if json.len() > self.limits.max_document {
                     return Err(too_large());
                 }
-                let request = decoded_json(body)?;
+                let request = decoded_json(json)?;
                 let now = |codec: &Codec| codec.store.clock.as_ref().map_or(0.0, |clock| clock());
                 let mut timings = vec![("receive", 0.0), ("parse", now(self) - started)];
                 if !request.is_object() {
                     return Err(api(400, "invalid_request", "The request must be a JSON object."));
                 }
-                let (data, name) = self.store.export(ctx, &request, &mut timings)?;
+                let (data, name) = self.store.export(ctx, &request, original, &mut timings)?;
                 timings.push(("total", now(self) - started));
                 let stages: Vec<String> = timings.iter().map(|(stage, duration)| format!("{stage};dur={duration:.3}")).collect();
                 Ok(Response {
@@ -325,6 +337,21 @@ impl Codec {
             _ => Err(api(404, "route_not_found", "Unknown codec endpoint.")),
         }
     }
+}
+
+/// The content type of an export request made of the JSON of the document and then the bytes of the Pivot original it carries
+/// (`_stykSource`, without its `source_base64`): four bytes of the JSON's length (little-endian), the JSON, the original (none, when the JSON holds the document's own).
+pub const FRAMED_EXPORT: &str = "application/vnd.stykanimate.export";
+
+/// The JSON and the original of a framed export request.
+fn split_export_frame(body: &[u8]) -> PyResult<(&[u8], &[u8])> {
+    let invalid = || api(400, "invalid_request", "The export request is not complete.");
+    let (length, rest) = body.split_first_chunk::<4>().ok_or_else(invalid)?;
+    let length = u32::from_le_bytes(*length) as usize;
+    if length > rest.len() {
+        return Err(invalid());
+    }
+    Ok(rest.split_at(length))
 }
 
 /// `server.error_response` as a response.

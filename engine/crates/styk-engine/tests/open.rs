@@ -318,3 +318,69 @@ fn an_open_is_stopped_between_its_steps_not_only_before_the_first() {
         }
     }
 }
+
+/// A project container with `payload` incompressible bytes in one picture, as the app saves it.
+fn project_with_a_picture(payload: usize) -> Vec<u8> {
+    use styk_engine::save::{ProjectRequest, save_project};
+    let text = std::fs::read(repo("engine/tests/edit/startup.document.json")).unwrap();
+    let mut tree = engine().open_document(OpenSource::Json { bytes: &text, name: "Untitled" }, APP, &|| false).unwrap().tree;
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let bytes: Vec<u8> = (0..payload)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 24) as u8
+        })
+        .collect();
+    tree.make_obj().unwrap().set("data_base64", Value::Blob(std::sync::Arc::new(styk_doc::Blob { prefix: "".into(), bytes: bytes.into() })));
+    save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, original_first: false, reservation: None }, &|| false).unwrap().bytes
+}
+
+#[test]
+fn a_project_is_admitted_by_the_size_of_its_parts_and_not_by_the_size_of_its_file() {
+    use styk_engine::document::open_estimate;
+    // 40 MB, nearly all of it one picture: by its size alone it asks for 16 times that, by its parts about twice that.
+    let file = project_with_a_picture(40 << 20);
+    assert!(open_estimate(file.len()) > 600 << 20);
+    let engine = engine();
+    let opened = styk_alloc::with_limit(300 << 20, || engine.open_document(OpenSource::File { bytes: &file, name: "Project.styk" }, APP, &|| false));
+    assert!(opened.is_ok(), "{:?}", opened.err().map(|error| error.message));
+    // The same bytes under another name are a file of unknown layout, asked for by their size.
+    let refused = styk_alloc::with_limit(300 << 20, || engine.open_document(OpenSource::File { bytes: &file, name: "Project.bin" }, APP, &|| false));
+    assert_eq!(refused.err().and_then(|error| error.code), Some("out_of_memory".to_string()));
+}
+
+/// A Pivot file of the fixtures with `padding` bytes of noise after its project, stored as they are: the file is as large as what it
+/// inflates to, as a project of pictures kept as they were is.
+fn pivot_file_padded_with_noise(padding: usize) -> Vec<u8> {
+    let original = std::fs::read(repo("engine/crates/styk-piv/tests/fixtures/modern-identities.piv")).unwrap();
+    let mut payload = miniz_oxide::inflate::decompress_to_vec_zlib(&original).unwrap();
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    payload.extend((0..padding).map(|_| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state >> 24) as u8
+    }));
+    miniz_oxide::deflate::compress_to_vec_zlib(&payload, 0)
+}
+
+#[test]
+fn a_pivot_file_the_size_estimate_refuses_is_asked_what_it_inflates_to() {
+    let engine = engine();
+    // 40 MiB of file: by its size an open reserves 640 MiB, by what it inflates to a half of that.
+    let fits = pivot_file_padded_with_noise(40 << 20);
+    assert!(styk_engine::document::open_estimate(fits.len()) > 600 << 20);
+    let opened = styk_alloc::with_limit(500 << 20, || engine.open_document(OpenSource::File { bytes: &fits, name: "Padded.piv" }, APP, &|| false));
+    assert!(opened.is_ok(), "{:?}", opened.err().map(|error| error.message));
+    // 70 MiB does not fit by either measure, and says so as it always has.
+    let too_large = pivot_file_padded_with_noise(70 << 20);
+    let refused = styk_alloc::with_limit(500 << 20, || engine.open_document(OpenSource::File { bytes: &too_large, name: "Padded.piv" }, APP, &|| false));
+    let error = refused.err().expect("the open is refused");
+    assert_eq!((error.code.as_deref(), error.key.as_deref()), (Some("out_of_memory"), Some("errors.engine.outOfMemory")));
+    // A cancelled open says that, not that the memory is short.
+    let cancelled = styk_alloc::with_limit(500 << 20, || engine.open_document(OpenSource::File { bytes: &fits, name: "Padded.piv" }, APP, &|| true));
+    assert!(cancelled.is_err());
+    assert!(engine.generation().is_none(), "a refused open changes nothing");
+}

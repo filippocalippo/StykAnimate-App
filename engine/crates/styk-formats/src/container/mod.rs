@@ -21,7 +21,7 @@ mod read;
 mod write;
 
 
-pub use read::{Checked, Decoded, Deferred, Parts, check, decode, decode_deferred, decode_parts, member_value, parse_lifted, parse_lifted_owned, parse_lifted_owned_within, parse_lifted_owned_admitted_within, LiftedAdmitted};
+pub use read::{Checked, Decoded, Deferred, Parts, check, decode, open_cost, decode_deferred, decode_deferred_owned, decode_parts, member_value, parse_lifted, parse_lifted_owned, parse_lifted_owned_within, parse_lifted_owned_admitted_within, LiftedAdmitted};
 pub use write::{Frame, LiftTimes, Lifted, ViewLifter, ViewPart, encode_v1, encode_v2, encode_v2_with, frame, lift, lift_together, lift_together_within, lift_until, lift_within};
 
 pub(crate) const HEADER: usize = 56;

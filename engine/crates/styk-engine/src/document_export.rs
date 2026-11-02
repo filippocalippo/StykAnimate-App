@@ -33,8 +33,11 @@ pub struct DocumentExport {
 pub enum Output {
     /// The document as JSON.
     Document,
-    /// `{document, sourceId, format, filename, figureTypeId}`: the body of the codec's export request.
-    CodecRequest { source_id: Option<String>, format: String },
+    /// The body of the codec's export request (`styk_piv::service::FRAMED_EXPORT`): four bytes of the length of the JSON
+    /// `{document, format, filename, figureTypeId}` (little-endian), the JSON, and the bytes of the Pivot original the document
+    /// carries (`_stykSource`), which the JSON does not hold: a base64 string of the whole file in it is a third more of the file, built
+    /// and sent and parsed, and a project of 90 MB then exceeds what the codec takes in one request.
+    CodecRequest { format: String },
     /// The figure file's container (`.stkz`, `.stykmov`), written and checked here.
     Container,
 }
@@ -76,7 +79,7 @@ impl Engine {
             }
             (store.tree.clone(), store.loader.clone(), prepared)
         };
-        let Exported { document, figure_type_id, drawings } = styk_edit::export::export_document(&tree, &loader, &prepared, request, &Hold { cancel })
+        let Exported { mut document, figure_type_id, drawings } = styk_edit::export::export_document(&tree, &loader, &prepared, request, &Hold { cancel })
             .map_err(|error| match error {
                 styk_edit::EditError::Invalid(message) if message == styk_edit::export::CANCELLED => DocumentExportError::Cancelled,
                 styk_edit::EditError::Invalid(message) => DocumentExportError::Refused(message),
@@ -100,12 +103,10 @@ impl Engine {
                 })?;
                 return Ok(DocumentExport { bytes: written.bytes, figure_type_id, drawings, raw_bytes: written.raw_bytes });
             }
-            Output::CodecRequest { source_id, format } => {
+            Output::CodecRequest { format } => {
+                let original = take_original(&mut document);
                 let mut body = Obj::new();
                 body.set("document", document);
-                if let Some(source_id) = source_id {
-                    body.set("sourceId", Value::str(source_id));
-                }
                 body.set("format", Value::str(format));
                 if let Some(name) = request.name.as_deref() {
                     body.set("filename", Value::str(name));
@@ -113,11 +114,30 @@ impl Engine {
                 if let Some(id) = figure_type_id {
                     body.set("figureTypeId", Value::Num(id));
                 }
-                styk_doc::json::to_string(&Value::object(body)).into_bytes()
+                let json = styk_doc::json::to_string(&Value::object(body)).into_bytes();
+                let original: &[u8] = original.as_deref().unwrap_or(&[]);
+                let mut framed = Vec::with_capacity(4 + json.len() + original.len());
+                framed.extend_from_slice(&(json.len() as u32).to_le_bytes());
+                framed.extend_from_slice(&json);
+                drop(json);
+                framed.extend_from_slice(original);
+                framed
             }
         };
         Ok(DocumentExport { raw_bytes: bytes.len(), bytes, figure_type_id, drawings })
     }
+}
+
+/// The Pivot original a document carries (`_stykSource.source_base64`, held as bytes), taken out of it.
+fn take_original(document: &mut Value) -> Option<std::sync::Arc<[u8]>> {
+    let record = document.make_obj()?.get_mut("_stykSource")?.make_obj()?;
+    let Some(Value::Blob(blob)) = record.get("source_base64") else { return None };
+    if !blob.prefix.is_empty() {
+        return None;
+    }
+    let bytes = blob.bytes.clone();
+    record.remove("source_base64");
+    Some(bytes)
 }
 
 /// The format a file extension names, if the engine exports it.

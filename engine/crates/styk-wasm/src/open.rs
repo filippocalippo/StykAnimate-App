@@ -150,6 +150,8 @@ fn build_meta(opened: &Opened) -> String {
     out.set("version", Value::Num(opened.version));
     out.set("lineage", Value::Num(opened.lineage() as f64));
     out.set("savedDraft", Value::Bool(opened.indexes.saved_draft));
+    // Whether the document was read from a Pivot file it can carry (`attach_source`).
+    out.set("source", Value::Bool(opened.source.is_some()));
     out.set("indexes", opened.indexes.indexes());
     let mut timings = Obj::new();
     for (phase, ms) in &opened.timings {
@@ -185,6 +187,8 @@ fn build_meta(opened: &Opened) -> String {
 #[wasm_bindgen]
 pub struct OpenedDocument {
     engine: Engine,
+    /// The memory the original is being written into (`begin_source`), until `end_source`.
+    source: Option<Arc<[std::mem::MaybeUninit<u8>]>>,
     /// Taken out only when the opening is released ([`Drop`]).
     opened: Option<Arc<Opened>>,
     lifter: RefCell<ViewLifter>,
@@ -204,7 +208,7 @@ impl Drop for OpenedDocument {
 
 impl OpenedDocument {
     fn new(engine: Engine, opened: Opened, meta: Option<String>) -> OpenedDocument {
-        OpenedDocument { engine, opened: Some(Arc::new(opened)), lifter: RefCell::new(ViewLifter::new()), meta: RefCell::new(meta) }
+        OpenedDocument { engine, source: None, opened: Some(Arc::new(opened)), lifter: RefCell::new(ViewLifter::new()), meta: RefCell::new(meta) }
     }
 
     fn opened(&self) -> &Arc<Opened> {
@@ -353,12 +357,29 @@ impl OpenedDocument {
         lift_keyed_record(&self.opened().tree, table, key)
     }
 
-    /// Gives the document the Pivot file it was read from (`description`: the codec's JSON description of it), so
-    /// that it carries its own original (`_stykSource`). Before the read view is built and the session starts.
-    pub fn attach_source(&mut self, description: &str, file: Vec<u8>) -> Result<(), JsError> {
-        let description = json::parse(description.as_bytes()).map_err(js_error)?;
+    /// Makes room for the Pivot file the document was read from (`length` bytes) where it will be kept, and returns where in the engine's
+    /// memory the caller writes it. The file is written once, into the memory the document holds it in: a copy in this module's memory first
+    /// and another to keep (what `Vec<u8>` arguments cost) would hold the file three times at the memory's fullest. Call
+    /// [`OpenedDocument::end_source`] when it is written.
+    pub fn begin_source(&mut self, length: f64) -> Result<usize, JsError> {
+        let length = crate::engine::counter(length).ok_or_else(|| js_error("the original's size is not a size"))? as usize;
+        if self.opened().source.is_none() {
+            return Err(js_error("the document was not read from a Pivot file"));
+        }
+        let mut memory = Arc::<[u8]>::new_zeroed_slice(length);
+        let at = Arc::get_mut(&mut memory).expect("the memory was just made").as_mut_ptr() as usize;
+        self.source = Some(memory);
+        Ok(at)
+    }
+
+    /// Gives the document the Pivot file written where [`OpenedDocument::begin_source`] said, so that it carries its own original
+    /// (`_stykSource`, described as the open described it: `meta().source`). Before the read view is built and the session starts.
+    pub fn end_source(&mut self) -> Result<(), JsError> {
+        let memory = self.source.take().ok_or_else(|| js_error("no original is being written"))?;
+        // SAFETY: the memory was made zeroed, and zero is a value of every byte, whatever was written over it.
+        let file = unsafe { memory.assume_init() };
         let opened = Arc::get_mut(self.opened.as_mut().expect("an opened document is held until it is dropped")).ok_or_else(|| js_error("the document is being edited already"))?;
-        opened.attach_source(&description, file).map_err(|error| js_error(error.to_json()))
+        opened.attach_source(file).map_err(|error| js_error(error.to_json()))
     }
 
     /// Starts the session that edits this document, with the editor's `state` (JSON: options, view and

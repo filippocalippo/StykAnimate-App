@@ -62,7 +62,7 @@ function failure(error) {
  * Makes the document of an export of `request` from the document the engine holds at `revision` (the interface's
  * revision of it). `request`: `format` (`piv`, `stk`, `stkz`, `stykmov`), `name`, `figureTypeId`, `figureUid`,
  * `figureUids`, `tick`, `output` (`document`, `container` for the figure file as it is stored, or `codec` for the body of the
- * codec's export request, with `sourceId`).
+ * codec's export request: four bytes of the length of its JSON, the JSON, and the bytes of the Pivot original the document carries).
  * `address` is a fresh `engine.handle.address()`; `cancelled()` says whether the export is stopped.
  * `address` is a fresh `engine.handle.address()` (consumed) whose workers the save may use, or 0.
  * `join` is null where the caller is a thread of the engine already (the tests, which run it in-process). `guard` is the worker's
@@ -81,17 +81,17 @@ export function makeExportDocument({join, address, revision, request, cancelled,
 /**
  * The `.styk` container of a project, written by the engine from the documents sessions handed over. `request`:
  * `snapshots` (tokens of `EditSession.snapshot()`, the outermost movieclip scope first, the document in front last, consumed
- * by the call), `scopes` (the movieclip type each document but the last was entered from), `name`, and `source`, the record
- * of the Pivot original the interface holds for the project, whose bytes are `source`.
+ * by the call), `scopes` (the movieclip type each document but the last was entered from) and `name`. A project opened from
+ * Pivot carries its original in the document (`_stykSource`).
  * `join` is null where the caller is a thread of the engine already (the tests, which run it in-process).
  * @returns {{bytes: Uint8Array, rawBytes: number, timings: object}} `timings`: where the save's time went in the engine (`prepare_ms`,
  * `lift_ms`, `assemble_ms`, `total_ms`, and for the skeleton, the arrays section and the payloads section `{raw, stored, hash_ms, compress_ms, reused}`).
  */
-export function makeProjectFile({join, request, source, cancelled, guard, address = 0}) {
+export function makeProjectFile({join, request, cancelled, guard, address = 0}) {
   return inside(guard, () => {
     if (join) joinEngine(join);
     let made;
-    try { made = save_project(address, JSON.stringify(request), source, cancelled); } catch (error) { throw failure(error); }
+    try { made = save_project(address, JSON.stringify(request), cancelled); } catch (error) { throw failure(error); }
     try { return {bytes: made.bytes(), rawBytes: made.raw_bytes(), timings: JSON.parse(made.timings() || 'null')}; } finally { made.free(); }
   });
 }

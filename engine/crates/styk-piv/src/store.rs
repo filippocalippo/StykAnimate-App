@@ -619,7 +619,9 @@ impl Store {
     }
 
     /// `export(request)`: the file bytes and the download name.
-    pub fn export(&mut self, ctx: &Ctx<'_>, request: &Value, timings: &mut Vec<(&'static str, f64)>) -> PyResult<(Vec<u8>, String)> {
+    /// `original` is the Pivot file the document carries (`_stykSource`), when the request gives it apart from the document's JSON
+    /// (`service::FRAMED_EXPORT`) instead of as the document's `source_base64`.
+    pub fn export(&mut self, ctx: &Ctx<'_>, request: &Value, original: Option<Arc<[u8]>>, timings: &mut Vec<(&'static str, f64)>) -> PyResult<(Vec<u8>, String)> {
         ctx.checkpoint()?;
         let mut stage_started = self.now();
         let mut mark = |store: &Store, stage: &'static str, timings: &mut Vec<(&'static str, f64)>| -> PyResult<()> {
@@ -666,7 +668,10 @@ impl Store {
         mark(self, "source_digest", timings)?;
         let empty = Value::object(styk_doc::Obj::new());
         let metadata = py::get(document, "_stykSource")?.unwrap_or(&empty);
-        let embedded_source = bridge::source_bytes(document)?;
+        let embedded_source = match original {
+            Some(bytes) => Some(bridge::checked_source(py::get(document, "_stykSource")?, bytes)?),
+            None => bridge::source_bytes(document)?,
+        };
         let (source, source_kind, original_digest): (Option<Arc<[u8]>>, Option<String>, Option<String>) = match pivot_entry {
             Some(found) => {
                 let entry = self.entry(found);

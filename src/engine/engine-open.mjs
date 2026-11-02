@@ -115,12 +115,18 @@ export class Opening {
   get timings() { return this.meta.timings; }
   get lineage() { return this.meta.lineage; }
 
+  /** Whether the document was read from a Pivot file it can carry (`attachSource`). */
+  get hasSource() { return this.meta.source === true; }
+
   /** Gives the document the Pivot file it was read from, as a saved native document carries its source (`_stykSource`). */
-  attachSource(description, bytes) {
+  attachSource(bytes) {
     if (!this.handle) throw new Error('This opening has been released.');
     try {
       this.engine.handle.admit_copy(bytes.byteLength);
-      this.handle.attach_source(JSON.stringify(description), bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+      // Written once, where the document keeps it: no copy of it in the engine's memory first.
+      const at = this.handle.begin_source(bytes.byteLength);
+      new Uint8Array(this.engine.join.memory.buffer, at, bytes.byteLength).set(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+      this.handle.end_source();
     } catch (error) { throw openFailure(error); }
   }
 
@@ -228,16 +234,33 @@ export class Opening {
   }
 }
 
+/**
+ * How long an open goes on waiting once a worker of the engine has stopped. A thread that traps cannot report its own end, and when it
+ * is the one that had the open there is nothing left to answer: without this the open waits for ever. A worker that only helped
+ * ends the open itself, with its error, in less than this.
+ */
+const LOST_WORKER_GRACE_MS = 3000;
+
 /** Waits for the engine's worker to finish `job`; an aborted `signal` stops it at its next checkpoint. */
-async function finish(engine, job, signal) {
+async function finish(engine, job, signal, graceMs = LOST_WORKER_GRACE_MS) {
   const stop = () => engine.handle.cancel_open(job);
   signal?.addEventListener('abort', stop, {once: true});
+  const lostBefore = engine.handle.workers_lost();
+  let lostAt = null;
   try {
     for (;;) {
       const seen = engine.progressSeen();
       let opened;
       try { opened = engine.handle.take_opened_document(job); } catch (error) { throw openFailure(error); }
       if (opened !== undefined) return new Opening(engine, opened);
+      if (engine.handle.workers_lost() !== lostBefore) {
+        lostAt ??= performance.now();
+        if (performance.now() - lostAt > graceMs) {
+          stop();
+          throw openFailure(new Error(JSON.stringify({message: 'A worker of the engine stopped while the document was being opened.', messageKey: 'errors.importClient.theFileImporterStoppedUnexpectedly',
+            code: 'worker_failed', stage: 'decode'})));
+        }
+      }
       await engine.whenProgress(seen);
     }
   } finally { signal?.removeEventListener('abort', stop); }
@@ -254,13 +277,13 @@ function memoryRefusal(engine, size) {
  * Opens a file on the engine's workers. Resolves with the opening, or rejects with the error the open raised
  * (an AbortError when `signal` aborted it). The bytes are copied into the engine; the caller keeps its own.
  */
-export function openBytes(bytes, filename, {engine, layerTimeline, signal} = {}) {
+export function openBytes(bytes, filename, {engine, layerTimeline, signal, lostGraceMs} = {}) {
   engine = engineOf(engine);
   engine.grow();
   const refusal = memoryRefusal(engine, bytes.byteLength);
   if (refusal) return Promise.reject(refusal);
   const job = engine.handle.open_document(bytesOf(bytes), filename, 'file', optionsText({layerTimeline}, helpersOf(engine)));
-  return finish(engine, job, signal);
+  return finish(engine, job, signal, lostGraceMs);
 }
 
 const jsonBytes = document => encoder.encode(typeof document === 'string' ? document : JSON.stringify(document));

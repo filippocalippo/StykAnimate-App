@@ -66,7 +66,7 @@ try {
       for (const format of ['piv', 'styk']) {
         const response = await (await import('/tests/support/page-codec.mjs')).codecFetch('/api/export', {method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({document: editor.serialize(), sourceId: styk.state.sourceId, format})});
+          body: JSON.stringify({document: editor.serialize(), format})});
         check(response.ok, `${format} export failed: ${await response.clone().text()}`);
         const reopened = await importer.importFile(new File([await response.arrayBuffer()], `restored.${format}`));
         check(reopened.document.keyframes.length === 1129, `${format} reopen lost frames`);

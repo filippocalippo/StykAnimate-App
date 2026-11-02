@@ -6,7 +6,7 @@ How the Rust engine (`engine/crates/styk-piv`) reads and writes Pivot `.piv`/`.s
 
 - **Reading.** `decode_document(bytes, filename, cancel)` returns the editable document as a `styk_doc::Value` tree: the report the Python decoder returned (same keys, same order, same values) after the import checks. Pose arrays are `Value::Nums` built straight from the file's floats (`F32` when every value is a float, `F64` otherwise), so doubles that are not float-exact and negative zero are the file's values. Embedded images are `Value::Blob` (the bytes, shared, plus the `data:…;base64,` prefix).
 - **Writing.** `encode_piv(document, source, cancel)` writes a Pivot 5 project: against its `source` when there is one (media and trailer bytes kept, the source itself returned when the rebuilt payload is identical, a legacy source migrated), from a blank scaffold otherwise. `encode_stk(document, figure_type_id, cancel)` writes one figure. Output bytes are the Python writers' bytes, including the zlib stream (`src/zlib` is a bit-exact port of zlib 1.3.1 level 6).
-- **Service.** `Codec::new(Limits::web() | Limits::desktop())` and `Codec::request(method, target, headers, body, cancel) -> Response` answer the routes of `browser_service.BrowserCodec.request`: `GET /api/health`, `/api/samples`, `/api/source?id=`; `POST /api/cancel`, `/api/import?filename=` (JSON, or the `STYKPIV1` frame transport when `Accept` names `application/vnd.stykanimate.piv-frames-v1`), `/api/export`, `/api/open` (404), `/api/source/retain`, `/api/source/release`. Same statuses, headers, size limits, cache and lease rules, and error bodies (`{"ok":false,"error","code"}`, as `server.error_response` built them). `request` never panics; every failure is an error response.
+- **Service.** `Codec::new(Limits::web() | Limits::desktop())` and `Codec::request(method, target, headers, body, cancel) -> Response` answer the routes of `browser_service.BrowserCodec.request`: `GET /api/health`, `/api/samples`, `/api/source?id=`; `POST /api/cancel`, `/api/import?filename=` (JSON, or the `STYKPIV1` frame transport when `Accept` names `application/vnd.stykanimate.piv-frames-v1`), `/api/export` (JSON, or the framed request the app makes: `Content-Type: application/vnd.stykanimate.export`, four bytes of the JSON's length little-endian, the JSON of the document without `_stykSource.source_base64`, then the bytes of the original; the original is checked against `_stykSource.sha256`, and the limit on it is `max_source`, not `max_document`), `/api/open` (404), `/api/source/retain`, `/api/source/release`. Same statuses, headers, size limits, cache and lease rules, and error bodies (`{"ok":false,"error","code"}`, as `server.error_response` built them). `request` never panics; every failure is an error response.
 - **"Unchanged" exports** return the original file. The decision compares document fingerprints (`src/digest.rs`, version 3 of `server.document_digest`), which native saves store, so their bytes are a file-format contract.
 - **Native documents** (`.styk`, `.stkz`, `.stykmov`, `.json`) go through the `NativeDocuments` trait; `Containers` implements it over `styk-formats` (feature `containers`, on by default). Without it those requests answer `415`.
 - **No threads, files or clock** in the library. Timing fields are zero unless the host calls `Codec::set_clock`. Cancellation is cooperative: `cancel` is polled where Python called `work_control.checkpoint` (per frame, per record, per table), and a cancelled request answers `499 cancelled` without changing the cache or any lease. The crate builds for `wasm32-unknown-unknown` with and without `containers`.
@@ -36,14 +36,17 @@ Every build runs it the same way: in a worker of the editor page.
   request over that port into a standard `Response`.
 - **Cancellation.** On a cross-origin isolated page (every host sends COOP/COEP) each job has
   an `Int32Array` over a `SharedArrayBuffer`: cancelling sets it, the codec sees it at its next
-  checkpoint and answers `499 cancelled`, and the worker keeps its cache and leases; requests
+  checkpoint and answers `499 cancelled`, and the worker keeps its cache; requests
   of that job still queued are answered `499` without running. Without isolation the busy
   worker is terminated and the next request starts a new one, unless other jobs wait on it.
 - **Profiles** (`codecProfile()` in `codec-web-host.mjs`). The web build (`<meta name="styk-codec"
   content="browser">`, or `?codec=browser`) uses `Limits::web()`, embeds each Pivot import's
   verified original in its document and announces the converter while it loads; the desktop
-  app and the development server use `Limits::desktop()` and keep originals leased in the
-  codec, as the desktop service did.
+  app and the development server use `Limits::desktop()`. Neither keeps an original in the codec
+  (the engine describes the file it opened and the document carries it); the Rust service still
+  answers the lease routes (`/api/source/keep`, `retain`, `release`) because the Python
+  service's recordings are replayed against it, and the app does not call them. The worker ends
+  two seconds after its last job on both profiles.
 - **Samples.** `/api/samples` and `/api/open` are not served by the codec. On the desktop the
   main process lists the `.piv`/`.stk` files beside a source checkout and reads one
   (`desktop/samples.cjs`, the rules of `ProjectStore.samples`, `safe_child` and `open`, with
