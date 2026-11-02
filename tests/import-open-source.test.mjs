@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate as nextTask} from 'node:timers/promises';
 import {ImportClient} from '../src/import-client.mjs';
-import {registeredEngine, useEngine} from '../src/engine/engine-open.mjs';
+import {openBytes, registeredEngine, useEngine} from '../src/engine/engine-open.mjs';
 import {FakeCodecHost} from './support/codec-host.mjs';
 
 // A Pivot project is opened on the engine, which describes the file it read and carries it in the document: the page gives the
@@ -18,6 +18,7 @@ function fakeEngine({source = true, copy = () => {}} = {}) {
     whenProgress: () => new Promise(resolve => { engine.wake = resolve; }),
     handle: {
       admit_open() {},
+      workers_lost: () => engine.lost ?? 0,
       admit_copy(size) { copy(size); },
       open_document() { engine.job = 7; return engine.job; },
       cancel_open(job) { engine.cancelled.push(job); engine.finish({error: new Error(JSON.stringify({code: 'cancelled', message: 'cancelled'}))}); },
@@ -108,4 +109,27 @@ test('a copy of the original the memory cannot hold fails the open with its mess
   await assert.rejects(pending, error => error.code === 'out_of_memory');
   assert.equal(engine.attached.length, 0);
   assert.equal(engine.freed, 1, 'the engine drops the opened document');
+});
+
+test('an open whose worker was lost ends with an error instead of waiting for ever', async () => {
+  const engine = fakeEngine();
+  engine.whenProgress = () => new Promise(resolve => setTimeout(resolve, 10));
+  const pending = openBytes(new Uint8Array(4), 'a.piv', {engine, lostGraceMs: 40});
+  pending.catch(() => {});
+  await new Promise(resolve => setTimeout(resolve, 30));
+  engine.lost = 1;
+  await assert.rejects(pending, error => error.code === 'worker_failed' && error.messageKey === 'errors.importClient.theFileImporterStoppedUnexpectedly');
+  assert.deepEqual(engine.cancelled, [7], 'the open is asked to stop');
+});
+
+test('a worker lost while the open still answers does not end it', async () => {
+  const engine = fakeEngine();
+  engine.whenProgress = () => new Promise(resolve => setTimeout(resolve, 10));
+  const pending = openBytes(new Uint8Array(4), 'a.piv', {engine, lostGraceMs: 200});
+  await new Promise(resolve => setTimeout(resolve, 20));
+  engine.lost = 1;
+  setTimeout(() => engine.finish({}), 40);
+  const opening = await pending;
+  assert.ok(opening);
+  assert.deepEqual(engine.cancelled, []);
 });

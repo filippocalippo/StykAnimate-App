@@ -97,7 +97,9 @@ const OPEN_MINIMUM_BYTES: usize = 96 << 20;
 /// reserves what it needs ([`open_estimate`]). The interface asks before it copies a file in, because the copy itself
 /// cannot be refused.
 pub fn admit_open(file_bytes: usize) -> Result<(), OpenError> {
-    styk_alloc::admit(file_bytes.saturating_add(open_estimate(file_bytes))).map_err(OpenError::out_of_memory)?;
+    // Only the copy and the least an open takes: what the open itself needs is reserved by the open, which knows more than the size
+    // of the file (a project states the size of its parts), and refuses with the same message.
+    styk_alloc::admit(file_bytes.saturating_add(OPEN_MINIMUM_BYTES)).map_err(OpenError::out_of_memory)?;
     block(file_bytes)
 }
 
@@ -116,6 +118,19 @@ fn block(bytes: usize) -> Result<(), OpenError> {
 /// What opening a document of `file_bytes` bytes may take, for the reservation that precedes the open.
 pub fn open_estimate(file_bytes: usize) -> usize {
     file_bytes.saturating_mul(OPEN_BYTES_PER_BYTE).max(OPEN_MINIMUM_BYTES)
+}
+
+/// What opening `source` may take, for the reservation that precedes the open: [`open_estimate`] of the file, or for a project
+/// container (which states how large its parts are) what its parts take, never more than the file's estimate.
+fn open_estimate_of(source: &OpenSource<'_>) -> usize {
+    let (bytes, name): (&[u8], &str) = match source {
+        OpenSource::File { bytes, name } => (bytes, name),
+        OpenSource::Owned { bytes, name } => (bytes.as_slice(), name),
+        OpenSource::Json { bytes, .. } => return open_estimate(bytes.len()),
+    };
+    let by_size = open_estimate(bytes.len());
+    let Some(kind) = styk_formats::Kind::from_extension(&extension(name).to_ascii_lowercase()) else { return by_size };
+    styk_formats::container::open_cost(bytes, kind).map_or(by_size, |cost| cost.clamp(OPEN_MINIMUM_BYTES, by_size))
 }
 
 impl OpenError {
@@ -220,6 +235,9 @@ pub struct OpenedDocument {
     /// What a Pivot project says of its original (`_stykSource` without the file: kind, version, the SHA-256 of the file and of the
     /// document read from it); the file is added by [`OpenedDocument::attach_source`]. `None` for any other kind of document.
     pub source: Option<styk_doc::Obj>,
+    /// A save stores the document's Pivot original (`_stykSource`) first in the payload section: the document was read from a Pivot file,
+    /// or from a project file that keeps it so. A project file that keeps it elsewhere is saved in the order it has.
+    pub original_first: bool,
     /// Where the open's time went, in milliseconds by the engine's clock: `decode` (the file read into a document), `prepare` (the
     /// load's checks and normalization), `views` (the typed views), `check` (what was left of the skeleton's checksum when the
     /// rest was done).
@@ -348,11 +366,8 @@ impl Engine {
         let began = self.now();
         fan.mark("started");
         // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
-        let length = match &source {
-            OpenSource::File { bytes, .. } | OpenSource::Json { bytes, .. } => bytes.len(),
-            OpenSource::Owned { bytes, .. } => bytes.len(),
-        };
-        let _memory = styk_alloc::reserve(open_estimate(length)).map_err(OpenError::out_of_memory)?;
+        // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
+        let _memory = styk_alloc::reserve(open_estimate_of(&source)).map_err(OpenError::out_of_memory)?;
 
         let mut check = None;
         let (document, kind, version, name, facts) = match source {
@@ -388,6 +403,7 @@ impl Engine {
         });
         let opened = self.prepare_opened(document, kind, version, name, options, cancel, &fan);
         let prepared = self.now();
+        let stored_first = check.as_ref().is_some_and(styk_formats::container::Deferred::original_first);
         let source = match (fingerprint, &opened) {
             (Some((facts, digest)), Ok(_)) => match digest.wait(&fan) {
                 Ok(Ok(document_sha256)) => Some(describe_source(&facts, document_sha256)),
@@ -396,6 +412,7 @@ impl Engine {
             },
             _ => None,
         };
+        let original_first = source.is_some() || stored_first;
         // A skeleton that does not match its checksum is the file's error, whatever became of the document read from it. A stopped
         // open does not wait for the check.
         match check {
@@ -406,6 +423,7 @@ impl Engine {
                 }
                 opened.map(|mut opened| {
                     opened.source = source;
+                    opened.original_first = original_first;
                     opened.timings.insert(0, ("decode", decoded - began));
                     opened.timings.push(("check", self.now() - prepared));
                     opened.timings.extend(steps(&fan, began));
@@ -414,6 +432,7 @@ impl Engine {
             }
             _ => opened.map(|mut opened| {
                 opened.source = source;
+                opened.original_first = original_first;
                 opened.timings.insert(0, ("decode", decoded - began));
                 opened.timings.extend(steps(&fan, began));
                 opened
@@ -454,7 +473,7 @@ impl Engine {
         let lineage = self.inner.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let views = self.now() - prepared;
         let prepare = prepared - started;
-        Ok(OpenedDocument { tree: tree.clone(), indexes, name, kind, version, typed: Typed { tree, loader, prepared: prepared_views, assets, lineage }, source: None, timings: vec![("prepare", prepare), ("views", views)] })
+        Ok(OpenedDocument { tree: tree.clone(), indexes, name, kind, version, typed: Typed { tree, loader, prepared: prepared_views, assets, lineage }, source: None, original_first: false, timings: vec![("prepare", prepare), ("views", views)] })
     }
 
     /// Makes the document that `typed` belongs to the engine's document, at `revision`, with `tree` as it

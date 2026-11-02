@@ -3631,9 +3631,14 @@ async function openFile() {
   prepareOpen();
   if (desktop) {
     status({messageKey: "app.openingFile", messageParams: {}}, false, true);
-    const result = await desktop.openFile();
-    if (result) await acceptNativeFile(result);
-    else status({messageKey: "app.ready", messageParams: {}});
+    try {
+      const result = await desktop.openFile();
+      if (result) await acceptNativeFile(result);
+      else status({messageKey: "app.ready", messageParams: {}});
+    } catch (error) {
+      // An open that fails says why and leaves the app as it was, whoever asked for it (the menu, a shortcut, a script).
+      fail(error);
+    }
   } else {
     $("file-input").value = "";
     $("file-input").click();

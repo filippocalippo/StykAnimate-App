@@ -318,3 +318,35 @@ fn an_open_is_stopped_between_its_steps_not_only_before_the_first() {
         }
     }
 }
+
+/// A project container with `payload` incompressible bytes in one picture, as the app saves it.
+fn project_with_a_picture(payload: usize) -> Vec<u8> {
+    use styk_engine::save::{ProjectRequest, save_project};
+    let text = std::fs::read(repo("engine/tests/edit/startup.document.json")).unwrap();
+    let mut tree = engine().open_document(OpenSource::Json { bytes: &text, name: "Untitled" }, APP, &|| false).unwrap().tree;
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let bytes: Vec<u8> = (0..payload)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 24) as u8
+        })
+        .collect();
+    tree.make_obj().unwrap().set("data_base64", Value::Blob(std::sync::Arc::new(styk_doc::Blob { prefix: "".into(), bytes: bytes.into() })));
+    save_project(std::slice::from_ref(&tree), &[], ProjectRequest { name: None, original_first: false, reservation: None }, &|| false).unwrap().bytes
+}
+
+#[test]
+fn a_project_is_admitted_by_the_size_of_its_parts_and_not_by_the_size_of_its_file() {
+    use styk_engine::document::open_estimate;
+    // 40 MB, nearly all of it one picture: by its size alone it asks for 16 times that, by its parts about twice that.
+    let file = project_with_a_picture(40 << 20);
+    assert!(open_estimate(file.len()) > 600 << 20);
+    let engine = engine();
+    let opened = styk_alloc::with_limit(300 << 20, || engine.open_document(OpenSource::File { bytes: &file, name: "Project.styk" }, APP, &|| false));
+    assert!(opened.is_ok(), "{:?}", opened.err().map(|error| error.message));
+    // The same bytes under another name are a file of unknown layout, asked for by their size.
+    let refused = styk_alloc::with_limit(300 << 20, || engine.open_document(OpenSource::File { bytes: &file, name: "Project.bin" }, APP, &|| false));
+    assert_eq!(refused.err().and_then(|error| error.code), Some("out_of_memory".to_string()));
+}

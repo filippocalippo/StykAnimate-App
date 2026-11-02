@@ -109,8 +109,15 @@ is carried by the document (`_stykSource`): the open describes the file it read 
 read from it, which a helper computes beside the preparation, `OpenedDocument.source`) and the interface gives the engine the file once
 (`OpenedDocument.attach_source`). The codec keeps nothing of it, so the codec worker is not needed to open a project and a saved project
 writes the original where it has always stored it, first in the payload section and its record last in the root
-(`styk_engine::save::carried_source`, for a document the session knows was read from Pivot: `ProjectRequest.original_first`; a document read
-from a project file keeps the order its file had).
+(`styk_engine::save::carried_source`, for a document whose session knows it keeps that layout: `ProjectRequest.original_first`, which the open sets for a
+Pivot file and for a project file laid out that way (`styk_formats::container::original_first`, read from the end of the skeleton); a document read
+from a project file that keeps its original anywhere else is saved in the order its file had). So a project saved from Pivot, opened and saved again
+without a change is the same file, byte for byte, whatever the file is called and as long as its name is the same.
+
+The Pivot export (`.piv`, `.stk`) is made by the codec from the document the engine prepares. The request does not carry the original as a base64
+string in the document's JSON (a third more than the file, built, sent and parsed, and over the codec's limit for a request at 90 MB): the engine
+writes the JSON of the document without the string and then the bytes of the original (`Output::CodecRequest`, `styk_piv::service::FRAMED_EXPORT`:
+four bytes of the JSON's length, the JSON, the original), and the codec checks the original against the SHA-256 the record states.
 
 The session that edits the document starts from the same tree and typed views
 (`OpenedDocument.start_session`; nothing is converted again) and is the document's from the moment the
