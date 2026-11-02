@@ -15,6 +15,7 @@
 // save that was refused. Exit 1 with the gestures leading up to it on the first.
 import '../tests/support/register-engine.mjs';
 import {readFileSync, writeFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
 import {installEngineOwner, ownerOf} from '../src/engine/engine-owner.mjs';
 import {attachRead, openBytes} from '../src/engine/engine-open.mjs';
@@ -60,7 +61,7 @@ async function startEditor() {
   if (blank) editor.newDocument();
   else if (drawn) editor.load((await (await import('../tests/support/painted-document.mjs')).paintedDocument()).document);
   else if (piv) {
-    const file = value('--piv') ?? new URL('../engine/crates/styk-piv/tests/fixtures/legacy-v3.piv', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+    const file = value('--piv') ?? fileURLToPath(new URL('../engine/crates/styk-piv/tests/fixtures/legacy-v3.piv', import.meta.url));
     const opening = await openBytes(new Uint8Array(readFileSync(decodeURIComponent(file))), 'x.piv', {layerTimeline: true}), read = await opening.read();
     attachRead(read.report, read); editor.load(read.report);
   } else editor.load(startDocument());
