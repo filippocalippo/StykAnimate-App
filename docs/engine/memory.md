@@ -161,8 +161,10 @@ opening; about a quarter of a second for 40 MB), and refuses only if 8 bytes per
 padded Ayame of 122 MB (2 MB of project, the rest noise) was refused with 16 x 122 = 1.9 GB asked of 2 GiB; it opens. A file whose estimate by size fits is
 not counted, and one that compresses far better than its size says (20 MB that inflates to 400) still takes the estimate by size: the open's allocations that
 cannot be refused are covered by the loss of the worker it ends with (`finish` in `engine-open.mjs`). `scripts/smoke-padded-pivot.mjs` opens such a file in
-the app, exports it unchanged and edited, saves it as a project and opens that. The opened padded Ayame exports unchanged (the file again, byte for byte) and saves as a project at 122 and 133 MB; its export edited works to
-about 115 MB, where the document the codec is sent (JSON, 256 MiB at most) holds the padding twice over, as a project's pictures are (`data_base64` and `data_url`).
+the app, exports it unchanged and edited, saves it as a project and opens that. The opened padded Ayame exports unchanged (the file again, byte for byte), saves as a project and opens that again at 100 and 122 MB (release build), and
+exports edited at 100. The document the codec is sent for a Pivot export is JSON of at most 256 MiB, and it holds the padding twice over, as a project's pictures are
+(`data_base64` and `data_url`): at 122 MB it is 265 MB of 268, and at 133 MB the export, edited or not, is refused with "The request exceeds the configured size
+limit" while the project opens (as it did with the codec holding the original: the document is the same).
 
 **The allocator lock** (`std`'s wasm allocator: one spinning lock for every thread). Timed with a gate in front of it, tdd2
 and svr_uriel through open, play and scrub, eight workers: a worker finds the lock taken on 5 to 40 % of its calls and
