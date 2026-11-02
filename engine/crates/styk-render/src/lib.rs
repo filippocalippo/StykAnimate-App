@@ -190,10 +190,14 @@ impl Renderer {
     /// The current draw list, decoded images and raster caches stay shared.
     pub fn set_drawing_grid(&mut self, grid: DrawingGrid) { self.drawing_grid = grid; }
 
-    /// Sizes the layer pages and the effect slots by each frame alone, not by the largest frame drawn before. The shaders
-    /// address them by normalized position, so a page kept from a larger frame moves the last bit of those positions and
-    /// a pixel here and there by one level: with kept sizes a frame depends on the frames drawn before it. The stage keeps
-    /// them (growing and shrinking textures is the cost); an export is the same frame whatever was drawn before.
+    /// Sizes the effect slots by each frame alone, not by the largest frame drawn before, and brings every particle material row
+    /// in. The effect passes address a slot by normalized position (1 / its size), so a slot kept from a larger frame moves the
+    /// last bit of those positions and a pixel here and there by one level, and the trilinear material atlas read a neighbouring
+    /// row only when a list before had named it: with kept sizes and lazy rows a frame depends on the frames drawn before it. The
+    /// stage keeps them (reallocating is the cost); an export is the same frame whatever was drawn before. The layer pages are
+    /// not sized this way: they are large and a page that changes size at every tile would be a texture made and dropped every
+    /// tile (the browser frees a dropped texture only when it collects it, which measured at 28 GiB on a 4K video), so they keep
+    /// growing with the largest layer ([`Renderer::page`] in frame.rs).
     pub fn set_exact_sizes(&mut self, exact: bool) {
         self.exact_sizes = exact;
         if let Some(executor) = &mut self.executor {
