@@ -174,15 +174,26 @@ pub(crate) fn down_tile_patch<S: std::hash::BuildHasher>(below: &HashMap<(i32, i
     let mut out = previous.to_vec();
     let (t, line) = (TILE as usize, TILE as usize * 4);
     for y in rect[1]..rect[3] {
-        for x in rect[0]..rect[2] {
-            let texel = &mut out[(y * t + x) * 4..][..4];
-            match subs[(y / HALF) * 2 + x / HALF] {
-                None => texel.fill(0),
+        // A row of the rectangle is at most two runs, one in each quadrant it crosses: each run is two source rows and an output row as slices.
+        let (qy, gy) = (y / HALF, y % HALF);
+        let mut x = rect[0];
+        while x < rect[2] {
+            let qx = x / HALF;
+            let end = rect[2].min((qx + 1) * HALF);
+            let row = &mut out[(y * t + x) * 4..(y * t + end) * 4];
+            match subs[qy * 2 + qx] {
+                None => row.fill(0),
                 Some(sub) => {
-                    let (gx, gy) = (x % HALF, y % HALF);
-                    reduce_block(&sub[2 * gy * line + gx * 8..][..8], &sub[(2 * gy + 1) * line + gx * 8..][..8], texel);
+                    let upper = &sub[2 * gy * line..][..line];
+                    let lower = &sub[(2 * gy + 1) * line..][..line];
+                    let first = x % HALF;
+                    for (k, texel) in row.chunks_exact_mut(4).enumerate() {
+                        let gx = first + k;
+                        reduce_block(&upper[gx * 8..gx * 8 + 8], &lower[gx * 8..gx * 8 + 8], texel);
+                    }
                 }
             }
+            x = end;
         }
     }
     out

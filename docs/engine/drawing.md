@@ -290,3 +290,29 @@ tile preparation, so publication now pauses while a replay is prepared
 reads (IndexedDB, decompression, checksum, decoding: 95–113 ms of history-worker time) and 7–9 ms
 of tile preparation. Fill medians were 96–122 ms (JavaScript 111–151) and publication 359–394 ms
 (369–674).
+
+### What is left of a stroke's undo (2026-11-02, release build, not queue-quiet: directional)
+
+A stroke's undo in the app on a blank document (release, three rounds) takes about 14 ms and on tdd2 about 20 ms (range 19.6–22.0 medians, 28 ms worst).
+The session call is 0.7 ms (the editor's own undo is 0.09 ms natively on 80 entries of history), and the pictures a publication leaves behind are no
+longer a cost of it: a republished cel writes only the tiles that differ (`upload_pictures` 0.1 ms per undo), nothing is taken while a live cel
+changed in the last 250 ms, and the publication waits for the run of edits to end. What is left, per undo of a stroke that changes about 40 tiles:
+
+* `live_cel_tiles` 2.8–5.1 ms in the app's CPU profile (named release build): `LiveCels::update` is the level reductions (`down_tile_patch`,
+  0.6–1.7 ms), `changed_rect` (0.6–1.2 ms before the texel groups, about 0.6 after), the tile hash maps and `memcmp` (0.5–1.1 ms), and the copy of the
+  tiles into the module (0.6 ms). Natively (`tests/live_update_bench.rs`, ignored: `cargo test --release -p styk-eval --test live_update_bench --
+  --ignored --nocapture`) one such undo is 0.8–1.8 ms in `update` (1.0–2.2 before the one-pass changes) and 0.6–1.3 ms in `take_runs` (105 slots in 24 runs; the spread is the machine's load).
+* `flush_live` writes only the slots that changed (a tile that changed, and a neighbour whose facing edge differs) at the levels that are resident;
+  what is left is the size of that set: 105 slots of 18 KB in 24 `writeTexture` calls (about 2 ms in the app).
+* the draw, about 3 ms, and the replay in the interface, about 5 ms.
+
+Two things would reduce the first two further and neither is done. (1) The levels above the ones drawn (`FIRST_LEVELS` and what the view shows) are
+reduced on every update though nothing reads them until the view zooms: their parents' rectangles could be recorded (the union of the children's) and
+the reduction made when a level is first read or in the idle `warm`, the final state being the same because the patch of a union rectangle
+recomputes every texel that may differ. That moves the cost onto the first zoom unless the idle pass catches up. (2) A slot could be written by the
+rectangle of it that changed, not the whole 68 × 68, at the price of the merged runs.
+
+The publication payload still carries the whole cel (`styk_tiles`, 250–300 KB as a data URL; the engine parses it once per publication, and the
+parse is not visible in release profiles of a stroke or an undo since the publication waits for the run of edits to end). Publishing only the tiles
+that changed needs the tiles to be held by the document as a table (`DrawingTiles` beside the blob) that a save writes out and the session patches:
+the blob is the file's cel data, so that is a change of the document's storage and of the save path, not of the publication alone.
