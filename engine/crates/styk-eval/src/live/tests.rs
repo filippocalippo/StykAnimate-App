@@ -685,3 +685,19 @@ fn a_warmed_level_is_written_again_when_its_tiles_change_and_it_is_not_shown() {
         matches_published(&cels, &atlas, "a", &tiles);
     }
 }
+
+#[test]
+fn a_page_can_be_reserved_before_any_slot_is_taken() {
+    let mut noise = Noise(3);
+    let mut cels = LiveCels::default();
+    assert_eq!(cels.pages(), 0);
+    cels.reserve();
+    assert_eq!((cels.pages(), cels.stats().slots), (1, 0), "room for a page, nothing held");
+    // The first tile takes the reserved slot, not a second one.
+    let uploads = update(&mut cels, "a", false, vec![((0, 0), Some(tile(&mut noise)))]).unwrap();
+    assert_eq!(cels.pages(), 1);
+    assert!(uploads.iter().any(|u| (u.page, u.x, u.y) == (0, BORDER, BORDER)), "slot 0 is the first one used");
+    // Reserving again, with a cel held, changes nothing.
+    cels.reserve();
+    assert_eq!((cels.pages(), cels.stats().slots), (1, 81));
+}

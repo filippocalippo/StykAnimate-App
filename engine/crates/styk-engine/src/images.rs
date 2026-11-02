@@ -44,6 +44,20 @@ impl Uploaded {
         self.places.insert(place(layer, x, y));
     }
 
+    /// The `count` pages that began at page `from` (the live pages) begin at `to` (greater) now: what was written to them stays.
+    pub fn move_pages(&mut self, from: u32, to: u32, count: u32) {
+        if to <= from {
+            return;
+        }
+        for k in (0..count).rev() {
+            let moved: Vec<u64> = self.places.iter().copied().filter(|place| (place >> 32) as u32 == from + k).collect();
+            for place in moved {
+                self.places.remove(&place);
+                self.places.insert(place & 0xffff_ffff | ((to + k) as u64) << 32);
+            }
+        }
+    }
+
     /// The pictures of the atlas page `layer` were taken away.
     pub fn forget_page(&mut self, layer: u32) {
         self.places.retain(|place| (place >> 32) as u32 != layer);
