@@ -106,19 +106,6 @@ impl ExportDevice {
 }
 
 
-/// A JavaScript function the queue calls back on the thread that made it (a worker's own event loop), which wgpu's
-/// `Send` bound does not know.
-struct OnThisThread(js_sys::Function);
-
-// SAFETY: it is only called, never moved to another thread: a browser reports queue work done on the thread that asked.
-unsafe impl Send for OnThisThread {}
-
-impl OnThisThread {
-    fn call(&self) {
-        let _ = self.0.call0(&JsValue::UNDEFINED);
-    }
-}
-
 /// What draws an export's tiles: the worker's GPU device, or the CPU rasterizer where the
 /// worker has none.
 enum Backend {
@@ -202,11 +189,6 @@ impl ExportRenderer {
         let generation = self.frames.generation().clone();
         match &mut self.backend {
             Backend::Gpu { gpu, .. } => {
-                // Staged pictures the GPU has not read yet are held: past a backlog the next ones wait for the queue
-                // ([`ExportRenderer::backlogged`], [`ExportRenderer::drained`]), so an export holds at most that many.
-                if styk_render::staging_backlogged() {
-                    return self.frames.images_pending() as u32;
-                }
                 let images = self.frames.take_images(IMAGE_UPLOAD_BYTES);
                 if !images.is_empty() {
                     gpu.upload_images(&generation.assets, images.iter().map(|image| &**image));
@@ -216,25 +198,6 @@ impl ExportRenderer {
             Backend::Cpu(cpu) => cpu.upload_images(&generation.assets, self.frames.take_images(usize::MAX)),
         }
         self.frames.images_pending() as u32
-    }
-
-    /// Whether so many staged bytes are waiting for the GPU that uploading more should wait for [`ExportRenderer::drained`].
-    pub fn backlogged(&self) -> bool {
-        styk_render::staging_backlogged()
-    }
-
-    /// Resolves once the queue has finished the work submitted so far (at once on the CPU).
-    pub fn drained(&self) -> js_sys::Promise {
-        match &self.backend {
-            Backend::Gpu { gpu, .. } => {
-                let queue = gpu.queue().clone();
-                js_sys::Promise::new(&mut |resolve, _| {
-                    let resolve = OnThisThread(resolve);
-                    queue.on_submitted_work_done(move || resolve.call());
-                })
-            }
-            Backend::Cpu(_) => js_sys::Promise::resolve(&JsValue::UNDEFINED),
-        }
     }
 
     /// Makes `tick` the frame to draw, and asks the engine's workers for the next ones up to
@@ -440,10 +403,9 @@ impl ExportRenderer {
         match &self.backend {
             Backend::Gpu { gpu, start_ms, .. } => {
                 let s = gpu.stats();
-                let staged = styk_render::staging_stats();
                 format!(
-                    "{{{head},\"startMs\":[{:.1},{:.1},{:.1}],\"prims\":{},\"passes\":{},\"rounds\":{},\"layerBytes\":{},\"effectBytes\":{},\"depthBytes\":{},\"glyphBytes\":{},\"staged\":{},\"stagedPeakBytes\":{},\"stagedPlain\":{}}}",
-                    start_ms[0], start_ms[1], start_ms[2], s.prims, s.passes, s.rounds, s.layer_bytes, s.effect_bytes, s.depth_bytes, s.glyph_bytes, staged.staged, staged.peak, staged.plain
+                    "{{{head},\"startMs\":[{:.1},{:.1},{:.1}],\"prims\":{},\"passes\":{},\"rounds\":{},\"layerBytes\":{},\"effectBytes\":{},\"depthBytes\":{},\"glyphBytes\":{}}}",
+                    start_ms[0], start_ms[1], start_ms[2], s.prims, s.passes, s.rounds, s.layer_bytes, s.effect_bytes, s.depth_bytes, s.glyph_bytes
                 )
             }
             Backend::Cpu(cpu) => {
@@ -461,7 +423,6 @@ impl ExportRenderer {
     pub fn dispose(&mut self) {
         self.current = None;
         if let Backend::Gpu { device, .. } = &self.backend {
-            styk_render::release_staging(device);
             device.destroy();
         }
     }

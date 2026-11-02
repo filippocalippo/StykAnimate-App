@@ -201,7 +201,6 @@ impl Renderer {
 
     /// Renders the current draw list into the offscreen frame.
     pub fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &ViewParams, size: [u32; 2]) {
-        crate::staging::retire();
         self.root_gpu_source = false;
         let foreground = matches!(self.paint_context, crate::paint::PaintContext::CanvasForeground { .. });
         let size = [size[0].max(1), size[1].max(1)];
@@ -356,7 +355,7 @@ impl Renderer {
         };
         let o = passes.len() * UNIFORM_STRIDE as usize;
         uniform_data[o..o + std::mem::size_of::<GpuView>()].copy_from_slice(bytemuck::bytes_of(&v));
-        crate::staging::write_buffer(&self.device, &self.queue, &self.uniforms, 0, &uniform_data);
+        self.queue.write_buffer(&self.uniforms, 0, &uniform_data);
 
         for depth in 1..=max_depth {
             let pages = rounds.iter().map(|round| round.pages_per_depth[depth as usize]).max().unwrap_or(0);

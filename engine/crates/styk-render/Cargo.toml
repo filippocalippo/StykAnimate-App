@@ -23,8 +23,6 @@ wgpu = { version = "30", optional = true }
 
 # In a browser: WebGPU where it exists, WebGL2 otherwise.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3"
-wasm-bindgen = "0.2"
 wgpu = { version = "30", default-features = false, features = ["webgpu", "webgl", "wgsl"], optional = true }
 
 [dev-dependencies]

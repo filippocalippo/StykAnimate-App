@@ -7,9 +7,10 @@
 // compares it with the bytes it wrote. A trial is one such pass; each condition runs `--trials` of them:
 //   arraybuffer          the source bytes are in an ordinary ArrayBuffer (a copy at the call is what the specification says)
 //   shared               the same bytes in a SharedArrayBuffer, as the engine's WebAssembly memory is
-//   arraybuffer+warm     a one-texel write to every layer first, the queue waited for, so the texture is not new for the pictures
+//   arraybuffer+warm     a one-texel write to every layer first, the queue waited for, so the texture is not new for the pictures (what the
+//                        engine does where it makes a texture: styk-render `warm_texture`)
 //   arraybuffer+warmnowait  the same, without waiting for the queue
-//   arraybuffer+staged   the pictures reach the texture through a buffer made mapped and a GPU copy (what the engine does now)
+//   arraybuffer+staged   the pictures reach the texture through a buffer made mapped and a GPU copy
 //   shared+warm, shared+staged   the same from the SharedArrayBuffer
 //   arraybuffer+scribble  the source is overwritten with 0xAA right after each call returns: a browser that read it late would write 0xAA
 //   shared+scribble       the same for the SharedArrayBuffer

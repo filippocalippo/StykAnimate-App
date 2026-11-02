@@ -1,6 +1,7 @@
 // An export of the same document twice must give the same frames, byte for byte, in the desktop app with a real GPU.
 //
 //   node scripts/smoke-export-determinism.mjs [--runs 14] [--pictures 64] [--keep <folder>] [--packaged]
+//   node scripts/smoke-export-determinism.mjs --file <document> --first <tick> --last <tick> [--runs 14]   a document of yours instead
 //
 // The document is made here (no private files): one large picture of noise a frame, each in a figure of its own, so the engine
 // uploads that many pictures to the export's atlas and every frame draws one of them. Each run exports the PNG-sequence frames of
@@ -33,6 +34,7 @@ const unpacked = process.platform === 'win32' ? ['win-unpacked', 'StykAnimate.ex
 const executablePath = packaged ? process.env.STYK_PACKAGED_EXECUTABLE || path.join(appRoot, 'release', ...unpacked) : undefined;
 const option = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at < 0 ? fallback : process.argv[at + 1]; };
 const runs = Number(option('runs', 14)), pictures = Number(option('pictures', 64)), keep = option('keep', null);
+const file = option('file', null), first = Number(option('first', 0)), last = Number(option('last', 0));
 const work = await mkdtemp(path.join(os.tmpdir(), 'styk-determinism-'));
 await writeFile(path.join(work, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now() } }));
 const env = { ...process.env, STYK_USER_DATA_DIR: work, STYK_LIBRARY_DIR: path.join(work, 'library'), STYK_STARTUP_VIEW: 'editor', STYK_BACKGROUND_WINDOW: '1' };
@@ -56,12 +58,17 @@ try {
     const dismiss = () => document.querySelectorAll('dialog.release-splash[open],dialog.styk-privacy[open]').forEach((d) => d.close());
     dismiss(); new MutationObserver(dismiss).observe(document.body, { subtree: true, attributes: true, childList: true, attributeFilter: ['open'] });
   });
+  if (file) {
+    await page.locator('#file-input').setInputFiles(path.resolve(file));
+    await page.waitForFunction(() => !styk.state.importing && styk.editor.report?.keyframes?.length, undefined, { timeout: 240000 });
+    await delay(1500);
+  }
   if (keep) await mkdir(keep, { recursive: true });
   await page.exposeFunction('keepFrame', async (name, base64) => { await writeFile(path.join(keep, name), Buffer.from(base64, 'base64')); });
-  const result = await page.evaluate(async ({ runs, pictures, keeping }) => {
+  const result = await page.evaluate(async ({ runs, pictures, keeping, imported, first, last }) => {
     const { emptyDocument, createFrame, createObject } = await import('/src/demo.mjs');
     const { createExportFrameRenderer } = await import('/src/engine/engine-export.mjs');
-    const W = 800, H = 450;
+    const W = imported ? styk.editor.report.canvas_width : 800, H = imported ? styk.editor.report.canvas_height : 450;
     // A picture of noise a figure (incompressible, so each is a large upload), drawn in a frame of its own.
     const noise = async (seed) => {
       const canvas = new OffscreenCanvas(W, H), context = canvas.getContext('2d'), image = context.createImageData(W, H);
@@ -75,10 +82,9 @@ try {
       let text = ''; for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
       return `data:image/png;base64,${btoa(text)}`;
     };
-    const report = emptyDocument();
-    report.canvas_width = W; report.canvas_height = H;
-    report.figure_types = [];
-    for (let i = 0; i < pictures; i++) {
+    const report = imported ? styk.editor.report : emptyDocument();
+    if (!imported) { report.canvas_width = W; report.canvas_height = H; report.figure_types = []; }
+    for (let i = 0; !imported && i < pictures; i++) {
       report.figure_types.push({
         figure_type_id: i + 1, name: `picture ${i}`, polyfills: [], text_assets: [],
         segments: [{ segment_id: 1, parent_id: 0, primitive_code: 2, segment_type: 'image', segment_kind: 'image', length: W, angle_rad: 0, bend_rad: 0, thickness: 1,
@@ -86,23 +92,25 @@ try {
         image_assets: [{ asset_index: 0, data_url: await noise(i), mime_type: 'image/png', width: W, height: H, anchor_start: { x: 0, y: 0 }, anchor_angle_rad: 0, anchor_length: W }],
       });
     }
-    report.keyframes = report.figure_types.map((figure, i) => createFrame([createObject(figure, i + 1, 0, H / 2)], 1));
-    styk.editor.load(report, 'Export determinism');
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    if (!imported) {
+      report.keyframes = report.figure_types.map((figure, i) => createFrame([createObject(figure, i + 1, 0, H / 2)], 1));
+      styk.editor.load(report, 'Export determinism');
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
     const hex = async (blob) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('');
-    const ticks = pictures, first = [], differing = [];
+    const firstTick = imported ? first : 0, ticks = imported ? last - first + 1 : pictures, firsts = [], differing = [];
     let backend = null;
     for (let run = 0; run < runs; run++) {
       const renderer = createExportFrameRenderer({ width: W, height: H, smoothing: 'edges', getRevision: () => styk.editor.revision },
-        { stage: styk.state.renderer, revision: styk.editor.revision, range: [0, ticks - 1] });
+        { stage: styk.state.renderer, revision: styk.editor.revision, range: [firstTick, firstTick + ticks - 1] });
       try {
         await renderer.load(styk.editor.report);
-        for (let tick = 0; tick < ticks; tick++) {
+        for (let tick = firstTick; tick < firstTick + ticks; tick++) {
           const frame = await renderer.renderNativeTick(tick, { preserveAlpha: true });
           const hash = await hex(frame.blob);
-          if (run === 0) { first[tick] = hash; continue; }
-          if (hash === first[tick]) continue;
-          differing.push({ run, tick, hash, expected: first[tick], size: frame.blob.size });
+          if (run === 0) { firsts[tick] = hash; continue; }
+          if (hash === firsts[tick]) continue;
+          differing.push({ run, tick, hash, expected: firsts[tick], size: frame.blob.size });
           if (keeping) {
             const bytes = new Uint8Array(await frame.blob.arrayBuffer()); let text = '';
             for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -112,11 +120,11 @@ try {
         backend = renderer.stats.engine?.backend;
       } finally { renderer.dispose(); }
     }
-    return { backend, pictures, runs, ticks, distinctFrames: new Set(first).size, differing };
-  }, { runs, pictures, keeping: Boolean(keep) });
+    return { backend, pictures, runs, ticks, distinctFrames: new Set(firsts.filter(Boolean)).size, differing };
+  }, { runs, pictures, keeping: Boolean(keep), imported: Boolean(file), first, last });
   console.log(JSON.stringify({ ...result, errors }));
   // The frames must show the pictures (a blank frame is the same in every run), and the runs must agree.
-  if (result.distinctFrames !== result.ticks) { console.error('The frames are not all different: the pictures were not drawn.'); failed = true; }
+  if (!file && result.distinctFrames !== result.ticks) { console.error('The frames are not all different: the pictures were not drawn.'); failed = true; }
   if (result.differing.length) { console.error(`${result.differing.length} frame(s) differ between runs.`); failed = true; }
   if (errors.length) failed = true;
 } catch (error) {

@@ -74,6 +74,7 @@ impl Renderer {
         }
         if !self.materials.full {
             self.materials = Materials::create(&self.device, true);
+            crate::resources::warm_texture(&self.queue, &self.materials.texture);
             self.rebind_sprites();
         }
         for row in 0..MATERIAL_ROWS {
@@ -81,9 +82,7 @@ impl Renderer {
                 continue;
             }
             for (mip, level) in atlas::row(row as usize).levels.iter().enumerate() {
-                crate::staging::write_texture(
-                    &self.device,
-                    &self.queue,
+                self.queue.write_texture(
                     wgpu::TexelCopyTextureInfo {
                         texture: &self.materials.texture,
                         mip_level: mip as u32,
@@ -91,8 +90,7 @@ impl Renderer {
                         aspect: wgpu::TextureAspect::All,
                     },
                     &level.data,
-                    level.width as u32 * 2,
-                    level.height as u32,
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(level.width as u32 * 2), rows_per_image: Some(level.height as u32) },
                     wgpu::Extent3d { width: level.width as u32, height: level.height as u32, depth_or_array_layers: 1 },
                 );
             }
