@@ -353,18 +353,3 @@ fn a_published_cel_is_the_sessions_and_the_answer_does_not_repeat_it() {
     assert!(json(&answer).len() < 4000, "and the answer does not carry it again");
     assert_eq!(answer.get("patch").map(json), Some("[]".to_string()));
 }
-
-#[test]
-fn warming_the_history_of_a_new_session_changes_nothing_a_call_can_see() {
-    let mut session = session(48 * 1024 * 1024);
-    let observed = |session: &Session| (json(&session.editor.state_value()), session.editor.revision, session.editor.history_size(), session.editor.events.len(), json(session.editor.report()));
-    let before = observed(&session);
-    session.warm_history();
-    assert_eq!(observed(&session), before);
-    // With history it does nothing at all: the person's stroke is still the one to undo.
-    let (layer, key) = drawing_layer(&mut session);
-    ok(&call(&mut session, "commitDrawingPixels", &first_stroke(&layer, &key)));
-    let after = observed(&session);
-    session.warm_history();
-    assert_eq!(observed(&session), after);
-}

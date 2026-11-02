@@ -123,7 +123,6 @@ impl EditSession {
         let tree = styk_doc::json::parse(document.as_bytes()).map_err(js_error)?;
         let mut session = styk_edit::session::Session::start(tree, state).map_err(js_error)?;
         session.set_clock(crate::clock);
-        session.warm_history();
         Ok(EditSession { session: Some(session), revision, publisher: None, working: [0; 2] })
     }
 
