@@ -498,6 +498,9 @@ pub struct Keyframe {
     pub background_color: Option<u32>,
     /// The scene's per-pose effect stack (`_stykVfx` of the frame), see [`crate::vfx`].
     pub vfx: Option<Arc<crate::vfx::Stacks>>,
+    /// This pose or one of its objects has an effect stack: what [`Keyframe::reindex`] last found. A document of many poses is asked this of
+    /// every one of them each time it is published, which should not look at every object of every pose.
+    pub has_vfx: bool,
 }
 
 impl Keyframe {
@@ -506,6 +509,7 @@ impl Keyframe {
     }
     pub fn reindex(&mut self) {
         self.slot_of = self.objects.iter().enumerate().map(|(i, o)| (o.uid, i as u32)).collect();
+        self.has_vfx = self.vfx.is_some() || self.objects.iter().any(|object| object.vfx.is_some());
     }
 }
 

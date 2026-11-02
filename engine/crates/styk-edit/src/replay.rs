@@ -197,6 +197,9 @@ fn replay_with_worker(reference: &Value, worker: bool, max_source_bytes: usize) 
             Ok(_) => differences.push("the document patch does not rebuild the document".into()),
             Err(error) => differences.push(format!("the document patch does not apply: {error}")),
         }
+        if let Err(difference) = crate::rebuild_check::rebuilt_whole(&editor) {
+            differences.push(difference);
+        }
         let actual = editor.report_json();
         if actual != expected {
             differences.push(format!("document differs: {}", first_difference(&actual, &expected)));

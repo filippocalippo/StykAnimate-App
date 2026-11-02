@@ -1377,6 +1377,7 @@ impl Prepared {
             continuations: source.continuations.clone(),
             background_color: source.background_color,
             vfx: source.pose_vfx.clone(),
+            has_vfx: false,
         };
         frame.reindex();
         frame
@@ -1558,6 +1559,7 @@ pub(crate) fn blank_keyframe() -> Keyframe {
         continuations: Vec::new(),
         background_color: None,
         vfx: None,
+        has_vfx: false,
     }
 }
 
