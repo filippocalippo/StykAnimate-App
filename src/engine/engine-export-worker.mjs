@@ -172,7 +172,13 @@ async function render(message) {
   const pose = message.override ? frameDocument?.keyframes?.[0] : null;
   if (message.override && !pose) throw new Error('The current export frame was not transferred.');
   // Every picture is in before the first frame: an export never shows a frame without one.
-  for (let seen = Atomics.load(progress, 0); renderer.upload_images() > 0; seen = Atomics.load(progress, 0)) { await whenProgress(seen); check(); }
+  // Staged pictures wait in the GPU process until it has read them: past a backlog the next ones wait for the queue to drain (a
+  // device that never answers is given up on after two seconds, the loop asking again), so an export holds at most that many.
+  for (let seen = Atomics.load(progress, 0); renderer.upload_images() > 0; seen = Atomics.load(progress, 0)) {
+    if (renderer.backlogged()) await Promise.race([renderer.drained(), new Promise(resolve => setTimeout(resolve, 2000))]);
+    else await whenProgress(seen);
+    check();
+  }
   const count = renderer.tiles(), last = Math.max(options.last ?? message.tick ?? 0, message.tick ?? 0);
   if (message.svg) return svg(message, pose, last, started);
   let drawn = pose ? null : ahead.get(message.tick) ?? null;

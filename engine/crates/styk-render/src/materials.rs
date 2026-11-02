@@ -81,7 +81,7 @@ impl Renderer {
                 continue;
             }
             for (mip, level) in atlas::row(row as usize).levels.iter().enumerate() {
-                crate::resources::write_texture(
+                crate::staging::write_texture(
                     &self.device,
                     &self.queue,
                     wgpu::TexelCopyTextureInfo {

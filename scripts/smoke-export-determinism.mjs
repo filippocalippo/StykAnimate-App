@@ -1,6 +1,6 @@
 // An export of the same document twice must give the same frames, byte for byte, in the desktop app with a real GPU.
 //
-//   node scripts/smoke-export-determinism.mjs [--runs 14] [--pictures 64] [--keep <folder>]
+//   node scripts/smoke-export-determinism.mjs [--runs 14] [--pictures 64] [--keep <folder>] [--packaged]
 //
 // The document is made here (no private files): one large picture of noise a frame, each in a figure of its own, so the engine
 // uploads that many pictures to the export's atlas and every frame draws one of them. Each run exports the PNG-sequence frames of
@@ -11,6 +11,9 @@
 // an export of tdd2 gave a frame of garbage streaks about one run in three (docs/engine/rendering.md, Exports). Pictures and the
 // engine's other large uploads go through staging buffers now (styk-render `resources::write_buffer`). A machine without WebGPU
 // uses the CPU rasterizer, which this checks as well but which never showed the problem.
+//
+// With --packaged it runs the packaged app (release/<platform>-unpacked, or STYK_PACKAGED_EXECUTABLE), where the export renderer it
+// creates is the application's own module (build-app.mjs lists it as a page entry), not a second copy.
 //
 // The window opens off-screen and takes no focus (STYK_BACKGROUND_WINDOW); the native "unsaved changes" prompt is replaced and the
 // run ends the app's own process tree if it does not close in 15 s.
@@ -23,6 +26,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { _electron as electron } from '../tests/support/playwright.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const packaged = process.argv.includes('--packaged');
+const unpacked = process.platform === 'win32' ? ['win-unpacked', 'StykAnimate.exe']
+  : process.platform === 'darwin' ? [process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'StykAnimate.app', 'Contents', 'MacOS', 'StykAnimate']
+  : [process.arch === 'arm64' ? 'linux-arm64-unpacked' : 'linux-unpacked', 'stykanimate'];
+const executablePath = packaged ? process.env.STYK_PACKAGED_EXECUTABLE || path.join(appRoot, 'release', ...unpacked) : undefined;
 const option = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at < 0 ? fallback : process.argv[at + 1]; };
 const runs = Number(option('runs', 14)), pictures = Number(option('pictures', 64)), keep = option('keep', null);
 const work = await mkdtemp(path.join(os.tmpdir(), 'styk-determinism-'));
@@ -38,7 +46,7 @@ const close = async () => {
 };
 const watchdog = setTimeout(() => { console.error('The determinism smoke ran past its limit.'); close().finally(() => process.exit(3)); }, 20 * 60 * 1000);
 try {
-  app = await electron.launch({ args: [appRoot], cwd: appRoot, env, timeout: 120000 });
+  app = await electron.launch({ executablePath, args: packaged ? [] : [appRoot], cwd: appRoot, env, timeout: 120000 });
   await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 2, checkboxChecked: false }); });
   const page = await app.firstWindow({ timeout: 120000 });
   const errors = [];

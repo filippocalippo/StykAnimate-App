@@ -87,7 +87,7 @@ impl PictureState {
             array_texture(device, "styk soft sprites", [SOFT_LAYER, SOFT_LAYER], soft_pages.min(crate::MAX_PAGES).div_ceil(SOFT_PER_LAYER), false)
         };
         let mut state = PictureState { soft, soft_view, table, table_view, entries, slots, dirty: true, whole, known: assets.atlas.len() };
-        state.flush(queue);
+        state.flush(device, queue);
         state
     }
 
@@ -114,15 +114,18 @@ impl PictureState {
         }
     }
 
-    pub(crate) fn flush(&mut self, queue: &wgpu::Queue) {
+    pub(crate) fn flush(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         if !std::mem::take(&mut self.dirty) {
             return;
         }
         let rows = (self.entries.len() / TABLE_WIDTH as usize) as u32;
-        queue.write_texture(
+        crate::staging::write_texture(
+            device,
+            queue,
             wgpu::TexelCopyTextureInfo { texture: &self.table, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             bytemuck::cast_slice(&self.entries),
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(TABLE_WIDTH * 16), rows_per_image: Some(rows) },
+            TABLE_WIDTH * 16,
+            rows,
             wgpu::Extent3d { width: TABLE_WIDTH, height: rows, depth_or_array_layers: 1 },
         );
     }

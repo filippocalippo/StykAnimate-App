@@ -544,6 +544,7 @@ impl Previews {
         self.picture = (0, 0, Vec::new());
         self.raster.release();
         if let Some(gpu) = &self.gpu {
+            styk_render::release_staging(&gpu.device);
             gpu.device.destroy();
         }
     }

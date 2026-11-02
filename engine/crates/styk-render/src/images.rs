@@ -5,7 +5,8 @@ use styk_eval::assets::{Assets, PAGE};
 use styk_eval::doc::Document;
 
 use crate::pictures::{PictureState, SOFT_LAYER, SOFT_PER_LAYER};
-use crate::resources::{array_texture, write_texture};
+use crate::resources::array_texture;
+use crate::staging::write_texture;
 use crate::Renderer;
 
 pub use styk_eval::assets::DecodedImage;
@@ -47,17 +48,20 @@ impl SpriteMap {
     }
 
     /// Writes the table: a page with no layer reads -1.
-    fn flush(&self, queue: &wgpu::Queue) {
+    fn flush(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
         let mut row = vec![-1f32; MAX_PAGES as usize];
         for (page, &layer) in self.layers.iter().enumerate().take(MAX_PAGES as usize) {
             if layer != UNMAPPED {
                 row[page] = layer as f32;
             }
         }
-        queue.write_texture(
+        write_texture(
+            device,
+            queue,
             wgpu::TexelCopyTextureInfo { texture: &self.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             bytemuck::cast_slice(&row),
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(MAX_PAGES * 4), rows_per_image: Some(1) },
+            MAX_PAGES * 4,
+            1,
             wgpu::Extent3d { width: MAX_PAGES, height: 1, depth_or_array_layers: 1 },
         );
     }
@@ -112,7 +116,7 @@ impl Renderer {
         let (texture, view) = array_texture(&self.device, "styk sprites", size, pages.max(1), false);
         self.sprite_view = view;
         self.sprite_map.layers = (0..pages.min(MAX_PAGES)).collect();
-        self.sprite_map.flush(&self.queue);
+        self.sprite_map.flush(&self.device, &self.queue);
         // Every picture is in, in the layer of its page.
         let held = PictureState::new(&self.device, &self.queue, assets, 0, true, |entry| Some(entry.layer));
         std::mem::replace(&mut self.pictures, held).destroy();
@@ -131,7 +135,7 @@ impl Renderer {
         let (texture, view) = array_texture(&self.device, "styk sprites", [PAGE, PAGE], layers.max(2), false);
         self.sprite_view = view;
         self.sprite_map.layers = vec![UNMAPPED; pages.min(MAX_PAGES) as usize];
-        self.sprite_map.flush(&self.queue);
+        self.sprite_map.flush(&self.device, &self.queue);
         let held = PictureState::new(&self.device, &self.queue, assets, assets.pages, false, |_| None);
         std::mem::replace(&mut self.pictures, held).destroy();
         let old = std::mem::replace(&mut self.sprites, texture);
@@ -177,7 +181,7 @@ impl Renderer {
 
     /// Writes the pictures put in or taken out since the last call to the table shaders read.
     pub fn flush_pictures(&mut self) {
-        self.pictures.flush(&self.queue);
+        self.pictures.flush(&self.device, &self.queue);
     }
 
     /// Gives `page` of the layout the layer `layer` of the sprite texture (`None`: takes its layer away, the page
@@ -196,7 +200,7 @@ impl Renderer {
 
     /// Writes the pages mapped since the last call to the table shaders read.
     pub fn flush_sprite_map(&self) {
-        self.sprite_map.flush(&self.queue);
+        self.sprite_map.flush(&self.device, &self.queue);
     }
 
     /// Gives the sprite texture `layers` layers (at least as many as it has), keeping every texel written. The old
@@ -231,7 +235,7 @@ impl Renderer {
             // The texture has the layers (it always has two): the pages of the live cels still need their rows of the
             // map, or they read no layer and nothing written to them lands.
             self.sprite_map.layers = (0..(assets.pages + live).min(MAX_PAGES)).collect();
-            self.sprite_map.flush(&self.queue);
+            self.sprite_map.flush(&self.device, &self.queue);
             return;
         }
         let old = self.install_sprites(assets, live);
@@ -401,9 +405,11 @@ mod tests {
         DecodedImage { index, drawing, soft: false, width, height, rgba }
     }
 
-    /// Pictures land in their atlas places row for row, whatever their width (rows are padded to 256 bytes in the staging
-    /// buffer; the first is below the size that is staged, the others above it), with the gutter or border outside the place,
-    /// and leave their neighbours' texels alone.
+    /// A layout test: pictures land in their atlas places row for row, whatever their width (rows are padded to 256 bytes in the
+    /// staging buffer; the first is below the size that is staged, the others above it), with the gutter or border outside the
+    /// place, and leave their neighbours' texels alone. It cannot catch the bug the staging is for (a browser's `writeTexture` from
+    /// shared memory leaving rows out: native adapters never showed it): only scripts/smoke-export-determinism.mjs, on a real
+    /// browser GPU, does. With no adapter it prints "skipped" and passes.
     #[test]
     fn uploaded_pictures_land_in_their_places_row_for_row() {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());

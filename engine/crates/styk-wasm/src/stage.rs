@@ -91,6 +91,8 @@ pub struct Stage {
     ready_ms: f64,
     /// Frames drawn with the soft copy of some picture (a document whose pages are kept a few at a time).
     soft_frames: u64,
+    /// Frames not drawn because staged uploads were backlogged ([`styk_render::staging_backlogged`]).
+    backlog_skips: u64,
     /// A picture being uploaded a few rows a frame, and the rows done.
     partial: Option<(Arc<styk_engine::DecodedImage>, u32)>,
     pictures: u32,
@@ -219,6 +221,7 @@ impl Stage {
             shown_pages: Vec::new(),
             partial: None,
             soft_frames: 0,
+            backlog_skips: 0,
             sync_ms: 0.0,
             ready_ms: 0.0,
             pictures: PICTURES_COMPLETE,
@@ -253,6 +256,7 @@ impl Stage {
     /// Destroys the graphics device as a driver reset would: the stage then reports it lost
     /// ([`Stage::device_lost`]). For tests of the interface's recovery.
     pub fn lose_device(&self) {
+        styk_render::release_staging(&self.device);
         self.device.destroy();
     }
 
@@ -432,6 +436,9 @@ impl Stage {
             return PICTURES_COMPLETE;
         }
         let Some(generation) = self.engine.generation() else { return PICTURES_COMPLETE };
+        if styk_render::staging_backlogged() {
+            return PICTURES_DECODED;
+        }
         self.sync_images(&generation);
         let warming = self.warm_live();
         let (decoding, decoded) = self.engine.images_backlog();
@@ -660,6 +667,12 @@ impl Stage {
         if self.lost.get().is_some() {
             return Ok(false);
         }
+        // Staged uploads the GPU has not read yet are held: while they are past a backlog the picture on show stays and the
+        // next animation frame asks again (never a wait: the interface thread does not block).
+        if styk_render::staging_backlogged() {
+            self.backlog_skips += 1;
+            return Ok(false);
+        }
         let started = crate::clock();
         self.sync_images(generation);
         let synced = crate::clock();
@@ -800,11 +813,20 @@ impl Stage {
         let s = &self.renderer.stats;
         let (sprite_pages, sprite_bytes) = self.renderer.sprite_memory();
         let (resident, loads, evictions) = self.residency_stats();
+        let staged = styk_render::staging_stats();
         format!(
-            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3}}}",
+            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3},\"staged\":{},\"stagedInFlightBytes\":{},\"stagedPeakBytes\":{},\"stagedPlain\":{},\"backlogSkips\":{}}}",
             s.prims, s.groups, s.passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
             sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled(),
-            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms
+            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms,
+            staged.staged, staged.in_flight, staged.peak, staged.plain, self.backlog_skips
         )
+    }
+}
+
+impl Drop for Stage {
+    /// A stage that goes away holds no staging buffer, finished with or not (its device goes with it).
+    fn drop(&mut self) {
+        styk_render::release_staging(&self.device);
     }
 }
