@@ -108,6 +108,14 @@ impl Pool {
         *self = Pool { capacity: self.capacity, ..Pool::default() };
     }
 
+    /// Counts the first page as needed, so the atlas has room for it before the first slot is taken.
+    fn reserve_page(&mut self) {
+        if self.high == 0 {
+            self.high = 1;
+            self.free.push(Reverse(0));
+        }
+    }
+
     fn take(&mut self) -> Result<u32, Full> {
         if let Some(Reverse(slot)) = self.free.pop() {
             return Ok(slot);
@@ -465,6 +473,12 @@ impl LiveCels {
     /// Pages of the atlas the slots need after the document's own.
     pub fn pages(&self) -> u32 {
         self.pool.high.div_ceil(PAGE_SLOTS)
+    }
+
+    /// Makes the first page count, before any cel holds a slot: the host allocates the atlas texture when the drawing
+    /// workspace opens, not at the first stroke.
+    pub fn reserve(&mut self) {
+        self.pool.reserve_page();
     }
 
     pub fn stats(&self) -> Stats {

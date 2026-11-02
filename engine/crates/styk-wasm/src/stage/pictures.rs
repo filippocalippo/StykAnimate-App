@@ -411,6 +411,34 @@ impl Stage {
             self.atlas_of = Some(layout);
             return;
         }
+        let appended = self.residency.is_some() && self.atlas_of.is_some_and(|(lineage, before)| lineage == layout.0 && before < pages) && live_pages >= self.live_pages && self.live_pages > 0;
+        if appended {
+            // Document pages were appended before the live ones (the first stroke on a blank exposure adds the cel's page): the
+            // live pages keep their layers and the tiles in them, and the new pages are given layers beside them.
+            let before = self.atlas_of.map_or(0, |(_, before)| before);
+            let held = self.live_pages;
+            self.uploaded.move_pages(before, pages, held);
+            let pinned: Vec<u32> = { let mut pinned: Vec<u32> = styk_engine::drawing_pages(&generation.assets).into_iter().collect(); pinned.sort_unstable(); pinned };
+            let pins = self.residency.as_mut().map(|residency| residency.append_pages(before, pages, held, live_pages, &pinned)).unwrap_or_default();
+            for k in 0..held {
+                if let Some(layer) = self.residency.as_ref().and_then(|residency| residency.layer_of(pages + k)) {
+                    self.renderer.map_sprite_page(pages + k, Some(layer));
+                }
+            }
+            for page in before..(pages.min(before + held)) {
+                if self.residency.as_ref().is_some_and(|residency| residency.layer_of(page).is_none()) {
+                    self.renderer.map_sprite_page(page, None);
+                }
+            }
+            self.renderer.flush_sprite_map();
+            self.live_pages = live_pages;
+            self.atlas_of = Some(layout);
+            self.atlas_serial += 1;
+            for page in pins {
+                self.pin_page(generation, page);
+            }
+            return;
+        }
         if self.residency.is_some() && self.atlas_of == Some(layout) && live_pages > self.live_pages {
             // More live slots: their pages are given layers beside the ones held.
             if let Some(residency) = self.residency.as_mut() {

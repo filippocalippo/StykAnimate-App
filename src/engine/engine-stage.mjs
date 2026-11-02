@@ -474,6 +474,8 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
         await engine.whenProgress(seen);
       }
     },
+    /** The drawing workspace opened: the engine makes room for live cels now, not at the first stroke (a new texture stalls a frame). */
+    prepareDrawing() { try { side.stage?.live_cel_reserve(); } catch { /* no document yet: the first stroke makes room */ } },
     /** The engine side of the stage, for the playback adapter and the other engine modules. */
     get engineSide() { return side; },
     destroy() {

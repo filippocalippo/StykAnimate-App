@@ -147,6 +147,33 @@ impl Residency {
         }
     }
 
+    /// The layout gained document pages before the live ones: the `count` live pages that began at page `from` now begin at
+    /// `to` (greater), with the layers they hold and their pins. The pages they leave have no layer.
+    pub fn move_pages(&mut self, from: u32, to: u32, count: u32) {
+        let (from, to, count) = (from as usize, to as usize, count as usize);
+        if to <= from || count == 0 {
+            return;
+        }
+        if self.pages.len() < to + count {
+            self.pages.resize(to + count, Page::default());
+        }
+        for k in (0..count).rev() {
+            self.pages[to + k] = std::mem::take(&mut self.pages[from + k]);
+        }
+    }
+
+    /// The layout gained document pages (`before` pages became `pages`) and live ones (`held` became `live`) between two syncs:
+    /// the `held` live pages keep their layers and pins at their new place, and the pages that now need a layer for good are
+    /// returned, in the order they are to be given one: the drawing cels' pages (`drawing`, in order) that have none, then the
+    /// live pages gained, which sit at `pages + held..pages + live`.
+    pub fn append_pages(&mut self, before: u32, pages: u32, held: u32, live: u32, drawing: &[u32]) -> Vec<u32> {
+        self.extend(pages + live);
+        self.move_pages(before, pages, held);
+        let mut pins: Vec<u32> = drawing.iter().copied().filter(|page| self.layer_of(*page).is_none()).collect();
+        pins.extend(pages + held..pages + live);
+        pins
+    }
+
     pub fn layer_of(&self, page: u32) -> Option<u32> {
         self.pages.get(page as usize).and_then(|page| page.layer)
     }
@@ -304,6 +331,88 @@ mod tests {
         assert_eq!(residency.layer_of(2), Some(first.0));
         assert_eq!(residency.resident(), 2);
         assert_eq!((residency.loads, residency.evictions), (3, 1));
+    }
+
+    #[test]
+    fn live_pages_keep_their_layers_when_document_pages_are_added_before_them() {
+        // Two document pages, a live page (2) holding layer 1; a third document page arrives and the live page becomes page 3.
+        let mut residency = Residency::new(3, 3);
+        let (document, _) = given(residency.acquire(0, &[], false));
+        let (live, _) = given(residency.acquire(2, &[], false));
+        residency.pin(2);
+        residency.extend(4);
+        residency.move_pages(2, 3, 1);
+        assert_eq!(residency.layer_of(3), Some(live), "the live page kept its layer");
+        assert_eq!(residency.layer_of(2), None, "the page it left has none");
+        assert_eq!(residency.layer_of(0), Some(document));
+        // It is still pinned: no page takes its layer.
+        residency.touch(&[1]);
+        let (layer, evicted) = given(residency.acquire(1, &[], false));
+        assert_ne!(layer, live);
+        assert_eq!(evicted, None);
+        let (other, evicted) = given(residency.acquire(2, &[], false));
+        assert_ne!(other, live);
+        assert!(evicted.is_none() || evicted == Some(0) || evicted == Some(1));
+    }
+
+    /// The stage's sync of an appended layout: every page `append_pages` returns is given a layer for good, as `Stage::pin_page` does.
+    fn pin_all(residency: &mut Residency, pins: &[u32]) {
+        for &page in pins {
+            given(residency.acquire(page, &[], true));
+            residency.pin(page);
+        }
+    }
+
+    #[test]
+    fn a_live_page_gained_with_document_pages_is_given_a_layer_and_the_held_ones_keep_theirs() {
+        // (document pages before, after, live pages held, live pages after, pool layers): a blank exposure's first stroke
+        // (a page gained, live pages held), a publication and a live update between two syncs at the four-page edge of the
+        // atlas, and a large document with many pool layers.
+        for (before, pages, held, live, pool) in [(1, 2, 1, 2, 0), (4, 5, 1, 2, 0), (4, 6, 2, 4, 3), (20, 23, 1, 2, 12), (3, 4, 3, 5, 6)] {
+            let mut residency = Residency::new(before + held, 4);
+            let drawing: Vec<u32> = (0..before).filter(|page| page % 2 == 0).collect();
+            // The sync before: the cels' pages and the live pages pinned.
+            for &page in drawing.iter().chain(&(before..before + held).collect::<Vec<_>>()) {
+                given(residency.acquire(page, &[], true));
+                residency.pin(page);
+            }
+            // A view of other pages loaded beside them uses the pool.
+            for k in 0..pool {
+                let page = 1 + 2 * (k % (before / 2).max(1));
+                residency.acquire_spare(page, &[], true);
+            }
+            let held_layers: Vec<Option<u32>> = (0..held).map(|k| residency.layer_of(before + k)).collect();
+            assert!(held_layers.iter().all(Option::is_some));
+            let drawing_layers: Vec<Option<u32>> = drawing.iter().map(|&page| residency.layer_of(page)).collect();
+            let held_pool = residency.pool_layers();
+
+            // The publication's new cel is on the first page it gained.
+            let mut drawing = drawing;
+            drawing.push(before);
+            let pins = residency.append_pages(before, pages, held, live, &drawing);
+            let expected: Vec<u32> = std::iter::once(before).chain(pages + held..pages + live).collect();
+            assert_eq!(pins, expected, "{:?}", (before, pages, held, live, pool));
+            for k in 0..held {
+                assert_eq!(residency.layer_of(pages + k), held_layers[k as usize], "held live page {k} moved with its layer: {:?}", (before, pages, held, live, pool));
+            }
+            for page in pages + held..pages + live {
+                assert!(pins.contains(&page), "the live page {page} gained is to be given a layer: {:?}", (before, pages, held, live, pool));
+            }
+            pin_all(&mut residency, &pins);
+            let mut layers = Vec::new();
+            for page in drawing.iter().copied().chain(pages..pages + live) {
+                let layer = residency.layer_of(page).unwrap_or_else(|| panic!("page {page} has no layer: {:?}", (before, pages, held, live, pool)));
+                assert!(!layers.contains(&layer), "page {page} shares layer {layer}: {:?}", (before, pages, held, live, pool));
+                layers.push(layer);
+            }
+            assert_eq!(residency.pool_layers(), held_pool, "the pool is not touched");
+            // The drawing pages that had layers kept them.
+            for (page, layer) in drawing.iter().zip(drawing_layers) {
+                if layer.is_some() {
+                    assert_eq!(residency.layer_of(*page), layer);
+                }
+            }
+        }
     }
 
     #[test]

@@ -1488,6 +1488,7 @@ function drawMotionPaths() {
   if (ghost) drawMotionPathGhost(ctx, trails.ghost(ghost.target, focus.tick), project,
     {color: ghost.color, entry: ghost.entry, relative, tick: editor.tick});
 }
+/** Paints the overlay; `geometry()` is read only by what needs the objects' geometry (the highlight, the handles), so a workspace that shows neither does not have it built after each edit. */
 function overlayRender(geometry) {
   const d = window.devicePixelRatio || 1;
   ctx.setTransform(d, 0, 0, d, 0, 0);
@@ -1497,7 +1498,7 @@ function overlayRender(geometry) {
     !editor.branchSelected && (isBuilderContext(state.tool) || builderMode?.active) && state.settings.builderHighlightSegment &&
     !isHidden(editor.selectedUid)
   )
-    drawBuilderHighlight(ctx, geometry, {
+    drawBuilderHighlight(ctx, geometry(), {
       uid: editor.selectedUid,
       jointIndex: editor.selectedJoint,
       report: editor.report,
@@ -1508,7 +1509,7 @@ function overlayRender(geometry) {
       cameraEnabled: false,
     });
   drawMotionPaths();
-  if (state.handles || state.tool === 'attach') drawCanvasHandles(geometry);
+  if (state.handles || state.tool === 'attach') drawCanvasHandles(geometry());
   if (
     cameraSelected() &&
     editor.report._styk?.layers?.fixed?.camera?.visible !== false &&
@@ -1562,7 +1563,7 @@ function overlayRender(geometry) {
     ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
   }
   if (state.polygon) {
-    const g = [...geometry.objects.values()].find(
+    const g = [...geometry().objects.values()].find(
       (g) => g?.obj.unique_id === state.polygon.uid,
     );
     const markers = state.polygon.handles
@@ -1608,8 +1609,8 @@ function overlayRender(geometry) {
     ctx.stroke();
   }
   construction?.draw(ctx);
-  if (state.handles) drawConnectorGuides(ctx,geometry,editor,screenPoint);
-  if (state.handles && builderMode?.active) drawRigGuides(ctx,geometry,editor,screenPoint);
+  if (state.handles) drawConnectorGuides(ctx,geometry(),editor,screenPoint);
+  if (state.handles && builderMode?.active) drawRigGuides(ctx,geometry(),editor,screenPoint);
   if(state.handles&&!builderMode?.active)drawSpatialGizmo(ctx,editor,screenPoint);
   if(builderMode?.active) {
     const g=editor.geometry.objects.get(editor.selectedSlot);
@@ -1763,7 +1764,7 @@ function loop(now) {
       // What is presented is what was drawn: a frame the stage could not draw yet leaves the previous picture on show.
       if (editingDrawn) state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
         sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
-      overlayRender(heldGeometry ?? editor.geometry);
+      overlayRender(() => heldGeometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
       setHidden($('preview-quality'), !(images.reduced || state.previewGovernor?.index));
     }
@@ -1814,7 +1815,7 @@ function loop(now) {
   if (state.dirtyOverlay && !scenePainted) {
     state.dirtyOverlay = false;
     if (!state.playing && !state.previewing) {
-      overlayRender(drawingController?.renderPreview?.geometry ?? motionDisplay()?.geometry ??
+      overlayRender(() => drawingController?.renderPreview?.geometry ?? motionDisplay()?.geometry ??
         state.drag?.geometry ?? keyboardHandleGesture?.geometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
       drawFinalOverlay();
