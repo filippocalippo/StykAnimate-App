@@ -37,15 +37,25 @@ function engineDocument(message) {
     tick: config.tick, output: piv ? 'codec' : 'container'}});
 }
 
+/** The content type of the codec's export request: the document's JSON, then the Pivot original the document carries (the engine's
+ * `CodecRequest` output; the codec's `FRAMED_EXPORT`). */
+const FRAMED_EXPORT = 'application/vnd.stykanimate.export';
+
 /** The body of the codec's export request. Pivot formats cannot carry tile blobs: drawing cels flatten into ordinary
  * sprites at source resolution (largest mip level past the 16 Mpx cap), with anchors rewritten so placement is identical. */
 async function codecBody(made) {
   if (!made.drawings) return made.bytes;
-  const request = JSON.parse(new TextDecoder().decode(made.bytes)), flattenStats = {}, flattening = performance.now();
+  // Four bytes of the JSON's length, the JSON, the original: only the JSON is read and rewritten.
+  const framed = made.bytes, length = new DataView(framed.buffer, framed.byteOffset, 4).getUint32(0, true);
+  const request = JSON.parse(new TextDecoder().decode(framed.subarray(4, 4 + length))), flattenStats = {}, flattening = performance.now();
   timings.drawing_flattens = await flattenDrawingFigures(request.document, {stats: flattenStats});
   if (flattenStats.downsampled) timings.drawing_downsampled = flattenStats.downsampled;
   timings.drawing_flatten_ms = +(performance.now() - flattening).toFixed(3);
-  return new TextEncoder().encode(JSON.stringify(request));
+  const json = new TextEncoder().encode(JSON.stringify(request)), original = framed.subarray(4 + length);
+  const body = new Uint8Array(4 + json.length + original.length);
+  new DataView(body.buffer).setUint32(0, json.length, true);
+  body.set(json, 4); body.set(original, 4 + json.length);
+  return body;
 }
 
 self.addEventListener('message', async event => {
@@ -94,7 +104,7 @@ self.addEventListener('message', async event => {
         // would recreate the freeze.
         timings.json_characters = body.length;
         const sending = performance.now();
-        const headers = {'Content-Type': 'application/json'};
+        const headers = {'Content-Type': FRAMED_EXPORT};
         if (config.jobId) headers['X-Styk-Job-Id'] = config.jobId;
         stage = 'request';
         const response = await codecRequest(config, '/api/export', {method: 'POST', headers, body});

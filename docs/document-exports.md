@@ -95,7 +95,8 @@ A project opened from a Pivot file carries the file's bytes in the document (`_s
 the interface gives it the bytes once, so no copy of the original lives in the codec or the page, a save needs no fetch of it, and
 the codec worker ends when it has nothing to do. The save writes the original first in the payload section and its record last in the
 root, as saves of projects opened from Pivot have always laid it out. The codec's own source cache and its lease routes (the Python
-service's, replayed against its recordings) are no longer used by the app.
+service's, replayed against its recordings) are no longer used by the app. A Pivot export sends the codec the document's JSON and then the original's
+bytes (not a base64 string of them inside the JSON), so a project of 90 MB exports as a project of 40 does.
 
 PIV/STK export uses the same frame-at-a-time fingerprint for the submitted
 document. Older fingerprint versions keep their historical encoding. Validation

@@ -62,7 +62,7 @@ function failure(error) {
  * Makes the document of an export of `request` from the document the engine holds at `revision` (the interface's
  * revision of it). `request`: `format` (`piv`, `stk`, `stkz`, `stykmov`), `name`, `figureTypeId`, `figureUid`,
  * `figureUids`, `tick`, `output` (`document`, `container` for the figure file as it is stored, or `codec` for the body of the
- * codec's export request).
+ * codec's export request: four bytes of the length of its JSON, the JSON, and the bytes of the Pivot original the document carries).
  * `address` is a fresh `engine.handle.address()`; `cancelled()` says whether the export is stopped.
  * `address` is a fresh `engine.handle.address()` (consumed) whose workers the save may use, or 0.
  * `join` is null where the caller is a thread of the engine already (the tests, which run it in-process). `guard` is the worker's

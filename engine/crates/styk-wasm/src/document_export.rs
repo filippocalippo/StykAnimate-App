@@ -115,7 +115,7 @@ fn bad(message: &str) -> JsError {
 
 /// Makes the document the export in `request` saves, at `revision` of the document the engine at `address` holds.
 /// `request` is JSON: `format` (`piv`, `stk`, `stkz`, `stykmov`), `name`, `figureTypeId`, `figureUid`, `figureUids`,
-/// `tick`, and `output`: `document` (the document as JSON) or `codec` (the codec's export request body, with `sourceId`).
+/// `tick`, and `output`: `document` (the document as JSON) or `codec` (the codec's export request body: the document's JSON and the Pivot original it carries, framed).
 /// `cancel()` answers whether the export is stopped.
 #[wasm_bindgen]
 pub fn export_document(address: usize, revision: f64, request: &str, cancel: &js_sys::Function) -> Result<DocumentExport, JsError> {
@@ -139,7 +139,7 @@ pub fn export_document(address: usize, revision: f64, request: &str, cancel: &js
     let name = request.get("name").and_then(Value::as_str).map(str::to_string);
     let output = match request.get("output").and_then(Value::as_str) {
         Some("container") => Output::Container,
-        Some("codec") => Output::CodecRequest { source_id: request.get("sourceId").and_then(Value::as_str).map(str::to_string), format: request.get("format").and_then(Value::as_str).unwrap_or("piv").to_string() },
+        Some("codec") => Output::CodecRequest { format: request.get("format").and_then(Value::as_str).unwrap_or("piv").to_string() },
         _ => Output::Document,
     };
     let cancelled = Cell::new(false);
