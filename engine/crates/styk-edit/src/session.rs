@@ -538,6 +538,16 @@ impl Session {
         call_values(&mut self.editor, method, args, view, false, None).expect("legacy response has no host cancellation callback")
     }
 
+    /// Runs undo and redo once on a session that has no history, which changes nothing. WebAssembly compiles a function when it is first
+    /// called, and the first undo of a document spent about 4 ms of its 5 in compiling the editor's undo: this is where that is paid, before
+    /// the first stroke, not by the person's first undo.
+    pub fn warm_history(&mut self) {
+        if self.editor.undo.is_empty() && self.editor.redo.is_empty() {
+            let _ = self.editor.undo();
+            let _ = self.editor.redo();
+        }
+    }
+
     /// Borrow the canonical COW report on its owning worker. The host pairs this
     /// with the acknowledged Engine generation/lineage; no report is serialized.
     pub fn report(&self) -> &Value {

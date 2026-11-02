@@ -554,6 +554,14 @@ step 0.02 ms, commits 5.0–9.0 ms, undo 2.1 ms.
 
 Not measured: WebAssembly, and the boundary (arguments in, changed records out).
 
+A stroke's undo in the app (directional, dev build, CPU profile of the session call): the first undo of a document took 5.4 ms in
+`EditSession::call`, of which 4.2 were `Editor::undo` itself; the second took 0.66 ms, and the same editor call is about 0.09 ms natively
+on 80 entries of history. WebAssembly compiles a function when it is first called, so the first undo paid for compiling the editor's undo.
+`Session::warm_history` (called when a session starts, `EditSession::from_document`) runs undo and redo once on the empty history, so that
+cost is paid at open; the first undo's session call fell to 2.7 ms, the rest being other first-call compiles (the drops of the selection
+and of the call's known identities). Copying the history stacks into the call's snapshot is not the cost: taking them out of the snapshot
+changed nothing.
+
 ## Arithmetic
 
 A ported command must round every stored result as the editor does. The platform's
