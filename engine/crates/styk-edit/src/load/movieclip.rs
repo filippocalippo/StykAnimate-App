@@ -314,3 +314,42 @@ fn cut(document: &mut Value, depth: usize) -> usize {
     }
     dropped
 }
+
+/// A frame's movieclip placements whose end is not after their start (older builds left such an end when a clip was placed in a frame that
+/// ended before it started), each given the shortest valid end, the frame after its start. Says how many frames it mended.
+fn repair_placements_in(frame: &mut Value) -> bool {
+    let Some(objects) = frame.make_obj().and_then(|frame| frame.get_mut("objects")).and_then(Value::make_arr) else { return false };
+    let mut mended = false;
+    for object in objects {
+        let Some(playback) = object.make_obj().and_then(|object| object.get_mut("_stykMovieclip")) else { continue };
+        let (start, end) = (playback.get("start").and_then(Value::as_f64), playback.get("end").and_then(Value::as_f64));
+        let presence = playback.get("clock").and_then(Value::as_str) == Some("presence");
+        if let (false, Some(start), Some(end)) = (presence, start, end) {
+            if start.fract() == 0.0 && end.fract() == 0.0 && (0.0..10_000_000.0).contains(&start) && end <= start {
+                if let Some(playback) = playback.make_obj() {
+                    playback.set("end", Value::Num(start + 1.0));
+                    mended = true;
+                }
+            }
+        }
+    }
+    mended
+}
+
+/// [`repair_placements_in`] for the keyframes and the retained poses of `report`.
+pub(super) fn repair_placements(report: &mut Value) -> usize {
+    let mut mended = 0;
+    if let Some(frames) = report.make_obj().and_then(|r| r.get_mut("keyframes")).and_then(Value::make_arr) {
+        mended += frames.iter_mut().filter_map(|frame| repair_placements_in(frame).then_some(())).count();
+    }
+    let sources = report.make_obj().and_then(|r| r.get_mut("_styk")).and_then(Value::make_obj).and_then(|s| s.get_mut("frameSources")).and_then(Value::make_obj);
+    if let Some(sources) = sources {
+        let ids: Vec<String> = sources.keys().map(|id| id.to_string()).collect();
+        for id in ids {
+            if sources.get_mut(&id).is_some_and(repair_placements_in) {
+                mended += 1;
+            }
+        }
+    }
+    mended
+}

@@ -317,7 +317,7 @@ fn prepare(report: &mut Value, fan: &dyn Fanout, mend: bool) -> Result<Prepared,
     // passes is never touched.
     // The poses a layer sheet retains (`_styk.frameSources`) are checked the same way, but an error of theirs that is not a join waits for
     // its place below.
-    let mut repaired = 0;
+    let mut repaired = if mend { movieclip::repair_placements(report) } else { 0 };
     let join_refusal = |refusal: &EditError| matches!(refusal, EditError::Invalid(key) if key == TYPE_ERROR || key == "errors.model.joinPointsToAMissingFigureOrHandle" || key == "errors.editorSelection.figuresContainACyclicJoin");
     let retained = |report: &Value| -> Vec<Value> { entries(path(Some(report), &["_styk", "frameSources"])).into_iter().map(|(_, frame)| frame.clone()).collect() };
     let early = |report: &Value| -> Result<(), EditError> {
@@ -335,6 +335,9 @@ fn prepare(report: &mut Value, fan: &dyn Fanout, mend: bool) -> Result<Prepared,
         }
         repaired += mended;
         early(report)?;
+    }
+    if mend {
+        repaired += drawings::repair_assignments(report);
     }
     drawings::validate(report)?;
     let audio = path(Some(report), &["_styk", "audio"]);

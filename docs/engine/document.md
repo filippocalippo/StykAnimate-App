@@ -47,14 +47,20 @@ each value replaced by values of the wrong kind or removed.
 
 A document the load would refuse for damage that older builds wrote is mended instead, once, and only then: a document whose frames and
 replacements all resolve is never touched, and `Prepared::repairs` (`repairs` of the open's metadata, `Opening.repairs`, which the app says
-with a notice) counts what was mended. Two kinds are known. The layer sheet of a movieclip's retained scene (`_styk.movieclipSource`)
+with a notice) counts what was mended. Four kinds are known. The layer sheet of a movieclip's retained scene (`_styk.movieclipSource`)
 named a frame replacement (`movieclipPatches`) for a figure that scene's poses no longer held, because the clip was made beside a
 movieclip placed over frames of the timeline and cut the poses down without the sheet: a replacement whose pose is missing is dropped and
-one by a missing figure becomes a replacement by nothing (`layer_state::repair_patches`). And a frame of a movieclip whose joins named no
-figure (a slot that is not there, a figure joined to itself, a ring) takes the joins its nearest frame that resolves has, by figure
-identity (`load/joins.rs`, only for a document the scene check refused for a join). Creating a movieclip no longer writes either:
-`movieclip_commands::prune_patches` cuts the sheet's replacements down with the poses, and `cut_frame` unjoins a figure whose parent
-the cut scene does not keep. `scripts/smoke-movieclip-save.mjs` makes movieclips by seeded gestures in the real app and opens what each
+one by a missing figure becomes a replacement by nothing (`layer_state::repair_patches`). A frame of a movieclip, a pose a layer sheet
+retains (`_styk.frameSources`) or a pose of a retained scene whose joins named no figure (a slot that is not there, a figure joined to
+itself, a ring) takes the joins its nearest keyframe that resolves has, by figure identity, else the joins any frame that resolves has, and a
+figure no frame can say a join for is unjoined; the work is linear in the figures of a frame (`load/joins.rs`, only for a document the scene
+check refused for a join). A timed placement whose end is not after its start (a clip placed in a frame that ended before it started) gets
+the frame after its start as its end (`movieclip::repair_placements`). A figure assigned to a drawing layer, which holds only drawing cels
+(a movieclip placed while one was active), is given the default layer (`drawings::repair_assignments`). Creating a movieclip no longer
+writes any of them: `movieclip_commands::prune_patches` cuts the sheet's replacements down with the poses, `cut_frame` unjoins a figure
+whose parent the cut scene does not keep, breaking a clip apart places the pivot of figures with an animation origin, appending a frame
+keeps the end of a clip that starts after it, and a movieclip is refused on a drawing layer and where its clip would nest too deep.
+`scripts/smoke-movieclip-save.mjs` makes movieclips by seeded gestures in the real app and opens what each
 way of saving wrote.
 
 The editor's read view is built from the opened tree once, in pieces

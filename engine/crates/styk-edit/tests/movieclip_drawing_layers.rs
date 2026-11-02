@@ -69,3 +69,23 @@ fn figures_with_an_animation_origin_broken_out_of_a_movieclip_open_in_the_saved_
     let opened = prepare_for_editor(session.report().clone(), true).expect("the project opens after it is saved");
     assert_eq!(opened.repairs, 0, "nothing needed mending");
 }
+
+/// A project as builds that placed a movieclip on a drawing layer left it: the drawing layer has an exposure of a frame holding a figure
+/// that is not a drawing cel, and opening refused it (`drawingLayersMustContainOneDrawingCelPer…`). The figure is given the default layer.
+#[test]
+fn a_figure_a_project_assigned_to_a_drawing_layer_opens_on_the_default_layer() {
+    let (session, layer) = started();
+    let mut report = session.report().clone();
+    let frame_id = report.get("keyframes").and_then(Value::elements).and_then(|e| e.get(0)).and_then(|f| f.path(&["_styk", "frameId"]).and_then(Value::as_str).map(str::to_string)).expect("the first frame has an identity");
+    let styk = report.make_obj().unwrap().get_mut("_styk").unwrap();
+    let layers = styk.make_obj().unwrap().get_mut("layers").unwrap();
+    layers.make_obj().unwrap().get_mut("assignments").unwrap().make_obj().unwrap().set("1", Value::str(&layer));
+    let track = styk.make_obj().unwrap().get_mut("layerSheet").unwrap().make_obj().unwrap().get_mut("tracks").unwrap().make_obj().unwrap().get_mut(&layer).unwrap();
+    let first = &mut track.make_obj().unwrap().get_mut("keys").unwrap().make_arr().unwrap()[0];
+    first.make_obj().unwrap().set("value", json(&format!(r#"{{"frameId":"{frame_id}"}}"#)));
+    first.make_obj().unwrap().set("empty", Value::Bool(false));
+    assert!(styk_edit::load::prepare_editor_load(report.clone()).is_err(), "opening without mending refuses it");
+    let opened = prepare_for_editor(report, true).expect("the project opens");
+    assert_eq!(opened.repairs, 1);
+    assert_eq!(opened.report.path(&["_styk", "layers", "assignments", "1"]).and_then(Value::as_str), Some("layer-1"));
+}

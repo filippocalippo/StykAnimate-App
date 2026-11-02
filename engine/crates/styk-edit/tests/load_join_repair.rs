@@ -85,3 +85,27 @@ fn a_retained_pose_whose_join_names_no_figure_opens_mended() {
     assert_eq!(opened.repairs, 1, "the pose was mended");
     assert_eq!(prepare_for_editor(opened.report, true).unwrap().repairs, 0, "what opening wrote needs no mending");
 }
+
+/// A timed movieclip placement whose end is not after its start, as a clip placed in a frame that ended before it started was left: opening
+/// refused it (`errors.movieclips.movieclipPlacementMustHaveAValidStartAnd`). The end becomes the frame after the start.
+#[test]
+fn a_placement_whose_end_is_not_after_its_start_opens_with_the_shortest_end() {
+    let mut document = read("tests/edit/clip-break-joined-sheet.document.json");
+    let timed = styk_doc::json::parse(br#"{"start":8,"end":8,"offset":0,"speed":1,"mode":"loop"}"#).unwrap();
+    let mut placed = 0;
+    let mut place = |frame: &mut Value| {
+        if let Some(object) = at(frame, "objects").make_arr().unwrap().first_mut() {
+            object.make_obj().unwrap().set("_stykMovieclip", timed.clone());
+            placed += 1;
+        }
+    };
+    place(&mut at(&mut document, "keyframes").make_arr().unwrap()[0]);
+    let sources = at(at(&mut document, "_styk"), "frameSources").make_obj().unwrap();
+    let id = sources.keys().next().unwrap().to_string();
+    place(sources.get_mut(&id).unwrap());
+    assert_eq!(placed, 2);
+    assert!(styk_edit::load::prepare_editor_load(document.clone()).is_err(), "opening without mending refuses it");
+    let opened = prepare_for_editor(document, true).expect("the project opens");
+    assert_eq!(opened.repairs, 2, "the keyframe and the retained pose were mended");
+    assert_eq!(opened.report.path(&["keyframes"]).and_then(Value::elements).unwrap().get(0).unwrap().path(&["objects"]).and_then(Value::elements).unwrap().get(0).unwrap().path(&["_stykMovieclip", "end"]).and_then(Value::as_f64), Some(9.0));
+}
