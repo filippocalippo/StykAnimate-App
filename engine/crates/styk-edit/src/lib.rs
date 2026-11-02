@@ -13,6 +13,7 @@
 //! answers [`EditError::Unported`], so a facade knows to run it in JavaScript.
 
 mod audio;
+mod rebuild_check;
 mod authored;
 mod builder;
 mod drawing_pixels;

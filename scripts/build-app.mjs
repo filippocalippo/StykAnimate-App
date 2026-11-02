@@ -17,9 +17,9 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 /** Electron 39's Chromium. */
 const TARGET = 'chrome142';
 /** Loaded by the page, by URL, and kept as separate entries. The modules the benchmark imports from the page (it reads the engine's memory and
- * patches `PlaybackMetrics`) are entries so that it meets the application's module and not a second copy; tests/app-bundle.test.mjs keeps
- * the list in step with scripts/benchmark-app.mjs. */
-const PAGE_ENTRIES = ['src/app.mjs', 'src/engine/engine-start.mjs', 'src/engine/engine.mjs', 'src/playback-metrics.mjs', 'src/canvas-interactions.mjs', 'src/renderer-geometry.mjs'];
+ * patches `PlaybackMetrics`) and the export renderer the determinism smoke creates are entries so that they meet the application's module
+ * and not a second copy; tests/app-bundle.test.mjs keeps the list in step with the scripts. */
+const PAGE_ENTRIES = ['src/app.mjs', 'src/engine/engine-start.mjs', 'src/engine/engine.mjs', 'src/engine/engine-export.mjs', 'src/playback-metrics.mjs', 'src/canvas-interactions.mjs', 'src/renderer-geometry.mjs'];
 /** The page's tables of where its bundled lines came from (frameTable), a classic script the page runs before its modules. */
 const FRAME_SCRIPT = 'src/frame-map.js';
 /** The one stylesheet index.html links. */
