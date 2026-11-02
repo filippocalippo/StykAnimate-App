@@ -60,6 +60,10 @@ struct State {
     decoding_bytes: usize,
     /// Pixels in `images`.
     image_bytes: usize,
+    /// The export asks for pictures as its frames need them ([`ExportFrames::decode_cels`]): `images_left` counts the drawing cels,
+    /// which a frame waits for, and `pictures_left` the pictures asked for, which only the frame that draws them waits for.
+    resident: bool,
+    pictures_left: usize,
 }
 
 /// Starts the bounded set of requested frames once their resource rectangles
@@ -115,18 +119,22 @@ fn start_decoders(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Sha
                 return;
             }
             let decoded = engine.decode_pixels(&generation, todo.picture());
-            pictures_ready(engine, &generation, &state, &ended, epoch, estimate, decoded);
+            pictures_ready(engine, &generation, &state, &ended, epoch, estimate, matches!(todo, Todo::Cel(_)), decoded);
         });
     }
 }
 
-fn pictures_ready(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Shared<State>>, ended: &Arc<AtomicBool>, epoch: u64, estimate: usize, images: Vec<DecodedImage>) {
+fn pictures_ready(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Shared<State>>, ended: &Arc<AtomicBool>, epoch: u64, estimate: usize, cel: bool, images: Vec<DecodedImage>) {
     {
         let mut state = state.lock();
         if ended.load(Ordering::Relaxed) || epoch != state.epoch {
             return;
         }
-        state.images_left = state.images_left.saturating_sub(1);
+        if state.resident && !cel {
+            state.pictures_left = state.pictures_left.saturating_sub(1);
+        } else {
+            state.images_left = state.images_left.saturating_sub(1);
+        }
         state.decoding = state.decoding.saturating_sub(1);
         state.decoding_bytes = state.decoding_bytes.saturating_sub(estimate);
         state.image_bytes += images.iter().map(|image| image.rgba.len()).sum::<usize>();
@@ -216,6 +224,59 @@ impl ExportFrames {
         }
         start_decoders(&self.engine, generation, &self.state, &self.ended);
         prepare_pending(&self.engine, generation, &self.state, &self.ended);
+    }
+
+    /// Decodes the drawing cels of the document only, and makes this export one that asks for the rest as its frames need them
+    /// ([`ExportFrames::request_pictures`]): the pictures of a long document are not all in memory at once. A frame waits for the
+    /// cels (their rectangles are not known before they are decoded) and for nothing else here.
+    pub fn decode_cels(&self) {
+        let generation = &self.generation;
+        let todo: VecDeque<Todo> = generation.assets.cels.keys().copied().map(Todo::Cel).collect();
+        {
+            let mut state = self.state.lock();
+            let remaining = todo.len();
+            state.epoch = state.epoch.wrapping_add(1);
+            let mut redo: Vec<_> = state.ready.keys().chain(state.inflight.iter()).copied().collect();
+            redo.sort_unstable();
+            redo.dedup();
+            state.inflight = redo.iter().copied().collect();
+            state.pending = redo;
+            state.ready.clear();
+            state.resident = true;
+            state.images_left = remaining;
+            state.pictures_left = 0;
+            state.todo = todo;
+            state.images.clear();
+            state.image_bytes = 0;
+            state.decoding = 0;
+            state.decoding_bytes = 0;
+        }
+        start_decoders(&self.engine, generation, &self.state, &self.ended);
+        prepare_pending(&self.engine, generation, &self.state, &self.ended);
+    }
+
+    /// Asks the engine's workers for the pictures `pictures` (indices into the document's images; each once: the caller keeps
+    /// what it asked for). They land in [`ExportFrames::take_images`].
+    pub fn request_pictures(&self, pictures: &[u32]) {
+        {
+            let mut state = self.state.lock();
+            for &picture in pictures {
+                state.todo.push_back(Todo::Image(picture as usize));
+                state.pictures_left += 1;
+            }
+        }
+        start_decoders(&self.engine, &self.generation, &self.state, &self.ended);
+    }
+
+    /// Pictures asked for that are being decoded or wait to be taken (an export that asks for them: [`ExportFrames::decode_cels`]).
+    pub fn pictures_in_flight(&self) -> usize {
+        let state = self.state.lock();
+        state.pictures_left + state.images.len()
+    }
+
+    /// Drawing cels still to be decoded, which frames wait for, in an export that asks for its pictures; every picture otherwise.
+    pub fn images_left(&self) -> usize {
+        self.state.lock().images_left
     }
 
     /// Decoded pictures not yet taken, up to `max_bytes` of pixels (at least one).
@@ -365,5 +426,29 @@ mod tests {
         assert_eq!(taken, total, "every picture arrives, as the renderer takes the ones before it");
         assert_eq!(frames.images_pending(), 0);
         assert_eq!(frames.state.lock().image_bytes, 0);
+    }
+
+    /// An export that asks for its pictures waits for the drawing cels and nothing else: its frames are made while no picture is in,
+    /// and a picture asked for lands by itself.
+    #[test]
+    fn a_resident_export_waits_for_its_cels_only_and_gets_a_picture_when_it_asks() {
+        let engine = Engine::new(clock, Budgets::for_device(None));
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/eval/sticknodes-sprites.json");
+        engine.open(&std::fs::read(file).unwrap(), "json", "pictures").unwrap();
+        while engine.step() {}
+        let _ = engine.take_images(usize::MAX);
+        let frames = engine.export_frames(0).unwrap();
+        let picture = frames.generation().assets.atlas.iter().position(|entry| entry.valid).expect("the fixture has a picture") as u32;
+        frames.decode_cels();
+        while engine.step() {}
+        assert_eq!(frames.images_left(), 0, "a document without cels leaves nothing for a frame to wait for");
+        assert!(frames.take(0).is_some(), "a frame is not held back by pictures nobody asked for");
+        assert_eq!(frames.pictures_in_flight(), 0, "nothing was asked for");
+        frames.request_pictures(&[picture]);
+        assert_eq!(frames.pictures_in_flight(), 1);
+        while engine.step() {}
+        let landed = frames.take_images(usize::MAX);
+        assert_eq!(landed.iter().filter(|image| !image.drawing && !image.soft && image.index == picture).count(), 1);
+        assert_eq!(frames.pictures_in_flight(), 0);
     }
 }

@@ -101,6 +101,40 @@ impl GpuExport {
         true
     }
 
+    /// Lays the sprite atlas out for an export that keeps only the pages its frames draw from ([`crate::resident`]): two layers
+    /// to begin with, none of the document's pages mapped, no soft copies.
+    pub fn prepare_sprites_resident(&mut self, lineage: u64, assets: &Assets) {
+        self.renderer.prepare_sprites_export(assets, 2);
+        self.atlas = Some((lineage, assets.pages, assets.atlas.len()));
+    }
+
+    /// Layers the sprite texture has.
+    pub fn sprite_layers(&self) -> u32 {
+        self.renderer.sprite_memory().0
+    }
+
+    /// Gives the sprite texture `layers` layers, keeping what is in it.
+    pub fn grow_sprite_layers(&mut self, layers: u32) {
+        self.renderer.resize_sprite_layers(layers);
+    }
+
+    /// Page `page` of the layout is in layer `layer` of the sprite texture (`None`: it is not). Takes effect with
+    /// [`GpuExport::flush_sprites`].
+    pub fn map_page(&mut self, page: u32, layer: Option<u32>) {
+        self.renderer.map_sprite_page(page, layer);
+    }
+
+    /// The picture at `entry` is in layer `layer` (`None`: it is not). Takes effect with [`GpuExport::flush_sprites`].
+    pub fn set_picture(&mut self, entry: &styk_eval::assets::AtlasEntry, layer: Option<u32>) {
+        self.renderer.set_picture(entry, layer);
+    }
+
+    /// Writes the pages and pictures set since the last call to the tables the shaders read.
+    pub fn flush_sprites(&mut self) {
+        self.renderer.flush_sprite_map();
+        self.renderer.flush_pictures();
+    }
+
     pub fn upload_images<'a>(&mut self, assets: &Assets, images: impl IntoIterator<Item = &'a DecodedImage>) {
         self.renderer.upload_images(assets, images);
     }

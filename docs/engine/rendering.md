@@ -906,9 +906,10 @@ and evaluates ticks as playback does: effects drawn (exports ignore the editor's
 preview), the session's hidden figures shown, the document's hidden layers hidden, generated
 effects with every earlier anchor evaluated. Up to eight following ticks are prepared on the
 engine's workers. The pose the editor shows (a PNG of the current frame) crosses as document
-chunks and is drawn by an `EditScene` without onion skins. Every
-picture of the document is decoded for the export's device before the first frame, so an
-export never shows a frame without one.
+chunks and is drawn by an `EditScene` without onion skins. A document whose layout has four
+pages or fewer has every picture decoded for the export's device before the first frame; a
+larger one keeps only the pages its frames draw from ([Pictures of a long document](#pictures-of-a-long-document)).
+Either way an export draws a frame only when every picture it shows is sharp: never a soft copy.
 
 **Settings** (`styk-export`):
 
@@ -926,8 +927,8 @@ export never shows a frame without one.
 (`tiles::TILE_SIDE`), each the same view shifted by whole pixels: the renderer's targets (frame,
 samples, isolation atlas pages, depth) stay those of one tile whatever the output, about the
 stage's own. Tiles are read back into at most eight slots of 64 MiB together; the worker keeps
-one tile's pixels and the output canvas. The export's device holds its own sprite atlas, the
-size of the stage's. Frames prepared ahead are at most eight draw lists. A GPU out-of-memory
+one tile's pixels and the output canvas. The export's device holds its own sprite atlas: the
+layout's whole size for a document of four pages or fewer, else a few layers of it. Frames prepared ahead are at most eight draw lists. A GPU out-of-memory
 error or a lost device retries the frame with half the tile side, then once with a new worker
 and device (the export renderer's ladder), then fails; nothing is written.
 
@@ -986,6 +987,50 @@ read-back slots (up to 64 MiB), the frame's samples and layer pages, and a secon
 sprite atlas, the stage keeping its own. Exports through the app (the export dialog opens 1.5 s before each
 export): Impact-FX-Fight.styk, 240 frames at 1,920×1,080, PNG sequence 16–19 s, APNG 22–25 s, GIF 53–65 s,
 MP4 14–19 s, WebM 15–20 s; the start document's 10 frames at 960×540 took 0.7–1.3 s a format.
+
+**At 4K, Max quality** (measured in the Electron app, 2026-11-01, release engine, RTX 4070 SUPER, Ryzen 5 5500, on a machine other jobs were
+using, so the times are directional). The size is the short side 2160 (4320×2160 for the user file and tdd2, 3780×2160 for svr_uriel, 3812×2160 for testingupload), drawn as 6 or 4 tiles of at most 1,906×1,080.
+No file timed out. A PNG of one frame took 0.5–2.2 s, nearly all of it the first frame waiting for the document's pictures (tdd2 and the user file 1.3–1.6 s). A whole-file H.264 MP4 took
+105–140 ms a frame in the app (259 frames in 27–35 s, 589 in 81–123 s, 1,872 in 256–288 s): the encoder alone, with the app's arguments (`-threads 2`), took 98 ms a frame on real 4K
+frames of tdd2 (0.23 processor-seconds a frame), 65 ms with 4 threads and 56 ms with 8, and the output of those differs in bytes, so the thread count was left alone. Before the next native
+frame was asked for ahead, the interface waited 84–93 ms a frame for the worker (resolving the tiles 30–45 ms, the PNG 44–59 ms) and then for the pipe; after it, 0.3 ms for tdd2 and svr_uriel
+(105 ms a frame for the user file, whose PNGs take the worker 84 ms under load). Resolving a tile that is not over black (PNG, APNG, PNG sequence) took 90–140 ms a frame and now 45–60: opaque pixels
+skip the division by their alpha (same bytes, `styk-export` test over every value). The memory of the app and its encoder rose by 1.2–2.8 GiB for the export and stayed flat while a
+video of 589 or 1,872 frames went on (the traces are in the result files): the GPU process holds most of it (+1.2–2.5 GiB: the export device's copy of the document's pictures, which a video needs
+whole because any frame may use any of them), the encoder 0.7–0.8 GiB, the renderer ±0.2 GiB. Exports of ticks 120–199 of tdd2, 80 frames at 4320×2160, drawn four times (twice with and twice without asking
+ahead), came out byte-identical in the last run; an earlier run on the same build had 3 of the 80 frames differ between runs, with or without asking ahead (the nondeterminism the export defect names).
+
+### Pictures of a long document
+
+A document whose layout has more than `styk_engine::ATLAS_PAGES` (four) pages of 4,096² texels (64 MiB each) is not held whole by its
+export (`styk_export::resident`, `ExportFrames::decode_cels` and `request_pictures`). The drawing cels' pages stay for good, as the stage's
+do; every other page is given one of at most eight layers (`KEPT_LAYERS`; the texture starts with two and doubles up to that, and grows past
+it only for a frame that draws from more pages) when a picture on it is needed: the engine decodes the pictures of the frame about to be drawn
+and, ahead of them, of the next six, and the page shown longest ago leaves when another is wanted (`styk_engine::Residency`).
+**A frame is drawn only when every picture it shows is in the texture and in the picture table** (`ExportRenderer::pictures_ready`, which the
+worker waits on before it draws a frame, one drawn ahead included): there is no soft atlas, a frame whose pictures are not in waits, and one
+drawn short of a picture is impossible. A picture the engine cannot decode is not waited for. The frames are the whole layout's to the byte
+(the hashes of 40 frames of tdd2 and 41 of the user file at 4320×2160, the whole layout against the resident one, are equal; the Rust
+test draws three fixtures both ways). Measured 2026-11-02, release engine, on a machine other jobs were using (directional): a PNG of
+one frame of tdd2 at 4K took 0.6–1.0 s in two runs (a third took 14.7 s, which nothing measured explains) instead of 2.0–2.4, and added 0.3 GiB instead of 1.7 (the frame draws from no picture: its first
+frame no longer waits for the 20 pages); a whole-file MP4 of tdd2 (589 frames, eight layers, 46 page loads, 38 evictions) ran at 122–134 ms a
+frame, as before, with the GPU process +1.3 GiB instead of +1.5 and the whole tree +2.3 GiB instead of +2.5 (ffmpeg is 0.85 of it). What it
+does not reduce: the user file has no pictures but sixteen pages of drawing cels, which stay (1 GiB), so its image export added 2.9 GiB and its
+video 2.9 (the GPU process +3.1 GiB: the cels' atlas, the effect slots and layer pages at 4K, the read-back slots, the device). The targets
+of 1 GiB for an image and 1.5 GiB for a video were met for the image of tdd2 only. Not done: cel pages are not paged; the page budget is a
+constant (eight) rather than from the document's table of what each tick draws (`Residency::set_next_use`).
+
+**A frame that depends on what was drawn before** (found and closed for what the fixtures and the user file show). The verifier saw tick 5
+of a document differ from a clean run by one level in a few hundred pixels. The draw lists were equal (hashed), so it was drawing: the effect
+slots (`Executor::prepare`) were kept at the largest size any earlier frame had needed and the effect passes address a slot by texel (1 / its
+size), the layer pages (`Renderer.page`) likewise grew with the largest layer, and the trilinear particle material atlas (`ensure_materials`)
+held only the rows a list had named, so a texel at a row's edge read a neighbour that was there only after some lists. An export now sizes its
+slots and pages by each frame alone and loads every material row (`Renderer::set_exact_sizes`, set by `GpuExport`); the textures it replaces
+are destroyed, not dropped (a browser frees a dropped texture only when it collects it: with pages sized per frame and dropped, a 4K video of the
+user file held 28 GiB). On the user file at 3840×2160 ticks 4, 5, 6 and 8 differed alone and after the frames before them (563 pixels, one level)
+and no longer do; `a_frame_is_the_same_alone_and_after_the_frames_before_it` (styk-export) draws the same draw lists alone, after the largest frame and after every frame
+before them, on four fixtures with effects and generated effects, and fails without the change. The glyph mask atlas (`GlyphMasks::fit`)
+also grows with the largest mask seen; its pages are powers of two, so the positions it is sampled at are exact, and no document shown it.
 
 **Cancellation and failure** (`--cancel`, `--integrity`): on Impact-FX-Fight.styk and TDD2 URIEL
 NEMESIS 3.styk, ten exports aborted after their first frame left no export worker, every worker

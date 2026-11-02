@@ -24,6 +24,7 @@ pub mod cpu;
 pub mod gpu;
 pub mod pick;
 pub mod pixels;
+pub mod resident;
 pub mod settings;
 pub mod svg;
 pub mod tiles;

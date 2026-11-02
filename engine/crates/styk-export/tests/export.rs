@@ -317,3 +317,59 @@ fn probe_evaluation_history() {
         eprintln!("PROBE {path}: draw lists that differ between a fresh engine and one that evaluated the ticks before: {differ:?}");
     }
 }
+
+/// The engine with `path` open and nothing decoded: an export that asks for its pictures decodes the cels, then what its frames draw.
+fn open_bare(path: &str) -> (Engine, styk_engine::export::ExportFrames) {
+    let file = repository(path);
+    let bytes = std::fs::read(&file).unwrap();
+    let extension = file.extension().unwrap().to_str().unwrap().to_string();
+    let engine = Engine::new(clock, Budgets::for_device(None));
+    engine.open(&bytes, &extension, "test").unwrap();
+    let frames = engine.export_frames(0).unwrap();
+    (engine, frames)
+}
+
+/// A document of many pages is exported with the pictures its frames draw in a few layers of the sprite texture
+/// (`styk_export::resident`). Whatever the layers hold, a frame has to be the frame the whole layout gives, to the byte: the
+/// fixtures here have pictures and a drawing cel but few pages, so what this tests is that every picture a frame draws is asked
+/// for, uploaded, mapped and waited for before the frame is drawn; the pages that leave are tested by exporting a document of
+/// twenty pages in the app (scripts/smoke-export-determinism.mjs --file).
+#[test]
+fn pictures_asked_for_as_frames_need_them_draw_the_frames_the_whole_layout_draws() {
+    let Some(gpu) = gpu() else {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    };
+    for (path, last) in [
+        ("engine/crates/styk-eval/tests/fixtures/eval/sticknodes-sprites.json", 5u32),
+        ("engine/crates/styk-eval/tests/fixtures/clip-paint/image-identity.json", 3),
+        ("engine/crates/styk-eval/tests/fixtures/drawlist/drawing-cel.json", 3),
+    ] {
+        let settings = Settings::new(640, 360, Smoothing::Edges, MAX_PIXELS).unwrap();
+        let (_, whole) = open(path);
+        let last = last.min(whole.ticks() - 1);
+        let expected: Vec<Vec<u8>> = (0..=last).map(|tick| export(&gpu, &open(path).1, settings, styk_export::TILE_SIDE, tick, false).0).collect();
+
+        let (engine, frames) = open_bare(path);
+        let generation = frames.generation().clone();
+        let mut exporter = GpuExport::new(&gpu.device, &gpu.queue, settings, styk_export::TILE_SIDE);
+        let mut resident = styk_export::resident::Resident::begin(&mut exporter, &frames);
+        for tick in 0..=last {
+            let frame = loop {
+                resident.upload(&mut exporter, &frames, styk_export::resident::UPLOAD_BYTES);
+                if let Some(frame) = frames.take(tick) {
+                    break frame;
+                }
+                assert!(engine.step(), "{path}: tick {tick} never came");
+            };
+            let mut waited = 0;
+            while !resident.ready(&mut exporter, &frames, &frame.list, Some(tick), last) {
+                assert!(engine.step() || waited < 1000, "{path}: the pictures of tick {tick} never landed");
+                waited += 1;
+            }
+            let pixels = exporter.frame_blocking(&generation.prepared.doc, &frame.list, frame.camera.as_ref(), false).unwrap();
+            let (count, largest) = differing(&pixels, &expected[tick as usize]);
+            assert_eq!(count, 0, "{path}: tick {tick} differs from the frame the whole layout draws in {count} pixels, by up to {largest}");
+        }
+    }
+}
