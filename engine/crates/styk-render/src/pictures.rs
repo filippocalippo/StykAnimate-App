@@ -86,6 +86,8 @@ impl PictureState {
         } else {
             array_texture(device, "styk soft sprites", [SOFT_LAYER, SOFT_LAYER], soft_pages.min(crate::MAX_PAGES).div_ceil(SOFT_PER_LAYER), false)
         };
+        crate::resources::warm_texture(queue, &table);
+        crate::resources::warm_texture(queue, &soft);
         let mut state = PictureState { soft, soft_view, table, table_view, entries, slots, dirty: true, whole, known: assets.atlas.len() };
         state.flush(queue);
         state

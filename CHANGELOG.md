@@ -43,6 +43,7 @@ What's new in each version of StykAnimate.
 - Fixed editing an existing text figure, which opened with the default text instead of its own.
 - Fixed Auto key, builder snapping and camera follow missing from the command palette.
 - Saving no longer fails when Windows is still scanning the file you just saved over, and a save that runs out of memory now says your project is still open.
+- Exporting the same animation twice no longer occasionally leaves a frame with garbled pixels.
 
 ### Performance
 

@@ -74,6 +74,7 @@ impl Renderer {
         }
         if !self.materials.full {
             self.materials = Materials::create(&self.device, true);
+            crate::resources::warm_texture(&self.queue, &self.materials.texture);
             self.rebind_sprites();
         }
         for row in 0..MATERIAL_ROWS {

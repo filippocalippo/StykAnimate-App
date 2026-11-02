@@ -110,6 +110,7 @@ impl Renderer {
         let pages = assets.pages + live;
         let size = if pages == 0 { [1, 1] } else { [PAGE, PAGE] };
         let (texture, view) = array_texture(&self.device, "styk sprites", size, pages.max(1), false);
+        crate::resources::warm_texture(&self.queue, &texture);
         self.sprite_view = view;
         self.sprite_map.layers = (0..pages.min(MAX_PAGES)).collect();
         self.sprite_map.flush(&self.queue);
@@ -129,6 +130,7 @@ impl Renderer {
     pub fn prepare_sprites_resident(&mut self, assets: &Assets, live: u32, layers: u32) {
         let pages = assets.pages + live;
         let (texture, view) = array_texture(&self.device, "styk sprites", [PAGE, PAGE], layers.max(2), false);
+        crate::resources::warm_texture(&self.queue, &texture);
         self.sprite_view = view;
         self.sprite_map.layers = vec![UNMAPPED; pages.min(MAX_PAGES) as usize];
         self.sprite_map.flush(&self.queue);
@@ -210,6 +212,7 @@ impl Renderer {
         }
         let old = self.sprites.clone();
         let (texture, view) = array_texture(&self.device, "styk sprites", [PAGE, PAGE], layers, false);
+        crate::resources::warm_texture(&self.queue, &texture);
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("styk sprites grow") });
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo { texture: &old, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
@@ -399,6 +402,61 @@ mod tests {
             wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
         );
         pollster::block_on(scope.pop()).is_some()
+    }
+
+    /// The RGBA of a rectangle of the sprite atlas's layer `layer`, read back from the GPU.
+    fn read_atlas(renderer: &Renderer, layer: u32, x: u32, y: u32, width: u32, height: u32) -> Vec<u8> {
+        let stride = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor { label: None, size: stride as u64 * height as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let mut encoder = renderer.device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { texture: &renderer.sprites, mip_level: 0, origin: wgpu::Origin3d { x, y, z: layer }, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(height) } },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        renderer.queue.submit([encoder.finish()]);
+        buffer.slice(..).map_async(wgpu::MapMode::Read, |result| result.expect("mapped"));
+        renderer.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
+        let mapped = buffer.slice(..).get_mapped_range().expect("mapped range");
+        (0..height as usize).flat_map(|row| mapped[row * stride as usize..row * stride as usize + width as usize * 4].to_vec()).collect()
+    }
+
+    fn picture(index: u32, drawing: bool, width: u32, height: u32, seed: u8) -> DecodedImage {
+        let rgba = (0..width * height * 4).map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed)).collect();
+        DecodedImage { index, drawing, soft: false, width, height, rgba }
+    }
+
+    /// A layout test: pictures land in their atlas places row for row, whatever their width, with the gutter or border outside the
+    /// place, and leave their neighbours' texels alone. It cannot catch the bug the warming of new textures is for (a browser's
+    /// `writeTexture` into a texture nothing has used yet losing the write: native adapters never showed it): only
+    /// scripts/smoke-export-determinism.mjs, on a real browser GPU, does. With no adapter it prints "skipped" and passes.
+    #[test]
+    fn uploaded_pictures_land_in_their_places_row_for_row() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
+        let mut renderer = Renderer::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+        let mut assets = assets(2);
+        let place = |layer, x, y, w, h| styk_eval::assets::AtlasEntry { layer, x, y, w, h, source_w: w, source_h: h, valid: true };
+        // Images keep a one-texel gutter around the place, drawing cels a border of BORDER.
+        assets.atlas = vec![place(0, 11, 13, 3, 2), place(1, 40, 8, 301, 61)];
+        assets.drawing = vec![place(0, 100, 50, 7, 6)];
+        let border = styk_eval::drawing::BORDER;
+        let pictures = [picture(0, false, 5, 4, 1), picture(1, false, 303, 63, 2), picture(0, true, 7 + 2 * border, 6 + 2 * border, 3)];
+        renderer.prepare_sprites(&assets);
+        renderer.upload_images(&assets, pictures.iter());
+        for (picture, (layer, x, y)) in pictures.iter().zip([(0, 10, 12), (1, 39, 7), (0, 100 - border, 50 - border)]) {
+            assert_eq!(read_atlas(&renderer, layer, x, y, picture.width, picture.height), picture.rgba, "picture {} (drawing: {})", picture.index, picture.drawing);
+        }
+        assert!(read_atlas(&renderer, 0, 9, 12, 1, 4).iter().all(|b| *b == 0), "the texels beside a picture are untouched");
+        // A later call, as a document's later pictures arrive, keeps the earlier ones.
+        let later = picture(1, false, 33, 9, 9);
+        renderer.upload_images(&assets, [&later]);
+        assert_eq!(read_atlas(&renderer, 1, 39, 7, 33, 9), later.rgba);
+        assert_eq!(read_atlas(&renderer, 0, 10, 12, 5, 4), pictures[0].rgba, "an earlier picture is kept");
     }
 
     fn assets(pages: u32) -> Assets {
