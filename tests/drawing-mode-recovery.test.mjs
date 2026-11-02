@@ -55,3 +55,10 @@ test('Draw exit does not select a hidden or locked prior layer', () => {
   editor.selectSheetLayer(drawing.editor.layers.find(layer => layer.drawing).id);
   drawing.exit(); assert.equal(editor.activeLayerId, alternate.id);
 });
+
+test('opening Draw asks the renderer to make room for live cels once, before the first stroke', () => {
+  const {drawing} = fixture(); let prepared = 0;
+  drawing.state.renderer = {prepareDrawing: () => { prepared++; }};
+  drawing.enter(); drawing.enter();
+  assert.equal(prepared, 1, 'the engine allocates its drawing texture when Draw opens, not on the first stroke');
+});
