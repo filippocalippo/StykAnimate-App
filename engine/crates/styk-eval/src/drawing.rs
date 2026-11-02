@@ -262,27 +262,14 @@ pub(crate) fn bordered_into<S: std::hash::BuildHasher>(level: &HashMap<(i32, i32
 pub fn decode_cel(cel: &DrawingTiles) -> Vec<(u32, u32, Vec<u8>)> {
     let mut level: HashMap<(i32, i32), Vec<u8>> = HashMap::with_capacity(cel.tiles.len());
     for (tx, ty, png) in &cel.tiles {
-        let Ok(image) = image::load_from_memory(png) else { continue };
-        let rgba = image.to_rgba8();
-        if rgba.width() == TILE && rgba.height() == TILE {
-            level.insert((*tx, *ty), rgba.into_raw());
+        if let Some(rgba) = decode_png_tile(png) {
+            level.insert((*tx, *ty), rgba);
         }
     }
     // This runs beside PNG decoding on the existing resource workers. Keep only
     // the derived rectangle, shared by revisions that reuse this immutable cel.
-    let mut bounds = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
-    for (&(tx, ty), rgba) in &level {
-        if let Some(alpha) = styk_drawing::tiles::alpha_bounds(rgba) {
-            let x = tx as i64 * TILE as i64 + alpha.x;
-            let y = ty as i64 * TILE as i64 + alpha.y;
-            bounds[0] = bounds[0].min(x);
-            bounds[1] = bounds[1].min(y);
-            bounds[2] = bounds[2].max(x + alpha.width);
-            bounds[3] = bounds[3].max(y + alpha.height);
-        }
-    }
-    let alpha = (bounds[0] != i64::MAX).then(|| [bounds[0] as f64, bounds[1] as f64, (bounds[2] - bounds[0]) as f64, (bounds[3] - bounds[1]) as f64]);
-    let _ = cel.decoded_bounds.set(alpha);
+    let ink: HashMap<(i32, i32), [i64; 4]> = level.iter().filter_map(|(&at, rgba)| tile_ink(at, rgba).map(|rect| (at, rect))).collect();
+    resolve_bounds(cel, ink);
     let mut out = Vec::new();
     for (n, drawn) in cel.levels.iter().enumerate() {
         if n > 0 {
@@ -294,6 +281,126 @@ pub fn decode_cel(cel: &DrawingTiles) -> Vec<(u32, u32, Vec<u8>)> {
         }
         for (index, &(tx, ty)) in drawn.iter().enumerate() {
             out.push((n as u32, index as u32, bordered(&level, tx, ty)));
+        }
+    }
+    out
+}
+
+/// The pixels of a level-0 tile's PNG; `None` when it does not decode to a 64-pixel tile.
+fn decode_png_tile(png: &[u8]) -> Option<Vec<u8>> {
+    let rgba = image::load_from_memory(png).ok()?.to_rgba8();
+    (rgba.width() == TILE && rgba.height() == TILE).then(|| rgba.into_raw())
+}
+
+/// The ink of the level-0 tile at `at` in cel pixels (`[x0, y0, x1, y1)`), if it has any.
+fn tile_ink(at: (i32, i32), rgba: &[u8]) -> Option<[i64; 4]> {
+    let alpha = styk_drawing::tiles::alpha_bounds(rgba)?;
+    let (x, y) = (at.0 as i64 * TILE as i64 + alpha.x, at.1 as i64 * TILE as i64 + alpha.y);
+    Some([x, y, x + alpha.width, y + alpha.height])
+}
+
+/// Resolves the cel's bounds from the ink of its tiles, and keeps the ink for the cel that replaces this one.
+fn resolve_bounds(cel: &DrawingTiles, ink: HashMap<(i32, i32), [i64; 4]>) {
+    let mut bounds = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
+    for rect in ink.values() {
+        bounds = [bounds[0].min(rect[0]), bounds[1].min(rect[1]), bounds[2].max(rect[2]), bounds[3].max(rect[3])];
+    }
+    let alpha = (bounds[0] != i64::MAX).then(|| [bounds[0] as f64, bounds[1] as f64, (bounds[2] - bounds[0]) as f64, (bounds[3] - bounds[1]) as f64]);
+    let _ = cel.decoded_bounds.set(alpha);
+    let _ = cel.tile_ink.set(Arc::new(ink));
+}
+
+/// Which drawn tiles of `new` differ from what the slot of the tile at the same level and coordinate in `old` holds (a decode of `old`),
+/// by level and index in `new.levels`. A tile differs when it is not in `old`, or when a level-0 tile under it or next to it changed:
+/// a slot holds the tile and its neighbours' edge texels, and a reduced tile the reduction of the tiles below it.
+pub fn dirty_tiles(old: &DrawingTiles, new: &DrawingTiles) -> Vec<Vec<bool>> {
+    let before: HashMap<(i32, i32), &Arc<[u8]>> = old.tiles.iter().map(|(x, y, png)| ((*x, *y), png)).collect();
+    let after: HashMap<(i32, i32), &Arc<[u8]>> = new.tiles.iter().map(|(x, y, png)| ((*x, *y), png)).collect();
+    let changed: Vec<(i32, i32)> = after
+        .iter()
+        .filter(|(at, png)| !before.get(at).is_some_and(|was| { let (was, png): (&Arc<[u8]>, &Arc<[u8]>) = (was, png); Arc::ptr_eq(was, png) || was[..] == png[..] }))
+        .map(|(at, _)| *at)
+        .chain(before.keys().filter(|at| !after.contains_key(at)).copied())
+        .collect();
+    new.levels
+        .iter()
+        .enumerate()
+        .map(|(n, drawn)| {
+            let span = 1i32 << n;
+            let touched: HashSet<(i32, i32)> = changed.iter().map(|&(x, y)| (x.div_euclid(span), y.div_euclid(span))).collect();
+            let was = old.levels.get(n);
+            drawn
+                .iter()
+                .map(|&(x, y)| {
+                    let held = was.is_some_and(|was| was.binary_search_by_key(&(y, x), |&(x, y)| (y, x)).is_ok());
+                    !held || (-1..=1).any(|dy| (-1..=1).any(|dx| touched.contains(&(x + dx, y + dy))))
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// [`decode_cel`]'s slots for the tiles marked in `dirty` (by level and index in `cel.levels`, as [`dirty_tiles`] says) and no others, with
+/// the same pixels: only the tiles those need are decoded and reduced. The cel's bounds are resolved from the ink the cel it replaced
+/// recorded for the tiles it shares ([`DrawingTiles::inherited_ink`]) and from the tiles decoded here; without it every tile is decoded.
+pub fn decode_cel_dirty(cel: &DrawingTiles, dirty: &[Vec<bool>]) -> Vec<(u32, u32, Vec<u8>)> {
+    let Some(inherited) = cel.inherited_ink.get() else { return decode_cel(cel).into_iter().filter(|(n, i, _)| dirty.get(*n as usize).is_some_and(|level| level.get(*i as usize).copied().unwrap_or(false))).collect() };
+    let levels = cel.levels.len();
+    let drawn: Vec<HashSet<(i32, i32)>> = cel.levels.iter().map(|level| level.iter().copied().collect()).collect();
+    // The tiles to write, and at each level the tiles whose pixels are needed to write them: those and their neighbours (the slot
+    // borders), and below them the tiles they are reduced from.
+    let mut need: Vec<HashSet<(i32, i32)>> = vec![HashSet::new(); levels];
+    for (n, level) in cel.levels.iter().enumerate() {
+        for (i, &(x, y)) in level.iter().enumerate() {
+            if dirty[n].get(i).copied().unwrap_or(false) {
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        if drawn[n].contains(&(x + dx, y + dy)) {
+                            need[n].insert((x + dx, y + dy));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for n in (1..levels).rev() {
+        let below: Vec<(i32, i32)> = need[n].iter().flat_map(|&(x, y)| [(2 * x, 2 * y), (2 * x + 1, 2 * y), (2 * x, 2 * y + 1), (2 * x + 1, 2 * y + 1)]).collect();
+        for at in below {
+            if drawn[n - 1].contains(&at) || n == 1 {
+                need[n - 1].insert(at);
+            }
+        }
+    }
+    // Level 0: the tiles needed, decoded; the others keep the ink they had.
+    let mut level: HashMap<(i32, i32), Vec<u8>> = HashMap::new();
+    let mut ink: HashMap<(i32, i32), [i64; 4]> = HashMap::new();
+    for (tx, ty, png) in &cel.tiles {
+        let at = (*tx, *ty);
+        if need[0].contains(&at) {
+            if let Some(rgba) = decode_png_tile(png) {
+                if let Some(rect) = tile_ink(at, &rgba) {
+                    ink.insert(at, rect);
+                }
+                level.insert(at, rgba);
+            }
+        } else if let Some(rect) = inherited.get(&at) {
+            ink.insert(at, *rect);
+        }
+    }
+    resolve_bounds(cel, ink);
+    let mut out = Vec::new();
+    for n in 0..levels {
+        if n > 0 {
+            level = need[n]
+                .iter()
+                .filter(|at| drawn[n].contains(at))
+                .filter_map(|&(tx, ty)| down_tile(&level, tx, ty).filter(|tile| tile.chunks_exact(4).any(|texel| texel[3] != 0)).map(|tile| ((tx, ty), tile)))
+                .collect();
+        }
+        for (index, &(tx, ty)) in cel.levels[n].iter().enumerate() {
+            if dirty[n].get(index).copied().unwrap_or(false) {
+                out.push((n as u32, index as u32, bordered(&level, tx, ty)));
+            }
         }
     }
     out

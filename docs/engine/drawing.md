@@ -144,14 +144,20 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
   for another project. The texture of the live pages is allocated when the drawing workspace opens
   (`Stage::live_cel_reserve`), not at the first stroke. When the slots are used up the engine
   drops the cel and the interface lets go of published ones before trying again.
-* The slots of a published cel (`Assets::drawing`) are given back when the document no longer has the cel: the edit that replaced it
-  is published, `Assets::extended` frees the blocks of its levels, and the cel placed in the same call takes them (smallest block
-  that fits per level, adjacent blocks joined), so a long session of strokes keeps the atlas at the size of the cel instead of
-  growing by a whole cel with every publication. Each placement has a number; the tiles decoded for it carry it
+* Every drawn tile of a published cel has a slot of its own (`Assets::cel_slots`, by level and index in `DrawingTiles::levels`). The slots of
+  a cel the document no longer has are given back (`Assets::extended`), and the cels placed in the same call take them, lowest first, so a
+  long session of strokes keeps the atlas at the size of the cel instead of growing by a whole cel with every publication. A cel that
+  replaces one with the same `CelRef::id` takes the slots of the tiles they share, and writes only the tiles that differ
+  (`Assets::extended_inheriting`, `Assets::cel_dirty`, `drawing::dirty_tiles`): a tile differs when its PNG differs, or a level-0 tile under
+  it or next to it does (a slot holds its neighbours' edge texels, a reduced tile the reduction of the tiles below it), or it was not in the
+  cel before. `drawing::decode_cel_dirty` decodes and reduces only what those tiles need and takes the ink of the others from the cel it
+  replaced (`DrawingTiles::tile_ink`/`inherited_ink`), so an undo's publication costs what it changed, not the cel. Only when the atlas holds
+  what the engine was asked for (`Engine::pictures_settled`: nothing waits to be decoded or taken) is anything assumed to be in those
+  slots; otherwise the cel is written whole (`Picture::Cel`, the atlas allocated again is written whole too). Each placement has a number; the tiles decoded for it carry it
   (`DecodedImage::placement`), and the engine drops a decode, and tiles waiting to be taken, whose placement the document in front no
   longer holds (`Engine::take_images`, `decode_picture`): they would write over the cel that has the slots now.
-  The slots hold the old cel's pixels until the new tiles are written, so `Uploaded::observe` marks the places of every placement new since
-  the last assets seen as being refilled and `Stage::draw` does not draw a list that samples one while pictures are on their way: the
+  The slots hold the old cel's pixels until the new tiles are written, so `Uploaded::observe` marks the places a placement new since
+  the last assets seen writes as being refilled and `Stage::draw` does not draw a list that samples one while pictures are on their way: the
   picture on show stays and is replaced whole, never a mix (a refused picture cannot hold a frame: nothing pending, nothing held). While a
   live cel changed in the last 250 ms (`LiveCels::changing`) `sync_images` takes no pictures unless a frame is waiting for them: the
   published copy of the live cel is the largest and is not what the frame shows.

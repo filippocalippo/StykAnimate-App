@@ -419,19 +419,19 @@ impl<'a> Ctx<'a> {
         }
         if let Some(tiles) = &a.tiles {
             // Every level's tiles; the shader keeps the level the view calls for (`crate::drawing`).
-            let Some(starts) = self.assets.cel_levels(tiles) else { return };
+            let Some(slots) = self.assets.cel_slots(tiles) else { return };
             for (level, drawn) in tiles.levels.iter().enumerate() {
                 let span = (crate::drawing::TILE << level) as f64;
-                let parents = tiles.levels.get(level + 1).zip(starts.get(level + 1));
+                let parents = tiles.levels.get(level + 1).zip(slots.get(level + 1));
                 for (i, &(tx, ty)) in drawn.iter().enumerate() {
-                    let Some(e) = self.assets.drawing.get((starts[level] + i as u32) as usize).filter(|e| e.valid) else { continue };
+                    let Some(e) = self.assets.drawing.get(slots[level][i] as usize).filter(|e| e.valid) else { continue };
                     // The tile one level up that covers this one (`F_DRAWING`): what Canvas 2D's
                     // smoothing blends in where the editor paints the cel into a raster.
                     let (px, py) = (tx.div_euclid(2), ty.div_euclid(2));
-                    let parent = parents.and_then(|(above, &start)| {
+                    let parent = parents.and_then(|(above, above_slots)| {
                         // Levels are sorted by row, then column (`crate::drawing::level_tiles`).
                         let j = above.binary_search_by_key(&(py, px), |&(x, y)| (y, x)).ok()?;
-                        self.assets.drawing.get((start + j as u32) as usize).filter(|e| e.valid)
+                        self.assets.drawing.get(above_slots[j] as usize).filter(|e| e.valid)
                     });
                     let paint = match parent {
                         Some(p) => {

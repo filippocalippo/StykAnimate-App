@@ -251,7 +251,7 @@ fn a_cel_whose_bounds_changed_keeps_its_pixels_and_its_atlas_slots() {
     let extended = assets.extended(&second);
     assert_eq!((extended.drawing.len(), extended.cels.len(), extended.pages), (assets.drawing.len(), 1, assets.pages));
     assert_eq!(extended.id(), assets.id(), "the same atlas");
-    assert!(extended.cel_levels(&after).is_some(), "and the new view finds its slots");
+    assert!(extended.cel_slots(&after).is_some(), "and the new view finds its slots");
 
     // A payload made anew (the same file read again) is other pixels.
     let anew = json::parse(&std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drawlist/drawing-cel.json")).unwrap()).unwrap();
@@ -268,7 +268,12 @@ fn a_cel_the_document_replaced_gives_its_slots_to_the_next_and_the_atlas_stops_g
     let mut loader = Loader::new();
     let first = loader.document(&json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
     let mut assets = Assets::build(&first);
-    let (slots, pages, starts) = (assets.drawing.len(), assets.pages, assets.cel_levels(&cel(&first)).unwrap().to_vec());
+    let held = |assets: &Assets, tiles: &Arc<styk_eval::doc::DrawingTiles>| {
+        let mut slots: Vec<u32> = assets.cel_slots(tiles).unwrap().iter().flatten().copied().collect();
+        slots.sort_unstable();
+        slots
+    };
+    let (slots, pages, starts) = (assets.drawing.len(), assets.pages, held(&assets, &cel(&first)));
     let mut before = (cel(&first), assets.id());
     let mut serials = vec![assets.placement(before.0.key())];
     assert_ne!(serials[0], 0);
@@ -282,7 +287,7 @@ fn a_cel_the_document_replaced_gives_its_slots_to_the_next_and_the_atlas_stops_g
         assert_ne!(tiles.key(), before.0.key(), "round {round}: other pixels");
         assert_eq!((assets.drawing.len(), assets.pages), (slots, pages), "round {round}: the atlas did not grow");
         assert_eq!(assets.cels.len(), 1, "round {round}: the replaced cel is gone");
-        assert_eq!(assets.cel_levels(&tiles).unwrap(), starts.as_slice(), "round {round}: it is in the slots of the one before");
+        assert_eq!(held(&assets, &tiles), starts, "round {round}: it is in the slots of the one before");
         assert_ne!(assets.id(), before.1, "round {round}: assets that place something are numbered anew");
         let serial = assets.placement(tiles.key());
         assert!(!serials.contains(&serial), "round {round}: a placement of its own");
@@ -319,19 +324,15 @@ fn a_cel_that_gained_tiles_is_given_the_slots_of_its_predecessor_and_new_ones_fo
         }
     }
     let extended = assets.extended(&document);
-    let starts = extended.cel_levels(&gained).expect("placed").to_vec();
-    let mut taken: Vec<u32> = Vec::new();
-    for (level, &start) in levels.iter().zip(&starts) {
-        taken.extend(start..start + level.len() as u32);
-    }
+    let mut taken: Vec<u32> = extended.cel_slots(&gained).expect("placed").iter().flatten().copied().collect();
+    assert_eq!(taken.len(), levels.iter().map(Vec::len).sum::<usize>(), "a slot for every tile");
     let total = taken.len();
     taken.sort_unstable();
     taken.dedup();
     assert_eq!(taken.len(), total, "no two tiles share a slot");
     assert!(taken.iter().all(|slot| (*slot as usize) < extended.drawing.len() && extended.drawing[*slot as usize].valid), "every slot has a place");
-    // The slots that did not fit the last level are new, and nothing more: a cel of the same shape after it needs none.
-    let widest = levels.iter().map(Vec::len).max().unwrap() as u32;
-    assert!(extended.drawing.len() as u32 <= assets.drawing.len() as u32 + widest, "{} slots for {} held, one level too big for the room", extended.drawing.len(), held);
+    // Only the slots the cel gained are new: a cel of the same shape after it needs none.
+    assert!(extended.drawing.len() as u32 <= assets.drawing.len() as u32 + 2, "{} slots for {} held, two tiles gained", extended.drawing.len(), held);
     assert_eq!(extended.cels.len(), 1);
     let again = Arc::new(DrawingTiles::new(old.anchor, old.pixels_per_unit, old.bounds, old.tiles.clone(), levels));
     let figure = Arc::make_mut(&mut document.figures[0]);

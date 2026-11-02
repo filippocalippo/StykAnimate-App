@@ -2,7 +2,7 @@
 //! the GPU sprite atlas (computed from image headers, so encoding never waits
 //! for pixel decoding) and triangulated glyph outlines.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::Cursor as Cursor2;
 use std::sync::Arc;
 
@@ -55,15 +55,16 @@ pub struct Assets {
     /// Atlas slots of drawing cel tiles (64×64 texels each, plus their border).
     pub drawing: Vec<AtlasEntry>,
     /// Per drawing cel, keyed by its pixels' identity ([`DrawingTiles::key`]): the cel (held, so the key stays
-    /// its own) and its first slot at each display level. A cel whose bounds or revision changed with the same
-    /// pixels is the same entry.
-    pub cels: HashMap<usize, (Arc<DrawingTiles>, Vec<u32>)>,
-    /// The slots of [`Assets::drawing`] each placed cel holds (by its key), one block per display level, and the number of its placement.
+    /// its own) and the slot of each of its drawn tiles, by display level and index in [`DrawingTiles::levels`]. A cel whose
+    /// bounds or revision changed with the same pixels is the same entry.
+    pub cels: HashMap<usize, (Arc<DrawingTiles>, Vec<Vec<u32>>)>,
+    /// The number of each placed cel's placement (by its key).
     placements: HashMap<usize, Placement>,
     /// The numbers of the placements in `placements`.
     serials: HashSet<u64>,
-    /// Blocks of slots no cel holds: a cel the document no longer has gave them back, the cels placed after it are given them first.
-    free: Vec<(u32, u32)>,
+    /// Slots of [`Assets::drawing`] no cel holds: a cel the document no longer has gave them back, the cels placed after it take them first
+    /// (lowest first, so a cel's tiles stay together on the pages).
+    free: BTreeSet<u32>,
     /// Where the next image goes.
     cursor: Cursor,
     /// Finer tessellations of glyphs drawn large ([`Assets::glyph_at`]), made when first
@@ -77,11 +78,14 @@ pub struct Assets {
     id: u64,
 }
 
-/// Where a cel's tiles are: a block of `(first slot, slots)` for each display level, and a number no other placement ever had.
+/// A number no other placement of a cel ever had, the cel's identity in the document (`CelRef::id`), and which of its tiles are to be written:
+/// all of them (`None`), or those `dirty` says (by level and index), the others being in the slots of the cel it replaced, where that cel's
+/// decode left them.
 #[derive(Clone)]
 struct Placement {
     serial: u64,
-    blocks: Vec<(u32, u32)>,
+    id: Option<Arc<str>>,
+    dirty: Option<Vec<Vec<bool>>>,
 }
 
 /// Numbers the placements of cels.
@@ -229,6 +233,13 @@ impl Assets {
     /// revision placed keep their rectangles, new ones are packed after them, and
     /// only new glyphs are tessellated.
     pub fn extended(&self, doc: &Document) -> Assets {
+        self.extended_inheriting(doc, false)
+    }
+
+    /// [`Assets::extended`], where a cel that replaces one with the same identity (`CelRef::id`) takes the slots of the tiles they share when
+    /// `inherit` says that cel's decode is over and its pixels are all in the atlas: the tiles that did not change keep their slots and are
+    /// not written again ([`Assets::cel_dirty`]). Without it every cel is written whole.
+    pub fn extended_inheriting(&self, doc: &Document, inherit: bool) -> Assets {
         let mut assets = self.clone();
         let held = (self.atlas.len(), self.drawing.len(), self.cels.len(), self.glyphs.len(), self.glyph_strokes.len());
         let known = assets.atlas.len().min(doc.images.len());
@@ -238,36 +249,63 @@ impl Assets {
         // Drawing cels the document no longer has (the edit that replaced them was published before this one) give their slots back.
         let mut cels = Vec::new();
         collect_cels(doc, &mut cels);
-        let wanted: HashSet<usize> = cels.iter().map(|cel| cel.key()).collect();
+        let wanted: HashSet<usize> = cels.iter().map(|(_, cel)| cel.key()).collect();
         let gone: Vec<usize> = assets.cels.keys().copied().filter(|key| !wanted.contains(key)).collect();
+        let mut given_back: Vec<(Option<Arc<str>>, Arc<DrawingTiles>, Vec<Vec<u32>>)> = Vec::new();
         for key in &gone {
-            assets.cels.remove(key);
-            if let Some(placement) = assets.placements.remove(key) {
+            let removed = assets.cels.remove(key);
+            if let (Some((tiles, slots)), Some(placement)) = (removed, assets.placements.remove(key)) {
                 assets.serials.remove(&placement.serial);
-                assets.free.extend(placement.blocks.into_iter().filter(|(_, count)| *count > 0));
+                given_back.push((placement.id, tiles, slots));
             }
         }
-        assets.coalesce_free();
-        // Drawing cels new in this revision are given the slots given back, then slots after everything placed before.
-        cels.retain(|cel| !assets.cels.contains_key(&cel.key()));
-        cels.dedup_by(|a, b| a.key() == b.key());
+        cels.retain(|(_, cel)| !assets.cels.contains_key(&cel.key()));
+        cels.dedup_by(|a, b| a.1.key() == b.1.key());
         let placed = !cels.is_empty() || !gone.is_empty();
-        for cel in cels {
-            if assets.cels.contains_key(&cel.key()) {
-                continue;
+        // A cel that replaces one given back keeps the slots of the tiles they share, when the one it replaces is all in the atlas.
+        let mut inherited_slots: HashSet<u32> = HashSet::new();
+        let mut plans: Vec<(Option<Arc<str>>, Arc<DrawingTiles>, Vec<Vec<Option<u32>>>, Option<Vec<Vec<bool>>>)> = Vec::new();
+        for (id, cel) in cels {
+            let mut plan: Vec<Vec<Option<u32>>> = cel.levels.iter().map(|level| vec![None; level.len()]).collect();
+            let mut dirty = None;
+            let before = if inherit && id.is_some() { given_back.iter().position(|(was, tiles, _)| *was == id && tiles.tile_ink.get().is_some()) } else { None };
+            if let Some(at) = before {
+                let (_, old, old_slots) = given_back.swap_remove(at);
+                if let Some(ink) = old.tile_ink.get() {
+                    let _ = cel.inherited_ink.set(ink.clone());
+                }
+                for (n, level) in cel.levels.iter().enumerate() {
+                    let Some(was) = old.levels.get(n) else { continue };
+                    for (i, &(x, y)) in level.iter().enumerate() {
+                        if let Ok(j) = was.binary_search_by_key(&(y, x), |&(x, y)| (y, x)) {
+                            plan[n][i] = Some(old_slots[n][j]);
+                            inherited_slots.insert(old_slots[n][j]);
+                        }
+                    }
+                }
+                dirty = Some(crate::drawing::dirty_tiles(&old, &cel));
+                // The old cel's slots that the new one does not use are free below.
+                given_back.push((None, old, old_slots));
             }
-            let mut starts = Vec::with_capacity(cel.levels.len());
-            let mut blocks = Vec::with_capacity(cel.levels.len());
-            for level in &cel.levels {
-                let count = level.len() as u32;
-                let first = assets.take_slots(count);
-                starts.push(first);
-                blocks.push((first, count));
-            }
+            plans.push((id, cel, plan, dirty));
+        }
+        for (_, _, slots) in given_back {
+            assets.free.extend(slots.into_iter().flatten().filter(|slot| !inherited_slots.contains(slot)));
+        }
+        // The tiles that inherited no slot are given the slots given back, then slots after everything placed before.
+        for (id, cel, plan, dirty) in plans {
+            let slots: Vec<Vec<u32>> = plan
+                .into_iter()
+                .map(|level| {
+                    let missing = level.iter().filter(|slot| slot.is_none()).count();
+                    let mut fresh = assets.take_slots(missing).into_iter();
+                    level.into_iter().map(|slot| slot.unwrap_or_else(|| fresh.next().expect("a slot for every tile"))).collect()
+                })
+                .collect();
             let serial = NEXT_PLACEMENT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             assets.serials.insert(serial);
-            assets.placements.insert(cel.key(), Placement { serial, blocks });
-            assets.cels.insert(cel.key(), (cel, starts));
+            assets.placements.insert(cel.key(), Placement { serial, id, dirty });
+            assets.cels.insert(cel.key(), (cel, slots));
         }
         assets.pages = if assets.cursor.used { assets.cursor.layer + 1 } else { 0 };
         let mut glyph_list: Vec<Arc<Glyph>> = Vec::new();
@@ -316,40 +354,25 @@ impl Assets {
         self.glyphs.contains_key(&address).then(|| self.fine.get(glyph, (address, u32::MAX, level), || tessellate_at(&glyph.path, level_tolerance(level))))
     }
 
-    /// `count` slots of [`Assets::drawing`] for one display level of a cel: the smallest block given back that holds them, else new ones
-    /// packed after everything placed. The first of them.
-    fn take_slots(&mut self, count: u32) -> u32 {
-        if count == 0 {
-            return self.drawing.len() as u32;
-        }
-        let best = self.free.iter().enumerate().filter(|(_, (_, room))| *room >= count).min_by_key(|(_, (_, room))| *room).map(|(at, _)| at);
-        if let Some(at) = best {
-            let (first, room) = self.free[at];
-            if room == count {
-                self.free.swap_remove(at);
-            } else {
-                self.free[at] = (first + count, room - count);
-            }
-            return first;
-        }
-        let first = self.drawing.len() as u32;
-        let sizes = vec![Some((crate::drawing::TILE, crate::drawing::TILE)); count as usize];
-        self.drawing.resize(self.drawing.len() + count as usize, AtlasEntry::default());
-        pack(&sizes, &mut self.drawing[first as usize..], &mut self.cursor, crate::drawing::BORDER);
-        first
-    }
-
-    /// Joins the blocks given back that follow each other.
-    fn coalesce_free(&mut self) {
-        self.free.sort_unstable();
-        let mut joined: Vec<(u32, u32)> = Vec::with_capacity(self.free.len());
-        for &(first, count) in &self.free {
-            match joined.last_mut() {
-                Some((before, room)) if *before + *room == first => *room += count,
-                _ => joined.push((first, count)),
+    /// `count` slots of [`Assets::drawing`] for the tiles of one display level of a cel: the lowest slots given back, then new ones packed
+    /// after everything placed.
+    fn take_slots(&mut self, count: usize) -> Vec<u32> {
+        let mut slots = Vec::with_capacity(count);
+        while slots.len() < count {
+            match self.free.pop_first() {
+                Some(slot) => slots.push(slot),
+                None => break,
             }
         }
-        self.free = joined;
+        let more = count - slots.len();
+        if more > 0 {
+            let first = self.drawing.len();
+            let sizes = vec![Some((crate::drawing::TILE, crate::drawing::TILE)); more];
+            self.drawing.resize(first + more, AtlasEntry::default());
+            pack(&sizes, &mut self.drawing[first..], &mut self.cursor, crate::drawing::BORDER);
+            slots.extend((first..first + more).map(|slot| slot as u32));
+        }
+        slots
     }
 
     /// The number of the placement of the cel with key `cel` (0 when it has none): the tiles decoded for it carry it ([`DecodedImage::placement`]).
@@ -357,9 +380,22 @@ impl Assets {
         self.placements.get(&cel).map_or(0, |placement| placement.serial)
     }
 
-    /// Every placement of a cel: its number and the blocks of slots of [`Assets::drawing`] it holds, one per display level.
-    pub fn placements(&self) -> impl Iterator<Item = (u64, &[(u32, u32)])> {
-        self.placements.values().map(|placement| (placement.serial, placement.blocks.as_slice()))
+    /// Every placement of a cel: its number and the slots of [`Assets::drawing`] its decode writes (all of its tiles', or the dirty ones').
+    pub fn placements(&self) -> impl Iterator<Item = (u64, Vec<u32>)> + '_ {
+        self.cels.iter().filter_map(|(key, (_, slots))| {
+            let placement = self.placements.get(key)?;
+            let written = slots
+                .iter()
+                .enumerate()
+                .flat_map(|(n, level)| level.iter().enumerate().filter(move |(i, _)| placement.dirty.as_ref().is_none_or(|dirty| dirty[n][*i])).map(|(_, slot)| *slot))
+                .collect();
+            Some((placement.serial, written))
+        })
+    }
+
+    /// Which tiles of `cel` its decode is to write, by level and index (`None`: all of them): the others are in the slots of the cel it replaced.
+    pub fn cel_dirty(&self, cel: usize) -> Option<&[Vec<bool>]> {
+        self.placements.get(&cel)?.dirty.as_deref()
     }
 
     /// Whether the placement numbered `serial` is still the place of a cel: the slots a tile decoded for it names are that cel's.
@@ -382,9 +418,9 @@ impl Assets {
         })
     }
 
-    /// The first atlas slot of each display level of `cel`.
-    pub fn cel_levels(&self, cel: &Arc<DrawingTiles>) -> Option<&[u32]> {
-        self.cels.get(&cel.key()).map(|(_, starts)| starts.as_slice())
+    /// The atlas slot of each drawn tile of `cel`, by display level and index in [`DrawingTiles::levels`].
+    pub fn cel_slots(&self, cel: &Arc<DrawingTiles>) -> Option<&[Vec<u32>]> {
+        self.cels.get(&cel.key()).map(|(_, slots)| slots.as_slice())
     }
 
     pub fn image(&self, index: u32) -> Option<&AtlasEntry> {
@@ -396,9 +432,9 @@ impl Assets {
     }
 }
 
-fn collect_cels(doc: &Document, out: &mut Vec<Arc<DrawingTiles>>) {
+fn collect_cels(doc: &Document, out: &mut Vec<(Option<Arc<str>>, Arc<DrawingTiles>)>) {
     for f in &doc.figures {
-        out.extend(f.images.iter().filter_map(|image| image.tiles.clone()));
+        out.extend(f.images.iter().filter_map(|image| image.tiles.clone().map(|tiles| (image.cel.as_ref().map(|cel| cel.id.clone()), tiles))));
         if let Some(m) = &f.movieclip {
             collect_cels(&m.document, out);
         }
@@ -634,12 +670,24 @@ pub struct DecodedImage {
 
 /// Decodes a drawing cel into its atlas slots (every level, see [`crate::drawing`]).
 pub fn decode_cel(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<DecodedImage> {
-    let Some(starts) = assets.cel_levels(cel) else { return Vec::new() };
+    let Some(slots) = assets.cel_slots(cel) else { return Vec::new() };
     let placement = assets.placement(cel.key());
     let side = crate::drawing::TILE + 2 * crate::drawing::BORDER;
     crate::drawing::decode_cel(cel)
         .into_iter()
-        .map(|(level, index, rgba)| DecodedImage { index: starts[level as usize] + index, drawing: true, soft: false, width: side, height: side, rgba, placement })
+        .map(|(level, index, rgba)| DecodedImage { index: slots[level as usize][index as usize], drawing: true, soft: false, width: side, height: side, rgba, placement })
+        .collect()
+}
+
+/// [`decode_cel`] for the tiles the cel's placement writes (`Assets::cel_dirty`): the whole cel when it writes it whole.
+pub fn decode_cel_changed(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<DecodedImage> {
+    let Some(dirty) = assets.cel_dirty(cel.key()) else { return decode_cel(assets, cel) };
+    let Some(slots) = assets.cel_slots(cel) else { return Vec::new() };
+    let placement = assets.placement(cel.key());
+    let side = crate::drawing::TILE + 2 * crate::drawing::BORDER;
+    crate::drawing::decode_cel_dirty(cel, dirty)
+        .into_iter()
+        .map(|(level, index, rgba)| DecodedImage { index: slots[level as usize][index as usize], drawing: true, soft: false, width: side, height: side, rgba, placement })
         .collect()
 }
 
@@ -650,6 +698,9 @@ pub enum Picture {
     Image(usize),
     /// A drawing cel, by its key in [`Assets::cels`].
     Cel(usize),
+    /// The tiles of a drawing cel that its placement writes ([`Assets::cel_dirty`]): the others are in the slots of the cel it replaced.
+    /// The whole cel when its placement writes it whole.
+    CelChanged(usize),
     /// The soft copy of an image of the document, without the image ([`soften_image`]).
     Soft(usize),
 }
@@ -662,6 +713,14 @@ impl Assets {
             Picture::Cel(cel) => {
                 let side = (crate::drawing::TILE + 2 * crate::drawing::BORDER) as usize;
                 self.cels.get(&cel).map_or(0, |(tiles, _)| tiles.levels.iter().map(Vec::len).sum::<usize>() * side * side * 4)
+            }
+            Picture::CelChanged(cel) => {
+                let side = (crate::drawing::TILE + 2 * crate::drawing::BORDER) as usize;
+                let tiles = match self.cel_dirty(cel) {
+                    Some(dirty) => dirty.iter().flatten().filter(|dirty| **dirty).count(),
+                    None => self.cels.get(&cel).map_or(0, |(tiles, _)| tiles.levels.iter().map(Vec::len).sum::<usize>()),
+                };
+                tiles * side * side * 4
             }
         }
     }
@@ -684,6 +743,13 @@ pub fn decode_picture(doc: &Document, assets: &Assets, picture: Picture) -> Resu
             let Some((tiles, _)) = assets.cels.get(&cel) else { return Ok(Vec::new()) };
             let _working = styk_alloc::reserve(3 * assets.picture_bytes(picture))?;
             Ok(decode_cel(assets, tiles))
+        }
+        Picture::CelChanged(cel) => {
+            let Some((tiles, _)) = assets.cels.get(&cel) else { return Ok(Vec::new()) };
+            // The tiles written, their neighbours and what they are reduced from: a dozen times what is written, at the most the whole cel.
+            let whole = assets.picture_bytes(Picture::Cel(cel));
+            let _working = styk_alloc::reserve(3 * assets.picture_bytes(picture).saturating_mul(12).min(whole))?;
+            Ok(decode_cel_changed(assets, tiles))
         }
     }
 }

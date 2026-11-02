@@ -785,7 +785,7 @@ impl Loader {
                     set
                 }
             };
-            Some(Arc::new(DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: Default::default(), tiles: set.tiles.clone(), levels: set.levels.clone(), identity: set.identity.clone() }))
+            Some(Arc::new(DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: Default::default(), tile_ink: Default::default(), inherited_ink: Default::default(), tiles: set.tiles.clone(), levels: set.levels.clone(), identity: set.identity.clone() }))
         });
         let image = if tiles.is_some() { None } else { self.image(a, &["data_url", "data_base64", "data_uri"]) };
         let size = match (num(a, "width"), num(a, "height")) {

@@ -58,17 +58,15 @@ impl Uploaded {
             return;
         }
         self.assets = assets.id();
-        for (serial, blocks) in assets.placements() {
+        for (serial, written) in assets.placements() {
             if !self.seen.insert(serial) || !self.primed {
                 continue;
             }
-            for &(first, count) in blocks {
-                for slot in first..first + count {
-                    if let Some(entry) = assets.drawing.get(slot as usize).filter(|entry| entry.valid) {
-                        let at = place(entry.layer, entry.x, entry.y);
-                        self.places.remove(&at);
-                        self.refilling.insert(at);
-                    }
+            for slot in written {
+                if let Some(entry) = assets.drawing.get(slot as usize).filter(|entry| entry.valid) {
+                    let at = place(entry.layer, entry.x, entry.y);
+                    self.places.remove(&at);
+                    self.refilling.insert(at);
                 }
             }
         }
@@ -158,7 +156,7 @@ fn pictures_to_decode(generation: &Generation) -> usize {
 /// Whether `picture` is a drawing cel that the engine's document does not place as `generation` did: it was replaced, and its slots
 /// are another cel's or free.
 fn superseded(state: &crate::State, generation: &Generation, picture: Picture) -> bool {
-    let Picture::Cel(cel) = picture else { return false };
+    let (Picture::Cel(cel) | Picture::CelChanged(cel)) = picture else { return false };
     let placement = generation.assets.placement(cel);
     placement != 0 && !state.current.as_ref().is_some_and(|current| current.lineage == generation.lineage && current.assets.holds_placement(placement))
 }
@@ -264,7 +262,7 @@ impl Engine {
     /// cannot hold is not shown (like one that cannot be decoded) and the engine goes on ([`Engine::pictures_refused`]).
     pub(crate) fn decode_pixels(&self, generation: &Generation, picture: Picture) -> Vec<DecodedImage> {
         let before = match picture {
-            Picture::Cel(cel) => generation.assets.cels.get(&cel).map(|(tiles, _)| (tiles.clone(), tiles.artwork_bounds())),
+            Picture::Cel(cel) | Picture::CelChanged(cel) => generation.assets.cels.get(&cel).map(|(tiles, _)| (tiles.clone(), tiles.artwork_bounds())),
             Picture::Image(_) | Picture::Soft(_) => None,
         };
         match styk_eval::assets::decode_picture(&generation.prepared.doc, &generation.assets, picture) {
@@ -322,6 +320,13 @@ impl Engine {
             state.frames.invalidate_resources();
         }
         self.inner.state.notify_all();
+    }
+
+    /// Whether every picture the engine was asked to decode is decoded and taken by the renderer: the atlas holds what the document in front
+    /// names, so a cel that replaces another can keep the slots of the tiles they share ([`Assets::extended_inheriting`]). `false` when
+    /// the state is busy: nothing is kept then.
+    pub(crate) fn pictures_settled(&self) -> bool {
+        self.inner.state.try_lock().is_some_and(|state| state.images.remaining == 0 && state.images.ready.is_empty() && state.images.inflight_bytes == 0 && state.images.parked.is_empty())
     }
 
     /// Decoded images the renderer has not uploaded yet, up to `max_bytes` of pixels

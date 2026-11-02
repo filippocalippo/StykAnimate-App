@@ -282,13 +282,10 @@ fn sources(assets: &Assets) -> HashMap<Place, Picture> {
     for (index, entry) in assets.atlas.iter().enumerate().filter(|(_, entry)| entry.valid) {
         sources.insert(Place(false, (entry.layer, entry.x, entry.y)), Picture::Image(index));
     }
-    for (cel, (tiles, starts)) in &assets.cels {
-        for (level, drawn) in tiles.levels.iter().enumerate() {
-            let Some(&first) = starts.get(level) else { continue };
-            for slot in first as usize..first as usize + drawn.len() {
-                if let Some(entry) = assets.drawing.get(slot).filter(|entry| entry.valid) {
-                    sources.insert(Place(true, (entry.layer, entry.x, entry.y)), Picture::Cel(*cel));
-                }
+    for (cel, (_, slots)) in &assets.cels {
+        for &slot in slots.iter().flatten() {
+            if let Some(entry) = assets.drawing.get(slot as usize).filter(|entry| entry.valid) {
+                sources.insert(Place(true, (entry.layer, entry.x, entry.y)), Picture::Cel(*cel));
             }
         }
     }

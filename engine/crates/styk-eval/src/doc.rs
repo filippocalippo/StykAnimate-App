@@ -189,6 +189,11 @@ pub struct DrawingTiles {
     pub tiles: Vec<(i32, i32, Arc<[u8]>)>,
     /// The tiles drawn at each display level 0–8 ([`crate::drawing::level_tiles`]).
     pub levels: Vec<Vec<(i32, i32)>>,
+    /// The ink of each level-0 tile that has some, `[x0, y0, x1, y1)` in cel pixels: set by the decode that resolved `decoded_bounds`.
+    /// A cel that replaces this one starts its own bounds from it ([`DrawingTiles::inherited_ink`]) so that it decodes only the tiles that changed.
+    pub tile_ink: OnceLock<Arc<HashMap<(i32, i32), [i64; 4]>>>,
+    /// The ink of the tiles this cel shares with the cel it replaced (`Assets::extended`): what an incremental decode does not decode again.
+    pub inherited_ink: OnceLock<Arc<HashMap<(i32, i32), [i64; 4]>>>,
     /// Which pixels these are: every view made from the same tile payload shares it, whatever else about the cel changed (its
     /// bounds and revision change with every edit), so the atlas places a payload's tiles once ([`DrawingTiles::key`]).
     pub identity: Arc<()>,
@@ -197,7 +202,7 @@ pub struct DrawingTiles {
 impl DrawingTiles {
     /// A cel of its own pixels.
     pub fn new(anchor: [f64; 2], pixels_per_unit: f64, bounds: Option<[f64; 4]>, tiles: Vec<(i32, i32, Arc<[u8]>)>, levels: Vec<Vec<(i32, i32)>>) -> DrawingTiles {
-        DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: OnceLock::new(), tiles, levels, identity: Arc::new(()) }
+        DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: OnceLock::new(), tile_ink: OnceLock::new(), inherited_ink: OnceLock::new(), tiles, levels, identity: Arc::new(()) }
     }
 
     /// What the atlas and the engine's decoding know the cel's pixels by.

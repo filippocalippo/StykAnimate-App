@@ -384,7 +384,7 @@ fn a_frame_that_draws_the_slots_a_replaced_cel_gave_waits_until_the_new_tiles_ar
         uploaded.record(&assets, &image);
     }
     let sampling = |assets: &Assets, tiles: &Arc<styk_eval::doc::DrawingTiles>| {
-        let entry = assets.drawing[assets.cel_levels(tiles).unwrap()[0] as usize];
+        let entry = assets.drawing[assets.cel_slots(tiles).unwrap()[0][0] as usize];
         DrawList { prims: vec![Prim { kind: K_IMAGE, group: 0, color: 0, paint: 0, a: [0.0; 4], b: [0.0, 0.0, entry.layer as f32, 0.0], c: entry.uv() }], ..Default::default() }
     };
     assert!(!uploaded.lacks(&sampling(&assets, &cel(&first))) && !uploaded.refilling_in(&sampling(&assets, &cel(&first))), "the cel placed first is in");
@@ -396,7 +396,7 @@ fn a_frame_that_draws_the_slots_a_replaced_cel_gave_waits_until_the_new_tiles_ar
     assert!(uploaded.refilling_in(&list), "its slots hold the old cel's pixels");
     assert!(uploaded.lacks(&list));
     let tiles = decode_cel(&replaced, &cel(&next));
-    let sampled = replaced.cel_levels(&cel(&next)).unwrap()[0];
+    let sampled = replaced.cel_slots(&cel(&next)).unwrap()[0][0];
     for image in tiles.iter().filter(|image| image.index != sampled) {
         uploaded.record(&replaced, image);
     }
