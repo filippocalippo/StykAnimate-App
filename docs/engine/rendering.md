@@ -41,7 +41,7 @@ triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
 | `frame.rs` | one frame: isolation layer passes by round and depth, each depth's effect stacks after its passes, then the frame pass (MSAA ×4, resolved once) |
 | `isolation.rs` | the layer atlas (8 pages of at least the frame's size, grown for larger effect layers, two for depth parity) and `plan_rounds`: layers that do not fit render in full-resolution rounds, the frame drawn between rounds |
 | `images.rs`, `pictures.rs` | the sprite atlas (texture array of 4,096² pages laid out by `styk_eval::assets`: shelves, and the free space an earlier page left before a new page opens), uploads of decoded images (in bands of rows) and drawing tiles; the table that maps a layout page to its layer for drawing cel tiles, and the picture table (a hash table of which pictures are in the sprite texture, in which layer) with the soft atlas (a texel to 8 of the page's, 20 MiB for 116 large pictures) that a picture not in it is drawn from: a renderer holding the whole layout has every picture in, the stage's, for a document with more pages than it keeps, does not ([memory.md](memory.md#pages-kept-against-a-budget-soft-copies-in-their-place)) |
-| `resources.rs` | GPU record layouts, lookup tables in float textures, buffers |
+| `resources.rs` | GPU record layouts, lookup tables in float textures, buffers, and `warm_texture` ([Uploads](#uploads)) |
 | `present.rs` | copy into the host's surface, read-back |
 | `view.rs` | world → output transform, artboard |
 | `effects/` | effect layers ([vfx.md](vfx.md#rendering)): `plan.rs` places each group for the view (density, crop, composite), `mod.rs` writes its group record, `executor.rs` and `passes.wgsl` run effect stacks on pooled slots |
@@ -170,6 +170,54 @@ pipeline, and either draws one instanced draw per pass; the material atlas is a
 placeholder texel until a list names a row, and the glyph atlas until a list has a
 lone glyph; glyph masks are filled only when first needed; WebGL2 limits (no storage buffers, one sampler
 per texture, array textures of at least two layers, [D11](decisions/0011-array-textures-two-layers.md)).
+
+### Uploads
+
+Every texture the renderer writes with `Queue::write_texture` (the sprite atlas and its soft copy, the lookup tables when they grow, the
+picture table, the particle material atlas) is **warmed** when it is made: `resources::warm_texture` writes one zero texel to every layer
+and mip level of it, not waited for. The texels were zero already; the write is what makes the browser initialize the texture before
+the first large write into it.
+
+Why: in a browser, `writeTexture` into a texture nothing has used yet is unreliable. Measured 2026-11-01 (Electron 39.8.10, Chromium
+142.0.7444.265, Windows 11, RTX 4070 SUPER), by the engine and by a page with no engine
+(`scripts/probe-webgpu-shared-writes.mjs`: a worker writes 116 pictures of 802×452 noise into a new 4096×4096×3 texture with `writeTexture`,
+reads them back and compares, 12 times a condition):
+
+| Source of the bytes | Pictures wrong | Trials with one | Which picture |
+| --- | ---: | ---: | --- |
+| an ordinary `ArrayBuffer` | 4 and 2 of 1,392 | 4 and 2 of 12 | the first written |
+| an ordinary `ArrayBuffer`, overwritten with 0xAA right after each call | 2 of 1,392 (one run) | 2 of 12 | the first written |
+| a `SharedArrayBuffer` (the engine's memory is one) | 1 and 5 of 1,392 | 1 and 5 of 12 | the first written |
+| a `SharedArrayBuffer`, overwritten with 0xAA right after each call | 13 and 12 | 12 and 11 of 12 | the first written |
+| a `SharedArrayBuffer`, three other threads writing beside it | 7 and 9 | 7 and 7 of 12 | the first written |
+| either, after one zero texel was written to each layer first (waited for, or not) | 0 of 4,176 | 0 of 36 | |
+| either, copied from a buffer made mapped (`copyBufferToTexture`) | 0 of 2,784 | 0 of 24 | |
+
+(Two runs of the probe, in order, where two numbers are given; the warmed and copied conditions ran in the second.) So the fault is the
+browser's, not a race in the engine's code: it shows with an ordinary `ArrayBuffer` in a page that has no engine. The first write into a
+new texture is sometimes lost (the picture then reads back wrong in every row), and from shared memory the browser reads the bytes after
+the call has returned (the 0xAA reached the texture in 11 or 12 of 12 trials), on that path only: the pictures written after the first
+were right. Native adapters (wgpu on this GPU) never lost a write. In the engine it showed as one picture of the
+sprite atlas, whichever was uploaded first (tdd2's 116 pictures, 1.4 MB each, uploaded as the decoders finish), wrong in about two exports of
+five, so the same export twice gave frames that differed, in the worst case by a frame of garbage streaks the size of the picture. The
+draw list was identical in every run (hashed per frame), and the CPU rasterizer gave the same bytes in every run.
+
+What did not help: banding a write into 4 MiB pieces, and keeping the source memory alive after the call. What did: warming (chosen: it
+costs a texel a layer once, where the texture is made, and no write after it differs from before), and copying every large write from a
+staging buffer the renderer fills itself (`copyBufferToBuffer` / `copyBufferToTexture`; it cost a buffer, a copy and a submit on the draw
+thread for each, and bytes held in the GPU process until the queue finished them, so it was dropped). Whether the fault is Chromium's or
+Dawn's lazy initialization of textures is not known: the probe is the reproduction to report.
+
+`scripts/smoke-export-determinism.mjs` (the desktop app on a real GPU, also with `STYK_BUNDLE_DIR` or `--packaged`) exports 64 pictures
+of noise, one to a frame, 14 times and fails when a frame differs between runs: without the warming 9 frames differed in 14 runs, with it,
+none; `--file <document> --first N --last M` does the same for a document of yours (tdd2 ticks 120–190: the frames of garbage went with the
+warming in 32 runs). `cargo test -p styk-render` checks what warming writes and that pictures land row for row in their atlas
+places; neither can show the browser's fault, which native adapters do not have.
+
+What remains: the engine's other writes (the draw list's primitives and tables, uniforms) are plain `Queue::write_buffer` / `write_texture`
+into resources that already hold data (a buffer written 280 frames in a row, read back, equalled the draw list every time), and a
+tdd2 export still differs by one level in a few pixels of about one render in 25 of the particle frames, ticks 183–188 (the
+same output as before the warming; native wgpu gave the same bytes in 3,200 renders; `styk export <file> <ticks> <out> --verify N`).
 
 ## Text
 
@@ -954,6 +1002,7 @@ page, twice in two runs; it did not in the two runs since.
 
 ## Testing
 
+`node scripts/smoke-export-determinism.mjs` (the desktop app on a real GPU: the same export twice gives the same bytes), `node scripts/probe-webgpu-shared-writes.mjs` (the browser's `writeTexture` with no engine: [Uploads](#uploads));
 `cargo test -p styk-export` (settings and their limits, tiles covering every pixel once, the
 output view, the 2×2 average against the JavaScript rule, and on a GPU: tiles against the whole
 frame by D13 with no seam along tile edges, crisp edges without partly covered pixels, Smooth
@@ -963,7 +1012,9 @@ edges fill no glyph mask); `cargo test -p styk-export --test svg` (plain artwork
 vector form as one picture); `node --test tests/engine-export.test.mjs` (the worker's protocol, the
 retry ladder, cancellation, warming, vector exports); `tests/svg-export.browser.mjs` (the SVG decoded in
 the browser against the engine's own pixels); `styk export <file>
-<ticks> <out> [--size WxH] [--smoothing edges|none|sprites] [--tile N] [--cpu]`.
+<ticks> <out> [--size WxH] [--smoothing edges|none|sprites] [--tile N] [--cpu] [--verify N]`
+(`--verify N` draws the range N times in a row and fails when a frame differs from the first pass: native wgpu gave
+the same bytes in 3,200 renders of tdd2 ticks 183-186 where the browser's WebGPU differs in about 1 in 25).
 
 `cargo test -p styk-raster` (the target's samples, the rasterization rules, effect windows
 against per-pixel shading; strokes covered by distance, no seams between adjacent triangles,
