@@ -162,7 +162,7 @@ static NEXT_SNAPSHOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU6
 /// Registers `tree` for [`save_project`]; the token names it until it is saved or [`release_snapshot`]d.
 pub(crate) fn snapshot(tree: Value) -> f64 {
     let token = NEXT_SNAPSHOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    SNAPSHOTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((token, tree));
+    styk_doc::lock::spinning(&SNAPSHOTS).push((token, tree));
     token as f64
 }
 
@@ -170,13 +170,13 @@ pub(crate) fn snapshot(tree: Value) -> f64 {
 /// save took it.
 #[wasm_bindgen]
 pub fn release_snapshot(token: f64) {
-    let mut held = SNAPSHOTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut held = styk_doc::lock::spinning(&SNAPSHOTS);
     held.retain(|(held_token, _)| *held_token as f64 != token);
 }
 
 /// Takes the snapshots, in the order asked; the registry keeps none of them.
 fn take_snapshots(tokens: &[f64]) -> Option<Vec<Value>> {
-    let mut held = SNAPSHOTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut held = styk_doc::lock::spinning(&SNAPSHOTS);
     let mut trees = Vec::with_capacity(tokens.len());
     for token in tokens {
         let at = held.iter().position(|(held_token, _)| *held_token as f64 == *token)?;

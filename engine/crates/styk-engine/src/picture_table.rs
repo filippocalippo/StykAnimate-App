@@ -22,7 +22,7 @@ pub(crate) struct PictureTable {
 }
 
 fn lock(table: &Mutex<PictureTable>) -> MutexGuard<'_, PictureTable> {
-    table.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    styk_doc::lock::spinning(table)
 }
 
 impl Engine {

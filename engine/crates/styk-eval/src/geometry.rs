@@ -1132,13 +1132,20 @@ fn build_clip_mesh(frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, c
 /// The clip's own scene at a local time, shared by every instance.
 pub fn clip_scene(clip: &Movieclip, local: f64) -> Arc<Scene> {
     let key = local.to_bits();
-    if let Some(s) = clip.cache.lock().unwrap().get(&key) {
-        return s.clone();
+    // The interface thread builds frames too, beside the workers that prepare them, and may not wait: the cache is tried once and a scene is
+    // made again where it is held (`styk_doc::lock::once`; a blocking lock throws on a browser's page thread and leaves the stage and the
+    // sessions marked as borrowed for good).
+    if let Some(cache) = styk_doc::lock::once(&clip.cache) {
+        if let Some(s) = cache.get(&key) {
+            return s.clone();
+        }
     }
     let frame = clip.prepared.evaluate_clip(clip.source_start + local);
     let scene = Arc::new(build(&clip.document, &frame));
-    let mut cache = clip.cache.lock().unwrap();
-    cache.publish(key, scene, &clip.document.scene_budget)
+    match styk_doc::lock::once(&clip.cache) {
+        Some(mut cache) => cache.publish(key, scene, &clip.document.scene_budget),
+        None => scene,
+    }
 }
 
 /// The drawing a spatial bone turns a movieclip to (`rotatedDrawing`): the view its turn and

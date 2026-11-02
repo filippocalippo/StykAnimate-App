@@ -104,6 +104,16 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   rechecks readiness without changing the counter. Publishing the document (`Engine::activate`,
   `publish_tree`, [document.md](document.md)) takes the document's lock only for pointer exchanges;
   a worker that reads the document (an edit session starting) tries it once.
+- **No blocking lock on the interface thread, whatever its critical section.** `Mutex::lock` waits with `memory.atomic.wait32`, which
+  throws on a page thread (`RuntimeError: Atomics.wait cannot be called in this context`). The exception passes through the engine's frames
+  without unwinding them, so the objects the call was made on (the `Stage` and the `EditSession` it was given) stay marked as borrowed for
+  good: every later call answers `recursive use of an object detected which would lead to unsafe aliasing in rust`, the stage stops drawing,
+  and a save cannot take its snapshot, so the project cannot be saved from that session. It happened on a movieclip's scene cache (`styk_eval::geometry::clip_scene`,
+  taken by the interface thread and by the workers that prepare frames; seen on a project restored after a crash, whose frames were being
+  prepared as it opened). A mutex the interface thread shares with workers is therefore taken with `styk_doc::lock::once` (one
+  attempt: a cache is skipped where busy and the work done again) or, where the interface thread cannot go without it (the engine's
+  store, the picture and snapshot registries), `styk_doc::lock::spinning`; `Shared::try_lock` and `Shared::lock` are the engine
+  state's own. The interface smoke `scripts/smoke-movieclip-save.mjs` (`STYK_TRACE_WASM=1`) names the first call that throws.
 - No rayon in WebAssembly: `styk_eval::par::map` is sequential there;
   parallelism is whole frames on workers.
 - Library code has no clock, file or thread of its own: the host injects a
