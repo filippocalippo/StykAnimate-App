@@ -251,3 +251,41 @@ fn property_name(value: &Value) -> Option<String> {
         _ => None,
     }
 }
+
+/// Figures assigned to a drawing layer, which holds only drawing cels (older builds assigned a movieclip placed while one was active), given
+/// the layer new figures go to. Says how many assignments it changed.
+pub(super) fn repair_assignments(report: &mut Value) -> usize {
+    let drawing_layers: HashSet<String> = entries(path(Some(report), &["_styk", "layers", "byId"]))
+        .into_iter()
+        .filter(|(_, layer)| truthy(get(Some(layer), "drawing")))
+        .map(|(id, _)| id.to_string())
+        .collect();
+    if drawing_layers.is_empty() {
+        return 0;
+    }
+    let default = path(Some(report), &["_styk", "layers", "defaultLayerId"]).and_then(Value::as_str).filter(|id| !drawing_layers.contains(*id)).map(str::to_string);
+    let Some(default) = default else { return 0 };
+    let drawn: HashSet<u64> = items(report.get("figure_types")).iter().filter(|f| truthy(path(Some(f), &["_styk", "drawing"]))).filter_map(|f| num(f.get("figure_type_id")).map(f64::to_bits)).collect();
+    let mut figures: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    let frames = items(report.get("keyframes")).into_iter().chain(entries(path(Some(report), &["_styk", "frameSources"])).into_iter().map(|(_, frame)| frame.clone()));
+    for frame in frames {
+        for object in items(frame.get("objects")) {
+            if let (Some(uid), Some(type_id)) = (object.get("unique_id").and_then(property_name), num(object.get("figure_type_id"))) {
+                let entry = figures.entry(uid).or_insert(true);
+                *entry &= drawn.contains(&type_id.to_bits());
+            }
+        }
+    }
+    let wrong: Vec<String> = entries(path(Some(report), &["_styk", "layers", "assignments"]))
+        .into_iter()
+        .filter(|(uid, layer)| layer.as_str().is_some_and(|layer| drawing_layers.contains(layer)) && figures.get(&**uid) == Some(&false))
+        .map(|(uid, _)| uid.to_string())
+        .collect();
+    let assignments = report.make_obj().and_then(|r| r.get_mut("_styk")).and_then(Value::make_obj).and_then(|s| s.get_mut("layers")).and_then(Value::make_obj).and_then(|l| l.get_mut("assignments")).and_then(Value::make_obj);
+    if let Some(assignments) = assignments {
+        for uid in &wrong {
+            assignments.set(uid, Value::str(&default));
+        }
+    }
+    wrong.len()
+}

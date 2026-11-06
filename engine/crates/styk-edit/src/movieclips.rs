@@ -348,7 +348,20 @@ impl Editor {
     }
 
     /// `publishDefinition(editor, figure, index, label)` replacing the definition at `index`.
+    /// A movieclip definition may take the project no deeper than movieclips may run: the levels of its own graph, one for its document,
+    /// and the movieclips the document being edited is inside of. Refused before anything changes, as creating a movieclip is.
+    pub(crate) fn check_definition_depth<'a>(&self, definitions: impl IntoIterator<Item = &'a Value>) -> Result<(), EditError> {
+        for figure in definitions {
+            let Some(clip) = figure.path(&["_styk", "movieclip", "document"]).filter(|clip| clip.truthy()) else { continue };
+            if self.outer_depth + 1 + crate::load::movieclip_levels(clip) > crate::load::MOVIECLIP_MAX_LEVELS {
+                return Err(EditError::Invalid("errors.movieclips.movieclipsNestAtMostEightLevelsDeep".into()));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn publish_definition(&mut self, index: usize, figure: Value, label: &str) -> Result<(), EditError> {
+        self.check_definition_depth([&figure])?;
         let figures = self.report.make_obj().and_then(|r| r.get_mut("figure_types")).and_then(Value::make_arr).ok_or_else(|| EditError::Unported("figure definitions that are not a list".into()))?;
         let before = figures.get(index).cloned();
         match figures.get_mut(index) {

@@ -336,6 +336,9 @@ pub struct Editor {
     pub(crate) camera_clipboard: Option<Value>,
     /// `editor.audioRipple` (the app sets it) and `_audioRippling`: frame edits of every layer move the audio.
     pub(crate) audio_ripple: bool,
+    /// How many movieclips the document is inside of (the interface's `_movieclipScopes`): its own movieclips nest that much deeper in the
+    /// project it belongs to, and the limit on how deep they may run is the project's.
+    pub(crate) outer_depth: usize,
     pub(crate) audio_rippling: bool,
     /// The layers Focus and lock holds (`editor.getLayerFocus()` with a lock), as the view of the call in progress has them.
     pub(crate) focus_lock: Option<FocusLock>,
@@ -487,6 +490,7 @@ impl Editor {
             camera_clipboard: None,
             audio_clipboard: None,
             audio_ripple: false,
+            outer_depth: 0,
             audio_rippling: false,
             focus_lock: None,
             camera_motion_clipboard: None,

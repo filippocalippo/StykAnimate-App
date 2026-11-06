@@ -105,13 +105,7 @@ impl FineGlyphs {
     /// Takes the map, spinning while another thread holds it: the interface thread may not
     /// wait (D7), and every critical section is a lookup or an insertion.
     fn lock(&self) -> std::sync::MutexGuard<'_, (FineMap, usize)> {
-        loop {
-            match self.map.try_lock() {
-                Ok(guard) => return guard,
-                Err(std::sync::TryLockError::Poisoned(poisoned)) => return poisoned.into_inner(),
-                Err(std::sync::TryLockError::WouldBlock) => std::hint::spin_loop(),
-            }
-        }
+        styk_doc::lock::spinning(&self.map)
     }
 
     /// The cached triangles of `key`, or `make()`'s, stored. Tessellation runs without the

@@ -748,6 +748,7 @@ impl Editor {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn commit_sheet_range_worker(&mut self, plans: &[(f64, Value, Vec<u32>)], inserted: &[u32], hints: &std::collections::HashMap<u32, String>, definitions: Vec<Value>, label: &str, selection: crate::select::SelectionState, payload: Option<(&[Value], bool)>, deletion: Option<(&[u32], &[Value])>, mut worker: Option<&mut crate::movieclip_planning::TimelineWorker<'_>>) -> Result<bool, EditError> {
+        self.check_definition_depth(definitions.iter())?;
         if let Some(worker) = worker.as_mut() { (worker.check)()?; }
         self.ensure_counts();
         let mut ids: Vec<String> = Vec::new();

@@ -427,7 +427,11 @@ impl Editor {
                 }
                 let mut record = object.as_obj().cloned().unwrap_or_default();
                 if let Some(mut playback) = record.get("_stykMovieclip").and_then(Value::as_obj).cloned() {
-                    playback.set("end", Value::Num(tick + duration));
+                    // A clip that starts after the new frame ends (its placement was shifted past it) is not playing in it: its end stays where
+                    // the shift put it, since an end that is not after its start is a placement opening refuses.
+                    if playback.get("start").and_then(Value::as_f64).is_none_or(|start| start < tick + duration) {
+                        playback.set("end", Value::Num(tick + duration));
+                    }
                     record.set("_stykMovieclip", Value::object(playback));
                 }
                 Value::object(record)

@@ -542,7 +542,7 @@ impl Engine {
     /// is now: the stage draws it, playback and exports read it. What changed in `tree` since `typed` was made
     /// is converted again; nothing else is.
     pub fn activate(&self, typed: &Typed, tree: &Value, revision: u64) -> Result<Committed, OpenError> {
-        let mut store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut store = styk_doc::lock::spinning(&self.inner.store);
         store.loader = typed.loader.clone();
         store.lineage = typed.lineage;
         store.assets = Some(typed.assets.clone());
@@ -563,7 +563,7 @@ impl Engine {
     /// [`Engine::publish_tree`] with the typed views the caller already made of `tree` (the editing session converts the
     /// document for its own reads): they are published as they are, and the document is converted once.
     pub fn publish_tree_with(&self, lineage: u64, tree: Value, revision: u64, made: Option<Arc<Prepared>>) -> Result<Option<Committed>, OpenError> {
-        let store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let store = styk_doc::lock::spinning(&self.inner.store);
         if store.lineage != lineage || store.prepared.is_none() {
             return Ok(None);
         }
@@ -578,7 +578,7 @@ impl Engine {
 
     /// The typed views of the document the engine holds, when `tree` is the tree it was published from.
     pub fn views_of(&self, tree: &Value) -> Option<Arc<Prepared>> {
-        let store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let store = styk_doc::lock::spinning(&self.inner.store);
         store.tree.same_node(tree).then(|| store.prepared.clone()).flatten()
     }
 
@@ -653,7 +653,7 @@ impl Engine {
     /// a planner reads never include a draft. `None` while no document is open.
     pub fn publish_draft(&self, token: u64, draft: &Draft) -> Result<Option<Committed>, OpenError> {
         let started = self.now();
-        let mut store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut store = styk_doc::lock::spinning(&self.inner.store);
         if store.prepared.is_none() {
             return Ok(None);
         }
@@ -677,7 +677,7 @@ impl Engine {
     /// Takes a draft out: the document itself is the generation in front again. `None` when none is held.
     pub fn clear_draft(&self) -> Option<Committed> {
         let started = self.now();
-        let mut store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut store = styk_doc::lock::spinning(&self.inner.store);
         store.draft.take()?;
         let (prepared, assets) = (store.prepared.clone()?, store.assets.clone()?);
         let revision = store.revision;

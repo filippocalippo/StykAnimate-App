@@ -295,6 +295,13 @@ impl Editor {
     }
 
     /// `editor.activeLayerId`.
+    /// A drawing layer holds only drawing cels: a movieclip placed while one is active used to be assigned to it (by replacements, which are
+    /// not checked as a key's frame is), and a movieclip made of it afterwards held a figure on a drawing layer, which opening refuses.
+    pub(crate) fn refuse_on_drawing_layer(&self) -> Result<(), EditError> {
+        let drawing = self.report.path(&["_styk", "layers", "byId", &self.active_layer(), "drawing", "version"]).and_then(Value::as_f64) == Some(1.0);
+        if drawing { Err(EditError::Invalid("errors.editorLayerSheet.drawingLayersAcceptOneDrawingCelAtA".into())) } else { Ok(()) }
+    }
+
     pub(crate) fn active_layer(&self) -> String {
         let layers = self.report.path(&["_styk", "layers"]);
         let named = |key: &str| layers.and_then(|l| l.get(key)).and_then(Value::as_str).map(str::to_string);
