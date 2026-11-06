@@ -7,7 +7,8 @@ everything gets faster. The owner decided this on 2026-11-05.
 
 - [architecture.md](architecture.md): the target: crates, owners, threads, the GPU, builds.
 - [decisions/](decisions/): the decision log of this phase (N1, N2, ...).
-- `INVENTORY.md` (lands with step 1): every feature and surface of today's app, its native owner, test and status.
+- [INVENTORY.md](INVENTORY.md): every feature and surface of today's app (1,270 feature rows, 276 commands, 129 IPC
+  channels, 93 stylesheets), its native owner, test, screen ID and status.
 - `docking.md`, `devtools.md`, `settings.md`: the new designs, written before they are built.
 
 ## Handoff (keep current; read this first to resume)
@@ -25,7 +26,7 @@ agent, `perf/briefs/native/<chunk>.md` per chunk, `perf/merge.sh <sha> <message>
 | M | movieclip save fix merged, the rest of the movieclip branch, the refused gesture sequence | T3 worktree, Sonnet | running |
 | D | drawing-undo atlas work, its compile fix, the polygon cache removed | T3 worktree, Sonnet | running |
 | X | export frames independent of export order, picture and cel residency in exports | T3 worktree, Sonnet | running |
-| I | the inventory, 12 areas, into `perf/native/inventory/` then `INVENTORY.md` | workflow, Sonnet | running |
+| I | the inventory | `docs/native/INVENTORY.md` | done: 1,270 rows, all todo; regenerate the appendices with `perf/native/tools/` |
 | N0 | the foundation (brief `perf/briefs/native/N0-foundation.md`) | T3 worktree, Sonnet | running |
 | S1-S6 | risk spike designs, in `perf/native/spikes/S*.md` | Sonnet | written; GPT-6.1 Sol reviewing each |
 
