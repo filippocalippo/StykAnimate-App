@@ -1,0 +1,31 @@
+[package]
+name = "iced_test"
+description = "A library for testing iced applications in headless mode"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+iced_runtime.workspace = true
+iced_program.workspace = true
+iced_selector.workspace = true
+
+iced_futures.workspace = true
+iced_futures.features = ["thread-pool"]
+
+iced_renderer.workspace = true
+iced_renderer.features = ["fira-sans"]
+
+nom.workspace = true
+png.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
