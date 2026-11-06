@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createTypeahead, findTypeahead, menuKeyAction, normalizeMenu} from '../src/ui/ui-menu.mjs';
 import {nextRovingIndex} from '../src/ui/roving-focus.mjs';
 import {CommandRegistry} from '../src/ui/command-registry.mjs';
+import {formatBinding} from '../src/hotkeys.mjs';
 import {kitText, translator} from '../src/ui/ui-strings.mjs';
 
 const registryItems = {
@@ -47,7 +48,7 @@ test('hidden items, empty submenus, stray separators and empty group labels are 
 });
 
 test('registry items render through normalizeMenu unchanged', () => {
-  const registry = new CommandRegistry({actions: {undo() {}, redo() {}}, requirements: {}, context: () => ({mode: 'animate'})});
+  const registry = new CommandRegistry({actions: {undo() {}, redo() {}}, hotkeys: {mac: false}, formatBinding: binding => formatBinding(binding, false), requirements: {}, context: () => ({mode: 'animate'})});
   const entries = normalizeMenu(registry.items(['undo', 'redo', null, 'split-segment']), {resolve: id => registry.get(id)});
   assert.deepEqual(entries.map(entry => [entry.command, entry.label, entry.shortcut, entry.disabled]), [['undo', 'Undo', 'Ctrl+Z', false], ['redo', 'Redo', 'Ctrl+Shift+Z', false]]);
 });

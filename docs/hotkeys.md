@@ -10,6 +10,11 @@ Open **Settings → Shortcuts** (or **Help → Keyboard shortcuts**). Click a bi
 
 ## Architecture
 
+`HotkeyManager` uses the same `mac` setting for resolving key events and displaying
+shortcut labels. Its default follows the host platform; an explicit override also
+applies to labels and hints. `shortcutLabel(bindings, id, mac)` accepts the same
+optional platform override, with host detection as the default.
+
 In Animate, Shift-dragging a figure origin carries its pinned IK nodes with it;
 Shift-click still toggles selection. Ctrl/Command constrains the origin move to
 one axis and can combine with Shift. Motion-path origins with pinned IK use the

@@ -213,7 +213,7 @@ const keyLabels = {Space: 'Space', Escape: 'Esc', ArrowLeft: '←', ArrowRight: 
 export function formatBinding(binding, mac = isMacPlatform()) {
   return binding.split('+').map(part => part === 'Mod' ? (mac ? 'Cmd' : 'Ctrl') : part === 'Meta' ? (mac ? 'Cmd' : 'Meta') : keyLabels[part] || part.replace(/^Key|^Digit/, '').replace(/^Numpad/, 'Num ')).join('+');
 }
-export function shortcutLabel(bindings, id) { return (bindings?.[id] ?? DEFAULT_HOTKEYS[id] ?? []).map(key => formatBinding(key)).join(' / '); }
+export function shortcutLabel(bindings, id, mac = isMacPlatform()) { return (bindings?.[id] ?? DEFAULT_HOTKEYS[id] ?? []).map(key => formatBinding(key, mac)).join(' / '); }
 export function isHotkeyInput(target) { return Boolean(target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]')); }
 
 /** Resolves and tracks held keys independently of DOM/event-listener ordering. */
@@ -263,5 +263,5 @@ export class HotkeyManager {
     const held = [...this.held.values()]; this.held.clear();
     for (const command of held) this.release(command.id, {cancelled: true});
   }
-  label(id) { return shortcutLabel(this.bindings, id); }
+  label(id) { return shortcutLabel(this.bindings, id, this.mac); }
 }

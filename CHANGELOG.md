@@ -27,6 +27,7 @@ What's new in each version of StykAnimate.
 
 ### Fixed
 
+- Shortcut hints consistently show Ctrl or Command for the configured platform.
 - Moving a figure shows its new position immediately.
 - Onion skins of styled figures no longer show an old shape after you change the figure’s settings, such as an angle lock.
 - Repeated pastes keep the expected spacing between copied figures.
