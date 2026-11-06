@@ -85,10 +85,23 @@ window are taken with PrintWindow (Windows) by the app itself or by `xtask`, nev
 
 ## Builds
 
-- **Release** (`cargo build --release -p styk-app`): what ships and what is measured; no developer tools, no symbols of
-  `styk-devtools`, instrumentation compiled to nothing.
+Run from the repository root (`cargo xtask` also works from `engine/`); the workspace is `engine/Cargo.toml`.
+
+- **Release** (`cargo build --manifest-path engine/Cargo.toml --release -p styk-app`): what ships and what is measured; no
+  developer tools, no symbols of `styk-devtools`, instrumentation compiled to nothing.
 - **Developer** (`--features devtools`, same optimisation as release): the tools, the control channel, live parameters.
-- **Quick** (`--profile quick`): incremental, optimised dependencies, fast linking; for iterating, never measured.
+- **Quick** (`--profile quick`): incremental, optimised dependencies; for iterating, never measured. A one-line change
+  rebuilds in about 3 to 4 seconds. Linking with `rust-lld` (`CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld.exe`) saves
+  about a second of that and works, but it is an opt-in, not the repository default: changing the linker makes cargo
+  rebuild every crate of a target folder once, which would cost every other build on a shared machine.
+- **Tasks** (`cargo xtask check`): `design check` (generated tokens and icons are current; see
+  [design-system.md](design-system.md)), `deps` (the engine and the core reach no iced, `styk-ui` or `styk-devtools`) and
+  `lock` (`engine/Cargo.lock` holds no git source).
+- **Unattended runs**: `STYK_BACKGROUND_WINDOW=1 stykanimate --screenshot out.png` opens the window off-screen, without
+  focus and without a taskbar entry, waits for its first complete frame, writes it and exits.
+
+`npm run engine:test` leaves out the iced crates (`styk-app`, `styk-ui`, `styk-devtools`) so the engine suites stay
+fast; test those with `cargo test --release -p styk-app -p styk-ui`.
 
 ## Platforms
 

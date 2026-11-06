@@ -1,0 +1,11 @@
+[package]
+name = "styk-trace"
+description = "The instrumentation layer: span!, counter! and mark!, compiled to nothing unless the enabled feature is on."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Turned on by the app's `devtools` feature only. Without it the macros expand to nothing and the crate has no code.
+enabled = []

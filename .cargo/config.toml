@@ -1,0 +1,4 @@
+# Cargo settings for the whole repository (run cargo from the repository root or from engine/).
+[alias]
+# The native app task runner (engine/crates/xtask): `cargo xtask design generate`, `deps`, `lock`, `check`.
+xtask = "run --quiet --manifest-path engine/Cargo.toml -p xtask --"

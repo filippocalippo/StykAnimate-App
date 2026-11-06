@@ -1,0 +1,15 @@
+[package]
+name = "styk-design"
+description = "The StykAnimate design system for the native app: tokens, icons, bundled fonts and shared widgets."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# The iced side: conversions to iced types, the font handles and the icon widget. Without it the crate is plain data
+# (tokens, icon bytes, font bytes) that tools and tests read without a toolkit.
+widgets = ["dep:iced"]
+
+[dependencies]
+iced = { workspace = true, optional = true }

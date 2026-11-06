@@ -1,0 +1,11 @@
+[package]
+name = "styk-ui"
+description = "The StykAnimate iced front end: draws what the core holds and turns input into core commands."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+iced = { workspace = true }
+styk-design = { path = "../styk-design", features = ["widgets"] }

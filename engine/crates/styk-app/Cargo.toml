@@ -1,0 +1,25 @@
+[package]
+name = "styk-app"
+description = "The stykanimate program: command line, startup and the wiring of services, core and interface."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "stykanimate"
+path = "src/main.rs"
+
+[features]
+# The developer build: the instrumentation layer records, and the tools are linked in. Same optimisation as release.
+devtools = ["dep:styk-devtools", "styk-trace/enabled"]
+
+[dependencies]
+iced = { workspace = true }
+png = "0.18"
+styk-core = { path = "../styk-core" }
+styk-design = { path = "../styk-design", features = ["widgets"] }
+styk-devtools = { path = "../styk-devtools", optional = true }
+styk-platform = { path = "../styk-platform" }
+styk-trace = { path = "../styk-trace" }
+styk-ui = { path = "../styk-ui" }
