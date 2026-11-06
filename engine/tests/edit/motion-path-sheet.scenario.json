@@ -1,0 +1,593 @@
+{
+ "name": "motion-path-sheet",
+ "document": "motion-path.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   6
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 260,
+    "y": 170
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 272,
+    "y": 182
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 22,
+    "joint": 1
+   },
+   8
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 330,
+    "y": 300
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 340,
+    "y": 310
+   },
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 345,
+    "y": 305
+   },
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 22,
+    "joint": 1
+   },
+   12,
+   {
+    "label": "Arc the shin"
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 300,
+    "y": 320
+   },
+   {
+    "isolate": true
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 2,
+    "handleId": 0,
+    "joint": -1
+   },
+   10
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 420,
+    "y": 330
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 2,
+    "handleId": 22,
+    "joint": 1
+   },
+   14
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 500,
+    "y": 350
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 505,
+    "y": 360
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 55,
+    "joint": 4
+   },
+   18
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 250,
+    "y": 340
+   }
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 260,
+    "y": 350
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   2
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   3
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 214,
+    "y": 160
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 214,
+    "y": 160
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "poseJoint",
+   300,
+   260
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 11,
+    "joint": 0
+   },
+   4
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 320,
+    "y": 250
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   5
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 240,
+    "y": 170
+   }
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   7
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 240,
+    "y": 175
+   }
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 44,
+    "joint": 3
+   },
+   9
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 220,
+    "y": 330
+   }
+  ],
+  [
+   "@seek",
+   1
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 22,
+    "joint": 1
+   },
+   11
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 260,
+    "y": 330
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   13
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 260,
+    "y": 175
+   }
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 22,
+    "joint": 1
+   },
+   15
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 270,
+    "y": 320
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   -1
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   2.5
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   24
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   99
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   "3"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   null
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 99,
+    "handleId": 0,
+    "joint": -1
+   },
+   3
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 99,
+    "joint": 1
+   },
+   3
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 22,
+    "joint": 2
+   },
+   3
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 77,
+    "joint": 6
+   },
+   3
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 3,
+    "handleId": 2,
+    "joint": 1
+   },
+   6
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 560,
+    "y": 260
+   },
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 565,
+    "y": 270
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 1,
+    "y": 2
+   }
+  ],
+  [
+   "setMotionPathFalloff",
+   {
+    "radius": 3
+   }
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   3
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": "a",
+    "y": 2
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 1,
+    "y": null
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 1
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 230,
+    "y": 165
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

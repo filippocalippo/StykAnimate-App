@@ -22,7 +22,7 @@ const check = (name, value = true) => {
 const view = () => page.evaluate(() => ({ ...styk.state.view }));
 const pose = () =>
   page.evaluate(() =>
-    styk.editor.frame.objects.map((o) => ({
+    styk.editor.evaluatedFrame.objects.map((o) => ({
       uid: o.unique_id,
       x: o.root_x,
       y: o.root_y,
@@ -83,8 +83,8 @@ function clamped(r) {
 const selection = () => page.evaluate(() => [...styk.editor.selectedUids]);
 const order = () =>
   page.evaluate(() =>
-    styk.editor.frame.object_draw_order.map(
-      (slot) => styk.editor.frame.objects[slot].unique_id,
+    styk.editor.evaluatedFrame.object_draw_order.map(
+      (slot) => styk.editor.evaluatedFrame.objects[slot].unique_id,
     ),
   );
 
@@ -233,9 +233,9 @@ try {
   await page.locator("#zoom-label").click();
   await page.keyboard.press("Escape");
   check(
-    "Escape closes the menu and restores canvas focus",
+    "Escape closes the menu and returns focus to the zoom button that opened it",
     (await page.locator("#menu").isHidden()) &&
-      (await page.evaluate(() => document.activeElement?.id === "viewport")),
+      (await page.evaluate(() => document.activeElement?.id === "zoom-label")),
   );
   await zoomCommand("zoom-reset");
   const fitView = await view();
@@ -278,9 +278,9 @@ try {
     (await selection()).join(",") === "2",
   );
   check(
-    "Canvas context menu offers figure and selection actions",
-    (await page.locator('#menu [data-action="select-same"]').isVisible()) &&
-      (await page.locator('#menu [data-action="layer-front"]').isVisible()),
+    "Canvas context menu offers figure actions and the selection submenu",
+    (await page.locator('#menu [data-action="duplicate"]').isVisible()) &&
+      (await page.locator('#menu [data-action="selection-more"]').isVisible()),
   );
   check(
     "Context menu stays within the window viewport",
@@ -298,25 +298,28 @@ try {
     { timeout: 60000 },
   );
   await rightClick(430, 300);
+  await page.locator('#menu [data-action="selection-more"]').click();
   await page.locator('#menu [data-action="select-same"]').click();
   check(
     "Select same figure selects both reusable walker instances",
     [...(await selection())].sort().join(",") === "1,2",
   );
   await rightClick(430, 300);
+  await page.locator('#menu [data-action="selection-more"]').click();
   await page.locator('#menu [data-action="select-invert"]').click();
   check(
     "Invert selection selects only the previously unselected figure",
     (await selection()).join(",") === "3",
   );
+  // The layer commands are the figure inspector's Front and Back tiles, not rows of the canvas menu.
   await rightClick(430, 300);
-  await page.locator('#menu [data-action="layer-front"]').click();
+  await page.keyboard.press("Escape");
+  await page.locator('[data-slot=inspector-head] [data-action="layer-front"]').click();
   check(
     "Bring to front changes the actual native layer order",
     (await order()).join(",") === "1,3,2",
   );
-  await rightClick(430, 300);
-  await page.locator('#menu [data-action="layer-back"]').click();
+  await page.locator('[data-slot=inspector-head] [data-action="layer-back"]').click();
   check(
     "Send to back changes the actual native layer order",
     (await order()).join(",") === "2,1,3",
@@ -324,7 +327,7 @@ try {
   await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press("Control+z");
   check(
-    "Context-menu layer changes are undoable",
+    "Layer changes are undoable",
     (await order()).join(",") === "1,3,2",
   );
   await page.setViewportSize({ width: 900, height: 700 });

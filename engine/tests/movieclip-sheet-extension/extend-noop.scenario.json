@@ -1,0 +1,37 @@
+{
+ "name": "extend-noop",
+ "document": "extend-noop.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   3
+  ],
+  [
+   "@seek",
+   16
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   9
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

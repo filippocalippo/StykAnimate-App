@@ -1,0 +1,91 @@
+{
+ "name": "range-ik-followers-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/followers.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "mirrorFiguresInFrames",
+   "horizontal",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0,
+     6
+    ]
+   }
+  ],
+  [
+   "rotateFiguresInFrames",
+   -0.4,
+   [
+    0
+   ],
+   {
+    "ticks": [
+     3
+    ]
+   }
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "mirrorSelection"
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "mirrorSelection",
+   "vertical"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelectionInFrames",
+   12,
+   -4,
+   [
+    0
+   ],
+   {
+    "movePins": true
+   }
+  ],
+  [
+   "moveSelectionInFrames",
+   6,
+   6,
+   [
+    0,
+    1
+   ]
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

@@ -80,7 +80,7 @@ export const timelineOrganizationMethods = {
     if(this.focusLayersButton.hidden!==focusHidden)this.focusLayersButton.hidden=focusHidden;
     if(this.newLayerButton)localizedAttribute(this.newLayerButton,'aria-label',this._drawWorkspace?.()?'timeline.newDrawingLayer':'timeline.newLayer');
     // An active filter says how much of the list it leaves, since the rows it hides give no other sign.
-    if(this.filterButton){const filtered=Boolean(this.layerView?.active);this.filterButton.dataset.active=String(filtered);
+    if(this.filterButton){const filtered=Boolean(this.layerView?.active);if(this.filterButton.dataset.active!==String(filtered))this.filterButton.dataset.active=String(filtered);
       localizedAttribute(this.filterButton,'data-tooltip',filtered?'layerFilter.count':'layerFilter.title',filtered?{shown:count,total}:{});}
     if(this.searchField){if(this.searchField.hidden!==!searching)this.searchField.hidden=!searching;if(this.labelTitle.hidden!==searching)this.labelTitle.hidden=searching;}
     const emptyHidden=count>0||!this.layerQuery&&!this.focusedLayerIds&&Boolean(this.layerView?.active)&&this.tracks.length>0||!(this.layerQuery||this.focusedLayerIds||this.layerView?.active);

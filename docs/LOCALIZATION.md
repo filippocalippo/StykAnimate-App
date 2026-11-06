@@ -8,15 +8,21 @@ menus use the same catalog and fallback rules. Existing accurate translations ar
 
 `src/localization.mjs` owns `Localization`, the shared `interfaceLocalization`,
 `t(key, params)`, and the component-kit adapter `messageText(optionalTranslator,
-key, params)`. `src/locales/en.mjs` composes English common and feature namespaces;
-`src/locales/en-features/` separates feature copy and diagnostics. Keys describe
+key, params)`. `src/locales/en-catalog.mjs` composes English common and feature namespaces;
+`src/locales/en-features/` separates feature copy and diagnostics. The page loads
+English as one generated module, `src/locales/en.mjs`, which `npm run locales:build`
+writes from the catalog (`locales:check` rejects a stale one). Keys describe
 semantic intent and remain stable when English wording changes. Duplicate English
 ownership fails validation. No UI imports a particular language or matches English
 captions to infer behavior.
 
 Each `src/locales/packs/<ID>.json` independently owns locale metadata and translated
-messages. `scripts/build-locales.mjs` generates the registry, source context and
-sandboxed preload diagnostics. The shared support asset generator includes its
+messages. `scripts/build-locales.mjs` generates the language index (`src/locales/locale-index.mjs`), one
+messages module per non-English language (`src/locales/messages/<ID>.mjs`), the source context and
+sandboxed preload diagnostics. A session loads the messages of the language it shows and no other:
+`loadLocale` (src/localization.mjs) brings a language in before it is chosen, the app awaits it for the saved language at
+startup and the Settings picker before it commits, and the desktop main process requires its language's module
+(`useLocale`, desktop/localization.cjs). `Localization` refuses a language that is not loaded. The shared support asset generator includes its
 localization import dependencies for standalone support builds. No dependency, new preference store, translation
 observer, remote service or runtime language installer is required. The original
 INI importer remains provenance. See [TRANSLATING.md](TRANSLATING.md) for the pack

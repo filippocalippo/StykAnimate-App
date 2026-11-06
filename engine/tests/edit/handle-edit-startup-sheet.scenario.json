@@ -1,0 +1,39 @@
+{
+ "name": "handle-edit-startup-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "editHandlePosition",
+   520,
+   300
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "editHandlePosition",
+   470,
+   260,
+   {
+    "bend": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

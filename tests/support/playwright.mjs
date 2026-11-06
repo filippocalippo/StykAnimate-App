@@ -8,8 +8,8 @@
 //  - Google Chrome is used when it is installed (the Windows developer and CI
 //    setup, unchanged). When it is not (a typical Linux machine, a clean CI
 //    image) the browser Playwright downloads is used instead.
-//  - On Linux, Chromium has no hardware WebGPU by default, so the editor uses its
-//    Canvas 2D renderer, whose output tests can read back reliably. Set
+//  - On Linux, Chromium has no hardware WebGPU by default, so the engine draws with
+//    its WebGL2 backend (SwiftShader without a GPU). Set
 //    STYK_BROWSER_GPU=1 to add Vulkan and the WebGPU opt-in (the switches the
 //    desktop app applies, desktop/gpu-switches.cjs). Whether that paints depends
 //    on the browser build and driver: on NVIDIA with Chromium 153 a bare WebGPU

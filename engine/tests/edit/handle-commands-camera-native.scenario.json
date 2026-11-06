@@ -1,0 +1,75 @@
+{
+ "name": "handle-commands-camera-native",
+ "document": "camera-chain.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "nudgeHandle",
+   5,
+   -3
+  ],
+  [
+   "nudgeHandle",
+   4,
+   2,
+   {
+    "view": {
+     "scale": 2,
+     "rotation": -0.4
+    }
+   }
+  ],
+  [
+   "nudgeHandle",
+   3,
+   3,
+   {
+    "cameraEnabled": false
+   }
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "nudgeHandle",
+   -6,
+   2
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "nudgeHandle",
+   2,
+   7
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "nudgeHandle",
+   1,
+   2
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

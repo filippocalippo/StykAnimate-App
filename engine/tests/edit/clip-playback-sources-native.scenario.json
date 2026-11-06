@@ -1,0 +1,70 @@
+{
+ "name": "clip-playback-sources-native",
+ "document": "clip-playback-sources-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   2.75
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "offset": 1.25,
+    "speed": 0.625
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "restartMovieclip"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "removeMovieclipRestart"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "mode": "single",
+    "offset": 2.5
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

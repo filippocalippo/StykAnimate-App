@@ -1,0 +1,158 @@
+{
+ "name": "range-ik-joined-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/joined.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "centerFiguresInFrames",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0,
+     3
+    ]
+   }
+  ],
+  [
+   "@select",
+   3,
+   -1
+  ],
+  [
+   "mirrorFiguresInFrames",
+   "vertical",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     1,
+     6
+    ]
+   }
+  ],
+  [
+   "detachFiguresInFrames",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     2,
+     7
+    ]
+   }
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "rotateFiguresInFrames",
+   0.3,
+   [
+    0
+   ],
+   {
+    "ticks": [
+     4
+    ]
+   }
+  ],
+  [
+   "scaleFiguresInFrames",
+   0.7,
+   [
+    0
+   ],
+   {
+    "ticks": [
+     4
+    ]
+   }
+  ],
+  [
+   "selectMany",
+   [
+    3,
+    4
+   ]
+  ],
+  [
+   "duplicateInFrames",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0
+    ]
+   }
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "deleteFiguresInFrames",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     5,
+     8
+    ]
+   }
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "mirrorFiguresInFrames",
+   "horizontal",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     9
+    ]
+   }
+  ],
+  [
+   "@select",
+   2,
+   0
+  ],
+  [
+   "mirrorSelection"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

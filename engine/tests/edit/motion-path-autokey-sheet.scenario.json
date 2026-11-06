@@ -1,0 +1,71 @@
+{
+ "name": "motion-path-autokey-sheet",
+ "document": "motion-path.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true,
+  "autoKey": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   10
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 250,
+    "y": 170
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 22,
+    "joint": 1
+   },
+   9,
+   {
+    "falloff": {
+     "radius": 4,
+     "shape": "smooth"
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 320,
+    "y": 310
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

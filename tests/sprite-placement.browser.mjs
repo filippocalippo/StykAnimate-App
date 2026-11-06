@@ -2,13 +2,13 @@ import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import backendService from '../desktop/backend.cjs';
+import backendService from '../desktop/web-host.cjs';
 const root=path.resolve(import.meta.dirname,'..'),output=path.join(root,'artifacts','sprite-placement');await mkdir(output,{recursive:true});
-const backend=await backendService.startBackend({appRoot:root});let browser;
+const backend=await backendService.startDesktopHost({appRoot:root});let browser;
 const checks=[],errors=[],check=name=>{checks.push(name);console.log(`PASS ${name}`);};
 try {
   browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage({viewport:{width:1100,height:780}});page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(`${backend.origin}/api/health`);
+  await page.goto(`${backend.origin}/tests/fixtures/blank.html`);
   await page.setContent(`<link rel="stylesheet" href="${backend.origin}/src/styles/app.css"><dialog id="dialog"><div id="content"></div></dialog>`);
   await page.evaluate(async()=>{
     const {imageFileToFigure}=await import('/src/media-authoring.mjs'),{SpritePlacementDialog}=await import('/src/sprite-placement-dialog.mjs');

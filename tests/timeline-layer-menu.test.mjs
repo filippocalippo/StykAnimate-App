@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {ownedEditorSync} from './support/owned-editor.mjs';
 import {emptyDocument} from '../src/demo.mjs';
 import {timelineLayerMenuGroups} from '../src/timeline-menu.mjs';
 import {timelineLayerFolderMethods} from '../src/timeline-layer-folders.mjs';
 
 function fixture() {
-  const editor = new Editor({demo: false, layerTimeline: true}).load(emptyDocument());
+  const {editor} = ownedEditorSync({demo: false, layerTimeline: true}, emptyDocument(), {recorded: false});
   editor.createLayer('Drawing'); editor.createLayer('Foreground');
   const host = {
     editor, selectedTrackId: 'layer-2', ids: ['layer-2'], labels: [], focusedLayerIds: null,

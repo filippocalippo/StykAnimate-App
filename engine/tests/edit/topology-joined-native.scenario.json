@@ -1,0 +1,53 @@
+{
+ "name": "topology-joined-native",
+ "document": "joined-chain.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "deleteSingleSegment"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "mirrorSegment",
+   "vertical"
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "unsplitSegment"
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "deleteSegment",
+   {}
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

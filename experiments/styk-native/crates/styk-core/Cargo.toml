@@ -1,0 +1,19 @@
+[package]
+name = "styk-core"
+description = "StykAnimate document model, file formats, evaluation and draw-list building. No UI, no GPU."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }
+flate2 = "1"
+zstd = "0.13"
+sha2 = "0.10"
+base64 = "0.22"
+rayon = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif"] }
+lyon_tessellation = "1"
+lyon_path = "1"
+thiserror = "2"

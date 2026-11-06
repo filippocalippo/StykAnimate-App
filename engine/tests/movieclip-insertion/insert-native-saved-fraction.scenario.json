@@ -1,0 +1,33 @@
+{
+ "name": "insert-native-saved-fraction",
+ "document": "insert-native-saved-fraction.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "addFigure",
+   999
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

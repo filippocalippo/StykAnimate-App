@@ -1,5 +1,5 @@
 import {messageError} from './localized-error.mjs';
-/** Lossless worker snapshots. Packets contain complete tokens and own their bytes. */
+/** Lossless snapshots for the shared clipboard. Packets contain complete tokens and own their bytes. */
 export const CLIPBOARD_WIRE_CHUNK_BYTES = 256 * 1024;
 const MAGIC = Uint8Array.of(83, 84, 89, 75, 67, 66, 87, 49); // STYKCBW1
 const T = {NULL:0, UNDEFINED:1, FALSE:2, TRUE:3, NUMBER:4, STRING:5, ARRAY:6, OBJECT:7,
@@ -38,7 +38,7 @@ export async function* clipboardWireChunks(value, options = {}) {
   if (!Number.isSafeInteger(maxResidentBytes) || maxResidentBytes < 1) throw messageError(new RangeError(''), "errors.clipboardWire.clipboardResidentBudgetMustBeAPositiveSafe", {});
   const stats = {encodedBytes:0, residentBytes:0, logicalBytes:0, maxSliceMs:0, workMs:0, chunks:0, completed:false};
   const frames = [], active = new WeakSet(), keys = new Map();
-  let depth = 0, hasValue = true, incomingKey = null, text = null, textOffset = 0, keyBytes = 0, header = false, done = false;
+  let depth = 0, hasValue = true, text = null, textOffset = 0, keyBytes = 0, header = false, done = false;
   const reserve = bytes => {
     if (stats.residentBytes + bytes > maxResidentBytes) throw messageError(new Error(''), "errors.clipboardWire.clipboardResidentDataBudgetExceeded", {});
     stats.residentBytes += bytes; stats.logicalBytes = stats.residentBytes;
@@ -83,11 +83,9 @@ export async function* clipboardWireChunks(value, options = {}) {
             reserve(array ? 32 + value.length * 8 : 64); active.add(value);
             packet[used++] = array ? T.ARRAY : prototype === null ? T.NULL_OBJECT : T.OBJECT;
             if (array) {view.setUint32(used, value.length, true); used += 4;}
-            const omitPose = options.omitRuntimeSegments && depth >= 3 && frames[depth - 1].edge === 'objects' &&
-              (frames[depth - 3].edge === 'keyframes' || (depth >= 4 && frames[depth - 3].edge === 'frameSources' && frames[depth - 4].edge === '_styk'));
             const frame = frames[depth] ??= {};
             frame.value = value; frame.array = array; frame.length = array ? value.length : 0; frame.index = 0;
-            frame.edge = incomingKey; frame.omitPose = omitPose; frame.iterator = null; frame.batch = null; frame.keyIndex = 0;
+            frame.iterator = null; frame.batch = null; frame.keyIndex = 0;
             depth++; hasValue = false;
           }
         } else if (depth) {
@@ -108,7 +106,7 @@ export async function* clipboardWireChunks(value, options = {}) {
               }
               reserve(count * 8); packet[begin] = T.NUMBERS; view.setUint16(begin + 1, count, true);
               frame.index += count; large = count === RUN;
-            } else {value = array[index]; incomingKey = index; frame.index++; hasValue = true;}
+            } else {value = array[index]; frame.index++; hasValue = true;}
           } else {
             if (!frame.batch || frame.keyIndex === frame.batch.length) {
               frame.iterator ??= propertyBatches(frame.value, frame.array);
@@ -119,7 +117,6 @@ export async function* clipboardWireChunks(value, options = {}) {
               } else {frame.batch = next.value; frame.keyIndex = 0; large = true;}
             } else {
               const key = frame.batch[frame.keyIndex];
-              if (frame.omitPose && key === 'runtime_segments') {frame.keyIndex++; continue;}
               const id = keys.get(key);
               const child = frame.value[key], type = typeof child;
               if (id !== undefined && (type === 'number' || child === null || type === 'boolean' || type === 'undefined')) {
@@ -140,7 +137,7 @@ export async function* clipboardWireChunks(value, options = {}) {
                 reserve(key.length * 2); packet[used++] = T.STRING; view.setUint32(used, key.length, true); used += 4;
                 if (key.length) {text = key; textOffset = 0;}
                 }
-                incomingKey = key; value = child; hasValue = true; frame.keyIndex++;
+                value = child; hasValue = true; frame.keyIndex++;
               }
             }
           }

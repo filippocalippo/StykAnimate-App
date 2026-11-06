@@ -3,7 +3,6 @@ export default Object.freeze({
   "dockHost.resizeStackedRightPanels": "Resize stacked right panels",
   "dockHost.folded": "{value}, folded",
   "dockHost.dragToMovePanelRightClickForLayout": "Drag to move panel; right-click for layout options",
-  "dockHost.resizeStackedPanels": "Resize stacked {side} panels",
   "dockHost.leftPanels": "Left panels",
   "dockHost.inspector": "Inspector",
   "dockHost.restoreTimelineHeight": "Restore timeline height",

@@ -4,7 +4,7 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url);
-const { startBackend } = require('../desktop/backend.cjs'); const backend = await startBackend({ appRoot }); let browser;
+const { startDesktopHost } = require('../desktop/web-host.cjs'); const backend = await startDesktopHost({ appRoot }); let browser;
 try {
   try { browser = await chromium.launch({ headless: true }); } catch { browser = await chromium.launch({ channel: 'chrome', headless: true }); }
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await page.goto(backend.origin);

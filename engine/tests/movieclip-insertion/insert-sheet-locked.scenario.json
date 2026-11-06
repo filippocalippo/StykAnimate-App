@@ -1,0 +1,29 @@
+{
+ "name": "insert-sheet-locked",
+ "document": "insert-sheet-locked.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

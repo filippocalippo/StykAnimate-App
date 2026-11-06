@@ -11,6 +11,9 @@ const output = path.join(appRoot, 'artifacts');
 const directory = path.join(output, `app-save-${Date.now()}`);
 const profile = path.join(directory, 'profile');
 await mkdir(directory, { recursive: true });
+// No first-run privacy prompt over the controls: the choice is recorded as declined.
+await mkdir(profile, { recursive: true });
+await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now() } }));
 const targets = Object.fromEntries(['First', 'Second', 'New', 'Pivot', 'Closed'].map(name => [name, path.join(directory, `${name}.styk`)]));
 const pivot = path.join(appRoot, '..', 'Goku_Broly_Movie_by_Killer1.piv');
 const pivotDigest = createHash('sha256').update(await readFile(pivot)).digest('hex');
@@ -18,6 +21,8 @@ const applications = [], checks = [], errors = [];
 const launch = () => electron.launch({ args: [appRoot], cwd: appRoot, timeout: 45000, env: { ...process.env, STYK_USER_DATA_DIR: profile } });
 const documentAt = async filename => await readNativeDocument(filename);
 const record = name => { checks.push(name); console.log(`PASS ${name}`); };
+// The release notes open over the controls the checks click.
+const dismissPrompts = async page => { await page.locator('.release-splash [aria-label="Close welcome screen"]').click({ timeout: 1500 }).catch(() => {}); };
 async function mocks(app) {
   await app.evaluate(({ dialog }) => {
     globalThis.__choices = []; globalThis.__saveCount = 0; globalThis.__closeChoices = []; globalThis.__closeCount = 0;
@@ -41,7 +46,7 @@ async function mocks(app) {
 try {
   const app = await launch(); applications.push(app); await mocks(app);
   const page = await app.firstWindow(); page.on('pageerror', e => errors.push(e.message));
-  await page.waitForFunction(() => window.styk?.ready && window.styk.state.documentToken, undefined, { timeout: 30000 });
+  await page.waitForFunction(() => window.styk?.ready && window.styk.state.documentToken, undefined, { timeout: 30000 }); await dismissPrompts(page);
   const initialToken = await page.evaluate(() => window.styk.state.documentToken);
   const choose = choice => app.evaluate((_e, value) => { globalThis.__choices.push(value); }, choice);
   const count = () => app.evaluate(() => globalThis.__saveCount);
@@ -91,10 +96,10 @@ try {
   await open(targets.Second); const reopenedToken = await page.evaluate(() => window.styk.state.documentToken);
   await edit(967); await page.keyboard.press('Control+s'); await saved();
   assert.equal((await documentAt(targets.Second)).canvas_width, 967); assert.equal(await count(), 4);
-  const figures = await page.evaluate(() => window.styk.editor.frame.objects.length);
+  const figures = await page.evaluate(() => window.styk.editor.evaluatedFrame.objects.length);
   await open(path.join(appRoot, '..', 'Samples.stk'));
   assert.equal(await page.evaluate(() => window.styk.state.documentToken), reopenedToken);
-  assert.equal(await page.evaluate(() => window.styk.editor.frame.objects.length), figures + 1);
+  assert.equal(await page.evaluate(() => window.styk.editor.evaluatedFrame.objects.length), figures + 1);
   await page.keyboard.press('Control+s'); await saved(); assert.equal(await count(), 4);
   record('Opening native STYK restores its target; adding STK figures preserves it.');
 
@@ -111,7 +116,7 @@ try {
 
   const second = await launch(); applications.push(second); await mocks(second);
   const next = await second.firstWindow(); next.on('pageerror', e => errors.push(e.message));
-  await next.waitForFunction(() => window.styk?.ready && window.styk.state.documentToken, undefined, { timeout: 30000 });
+  await next.waitForFunction(() => window.styk?.ready && window.styk.state.documentToken, undefined, { timeout: 30000 }); await dismissPrompts(next);
   assert.equal(await next.evaluate(() => window.styk.state.settings.handleSize), 7);
   assert.equal(await next.evaluate(() => window.styk.state.settings.autosaveSeconds), 0);
   record('Settings changed through the actual UI restore after an application restart.');

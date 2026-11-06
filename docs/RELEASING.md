@@ -42,10 +42,8 @@ For a local Windows release, install the locked dependencies and build prerequis
 
 ```powershell
 npm run changelog:check
-npm run build:frame-scan
+node scripts/engine-build.mjs
 npm run build:vfw
-npm run build:sidecar
-npm run verify:sidecar
 npm run build:video-encoder
 $releaseVersion = (Get-Content package.json | ConvertFrom-Json).version
 npm run dist:win -- --x64 --publish never "--config.directories.output=release/$releaseVersion"
@@ -56,6 +54,8 @@ npm run test:desktop:packaged
 npm run mark:release
 npm run release:verify -- "release/$releaseVersion" --platform=win32
 ```
+
+`verify:package` also requires the app's script bundle (`resources/bundle`) and compares it with a fresh build of the source, so run it on the checkout the package was built from, with the dev dependencies installed (`docs/DESKTOP-RELEASE.md`, `docs/APP-START.md`).
 
 Check each command's exit status and stop on failure; PowerShell does not automatically stop after a failed native command. Build and verify Linux on its own host as described in `docs/LINUX.md`. Combine its AppImage and `latest-linux.yml` with the four Windows assets in `release/<version>`, then run `npm run release:verify`. The default verification and publisher require both platforms.
 

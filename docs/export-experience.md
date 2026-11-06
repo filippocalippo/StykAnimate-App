@@ -37,6 +37,13 @@ scene complexity; the browser calculates a target from the final dimensions
 and frame rate. See the [quality-control contract](EXPORT-FORMATS.md) for
 mappings and verification.
 
+For a document the engine draws, the frames come from the engine's export
+renderer ([engine rendering: exports](engine/rendering.md#exports)); opening
+the dialog starts its worker and GPU device, so the export does not wait for
+them (`prewarmExportRenderer`; a worker no export takes within a minute is
+released). Progress, Cancel and Stop exporting behave as with the JavaScript
+renderer.
+
 ## Quick presets
 
 Quick presets (`src/export-presets.mjs`, `#export-presets`) are tiles for where
@@ -161,13 +168,6 @@ covered by the unit comparison, not by this run.
   inline rejection, format visibility, balanced columns, 1100×680 and 540×700
   layouts, actual 4K APNG output, live counts, two-pass GIF and cancellation.
   Light, dark and compact screenshots were visually inspected.
-- `node tests/export-throughput.browser.mjs --before`, then the same command
-  without the flag: 100 visible outlined figures, 3840×2160, Smooth sprites,
-  256 MiB working-pixel allowance, three repeated frames. Median render wall
-  time changed from **20,845.8 ms to 450.4 ms** (about **46×**). Before/after
-  output SHA-256 was identical. This is an isolated fixture on one machine,
-  not end-to-end video speed or a low-end hardware benchmark. Baseline flag
-  labels the captured run; reproducing a baseline requires the prior source.
 - `node tests/export-4k.desktop.mjs`: actual sandboxed Electron renderer, worker,
   native IPC/FFmpeg and staged save. MP4 with Smooth sprites, WebM with Smooth
   edges, and MP4 with No smoothing each saved 3840×2160 files. Independent
@@ -177,22 +177,14 @@ covered by the unit comparison, not by this run.
   connected. Total measured export plus independent verification time was
   4.63, 3.64 and 3.56 seconds respectively. Electron launch required execution
   outside the tool's restrictive process sandbox.
-- `node tests/export-memory.browser.mjs`: twenty repeated frames under a
-  constrained 32 MiB pixel allowance, tiled pixel comparison, injected canvas
-  loss, resource release and a successful retry.
-- `node tests/export-device-isolation.browser.mjs`: repeated 1080p exports in all
-  sampling modes, stable software scratch-context count, actual WebM decode,
-  injected editor GPU device loss, automatic software recovery, successful
-  concurrent export, preserved editing and undo.
-- `node tests/export-sampling.browser.mjs`: 164 worker/encoder checks; actual-app
-  companion `node tests/export-sampling-app.browser.mjs`: 25 checks. The
+- `node tests/export-sampling-app.browser.mjs`: the export buttons in the app, every sampling mode,
+  cancellation and a lost export surface. The
   browser WebM decode/playback/error/cancellation suite also passed.
 - Focused unit/native service checks passed for frame accounting, pending
   encoder windows, resource rejection, timeout cleanup, codecs, native output
   decoding, VFW, streaming limits and cancellation.
 
-Artifacts are under `artifacts/export-experience`, `export-throughput`,
-`export-4k`, `export-memory`, `export-device-isolation`, and `export-sampling`.
+Artifacts are under `artifacts/export-experience`, `export-4k` and `export-sampling-app`.
 The full root unit run reported **1,600 passed / 9 failed**. Failures are in
 untouched animation target/key insertion, onion-skin sampling, property channel
 authoring and native-document materialization tests; their import paths do not

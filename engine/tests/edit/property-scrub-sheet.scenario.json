@@ -1,0 +1,307 @@
+{
+ "name": "property-scrub-sheet",
+ "document": "property-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "scale"
+  ],
+  [
+   "previewAnimationEdit",
+   1.3
+  ],
+  [
+   "previewAnimationEdit",
+   1.6
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 2
+   },
+   "opacity"
+  ],
+  [
+   "previewAnimationEdit",
+   0.4
+  ],
+  [
+   "cancelAnimationEdit"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "color"
+  ],
+  [
+   "previewAnimationEdit",
+   4281368768
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "camera"
+   },
+   "x"
+  ],
+  [
+   "previewAnimationEdit",
+   40
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "segment",
+    "uid": 1,
+    "handleId": 22
+   },
+   "thickness"
+  ],
+  [
+   "previewAnimationEdit",
+   9
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "outlineWidth"
+  ],
+  [
+   "previewAnimationEdit",
+   3
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 2
+   },
+   "zIndex"
+  ],
+  [
+   "previewAnimationEdit",
+   2
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "scene"
+   },
+   "color"
+  ],
+  [
+   "previewAnimationEdit",
+   4280303712
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "scale"
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "scale"
+  ],
+  [
+   "previewAnimationEdit",
+   1.6
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 2
+   },
+   "scale"
+  ],
+  [
+   "previewAnimationEdit",
+   0.8
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "opacity"
+  ],
+  [
+   "previewAnimationEdit",
+   0.5
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "pose"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 99
+   },
+   "scale"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure"
+   },
+   "scale"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "layer",
+    "id": "layer-1"
+   },
+   "scale"
+  ],
+  [
+   "previewAnimationEdit",
+   1.2
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "cancelAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 2
+   },
+   "opacity"
+  ],
+  [
+   "previewAnimationEdit",
+   2
+  ],
+  [
+   "previewAnimationEdit",
+   0.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 3
+   },
+   "x"
+  ],
+  [
+   "previewAnimationEdit",
+   380
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 2
+   },
+   "rotation"
+  ],
+  [
+   "previewAnimationEdit",
+   0.5
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

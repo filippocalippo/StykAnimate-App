@@ -1,0 +1,893 @@
+{
+ "name": "vfx-clip-paints-sheet",
+ "document": {
+  "version": 5,
+  "canvas_width": 960,
+  "canvas_height": 540,
+  "fps": 24,
+  "auto_easing": false,
+  "auto_easing_disabled_raw": 1,
+  "auto_easing_source": "file",
+  "backgrounds": [],
+  "figure_types": [
+   {
+    "figure_type_id": 1,
+    "name": "Figure 1",
+    "segment_count": 6,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 44,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 2.1,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 55,
+      "parent_id": 44,
+      "length": 90,
+      "angle_rad": 1.2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 66,
+      "parent_id": 55,
+      "length": 35,
+      "angle_rad": 3.141592653589793,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 2,
+    "name": "Figure 2",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 3,
+    "name": "Figure 3",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   }
+  ],
+  "keyframes": [
+   {
+    "duration_raw": 6,
+    "background_id": 0,
+    "background_id_b": 0,
+    "background_mix": 0,
+    "camera": {
+     "is_default": true,
+     "x": 0,
+     "y": 0,
+     "scale": 1,
+     "angle_rad": 0
+    },
+    "objects": [
+     {
+      "object_slot": 0,
+      "unique_id": 1,
+      "figure_type_id": 1,
+      "root_x": 200,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0,
+       2.1,
+       1.2,
+       3.141592653589793
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": null
+     },
+     {
+      "object_slot": 1,
+      "unique_id": 2,
+      "figure_type_id": 2,
+      "root_x": 340,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 0,
+       "target_unique_id": 1,
+       "target_handle_id": 33
+      }
+     },
+     {
+      "object_slot": 2,
+      "unique_id": 3,
+      "figure_type_id": 3,
+      "root_x": 480,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 1,
+       "target_unique_id": 2,
+       "target_handle_id": 22
+      }
+     }
+    ],
+    "object_draw_order": [
+     0,
+     1,
+     2
+    ],
+    "object_draw_order_unique_ids": [
+     1,
+     2,
+     3
+    ],
+    "_styk": {
+     "frameId": "frame-1"
+    }
+   },
+   {
+    "duration_raw": 6,
+    "background_id": 0,
+    "background_id_b": 0,
+    "background_mix": 0,
+    "camera": {
+     "is_default": true,
+     "x": 0,
+     "y": 0,
+     "scale": 1,
+     "angle_rad": 0
+    },
+    "objects": [
+     {
+      "object_slot": 0,
+      "unique_id": 1,
+      "figure_type_id": 1,
+      "root_x": 240,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0,
+       2.1,
+       1.2,
+       3.141592653589793
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": null
+     },
+     {
+      "object_slot": 1,
+      "unique_id": 2,
+      "figure_type_id": 2,
+      "root_x": 300.2503967285156,
+      "root_y": 316.3988037109375,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 0,
+       "target_unique_id": 1,
+       "target_handle_id": 33
+      }
+     },
+     {
+      "object_slot": 2,
+      "unique_id": 3,
+      "figure_type_id": 3,
+      "root_x": 325.50079345703125,
+      "root_y": 462.797607421875,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 1,
+       "target_unique_id": 2,
+       "target_handle_id": 22
+      }
+     }
+    ],
+    "object_draw_order": [
+     0,
+     1,
+     2
+    ],
+    "object_draw_order_unique_ids": [
+     1,
+     2,
+     3
+    ],
+    "_styk": {
+     "frameId": "frame-2"
+    }
+   }
+  ],
+  "_styk": {
+   "format": "StykAnimate",
+   "format_version": 1,
+   "name": "Untitled animation",
+   "layers": {
+    "version": 1,
+    "nextId": 2,
+    "order": [
+     "layer-1"
+    ],
+    "byId": {
+     "layer-1": {
+      "name": "Layer 1",
+      "visible": true,
+      "locked": false
+     }
+    },
+    "assignments": {},
+    "defaultLayerId": "layer-1",
+    "activeId": "layer-1",
+    "fixed": {
+     "scene": {
+      "visible": true,
+      "locked": false
+     },
+     "camera": {
+      "visible": true,
+      "locked": false
+     }
+    }
+   },
+   "vfxClips": {
+    "version": 1,
+    "clips": [
+     {
+      "id": "clip-paint",
+      "name": "",
+      "target": {
+       "kind": "figure",
+       "uid": 1
+      },
+      "start": 0,
+      "duration": 12,
+      "offset": 0,
+      "enabled": true,
+      "strength": 1,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "includeAttached": false,
+      "effects": [
+       {
+        "version": 2,
+        "id": "fx-paint",
+        "type": "tint",
+        "enabled": true,
+        "params": {
+         "effectStrength": 1,
+         "color": 6737151,
+         "mix": 0.5
+        }
+       }
+      ],
+      "keys": {}
+     }
+    ]
+   }
+  }
+ },
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "setVfxClip",
+   "clip-paint",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "figure",
+    "uid": 2
+   },
+   "glow",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "setVfxClipParameter",
+   "clip-paint",
+   "fx-paint",
+   "color",
+   {
+    "type": "linear",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     },
+     {
+      "offset": 0,
+      "color": [
+       40,
+       120.5,
+       255
+      ],
+      "opacity": 1
+     }
+    ]
+   }
+  ],
+  [
+   "setVfxClipParameter",
+   "clip-paint",
+   "fx-paint",
+   "color",
+   {
+    "type": "bad",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     },
+     {
+      "offset": 0,
+      "color": [
+       40,
+       120.5,
+       255
+      ],
+      "opacity": 1
+     }
+    ]
+   }
+  ],
+  [
+   "setVfxClipParameter",
+   "clip-paint",
+   "fx-paint",
+   "color",
+   null
+  ],
+  [
+   "setVfxClipParameters",
+   "clip-paint",
+   "fx-paint",
+   {
+    "mix": 0.4,
+    "color": {
+     "type": "linear",
+     "angle": 1000000,
+     "stops": [
+      {
+       "offset": 1,
+       "color": [
+        240.5,
+        60.2,
+        80
+       ],
+       "opacity": 0.6
+      },
+      {
+       "offset": 0,
+       "color": [
+        40,
+        120.5,
+        255
+       ],
+       "opacity": 1
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "setVfxClipParameter",
+   "clip-paint",
+   "fx-paint",
+   "color",
+   {
+    "type": "linear",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     },
+     {
+      "offset": 0,
+      "color": [
+       40,
+       120.5,
+       255
+      ],
+      "opacity": 1
+     }
+    ]
+   },
+   {
+    "key": true,
+    "tick": 0
+   }
+  ],
+  [
+   "setVfxClipParameter",
+   "clip-paint",
+   "fx-paint",
+   "color",
+   {
+    "type": "radial",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     },
+     {
+      "offset": 0,
+      "color": [
+       40,
+       120.5,
+       255
+      ],
+      "opacity": 1
+     }
+    ]
+   },
+   {
+    "key": true,
+    "tick": 8
+   }
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "copyVfxClip",
+   "clip-paint"
+  ],
+  [
+   "pasteVfxClip",
+   {
+    "kind": "figure",
+    "uid": 2
+   },
+   {
+    "animation": false
+   }
+  ],
+  [
+   "pasteVfxClip",
+   {
+    "kind": "segment",
+    "uid": 1,
+    "handleId": 22
+   }
+  ],
+  [
+   "toggleVfxClipKey",
+   "clip-paint",
+   "vfx1:tint:fx-paint:color",
+   4
+  ],
+  [
+   "setVfxClipEasing",
+   "clip-paint",
+   "vfx1:tint:fx-paint:color",
+   0,
+   "ease-in"
+  ],
+  [
+   "beginVfxClipEdit"
+  ],
+  [
+   "setVfxClipParameter",
+   "clip-paint",
+   "fx-paint",
+   "color",
+   {
+    "type": "angular",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     },
+     {
+      "offset": 0,
+      "color": [
+       40,
+       120.5,
+       255
+      ],
+      "opacity": 1
+     }
+    ]
+   },
+   {
+    "tick": 4
+   }
+  ],
+  [
+   "cancelVfxClipEdit"
+  ],
+  [
+   "beginVfxClipEdit"
+  ],
+  [
+   "setVfxClipParameter",
+   "clip-paint",
+   "fx-paint",
+   "color",
+   {
+    "type": "diamond",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     },
+     {
+      "offset": 0,
+      "color": [
+       40,
+       120.5,
+       255
+      ],
+      "opacity": 1
+     }
+    ]
+   },
+   {
+    "tick": 4
+   }
+  ],
+  [
+   "commitVfxClipEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

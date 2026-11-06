@@ -3,10 +3,10 @@ import {appendLocalized, localizedAttribute} from './localization-bindings.mjs';
 
 import {t as interfaceText} from './localization.mjs';
 import {clipContains,vfxFadeAt} from './vfx-clips.mjs';
-import {VFX_REGISTRY,vfxDescriptor} from './vfx.mjs';
+import {vfxDescriptor} from './vfx.mjs';
 import {vfxVisibleKeys,vfxChannelLabel,vfxChannelMessage} from './vfx-key-channels.mjs';
 import {openVfxChannelMenu} from './vfx-key-channel-menu.mjs';
-import {generatorClipTail} from './vfx-generators.mjs';
+import {clipTail} from './vfx-clip-views.mjs';
 
 /** Where an effect lane's keys sit: under the clip's name, near the lane's foot (the lane is `size` px tall, timeline-rows.mjs). */
 const keyY=size=>size-9;
@@ -54,7 +54,7 @@ export function paintVfxRow(host,ctx,row,y,size=32){
  for(const source of row.clips){
   const clip=previewClip(host,source),duration=clip.duration??host.editor.totalTicks,left=clip.start*step-sx,right=left+duration*step,selected=host.editor._selectedVfxClip===clip.id;
   // Hatched tail: particles emitted inside the clip stay visible after it.
-  const tail=clip.duration===null?0:generatorClipTail(clip);
+  const tail=clipTail(host.editor,clip);
   if(left>host.width||right+tail*step<0)continue;
   if(tail>0){const ta=Math.max(-5,right),tb=Math.min(host.width+5,right+tail*step);if(tb>ta+1){ctx.save();ctx.globalAlpha=clip.enabled?.6:.25;ctx.beginPath();ctx.rect(ta,top+6,tb-ta,height-12);ctx.clip();ctx.strokeStyle=selected?c.accent:c.muted??c.line;ctx.lineWidth=1;ctx.beginPath();for(let x=ta-14;x<tb;x+=5){ctx.moveTo(x,top+height-6);ctx.lineTo(x+14,top+6);}ctx.stroke();ctx.restore();}}
   if(right<0)continue;

@@ -1,5 +1,7 @@
 import {messageError} from './localized-error.mjs';
-const CHUNK_BYTES = 256 * 1024;
+/** Bytes a chunk of a file transfer carries at most: few enough round trips to the main process for a large save (a project of 80 MB is
+ * twenty, not three hundred), small enough that two in flight stay a few megabytes. The main process names its own limit (`maxChunkBytes`). */
+export const CHUNK_BYTES = 4 * 1024 * 1024;
 
 function checkAbort(signal) {
   if (signal?.aborted) throw signal.reason || messageError(new DOMException('', 'AbortError'), "errors.nativeFiles.theFileTransferWasCancelled", {});
@@ -8,9 +10,9 @@ function checkAbort(signal) {
 /** Write a worker-produced Blob without whole-file ArrayBuffer/base64 conversion. */
 export async function writeNativeBlob(desktop, blob, options = {}) {
   if (!(blob instanceof Blob)) throw messageError(new TypeError(''), "errors.nativeFiles.aBlobIsRequiredForNativeFileWriting", {});
-  const { recovery = false, clipboard = false, signal, onProgress, onSaved, name, defaultPath, filters, documentToken, saveAs = false } = options;
+  const { recovery = false, signal, onProgress, onSaved, name, defaultPath, filters, documentToken, saveAs = false } = options;
   checkAbort(signal);
-  const start = clipboard ? desktop.beginClipboardWrite : recovery ? desktop.beginRecoveryWrite : documentToken ? desktop.beginProjectWrite : desktop.beginFileWrite;
+  const start = recovery ? desktop.beginRecoveryWrite : documentToken ? desktop.beginProjectWrite : desktop.beginFileWrite;
   if (typeof start !== 'function') throw messageError(new Error(''), "errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming", {});
   const started=options.onTiming?performance.now():0;
   const transfer = await start({ size: blob.size, name, defaultPath, filters, documentToken, saveAs });
@@ -19,13 +21,19 @@ export async function writeNativeBlob(desktop, blob, options = {}) {
   if (!transfer) return false;
   const chunkSize = Math.min(CHUNK_BYTES, transfer.maxChunkBytes || CHUNK_BYTES);
   try {
-    for (let offset = 0; offset < blob.size; offset += chunkSize) {
-      checkAbort(signal);
-      const bytes = await blob.slice(offset, Math.min(blob.size, offset + chunkSize)).arrayBuffer();
-      checkAbort(signal);
-      await desktop.writeFileChunk(transfer.token, bytes);
-      onProgress?.({ written: Math.min(blob.size, offset + chunkSize), total: blob.size });
-    }
+    // The next chunk is read from the blob while the last one is being written by the main process.
+    const read = offset => offset < blob.size ? blob.slice(offset, Math.min(blob.size, offset + chunkSize)).arrayBuffer() : null;
+    let next = read(0);
+    try {
+      for (let offset = 0; offset < blob.size; offset += chunkSize) {
+        checkAbort(signal);
+        const bytes = await next;
+        next = read(offset + chunkSize);
+        checkAbort(signal);
+        await desktop.writeFileChunk(transfer.token, bytes);
+        onProgress?.({ written: Math.min(blob.size, offset + chunkSize), total: blob.size });
+      }
+    } finally { next?.catch(() => {}); }
     checkAbort(signal);
     const result = await desktop.finishFileWrite(transfer.token);
     try{options.onTiming?.('write',performance.now()-writeStarted);}catch{/* Diagnostics cannot change file outcomes. */}
@@ -33,6 +41,8 @@ export async function writeNativeBlob(desktop, blob, options = {}) {
     return Boolean(result?.saved);
   } catch (error) {
     await desktop.cancelFileWrite(transfer.token).catch(() => {});
+    // A save stopped on the way is a cancelled save, whatever the transfer made of it: the previous file was kept.
+    if (signal?.aborted && error?.name !== 'AbortError') checkAbort(signal);
     throw error;
   }
 }
@@ -42,11 +52,6 @@ export async function readNativeRecovery(desktop, { signal, onProgress, id } = {
   if (typeof desktop.beginRecoveryRead !== 'function') throw messageError(new Error(''), "errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming2", {});
   // `id` names one of the listed copies; without it the newest is read.
   return readNativeStoredFile(desktop, () => desktop.beginRecoveryRead(id), {signal, onProgress});
-}
-
-export async function readNativeClipboard(desktop, options = {}) {
-  if (typeof desktop.beginClipboardRead !== 'function') throw messageError(new Error(''), "errors.nativeFiles.restartTheLatestDesktopAppToEnableThe", {});
-  return readNativeStoredFile(desktop, desktop.beginClipboardRead, options);
 }
 
 async function readNativeStoredFile(desktop, beginRead, {signal, onProgress} = {}) {

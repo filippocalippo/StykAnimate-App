@@ -1,0 +1,69 @@
+{
+ "name": "clip-capture-active-cancel-native",
+ "document": "clip-capture-active-cancel-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginDrag",
+   "Outside"
+  ],
+  [
+   "moveSelection",
+   7,
+   -3
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 7,
+    "end": 2
+   }
+  ],
+  [
+   "moveSelection",
+   2,
+   1
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "@batch",
+   "Abort conversion",
+   [
+    [
+     "createMovieclip",
+     {
+      "start": 2,
+      "end": 6
+     }
+    ],
+    [
+     "placeMovieclip",
+     {
+      "start": 7,
+      "end": 2
+     }
+    ]
+   ]
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 2,
+    "end": 6
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

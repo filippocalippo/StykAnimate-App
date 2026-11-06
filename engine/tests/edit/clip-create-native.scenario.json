@@ -1,0 +1,43 @@
+{
+ "name": "clip-create-native",
+ "document": "clip-create-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 2,
+    "end": 6
+   }
+  ],
+  [
+   "@seek",
+   3.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   7
+  ],
+  [
+   "undo"
+  ],
+  [
+   "createEmptyMovieclip",
+   "Branch"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

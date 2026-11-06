@@ -1,0 +1,9 @@
+[package]
+name = "styk-draw"
+description = "The StykAnimate draw-list format: what evaluation produces and every renderer (GPU, CPU) draws."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]

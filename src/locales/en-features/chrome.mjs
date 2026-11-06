@@ -1,6 +1,5 @@
 export default Object.freeze({
   "chrome.applicationMenu": "Application menu",
-  "chrome.renameProject": "Rename project",
   "chrome.openProjects": "Open projects",
   "chrome.newAnimation": "New animation",
   "chrome.editingWorkspace": "Editing workspace",

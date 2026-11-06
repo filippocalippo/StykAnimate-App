@@ -65,18 +65,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # The unit tests open Pivot files through the codec module the engine build produces.
+      - uses: ./.github/actions/engine-build
       - name: Validate release and source
         run: |
           npm run changelog:check
           npm run check
           npm test
           python -m unittest discover -s backend -p 'test_*.py'
-      - name: Build standalone codecs and video encoder
+      - name: Build the installed-codec helpers and video encoder
         run: |
-          npm run build:frame-scan
           if [ "$RUNNER_OS" = Windows ]; then npm run build:vfw; fi
-          npm run build:sidecar
-          npm run verify:sidecar
           npm run build:video-encoder
       - name: Package the release
         env:
@@ -125,7 +124,6 @@ jobs:
         with:
           name: release-evidence-${{ matrix.platform }}
           path: |
-            artifacts/sidecar-smoke.json
             artifacts/package-manifest.json
             artifacts/updates/smoke.json
             artifacts/updates/appimage-smoke.json

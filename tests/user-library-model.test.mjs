@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {UserLibrary} from '../src/user-library.mjs';
-import {interfaceLocalization} from '../src/localization.mjs';
+import {interfaceLocalization, loadLocales} from '../src/localization.mjs';
+await loadLocales();
 
 const asset = (id, name, category = 'props') => ({id, name, category, kind: 'figure', author: 'Kim', tags: ['paper'], description: 'Folded artwork', sha256: id});
 const owner = overrides => Object.assign(Object.create(UserLibrary.prototype), {
@@ -82,4 +83,15 @@ test('search uses the interface language and refreshes cached case folding after
     await interfaceLocalization.setLocale('en');
     assert.equal(local.visibleItems().length, 0); assert.equal(community.visibleItems().length, 0);
   } finally { await interfaceLocalization.setLocale(previous); }
+});
+
+test('playback ticks do not sync the selection state of the panel (it reads the frame on show); other changes do at once', async () => {
+  let syncs = 0;
+  const library = owner({syncSelection: () => { syncs++; }});
+  for (let tick = 0; tick < 5; tick++) library.editorChanged({detail: {kind: 'seek', tick}});
+  assert.equal(syncs, 0, 'a tick waits for the playhead to rest');
+  library.editorChanged({detail: {kind: 'edit'}});
+  assert.equal(syncs, 1, 'an edit is shown at once');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal(syncs, 2, 'the playhead at rest syncs once');
 });

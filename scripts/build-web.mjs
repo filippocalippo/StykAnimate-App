@@ -1,5 +1,6 @@
 // Builds the editor as a static site in build/web: the same files the desktop
-// app serves from its resources, plus the in-browser Pivot codec.
+// app serves from its resources, the Pivot codec included (its WebAssembly module is
+// in src/engine/pkg/, built by node scripts/engine-build.mjs).
 //
 //   npm run web:build        build/web
 //   npm run web:verify       checks the result before it is deployed
@@ -12,10 +13,10 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { codecBundle } from './codec-bundle.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const PYODIDE_FILES = ['pyodide.mjs', 'pyodide.asm.mjs', 'pyodide.asm.wasm', 'python_stdlib.zip', 'pyodide-lock.json'];
+/** The Pivot codec's module: fetched after the editor when the app installs, and on the first Pivot file otherwise. */
+export const CODEC_FILES = ['src/engine/pkg/styk_codec.js', 'src/engine/pkg/styk_codec_bg.wasm'];
 
 /** The desktop app's `web` resource filter, so both builds ship the same files. */
 export async function webFilter(root = appRoot) {
@@ -72,10 +73,10 @@ export function markInstallable(html) {
   return `${before}  ${INSTALL_TAGS.join(`\n${indent}  `)}\n${indent}${html.slice(end)}`;
 }
 
-// Everything the service worker stores, except what is not part of the app. The Pivot runtime is a separate group
+// Everything the service worker stores, except what is not part of the app. The Pivot codec is a separate group
 // because the worker fetches it after the editor.
 const NOT_PRECACHED = new Set(['_headers', 'sw.js', 'build-info.json', 'robots.txt']);
-const isCodecFile = (name) => name.startsWith('vendor/pyodide/') || name.startsWith('python/');
+const isCodecFile = (name) => CODEC_FILES.includes(name);
 
 /** The files of a built site as [path, hash] pairs in two groups, and a version that changes when any of them does. The page is the empty path. */
 export async function precacheList(root) {
@@ -124,21 +125,13 @@ export async function buildWeb({ root = appRoot, output = path.join(root, 'build
     else await copyFile(path.join(root, relative), target);
   }
 
-  // Pyodide runs the Pivot codec; only the files the loader requests are shipped.
-  const pyodideSource = path.join(root, 'node_modules', 'pyodide');
-  let pyodideVersion;
-  try { pyodideVersion = JSON.parse(await readFile(path.join(pyodideSource, 'package.json'), 'utf8')).version; }
-  catch { throw new Error('The Pivot codec runtime is missing. Run npm ci first.'); }
-  const runtime = path.join(output, 'vendor', 'pyodide');
-  await mkdir(runtime, { recursive: true });
-  for (const name of PYODIDE_FILES) await copyFile(path.join(pyodideSource, name), path.join(runtime, name));
-  await writeFile(path.join(runtime, 'NOTICE.txt'),
-    `Pyodide ${pyodideVersion} (https://pyodide.org), distributed under the Mozilla Public License 2.0\n` +
-    'with CPython (PSF License) and the packages it bundles. Source: https://github.com/pyodide/pyodide\n');
-
-  await mkdir(path.join(output, 'python'), { recursive: true });
-  const bundle = await codecBundle(root);
-  await writeFile(path.join(output, 'python', 'codec-bundle.json'), JSON.stringify(bundle));
+  // The Pivot codec's module is built, not committed: a site without it could not open Pivot files.
+  const shipped = new Set(files.map((name) => name.split(path.sep).join('/')));
+  for (const name of CODEC_FILES) if (!shipped.has(name)) throw new Error(`${name} is missing. Build the engine first: node scripts/engine-build.mjs`);
+  let codec;
+  try { codec = JSON.parse(await readFile(path.join(root, 'src', 'engine', 'pkg', 'build-info.json'), 'utf8')).codec; }
+  catch { codec = null; }
+  if (!codec?.sha256) throw new Error('src/engine/pkg/build-info.json does not describe the Pivot codec. Build the engine first: node scripts/engine-build.mjs');
 
   await copyFile(path.join(root, 'web', '_headers'), path.join(output, '_headers'));
   await copyFile(path.join(root, 'web', 'robots.txt'), path.join(output, 'robots.txt'));
@@ -152,12 +145,12 @@ export async function buildWeb({ root = appRoot, output = path.join(root, 'build
   let bytes = 0, count = 0;
   for await (const file of walk(output)) { bytes += (await stat(file)).size; count++; }
   // No timestamp: the same inputs produce the same site.
-  await writeFile(path.join(output, 'build-info.json'), JSON.stringify({ app: 'StykAnimate', version, pyodide: pyodideVersion, codecFiles: Object.keys(bundle.files).length, offline: precache.version, files: count + 1 }, null, 2) + '\n');
-  return { output, files: count + 1, bytes, version, pyodideVersion };
+  await writeFile(path.join(output, 'build-info.json'), JSON.stringify({ app: 'StykAnimate', version, codec: { wasmBytes: codec.wasmBytes, sha256: codec.sha256 }, offline: precache.version, files: count + 1 }, null, 2) + '\n');
+  return { output, files: count + 1, bytes, version };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const result = await buildWeb();
-  console.log(`Built ${result.files} files (${(result.bytes / 1048576).toFixed(1)} MiB) for StykAnimate ${result.version} with Pyodide ${result.pyodideVersion} in ${path.relative(process.cwd(), result.output)}`);
+  console.log(`Built ${result.files} files (${(result.bytes / 1048576).toFixed(1)} MiB) for StykAnimate ${result.version} in ${path.relative(process.cwd(), result.output)}`);
 }
 

@@ -1,0 +1,41 @@
+{
+ "name": "clip-create-definition-sheet",
+ "document": "clip-create-definition-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 2,
+    "end": 6,
+    "replace": false,
+    "name": "Motion"
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 0,
+    "end": 1,
+    "replace": false
+   }
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

@@ -5,7 +5,7 @@ import {deviceMemoryHint} from './playback-budget.mjs';
 const MiB = 1024 * 1024;
 /** Upper bound on the export-owned pixel working set. Real budgets scale with
  * the device-RAM hint; this ceiling only stops runaway reservations. */
-export const EXPORT_MAX_WORKING_BYTES = 2048 * MiB;
+const EXPORT_MAX_WORKING_BYTES = 2048 * MiB;
 /** Smallest decoded-image allowance a tile can usefully work with. */
 export const EXPORT_MIN_ASSET_BYTES = 4 * MiB;
 /** A conservative allowance for export-owned pixels, not a measurement of free RAM.

@@ -1,13 +1,13 @@
 /** Actual render/encode routes, callable through the collaborative preview. */
 import {exportAnimation} from '../src/image-export.mjs';
-import {ExportFrameRenderer} from '../src/export-frame-renderer.mjs';
+import {pageExporter} from '../tests/support/page-export.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 import {crc32} from '../src/image-codecs.mjs';
 
 const assert = (condition, message) => {if (!condition) throw new Error(message);};
 async function sourceHashes() {
   const files = ['image-export.mjs', 'image-export-worker.mjs', 'image-codecs.mjs',
-    'export-frame-renderer.mjs', 'export-frame-worker.mjs'];
+    'engine/engine-export.mjs', 'engine/engine-export-worker.mjs'];
   const hashes = {};
   for (const file of files) {
     const response = await fetch(`/src/${file}`, {cache: 'no-store'});
@@ -68,7 +68,7 @@ export async function imageExportCase({format = 'apng', width = 960, height = 54
     20 + (i % 16) * width / 16, 50 + Math.floor(i / 16) * height / 5, {scale: .4}));
   assert(count >= 2, 'The measured animation needs at least two ticks');
   report.keyframes = [createFrame(objects, count - 1), createFrame(structuredClone(objects), 1)];
-  const renderer = new ExportFrameRenderer({width, height});
+  const renderer = pageExporter({width, height});
   const rows = [], output = new Map();
   try {
     await renderer.load(report);
@@ -92,7 +92,7 @@ export async function imageExportCase({format = 'apng', width = 960, height = 54
       maxChannelDifference = Math.max(maxChannelDifference, difference);
     }
     assert(!differingChannels, `Pixel mismatch: ${differingChannels} channels, max ${maxChannelDifference}`);
-    const fresh = new ExportFrameRenderer({width, height});
+    const fresh = pageExporter({width, height});
     let freshPresentationSize;
     try {
       await fresh.load(report);

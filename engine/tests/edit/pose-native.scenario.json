@@ -1,0 +1,36 @@
+{
+ "name": "pose-native",
+ "document": "two-limbs.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "poseJoint",
+   330,
+   220
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "poseJoint",
+   360,
+   260,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

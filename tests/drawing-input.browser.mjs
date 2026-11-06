@@ -16,7 +16,6 @@ try{
   await page.locator('[data-workspace-mode="draw"]').click();
   await page.locator('[data-draw-action="new"]').first().click();
   await page.locator('[data-tool="drawing-brush"]').click();
-  await page.evaluate(()=>styk.state.renderer?.gpuDrawingReady);
   await page.evaluate(()=>{
     Object.assign(styk.drawing.settings,{preset:'ink',size:24,color:'#202020',opacity:1,flow:1,hardness:1,pressureSize:true,pressureOpacity:false,stabilization:0,texture:0,scatter:0,roundness:1,blend:'normal',alphaLock:false});
     window.alphaAt=(x,y)=>{const d=styk.drawing,t=styk.editor.drawingTarget();if(!t.figure)return 0;const p=d.pixel({clientX:x,clientY:y},t);return d.owner.entry(t.figure).store?.pixel(Math.floor(p.x),Math.floor(p.y))[3]??0;};

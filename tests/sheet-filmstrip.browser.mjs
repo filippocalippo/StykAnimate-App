@@ -9,13 +9,13 @@ const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('
 try {
   await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
   check('Hidden mount defers selection reveal and thumbnail work',await page.evaluate(async()=>{
-    const {Editor}=await import('/src/editor.mjs'),{createDemo}=await import('/src/demo.mjs'),{SimpleTimeline}=await import('/src/simple-timeline.mjs');
+    const {pageEditor}=await import('/tests/support/page-editor.mjs'),{createDemo}=await import('/src/demo.mjs'),{SheetFilmstrip}=await import('/src/sheet-filmstrip.mjs');
     const report=createDemo();report.keyframes=Array.from({length:240},(_,i)=>structuredClone(report.keyframes[i%24]));
-    const editor=new Editor({demo:false,layerTimeline:true}).load(report);editor.selectFrame(200);
+    const editor=pageEditor().load(report);editor.selectFrame(200);
     const host=document.createElement('div');host.style.cssText='position:fixed;left:20px;top:100px;width:640px;height:260px;z-index:10000';
     host.style.setProperty('display','none','important');document.body.append(host);
     window.filmstripTest={editor,host,painted:0,release:null,hold:false};const state=filmstripTest;
-    state.ui=new SimpleTimeline(host,editor,{renderThumbnail:async(index,canvas)=>{
+    state.ui=new SheetFilmstrip(host,editor,{renderThumbnail:async(index,canvas)=>{
       if(state.hold){state.hold=false;await new Promise(resolve=>state.release=resolve);}
       const ctx=canvas.getContext('2d');ctx.fillStyle='rgb(25,80,160)';ctx.fillRect(0,0,canvas.width,canvas.height);state.painted++;return true;
     }});
@@ -50,6 +50,16 @@ try {
   await page.waitForFunction(()=>filmstripTest.ui.thumbnailStats.retries>0&&filmstripTest.ui.previews.has(0)&&!filmstripTest.ui.busy);
   check('Cancelled preview retries without another user interaction',true);
   check('Preview bitmap cache stays below 8 MiB',await page.evaluate(()=>filmstripTest.ui.bitmapCache.size<=32));
+  // A thumbnail drawn from soft copies shows, is neither marked painted nor cached, and is drawn again until it is sharp.
+  await page.evaluate(()=>{const s=filmstripTest,{ui}=s,render=ui.renderThumbnail;let soft=2;s.seen=[];
+    ui.renderThumbnail=async(index,canvas,options)=>{
+      if(index===0){s.seen.push({previewed:ui.previews.has(0),cached:ui.bitmapCache.has(0)});
+        if(soft>0){soft--;const ctx=canvas.getContext('2d');ctx.fillStyle='rgb(200,10,10)';ctx.fillRect(0,0,canvas.width,canvas.height);return 'soft';}}
+      return render(index,canvas,options);};
+    ui.previews.delete(0);ui.bitmapCache.delete(0);ui.update();});
+  await page.waitForFunction(()=>filmstripTest.ui.thumbnailStats.soft>=2&&filmstripTest.ui.previews.has(0)&&!filmstripTest.ui.busy);
+  check('A soft thumbnail is drawn again and not kept, until the sharp one replaces it',await page.evaluate(()=>{const {ui,seen}=filmstripTest,p=ui.cards.get(0)._canvas.getContext('2d').getImageData(50,30,1,1).data;
+    return seen.length===3&&seen.slice(1).every(row=>!row.previewed&&!row.cached)&&p[0]===25&&p[1]===80&&p[2]===160&&ui.bitmapCache.has(0);}));
   const invalidations=await page.evaluate(()=>filmstripTest.ui.thumbnailStats.invalidations);
   await page.evaluate(()=>filmstripTest.editor.renameLayer('layer-1','Renamed'));
   check('Renaming a layer preserves thumbnails',await page.evaluate(n=>filmstripTest.ui.thumbnailStats.invalidations===n,invalidations));

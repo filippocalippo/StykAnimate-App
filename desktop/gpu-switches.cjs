@@ -3,13 +3,13 @@
 // Chromium switches that decide whether the editor gets a hardware WebGPU
 // adapter. Windows and macOS need none: Chromium enables WebGPU through D3D12
 // and Metal. Electron's Chromium does not enable Linux WebGPU by default, so the
-// renderer would silently fall back to the Canvas 2D compatibility path even on
-// a capable GPU (or land on SwiftShader, which the renderer rejects). Vulkan
-// plus the WebGPU opt-in reaches the real device on Mesa and NVIDIA drivers.
+// engine would silently draw with its WebGL2 backend even on a capable GPU
+// (or land on SwiftShader). Vulkan plus the WebGPU opt-in reaches the real
+// device on Mesa and NVIDIA drivers.
 //
-// The renderer keeps its own safety net: no adapter, or a software adapter,
-// selects the compatibility renderer, so a driver that cannot do WebGPU still
-// edits and plays back correctly.
+// The engine keeps its own safety net: no WebGPU adapter selects its WebGL2
+// backend, so a driver that cannot do WebGPU still edits and plays back
+// correctly.
 //
 // STYK_GPU_UNSAFE=1 forces the opt-in on any platform; STYK_GPU_UNSAFE=0 leaves
 // Chromium's own driver allowlist untouched everywhere (useful when diagnosing

@@ -9,7 +9,7 @@ const fixture=builderFixture(6);
 fixture.figure_types[0].segments.forEach((s,i)=>{s.parent_id=i%2?i:0;s.angle_rad=Math.floor(i/2)*2;s.length=i%2?40:60;s.thickness=8;});
 fixture.keyframes[0].objects[0].angles=fixture.figure_types[0].segments.map(s=>s.angle_rad);
 const point=index=>page.evaluate(async index=>{
- const {worldToScreen}=await import('/src/renderer.mjs'),{editor,state}=styk;
+ const {worldToScreen}=await import('/src/renderer-geometry.mjs'),{editor,state}=styk;
  const world=index<0?editor.geometry.objects.get(editor.selectedSlot).root:editor.geometry.objects.get(editor.selectedSlot).segments[index].end;
  const p=worldToScreen(world,{report:editor.report,frame:editor.frame,view:state.view});const r=document.querySelector('#viewport').getBoundingClientRect();return {x:r.x+p.x,y:r.y+p.y};
 },index);
@@ -17,7 +17,7 @@ try {
  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47841');await page.waitForFunction(()=>window.styk?.ready);
  for(const mode of ['single-select','toggle-select','selection-select','shift-select','toggle-rig']) {
   await page.evaluate(f=>{styk.builder?.leave();styk.editor.load(f);styk.editor.select(1,-1);styk.builder.enter();styk.state.builderBranch=false;},fixture);
-  await page.locator('.rail-quick [data-action=zoom-selection]').click();await page.locator('[data-tool=select]').click();await settle();
+  await page.locator('.ui-quick [data-action=zoom-selection]').click();await page.locator('[data-tool=select]').click();await settle();
   // A real Select-tool pose gesture must survive deleting another limb.
   const beforePose=await point(5);await page.mouse.move(beforePose.x,beforePose.y);await page.mouse.down();await page.mouse.move(beforePose.x+24,beforePose.y-20,{steps:5});await page.mouse.up();await settle();
   const posed=await page.evaluate(()=>{const {editor:e}=styk;const s=e.geometry.objects.get(e.selectedSlot).segments[5];return {uid:e.selectedUid,end:s.end};});

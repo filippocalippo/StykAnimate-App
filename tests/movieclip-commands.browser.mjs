@@ -14,10 +14,10 @@ async function select(tick){await page.evaluate(t=>{styk.editor.seek(t);styk.edi
 try{
   await page.goto(process.env.STYK_URL??'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
   await page.evaluate(async()=>{
-    const {Editor}=await import('/src/editor.mjs');styk.settingsUI.commit({timelineMode:'advanced'});styk.editor.load(new Editor().report);styk.editor.select(1);
-    const {buildGeometry,evaluatedFrame,timeline}=await import('/src/pivot/geometry.mjs');
-    window.snapshot=t=>{const e=styk.editor,rows=timeline(e.report);let i=0;while(i+1<rows.length&&rows[i+1].start<=t)i++;return buildGeometry(e.report,evaluatedFrame(e.report,i,(t-rows[i].start)/rows[i].count,t)).drawables.map(s=>[s.type,s.rgb,s.points.map(p=>[Math.round(p.x*1e5),Math.round(p.y*1e5)])]);};
-    window.before=Array.from({length:30},(_,t)=>snapshot(t));styk.movieclips.open('range');
+    const {createDemo}=await import('/src/demo.mjs'),{pageExporter}=await import('/tests/support/page-export.mjs');styk.settingsUI.commit({timelineMode:'advanced'});styk.editor.load(createDemo());styk.editor.select(1);
+    // What the scene draws at each tick of the project on show: the engine's vector frames.
+    window.drawn=async()=>{const frames=pageExporter({width:640,height:360},{vector:true});try{await frames.load(styk.editor.report);const svgs=[];for(let t=0;t<30;t++)svgs.push(await(await frames.renderSVGTick(t)).text());return svgs;}finally{frames.dispose();}};
+    window.before=await drawn();styk.movieclips.open('range');
   });
   await page.locator('.movieclip-dialog input[name=name]').fill('Five frames');
   await page.locator('.movieclip-dialog input[name=end]').fill('5');await page.locator('.movieclip-dialog button[type=submit]').click();
@@ -38,18 +38,19 @@ try{
   await select(1);await openSection('bake');await page.locator('[data-action=movieclip-break]').click();
   check('Adjacent breaks reuse one ordinary figure track',await page.evaluate(id=>styk.editor.selectedUid===id,first));
   check('Frame breaks use layer poses without figure channels',await page.evaluate(()=>styk.editor.animationChannels.length===0));
-  check('Every frame retains the original scene geometry',await page.evaluate(()=>before.every((frame,t)=>JSON.stringify(frame)===JSON.stringify(snapshot(t)))));
+  check('Every frame retains the original scene geometry',await page.evaluate(async()=>{const now=await drawn();return before.every((frame,t)=>frame===now[t]);}));
   await page.screenshot({path:path.join(out,'break-apart-poses.png')});
   await select(2);
   check('Clip returns after the two broken frames',await page.evaluate(()=>styk.editor.evaluatedFrame.objects.some(o=>o.unique_id===clipUid)));
   await page.screenshot({path:path.join(out,'frame-gaps.png')});
   const binary=await page.evaluate(async()=>{
-    const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{Editor}=await import('/src/editor.mjs');
-    const e=styk.editor,exporter=new DocumentExporter(),importer=new ImportClient();
+    const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{ pageEditor }=await import('/tests/support/page-editor.mjs');
+    const e=styk.editor,exporter=new DocumentExporter(),importer=new ImportClient(),numbers=svg=>svg.match(/-?\d+(?:\.\d+)?(?:e-?\d+)?/g).map(Number);
     const phases=editor=>Array.from({length:8},(_,t)=>{editor.seek(t);return editor.evaluatedFrame.objects.filter(o=>o._stykMovieclip).map(o=>[o.unique_id,o._movieclipSample]);});
-    try{const expected=phases(e),blob=await exporter.export(e.report,{format:'styk',name:'presence-test'}),result=await importer.importFile(new File([blob],'presence-test.styk')),reopened=new Editor({demo:false,layerTimeline:true}).load(result.document);const styk=JSON.stringify(phases(reopened))===JSON.stringify(expected);
-      const coordinates=editor=>Array.from({length:30},(_,t)=>{editor.seek(t);return editor.geometry.drawables.flatMap(d=>d.points.flatMap(p=>[p.x,p.y]));});
-      const geometry=coordinates(e),piv=await exporter.export(e.report,{format:'piv',name:'presence-test'}),native=await importer.importFile(new File([piv],'presence-test.piv')),pivot=new Editor({demo:false,layerTimeline:true}).load(native.document),actual=coordinates(pivot);
+    try{const expected=phases(e),blob=await exporter.export(e.report,{format:'styk',name:'presence-test'}),result=await importer.importFile(new File([blob],'presence-test.styk')),reopened=pageEditor({demo:false,layerTimeline:true}).load(result.document);const styk=JSON.stringify(phases(reopened))===JSON.stringify(expected);
+      // The Pivot file is opened in the project on show, which draws it; the project itself is put back after.
+      const geometry=(await drawn()).map(numbers),piv=await exporter.export(e.report,{format:'piv',name:'presence-test',revision:e.revision}),native=await importer.importFile(new File([piv],'presence-test.piv')),original=structuredClone(e.report),selected=e.selectedUid;
+      e.load(native.document);const actual=(await drawn()).map(numbers);e.load(original);e.select(selected);
       return {styk,pivot:geometry.every((values,t)=>values.length===actual[t].length&&values.every((value,i)=>Math.abs(value-actual[t][i])<.001))};}
     finally{exporter.dispose();importer.dispose();}
   });
@@ -59,17 +60,17 @@ try{
   await page.getByLabel('Movieclip speed',{exact:true}).fill('2');await page.getByLabel('Movieclip speed',{exact:true}).press('Tab');
   check('Playback edits leave scene length unchanged',await page.evaluate(()=>styk.editor.totalTicks)===duration);
   await page.getByLabel('Movieclip speed',{exact:true}).fill('1');await page.getByLabel('Movieclip speed',{exact:true}).press('Tab');
-  await page.evaluate(()=>window.restarted=Array.from({length:30},(_,t)=>snapshot(t)));
+  await page.evaluate(async()=>{window.restarted=await drawn();});
   await select(2);await openSection('bake');await page.locator('[data-action=movieclip-bake]').click();
   await page.waitForFunction(()=>styk.editor._undo.at(-1)?.label==='Bake animation');
-  check('Bake button preserves previous breaks and every scene frame',await page.evaluate(()=>restarted.every((frame,t)=>JSON.stringify(frame)===JSON.stringify(snapshot(t)))));
+  check('Bake button preserves previous breaks and every scene frame',await page.evaluate(async()=>{const now=await drawn();return restarted.every((frame,t)=>frame===now[t]);}));
   await page.evaluate(()=>styk.settingsUI.commit({timelineMode:'simple'}));
-  check('Simple uses exactly the same baked poses',await page.evaluate(()=>restarted.every((frame,t)=>JSON.stringify(frame)===JSON.stringify(snapshot(t)))));
+  check('Simple uses exactly the same baked poses',await page.evaluate(async()=>{const now=await drawn();return restarted.every((frame,t)=>frame===now[t]);}));
   await page.screenshot({path:path.join(out,'baked-simple.png')});
   await page.evaluate(()=>styk.settingsUI.commit({timelineMode:'advanced'}));
-  check('Switching back retains timing and geometry',await page.evaluate(()=>restarted.every((frame,t)=>JSON.stringify(frame)===JSON.stringify(snapshot(t)))));
+  check('Switching back retains timing and geometry',await page.evaluate(async()=>{const now=await drawn();return restarted.every((frame,t)=>frame===now[t]);}));
   await page.evaluate(async()=>{
-    const {Editor}=await import('/src/editor.mjs');styk.editor.load(new Editor().report);styk.settingsUI.commit({timelineMode:'simple'});
+    const {createDemo}=await import('/src/demo.mjs');styk.editor.load(createDemo());styk.settingsUI.commit({timelineMode:'simple'});
     styk.editor.select(1);styk.movieclips.open('selection');
   });
   await page.locator('.movieclip-dialog input[name=name]').fill('Simple clip');await page.locator('.movieclip-dialog button[type=submit]').click();
@@ -80,7 +81,7 @@ try{
     const e=styk.editor,o=e.evaluatedFrame.objects.find(o=>o.unique_id===before.uid);return o&&o._stykMovieclip.clock==='presence'&&o._stykMovieclip.end===undefined&&e.totalTicks===before.duration+1&&e.tick>before.tick;
   },beforeAdd));
   await page.evaluate(()=>styk.settingsUI.commit({timelineMode:'advanced'}));
-  check('The added Simple clip remains visible in Advanced',await page.evaluate(()=>styk.editor.evaluatedFrame.objects.some(o=>o._stykMovieclip)&&styk.editor.geometry.drawables.length===12));
+  check('The added Simple clip remains visible in Advanced',await page.evaluate(async()=>styk.editor.evaluatedFrame.objects.some(o=>o._stykMovieclip)&&(await drawn())[styk.editor.tick].includes('<path')));
   for(const mode of ['simple','advanced']){
     await page.evaluate(async mode=>{
       const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs'),{movieclipFigure}=await import('/src/movieclips.mjs');
@@ -89,8 +90,8 @@ try{
       report.keyframes=Array.from({length:5},()=>createFrame());
       styk.editor.load(report);styk.settingsUI.commit({timelineMode:mode});styk.editor.seek(0);styk.editor.addFigure(2);window.clipUid=styk.editor.selectedUid;
       styk.state.applyRange=false;styk.fit();
-      window.clipPhases=()=>Array.from({length:5},(_,t)=>{const e=styk.editor,rows=e.timeline;let i=0;while(i+1<rows.length&&rows[i+1].start<=t)i++;return window.sampleClip(e,i,rows[i],t);});
-      const {evaluatedFrame}=await import('/src/pivot/geometry.mjs');window.sampleClip=(e,i,row,t)=>evaluatedFrame(e.report,i,(t-row.start)/(row.count||1),t).objects.find(o=>o.unique_id===clipUid)?._movieclipSample??null;
+      // The clip's clock at each tick, read from the engine's frame there (the playhead goes back to where it was).
+      window.clipPhases=()=>Array.from({length:5},(_,t)=>{const e=styk.editor,tick=e.tick;e.seek(t);const sample=e.evaluatedFrame.objects.find(o=>o.unique_id===clipUid)?._movieclipSample??null;e.seek(tick);return sample;});
     },mode);
     // Keep canvas shortcuts out of the timeline's separate frame clipboard.
     await page.locator('#viewport').focus();await page.keyboard.press('Control+c');

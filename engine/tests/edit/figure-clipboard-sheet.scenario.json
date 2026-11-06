@@ -1,0 +1,143 @@
+{
+ "name": "figure-clipboard-sheet",
+ "document": "sheet-layers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "pasteSelection"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "copySelection"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "pasteSelection",
+   {
+    "pasteMode": "instance",
+    "offset": 0
+   }
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    2
+   ]
+  ],
+  [
+   "copySelection"
+  ],
+  [
+   "pasteSelection",
+   {
+    "pasteMode": "unique",
+    "pasteDepth": "front"
+   }
+  ],
+  [
+   "pasteSelection",
+   {
+    "pasteMode": "bogus"
+   }
+  ],
+  [
+   "pasteSelection",
+   {
+    "pasteDepth": "x"
+   }
+  ],
+  [
+   "pasteSelection",
+   {
+    "offset": "x"
+   }
+  ],
+  [
+   "@select",
+   3,
+   -1
+  ],
+  [
+   "copySelection"
+  ],
+  [
+   "setActiveLayer",
+   "layer-2"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "cutSelection"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "duplicateSelection"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "duplicateSelection",
+   {
+    "offset": 10
+   }
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "@select",
+   3,
+   -1
+  ],
+  [
+   "setActiveLayer",
+   "layer-1"
+  ],
+  [
+   "duplicateSelection"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

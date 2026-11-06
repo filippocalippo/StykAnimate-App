@@ -1,0 +1,57 @@
+{
+ "name": "clip-break-sheet",
+ "document": "clip-break-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "moveSelection",
+   7,
+   -3
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

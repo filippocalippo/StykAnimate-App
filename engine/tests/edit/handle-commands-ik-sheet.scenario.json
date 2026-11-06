@@ -1,0 +1,62 @@
+{
+ "name": "handle-commands-ik-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/stretch.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "nudgeHandle",
+   6,
+   2
+  ],
+  [
+   "segmentValues",
+   {
+    "relative": true
+   }
+  ],
+  [
+   "setSegmentValues",
+   {
+    "angle": 20
+   },
+   {
+    "relative": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "alignHandle",
+   0,
+   1
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "setSegmentValues",
+   {
+    "length": 70
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

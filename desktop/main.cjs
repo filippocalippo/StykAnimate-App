@@ -1,20 +1,21 @@
 'use strict';
-const { t, messageError, localization, normalizeLocale } = require('./localization.cjs');
+const { t, messageError, useLocale } = require('./localization.cjs');
 
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, session, clipboard, contentTracing } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, session, clipboard, contentTracing, protocol } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs/promises');
 const { mkdirSync, existsSync } = require('node:fs');
-const { startDesktopHost } = require('./web-host.cjs');
+const { registerAppScheme, handleAppProtocol } = require('./web-host.cjs');
 const { applyGpuSwitches, relaunchOnX11 } = require('./gpu-switches.cjs');
 const { RecoveryStore, atomicWrite } = require('./recovery.cjs');
 const { FileStreams } = require('./file-streams.cjs');
+const { PagePushes } = require('./page-pushes.cjs');
 const { SharedClipboard } = require('./shared-clipboard.cjs');
 const { workspaceDirectory } = require('./workspace-instance.cjs');
 const { spawn } = require('node:child_process');
-const { randomBytes } = require('node:crypto');
+const { sampleRoot, listSamples, readSample } = require('./samples.cjs');
 const { WorkspacePreferences } = require('./preferences.cjs');
 const { SupportService } = require('./support.cjs');
 const { ProjectFiles } = require('./project-files.cjs');
@@ -49,9 +50,8 @@ const fileFilters = () => [
   { name: t('desktop.main.stykanimateProject'), extensions: ['styk', 'json'] },
 ];
 let window;
-let backend;
-// Per-launch secret required by the loopback codec API; never persisted.
-const apiToken = randomBytes(32).toString('hex');
+// The origin the editor page is served from: the app scheme (web-host.cjs).
+let webHost;
 let fileStreams;
 let videoExports;
 let audioImports;
@@ -65,7 +65,8 @@ let telemetryClosed = false;
 let updates;
 let startupShown = false;
 let traceRunning = false;
-let pageLoaded = false;
+// What the main process sends to the page on its own waits here until the page's listeners are on (desktop/page-pushes.cjs).
+const pushes = new PagePushes((channel, args) => { if (window && !window.isDestroyed()) window.webContents.send(channel, ...args); });
 let pendingProtocol = process.argv.find(value => /^stykanimate:\/\//i.test(value));
 // A public library link (stykanimate://library/<id>) waits here until the
 // workspace takes it, so a link that starts the app is not lost during startup.
@@ -76,10 +77,10 @@ function handleProtocol(value) {
     if (url.protocol !== 'stykanimate:' || url.username || url.password || url.search || url.hash || url.port) return false;
     const root = ['', '/'].includes(url.pathname), asset = /^\/([^/]+)\/?$/.exec(url.pathname)?.[1];
     if (!(root && ['open', 'privacy', 'library'].includes(url.hostname)) && !(url.hostname === 'library' && isPublicId(asset))) return false;
-    if (!window || !pageLoaded) { pendingProtocol = value; return true; }
+    if (!window) { pendingProtocol = value; return true; }
     if (window.isMinimized()) window.restore(); window.show(); window.focus();
     if (url.hostname === 'privacy') sendAction('privacy');
-    if (url.hostname === 'library') { publicLibraryLink = asset ?? ''; window.webContents.send('styk:public-library-link'); }
+    if (url.hostname === 'library') { publicLibraryLink = asset ?? ''; pushes.send('styk:public-library-link'); }
     return true;
   } catch { return false; }
 }
@@ -93,6 +94,13 @@ let pendingFiles = process.argv.slice(app.isPackaged ? 1 : 2).filter((arg) => /\
 // Windows and macOS use Chromium's normal driver allowlist. Linux needs the
 // Vulkan WebGPU opt-in to reach the GPU; see gpu-switches.cjs.
 applyGpuSwitches(app.commandLine);
+registerAppScheme(protocol);
+
+// STYK_BACKGROUND_WINDOW=1 (scripts and agents driving the app, packaged smoke tests too) opens the
+// window off-screen, out of the taskbar and without taking focus, and keeps it drawing there
+// (Windows would otherwise count an off-screen window as occluded and stop its frames).
+const backgroundWindow = process.env.STYK_BACKGROUND_WINDOW === '1';
+if (backgroundWindow) app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 app.setName('StykAnimate');
 const profileDirectory = process.env.STYK_USER_DATA_DIR || (!app.isPackaged ? path.join(APP_ROOT, '.desktop-data') : null);
@@ -109,8 +117,18 @@ if (!primaryInstance) {
   app.setPath('sessionData', instanceDirectory);
   app.setPath('crashDumps', path.join(instanceDirectory, 'crashes'));
 }
+/**
+ * IndexedDB here is temporary worker storage (undo caches), so the previous launch's is reclaimed before any editor or
+ * worker can use the session. The folder goes before Chromium opens its storage, which happens after `ready`: far quicker
+ * than clearing it through the session, and the page loads once it is gone. Local storage stays: the origin is the same on
+ * every launch, so recent colours, palettes and the brush library last, as in the browser; settings, layout, hotkeys and
+ * recovery live in native files (`scripts/smoke-storage.mjs`, and the restart smokes clear local storage to prove it).
+ */
+let browserStorageCleared = Promise.resolve();
 if (!primaryInstance && pendingProtocol) app.quit();
 else {
+  browserStorageCleared = fs.rm(path.join(app.getPath('sessionData'), 'IndexedDB'), {recursive: true, force: true})
+    .then(() => {}, error => console.warn('Temporary browser storage cleanup:', error.message));
   app.on('second-instance', (_event, argv) => {
     // Each ordinary launch owns its project. Protocol links still target the
     // primary workspace without opening an extra editor.
@@ -126,7 +144,7 @@ else {
 
 function trusted(event) {
   const url = event.senderFrame?.url || '';
-  if (!window || event.sender !== window.webContents || !backend || new URL(url).origin !== backend.origin) {
+  if (!window || event.sender !== window.webContents || !webHost || !webHost.owns(url)) {
     throw messageError(new Error(''), 'desktop.main.errors.thisOperationIsRestrictedToTheStykAnimateWorkspace', {});
   }
 }
@@ -144,7 +162,7 @@ function handle(channel, listener) {
 
 function sendAction(action) {
   if (!window || window.isDestroyed()) return;
-  window.webContents.send('styk:menu-action', action);
+  pushes.send('styk:menu-action', action);
 }
 
 function windowState() {
@@ -206,7 +224,8 @@ async function readImportFile(file) {
   // The renderer transfers these compact source bytes to its import worker.
   // Expanded JSON is never parsed or transported through Electron main.
   return {
-    bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    // A file this large owns its buffer: sent as it is, not copied.
+    bytes: bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes.buffer : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
     filename: path.basename(file),
     nativePath: file,
     openToken: projectFiles.rememberOpen(path.resolve(file)),
@@ -227,15 +246,12 @@ async function rememberRecent(file) {
 }
 
 async function queueOpenFile(file) {
-  if (!window || !backend || !pageLoaded) { pendingFiles.push(file); return; }
-  try { window.webContents.send('styk:file-opened', await readImportFile(file)); }
+  if (!window || !webHost) { pendingFiles.push(file); return; }
+  try { pushes.send('styk:file-opened', await readImportFile(file)); }
   catch (error) { dialog.showErrorBox(t('desktop.main.unableToOpenFile'), error.message); }
 }
 
-// loadURL resolves around did-finish-load while webContents.isLoading() may
-// still report true, so opens queued here must be flushed by the load events
-// rather than a one-shot drain. did-finish-load also guarantees the renderer's
-// module scripts ran, so its onOpenFile/menu-action listeners are registered.
+// Opens and links that came before the window existed go to the page once it does; the page's listeners may not be on yet, which `pushes` waits for.
 async function flushPendingOpens() {
   if (pendingProtocol) { const value = pendingProtocol; pendingProtocol = null; handleProtocol(value); }
   const files = pendingFiles.splice(0);
@@ -370,6 +386,8 @@ function registerIpc() {
     return library.saveBytes({folder: typeof options?.folder === 'string' ? options.folder : '', name: item.name, extension, kind: item.kind, thumbnail: options?.thumbnail, bytes});
   });
   handle('styk:public-library-page', (event, id) => { trusted(event); return shell.openExternal(publicLibrary.pageFor(id)); });
+  // The page's listeners for what the main process pushes are on: everything held until now goes out.
+  handle('styk:page-listening', event => { trusted(event); pushes.listen(); return true; });
   handle('styk:public-library-link', event => { trusted(event); const id = publicLibraryLink; publicLibraryLink = null; return id; });
   recentFiles = new RecentFiles({directory: app.getPath('userData'), limit: 20});
   handle('styk:recent-list', event => { trusted(event); return recentFiles.list(); });
@@ -477,28 +495,12 @@ function registerIpc() {
   handle('styk:editor-settings-set', async (event, value) => {
     trusted(event);
     await editorSettings.set(value);
-    if (localization.setLocale(normalizeLocale(value?.locale))) nativeMenu();
+    if (useLocale(value?.locale)) nativeMenu();
     return {saved: true};
   });
   handle('styk:vfx-presets-get', (event) => { trusted(event); return vfxPresets.get(); });
   handle('styk:vfx-presets-set', (event, value) => { trusted(event); return vfxPresets.set(value); });
   fileStreams = new FileStreams({onCommitError:error=>telemetry?.error(error?.name||'Error','app',null,{code:error?.code||'write_failed',stage:'write'})});
-  const clipboardFile = path.join(app.getPath('userData'), 'frame-clipboard.styk');
-  let clipboardWriteToken = null, clipboardControl = Promise.resolve();
-  handle('styk:clipboard-write-begin', (event, options) => {
-    trusted(event); fileStreams.validateSize(options?.size);
-    if (!options.size) throw messageError(new Error(''), 'desktop.main.errors.theFrameClipboardIsEmpty', {});
-    const pending = clipboardControl.then(async () => {
-      if (clipboardWriteToken) await fileStreams.cancel(clipboardWriteToken);
-      const transfer = await fileStreams.beginWrite({destination: clipboardFile, size: options.size});
-      clipboardWriteToken = transfer.token; return transfer;
-    });
-    clipboardControl = pending.catch(() => {}); return pending;
-  });
-  handle('styk:clipboard-read-begin', async event => {
-    trusted(event); const transfer = await fileStreams.beginRead(clipboardFile);
-    return transfer ? {...transfer, name: 'Copied keyframes'} : null;
-  });
   const projectTransfers = new Map();
   let projectRequestPending = false;
   // A save belongs to the project in front: bringing another one there ends what the previous one had in flight.
@@ -720,10 +722,14 @@ function registerIpc() {
     return windowState();
   });
   handle('styk:window-state', (event) => { trusted(event); return windowState(); });
-  // Only the trusted workspace frame receives the codec session token.
-  ipcMain.on('styk:api-token', (event) => {
-    try { trusted(event); event.returnValue = apiToken; }
-    catch { event.returnValue = ''; }
+  // The sample list and the bytes of one sample, under the rules in samples.cjs.
+  handle('styk:samples-list', async (event) => {
+    trusted(event);
+    return listSamples(await sampleRoot({ appRoot: APP_ROOT, packaged: app.isPackaged }));
+  });
+  handle('styk:sample-read', async (event, relative) => {
+    trusted(event);
+    return readSample(await sampleRoot({ appRoot: APP_ROOT, packaged: app.isPackaged }), relative);
   });
   ipcMain.on('styk:memory-bytes', (event) => {
     try { trusted(event); event.returnValue = os.totalmem(); }
@@ -752,10 +758,12 @@ function startupView() {
   return pendingFiles.length || pendingProtocol ? 'editor' : null;
 }
 
-async function createWindow() {
+/** `storageCleared` settles when the previous launch's browser storage is gone: the page loads after it. */
+async function createWindow(storageCleared = Promise.resolve()) {
   const view = startupView();
   window = new BrowserWindow({
     width: 1560, height: 1000, minWidth: 1000, minHeight: 680,
+    ...(backgroundWindow ? { x: -20000, y: -20000, skipTaskbar: true } : {}),
     backgroundColor: '#0a0b0f', show: false,
     title: 'StykAnimate',
     icon: path.join(__dirname, 'assets', 'stykanimate.png'),
@@ -766,7 +774,7 @@ async function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true, nodeIntegration: false, sandbox: true,
       webSecurity: true, allowRunningInsecureContent: false,
-      backgroundThrottling: true, spellcheck: false,
+      backgroundThrottling: !backgroundWindow, spellcheck: false,
       additionalArguments: view ? [`--styk-startup-view=${view}`] : [],
     },
   });
@@ -775,7 +783,7 @@ async function createWindow() {
     return { action: 'deny' };
   });
   window.webContents.on('will-navigate', (event, url) => {
-    if (new URL(url).origin !== backend.origin) event.preventDefault();
+    if (!webHost.owns(url)) event.preventDefault();
   });
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   const editorWindow = window;
@@ -792,7 +800,7 @@ async function createWindow() {
       if (editorWindow.isDestroyed() || !rendererFailed) return;
       if (answer.response === 0) {
         documentState = { name: 'Untitled', dirty: false, unsaved: 0, unsavedName: '' };
-        await editorWindow.loadURL(backend.origin);
+        await editorWindow.loadURL(webHost.origin);
       } else if (answer.response === 2) {
         // The dead renderer cannot save. Closing this window must retain the
         // existing recovery file and must not wait for a save acknowledgement.
@@ -806,7 +814,7 @@ async function createWindow() {
   }
   window.webContents.on('render-process-gone', (_event, details) => {
     if (details.reason === 'clean-exit' || quitting) return;
-    rendererFailed = true; pageLoaded = false;
+    rendererFailed = true; pushes.reset();
     telemetry?.error('RendererCrash', 'renderer', 'renderer_crashes');
     // One bounded, local diagnostic survives even when optional telemetry is
     // disabled. It contains no document contents or user identifiers.
@@ -834,21 +842,22 @@ async function createWindow() {
     }
   });
   window.on('closed', () => { window = null; });
-  window.once('ready-to-show', () => window.show());
-  window.webContents.on('did-start-loading', () => { pageLoaded = false; });
+  window.once('ready-to-show', () => backgroundWindow ? window.showInactive() : window.show());
+  window.webContents.on('did-start-loading', () => { pushes.reset(); });
   // A page that loads again opens its own documents; the previous page's cannot be written any more.
   window.webContents.on('did-start-navigation', (event, _url, inPlace, mainFrame) => {
     if ((event.isMainFrame ?? mainFrame) && !(event.isSameDocument ?? inPlace)) projectFiles.clear();
   });
-  window.webContents.on('did-finish-load', () => { rendererFailed = false; pageLoaded = true; void flushPendingOpens(); });
-  await window.loadURL(backend.origin);
+  window.webContents.on('did-finish-load', () => { rendererFailed = false; });
+  await storageCleared;
+  await window.loadURL(webHost.origin);
   if (process.env.STYK_DEVTOOLS === '1') window.webContents.openDevTools({ mode: 'detach' });
   await flushPendingOpens();
 }
 
 async function start() {
   const saved = await new WorkspacePreferences(app.getPath('userData'), {filename: 'editor-settings.json'}).get();
-  localization.setLocale(normalizeLocale(saved.locale));
+  useLocale(saved.locale);
   const availability = updateAvailabilityDetails({ packaged: app.isPackaged, platform: process.platform,
     appImage: process.env.APPIMAGE,
     portable: Boolean(process.env.PORTABLE_EXECUTABLE_DIR), installed: existsSync(path.join(path.dirname(process.execPath), 'Uninstall StykAnimate.exe')) });
@@ -869,11 +878,9 @@ async function start() {
   const memoryTimer = setInterval(() => {
     if (telemetry?.state.consent.diagnostics && window?.isFocused()) {
       const metrics = app.getAppMetrics();
-      const phase=telemetry.resourcePhase||'unknown',epoch=telemetry.epoch;
+      const phase=telemetry.resourcePhase||'unknown';
+      // The Pivot codec runs in a worker of the editor page, so the renderer's share includes it.
       telemetry.sampleResources({memory_process:metrics.reduce((sum,item)=>sum+(item.memory?.workingSetSize||0),0)/1024},phase);
-      if(backend?.origin)void fetch(backend.origin+'/api/health',{signal:AbortSignal.timeout(1500)}).then(response=>response.json()).then(value=>{
-        if(telemetry.epoch===epoch&&window?.isFocused()&&Number.isFinite(value.processMemoryMiB))telemetry.sampleResources({memory_backend:value.processMemoryMiB},phase);
-      }).catch(()=>{});
       telemetry.sampleMemory(metrics.reduce((sum, item) => sum + (item.memory?.workingSetSize || 0), 0) / 1024);
       telemetry.record({ epoch: telemetry.epoch, data: { gauges: { process_cpu_percent: metrics.reduce((sum, item) => sum + (item.cpu?.percentCPUUsage || 0), 0) } } });
     }
@@ -881,21 +888,20 @@ async function start() {
   library = new LibraryStore(process.env.STYK_LIBRARY_DIR || path.join(app.getPath('documents'), 'StykAnimate', 'library'));
   // A temporarily unavailable Documents volume should not prevent animation work.
   void library.init().catch(error => console.warn('Library initialization:', error.message));
-  backend = await startDesktopHost({
-    appRoot: APP_ROOT, resourcesPath: process.resourcesPath, packaged: app.isPackaged, token: apiToken,
-    log: (message) => { if (process.env.STYK_DEBUG === '1') process.stderr.write(message); },
-    onError: (message) => { telemetry?.error('BackendError', 'backend', 'backend_errors'); if (window && !window.isDestroyed()) window.webContents.send('styk:backend-error', message); },
-  });
+  // The packaged app ships its scripts bundled (scripts/build-app.mjs); from source the page loads the modules, unless
+  // STYK_BUNDLE_DIR names a bundle built with `npm run app:bundle`.
+  const packagedBundle = path.join(process.resourcesPath || '', 'bundle');
+  const bundleRoot = app.isPackaged ? (existsSync(packagedBundle) ? packagedBundle : null) : process.env.STYK_BUNDLE_DIR || null;
+  webHost = await handleAppProtocol({ protocol, appRoot: APP_ROOT, resourcesPath: process.resourcesPath, packaged: app.isPackaged, bundleRoot });
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
-  // Each workspace owns a separate Chromium session directory, and each
-  // launch gets a new loopback origin. IndexedDB here is temporary worker
-  // storage only; native recovery, preferences and library data live in files.
-  // Reclaim old-origin undo caches before any editor/worker can use the session.
-  await session.defaultSession.clearStorageData({storages:['indexdb']}).catch(error=>console.warn('Temporary drawing cache cleanup:',error.message));
+  // Each workspace owns a separate Chromium session directory. IndexedDB here is
+  // temporary worker storage only; native recovery, preferences and library data
+  // live in files. Reclaim the previous launch's undo caches before any
+  // editor/worker can use the session.
   nativeMenu();
   registerIpc();
-  await createWindow();
+  await createWindow(browserStorageCleared);
   updates.start();
   app.on('activate', () => { if (!window) createWindow(); });
 }
@@ -909,5 +915,4 @@ app.on('before-quit', (event) => {
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('will-quit', () => updates?.dispose());
-app.on('will-quit', () => { backend?.stop(); library?.dispose().catch(() => {}); fileStreams?.dispose().catch(() => {}); videoExports?.dispose().catch(() => {}); vfwExports?.dispose().catch(() => {}); audioImports?.dispose().catch(() => {}); });
-process.on('exit', () => backend?.stop());
+app.on('will-quit', () => { library?.dispose().catch(() => {}); fileStreams?.dispose().catch(() => {}); videoExports?.dispose().catch(() => {}); vfwExports?.dispose().catch(() => {}); audioImports?.dispose().catch(() => {}); });

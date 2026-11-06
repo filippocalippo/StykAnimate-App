@@ -889,6 +889,11 @@ class Handler(BaseHTTPRequestHandler):
         if etag:
             self.send_header("ETag", etag)
         self.send_header("X-Content-Type-Options", "nosniff")
+        # The engine's worker threads share one WebAssembly memory, which browsers
+        # only allow on a cross-origin isolated page.
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         origin = self.headers.get("Origin")
         if origin and origin != "null":
             parts = urlsplit(origin)

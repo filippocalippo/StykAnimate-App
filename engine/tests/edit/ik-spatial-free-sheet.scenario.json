@@ -1,0 +1,60 @@
+{
+ "name": "ik-spatial-free-sheet",
+ "document": "ik-spatial-free.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   223,
+   241
+  ],
+  [
+   "poseJoint",
+   231,
+   235
+  ],
+  [
+   "poseJoint",
+   203,
+   251
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "poseJoint",
+   219,
+   249
+  ],
+  [
+   "setSpatialIKTarget",
+   {
+    "swivel": -0.2
+   }
+  ],
+  [
+   "setSpatialIKTarget",
+   {
+    "depth": 3
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

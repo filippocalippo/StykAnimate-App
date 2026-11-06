@@ -1,0 +1,49 @@
+{
+ "name": "clip-native-extended-bounds",
+ "document": "clip-native-extended-bounds.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 10,
+    "end": 20
+   },
+   {
+    "move": true
+   }
+  ],
+  [
+   "@seek",
+   19.75
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 5,
+    "end": null
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   30
+  ]
+ ]
+}

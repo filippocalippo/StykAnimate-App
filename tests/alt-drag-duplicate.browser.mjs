@@ -13,7 +13,7 @@ const check = (name, value) => { assert.ok(value, name); checks.push(name); cons
 async function setup() {
   await page.evaluate(async () => {
     const {emptyDocument, createFrame, createObject} = await import('/src/demo.mjs');
-    const {worldToScreen} = await import('/src/renderer.mjs');
+    const {worldToScreen} = await import('/src/renderer-geometry.mjs');
     const report = emptyDocument(), figure = report.figure_types[0];
     report.keyframes = [0, 1, 2].map(i => createFrame([createObject(figure, 1, 240 + i * 20, 270)], 10));
     styk.editor.load(report, 'Alt-drag acceptance'); styk.editor.select(1);

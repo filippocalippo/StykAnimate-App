@@ -1,5 +1,5 @@
 /** Serial, reproducible audit driver; does not replace production implementations.
- * node scripts/benchmark-codebase-sweep.mjs [label] [kernels|desktop|all|evidence]
+ * node scripts/benchmark-codebase-sweep.mjs [label] [kernels|evidence]
  * Detailed output stays local; the audit's reviewed evidence summary is committed.
  */
 import assert from 'node:assert/strict';
@@ -12,7 +12,7 @@ import {performanceSourceHashes} from './performance-source-hashes.mjs';
 
 const label = process.argv[2] ?? 'codebase-sweep', mode = process.argv[3] ?? 'kernels';
 assert.match(label, /^[a-zA-Z0-9_-]+$/);
-assert.ok(['kernels', 'desktop', 'all', 'evidence'].includes(mode));
+assert.ok(['kernels', 'evidence'].includes(mode));
 if (mode === 'evidence') {
   // Collect this audit's fixed recorded runs; never substitute newly generated
   // samples into the report silently. A later audit should use its own dates.
@@ -24,16 +24,10 @@ if (mode === 'evidence') {
       platform: process.platform, release: os.release(), releaseRuntimeMismatch: 'Node 24.16.0 and Python 3.11.15; release CI pins Node 24.11.0/Python 3.12.9'},
     measurements: {}};
   for (const name of ['benchmark-codebase-sweep.mjs', 'benchmark-codec-topology-sweep.py',
-    'benchmark-drawing-filter-sweep.mjs', 'benchmark-layer-sheet-sweep.mjs',
-    'benchmark-localization-sweep.mjs', 'performance-sweep-browser-fixture.mjs'])
+    'benchmark-localization-sweep.mjs'])
     evidence.benchmarkSources[`scripts/${name}`] = createHash('sha256').update(await readFile(`scripts/${name}`)).digest('hex');
-  for (const name of ['animation-modes', 'animation-locality', 'builder', 'node-selection',
-    'rig-constraints', 'movieclips', 'telemetry', 'connected-transactions', 'drawing-filters'])
+  for (const name of ['node-selection', 'telemetry'])
     evidence.measurements[name] = await read(`${base}/${name}.json`);
-  evidence.measurements.audio = await read(`${base}/audio/benchmark.json`);
-  evidence.measurements.animationMemory = await read(`${base}/animation-memory/memory.json`);
-  evidence.measurements.layerSheet = await read('artifacts/performance-sweep/layer-sheet/sweep-20261001.json');
-  evidence.measurements.layerSheetSourceCheck = await read(`${later}/layer-sheet-source-check.json`);
   evidence.measurements.localization = await read('artifacts/performance-sweep/sweep-20261001-r2/localization.json');
   evidence.measurements.stkTopology = await read(`${later}/stk-topology.json`);
   evidence.measurements.browser = await read(`${later}/browser.json`);
@@ -43,9 +37,6 @@ if (mode === 'evidence') {
   evidence.verification = await read(`${later}/verification.json`);
   evidence.measurements.desktop = await Promise.all([30, 300].map(async figures => ({figures,
     report: await read(`artifacts/performance-goal/sweep-20261001-r2-${figures}/report.json`)})));
-  evidence.measurements.fill = {};
-  for (const kind of ['drawing-fill-4k', 'drawing-fill-sparse'])
-    evidence.measurements.fill[kind] = JSON.parse((await readFile(`${base}/${kind}.log`, 'utf8')).split('\n').find(line => line.startsWith('{')));
   // Full hashes appear once where many reports certify the same bytes. Keep
   // per-run differences explicitly; never flatten differing source versions.
   for (const item of evidence.measurements.desktop) {
@@ -102,54 +93,18 @@ async function run(name, args, env = {}) {
   await writeFile(path.join(output, `manifest-${mode}.json`), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report.rows.at(-1)));
 }
-if (mode !== 'desktop') {
+{
   const jobs = [
-    ['animation-modes', ['--expose-gc', 'scripts/benchmark-animation-modes.mjs', label]],
-    ['animation-locality', ['--expose-gc', 'scripts/benchmark-animation-locality.mjs', '.', path.join(output, 'animation-locality.json')]],
-    ['animation-memory', ['--expose-gc', 'scripts/benchmark-animation-memory.mjs'], {STYK_BENCH_OUT: path.join(output, 'animation-memory')}],
-    ['connected-transactions', ['scripts/benchmark-connected-transactions.mjs']],
-    ['builder', ['scripts/benchmark-builder.mjs', label]],
     ['node-selection', ['scripts/benchmark-node-selection.mjs']],
-    ['rig-constraints', ['--expose-gc', 'scripts/benchmark-rig-constraints.mjs']],
-    ['movieclips', ['scripts/benchmark-movieclips.mjs']],
-    ['audio', ['scripts/benchmark-audio.mjs'], {STYK_BENCH_OUT: path.join(output, 'audio')}],
     ['telemetry', ['scripts/benchmark-telemetry.mjs']],
-    ['drawing-filters', ['--expose-gc', 'scripts/benchmark-drawing-filter-sweep.mjs', path.join(output, 'drawing-filters.json')]],
-    ['drawing-fill-4k', ['--expose-gc', 'scripts/benchmark-drawing-fill.mjs', '--sample', new URL('../src/drawing-fill.mjs', import.meta.url).href, 'uniform4k']],
-    ['drawing-fill-sparse', ['--expose-gc', 'scripts/benchmark-drawing-fill.mjs', '--sample', new URL('../src/drawing-fill.mjs', import.meta.url).href, 'distant']],
   ];
   for (const [name, args, env] of jobs) await run(name, args, env);
   for (const [name, source] of Object.entries({
-    'animation-modes': `artifacts/animation-mode-performance/${label}.json`,
-    'connected-transactions': 'artifacts/connected-editing/transactions/report.json',
-    builder: `artifacts/builder-performance/${label}.json`,
     'node-selection': 'artifacts/join-selection/benchmark.json',
-    'rig-constraints': 'artifacts/rig-constraints/benchmark.json',
-    movieclips: 'artifacts/movieclips/performance.json', telemetry: 'artifacts/telemetry-performance.json',
+    telemetry: 'artifacts/telemetry-performance.json',
   })) {
     if (report.rows.find(row => row.name === name)?.exitCode === 0)
       await writeFile(path.join(output, `${name}.json`), await readFile(source));
-  }
-}
-if (mode !== 'kernels') {
-  await run('shell', ['scripts/benchmark-shell-startup.mjs', label, 'normal']);
-  const {emptyDocument, createObject, createFrame} = await import('../src/demo.mjs');
-  const {buildContainerV2} = await import('../src/native-container.mjs');
-  for (const count of [30, 300]) {
-    const document = emptyDocument(), figure = document.figure_types[0];
-    document.fps = 60;
-    document.keyframes = Array.from({length: 120}, (_, tick) => createFrame(Array.from({length: count}, (_, slot) =>
-      createObject(figure, slot + 1, 20 + (slot % 30) * 20 + tick % 10, 40 + Math.floor(slot / 30) * 35,
-        {scale: .25})), 1));
-    const fixture = path.join(output, `synthetic-${count}.styk`);
-    const bytes = await buildContainerV2(document, 'styk');
-    await writeFile(fixture, bytes);
-    report.fixtures ??= [];
-    report.fixtures.push({figures: count, frames: 120, bytes: bytes.byteLength,
-      sha256: createHash('sha256').update(bytes).digest('hex')});
-    await run(`desktop-${count}`, ['scripts/benchmark-performance-desktop.mjs', fixture, `${label}-${count}`, '3'],
-      {STYK_BENCH_PLAYBACK: '1', STYK_BENCH_PLAYBACK_FRAMES: '120', STYK_BENCH_EDITING: '0',
-        STYK_BENCH_EXPORT: '1', STYK_BENCH_EXPORT_FORMATS: 'styk'});
   }
 }
 const after = await performanceSourceHashes();

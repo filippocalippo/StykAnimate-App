@@ -1,4 +1,4 @@
-import { cameraValues } from './editor-camera.mjs';
+import { cameraValues } from './pivot/model.mjs';
 import { canvasFont } from './ui/font-loading.mjs';
 
 /** Document-space geometry with controls sized in screen pixels. */

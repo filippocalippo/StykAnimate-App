@@ -13,7 +13,7 @@ import {VFX_LIMIT} from './vfx.mjs';
 export const USER_PRESET_LIMIT=60;
 export const USER_PRESET_NAME_LENGTH=60;
 /** Keys a preset may carry: plenty for a looping pulse, never a whole take. */
-export const USER_PRESET_KEY_LIMIT=4000;
+const USER_PRESET_KEY_LIMIT=4000;
 const STORAGE_KEY='stykanimate.vfx-presets.v1';
 const ID=/^[\w-]{1,80}$/;
 

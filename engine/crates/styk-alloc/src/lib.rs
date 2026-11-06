@@ -1,0 +1,383 @@
+#![cfg_attr(all(target_arch = "wasm32", target_feature = "atomics"), feature(link_llvm_intrinsics), allow(internal_features))]
+//! The allocator of the engine's WebAssembly modules.
+//!
+//! Rust's allocator on `wasm32-unknown-unknown` (dlmalloc) asks the host for more linear
+//! memory exactly when its free space runs out: one 64 KiB page at a time for the many
+//! small records of a document. Each `memory.grow` is a call into the host, which commits
+//! the pages and replaces the memory's buffer, and costs about a millisecond whatever the
+//! size of the step (measured in Node on Windows on a large memory: 1.1 to 1.7 ms for 1 page or 2048 pages
+//! alike). Opening a large Pivot file made tens of thousands of them and spent most of its
+//! time there.
+//!
+//! [`GrowAhead`] is the standard allocator, and whenever that allocator had to grow the
+//! memory it grows it further in one step ([`grow_ahead_pages`]) and hands the extra pages
+//! back to the allocator's free space. Allocation results are unchanged; the memory
+//! reaches the same size in a few dozen steps instead of tens of thousands, and ends at
+//! most one step larger than the document needs. A memory that cannot grow that far (its
+//! maximum, D14) is grown by the largest step that fits, down to what the allocation asked.
+//!
+//! # Threads
+//!
+//! The engine's threads share one memory and so one heap, whose lock the toolchain's allocator spins on. Opening a large document
+//! made seven million calls from four threads at once, half of them finding the lock held, and each helper thread spent a fifth to
+//! two fifths of the open waiting for it. Two things changed (measurements in `docs/engine/memory.md`):
+//!
+//! - **A cache of small blocks for each thread** ([`cache`]): requests of up to 508 bytes (98% of the calls) are served from a list the
+//!   thread owns, and the heap's lock is taken once for a batch of blocks to fill an empty list or empty a full one. A cache holds at
+//!   most about 2 KiB of each size (125 KiB for all 63 sizes of a thread, a few KiB in practice). Blocks freed by another thread than
+//!   the one that allocated them join the freeing thread's lists; a thread that ends gives its lists back when it frees its
+//!   thread-local block (`__wbindgen_thread_destroy`), and one that is terminated loses at most its lists, which stay allocated.
+//! - **Our own lock** ([`lock`]), taken once for a batch of blocks, and once more for a growth of the memory (the toolchain's own lock
+//!   inside stays free, since only one thread at a time reaches it). Waiting is spinning, on every thread: the holds are short, and a thread
+//!   that slept would have to be woken (the interface thread cannot sleep at all, D7).
+//!
+//! The bytes handed out are counted per thread and added to the shared counter in steps of 16 KiB, so that every call does not write
+//! one cache line all the threads share: [`live_bytes`] is exact for the thread that asks and short by at most that step for each of the
+//! others, and a request of 8 KiB or more is counted at once.
+//!
+//! # Running out of memory
+//!
+//! A failed allocation that nothing checks aborts the module (`unreachable`), and a module that
+//! aborted is gone for good. The allocator therefore counts the bytes it has handed out
+//! ([`live_bytes`]) against a limit the host sets to the memory's maximum ([`set_limit`]) and keeps
+//! the last sixteenth of it ([`ceiling`]) for the small allocations nothing can refuse (a record, a
+//! string, an error message). A request of [`LARGE_BYTES`] or more that would reach into that
+//! reserve is refused with a null pointer: code that allocates fallibly (`Vec::try_reserve`) gets
+//! an error it can report. Work that allocates in many pieces (opening a document, decoding a
+//! picture, an editing call) first [`reserve`]s the most it expects to need and refuses itself
+//! when the memory cannot give it; the reservation counts against every other request until it is
+//! dropped. Callers only ever see [`OutOfMemory`].
+//!
+//! A module whose limit is not set (the codec, the drawing engine) is never refused. Native builds
+//! use the system allocator, which does not count: there [`live_bytes`] stays 0 and only a limit a
+//! test sets ([`with_limit`]) makes [`admit`] refuse.
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(any(all(target_arch = "wasm32", target_feature = "atomics"), test))]
+mod cache;
+#[cfg(any(all(target_arch = "wasm32", target_feature = "atomics"), test))]
+mod lock;
+
+/// WebAssembly pages are 64 KiB.
+pub const PAGE_BYTES: usize = 64 * 1024;
+/// The least memory added in one step: 16 MiB.
+const MIN_AHEAD_PAGES: usize = 256;
+/// The most memory added in one step: 32 MiB. Every page of a step is committed in the browser's accounting whether or
+/// the module touches it or not, so the tail a step leaves unused is memory the app pays for: 32 MiB at most, where
+/// 128 MiB steps left up to a hundred megabytes of a large document's memory dead.
+const MAX_AHEAD_PAGES: usize = 512;
+/// Requests of this size or more are refused when they would reach into the reserve: 256 KiB.
+pub const LARGE_BYTES: usize = 256 * 1024;
+
+/// How many pages to add ahead of the allocator when a memory of `current` pages had to
+/// grow: an eighth of the memory, between 16 and 32 MiB, so the number of steps stays
+/// small (about seventy for the largest memory, a millisecond or two each) while the unused tail stays small.
+pub fn grow_ahead_pages(current: usize) -> usize {
+    (current / 8).clamp(MIN_AHEAD_PAGES, MAX_AHEAD_PAGES)
+}
+
+/// Bytes the allocator has handed out and not taken back (WebAssembly modules only). Threads add to it in steps and a free can arrive
+/// before the allocation it undoes, so it wraps: read it through [`live_bytes`].
+static LIVE: AtomicUsize = AtomicUsize::new(0);
+/// The most bytes the host lets the module hold: the memory's maximum. Unset: no limit.
+static LIMIT: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+/// Bytes work in progress has reserved ([`reserve`]) and not released yet.
+static RESERVED: AtomicUsize = AtomicUsize::new(0);
+/// The most bytes handed out at once since the module started or [`reset_peak`] (WebAssembly modules only).
+static PEAK: AtomicUsize = AtomicUsize::new(0);
+
+/// Bytes handed out and not freed yet, by the allocator of this module. Zero where the allocator does not count.
+#[cfg(target_arch = "wasm32")]
+pub fn live_bytes() -> usize {
+    wasm::live()
+}
+
+/// Bytes handed out and not freed yet, by the allocator of this module. Zero where the allocator does not count.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn live_bytes() -> usize {
+    (LIVE.load(Ordering::Relaxed) as isize).max(0) as usize
+}
+
+/// The most bytes that were handed out at once since the module started or the last [`reset_peak`].
+pub fn peak_bytes() -> usize {
+    // Threads publish their counts in steps, so the peak can lag what the calling thread holds.
+    PEAK.load(Ordering::Relaxed).max(live_bytes())
+}
+
+/// Starts measuring the peak again from what is handed out now.
+pub fn reset_peak() {
+    PEAK.store(live_bytes(), Ordering::Relaxed);
+}
+
+/// Sets the memory the module may use: the maximum of the memory it was given. Once, when the engine starts.
+pub fn set_limit(bytes: usize) {
+    LIMIT.store(bytes, Ordering::Relaxed);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+    /// A limit a test sets for its own thread.
+    static TEST_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `run` with the module's limit set to `bytes` on this thread: the way a native test makes [`admit`] refuse.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn with_limit<T>(bytes: usize, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<usize>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_LIMIT.with(|limit| limit.set(self.0));
+        }
+    }
+    let _restore = Restore(TEST_LIMIT.with(|limit| limit.replace(Some(bytes))));
+    run()
+}
+
+fn limit() -> usize {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(bytes) = TEST_LIMIT.with(std::cell::Cell::get) {
+        return bytes;
+    }
+    LIMIT.load(Ordering::Relaxed)
+}
+
+/// What the module may hold before large requests are refused: its limit less the reserve (a sixteenth).
+pub fn ceiling() -> usize {
+    let limit = limit();
+    limit - limit / 16
+}
+
+/// Bytes a request may still take before it reaches into the reserve: what is neither handed out nor reserved.
+pub fn headroom() -> usize {
+    ceiling().saturating_sub(live_bytes()).saturating_sub(RESERVED.load(Ordering::Relaxed))
+}
+
+/// Bytes work in progress has reserved.
+pub fn reserved_bytes() -> usize {
+    RESERVED.load(Ordering::Relaxed)
+}
+
+/// The module is too low on memory for the work asked of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutOfMemory {
+    /// Bytes the work needs, as far as the caller knew.
+    pub requested: usize,
+    /// Bytes the module could still give.
+    pub available: usize,
+}
+
+impl std::fmt::Display for OutOfMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the engine is out of memory: {} MiB wanted, {} MiB available", self.requested.div_ceil(1 << 20), self.available >> 20)
+    }
+}
+
+impl std::error::Error for OutOfMemory {}
+
+/// Whether the module can take `bytes` more without reaching into its reserve. For work that
+/// allocates in many small pieces (a document's tree), where the caller knows its size ahead.
+pub fn admit(bytes: usize) -> Result<(), OutOfMemory> {
+    let available = headroom();
+    if bytes > available { Err(OutOfMemory { requested: bytes, available }) } else { Ok(()) }
+}
+
+/// Memory set aside for work in progress, until dropped (see [`reserve`]).
+#[derive(Debug)]
+pub struct Reservation {
+    bytes: usize,
+    /// The name the work gave it ([`reserve_named`]), under which the host can give it back if the work dies without dropping it.
+    token: Option<u64>,
+}
+
+/// The reservations that carry a name, by name: whoever takes one out gives its bytes back (the work that ends, or the host that
+/// saw the thread die; never both).
+static NAMED: std::sync::Mutex<Vec<(u64, usize)>> = std::sync::Mutex::new(Vec::new());
+
+fn take_named(token: u64) -> Option<usize> {
+    let mut named = NAMED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let at = named.iter().position(|(held, _)| *held == token)?;
+    Some(named.swap_remove(at).1)
+}
+
+/// Gives back the bytes of the reservation named `token` if its work has not already (a thread that traps never drops what it held, and
+/// the host, which sees its `error`, calls this). Returns the bytes released, zero when there was nothing to release.
+pub fn release_named(token: u64) -> usize {
+    match take_named(token) {
+        Some(bytes) => {
+            RESERVED.fetch_sub(bytes, Ordering::Relaxed);
+            bytes
+        }
+        None => 0,
+    }
+}
+
+impl Reservation {
+    /// The bytes held.
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        match self.token {
+            // Given back already by the host when its thread was lost: nothing is subtracted twice.
+            Some(token) => {
+                release_named(token);
+            }
+            None => {
+                RESERVED.fetch_sub(self.bytes, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+/// Sets `bytes` aside for work that is about to allocate about that much, in pieces nothing can refuse: the
+/// work holds the reservation until it is done and goes without when the module cannot give it.
+pub fn reserve(bytes: usize) -> Result<Reservation, OutOfMemory> {
+    reserve_as(bytes, None)
+}
+
+/// [`reserve`] under a name the host can release ([`release_named`]) if the thread holding the reservation dies without dropping it.
+/// Names are the host's to keep apart.
+pub fn reserve_named(token: u64, bytes: usize) -> Result<Reservation, OutOfMemory> {
+    reserve_as(bytes, Some(token))
+}
+
+fn reserve_as(bytes: usize, token: Option<u64>) -> Result<Reservation, OutOfMemory> {
+    let mut reserved = RESERVED.load(Ordering::Relaxed);
+    loop {
+        let available = ceiling().saturating_sub(live_bytes()).saturating_sub(reserved);
+        if bytes > available {
+            return Err(OutOfMemory { requested: bytes, available });
+        }
+        match RESERVED.compare_exchange_weak(reserved, reserved + bytes, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => {
+                if let Some(token) = token {
+                    NAMED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((token, bytes));
+                }
+                return Ok(Reservation { bytes, token });
+            }
+            Err(now) => reserved = now,
+        }
+    }
+}
+
+/// Whether the allocator refuses a request of `size` bytes with `live` bytes handed out under `limit`.
+#[cfg(any(target_arch = "wasm32", test))]
+fn refuses(size: usize, live: usize, limit: usize) -> bool {
+    size >= LARGE_BYTES && live.saturating_add(size) > limit - limit / 16
+}
+
+#[cfg(target_arch = "wasm32")]
+mod wasm;
+
+#[cfg(target_arch = "wasm32")]
+pub use wasm::GrowAhead;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The reservations are counted for the whole process: tests that look at the headroom take turns.
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn steps_scale_with_the_memory_between_the_bounds() {
+        assert_eq!(grow_ahead_pages(0), MIN_AHEAD_PAGES);
+        assert_eq!(grow_ahead_pages(1024), MIN_AHEAD_PAGES, "a 64 MiB memory still grows 16 MiB at a time");
+        assert_eq!(grow_ahead_pages(2048), 256, "a 128 MiB memory grows by 16 MiB");
+        assert_eq!(grow_ahead_pages(8192), MAX_AHEAD_PAGES, "a 512 MiB memory grows by 32 MiB");
+        assert_eq!(grow_ahead_pages(32768), MAX_AHEAD_PAGES, "a 2 GiB memory grows by 32 MiB");
+        assert_eq!(grow_ahead_pages(usize::MAX), MAX_AHEAD_PAGES);
+    }
+
+    #[test]
+    fn a_memory_reaches_a_large_document_in_few_steps() {
+        let (mut pages, mut steps) = (256usize, 0);
+        while pages < 24_000 {
+            pages += grow_ahead_pages(pages);
+            steps += 1;
+        }
+        assert!(steps < 70, "{steps} steps to reach 1.5 GiB");
+    }
+
+    #[test]
+    fn a_large_request_is_refused_before_the_reserve_is_touched() {
+        let limit = 2usize << 30;
+        let ceiling = limit - limit / 16;
+        assert!(!refuses(LARGE_BYTES, ceiling - LARGE_BYTES, limit), "a request that ends at the ceiling is served");
+        assert!(refuses(LARGE_BYTES, ceiling - LARGE_BYTES + 1, limit), "a request that passes the ceiling is refused");
+        assert!(!refuses(LARGE_BYTES - 1, ceiling, limit), "a small request may use the reserve");
+        assert!(!refuses(usize::MAX / 2, 0, usize::MAX), "a module without a limit is never refused");
+    }
+
+    #[test]
+    fn reservations_count_against_each_other_until_dropped() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        with_limit(64 << 20, || {
+            let first = reserve(40 << 20).unwrap();
+            assert_eq!(first.bytes(), 40 << 20);
+            let before = reserved_bytes();
+            assert_eq!(headroom(), (60 << 20) - (40 << 20));
+            let refused = reserve(21 << 20).unwrap_err();
+            assert_eq!((refused.requested, refused.available), (21 << 20, 20 << 20));
+            assert_eq!(reserved_bytes(), before, "a refusal reserves nothing");
+            let second = reserve(20 << 20).unwrap();
+            assert_eq!(headroom(), 0);
+            drop(first);
+            assert_eq!(headroom(), 40 << 20, "dropping a reservation gives its bytes back");
+            drop(second);
+        });
+    }
+
+    #[test]
+    fn a_reservation_of_a_thread_that_died_is_given_back_by_its_name_and_only_once() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        with_limit(64 << 20, || {
+            let before = reserved_bytes();
+            // A thread that traps never drops its reservation: forgetting it is the same.
+            std::mem::forget(reserve_named(7, 30 << 20).unwrap());
+            assert_eq!(reserved_bytes(), before + (30 << 20));
+            assert_eq!(release_named(7), 30 << 20);
+            assert_eq!(reserved_bytes(), before, "the host gave it back");
+            assert_eq!(release_named(7), 0, "and gives nothing back twice");
+            // A reservation released by its name and then dropped subtracts once, and one dropped first is not released again.
+            let late = reserve_named(8, 10 << 20).unwrap();
+            assert_eq!(release_named(8), 10 << 20);
+            drop(late);
+            assert_eq!(reserved_bytes(), before);
+            let done = reserve_named(9, 10 << 20).unwrap();
+            drop(done);
+            assert_eq!(release_named(9), 0);
+            assert_eq!(reserved_bytes(), before);
+        });
+    }
+
+    #[test]
+    fn a_free_counted_before_its_allocation_does_not_read_as_a_huge_count() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        // Another thread frees what this one allocated and has not yet added to the counter: the counter dips below zero for a moment.
+        LIVE.store(0usize.wrapping_sub(4096), Ordering::Relaxed);
+        assert_eq!(live_bytes(), 0);
+        reset_peak();
+        assert_eq!(peak_bytes(), 0);
+        LIVE.store(0, Ordering::Relaxed);
+        assert_eq!(live_bytes(), 0);
+    }
+
+    #[test]
+    fn work_that_does_not_fit_is_refused_with_the_figures() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        with_limit(64 << 20, || {
+            assert_eq!(ceiling(), 60 << 20);
+            assert_eq!(admit(60 << 20), Ok(()));
+            let refused = admit(61 << 20).unwrap_err();
+            assert_eq!((refused.requested, refused.available), (61 << 20, 60 << 20));
+            assert_eq!(refused.to_string(), "the engine is out of memory: 61 MiB wanted, 60 MiB available");
+        });
+        assert_eq!(admit(usize::MAX / 2), Ok(()), "the limit a test set ends with it");
+    }
+}

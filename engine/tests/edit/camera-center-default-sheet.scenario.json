@@ -1,0 +1,114 @@
+{
+ "name": "camera-center-default-sheet",
+ "document": "camera-follow-joined.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "centerCamera"
+  ],
+  [
+   "centerCamera",
+   "x"
+  ],
+  [
+   "centerCamera",
+   "y",
+   [
+    0,
+    1
+   ]
+  ],
+  [
+   "beginCameraDrag"
+  ],
+  [
+   "updateCameraDrag",
+   {
+    "x": 8
+   }
+  ],
+  [
+   "centerCamera"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginDrag",
+   "Move figures"
+  ],
+  [
+   "moveSelection",
+   3,
+   2
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    99
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "beginCameraDrag"
+  ],
+  [
+   "updateCameraDrag",
+   {
+    "y": 4
+   }
+  ],
+  [
+   "centerCamera",
+   "invalid"
+  ],
+  [
+   "cancelCameraDrag"
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    0
+   ],
+   {
+    "boundsOf": null
+   }
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    0
+   ],
+   {
+    "boundsOf": {}
+   }
+  ],
+  [
+   "selectMany",
+   []
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    99
+   ]
+  ]
+ ]
+}

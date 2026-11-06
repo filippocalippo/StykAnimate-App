@@ -1,0 +1,52 @@
+{
+ "name": "branch-thickness-locked-sheet",
+ "document": "branch-thickness-locked-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "changeBranchThickness",
+   3
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "changeBranchThickness",
+   3
+  ],
+  [
+   "setLayerVisible",
+   "layer-1",
+   false
+  ],
+  [
+   "changeBranchThickness",
+   4
+  ],
+  [
+   "setLayerVisible",
+   "layer-1",
+   true
+  ],
+  [
+   "changeBranchThickness",
+   -2
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

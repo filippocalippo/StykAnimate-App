@@ -38,7 +38,7 @@ try {
     renderer: window.styk?.state?.renderer?.stats,
     figures: window.styk?.editor?.frame?.objects?.length,
     state: await window.stykDesktop?.getWindowState(),
-    backend: await (await fetch('/api/health')).json(),
+    codec: await (await (async (path, init) => { const [{codecJob}, {codecRequest}] = await Promise.all([import('/src/codec-job.mjs'), import('/src/codec-request.mjs')]); const job = codecJob(); try { return await codecRequest(job.link().fields, path, init); } finally { job.finish(); } })('/api/health')).json(),
   }));
   if (!actual.desktop || actual.bridge !== 'function') throw new Error('Desktop bridge was not initialized.');
   if (actual.nodeExposed) throw new Error('Node.js is exposed to the renderer.');
@@ -49,8 +49,9 @@ try {
     const manifest=JSON.parse(await readFile(path.join(output,'package-manifest.json'),'utf8'));
     actual.packageFilesSha256=createHash('sha256').update(JSON.stringify([...manifest.files].sort((a,b)=>a.path.localeCompare(b.path)))).digest('hex');
   }
-  if (packaged && actual.backend.jsonEncoder !== 'orjson') throw new Error('The packaged backend did not use the compiled JSON encoder.');
-  if (packaged && actual.backend.nativeFrameScanner !== 'cpp') throw new Error('The packaged backend did not load its native PIV scanner.');
+  // The Pivot codec runs in a worker of the page from its WebAssembly module, with the desktop limits.
+  if (actual.codec.jsonEncoder !== 'rust' || actual.codec.nativeFrameScanner !== 'rust') throw new Error('The Pivot codec did not load its WebAssembly module.');
+  if (actual.codec.maxImportBytes !== 128 * 1024 * 1024) throw new Error('The desktop Pivot codec did not use the desktop limits.');
   if (packaged) {
     actual.videoCapabilities = await page.evaluate(() => window.stykDesktop.getVideoCapabilities({width:320,height:240}));
     for (const format of ['mp4','avi','wmv','webm']) {

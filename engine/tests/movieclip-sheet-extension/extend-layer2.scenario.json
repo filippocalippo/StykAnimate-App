@@ -1,0 +1,46 @@
+{
+ "name": "extend-layer2",
+ "document": "extend-layer2.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   3
+  ],
+  [
+   "@seek",
+   5.75
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-2"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

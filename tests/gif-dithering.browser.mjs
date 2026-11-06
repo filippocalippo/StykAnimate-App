@@ -1,17 +1,17 @@
 import { chromium } from "./support/playwright.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import backend from "../desktop/backend.cjs";
+import backend from '../desktop/web-host.cjs';
 const output = path.resolve("artifacts/gif-dithering");
 await mkdir(output, { recursive: true });
-const service = await backend.startBackend({ appRoot: process.cwd() });
+const service = await backend.startDesktopHost({ appRoot: process.cwd() });
 let browser;
 try {
   browser = await chromium.launch({ channel: "chrome", headless: true });
   const page = await browser.newPage(),
     errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto(service.origin + "/api/health");
+  await page.goto(service.origin + "/tests/fixtures/blank.html");
   const result = await page.evaluate(async () => {
     const { exportAnimation } = await import("/src/image-export.mjs"),
       { gifFixture } = await import("/tests/gif-fixtures.mjs");

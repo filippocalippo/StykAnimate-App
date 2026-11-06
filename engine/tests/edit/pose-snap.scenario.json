@@ -1,0 +1,109 @@
+{
+ "name": "pose-snap",
+ "document": "two-limbs.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "poseJoint",
+   262.7659928955929,
+   333.6777334554099,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "poseJoint",
+   274.00195748236575,
+   309.12670293111654,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "poseJoint",
+   262.7659928955929,
+   333.6777334554099,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "poseJoint",
+   274.00195748236575,
+   309.12670293111654,
+   {
+    "stretch": true,
+    "snap": false
+   }
+  ],
+  [
+   "poseJoint",
+   271.5050764630829,
+   314.58248749207064,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "bendJoint",
+   246.3381788825379,
+   285.3537284859317
+  ],
+  [
+   "bendJoint",
+   269.68648160943155,
+   313.75019381897636
+  ],
+  [
+   "bendJoint",
+   252.73877136606583,
+   291.67551133223293
+  ],
+  [
+   "bendJoint",
+   249.20646525012006,
+   349.37034401114107,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   258.60452453012147,
+   342.77070772366676,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "poseJoint",
+   274.6261777371865,
+   307.76275679087803,
+   {
+    "stretch": true,
+    "snapTolerance": 2
+   }
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

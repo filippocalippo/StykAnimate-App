@@ -1,0 +1,527 @@
+//! What the interface's file workers ask of a native file: opening one into the
+//! lifted form the interface shares with the store, and saving from it.
+
+use styk_doc::json;
+use styk_formats::container::{Kind, encode_v1, encode_v2, lift};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use styk_formats::files::{self, Host, Job, JobsFailed, Rules};
+
+/// A block of a save, shared as a save takes it.
+fn arc(bytes: impl AsRef<[u8]>) -> Arc<Vec<u8>> {
+    Arc::new(bytes.as_ref().to_vec())
+}
+
+fn doc(text: &str) -> styk_doc::Value {
+    json::parse(text.as_bytes()).unwrap()
+}
+
+fn numbers(count: usize) -> String {
+    let values: Vec<String> = (0..count).map(|i| format!("{}", (i as f64 * 0.37).sin() * 180.0)).collect();
+    format!("[{}]", values.join(","))
+}
+
+fn container(text: &str, kind: Kind) -> Vec<u8> {
+    encode_v2(&lift(&doc(text), &[]).unwrap(), kind).unwrap()
+}
+
+/// A project with one array held twice, an image and an embedded source with its fingerprint.
+fn project() -> Vec<u8> {
+    let source = [7u8; 9000];
+    let mut encoded = Vec::new();
+    json::base64_into(&source, &mut encoded);
+    let mut image = Vec::new();
+    json::base64_into(&vec![3u8; 80_000], &mut image);
+    let hash = {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(source).iter().map(|b| format!("{b:02x}")).collect::<String>()
+    };
+    let text = format!(
+        r#"{{"version":5,"media":[{{"data_url":"data:image/png;base64,{img}"}}],"_stykSource":{{"sha256":"{hash}","source_base64":"{src}"}}}}"#,
+        img = String::from_utf8(image).unwrap(),
+        src = String::from_utf8(encoded).unwrap(),
+    );
+    let mut document = doc(&text);
+    let angles = doc(&numbers(64));
+    let mut pose = styk_doc::Obj::new();
+    pose.set("angles", angles.clone());
+    let mut frame = styk_doc::Obj::new();
+    frame.set("objects", styk_doc::Value::array(vec![styk_doc::Value::object(pose)]));
+    let object = document.make_obj().unwrap();
+    object.set("angles", angles);
+    object.set("keyframes", styk_doc::Value::array(vec![styk_doc::Value::object(frame)]));
+    encode_v2(&lift(&document, &[]).unwrap(), Kind::Styk).unwrap()
+}
+
+#[test]
+fn a_project_opens_into_the_lifted_form_and_saves_back_to_the_same_bytes() {
+    let file = project();
+    let opened = files::open(&file, Kind::Styk, Rules::PROJECT).unwrap();
+    assert_eq!(opened.version, 2);
+    assert!(opened.materialized_bytes > opened.skeleton.len());
+    let saved = files::save(Kind::Styk, arc(&opened.skeleton), arc(&opened.sections[0]), arc(&opened.sections[1]), &|| false).unwrap();
+    assert_eq!(saved.bytes, file, "an unchanged project saves to the bytes it was opened from");
+}
+
+#[test]
+fn arrays_shared_in_the_file_share_one_marker_in_the_skeleton() {
+    let opened = files::open(&project(), Kind::Styk, Rules::PROJECT).unwrap();
+    let skeleton = doc(std::str::from_utf8(&opened.skeleton).unwrap());
+    let top = skeleton.get("angles").and_then(|v| v.as_str()).unwrap().to_string();
+    let frame = skeleton.get("keyframes").and_then(|frames| frames.item(0)).unwrap();
+    let pose = frame.get("objects").and_then(|objects| objects.item(0)).unwrap();
+    let inner = pose.get("angles").and_then(|v| v.as_str()).unwrap();
+    assert!(top.starts_with("S2B:"));
+    assert_eq!(top, inner, "one array, one marker");
+}
+
+#[test]
+fn the_document_rules_are_the_callers_choice() {
+    let wrapped = r#"{"format":"stykanimate","version":1,"document":{"version":5,"editable_paths":{},"_codec":{},"keyframes":[]}}"#;
+    let file = container(wrapped, Kind::Styk);
+    let raw = files::open(&file, Kind::Styk, Rules::RAW).unwrap();
+    assert!(std::str::from_utf8(&raw.skeleton).unwrap().contains("\"format\":\"stykanimate\""));
+    let normal = files::open(&file, Kind::Styk, Rules::PROJECT).unwrap();
+    assert_eq!(std::str::from_utf8(&normal.skeleton).unwrap(), r#"{"version":5,"keyframes":[]}"#);
+    let future = container(r#"{"format":"stykanimate","version":2,"document":{}}"#, Kind::Styk);
+    let error = files::open(&future, Kind::Styk, Rules::PROJECT).err().unwrap();
+    assert_eq!((error.message_key, error.code), ("errors.nativeContainer.unsupportedStykanimateProjectVersion", Some("invalid_native_version")));
+}
+
+#[test]
+fn a_figure_file_must_hold_one_pose_of_reusable_figures() {
+    let figure = r#"{"figure_types":[{"figure_type_id":1}],"keyframes":[{"objects":[{"figure_type_id":9}]}]}"#;
+    let file = container(figure, Kind::Stkz);
+    let error = files::open(&file, Kind::Stkz, Rules::PREVIEW).err().unwrap();
+    assert_eq!((error.message_key, error.code, error.kind), ("errors.nativeContainer.theFigureMustBeSelfContained", Some("invalid_native_figure"), Some("stkz")));
+    assert!(files::open(&file, Kind::Stkz, Rules::RAW).is_ok(), "raw reads the container only");
+    let saved = files::save(Kind::Stkz, arc(figure.as_bytes()), arc(&[]), arc(&[]), &|| false).err().unwrap();
+    assert_eq!((saved.message_key, saved.code, saved.kind), ("errors.nativeContainer.theFigureMustBeSelfContained", Some("invalid_native_figure"), Some("stkz")));
+    let movieclip = r#"{"figure_types":[{"figure_type_id":1}],"keyframes":[{"objects":[{"figure_type_id":1}]}]}"#;
+    let error = files::save(Kind::Stykmov, arc(movieclip.as_bytes()), arc(&[]), arc(&[]), &|| false).err().unwrap();
+    assert_eq!((error.message_key, error.code), ("errors.nativeContainer.aStykmovFileMustContainOneMovieclip", Some("invalid_movieclip")));
+    assert!(files::save(Kind::Stkz, arc(movieclip.as_bytes()), arc(&[]), arc(&[]), &|| false).is_ok());
+    assert!(files::save(Kind::Styk, arc(figure.as_bytes()), arc(&[]), arc(&[]), &|| false).is_ok(), "a project is not a figure file");
+}
+
+#[test]
+fn the_embedded_source_is_checked_against_its_fingerprint() {
+    let text = r#"{"_stykSource":{"sha256":"00","source_base64":"AAAA"}}"#;
+    let file = container(text, Kind::Styk);
+    let error = files::open(&file, Kind::Styk, Rules::PROJECT).err().unwrap();
+    assert_eq!(error.message_key, "errors.nativeContainer.embeddedOriginalSourceFingerprintDoesNotMatch");
+    assert!(files::open(&file, Kind::Styk, Rules::PREVIEW).is_ok(), "a preview does not read the source");
+}
+
+#[test]
+fn damaged_and_foreign_files_name_their_message() {
+    let file = project();
+    let mut flipped = file.clone();
+    flipped[30] ^= 0xff; // the skeleton's fingerprint
+    assert_eq!(files::open(&flipped, Kind::Styk, Rules::PROJECT).err().unwrap().message_key, "errors.nativeContainer.theStykanimateFileIsDamagedChecksumMismatch");
+    assert_eq!(files::open(&file, Kind::Stkz, Rules::PROJECT).err().unwrap().message_key, "errors.nativeContainer.theStykanimateFileTypeDoesNotMatchIts");
+    let old = encode_v1(br#"{"version":5,"keyframes":[]}"#, Kind::Styk);
+    assert_eq!(files::open(&old, Kind::Styk, Rules::PROJECT).unwrap().version, 1);
+    let plain = files::open(b"  {\"version\":5}", Kind::Styk, Rules::PROJECT).unwrap();
+    assert_eq!(plain.version, 0);
+}
+
+#[test]
+fn saving_refuses_what_the_format_cannot_hold() {
+    let error = files::save(Kind::Styk, arc(b"{}"), Arc::new(vec![0; (256 << 20) + 1]), arc(&[]), &|| false).err().unwrap();
+    assert_eq!((error.message_key, error.code), ("errors.nativeContainer.theStykanimateDocumentExceedsTheUncompressedSizeLimit", Some("document_too_large")));
+}
+
+/// The document a skeleton and its sections stand for.
+fn restored(opened: &files::Opened) -> String {
+    json::to_string(&styk_formats::container::parse_lifted(&opened.skeleton, &opened.sections[0], &opened.sections[1]).unwrap())
+}
+
+#[test]
+fn a_project_that_keeps_its_document_is_handed_over_as_stored() {
+    let file = project();
+    let stored = styk_formats::container::decode_parts(&file, Kind::Styk).unwrap();
+    let opened = files::open(&file, Kind::Styk, Rules::PROJECT).unwrap();
+    assert_eq!(opened.skeleton, stored.skeleton, "no tree was built and nothing was written again");
+    assert_eq!(opened.sections, stored.sections.iter().map(|(_, bytes)| bytes.clone()).collect::<Vec<_>>());
+    // It stands for the document the tree path reads.
+    let tree = styk_formats::container::decode(&file, Kind::Styk).unwrap().document;
+    assert_eq!(restored(&opened), json::to_string(&tree));
+}
+
+#[test]
+fn the_scanned_and_the_built_paths_refuse_the_same_files_the_same_way() {
+    let mut forged = vec![project()];
+    let crafted = |skeleton: &str, arrays: Vec<u8>| {
+        encode_v2_with_parts(skeleton, arrays)
+    };
+    for marker in ["S2B:f64:0:0:4", "S2B:f64:0:8:64", "S2B:f64:3:0:1", "S2B:u8:0:0:99999", "S2S:1:0:5", "S2B:bad", "S2B:u64:0:0:1"] {
+        forged.push(crafted(&format!(r#"{{"a":"{marker}"}}"#), vec![0, 0, 0, 0, 0, 0, 0xf8, 0x7f, 0, 0, 0, 0, 0, 0, 0xf8, 0x7f, 0, 0, 0, 0, 0, 0, 0xf8, 0x7f, 0, 0, 0, 0, 0, 0, 0xf8, 0x7f]));
+    }
+    forged.push(crafted(r#"{"a":"S2B:f64:0:0:3","b":1,}"#, vec![0; 24]));
+    for file in forged {
+        let built = styk_formats::container::decode(&file, Kind::Styk).err().map(|error| error.message_key());
+        let opened = files::open(&file, Kind::Styk, Rules::RAW).err().map(|error| error.message_key);
+        assert_eq!(opened, built);
+    }
+}
+
+fn encode_v2_with_parts(skeleton: &str, arrays: Vec<u8>) -> Vec<u8> {
+    encode_v2(&styk_formats::container::Lifted { skeleton: skeleton.as_bytes().to_vec(), arrays, payloads: Vec::new(), reserved_offsets: Vec::new() }, Kind::Styk).unwrap()
+}
+
+#[test]
+fn text_the_store_cannot_hold_survives_when_the_file_is_handed_over_as_stored() {
+    // JavaScript keeps a surrogate without its pair; the store replaces it. Handed over as stored, it is kept.
+    let plain = br#"{"name":"lone \ud800 surrogate","keyframes":[]}"#;
+    let opened = files::open(plain, Kind::Styk, Rules::PROJECT).unwrap();
+    assert_eq!((opened.version, opened.skeleton.as_slice()), (0, plain.as_slice()));
+    assert!(opened.sections.is_empty() && !opened.markers, "a plain project is the document itself");
+    // Bytes that are not UTF-8 are replaced, as the browser's text decoder replaces them.
+    let broken = files::open(b"{\"name\":\"caf\xe9\"}", Kind::Styk, Rules::PROJECT).unwrap();
+    assert_eq!(broken.skeleton, "{\"name\":\"caf\u{fffd}\"}".as_bytes());
+}
+
+#[test]
+fn the_rules_that_rewrite_a_document_take_the_built_path() {
+    // Browser fields are dropped, a project wrapped by an early build is unwrapped, and a missing source fingerprint is refused.
+    let browser = container(r#"{"version":5,"_codec":{"x":1},"keyframes":[]}"#, Kind::Styk);
+    assert_eq!(std::str::from_utf8(&files::open(&browser, Kind::Styk, Rules::PROJECT).unwrap().skeleton).unwrap(), r#"{"version":5,"keyframes":[]}"#);
+    assert!(std::str::from_utf8(&files::open(&browser, Kind::Styk, Rules::RAW).unwrap().skeleton).unwrap().contains("_codec"));
+    let other = container(r#"{"format":"something else","version":5}"#, Kind::Styk);
+    assert!(std::str::from_utf8(&files::open(&other, Kind::Styk, Rules::PROJECT).unwrap().skeleton).unwrap().contains("something else"));
+    let scalar = container("7", Kind::Styk);
+    assert_eq!(files::open(&scalar, Kind::Styk, Rules::PROJECT).err().unwrap().code, Some("invalid_document"));
+    assert!(files::open(&scalar, Kind::Styk, Rules::RAW).is_ok());
+}
+
+#[test]
+fn a_string_that_looks_like_a_marker_is_only_a_marker_in_a_version_two_skeleton() {
+    let legacy = encode_v1(br#"{"marker":"S2B:f64:0:0:5","escaped":"S2E:x"}"#, Kind::Styk);
+    let opened = files::open(&legacy, Kind::Styk, Rules::PROJECT).unwrap();
+    assert!(!opened.markers && opened.version == 1);
+    assert_eq!(opened.skeleton, br#"{"marker":"S2B:f64:0:0:5","escaped":"S2E:x"}"#);
+    assert!(files::open(&project(), Kind::Styk, Rules::PROJECT).unwrap().markers);
+    // A document the rules rewrite is lifted, whatever container it came from: its markers are real.
+    let wrapped = encode_v1(br#"{"format":"stykanimate","version":1,"document":{"literal":"S2B:f64:0:0:5"}}"#, Kind::Styk);
+    let lifted = files::open(&wrapped, Kind::Styk, Rules::PROJECT).unwrap();
+    assert!(lifted.markers);
+    assert_eq!(lifted.skeleton, br#"{"literal":"S2E:S2B:f64:0:0:5"}"#);
+}
+
+/// A small deterministic generator.
+struct Noise(u64);
+impl Noise {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+}
+
+/// JSON text shaped like a project's skeleton: records of figures and frames with the same keys again and again, numbers that
+/// do not repeat, and whole records that come back far later (a figure held by several frames and clips).
+fn skeleton_shaped(length: usize) -> Vec<u8> {
+    let mut noise = Noise(0x2545_f491_4f6c_dd1d);
+    let mut out = Vec::with_capacity(length + 4096);
+    let mut records: Vec<(usize, usize)> = Vec::new();
+    out.extend_from_slice(b"{\"keyframes\":[");
+    while out.len() < length {
+        let start = out.len();
+        if !records.is_empty() && noise.below(5) == 0 {
+            // A record from far back, with a few numbers changed.
+            let (from, to) = records[noise.below(records.len() as u64) as usize];
+            let copy = out[from..to].to_vec();
+            out.extend_from_slice(&copy);
+            let at = out.len() - 40.min(copy.len());
+            out[at] = b'0' + noise.below(10) as u8;
+        } else {
+            let id = noise.below(1 << 20);
+            let text = format!(
+                "{{\"duration_raw\":{},\"object_slot\":{},\"unique_id\":{id},\"figure_type_id\":{},\"root_x\":{}.{:04},\"root_y\":{}.{:04},\"scale\":1,\"angles\":\"S2B:f32:0:{}:{}\",\"lengths\":\"S2B:f32:0:{}:{}\",\"len_flag\":1,\"bend_flag\":0,\"join\":null,\"_styk\":{{\"frameId\":\"frame-{}\",\"easing\":{{\"x1\":0.{},\"y1\":0.{}}}}}}}",
+                1 + noise.below(4), noise.below(8), noise.below(6), noise.below(900), noise.below(10000), noise.below(500), noise.below(10000),
+                noise.below(1 << 26), 30 + noise.below(30), noise.below(1 << 26), 30 + noise.below(30), noise.below(1 << 22), noise.below(1000), noise.below(1000)
+            );
+            out.extend_from_slice(text.as_bytes());
+        }
+        records.push((start, out.len()));
+        out.push(b',');
+    }
+    out.extend_from_slice(b"null]}");
+    out
+}
+
+/// Packed pose arrays: smooth angles (single precision), lengths that rarely change, whole frames that repeat after a long while.
+fn arrays_shaped(length: usize) -> Vec<u8> {
+    let mut noise = Noise(0x9e37_79b9_7f4a_7c15);
+    let segments = 60usize;
+    let lengths: Vec<f32> = (0..segments).map(|i| 20.0 + (i * 7 % 40) as f32 + noise.below(100) as f32 / 8.0).collect();
+    let mut out: Vec<u8> = Vec::with_capacity(length + 1024);
+    let mut frame = 0usize;
+    while out.len() < length {
+        if frame % 3000 == 2999 {
+            // A stretch from far back comes again.
+            let from = (noise.below((out.len() / 2) as u64) as usize / 4) * 4;
+            let copy = out[from..from + 720 * 40].to_vec();
+            out.extend_from_slice(&copy);
+        }
+        for (i, &len) in lengths.iter().enumerate() {
+            let angle = ((frame as f32) * 0.013 + i as f32 * 0.37).sin() * 1.5 + (noise.below(64) as f32) / 4096.0;
+            out.extend_from_slice(&angle.to_le_bytes());
+            out.extend_from_slice(&(if frame % 211 == 0 { len + 1.0 } else { len }).to_le_bytes());
+            out.extend_from_slice(&0f32.to_le_bytes());
+        }
+        frame += 1;
+    }
+    out
+}
+
+/// Picture-like payload bytes: runs and gradients with noise, rows that repeat, and a pattern that comes back megabytes later.
+fn payload_shaped(length: usize) -> Vec<u8> {
+    let mut noise = Noise(0xd6e8_feb8_6659_fd93);
+    let mut out: Vec<u8> = Vec::with_capacity(length + 8192);
+    while out.len() < length {
+        let row: Vec<u8> = (0..4096).map(|x| ((x / 16) as u8).wrapping_mul(3).wrapping_add(noise.below(4) as u8)).collect();
+        out.extend_from_slice(&row);
+        if noise.below(7) == 0 && out.len() > (3 << 20) {
+            let from = noise.below((out.len() - 8192) as u64) as usize;
+            let copy = out[from..from + 8192].to_vec();
+            out.extend_from_slice(&copy);
+        }
+    }
+    out
+}
+
+#[test]
+fn sections_shaped_like_real_ones_compress_to_the_frames_one_shot_compression_makes() {
+    // `encode_v2` compresses each block in one call; `files::save` must write the same frames, byte for byte, because a
+    // person's unchanged project has to save to the bytes it was opened from. A compressor fed in pieces, or with a small output
+    // buffer, writes other (valid) frames once the input passes a few megabytes of real structure: synthetic noise does not show it.
+    let skeleton = skeleton_shaped(16 << 20);
+    let arrays = arrays_shaped(24 << 20);
+    let payloads = payload_shaped(20 << 20);
+    let shapes: [(&str, &[u8], &[u8], &[u8]); 3] = [("skeleton", &skeleton, &[], &[]), ("arrays", b"{}", &arrays, &[]), ("payloads", b"{}", &[], &payloads)];
+    for (name, skeleton, arrays, payloads) in shapes {
+        let one_shot = encode_v2(&styk_formats::container::Lifted { skeleton: skeleton.to_vec(), arrays: arrays.to_vec(), payloads: payloads.to_vec(), reserved_offsets: Vec::new() }, Kind::Styk).unwrap();
+        let saved = files::save(Kind::Styk, arc(skeleton), arc(arrays), arc(payloads), &|| false).unwrap().bytes;
+        assert!(saved == one_shot, "the {name} section: {} bytes saved, {} one-shot", saved.len(), one_shot.len());
+    }
+}
+
+#[test]
+fn a_save_asks_whether_to_stop_often_enough_and_stops_at_once() {
+    let (arrays, payloads) = (arrays_shaped(40 << 20), payload_shaped(6 << 20));
+    let asked = std::cell::Cell::new(0usize);
+    let saved = files::save(Kind::Styk, arc(b"{}"), arc(&arrays), arc(&payloads), &|| { asked.set(asked.get() + 1); false }).unwrap();
+    // Hashing asks every 4 MiB; compression, one call to the compressor for a block, is asked before and after each of the three.
+    let (hashing, compressing) = ((arrays.len() + payloads.len()).div_ceil(4 << 20), 6);
+    assert!(asked.get() >= hashing + compressing, "{} questions for {} MiB", asked.get(), (arrays.len() + payloads.len()) >> 20);
+    assert!(!saved.bytes.is_empty());
+    // Whichever question says stop, the save ends there with the code the callers read, and has asked nothing since.
+    for stop_at in [1, 2, hashing + 3, asked.get() - 1, asked.get()] {
+        let asked = std::cell::Cell::new(0usize);
+        let stopped = files::save(Kind::Styk, arc(b"{}"), arc(&arrays), arc(&payloads), &|| { asked.set(asked.get() + 1); asked.get() >= stop_at }).err().expect("stopped");
+        assert_eq!(stopped.code, Some(styk_formats::container::CANCELLED), "stopped at question {stop_at}");
+        assert_eq!(asked.get(), stop_at, "no question after the one that said stop");
+    }
+}
+
+#[test]
+fn a_lift_asks_whether_to_stop() {
+    let document = doc(&format!("{{\"items\":[{}]}}", (0..20_000).map(|i| format!("{{\"n\":{i}}}")).collect::<Vec<_>>().join(",")));
+    let asked = std::cell::Cell::new(0usize);
+    styk_formats::container::lift_until(&document, &[], &|| { asked.set(asked.get() + 1); false }).unwrap();
+    assert!(asked.get() >= 8, "{} questions for 40,000 values", asked.get());
+    let stopped = styk_formats::container::lift_until(&document, &[], &|| true).err().expect("stopped");
+    assert_eq!(stopped, styk_formats::container::ContainerError::Cancelled);
+}
+
+/// A host with threads to spare: every job on a thread of its own, the stop flag kept up to date by a cancel the jobs cannot call.
+struct Threads<F: Fn() -> bool>(F);
+
+impl<F: Fn() -> bool> Host for Threads<F> {
+    fn cancelled(&self) -> bool {
+        (self.0)()
+    }
+
+    fn threads(&self) -> usize {
+        4
+    }
+
+    fn together(&self, jobs: Vec<Job>, stop: &Arc<AtomicBool>) -> Result<(), JobsFailed> {
+        if self.cancelled() {
+            stop.store(true, Ordering::Relaxed);
+        }
+        let threads: Vec<_> = jobs
+            .into_iter()
+            .map(|job| {
+                let stop = stop.clone();
+                std::thread::spawn(move || job(&|| stop.load(Ordering::Relaxed)))
+            })
+            .collect();
+        for thread in threads {
+            thread.join().map_err(|_| JobsFailed::Panicked)?;
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn blocks_hashed_and_compressed_side_by_side_make_the_same_container() {
+    let skeleton = skeleton_shaped(6 << 20);
+    let (arrays, payloads) = (arrays_shaped(5 << 20), payload_shaped(7 << 20));
+    let one_shot = encode_v2(&styk_formats::container::Lifted { skeleton: skeleton.clone(), arrays: arrays.clone(), payloads: payloads.clone(), reserved_offsets: Vec::new() }, Kind::Styk).unwrap();
+    let side_by_side = files::save(Kind::Styk, arc(&skeleton), arc(&arrays), arc(&payloads), &Threads(|| false)).unwrap();
+    assert!(side_by_side.bytes == one_shot, "{} bytes side by side, {} one after another", side_by_side.bytes.len(), one_shot.len());
+    assert_eq!(side_by_side.stats.container_raw_bytes, skeleton.len() + arrays.len() + payloads.len());
+    // A host that is stopped before the work starts gets no container.
+    let stopped = files::save(Kind::Styk, arc(&skeleton), arc(&arrays), arc(&payloads), &Threads(|| true)).err().expect("stopped");
+    assert_eq!(stopped.code, Some(styk_formats::container::CANCELLED));
+}
+
+#[test]
+fn a_save_reports_what_each_block_cost_by_the_hosts_clock() {
+    use std::cell::Cell;
+    struct Ticking(Cell<u32>);
+    impl Host for Ticking {
+        fn cancelled(&self) -> bool {
+            false
+        }
+        fn clock(&self) -> fn() -> f64 {
+            || {
+                thread_local!(static NOW: Cell<f64> = const { Cell::new(0.0) });
+                NOW.with(|now| { now.set(now.get() + 1.0); now.get() })
+            }
+        }
+    }
+    let saved = files::save(Kind::Styk, arc(b"{}"), arc(&sample_bytes(1 << 20)), arc(&sample_bytes(1 << 19)), &Ticking(Cell::new(0))).unwrap();
+    assert_eq!(saved.frames.map(|frame| frame.raw_bytes), [2, 1 << 20, 1 << 19]);
+    assert!(saved.frames.iter().all(|frame| frame.hash_ms > 0.0 && frame.compress_ms > 0.0 && frame.stored_bytes > 0), "{:?}", saved.frames);
+    assert!(saved.frames_ms > 0.0);
+}
+
+fn sample_bytes(length: usize) -> Vec<u8> {
+    let mut noise = Noise(0x1234_5678_9abc_def1);
+    (0..length).map(|_| noise.below(7) as u8).collect()
+}
+
+/// A host that cannot do the jobs: a thread of the engine stopped under it.
+struct Failing(JobsFailed);
+
+impl Host for Failing {
+    fn cancelled(&self) -> bool {
+        false
+    }
+
+    fn together(&self, _jobs: Vec<Job>, _stop: &Arc<AtomicBool>) -> Result<(), JobsFailed> {
+        Err(self.0)
+    }
+}
+
+#[test]
+fn a_save_whose_jobs_could_not_be_done_is_a_failed_save_with_its_own_code_and_no_container() {
+    for failure in [JobsFailed::Panicked, JobsFailed::WorkerLost] {
+        let error = files::save(Kind::Styk, arc(b"{}"), arc(sample_bytes(1 << 16)), arc(sample_bytes(1 << 16)), &Failing(failure)).err().expect("failed");
+        assert_eq!(error.code, Some("worker_failed"), "{failure:?}");
+        assert_eq!(error.message_key, "errors.documentExport.documentExportFailed");
+    }
+}
+
+
+/// A project-shaped document: a big array of records (the elements the lift cuts into pieces) with numeric arrays some records share,
+/// short arrays, pictures that repeat, strings that look like markers, and an original source held beside the array.
+fn big_document(records: usize, original: &Arc<[u8]>) -> styk_doc::Value {
+    use styk_doc::{Blob, Nums, Obj, Value};
+    let shared: Vec<Value> = (0..5).map(|k| Value::Nums(Arc::new(Nums::new(&(0..40).map(|i| (i * (k + 1)) as f64 * 0.5).collect::<Vec<_>>())))).collect();
+    let picture = |seed: usize| {
+        let bytes: Vec<u8> = (0..60_000usize).map(|i| (i * 31 + seed * 17 + (i >> 5)) as u8).collect();
+        Value::Blob(Arc::new(Blob { prefix: Arc::from("data:image/png;base64,"), bytes: Arc::from(bytes) }))
+    };
+    let pictures: Vec<Value> = (0..3).map(picture).collect();
+    let mut items = Vec::with_capacity(records);
+    for i in 0..records {
+        let mut object = Obj::new();
+        object.set("unique_id", Value::Num(i as f64));
+        object.set("angles", shared[i % 5].clone());
+        object.set("lengths", Value::Nums(Arc::new(Nums::new(&(0..40).map(|k| ((i * 40 + k) % 977) as f64 * 0.25).collect::<Vec<_>>()))));
+        object.set("short", Value::Nums(Arc::new(Nums::new(&[1.0, 2.5, i as f64]))));
+        object.set("name", Value::str(if i % 13 == 0 { "S2B:f32:0:0:3" } else { "plain" }));
+        object.set("ratio", Value::Num(i as f64 / 7.0));
+        object.set("weights", Value::Nums(Arc::new(Nums::new(&(0..33).map(|k| if k == 5 { f64::NAN } else { k as f64 }).collect::<Vec<_>>()))));
+        if i % 90 == 0 {
+            let mut asset = Obj::new();
+            asset.set("data_url", pictures[(i / 90) % 3].clone());
+            object.set("asset", Value::object(asset));
+        }
+        items.push(Value::object(object));
+    }
+    let mut source = Obj::new();
+    source.set("kind", Value::str("piv"));
+    source.set("source_base64", Value::Blob(Arc::new(Blob { prefix: Arc::from(""), bytes: original.clone() })));
+    let mut root = Obj::new();
+    root.set("version", Value::Num(5.0));
+    root.set("_stykSource", Value::object(source));
+    root.set("keyframes", Value::array(items));
+    root.set("backgrounds", Value::array((0..3).map(|k| { let mut b = Obj::new(); b.set("data_url", pictures[k].clone()); Value::object(b) }).collect()));
+    Value::object(root)
+}
+
+/// A host that has threads to spare in name only: the jobs run one after another, so the splicing is tested without a race.
+struct Pretending(usize);
+
+impl Host for Pretending {
+    fn cancelled(&self) -> bool {
+        false
+    }
+
+    fn threads(&self) -> usize {
+        self.0
+    }
+}
+
+#[test]
+fn a_document_lifted_in_pieces_is_the_document_lifted_whole() {
+    use styk_formats::container::{lift_together, lift_together_within, lift_within};
+    let original: Arc<[u8]> = Arc::from(vec![9u8; 5000]);
+    let document = big_document(700, &original);
+    let reserved = [original.clone()];
+    let whole = lift(&document, &reserved).unwrap();
+    assert!(whole.skeleton.len() > 100_000 && !whole.arrays.is_empty() && whole.payloads.len() > 100_000);
+    let hosts: Vec<(&str, Box<dyn Host>)> = vec![("pretending 4 threads", Box::new(Pretending(4))), ("pretending 3", Box::new(Pretending(3))), ("4 real threads", Box::new(Threads(|| false)))];
+    for (name, host) in &hosts {
+        let (parts, times) = lift_together(&document, &reserved, host.as_ref()).unwrap();
+        assert!(parts.skeleton == whole.skeleton, "{name}: skeleton");
+        assert!(parts.arrays == whole.arrays, "{name}: arrays");
+        assert!(parts.payloads == whole.payloads, "{name}: payloads");
+        assert_eq!(parts.reserved_offsets, whole.reserved_offsets, "{name}");
+        assert!(times.pieces_ms >= 0.0 && times.splice_ms >= 0.0, "{name}");
+    }
+    // A small document, or a host with one thread, lifts as it always did.
+    let small = big_document(10, &original);
+    assert!(lift_together(&small, &reserved, &Pretending(4)).unwrap().0.skeleton == lift(&small, &reserved).unwrap().skeleton);
+    assert!(lift_together(&document, &reserved, &Pretending(1)).unwrap().0.skeleton == whole.skeleton);
+    // The limits are the same limits: a document too large for its sections is refused either way.
+    let refused_whole = lift_within(&document, &reserved, 100_000).err().map(|e| e.code());
+    let refused_parts = lift_together_within(&document, &reserved, 100_000, &Pretending(4)).err().map(|e| e.code());
+    assert_eq!(refused_whole, Some(Some("document_too_large")));
+    assert_eq!(refused_parts, refused_whole);
+    // A stopped lift produces nothing.
+    assert_eq!(lift_together(&document, &reserved, &Threads(|| true)).err(), Some(styk_formats::container::ContainerError::Cancelled));
+}
+
+#[test]
+fn a_started_job_runs_when_it_is_waited_for_on_a_host_with_no_thread_to_spare() {
+    let ran = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = ran.clone();
+    let host = Pretending(1);
+    let stop = Arc::new(AtomicBool::new(false));
+    let waiting = host.start(Box::new(move |_| { counter.fetch_add(1, Ordering::Relaxed); }), &stop);
+    assert_eq!(ran.load(Ordering::Relaxed), 0, "nothing runs before it is waited for");
+    assert_eq!(waiting(), Ok(()));
+    assert_eq!(ran.load(Ordering::Relaxed), 1);
+}

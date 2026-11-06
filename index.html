@@ -10,9 +10,15 @@
     />
     <title>StykAnimate — First steps</title>
     <link rel="icon" type="image/svg+xml" href="./mark.svg" />
+    <link rel="modulepreload" href="./src/engine/engine-start.mjs" />
+    <link rel="modulepreload" href="./src/engine/engine.mjs" />
+    <link rel="modulepreload" href="./src/engine/pkg/styk_engine.js" />
+    <link rel="modulepreload" href="./src/engine/engine-memory.mjs" />
+    <link rel="preload" href="./src/engine/pkg/styk_engine_bg.wasm" as="fetch" type="application/wasm" crossorigin />
     <script src="./src/theme-bootstrap.js"></script>
     <link rel="preload" href="./assets/fonts/inter-latin-opsz-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="./src/styles/app.css" />
+    <script type="module" src="./src/engine/engine-start.mjs"></script>
   </head>
   <body>
     <div id="app" class="shell">

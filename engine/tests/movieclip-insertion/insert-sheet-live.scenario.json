@@ -1,0 +1,55 @@
+{
+ "name": "insert-sheet-live",
+ "document": "insert-sheet-live.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginTranslationDrag",
+   "Insert after drag"
+  ],
+  [
+   "moveSelection",
+   4.5,
+   -2.25
+  ],
+  [
+   "addFigure",
+   999
+  ],
+  [
+   "moveSelection",
+   1,
+   1
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "beginTranslationDrag",
+   "Insert after accepted drag"
+  ],
+  [
+   "moveSelection",
+   3,
+   -1
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

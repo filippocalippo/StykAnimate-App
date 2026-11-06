@@ -43,13 +43,22 @@ try{
   await panel.locator('[data-parallax-field="linked"]').uncheck();await panel.locator('[data-parallax-field="y"]').fill('75');await panel.locator('[data-parallax-field="y"]').press('Enter');
   check('Unlinked parallax axes edit independently',await page.evaluate(()=>styk.editor.getLayer('layer-1').parallax.x===.25&&styk.editor.getLayer('layer-1').parallax.y===.75));
   const persistence=await page.evaluate(async()=>{
-    const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{Editor}=await import('/src/editor.mjs'),{cameraMatrix}=await import('/src/renderer-geometry.mjs'),{parallaxResolver}=await import('/src/layer-parallax.mjs');
+    const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{pageExporter}=await import('/tests/support/page-export.mjs');
     const e=styk.editor,exporter=new DocumentExporter(),importer=new ImportClient();
-    const samples=e=>Array.from({length:e.totalTicks},(_,tick)=>{e.seek(tick);const f=e.evaluatedFrame,m=cameraMatrix({report:e.report,frame:f}),p=parallaxResolver(e.report,f);return f.objects.map(o=>{const d=p(o.unique_id),x=o.root_x+d.x,y=o.root_y+d.y;return [m[0]*x+m[2]*y+m[4],m[1]*x+m[3]*y+m[5]];});});
-    try{const expected=samples(e),styk=await exporter.export(e.report,{format:'styk',name:'motion-test'}),decoded=await importer.importFile(new File([styk],'motion-test.styk')),loaded=new Editor({demo:false,layerTimeline:true}).load(decoded.document),actual=samples(loaded);
-      const piv=await exporter.export(e.report,{format:'piv',name:'motion-test'}),native=await importer.importFile(new File([piv],'motion-test.piv')),pivot=samples(new Editor({demo:false,layerTimeline:true}).load(native.document));
-      let max=0;expected.forEach((frame,t)=>frame.forEach((p,i)=>p.forEach((n,k)=>max=Math.max(max,Math.abs(n-pivot[t][i][k])))));
-      return {exact:JSON.stringify(expected)===JSON.stringify(actual),pivotMax:max,stykBytes:styk.size,pivBytes:piv.size,clips:loaded.getCameraMotions().length};
+    // What the scene draws at each tick, camera and layer parallax included: the engine's vector frames of the project on show.
+    const drawn=async()=>{const frames=pageExporter({width:640,height:360},{vector:true});try{await frames.load(e.report);const svgs=[];for(let t=0;t<e.totalTicks;t++)svgs.push(await(await frames.renderSVGTick(t)).text());return svgs;}finally{frames.dispose();}};
+    const numbers=svg=>svg.match(/-?\d+(?:\.\d+)?(?:e-?\d+)?/g).map(Number);
+    try{
+      const expected=await drawn(),original=structuredClone(e.report),selected=e.selectedUid;
+      const styk=await exporter.export(e.report,{format:'styk',name:'motion-test'}),decoded=await importer.importFile(new File([styk],'motion-test.styk'));
+      const piv=await exporter.export(e.report,{format:'piv',name:'motion-test',revision:e.revision}),native=await importer.importFile(new File([piv],'motion-test.piv'));
+      // Each file is opened in the project on show, which draws it; the project itself is put back after.
+      e.load(decoded.document);const actual=await drawn(),clips=e.getCameraMotions().length;
+      e.load(native.document);const pivot=(await drawn()).map(numbers);
+      e.load(original);e.select(selected);
+      let max=0;const lengths=expected.every((frame,t)=>numbers(frame).length===pivot[t].length);
+      expected.forEach((frame,t)=>numbers(frame).forEach((n,i)=>{if(pivot[t][i]!==undefined)max=Math.max(max,Math.abs(n-pivot[t][i]));}));
+      return {exact:JSON.stringify(expected)===JSON.stringify(actual),pivotMax:lengths?max:Infinity,stykBytes:styk.size,pivBytes:piv.size,clips};
     }finally{exporter.dispose();importer.dispose();}
   });
   check('Binary STYK keeps editable effects and exact sampled output',persistence.exact&&persistence.clips===2);check('Binary PIV bakes matching projection',persistence.pivotMax<.05);

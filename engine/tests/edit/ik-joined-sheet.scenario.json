@@ -1,0 +1,99 @@
+{
+ "name": "ik-joined-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/joined.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   10,
+   5
+  ],
+  [
+   "@select",
+   2,
+   0
+  ],
+  [
+   "poseJoint",
+   350,
+   280
+  ],
+  [
+   "@select",
+   3,
+   0
+  ],
+  [
+   "rotateJoint",
+   0.3
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "rotateJoint",
+   -0.2
+  ],
+  [
+   "@select",
+   2,
+   0
+  ],
+  [
+   "poseJoint",
+   390,
+   330,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "@select",
+   3,
+   0
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "rotateJoint",
+   0.1
+  ],
+  [
+   "rotateJoint",
+   0.1
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "rotateSelection",
+   0.2
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

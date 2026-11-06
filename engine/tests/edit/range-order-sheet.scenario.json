@@ -1,0 +1,344 @@
+{
+ "name": "range-order-sheet",
+ "document": "sheet-layers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "addFigure",
+   2
+  ],
+  [
+   "moveSelection",
+   -260,
+   40
+  ],
+  [
+   "addFigure",
+   3
+  ],
+  [
+   "moveSelection",
+   220,
+   90
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "orderFiguresInFrames",
+   "back",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0,
+     4
+    ]
+   }
+  ],
+  [
+   "orderFiguresInFrames",
+   1,
+   [
+    0
+   ],
+   {
+    "ticks": [
+     1
+    ]
+   }
+  ],
+  [
+   "orderFiguresInFrames",
+   1,
+   [
+    0
+   ],
+   {
+    "ticks": [
+     1
+    ]
+   }
+  ],
+  [
+   "bringToFront"
+  ],
+  [
+   "sendToBack"
+  ],
+  [
+   "moveSelectionLayer",
+   1
+  ],
+  [
+   "moveSelectionLayer",
+   -1
+  ],
+  [
+   "moveSelectionLayer",
+   0.5
+  ],
+  [
+   "orderSelection",
+   "front",
+   {}
+  ],
+  [
+   "orderSelection",
+   2
+  ],
+  [
+   "orderSelection",
+   "back",
+   {
+    "frameIndices": [
+     0,
+     1
+    ]
+   }
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    5
+   ]
+  ],
+  [
+   "orderFiguresInFrames",
+   "front",
+   [
+    0,
+    1
+   ]
+  ],
+  [
+   "orderFiguresInFrames",
+   "sideways",
+   [
+    0
+   ]
+  ],
+  [
+   "orderFiguresInFrames",
+   -3,
+   {
+    "@array": [
+     0
+    ],
+    "sheetTicks": [
+     2,
+     6
+    ]
+   }
+  ],
+  [
+   "orderFiguresInFrames",
+   100000,
+   [
+    0
+   ],
+   {
+    "ticks": [
+     3
+    ]
+   }
+  ],
+  [
+   "@select",
+   3,
+   -1
+  ],
+  [
+   "bringToFront"
+  ],
+  [
+   "sendToBack"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 2
+     },
+     "property": "zIndex",
+     "tick": 0,
+     "value": 1000000
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 4
+     },
+     "property": "zIndex",
+     "tick": 0,
+     "value": 1000000
+    }
+   ]
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "orderFiguresInFrames",
+   "front",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0
+    ]
+   }
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 2
+     },
+     "property": "zIndex",
+     "tick": 0,
+     "value": -1000000
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 5
+     },
+     "property": "zIndex",
+     "tick": 0,
+     "value": -1000000
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 4
+     },
+     "property": "zIndex",
+     "tick": 0,
+     "value": 0
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "zIndex",
+     "tick": 0,
+     "value": 1
+    }
+   ]
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "orderFiguresInFrames",
+   "back",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0
+    ]
+   }
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "zIndex",
+     "tick": 0,
+     "value": -1000000
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 2
+     },
+     "property": "zIndex",
+     "tick": 0,
+     "value": 0
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 4
+     },
+     "property": "zIndex",
+     "tick": 0,
+     "value": 1000000
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 5
+     },
+     "property": "zIndex",
+     "tick": 0,
+     "value": 1000000
+    }
+   ]
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "orderFiguresInFrames",
+   "front",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

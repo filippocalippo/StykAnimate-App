@@ -1,0 +1,142 @@
+{
+ "name": "figure-clipboard-pastes-sheet",
+ "document": "sheet-movieclip.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "copySelection"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "pasteSelection",
+   {
+    "offset": 0
+   }
+  ],
+  [
+   "pasteSelection",
+   {
+    "pasteMode": "bogus"
+   }
+  ],
+  [
+   "pasteSelection",
+   {
+    "pasteDepth": "x"
+   }
+  ],
+  [
+   "pasteSelection",
+   {
+    "offset": "x"
+   }
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "duplicateSelection"
+  ],
+  [
+   "duplicateSelection",
+   {
+    "offset": 0
+   }
+  ],
+  [
+   "selectMany",
+   []
+  ],
+  [
+   "copySelection"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "cutSelection"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "pasteSelection",
+   {
+    "offset": 0
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "selectMany",
+   []
+  ],
+  [
+   "duplicateSelection"
+  ],
+  [
+   "@seek",
+   2
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "copySelection"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "deleteSelection"
+  ],
+  [
+   "pasteSelection"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ],
+ "observeFigureClipboardPastes": true
+}

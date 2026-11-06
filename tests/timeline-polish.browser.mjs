@@ -56,7 +56,7 @@ try {
   await preview(1).click();await preview(2).click({modifiers:['Shift']});await preview(1).click({button:'right'});
   assert.deepEqual(await page.evaluate(()=>styk.timeline.selectedFrameIndices),[0,1]);
   const menu=page.getByRole('menu');
-  assert.deepEqual((await menu.getByRole('menuitem').allTextContents()).map(text=>text.trim()),['Change easing…','Copy framesCtrl+C','Cut framesCtrl+X','Paste framesCtrl+V','Delete framesDelete / Backspace']);
+  assert.deepEqual((await menu.getByRole('menuitem').allTextContents()).map(text=>text.trim()),['Change easing…','Copy framesCtrl+C','Cut framesCtrl+X','Paste framesCtrl+V','Delete framesDelete']);
   assert.equal(await menu.locator('button .icon').count(),5);
   const box=await menu.boundingBox();assert.ok(box.height<220&&box.y>=0&&box.y+box.height<=960);
   await page.screenshot({path:'artifacts/timeline-simple-menu.png'});
@@ -74,7 +74,6 @@ try {
   assert.equal(await page.evaluate(()=>styk.editor.evaluatedFrame.objects[0].root_x),320);
   await strip.press('Control+z');await settle();assert.equal(await snapshot(),baseline);
   await page.setViewportSize({width:900,height:700});await settle();
-  assert.equal(await page.getByRole('slider',{name:'Timeline zoom',exact:true}).isVisible(),true);
   await page.screenshot({path:'artifacts/timeline-simple-compact.png'});
   await page.setViewportSize({width:1440,height:960});
   await page.evaluate(()=>{styk.settingsUI.commit({timelineMode:'advanced'});styk.editor.seek(0);});await settle();

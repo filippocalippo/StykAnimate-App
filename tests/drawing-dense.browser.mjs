@@ -7,7 +7,7 @@ page.on('pageerror',e=>errors.push(e.message));
 try{
   await page.goto(process.env.STYK_URL||'http://127.0.0.1:47839');await page.waitForFunction(()=>window.styk?.ready);
   const result=await page.evaluate(async()=>{
-    const {DrawingResources}=await import('/src/drawing-resources.mjs'),{createDrawingFigure}=await import('/src/drawing-model.mjs'),{strokeRegion}=await import('/src/drawing-stroke-region.mjs'),{levelStore}=await import('/src/drawing-raster.mjs');
+    const {DrawingResources}=await import('/src/drawing-resources.mjs'),{createDrawingFigure}=await import('/src/drawing-model.mjs'),{levelStore}=await import('/src/drawing-raster.mjs');
     const figure=createDrawingFigure({celId:'dense-preview'}),owner=new DrawingResources({figure_types:[figure]},{onError:e=>{throw e;}});owner.busy=true;
     const tiles=[];for(let ty=0;ty<34;ty++)for(let tx=0;tx<60;tx++){const pixels=new Uint8ClampedArray(64*64*4);for(let i=0;i<pixels.length;i+=4)pixels.set([tx*4,ty*7,120,255],i);tiles.push({tx,ty,pixels:pixels.buffer});}
     const entry=owner.install(figure,tiles),p=owner.presenter(figure),rect={x:0,y:0,width:3840,height:2176},gaps=[];let last=performance.now();
@@ -30,19 +30,18 @@ try{
       const startFill=performance.now(),fill=await owner.worker.request('fill',{tiles:[],bounds:{x:0,y:0,width:7680,height:4320},options:{x:10,y:10,color:[12,34,56,255],expansion:1,gap:0,maxBytes:owner.hardBudget}}),fillMs=performance.now()-startFill;
       const abort=new AbortController(),pending=owner.worker.request('fill',{tiles:[],bounds:{x:0,y:0,width:7680,height:4320},options:{x:10,y:10,color:[1,2,3,255]}},{signal:abort.signal});abort.abort();let cancelled=false;try{await pending;}catch(e){cancelled=e.name==='AbortError';}
       const restarted=await owner.worker.request('fill',{tiles:[],bounds:{x:0,y:0,width:2,height:2},options:{x:0,y:0,color:[1,2,3,255]}});
-      return {firstWasAsync:first===null,pixel,updated,requestMs,readyMs,warmMs,transferredTiles,referenceMipMs,eventLoopTicks:gaps.length,diagonalTiles:[...strokeRegion([{x:0,y:0},{x:7680,y:4320}],10)].length,fillMs,fillTiles:fill.tiles.length,fillUniform:fill.tiles.every(t=>t.after?.[0]===12&&t.after?.[3]===255),cancelled,restarted:restarted.tiles.length===1,stats:owner.stats};
+      return {firstWasAsync:first===null,pixel,updated,requestMs,readyMs,warmMs,transferredTiles,referenceMipMs,eventLoopTicks:gaps.length,fillMs,fillTiles:fill.tiles.length,fillUniform:fill.tiles.every(t=>t.after?.[0]===12&&t.after?.[3]===255),cancelled,restarted:restarted.tiles.length===1,stats:owner.stats};
     }finally{clearInterval(interval);owner.dispose();}
   });
-  assert.ok(result.firstWasAsync);assert.deepEqual(result.pixel,[4,7,120,255]);assert.deepEqual(result.updated,[255,0,0,255]);assert.ok(result.eventLoopTicks>0);assert.ok(result.fillUniform&&result.fillTiles>8000);assert.ok(result.cancelled&&result.restarted);assert.ok(result.diagonalTiles<400);assert.deepEqual(errors,[]);
+  assert.ok(result.firstWasAsync);assert.deepEqual(result.pixel,[4,7,120,255]);assert.deepEqual(result.updated,[255,0,0,255]);assert.ok(result.eventLoopTicks>0);assert.ok(result.fillUniform&&result.fillTiles>8000);assert.ok(result.cancelled&&result.restarted);assert.deepEqual(errors,[]);
   await page.locator('[data-workspace-mode="draw"]').click();
   await page.evaluate(async()=>{
     const {emptyDocument}=await import('/src/demo.mjs'),e=styk.editor,d=styk.drawing,report=emptyDocument();report.canvas_width=3840;report.canvas_height=2160;e.load(report);e.createDrawingLayer();
     const target=e.prepareDrawingCel({pixelsPerUnit:1,world:{x:0,y:0}});await d.owner.surface(target.figure);d.owner.busy=true;
     const tiles=[];for(let ty=0;ty<34;ty++)for(let tx=0;tx<60;tx++)tiles.push({tx,ty,before:null,after:new Uint8ClampedArray([tx*4,ty*7,120,255])});e.commitDrawingPixels(target,tiles);styk.fit();
   });
-  // WebGPU draws resident tiles; the Canvas path waits for its worker preview.
-  await page.waitForFunction(()=>{const gpu=styk.state.renderer.drawingGpu,previews=styk.drawing.owner.previews;return gpu?gpu.frame>0&&!gpu.incomplete&&gpu.stats.slots>0:previews.cache.size>0&&!previews.active;});
-  await page.waitForFunction(()=>styk.state.renderer.stats.drawingGpuBytes>0);
+  // The engine's stage draws the cel once its pictures are decoded and uploaded.
+  await page.waitForFunction(()=>!styk.state.dirtyRender&&styk.state.renderer.engineSide.stage.pictures_pending()===0);
   await page.screenshot({path:out+'/dense-workspace.png'});
   assert.deepEqual(errors,[]);
   await writeFile(out+'/result.json',JSON.stringify({result,errors,browser:await browser.version()},null,2));console.log(JSON.stringify(result,null,2));

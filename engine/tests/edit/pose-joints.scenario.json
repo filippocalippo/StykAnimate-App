@@ -1,0 +1,167 @@
+{
+ "name": "pose-joints",
+ "document": "two-limbs.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "poseJoint",
+   300,
+   260
+  ],
+  [
+   "rotateJoint",
+   0.3
+  ],
+  [
+   "rotateJoint",
+   -0.1,
+   {
+    "isolate": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "bendJoint",
+   320,
+   250
+  ],
+  [
+   "bendJoint",
+   330,
+   240,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "poseJoint",
+   340,
+   250,
+   {
+    "stretch": true,
+    "snap": false
+   }
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   330,
+   270
+  ],
+  [
+   "poseJoint",
+   320,
+   280,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "poseJoint",
+   318,
+   279,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "poseJoint",
+   300,
+   300,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "poseJoint",
+   305,
+   300,
+   {
+    "stretch": true,
+    "snapTolerance": 40
+   }
+  ],
+  [
+   "bendJoint",
+   310,
+   300,
+   {
+    "snapTolerance": 50
+   }
+  ],
+  [
+   "poseJoint",
+   1,
+   2,
+   {
+    "snapTolerance": -1
+   }
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "poseJoint",
+   300,
+   300
+  ],
+  [
+   "bendJoint",
+   300,
+   300
+  ],
+  [
+   "rotateJoint",
+   1
+  ],
+  [
+   "@select",
+   2,
+   2
+  ],
+  [
+   "bendJoint",
+   420,
+   260
+  ],
+  [
+   "poseJoint",
+   440,
+   250
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

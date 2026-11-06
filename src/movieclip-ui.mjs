@@ -8,7 +8,6 @@ import {t as interfaceText} from './localization.mjs';
 import {drawingSetsView} from './movieclip-drawings-view.mjs';
 import {drawingBarrier} from './drawing-resources.mjs';
 import {playbackSettings,movieclipAsset,movieclipTime} from './movieclips.mjs';
-import {renderInspector} from './inspector-kit.mjs';
 
 const inspectorStates=new WeakMap();
 const seconds=value=>Number(Number(value).toFixed(3));
@@ -82,8 +81,6 @@ export function movieclipSections(editor,{number=(label,key,value,unit='',extra=
     {id:'drawing-sets',title:interfaceText("movieclipUi.drawingSets"), titleKey: "movieclipUi.drawingSets",place:'titled',open:Boolean(sets),hidden:!sets,rows:[{kind:'markup',html:sets}]},
   ];
 }
-/** A movieclip instance's inspector HTML, without the Edit together switch and Layer select that inspector-view.mjs adds. */
-export const movieclipInspector=editor=>renderInspector({kind:'movieclip',sections:movieclipSections(editor)});
 /** mountBreadcrumb(element) places the session breadcrumb ("← Scene", the scope path, Cancel, Done); the app owns where the stage
  * shows it, and without it the breadcrumb is not shown. */
 export function installMovieclipUI({editor,actions,pause,finishEdit,getTimeline,setTool,onError,queueUI,exportClip,mountBreadcrumb}){

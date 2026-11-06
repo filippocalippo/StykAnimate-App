@@ -34,7 +34,7 @@ export function previewMemoryPlan(deviceMemory = deviceMemoryHint(), workerCount
     editorRasters: Math.min(128 * mib, base / 2), editorOnions: Math.min(64 * mib, base / 8),
     editorSoftwareFilters: Math.min(64 * mib, base / 4),
     editorBackgrounds: Math.min(16 * mib, base / 16),
-    thumbnails: Math.min(24 * mib, base / 8), library: 8 * mib,...playbackReuseMemoryPlan(base)};
+    library: 8 * mib,...playbackReuseMemoryPlan(base)};
   return {...plan, workerImages: workers.images, workerSources: workers.sources, workerRasters: workers.rasters,
     workerVectors: workers.vectors, workerDrawings: workers.drawings, workerTints: workers.tints, workerSoftwareFilters: workers.softwareFilters, workerBackgrounds: workers.backgrounds,
     workerCount: count, workerRetainedBytes: workers.retainedBytes, workerPoolBytes: workers.retainedBytes * count,
@@ -53,26 +53,6 @@ export function playbackWorkerMemoryPlan(frameBytes = playbackMemoryBudget()) {
     vectors: Math.min(32 * mib, base / 8), drawings: Math.min(96 * mib, Math.max(16 * mib, images)), tints: 32 * mib,
     softwareFilters: Math.min(64 * mib, base / 8), backgrounds: Math.min(16 * mib, base / 16)};
   return {...plan, retainedBytes: Object.values(plan).reduce((sum, bytes) => sum + bytes, 0)};
-}
-
-/** Admission target for the worker pool, including its private document copies.
- * This leaves the majority of RAM for the editor, GPU caches and other apps.
- * It is an estimate-based policy, never a hard cap on process/driver memory. */
-export function playbackWorkerAdmissionBudget(deviceMemory = deviceMemoryHint()) {
-  return Number.isFinite(deviceMemory) && deviceMemory > 0 ? deviceMemory * 1073741824 / 3 : 1024 * 1024 * 1024;
-}
-
-export function playbackWorkerAdmission({maxWorkers, maxBytes, frameBytes, documentBytes = 0, nativeBytes = 0}) {
-  const retained = playbackWorkerMemoryPlan(frameBytes).retainedBytes;
-  // Reserve one preparing/unacknowledged packet and derived geometry per lane.
-  // Live geometry can exceed this reserve; do not describe it as measured bytes.
-  const packetReserve = frameBytes * .8, geometryReserve = frameBytes / 4;
-  const perWorkerEstimate = documentBytes + nativeBytes + retained + packetReserve + geometryReserve;
-  const workers = Math.max(1, Math.min(maxWorkers, Math.floor(maxBytes / Math.max(1, perWorkerEstimate))));
-  return {maxWorkers, workers, budgetBytes: Number.isFinite(maxBytes) ? maxBytes : null,
-    documentBytesEstimate: documentBytes, nativeBytes, retainedTarget: retained, packetReserve, geometryReserve,
-    perWorkerEstimate, poolEstimate: perWorkerEstimate * workers, reduced: workers < maxWorkers,
-    minimumExceedsTarget: perWorkerEstimate > maxBytes};
 }
 
 /** Parallel packet-preparation workers. Every worker mirrors the document and

@@ -1,0 +1,391 @@
+//! Opening a document: a file's bytes or JSON text decoded, normalized and made ready on the engine's
+//! workers, then read back by the interface in bounded pieces (docs/engine/document.md).
+//!
+//! The interface starts a job ([`EngineHandle::open_document`]), waits on the progress counter, and takes the
+//! [`OpenedDocument`]. The editor's read view is built from its pieces ([`OpenedDocument::part`]), each a
+//! record of the document lifted as a file would lift it; the session that edits the document starts from
+//! the same tree ([`OpenedDocument::start_session`]).
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
+
+use styk_doc::{Obj, Value, json};
+use styk_engine::Engine;
+use styk_engine::document::{OpenError, OpenOptions, OpenSource, OpenedDocument as Opened};
+use styk_formats::container::ViewLifter;
+use wasm_bindgen::prelude::*;
+
+use crate::edit::EditSession;
+use crate::engine::EngineHandle;
+use crate::js_error;
+
+/// A job the interface started, until it takes the outcome.
+pub(crate) struct Job {
+    cancelled: Arc<AtomicBool>,
+    /// The document, and the text of its `meta()`, which the worker made so that the interface does not.
+    outcome: Option<Result<(Opened, String), OpenError>>,
+}
+
+/// The jobs of a handle, by number.
+#[derive(Clone, Default)]
+pub(crate) struct Jobs {
+    table: Arc<Mutex<HashMap<u32, Job>>>,
+    next: Arc<AtomicU32>,
+}
+
+/// The editor's options and how many of the engine's other workers the open may use (`helpers`).
+fn options_of(text: &str) -> Result<(OpenOptions, usize), JsError> {
+    let options = json::parse(text.as_bytes()).map_err(js_error)?;
+    let helpers = options.get("helpers").and_then(Value::as_f64).filter(|count| *count >= 0.0 && *count < 64.0).map_or(0, |count| count as usize);
+    Ok((OpenOptions { layer_timeline: options.get("layerTimeline").is_some_and(Value::truthy) }, helpers))
+}
+
+fn run(engine: &Engine, bytes: &[u8], name: &str, source: &str, (options, helpers): (OpenOptions, usize), cancel: &dyn Fn() -> bool) -> Result<Opened, OpenError> {
+    match source {
+        "json" => engine.open_document_with(OpenSource::Json { bytes, name }, options, cancel, helpers),
+        _ => engine.open_document_with(OpenSource::File { bytes, name }, options, cancel, helpers),
+    }
+}
+
+/// [`run`] for a job that owns the bytes it was given: a file's copy is dropped as soon as the reader is done with it.
+fn run_owned(engine: &Engine, bytes: Vec<u8>, name: &str, source: &str, (options, helpers): (OpenOptions, usize), cancel: &dyn Fn() -> bool) -> Result<Opened, OpenError> {
+    match source {
+        "json" => engine.open_document_with(OpenSource::Json { bytes: &bytes, name }, options, cancel, helpers),
+        _ => engine.open_document_with(OpenSource::Owned { bytes, name }, options, cancel, helpers),
+    }
+}
+
+#[wasm_bindgen]
+impl EngineHandle {
+    /// Starts opening a document on a worker and returns the job's number. `source` is `"file"` (the bytes of a
+    /// file called `name`) or `"json"` (JSON text, shown under `name`); `options` is JSON (`layerTimeline`: the
+    /// editor gives every document a layer sheet; `helpers`: how many other workers may take part). Watch the progress counter, then call
+    /// [`EngineHandle::take_opened_document`].
+    pub fn open_document(&self, bytes: Vec<u8>, name: String, source: String, options: &str) -> Result<u32, JsError> {
+        let options = options_of(options)?;
+        let jobs = self.jobs.clone();
+        let id = jobs.next.fetch_add(1, Ordering::Relaxed) + 1;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        jobs.table.lock().unwrap_or_else(|e| e.into_inner()).insert(id, Job { cancelled: cancelled.clone(), outcome: None });
+        self.engine.spawn(move |engine| {
+            let outcome = run_owned(engine, bytes, &name, &source, options, &|| cancelled.load(Ordering::Relaxed)).map(|opened| {
+                let meta = build_meta(&opened);
+                (opened, meta)
+            });
+            let mut table = jobs.table.lock().unwrap_or_else(|e| e.into_inner());
+            // A job nobody wants any more (cancelled and forgotten) is dropped here, on the worker.
+            if let Some(job) = table.get_mut(&id) {
+                job.outcome = Some(outcome);
+            }
+        });
+        Ok(id)
+    }
+
+    /// Whether the engine has the memory to open a file of `file_bytes` bytes ([`styk_engine::document::admit_open`]).
+    /// Checked by the interface before it copies a file in. The error is an open error.
+    pub fn admit_open(&self, file_bytes: f64) -> Result<(), JsError> {
+        let bytes = crate::engine::counter(file_bytes).map_or(usize::MAX, |bytes| bytes as usize);
+        styk_engine::document::admit_open(bytes).map_err(|error| js_error(error.to_json()))
+    }
+
+    /// Whether the engine has the memory to take `bytes` bytes in, as the Pivot original kept with a document is
+    /// ([`OpenedDocument::attach_source`]). The error is an open error.
+    pub fn admit_copy(&self, bytes: f64) -> Result<(), JsError> {
+        let bytes = crate::engine::counter(bytes).map_or(usize::MAX, |bytes| bytes as usize);
+        styk_engine::document::admit_copy(bytes).map_err(|error| js_error(error.to_json()))
+    }
+
+    /// The text of a payload (a picture, a Pivot original) the read view names by token (`S2P:<token>`): its prefix and
+    /// the base64 of its bytes. An error once no document or history entry holds the payload any more.
+    pub fn payload_text(&self, token: f64) -> Result<String, JsError> {
+        let held = token >= 0.0 && token.fract() == 0.0 && token < 9007199254740992.0;
+        held.then(|| styk_doc::payload::text(token as u64)).flatten().ok_or_else(|| js_error("the payload is no longer held"))
+    }
+
+    /// Asks a job to stop at its next checkpoint; its outcome is still taken (as a cancellation).
+    pub fn cancel_open(&self, job: u32) {
+        if let Some(job) = self.jobs.table.lock().unwrap_or_else(|e| e.into_inner()).get(&job) {
+            job.cancelled.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// The outcome of a job, once: `undefined` while it runs. An error carries the open error as JSON in its
+    /// message (`message`, `messageKey`, `messageParams`, `code`, `status`, `stage`).
+    pub fn take_opened_document(&self, job: u32) -> Result<Option<OpenedDocument>, JsError> {
+        // Only tried: the interface thread must not wait for a worker storing its result.
+        let Ok(mut table) = self.jobs.table.try_lock() else { return Ok(None) };
+        if table.get(&job).is_none_or(|entry| entry.outcome.is_none()) {
+            return if table.contains_key(&job) { Ok(None) } else { Err(js_error("no such open job")) };
+        }
+        match table.remove(&job).and_then(|entry| entry.outcome) {
+            Some(Ok((opened, meta))) => Ok(Some(OpenedDocument::new(self.engine.clone(), opened, Some(meta)))),
+            Some(Err(error)) => Err(js_error(error.to_json())),
+            None => Ok(None),
+        }
+    }
+
+    /// Opens a document on this thread and returns it: for small documents (a new one, a tutorial's), where
+    /// the editor needs the document at once.
+    pub fn open_document_now(&self, bytes: &[u8], name: &str, source: &str, options: &str) -> Result<OpenedDocument, JsError> {
+        // On this thread nothing may wait for a worker: the open takes none.
+        let (options, _) = options_of(options)?;
+        match run(&self.engine, bytes, name, source, (options, 0), &|| false) {
+            Ok(opened) => Ok(OpenedDocument::new(self.engine.clone(), opened, None)),
+            Err(error) => Err(js_error(error.to_json())),
+        }
+    }
+}
+
+/// Where the read view splits a document into pieces: tables and tables of records at these paths arrive one
+/// entry at a time, after the rest of the document.
+const SPLITS: [&[&str]; 5] = [&["figure_types"], &["keyframes"], &["backgrounds"], &["_styk", "frameSources"], &["_styk", "audio", "assets"]];
+
+/// The text of an opened document's `meta()`.
+fn build_meta(opened: &Opened) -> String {
+    let mut out = Obj::new();
+    out.set("name", Value::str(&opened.name));
+    out.set("kind", Value::str(opened.kind));
+    out.set("version", Value::Num(opened.version));
+    out.set("lineage", Value::Num(opened.lineage() as f64));
+    out.set("savedDraft", Value::Bool(opened.indexes.saved_draft));
+    // Whether the document was read from a Pivot file it can carry (`attach_source`).
+    out.set("source", Value::Bool(opened.source.is_some()));
+    out.set("indexes", opened.indexes.indexes());
+    let mut timings = Obj::new();
+    for (phase, ms) in &opened.timings {
+        timings.set(phase, Value::Num((ms * 10.0).round() / 10.0));
+    }
+    out.set("timings", Value::object(timings));
+    let splits: Vec<Value> = splits_of(opened)
+        .into_iter()
+        .map(|(_, path, value)| {
+            let mut split = Obj::new();
+            split.set("path", Value::array(path.iter().map(|key| Value::str(key)).collect()));
+            match &value {
+                Value::Obj(object) => split.set("keys", Value::array(object.keys().map(|key| Value::str(key)).collect())),
+                other => split.set("count", Value::Num(other.array_len().unwrap_or(0) as f64)),
+            }
+            Value::object(split)
+        })
+        .collect();
+    out.set("splits", Value::array(splits));
+    // What the view knows of its lazy tables without fetching a record (`LAZY_TABLES`): the row of each record (its identity, for a keyframe), and the
+    // timeline the keyframes make.
+    let tree = &opened.tree;
+    let column = |table: &str, id: &dyn Fn(&Value) -> Value| Value::array(tree.get(table).and_then(Value::elements).map(|records| records.iter().map(|record| id(&record)).collect()).unwrap_or_default());
+    let mut rows = Obj::new();
+    rows.set("keyframes", column("keyframes", &styk_edit::frame_row));
+    rows.set("figure_types", column("figure_types", &styk_edit::figure_row));
+    out.set("rows", Value::object(rows));
+    out.set("timeline", Value::array(styk_edit::timeline_rows(tree).into_iter().map(|(start, count)| Value::array(vec![Value::Num(start), Value::Num(count)])).collect()));
+    json::to_string(&Value::object(out))
+}
+
+/// An opened document, until the editor has built its view and a session has started from it.
+#[wasm_bindgen]
+pub struct OpenedDocument {
+    engine: Engine,
+    /// The memory the original is being written into (`begin_source`), until `end_source`.
+    source: Option<Arc<[std::mem::MaybeUninit<u8>]>>,
+    /// Taken out only when the opening is released ([`Drop`]).
+    opened: Option<Arc<Opened>>,
+    lifter: RefCell<ViewLifter>,
+    /// The text of `meta()` when the worker that opened the document made it.
+    meta: RefCell<Option<String>>,
+}
+
+/// An opened document can be hundreds of megabytes: the last owner drops it on an engine worker, never on the
+/// interface thread (D7).
+impl Drop for OpenedDocument {
+    fn drop(&mut self) {
+        if let Some(opened) = self.opened.take() {
+            self.engine.spawn(move |_| drop(opened));
+        }
+    }
+}
+
+impl OpenedDocument {
+    fn new(engine: Engine, opened: Opened, meta: Option<String>) -> OpenedDocument {
+        OpenedDocument { engine, source: None, opened: Some(Arc::new(opened)), lifter: RefCell::new(ViewLifter::new()), meta: RefCell::new(meta) }
+    }
+
+    fn opened(&self) -> &Arc<Opened> {
+        self.opened.as_ref().expect("an opened document is held until it is dropped")
+    }
+
+    /// The splits the document has, in order, with how many entries each holds.
+    fn splits(&self) -> Vec<(usize, &'static [&'static str], Value)> {
+        splits_of(self.opened())
+    }
+}
+
+fn splits_of(opened: &Opened) -> Vec<(usize, &'static [&'static str], Value)> {
+    SPLITS.iter().enumerate().filter_map(|(at, path)| opened.tree.path(path).filter(|value| matches!(value, Value::Arr(_) | Value::Nums(_) | Value::Obj(_))).map(|value| (at, *path, value.clone()))).collect()
+}
+
+/// `value` with the entry at `path` replaced by `empty` (where the path leads).
+fn emptied(value: &Value, path: &[&str], empty: &Value) -> Value {
+    let Some((first, rest)) = path.split_first() else { return empty.clone() };
+    let Some(object) = value.as_obj() else { return value.clone() };
+    let Some(child) = object.get(first) else { return value.clone() };
+    let mut copy = object.clone();
+    copy.set(first, emptied(child, rest, empty));
+    Value::object(copy)
+}
+
+/// The root with every split's contents taken out (the empty array or object stays, so the keys keep their places).
+fn without_splits(tree: &Value, splits: &[(usize, &'static [&'static str], Value)]) -> Value {
+    let mut root = tree.clone();
+    for (_, path, value) in splits {
+        let empty = if matches!(value, Value::Obj(_)) { Value::object(Obj::new()) } else { Value::array(Vec::new()) };
+        root = emptied(&root, path, &empty);
+    }
+    root
+}
+
+/// One piece of the read view: a record lifted as a file lifts it, and the section bytes it gained.
+#[wasm_bindgen]
+pub struct ViewPart {
+    skeleton: String,
+    sequences: String,
+    arrays: Vec<u8>,
+    arrays_base: f64,
+    payloads: Vec<u8>,
+    payloads_base: f64,
+}
+
+impl From<styk_formats::container::ViewPart> for ViewPart {
+    fn from(part: styk_formats::container::ViewPart) -> ViewPart {
+        ViewPart { skeleton: String::from_utf8_lossy(&part.skeleton).into_owned(), sequences: String::from_utf8_lossy(&part.sequences).into_owned(), arrays: part.arrays, arrays_base: part.arrays_base as f64, payloads: part.payloads, payloads_base: part.payloads_base as f64 }
+    }
+}
+
+/// Record `index` of the table `table` of `tree`, lifted on its own (`OpenedDocument::record`, `EditSession::record`).
+pub(crate) fn lift_record(tree: &Value, table: &str, index: u32) -> Result<ViewPart, JsError> {
+    let record = tree.get(table).and_then(Value::elements).and_then(|records| records.get(index as usize)).ok_or_else(|| js_error("no such document entry"))?;
+    ViewLifter::new().part(&record, "").map(ViewPart::from).map_err(js_error)
+}
+
+/// The record under `key` of the table of records by key at `table` (the path with dots: `_styk.frameSources`), lifted on its own.
+pub(crate) fn lift_keyed_record(tree: &Value, table: &str, key: &str) -> Result<ViewPart, JsError> {
+    let path: Vec<&str> = table.split('.').collect();
+    let record = tree.path(&path).and_then(|records| records.get(key)).ok_or_else(|| js_error("no such document entry"))?;
+    ViewLifter::new().part(record, "").map(ViewPart::from).map_err(js_error)
+}
+
+#[wasm_bindgen]
+impl ViewPart {
+    /// The JSON text of the record, with markers (`S2B:…`, `S2D:…`) where arrays and images moved out.
+    #[wasm_bindgen(getter)]
+    pub fn skeleton(&self) -> String {
+        self.skeleton.clone()
+    }
+
+    /// The bytes the numeric-array section gained, starting at [`ViewPart::arrays_base`] of the whole section.
+    /// The pose key sequences first met in this piece, as JSON (`[{"id":0,"v":[…]},…]`), or empty. The skeleton
+    /// names one `S2R:<id>` wherever a channel holds it.
+    #[wasm_bindgen(getter)]
+    pub fn sequences(&self) -> String {
+        self.sequences.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn arrays(&self) -> Vec<u8> {
+        self.arrays.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn arrays_base(&self) -> f64 {
+        self.arrays_base
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn payloads(&self) -> Vec<u8> {
+        self.payloads.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn payloads_base(&self) -> f64 {
+        self.payloads_base
+    }
+}
+
+#[wasm_bindgen]
+impl OpenedDocument {
+    /// What the interface needs to know before it reads the document, as JSON: its `name`, `kind`, `version`,
+    /// the `lineage` of its generations, whether it stored a frame draft (`savedDraft`), the `indexes` the editor
+    /// adopts (next identities, figures per layer, tracks) and the `splits` its view arrives in
+    /// (`path`, and `count` of an array or `keys` of an object).
+    pub fn meta(&self) -> String {
+        // The worker that opened the document made it; one opened on this thread makes it now.
+        if let Some(text) = self.meta.borrow().as_ref() {
+            return text.clone();
+        }
+        build_meta(self.opened())
+    }
+
+    /// A piece of the document: `split` -1 is the document without the contents of its splits, `split` n
+    /// (an index into [`OpenedDocument::meta`]'s `splits`) the entry `index` of that split. Pieces are lifted
+    /// in the order they are asked for; ask for each once, the root first.
+    pub fn part(&self, split: i32, index: u32) -> Result<ViewPart, JsError> {
+        let splits = self.splits();
+        let lifted = if split < 0 {
+            let root = without_splits(&self.opened().tree, &splits);
+            self.lifter.borrow_mut().part(&root, "")
+        } else {
+            let (_, _, container) = splits.get(split as usize).ok_or_else(|| js_error("no such document split"))?;
+            let entry = match &container {
+                Value::Obj(object) => object.iter().nth(index as usize).map(|(_, value)| value.clone()),
+                other => other.elements().and_then(|items| items.get(index as usize)),
+            };
+            let entry = entry.ok_or_else(|| js_error("no such document entry"))?;
+            self.lifter.borrow_mut().part(&entry, "")
+        };
+        lifted.map(ViewPart::from).map_err(js_error)
+    }
+
+    /// Record `index` of the table `table` of the document (`keyframes`, `figure_types`), lifted on its own: the piece is whole
+    /// (nothing is shared with the pieces asked for before), for a view that fetches its records when something reads them.
+    pub fn record(&self, table: &str, index: u32) -> Result<ViewPart, JsError> {
+        lift_record(&self.opened().tree, table, index)
+    }
+
+    /// The record under `key` of the table of records by key `table` (`_styk.frameSources`), lifted on its own.
+    pub fn keyed_record(&self, table: &str, key: &str) -> Result<ViewPart, JsError> {
+        lift_keyed_record(&self.opened().tree, table, key)
+    }
+
+    /// Makes room for the Pivot file the document was read from (`length` bytes) where it will be kept, and returns where in the engine's
+    /// memory the caller writes it. The file is written once, into the memory the document holds it in: a copy in this module's memory first
+    /// and another to keep (what `Vec<u8>` arguments cost) would hold the file three times at the memory's fullest. Call
+    /// [`OpenedDocument::end_source`] when it is written.
+    pub fn begin_source(&mut self, length: f64) -> Result<usize, JsError> {
+        let length = crate::engine::counter(length).ok_or_else(|| js_error("the original's size is not a size"))? as usize;
+        if self.opened().source.is_none() {
+            return Err(js_error("the document was not read from a Pivot file"));
+        }
+        let mut memory = Arc::<[u8]>::new_zeroed_slice(length);
+        let at = Arc::get_mut(&mut memory).expect("the memory was just made").as_mut_ptr() as usize;
+        self.source = Some(memory);
+        Ok(at)
+    }
+
+    /// Gives the document the Pivot file written where [`OpenedDocument::begin_source`] said, so that it carries its own original
+    /// (`_stykSource`, described as the open described it: `meta().source`). Before the read view is built and the session starts.
+    pub fn end_source(&mut self) -> Result<(), JsError> {
+        let memory = self.source.take().ok_or_else(|| js_error("no original is being written"))?;
+        // SAFETY: the memory was made zeroed, and zero is a value of every byte, whatever was written over it.
+        let file = unsafe { memory.assume_init() };
+        let opened = Arc::get_mut(self.opened.as_mut().expect("an opened document is held until it is dropped")).ok_or_else(|| js_error("the document is being edited already"))?;
+        opened.attach_source(file).map_err(|error| js_error(error.to_json()))
+    }
+
+    /// Starts the session that edits this document, with the editor's `state` (JSON: options, view and
+    /// counters). The session shares the document's tree and typed views.
+    pub fn start_session(&self, state: &str) -> Result<EditSession, JsError> {
+        let session = self.opened().start_session(state).map_err(js_error)?;
+        Ok(EditSession::publishing(session, self.engine.clone(), self.opened().clone()))
+    }
+}

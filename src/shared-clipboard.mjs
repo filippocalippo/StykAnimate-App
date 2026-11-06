@@ -20,7 +20,6 @@ export function clipboardSnapshot(editor, kind) {
       layerNames: Object.fromEntries(editor._sheetClipboard.rows.map(row => [row.id, editor.getLayer(row.id)?.name ?? 'Copied layer']))};
   } else if (kind === 'drawing-pixels') data=editor._drawingPixelClipboard;
   else if (kind === 'camera-motion') data = editor._cameraMotionClipboard;
-  else if (kind === 'frames') data = editor.frameClipboardDocumentView?.() ?? editor.frameClipboardDocument();
   else throw messageError(new Error(''), "errors.sharedClipboard.unsupportedClipboardType", {});
   return data ? {format: 'StykAnimate clipboard', version: 1, kind, data} : null;
 }
@@ -42,9 +41,6 @@ export async function restoreClipboard(editor, packet, checkCurrent = () => {}) 
     editor._drawingPixelClipboard=data;
   } else if (kind === 'camera-motion') {
     validateCameraMotion({version:1,clips:[data]});editor._cameraMotionClipboard=data;
-  } else if (kind === 'frames') {
-    if (editor.restoreFrameClipboardAsync) await editor.restoreFrameClipboardAsync(data, {checkCurrent});
-    else editor.restoreFrameClipboard(data);
   } else throw messageError(new Error(''), "errors.sharedClipboard.unsupportedClipboardType", {});
   editor._emit('clipboard-restored', {clipboard: true});
   return kind;

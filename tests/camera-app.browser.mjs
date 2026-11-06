@@ -24,8 +24,8 @@ async function setup(){
 async function handle(kind,index){return page.evaluate(async({kind,index})=>__project((await __cam()).handles.find(h=>h.kind===kind&&(index==null||h.index===index)).point),{kind,index});}
 async function drag(a,b){await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y,{steps:4});await page.mouse.up();await page.waitForTimeout(45);}
 try{
- await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
- await setup();check('Editing renders world space despite a saved camera',await page.evaluate(()=>styk.state.renderer.last.cameraEnabled===false));
+ await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);await page.evaluate(async()=>(await import('/tests/support/stage-probe.mjs')).watchStage());
+ await setup();check('Editing renders world space despite a saved camera',await page.evaluate(()=>window.stageLast.cameraEnabled===false));
  const point=await page.evaluate(()=>__project(styk.editor.geometry.objects.get(0).root)),before=await page.evaluate(()=>({x:styk.editor.object.root_x,y:styk.editor.object.root_y,scale:styk.state.view.scale}));
  await drag(point,{x:point.x+40,y:point.y+20});let moved=await page.evaluate(()=>({x:styk.editor.object.root_x,y:styk.editor.object.root_y}));
  check('Figure origin drag ignores camera rotation and magnification',near(moved.x-before.x,40/before.scale)&&near(moved.y-before.y,20/before.scale));
@@ -45,8 +45,8 @@ try{
  await page.keyboard.press('Control+z');p=await handle('position');await page.mouse.move(p.x,p.y);base=await pose();await page.keyboard.down('ArrowDown');await page.keyboard.press('Escape');await page.keyboard.up('ArrowDown');after=await pose();
  check('Escape restores an active camera keyboard gesture',near(after.y,base.y)&&after.undo===base.undo);
  await page.locator('#play-button').click({modifiers:['Control']});const tick=await page.evaluate(()=>styk.editor.tick);await page.waitForTimeout(120);
- check('Ctrl Play previews the current camera without advancing time',await page.evaluate(tick=>styk.state.previewing&&!styk.state.playing&&styk.editor.tick===tick&&styk.state.renderer.last.cameraEnabled===true,tick));
- await page.locator('#viewport').click({position:{x:10,y:10}});await page.waitForTimeout(45);check('Canvas click exits preview without an edit',await page.evaluate(()=>!styk.state.previewing&&styk.state.renderer.last.cameraEnabled===false));
+ check('Ctrl Play previews the current camera without advancing time',await page.evaluate(tick=>styk.state.previewing&&!styk.state.playing&&styk.editor.tick===tick&&window.stageLast.cameraEnabled===true,tick));
+ await page.locator('#viewport').click({position:{x:10,y:10}});await page.waitForTimeout(45);check('Canvas click exits preview without an edit',await page.evaluate(()=>!styk.state.previewing&&window.stageLast.cameraEnabled===false));
  await page.locator('#viewport').focus();await page.keyboard.press('Control+k');check('Ctrl K disables camera interaction',await page.evaluate(()=>!styk.state.settings.showCamera));
  await page.screenshot({path:`${out}/camera-editor.png`});check('No page errors',errors.length===0);
  await writeFile(`${out}/report.json`,JSON.stringify({passed:true,checks,errors},null,2));

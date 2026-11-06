@@ -25,10 +25,8 @@ import {t as interfaceText} from './localization.mjs';
  * sources, which a definition-only snapshot could not.
  */
 import {isMovieclip} from './movieclips.mjs';
-import {frameOrder, setOrder, normalizeFrame} from './pivot/structure.mjs';
-import {validateScene} from './pivot/model.mjs';
-import {nativeFigureDocument} from './native-figure.mjs';
 import {drawingMetadata, isDrawingLayer} from './drawing-model.mjs';
+import {findFigureType, figureRows} from './figure-types.mjs';
 
 const clone = value => structuredClone(value);
 
@@ -49,7 +47,7 @@ export class BuilderSession {
     this.documentToken = editor._documentToken;
     this.baselineRevision = editor.revision;
     this.preexistingUids = new Set(editor.selectionFrame.objects.map(object => object.unique_id));
-    this.preexistingTypeIds = new Set(editor.report.figure_types.map(figure => figure.figure_type_id));
+    this.preexistingTypeIds = new Set(figureRows(editor.report.figure_types).map(row => row.id));
     const object = editor.object, figure = editor.figure;
     const editableLayer = layer => layer?.kind === 'layer' && layer.visible && !layer.locked && !isDrawingLayer(layer);
     const selectedLayer = object && editor.getLayer(editor.layerForUid(object.unique_id));
@@ -73,7 +71,7 @@ export class BuilderSession {
    * bound instance is currently on screen or selected. */
   get figure() {
     return this.typeId === null ? null :
-      this.editor.report.figure_types.find(figure => figure.figure_type_id === this.typeId) ?? null;
+      findFigureType(this.editor.report.figure_types, this.typeId) ?? null;
   }
   /** UIDs of bound-figure instances in the current selection frame. Lazily
    * rebuilt whenever the frame's object array changes identity. */
@@ -146,9 +144,7 @@ export class BuilderSession {
     // The definition alone is not the displayed figure: native poses, paint
     // overrides and rig controls belong to its instance. Capture both before
     // undo restores the original, using the same portable format as the library.
-    const edited = clone(nativeFigureDocument(editor.report, {
-      figureUid: this.preferredUid, tick: editor.tick, sourceFrame: editor.selectionFrame,
-    }));
+    const edited = editor._shown.figureDocument({figureUid: this.preferredUid, tick: editor.tick});
     this.undoSession();
     const source = editor.selectionFrame.objects.find(object => object.unique_id === this.uid)
       ?? editor.selectionFrame.objects.find(object => object.figure_type_id === this.typeId);
@@ -159,7 +155,7 @@ export class BuilderSession {
   }
   /** Covers the rare case where session commands were evicted before discard:
    * restores the bound definition (edit) or removes the created figure
-   * (create), as one undoable command. */
+   * (create), as one undoable command of the engine. */
   _repairDiscard() {
     const editor = this.editor;
     if (this.mode === 'edit') {
@@ -168,31 +164,11 @@ export class BuilderSession {
         editor.replaceFigureDefinition(this.typeId, clone(this.baselineFigure), {label: interfaceText("builderSession.discardFigureEdits"), labelKey: "builderSession.discardFigureEdits"});
       return;
     }
-    if (this.typeId === null || !editor.report.figure_types.some(figure => figure.figure_type_id === this.typeId)) return;
+    if (this.typeId === null || findFigureType(editor.report.figure_types, this.typeId) === undefined) return;
     this._removeCreatedFigure(this.typeId);
   }
+  /** The creation of the figure left the history: its instances in every frame and its definition go, as one entry of the engine. */
   _removeCreatedFigure(typeId) {
-    const editor = this.editor, report = editor.report;
-    const before = {figures: clone(report.figure_types), frame: clone(editor.frame)}, beforeSelection = editor._selectionState();
-    for (const frame of editor._allSourceFrames()) {
-      const remove = new Set(frame.objects.filter(object => object.figure_type_id === typeId).map(object => object.unique_id));
-      if (!remove.size) continue;
-      for (const object of frame.objects) if (object.join) {
-        object.join.target_unique_id = frame.objects[object.join.target_object_slot]?.unique_id;
-        if (!remove.has(object.unique_id) && remove.has(object.join.target_unique_id)) object.join = null;
-      }
-      frame.objects = frame.objects.filter(object => !remove.has(object.unique_id));
-      frame.objects.forEach((object, slot) => { object.object_slot = slot; });
-      setOrder(frame, frameOrder(frame).filter(uid => !remove.has(uid)));
-      normalizeFrame(frame);
-    }
-    report.figure_types = report.figure_types.filter(figure => figure.figure_type_id !== typeId);
-    if (editor.selectedUids.size) editor._selectIds([...editor.selectedUids].filter(uid => editor.selectionFrame.objects.some(o => o.unique_id === uid)));
-    validateScene({...report, keyframes: editor._allSourceFrames()});
-    editor._record({kind: 'import', label: interfaceText("builderSession.discardNewFigure"), labelKey: "builderSession.discardNewFigure", index: editor.frameIndex, before,
-      after: {figures: clone(report.figure_types), frame: clone(editor.frame)},
-      beforeSelection, afterSelection: editor._selectionState(), structural: true, timing: false});
-    editor._invalidate();
-    editor._emit('edit', {label: interfaceText("builderSession.discardNewFigure"), labelKey: "builderSession.discardNewFigure", structural: true});
+    this.editor.discardNewFigure(typeId, {label: interfaceText("builderSession.discardNewFigure"), labelKey: "builderSession.discardNewFigure"});
   }
 }

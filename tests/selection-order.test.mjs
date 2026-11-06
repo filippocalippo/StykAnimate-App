@@ -1,19 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
 import {emptyDocument, createObject, createFrame} from '../src/demo.mjs';
 import {builderDrawables} from '../src/editor-builder-style.mjs';
 import {resolveInstanceFigure} from '../src/animation-style.mjs';
 import {validateLayerSheet} from '../src/layer-sheet.mjs';
 
-function fixture({propertyChannels = true, joined = false} = {}) {
+/** `prepare(figure)` changes the figure definition before the document opens. */
+function fixture({propertyChannels = true, joined = false, prepare = null} = {}) {
   const report = emptyDocument(), figure = report.figure_types[0];
   figure.segments = figure.segments.slice(0, 4).map((s, i) => ({...s, segment_id: i + 1,
     parent_id: [0, 1, 0, 0][i], z_order: i + 1}));
   figure.segment_count = 4;
+  prepare?.(figure);
   report.keyframes = [0, 1, 2].map(() => createFrame([1, 2, 3, 4].map(uid => createObject(figure, uid, 200, 200)), 10));
   if (joined) for (const frame of report.keyframes) frame.objects[1].join = {target_object_slot: 0, target_handle_id: 2};
-  const editor = new Editor({demo: false, layerTimeline: true, propertyChannels}).load(report);
+  const editor = newOwnedEditor({demo: false, layerTimeline: true, propertyChannels}).load(report);
   editor.seek(5); editor.select(1);
   return editor;
 }
@@ -46,7 +48,7 @@ for (const [direction, joint, expected] of [
   assert.equal(e.selectedJoint, joint); assert.equal(e._undo.length, history + 1);
   e.undo(); assert.deepEqual(e.figure, original);
   e.redo(); assert.deepEqual(segments(e), expected);
-  const reopened = new Editor({demo: false, layerTimeline: true}).load(e.serialize());
+  const reopened = newOwnedEditor({demo: false, layerTimeline: true}).load(e.serialize());
   reopened.seek(5);
   reopened.select(1, joint); assert.deepEqual(segments(reopened), expected);
   reopened.seek(0);assert.deepEqual(segments(reopened),[1,2,3,4]);
@@ -54,8 +56,7 @@ for (const [direction, joint, expected] of [
 });
 
 test('internal branch ordering includes descendant segments and contained polygons', () => {
-  const e = fixture();
-  e.figure.polyfills = [{polyfill_id: 1, segment_ids: [0, 1, 2], z_order: 1.5, color_rgb: [200, 10, 20], color_alpha: 1}];
+  const e = fixture({prepare: figure => { figure.polyfills = [{polyfill_id: 1, segment_ids: [0, 1, 2], z_order: 1.5, color_rgb: [200, 10, 20], color_alpha: 1}]; }});
   e.selectBranch(1, 0); assert.deepEqual([...e.selectedUids], [1]);
   const original = internal(e);
   e.orderSelection('front');
@@ -79,8 +80,8 @@ test('a branch with attached figures orders the complete selection without chang
   e.redo(); assert.deepEqual(order(e), [3, 4, 1, 2]);
 });
 
-for (const layerTimeline of [false, true]) for (const propertyChannels of [false, true])
-test(`single-segment joints and joined branches move in scene order (sheet=${layerTimeline}, properties=${propertyChannels})`, () => {
+for (const propertyChannels of [false, true])
+test(`single-segment joints and joined branches move in scene order (properties=${propertyChannels})`, () => {
   const report = emptyDocument(), figure = report.figure_types[0];
   figure.segments = [figure.segments[0]]; figure.segment_count = 1;
   const ids = [70, 10, 80, 30, 50, 20], before = [30, 70, 20, 10, 50, 80];
@@ -91,7 +92,7 @@ test(`single-segment joints and joined branches move in scene order (sheet=${lay
     frame.object_draw_order_unique_ids = [...before]; frame.object_draw_order = before.map(uid => ids.indexOf(uid));
     return frame;
   });
-  const e = new Editor({demo: false, layerTimeline, propertyChannels}).load(report);
+  const e = newOwnedEditor({demo: false, layerTimeline: true, propertyChannels}).load(report);
   e.select(70, 0);
   e.orderSelection('front'); assert.deepEqual(order(e), [30, 20, 10, 50, 80, 70]);
   e.undo(); assert.deepEqual(order(e), before);
@@ -117,15 +118,14 @@ test(`single-segment joints and joined branches move in scene order (sheet=${lay
   e.orderSelection('front'); e.orderSelection(1); assert.equal(e._undo.length, endHistory);
   while (e._undo.length > history) e.undo(); assert.deepEqual(order(e), before);
   while (e._redo.length) e.redo(); assert.deepEqual(order(e), after);
-  const restored = new Editor({demo: false, layerTimeline, propertyChannels}).load(e.serialize());
+  const restored = newOwnedEditor({demo: false, layerTimeline: true, propertyChannels}).load(e.serialize());
   assert.deepEqual(order(restored), after);
   restored.seek(10); assert.deepEqual(order(restored), before);
 });
 
 test('a branch containing the whole figure moves the instance while partial branches stay internal', () => {
-  const e = fixture();
-  e.figure.segments.forEach((segment, index) => { segment.parent_id = index ? 1 : 0; });
-  e._invalidate(); e.selectBranch(1, 0);
+  const e = fixture({prepare: figure => figure.segments.forEach((segment, index) => { segment.parent_id = index ? 1 : 0; })});
+  e.selectBranch(1, 0);
   const original = internal(e);
   e.orderSelection('front'); assert.deepEqual(order(e), [2, 3, 4, 1]);
   assert.deepEqual(internal(e), original);

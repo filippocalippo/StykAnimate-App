@@ -1,0 +1,70 @@
+{
+ "name": "move-frames-clip-sheet",
+ "document": "sheet-movieclip-timed.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "sheetMoveFrames",
+   [
+    "layer-1"
+   ],
+   0,
+   0,
+   2
+  ],
+  [
+   "sheetMoveFrames",
+   [
+    "layer-1"
+   ],
+   6,
+   6,
+   3,
+   {
+    "copy": true
+   }
+  ],
+  [
+   "sheetMoveFrames",
+   [
+    "layer-1"
+   ],
+   2,
+   2,
+   -2
+  ],
+  [
+   "@seek",
+   9
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "sheetMoveFrames",
+   [
+    "layer-1"
+   ],
+   6,
+   9,
+   1
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

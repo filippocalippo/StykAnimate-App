@@ -1,0 +1,48 @@
+{
+ "name": "polygons-native-file-sheet",
+ "document": "polygons.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "removePolygon",
+   2
+  ],
+  [
+   "addPolygon",
+   [
+    0,
+    4,
+    5
+   ]
+  ],
+  [
+   "removePolygon",
+   1
+  ],
+  [
+   "addPolygon",
+   [
+    0,
+    7,
+    8
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

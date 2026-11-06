@@ -1,0 +1,518 @@
+{
+ "name": "selection-metadata-saved-layout-sheet",
+ "document": "selection-metadata-saved-layout-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true,
+  "autoKey": false
+ },
+ "steps": [
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectPolygon",
+   1,
+   0
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectMany",
+   [
+    1
+   ]
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@restoreSelection",
+   {
+    "frameIndex": 0,
+    "tick": 2.25,
+    "uid": 1,
+    "uids": [
+     1
+    ],
+    "joint": -1,
+    "activeLayerId": "layer-1",
+    "sheetSelection": null,
+    "polygonSelection": {
+     "uid": 1,
+     "index": 0,
+     "typeId": 1,
+     "unknown": {
+      "label": "polygon",
+      "nested": [
+       1,
+       2
+      ]
+     }
+    }
+   }
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "setFPS",
+   31
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@select",
+   2,
+   0
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectPolygon",
+   1,
+   1
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectPolygon",
+   999,
+   0
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectPolygon",
+   1,
+   999
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "toggleSegment",
+   999,
+   0
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectPolygon",
+   1,
+   2
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "toggleSegment",
+   1,
+   999
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "toggleSegment",
+   1,
+   1
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "toggleSegment",
+   1,
+   2
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "setCanvasSize",
+   720,
+   480
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@restoreSelection",
+   {
+    "frameIndex": 0,
+    "tick": 2.25,
+    "uid": 1,
+    "uids": [
+     1
+    ],
+    "joint": 2,
+    "activeLayerId": "layer-1",
+    "sheetSelection": null,
+    "segmentIds": [
+     11,
+     9999,
+     22,
+     11,
+     33
+    ]
+   }
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "toggleSegment",
+   1,
+   1
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "toggleSegment",
+   1,
+   0
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "toggleSegment",
+   1,
+   2
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectBranch",
+   1,
+   0
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectBranch",
+   1,
+   999
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@restoreSelection",
+   {
+    "frameIndex": 0,
+    "tick": 2.25,
+    "uid": 1,
+    "uids": [
+     1,
+     4
+    ],
+    "joint": 0,
+    "activeLayerId": "layer-1",
+    "sheetSelection": null,
+    "branch": {
+     "uid": 1,
+     "joint": 0,
+     "unknown": {
+      "label": "branch",
+      "flags": [
+       false,
+       true
+      ]
+     }
+    }
+   }
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "updateProject",
+   {
+    "fps": 47,
+    "canvas_width": 640,
+    "canvas_height": 400
+   }
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectMany",
+   [
+    4,
+    2,
+    1
+   ]
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectMany",
+   [
+    4,
+    4,
+    999,
+    2
+   ]
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@seek",
+   6.5
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@restoreSelection",
+   {
+    "frameIndex": 0,
+    "tick": 3.5,
+    "uid": 999,
+    "uids": [
+     999,
+     1,
+     4,
+     1
+    ],
+    "joint": 1,
+    "activeLayerId": "layer-1",
+    "sheetSelection": null,
+    "polygonSelection": {
+     "uid": 1,
+     "index": 0,
+     "typeId": 999,
+     "unknown": "invalid type"
+    },
+    "segmentIds": [
+     999,
+     11
+    ],
+    "branch": {
+     "uid": 999,
+     "joint": 1,
+     "unknown": "hidden"
+    }
+   }
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectMany",
+   [
+    1
+   ]
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@restoreSelection",
+   {
+    "frameIndex": 99,
+    "tick": 99,
+    "uid": 1,
+    "uids": [
+     1
+    ],
+    "joint": -1,
+    "activeLayerId": "missing-layer",
+    "sheetSelection": {
+     "id": "layer-1",
+     "contents": false
+    },
+    "polygonSelection": {
+     "uid": 1,
+     "index": 999,
+     "id": 5,
+     "typeId": 1,
+     "unknown": "stable id"
+    }
+   }
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "setFPS",
+   48
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectMany",
+   []
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "selectPolygon",
+   1,
+   0
+  ],
+  [
+   "@selection"
+  ],
+  [
+   "@restoreSelection",
+   {
+    "frameIndex": 1,
+    "tick": 8,
+    "uid": 1,
+    "uids": [
+     1
+    ],
+    "joint": -1,
+    "activeLayerId": "layer-1",
+    "sheetSelection": null,
+    "polygonSelection": {
+     "uid": 1,
+     "index": 0,
+     "typeId": 1
+    },
+    "segmentIds": [
+     11,
+     22
+    ],
+    "branch": {
+     "uid": 1,
+     "joint": -1
+    }
+   }
+  ],
+  [
+   "@selection"
+  ]
+ ]
+}

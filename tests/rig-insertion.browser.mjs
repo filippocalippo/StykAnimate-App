@@ -7,7 +7,7 @@ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],
 page.on('pageerror',error=>errors.push(error.message));await mkdir(output,{recursive:true});
 const settle=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 const saved=()=>page.evaluate(()=>JSON.stringify(styk.editor.serialize()));
-const gallery=async()=>{await page.locator('#library-tab').click();await page.locator('.rig-library-examples').click();await settle();};
+const gallery=async()=>{await page.evaluate(()=>styk.actions['rig-examples']());await settle();};
 const load=async()=>{await page.evaluate(async()=>{styk.builder.leave();const {rigExampleDocument}=await import('/src/rig-examples.mjs');styk.editor.load(rigExampleDocument('sliding-carriage'));styk.editor.select(1,0);});await settle();};
 try{
   await page.goto(process.env.STYK_URL??'http://127.0.0.1:47851');await page.waitForFunction(()=>window.styk?.ready);
@@ -46,7 +46,7 @@ try{
   const created=await saved();await gallery();await page.locator('[data-rig-insert="wire-globe-3d"]').click();await settle();
   assert.equal(await page.evaluate(()=>styk.builder.active),false);await page.keyboard.press('Control+z');await settle();assert.equal(await saved(),created);
   // A locked destination leaves both the construction and the dialog intact.
-  await load();await page.evaluate(()=>{styk.editor.setLayerLocked(styk.editor.activeLayerId,true);styk.builder.enter();});await settle();
+  await load();await page.evaluate(()=>{styk.builder.enter();styk.editor.setLayerLocked(styk.editor.activeLayerId,true);});await settle();
   const locked=await saved();await gallery();await page.locator('[data-rig-insert="turbine-3d"]').click();await settle();
   assert.match(await page.locator('#rig-example-status').textContent(),/Unlock/);assert.equal(await saved(),locked);assert.equal(await page.evaluate(()=>styk.builder.active),true);
   await page.locator('#dialog [data-action="close-dialog"]').first().click();

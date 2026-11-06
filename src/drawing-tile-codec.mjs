@@ -4,12 +4,12 @@ import {decodeDrawingPNGBytes,encodeRGBAPNG} from './drawing-png.mjs';
 import {base64ToBytes} from './base64.mjs';
 export const TILE_BLOB_PREFIX='data:application/x-styk-tiles;base64,';
 const TILE_BLOB_MAX_BYTES=96*1024*1024,TILE_BLOB_MAX_PIXELS=512*1024*1024;
-export const TILE_BLOB_MAX_TILES=TILE_BLOB_MAX_PIXELS/TILE_BYTES;
-export const TILE_BLOB_MAX_CHARACTERS=4*Math.ceil(TILE_BLOB_MAX_BYTES/3);
+const TILE_BLOB_MAX_TILES=TILE_BLOB_MAX_PIXELS/TILE_BYTES;
+const TILE_BLOB_MAX_CHARACTERS=4*Math.ceil(TILE_BLOB_MAX_BYTES/3);
 export function tileBlobBytes(url){if(typeof url!=='string'||!url.startsWith(TILE_BLOB_PREFIX))throw messageError(new Error(''), "errors.drawingTileCodec.drawingTilesNeedAnEmbeddedTileBlob", {});if(url.length>TILE_BLOB_PREFIX.length+TILE_BLOB_MAX_CHARACTERS)throw messageError(new Error(''), "errors.drawingTileCodec.drawingTileBlobExceedsItsSizeBound", {});const bytes=base64ToBytes(url.slice(TILE_BLOB_PREFIX.length));if(bytes.length>TILE_BLOB_MAX_BYTES)throw messageError(new Error(''), "errors.drawingTileCodec.drawingTileBlobExceedsItsSizeBound", {});return bytes;}
 export {base64ToBytes as base64Bytes};
 /** Assemble the blob bytes from already-encoded per-tile PNGs. */
-export function assembleTileBlobBytes(tiles){
+function assembleTileBlobBytes(tiles){
   if(tiles.length>TILE_BLOB_MAX_TILES)throw messageError(new Error(''), "errors.drawingTileCodec.drawingTileBlobExceedsItsTileBound", {});
   const seen=new Set();for(const tile of tiles){assertTileCoordinates(tile.tx,tile.ty);const key=tileKey(tile.tx,tile.ty);if(seen.has(key))throw messageError(new Error(''), "errors.drawingTileCodec.drawingTileBlobContainsDuplicateTiles", {});seen.add(key);}
   const head=16+12*tiles.length,total=tiles.reduce((n,t)=>n+t.png.length,head);
@@ -36,7 +36,7 @@ export async function encodeTileBlob(store){
 }
 /** Parallel decode shards own whole 8×8-tile blocks, so each shard can also
  * build its mip levels up to level 3 without tiles from another shard. */
-export const inShard=(tx,ty,[index,count])=>((((tx>>3)+(ty>>3))%count)+count)%count===index;
+const inShard=(tx,ty,[index,count])=>((((tx>>3)+(ty>>3))%count)+count)%count===index;
 export async function decodeTileBlob(url,{shard,maxBytes=TILE_BLOB_MAX_PIXELS}={}){
   const bytes=tileBlobBytes(url),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   if(bytes.length<16||view.getUint32(0)!==0x54595453||view.getUint32(4,true)!==1||view.getUint32(8,true)!==TILE)throw messageError(new Error(''), "errors.drawingModel.invalidDrawingTileBlob", {});

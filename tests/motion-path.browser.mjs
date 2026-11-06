@@ -61,7 +61,7 @@ try {
  check('Remote trail point starts a gesture',await page.evaluate(()=>styk.state.drag?.kind==='motion-path'&&styk.state.drag.tick===8));
  await page.keyboard.down('Shift');await page.mouse.move(grab.x+35,grab.y+10,{steps:4});await page.keyboard.up('Shift');await page.mouse.up();
  check('Offset drag preserves playhead and commits one undo entry',await page.evaluate(n=>styk.editor.tick===24&&styk.editor._undo.length===n+1,grab.undo));
- check('Shift locks axis without grab jump',await page.evaluate(async({root,scale})=>{const {samplePathPoint}=await import('/src/motion-path.mjs');return Math.abs(samplePathPoint(styk.editor.report,{kind:'node',uid:1,handleId:0},8).x-(root+35/scale))<.001;},grab));
+ check('Shift locks axis without grab jump',await page.evaluate(async({root,scale})=>{const {MotionTrails}=await import('/src/motion-path.mjs');return Math.abs(new MotionTrails(styk.editor,{budgetMs:Infinity}).read([{kind:'node',uid:1,handleId:0}])[0].points.get(8).x-(root+35/scale))<.001;},grab));
  await page.evaluate(()=>styk.editor.undo());
  check('Undo restores remote pose',await page.evaluate(root=>styk.editor.report.keyframes[1].objects[0].root_x===root,grab.root));
  await page.waitForTimeout(300);await page.mouse.move(grab.x+1,grab.y);await page.mouse.move(grab.x,grab.y);await page.waitForTimeout(100);
@@ -94,7 +94,7 @@ try {
  await page.screenshot({path:out+'/falloff-settings.png'});
  await page.keyboard.press('Escape');
  await page.waitForTimeout(300);
- const rootY=async()=>page.evaluate(async()=>{const {samplePathPoint}=await import('/src/motion-path.mjs');return [0,8,16,24].map(t=>samplePathPoint(styk.editor.report,{kind:'node',uid:1,handleId:0},t).y);});
+ const rootY=async()=>page.evaluate(async()=>{const {MotionTrails}=await import('/src/motion-path.mjs'),[trail]=new MotionTrails(styk.editor,{budgetMs:Infinity}).read([{kind:'node',uid:1,handleId:0}]);return [0,8,16,24].map(t=>trail.points.get(t).y);});
  const arc=await page.evaluate(()=>{const r=document.querySelector('#viewport').getBoundingClientRect(),v=styk.state.view,o=styk.editor.report.keyframes[1].objects[0];return {x:r.left+v.x+o.root_x*v.scale,y:r.top+v.y+o.root_y*v.scale,undo:styk.editor._undo.length};});
  const beforeY=await rootY();
  await page.mouse.move(arc.x+1,arc.y);await page.mouse.move(arc.x,arc.y);

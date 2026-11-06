@@ -1,0 +1,47 @@
+{
+ "name": "ik-rig-stretch-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/rig-stretch.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   10,
+   5
+  ],
+  [
+   "rotateSelection",
+   0.1
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "rotateJoint",
+   0.2
+  ],
+  [
+   "bendJoint",
+   260,
+   200
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

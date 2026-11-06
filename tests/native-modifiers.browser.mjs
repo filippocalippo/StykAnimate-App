@@ -10,7 +10,7 @@ const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('
 async function setup() {
   await page.evaluate(async()=>{
     const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');
-    const {worldToScreen}=await import('/src/renderer.mjs');
+    const {worldToScreen}=await import('/src/renderer-geometry.mjs');
     const report=emptyDocument(),figure=report.figure_types[0];report.keyframes=[createFrame([createObject(figure,1,400,300)])];
     styk.editor.load(report,'Native modifiers');styk.editor.select(1,0);styk.fit();
     window.__screen=point=>{const r=document.querySelector('#viewport').getBoundingClientRect(),p=worldToScreen(point,{report:styk.editor.report,frame:styk.editor.evaluatedFrame,view:styk.state.view});return{x:r.x+p.x,y:r.y+p.y};};
@@ -18,7 +18,7 @@ async function setup() {
 }
 const screen=p=>page.evaluate(p=>__screen(p),p);
 try{
-  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>styk?.ready);
+  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
   for(const key of ['Control','Shift']) {
     await setup();const origin={x:400,y:300},start=await screen({x:400,y:222}),middle=await screen({x:460,y:240}),end=await screen({x:556,y:300});
     await page.mouse.move(start.x,start.y);await page.keyboard.down('Alt');await page.keyboard.down(key);await page.mouse.down();

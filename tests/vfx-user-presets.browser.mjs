@@ -7,7 +7,7 @@ const out='artifacts/vfx-user-presets';await mkdir(out,{recursive:true});
 const browser=await chromium.launch({channel:'chrome',headless:true}),page=await browser.newPage({viewport:{width:1440,height:900}});
 const errors=[];page.on('pageerror',e=>errors.push(e.stack));
 const check=(name,value)=>{assert.ok(value,name);console.log('PASS',name);};
-const ready=async()=>{await page.waitForFunction(()=>styk.ready);await page.evaluate(async()=>{const {emptyDocument,createObject,createFrame}=await import('/src/demo.mjs'),r=emptyDocument(),f=r.figure_types[0];r.keyframes=[createFrame([createObject(f,1,200,200),createObject(f,2,500,200)],24)];styk.editor.load(r);styk.editor.select(1);});await page.getByRole('tab',{name:'VFX',exact:true}).click();};
+const ready=async()=>{await page.waitForFunction(()=>window.styk?.ready);await page.evaluate(async()=>{const {emptyDocument,createObject,createFrame}=await import('/src/demo.mjs'),r=emptyDocument(),f=r.figure_types[0];r.keyframes=[createFrame([createObject(f,1,200,200),createObject(f,2,500,200)],24)];styk.editor.load(r);styk.editor.select(1);});await page.getByRole('tab',{name:'VFX',exact:true}).click();};
 try{
   await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');
   await page.evaluate(()=>localStorage.removeItem('stykanimate.vfx-presets.v1'));await page.reload();await ready();

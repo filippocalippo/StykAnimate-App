@@ -1,0 +1,73 @@
+{
+ "name": "clip-break-presence-native",
+ "document": "clip-break-presence-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "@select",
+   7,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "@seek",
+   5.75
+  ],
+  [
+   "@select",
+   7,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   0
+  ],
+  [
+   "@select",
+   7,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   11
+  ],
+  [
+   "@select",
+   7,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

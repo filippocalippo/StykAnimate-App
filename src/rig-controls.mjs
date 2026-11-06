@@ -32,7 +32,7 @@ const head = row => ({kind: 'grid', rows: [{span: 2, ...row}]});
 const settings = (rows, extra = {}) => ({kind: 'grid', rows, ...extra, data: {'rig-settings': true, ...extra.data}});
 
 /** The Rig section's title: what the part's rig is (a weighted joint and an angle-driven path have their own controls). */
-export function rigSectionTitle(segment) {
+function rigSectionTitle(segment) {
   const r = segment?._stykRig ?? {};
   return r.weighted ? interfaceText("rigControls.weightedJoint") : r.anglePath ? interfaceText("rigControls.angleDrivenPath") : interfaceText("rigControls.rig");
 }

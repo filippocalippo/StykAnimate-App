@@ -1,0 +1,76 @@
+{
+ "name": "ik-joined-unpinned-sheet",
+ "document": "ik-joined-unpinned.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   2,
+   0
+  ],
+  [
+   "poseJoint",
+   350,
+   270
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   360,
+   280
+  ],
+  [
+   "poseJoint",
+   380,
+   300
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   3,
+   0
+  ],
+  [
+   "rotateJoint",
+   0.2
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   5,
+   5
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   2,
+   0
+  ],
+  [
+   "poseJoint",
+   330,
+   300
+  ]
+ ]
+}

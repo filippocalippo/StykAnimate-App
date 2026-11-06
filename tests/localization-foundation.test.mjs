@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import english from '../src/locales/en.mjs';
-import packs from '../src/locales/locale-packs.mjs';
+import italian from '../src/locales/messages/it.mjs';
 import {parseLanguagePack, validateCatalog, mergeEnglishMessages} from '../src/locales/catalog-validation.mjs';
 import {inspectMessageReferences, inspectApplicationMessages} from '../scripts/localization-source.mjs';
 import {messageError, restoreMessageError, errorMessageData} from '../src/localized-error.mjs';
 import {errorText} from '../src/error-presentation.mjs';
-import {interfaceLocalization, Localization} from '../src/localization.mjs';
+import {interfaceLocalization, Localization, loadLocales} from '../src/localization.mjs';
+
+await loadLocales();
 import {messageTuple, tupleMessages} from '../src/localization-bindings.mjs';
 import {menuKeyAction} from '../src/ui/ui-menu.mjs';
 
@@ -58,7 +60,7 @@ test('sandboxed preload uses the same generated diagnostic constructor without N
 test('presentation references and precise numbers resolve in the selected language', () => {
   const localization = new Localization({locale:'it'});
   assert.equal(localization.t('quick.unavailable', {label:{messageKey:'common.save'},reason:'Example'}), 'Salva (Example)');
-  const source = packs.find(pack => pack.locale.id === 'it').messages['app.savedAt'] ?? english['app.savedAt'];
+  const source = italian['app.savedAt'] ?? english['app.savedAt'];
   const result = localization.t('app.savedAt', {time:{format:'date',value:Date.UTC(2026,0,1,12,5),options:{hour:'numeric',minute:'2-digit',timeZone:'UTC'}}});
   assert.equal(result, source.replace('{time}', new Intl.DateTimeFormat('it',{hour:'numeric',minute:'2-digit',timeZone:'UTC'}).format(Date.UTC(2026,0,1,12,5))));
 });

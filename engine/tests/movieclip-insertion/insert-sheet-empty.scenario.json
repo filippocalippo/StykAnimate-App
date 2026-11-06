@@ -1,0 +1,39 @@
+{
+ "name": "insert-sheet-empty",
+ "document": "insert-sheet-empty.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "@seek",
+   4.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "createEmptyMovieclip",
+   "Drop inserted branch"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -1,0 +1,1 @@
+{"name":"native-vfx-scene-baked","document":"native-vfx-scene-baked.document.json","editor":{},"steps":[["@select",4,-1],["@frame"],["@seek",2.25],["@frame"],["@seek",7.75],["@frame"],["@seek",16],["@frame"]]}

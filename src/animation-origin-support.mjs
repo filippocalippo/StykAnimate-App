@@ -2,7 +2,7 @@ import {messageError} from './localized-error.mjs';
 /** Numeric animation dependencies retained after construction joints disappear.
  * These bones never enter native geometry, selection, or the renderer. */
 const layouts = new WeakMap();
-export function originSupportLayout(figure) {
+function originSupportLayout(figure) {
   const support = figure?._styk?.animationOrigin?.support;
   if (!support) return null;
   let layout = layouts.get(support);
@@ -36,50 +36,9 @@ export function originSupportOffset(figure, object) {
   }
   return {x, y};
 }
-/** Scalar and whole-figure rotation must carry hidden angular dependencies. */
-export function rotateOriginSupport(figure, object, delta) {
-  if (!delta || !figure?._styk?.animationOrigin?.support || !object._stykAnimationOrigin?.ghosts) return object;
-  const ghosts = Object.fromEntries(Object.entries(object._stykAnimationOrigin.ghosts).map(([index, pose]) => [index, {...pose, angle_rad: pose.angle_rad + delta}]));
-  object._stykAnimationOrigin = {...object._stykAnimationOrigin, ghosts}; return object;
-}
-export function mirrorOriginSupport(figure, object, axis = 'horizontal') {
-  if (!figure?._styk?.animationOrigin?.support || !object._stykAnimationOrigin?.ghosts) return object;
-  const ghosts = Object.fromEntries(Object.entries(object._stykAnimationOrigin.ghosts).map(([index, pose]) => [index,
-    {...pose, angle_rad: axis === 'vertical' ? -pose.angle_rad : Math.PI - pose.angle_rad, bend_rad: -pose.bend_rad}]));
-  object._stykAnimationOrigin = {...object._stykAnimationOrigin, ghosts}; return object;
-}
-export function resetOriginSupport(figure, object) {
-  if (!figure?._styk?.animationOrigin?.support) return false;
-  const before = JSON.stringify(object._stykAnimationOrigin?.ghosts); initializeOriginSupport(figure, object);
-  return before !== JSON.stringify(object._stykAnimationOrigin?.ghosts);
-}
 export function initializeOriginSupport(figure, object) {
   const support = figure?._styk?.animationOrigin?.support; if (!support) return;
   const ghosts = {};
   support.bones.forEach((bone, index) => {if (bone.handleId === null) ghosts[index] = {angle_rad: bone.angle_rad, bend_rad: bone.bend_rad, length: bone.length};});
   if (Object.keys(ghosts).length) object._stykAnimationOrigin = {...object._stykAnimationOrigin, ghosts};
-}
-/** `sample` uses exactly the native interpolation/easing/wrap implementation. */
-export function interpolateOriginSupport(figure, output, sample) {
-  const layout = originSupportLayout(figure), {support} = layout, ghosts = {}, angles = new Array(support.bones.length), bends = new Array(support.bones.length);
-  for (const index of layout.ready) {
-    const bone = support.bones[index];
-    bends[index] = sample(object => originSupportPose(figure, object, index, layout).bend_rad);
-    if (bone.handleId === null) ghosts[index] = {bend_rad: bends[index], length: sample(object => originSupportPose(figure, object, index, layout).length)};
-    const relative = sample(object => {
-      const pose = originSupportPose(figure, object, index, layout);
-      if (bone.parent < 0) return pose.angle_rad;
-      const parent = originSupportPose(figure, object, bone.parent, layout);
-      return pose.angle_rad - parent.angle_rad - parent.bend_rad;
-    }, true);
-    angles[index] = relative + (bone.parent < 0 ? 0 : angles[bone.parent] + bends[bone.parent]);
-    // The legacy reversed-edge round trip adds one turn when it writes a
-    // native angle and reads its virtual direction again. Retain that exact
-    // property value for hidden edges as well as their identical geometry.
-    if (bone.handleId === null) ghosts[index].angle_rad = angles[index] + (bone.reversed ? 2 * Math.PI : 0);
-  }
-  output.angles = [...output.angles];
-  support.bones.forEach((bone, index) => {if (bone.handleId !== null) output.angles[layout.indices[index]] = angles[index] + (bone.reversed ? bends[index] + Math.PI : 0);});
-  if (Object.keys(ghosts).length) output._stykAnimationOrigin = {...output._stykAnimationOrigin, ghosts};
-  return output;
 }

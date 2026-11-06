@@ -2,7 +2,7 @@
 import {chromium} from './support/playwright.mjs';
 import {readFile,writeFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
-import {decodeDocument} from '../src/native-container.mjs';
+import {decodeDocument} from './support/native-files.mjs';
 const directory='artifacts/skateboard-360',browser=await chromium.launch({channel:'chrome',headless:true});
 const errors=[],checks=[];
 try{

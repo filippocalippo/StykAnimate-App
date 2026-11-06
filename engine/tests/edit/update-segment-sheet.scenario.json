@@ -1,0 +1,158 @@
+{
+ "name": "update-segment-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "updateSegment",
+   {
+    "angle_rad": 1.2
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "length": 40
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "bend_rad": 0.3
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "color_rgb": [
+     200,
+     30,
+     40
+    ]
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "transparency": 128,
+    "thickness": 9
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "primitive_code": 1
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "is_static": true
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "angle_rad": 0.5,
+    "color_rgb": [
+     0,
+     0,
+     255
+    ]
+   }
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "updateSegment",
+   {
+    "thickness": 0
+   }
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "updateSegment",
+   {
+    "color_rgb": [
+     300,
+     0,
+     0
+    ]
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "transparency": -1
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "primitive_code": 9
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "length": -2
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "parent_id": 1
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "thickness": -1
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "angle_rad": "x"
+   }
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "updateSegment",
+   {
+    "thickness": 3
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

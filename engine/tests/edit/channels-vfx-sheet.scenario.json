@@ -1,0 +1,94 @@
+{
+ "name": "channels-vfx-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/channels/channels-vfx.sheet.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   10,
+   10
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "rotateSelection",
+   0.4
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "poseJoint",
+   420,
+   260
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001",
+   "radius",
+   4
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "vfx1:blur:fx-00000000000040008000000000000001:radius",
+   {
+    "exactTarget": true
+   }
+  ],
+  [
+   "previewAnimationEdit",
+   10
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "@seek",
+   9
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "scene"
+   },
+   "fx-00000000000040008000000000000003",
+   "contrast",
+   1.3
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "duplicateFigure"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

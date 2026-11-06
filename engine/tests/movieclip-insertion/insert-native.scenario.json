@@ -1,0 +1,36 @@
+{
+ "name": "insert-native",
+ "document": "insert-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "@seek",
+   4.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "createEmptyMovieclip",
+   "Drop inserted branch"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

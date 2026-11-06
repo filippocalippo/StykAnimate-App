@@ -1,6 +1,6 @@
 /** Geometry-keyed face discovery. No document mutation and no raster flood buffer. */
 const cache = new WeakMap();
-export function pointInFill(points, point) {
+function pointInFill(points, point) {
   let inside = false;
   for (let i=0,j=points.length-1;i<points.length;j=i++) {
     const a=points[i],b=points[j];

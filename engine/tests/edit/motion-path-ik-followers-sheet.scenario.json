@@ -1,0 +1,106 @@
+{
+ "name": "motion-path-ik-followers-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/followers.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 11,
+    "joint": 0
+   },
+   2
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 260,
+    "y": 300
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 33,
+    "joint": 5
+   },
+   4
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 330,
+    "y": 420
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 11,
+    "joint": 0
+   },
+   5
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 250,
+    "y": 310
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 22,
+    "joint": 2
+   },
+   3,
+   {
+    "falloff": {
+     "radius": 4
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 340,
+    "y": 380
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

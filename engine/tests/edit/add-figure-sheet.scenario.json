@@ -1,0 +1,47 @@
+{
+ "name": "add-figure-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "addFigure"
+  ],
+  [
+   "addFigure",
+   1
+  ],
+  [
+   "addFigure",
+   99
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "addFigure"
+  ],
+  [
+   "@select",
+   4,
+   3
+  ],
+  [
+   "poseJoint",
+   300,
+   200
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

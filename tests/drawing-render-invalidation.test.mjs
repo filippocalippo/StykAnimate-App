@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import {objectBounds} from '../src/renderer-geometry.mjs';
 import {createDrawingFigure} from '../src/drawing-model.mjs';
 import {createObject,createFrame} from '../src/demo.mjs';
-import {buildGeometry} from '../src/pivot/geometry.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 
 test('drawing bounds never request a placeholder image, including empty and live cels',()=>{
-  const fig=createDrawingFigure(),frame=createFrame([createObject(fig,1,100,100)]);
-  const report={version:5,figure_types:[fig],keyframes:[frame]},items=buildGeometry(report,frame).drawables;
+  const e=ownedEditorFor({demo:false,layerTimeline:true}),fig=createDrawingFigure({figureTypeId:60}),frame=createFrame([createObject(fig,60,100,100)]);
+  const items=e._shown.previewGeometry(frame,fig,e.activeLayerId,60).drawables;
   const image=()=>assert.fail('drawing carrier images must not enter the decode/invalidation loop');
   objectBounds(items,{image,url:asset=>asset.data_url});
   fig._styk.drawing.bounds={x:-12,y:-9,width:80,height:60};

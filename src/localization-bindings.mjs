@@ -103,20 +103,11 @@ export function appendLocalized(parent, ...nodes) {
   parent.append(...nodes);
   for (const node of nodes) if (typeof node !== 'string') connectTranslations(node);
 }
-export function appendChildLocalized(parent, node) {
-  const result = parent.appendChild(node);
-  connectTranslations(parent);
-  return result;
-}
 
 /** Descriptor keys belong to the feature; renderers only attach the binding. */
 export function descriptorAttributes(descriptor, property = 'label', attribute = 'text') {
   const key = descriptor?.[`${property}Key`];
   return key ? ' ' + messageAttributes(key, descriptor[`${property}Params`], attribute) : '';
-}
-export function descriptorText(descriptor, property = 'label') {
-  const key = descriptor?.[`${property}Key`];
-  return key ? interfaceLocalization.t(key, descriptor[`${property}Params`]) : descriptor?.[property];
 }
 
 function caption(element, text) {
@@ -195,8 +186,6 @@ export const APP_CHROME_BINDINGS = Object.freeze([
   ['#window-controls [data-action="close"]', { 'aria-label': 'chrome.close' }],
   ['.left-panel .panel-tabs [data-tab="layers"]', { text: 'layers.title' }],
   ['.left-panel .panel-tabs [data-tab="assets"]', { text: 'chrome.assets' }],
-  ['.right-panel .panel-tabs [data-inspector="design"]', { text: 'chrome.design' }],
-  ['.right-panel .panel-tabs [data-inspector="animation"]', { text: 'settings.animation' }],
   ['.panel-bottom [data-action="import"]', { text: 'chrome.importFigures' }],
   ['.panel-bottom [data-action="help"]', { title: 'menu.shortcuts' }],
   ['.timeline-title', { text: 'timeline.title' }],

@@ -1,0 +1,173 @@
+{
+ "name": "ik-spatial-joined-free-sheet",
+ "document": "ik-spatial-joined-free-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   393,
+   474
+  ],
+  [
+   "poseJoint",
+   403,
+   484
+  ],
+  [
+   "poseJoint",
+   385,
+   480
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   373,
+   489
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "poseJoint",
+   390,
+   483
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "setSpatialFeetPinned",
+   false
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   400,
+   470
+  ],
+  [
+   "poseJoint",
+   407,
+   481
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "setSpatialFeetPinned",
+   true
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "setSpatialFeetPinned",
+   true
+  ],
+  [
+   "setSpatialFeetPinned",
+   "invalid"
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "setSpatialFeetPinned",
+   false
+  ],
+  [
+   "setSpatialFeetPinned",
+   true
+  ],
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "poseJoint",
+   null,
+   3
+  ],
+  [
+   "poseJoint",
+   1,
+   2,
+   {
+    "snapTolerance": -1
+   }
+  ],
+  [
+   "updateObject",
+   {
+    "_stykSpatial": {
+     "camera": {
+      "strength": 0.8,
+      "distance": 400
+     }
+    }
+   }
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "setSpatialFeetPinned",
+   false
+  ],
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   405,
+   465
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

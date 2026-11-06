@@ -35,20 +35,6 @@ export function poseChoiceGroups(figure,object){
  return [...channels,...visibility];
 }
 
-/** Definition-only presets apply existing native channels in one editor command.
- * No selector value is saved on an instance or carried between frames. */
-export function applyChannelPoseChoice(figure,object,choice){
- const sign=object.image_text_flags?-1:1,rotation=animationRotation(figure,object),byId=new Map(figure.segments.map((s,i)=>[s.segment_id,i]));
- object.angles=object.angles.slice();
- for(const[id,value]of choice.angles){const i=byId.get(id);object.angles[i]=rotation+(figure.segments[i].angle_rad+value)*sign;}
- if(choice.lengths.length){
-  object.lengths=object.len_flag?object.lengths.slice():figure.segments.map(s=>s.length);
-  for(const[id,value]of choice.lengths)object.lengths[byId.get(id)]=value;
-  object.len_flag=1;
- }
- delete object.runtime_segments;
-}
-
 export function validateFigurePoseChoices(figure){
  const groups=figure._styk?.poseChoices;if(groups===undefined)return;
  const fail=()=>{throw new Error('Invalid native rig pose choices.');};

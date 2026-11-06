@@ -24,7 +24,7 @@ and evaluation. Sparse keys store `interpolation` and, only for Bezier, a four-n
 Pose-track wrappers carry their outgoing key's metadata into the native evaluator.
 For manual timing modes the native evaluator applies the timing curve once,
 before interpolating pose, camera and background properties. Auto instead passes
-raw time into the shared `autoValue` numeric evaluator for each property. Scalar
+raw time into the engine's Auto evaluator for each property. Scalar
 tracks use the same evaluators, including independent ARGB components. Native
 pose angles unwrap along the shortest arc; explicit scalar rotations retain full
 turns. Missing identities, passthrough keys, zero-length intervals and non-Auto
@@ -40,8 +40,8 @@ explicit easing. An explicit key setting disables that fallback for its interval
 it never combines a timing curve with automatic native tangents. Lazily adopted
 native tracks retain inherited intervals until the user gives them an explicit mode.
 
-`setAnimationKeysEasing` edits independent keys in one undo command, adopting native
-tracks as needed. `setFramesEasing` edits the shared native frame sequence. Neither
+The easing commands (session commands in `styk-edit`) edit independent keys in one undo command, adopting native
+tracks as needed, or the shared native frame sequence. Neither
 operation bakes source poses. Copying, retiming and duplication carry key metadata.
 Native Pivot export materializes explicit easing at output ticks and strips the
 authored metadata so it cannot be applied twice. Worker patches carry both frame

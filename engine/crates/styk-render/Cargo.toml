@@ -1,0 +1,29 @@
+[package]
+name = "styk-render"
+description = "GPU renderer for StykAnimate draw lists (wgpu: WebGPU, WebGL2, Vulkan, Metal, DX12)."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = ["gpu"]
+# The renderer itself. Without it the crate is the arithmetic both renderers follow: the
+# view, where layers go for it (`effects::plan`, `effects::record`) and effect recipes
+# (`effects::recipe`), which the CPU rasterizer (styk-raster) uses.
+gpu = ["dep:wgpu"]
+
+[dependencies]
+styk-draw = { path = "../styk-draw" }
+styk-eval = { path = "../styk-eval" }
+bytemuck = { version = "1", features = ["derive"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { version = "30", optional = true }
+
+# In a browser: WebGPU where it exists, WebGL2 otherwise.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["webgpu", "webgl", "wgsl"], optional = true }
+
+[dev-dependencies]
+pollster = "0.4"

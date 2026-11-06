@@ -1,9 +1,13 @@
 import {errorMessageData} from './localized-error.mjs';
-import {StrokeEngine} from './drawing-stroke-engine.mjs';
+import {StrokeEngine,loadDrawingEngine} from './engine/engine-drawing.mjs';
 
-const engine=new StrokeEngine();
+// The drawing raster engine (Rust) paints. Messages wait for it, in their order.
+const ready=loadDrawingEngine().then(()=>new StrokeEngine());
+let queue=Promise.resolve();
 
-self.onmessage=({data})=>{
+self.onmessage=({data})=>{queue=queue.then(()=>ready).then(engine=>handle(engine,data)).catch(error=>self.postMessage({kind:'error',stroke:data.stroke,message:error.message, ...errorMessageData(error)}));};
+
+function handle(engine,data){
   const {kind,stroke:id}=data;
   try{
     if(kind==='begin')engine.begin(id,data.settings);
@@ -17,4 +21,4 @@ self.onmessage=({data})=>{
     }
     else if(kind==='cancel')engine.cancel(id);
   }catch(error){engine.cancel(id);self.postMessage({kind:'error',stroke:id,message:error.message, ...errorMessageData(error)});}
-};
+}

@@ -1,0 +1,74 @@
+{
+ "name": "timing-live-accepted",
+ "document": "timing-live-accepted.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "beginTranslationDrag",
+   "Other figure"
+  ],
+  [
+   "moveSelection",
+   4.5,
+   -2.25
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 0.625
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "moveSelection",
+   2,
+   1
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "placeMovieclip",
+   {
+    "end": 9
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

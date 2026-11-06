@@ -8,14 +8,14 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { PYODIDE_FILES, precacheList } from './build-web.mjs';
+import { CODEC_FILES, precacheList } from './build-web.mjs';
 import { headersFor, parseHeaders } from './serve-web.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Cloudflare Workers static assets: https://developers.cloudflare.com/workers/static-assets/
 export const LIMITS = { files: 20000, fileBytes: 25 * 1024 * 1024, headerRules: 100, headerLine: 2000 };
-const REQUIRED = ['index.html', '_headers', 'build-info.json', 'python/codec-bundle.json', 'src/app.mjs', 'src/codec-web-worker.mjs',
-  'src/codec-web-engine.mjs', 'src/web-offline.mjs', 'src/web-support.js', 'src/web-library.mjs', 'src/community-library.mjs', 'sw.js', 'manifest.webmanifest', 'robots.txt', ...PYODIDE_FILES.map((name) => `vendor/pyodide/${name}`)];
+const REQUIRED = ['index.html', '_headers', 'build-info.json', 'src/app.mjs', 'src/codec-web-worker.mjs', 'src/codec-engine.mjs',
+  'src/web-offline.mjs', 'src/web-support.js', 'src/web-library.mjs', 'src/community-library.mjs', 'sw.js', 'manifest.webmanifest', 'robots.txt', ...CODEC_FILES];
 const PRIVATE = /(^|\/)(\.env[^/]*|telemetry-build\.json|[^/]+\.(pem|key|p12)|desktop|backend|codecs|cloud|node_modules)(\/|$)/;
 
 async function listFiles(root, directory = root, out = new Map()) {
@@ -96,7 +96,7 @@ export async function verifyWeb(root = path.join(appRoot, 'build', 'web')) {
 
   // Every module the app can load must have been shipped.
   for (const name of files.keys()) {
-    if (!/\.(mjs|js)$/.test(name) || name.startsWith('vendor/pyodide/')) continue;
+    if (!/\.(mjs|js)$/.test(name)) continue;
     const directory = path.posix.dirname(name);
     for (const reference of relativeReferences(await readFile(path.join(root, name), 'utf8'))) {
       const target = path.posix.normalize(path.posix.join(directory, reference));
@@ -124,15 +124,6 @@ export async function verifyWeb(root = path.join(appRoot, 'build', 'web')) {
 
   if (files.has('manifest.webmanifest')) await verifyManifest(root, files, fail);
   if (files.has('sw.js')) await verifyServiceWorker(root, fail);
-
-  if (files.has('python/codec-bundle.json')) {
-    try {
-      const bundle = JSON.parse(await readFile(path.join(root, 'python', 'codec-bundle.json'), 'utf8'));
-      for (const required of ['backend/server.py', 'backend/browser_service.py', 'codecs/codec_bridge.py', 'codecs/piv_codec.py']) {
-        if (typeof bundle.files?.[required] !== 'string') fail(`The codec bundle is missing ${required}.`);
-      }
-    } catch (error) { fail(`python/codec-bundle.json is unreadable: ${error.message}`); }
-  }
 
   if (files.has('build-info.json')) {
     const info = JSON.parse(await readFile(path.join(root, 'build-info.json'), 'utf8'));

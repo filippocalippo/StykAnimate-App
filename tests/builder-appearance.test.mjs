@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
 import {copyBuilderAppearance,pasteBuilderAppearance,builderStrokeAppearance,setBuilderStroke} from '../src/builder-appearance.mjs';
-import {branchSegmentIndices} from '../src/editor-builder-branch.mjs';
-const fixture=()=>{const e=new Editor({demo:false});e.addFigure();e.select(e.selectedUid,2);e.updateSegmentStyle({paint:{type:'linear',angle:30,stops:[{offset:0,color:[220,30,90],opacity:.6},{offset:1,color:[20,70,230],opacity:.3}]},thickness:21});return e;};
+import {segmentBranchIndices} from '../src/pivot/structure.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
+const fixture=()=>{const e=ownedEditorFor({demo:false,layerTimeline:true});e.addFigure();e.select(e.selectedUid,2);e.updateSegmentStyle({paint:{type:'linear',angle:30,stops:[{offset:0,color:[220,30,90],opacity:.6},{offset:1,color:[20,70,230],opacity:.3}]},thickness:21});return e;};
 test('appearance clipboard is a detached snapshot; paste preserves geometry and undo/redo',()=>{
  const e=fixture(),clip=copyBuilderAppearance(e),original=structuredClone(clip),count=e._undo.length;
  assert.equal(e._undo.length,count);e.select(e.selectedUid,4);
@@ -16,11 +16,12 @@ test('appearance clipboard is a detached snapshot; paste preserves geometry and 
 });
 test('branch paste styles descendants, while explicit multi-selection targets only its joints',()=>{
  const e=fixture(),clip=copyBuilderAppearance(e);e.select(e.selectedUid,0);
- const indices=branchSegmentIndices(e.figure,0);assert.ok(indices.length>1);
+ const indices=segmentBranchIndices(e.figure.segments,e.figure.segments[0].segment_id);assert.ok(indices.length>1);
  pasteBuilderAppearance(e,clip,{branch:true});for(const index of indices){e.select(e.selectedUid,index);assert.deepEqual(copyBuilderAppearance(e),clip);}
- e.undo();e.select(e.selectedUid,0);e.toggleSegment(e.selectedUid,4);
- const before=e.figure.segments.map(s=>s.thickness);pasteBuilderAppearance(e,clip,{branch:true});
- e.figure.segments.forEach((s,i)=>assert.equal(s.thickness,[0,4].includes(i)?21:before[i]));
+ const thickness=()=>e.figure.segments.map((_,i)=>{e.select(e.selectedUid,i);return copyBuilderAppearance(e).thickness;});
+ e.undo();const before=thickness();e.select(e.selectedUid,0);e.toggleSegment(e.selectedUid,4);
+ pasteBuilderAppearance(e,clip,{branch:true});
+ thickness().forEach((value,i)=>assert.equal(value,[0,4].includes(i)?21:before[i]));
 });
 test('preview snapshots match inherited width at reflected scale and have a zero-width guide',()=>{
  const e=fixture();e.object.scale=-2;

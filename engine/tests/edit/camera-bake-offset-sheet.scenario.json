@@ -1,0 +1,63 @@
+{
+ "name": "camera-bake-offset-sheet",
+ "document": "camera-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "applyCameraToFigures",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     4,
+     2
+    ]
+   }
+  ],
+  [
+   "@seek",
+   2
+  ],
+  [
+   "copyCamera"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "copyCamera"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "copyCamera"
+  ],
+  [
+   "@seek",
+   0
+  ],
+  [
+   "applyCameraToFigures",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     1,
+     5
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

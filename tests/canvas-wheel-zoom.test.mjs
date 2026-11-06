@@ -158,11 +158,11 @@ test('stepped notches still settle once, after the last notch', t => {
   t.mock.timers.tick(1); assert.equal(page.glide.interacting, false); assert.equal(paints, 1);
 });
 
-test('Automatic smooth zooming glides except in Compatibility mode; On and Off override it', () => {
+test('Automatic smooth zooming glides except on the slower WebGL2 backend; On and Off override it', () => {
   assert.equal(smoothWheelZoom('auto', 'WebGPU'), true);
-  assert.equal(smoothWheelZoom('auto', 'Canvas 2D fallback'), false);
+  assert.equal(smoothWheelZoom('auto', 'WebGL2'), false);
   assert.equal(smoothWheelZoom('auto', undefined), true, 'before a renderer exists, the default glide applies');
-  for (const backend of ['WebGPU', 'Canvas 2D fallback', undefined]) {
+  for (const backend of ['WebGPU', 'WebGL2', undefined]) {
     assert.equal(smoothWheelZoom('on', backend), true);
     assert.equal(smoothWheelZoom('off', backend), false);
   }

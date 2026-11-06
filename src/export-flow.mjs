@@ -21,8 +21,7 @@ import {localizedMarkup} from './localization-bindings.mjs';
  * dialog of its own when the export was not started from it.
  *
  * DOM-free at import. ctx (from app.mjs): {editor, state, actions, desktop,
- * importer, telemetry, audioEngine, exportJobs, playback,
- * editablePreparation, fail, status, toast, persistentFailure,
+ * telemetry, audioEngine, exportJobs, playback, fail, status, toast, persistentFailure,
  * finishCurrentEdit, pause, interruptRecovery, runDocumentExport,
  * writeNativeBlob, currentFrame, nameOf, simpleFrameCount}; optionally
  * overlays (the overlay stack), localization() and commitSettings(patch),
@@ -38,21 +37,20 @@ import { audioState, audibleClips } from "./audio-model.mjs";
 import { workload } from "./telemetry-workload.mjs";
 import { sizeBucket } from "./telemetry-schema.mjs";
 import { openExportSink as openExportSinkRaw } from "./export-sink.mjs";
-import { materializeSimpleFrameDraftForPivot } from "./pivot-frame-draft.mjs";
 import { exportAnimation } from "./image-export.mjs";
 import { defaultGIFDither } from "./gif-options.mjs";
-import { ExportFrameRenderer } from "./export-frame-renderer.mjs";
+import { createExportFrameRenderer, prewarmExportRenderer } from "./engine/engine-export.mjs";
 import { exportProgressMarkup, mountExportProgress } from "./export-progress.mjs";
 import { checkExportContext } from "./export-canvas.mjs";
 import { buildExportRequest, exportFormatInfo, exportJob } from "./export-request.mjs";
 import { openExportSheet, openExportProgress } from "./export-sheet.mjs";
-import { ThumbnailRenderer } from "./thumbnail-renderer.mjs";
+import { createThumbnailRenderer } from "./engine/engine-thumbnails.mjs";
 import { isMovieclip } from "./movieclips.mjs";
 import { icon } from "./icons.mjs";
 
 export function createExportFlow(ctx) {
   const {
-    editor, state, actions, desktop, importer, telemetry, audioEngine, exportJobs, playback, editablePreparation,
+    editor, state, actions, desktop, telemetry, audioEngine, exportJobs, playback,
     fail, status, toast, persistentFailure, finishCurrentEdit, pause, interruptRecovery,
     runDocumentExport, writeNativeBlob, currentFrame, nameOf, simpleFrameCount,
   } = ctx;
@@ -167,10 +165,6 @@ export function createExportFlow(ctx) {
       vfw: request.format === "vfw" ? (sheet?.open ? sheet.vfwContext() : { available: false }) : undefined,
     };
   }
-  const playedReport = () =>
-    state.settings.timelineMode === "simple"
-      ? materializeSimpleFrameDraftForPivot(editor.report)
-      : editor.report;
   /** An editable file: .piv, .stk, .stkz, or .stykmov (the figure type of a selected movieclip). */
   async function exportPivot(type = "piv") {
     finishCurrentEdit();
@@ -211,12 +205,9 @@ export function createExportFlow(ctx) {
     if ([...exportJobs].some(job => job.raster)) throw messageError(new Error(''), "errors.exportFlow.anExportIsAlreadyRunningWaitForIt", {});
     pause();
     interruptRecovery();
-    // Drop speculative playback pixels while keeping the editable document and
-    // active scene. Workers reload their disposable cache when playback resumes.
-    editablePreparation.cancel();
-    state.editingPacket = null;
+    // Drop speculative playback frames while keeping the editable document and
+    // active scene. The engine prepares them again when playback resumes.
     playback.invalidate();
-    state.renderer?.clearPreparedFrames?.();
     const controller = new AbortController(),
       job = { controller, recovery: false, raster: true },
       source = editor.report;
@@ -233,19 +224,18 @@ export function createExportFlow(ctx) {
     measurement.onProgress = value => progressUI.update(value);
     measurement.releaseRenderer = () => frameRenderer?.dispose();
     try {
-      frameRenderer = new ExportFrameRenderer({
+      // The engine draws the frames (src/engine/engine-export.mjs); an SVG is the engine's vector output.
+      frameRenderer = createExportFrameRenderer({
         width: options.width,
         height: options.height,
         smoothing: options.smoothing,
-        baseURL: importer.baseURL,
-        token: importer.token,
         signal: controller.signal,
         onFrame: ({stage, tick}) => stage === 'rendering' ? progressUI.frameStarted(tick) : progressUI.frameRendered(),
         getRevision: () =>
           editor.report === source
-            ? `${editor.revision}:${editor.frameDraftRevision}`
+            ? `${editor.revision}`
             : "replaced",
-      });
+      }, {stage: state.renderer, revision: editor.revision, range: [start, start + frames - 1], vector: format === 'svg'});
       await frameRenderer.load(report);
       measurement.stage = 'encode';
       const saved = await render(
@@ -329,7 +319,7 @@ export function createExportFlow(ctx) {
     finishCurrentEdit();
     // The options, frame count, rate, name and GIF repeat (the Loop setting) come from the request.
     const request = currentRequest(format),
-      report = playedReport(),
+      report = editor.report,
       { options, ticks, fps, filename, animation } = exportJob(request, jobContext(request, report));
     if ([...exportJobs].some(job => job.raster)) throw messageError(new Error(''), "errors.exportFlow.anExportIsAlreadyRunningWaitForIt", {});
     // Streamed exports pick their destination up front, then write while encoding.
@@ -377,7 +367,7 @@ export function createExportFlow(ctx) {
     // encoded (sound with a browser encoder, a VFW codec still being checked)
     // throws here with the reason, before a file is chosen.
     const request = currentRequest(format),
-      report = playedReport(),
+      report = editor.report,
       plan = exportJob(request, jobContext(request, report)),
       { options, ticks, fps, extension, filename, includeAudio } = plan;
     const encode = { vfw: encodeVfwVideo, webcodecs: format === "mp4" ? encodeMP4 : encodeWebM, native: encodeNativeVideo }[plan.encoder];
@@ -437,13 +427,13 @@ export function createExportFlow(ctx) {
       throw error;
     }
   }
-  /** The export dialog's frame previews: the thumbnail worker, only while the dialog shows them. */
+  /** The export dialog's frame previews: thumbnails (the engine's for documents it draws), only while the dialog shows them. */
   function previewFrames() {
     let renderer = null;
     return {
       render(tick, canvas, { signal } = {}) {
         if (!editor.totalTicks || signal?.aborted) return Promise.resolve(false);
-        renderer ??= new ThumbnailRenderer(editor, { baseURL: importer.baseURL, token: importer.token, onError: () => {} });
+        renderer ??= createThumbnailRenderer(editor, { stage: () => state.renderer });
         const rows = editor.timeline, index = Math.max(0, rows.findLastIndex((row) => row.start <= tick));
         return renderer.renderThumbnail(index, canvas, { tick, storedFrames: false, signal });
       },
@@ -456,6 +446,8 @@ export function createExportFlow(ctx) {
   function showExport() {
     finishCurrentEdit();
     sheet?.close();
+    // The engine's export worker and its GPU device start while the choices are made.
+    prewarmExportRenderer({ stage: state.renderer });
     const report = editor.report, audio = audioState(report), clips = audibleClips(audio);
     const fps = report.frame_delay_ms ? 1000 / report.frame_delay_ms : report.fps;
     const opened = sheet = openExportSheet({

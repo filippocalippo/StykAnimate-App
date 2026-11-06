@@ -1,0 +1,188 @@
+{
+ "name": "builder-order-sheet",
+ "document": "builder.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "moveBuilderOrder",
+   {
+    "kind": "segment"
+   },
+   "front"
+  ],
+  [
+   "moveBuilderOrder",
+   {
+    "kind": "segment"
+   },
+   "up",
+   {
+    "branch": true
+   }
+  ],
+  [
+   "moveBuilderOrder",
+   {
+    "kind": "segment",
+    "index": 3
+   },
+   "back"
+  ],
+  [
+   "moveBuilderOrder",
+   {
+    "kind": "polygon",
+    "index": 0
+   },
+   "front"
+  ],
+  [
+   "moveBuilderOrder",
+   {
+    "kind": "polygon",
+    "index": 2
+   },
+   "up"
+  ],
+  [
+   "moveBuilderOrder",
+   {
+    "kind": "segment"
+   },
+   "down",
+   {
+    "branch": true
+   }
+  ],
+  [
+   "moveBuilderOrder",
+   {
+    "kind": "segment"
+   },
+   "sideways"
+  ],
+  [
+   "moveBuilderOrder",
+   {
+    "kind": "polygon",
+    "index": 9
+   },
+   "up"
+  ],
+  [
+   "moveBuilderOrder",
+   {
+    "kind": "blob"
+   },
+   "up"
+  ],
+  [
+   "moveBuilderOrder",
+   {
+    "kind": "segment",
+    "index": 0
+   },
+   "down"
+  ],
+  [
+   "setBuilderOrder",
+   {
+    "kind": "segment",
+    "index": 2
+   },
+   3
+  ],
+  [
+   "setBuilderOrder",
+   {
+    "kind": "polygon",
+    "index": 1
+   },
+   1,
+   {
+    "branch": false
+   }
+  ],
+  [
+   "setBuilderOrder",
+   {
+    "kind": "segment",
+    "index": 1
+   },
+   2,
+   {
+    "branch": true
+   }
+  ],
+  [
+   "setBuilderOrder",
+   {
+    "kind": "segment",
+    "index": 2
+   },
+   99
+  ],
+  [
+   "setBuilderOrder",
+   {
+    "kind": "segment",
+    "index": 2
+   },
+   "x"
+  ],
+  [
+   "setBuilderOrder",
+   {
+    "kind": "segment",
+    "index": 1
+   },
+   2,
+   {
+    "branch": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "orderSelection",
+   1
+  ],
+  [
+   "orderSelection",
+   "back"
+  ],
+  [
+   "orderSelection",
+   -1
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

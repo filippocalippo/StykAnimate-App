@@ -1,0 +1,334 @@
+{
+ "name": "builder-styles-sheet",
+ "document": "builder.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "convertSegment",
+   "circleFill"
+  ],
+  [
+   "convertSegment",
+   "circleFill"
+  ],
+  [
+   "convertSegment",
+   "bogus"
+  ],
+  [
+   "convertSegment",
+   6
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "convertSegment",
+   "squareLine"
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "static": true
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "static": "yes"
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "thickness": 3,
+    "shape": "line"
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "shape": "circle"
+   },
+   {
+    "branch": true
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "opacity": 0.5
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "opacity": 0.4
+   },
+   {
+    "branch": true
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "thickness": 9
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "color": "#ff0000"
+   }
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "gradient": {
+     "color": "#00ff00",
+     "opacity": 0.5
+    }
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "paint": {
+     "type": "radial",
+     "angle": 0,
+     "stops": [
+      {
+       "offset": 0,
+       "color": [
+        255,
+        0,
+        0
+       ],
+       "opacity": 1
+      },
+      {
+       "offset": 1,
+       "color": [
+        0,
+        0,
+        255
+       ],
+       "opacity": 0.5
+      }
+     ]
+    }
+   },
+   {
+    "branch": true
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "bogus": 1
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   null
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {},
+   {
+    "branch": "x"
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "opacity": 2
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {}
+  ],
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "opacity": 1,
+    "thickness": 6
+   }
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "updateSegmentStyle",
+   {
+    "shape": "squareLine"
+   }
+  ],
+  [
+   "updateSegmentBranchStyle",
+   {
+    "static": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "setBranchCaps"
+  ],
+  [
+   "setBranchCaps",
+   true
+  ],
+  [
+   "setBranchCaps",
+   "x"
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "setBranchFill"
+  ],
+  [
+   "setBranchFill",
+   "circle"
+  ],
+  [
+   "setBranchFill",
+   "line"
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "setBranchFill"
+  ],
+  [
+   "setPolygonOpacity",
+   1,
+   0.3
+  ],
+  [
+   "setPolygonOpacity",
+   1,
+   3
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "name": "  Hero  "
+   }
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "name": " "
+   }
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "name": "Hero"
+   }
+  ],
+  [
+   "updateFigureStyle",
+   {
+    "name": "Hero",
+    "outlineWidth": 2.5,
+    "outlineColor": "#102030",
+    "outlineOpacity": 0.5
+   }
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "convertSegment",
+   "line"
+  ],
+  [
+   "setBranchCaps",
+   true
+  ],
+  [
+   "@select",
+   1,
+   6
+  ],
+  [
+   "beginDrag",
+   "Pose joint"
+  ],
+  [
+   "rotateJoint",
+   0.3
+  ],
+  [
+   "convertSegment",
+   "circle"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

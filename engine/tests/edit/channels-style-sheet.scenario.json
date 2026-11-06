@@ -1,0 +1,70 @@
+{
+ "name": "channels-style-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/channels/channels-style.sheet.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   5,
+   15
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "updatePolygon",
+   0,
+   {
+    "opacity": 0.3
+   }
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "segment",
+    "uid": 1,
+    "handleId": 22
+   },
+   "thickness"
+  ],
+  [
+   "previewAnimationEdit",
+   6
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "@seek",
+   8
+  ],
+  [
+   "@select",
+   2,
+   2
+  ],
+  [
+   "poseJoint",
+   470,
+   230
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

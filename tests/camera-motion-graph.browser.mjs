@@ -63,7 +63,7 @@ try{
   check('Seeking updates the cursor while retaining sampled curve DOM',await page.evaluate(()=>retainedCurve===document.querySelector('[data-motion-curve="x"]'))&&await graph.locator('[data-motion-graph-cursor] path').getAttribute('d')!==cursorBefore);
   before=await state();const rect=await graph.locator('svg.motion-graph-plot').boundingBox();
   await page.mouse.move(rect.x+rect.width*.65,rect.y+rect.height*.5);await settle();
-  check('Hover reports exact sampled values without seeking or editing',await page.evaluate(async()=>{const {sampleCameraMotion}=await import('/src/camera-motion.mjs'),e=styk.editor,tick=Number(document.querySelector('[data-motion-graph-frame]').textContent.slice(2))-1,sample=sampleCameraMotion({clips:[e.getCameraMotions()[0]]},tick,e.report.fps);return Math.abs(parseFloat(document.querySelector('[data-motion-value="x"]').textContent)-sample.x)<.011;})&&(await state()).tick===before.tick&&(await state()).undo===before.undo);
+  check('Hover reports exact sampled values without seeking or editing',await page.evaluate(async()=>{const e=styk.editor,tick=Number(document.querySelector('[data-motion-graph-frame]').textContent.slice(2))-1,[x]=e._shown.cameraSamples(e.getCameraMotions()[0],[tick]),sample={x};return Math.abs(parseFloat(document.querySelector('[data-motion-value="x"]').textContent)-sample.x)<.011;})&&(await state()).tick===before.tick&&(await state()).undo===before.undo);
   await page.mouse.move(600,200);await settle();
   await page.locator('[data-motion-action="preview"]').click();
   await page.waitForFunction(()=>styk.state.playing&&styk.editor.tick>2);

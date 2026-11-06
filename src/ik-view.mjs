@@ -1,7 +1,6 @@
 import {tupleMessages, messageTuple} from './localization-bindings.mjs';
 
 import {t as interfaceText} from './localization.mjs';
-import {renderInspector} from './inspector-kit.mjs';
 
 /**
  * The joint's IK section: Use IK, and while it is on its options in
@@ -31,6 +30,3 @@ export function ikSection(ik) {
     ] : []},
   ]};
 }
-
-/** The IK section's HTML, as the inspector renders it. */
-export const ikControlsView = ik => renderInspector({kind: 'joint', sections: [ikSection(ik)]});

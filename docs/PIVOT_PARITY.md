@@ -71,8 +71,7 @@ silently simplifying imported animation is not.
 
 - [x] F01 Open all 37 original PIV fixtures: 4 V2, 1 V3, 9 V4, and 23 V5. Keep
   the two Broly projects distinct; their equal payload lengths do not imply identity.
-  **Verified:** [renderer-corpus.mjs](../tests/renderer-corpus.mjs),
-  [37-file result](../artifacts/renderer-corpus-prepared/results.json) and
+  **Verified:** [37-file result](../artifacts/renderer-corpus-prepared/results.json) and
   [summary](../artifacts/renderer-corpus-prepared/summary.json): no failed imports,
   missing assets, browser exceptions or GPU errors. Both Broly paths are separate.
 - [ ] F02 Import STK definitions, including legacy vector figures, polygons,
@@ -204,8 +203,8 @@ migration,
   **Progress:** The [actual Akane pointer regression](../artifacts/native-handle-pointer/report.json)
   picks parent 460616/native handle 1 from a selected attached figure and changes
   only the nine-figure branch, keeping free origins fixed. Independently timed
-  layer composition has joined-ancestor/detachment regressions in
-  [animation-pose-review.test.mjs](../tests/animation-pose-review.test.mjs).
+  layer composition has joined-ancestor/detachment regressions in the engine's
+  recorded layer-composition fixtures.
   All join transitions, bent media and all-frame native render parity remain open.
 - [ ] P10 Distinguish joined-subtree scale gestures from numeric selected-figure
   scaling. A selected parent and child must never receive the same transform twice.
@@ -266,15 +265,7 @@ style findings.
   with an arbitrary CSS easing curve.
 - [ ] T06 Insert a baked inbetween at a chosen ratio and retain surrounding
   timing/media. Reject unrepresentable background transitions explicitly.
-  **Progress:** [5 root-app](../artifacts/insert-inbetween-app.json),
-  [14 dialog](../artifacts/insert-inbetween-dialog.json) and 14 model/codec checks
-  prove selected native ranges, forced-linear ratio previews, exposure inheritance,
-  cancel/undo and PIV/STYK reopen. [The contract](INSERT-INBETWEEN.md) records
-  unsupported blends and bounded large ranges. Cancellable worker planning now
-  has seven async-model and 15 transport checks. The [actual Akane run](../artifacts/akane-inbetween-async-app/report.json)
-  inserts 20 keys with exact pose/order/joins/media/camera, one Undo/Redo and
-  cancellation: 8.39 seconds background, 16.3 ms commit and zero long tasks.
-  Its 104.2 ms maximum rAF gap remains an explicit performance observation.
+  **Progress:** the Insert Inbetween dialog and its planner were removed from the app; nothing opened them.
 - [ ] T07 Play/stop/loop/preview/scrub, previous/next key and output tick,
   visible time, and elapsed-time-based playback without cumulative timer drift.
   **Progress:** Stored/output-key navigation, Ctrl+Play current-frame camera preview,
@@ -289,7 +280,7 @@ style findings.
   pacing, native comparison and repeated-session drift remain open.
 - [x] T08 A bottom timeline with time ruler, playhead, visible keys/holds,
   editable timing, track selection, range selection, and horizontal zoom.
-  **Verified:** [timeline.mjs](../src/timeline.mjs),
+  **Verified:** [layer-timeline.mjs](../src/layer-timeline.mjs),
   [timeline.browser.mjs](../tests/timeline.browser.mjs),
   [timeline report](../artifacts/timeline-verification.json) and integrated
   authoring/creation UI reports exercise timing, tracks, ranges and scrubbing.
@@ -381,7 +372,7 @@ native easing tests, local 5.2.9 release notes.
 - [ ] B06 Add multiple sprites to one figure; position endpoints, reflect,
   stretch, bend, and preserve source alpha.
   **Progress:** sprite import and embedded image/STK round trips pass the media
-  report; [builder unit cases](../tests/editor-builder.test.mjs) also cover branch
+  report; the [Builder edit tapes](../engine/tests/edit/polygons-sheet.scenario.json) also cover branch
   copies sharing one embedded media table. [Sprite placement](SPRITE-PLACEMENT.md)
   now has ten model/native PIV/STK cases and [nine actual dialog checks](../artifacts/sprite-placement/report.json)
   for endpoints, alpha, races and narrow layouts. [Eight actual desktop checks](../artifacts/sprite-builder-smoke.json)

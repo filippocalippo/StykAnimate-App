@@ -1,0 +1,27 @@
+[package]
+name = "styk-piv"
+description = "Pivot .piv/.stk codec and its request service: reads into the document store, writes Pivot 5 files, and answers the codec API the Python service answered."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "styk-piv"
+path = "src/bin/styk-piv/main.rs"
+required-features = ["containers"]
+
+[features]
+default = ["containers"]
+# Native .styk/.stkz/.stykmov documents through `styk-formats`. Without it those
+# requests answer as an unsupported format unless the host supplies its own reader.
+containers = ["dep:styk-formats"]
+
+[dependencies]
+styk-doc = { path = "../styk-doc" }
+styk-formats = { path = "../styk-formats", optional = true }
+sha2 = "0.10"
+ryu-js = "1"

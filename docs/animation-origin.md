@@ -43,10 +43,7 @@ corrected poses in the export worker, then removes the pivot metadata. Native
 reimport therefore needs no second composition step. Unedited native documents
 continue through the original byte-preserving export path.
 
-Verification lives in `tests/editor-animation-origin.test.mjs` and
-`tests/animation-origin.browser.mjs`: dense curved poses with native easing,
-independent transform curves, repeated roots, retained sources and separately
-retimed joined layers; actual STYK/PIV reopen; and WebGPU pixel comparisons.
+Verification lives in `tests/editor-animation-origin.test.mjs`.
 
 ## Deleting a retained reference
 
@@ -76,8 +73,9 @@ thus keep their original meaning while the construction follows native Delete
 and Unsplit behavior. The static evidence and its scope are recorded in
 `artifacts/native-static/builder-delete-reroot.md`.
 
-`tests/editor-origin-support.test.mjs` checks 201 continuous samples for native
-and authored animation with and without easing, branch reconnection, Unsplit
-endpoints and transform curves, repeated origins, splitting, fresh instances,
-exact undo/redo, and actual STYK/PIV codec roundtrips. Native export materializes
-the evaluated visible poses and strips both support and ghost metadata.
+The recorded edit tapes (`engine/tests/edit/origin-topology-*` and
+`origin-reroot-*`) check native and authored animation with and without
+easing, branch reconnection, Unsplit endpoints and transform curves, repeated
+origins, splitting, fresh instances and exact undo/redo. Native export
+materializes the evaluated visible poses and strips both support and ghost
+metadata.

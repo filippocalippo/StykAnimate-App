@@ -1,11 +1,11 @@
 /** Manual saves and recovery deadlines belong to the document lifetime, not history. */
 export function documentCheckpoint(editor, token, epoch) {
-  return { report: editor.report, token, revision: editor.revision, draftRevision: editor.frameDraftRevision, epoch };
+  return { report: editor.report, token, revision: editor.revision, epoch };
 }
 
-export function sameDocumentCheckpoint(a, b) {
+function sameDocumentCheckpoint(a, b) {
   return Boolean(a && b && a.report === b.report && a.token === b.token &&
-    a.revision === b.revision && a.draftRevision === b.draftRevision && a.epoch === b.epoch);
+    a.revision === b.revision && a.epoch === b.epoch);
 }
 
 export function matchesDocumentCheckpoint(checkpoint, editor, token, { saved = false, epoch } = {}) {

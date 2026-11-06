@@ -44,24 +44,24 @@ for the complete property list and compatibility behavior.
 ## Implementation
 
 - `animation-properties.mjs` defines channel names, supported targets and
-  discrete properties, shared by validation, sampling, easing and the timeline.
-- `animation-property-state.mjs` derives inspector provenance without persisting
-  synthetic scalar keys. It uses binary key lookup and weakly cached key facts.
-- Z-index channels target stable figure UIDs. Composition writes `_stykZIndex`
-  on an evaluated object using copy-on-write, retaining its geometry vectors.
-  Captured poses/clipboard objects retain this small override.
-- `applyLayerOrder` stably sorts depths within user layers after pose and scalar
-  composition. Object slots and attachment references are never reordered.
-- Authored order commands write Z-index keys directly, including tied depths,
-  so independent figure poses cannot override them. Native-only editing retains
-  native paint order. History and range edits remain atomic. The canvas toolbar
-  provides Bring to front and Send to back for the current selection. Holding
-  Shift while clicking moves the selection one step forward or backward instead.
-- Worker playback and export use the same evaluator. Pivot materialization
+  discrete properties, shared by validation and the timeline.
+- Z-index channels target stable figure UIDs. The engine's evaluation writes
+  `_stykZIndex` on an evaluated object, retaining its geometry vectors; captured
+  poses and clipboard objects retain this small override.
+- The engine stably sorts depths within user layers after pose and scalar
+  composition (`styk_eval`). Object slots and attachment references are never
+  reordered.
+- Authored order commands (`styk-edit`) write Z-index keys directly, including
+  tied depths, so independent figure poses cannot override them. Native-only
+  editing retains native paint order. History and range edits remain atomic. The
+  canvas toolbar provides Bring to front and Send to back for the current
+  selection. Holding Shift while clicking moves the selection one step forward or
+  backward instead.
+- Playback and export use the same evaluation. Pivot materialization
   writes the resulting native draw order and removes the depth extension.
 
-Regression coverage lives in `tests/figure-z-index.test.mjs` and
-`tests/figure-z-index.browser.mjs`, alongside existing animation, property-control,
+Regression coverage lives in `tests/figure-z-index.browser.mjs`, alongside the
+engine's recorded order tapes and the existing animation, property-control,
 timeline, range-operation and clipboard checks.
 
 `tests/selection-order.test.mjs` covers selection scope, joined groups, stable

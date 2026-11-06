@@ -1,0 +1,23 @@
+{
+ "name": "layer-parallax-camera-sheet",
+ "document": "parallax-camera.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "setLayerParallax",
+   "layer-1",
+   {
+    "enabled": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -3,11 +3,11 @@ import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import path from 'node:path';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 import {chooseExport} from './helpers/export-dialog.mjs';
 const output=path.resolve('artifacts/gif-dithering-app');
 await mkdir(output,{recursive:true});
-const service=await backend.startBackend({appRoot:process.cwd()});
+const service=await backend.startDesktopHost({appRoot:process.cwd()});
 let browser;const checks=[],errors=[];
 const check=(name,value)=>{assert.ok(value,name);checks.push(name);};
 try{

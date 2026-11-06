@@ -1,0 +1,10 @@
+[package]
+name = "styk-math"
+description = "JavaScript's Math functions bit for bit as V8 computes them, for engine code whose results are stored in documents."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+libm = "0.2.16"

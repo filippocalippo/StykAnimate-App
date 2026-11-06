@@ -21,7 +21,7 @@ try {
   await page.goto(process.env.STYK_URL || 'http://127.0.0.1:47831'); await page.waitForFunction(() => window.styk?.ready);
   await page.evaluate(async () => {
     const {emptyDocument, createFrame, createObject} = await import('/src/demo.mjs');
-    const {worldToScreen} = await import('/src/renderer.mjs');
+    const {worldToScreen} = await import('/src/renderer-geometry.mjs');
     const report = emptyDocument(), figure = report.figure_types[0];
     figure.segments = [{...figure.segments[0], segment_id: 1, parent_id: 0, length: 80, angle_rad: -Math.PI / 2}]; figure.segment_count = 1;
     report.keyframes = [createFrame([createObject(figure, 1, 180, 280), createObject(figure, 2, 450, 280), createObject(figure, 3, 750, 280)], 10)];

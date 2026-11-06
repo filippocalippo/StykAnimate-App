@@ -1,0 +1,199 @@
+{
+ "name": "motion-path-ik-pinned-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/startup-pinned.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "sheetInsertKey",
+   [
+    "layer-1"
+   ],
+   6
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 8,
+    "joint": 7
+   },
+   3
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 500,
+    "y": 430
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 7,
+    "joint": 6
+   },
+   2
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 520,
+    "y": 360
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 2,
+    "joint": 1
+   },
+   7
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 560,
+    "y": 240
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   4
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 510,
+    "y": 210
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 0,
+    "joint": -1
+   },
+   8
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 520,
+    "y": 190
+   },
+   {
+    "movePins": true
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 530,
+    "y": 195
+   },
+   {
+    "movePins": true
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 10,
+    "joint": 9
+   },
+   5,
+   {
+    "falloff": {
+     "radius": 3,
+     "shape": "linear"
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 450,
+    "y": 440
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 9,
+    "joint": 8
+   },
+   1,
+   {
+    "falloff": {
+     "radius": 6,
+     "shape": "flat"
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 430,
+    "y": 380
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -1,24 +1,12 @@
 import {messageError} from './localized-error.mjs';
-import {TILE,TILE_BYTES,TileStore,tileTransparent,assertTileCoordinates} from './drawing-tiles.mjs';
+import {TILE,TILE_BYTES,assertTileCoordinates} from './drawing-tiles.mjs';
 
-export const DRAWING_PREPARATION_BYTES=1024*1024;
+const DRAWING_PREPARATION_BYTES=1024*1024;
+/** Replacements up to this size apply on the interface thread in the commit itself (about 13 µs a tile, measured: a stroke's
+ * undo is 100 tiles): a worker round trip would wait behind whatever the pixel worker is publishing. Larger ones are prepared in batches. */
+const DRAWING_SYNC_BYTES=4*1024*1024;
 const BATCH_TILES=DRAWING_PREPARATION_BYTES/TILE_BYTES;
 const aborted=()=>messageError(new DOMException('', 'AbortError'), "errors.drawingPreparation.drawingPreparationCancelledOrSuperseded", {});
-
-/** Takes exclusive ownership of transferred input. Full tiles already have
- * their final allocation; only compact uniform colors need expansion. */
-export function materializeDrawingTiles(input){
-  if(!Array.isArray(input)||input.length>BATCH_TILES)throw messageError(new Error(''), "errors.drawingPreparation.drawingPreparationBatchIsTooLarge", {});
-  const store=new TileStore(),tiles=[];
-  for(const t of input){
-    if(t.pixels!=null&&(!(t.pixels instanceof ArrayBuffer)||t.pixels.byteLength!==4&&t.pixels.byteLength!==TILE_BYTES))throw messageError(new Error(''), "errors.drawingPreparation.invalidDrawingPreparationPixels", {});
-    if(t.pixels?.byteLength===TILE_BYTES)store.adopt(t.tx,t.ty,new Uint8ClampedArray(t.pixels));
-    else store.set(t.tx,t.ty,t.pixels==null?null:new Uint8ClampedArray(t.pixels));
-    const tile=store.get(t.tx,t.ty),visible=tile&&!tileTransparent(tile);
-    tiles.push({tx:t.tx,ty:t.ty,pixels:visible?tile.pixels.buffer:null,alphaBounds:visible?tile.alphaBounds:null});
-  }
-  return tiles;
-}
 
 export function* drawingPixelCommands(root,direction='after'){
   if(!root)return;if(root.kind==='drawing-pixels')yield root;
@@ -31,7 +19,7 @@ export function validateDrawingChanges(tiles){
   }
 }
 export function needsDrawingPreparation(root,direction){
-  let bytes=0;for(const command of drawingPixelCommands(root,direction))for(const tile of command.tiles??[])if(tile[direction]!=null){bytes+=TILE_BYTES;if(bytes>DRAWING_PREPARATION_BYTES)return true;}return false;
+  let bytes=0;for(const command of drawingPixelCommands(root,direction))for(const tile of command.tiles??[])if(tile[direction]!=null){bytes+=TILE_BYTES;if(bytes>DRAWING_SYNC_BYTES)return true;}return false;
 }
 
 /** Owns detached replacements until a synchronous editor transaction adopts
@@ -66,25 +54,6 @@ class DrawingPreparation {
     if(this.pinned)for(const entry of this.entries.keys())entry.preparing--;
     this.plans=[];this.entries.clear();this.bytes=0;this.owner.hold(this,0);
   }
-}
-
-/** Wrap replacements materialized elsewhere (the GPU brush read-back) in the
- * same validated, pinned and accounted preparation a worker job produces.
- * `tiles` aligns with the single command's changes. */
-export function adoptDrawingPreparation(owner,root,direction,tiles){
-  const prepared=new DrawingPreparation(owner,root,direction);
-  try{
-    const plan=prepared.plans[0];
-    if(prepared.plans.length!==1||plan.changes.length!==tiles.length)throw messageError(new Error(''), "errors.drawingPreparation.preparedPixelsDoNotMatchThisDrawingTransaction", {});
-    for(let i=0;i<tiles.length;i++){
-      const t=tiles[i],c=plan.changes[i],b=t.alphaBounds;
-      if(t.tx!==c.tx||t.ty!==c.ty||t.pixels!=null&&(!(t.pixels instanceof Uint8ClampedArray)||t.pixels.byteLength!==TILE_BYTES||!b||![b.x,b.y,b.width,b.height].every(Number.isInteger)||b.x<0||b.y<0||b.width<1||b.height<1||b.x+b.width>TILE||b.y+b.height>TILE))throw messageError(new Error(''), "errors.drawingPreparation.invalidPreparedDrawingTile", {});
-      plan.tiles.push({tx:t.tx,ty:t.ty,pixels:t.pixels??null,alphaBounds:t.pixels?b:null,shared:Boolean(t.pixels&&t.shared)});
-    }
-    plan.bytes=prepared.bytes=plan.tiles.reduce((n,t)=>n+(t.pixels?.byteLength??0),0);
-    prepared.checkSources();for(const entry of prepared.entries.keys())entry.preparing=(entry.preparing??0)+1;prepared.pinned=true;
-    owner.hold(prepared,prepared.bytes);prepared.validate(root,direction);return prepared;
-  }catch(error){prepared.release();throw error;}
 }
 
 /** The 1 MiB input/output batches keep expansion, cloning and alpha scanning

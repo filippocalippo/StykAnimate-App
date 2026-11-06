@@ -58,18 +58,3 @@ export function exportSamplingSize(width, height, smoothing = "edges") {
     renderHeight: height * factor,
   };
 }
-
-/** Exact 2× box filter, averaging premultiplied colors to preserve transparent edges. */
-export function downsampleExportPixels(source, width, height) {
-  if (source.length !== width * height * 16) throw messageError(new Error(''), "errors.exportSampling.invalidSupersampledExportTile", {});
-  const output = new Uint8ClampedArray(width * height * 4), stride = width * 8;
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const a = y * stride * 2 + x * 8, b = a + 4, c = a + stride, d = c + 4;
-    const alpha = source[a+3] + source[b+3] + source[c+3] + source[d+3], at = (y * width + x) * 4;
-    output[at+3] = Math.round(alpha / 4);
-    if (alpha) for (let channel = 0; channel < 3; channel++)
-      output[at+channel] = Math.round((source[a+channel]*source[a+3] + source[b+channel]*source[b+3] +
-        source[c+channel]*source[c+3] + source[d+channel]*source[d+3]) / alpha);
-  }
-  return output;
-}

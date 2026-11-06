@@ -37,13 +37,14 @@ try {
   page.on('console', (message) => { if (message.type() === 'error') problems.push(message.text()); });
   page.on('request', (request) => requests.push(new URL(request.url()).pathname));
   const since = (mark) => requests.slice(mark);
-  const runtimeLoaded = (list) => list.some((pathname) => pathname.startsWith('/vendor/pyodide/pyodide.asm'));
+  // The Pivot codec's WebAssembly module (src/codec-web-worker.mjs loads it on the first Pivot request).
+  const runtimeLoaded = (list) => list.some((pathname) => pathname === '/src/engine/pkg/styk_codec_bg.wasm');
 
   await page.goto(site.origin, { waitUntil: 'load' });
   await page.waitForFunction(() => window.styk?.ready === true, undefined, { timeout: 60000 });
   check('The site boots with the browser codec selected', await page.evaluate(() => document.querySelector('meta[name="styk-codec"]')?.content === 'browser' && !window.stykDesktop));
-  check('The editor renders (WebGPU or the compatibility renderer)', await page.evaluate(() => ['WebGPU', 'Canvas 2D fallback'].includes(window.styk.state.renderer.stats.backend)));
-  check('Opening the editor does not download the Pivot runtime', !runtimeLoaded(requests));
+  check('The editor renders (WebGPU or the compatibility renderer)', await page.evaluate(() => ['WebGPU', 'WebGL2'].includes(window.styk.state.renderer.stats.backend)));
+  check('Opening the editor does not download the Pivot codec', !runtimeLoaded(requests));
 
   // Native projects never need the codec.
   const save = page.waitForEvent('download');
@@ -54,7 +55,7 @@ try {
   await page.locator('#file-input').setInputFiles(saved);
   await page.waitForFunction(() => window.styk.editor.name === 'project', undefined, { timeout: 30000 });
   check('The saved project reopens', await page.evaluate(() => window.styk.editor.frame.objects.length >= 1));
-  check('Native save and open do not download the Pivot runtime', !runtimeLoaded(requests));
+  check('Native save and open do not download the Pivot codec', !runtimeLoaded(requests));
 
   // Pivot files go through the in-browser codec.
   const exportPiv = async (name) => {
@@ -66,7 +67,7 @@ try {
   };
   let mark = requests.length;
   const first = await exportPiv('first.piv');
-  check('A Pivot export downloads the runtime on demand', runtimeLoaded(since(mark)));
+  check('A Pivot export downloads the codec on demand', runtimeLoaded(since(mark)));
   check('The exported Pivot file has content', (await stat(first)).size > 100);
 
   await page.locator('#file-input').setInputFiles(first);
@@ -75,7 +76,7 @@ try {
 
   mark = requests.length;
   const second = await exportPiv('second.piv');
-  check('The runtime is downloaded once and reused', !runtimeLoaded(since(mark)));
+  check('The codec is downloaded once and reused', !runtimeLoaded(since(mark)));
   check('Re-exporting an unchanged Pivot import is byte-identical', Buffer.compare(await readFile(first), await readFile(second)) === 0);
 
   // The readout once updated inside a hidden status bar. Check its rendered

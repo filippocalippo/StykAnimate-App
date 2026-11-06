@@ -1,0 +1,318 @@
+{
+ "name": "topology-sheet",
+ "document": "builder.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "opacity": 0.5
+   }
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "color": "#cc3311"
+   }
+  ],
+  [
+   "addSegment",
+   {
+    "length": 40,
+    "angle": 0.5
+   }
+  ],
+  [
+   "addSegments",
+   [
+    {
+     "length": 30,
+     "angle": 1
+    },
+    {
+     "length": 20,
+     "angle": 1.5,
+     "type": "circle"
+    }
+   ]
+  ],
+  [
+   "addSegment",
+   {
+    "length": -1
+   }
+  ],
+  [
+   "addSegment",
+   {
+    "type": "image"
+   }
+  ],
+  [
+   "addSegment",
+   {
+    "parentId": 999
+   }
+  ],
+  [
+   "addSegment",
+   {
+    "length": "x"
+   }
+  ],
+  [
+   "addSegments",
+   []
+  ],
+  [
+   "addSegment",
+   {
+    "parentId": 0,
+    "length": 25,
+    "angle": -1,
+    "thickness": 3,
+    "type": "squareLine"
+   }
+  ],
+  [
+   "@select",
+   1,
+   6
+  ],
+  [
+   "deleteSingleSegment"
+  ],
+  [
+   "deleteSingleSegment",
+   {
+    "preserveEndpoints": "x"
+   }
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "splitSegment",
+   0.25
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "unsplitSegment"
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "mirrorSegment",
+   "horizontal"
+  ],
+  [
+   "mirrorSegmentBranch",
+   "vertical"
+  ],
+  [
+   "mirrorSegment",
+   "diagonal"
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "mirrorSegment"
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "updateSegment",
+   {
+    "bend_rad": 0.6
+   }
+  ],
+  [
+   "splitSegment",
+   0.5
+  ],
+  [
+   "unsplitSegment"
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "duplicateSegment",
+   {
+    "flip": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "moveBuilderSegment",
+   66,
+   {
+    "parentId": 11
+   }
+  ],
+  [
+   "moveBuilderSegment",
+   11,
+   {
+    "parentId": 66
+   }
+  ],
+  [
+   "moveBuilderSegment",
+   44,
+   {
+    "parentId": 0,
+    "beforeId": 11
+   }
+  ],
+  [
+   "moveBuilderSegment",
+   999,
+   {}
+  ],
+  [
+   "moveBuilderSegment",
+   55,
+   {
+    "parentId": 999
+   }
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "splitSegmentBranch"
+  ],
+  [
+   "splitBuilderSegments",
+   {
+    "fraction": 2
+   }
+  ],
+  [
+   "splitBuilderSegments",
+   {
+    "branch": "x"
+   }
+  ],
+  [
+   "duplicateSegment",
+   {}
+  ],
+  [
+   "duplicateSegmentBranch",
+   {
+    "angleOffset": 0.4,
+    "flip": true
+   }
+  ],
+  [
+   "duplicateSegment",
+   {
+    "parentId": 999
+   }
+  ],
+  [
+   "duplicateSegment",
+   {
+    "flip": "y"
+   }
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "deleteSegment",
+   {}
+  ],
+  [
+   "deleteSegment",
+   {
+    "handleIds": [
+     999
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

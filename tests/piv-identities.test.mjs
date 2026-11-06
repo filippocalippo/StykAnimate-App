@@ -1,37 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {mkdtemp, readFile, rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import backend from '../desktop/backend.cjs';
-import {unpackNativeFrameResponse, materializeNativeFrames} from '../src/import-wire.mjs';
-import {Editor} from '../src/editor.mjs';
+import {NATIVE_FRAME_CONTENT_TYPE, unpackNativeFrameResponse, materializeNativeFrames} from '../src/import-wire.mjs';
+import {engineEditor} from './support/owned-editor.mjs';
+import {nodeCodec} from './support/codec.mjs';
 
 const app = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 test('recovered native IDs match JSON import and keep separate editable geometry and joins', async () => {
-  const temp = await mkdtemp(path.join(tmpdir(), 'styk-identities-'));
-  try {
-    const python = backend.pythonCandidates()[0];
-    const generated = spawnSync(python.command, [...python.args, '-c', String.raw`
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path('backend').resolve()))
-import server
-from test_piv_identities import identity_source
-root = Path(sys.argv[1]); source = identity_source(); store = server.ProjectStore(server.WORKSPACE)
-(root/'fixture.wire').write_bytes(store.import_bytes(source, 'identities.piv', prefer_native=True))
-(root/'fixture.json').write_bytes(store.import_bytes(source, 'identities.piv', as_json=True))
-`, temp], {cwd: app, encoding: 'utf8', windowsHide: true});
-    assert.equal(generated.status, 0, generated.error?.message || generated.stderr);
-    const raw = await readFile(path.join(temp, 'fixture.wire'));
-    const buffer = raw.buffer.slice(raw.byteOffset, raw.byteOffset+raw.byteLength);
+  {
+    // backend/test_piv_identities.py identity_source(), as the codec's fixture (engine/tools/piv/fixtures.py).
+    const source = await readFile(path.join(app, 'engine/crates/styk-piv/tests/fixtures/modern-identities.piv')), codec = nodeCodec();
+    const request = accept => codec.fetch('/api/import?filename=identities.piv', {method: 'POST', headers: {Accept: accept}, body: source});
+    const wire = await request(NATIVE_FRAME_CONTENT_TYPE), json = await request('application/json');
+    assert.equal(wire.headers.get('Content-Type'), NATIVE_FRAME_CONTENT_TYPE);
+    const buffer = await wire.arrayBuffer();
     const packet = unpackNativeFrameResponse(buffer);
-    const expected = JSON.parse(await readFile(path.join(temp, 'fixture.json'), 'utf8'));
+    const expected = await json.json();
     const result = await materializeNativeFrames(packet.result, buffer, packet.offset);
     assert.deepEqual(result.document, expected.document);
-    const editor = new Editor({demo: false}).load(result.document);
+    const editor = engineEditor({demo: false}, result.document);
     assert.equal(editor.totalTicks, 8);
     for (const index of [0, 1, 2, 3]) {
       editor.selectFrame(index);
@@ -54,5 +43,5 @@ root = Path(sys.argv[1]); source = identity_source(); store = server.ProjectStor
       repair.source_unique_id, true);
     await assert.rejects(materializeNativeFrames(fresh.result, invalid, fresh.offset), /Duplicate native figure identity/);
     assert.deepEqual(fresh.result.document.keyframes, []);
-  } finally { await rm(temp, {recursive: true, force: true}); }
+  }
 });

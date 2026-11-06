@@ -1,0 +1,151 @@
+{
+ "name": "topology-rig-sheet",
+ "document": "rig.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "deleteSingleSegment"
+  ],
+  [
+   "duplicateSegmentBranch",
+   {}
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "beginDrag",
+   "Pose joint"
+  ],
+  [
+   "rotateJoint",
+   0.2
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "splitSegment",
+   0.5
+  ],
+  [
+   "addConnector",
+   11,
+   33
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "addConnector",
+   11,
+   55,
+   {
+    "position": 0.3
+   }
+  ],
+  [
+   "addConnector",
+   11,
+   11
+  ],
+  [
+   "addConnector",
+   11,
+   999
+  ],
+  [
+   "addConnector",
+   11,
+   55,
+   {
+    "position": 2
+   }
+  ],
+  [
+   "addWeightedJoint",
+   11,
+   [
+    {
+     "joint": 55,
+     "weight": 0.5
+    }
+   ]
+  ],
+  [
+   "addWeightedJoint",
+   11,
+   [
+    {
+     "joint": 999,
+     "weight": 1
+    }
+   ]
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "splitSegment",
+   0.5
+  ],
+  [
+   "mirrorSegment",
+   "horizontal"
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "unsplitSegment"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

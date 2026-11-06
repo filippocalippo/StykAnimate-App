@@ -130,7 +130,7 @@ visually inspected; the dialog has no horizontal overflow. See
 Windows installed-codec service, UI, configuration, keyframe interval, decoding
 and output-limit evidence is listed in [Windows codec integration](WINDOWS-CODECS.md).
 
-After integration of the shared `ExportFrameRenderer`,
+After integration of the shared export renderer (now `EngineExportFrames`),
 `tests/worker-video.desktop.mjs` passes nine additional actual desktop checks.
 WebM and VFW cancellation stops both workers and native jobs without opening
 Save; subsequent exports save and independently decode six frames in order.

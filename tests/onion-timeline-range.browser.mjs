@@ -7,7 +7,7 @@ const browser=await chromium.launch({channel:'chrome',headless:true});
 const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[];
 page.on('pageerror',error=>errors.push(error.message));
 const settle=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-const value=()=>page.evaluate(()=>({before:styk.onionController.snapshot().before.span,after:styk.onionController.snapshot().after.span,tick:styk.editor.tick,stored:styk.state.settings.onionRangeBefore,revision:styk.editor.revision,poses:styk.onionCache.last?.frames.length}));
+const value=()=>page.evaluate(()=>({before:styk.onionController.snapshot().before.span,after:styk.onionController.snapshot().after.span,tick:styk.editor.tick,stored:styk.state.settings.onionRangeBefore,revision:styk.editor.revision,poses:styk.onionSkins()?.ghosts.length}));
 async function drag(locator,dx,{release=true,shift=false}={}){
   if(shift)await page.keyboard.down('Shift');
   const box=await locator.boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
@@ -56,7 +56,7 @@ try{
   await page.locator('#onion-popover .onion-more>summary').click();await panel.getByLabel('Onion sampling',{exact:true}).selectOption('frames');await settle();assert.equal((await value()).before,26,'sampling changes preserve temporal spans');assert.equal((await value()).poses,46);
   const opacity=panel.getByRole('slider',{name:'Onion opacity slider',exact:true});await opacity.fill('45');await settle();assert.equal(await page.evaluate(()=>styk.state.settings.onionOpacity),.45);
   const opacityBox=await opacity.boundingBox();await page.mouse.move(opacityBox.x+opacityBox.width*.45,opacityBox.y+opacityBox.height/2);await page.mouse.down();await page.mouse.move(opacityBox.x+opacityBox.width*.8,opacityBox.y+opacityBox.height/2);await settle();assert.equal(await page.evaluate(()=>styk.state.settings.onionOpacity),.45);await page.keyboard.press('Escape');await page.mouse.move(opacityBox.x+opacityBox.width*.9,opacityBox.y+opacityBox.height/2);await page.mouse.up();await settle();assert.equal(await page.evaluate(()=>styk.state.settings.onionOpacity),.45,'release after Escape cannot re-commit a native slider');
-  await panel.getByLabel('Show on top',{exact:true}).check();await settle();assert.ok(await page.evaluate(()=>styk.onionCache.last.frames.every(frame=>frame.showOnTop)));
+  await panel.getByLabel('Show on top',{exact:true}).check();await settle();assert.ok(await page.evaluate(()=>styk.onionSkins().ghosts.every(ghost=>ghost.showOnTop)));
   await page.screenshot({path:out+'/light.png'});
   await panel.getByRole('button',{name:'Close onion settings'}).click();
   await page.setViewportSize({width:900,height:740});await page.evaluate(()=>styk.settingsUI.commit({theme:'dark'}));await settle();

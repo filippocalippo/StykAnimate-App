@@ -81,7 +81,7 @@ try{
 
   // The palette is saved with the project and reopens with it.
   const reopened=await page.evaluate(async()=>{
-    const {buildContainerV2,decodeDocument}=await import('/src/native-container.mjs');
+    const {buildContainerV2,decodeDocument}=await import('/tests/support/native-files.mjs');
     const {document}=await decodeDocument(await buildContainerV2(styk.editor.report,'styk'),'styk');
     return document._styk.palette.colors.length;
   });

@@ -55,29 +55,13 @@ test('sparse arrays retain holes, explicit undefined and enumerable nonindex pro
   assert.equal(result.array.length, 4099); assert.equal(Object.getPrototypeOf(result.array), Array.prototype);
 });
 
-test('runtime omission is opt-in and limited to nested native poses and retained source poses', async () => {
-  const pose = {angles:[1/3], runtime_segments:[{length:99}], extra:{runtime_segments:'opaque'}};
-  const report = {keyframes:[{objects:[pose]}], _styk:{frameSources:{source:{objects:[pose]}}},
-    figure_types:[{runtime_segments:'definition field'}], runtime_segments:'document field'};
-  const input = {report, clipboard:{...report}, arbitrary:{objects:[pose]}, runtime_segments:'wire field'};
-  assert.deepEqual((await roundTrip(input)).result, input);
-  const expected = structuredClone(input);
-  // structuredClone preserves aliases, so build the expected projection independently.
-  for (const name of ['report','clipboard']) {
-    expected[name].keyframes = [{objects:[{angles:[1/3],extra:{runtime_segments:'opaque'}}]}];
-    expected[name]._styk = {frameSources:{source:{objects:[{angles:[1/3],extra:{runtime_segments:'opaque'}}]}}};
-  }
-  const {result} = await roundTrip(input, {encoder:{omitRuntimeSegments:true}});
-  assert.deepEqual(result, expected); assert.equal(input.report.keyframes[0].objects[0].runtime_segments[0].length, 99);
-});
-
 test('repeated poses compact both numeric storage and repeated key names', async () => {
   const objects = Array.from({length:300}, (_, i) => ({unique_id:i,figure_type_id:1,object_slot:i,
     angles:Array.from({length:32}, (_, j) => j/7),lengths:[0,1/3,9],bends:[],root_x:i/3,root_y:-0,
     scale:1,color_override_raw:0xffaabbcc,color_override_rgb:[204,187,170],color_override_mix:255,
     field28:0,transparency:0,opacity:1,len_flag:1,bend_flag:0,join:null,record_offset:i*10,record_end:i*10+9}));
   const report = {keyframes:[{objects}],figure_types:[]};
-  let estimate = 0; for (const chunk of documentChunks(report,{maxBytes:65536,omitRuntimeSegments:true})) estimate += chunk.header ? 64 : chunk.estimatedBytes;
+  let estimate = 0; for (const chunk of documentChunks(report,{maxBytes:65536})) estimate += chunk.header ? 64 : chunk.estimatedBytes;
   const {result,packed} = await roundTrip(report); assert.deepEqual(result,report);
   assert.ok(packed.encodedBytes < estimate / 3, `${packed.encodedBytes} must be less than a third of ${estimate}`);
   assert.ok(packed.residentBytes > packed.encodedBytes, 'Resident allocation and encoded transfer are separate quantities.');

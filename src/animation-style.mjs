@@ -4,7 +4,7 @@ import {normalizePaint, segmentPaint} from './paint.mjs';
 import {validateDrawableZIndex} from './animation-properties.mjs';
 const alphaByte = opacity => Math.round((1 - opacity) * 255);
 const opacityOf = alpha => 1 - Number(alpha ?? 0) / 255;
-export const styleColor = rgb => ((rgb?.[0] ?? 0) << 16 | (rgb?.[1] ?? 0) << 8 | (rgb?.[2] ?? 0)) >>> 0;
+const styleColor = rgb => ((rgb?.[0] ?? 0) << 16 | (rgb?.[1] ?? 0) << 8 | (rgb?.[2] ?? 0)) >>> 0;
 const rgbOf = color => [color >>> 16 & 255, color >>> 8 & 255, color & 255];
 /** Resolve only the small palette. Mesh topology and compiled bone bindings
  * remain the shared definition even when one instance changes its colours. */
@@ -13,7 +13,7 @@ export const meshPaletteColor = (figure, object, index) => {
   return value === undefined ? figure?._styk?.spatialMesh?.colors[index] : rgbOf(value);
 };
 export const polygonIdentity = (polygon,index) => polygon.polyfill_id ?? index + 1;
-export const nativeSegmentOpacity = segment => segment.transparency === undefined ? Number(segment.color_alpha ?? 1) : opacityOf(segment.transparency);
+const nativeSegmentOpacity = segment => segment.transparency === undefined ? Number(segment.color_alpha ?? 1) : opacityOf(segment.transparency);
 
 /** Validate the small persisted overlay without inspecting shared assets. */
 export function validateAnimationStyle(object, figure) {
@@ -64,11 +64,6 @@ export function validateAnimationStyle(object, figure) {
   return object;
 }
 
-export function isAnimationStyleProperty(target, property) {
-  if (target.kind === 'polygon') return true;
-  return target.kind === 'segment' || (target.kind === 'figure' && ['outlineOpacity', 'outlineColor', 'outlineWidth'].includes(property));
-}
-
 /** Read the displayed style, including a pose source's captured overrides. */
 export function animationStyleValue(figure, object, target, property) {
   if (!figure || !object) return undefined;
@@ -97,21 +92,6 @@ export function animationStyleValue(figure, object, target, property) {
   if (!segment.secondary && !endpoint) return undefined;
   if (property === 'gradientColor') return override?.gradientColor ?? (endpoint ? styleColor(endpoint.color) : styleColor(segment.secondary.rgb));
   return override?.gradientOpacity ?? (endpoint?.opacity ?? opacityOf(segment.secondary.a));
-}
-
-/** Update an already copied object without copying assets or other segments. */
-export function setAnimationStyle(object, target, property, value) {
-  if (target.kind === 'segment' && target.figureTypeId !== undefined && target.figureTypeId !== object.figure_type_id) return object;
-  const style = object._stykStyle = {...object._stykStyle};
-  if (target.kind === 'figure') style[property] = value;
-  else if (target.kind === 'polygon') {
-    if (target.figureTypeId !== object.figure_type_id) return object;
-    style.polygons = {...style.polygons, [target.polygonId]:{...style.polygons?.[target.polygonId], [property]:value}};
-  } else {
-    style.segments = {...style.segments};
-    style.segments[target.handleId] = {...style.segments[target.handleId], [property]: value};
-  }
-  return object;
 }
 
 /**

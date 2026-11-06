@@ -1,0 +1,135 @@
+{
+ "name": "ik-capture-double-spatial-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/spatial.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "setNodeIK",
+   {
+    "chainLength": 2,
+    "bendDirection": 0
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "setNodeIK",
+   {
+    "bogus": 1,
+    "chainLength": 99,
+    "enabled": "yes",
+    "bendDirection": 0
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "setNodeIK",
+   {
+    "chainLength": 99,
+    "enabled": "yes",
+    "bendDirection": 0
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": "yes",
+    "bendDirection": 0
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": false
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "setNodeIK",
+   {
+    "enabled": true,
+    "pinned": false,
+    "chainLength": 2,
+    "bendDirection": 0
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setNodeIK",
+   {
+    "chainLength": 2,
+    "bendDirection": 0
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ]
+ ]
+}

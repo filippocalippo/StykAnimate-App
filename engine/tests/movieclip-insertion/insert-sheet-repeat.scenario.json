@@ -1,0 +1,42 @@
+{
+ "name": "insert-sheet-repeat",
+ "document": "insert-sheet-repeat.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   2
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "@seek",
+   5
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "@seek",
+   7.75
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

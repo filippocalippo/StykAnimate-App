@@ -1,0 +1,44 @@
+{
+ "name": "update-segment-rig-sheet",
+ "document": "rig.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "updateSegment",
+   {
+    "length": 0.4
+   }
+  ],
+  [
+   "updateSegment",
+   {
+    "length": 2
+   }
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "updateSegment",
+   {
+    "angle_rad": 2
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

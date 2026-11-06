@@ -1,0 +1,34 @@
+{
+ "name": "insert-sheet-fraction",
+ "document": "insert-sheet-fraction.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "@seek",
+   5.75
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

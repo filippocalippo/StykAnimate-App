@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
+import {ownedScope} from './support/owned-scope.mjs';
+
+const open = ownedScope();
 
 const near = (a, b) => assert.ok(Math.abs(a - b) < 2e-5, `${a} != ${b}`);
 function fixture({sheet = false, staticJoint = false} = {}) {
@@ -17,13 +19,14 @@ function fixture({sheet = false, staticJoint = false} = {}) {
   second.bend_flag = 1; second.bends = [.2, 0, 0]; second.len_flag = 1; second.lengths = [120, 60, 40];
   second.angles = second.angles.map(a => a + .3);
   report.keyframes = [createFrame([first], 1), createFrame([second], 1)];
-  const e = new Editor({demo: false, layerTimeline: sheet, propertyChannels: sheet}).load(report);
+  const e = open({demo: false, layerTimeline: sheet, propertyChannels: sheet}, report);
   e.select(1, 0); return e;
 }
 
-for (const sheet of [false, true]) test(`Build bend publishes one reusable edit and preserves other poses (sheet=${sheet})`, () => {
-  const e = fixture({sheet}), before = e.serialize(), definition = e.figure;
-  const sourceBefore = e._allSourceFrames().map(f => structuredClone(f.objects[0]));
+test('Build bend publishes one reusable edit and preserves other poses', () => {
+  const e = fixture({sheet: true}), before = e.serialize(), definition = e.figure;
+  const storedFrames = () => [...e.report.keyframes, ...Object.values(e.report._styk.frameSources ?? {})];
+  const sourceBefore = storedFrames().map(f => structuredClone(f.objects[0]));
   const history = e._undo.length;
   e.beginRigDrag({bend: true});
   for (let i = 1; i <= 15; i++) e.bendJoint(200, 100 + i * 2, {snap: false, stretch: true});
@@ -35,7 +38,7 @@ for (const sheet of [false, true]) test(`Build bend publishes one reusable edit 
   near(e.figure.segments[0].bend_rad, bend); near(e.figure.segments[0].length, length);
   near(e.figure.segments[1].angle_rad, .5 + bend); near(e.figure.segments[2].angle_rad, -1);
   e.geometry.objects.get(e.selectedSlot).segments.forEach((s, i) => {near(s.end.x, preview[i].x); near(s.end.y, preview[i].y);});
-  const sources = e._allSourceFrames();
+  const sources = storedFrames();
   for (let i = 0; i < sources.length; i++) {
     const obj = sources[i].objects[0], old = sourceBefore[i];
     near(obj.angles[1], old.angles[1] + bend); near(obj.angles[2], old.angles[2]);
@@ -44,7 +47,7 @@ for (const sheet of [false, true]) test(`Build bend publishes one reusable edit 
   }
   const after = e.serialize(); e.undo(); assert.deepEqual(e.serialize(), before);
   e.redo(); assert.deepEqual(e.serialize(), after);
-  const reopened = new Editor({demo: false, layerTimeline: sheet, propertyChannels: sheet}).load(after);
+  const reopened = open({demo: false, layerTimeline: true, propertyChannels: true}, after);
   near(reopened.report.figure_types[0].segments[0].bend_rad, bend);
 });
 

@@ -1,0 +1,139 @@
+{
+ "name": "camera-motion-sheet",
+ "document": "camera-motion.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "setCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002",
+   {
+    "start": 14
+   }
+  ],
+  [
+   "setCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002",
+   {
+    "params": {
+     "strength": 1.5,
+     "seed": 7
+    }
+   }
+  ],
+  [
+   "setCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002",
+   {
+    "enabled": false
+   }
+  ],
+  [
+   "setCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002",
+   {
+    "duration": 80
+   }
+  ],
+  [
+   "setCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000001",
+   {
+    "targets": [
+     {
+      "uid": 1,
+      "weight": 0.5
+     }
+    ]
+   }
+  ],
+  [
+   "setCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002",
+   {
+    "params": {
+     "strength": 9
+    }
+   }
+  ],
+  [
+   "setCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002",
+   {
+    "bogus": 1
+   }
+  ],
+  [
+   "setCameraMotion",
+   "nope",
+   {
+    "start": 1
+   }
+  ],
+  [
+   "setCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002",
+   {
+    "targets": [
+     {
+      "uid": 1,
+      "weight": 1
+     }
+    ]
+   }
+  ],
+  [
+   "setCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000001",
+   {
+    "duration": 200000
+   }
+  ],
+  [
+   "setCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002",
+   {
+    "start": 14
+   }
+  ],
+  [
+   "setLayerLocked",
+   "camera",
+   true
+  ],
+  [
+   "setCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002",
+   {
+    "start": 3
+   }
+  ],
+  [
+   "setLayerLocked",
+   "camera",
+   false
+  ],
+  [
+   "deleteCameraMotion",
+   "motion-00000000-0000-4000-8000-000000000002"
+  ],
+  [
+   "deleteCameraMotion",
+   "nope"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

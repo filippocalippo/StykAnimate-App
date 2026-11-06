@@ -36,10 +36,12 @@ test('fallback lookup and coverage stay accurate for incomplete and complete cat
     {locale: {...locale, id:'ar-EG'}, messages:complete},
     {locale: {...locale, id:'ar-SA'}, messages:missingForm},
   ];
+  const fixtureLocales = fixturePacks.map(pack => pack.locale);
   const source = (await readFile(new URL('../src/localization.mjs', import.meta.url), 'utf8'))
     .replace("'./locales/en.mjs'", JSON.stringify(new URL('../src/locales/en.mjs', import.meta.url).href))
-    .replace(/import packs from '[^']+';/, `const packs = ${JSON.stringify(fixturePacks)};`);
-  const {Localization: FixtureLocalization} = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+    .replace(/import locales from '[^']+';/, `const locales = ${JSON.stringify(fixtureLocales)};`);
+  const {Localization: FixtureLocalization, registerLocale} = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+  for (const pack of fixturePacks) if (pack.locale.id !== 'en') registerLocale(pack.locale.id, pack.messages);
   const service = new FixtureLocalization({locale:'ar'});
   assert.equal(service.hasFallback, true);
   assert.equal(service.t('common.save'), 'حفظ');

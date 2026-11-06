@@ -75,16 +75,21 @@ try {
     check('Stop ends Edit together and the line goes', await page.evaluate(() => styk.state.applyRange === false) && await page.locator('[data-slot=inspector-head] .ui-scope').count() === 0);
   } else console.log('SKIP scope line: this document selects no frame range');
 
-  // A joint: its name, its quick actions, Isolate's state; the scene: no quick actions.
+  // A joint: its name, its quick actions (Front, Back and Flip limb since 8a7df1f3; Isolate, Exact values and Match moved
+  // to the ⋯ menu), Isolate's state in that menu; the scene: no quick actions.
   await page.evaluate(() => styk.editor.select(1, 4)); await settle();
   check('A joint is titled as today', /^Joint \d+$/.test(await name()) && await page.locator('#inspector-context').textContent() === 'Joint');
-  assert.deepEqual((await quick()).map(([action]) => action), ['toggle-isolate', 'segment-values', 'locate-previous', 'locate-next', 'mirror']);
-  check('Match is one tile: its label and two pose buttons', await page.locator('.ui-quick-tile').getAttribute('aria-label') === 'Match' &&
-    await page.locator('.ui-quick-tile button').count() === 2);
-  await page.locator('[data-slot=inspector-head] [data-action="toggle-isolate"]').click(); await settle();
-  check('Isolate shows its state', await page.evaluate(() => styk.state.isolateMode) &&
-    await page.locator('[data-slot=inspector-head] [data-action="toggle-isolate"]').getAttribute('aria-pressed') === 'true');
-  await page.locator('[data-slot=inspector-head] [data-action="toggle-isolate"]').click();
+  assert.deepEqual((await quick()).map(([action]) => action), ['selection-front', 'selection-back', 'mirror']);
+  check('Isolate is in the ⋯ menu and names its state', await (async () => {
+    await page.locator('#object-actions').click(); await settle();
+    await page.getByRole('menuitem', {name: 'Isolate joint', exact: true}).click(); await settle();
+    const isolated = await page.evaluate(() => styk.state.isolateMode);
+    await page.locator('#object-actions').click(); await settle();
+    const stop = page.getByRole('menuitem', {name: 'Stop isolating joint', exact: true});
+    const named = await stop.count() === 1;
+    await stop.click(); await settle();
+    return isolated && named && await page.evaluate(() => !styk.state.isolateMode);
+  })());
   await page.evaluate(() => styk.editor.select(null)); await settle();
   check('The scene has a name, a kind glyph and no quick actions', await name() === 'Scene' && !(await page.locator('.ui-target-kind').isHidden()) &&
     await page.locator('[data-slot=inspector-head]').isHidden());

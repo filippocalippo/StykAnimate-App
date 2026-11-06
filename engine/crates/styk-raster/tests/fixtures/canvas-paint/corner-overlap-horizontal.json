@@ -1,0 +1,228 @@
+{
+  "version": 5,
+  "canvas_width": 960,
+  "canvas_height": 540,
+  "fps": 24,
+  "auto_easing": false,
+  "auto_easing_disabled_raw": 1,
+  "auto_easing_source": "file",
+  "backgrounds": [],
+  "figure_types": [
+    {
+      "figure_type_id": 1,
+      "name": "Figure 1",
+      "segment_count": 2,
+      "segments": [
+        {
+          "segment_id": 1,
+          "parent_id": 0,
+          "length": 1000,
+          "angle_rad": 0,
+          "thickness": 2000,
+          "bend_rad": 0,
+          "primitive_code": 0,
+          "aux_code": 0,
+          "flags": 0,
+          "segment_type": "line",
+          "segment_kind": "line",
+          "color_rgb": [
+            240,
+            48,
+            32
+          ],
+          "transparency": 128,
+          "visible": true,
+          "z_order": 1,
+          "is_static": false,
+          "flag_bits": {
+            "is_static": false
+          }
+        },
+        {
+          "segment_id": 2,
+          "parent_id": 0,
+          "length": 1000,
+          "angle_rad": 0,
+          "thickness": 2000,
+          "bend_rad": 0,
+          "primitive_code": 0,
+          "aux_code": 0,
+          "flags": 0,
+          "segment_type": "line",
+          "segment_kind": "line",
+          "color_rgb": [
+            32,
+            96,
+            240
+          ],
+          "transparency": 128,
+          "visible": true,
+          "z_order": 1,
+          "is_static": false,
+          "flag_bits": {
+            "is_static": false
+          }
+        }
+      ],
+      "polyfills": [],
+      "image_assets": [],
+      "text_assets": []
+    }
+  ],
+  "keyframes": [
+    {
+      "duration_raw": 1,
+      "background_id": 0,
+      "background_id_b": 0,
+      "background_mix": 0,
+      "camera": {
+        "is_default": true,
+        "x": 0,
+        "y": 0,
+        "scale": 1,
+        "angle_rad": 0
+      },
+      "objects": [
+        {
+          "object_slot": 0,
+          "unique_id": 1,
+          "figure_type_id": 1,
+          "root_x": -20,
+          "root_y": 270,
+          "scale": 1,
+          "color_override_raw": 0,
+          "field28": 0,
+          "angles": [
+            0,
+            0
+          ],
+          "len_flag": 0,
+          "lengths": [],
+          "bend_flag": 0,
+          "bends": [],
+          "join": null,
+          "color_override_rgb": [
+            0,
+            0,
+            0
+          ],
+          "color_override_mix": 0,
+          "transparency": 0,
+          "opacity": 1
+        }
+      ],
+      "object_draw_order": [
+        0
+      ],
+      "object_draw_order_unique_ids": [
+        1
+      ],
+      "_styk": {
+        "frameId": "frame-1"
+      },
+      "inbetweens": 0,
+      "hidden": false
+    }
+  ],
+  "_styk": {
+    "format": "StykAnimate",
+    "format_version": 1,
+    "name": "Untitled animation",
+    "layers": {
+      "version": 1,
+      "nextId": 2,
+      "order": [
+        "layer-1"
+      ],
+      "byId": {
+        "layer-1": {
+          "name": "Layer 1",
+          "visible": true,
+          "locked": false
+        }
+      },
+      "assignments": {},
+      "defaultLayerId": "layer-1",
+      "activeId": "layer-1",
+      "fixed": {
+        "scene": {
+          "visible": true,
+          "locked": false
+        },
+        "camera": {
+          "visible": true,
+          "locked": false
+        }
+      }
+    },
+    "layerSheet": {
+      "version": 1,
+      "duration": 1,
+      "nextId": 4,
+      "tracks": {
+        "scene": {
+          "end": 1,
+          "keys": [
+            {
+              "id": "cell-1",
+              "tick": 0,
+              "interpolation": "linear",
+              "value": {
+                "frameId": "frame-2"
+              },
+              "empty": false
+            }
+          ]
+        },
+        "camera": {
+          "end": 1,
+          "keys": [
+            {
+              "id": "cell-2",
+              "tick": 0,
+              "sourceTick": 0,
+              "interpolation": "linear"
+            }
+          ]
+        },
+        "layer-1": {
+          "end": 1,
+          "keys": [
+            {
+              "id": "cell-3",
+              "tick": 0,
+              "sourceTick": 0,
+              "interpolation": "linear",
+              "empty": false
+            }
+          ]
+        }
+      }
+    },
+    "frameSources": {
+      "frame-2": {
+        "duration_raw": 1,
+        "background_id": 0,
+        "background_id_b": 0,
+        "background_mix": 0,
+        "camera": {
+          "is_default": true,
+          "x": 0,
+          "y": 0,
+          "scale": 1,
+          "angle_rad": 0
+        },
+        "objects": [],
+        "object_draw_order": [],
+        "object_draw_order_unique_ids": [],
+        "_styk": {
+          "frameId": "frame-2"
+        },
+        "_stykBackgroundColor": 1054752,
+        "object_count": 0
+      }
+    }
+  },
+  "total_output_frames": 1,
+  "duration_seconds": 0.041666666666666664
+}

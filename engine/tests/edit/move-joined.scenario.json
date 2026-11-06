@@ -1,0 +1,66 @@
+{
+ "name": "move-joined",
+ "document": "joined-chain.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@seek",
+   0
+  ],
+  [
+   "@select",
+   3,
+   -1
+  ],
+  [
+   "moveSelection",
+   15,
+   5
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "moveSelection",
+   10,
+   0,
+   {
+    "detachExternal": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   -20,
+   8
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {engineEditor, newOwnedEditor} from './support/owned-editor.mjs';
 import {emptyDocument,createFrame,createObject,defaultFigure} from '../src/demo.mjs';
 import {movieclipFigure,validatePlayback} from '../src/movieclips.mjs';
-import {presencePlayback,continuations} from '../src/movieclip-presence.mjs';
-import {evaluatedFrame,timeline,buildGeometry,movieclipPresenceIndex} from '../src/pivot/geometry.mjs';
-import {materializePivotDocument} from '../src/pivot-export-materialize.mjs';
-import {nativeFigureDocument} from '../src/native-figure.mjs';
-import {movieclipInspector} from '../src/movieclip-ui.mjs';
+import {continuations} from '../src/movieclip-presence.mjs';
+import {presencePlayback} from './support/movieclip-playback.mjs';
+import {sceneAt} from './support/engine-geometry.mjs';
+import {movieclipInspector} from './support/control-views.mjs';
+import {pivotDocument, figureDocument} from './support/engine-export.mjs';
 
 function fixture({duration=12,clipDuration=8,fps=24,clipFps=24,empty=false}={}){
   const child=defaultFigure(),document={...emptyDocument(),fps:clipFps};
@@ -16,18 +16,20 @@ function fixture({duration=12,clipDuration=8,fps=24,clipFps=24,empty=false}={}){
   const report={...emptyDocument(),fps,figure_types:[defaultFigure(),clip]};
   const objects=()=>empty?[]:[createObject(clip,7,300,300,{_stykMovieclip:presencePlayback()})];
   report.keyframes=duration===1?[createFrame(objects())]:[createFrame(objects(),duration-1),createFrame(objects())];
-  const e=new Editor({demo:false,layerTimeline:true});e.load(report);e.select(7);return e;
+  const e=engineEditor({demo:false,layerTimeline:true}, report);e.select(7);return e;
 }
-function frame(e,t){const report=e.report??e,rows=timeline(report);let i=0;while(i+1<rows.length&&rows[i+1].start<=t)i++;return evaluatedFrame(report,i,(t-rows[i].start)/(rows[i].count||1),t);}
+/** The frame the engine shows for the editor at tick `t` (its playhead stays where it was). */
+function frame(e,t){const at=e.tick;e.seek(t,{allowBeyondEnd:true});const shown=e.evaluatedFrame;e.seek(at);return shown;}
 const phase=(e,t,uid=7)=>frame(e,t).objects.find(o=>o.unique_id===uid)?._movieclipSample??null;
 const phases=(e,n=12,uid=7)=>Array.from({length:n},(_,t)=>phase(e,t,uid));
-const shape=(e,t)=>buildGeometry(e.report??e,frame(e,t)).drawables.map(d=>[d.type,d.rgb,d.alpha,d.points.map(p=>[+p.x.toFixed(5),+p.y.toFixed(5)])]);
+/** The shapes the engine draws at tick `t`, movieclip contents included. */
+const shape=(e,t)=>sceneAt(e,t).drawables.map(d=>[d.type,d.rgb,d.alpha,d.points.map(p=>[+p.x.toFixed(5),+p.y.toFixed(5)])]);
 function closeShape(actual,expected){
   assert.equal(actual.length,expected.length);
   actual.forEach((value,i)=>{assert.deepEqual(value.slice(0,3),expected[i].slice(0,3));assert.equal(value[3].length,expected[i][3].length);value[3].forEach((point,j)=>point.forEach((v,k)=>assert.ok(Math.abs(v-expected[i][3][j][k])<.0001,`point ${i}/${j}/${k}: ${v} != ${expected[i][3][j][k]}`)));});
 }
 const structure=e=>JSON.stringify({duration:e.totalTicks,tracks:Object.fromEntries(Object.entries(e.report._styk.layerSheet.tracks).map(([id,t])=>[id,{end:t.end,keys:t.keys.map(k=>[k.id,k.tick,k.interpolation])}]))});
-const reopen=e=>new Editor({demo:false,layerTimeline:true}).load(JSON.parse(JSON.stringify(e.report)));
+const reopen=e=>newOwnedEditor({demo:false,layerTimeline:true}).load(JSON.parse(JSON.stringify(e.report)));
 
 test('inserting a long asset adds only current presence, with no source-length scene extension',()=>{
   const e=fixture({duration:1,clipDuration:80,empty:true}),before=e.totalTicks,undo=e._undo.length;
@@ -71,7 +73,6 @@ test('speed integration, different FPS, single frame, loops, once and final hold
   e.setMovieclipPlayback({mode:'single',offset:3},{allFrames:true});assert.equal(phase(e,10),3);
   e.setMovieclipPlayback({mode:'hold',speed:10,offset:0},{allFrames:true});assert.equal(phase(e,10),7);
   e.setMovieclipPlayback({mode:'once'},{allFrames:true});assert.equal(phase(e,10),null);
-  assert.equal(movieclipPresenceIndex(e.report).get(7).elapsed,120);
 });
 
 test('removing inside a held exposure changes only that output frame',()=>{
@@ -95,12 +96,15 @@ test('breaking one held frame preserves every rendered frame, phase, length and 
   assert.deepEqual(phases(reopen(e)),phases(e));e.undo();assert.equal(phase(e,4),4);e.redo();assert.equal(phase(e,5),5);
 });
 
-test('adjacent, first, last and out-of-order breaks keep child identities and future phases',()=>{
+/** The frames of the layer sheet at these ticks, as the timeline chooses them. */
+const sheetRange=(e,ticks)=>Object.assign([e.frameIndex],{sheetTicks:ticks});
+
+test('adjacent, first, last and out-of-order breaks keep child identities and future phases',async()=>{
   const e=fixture();let children;
   for(const t of [4,0,11,3,5]){e.seek(t);e.select(7);const next=e.breakApartMovieclip();if(children)assert.deepEqual(next,children);children=next;}
   assert.equal(e.totalTicks,12);assert.deepEqual(phases(e),[null,1,2,null,null,null,6,7,0,1,2,null]);
   e.seek(6);e.select(7);const before=Array.from({length:12},(_,t)=>shape(e,t));
-  return e.bakeMovieclip().then(()=>{for(let t=0;t<12;t++)closeShape(shape(e,t),before[t]);assert.ok(phases(e).every(v=>v===null));});
+  await e.bakeMovieclip();for(let t=0;t<12;t++)closeShape(shape(e,t),before[t]);assert.ok(phases(e).every(v=>v===null));
 });
 
 test('deleting all broken children does not undo the consumed playback step',()=>{
@@ -129,7 +133,7 @@ test('cross-project clipboard carries broken frames, definitions and reserved id
 test('Duplicate starts at frame one; colliding single-figure paste retains the copied source phase',()=>{
   const e=fixture();e.seek(5);e.select(7);e.duplicateFigure();const duplicate=e.selectedUid;
   assert.notEqual(duplicate,7);assert.equal(phase(e,5,duplicate),0);assert.equal(phase(e,6,duplicate),1);assert.equal(phase(e,6),6);
-  e.select(7);e.copyFigure();e.pasteFigure();assert.notEqual(e.selectedUid,7);assert.notEqual(e.selectedUid,duplicate);assert.equal(phase(e,5,e.selectedUid),5);assert.equal(phase(e,5),5);
+  e.select(7);e.copySelection();e.pasteSelection();assert.notEqual(e.selectedUid,7);assert.notEqual(e.selectedUid,duplicate);assert.equal(phase(e,5,e.selectedUid),5);assert.equal(phase(e,5),5);
 });
 
 test('hidden layers and opacity do not pause authored membership',()=>{
@@ -138,9 +142,9 @@ test('hidden layers and opacity do not pause authored membership',()=>{
 });
 
 test('portable imports use the new clock and legacy documents keep their saved clocks',()=>{
-  const e=fixture(),portable=nativeFigureDocument(e.report,{figureUid:7}),target=fixture({empty:true});target.seek(4);target.importFigure(portable);
+  const e=fixture(),portable=figureDocument(e.report,{figureUid:7}),target=fixture({empty:true});target.seek(4);target.importFigure(portable);
   assert.equal(target.object._stykMovieclip.clock,'presence');assert.equal(target.object._movieclipSample,0);assert.equal(target.totalTicks,12);
-  const legacy=new Editor();legacy.select(1);legacy.createMovieclip({start:3,end:12});const uid=legacy.selectedUid,before=phases(legacy,20,uid);
+  const legacy=engineEditor();legacy.select(1);legacy.createMovieclip({start:3,end:12});const uid=legacy.selectedUid,before=phases(legacy,20,uid);
   const loaded=reopen(legacy);assert.deepEqual(phases(loaded,20,uid),before);
 });
 
@@ -155,17 +159,16 @@ test('nested cropped movieclips retain source phase before and after entering th
 
 test('Pivot expansion agrees with every rendered frame after gaps and breaks',()=>{
   const e=fixture();e.sheetClearFrames(['layer-1'],2);e.seek(5);e.select(7);e.breakApartMovieclip();
-  const flat=materializePivotDocument(e.report);for(let t=0;t<12;t++)closeShape(shape(flat,t),shape(e,t));
+  const flat=pivotDocument(e.report);for(let t=0;t<12;t++)closeShape(shape(flat,t),shape(e,t));
 });
 
-test('large held scenes build a sparse clock once and reuse it while seeking',()=>{
+test('large held scenes keep the clock exact while seeking',()=>{
   const e=fixture();e.sheetInsertFrames(['layer-1'],5,50000);
-  const index=movieclipPresenceIndex(e.report);assert.equal(index.get(7).spans.length,1);
-  for(const t of [45000,0,30000,49999]){assert.equal(phase(e,t),t%8);assert.equal(movieclipPresenceIndex(e.report),index);}
+  for(const t of [45000,0,30000,49999])assert.equal(phase(e,t),t%8);
 });
 
 test('Break Apart preserves an eased outer motion and unrelated figures on its layer',()=>{
-  const e=new Editor({layerTimeline:true,propertyChannels:true});e.select(1);e.createMovieclip({start:0,end:30});const uid=e.selectedUid;
+  const e=engineEditor({layerTimeline:true,propertyChannels:true});e.select(1);e.createMovieclip({start:0,end:30});const uid=e.selectedUid;
   e.seek(8);e.select(uid);e.moveSelection(70,20);e.seek(20);e.select(uid);e.moveSelection(-40,40);
   e.sheetSetEasing(['layer-1'],0,29,{interpolation:'auto'});
   const before=Array.from({length:e.totalTicks},(_,t)=>shape(e,t));e.seek(7);e.select(uid);e.breakApartMovieclip();
@@ -213,7 +216,7 @@ test('moving frames containing a break and copying only a broken frame keep vali
   assert.equal(phase(e,3),3);assert.equal(phase(e,5),null);assert.equal(phase(e,6),6);
   e.sheetCopyFrames(['layer-1'],5);const layer=e.createLayer('Broken copy');e.sheetPasteFrames([layer.id],0);
   const loaded=reopen(e);assert.ok(loaded._nextUid>Math.max(...continuations(frame(loaded,0)).map(step=>step.uid)));
-  loaded.addFigure(2);assert.ok(loaded.selectedUid>7);loaded._pruneFrameSources();reopen(loaded);
+  loaded.addFigure(2);assert.ok(loaded.selectedUid>7);reopen(loaded);
 });
 
 test('deleting a clip before its broken frame pauses one step and preserves the break',()=>{
@@ -246,19 +249,6 @@ test('breaking an attached clip preserves unrelated joins and detaches its attac
   reopen(e);
 });
 
-test('object copy/paste through five authored frames retains one clock; middle deletion pauses it',()=>{
-  for(const single of [false,true]){
-    const e=fixture({duration:5,empty:true});for(let t=1;t<5;t++)e.sheetInsertKey(['layer-1'],t);
-    e.seek(0);e.addFigure(2);const uid=e.selectedUid,x=e.object.root_x;single?e.copyFigure():e.copySelection();
-    for(let t=1;t<5;t++){e.seek(t);single?e.pasteFigure():e.pasteSelection();assert.equal(e.selectedUid,uid);assert.equal(e.object.root_x,x);}
-    assert.deepEqual(phases(e,5,uid),[0,1,2,3,4]);assert.equal(e.totalTicks,5);
-    const before=e.serialize();e.seek(2);e.select(uid);e.deleteSelection();
-    assert.deepEqual(phases(e,5,uid),[0,1,null,2,3]);assert.deepEqual(phases(reopen(e),5,uid),[0,1,null,2,3]);
-    e.undo();assert.deepEqual(e.serialize(),before);e.redo();assert.deepEqual(phases(e,5,uid),[0,1,null,2,3]);
-    e.seek(2);e.pasteSelection();assert.equal(e.selectedUid,uid);assert.deepEqual(phases(e,5,uid),[0,1,2,3,4]);
-  }
-});
-
 test('repeated colliding pastes create fresh instances on the original layer and preserve existing poses',()=>{
   const e=fixture(),layer=e.createLayer('Other');e.copySelection();e.setActiveLayer(layer.id);
   const next=e._nextUid,ids=new Set([7]);
@@ -280,7 +270,7 @@ test('mixed movieclip paste retains absent identities while remapping collisions
  const e=fixture();e.addFigure(2);const second=e.selectedUid;e.selectMany([7,second]);e.copySelection();
  e.seek(4);e.select(second);e.deleteSelection();e.seek(6);e.select(second);e.deleteSelection();
  const before=e.serialize(),history=e._undo.length;
- const result=e.applyFigureRange({kind:'paste'},{ticks:[4,6]});
+ const result=e.pasteFiguresInFrames(sheetRange(e,[4,6]));
  const fresh=result.insertedUids.find(uid=>uid!==second);assert.notEqual(fresh,7);assert.equal(result.insertedUids.length,2);
  for(const t of [4,6]){const ids=frame(e,t).objects.map(o=>o.unique_id);assert.ok(ids.includes(7)&&ids.includes(second)&&ids.includes(fresh));assert.equal(new Set(ids).size,ids.length);}
  assert.equal(e._undo.length,history+1);e.undo();assert.deepEqual(e.serialize(),before);e.redo();reopen(e);
@@ -295,8 +285,8 @@ test('a hidden completed instance still collides, and paste starts a visible cop
 
 test('range paste reuses one movieclip identity and range delete removes only requested frames',()=>{
   const e=fixture();e.copySelection();e.sheetClearFrames(['layer-1'],0,11);
-  e.applyFigureRange({kind:'paste'},{ticks:[0,2,4]});assert.deepEqual(phases(e,6),[0,1,2,3,4,5]);
-  e.select(7);const before=e.serialize();e.applyFigureRange({kind:'delete'},{ticks:[1,3]});
+  e.pasteFiguresInFrames(sheetRange(e,[0,2,4]));assert.deepEqual(phases(e,6),[0,1,2,3,4,5]);
+  e.select(7);const before=e.serialize();e.deleteFiguresInFrames(sheetRange(e,[1,3]));
   assert.deepEqual(phases(e,6),[0,null,1,null,2,3]);assert.deepEqual(phases(reopen(e),6),[0,null,1,null,2,3]);
   e.undo();assert.deepEqual(e.serialize(),before);
 });
@@ -337,7 +327,7 @@ test('Make unique separates only this frame, preserves its phase and joins, and 
 });
 
 test('pasting clips alongside frame-only breaks preserves unrelated curves and editable children',()=>{
-  const e=new Editor({layerTimeline:true,propertyChannels:true});e.select(1);e.createMovieclip({start:0,end:30});const uid=e.selectedUid;
+  const e=engineEditor({layerTimeline:true,propertyChannels:true});e.select(1);e.createMovieclip({start:0,end:30});const uid=e.selectedUid;
   e.seek(8);e.select(uid);e.moveSelection(70,20);e.seek(20);e.select(uid);e.moveSelection(-40,40);e.sheetSetEasing(['layer-1'],0,29,{interpolation:'auto'});
   e.seek(7);e.select(uid);e.breakApartMovieclip();const before=Array.from({length:e.totalTicks},(_,t)=>shape(e,t));
   const asset=e.createEmptyMovieclip('Other');e.seek(0);e.addFigure(asset.figure_type_id);const other=e.selectedUid;e.copySelection();
@@ -360,18 +350,3 @@ test('editing playback on the current pasted exposure works without adding timel
   e.undo();assert.equal(phase(e,6),2);e.redo();assert.equal(phase(reopen(e),6),5);
 });
 
-
-test('unique movieclip paste owns a definition and identity while default paste retains the clock',()=>{
-  const e=fixture();e.copySelection();const original=e.object.figure_type_id;
-  const document=e.figure._styk.movieclip.document;
-  e.sheetClearFrames(['layer-1'],0,11);e.seek(0);
-  const before=e.serialize();e.pasteSelection({pasteMode:'unique'});
-  assert.notEqual(e.selectedUid,7);const unique=e.object.figure_type_id;assert.notEqual(unique,original);
-  assert.equal(e.figure._styk.movieclip.document,document,'Immutable animation is shared without a deep copy.');
-  const after=e.serialize();e.undo();assert.deepEqual(e.serialize(),before);e.redo();assert.deepEqual(e.serialize(),after);
-  e.enterMovieclip();e.select(e.selectionFrame.objects[0].unique_id);e.moveSelection(15,20);e.leaveMovieclip();
-  assert.equal(e.report.figure_types.find(f=>f.figure_type_id===original)._styk.movieclip.document,document);
-  assert.notEqual(e.report.figure_types.find(f=>f.figure_type_id===unique)._styk.movieclip.document,document);
-  e.pasteSelection();assert.equal(e.selectedUid,7);assert.equal(e.object.figure_type_id,original);
-  reopen(e);
-});

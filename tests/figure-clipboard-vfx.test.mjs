@@ -1,22 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
 import {emptyDocument, createObject, createFrame} from '../src/demo.mjs';
-import {initializeLayerSheet} from '../src/editor-layer-sheet.mjs';
-import {vfxProperty, vfxStack} from '../src/vfx.mjs';
+import {vfxProperty} from '../src/vfx.mjs';
 import {clipboardSnapshot, restoreClipboard} from '../src/shared-clipboard.mjs';
+import {ownedScope} from './support/owned-scope.mjs';
 
-function fixture(sheet = true) {
+const open = ownedScope();
+
+function fixture() {
   const report = emptyDocument(), figure = report.figure_types[0];
   report.keyframes = [0, 1, 2].map(() => createFrame([createObject(figure, 1, 120, 180), createObject(figure, 2, 280, 180)], 10));
-  const editor = new Editor({demo: false}).load(report);
-  if (sheet) { initializeLayerSheet(editor.report); editor._invalidate({timing: true}); }
-  return editor;
+  return open({demo: false, layerTimeline: true}, report);
 }
 const clipsFor = (editor, uid) => editor.getVfxClips().filter(clip => clip.target.uid === uid);
 
-for (const sheet of [true, false]) test(`pasting a figure keeps its timeline effects (${sheet ? 'layers' : 'legacy'})`, () => {
-  const editor = fixture(sheet);
+test('pasting a figure keeps its timeline effects', () => {
+  const editor = fixture();
   const always = editor.addVfxClip({kind: 'figure', uid: 1}, 'glow');
   const timed = editor.addVfxClip({kind: 'segment', uid: 1, handleId: 2}, 'tint', {start: 4, duration: 12});
   const effect = editor.getVfxClips().find(clip => clip.id === timed).effects[0];
@@ -37,8 +36,6 @@ for (const sheet of [true, false]) test(`pasting a figure keeps its timeline eff
   assert.equal(glow.duration, null);
   assert.deepEqual([tint.target.kind, tint.target.handleId, tint.start, tint.duration], ['segment', 2, 7, 12], 'timing follows the playhead');
   assert.deepEqual(tint.keys[vfxProperty('tint', tint.effects[0].id, 'mix')].map(key => key.value), [0, 1]);
-  editor.seek(9);
-  assert.equal(vfxStack([...editor.geometry.objects.values()].find(g => g.obj.unique_id === pasted.unique_id).obj)[0]?.type, 'glow');
   editor.undo();
   assert.equal(clipsFor(editor, pasted.unique_id).length, 0);
   assert.equal(editor.getVfxClips().length, 3);
