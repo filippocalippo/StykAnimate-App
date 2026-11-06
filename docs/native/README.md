@@ -26,6 +26,14 @@ agent, `perf/briefs/native/<chunk>.md` per chunk, `perf/merge.sh <sha> <message>
 | D | drawing-undo atlas work, its compile fix, the polygon cache removed | T3 worktree, Sonnet | running |
 | X | export frames independent of export order, picture and cel residency in exports | T3 worktree, Sonnet | running |
 | I | the inventory, 12 areas, into `perf/native/inventory/` then `INVENTORY.md` | workflow, Sonnet | running |
+| N0 | the foundation (brief `perf/briefs/native/N0-foundation.md`) | T3 worktree, Sonnet | running |
+| S1-S6 | risk spike designs, in `perf/native/spikes/S*.md` | Sonnet | written; GPT-6.1 Sol reviewing each |
+
+Spike design findings so far: desktop video export already runs a bundled FFmpeg 7.1 sidecar (WebCodecs is the
+browser's fallback only), so the native export runs the same FFmpeg with the same arguments and aims at identical bytes;
+the pen reaches iced only as touch with pressure, so a `WM_POINTER` subclass reads pen history (tilt, eraser, barrel,
+timestamps) into a ring; iced has no right-to-left layout, Tab order or focus ring, and its Windows IME is IMM32 only:
+those are ours (`styk-design`, `styk-core`) plus a few small fork patches; Inter must be converted from WOFF2 to TTF.
 
 **Next, in order.** After M merges: L (the blocking locks in `styk-wasm/src/open.rs` and `stage.rs`, the 250 MB Pivot file
 that fails and the memory it keeps) and P (the padded `.piv` export that is refused). Then N0, the foundation: vendored
