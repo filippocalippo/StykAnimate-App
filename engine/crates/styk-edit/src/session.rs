@@ -977,7 +977,8 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     if view.get("patch") == Some(&Value::Bool(true)) {
         let (ops, named) = {
             let _scope = crate::prof::scope("patch::diff");
-            let mut ops = crate::patch::diff(&before, report);
+            // The owner's `@publishCel` hands the session a payload the read view holds already: its answer repeats nothing.
+            let mut ops = if method == "@publishCel" { Value::array(Vec::new()) } else { crate::patch::diff(&before, report) };
             // A view that fetches the records of its tables on demand holds some of them: the others come whole.
             if let Some(known) = crate::patch::known(&view) {
                 ops = crate::patch::for_lazy(ops, report, &known);

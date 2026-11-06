@@ -40,6 +40,9 @@ pub fn run(args: &[String]) -> i32 {
     let first = turned(0);
     let scene = build_remembering(&p.doc, &first, &mut built);
     let _ = encode_composed_remembering(&p.doc, &assets, &scene, &overrides, &[], None, &mut encoded);
+    // Why a frame is encoded whole: the conditions of the encode memory (`encode_scene`) and what it kept.
+    let text = scene.items.iter().filter(|it| it.kind == styk_eval::geometry::ItemKind::Text).count();
+    println!("encode memory: kept {} of {} objects; vfx {}, clip vfx {}, meshes {}, depths {}, text items {}, built_in {} of {}", encoded.kept(), scene.objects.len(), scene.vfx.is_some(), scene.clip_vfx.iter().filter(|c| c.is_some()).count(), scene.meshes.len(), scene.depths.len(), text, scene.built_in.len(), scene.objects.len());
     // Three onion skins, other ticks of the document, built once as the stage keeps them while a gesture goes on.
     let skins: Vec<(styk_eval::eval::Frame, styk_eval::geometry::Scene)> = [tick - 12.0, tick - 6.0, tick + 6.0].into_iter().filter(|t| *t >= 0.0).map(|t| {
         let frame = p.evaluate(t);

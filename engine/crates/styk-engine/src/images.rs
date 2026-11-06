@@ -20,6 +20,13 @@ pub use residency::{drawing_pages, has_place, images_on, on_demand, pictures_of,
 #[derive(Default)]
 pub struct Uploaded {
     places: HashSet<u64>,
+    /// Places of cels the document replaced since the atlas was laid out, which the new cel was given (a replaced cel's slots go to the
+    /// next, [`Assets::extended`]): what they hold is the old cel's until the new one's tiles are in, so a frame that draws them waits.
+    refilling: HashSet<u64>,
+    /// The numbers of the placements seen ([`Assets::placement`]), the assets they were seen in, and whether any assets were seen before.
+    seen: HashSet<u64>,
+    assets: u64,
+    primed: bool,
 }
 
 /// An atlas place by its page and corner (the gutter excluded), as records name it.
@@ -37,6 +44,45 @@ impl Uploaded {
     /// The atlas was allocated again: it holds nothing.
     pub fn clear(&mut self) {
         self.places.clear();
+        self.refilling.clear();
+        self.seen.clear();
+        self.assets = 0;
+        self.primed = false;
+    }
+
+    /// The atlas `assets` lays out is the document in front: the cels it placed since the last assets seen (the document replaced
+    /// the cels before them) are to be written, so their places hold no pixels until their tiles are in ([`Uploaded::refilling_in`]).
+    /// The first assets seen after the atlas was allocated are not new: nothing was there before them.
+    pub fn observe(&mut self, assets: &Assets) {
+        if self.assets == assets.id() && self.primed {
+            return;
+        }
+        self.assets = assets.id();
+        for (serial, written) in assets.placements() {
+            if !self.seen.insert(serial) || !self.primed {
+                continue;
+            }
+            for slot in written {
+                if let Some(entry) = assets.drawing.get(slot as usize).filter(|entry| entry.valid) {
+                    let at = place(entry.layer, entry.x, entry.y);
+                    self.places.remove(&at);
+                    self.refilling.insert(at);
+                }
+            }
+        }
+        self.seen.retain(|serial| assets.holds_placement(*serial));
+        self.primed = true;
+    }
+
+    /// Whether `list` draws a place that is being refilled with the pixels of the cel that replaced the one it held: a frame that drew
+    /// it now would show the old cel's tiles among the new cel's.
+    pub fn refilling_in(&self, list: &DrawList) -> bool {
+        !self.refilling.is_empty()
+            && list.prims.iter().any(|p| match p.kind & 255 {
+                K_IMAGE => self.refilling.contains(&record_place(p.b[2], p.c[0], p.c[1])),
+                K_BG_IMAGE => self.refilling.contains(&record_place(p.a[2], p.c[0], p.c[1])),
+                _ => false,
+            })
     }
 
     /// A live drawing slot was written at the corner `(x, y)` of page `layer`.
@@ -76,7 +122,11 @@ impl Uploaded {
     /// `image` was written into the atlas `assets` lays out. Whether it was not there before.
     pub fn record(&mut self, assets: &Assets, image: &DecodedImage) -> bool {
         let entry: Option<&AtlasEntry> = if image.drawing { assets.drawing.get(image.index as usize) } else { assets.atlas.get(image.index as usize) };
-        entry.filter(|e| e.valid).is_some_and(|e| self.places.insert(place(e.layer, e.x, e.y)))
+        entry.filter(|e| e.valid).is_some_and(|e| {
+            let at = place(e.layer, e.x, e.y);
+            self.refilling.remove(&at);
+            self.places.insert(at)
+        })
     }
 
     /// Whether `list` samples an atlas place that holds no pixels yet: a picture or a
@@ -101,6 +151,14 @@ pub(crate) fn picture_of_image(generation: &Generation, atlas_pages: u32, index:
 
 fn pictures_to_decode(generation: &Generation) -> usize {
     generation.prepared.doc.images.len() + generation.assets.cels.len()
+}
+
+/// Whether `picture` is a drawing cel that the engine's document does not place as `generation` did: it was replaced, and its slots
+/// are another cel's or free.
+fn superseded(state: &crate::State, generation: &Generation, picture: Picture) -> bool {
+    let (Picture::Cel(cel) | Picture::CelChanged(cel)) = picture else { return false };
+    let placement = generation.assets.placement(cel);
+    placement != 0 && !state.current.as_ref().is_some_and(|current| current.lineage == generation.lineage && current.assets.holds_placement(placement))
 }
 
 /// The pixels decoding `picture` produces, as far as is known without decoding it.
@@ -204,7 +262,7 @@ impl Engine {
     /// cannot hold is not shown (like one that cannot be decoded) and the engine goes on ([`Engine::pictures_refused`]).
     pub(crate) fn decode_pixels(&self, generation: &Generation, picture: Picture) -> Vec<DecodedImage> {
         let before = match picture {
-            Picture::Cel(cel) => generation.assets.cels.get(&cel).map(|(tiles, _)| (tiles.clone(), tiles.artwork_bounds())),
+            Picture::Cel(cel) | Picture::CelChanged(cel) => generation.assets.cels.get(&cel).map(|(tiles, _)| (tiles.clone(), tiles.artwork_bounds())),
             Picture::Image(_) | Picture::Soft(_) => None,
         };
         match styk_eval::assets::decode_picture(&generation.prepared.doc, &generation.assets, picture) {
@@ -229,6 +287,12 @@ impl Engine {
         let epoch = {
             let mut state = self.inner.state.lock();
             if state.images.lineage != generation.lineage { state.images.finish_decode(estimate); return }
+            // A cel the document has replaced since gave its slots to the next: nothing is decoded for it.
+            if superseded(&state, generation, picture) {
+                state.images.finish_decode(estimate);
+                state.images.remaining = state.images.remaining.saturating_sub(1);
+                return;
+            }
             state.images.epoch
         };
         let mut ready: std::collections::LinkedList<_> = self.decode_pixels(generation, picture).into_iter().map(Arc::new).collect();
@@ -237,6 +301,7 @@ impl Engine {
         state.images.finish_decode(estimate);
         if state.images.lineage != generation.lineage || state.images.epoch != epoch { return }
         state.images.remaining = state.images.remaining.saturating_sub(1);
+        if superseded(&state, generation, picture) { return }
         state.images.ready_bytes += bytes;
         state.images.ready.append(&mut ready);
     }
@@ -247,7 +312,7 @@ impl Engine {
         {
             let mut state = self.inner.state.lock();
             let retained = state.current.as_ref().is_some_and(|current| {
-                current.lineage == generation.lineage && current.assets.cels.contains_key(&(Arc::as_ptr(cel) as usize))
+                current.lineage == generation.lineage && current.assets.cels.contains_key(&cel.key())
             });
             if !retained {
                 return;
@@ -257,14 +322,29 @@ impl Engine {
         self.inner.state.notify_all();
     }
 
+    /// Whether every picture the engine was asked to decode is decoded and taken by the renderer: the atlas holds what the document in front
+    /// names, so a cel that replaces another can keep the slots of the tiles they share ([`Assets::extended_inheriting`]). `false` when
+    /// the state is busy: nothing is kept then.
+    pub(crate) fn pictures_settled(&self) -> bool {
+        self.inner.state.try_lock().is_some_and(|state| state.images.remaining == 0 && state.images.ready.is_empty() && state.images.inflight_bytes == 0 && state.images.parked.is_empty())
+    }
+
     /// Decoded images the renderer has not uploaded yet, up to `max_bytes` of pixels
     /// (at least one image), so one frame never uploads more than it can afford.
     pub fn take_images(&self, max_bytes: usize) -> Vec<Arc<DecodedImage>> {
         let mut taken = std::collections::LinkedList::new();
+        let mut stale = std::collections::LinkedList::new();
         let mut bytes = 0;
         let released = {
             let mut state = self.inner.state.lock();
             while let Some(image) = state.images.ready.back() {
+                // The tile of a cel whose slots another cel was given since it was decoded would overwrite that cel's: it is dropped.
+                if image.placement != 0 && !state.current.as_ref().is_some_and(|current| current.assets.holds_placement(image.placement)) {
+                    state.images.ready_bytes = state.images.ready_bytes.saturating_sub(image.rgba.len());
+                    let tail = state.images.ready.len() - 1;
+                    stale.append(&mut state.images.ready.split_off(tail));
+                    continue;
+                }
                 if !taken.is_empty() && image.rgba.len() > max_bytes.saturating_sub(bytes) { break }
                 bytes += image.rgba.len();
                 let tail = state.images.ready.len() - 1;
@@ -277,6 +357,7 @@ impl Engine {
         // Pictures that waited for room are decoded now.
         if released { self.inner.state.notify_all(); }
         // Node disposal and output allocation happen after the shared lock.
+        drop(stale);
         taken.into_iter().collect()
     }
 
