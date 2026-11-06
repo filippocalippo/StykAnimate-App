@@ -13,7 +13,7 @@ everything gets faster. The owner decided this on 2026-11-05.
 
 ## Handoff (keep current; read this first to resume)
 
-**Updated 2026-11-06 18:45.** Branch `native-app` from `engine-rust` `99c62189` (not pushed yet). The main checkout is on
+**Updated 2026-11-06 21:30.** Branch `native-app` from `engine-rust` `99c62189`, pushed. The main checkout is on
 `native-app`; merges into `engine-rust` happen in `wt/int-engine-rust` ([N3](decisions/0003-branches-and-integration.md)).
 The orchestrator's briefs and tools live outside the repository in `perf/` (`perf/briefs/native-common.md` for every
 agent, `perf/briefs/native/<chunk>.md` per chunk, `perf/merge.sh <sha> <message> [native-app|engine-rust]`).
@@ -22,13 +22,14 @@ agent, `perf/briefs/native/<chunk>.md` per chunk, `perf/merge.sh <sha> <message>
 
 | Chunk | What | Where | State |
 | --- | --- | --- | --- |
-| Gate | local `engine-rust` (`99c62189`: two merges never run together) | `wt/perf-now`, `perf/batches/b13/` | release build passed; suites running |
+| Gate b13 | local `engine-rust` `99c62189` (two merges never run together) | `perf/batches/b13/` | **passed and pushed**: check, `npm test` 2705/2705, Rust workspace, parity, web, every smoke (the video smoke needed the bundled encoder copied into the gate checkout). Benchmark deferred to the cleanup batch (one exclusive run after M, D, X) |
 | M | movieclip save fix merged, the rest of the movieclip branch, the refused gesture sequence | T3 worktree, Sonnet | running |
 | D | drawing-undo atlas work, its compile fix, the polygon cache removed | T3 worktree, Sonnet | running |
 | X | export frames independent of export order, picture and cel residency in exports | T3 worktree, Sonnet | running |
 | I | the inventory | `docs/native/INVENTORY.md` | done: 1,270 rows, all todo; regenerate the appendices with `perf/native/tools/` |
 | N0 | the foundation (brief `perf/briefs/native/N0-foundation.md`) | T3 worktree, Sonnet | running |
-| S1-S6 | risk spike designs, in `perf/native/spikes/S*.md` | Sonnet | written; GPT-6.1 Sol reviewing each |
+| S1-S6 | risk spike designs, in `perf/native/spikes/S*.md` | Sonnet, then GPT-6.1 Sol | reviewed, every finding accepted (`perf/native/spikes/reviews/`); briefs ready in `perf/briefs/native/` (S1, S2a fields, S2t typography, S2b text tool, S3 video), launched when N0 merges |
+| Designs | docking, developer tools, Settings, in `perf/native/designs/` | Sonnet, then GPT-6.1 Sol | drafted; decisions on open questions in `decisions-on-open-questions.md`; reviews running |
 
 Spike design findings so far: desktop video export already runs a bundled FFmpeg 7.1 sidecar (WebCodecs is the
 browser's fallback only), so the native export runs the same FFmpeg with the same arguments and aims at identical bytes;
