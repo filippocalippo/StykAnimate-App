@@ -29,7 +29,7 @@
  * place shows as a difference.
  */
 import {applyDocumentPatch} from './engine-patch.mjs';
-import {payloadText} from './engine-open.mjs';
+import {openMovieclipNow, payloadText} from './engine-open.mjs';
 import {fetchedRecords, holdAllRecords, holdingAll, recordsOf, tableOf} from '../lazy-table.mjs';
 import {messageError} from '../localized-error.mjs';
 import {validationLabel} from '../validation-labels.mjs';
@@ -475,7 +475,8 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
       return record = at >= 0 ? figures[at] : identity;
     };
     return new Proxy(identity, {
-      get: (target, key) => Object.hasOwn(target, key) ? target[key] : Reflect.get(definition(), key),
+      // A check for a promise (`then`) is not a read of the definition: an answer returned from an async function is asked for it.
+      get: (target, key) => Object.hasOwn(target, key) ? target[key] : key === 'then' ? undefined : Reflect.get(definition(), key),
       has: (target, key) => key in definition() || key in target,
       ownKeys: () => Reflect.ownKeys(definition()),
       getOwnPropertyDescriptor: (target, key) => { const own = Reflect.getOwnPropertyDescriptor(definition(), key); return own && {...own, configurable: true}; },
@@ -520,9 +521,11 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   };
   /** The token of the tree the session of document `held` holds, the open one or a parked one. */
   const handOver = held => (document === held ? session : parked.get(held)?.session)?.snapshot();
+  /** The error of an answer the engine refused with a message of the interface's (it is out of memory): the person reads it as the editor words it. */
+  const refusal = answer => typeof answer.error === 'string' && Object.hasOwn(english, answer.error) ? failure(answer.error, answer.errorParams) : null;
   const call = (method, args) => {
     const answer = JSON.parse(session.call(method, JSON.stringify(args), JSON.stringify(view())));
-    if (answer.status !== 'ok') throw new Error(`${method}: ${answer.error ?? answer.reason}`);
+    if (answer.status !== 'ok') throw refusal(answer) ?? new Error(`${method}: ${answer.error ?? answer.reason}`);
     return answer;
   };
   /** Makes the session's document the engine's: the stage draws it, playback and exports read it. */
@@ -708,7 +711,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   const perform = (live, redo, pixels) => {
     const answer = JSON.parse(live.call(redo ? 'redo' : 'undo', '[]', JSON.stringify({...view(), patch: true})));
     if (answer.status === 'unported') throw refuse(redo ? 'redo' : 'undo', answer.reason);
-    if (answer.status !== 'ok') throw new Error(`The engine could not ${redo ? 'redo' : 'undo'}: ${answer.error ?? answer.reason}`);
+    if (answer.status !== 'ok') throw refusal(answer) ?? new Error(`The engine could not ${redo ? 'redo' : 'undo'}: ${answer.error ?? answer.reason}`);
     adoptState(answer);
     pixels?.(answer);
     emit(answer);
@@ -766,6 +769,12 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   }
   layer.undo = function owned(...args) { return historyCall(false, args); };
   layer.redo = function owned(...args) { return historyCall(true, args); };
+  // Entering a movieclip opens its document from the tree the project's session holds, not from the text of a record the page read.
+  layer._movieclipDocument = function owned(typeId) {
+    const live = ensure();
+    if (!live) throw refuse('enterMovieclip', 'no engine session runs this document');
+    return openMovieclipNow(live, typeId, {layerTimeline: editor.layerTimeline});
+  };
   // Entering a movieclip loads its document, which gets its session as any document does (the 'document' event below);
   // leaving it gives the clip's edit to the session of the document it was in, and ends the clip's own.
   const leaveMovieclip = editor.leaveMovieclip;

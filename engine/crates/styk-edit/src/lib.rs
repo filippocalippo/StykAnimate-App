@@ -138,7 +138,7 @@ pub fn timeline_rows(report: &Value) -> Vec<(f64, f64)> {
     timeline::rows(report).into_iter().map(|row| (row.start, row.count)).collect()
 }
 
-pub use history::{Command, CommandKind, HistoryLimits};
+pub use history::{Command, CommandKind, EntryCosts, HistoryLimits};
 pub use frame::FrameSlice;
 pub use onion_skins::{Ghost, OnionSet, MAX_GHOSTS};
 pub use layer_focus::FocusLock;
@@ -386,6 +386,9 @@ pub struct Editor {
     pub(crate) camera_views: RefCell<camera_views::Cache>,
     /// The host's clock (milliseconds), which a read that is given a time to take is held to; without one it takes what it needs.
     pub(crate) clock: Option<fn() -> f64>,
+    /// Whether the host can take about this many more bytes (the allocator's headroom): asked before a command copies a large part of the
+    /// document, which refuses the command, nothing changed, rather than run the module out of memory. Without one every command runs.
+    pub(crate) memory_gate: Option<fn(usize) -> bool>,
     /// The last document checked for unported features, and the answer.
     gate: RefCell<Option<(Value, Option<&'static str>)>>,
 }
@@ -514,6 +517,7 @@ impl Editor {
             onions: RefCell::default(),
             camera_views: RefCell::default(),
             clock: None,
+            memory_gate: None,
             gate: RefCell::new(None),
         }
     }

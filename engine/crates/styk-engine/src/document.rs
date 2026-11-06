@@ -38,6 +38,9 @@ pub enum OpenSource<'a> {
     Owned { bytes: Vec<u8>, name: &'a str },
     /// A document as JSON text, and the name it is shown under.
     Json { bytes: &'a [u8], name: &'a str },
+    /// A document already in memory as a tree, and the name it is shown under: a movieclip's own, taken from the project that holds it. Nothing is
+    /// read from text, so what the open makes is the normalized document and its views.
+    Tree { document: Value, name: &'a str },
 }
 
 /// How far an open got.
@@ -115,6 +118,16 @@ fn block(bytes: usize) -> Result<(), OpenError> {
     copy.try_reserve_exact(bytes).map_err(|_| OpenError::out_of_memory(styk_alloc::OutOfMemory { requested: bytes, available: styk_alloc::headroom() }))
 }
 
+/// How many times the text of a document that is already a tree the open of it may take: the normalized copy and the typed views (a clip of
+/// every figure of a large project took one time its text; the open of its text takes sixteen, for the buffers it parses through).
+pub const OPEN_BYTES_PER_TREE_BYTE: usize = 3;
+
+/// What opening `tree` may take, for the reservation that precedes the open.
+pub fn open_tree_estimate(tree: &Value) -> usize {
+    let text = styk_doc::json::utf16_units_checked::<std::convert::Infallible>(tree, || Ok(())).unwrap_or(0);
+    text.saturating_mul(OPEN_BYTES_PER_TREE_BYTE).max(OPEN_MINIMUM_BYTES)
+}
+
 /// What opening a document of `file_bytes` bytes may take, for the reservation that precedes the open.
 pub fn open_estimate(file_bytes: usize) -> usize {
     file_bytes.saturating_mul(OPEN_BYTES_PER_BYTE).max(OPEN_MINIMUM_BYTES)
@@ -168,7 +181,7 @@ fn reserve_for_open(source: &OpenSource<'_>, cancel: &dyn Fn() -> bool) -> Resul
     let (bytes, name): (&[u8], &str) = match source {
         OpenSource::File { bytes, name } => (bytes, name),
         OpenSource::Owned { bytes, name } => (bytes.as_slice(), name),
-        OpenSource::Json { .. } => return Err(OpenError::out_of_memory(refused)),
+        OpenSource::Json { .. } | OpenSource::Tree { .. } => return Err(OpenError::out_of_memory(refused)),
     };
     if !matches!(extension(name).to_ascii_lowercase().as_str(), "piv" | "stk") {
         return Err(OpenError::out_of_memory(refused));
@@ -190,6 +203,7 @@ fn open_estimate_of(source: &OpenSource<'_>) -> usize {
         OpenSource::File { bytes, name } => (bytes, name),
         OpenSource::Owned { bytes, name } => (bytes.as_slice(), name),
         OpenSource::Json { bytes, .. } => return open_estimate(bytes.len()),
+        OpenSource::Tree { document, .. } => return open_tree_estimate(document),
     };
     let by_size = open_estimate(bytes.len());
     let Some(kind) = styk_formats::Kind::from_extension(&extension(name).to_ascii_lowercase()) else { return by_size };
@@ -199,6 +213,11 @@ fn open_estimate_of(source: &OpenSource<'_>) -> usize {
 impl OpenError {
     fn decode(message: impl Into<String>) -> OpenError {
         OpenError { message: message.into(), key: None, params: Vec::new(), code: None, status: None, stage: OpenStage::Decode }
+    }
+
+    /// A refusal that is a message of the interface's, for a document that cannot be opened as asked.
+    pub fn refused(key: &str) -> OpenError {
+        OpenError { key: Some(key.into()), stage: OpenStage::Prepare, ..OpenError::decode(key) }
     }
 
     fn unreadable() -> OpenError {
@@ -451,6 +470,10 @@ impl Engine {
                     None => read_file(&bytes, name, cancel, &fan, &mut check)?,
                 },
             },
+            OpenSource::Tree { document, name } => {
+                let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
+                (document, "json", version, name.to_string(), None)
+            }
             OpenSource::Json { bytes, name } => {
                 let document = styk_doc::json::parse(bytes).map_err(|_| OpenError::unreadable())?;
                 let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);

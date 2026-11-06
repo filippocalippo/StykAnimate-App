@@ -16,6 +16,12 @@ fn object(fields: &[(&str, Value)]) -> Value {
     }
     Value::object(o)
 }
+/// What a figure's record in a frame costs a clip that copies it: the copied record and its typed view (measured on a clip of every figure of a
+/// large project, `docs/engine/editing.md`).
+const CLIP_BYTES_PER_OBJECT: usize = 2 << 10;
+/// What the record of one figure replaced at one key costs (the patch and the typed view of it).
+const CLIP_BYTES_PER_REPLACEMENT: usize = 512;
+
 pub(crate) fn error(key: &str) -> EditError {
     EditError::Invalid(format!("errors.editorMovieclips.{key}"))
 }
@@ -557,7 +563,20 @@ impl Editor {
             }
             index += 1;
         }
+        // The clip copies every record of its figures, in the frames and in the pose sources, and the engine makes typed views of the copy: a
+        // clip of everything in a large project is refused here, before anything is copied, if the host cannot take it.
+        let clipped = frames.iter().chain(sources.iter().map(|(_, f)| f)).map(|f| items(f.get("objects")).iter().filter(|o| uid(o).is_some_and(|u| selected.contains(&u))).count()).sum::<usize>();
         let selected_layers: HashSet<String> = selected.iter().map(|u| self.layer_of(*u)).collect();
+        // And the layer sheet records the replacement of each figure at the clip's first frame and at every key of its layer inside it: a clip
+        // of every figure of a project for its whole length is a record for each figure at each key.
+        let replacements: usize = selected_layers
+            .iter()
+            .map(|layer| {
+                let keys = items(self.report.path(&["_styk", "layerSheet", "tracks", layer, "keys"])).iter().filter(|k| num(k, "tick").is_some_and(|t| t > start && t < end)).count();
+                selected.iter().filter(|u| self.layer_of(**u) == *layer).count().saturating_mul(1 + keys)
+            })
+            .sum();
+        self.admit(clipped.saturating_mul(CLIP_BYTES_PER_OBJECT).saturating_add(replacements.saturating_mul(CLIP_BYTES_PER_REPLACEMENT)))?;
         let filtered = frames.iter().map(|f| cut_frame(f, &selected)).collect::<Vec<_>>();
         let mut source_table = Obj::new();
         for (k, f) in &sources {

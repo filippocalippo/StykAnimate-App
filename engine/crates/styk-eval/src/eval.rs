@@ -78,6 +78,9 @@ pub struct Frame {
     pub parallax: Option<Arc<crate::parallax::Parallax>>,
 }
 
+/// For each figure a layer's keys replace, the keys (by index) that replace it and the pose source each shows, in key order.
+type PatchIndex = HashMap<u32, Vec<(u32, Arc<str>)>>;
+
 /// A document plus the timing tables evaluation needs, built once per revision.
 pub struct Prepared {
     pub doc: Arc<Document>,
@@ -89,8 +92,14 @@ pub struct Prepared {
     pub has_vfx: bool,
     tracks: HashMap<String, Arc<Seq>>,
     imported: HashMap<String, bool>,
-    /// The pose track of each replaced movieclip, by layer and replaced uid (`patchChannels`).
-    patches: HashMap<(String, u32), Arc<Seq>>,
+    /// The pose track of each replaced movieclip, by layer and replaced uid (`patchChannels`), made when a replacement is tweened and
+    /// asks for it ([`Prepared::patch_track`]): a clip of every figure of a project replaces thousands, each with a track as long as the layer's.
+    patches: HashMap<(String, u32), std::sync::OnceLock<Arc<Seq>>>,
+    /// Per layer, for each figure its keys replace: the keys that do and the pose source each shows ([`PatchIndex`]), made on first use.
+    patch_index: HashMap<String, std::sync::OnceLock<PatchIndex>>,
+    /// The replacement tracks made, by layer and which keys replace the figure with what: the figures of a clip are all replaced the same way
+    /// (but for the one the clip sits at), so thousands of them share one track.
+    patch_seqs: std::sync::Mutex<HashMap<(String, Vec<(u32, Arc<str>)>), Arc<Seq>>>,
     /// Presence-clock spans per movieclip instance: (start, end, elapsed, rate).
     presence: HashMap<u32, Vec<(f64, f64, f64, f64)>>,
     /// Follow camera clips and their shaped paths ([`crate::follow`]).
@@ -739,7 +748,8 @@ impl Prepared {
         let channels = doc.animation.as_ref().map(|animation| crate::channels::Compiled::new(&doc, animation));
         let mut tracks = HashMap::new();
         let mut imported = HashMap::new();
-        let mut patches = HashMap::new();
+        let mut patches: HashMap<(String, u32), std::sync::OnceLock<Arc<Seq>>> = HashMap::new();
+        let mut patch_index = HashMap::new();
         if let Some(sheet) = &doc.sheet {
             rows.retain(|r| r.start < sheet.duration);
             for r in rows.iter_mut() {
@@ -751,9 +761,13 @@ impl Prepared {
             for (id, track) in &sheet.tracks {
                 tracks.insert(id.clone(), Arc::new(pose_track(&doc, id, track)));
                 imported.insert(id.clone(), track.keys.iter().any(|k| matches!(k.value, SheetValue::SourceTick(_))));
+                let mut replaced = std::collections::HashSet::new();
                 for patch in track.keys.iter().flat_map(|k| &k.movieclip_patches) {
-                    patches.entry((id.clone(), patch.uid)).or_insert_with(|| Arc::new(patch_track(&doc, track, patch.uid)));
+                    if replaced.insert(patch.uid) {
+                        patches.insert((id.clone(), patch.uid), Default::default());
+                    }
                 }
+                patch_index.insert(id.clone(), Default::default());
             }
         } else if let Some(last) = rows.last_mut() {
             // A native timeline also lasts until the channels' last frame (`animationEndTick`).
@@ -768,7 +782,7 @@ impl Prepared {
         let follow = crate::follow::Follow::new(&doc);
         let source = doc.movieclip_source.as_ref().map(|source| Arc::new(Prepared::new(source.document.clone())));
         let has_vfx = has_vfx || source.as_ref().is_some_and(|source| source.has_vfx);
-        let mut prepared = Prepared { doc, native, rows, total_ticks, has_vfx, tracks, imported, patches, presence: HashMap::new(), follow, channels, source };
+        let mut prepared = Prepared { doc, native, rows, total_ticks, has_vfx, tracks, imported, patches, patch_index, patch_seqs: Default::default(), presence: HashMap::new(), follow, channels, source };
         prepared.presence = prepared.presence_index();
         prepared
     }
@@ -874,9 +888,24 @@ impl Prepared {
         })
     }
 
+    /// How many figures the sheet's keys replace with a movieclip's frames, how many of them have asked for their track, and how many
+    /// different tracks that made (figures replaced the same way share one): a measurement and a test's witness.
+    pub fn patch_tracks(&self) -> (usize, usize, usize) {
+        let seqs = self.patch_seqs.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).len();
+        (self.patches.len(), self.patches.values().filter(|cell| cell.get().is_some()).count(), seqs)
+    }
+
     /// The pose track of what replaces movieclip `uid` on layer `id` (`patchChannels`).
     pub(crate) fn patch_track(&self, id: &str, uid: u32) -> Option<&Seq> {
-        self.patches.get(&(id.to_string(), uid)).map(|seq| &**seq)
+        let cell = self.patches.get(&(id.to_string(), uid))?;
+        let track = self.doc.sheet.as_ref()?.tracks.get(id)?;
+        let seq = cell.get_or_init(|| {
+            let index = self.patch_index.get(id).expect("a layer with replacements has its index").get_or_init(|| patch_index(track));
+            let replaced = index.get(&uid).map(Vec::as_slice).unwrap_or(&[]);
+            let mut seqs = self.patch_seqs.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            seqs.entry((id.to_string(), replaced.to_vec())).or_insert_with(|| Arc::new(patch_track(&self.doc, track, replaced))).clone()
+        });
+        Some(&**seq)
     }
 
     /// One layer's own frame at `tick`, movieclip replacements applied (`sample(id)`).
@@ -1151,14 +1180,16 @@ impl Prepared {
         let Some(key) = at.checked_sub(1).map(|i| &track.keys[i]) else { return frame.map(|frame| (frame, identity)) };
         let next = track.keys.get(at);
         let held = key.easing.map(|e| e.mode) == Some(EasingMode::Constant);
+        // The figures the next key replaces too: read once, not once for each figure this key replaces.
+        let continuing: Option<std::collections::HashSet<u32>> = next.filter(|_| !held && !key.movieclip_patches.is_empty()).map(|n| n.movieclip_patches.iter().map(|p| p.uid).collect());
         for patch in &key.movieclip_patches {
             let source = |fid: &Arc<str>| {
                 let key = self.doc.pose_source(fid)?;
                 Some(frame_of(&KeyRef { frame: key.clone(), duration: 1, easing: None, origin: Some(FrameRef::Source(fid.clone())) }))
             };
             // Consecutive replacements of one movieclip tween like any pose track.
-            let tweened = !held && next.is_some_and(|n| n.movieclip_patches.iter().any(|p| p.uid == patch.uid));
-            let replacement = match self.patches.get(&(id.to_string(), patch.uid)).filter(|_| tweened) {
+            let tweened = !held && continuing.as_ref().is_some_and(|uids| uids.contains(&patch.uid));
+            let replacement = match tweened.then(|| self.patch_track(id, patch.uid)).flatten() {
                 Some(seq) => sample_pose_track(&self.doc, seq, tick),
                 None => source(&patch.frame_id),
             };
@@ -1537,9 +1568,24 @@ fn pose_track(doc: &Document, id: &str, track: &SheetTrack) -> Seq {
 
 /// The pose track of what replaces movieclip `uid` on a layer: every key of the
 /// layer, posing the frame it replaces the movieclip with (or nothing).
-fn patch_track(doc: &Document, track: &SheetTrack, uid: u32) -> Seq {
-    let keys = track.keys.iter().map(|k| (k, k.movieclip_patches.iter().find(|p| p.uid == uid).map(|p| &p.frame_id)));
+fn patch_track(doc: &Document, track: &SheetTrack, replaced: &[(u32, Arc<str>)]) -> Seq {
+    let mut next = replaced.iter().peekable();
+    let keys = track.keys.iter().enumerate().map(|(at, k)| (k, next.next_if(|(key, _)| *key as usize == at).map(|(_, frame_id)| frame_id)));
     virtual_track(doc, false, keys.collect())
+}
+
+/// The keys of `track` that replace each figure, in key order, with the first patch a key has for it.
+fn patch_index(track: &SheetTrack) -> PatchIndex {
+    let mut index = PatchIndex::new();
+    for (at, key) in track.keys.iter().enumerate() {
+        for patch in &key.movieclip_patches {
+            let keys = index.entry(patch.uid).or_default();
+            if keys.last().is_none_or(|(last, _)| *last as usize != at) {
+                keys.push((at as u32, patch.frame_id.clone()));
+            }
+        }
+    }
+    index
 }
 
 /// A pose with nothing in it: no figures, the default camera, the first background.

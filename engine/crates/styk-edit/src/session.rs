@@ -507,6 +507,16 @@ impl Session {
         })
     }
 
+    /// The memory a command that copies much of the document asks for before it begins (`Editor::admit`).
+    pub fn set_memory_gate(&mut self, gate: fn(usize) -> bool) {
+        self.editor.memory_gate = Some(gate);
+    }
+
+    /// How many entries the history can undo and redo.
+    pub fn history_depths(&self) -> (usize, usize) {
+        (self.editor.undo.len(), self.editor.redo.len())
+    }
+
     /// The clock reads that are given a time to take are held to (milliseconds).
     pub fn set_clock(&mut self, clock: fn() -> f64) {
         self.editor.clock = Some(clock);

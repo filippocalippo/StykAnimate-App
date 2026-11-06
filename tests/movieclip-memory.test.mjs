@@ -1,0 +1,106 @@
+// A movieclip the engine cannot hold is refused, and the session stays alive with the project as it was (docs/engine/editing.md, "Making a
+// clip"). The engine's memory limit is lowered for the call and put back: a clip of every figure of a large project made the engine run
+// out of memory and trap, which loses the project.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {registeredEngine} from '../src/engine/engine-open.mjs';
+import {createFrame, createObject, emptyDocument} from '../src/demo.mjs';
+import {ownedEditorSync} from './support/owned-editor.mjs';
+import './support/engine-node.mjs';
+
+const options = {demo: false, layerTimeline: true, propertyChannels: true};
+const MiB = 1 << 20;
+/** The cost the engine reserves for any call, below which every call is refused before it begins. */
+const CALL_WORKING = 64 * MiB;
+
+function crowd(count) {
+  const document = emptyDocument(), figure = document.figure_types[0];
+  for (let id = 11; id < 71; id++) figure.segments.push({...figure.segments[2], segment_id: id, parent_id: 1, z_order: id});
+  figure.segment_count = figure.segments.length;
+  document.keyframes = Array.from({length: 6}, (_, index) => createFrame(Array.from({length: count}, (_, slot) => createObject(figure, slot + 1, 100 + index + slot * 40, 100)), 1));
+  return document;
+}
+
+/** Runs `body` with the engine able to take `headroom` bytes more than it holds now, and puts its limit back. */
+async function withHeadroom(headroom, body) {
+  const engine = registeredEngine(), before = engine.handle.limit_memory(Math.ceil((engine.memory().liveBytes + headroom) * 16 / 15));
+  try { return await body(); } finally { engine.handle.limit_memory(before); }
+}
+
+const session = count => ownedEditorSync(options, crowd(count), {verify: false});
+
+test('a clip the engine cannot take is refused before it is made, and the project is as it was', async () => {
+  const {editor, owner} = session(6);
+  editor.select(null);
+  const before = owner.session().report_json(), depth = editor._undo.length;
+  // Room for the call itself but not for the records the clip copies.
+  await withHeadroom(CALL_WORKING + 64 * 1024, () => {
+    assert.throws(() => editor.createMovieclip({start: 0, end: 4, uids: []}), /not enough memory/);
+  });
+  assert.equal(owner.session().report_json(), before, 'the document is as it was');
+  assert.equal(editor._undo.length, depth, 'no entry was made');
+  assert.equal(editor.report.figure_types.length, 1, 'and no figure');
+  // The session is alive: with the room back, the same call runs, and undoes and redoes.
+  const clip = editor.createMovieclip({start: 0, end: 4, uids: []});
+  assert.ok(clip.figure_type_id > 1);
+  await editor.undo();
+  assert.equal(owner.session().report_json(), before);
+  await editor.redo();
+  assert.equal(editor.report.figure_types.length, 2);
+});
+
+test('a redo the engine cannot take is refused with the clip as it was, and runs when there is room', async () => {
+  const {editor, owner} = session(4);
+  editor.select(null);
+  editor.createMovieclip({start: 0, end: 4, uids: []});
+  const made = owner.session().report_json();
+  await editor.undo();
+  const undone = owner.session().report_json();
+  await withHeadroom(32 * MiB, async () => {
+    await assert.rejects(async () => editor.redo(), /not enough memory/);
+  });
+  assert.equal(owner.session().report_json(), undone, 'nothing was redone');
+  assert.equal(editor.canRedo, true, 'the entry is still there to redo');
+  await editor.redo();
+  assert.equal(owner.session().report_json(), made);
+});
+
+test('entering a clip the engine cannot take is refused, and the project stays open', async () => {
+  const {editor, owner} = session(4);
+  editor.select(null);
+  const clip = editor.createMovieclip({start: 0, end: 4, uids: []});
+  const report = editor.report;
+  await withHeadroom(16 * MiB, () => {
+    assert.throws(() => editor.enterMovieclip(clip.figure_type_id), /not enough memory/);
+  });
+  assert.equal(editor.report, report, 'still the project');
+  assert.ok(!editor._movieclipScopes?.length);
+  assert.equal(owner.sessions(), 1);
+  editor.enterMovieclip(clip.figure_type_id);
+  assert.equal(editor._movieclipScopes.length, 1, 'and it enters once there is room');
+});
+
+test('a clip whose edit the project cannot take stays open with the edit, to leave again', async () => {
+  const {editor, owner} = session(4);
+  editor.select(null);
+  const clip = editor.createMovieclip({start: 0, end: 4, uids: []});
+  editor.enterMovieclip(clip.figure_type_id);
+  const inside = editor.report;
+  editor.select(editor.evaluatedFrame.objects[0].unique_id, -1);
+  editor.moveSelection(25, 10);
+  const edited = owner.session().report_json();
+  await withHeadroom(16 * MiB, () => {
+    assert.throws(() => editor.leaveMovieclip(), /memory/);
+  });
+  assert.equal(editor.report, inside, 'still in the clip');
+  assert.equal(editor._movieclipScopes.length, 1);
+  // The next call or read of the clip is the clip session's again.
+  assert.ok(owner.ready());
+  assert.equal(owner.session().report_json(), edited, 'with the edit it had');
+  assert.equal(owner.sessions(), 2, 'the clip and the project each have their session');
+  assert.ok(editor.canUndo && editor.undoLabel !== 'Edit movieclip', 'and its own history');
+  editor.leaveMovieclip();
+  assert.equal(editor._movieclipScopes.length, 0);
+  assert.equal(editor.undoLabel, 'Edit movieclip', 'the edit reached the project');
+  assert.deepEqual(owner.refused, {});
+});

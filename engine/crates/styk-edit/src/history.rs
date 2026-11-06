@@ -26,6 +26,45 @@ const HISTORY_LIMIT: usize = 80;
 pub struct HistoryLimits { pub count: usize, pub bytes: f64 }
 impl Default for HistoryLimits { fn default() -> Self { Self { count: HISTORY_LIMIT, bytes: 48.0 * 1024.0 * 1024.0 } } }
 
+/// What the call that made each entry of the history took, for the undo stack and the redo stack: an undo or a redo builds again what the
+/// call built, so the host asks for that much before it begins (and refuses, nothing changed, when it cannot have it). The numbers are the
+/// host's (bytes); the bookkeeping is the session's, so that a history trimmed, cleared or branched leaves each entry its own number.
+#[derive(Clone, Debug, Default)]
+pub struct EntryCosts {
+    undo: Vec<usize>,
+    redo: Vec<usize>,
+}
+
+impl EntryCosts {
+    /// What redoing the entry on top of the redo stack needs.
+    pub fn redo(&self) -> usize {
+        self.redo.last().copied().unwrap_or(0)
+    }
+
+    /// After `method` ran with the stacks at `before` (undo, redo) and left them at `after`; `took` is what the call took.
+    pub fn note(&mut self, method: &str, before: (usize, usize), after: (usize, usize), took: usize) {
+        match method {
+            "undo" if after.0 < before.0 => { if let Some(cost) = self.undo.pop() { self.redo.push(cost.max(took)); } }
+            "redo" if after.1 < before.1 => { if let Some(cost) = self.redo.pop() { self.undo.push(cost); } }
+            "undo" | "redo" => {}
+            _ => {
+                // A call that made entries gives the last one what it took; one that made none leaves the stacks as they are.
+                if after.0 > before.0 {
+                    self.undo.resize(before.0.min(self.undo.len()), 0);
+                    self.undo.resize(after.0 - 1, 0);
+                    self.undo.push(took);
+                }
+                if after.1 == 0 { self.redo.clear(); }
+            }
+        }
+        // A history trimmed from its oldest end loses the same numbers; one that grew another way has none for the new ones.
+        for (stack, depth) in [(&mut self.undo, after.0), (&mut self.redo, after.1)] {
+            if stack.len() > depth { stack.drain(..stack.len() - depth); }
+            while stack.len() < depth { stack.insert(0, 0); }
+        }
+    }
+}
+
 /// One weight tree parallel to a batch's existing command tree. No retained
 /// document data is copied and child weights survive revision overrides.
 #[derive(Clone, Debug, Default)]
@@ -645,4 +684,51 @@ impl Editor {
             }
         }
     }
+}
+
+#[cfg(test)]
+mod entry_cost_tests {
+    use super::EntryCosts;
+
+    #[test]
+    fn an_entry_keeps_what_its_call_took_through_undo_and_redo() {
+        let mut costs = EntryCosts::default();
+        costs.note("moveSelection", (0, 0), (1, 0), 10);
+        costs.note("createMovieclip", (1, 0), (2, 0), 900);
+        assert_eq!(costs.redo(), 0, "nothing to redo yet");
+        costs.note("undo", (2, 0), (1, 1), 5);
+        assert_eq!(costs.redo(), 900, "the entry undone is the one that took 900");
+        costs.note("undo", (1, 1), (0, 2), 5);
+        assert_eq!(costs.redo(), 10);
+        costs.note("redo", (0, 2), (1, 1), 3);
+        costs.note("redo", (1, 1), (2, 0), 3);
+        assert_eq!(costs.redo(), 0);
+        costs.note("undo", (2, 0), (1, 1), 7);
+        assert_eq!(costs.redo(), 900, "and it still does after it was redone");
+    }
+
+    #[test]
+    fn a_new_edit_clears_the_redo_costs_and_a_refused_call_changes_nothing() {
+        let mut costs = EntryCosts::default();
+        costs.note("createMovieclip", (0, 0), (1, 0), 900);
+        costs.note("undo", (1, 0), (0, 1), 1);
+        costs.note("redo", (0, 1), (0, 1), 1);
+        assert_eq!(costs.redo(), 900, "a redo that changed nothing leaves the entry's cost");
+        costs.note("moveSelection", (0, 1), (1, 0), 4);
+        assert_eq!(costs.redo(), 0, "an edit after an undo ends the redo history");
+    }
+
+    #[test]
+    fn a_history_trimmed_from_its_oldest_end_loses_the_oldest_costs() {
+        let mut costs = EntryCosts::default();
+        for took in [1, 2, 3] { let at = (costs_len(&costs), 0); costs.note("edit", at, (at.0 + 1, 0), took); }
+        // The history now holds two entries: the oldest went.
+        costs.note("@limits", (3, 0), (2, 0), 0);
+        costs.note("undo", (2, 0), (1, 1), 0);
+        assert_eq!(costs.redo(), 3);
+        costs.note("undo", (1, 1), (0, 2), 0);
+        assert_eq!(costs.redo(), 2);
+    }
+
+    fn costs_len(costs: &EntryCosts) -> usize { costs.undo.len() }
 }
