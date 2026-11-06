@@ -6,7 +6,9 @@
 //! are filled again as they are drawn); the atlas holds at most [`BUDGET`] bytes of pages.
 //! When a mask does not fit, the least recently used page that no instance of the frame
 //! samples is emptied. An instance whose mask cannot be placed is drawn from its triangles
-//! for that frame.
+//! for that frame. An export ([`crate::Renderer::set_exact_sizes`]) keeps nothing across frames: each frame sizes the pages by its
+//! own largest mask and places its masks afresh, because where a mask sits in the atlas changes the last bit of the position it
+//! is sampled at.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -58,6 +60,8 @@ pub(crate) struct GlyphMasks {
     pub(crate) filled: u32,
     /// The atlas texture was replaced since the last bind.
     replaced: bool,
+    /// Placement follows the frame alone ([`Renderer::set_exact_sizes`]): see [`GlyphMasks::prepare`].
+    exact: bool,
 }
 
 /// The atlas texture: `layers` pages (at least two, D11) of `side` texels.
@@ -92,6 +96,7 @@ impl GlyphMasks {
             frame: 0,
             filled: 0,
             replaced: false,
+            exact: false,
         }
     }
 
@@ -136,7 +141,7 @@ impl GlyphMasks {
     /// pages start again at that side (masks are filled again as instances draw them).
     fn fit(&mut self, side: u32) {
         let side = side.max(SMALLEST_PAGE).next_power_of_two();
-        if side > self.side {
+        if side > self.side || (self.exact && side != self.side) {
             self.entries.clear();
             self.pages.clear();
             self.side = side;
@@ -150,13 +155,19 @@ impl GlyphMasks {
             return;
         }
         let (texture, view) = atlas(device, self.side, pages.max(layers));
-        if !self.pages.is_empty() {
+        let copied = !self.pages.is_empty();
+        if copied {
             let extent = wgpu::Extent3d { width: self.side, height: self.side, depth_or_array_layers: self.pages.len() as u32 };
             encoder.copy_texture_to_texture(self.texture.as_image_copy(), texture.as_image_copy(), extent);
         }
-        self.texture = texture;
+        let old = std::mem::replace(&mut self.texture, texture);
         self.view = view;
         self.replaced = true;
+        // An export changes the side of its pages with its frames: a browser frees a dropped texture only when it collects it
+        // (the copy above still reads one that is kept until the frame is submitted).
+        if self.exact && !copied {
+            old.destroy();
+        }
     }
 
     /// Fills the glyph `triangles` into a new mask laid out as `mask` at `page`, `at`: four samples a
@@ -222,8 +233,16 @@ impl GlyphMasks {
     /// instance's mask (filled now if no frame did yet) or its triangles, written to the
     /// glyph table. Returns whether the atlas texture was replaced (bind groups that hold it
     /// must be rebuilt) and whether the table was.
-    pub(crate) fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, list: &DrawList, resolution: f64, masks: bool) -> (bool, bool) {
+    pub(crate) fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, list: &DrawList, resolution: f64, masks: bool, exact: bool) -> (bool, bool) {
         self.frame += 1;
+        self.exact = exact;
+        if exact {
+            self.entries.clear();
+            for page in &mut self.pages {
+                page.shelf = Shelf { size: [self.side, self.side], page: 0, x: 0, y: 0, row: 0 };
+                page.used = 0;
+            }
+        }
         self.filled = 0;
         self.replaced = false;
         self.rows.clear();
@@ -300,7 +319,7 @@ impl Renderer {
             return;
         }
         // Crisp edges draw every glyph from its outline: a mask's coverage is smooth.
-        let (atlas, table) = self.glyphs.prepare(&self.device, &self.queue, encoder, list, resolution, !self.crisp);
+        let (atlas, table) = self.glyphs.prepare(&self.device, &self.queue, encoder, list, resolution, !self.crisp, self.exact_sizes);
         if atlas {
             self.rebind_sprites();
         }

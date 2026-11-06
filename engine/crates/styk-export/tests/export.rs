@@ -298,6 +298,61 @@ fn a_frame_is_the_same_alone_and_after_the_frames_before_it() {
     }
 }
 
+
+/// A frame of `count` lone glyphs (styk-draw `K_GLYPH`) built here, no document: each glyph is a blob of its own (so each has a
+/// mask of its own) at a fractional place, size and angle of the 640×360 view, the places and sizes drawn from `seed`.
+fn glyph_frame(seed: u32, count: usize, scale: f64) -> (std::sync::Arc<styk_draw::DrawList>, Option<styk_eval::doc::Camera>) {
+    use styk_draw::{DrawList, GlyphInstance, GlyphMask, Group, Pass, Prim, K_GLYPH, NO_LAYER, NO_PAINT};
+    let mut state = seed.wrapping_mul(2_654_435_761).wrapping_add(12345);
+    let mut next = move || {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (state >> 8) as f64 / (1u32 << 24) as f64
+    };
+    let mut list = DrawList::default();
+    for index in 0..count {
+        // A fan of triangles round a centre, the radius of each spoke its own.
+        let spokes = 9;
+        let ring: Vec<[f32; 2]> = (0..spokes).map(|k| {
+            let angle = k as f64 / spokes as f64 * std::f64::consts::TAU;
+            let radius = 30.0 + 20.0 * next();
+            [(50.0 + radius * angle.cos()) as f32, (50.0 + radius * angle.sin()) as f32]
+        }).collect();
+        let triangles: Vec<[f32; 2]> = (0..spokes).flat_map(|k| [[50.0, 50.0], ring[k], ring[(k + 1) % spokes]]).collect();
+        let size = scale * (0.6 + 0.8 * next());
+        let mask = GlyphMask { bounds: [0.0, 0.0, 100.0, 100.0], origin: [20.0 + 560.0 * next(), 20.0 + 300.0 * next()], angle: 0.4 * next(), scale: [size, size], offset: [0.0, 0.0] };
+        list.glyphs.push(GlyphInstance { mask, triangles: triangles.into() });
+        list.prims.push(Prim { kind: K_GLYPH, group: 0, color: 0xff20_40c0 + index as u32 * 0x0001_0100, paint: NO_PAINT, a: [0.0; 4], b: [f32::from_bits(index as u32), 0.0, 0.0, 0.0], c: [0.0; 4] });
+    }
+    list.groups.push(Group { parent: 0, depth: 0, opacity: 1.0, bounds: [0.0, 0.0, 640.0, 360.0], layer: NO_LAYER });
+    list.passes.push(Pass { depth: 0, start: 0, end: count as u32 });
+    (std::sync::Arc::new(list), None)
+}
+
+/// A frame must be the same whatever was drawn before it. A lone glyph's mask is kept in an atlas and sampled at the place it was
+/// given, `(place + position in the mask) / atlas side`: the sum rounds with the size of the place, and the bilinear weights of a
+/// few pixels at the masks' edges change by a level, so a glyph drawn after others (which took the first places) differed from the
+/// same glyph drawn alone. An export now places the masks of each frame afresh.
+#[test]
+fn a_frame_of_glyphs_is_the_same_alone_and_after_other_frames() {
+    let Some(gpu) = gpu() else {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    };
+    // Any document does: the lists are made here and only the view's size is the document's.
+    let path = "engine/crates/styk-eval/tests/fixtures/eval/sticknodes-sprites.json";
+    let lists = [glyph_frame(1, 6, 0.9), glyph_frame(2, 150, 0.7), glyph_frame(3, 40, 1.4)];
+    let settings = Settings::new(640, 360, Smoothing::Edges, MAX_PIXELS).unwrap();
+    let alone: Vec<Vec<u8>> = (0..lists.len()).map(|index| draw_in_turn(&gpu, path, settings, &lists, &[index]).remove(0).0).collect();
+    assert!(alone.iter().all(|pixels| pixels.chunks(4).any(|p| p[..3] != alone[0][..3])), "the glyphs are drawn");
+    for order in [[0usize, 1, 2], [2, 1, 0], [1, 0, 2], [2, 0, 1]] {
+        let drawn = draw_in_turn(&gpu, path, settings, &lists, &order);
+        for (turn, &index) in order.iter().enumerate() {
+            let (count, largest) = differing(&alone[index], &drawn[turn].0);
+            assert_eq!(count, 0, "glyph frame {index} differs from the frame drawn alone in {count} pixels, by up to {largest}, in the order {order:?}");
+        }
+    }
+}
+
 /// Evaluation, not drawing: the draw list of a tick after the ticks before it against its draw list in a fresh engine.
 /// Printed, not asserted: what it finds is in the notes of docs/engine/rendering.md.
 #[test]

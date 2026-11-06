@@ -190,14 +190,14 @@ impl Renderer {
     /// The current draw list, decoded images and raster caches stay shared.
     pub fn set_drawing_grid(&mut self, grid: DrawingGrid) { self.drawing_grid = grid; }
 
-    /// Sizes the effect slots by each frame alone, not by the largest frame drawn before, and brings every particle material row
-    /// in. The effect passes address a slot by normalized position (1 / its size), so a slot kept from a larger frame moves the
-    /// last bit of those positions and a pixel here and there by one level, and the trilinear material atlas read a neighbouring
-    /// row only when a list before had named it: with kept sizes and lazy rows a frame depends on the frames drawn before it. The
-    /// stage keeps them (reallocating is the cost); an export is the same frame whatever was drawn before. The layer pages are
-    /// not sized this way: they are large and a page that changes size at every tile would be a texture made and dropped every
-    /// tile (the browser frees a dropped texture only when it collects it, which measured at 28 GiB on a 4K video), so they keep
-    /// growing with the largest layer ([`Renderer::page`] in frame.rs).
+    /// Makes a frame depend on the frame alone, not on the frames drawn before it (an export asks for it; the stage keeps what it
+    /// has, because reallocating and refilling is the cost). It sizes the layer pages and the effect slots by each frame (the effect
+    /// passes address a slot by normalized position, 1 / its size, so one kept from a larger frame moves the last bit of those
+    /// positions and a pixel here and there by one level), brings every particle material row in (the atlas is sampled
+    /// trilinearly, so a texel at a row's edge read a neighbour that was there only when a list before had named it), and places
+    /// the lone glyph masks afresh (a mask is sampled at `(place + position in the mask) / atlas side`, which rounds with the place,
+    /// so a glyph drawn after others, which took the first places, differed by a level at its edges). Textures it replaces are
+    /// destroyed, not dropped: a browser frees a dropped texture only when it collects it, which measured 28 GiB on a 4K video.
     pub fn set_exact_sizes(&mut self, exact: bool) {
         self.exact_sizes = exact;
         if let Some(executor) = &mut self.executor {

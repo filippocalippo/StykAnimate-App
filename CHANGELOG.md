@@ -53,7 +53,6 @@ What's new in each version of StykAnimate.
 - Dragging joints, releasing a pose and undoing keep up better on large animations with onion skins, and undoing a brush stroke no longer pauses.
 - Editing large animations and 3D figures is faster.
 - Exporting animations with effects, particles, 3D or many figures is several times faster.
-- Exporting a single frame of a long animation with many pictures starts sooner and uses much less memory.
 - Animations with particles, auras, beams, smoke or explosions play and edit more smoothly.
 - Fills, magic wand selections, filters and saving are faster on drawing layers.
 - Timeline and asset library previews appear almost instantly, and large projects use less memory, while they are shown and once opened.

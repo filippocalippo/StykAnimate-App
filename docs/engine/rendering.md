@@ -1029,8 +1029,15 @@ slots and pages by each frame alone and loads every material row (`Renderer::set
 are destroyed, not dropped (a browser frees a dropped texture only when it collects it: with pages sized per frame and dropped, a 4K video of the
 user file held 28 GiB). On the user file at 3840×2160 ticks 4, 5, 6 and 8 differed alone and after the frames before them (563 pixels, one level)
 and no longer do; `a_frame_is_the_same_alone_and_after_the_frames_before_it` (styk-export) draws the same draw lists alone, after the largest frame and after every frame
-before them, on four fixtures with effects and generated effects, and fails without the change. The glyph mask atlas (`GlyphMasks::fit`)
-also grows with the largest mask seen; its pages are powers of two, so the positions it is sampled at are exact, and no document shown it.
+before them, on four fixtures with effects and generated effects, and fails without the change.
+
+**Lone glyphs** were the rest of it (frames of two long documents with text differed by order, by one to five levels in a few dozen pixels at the
+edges of their glyphs; the draw lists were equal and dropping the glyph records removed every difference). A glyph's mask is kept in an
+atlas and sampled at `(place + position in the mask) / atlas side` (prim.wgsl, `K_GLYPH`): the sum rounds with the size of the place, the
+place depends on which masks were placed before it, and the bilinear weights of an edge pixel move by a level. An export places each
+frame's masks afresh and sizes the atlas pages by that frame's largest mask (`GlyphMasks::prepare`, `exact`), so a mask costs a fill
+each frame it is drawn (the stage keeps its masks). `a_frame_of_glyphs_is_the_same_alone_and_after_other_frames` (styk-export) draws
+three frames of generated glyphs in four orders against each frame drawn alone and fails without the change (19 pixels, up to five levels).
 
 **Cancellation and failure** (`--cancel`, `--integrity`): on Impact-FX-Fight.styk and TDD2 URIEL
 NEMESIS 3.styk, ten exports aborted after their first frame left no export worker, every worker
