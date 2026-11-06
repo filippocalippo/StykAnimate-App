@@ -343,7 +343,13 @@ impl<'a> Ctx<'a> {
             }
             return;
         }
-        let tris = self.assets.fill(pts);
+        let mut builder = lyon_path::Path::builder();
+        builder.begin(lyon_path::math::point(pts[0][0] as f32, pts[0][1] as f32));
+        for p in &pts[1..] {
+            builder.line_to(lyon_path::math::point(p[0] as f32, p[1] as f32));
+        }
+        builder.end(true);
+        let tris = crate::assets::triangulate(&builder.build(), lyon_tessellation::FillRule::EvenOdd, 0.05);
         for t in tris.chunks_exact(3) {
             let f = |v: [f32; 2]| [v[0] as f64, v[1] as f64];
             tri(out, color, paint, f(t[0]), f(t[1]), f(t[2]));
