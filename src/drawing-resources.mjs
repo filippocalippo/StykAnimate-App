@@ -43,6 +43,8 @@ export function defaultTileBudget(memory=globalThis.navigator?.deviceMemory){con
 const DECODE_LEVELS=3;
 const sideBytes=s=>s==null?0:s.byteLength===4?TILE_BYTES:s.byteLength;
 const PUBLICATION_BATCH_BYTES=1024*1024;
+/** A publication waits until the edits stop for this long, and never longer than the second after the first one waited: a run of strokes, undos and redos publishes once, after it, not once during every pause in it. */
+const PUBLISH_QUIET_MS=250,PUBLISH_MAX_WAIT_MS=2000;
 
 /** The tile store is the single authoritative raster. Publications are derived:
  * the per-tile PNG blob on image_assets[0].styk_tiles plus a bounds-sized
@@ -347,7 +349,12 @@ export class DrawingResources {
     // fork's own base and captured operations independently instead.
     this.residentMemory();this.schedule();
   }
-  schedule(){if(this.timer||this.encoding||this.disposed||this._busy)return;this.timer=setTimeout(()=>{this.timer=null;if(this._busy)return;this.flush().catch(this.onError);},80);}
+  schedule(){
+    if(this.encoding||this.disposed||this._busy)return;
+    const now=performance.now(),quiet=this.quietMs??PUBLISH_QUIET_MS,longest=this.maxWaitMs??PUBLISH_MAX_WAIT_MS;
+    if(this.timer)clearTimeout(this.timer);else this.waitingSince=now;
+    this.timer=setTimeout(()=>{this.timer=null;if(this._busy)return;this.flush().catch(this.onError);},Math.max(0,Math.min(quiet,this.waitingSince+longest-now)));
+  }
   async flush({signal}={}) {
     if(this.disposed)throw messageError(new DOMException('', 'AbortError'), "errors.drawingResources.drawingDocumentClosed", {});
     if(this.encoding){await this.encoding;return this.flush({signal});}

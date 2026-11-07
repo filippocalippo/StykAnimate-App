@@ -11,3 +11,4 @@
 pub mod input;
 pub mod unattended;
 pub mod window;
+pub mod fonts;

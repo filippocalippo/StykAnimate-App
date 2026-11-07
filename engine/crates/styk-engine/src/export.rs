@@ -56,6 +56,8 @@ struct State {
     /// Requested frames wait here while this renderer preloads its pictures.
     pending: Vec<u32>,
     images: Vec<Arc<DecodedImage>>,
+    /// Places a refused decode left to write over with nothing, made into tiles as the renderer takes them ([`crate::images::take_cleared`]).
+    cleared: Vec<(u32, u64)>,
     /// Pictures not yet landed (to decode, decoding, or just decoded), and the ones still to start.
     images_left: usize,
     todo: VecDeque<Todo>,
@@ -140,7 +142,8 @@ fn start_decoders(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Sha
     }
 }
 
-fn pictures_ready(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Shared<State>>, ended: &Arc<AtomicBool>, epoch: u64, estimate: usize, todo: Todo, images: Vec<DecodedImage>) {
+fn pictures_ready(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Shared<State>>, ended: &Arc<AtomicBool>, epoch: u64, estimate: usize, todo: Todo, decoded: crate::images::Decoded) {
+    let crate::images::Decoded { images, cleared } = decoded;
     {
         let mut state = state.lock();
         if ended.load(Ordering::Relaxed) || epoch != state.epoch {
@@ -157,8 +160,14 @@ fn pictures_ready(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Sha
             state.image_bytes += images.iter().map(|image| image.rgba.len()).sum::<usize>();
             let images = images.into_iter().map(Arc::new);
             match todo {
+                // A refused attempt lands with no images, and the resident renderer clears the cel's places itself (it knows the layers its
+                // pages hold): the places the decode names are not queued, so a refused cel is cleared once, and an attempt that ended
+                // after a later one started can never write over the slots of the later one.
                 Todo::Asked(cel, attempt) => state.landed_cels.push_back(LandedCel { cel, attempt, images: images.collect() }),
-                _ => state.images.extend(images),
+                _ => {
+                    state.images.extend(images);
+                    state.cleared.extend(cleared);
+                }
             }
         }
     }
@@ -271,6 +280,7 @@ impl ExportFrames {
             state.landed_cels.clear();
             state.todo = todo;
             state.images.clear();
+            state.cleared.clear();
             state.image_bytes = 0;
             state.decoding = 0;
             state.decoding_bytes = 0;
@@ -340,7 +350,7 @@ impl ExportFrames {
     /// Decoded pictures not yet taken, up to `max_bytes` of pixels (at least one).
     pub fn take_images(&self, max_bytes: usize) -> Vec<Arc<DecodedImage>> {
         let mut taken = Vec::new();
-        {
+        let blanks = {
             let mut state = self.state.lock();
             let mut bytes = 0;
             while let Some(image) = state.images.last() {
@@ -351,7 +361,9 @@ impl ExportFrames {
                 taken.push(state.images.pop().expect("checked above"));
             }
             state.image_bytes = state.image_bytes.saturating_sub(bytes);
-        }
+            crate::images::take_cleared(&mut state.cleared, taken.is_empty(), bytes, max_bytes)
+        };
+        taken.extend(blanks.into_iter().map(|(slot, placement)| Arc::new(styk_eval::assets::blank_tile(slot, placement))));
         // Room for more pictures: the ones that waited are decoded now.
         start_decoders(&self.engine, &self.generation, &self.state, &self.ended);
         taken
@@ -360,7 +372,7 @@ impl ExportFrames {
     /// Pictures still being decoded or waiting to be taken.
     pub fn images_pending(&self) -> usize {
         let state = self.state.lock();
-        state.images_left + state.images.len()
+        state.images_left + state.images.len() + state.cleared.len()
     }
 
     /// Asks the engine's workers for `ticks` (the ones after the frame being drawn), at most
@@ -432,6 +444,7 @@ impl Drop for ExportFrames {
         let mut state = self.state.lock();
         state.ready.clear();
         state.images.clear();
+        state.cleared.clear();
         state.landed_cels.clear();
         state.image_bytes = 0;
         state.todo.clear();
@@ -562,10 +575,10 @@ mod tests {
         assert_eq!(frames.pictures_in_flight(), 0);
         // The second ends first and the first is refused (it comes with nothing): the records keep their numbers and their images.
         let epoch = frames.state.lock().epoch;
-        let tiles: Vec<DecodedImage> = landed[1].images.iter().map(|image| DecodedImage { index: image.index, drawing: true, soft: false, width: image.width, height: image.height, rgba: image.rgba.clone() }).collect();
+        let tiles: Vec<DecodedImage> = landed[1].images.iter().map(|image| DecodedImage { index: image.index, drawing: true, soft: false, width: image.width, height: image.height, rgba: image.rgba.clone(), placement: 0 }).collect();
         let count = tiles.len();
-        pictures_ready(&engine, frames.generation(), &frames.state, &frames.ended, epoch, 0, Todo::Asked(cel, 2), tiles);
-        pictures_ready(&engine, frames.generation(), &frames.state, &frames.ended, epoch, 0, Todo::Asked(cel, 1), Vec::new());
+        pictures_ready(&engine, frames.generation(), &frames.state, &frames.ended, epoch, 0, Todo::Asked(cel, 2), crate::images::Decoded { images: tiles, cleared: Vec::new() });
+        pictures_ready(&engine, frames.generation(), &frames.state, &frames.ended, epoch, 0, Todo::Asked(cel, 1), crate::images::Decoded { images: Vec::new(), cleared: Vec::new() });
         assert_eq!(frames.pictures_in_flight(), 2, "two attempts wait to be taken");
         let landed = frames.take_landed_cels(usize::MAX);
         assert_eq!(landed.iter().map(|l| (l.attempt, l.images.len())).collect::<Vec<_>>(), [(2, count), (1, 0)]);
@@ -599,5 +612,33 @@ mod tests {
         assert!(held.landed_cels.is_empty(), "the landed attempt's images are let go with the export");
         assert_eq!(held.image_bytes, 0, "and so are their bytes");
         assert!(held.todo.is_empty() && held.images.is_empty());
+    }
+
+    /// A refused decode names the places it would have written. For a cel the resident export asked for the refusal is its attempt landing with
+    /// no images, and the renderer clears the cel's places itself (it knows the layers its pages hold): the engine queues none, so the cel is
+    /// cleared once and an attempt that ends late cannot write over the slots of a later one. A cel decoded for an export that keeps an earlier
+    /// generation's pictures has no such renderer: its places are queued, to be handed out as tiles.
+    #[test]
+    fn a_refused_attempt_lands_empty_and_queues_no_places_while_a_refused_plain_cel_queues_its_own() {
+        let engine = Engine::new(clock, Budgets::for_device(None));
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/drawlist/drawing-cel.json");
+        engine.open(&std::fs::read(file).unwrap(), "json", "pictures").unwrap();
+        while engine.step() {}
+        let _ = engine.take_images(usize::MAX);
+        let frames = engine.export_frames(0).unwrap();
+        let cel = *frames.generation().assets.cels.keys().next().expect("the fixture has a cel");
+        let epoch = frames.state.lock().epoch;
+        let refused = || crate::images::Decoded { images: Vec::new(), cleared: vec![(3, 9), (4, 9)] };
+        pictures_ready(&engine, frames.generation(), &frames.state, &frames.ended, epoch, 0, Todo::Asked(cel, 5), refused());
+        assert!(frames.state.lock().cleared.is_empty(), "the resident export clears the cel itself");
+        let landed = frames.take_landed_cels(usize::MAX);
+        assert_eq!((landed.len(), landed[0].attempt, landed[0].images.len()), (1, 5, 0), "the refusal lands as an empty attempt");
+        pictures_ready(&engine, frames.generation(), &frames.state, &frames.ended, epoch, 0, Todo::Bounds(cel), refused());
+        assert!(frames.state.lock().cleared.is_empty(), "a cel decoded for its bounds is not written");
+        pictures_ready(&engine, frames.generation(), &frames.state, &frames.ended, epoch, 0, Todo::Cel(cel), refused());
+        assert_eq!(frames.state.lock().cleared, [(3, 9), (4, 9)], "a plain cel's places are queued");
+        let tiles = frames.take_images(usize::MAX);
+        assert_eq!(tiles.iter().map(|tile| tile.index).collect::<Vec<_>>(), [3, 4], "as tiles, one slot each");
+        assert!(frames.state.lock().cleared.is_empty());
     }
 }

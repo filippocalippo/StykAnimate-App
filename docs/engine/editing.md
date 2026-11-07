@@ -554,6 +554,11 @@ step 0.02 ms, commits 5.0–9.0 ms, undo 2.1 ms.
 
 Not measured: WebAssembly, and the boundary (arguments in, changed records out).
 
+A stroke's undo in the app (directional): in a dev build the session call of the first undo took 5.4 ms against 0.66 ms for the second, and the
+same editor call is about 0.09 ms natively on 80 entries of history; a release build shows no such penalty (19.7, 26.4 and 19.9 ms for the
+first undo against 21.0, 26.4 and 21.3 for later ones), so the cost is a development-build effect (a function compiled on its first call)
+and nothing warms it. Copying the history stacks into the call's snapshot is not the cost: taking them out of the snapshot changed nothing.
+
 ## Arithmetic
 
 A ported command must round every stored result as the editor does. The platform's

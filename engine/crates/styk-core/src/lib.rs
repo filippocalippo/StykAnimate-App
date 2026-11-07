@@ -17,5 +17,6 @@ pub mod limits;
 pub mod number;
 pub mod roving;
 pub mod text_entry;
+pub mod text;
 
 pub use launch::{Launch, LaunchError, USAGE};

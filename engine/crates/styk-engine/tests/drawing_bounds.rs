@@ -188,3 +188,26 @@ fn an_export_worker_started_before_preloading_cannot_replace_or_remove_its_new_r
         }
     }
 }
+
+/// An edit that leaves the pixels alone (a figure's name) makes its cel anew with the same pixels: the bounds the decode resolved for them are
+/// still the cel's, so the effect around its ink keeps its size.
+#[test]
+fn an_edit_that_leaves_a_cels_pixels_alone_keeps_the_bounds_their_decode_resolved() {
+    let engine = Engine::new(|| 0.0, Budgets::for_device(None));
+    let text = json::to_string(&fixture(true));
+    let opened = engine.open_document(OpenSource::Json { bytes: text.as_bytes(), name: "drawing bounds" }, OpenOptions::default(), &|| false).unwrap();
+    engine.activate(&opened.typed, &opened.tree, 1).unwrap();
+    let previous = cel(&engine);
+    while previous.decoded_bounds.get().is_none() {
+        assert!(engine.step(), "the decode of the cel runs");
+    }
+    assert!(previous.artwork_bounds().is_some(), "the decode recovered the bounds the file lacks");
+    let mut next = opened.tree.clone();
+    next.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap()[0].make_obj().unwrap().set("name", Value::str("Renamed"));
+    engine.publish_tree(opened.lineage(), next, 2).unwrap().expect("the document is the engine's");
+    // The cel the document draws now: the atlas keeps the one it first placed for these pixels.
+    let renamed = engine.generation().unwrap().prepared.doc.figures[0].images.iter().find_map(|image| image.tiles.clone()).expect("the figure draws a cel");
+    assert!(!Arc::ptr_eq(&previous, &renamed), "the cel was made anew");
+    assert_eq!(renamed.key(), previous.key(), "from the same pixels");
+    assert_eq!(renamed.artwork_bounds(), previous.artwork_bounds(), "so its bounds are the ones the decode found");
+}
