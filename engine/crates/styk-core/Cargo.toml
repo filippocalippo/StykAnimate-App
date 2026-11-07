@@ -7,10 +7,12 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+styk-alloc = { path = "../styk-alloc" }
 styk-doc = { path = "../styk-doc" }
+styk-drawing = { path = "../styk-drawing" }
+styk-edit = { path = "../styk-edit" }
 styk-engine = { path = "../styk-engine" }
 styk-eval = { path = "../styk-eval" }
-styk-drawing = { path = "../styk-drawing" }
 styk-math = { path = "../styk-math" }
 styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace" }
@@ -18,6 +20,8 @@ unicode-normalization = "=0.1.23"
 
 [dev-dependencies]
 sha2 = "0.10"
-styk-edit = { path = "../styk-edit" }
 styk-formats = { path = "../styk-formats" }
 zstd = "0.13"
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }

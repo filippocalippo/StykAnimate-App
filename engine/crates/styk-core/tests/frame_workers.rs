@@ -60,6 +60,22 @@ fn ready(frames: &mut Frames, wake: &mpsc::Receiver<()>, clock: &dyn Clock) {
     }
 }
 
+fn snapshot_entered(frames: &mut Frames, entered: &mpsc::Receiver<()>, clock: &dyn Clock) {
+    let deadline = clock.now() + Duration::from_secs(10);
+    loop {
+        // Initial admission can also be Busy while a newly started worker
+        // inspects its empty queue. Exercise the same retry contract as a host.
+        frames.flush();
+        match entered.recv_timeout(Duration::from_millis(25)) {
+            Ok(()) => return,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                assert!(clock.now() < deadline, "snapshot did not start")
+            }
+            Err(error) => panic!("snapshot gate disconnected: {error}"),
+        }
+    }
+}
+
 #[test]
 fn platform_workers_deliver_the_last_view_and_close_while_a_snapshot_is_stalled() {
     struct Stalled {
@@ -104,7 +120,7 @@ fn platform_workers_deliver_the_last_view_and_close_while_a_snapshot_is_stalled(
     frames
         .request(Consumer::Stage, 0.0, Arc::new(View::default()))
         .unwrap();
-    waiting.recv_timeout(Duration::from_secs(10)).unwrap();
+    snapshot_entered(&mut frames, &waiting, clock.as_ref());
     for x in 1..=1000 {
         let mut view = View::default();
         view.pan[0] = f64::from(x);
@@ -130,7 +146,7 @@ fn platform_workers_deliver_the_last_view_and_close_while_a_snapshot_is_stalled(
         .request(Consumer::Stage, 0.5, Arc::new(view))
         .unwrap();
     frames.flush();
-    waiting.recv_timeout(Duration::from_secs(10)).unwrap();
+    snapshot_entered(&mut frames, &waiting, clock.as_ref());
     frames.close();
     assert!(matches!(
         frames.with_ready(Consumer::Stage, |_| panic!("closed stage drawn")),

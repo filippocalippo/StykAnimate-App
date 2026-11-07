@@ -387,7 +387,7 @@ fn every_presentation_input_changes_the_key_and_invalid_requests_are_visible() {
     let base = frames
         .request(Consumer::Stage, 0.0, Arc::new(View::default()))
         .unwrap();
-    let mut variants = vec![View::default(); 11];
+    let mut variants = vec![View::default(); 12];
     variants[0].size[0] += 1;
     variants[1].zoom = 2.0;
     variants[2].pan[0] = 1.0;
@@ -405,6 +405,7 @@ fn every_presentation_input_changes_the_key_and_invalid_requests_are_visible() {
         hidden_uids: vec![1],
     });
     variants[10].scene.translations.push((1, [10.0, 20.0]));
+    variants[11].samples = 1;
     for view in variants {
         assert_ne!(
             base,

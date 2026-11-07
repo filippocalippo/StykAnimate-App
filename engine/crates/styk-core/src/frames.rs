@@ -85,6 +85,8 @@ pub struct View {
     pub pan: [f64; 2],
     /// Backing density, e.g. 1, .75, .5 or .25.
     pub quality: f64,
+    /// Preview edge sampling can change without changing backing density.
+    pub samples: u8,
     pub scene: Options,
 }
 
@@ -95,6 +97,7 @@ impl Default for View {
             zoom: 1.0,
             pan: [0.0; 2],
             quality: 1.0,
+            samples: 4,
             scene: Options::default(),
         }
     }
@@ -109,6 +112,7 @@ impl View {
             && self.quality.is_finite()
             && self.quality > 0.0
             && self.quality <= 1.0
+            && matches!(self.samples, 1 | 4)
             && self.scene.hidden_uids.capacity() <= MAX_HIDDEN
             && self.scene.onions.len() <= ONIONS
             && self.scene.onions.capacity() <= ONIONS.next_power_of_two()

@@ -2668,6 +2668,7 @@ dependencies = [
  "styk-raster",
  "styk-render",
  "styk-services",
+ "windows",
 ]
 
 [[package]]
@@ -2686,6 +2687,7 @@ name = "styk-core"
 version = "0.1.0"
 dependencies = [
  "sha2",
+ "styk-alloc",
  "styk-doc",
  "styk-drawing",
  "styk-edit",
@@ -2696,6 +2698,7 @@ dependencies = [
  "styk-services",
  "styk-trace",
  "unicode-normalization",
+ "windows-sys",
  "zstd",
 ]
 
@@ -2859,6 +2862,7 @@ dependencies = [
  "raw-window-handle",
  "sha2",
  "styk-services",
+ "windows",
  "windows-sys",
 ]
 

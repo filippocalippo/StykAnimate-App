@@ -21,7 +21,7 @@ not stop the document engine or its other jobs.
   slot; then come 48 playback, 48 onion, eight preview and eight thumbnail slots.
   There is no queue node per pointer move. Invalid slots and inputs are refused.
 - A key contains document identity, revision, resource epoch, exact fractional tick,
-  size, zoom, pan, backing quality, hidden figures, effects, camera, clipping,
+  size, zoom, pan, backing quality, MSAA samples, hidden figures, effects, camera, clipping,
   background, figure translations and ordered onion settings (including per-ghost
   hidden figures). Zero has numeric identity; NaN and infinity
   are refused. Raster size and transform travel to presentation even though geometry

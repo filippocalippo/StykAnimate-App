@@ -32,6 +32,7 @@ toolkit) sits on `styk-core` without rewriting a feature; the core's features ar
   called directly in Rust by `styk_core::documents`. There is no read view, no JSON patch and no second copy of the
   document: the interface reads the session through narrow queries (`styk-edit`'s and `styk-eval`'s typed views) and
   view models the core builds from them, cached by document revision.
+  The first implemented panel seam and its worker-prepared session handoff are in [documents.md](documents.md).
 - **View state** (selection, tools, playhead, layer focus, panels, zoom and pan) lives in `styk-core`. It is sent to
   the session with each call as the JavaScript editor sends it today.
 - **Commands.** Every user action is a `styk_core::Command`. Shortcuts, menus, the command palette, buttons and the
