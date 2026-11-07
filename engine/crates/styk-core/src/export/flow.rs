@@ -8,14 +8,15 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use styk_services::video::{Committed, Phase, Progress, VideoError, VideoRequest, VideoService, VideoSession};
+use styk_services::video::{Committed, FrameLayout, Phase, Progress, VideoError, VideoRequest, VideoService, VideoSession};
 use styk_services::Cancel;
 
 /// Draws the frames of an export, in order.
 pub trait FrameProducer {
     /// Draws frame `index` (0-based within the export) into `out` as RGBA, rows packed, composited over black when
-    /// `matte` (every codec without alpha) and straight otherwise. `out` arrives empty with its capacity kept.
-    fn frame_into(&mut self, index: u32, matte: bool, out: &mut Vec<u8>) -> Result<(), String>;
+    /// `layout.matte` (every codec without alpha) and straight otherwise, passed through `styk_export::legacy_canvas`
+    /// when `layout.legacy_canvas`. `out` arrives empty with its capacity kept.
+    fn frame_into(&mut self, index: u32, layout: &FrameLayout, out: &mut Vec<u8>) -> Result<(), String>;
 }
 
 /// The sound of an export, as 250 ms chunks of interleaved stereo f32 at 48 kHz.
@@ -54,7 +55,7 @@ pub fn run_video_export(
 
 fn render(session: &mut dyn VideoSession, frames: u32, producer: &mut dyn FrameProducer, audio: Option<&mut dyn AudioSource>, cancel: &Cancel, progress: &Progress) -> Result<(), VideoError> {
     progress.set_phase(Phase::Rendering);
-    let matte = session.layout().matte;
+    let layout = session.layout().clone();
     if let Some(audio) = audio {
         let mut chunk = Vec::new();
         loop {
@@ -73,7 +74,7 @@ fn render(session: &mut dyn VideoSession, frames: u32, producer: &mut dyn FrameP
         if cancel.is_cancelled() {
             return Err(VideoError::Cancelled);
         }
-        producer.frame_into(index, matte, buffer.bytes_mut()).map_err(VideoError::Io)?;
+        producer.frame_into(index, &layout, buffer.bytes_mut()).map_err(VideoError::Io)?;
         session.submit(buffer)?;
     }
     Ok(())
@@ -152,8 +153,8 @@ mod tests {
     }
 
     impl FrameProducer for Numbers {
-        fn frame_into(&mut self, index: u32, matte: bool, out: &mut Vec<u8>) -> Result<(), String> {
-            assert!(matte, "H.264 has no alpha");
+        fn frame_into(&mut self, index: u32, layout: &FrameLayout, out: &mut Vec<u8>) -> Result<(), String> {
+            assert!(layout.matte, "H.264 has no alpha");
             if let Some((at, cancel)) = &self.cancel_at
                 && *at == index
             {

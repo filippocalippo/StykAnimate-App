@@ -121,7 +121,7 @@ impl VideoService for FfmpegVideoService {
         let extension = request.container.extension();
         let output = stage.path(&format!("video.{extension}"));
         let (encoded_width, encoded_height, edge) = codec_dimensions(request.codec, request.width, request.height);
-        let layout = FrameLayout { width: request.width, height: request.height, bytes: request.width as usize * request.height as usize * 4, matte: !request.codec.alpha(), encoded: (encoded_width, encoded_height), edge };
+        let layout = FrameLayout { width: request.width, height: request.height, bytes: request.width as usize * request.height as usize * 4, matte: !request.codec.alpha(), legacy_canvas: request.codec.alpha(), encoded: (encoded_width, encoded_height), edge };
         let arguments = FfmpegVideoService::arguments(request, &output.to_string_lossy());
         let session = Session::start(&self.program, arguments, Kind::Ffmpeg(request.clone()), layout, stage, output, destination, cancel)?;
         Ok(Box::new(session))

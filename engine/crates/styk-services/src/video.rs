@@ -251,6 +251,9 @@ pub struct FrameLayout {
     pub bytes: usize,
     /// The producer composites over black (every codec without alpha); otherwise straight RGBA.
     pub matte: bool,
+    /// Straight frames pass through the mapping of today's canvas step first (WebM with transparency): a translucent
+    /// pixel's colour comes out of a canvas premultiplied and back, and the bytes of the file follow.
+    pub legacy_canvas: bool,
     /// The size the encoder writes (a padded edge), and the edge when it differs.
     pub encoded: (u32, u32),
     pub edge: Option<Edge>,
@@ -505,14 +508,14 @@ pub mod fake {
         }
 
         fn begin(&self, _destination: &Path, request: &VideoRequest, cancel: &Cancel) -> Result<Box<dyn VideoSession>, VideoError> {
-            let (width, height, matte, encoded, edge) = match request {
+            let (width, height, matte, legacy, encoded, edge) = match request {
                 VideoRequest::Ffmpeg(r) => {
                     let (w, h, edge) = codec_dimensions(r.codec, r.width, r.height);
-                    (r.width, r.height, !r.codec.alpha(), (w, h), edge)
+                    (r.width, r.height, !r.codec.alpha(), r.codec.alpha(), (w, h), edge)
                 }
-                VideoRequest::Vfw(r) => (r.width, r.height, true, (r.width, r.height), None),
+                VideoRequest::Vfw(r) => (r.width, r.height, false, false, (r.width, r.height), None),
             };
-            let layout = FrameLayout { width, height, bytes: width as usize * height as usize * 4, matte, encoded, edge };
+            let layout = FrameLayout { width, height, bytes: width as usize * height as usize * 4, matte, legacy_canvas: legacy, encoded, edge };
             let pool = FramePool::new(3, layout.bytes, cancel);
             Ok(Box::new(FakeSession { layout, pool, recording: self.recording.clone(), fail_after: self.fail_after, progress: Arc::new(Progress::default()), cancel: cancel.clone() }))
         }

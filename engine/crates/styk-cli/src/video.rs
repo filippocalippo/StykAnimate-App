@@ -25,7 +25,7 @@ use styk_engine::{Budgets, Engine};
 use styk_export::{CpuExport, FrameRenderer, GpuExport, Settings, Smoothing};
 use styk_platform::video::{FfmpegVideoService, VfwVideoService};
 use styk_render::wgpu;
-use styk_services::video::{Arch, VfwRequest, VideoError, VideoRequest, VideoService};
+use styk_services::video::{Arch, FrameLayout, VfwRequest, VideoError, VideoRequest, VideoService};
 use styk_services::Cancel;
 
 use crate::win;
@@ -96,7 +96,7 @@ struct Producer {
 }
 
 impl FrameProducer for Producer {
-    fn frame_into(&mut self, index: u32, matte: bool, out: &mut Vec<u8>) -> Result<(), String> {
+    fn frame_into(&mut self, index: u32, layout: &FrameLayout, out: &mut Vec<u8>) -> Result<(), String> {
         if let Some((at, cancel, when)) = &self.cancel_at
             && *at == index
         {
@@ -113,7 +113,10 @@ impl FrameProducer for Producer {
         let frame = self.frames.take(tick).ok_or("no frame")?;
         let drawing = Instant::now();
         let doc = &self.generation.prepared.doc;
-        self.renderer.frame_into(doc, &frame.list, frame.camera.as_ref(), matte, out)?;
+        self.renderer.frame_into(doc, &frame.list, frame.camera.as_ref(), layout.matte, out)?;
+        if layout.legacy_canvas {
+            styk_export::legacy_canvas::apply(out);
+        }
         let mut timings = self.timings.lock().unwrap();
         timings.evaluate_ms += (drawing - started).as_secs_f64() * 1000.0;
         timings.draw_ms += drawing.elapsed().as_secs_f64() * 1000.0;
@@ -349,9 +352,9 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
         let hashes = option(rest, "--frame-hashes").ok_or_else(|| fail("--no-encode needs --frame-hashes FILE"))?;
         let mut lines = vec![String::new(); count as usize];
         let mut buffer = Vec::new();
-        let matte = !flag(rest, "--straight");
+        let layout = FrameLayout { width, height, bytes: 0, matte: !flag(rest, "--straight"), legacy_canvas: false, encoded: (width, height), edge: None };
         for index in 0..count {
-            producer.frame_into(index, matte, &mut buffer).map_err(fail)?;
+            producer.frame_into(index, &layout, &mut buffer).map_err(fail)?;
             let tick = producer.order[index as usize];
             let digest: String = Sha256::digest(&buffer).iter().map(|b| format!("{b:02x}")).collect();
             lines[(tick - first) as usize] = format!("{tick} {digest}");

@@ -15,6 +15,7 @@
 //! - [`cpu`]: the same tiles drawn by the CPU rasterizer (styk-raster), for a worker
 //!   without a GPU device.
 //! - [`svg`]: the frame's draw list written as vector SVG (the export that is not pixels).
+//! - [`legacy_canvas`]: the mapping of today's canvas step on translucent colour, kept for WebM's bytes.
 //! - [`pick`]: the figure whose artwork a point of a frame touches, drawn on the CPU (a click on the stage).
 //!
 //! Encoders (PNG, GIF, APNG, ZIP, WebCodecs, FFmpeg) stay platform services of the
@@ -22,6 +23,7 @@
 
 pub mod cpu;
 pub mod gpu;
+pub mod legacy_canvas;
 pub mod pick;
 pub mod pixels;
 pub mod settings;
