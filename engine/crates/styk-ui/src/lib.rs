@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::let_underscore_must_use, unused_must_use, clippy::disallowed_methods, clippy::disallowed_types))]
 //! The iced front end.
 //!
 //! It lays out and draws what the core holds and turns input into core commands (`docs/native/architecture.md`): the

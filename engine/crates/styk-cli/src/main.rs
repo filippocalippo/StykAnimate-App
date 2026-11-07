@@ -29,14 +29,14 @@ use styk_eval::geometry::build;
 #[cfg(feature = "app-tools")]
 mod audio;
 mod container;
+mod image_diff;
 mod export;
 mod load;
 mod prims;
 mod stepbench;
-#[cfg(all(feature = "app-tools", windows))]
-mod video;
-#[cfg(all(feature = "app-tools", windows))]
-mod win;
+#[cfg(feature = "app-tools")]
+styk_platform::video_tools!({ mod video; } {});
+
 mod raster_parity;
 
 fn main() {
@@ -49,6 +49,7 @@ fn main() {
             eprintln!("styk audio needs the app-tools feature: cargo run -p styk-cli --features app-tools -- audio ...");
             2
         }
+        Some("image-diff") => image_diff::run(&args[1..]),
         Some("container") if args.len() >= 3 && args[1] == "roundtrip" => container::roundtrip(&args[2], &args[3..]),
         Some("container") if args.len() >= 4 && args[1] == "json" => container::json(&args[2], &args[3]),
         Some("open") if args.len() >= 2 => load::open(&args[1], &args[2..]),
@@ -75,9 +76,12 @@ fn main() {
         Some("edit-bench") if args.len() >= 4 => edit_bench(&args[1], &args[2], &args[3], &args[4..]),
         Some("diff") if args.len() >= 4 => diff(&args[1], &args[2], &args[3], &args[4..]),
         Some("export") if args.len() >= 4 => export::export(&args[1], &args[2], &args[3], &args[4..]),
-        #[cfg(all(feature = "app-tools", windows))]
-        Some("video") if args.len() >= 4 => video::video(&args[1], &args[2], &args[3], &args[4..]),
-        #[cfg(not(all(feature = "app-tools", windows)))]
+        #[cfg(feature = "app-tools")]
+        Some("video") if args.len() >= 4 => styk_platform::video_tools!({ video::video(&args[1], &args[2], &args[3], &args[4..]) } {{
+            eprintln!("styk video needs a platform with native video services");
+            2
+        }}),
+        #[cfg(not(feature = "app-tools"))]
         Some("video") => {
             eprintln!("styk video needs the app-tools feature and Windows: cargo run -p styk-cli --features app-tools -- video ...");
             2

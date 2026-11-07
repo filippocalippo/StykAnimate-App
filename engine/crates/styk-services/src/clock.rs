@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// A monotonic clock: the time elapsed since an origin of its own, which only ever grows.
 ///
@@ -13,30 +13,11 @@ pub trait Clock: Send + Sync {
     fn now(&self) -> Duration;
 }
 
-/// The real clock: its origin is the moment it was created.
-#[derive(Clone, Debug)]
-pub struct SystemClock {
-    origin: Instant,
-}
-
-impl SystemClock {
-    /// A clock whose origin is now.
-    pub fn new() -> SystemClock {
-        SystemClock { origin: Instant::now() }
-    }
-}
-
-impl Default for SystemClock {
-    fn default() -> SystemClock {
-        SystemClock::new()
-    }
-}
-
-impl Clock for SystemClock {
-    fn now(&self) -> Duration {
-        self.origin.elapsed()
-    }
-}
+#[cfg(any(test, feature = "test-fakes"))]
+#[path = "../tests/support/clock.rs"]
+pub mod test_fakes;
+#[cfg(any(test, feature = "test-fakes"))]
+pub use test_fakes::SystemClock;
 
 /// A clock that moves only when told to. Clones share one time.
 #[derive(Clone, Debug, Default)]

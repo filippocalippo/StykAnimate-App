@@ -13,4 +13,5 @@ styk-math = { path = "../styk-math" }
 thiserror = "2"
 
 [dev-dependencies]
+styk-doc = { path = "../styk-doc", features = ["test-fakes"] }
 sha2 = "0.10"

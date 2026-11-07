@@ -8,7 +8,7 @@ publish.workspace = true
 
 [features]
 # `styk_core::testing`: what the interface's tests need to open a document without naming an engine crate.
-testing = []
+testing = ["styk-services/test-fakes"]
 
 [dependencies]
 styk-alloc = { path = "../styk-alloc" }
@@ -25,6 +25,7 @@ unicode-normalization = "=0.1.23"
 [dev-dependencies]
 # The integration tests open documents through the same harness the interface's tests use.
 styk-core = { path = ".", features = ["testing"] }
+styk-services = { path = "../styk-services", features = ["test-fakes"] }
 sha2 = "0.10"
 styk-formats = { path = "../styk-formats" }
 zstd = "0.13"

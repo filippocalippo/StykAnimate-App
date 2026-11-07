@@ -22,6 +22,7 @@ pub mod facts;
 pub mod field;
 pub mod focus;
 pub mod frames;
+pub mod engine;
 pub mod history;
 pub mod i18n;
 pub mod inspector;
@@ -38,3 +39,6 @@ pub mod testing;
 pub mod view_state;
 
 pub use launch::{Launch, LaunchError, USAGE};
+
+/// Service contracts exposed to views through the application core.
+pub use styk_services as services;
