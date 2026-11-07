@@ -5,9 +5,9 @@ struct Uniforms {
     size: vec2<f32>,     // the pad, physical pixels
     pan: vec2<f32>,      // cel pixel at the pad's top-left
     zoom: f32,           // physical pixels per cel pixel
-    atlas: f32,          // the atlas texture's width in texels
+    atlas_w: f32,        // the atlas texture's size in texels
+    atlas_h: f32,
     srgb: f32,           // 1 when the target converts sRGB on write
-    pad0: f32,
     color: vec4<f32>,    // the wet ink's colour
     wet: vec4<f32>,      // hardness, opacity
     paper: vec4<f32>,
@@ -60,7 +60,7 @@ fn tile_vs(in: TileIn) -> TileOut {
     let c = CORNERS[in.vertex];
     var out: TileOut;
     out.position = to_clip(in.origin + c * in.size);
-    out.uv = (in.texel + c * 64.0) / u.atlas;
+    out.uv = (in.texel + c * 64.0) / vec2<f32>(u.atlas_w, u.atlas_h);
     out.solid = in.solid;
     return out;
 }

@@ -1,35 +1,37 @@
-//! The pen lab's self-test: a scripted synthetic pen (or scripted queue input) through the whole path, and what it proved.
+//! The pen lab's self-test: scripted input through the pad's whole path, fed from an in-process thread.
+//!
+//! The feeder pushes samples into the pad's input queue as a platform source would (from a thread, stamped with the clock at
+//! the moment of the push, at the script's own pace). Nothing is injected into the operating system: no window is placed on
+//! the screen and no system input is synthesised (decision N6). What this does not exercise is the `WM_POINTER` subclass
+//! itself: its pure parts have unit tests in `styk-platform`, the rest needs a tablet.
 
 use super::report::{self, Report};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering::Relaxed;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::JoinHandle;
-use styk_platform::windows::inject::{PenInjector, TouchInjector};
+use std::time::Duration;
 use styk_platform::windows::input::InputCounters;
-use styk_services::input::{InputEvent, Phase, Script, ScriptSpec, ScriptStep, Tool};
-use styk_ui::ink_pad::{PadCore, Switches, View};
+use styk_services::input::{InputEvent, Modifiers, PenButtons, PenSample, Phase, Script, ScriptSpec, ScriptStep, Tool, Valid};
+use styk_ui::ink_pad::{FrameRow, PadCore, Switches, View};
 
 /// Frames to let the window settle before the script starts.
 const WARMUP_FRAMES: u32 = 60;
 /// Frames to wait after the script for the last tiles to land.
 const SETTLE_FRAMES: u32 = 90;
-/// The forced interface-thread block of the history test, and how many there are.
+/// The forced interface-thread block of the blocked test, and how many there are.
 const BLOCK_MS: u64 = 50;
 const BLOCKS: u32 = 20;
-/// How many times a refused injection starts the script again.
-const MAX_RETRIES: u32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TestKind {
     /// 240 Hz for the given seconds: fields, rate, latency, slices.
     Standard,
-    /// The same, with the interface thread blocked for 50 ms twenty times: the history must recover every sample.
+    /// The same, with the interface thread blocked for 50 ms twenty times: no sample may be lost or reordered.
     Blocked,
-    /// Hover over a toolkit widget, the barrel button, a 1.5 s stationary press.
+    /// The pad's gestures from scripted samples: the barrel, a finger, the palm, a press on a control.
     Behaviour,
-    /// Worst inputs on the worker: a huge gap with a fine brush, deep zoom, a mirrored stroke.
+    /// Worst inputs for the worker: a huge gap with a fine brush at deep zoom, a mirrored stroke.
     Stress,
 }
 
@@ -64,10 +66,6 @@ pub struct Context<'a> {
     pub counters: Option<&'a Arc<InputCounters>>,
     pub refresh_hz: f64,
     pub out_dir: Option<&'a Path>,
-    pub hover_enters: u64,
-    pub client_origin: (i32, i32),
-    /// The window is the topmost one over its whole client area: injected input will reach it and nothing else.
-    pub window_clear: bool,
 }
 
 pub enum Step {
@@ -76,14 +74,14 @@ pub enum Step {
     Done(i32),
 }
 
-type Injection = Result<Vec<u64>, String>;
-
 enum Phase_ {
     Warmup(u32),
-    Injecting { thread: JoinHandle<Injection>, script: Script, blocks_done: u32, frames: u32 },
-    Settling { script: Script, injected: Injection, frames: u32 },
-    /// Waiting for the worker to finish the stress strokes.
-    Stress { frames: u32 },
+    Feeding { thread: JoinHandle<Vec<u64>>, script: Script, blocks_done: u32, frames: u32 },
+    Settling { script: Script, pushed: Vec<u64>, frames: u32 },
+    /// The behaviour test: scripts one after another.
+    Behaviour { thread: Option<JoinHandle<Vec<u64>>>, frames: u32 },
+    /// The stress test: strokes queued, waiting for the worker to finish them.
+    Stress { frames: u32, stage: u32 },
     Capturing,
     Done(i32),
 }
@@ -91,28 +89,56 @@ enum Phase_ {
 pub struct Runner {
     test: SelfTest,
     phase: Phase_,
-    result: Arc<Mutex<Option<Injection>>>,
     summary: String,
     failures: u32,
-    behaviour: Option<Behaviour>,
-    /// Times the system refused an injection and the script was started over.
-    attempts: u32,
+    step: u32,
+    /// (strokes, touch samples, palette opens) when each behaviour step began.
+    marks: Vec<(u64, u64, u64)>,
 }
 
-/// The behaviour test's three scripts run one after another; their results are read between them.
-struct Behaviour {
-    step: u32,
-    hover_before: u64,
-    palette_before: u64,
-    menus_before: u64,
-    strokes_before: u64,
-    /// (strokes, touch samples) when each of the finger steps began.
-    marks: Vec<(u64, u64)>,
+/// Sleeps until the clock reaches `target_ns`, spinning for the last stretch.
+fn wait_until(core: &PadCore, target_ns: u64) {
+    loop {
+        let now = core.now_ns();
+        if now >= target_ns {
+            return;
+        }
+        let left = target_ns - now;
+        if left > 2_000_000 {
+            std::thread::sleep(Duration::from_nanos(left - 1_500_000));
+        } else {
+            std::hint::spin_loop();
+        }
+    }
+}
+
+/// Pushes a script into the queue at its own pace, each sample stamped with the clock at its push. Returns the push times.
+fn feed(core: Arc<PadCore>, script: Script) -> JoinHandle<Vec<u64>> {
+    std::thread::Builder::new()
+        .name("styk-pen-feeder".into())
+        .spawn(move || {
+            let start = core.now_ns();
+            let mut times = Vec::with_capacity(script.steps.len());
+            for step in &script.steps {
+                wait_until(&core, start + step.t_ns);
+                let now = core.now_ns();
+                let mut sample = step.sample(script.pointer, 0);
+                sample.time_ns = now;
+                core.queue.push(InputEvent::Sample(sample));
+                times.push(now);
+            }
+            times
+        })
+        .expect("the feeder thread starts")
+}
+
+fn step_of(t_ns: u64, x: f64, y: f64, tool: Tool, phase: Phase, pressure: u32, barrel: bool) -> ScriptStep {
+    ScriptStep { t_ns, x, y, tool, phase, raw_pressure: pressure, tilt_x: 0, tilt_y: 0, barrel, modifiers: Modifiers::NONE }
 }
 
 impl Runner {
     pub fn new(test: SelfTest) -> Runner {
-        Runner { test, phase: Phase_::Warmup(0), result: Arc::new(Mutex::new(None)), summary: String::new(), failures: 0, behaviour: None, attempts: 0 }
+        Runner { test, phase: Phase_::Warmup(0), summary: String::new(), failures: 0, step: 0, marks: Vec::new() }
     }
 
     pub fn captured(&mut self) {
@@ -128,51 +154,17 @@ impl Runner {
         let _ = writeln!(self.summary, "{} {name}: {detail}", if pass { "PASS" } else { "FAIL" });
     }
 
-    fn spawn_task(&self, task: impl FnOnce() -> Injection + Send + 'static) -> JoinHandle<Injection> {
-        let result = self.result.clone();
-        std::thread::Builder::new()
-            .name("styk-pen-inject".into())
-            .spawn(move || {
-                let outcome = task();
-                *result.lock().unwrap_or_else(|p| p.into_inner()) = Some(outcome.clone());
-                outcome
-            })
-            .expect("the injection thread starts")
-    }
-
-    fn spawn_injection(&self, script: Script, origin: (i32, i32)) -> JoinHandle<Injection> {
-        self.spawn_task(move || {
-            let mut injector = PenInjector::new(script.pointer).map_err(|e| e.to_string())?;
-            injector.play(&script, origin, |_| {}).map_err(|e| e.to_string())
-        })
-    }
-
-    /// A finger on the pad: presses, drags a little and lifts. With `pen_first`, a pen hovers over the pad 100 ms before.
-    fn spawn_finger(&self, origin: (i32, i32), at: (f64, f64), pen_first: bool) -> JoinHandle<Injection> {
-        self.spawn_task(move || {
-            let screen = (origin.0 + at.0 as i32, origin.1 + at.1 as i32);
-            let pause = |ms| std::thread::sleep(std::time::Duration::from_millis(ms));
-            let _pen = if pen_first {
-                let mut pen = PenInjector::new(7).map_err(|e| e.to_string())?;
-                let hover = ScriptStep { t_ns: 0, x: at.0 - 40.0, y: at.1 - 40.0, tool: Tool::Pen, phase: Phase::Hover, raw_pressure: 0, tilt_x: 0, tilt_y: 0, barrel: false, modifiers: styk_services::input::Modifiers::NONE };
-                pen.inject(&hover, origin).map_err(|e| e.to_string())?;
-                pause(100);
-                Some(pen)
-            } else {
-                // The pen was last used moments ago: wait out the palm window before the finger alone.
-                pause(900);
-                None
-            };
-            let mut finger = TouchInjector::new(9).map_err(|e| e.to_string())?;
-            finger.inject(Phase::Down, screen).map_err(|e| e.to_string())?;
-            for i in 1..=10 {
-                pause(8);
-                finger.inject(Phase::Move, (screen.0 + i * 6, screen.1)).map_err(|e| e.to_string())?;
+    fn finish(&mut self, cx: &Context) -> Step {
+        match cx.out_dir {
+            Some(dir) => {
+                self.phase = Phase_::Capturing;
+                Step::Capture(dir.join("screenshot.png"))
             }
-            finger.inject(Phase::Up, (screen.0 + 60, screen.1)).map_err(|e| e.to_string())?;
-            pause(50);
-            Ok(Vec::new())
-        })
+            None => {
+                self.phase = Phase_::Done(i32::from(self.failures > 0));
+                Step::Continue
+            }
+        }
     }
 
     pub fn step(&mut self, cx: &Context) -> Step {
@@ -180,9 +172,9 @@ impl Runner {
             Phase_::Warmup(frames) => {
                 *frames += 1;
                 let pad = cx.core.gpu_stats().pad_px;
-                if *frames < WARMUP_FRAMES || pad.0 <= 0.0 || cx.counters.is_none() || (!cx.window_clear && self.test.kind != TestKind::Stress) {
+                if *frames < WARMUP_FRAMES || pad.0 <= 0.0 || cx.counters.is_none() {
                     if *frames > WARMUP_FRAMES * 20 {
-                        let _ = writeln!(self.summary, "FAIL setup: the window never drew a pad, the input source never attached, or another window covered the test window (nothing was injected)");
+                        let _ = writeln!(self.summary, "FAIL setup: the window never drew a pad or the input source never attached");
                         self.failures += 1;
                         self.phase = Phase_::Done(2);
                     }
@@ -190,43 +182,35 @@ impl Runner {
                 }
                 match self.test.kind {
                     TestKind::Stress => return self.stress(cx),
-                    TestKind::Behaviour => return self.behaviour_step(cx),
+                    TestKind::Behaviour => {
+                        self.phase = Phase_::Behaviour { thread: None, frames: 0 };
+                        return Step::Continue;
+                    }
                     _ => {}
                 }
-                let mut script = Script::generate(&ScriptSpec::standard(self.test.rate_hz, self.test.seconds, pad.0 as f64, pad.1 as f64), 1);
-                // A synthetic pen has no eraser end (see `inject`): the second stroke is injected with the tip.
-                for step in &mut script.steps {
-                    step.tool = Tool::Pen;
-                }
-                cx.core.with_inspector(|inspector| {
-                    inspector.update_max_us = 0;
-                    inspector.max_generate_ms = 0.0;
-                    inspector.max_raster_ms = 0.0;
-                });
-                cx.core.with_gpu(|gpu| gpu.prepare_max_us = 0);
+                let script = Script::generate(&ScriptSpec::standard(self.test.rate_hz, self.test.seconds, pad.0 as f64, pad.1 as f64), 1);
+                self.reset_maxima(cx);
                 cx.core.set_recording(true);
-                let thread = self.spawn_injection(script.clone(), cx.client_origin);
-                self.phase = Phase_::Injecting { thread, script, blocks_done: 0, frames: 0 };
+                let thread = feed(cx.core.clone(), script.clone());
+                self.phase = Phase_::Feeding { thread, script, blocks_done: 0, frames: 0 };
                 Step::Continue
             }
-            Phase_::Injecting { thread, blocks_done, frames, .. } => {
+            Phase_::Feeding { thread, blocks_done, frames, .. } => {
                 *frames += 1;
                 if self.test.kind == TestKind::Blocked {
                     // Spread the blocks over the script, none before it starts or after it ends.
                     let every = ((self.test.seconds * cx.refresh_hz.max(60.0)) / (BLOCKS as f64 + 1.0)).max(1.0) as u32;
                     if *blocks_done < BLOCKS && *frames % every == 0 {
-                        std::thread::sleep(std::time::Duration::from_millis(BLOCK_MS));
+                        std::thread::sleep(Duration::from_millis(BLOCK_MS));
                         *blocks_done += 1;
                     }
                 }
                 if !thread.is_finished() {
                     return Step::Continue;
                 }
-                let injected = match std::mem::replace(&mut self.phase, Phase_::Capturing) {
-                    Phase_::Injecting { thread, script, .. } => (thread.join().unwrap_or_else(|_| Err("the injection thread panicked".into())), script),
-                    _ => unreachable!("the phase was Injecting"),
-                };
-                self.phase = Phase_::Settling { script: injected.1, injected: injected.0, frames: 0 };
+                let Phase_::Feeding { thread, script, .. } = std::mem::replace(&mut self.phase, Phase_::Capturing) else { unreachable!("the phase was Feeding") };
+                let pushed = thread.join().unwrap_or_default();
+                self.phase = Phase_::Settling { script, pushed, frames: 0 };
                 Step::Continue
             }
             Phase_::Settling { frames, .. } => {
@@ -234,31 +218,13 @@ impl Runner {
                 if *frames < SETTLE_FRAMES {
                     return Step::Continue;
                 }
-                let Phase_::Settling { script, injected, .. } = std::mem::replace(&mut self.phase, Phase_::Capturing) else { unreachable!("the phase was Settling") };
-                if self.test.kind == TestKind::Behaviour {
-                    // The next script of the behaviour test, or its verdicts.
-                    match injected {
-                        Err(error) if self.attempts >= MAX_RETRIES => {
-                            self.check("injection", false, error);
-                            self.phase = Phase_::Done(3);
-                        }
-                        Err(error) => {
-                            self.attempts += 1;
-                            let _ = writeln!(self.summary, "injection refused ({error}); starting the step again ({} of {MAX_RETRIES})", self.attempts);
-                            if let Some(state) = self.behaviour.as_mut() {
-                                state.step = state.step.saturating_sub(1);
-                            }
-                            self.phase = Phase_::Warmup(WARMUP_FRAMES);
-                        }
-                        Ok(_) => self.phase = Phase_::Warmup(WARMUP_FRAMES),
-                    }
-                    return Step::Continue;
-                }
-                self.finish_scripted(cx, &script, injected)
+                let Phase_::Settling { script, pushed, .. } = std::mem::replace(&mut self.phase, Phase_::Capturing) else { unreachable!("the phase was Settling") };
+                self.finish_scripted(cx, &script, &pushed)
             }
-            Phase_::Stress { frames } => {
-                let frames = *frames;
-                self.stress_wait(cx, frames)
+            Phase_::Behaviour { .. } => self.behaviour(cx),
+            Phase_::Stress { frames, stage } => {
+                let (frames, stage) = (*frames, *stage);
+                self.stress_wait(cx, frames, stage)
             }
             Phase_::Capturing => Step::Continue,
             Phase_::Done(code) => {
@@ -272,142 +238,113 @@ impl Runner {
         }
     }
 
-    fn finish_scripted(&mut self, cx: &Context, script: &Script, injected: Injection) -> Step {
+    fn reset_maxima(&self, cx: &Context) {
+        cx.core.with_inspector(|inspector| {
+            inspector.update_max_us = 0;
+            inspector.max_generate_ms = 0.0;
+            inspector.max_raster_ms = 0.0;
+        });
+        cx.core.with_gpu(|gpu| gpu.prepare_max_us = 0);
+    }
+
+    fn finish_scripted(&mut self, cx: &Context, script: &Script, pushed: &[u64]) -> Step {
         cx.core.set_recording(false);
         let (samples, frames) = cx.core.take_recording();
         let inspector = cx.core.inspector();
         let gpu = cx.core.gpu_stats();
         let present = std::env::var("ICED_PRESENT_MODE").unwrap_or_else(|_| "Fifo (iced AutoVsync)".into());
-        let injected_ns = match injected {
-            Ok(times) => times,
-            Err(error) if self.attempts < MAX_RETRIES => {
-                // The system sometimes refuses a report of a script (error 87) for a reason it does not give; the script starts over.
-                self.attempts += 1;
-                let _ = writeln!(self.summary, "injection refused ({error}); starting the script again ({} of {MAX_RETRIES})", self.attempts);
-                self.phase = Phase_::Warmup(WARMUP_FRAMES);
-                return Step::Continue;
-            }
-            Err(error) => {
-                self.check("injection", false, error);
-                self.phase = Phase_::Done(3);
-                return Step::Continue;
-            }
-        };
-        let report = report::analyse(script, &injected_ns, &samples, &frames, (0.0, 0.0));
+        let report = report::analyse(script, pushed, &samples, &frames, (0.0, 0.0));
         self.summary.push_str(&report.text(cx.refresh_hz, &present, (inspector.update_max_us, gpu.prepare_max_us)));
-        self.judge(cx, &report, script);
+        self.judge(cx, &report);
         if let Some(dir) = cx.out_dir {
-            write_csvs(dir, &samples, &frames, &injected_ns);
+            write_csvs(dir, &samples, &frames, pushed);
         }
-        match cx.out_dir {
-            Some(dir) => {
-                self.phase = Phase_::Capturing;
-                Step::Capture(dir.join("screenshot.png"))
-            }
-            None => {
-                self.phase = Phase_::Done(i32::from(self.failures > 0));
-                Step::Continue
-            }
-        }
+        self.finish(cx)
     }
 
-    fn judge(&mut self, cx: &Context, report: &Report, script: &Script) {
-        let expected = script.steps.len() as f64;
-        let counters = cx.counters.expect("the source is attached");
+    fn judge(&mut self, cx: &Context, report: &Report) {
         let inspector = cx.core.inspector();
-        // Hover reports are partly the system's own and, injected with a millisecond clock and whole-pixel positions, sometimes
-        // identical; the samples in contact are the ones a stroke is made of.
-        self.check("A2 count of samples in contact", report.delivered_contact == report.injected_contact, format!("{} delivered of {} injected", report.delivered_contact, report.injected_contact));
-        self.check("A2 count of all samples within 2", (report.delivered as f64 - expected).abs() <= 2.0, format!("{} delivered of {} injected", report.delivered, report.injected));
+        self.check("A2 every sample arrives", report.delivered == report.injected, format!("{} delivered of {} pushed", report.delivered, report.injected));
         self.check("A2 no duplicates", report.duplicates == 0, report.duplicates);
         self.check("A2 monotonic", report.monotonic, report.monotonic);
-        if self.test.kind == TestKind::Standard {
-            self.check("A2 median gap 4.17 +/- 0.3 ms", (report.median_gap_ms - 1000.0 / self.test.rate_hz).abs() <= 0.3, format!("{:.3} ms", report.median_gap_ms));
-        } else {
-            self.check("A2 history recovered samples", report.history_samples > 0, format!("{} flagged", report.history_samples));
-        }
         self.check("A1 fields compared", report.aligned, report.aligned);
         if report.aligned {
             self.check("A1 tool, barrel, phase", report.tool_mismatches + report.barrel_mismatches + report.phase_mismatches == 0, format!("{}/{}/{} mismatches", report.tool_mismatches, report.barrel_mismatches, report.phase_mismatches));
-            self.check("A1 tilt within 1 deg", report.max_tilt_error <= 1.0, format!("max {:.1}", report.max_tilt_error));
-            self.check("A1 pressure within 1/1024", report.max_pressure_error <= 1.0, format!("max {:.1}/1024", report.max_pressure_error));
-            self.check("A3 position within 0.5 px", report.max_position_error <= 0.5, format!("max {:.2} px", report.max_position_error));
+            self.check("A1 tilt and pressure exact", report.max_tilt_error == 0.0 && report.max_pressure_error == 0.0, format!("tilt {:.1}, pressure {:.1}/1024", report.max_tilt_error, report.max_pressure_error));
+            self.check("A3 position exact", report.max_position_error <= 0.5, format!("max {:.2} px", report.max_position_error));
         }
-        self.check("A7 no mouse stroke from a pen", inspector.mouse_contact_samples == 0, format!("{} mouse strokes ({} hover samples from the system), {} promoted mouse messages ignored", inspector.mouse_contact_samples, inspector.mouse_samples, counters.promoted_mouse_messages.load(Relaxed)));
-        self.check("A7 promotion reaches the toolkit", counters.promoted_mouse_messages.load(Relaxed) > 0, counters.promoted_mouse_messages.load(Relaxed));
-        self.check("A5 update slice under 4 ms", inspector.update_max_us < 4000 || self.test.kind == TestKind::Blocked, format!("{} us", inspector.update_max_us));
-        self.check("A5 prepare slice under 4 ms", cx.core.gpu_stats().prepare_max_us < 4000, format!("{} us", cx.core.gpu_stats().prepare_max_us));
+        self.check("queue never shed", inspector.queue.dropped_moves + inspector.queue.dropped_hover + inspector.queue.refused_downs == 0, format!("{:?}", inspector.queue));
+        // The blocked test holds the interface thread on purpose; its own slices are the point of it.
+        if self.test.kind == TestKind::Standard {
+            self.check("A5 update slice under 4 ms", inspector.update_max_us < 4000, format!("{} us", inspector.update_max_us));
+            self.check("A5 prepare slice under 4 ms", cx.core.gpu_stats().prepare_max_us < 4000, format!("{} us", cx.core.gpu_stats().prepare_max_us));
+        }
     }
 
-    fn behaviour_step(&mut self, cx: &Context) -> Step {
-        let pad = cx.core.gpu_stats().pad_px;
-        let counters = cx.counters.expect("the source is attached");
-        let inspector = cx.core.inspector();
-        let state = self.behaviour.get_or_insert(Behaviour { step: 0, hover_before: cx.hover_enters, palette_before: inspector.palette_opens, menus_before: counters.context_menus.load(Relaxed), strokes_before: inspector.strokes, marks: Vec::new() });
-        // The script of the current step, or the verdict of the previous one once its injection has finished.
-        if matches!(self.phase, Phase_::Injecting { .. }) {
-            return Step::Continue;
-        }
-        let at = |t: u64, x: f64, y: f64, phase: Phase, barrel: bool, pressure: u32| ScriptStep { t_ns: t, x, y, tool: Tool::Pen, phase, raw_pressure: pressure, tilt_x: 0, tilt_y: 0, barrel, modifiers: styk_services::input::Modifiers::NONE };
-        let period = 1_000_000_000u64 / self.test.rate_hz as u64;
-        if state.step == 3 || state.step == 4 {
-            // A finger alone draws once the setting says so; a finger within 700 ms of the pen does not.
-            state.marks.push((inspector.strokes, inspector.touch_samples));
-            state.step += 1;
-            let alone = state.step == 4;
-            if alone {
-                cx.core.set_switches(Switches { finger_draws: true, ..cx.core.switches() });
+    /// The pad's gestures from scripted samples, one script after another.
+    fn behaviour(&mut self, cx: &Context) -> Step {
+        let Phase_::Behaviour { thread, frames } = &mut self.phase else { unreachable!("the phase is Behaviour") };
+        *frames += 1;
+        if let Some(handle) = thread {
+            if !handle.is_finished() || *frames < 40 {
+                return Step::Continue;
             }
-            let thread = self.spawn_finger(cx.client_origin, (pad.0 as f64 / 2.0, pad.1 as f64 / 2.0), !alone);
-            self.phase = Phase_::Injecting { thread, script: Script { pointer: 0, steps: Vec::new() }, blocks_done: 0, frames: 0 };
+            if let Some(handle) = thread.take() {
+                let _ = handle.join();
+            }
+        } else if *frames < 5 {
             return Step::Continue;
         }
-        let script = match state.step {
+        *frames = 0;
+        let pad = cx.core.gpu_stats().pad_px;
+        let inspector = cx.core.inspector();
+        self.marks.push((inspector.strokes, inspector.touch_samples, inspector.palette_opens));
+        let period = 1_000_000_000u64 / self.test.rate_hz as u64;
+        let (mid_x, mid_y) = (pad.0 as f64 / 2.0, pad.1 as f64 / 2.0);
+        let at = |i: u64, x: f64, y: f64, tool, phase, pressure, barrel| step_of(i * period, x, y, tool, phase, pressure, barrel);
+        let contact = |i: u64| if i == 0 { Phase::Down } else if i == 29 { Phase::Up } else { Phase::Move };
+        let script = match self.step {
             0 => {
-                // Hover from the pad over the toolkit's hover box in the panel.
-                let steps = (0..60).map(|i| at(i * period, pad.0 as f64 / 2.0 + (i as f64 / 59.0) * (pad.0 as f64 / 2.0 + 100.0), 40.0 + 0.0 * i as f64, Phase::Hover, false, 0)).collect();
+                // The barrel button pressed while hovering over the pad.
+                let steps = (0..40).map(|i| at(i, mid_x, mid_y, Tool::Pen, Phase::Hover, 0, (10..30).contains(&i))).collect();
                 Script { pointer: 1, steps }
             }
             1 => {
-                // The barrel button pressed while hovering over the pad.
-                let steps = (0..40).map(|i| at(i * period, pad.0 as f64 / 2.0, pad.1 as f64 / 2.0, Phase::Hover, (10..30).contains(&i), 0)).collect();
+                // A pen press that begins over a control, in the panel beside the pad, and drags back over the pad.
+                let steps = (0..30).map(|i| at(i, pad.0 as f64 + 60.0 - i as f64 * 8.0, 40.0, Tool::Pen, contact(i), 600, false)).collect();
                 Script { pointer: 1, steps }
             }
             2 => {
-                // A stationary press for 1.5 seconds.
-                let held = (1.5 * self.test.rate_hz) as u64;
-                let mut steps = vec![at(0, pad.0 as f64 / 3.0, pad.1 as f64 / 3.0, Phase::Down, false, 600)];
-                steps.extend((1..held).map(|i| at(i * period, pad.0 as f64 / 3.0, pad.1 as f64 / 3.0, Phase::Move, false, 600)));
-                steps.push(at(held * period, pad.0 as f64 / 3.0, pad.1 as f64 / 3.0, Phase::Up, false, 0));
-                Script { pointer: 1, steps }
+                // A finger alone, once the setting says a finger draws; the pen was last used long ago.
+                cx.core.set_switches(Switches { finger_draws: true, ..cx.core.switches() });
+                std::thread::sleep(Duration::from_millis(800));
+                let steps = (0..30).map(|i| at(i, mid_x + i as f64 * 3.0, mid_y, Tool::Touch, contact(i), 512, false)).collect();
+                Script { pointer: 9, steps }
+            }
+            3 => {
+                // A finger within 700 ms of the pen: the pen hovers, then the finger presses.
+                let hover: Vec<ScriptStep> = (0..4).map(|i| at(i, mid_x - 40.0, mid_y - 40.0, Tool::Pen, Phase::Hover, 0, false)).collect();
+                let _ = feed(cx.core.clone(), Script { pointer: 7, steps: hover }).join();
+                let steps = (0..30).map(|i| at(i, mid_x + i as f64 * 3.0, mid_y + 50.0, Tool::Touch, contact(i), 512, false)).collect();
+                Script { pointer: 9, steps }
             }
             _ => {
-                state.marks.push((inspector.strokes, inspector.touch_samples));
-                let marks = state.marks.clone();
-                let enters = cx.hover_enters - state.hover_before;
-                let palette = inspector.palette_opens - state.palette_before;
-                let menus = counters.context_menus.load(Relaxed) - state.menus_before;
-                // Strokes the pen made, up to the moment the finger steps began.
-                let strokes = marks[0].0 - state.strokes_before;
-                self.check("A7 pen hover reaches a toolkit widget", enters >= 1, format!("{enters} enter events"));
-                self.check("A7 barrel press opens the palette once", palette == 1, format!("{palette} palette actions"));
-                self.check("A7 a finger alone draws when the setting says so", marks[1].0 > marks[0].0 && marks[1].1 > marks[0].1, format!("{} strokes, {} touch samples", marks[1].0 - marks[0].0, marks[1].1 - marks[0].1));
-                self.check("A7 a finger within 700 ms of the pen is ignored", marks[2].0 == marks[1].0 && marks[2].1 > marks[1].1, format!("{} strokes, {} touch samples", marks[2].0 - marks[1].0, marks[2].1 - marks[1].1));
-                self.check("A7 a 1.5 s stationary press raises no menu", menus == 0 && strokes >= 1, format!("{menus} context menus, {strokes} strokes"));
-                self.phase = Phase_::Capturing;
-                return match cx.out_dir {
-                    Some(dir) => Step::Capture(dir.join("screenshot.png")),
-                    None => {
-                        self.phase = Phase_::Done(i32::from(self.failures > 0));
-                        Step::Continue
-                    }
-                };
+                let d = |i: usize| (self.marks[i + 1].0 - self.marks[i].0, self.marks[i + 1].1 - self.marks[i].1, self.marks[i + 1].2 - self.marks[i].2);
+                let (_, _, palette) = d(0);
+                let (outside_strokes, ..) = d(1);
+                let (finger_strokes, finger_touch, _) = d(2);
+                let (palm_strokes, palm_touch, _) = d(3);
+                self.check("A7 the barrel press over the pad opens the palette once", palette == 1, format!("{palette} palette actions"));
+                self.check("A7 a press that begins on a control starts no stroke", outside_strokes == 0, format!("{outside_strokes} strokes"));
+                self.check("A7 a finger alone draws when the setting says so", finger_strokes >= 1 && finger_touch > 0, format!("{finger_strokes} strokes, {finger_touch} touch samples"));
+                self.check("A7 a finger within 700 ms of the pen is ignored", palm_strokes == 0 && palm_touch > 0, format!("{palm_strokes} strokes, {palm_touch} touch samples"));
+                return self.finish(cx);
             }
         };
-        // The verdicts are taken after every injection has been seen by the pad: a few frames after the thread ends.
-        state.step += 1;
-        let thread = self.spawn_injection(script.clone(), cx.client_origin);
-        self.phase = Phase_::Injecting { thread, script, blocks_done: 0, frames: 0 };
+        self.step += 1;
+        if let Phase_::Behaviour { thread, .. } = &mut self.phase {
+            *thread = Some(feed(cx.core.clone(), script));
+        }
         Step::Continue
     }
 
@@ -419,75 +356,128 @@ impl Runner {
         core.set_brush(brush);
         core.set_view(View { zoom: 64.0, pan: (0.0, 0.0) });
         core.set_switches(Switches { mirror_x: true, ..core.switches() });
+        self.reset_maxima(cx);
+        core.set_recording(true);
+        Self::push_stroke(core, 1, &[(100.0, 100.0), (900.0, 100.0), (100.0, 400.0), (900.0, 400.0)]);
+        self.phase = Phase_::Stress { frames: 0, stage: 0 };
+        Step::Continue
+    }
+
+    fn push_stroke(core: &Arc<PadCore>, pointer: u32, points: &[(f64, f64)]) {
         let now = core.now_ns();
-        let sample = |i: u64, x: f64, y: f64, phase: Phase| {
-            let mut s = styk_services::input::PenSample::at(now + i * 4_000_000, 1, Tool::Pen, x, y);
-            s.phase = phase;
+        for (i, &(x, y)) in points.iter().enumerate() {
+            let mut s = PenSample::at(now + i as u64 * 4_000_000, pointer, Tool::Pen, x, y);
+            s.phase = if i == 0 { Phase::Down } else if i + 1 == points.len() { Phase::Up } else { Phase::Move };
+            s.buttons = if s.phase == Phase::Up { PenButtons::NONE } else { PenButtons::TIP };
             s.pressure = 0.8;
             s.raw_pressure = 819;
             s.pressure_max = 1024;
-            s.valid = styk_services::input::Valid::PRESSURE;
-            s
-        };
-        let started = std::time::Instant::now();
-        // A coordinate gap of 100,000 window pixels at 64x is 1,500 cel pixels; the second gap is the huge one at 1x below.
-        for (i, (x, y, phase)) in [(100.0, 100.0, Phase::Down), (900.0, 100.0, Phase::Move), (100.0, 400.0, Phase::Move), (900.0, 400.0, Phase::Up)].into_iter().enumerate() {
-            core.queue.push(InputEvent::Sample(sample(i as u64, x, y, phase)));
+            s.valid = Valid::PRESSURE;
+            core.queue.push(InputEvent::Sample(s));
         }
-        let pushed = started.elapsed();
-        self.check("A5 queueing the stress input", pushed.as_millis() < 4, format!("{:?}", pushed));
-        core.set_view(View { zoom: 1.0, pan: (0.0, 0.0) });
-        // One coordinate gap of 200,000 pixels with a 2 pixel brush: some 800,000 dabs from a single sample.
-        let huge = |i: u64, x: f64, phase: Phase| sample(10 + i, x, 200.0, phase);
-        core.queue.push(InputEvent::Sample(huge(0, 10.0, Phase::Down)));
-        core.queue.push(InputEvent::Sample(huge(1, 200_000.0, Phase::Move)));
-        core.queue.push(InputEvent::Sample(huge(2, 200_000.0, Phase::Up)));
-        core.set_recording(true);
-        self.phase = Phase_::Stress { frames: 0 };
-        Step::Continue
     }
 
-    fn stress_wait(&mut self, cx: &Context, frames: u32) -> Step {
-        let inspector = cx.core.inspector();
-        let limit = (cx.refresh_hz.max(60.0) * 60.0) as u32;
-        if inspector.finished_strokes < 2 && frames < limit {
-            self.phase = Phase_::Stress { frames: frames + 1 };
+    fn stress_wait(&mut self, cx: &Context, frames: u32, stage: u32) -> Step {
+        let core = cx.core;
+        let inspector = core.inspector();
+        if stage == 0 {
+            // The first stroke is the zoomed, mirrored one. Its mapping is captured when the pad reads its press; only then
+            // may the view change for the second stroke (a view changed earlier would apply to both).
+            if inspector.strokes < 1 {
+                self.phase = Phase_::Stress { frames: frames + 1, stage: 0 };
+                return Step::Continue;
+            }
+            core.set_view(View { zoom: 1.0, pan: (0.0, 0.0) });
+            // One coordinate gap of 200,000 pixels with a 2 pixel brush: some 800,000 dabs from a single sample.
+            Self::push_stroke(core, 2, &[(10.0, 200.0), (200_000.0, 200.0), (200_000.0, 200.0)]);
+            self.phase = Phase_::Stress { frames: frames + 1, stage: 1 };
             return Step::Continue;
         }
-        cx.core.set_recording(false);
-        let (_, rows) = cx.core.take_recording();
-        let gpu = cx.core.gpu_stats();
-        let mut periods: Vec<f64> = rows.windows(2).map(|p| (p[1].prepare_start_ns.saturating_sub(p[0].prepare_start_ns)) as f64 / 1e6).collect();
+        let limit = (cx.refresh_hz.max(60.0) * 90.0) as u32;
+        if inspector.finished_strokes < 2 && frames < limit {
+            self.phase = Phase_::Stress { frames: frames + 1, stage: 1 };
+            return Step::Continue;
+        }
+        core.set_recording(false);
+        let (_, rows) = core.take_recording();
+        let gpu = core.gpu_stats();
+        let mut periods: Vec<f64> = rows.windows(2).map(|p| p[1].prepare_start_ns.saturating_sub(p[0].prepare_start_ns) as f64 / 1e6).collect();
         periods.sort_by(|a, b| a.total_cmp(b));
         let median = periods.get(periods.len() / 2).copied().unwrap_or(0.0);
         let worst = periods.last().copied().unwrap_or(0.0);
-        self.check("stress strokes finished", inspector.finished_strokes >= 2, format!("{} finished, {} failed", inspector.finished_strokes, inspector.worker_errors.len()));
+        self.check("stress strokes finished", inspector.finished_strokes >= 2, format!("{} finished, {} refusals, {} worker errors", inspector.finished_strokes, inspector.worker_refusals, inspector.worker_errors.len()));
         self.check("A5 update slice under 4 ms", inspector.update_max_us < 4000, format!("{} us", inspector.update_max_us));
         self.check("A5 prepare slice under 4 ms", gpu.prepare_max_us < 4000, format!("{} us", gpu.prepare_max_us));
         self.check("A5 no frame skipped while the worker works", worst < median * 2.5 + 2.0, format!("median frame {median:.2} ms, worst {worst:.2} ms over {} frames", rows.len()));
-        let _ = writeln!(self.summary, "worker: longest dab generation {:.1} ms, longest raster {:.1} ms (display {:.0} Hz)", inspector.max_generate_ms, inspector.max_raster_ms, cx.refresh_hz);
+        let _ = writeln!(self.summary, "worker: longest dab generation {:.1} ms, longest raster {:.1} ms; display {:.0} Hz", inspector.max_generate_ms, inspector.max_raster_ms, cx.refresh_hz);
+        let _ = writeln!(self.summary, "tiles: resident {}, evicted {}, deferred {}, dropped batches {}, fetched {}", gpu.tiles_resident, gpu.sync.evicted, gpu.sync.deferred, gpu.sync.dropped_batches, gpu.sync.fetched);
+        self.long_frames(&rows, median);
         self.phase = Phase_::Done(i32::from(self.failures > 0));
         Step::Continue
     }
+
+    /// What the long frames were: for each frame whose gap to the previous is over twice the median, where the time went.
+    fn long_frames(&mut self, rows: &[FrameRow], median_ms: f64) {
+        let mut long = 0;
+        let (mut in_prepare, mut in_update, mut in_view, mut elsewhere) = (0, 0, 0, 0);
+        for pair in rows.windows(2) {
+            let gap_ms = pair[1].prepare_start_ns.saturating_sub(pair[0].prepare_start_ns) as f64 / 1e6;
+            if gap_ms <= median_ms * 2.0 {
+                continue;
+            }
+            long += 1;
+            // Work the interface thread did in the frame that ended the gap, by part, against the gap itself.
+            let row = &pair[1];
+            let prepare_ms = (row.prepare_end_ns - row.prepare_start_ns) as f64 / 1e6;
+            let (update_ms, view_ms) = (row.update_us as f64 / 1e3, row.view_us as f64 / 1e3);
+            let explained = prepare_ms.max(update_ms).max(view_ms);
+            if explained < gap_ms * 0.5 {
+                elsewhere += 1;
+            } else if prepare_ms >= update_ms && prepare_ms >= view_ms {
+                in_prepare += 1;
+            } else if update_ms >= view_ms {
+                in_update += 1;
+            } else {
+                in_view += 1;
+            }
+        }
+        let _ = writeln!(self.summary, "long frames (gap over twice the median): {long}: mostly in prepare {in_prepare}, in the pad update {in_update}, in the lab view {in_view}, outside all three (draw, GPU, present, other threads) {elsewhere}");
+        let mut worst: Vec<&FrameRow> = rows.iter().collect();
+        worst.sort_by_key(|r| std::cmp::Reverse(r.prepare_end_ns - r.prepare_start_ns));
+        for row in worst.iter().take(3) {
+            let _ = writeln!(
+                self.summary,
+                "slowest prepare: {:.2} ms = replies {:.2} + install {:.2} + preview {:.2} ms, {} tiles written, {} wet dabs; update {} us, view {} us",
+                (row.prepare_end_ns - row.prepare_start_ns) as f64 / 1e6,
+                row.replies_us as f64 / 1e3,
+                row.install_us as f64 / 1e3,
+                row.wet_us as f64 / 1e3,
+                row.tiles_uploaded,
+                row.wet_dabs,
+                row.update_us,
+                row.view_us
+            );
+        }
+    }
 }
 
-fn write_csvs(dir: &Path, samples: &[styk_ui::ink_pad::SampleRow], frames: &[styk_ui::ink_pad::FrameRow], injected: &[u64]) {
+fn write_csvs(dir: &Path, samples: &[styk_ui::ink_pad::SampleRow], frames: &[FrameRow], pushed: &[u64]) {
     let mut out = String::from("time_ns,pointer,tool,phase,x,y,pressure,raw_pressure,tilt_x,tilt_y,buttons,flags,modifiers,received_ns\n");
     for r in samples {
         let s = &r.sample;
         let _ = writeln!(out, "{},{},{:?},{:?},{},{},{},{},{},{},{},{},{},{}", s.time_ns, s.pointer, s.tool, s.phase, s.x, s.y, s.pressure, s.raw_pressure, s.tilt_x, s.tilt_y, s.buttons.0, s.flags.0, s.modifiers.0, r.received_ns);
     }
     let _ = std::fs::write(dir.join("samples.csv"), out);
-    let mut out = String::from("frame,prepare_start_ns,prepare_end_ns,newest_wet_ns,newest_exact_ns,wet_dabs,tiles_uploaded\n");
+    let mut out = String::from("frame,prepare_start_ns,prepare_end_ns,newest_wet_ns,newest_exact_ns,wet_dabs,tiles_uploaded,replies_us,install_us,wet_us,view_us,update_us\n");
     for f in frames {
-        let _ = writeln!(out, "{},{},{},{},{},{},{}", f.frame, f.prepare_start_ns, f.prepare_end_ns, f.newest_wet_ns, f.newest_exact_ns, f.wet_dabs, f.tiles_uploaded);
+        let _ = writeln!(out, "{},{},{},{},{},{},{},{},{},{},{},{}", f.frame, f.prepare_start_ns, f.prepare_end_ns, f.newest_wet_ns, f.newest_exact_ns, f.wet_dabs, f.tiles_uploaded, f.replies_us, f.install_us, f.wet_us, f.view_us, f.update_us);
     }
     let _ = std::fs::write(dir.join("frames.csv"), out);
-    let mut out = String::from("step,inject_ns\n");
-    for (i, t) in injected.iter().enumerate() {
+    let mut out = String::from("step,pushed_ns\n");
+    for (i, t) in pushed.iter().enumerate() {
         let _ = writeln!(out, "{i},{t}");
     }
-    let _ = std::fs::write(dir.join("inject.csv"), out);
+    let _ = std::fs::write(dir.join("pushed.csv"), out);
 }
 
 #[cfg(test)]

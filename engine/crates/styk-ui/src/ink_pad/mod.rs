@@ -43,6 +43,9 @@ pub struct PadState {
     brush_json: Option<Arc<str>>,
     last_time: Option<u64>,
     recent: Vec<(f64, f64, u64)>,
+    /// The stroke in progress, and whether it may be previewed.
+    stroke_id: u64,
+    eligible: bool,
     commands: Vec<StrokeCommand>,
     events: Vec<InputEvent>,
 }
@@ -122,6 +125,8 @@ impl Pad {
             live.raw = Some((x as f32, y as f32, time_ns));
             live.predicted = predicted.flatten();
             live.show = show;
+            live.stroke = state.stroke_id;
+            live.eligible = state.eligible;
         });
     }
 
@@ -152,6 +157,7 @@ impl<Message> shader::Program<Message> for Pad {
         let json = state.brush_json.get_or_insert_with(|| brush.to_json()).clone();
         let switches = self.core.switches();
         let mapping_now = self.mapping(bounds);
+        let scale = self.core.scale() as f64;
         self.core.with_inspector(|inspector| {
             for input in &events {
                 self.note(inspector, state, input, started);
@@ -162,6 +168,7 @@ impl<Message> shader::Program<Message> for Pad {
                     finger: if switches.finger_draws { FingerDraw::Always } else { FingerDraw::Never },
                     mapping: &mapping_now,
                     continue_from: state.input.last_end(),
+                    region: Some((mapping_now.window_origin.0, mapping_now.window_origin.1, mapping_now.window_origin.0 + bounds.width as f64 * scale, mapping_now.window_origin.1 + bounds.height as f64 * scale)),
                 };
                 let before = commands.len();
                 state.input.feed(input, &context, &mut commands);
@@ -174,7 +181,9 @@ impl<Message> shader::Program<Message> for Pad {
                             inspector.strokes += 1;
                             state.mapping = mapping.clone();
                             state.brush_json = Some(brush.to_json());
-                            self.core.with_ledger(|ledger| ledger.stroke_started(*id, brush.wet_eligible(*erase) && switches.wet_ink));
+                            state.stroke_id = *id;
+                            state.eligible = brush.wet_eligible(*erase) && switches.wet_ink;
+                            self.core.with_ledger(|ledger| ledger.stroke_started(*id, state.eligible));
                             self.clear_live(state);
                         }
                         StrokeCommand::Sample { x, y, time_ms, .. } => {
@@ -194,10 +203,24 @@ impl<Message> shader::Program<Message> for Pad {
         });
         // The commands reach the worker in order, after the bookkeeping.
         let json = state.brush_json.clone().unwrap_or(json);
+        let mut refused_stroke = None;
         for command in commands.drain(..) {
-            self.core.worker.command(command, &json);
+            let id = if let StrokeCommand::Sample { id, .. } = &command { Some(*id) } else { None };
+            if !self.core.worker.command(command, &json) {
+                refused_stroke = id;
+            }
         }
-        let busy = state.input.active() || self.core.worker.queued() > 0;
+        // The worker is too far behind to take more of this stroke: it ends here and keeps what it has.
+        if refused_stroke.is_some() {
+            let mut ending = Vec::new();
+            state.input.finish(&mut ending);
+            for command in ending {
+                self.core.worker.command(command, &json);
+            }
+            self.core.with_inspector(|inspector| inspector.worker_refusals += 1);
+        }
+        let gpu = self.core.gpu_stats();
+        let busy = state.input.active() || self.core.worker.queued() > 0 || gpu.replies_left || gpu.batches_waiting > 0;
         let took = (self.core.now_ns() - started) / 1000;
         self.core.with_inspector(|inspector| {
             inspector.update_last_us = took;

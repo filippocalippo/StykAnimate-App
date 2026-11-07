@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 /// The command line's shape, shown with every parse error.
 pub const USAGE: &str = "usage: stykanimate [file] [--automation <script>] [--screenshot <png>] [--size WxH] [--scale <factor>]
-       (developer build) stykanimate --pen-lab [--self-test standard|blocked|behaviour|stress[:seconds]] [--out <folder>] [--inject-on-screen]";
+       (developer build) stykanimate --pen-lab [--self-test standard|blocked|behaviour|stress[:seconds]] [--out <folder>]";
 
 /// What the command line asked for.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -25,8 +25,6 @@ pub struct Launch {
     pub self_test: Option<String>,
     /// Where a self-test writes what it recorded.
     pub out: Option<PathBuf>,
-    /// A self-test window sits (nearly invisible) in the screen's corner, where injected pen input can reach it.
-    pub inject_on_screen: bool,
 }
 
 /// A command line that cannot be run.
@@ -66,7 +64,6 @@ impl Launch {
                     launch.pen_lab = true;
                     launch.self_test = Some(value("--self-test")?);
                 }
-                "--inject-on-screen" => launch.inject_on_screen = true,
                 "--out" => launch.out = Some(PathBuf::from(value("--out")?)),
                 other if other.starts_with("--") => return Err(LaunchError(format!("unknown option {other}"))),
                 _ => {

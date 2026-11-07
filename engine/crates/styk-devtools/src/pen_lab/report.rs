@@ -51,10 +51,10 @@ pub struct Report {
     pub max_tilt_error: f64,
     pub max_pressure_error: f64,
     pub max_position_error: f64,
-    /// Injection to the end of the `prepare` of the first frame showing the sample, milliseconds.
+    /// The push of the sample to the end of the `prepare` of the first frame showing it, milliseconds.
     pub preview_ms: Percentiles,
     pub exact_ms: Percentiles,
-    /// Injection to the sample's being read from the queue.
+    /// The push to the sample's being read from the queue.
     pub delivery_ms: Percentiles,
     pub frame_period_ms: f64,
     pub frames: usize,
@@ -186,9 +186,9 @@ impl Report {
             let _ = writeln!(out, "fields: not compared (contact runs differ in length, or re-delivered samples)");
         }
         let period = if self.frame_period_ms > 0.0 { self.frame_period_ms } else { 1000.0 / refresh_hz.max(1.0) };
-        row(&mut out, "injection -> queue read", &self.delivery_ms, period);
-        row(&mut out, "injection -> preview frame", &self.preview_ms, period);
-        row(&mut out, "injection -> exact tiles frame", &self.exact_ms, period);
+        row(&mut out, "push -> queue read", &self.delivery_ms, period);
+        row(&mut out, "push -> preview frame", &self.preview_ms, period);
+        row(&mut out, "push -> exact tiles frame", &self.exact_ms, period);
         let _ = writeln!(out, "interface-thread slices: update max {} us, prepare max {} us", slices_us.0, slices_us.1);
         out
     }

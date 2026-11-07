@@ -5,7 +5,9 @@
 //! the newest sample's fields, the sample rate, the history and drop counters, the worker's batch times and the frame
 //! and slice times. It becomes the developer tools' Input panel.
 //!
-//! `self_test` runs a scripted synthetic pen through the whole path and writes what it measured.
+//! `self_test` drives scripted input through the pad's queue from an in-process thread (no system-level injection: decision
+//! N6) and writes what it measured; the operating system's own path (`WM_POINTER`) is covered by the platform crate's tests of
+//! its pure parts and by hand with a tablet.
 
 pub mod report;
 mod self_test;
@@ -32,8 +34,6 @@ pub struct LabOptions {
     pub scale: f32,
     /// The window is created hidden and shown without activation (an unattended run on Windows).
     pub show_after_open: bool,
-    /// The window is made nearly invisible so it can sit on the screen for injected input.
-    pub invisible: bool,
     pub self_test: Option<SelfTest>,
     pub out_dir: Option<PathBuf>,
 }
@@ -43,7 +43,6 @@ pub enum Message {
     Opened(window::Id),
     Attached(Attached),
     Frame,
-    Origin((i32, i32), bool),
     Brush(BrushChange),
     Switch(SwitchChange),
     Clear,
@@ -57,7 +56,7 @@ pub enum Message {
 
 /// The result of hooking the window, handed from the window closure (which runs on the interface thread) to the lab.
 #[derive(Clone)]
-pub struct Attached(Arc<Mutex<Option<Result<(Arc<InputCounters>, f64, (i32, i32)), String>>>>);
+pub struct Attached(Arc<Mutex<Option<Result<(Arc<InputCounters>, f64), String>>>>);
 
 thread_local! {
     /// The source stays on the interface thread: it is dropped there, and nothing else touches it.
@@ -91,16 +90,12 @@ struct Lab {
     counters: Option<Arc<InputCounters>>,
     window: Option<window::Id>,
     refresh_hz: f64,
-    client_origin: (i32, i32),
     show_after_open: bool,
-    invisible: bool,
     out_dir: Option<PathBuf>,
     test: Option<self_test::Runner>,
     hover_target: bool,
     hover_enters: u64,
     frames: u64,
-    /// Nothing covers the window: injected input will reach it.
-    window_clear: bool,
     error: Option<String>,
     exit_code: Arc<Mutex<i32>>,
 }
@@ -115,15 +110,12 @@ impl Lab {
             counters: None,
             window: None,
             refresh_hz: 0.0,
-            client_origin: (0, 0),
             show_after_open: options.show_after_open,
-            invisible: options.invisible,
             out_dir: options.out_dir.clone(),
             test: options.self_test.clone().map(self_test::Runner::new),
             hover_target: false,
             hover_enters: 0,
             frames: 0,
-            window_clear: false,
             error: None,
             exit_code,
         }
@@ -135,7 +127,6 @@ impl Lab {
                 self.window = Some(id);
                 let queue = self.core.queue.clone();
                 let show_after_open = self.show_after_open;
-                let invisible = self.invisible;
                 let attached = Attached(Arc::new(Mutex::new(None)));
                 let slot = attached.clone();
                 let show = styk_platform::window::show_without_activation;
@@ -143,14 +134,11 @@ impl Lab {
                     if show_after_open {
                         let _ = show(window);
                     }
-                    if invisible {
-                        let _ = styk_platform::windows::inject::make_nearly_invisible(window, 2);
-                    }
                     let result = WindowsInput::attach(window, queue)
                         .map(|source| {
                             let counters = source.counters();
                             SOURCE.with(|cell| *cell.borrow_mut() = Some(source));
-                            (counters, refresh_hz(window), styk_platform::windows::input::client_origin(window).unwrap_or((0, 0)))
+                            (counters, refresh_hz(window))
                         })
                         .map_err(|e| e.to_string());
                     *slot.0.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
@@ -159,41 +147,26 @@ impl Lab {
             }
             Message::Attached(slot) => {
                 match slot.0.lock().unwrap_or_else(|p| p.into_inner()).take() {
-                    Some(Ok((counters, hz, origin))) => {
+                    Some(Ok((counters, hz))) => {
                         self.counters = Some(counters);
                         self.refresh_hz = hz;
-                        self.client_origin = origin;
                     }
                     Some(Err(error)) => self.error = Some(error),
                     None => {}
                 }
                 Task::none()
             }
-            Message::Origin(origin, clear) => {
-                self.client_origin = origin;
-                self.window_clear = clear;
-                Task::none()
-            }
             Message::Frame => {
                 self.frames += 1;
-                // The window may still be moving into place when it attaches: keep the client origin current.
-                let refresh = match (self.window, self.frames % 15 == 0) {
-                    (Some(id), true) => window::run(id, |w| Message::Origin(styk_platform::windows::input::client_origin(w).unwrap_or((0, 0)), styk_platform::windows::inject::covers_client_area(w))),
-                    _ => Task::none(),
-                };
-                // The window's client origin moves with the window; ask again each second or so.
-                let Some(runner) = self.test.as_mut() else { return refresh };
+                let Some(runner) = self.test.as_mut() else { return Task::none() };
                 let context = self_test::Context {
                     core: &self.core,
                     counters: self.counters.as_ref(),
                     refresh_hz: self.refresh_hz,
                     out_dir: self.out_dir.as_deref(),
-                    hover_enters: self.hover_enters,
-                    client_origin: self.client_origin,
-                    window_clear: self.window_clear,
                 };
                 match runner.step(&context) {
-                    self_test::Step::Continue => refresh,
+                    self_test::Step::Continue => Task::none(),
                     self_test::Step::Capture(path) => {
                         let id = self.window;
                         match id {
@@ -273,6 +246,7 @@ impl Lab {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        let built = self.core.now_ns();
         let inspector = self.core.inspector();
         let gpu = self.core.gpu_stats();
         let brush = self.core.brush();
@@ -306,7 +280,7 @@ impl Lab {
             .push(line(format!("strokes {}  interrupted {}  palette {}  pick {}  resize {}", inspector.strokes, inspector.interrupts, inspector.palette_opens, inspector.color_picks, inspector.resizes)))
             .push(line(String::new()))
             .push(line(format!("worker queue {}  generate {:.2} ms (max {:.2})  raster {:.2} ms (max {:.2})", inspector.worker_queued, inspector.last_generate_ms, inspector.max_generate_ms, inspector.last_raster_ms, inspector.max_raster_ms)))
-            .push(line(format!("tiles resident {}  uploaded {}  waiting {}  atlas full {}", gpu.tiles_resident, gpu.tiles_uploaded, gpu.upload_waiting, gpu.atlas_full)))
+            .push(line(format!("tiles resident {}  uploaded {}  batches waiting {}  evicted {}  deferred {}  dropped {}", gpu.tiles_resident, gpu.tiles_uploaded, gpu.batches_waiting, gpu.sync.evicted, gpu.sync.deferred, gpu.sync.dropped_batches)))
             .push(line(format!("wet dabs {}  batches retired {} by tiles {} by age  dropped {}  stale {}", gpu.wet_instances, gpu.ledger.retired_by_tiles, gpu.ledger.retired_by_age, gpu.ledger.dropped, gpu.ledger.stale)))
             .push(line(format!("frames {}  prepare {} us (max {})  update {} us (max {})", gpu.frames, gpu.prepare_last_us, gpu.prepare_max_us, inspector.update_last_us, inspector.update_max_us)))
             .push(line(format!("display {:.0} Hz  recording {}", self.refresh_hz, self.core.recording())));
@@ -350,7 +324,9 @@ impl Lab {
         ]
         .spacing(8);
         let panel = container(column![controls, lines].spacing(14)).padding(12).width(Length::Fixed(PANEL_WIDTH)).height(Length::Fill);
-        row![ink_pad(self.core.clone()), panel].boxed()
+        let element = row![ink_pad(self.core.clone()), panel].boxed();
+        self.core.set_view_us((self.core.now_ns() - built) / 1000);
+        element
     }
 
     fn subscription(&self) -> Subscription<Message> {

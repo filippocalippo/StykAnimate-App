@@ -8,5 +8,6 @@
 
 pub mod mapping;
 pub mod stroke_input;
+pub mod tile_sync;
 pub mod wet;
 pub mod worker;

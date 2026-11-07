@@ -89,8 +89,12 @@ impl Default for Switches {
 pub struct Live {
     pub raw: Option<(f32, f32, u64)>,
     pub predicted: Option<(f32, f32)>,
-    /// Draw the raw point (the stabiliser is off) and for which stroke.
+    /// Draw the raw point (the stabiliser is off).
     pub show: bool,
+    /// The stroke the position belongs to, and whether that stroke may be previewed (decided when it began, from its own
+    /// tool: a physical eraser with the brush selected is not previewed as paint).
+    pub stroke: u64,
+    pub eligible: bool,
 }
 
 /// One input sample as the recorder keeps it.
@@ -113,6 +117,13 @@ pub struct FrameRow {
     pub newest_exact_ns: u64,
     pub wet_dabs: u32,
     pub tiles_uploaded: u32,
+    /// Where the `prepare` spent its time, microseconds: taking replies, installing tiles, building the preview.
+    pub replies_us: u32,
+    pub install_us: u32,
+    pub wet_us: u32,
+    /// The application's own view build and the pad's last `update`, microseconds, as of this frame.
+    pub view_us: u32,
+    pub update_us: u32,
 }
 
 /// What the pen lab's inspector shows and the self-test reads.
@@ -136,6 +147,8 @@ pub struct Inspector {
     pub color_picks: u64,
     pub resizes: u64,
     pub limit_errors: u64,
+    /// Strokes ended early because the worker was too far behind to take their samples.
+    pub worker_refusals: u64,
     pub gaps_ns: VecDeque<u64>,
     pub queue: QueueStats,
     pub worker_queued: usize,
@@ -173,13 +186,17 @@ pub struct GpuStats {
     pub frames: u64,
     pub tiles_uploaded: u64,
     pub tiles_resident: usize,
-    pub atlas_full: u64,
+    /// The atlas's counters: see `SyncStats`.
+    pub sync: styk_core::drawing::tile_sync::SyncStats,
+    /// Replies the `prepare` left in the channel for the next frame (its budget ran out first).
+    pub replies_left: bool,
+    /// Batches installed but not yet shown whole (waiting for a slot or the frame's budget).
+    pub batches_waiting: usize,
     pub wet_instances: usize,
     pub wet_overflow: u64,
     pub prepare_last_us: u64,
     pub prepare_max_us: u64,
     pub ledger: LedgerStats,
-    pub upload_waiting: usize,
     /// The pad's size in physical pixels, as the last frame saw it.
     pub pad_px: (f32, f32),
 }
@@ -203,6 +220,8 @@ pub struct PadCore {
     /// Set by Escape or the lab's button: the stroke in progress is discarded.
     discard: AtomicBool,
     frame: AtomicU64,
+    /// How long the application took to build its view last (the lab sets it), for a frame's record.
+    view_us: AtomicU64,
 }
 
 impl std::fmt::Debug for PadCore {
@@ -234,6 +253,7 @@ impl PadCore {
             scale: AtomicU32::new(1.0f32.to_bits()),
             discard: AtomicBool::new(false),
             frame: AtomicU64::new(0),
+            view_us: AtomicU64::new(0),
         })
     }
 
@@ -282,6 +302,14 @@ impl PadCore {
         self.discard.swap(false, Ordering::SeqCst)
     }
 
+    pub fn set_view_us(&self, us: u64) {
+        self.view_us.store(us, Ordering::Relaxed);
+    }
+
+    pub fn view_us(&self) -> u64 {
+        self.view_us.load(Ordering::Relaxed)
+    }
+
     pub fn next_frame(&self) -> u64 {
         self.frame.fetch_add(1, Ordering::Relaxed) + 1
     }
@@ -322,6 +350,11 @@ impl PadCore {
         copy.queue = self.queue.stats();
         copy.worker_queued = self.worker.queued();
         copy
+    }
+
+    /// The pad's last `update` slice, microseconds.
+    pub fn inspector_update_us(&self) -> u64 {
+        lock(&self.inspector).update_last_us
     }
 
     pub fn with_inspector<R>(&self, f: impl FnOnce(&mut Inspector) -> R) -> R {

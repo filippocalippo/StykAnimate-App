@@ -202,6 +202,11 @@ impl StrokeInput {
         }
     }
 
+    /// Ends the gesture in progress and keeps its ink (the worker cannot take more of it).
+    pub fn finish(&mut self, out: &mut Vec<StrokeCommand>) {
+        self.end(out);
+    }
+
     fn end(&mut self, out: &mut Vec<StrokeCommand>) {
         if let Some(active) = self.active.take() {
             match active.gesture {

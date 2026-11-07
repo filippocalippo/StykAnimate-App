@@ -226,13 +226,7 @@ fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
             return ExitCode::from(2);
         }
     }
-    let mut settings = window::settings(launch, strategy);
-    if launch.inject_on_screen {
-        // Injected pen input reaches the window under the pointer: the window sits, all but invisible, in the screen's corner.
-        let (screen_w, screen_h) = styk_platform::windows::inject::primary_screen_size();
-        settings.position = iced_window::Position::Specific(iced::Point::new((screen_w as f32 - settings.size.width).max(0.0), (screen_h as f32 - settings.size.height).max(0.0)));
-    }
-    let options = LabOptions { window: settings, invisible: launch.inject_on_screen, scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test, out_dir: launch.out.clone() };
+    let options = LabOptions { window: window::settings(launch, strategy), scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test, out_dir: launch.out.clone() };
     match pen_lab::run(options) {
         Ok(0) => ExitCode::SUCCESS,
         Ok(code) => ExitCode::from(code.clamp(1, 255) as u8),
