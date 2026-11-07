@@ -8,4 +8,7 @@ publish.workspace = true
 
 [features]
 # Turned on by the app's `devtools` feature only. Without it the macros expand to nothing and the crate has no code.
-enabled = []
+enabled = ["dep:styk-services"]
+
+[dependencies]
+styk-services = { path = "../styk-services", optional = true }

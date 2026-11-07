@@ -3035,6 +3035,9 @@ dependencies = [
 [[package]]
 name = "styk-trace"
 version = "0.1.0"
+dependencies = [
+ "styk-services",
+]
 
 [[package]]
 name = "styk-ui"

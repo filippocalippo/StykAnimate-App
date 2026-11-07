@@ -5,20 +5,67 @@
 //! sequence was even and unchanged around its reads, and skips a slot the writer is in the middle of. No lock is
 //! held by a writer, and after a thread's first event (which registers its ring) a write allocates nothing.
 //!
-//! Call sites are `static` [`Site`]s created by the macros; a site registers itself once, on first use, and events
-//! carry its small integer id, so the ring never holds a pointer.
-//!
+//! Call sites are static and records carry a process-lifetime pointer; no interning lock or allocation.
 //! A ring belongs to its thread: when the thread exits its ring is released (about 128 KiB each), and the thread's
 //! last events move into one archive bounded to [`ARCHIVE_CAPACITY`] records for all finished threads together, so
 //! neither memory nor a snapshot grows with the number of threads a process has ever spawned.
 
-use std::cell::OnceCell;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
+use std::sync::{Arc, Mutex, Weak};
 
 /// Slots per thread: the most recent events a snapshot can show.
 const CAPACITY: usize = 4096;
+pub const MAX_RING_BYTES: usize = 24 * 1024 * 1024;
+pub const MAX_SNAPSHOT_BYTES: usize = 24 * 1024 * 1024;
+const NAME_BYTES: usize = 128;
+pub const MAX_ARCHIVE_BYTES: usize =
+    2 * ARCHIVE_CAPACITY * (std::mem::size_of::<Record>() + NAME_BYTES);
+const RING_BYTES: usize =
+    CAPACITY * std::mem::size_of::<Slot>() + std::mem::size_of::<Ring>() + NAME_BYTES + 32;
+static RING_BUDGET: Budget = Budget::new(MAX_RING_BYTES);
+static DROPPED: AtomicU64 = AtomicU64::new(0);
+pub fn dropped() -> u64 {
+    DROPPED.load(Ordering::Relaxed)
+}
+pub fn ring_bytes() -> usize {
+    RING_BUDGET.used.load(Ordering::Relaxed)
+}
+fn refuse(n: u64) {
+    DROPPED.fetch_add(n, Ordering::Relaxed);
+}
+struct Budget {
+    used: AtomicUsize,
+    limit: usize,
+}
+impl Budget {
+    const fn new(limit: usize) -> Self {
+        Self {
+            used: AtomicUsize::new(0),
+            limit,
+        }
+    }
+    fn reserve(&self, bytes: usize) -> Option<Reservation<'_>> {
+        self.used
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                used.checked_add(bytes).filter(|total| *total <= self.limit)
+            })
+            .ok()?;
+        Some(Reservation {
+            budget: self,
+            bytes,
+        })
+    }
+}
+struct Reservation<'a> {
+    budget: &'a Budget,
+    bytes: usize,
+}
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        self.budget.used.fetch_sub(self.bytes, Ordering::AcqRel);
+    }
+}
 
 /// How many events each thread's ring keeps.
 pub fn capacity() -> usize {
@@ -30,66 +77,31 @@ pub const ARCHIVE_CAPACITY: usize = 4096;
 
 /// How many threads have a ring right now: threads that have recorded and not yet exited.
 pub fn live_threads() -> usize {
-    lock(registry()).len()
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    registry().try_lock().map_or(0, |rings| {
+        rings.iter().filter(|r| r.strong_count() > 0).count()
+    })
 }
 
 /// Nanoseconds since the first event or snapshot of this process: the clock every record uses.
 pub fn now_ns() -> u64 {
-    static START: OnceLock<Instant> = OnceLock::new();
-    START.get_or_init(Instant::now).elapsed().as_nanos() as u64
+    crate::clock::now_ns()
 }
 
-const UNREGISTERED: u32 = u32::MAX;
-
-/// A named place in the code, created by `span!`, `counter!` or `mark!` as a `static`.
+/// A static callsite: records point to it, so there is no dynamic interning allocation or lock.
 pub struct Site {
     name: &'static str,
-    id: AtomicU32,
 }
-
-fn sites() -> &'static Mutex<Vec<&'static str>> {
-    static SITES: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
-    &SITES
-}
-
 impl Site {
-    #[doc(hidden)]
-    pub const fn new(name: &'static str) -> Site {
-        Site { name, id: AtomicU32::new(UNREGISTERED) }
+    pub const fn new(name: &'static str) -> Self {
+        Self { name }
     }
-
-    fn id(&self) -> u32 {
-        let id = self.id.load(Ordering::Relaxed);
-        if id != UNREGISTERED {
-            return id;
-        }
-        let mut names = lock(sites());
-        // Another thread may have registered this site while this one waited for the lock.
-        let id = self.id.load(Ordering::Relaxed);
-        if id != UNREGISTERED {
-            return id;
-        }
-        let id = names.len() as u32;
-        names.push(self.name);
-        self.id.store(id, Ordering::Relaxed);
-        id
-    }
-
-    #[doc(hidden)]
     pub fn counter(&'static self, value: i64) {
-        record(KIND_COUNTER, self.id(), now_ns(), value as u64);
+        record(KIND_COUNTER, self, now_ns(), value as u64);
     }
-
-    #[doc(hidden)]
     pub fn mark(&'static self) {
-        record(KIND_MARK, self.id(), now_ns(), 0);
+        record(KIND_MARK, self, now_ns(), 0);
     }
 }
-
 /// A span in progress: it is recorded, with its duration, when it drops.
 #[must_use = "a span ends when its guard drops; bind it with `let _span = span!(..)`"]
 pub struct Span {
@@ -100,14 +112,22 @@ pub struct Span {
 impl Span {
     #[doc(hidden)]
     pub fn enter(site: &'static Site) -> Span {
-        Span { site, start_ns: now_ns() }
+        Span {
+            site,
+            start_ns: now_ns(),
+        }
     }
 }
 
 impl Drop for Span {
     fn drop(&mut self) {
         let end = now_ns();
-        record(KIND_SPAN, self.site.id(), self.start_ns, end.saturating_sub(self.start_ns));
+        record(
+            KIND_SPAN,
+            self.site,
+            self.start_ns,
+            end.saturating_sub(self.start_ns),
+        );
     }
 }
 
@@ -121,6 +141,8 @@ struct Slot {
     sequence: AtomicU64,
     /// The kind in the top two bits, the site id below.
     kind_site: AtomicU32,
+    site: AtomicPtr<Site>,
+    event: AtomicU64,
     /// The start (span, counter, mark), in nanoseconds.
     start: AtomicU64,
     /// The duration (span) or the value (counter).
@@ -128,17 +150,18 @@ struct Slot {
 }
 
 struct Ring {
-    thread_name: String,
+    thread_name: Arc<str>,
     /// The order in which threads first recorded, for the life of the process.
     thread_index: u32,
     /// How many events this thread has recorded in all.
     written: AtomicUsize,
     slots: Box<[Slot]>,
+    _reservation: Reservation<'static>,
 }
 
 /// The rings of running threads.
-fn registry() -> &'static Mutex<Vec<Arc<Ring>>> {
-    static RINGS: Mutex<Vec<Arc<Ring>>> = Mutex::new(Vec::new());
+fn registry() -> &'static Mutex<Vec<Weak<Ring>>> {
+    static RINGS: Mutex<Vec<Weak<Ring>>> = Mutex::new(Vec::new());
     &RINGS
 }
 
@@ -153,49 +176,90 @@ struct Local(Arc<Ring>);
 
 impl Drop for Local {
     fn drop(&mut self) {
-        let names: Vec<&'static str> = lock(sites()).clone();
-        let last = read(&self.0, &names);
-        lock(registry()).retain(|ring| !Arc::ptr_eq(ring, &self.0));
-        let mut archive = lock(archive());
+        let last = read(&self.0);
+        let Ok(mut archive) = archive().try_lock() else {
+            refuse(last.len() as u64);
+            return;
+        };
+        if archive.capacity() < 2 * ARCHIVE_CAPACITY {
+            let needed = 2 * ARCHIVE_CAPACITY - archive.len();
+            if archive.try_reserve_exact(needed).is_err() {
+                refuse(last.len() as u64);
+                return;
+            }
+        }
         archive.extend(last);
+        archive.sort_unstable_by_key(|record| (record.start_ns, record.thread, record.sequence));
         if archive.len() > ARCHIVE_CAPACITY {
-            // Keep the newest: the archive is sorted by start before the oldest are dropped.
-            archive.sort_by_key(|record| record.start_ns);
             let excess = archive.len() - ARCHIVE_CAPACITY;
             archive.drain(..excess);
+            refuse(excess as u64);
         }
     }
 }
 
 thread_local! {
-    static RING: OnceCell<Local> = const { OnceCell::new() };
+    static RING: RefCell<Option<Local>> = const { RefCell::new(None) };
 }
 
 static THREADS: AtomicU32 = AtomicU32::new(0);
 
-fn record(kind: u32, site: u32, start: u64, payload: u64) {
-    // A thread whose local storage is already gone (the last events of a dying thread) records nothing.
+fn record(kind: u32, site: &'static Site, start: u64, payload: u64) {
+    // Cold registration uses only try_lock. Refused threads can retry after capacity is released.
     let _ = RING.try_with(|cell| {
-        let ring = &cell
-            .get_or_init(|| {
-                let thread_index = THREADS.fetch_add(1, Ordering::Relaxed);
-                let thread = std::thread::current();
-                let ring = Arc::new(Ring {
-                    thread_name: thread.name().map_or_else(|| format!("thread-{thread_index}"), str::to_string),
-                    thread_index,
-                    written: AtomicUsize::new(0),
-                    slots: (0..CAPACITY).map(|_| Slot::default()).collect(),
-                });
-                lock(registry()).push(ring.clone());
-                Local(ring)
-            })
-            .0;
+        let Ok(mut local) = cell.try_borrow_mut() else {
+            refuse(1);
+            return;
+        };
+        if local.is_none() {
+            let Some(reservation) = RING_BUDGET.reserve(RING_BYTES) else {
+                refuse(1);
+                return;
+            };
+            let mut slots = Vec::new();
+            if slots.try_reserve_exact(CAPACITY).is_err() {
+                refuse(1);
+                return;
+            }
+            slots.resize_with(CAPACITY, Slot::default);
+            let thread_index = THREADS.fetch_add(1, Ordering::Relaxed);
+            let thread = std::thread::current();
+            let name = thread.name().unwrap_or("unnamed");
+            let mut end = name.len().min(NAME_BYTES);
+            while !name.is_char_boundary(end) {
+                end -= 1;
+            }
+            let ring = Arc::new(Ring {
+                thread_name: name[..end].into(),
+                thread_index,
+                written: AtomicUsize::new(0),
+                slots: slots.into_boxed_slice(),
+                _reservation: reservation,
+            });
+            let Ok(mut registry) = registry().try_lock() else {
+                refuse(1);
+                return;
+            };
+            registry.retain(|ring| ring.strong_count() > 0);
+            registry.push(Arc::downgrade(&ring));
+            *local = Some(Local(ring));
+        }
+        let Some(local) = local.as_ref() else {
+            return;
+        };
+        let ring = &local.0;
         let index = ring.written.load(Ordering::Relaxed);
         let slot = &ring.slots[index % CAPACITY];
+        if index >= CAPACITY {
+            refuse(1);
+        }
         let sequence = slot.sequence.load(Ordering::Relaxed);
         slot.sequence.store(sequence | 1, Ordering::Relaxed);
         fence(Ordering::Release);
-        slot.kind_site.store(kind << 30 | site, Ordering::Relaxed);
+        slot.kind_site.store(kind, Ordering::Relaxed);
+        slot.site
+            .store(std::ptr::from_ref(site).cast_mut(), Ordering::Relaxed);
+        slot.event.store(index as u64 + 1, Ordering::Relaxed);
         slot.start.store(start, Ordering::Relaxed);
         slot.payload.store(payload, Ordering::Relaxed);
         slot.sequence.store((sequence | 1) + 1, Ordering::Release);
@@ -218,9 +282,11 @@ pub enum RecordKind {
 #[derive(Clone, Debug)]
 pub struct Record {
     /// The thread's name, or `thread-N` for an unnamed one.
-    pub thread_name: String,
+    pub thread_name: Arc<str>,
     /// The order in which threads first recorded: a small number, unique for the life of the process.
     pub thread: u32,
+    /// Publication sequence within this thread, used by drains to avoid duplicates.
+    pub sequence: u64,
     /// The name given to the macro.
     pub name: &'static str,
     /// What it is.
@@ -236,20 +302,33 @@ pub struct Record {
 ///
 /// An event being written at the very moment of the call is left out rather than shown torn.
 pub fn snapshot() -> Vec<Record> {
-    let rings: Vec<Arc<Ring>> = lock(registry()).clone();
-    let names: Vec<&'static str> = lock(sites()).clone();
-    let mut records: Vec<Record> = lock(archive()).clone();
+    let rings: Vec<Arc<Ring>> = registry()
+        .try_lock()
+        .map(|rings| rings.iter().filter_map(Weak::upgrade).collect())
+        .unwrap_or_default();
+    let max = MAX_SNAPSHOT_BYTES / (std::mem::size_of::<Record>() + NAME_BYTES);
+    let mut records = Vec::with_capacity(max);
+    if let Ok(archive) = archive().try_lock() {
+        records.extend(archive.iter().cloned().take(max));
+    } else {
+        refuse(1);
+    }
     for ring in rings {
-        records.extend(read(&ring, &names));
+        let rows = read(&ring);
+        let room = max.saturating_sub(records.len());
+        if rows.len() > room {
+            refuse((rows.len() - room) as u64);
+        }
+        records.extend(rows.into_iter().take(room));
     }
     // Stable: events of one thread that share a timestamp keep the order they were written in.
-    records.sort_by_key(|record| record.start_ns);
+    records.sort_unstable_by_key(|record| (record.start_ns, record.thread, record.sequence));
     records
 }
 
 /// The events one ring holds, oldest first.
-fn read(ring: &Ring, names: &[&'static str]) -> Vec<Record> {
-    let mut records = Vec::new();
+fn read(ring: &Ring) -> Vec<Record> {
+    let mut records = Vec::with_capacity(CAPACITY);
     let written = ring.written.load(Ordering::Acquire);
     for index in written.saturating_sub(CAPACITY)..written {
         let slot = &ring.slots[index % CAPACITY];
@@ -258,19 +337,61 @@ fn read(ring: &Ring, names: &[&'static str]) -> Vec<Record> {
             continue;
         }
         let kind_site = slot.kind_site.load(Ordering::Relaxed);
+        let site = slot.site.load(Ordering::Relaxed);
+        let event = slot.event.load(Ordering::Relaxed);
         let start = slot.start.load(Ordering::Relaxed);
         let payload = slot.payload.load(Ordering::Relaxed);
         fence(Ordering::Acquire);
-        if slot.sequence.load(Ordering::Relaxed) != before {
+        if event != index as u64 + 1 || slot.sequence.load(Ordering::Relaxed) != before {
             continue;
         }
-        let Some(&name) = names.get((kind_site & 0x3fff_ffff) as usize) else { continue };
-        let (kind, duration_ns) = match kind_site >> 30 {
+        if site.is_null() {
+            continue;
+        }
+        // SAFETY: only &'static Site pointers are published, and all slot payloads are atomic.
+        let name = unsafe { (*site).name };
+        let (kind, duration_ns) = match kind_site {
             KIND_SPAN => (RecordKind::Span, payload),
             KIND_COUNTER => (RecordKind::Counter(payload as i64), 0),
             _ => (RecordKind::Mark, 0),
         };
-        records.push(Record { thread_name: ring.thread_name.clone(), thread: ring.thread_index, name, kind, start_ns: start, duration_ns });
+        records.push(Record {
+            thread_name: ring.thread_name.clone(),
+            thread: ring.thread_index,
+            sequence: index as u64 + 1,
+            name,
+            kind,
+            start_ns: start,
+            duration_ns,
+        });
     }
     records
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    #[test]
+    fn admission_precedes_allocation_and_releases_exactly() {
+        let b = Budget::new(RING_BYTES);
+        let r = b.reserve(RING_BYTES).unwrap();
+        assert!(b.reserve(1).is_none());
+        assert_eq!(b.used.load(Ordering::Relaxed), RING_BYTES);
+        drop(r);
+        assert!(b.reserve(RING_BYTES).is_some());
+    }
+    #[test]
+    fn contended_registration_drops_without_waiting() {
+        let _turn = crate::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let before = dropped();
+        let guard = registry().lock().unwrap();
+        std::thread::spawn(|| {
+            static SITE: Site = Site::new("test.refusal");
+            SITE.mark();
+        })
+        .join()
+        .unwrap();
+        drop(guard);
+        assert!(dropped() > before);
+    }
 }
