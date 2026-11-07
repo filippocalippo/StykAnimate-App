@@ -53,3 +53,15 @@ mod tests {
         assert_eq!(translucent.a, 0.36);
     }
 }
+
+pub mod dir;
+pub mod field;
+pub mod focus;
+pub mod number_field;
+pub mod roving;
+#[cfg(feature = "testing")]
+pub mod testing;
+#[cfg(all(test, feature = "testing"))]
+mod page_tests;
+
+pub use dir::Dir;

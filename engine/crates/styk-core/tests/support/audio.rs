@@ -120,6 +120,19 @@ impl AudioDecoder for TestDecoder {
     }
 }
 
+/// A spawner on plain threads, for the tests: `styk-core` must not reach `styk-platform`, where the real one lives.
+pub struct TestSpawner;
+
+impl styk_services::Spawner for TestSpawner {
+    fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+        std::thread::Builder::new().name(name.to_string()).spawn(job).map(|_| ()).map_err(|e| styk_services::SpawnError(e.to_string()))
+    }
+}
+
+pub fn thread_spawner() -> Arc<dyn styk_services::Spawner> {
+    Arc::new(TestSpawner)
+}
+
 pub struct Rig {
     pub transport: AudioTransport,
     pub fake: FakeHandle,
@@ -129,7 +142,7 @@ pub const BIG: u64 = 768 << 20;
 
 pub fn rig_with(config: FakeConfig, decoder: Arc<dyn AudioDecoder>, budget: u64, capture: bool) -> Rig {
     let (output, fake) = FakeOutput::new(config, capture);
-    let transport = AudioTransport::new(Box::new(output), fake.host_clock(), decoder, budget).expect("the fake opens");
+    let transport = AudioTransport::new(thread_spawner(), Box::new(output), fake.host_clock(), decoder, budget).expect("the fake opens");
     Rig { transport, fake }
 }
 

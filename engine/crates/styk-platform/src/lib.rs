@@ -11,6 +11,8 @@
 // Audio decoding and the WASAPI output run the bundled FFmpeg and the Windows device; Windows only in this phase (decision N8).
 #[cfg(windows)]
 pub mod audio;
+pub mod input;
+pub mod spawn;
 // Video export runs the bundled FFmpeg and the Windows codec helper; Windows only in this phase (decision N8).
 #[cfg(windows)]
 pub mod video;

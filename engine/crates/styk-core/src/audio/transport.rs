@@ -15,11 +15,12 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::sync::Arc;
-use std::thread::{JoinHandle, Thread};
+use std::sync::OnceLock;
+use std::thread::Thread;
 
 use styk_services::audio::clock::Reading;
 use styk_services::audio::{AudioDecoder, AudioError, AudioOutput, HostClock, Next, OutputInfo, RenderResult, RenderSource, StreamClock, StreamControl};
-use styk_services::Cancel;
+use styk_services::{Cancel, Spawner};
 
 use super::model::{AudioState, RATE};
 use super::plan::{build_plan, MixPlan};
@@ -206,7 +207,6 @@ impl RenderSource for Renderer {
 /// items. Past the backlog the oldest item is freed on the caller, and counted: the failure is visible and the transport goes on.
 struct Reclaimer {
     tx: Option<SyncSender<Reclaim>>,
-    thread: Option<JoinHandle<()>>,
     backlog: VecDeque<Reclaim>,
     overflows: u64,
 }
@@ -223,10 +223,11 @@ const RECLAIM_BACKLOG: usize = 256;
 const RECLAIM_PER_CALL: usize = 64;
 
 impl Reclaimer {
-    fn new() -> Reclaimer {
+    /// The freeing task starts through the spawner; it ends by itself when the sender is dropped.
+    fn new(spawner: &dyn Spawner) -> Result<Reclaimer, AudioError> {
         let (tx, rx) = sync_channel::<Reclaim>(RECLAIM_QUEUE);
-        let thread = std::thread::Builder::new().name("styk audio reclaim".into()).spawn(move || for item in rx { drop(item) }).expect("a thread to free audio buffers");
-        Reclaimer { tx: Some(tx), thread: Some(thread), backlog: VecDeque::new(), overflows: 0 }
+        spawner.spawn("styk audio reclaim", Box::new(move || for item in rx { drop(item) })).map_err(|e| AudioError::Io(e.to_string()))?;
+        Ok(Reclaimer { tx: Some(tx), backlog: VecDeque::new(), overflows: 0 })
     }
 
     fn give(&mut self, item: Reclaim) {
@@ -329,10 +330,22 @@ struct Jobs {
     request: Handoff<Job>,
     result: Handoff<Prepared>,
     shutdown: AtomicBool,
+    /// The worker task's own thread, published by the task when it starts (it may start after `spawn` returns).
+    parker: OnceLock<Thread>,
 }
 
 impl Jobs {
+    /// Wakes the worker if it is parked. Before the task has started there is nothing to wake: it looks for a request first.
+    fn unpark(&self) {
+        if let Some(thread) = self.parker.get() {
+            thread.unpark();
+        }
+    }
+
     fn worker(self: Arc<Jobs>, store: Arc<SourceStore>) {
+        // Published before the first look at the request slot, so a request put at any moment is either seen by that look or finds
+        // the thread to wake.
+        let _ = self.parker.set(std::thread::current());
         loop {
             if self.shutdown.load(Ordering::Acquire) {
                 return;
@@ -370,8 +383,7 @@ pub struct AudioTransport {
     info: Option<OutputInfo>,
     store: ManuallyDrop<Arc<SourceStore>>,
     jobs: ManuallyDrop<Arc<Jobs>>,
-    worker: Option<JoinHandle<()>>,
-    worker_thread: Thread,
+    spawner: Arc<dyn Spawner>,
     /// The generation of the last command issued.
     generation: u64,
     next_job: JobId,
@@ -382,29 +394,30 @@ pub struct AudioTransport {
 }
 
 impl AudioTransport {
-    /// A transport on `output` (opened now; a failure is returned and the transport is unusable but safe to drop).
-    pub fn new(mut output: Box<dyn AudioOutput>, host: Arc<dyn HostClock>, decoder: Arc<dyn AudioDecoder>, budget_bytes: u64) -> Result<AudioTransport, AudioError> {
+    /// A transport on `output` (opened now; a failure is returned and the transport is unusable but safe to drop). Its background
+    /// tasks (the preparing worker, the freeing task, the closing task) start through `spawner`.
+    pub fn new(spawner: Arc<dyn Spawner>, mut output: Box<dyn AudioOutput>, host: Arc<dyn HostClock>, decoder: Arc<dyn AudioDecoder>, budget_bytes: u64) -> Result<AudioTransport, AudioError> {
         let shared = Shared::new();
         let renderer = Renderer { shared: shared.clone(), plan: None, playing: false, next_sample: 0, end_sample: 0, generation: 0 };
         let info = output.open(Box::new(renderer))?;
         let store = SourceStore::new(Budget::new(budget_bytes), decoder);
-        let jobs = Arc::new(Jobs { request: Handoff::new(), result: Handoff::new(), shutdown: AtomicBool::new(false) });
-        let worker = {
+        let jobs = Arc::new(Jobs { request: Handoff::new(), result: Handoff::new(), shutdown: AtomicBool::new(false), parker: OnceLock::new() });
+        let reclaimer = Reclaimer::new(&*spawner)?;
+        {
             let (jobs, store) = (jobs.clone(), store.clone());
-            std::thread::Builder::new().name("styk audio prepare".into()).spawn(move || jobs.worker(store)).map_err(|e| AudioError::Io(e.to_string()))?
-        };
+            spawner.spawn("styk audio prepare", Box::new(move || jobs.worker(store))).map_err(|e| AudioError::Io(e.to_string()))?;
+        }
         Ok(AudioTransport {
             shared: ManuallyDrop::new(shared),
             control: output.control(),
             clock: output.clock(),
             host,
-            reclaimer: ManuallyDrop::new(Reclaimer::new()),
+            reclaimer: ManuallyDrop::new(reclaimer),
             output: Some(output),
             info: Some(info),
             store: ManuallyDrop::new(store),
             jobs: ManuallyDrop::new(jobs),
-            worker_thread: worker.thread().clone(),
-            worker: Some(worker),
+            spawner,
             generation: 0,
             next_job: 0,
             pending: None,
@@ -461,7 +474,7 @@ impl AudioTransport {
         if let Some(replaced) = self.jobs.request.put(job) {
             self.reclaimer.give(Reclaim::Job(replaced));
         }
-        self.worker_thread.unpark();
+        self.jobs.unpark();
         self.pending = Some(Pending { id, then, cancel });
         id
     }
@@ -574,18 +587,15 @@ impl Drop for AudioTransport {
         if let Some(pending) = self.pending.take() {
             pending.cancel.cancel();
         }
-        // The worker is told to end now (an atomic and an unpark); it is joined on the closing thread.
+        // The worker is told to end now (an atomic and an unpark); it ends by itself, and whoever holds the last reference to what
+        // it owns frees it, never the interface thread.
         self.jobs.shutdown.store(true, Ordering::Release);
-        self.worker_thread.unpark();
+        self.jobs.unpark();
         let mut output = self.output.take();
-        let worker = self.worker.take();
         let control = self.control.clone();
         // SAFETY: `drop` runs once and nothing reads these fields afterwards.
         let (shared, store, jobs, reclaimer) = unsafe { (ManuallyDrop::take(&mut self.shared), ManuallyDrop::take(&mut self.store), ManuallyDrop::take(&mut self.jobs), ManuallyDrop::take(&mut self.reclaimer)) };
-        let _ = std::thread::Builder::new().name("styk audio close".into()).spawn(move || {
-            if let Some(worker) = worker {
-                let _ = worker.join();
-            }
+        let closing: styk_services::Job = Box::new(move || {
             if let Some(output) = output.as_mut() {
                 output.close();
             }
@@ -595,13 +605,13 @@ impl Drop for AudioTransport {
             drop(shared);
             drop(store);
             drop(jobs);
-            let Reclaimer { tx, thread, backlog, .. } = reclaimer;
+            // The freeing task ends when its sender is dropped.
+            let Reclaimer { tx, backlog, .. } = reclaimer;
             drop(backlog);
             drop(tx);
-            if let Some(thread) = thread {
-                let _ = thread.join();
-            }
         });
+        // If the spawner cannot start the task, the job is dropped here with what it holds: the one case where the caller frees.
+        let _ = self.spawner.spawn("styk audio close", closing);
     }
 }
 

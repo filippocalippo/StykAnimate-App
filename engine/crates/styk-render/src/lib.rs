@@ -36,6 +36,8 @@ pub mod effects;
 pub mod paint;
 #[cfg(feature = "gpu")]
 mod frame;
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+pub mod native_gpu;
 #[cfg(feature = "gpu")]
 mod glyphs;
 #[cfg(feature = "gpu")]

@@ -220,8 +220,14 @@ fn to_target(world: vec2<f32>, g: u32, gr: Group) -> vec2<f32> {
     return affine(gr.m, gr.t, world);
 }
 
+// Screen pixels to clip space. WGSL lets a compiler reassociate this, and the rasteriser snaps the result to 1/256 pixel before
+// it decides which samples a triangle covers, so a different rounding moves the edges of thin triangles by a sample: DX12's
+// compiler (FXC) folded `t / size * 2 - 1` into `t * (2 / size) - 1`. The division is a statement of its own here, which keeps
+// Direct3D 12 and Vulkan equal on this machine. Nothing in the language guarantees it: tests/clip_position.rs holds both
+// backends to the same coverage.
 fn clip_pos(t: vec2<f32>) -> vec4<f32> {
-    return vec4<f32>(t.x / view.dest.x * 2.0 - 1.0, 1.0 - t.y / view.dest.y * 2.0, 0.0, 1.0);
+    let q = t / view.dest.xy;
+    return vec4<f32>(fma(q.x, 2.0, -1.0), fma(q.y, -2.0, 1.0), 0.0, 1.0);
 }
 
 fn corner(v: u32) -> vec2<f32> {

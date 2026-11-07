@@ -782,6 +782,12 @@ impl DrawingStroke {
         items.into_iter().map(|i| (self.tiles[i].tx, self.tiles[i].ty, self.tiles[i].pixels.to_vec())).collect()
     }
 
+    /// The pixels of one tile as the stroke has it now, or `None` if the stroke has not touched it: what the cel will hold once
+    /// the stroke is kept, for a viewer that asks mid-stroke.
+    pub fn tile_pixels(&self, tx: i64, ty: i64) -> Option<Vec<u8>> {
+        self.index.get(&(tx, ty)).map(|&i| self.tiles[i].pixels.to_vec())
+    }
+
     /// The pixels of every tile the stroke touched, as they are now (tests and previews).
     pub fn current(&self) -> TileStore {
         let mut store = self.store.clone();
@@ -894,6 +900,11 @@ impl StrokeEngine {
     pub fn end(&mut self, id: u64) -> Result<Option<Vec<TileChange>>> {
         let Some(mut s) = self.strokes.remove(&id) else { return Ok(None) };
         Ok(Some(s.stroke.finish()?))
+    }
+
+    /// The pixels of a tile as stroke `id` has them now (see `DrawingStroke::tile_pixels`).
+    pub fn tile(&self, id: u64, tx: i64, ty: i64) -> Option<Vec<u8>> {
+        self.strokes.get(&id).and_then(|s| s.stroke.tile_pixels(tx, ty))
     }
 
     /// `cancel(id)`.

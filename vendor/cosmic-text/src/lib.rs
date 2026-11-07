@@ -100,6 +100,9 @@ mod bidi_para;
 pub use self::buffer::*;
 mod buffer;
 
+pub use self::caret::*;
+mod caret;
+
 pub use self::buffer_line::*;
 mod buffer_line;
 

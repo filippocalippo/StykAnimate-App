@@ -383,7 +383,7 @@ fn a_lost_device_is_reported_and_playback_falls_back_without_a_panic() {
 fn an_output_that_cannot_open_is_an_error_not_a_silent_transport() {
     let (mut output, _fake) = FakeOutput::new(config(), false);
     output.fail_open = Some(AudioError::Unavailable("no audio device".into()));
-    let result = AudioTransport::new(Box::new(output), Arc::new(NoClock), TestDecoder::new(Behavior::Silence), BIG);
+    let result = AudioTransport::new(thread_spawner(), Box::new(output), Arc::new(NoClock), TestDecoder::new(Behavior::Silence), BIG);
     assert_eq!(result.err(), Some(AudioError::Unavailable("no audio device".into())));
 }
 
@@ -658,4 +658,31 @@ fn a_stalled_output_and_thousands_of_commands_keep_the_reclaim_backlog_bounded_a
         std::thread::sleep(Duration::from_micros(300));
     }
     assert_eq!(rig.transport.reclaim_overflows(), burst_overflows, "at a human pace nothing is freed on the caller");
+}
+
+#[test]
+fn the_background_tasks_start_through_the_spawner_and_a_spawner_that_fails_fails_the_open() {
+    use styk_services::ManualSpawner;
+    // Nothing starts until the spawner runs it: the transport asked for a named task for each of its two background jobs.
+    let spawner = Arc::new(ManualSpawner::new());
+    let (output, fake) = FakeOutput::new(config(), false);
+    let transport = AudioTransport::new(spawner.clone(), Box::new(output), fake.host_clock(), TestDecoder::new(Behavior::Silence), BIG).expect("the fake opens");
+    let mut names = spawner.names();
+    names.sort();
+    assert_eq!(names, ["styk audio prepare", "styk audio reclaim"]);
+    // Closing asks for a third task, to free everything elsewhere.
+    drop(transport);
+    let mut names = spawner.names();
+    names.sort();
+    assert_eq!(names, ["styk audio close", "styk audio prepare", "styk audio reclaim"]);
+
+    struct Refusing;
+    impl styk_services::Spawner for Refusing {
+        fn spawn(&self, _name: &str, _job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+            Err(styk_services::SpawnError("no threads".into()))
+        }
+    }
+    let (output, fake) = FakeOutput::new(config(), false);
+    let result = AudioTransport::new(Arc::new(Refusing), Box::new(output), fake.host_clock(), TestDecoder::new(Behavior::Silence), BIG);
+    assert!(matches!(result.err(), Some(AudioError::Io(message)) if message.contains("no threads")));
 }

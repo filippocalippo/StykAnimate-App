@@ -88,7 +88,7 @@ fn transport_on(output: WasapiOutput) -> (AudioTransport, QpcClock) {
     let work = std::env::temp_dir().join("styk-audio-device-test");
     let decoder = Arc::new(FfmpegAudioDecoder::new(ffmpeg(), work));
     let host = QpcClock::new();
-    let transport = AudioTransport::new(Box::new(output), Arc::new(host), decoder, 768 << 20).expect("the default audio endpoint opens");
+    let transport = AudioTransport::new(Arc::new(styk_platform::spawn::ThreadSpawner), Box::new(output), Arc::new(host), decoder, 768 << 20).expect("the default audio endpoint opens");
     (transport, host)
 }
 

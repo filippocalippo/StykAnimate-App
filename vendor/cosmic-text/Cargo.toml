@@ -43,7 +43,7 @@ default-features = false
 features = ["hardcoded-data"]
 
 [features]
-default = ["std", "swash", "fontconfig"]
+default = ["std", "swash", "fontconfig", "shape-run-cache"]
 fontconfig = ["fontdb/fontconfig", "std"]
 monospace_fallback = []
 no_std = [
