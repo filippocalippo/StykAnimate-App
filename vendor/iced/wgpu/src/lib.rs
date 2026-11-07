@@ -285,6 +285,7 @@ impl Renderer {
 
         self.text_viewport
             .update(&self.engine.queue, viewport.physical_size());
+        self.text_viewport.set_rendering(&self.engine.queue);
 
         let physical_bounds =
             Rectangle::<f32>::from(Rectangle::with_size(viewport.physical_size()));
@@ -914,7 +915,7 @@ impl renderer::Headless for Renderer {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("iced_wgpu [headless]"),
-                required_features: wgpu::Features::empty(),
+                required_features: adapter.features() & wgpu::Features::DUAL_SOURCE_BLENDING,
                 required_limits: wgpu::Limits {
                     max_bind_groups: 2,
                     ..wgpu::Limits::default()

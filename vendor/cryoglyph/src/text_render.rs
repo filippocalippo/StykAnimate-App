@@ -1,7 +1,9 @@
 use crate::{
     ColorMode, FontSystem, GlyphDetails, GlyphToRender, GpuCacheStatus, PrepareError, RenderError,
-    SwashCache, SwashContent, TextArea, TextAtlas, Viewport,
+    SwashCache, SwashContent, SwashImage, TextArea, TextAtlas, Viewport,
 };
+use cosmic_text::CacheKeyFlags;
+use std::borrow::Cow;
 use std::{num::NonZeroU64, slice};
 use wgpu::util::StagingBelt;
 use wgpu::{
@@ -67,6 +69,7 @@ impl TextRenderer {
         let resolution = viewport.resolution();
 
         for text_area in text_areas {
+            let subpixel = text_area.subpixel && atlas.subpixel;
             let bounds_min_x = text_area.bounds.left.max(0);
             let bounds_min_y = text_area.bounds.top.max(0);
             let bounds_max_x = text_area.bounds.right.min(resolution.width as i32);
@@ -87,9 +90,12 @@ impl TextRenderer {
 
             for run in layout_runs {
                 for glyph in run.glyphs.iter() {
-                    let physical_glyph =
+                    let mut physical_glyph =
                         glyph.physical((text_area.left, text_area.top), text_area.scale);
 
+                    if subpixel {
+                        physical_glyph.cache_key.flags |= CacheKeyFlags::LCD;
+                    }
                     let cache_key = physical_glyph.cache_key;
 
                     let mask_generation = atlas.mask_atlas.generation;
@@ -114,12 +120,10 @@ impl TextRenderer {
                         let content_type = match image.content {
                             SwashContent::Color => ContentType::Color,
                             SwashContent::Mask => ContentType::Mask,
-                            SwashContent::SubpixelMask => {
-                                // Not implemented yet, but don't panic if this happens.
-                                ContentType::Mask
-                            }
+                            SwashContent::SubpixelMask => ContentType::Lcd,
                         };
 
+                        let (texels, atlas_width) = atlas_texels(&image);
                         let width = image.placement.width as usize;
                         let height = image.placement.height as usize;
 
@@ -130,7 +134,7 @@ impl TextRenderer {
 
                             // Find a position in the packer
                             let allocation = loop {
-                                match inner.try_allocate(width, height) {
+                                match inner.try_allocate(atlas_width, height) {
                                     Some(a) => break a,
                                     None => {
                                         if !atlas.grow(
@@ -160,14 +164,14 @@ impl TextRenderer {
                                     },
                                     aspect: TextureAspect::All,
                                 },
-                                &image.data,
+                                &texels,
                                 TexelCopyBufferLayout {
                                     offset: 0,
-                                    bytes_per_row: Some(width as u32 * inner.num_channels() as u32),
+                                    bytes_per_row: Some(atlas_width as u32 * inner.num_channels() as u32),
                                     rows_per_image: None,
                                 },
                                 Extent3d {
-                                    width: width as u32,
+                                    width: atlas_width as u32,
                                     height: height as u32,
                                     depth_or_array_layers: 1,
                                 },
@@ -228,7 +232,7 @@ impl TextRenderer {
 
                         x = bounds_min_x;
                         width = max_x - bounds_min_x;
-                        atlas_x += right_shift as u16;
+                        atlas_x += (right_shift * if content_type == ContentType::Lcd { 3 } else { 1 }) as u16;
                     }
 
                     // Clip right edge
@@ -371,6 +375,25 @@ impl TextRenderer {
 pub enum ContentType {
     Color = 0,
     Mask = 1,
+    /// Subpixel coverage: three texels of the mask atlas per pixel, red, green and blue.
+    Lcd = 2,
+}
+
+/// The texels a glyph occupies in its atlas and their width: the image as it is, or for subpixel coverage the red, green
+/// and blue coverage of each pixel as three consecutive single-channel texels (three times as wide).
+///
+/// swash's subpixel mask holds, for each subpixel in turn, the coverage of a box one pixel wide centred on it: the same
+/// filter a ClearType glyph has. A wider one (a second pass of the box: a triangle five subpixels across) was tried
+/// against Chromium's text and drew fringes only half as strong; this one matches.
+pub(crate) fn atlas_texels(image: &SwashImage) -> (Cow<'_, [u8]>, usize) {
+    let width = image.placement.width as usize;
+    match image.content {
+        SwashContent::SubpixelMask => {
+            let texels = image.data.chunks_exact(4).flat_map(|pixel| [pixel[0], pixel[1], pixel[2]]).collect();
+            (Cow::Owned(texels), width * 3)
+        }
+        _ => (Cow::Borrowed(&image.data), width),
+    }
 }
 
 /// The baseline of a line in physical pixels, placed as Chromium places it so that text sits on the same pixel rows as
@@ -404,6 +427,30 @@ mod tests {
             line_height,
             line_w: 0.0,
         }
+    }
+
+    #[test]
+    fn subpixel_coverage_is_uploaded_as_three_texels_per_pixel() {
+        use cosmic_text::SwashImage;
+        let mut image = SwashImage::default();
+        image.content = SwashContent::SubpixelMask;
+        image.placement.width = 2;
+        image.placement.height = 1;
+        image.data = vec![1, 2, 3, 255, 4, 5, 6, 255];
+        let (texels, width) = atlas_texels(&image);
+        assert_eq!((&texels[..], width), (&[1u8, 2, 3, 4, 5, 6][..], 6), "red, green and blue of each pixel, the alpha dropped");
+    }
+
+    #[test]
+    fn a_grayscale_glyph_is_uploaded_as_it_is() {
+        use cosmic_text::SwashImage;
+        let mut image = SwashImage::default();
+        image.content = SwashContent::Mask;
+        image.placement.width = 2;
+        image.placement.height = 1;
+        image.data = vec![10, 200];
+        let (texels, width) = atlas_texels(&image);
+        assert_eq!((&texels[..], width), (&[10u8, 200][..], 2));
     }
 
     #[test]

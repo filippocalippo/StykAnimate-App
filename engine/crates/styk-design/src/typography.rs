@@ -14,6 +14,55 @@ use iced::font::{Feature, OpticalSize, Weight};
 use iced::widget::text::LineHeight;
 use iced::{Font, Pixels};
 
+/// The text contrast of Skia's coverage adjustment: Skia's own default (`SK_GAMMA_CONTRAST`). Chromium on this
+/// system, whose ClearType contrast is 1.2, draws text as a contrast of 0.5 does (`cargo xtask fonts`: the error against
+/// Chromium is least at 0.5 and several times larger at 1.2), so the system's value is not applied.
+pub const CONTRAST: f32 = 0.5;
+
+/// The gamma of Skia's luminance conversion, found by sweeping it against Chromium's text (`docs/native/typography.md`,
+/// section 6): the error is least at 1.8 for light text on dark and 1.2 to 1.8 for dark text on light.
+pub const GAMMA: f32 = 1.8;
+
+/// How glyphs are rasterized and blended for the system's text smoothing: subpixel coverage when ClearType is on (in the
+/// order of the display's subpixels), and Skia's luminance-dependent coverage adjustment whenever the system smooths
+/// text at all. The browser does both; see `docs/native/typography.md`, section 6.
+pub fn rendering_for(smoothing: styk_platform::font_smoothing::FontSmoothing) -> iced::advanced::graphics::text::Rendering {
+    use iced::advanced::graphics::text::{Rendering, SubpixelOrder};
+    use styk_platform::font_smoothing::{Smoothing, SubpixelOrder as Order};
+    match smoothing.smoothing {
+        Smoothing::Off => Rendering::default(),
+        Smoothing::Grayscale | Smoothing::ClearType => Rendering {
+            subpixel: (smoothing.smoothing == Smoothing::ClearType).then_some(match smoothing.order {
+                Order::Rgb => SubpixelOrder::Rgb,
+                Order::Bgr => SubpixelOrder::Bgr,
+            }),
+            adjustment: Some((CONTRAST, GAMMA)),
+        },
+    }
+}
+
+/// Reads the system's text smoothing and applies it to every window's text (`graphics::text::set_rendering`).
+///
+/// Diagnostics for the typography check can override it through the environment: `STYK_TEXT_SUBPIXEL=0` draws
+/// grayscale, `STYK_TEXT_ADJUST=0` draws no coverage adjustment, `STYK_TEXT_CONTRAST` and `STYK_TEXT_GAMMA` set the
+/// adjustment's parameters.
+pub fn apply_system_text_rendering() -> iced::advanced::graphics::text::Rendering {
+    let mut rendering = rendering_for(styk_platform::font_smoothing::current());
+    let number = |name: &str| std::env::var(name).ok().and_then(|value| value.parse::<f32>().ok());
+    if std::env::var("STYK_TEXT_SUBPIXEL").is_ok_and(|value| value == "0") {
+        rendering.subpixel = None;
+    }
+    if std::env::var("STYK_TEXT_ADJUST").is_ok_and(|value| value == "0") {
+        rendering.adjustment = None;
+    } else if let Some(mut adjustment) = rendering.adjustment {
+        adjustment.0 = number("STYK_TEXT_CONTRAST").unwrap_or(adjustment.0);
+        adjustment.1 = number("STYK_TEXT_GAMMA").unwrap_or(adjustment.1);
+        rendering.adjustment = Some(adjustment);
+    }
+    iced::advanced::graphics::text::set_rendering(rendering);
+    rendering
+}
+
 /// `font-variant-numeric: tabular-nums`: every digit has the same advance, so a column of numbers aligns.
 pub const TABULAR: &[Feature] = &[(*b"tnum", 1)];
 
@@ -67,6 +116,27 @@ impl TextStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use styk_platform::font_smoothing::{FontSmoothing, Smoothing, SubpixelOrder as Order};
+
+    #[test]
+    fn clear_type_gives_subpixel_text_in_the_displays_order_and_the_coverage_adjustment() {
+        use iced::advanced::graphics::text::SubpixelOrder;
+        let clear_type = FontSmoothing { smoothing: Smoothing::ClearType, ..FontSmoothing::default() };
+        let rendering = rendering_for(clear_type);
+        assert_eq!(rendering.subpixel, Some(SubpixelOrder::Rgb));
+        assert_eq!(rendering.adjustment, Some((CONTRAST, GAMMA)));
+        assert_eq!(rendering_for(FontSmoothing { order: Order::Bgr, ..clear_type }).subpixel, Some(SubpixelOrder::Bgr));
+        // The system's own contrast is not what the browser draws with: it is read, not applied.
+        assert_eq!(rendering_for(FontSmoothing { contrast: Some(1.2), gamma: Some(2.0), ..clear_type }), rendering);
+    }
+
+    #[test]
+    fn grayscale_smoothing_has_no_subpixels_and_no_smoothing_has_nothing() {
+        let grayscale = rendering_for(FontSmoothing { smoothing: Smoothing::Grayscale, ..FontSmoothing::default() });
+        assert_eq!(grayscale.subpixel, None);
+        assert_eq!(grayscale.adjustment, Some((CONTRAST, GAMMA)));
+        assert_eq!(rendering_for(FontSmoothing { smoothing: Smoothing::Off, ..FontSmoothing::default() }), Default::default());
+    }
     use crate::fonts;
     use iced::advanced::graphics::text::{self as graphics_text, Paragraph};
     use iced::advanced::graphics::text::cosmic_text::{CacheKey, OpticalSize as CosmicOpticalSize, SwashCache};

@@ -252,8 +252,32 @@ pub fn compare(matrix_path: &Path, dir: &Path, chromium: &str, label: &str, scal
     let _ = writeln!(text, "mean colour spread of ink pixels: chromium {:.1}, native {:.1} (0 is grayscale)", chroma_chromium / chroma_rows as f32, chroma_native / chroma_rows as f32);
     let mean_ratio = ratios.iter().sum::<f32>() / ratios.len().max(1) as f32;
     let _ = writeln!(text, "native ink over chromium ink (mean of rows): {mean_ratio:.3}");
+    // The mark to beat: how far Chromium's own grayscale text is from its ClearType text. Native subpixel text that is
+    // closer to ClearType than that has the same ink to within what the two kinds of text differ by.
+    if chromium == "chromium" {
+        if let Some(gap) = clear_type_gap(&items, dir, label, scale) {
+            let native = by_class.get("Inter").map(|rows| rows.iter().map(|row| row.1).sum::<f32>() / rows.len() as f32).unwrap_or(0.0);
+            let _ = writeln!(text, "Inter ink error: native against Chromium's ClearType {native:.3}; Chromium's grayscale against its ClearType {gap:.3} (the mark to beat): {}", if native < gap { "below" } else { "ABOVE" });
+        }
+    }
     let _ = writeln!(text, "widths {}", if widths_hold { "hold" } else { "DO NOT HOLD" });
     Ok(Report { text, widths_hold })
+}
+
+/// The mean ink error of the Inter rows between Chromium's ClearType and grayscale captures, when both exist.
+fn clear_type_gap(items: &[matrix::Item], dir: &Path, label: &str, scale: f32) -> Option<f32> {
+    let mut errors = Vec::new();
+    let mut pictures: BTreeMap<usize, (Picture, Picture)> = BTreeMap::new();
+    for (index, _) in items.iter().enumerate().filter(|(_, item)| item.class() == "Inter") {
+        let (page, row) = (index / PAGE_ROWS, index % PAGE_ROWS);
+        if !pictures.contains_key(&page) {
+            let pair = (read_png(&dir.join(format!("chromium-{label}-p{page}.png"))).ok()?, read_png(&dir.join(format!("chromium-gray-{label}-p{page}.png"))).ok()?);
+            pictures.insert(page, pair);
+        }
+        let (clear_type, gray) = &pictures[&page];
+        errors.push(row_ink(clear_type, gray, row, scale).error);
+    }
+    (!errors.is_empty()).then(|| errors.iter().sum::<f32>() / errors.len() as f32)
 }
 
 #[cfg(test)]

@@ -1,8 +1,8 @@
 # Typography: Inter and Inter Tight as the browser draws them
 
 The native interface must set its text the way today's app does: the same families, weights, numerals, widths and line
-pitch, and the same ink on the screen. This page is the contract for that (the spike S2t), how the iced text stack
-reproduces it, and the record of the check that proves it and of the one thing that is still different.
+pitch, and the same ink on the screen. This page is the contract for that (the spikes S2t and S2c), how the iced text stack
+reproduces it, and the record of the check that proves it and of what is still different.
 
 Sources: `src/styles/tokens.css` (the roles), `src/styles/base/fonts.css` (what the browser loads) and the components
 that use them. The bundled files: [design-system.md](design-system.md) and `engine/crates/styk-design/fonts/README.md`.
@@ -115,9 +115,10 @@ Chromium with today's `tokens.css` and `fonts.css` (Playwright from `node_module
   features the subsets lost are listed. Result: 1,690 code points (Inter) and 1,719 (Inter Tight) identical;
   `aalt case cv01..cv14 dlig ordn salt sinf ss01..ss08 subs sups zero` are in no shipped subset of Inter.
 
-Result of the last run (Windows 11, ClearType on, RTX 4070 SUPER; Chromium from Playwright 1.63). The table is
-produced by the command; widths are in logical pixels, the ink error is the sum of absolute luminance differences over
-Chromium's ink (0 is identical, 1 is as different as an empty cell):
+Result of the typography spike's run, with grayscale native text (Windows 11, ClearType on, RTX 4070 SUPER; Chromium from
+Playwright 1.63; section 6 has the same table for the subpixel text that is drawn now). The table is produced by the
+command; widths are in logical pixels, the ink error is the sum of absolute luminance differences over Chromium's ink
+(0 is identical, 1 is as different as an empty cell):
 
 | Theme, scale | max \|dwidth\| Inter / Arabic / Hebrew / CJK | Rows better when shifted | Ink error, Inter, vs Chromium (ClearType) | Ink error, Inter, vs Chromium (grayscale) | Chromium ClearType vs Chromium grayscale |
 | --- | --- | --- | --- | --- | --- |
@@ -133,28 +134,87 @@ Segoe UI (Chromium names the face "Segoe UI Semibold": weight 500 sits between R
 takes the heavier), Japanese and Chinese use Microsoft YaHei UI. On a machine without those fonts both programs fall
 through the same list.
 
-## 6. Subpixel text: the decision
+## 6. Subpixel text and the coverage adjustment
 
-**What differs.** Today's app draws ClearType text (RGB subpixel coverage) on opaque surfaces whenever Windows has
-ClearType on (`HKCU\Control Panel\Desktop` `FontSmoothing` 2, `FontSmoothingType` 2: true here). The mean colour spread
-of the ink pixels is 55 to 80 in Chromium's captures and 6.5 (the tint of the background) in the native ones. iced
-draws grayscale coverage only: cryoglyph downgrades swash's `SubpixelMask` to a mask. Measured on the luminance alone,
-ClearType against grayscale in Chromium itself differs by an ink error of 0.05 to 0.12, about as much as the whole
-remaining native difference (0.07 to 0.16 against ClearType): the colour fringes come on top, since the comparison
-ignores colour.
+**What differed.** Today's app draws ClearType text (RGB subpixel coverage) on opaque surfaces whenever Windows has
+ClearType on (`HKCU\Control Panel\Desktop` `FontSmoothing` 2, `FontSmoothingType` 2, orientation RGB, contrast 1200: all
+true on the machine this was measured on). The native interface drew grayscale only: cryoglyph downgraded swash's subpixel
+mask to a mask. Chromium also bends glyph coverage by the colour of the text (Skia's `SkMaskGamma`, the "contrast and
+gamma hack"), so light text on a dark surface keeps the weight of its font: natively it was 14 % lighter.
 
-**Decision.** The native app draws ClearType-style subpixel text on Windows when the system has it on, and grayscale
-otherwise (other platforms, ClearType off, text on translucent layers). It is **not built in this spike**: it is a
-patch through four crates (swash `Format::Subpixel` masks in cosmic-text, a third glyph atlas and a shader output in
-cryoglyph, a dual-source blend state in the wgpu text pipeline with a grayscale fallback where the adapter lacks
-`DUAL_SOURCE_BLENDING`, and the system-setting lookup in `styk-platform`) whose result only this check can judge.
-Its acceptance is stated in numbers: the native ink error against Chromium's ClearType must fall below the last
-column above for all four combinations, and the colour spread must reach Chromium's.
+**What is built.** On Windows with ClearType on, the native interface draws subpixel text; with it off, and on every other
+platform, grayscale; both with Skia's coverage adjustment.
 
-**Contrast in dark mode.** The native ink is 14 % lighter than Chromium's ClearType (0.86 of its ink at 100 %, 0.90 at
-150 %) for light text on dark, and 3 to 9 % heavier for dark text on light (1.09, 1.06). Skia adjusts coverage by the
-text colour's luminance; iced blends the mask as it is. The same follow-up adds that curve and is judged by the same
-check.
+- `styk_platform::font_smoothing::current()` reads `SPI_GETFONTSMOOTHING`, `SPI_GETFONTSMOOTHINGTYPE`,
+  `SPI_GETFONTSMOOTHINGORIENTATION` (RGB or BGR) and the contrast and gamma the system reports.
+  `styk_design::typography::apply_system_text_rendering()` turns them into the program's text rendering
+  (`graphics::text::set_rendering`); `warm_up::install_bundled` calls it, so the application, the headless path and the
+  typography check all draw the same way.
+- cosmic-text rasterizes a glyph with `CacheKeyFlags::LCD` as one coverage sample per subpixel (swash, a third of a pixel
+  apart); cryoglyph stores it in the existing mask atlas, three texels per pixel, and the fragment shader blends each
+  channel by its own coverage with a second fragment output: **one device, the same pass**. A device without
+  `DUAL_SOURCE_BLENDING` builds the other shader variant, which has no subpixel entry, and text stays grayscale
+  (`text_pipeline.rs` builds both variants on a real device). iced's wgpu device requests the feature where the adapter
+  has it.
+- The coverage adjustment is Skia's: per channel for subpixel text and on the luminance for grayscale, the text colour
+  quantized to three bits as Skia does, with the contrast and gamma below.
+- Only where Chromium draws it. `styk_design::grayscale::grayscale(content)` draws the text inside it in grayscale
+  (iced's `Grayscale` scope, read when the text is drawn); canvas text is always grayscale. Which surfaces of today's app
+  need it was measured with `cargo xtask fonts surfaces` (one row of text per CSS pattern; the colour spread of its
+  ink pixels, about 7 for grayscale and 14 to 98 for ClearType):
+
+| Chromium draws ClearType | Chromium draws grayscale |
+| --- | --- |
+| a plain opaque page; text colour with alpha; a translucent background on an opaque page | `opacity` below 1 (even .99); `will-change`; `transform: translateZ(0)` and `scale()` |
+| `translate(.5px)`; `rotate(.01deg)`; `isolation: isolate` | `backdrop-filter`; `filter`; `mix-blend-mode` |
+| `overflow: hidden` with a radius; a box shadow on an opaque panel | `position: fixed` over the page (its own layer); a CSS animation of opacity or transform |
+| a top-layer `<dialog>` or popover | canvas 2D by default (`alpha: false` canvases get ClearType) |
+
+  In the app's stylesheets that is: the faded and disabled states (about 40 rules with `opacity` from .25 to .92), the
+  few `will-change` and `backdrop-filter` rules, fixed-position layers and canvas painters. Everything else, panels,
+  menus in the top layer, dialogs, is ClearType.
+
+**What the numbers decided.** The contrast and the gamma were swept against Chromium's ClearType captures
+(`cargo xtask fonts`, the four combinations):
+
+- The system's ClearType contrast (1.2 here) is *not* what Chromium draws with: against Chromium the error is least at
+  Skia's own default 0.5 (`CONTRAST`) and several times larger at 1.2. The system values are read but not applied.
+- The gamma (`GAMMA` 1.8): least at 1.8 for light text on dark (insensitive to the contrast) and 1.2 to 1.8 for dark text
+  on light. The paint gamma and the device gamma of Skia make no difference for the near-black and near-white text the
+  app uses (the colour is quantized to a level that is 0 or 1 in any gamma), so there is one gamma.
+- The order of the subpixels: swash's mask is blue first (its first channel samples the glyph to the right of the
+  pixel's centre), so an RGB display takes the channels reversed. With them the wrong way round the error was about 0.14
+  in the light themes; it is 0.09 now. A wider filter (a second pass of the box, five subpixels across) gave fringes half
+  as strong as Chromium's and a larger error: swash's one-pixel box per subpixel is the filter. The offset of the samples
+  (0.25 to 0.36 of a pixel) changes the error by 0.001.
+
+**Result** (`cargo xtask fonts`, Windows 11, ClearType on): the mean ink error of the Inter rows between native text and
+Chromium's ClearType, against the mark to beat (Chromium's grayscale against its ClearType):
+
+| Theme, scale | Native vs ClearType, before | Native vs ClearType, now | The mark: Chromium grayscale vs ClearType | |
+| --- | --- | --- | --- | --- |
+| dark, 100 % | 0.155 | **0.071** | 0.116 | below |
+| dark, 150 % | 0.113 | **0.048** | 0.083 | below |
+| light, 100 % | 0.131 | **0.088** | 0.077 | above |
+| light, 150 % | 0.085 | **0.058** | 0.052 | above |
+
+The mean colour spread of the ink pixels, which was 6.5 (grayscale), is now 74.8 against Chromium's 79.8 (light, 100 %),
+and the total ink of every row is within 1 % of Chromium's, weight by weight. The widths are unchanged (0.03 px).
+
+**What is left.** The two light combinations miss the mark by 0.011 and 0.006. Total ink and its centroid match; what
+differs is its distribution (the error falls with weight and size: 0.04 for display text, 0.12 for 400-weight body text),
+which is the rasterizer: DirectWrite draws Chromium's glyphs and swash ours. Tuning the contrast, the gamma, the offset
+and the filter did not close it (the least error found in the light themes was 0.083). The way to close it is to
+rasterize glyph masks with DirectWrite on Windows (`IDWriteGlyphRunAnalysis` in `ClearType` 3x1, natural symmetric, fed
+the bundled variable fonts through an in-memory font loader), which is a different rasterizer behind the same atlas:
+named as the next step, not started.
+
+**Cost.** A text-dense frame (`styk-text-check bench`: 5,376 glyphs of the interface's body text, drawn and read back in a
+headless renderer, the machine shared with other jobs) takes the same time with subpixel and grayscale text within the
+run-to-run noise: medians of 2.5, 3.7, 3.9 and 2.7 ms at 100 % against 2.3, 3.5, 3.6 and 3.1 ms, and of 8.0, 11.0, 10.6
+and 9.1 ms at 150 % against 9.8, 11.4, 9.4 and 9.5 ms over four interleaved rounds (a frame is 7 ms at 144 Hz; the
+difference, at most a few tenths of a millisecond on a screen of 5,000 glyphs, is not one a person can see). The glyph
+cache holds a subpixel glyph three texels wide per pixel, in the same atlas.
 
 ## 7. The font system is ready before the first font-dependent widget
 

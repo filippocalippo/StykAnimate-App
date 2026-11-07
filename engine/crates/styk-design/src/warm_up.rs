@@ -107,6 +107,8 @@ pub fn install_bundled() -> Ready {
         system.load_font(Cow::Borrowed(font));
     }
     system.raw().set_fallback(StylesheetFallback);
+    // The text system's other setup: how glyphs are rasterized and blended (subpixel coverage, contrast).
+    crate::typography::apply_system_text_rendering();
     Ready(())
 }
 

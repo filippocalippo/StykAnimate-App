@@ -151,8 +151,8 @@ impl InnerAtlas {
 
             let image = cache.get_image_uncached(font_system, cache_key).unwrap();
 
-            let width = image.placement.width as usize;
             let height = image.placement.height as usize;
+            let (data, width) = crate::text_render::atlas_texels(&image);
 
             queue.write_texture(
                 TexelCopyTextureInfo {
@@ -165,7 +165,7 @@ impl InnerAtlas {
                     },
                     aspect: TextureAspect::All,
                 },
-                &image.data,
+                &data,
                 TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(width as u32 * self.kind.num_channels() as u32),
@@ -251,6 +251,7 @@ pub struct TextAtlas {
     pub(crate) mask_atlas: InnerAtlas,
     pub(crate) format: TextureFormat,
     pub(crate) color_mode: ColorMode,
+    pub(crate) subpixel: bool,
 }
 
 impl TextAtlas {
@@ -292,7 +293,13 @@ impl TextAtlas {
             mask_atlas,
             format,
             color_mode,
+            subpixel: cache.subpixel_supported(),
         }
+    }
+
+    /// Whether this atlas can hold and draw subpixel glyphs: the device blends with two sources.
+    pub fn subpixel_supported(&self) -> bool {
+        self.subpixel
     }
 
     pub fn trim(&mut self) {
@@ -309,7 +316,7 @@ impl TextAtlas {
         content_type: ContentType,
     ) -> bool {
         let did_grow = match content_type {
-            ContentType::Mask => self.mask_atlas.grow(device, queue, font_system, cache),
+            ContentType::Mask | ContentType::Lcd => self.mask_atlas.grow(device, queue, font_system, cache),
             ContentType::Color => self.color_atlas.grow(device, queue, font_system, cache),
         };
 
@@ -323,7 +330,7 @@ impl TextAtlas {
     pub(crate) fn inner_for_content_mut(&mut self, content_type: ContentType) -> &mut InnerAtlas {
         match content_type {
             ContentType::Color => &mut self.color_atlas,
-            ContentType::Mask => &mut self.mask_atlas,
+            ContentType::Mask | ContentType::Lcd => &mut self.mask_atlas,
         }
     }
 
@@ -345,3 +352,4 @@ impl TextAtlas {
         );
     }
 }
+

@@ -88,7 +88,12 @@ fn swash_image(
         Source::Outline,
     ])
     // Select a subpixel format
-    .format(Format::Alpha)
+    .format(if cache_key.flags.contains(CacheKeyFlags::LCD) {
+        // One sample per subpixel: a third of a pixel apart. The first channel is blue's (the mask is read blue first).
+        Format::CustomSubpixel([-1.0 / 3.0, 0.0, 1.0 / 3.0])
+    } else {
+        Format::Alpha
+    })
     // Apply the fractional offset
     .offset(offset)
     .transform(if cache_key.flags.contains(CacheKeyFlags::FAKE_ITALIC) {

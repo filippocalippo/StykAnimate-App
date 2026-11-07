@@ -29,6 +29,8 @@ pub enum Text {
         color: Color,
         clip_bounds: Rectangle,
         transformation: Transformation,
+        /// Drawn in grayscale even where subpixel text is on (see [`Grayscale`]).
+        grayscale: bool,
     },
     /// An editor.
     #[allow(missing_docs)]
@@ -38,6 +40,8 @@ pub enum Text {
         color: Color,
         clip_bounds: Rectangle,
         transformation: Transformation,
+        /// Drawn in grayscale even where subpixel text is on (see [`Grayscale`]).
+        grayscale: bool,
     },
     /// Some cached text.
     Cached {
@@ -65,6 +69,8 @@ pub enum Text {
         ellipsis: Ellipsis,
         /// The clip bounds of the text.
         clip_bounds: Rectangle,
+        /// Drawn in grayscale even where subpixel text is on (see [`Grayscale`]).
+        grayscale: bool,
     },
     /// Some raw text.
     #[allow(missing_docs)]
@@ -104,6 +110,66 @@ impl Text {
             Text::Raw { raw, .. } => Some(raw.clip_bounds),
         }
     }
+}
+
+/// How glyphs are rasterized and blended: subpixel (ClearType-style) coverage and the coverage adjustment the platform
+/// asks for (`docs/native/typography.md`, section 6). Set once by the program (`set_rendering`) before it draws.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Rendering {
+    /// Subpixel coverage, with the order of the subpixels, or `None` for grayscale.
+    pub subpixel: Option<SubpixelOrder>,
+    /// Skia's luminance-dependent coverage adjustment: `(contrast, gamma)`, or `None` for none.
+    pub adjustment: Option<(f32, f32)>,
+}
+
+/// The order of the subpixels of the display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubpixelOrder {
+    /// Red, green, blue from left to right.
+    Rgb,
+    /// Blue, green, red.
+    Bgr,
+}
+
+static RENDERING: RwLock<Rendering> = RwLock::new(Rendering { subpixel: None, adjustment: None });
+
+/// Sets how glyphs are rasterized and blended, for every window.
+pub fn set_rendering(rendering: Rendering) {
+    *RENDERING.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = rendering;
+}
+
+/// How glyphs are rasterized and blended.
+pub fn rendering() -> Rendering {
+    *RENDERING.read().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+thread_local! {
+    static GRAYSCALE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// While alive, text drawn on this thread is grayscale whatever [`rendering`] says: a browser draws subpixel text only
+/// on opaque layers, so text under a translucent or composited surface (a faded, disabled panel; canvas text) stays
+/// grayscale there too.
+#[derive(Debug)]
+pub struct Grayscale(());
+
+impl Grayscale {
+    /// Starts a scope of grayscale text.
+    pub fn scope() -> Self {
+        GRAYSCALE_DEPTH.with(|depth| depth.set(depth.get() + 1));
+        Self(())
+    }
+}
+
+impl Drop for Grayscale {
+    fn drop(&mut self) {
+        GRAYSCALE_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+/// Whether a [`Grayscale`] scope is active on this thread.
+pub fn grayscale_active() -> bool {
+    GRAYSCALE_DEPTH.with(|depth| depth.get() > 0)
 }
 
 /// The regular variant of the [Fira Sans] font.

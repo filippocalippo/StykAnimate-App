@@ -18,6 +18,8 @@ pub mod icons;
 mod icon_table;
 pub mod tokens;
 #[cfg(feature = "widgets")]
+pub mod grayscale;
+#[cfg(feature = "widgets")]
 pub mod typography;
 #[cfg(feature = "widgets")]
 pub mod warm_up;

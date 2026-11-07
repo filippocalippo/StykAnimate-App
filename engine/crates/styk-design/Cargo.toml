@@ -9,10 +9,11 @@ publish.workspace = true
 [features]
 # The iced side: conversions to iced types, the font handles and the icon widget. Without it the crate is plain data
 # (tokens, icon bytes, font bytes) that tools and tests read without a toolkit.
-widgets = ["dep:iced"]
+widgets = ["dep:iced", "dep:styk-platform"]
 
 [dependencies]
 iced = { workspace = true, optional = true }
+styk-platform = { path = "../styk-platform", optional = true }
 
 # The same Linux display backends as styk-app and styk-ui, so `-p styk-design --features widgets` builds there too.
 [target.'cfg(target_os = "linux")'.dependencies]

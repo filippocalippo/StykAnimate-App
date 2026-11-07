@@ -257,6 +257,18 @@ impl Storage {
 pub struct Viewport(cryoglyph::Viewport);
 
 impl Viewport {
+    /// Tells the text renderer how glyphs are rasterized and blended (`graphics::text::set_rendering`).
+    pub fn set_rendering(&mut self, queue: &wgpu::Queue) {
+        let rendering = crate::graphics::text::rendering();
+        self.0.set_rendering(
+            queue,
+            cryoglyph::TextRendering {
+                bgr: rendering.subpixel == Some(crate::graphics::text::SubpixelOrder::Bgr),
+                adjustment: rendering.adjustment.map(|(contrast, gamma)| cryoglyph::CoverageAdjustment { contrast, gamma }),
+            },
+        );
+    }
+
     pub fn update(&mut self, queue: &wgpu::Queue, resolution: Size<u32>) {
         self.0.update(
             queue,
@@ -430,6 +442,14 @@ impl State {
     }
 }
 
+/// Whether the text was drawn inside a grayscale scope.
+fn grayscale(section: &Text) -> bool {
+    match section {
+        Text::Paragraph { grayscale, .. } | Text::Editor { grayscale, .. } | Text::Cached { grayscale, .. } => *grayscale,
+        Text::Raw { .. } => false,
+    }
+}
+
 fn prepare(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -492,6 +512,8 @@ fn prepare(
             Text::Raw { raw, .. } => raw.buffer.upgrade().map(Allocation::Raw),
         })
         .collect();
+
+    let subpixel = crate::graphics::text::rendering().subpixel.is_some();
 
     let text_areas = sections
         .iter()
@@ -637,6 +659,7 @@ fn prepare(
                     bottom: (clip_bounds.y + clip_bounds.height) as i32,
                 },
                 default_color: to_color(color),
+                subpixel: subpixel && !grayscale(section),
             })
         });
 

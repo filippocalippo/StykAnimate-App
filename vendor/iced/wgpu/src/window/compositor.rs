@@ -166,11 +166,13 @@ impl Compositor {
         });
 
         // Request SHADER_F16 only if the adapter supports it (e.g., not available in WebGL2)
-        let required_features = if adapter.features().contains(wgpu::Features::SHADER_F16) {
+        let mut required_features = if adapter.features().contains(wgpu::Features::SHADER_F16) {
             wgpu::Features::SHADER_F16
         } else {
             wgpu::Features::empty()
         };
+        // Subpixel text blends each channel by its own coverage (cryoglyph); without it text is grayscale.
+        required_features |= adapter.features() & wgpu::Features::DUAL_SOURCE_BLENDING;
 
         let mut errors = Vec::new();
 

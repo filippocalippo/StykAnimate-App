@@ -12,6 +12,13 @@ path = "src/main.rs"
 
 [dependencies]
 iced = { workspace = true }
+iced_runtime = { path = "../../../vendor/iced/runtime" }
 png = "0.18"
+pollster = "0.4"
 styk-design = { path = "../styk-design", features = ["widgets"] }
 styk-platform = { path = "../styk-platform" }
+
+[dev-dependencies]
+# The pipeline tests open a real device and build cryoglyph's text pipeline on it.
+cryoglyph = { git = "https://github.com/iced-rs/cryoglyph.git", rev = "cf38ed5ea0cfe95270b31ced2910560a7fcc5003" }
+wgpu = { version = "30", default-features = false, features = ["wgsl", "dx12", "vulkan", "metal"] }

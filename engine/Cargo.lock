@@ -2497,6 +2497,7 @@ name = "styk-design"
 version = "0.1.0"
 dependencies = [
  "iced",
+ "styk-platform",
 ]
 
 [[package]]
@@ -2669,10 +2670,14 @@ version = "0.1.0"
 name = "styk-text-check"
 version = "0.1.0"
 dependencies = [
+ "cryoglyph",
  "iced",
+ "iced_runtime",
  "png",
+ "pollster",
  "styk-design",
  "styk-platform",
+ "wgpu",
 ]
 
 [[package]]

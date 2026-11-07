@@ -76,6 +76,7 @@ impl Sheet {
             Message::Shown => Task::none(),
             Message::FontsReady => {
                 self.fonts_ready = true;
+                eprintln!("text rendering: {:?}", iced::advanced::graphics::text::rendering());
                 if warm_up::built_early() {
                     return self.fail("the interface thread built the font system before the warm-up worker did".to_string());
                 }

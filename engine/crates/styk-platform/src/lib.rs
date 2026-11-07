@@ -8,5 +8,6 @@
 //!
 //! It must never depend on the engine, the core or a toolkit: windows reach it as `raw-window-handle` handles.
 
+pub mod font_smoothing;
 pub mod unattended;
 pub mod window;
