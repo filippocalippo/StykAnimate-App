@@ -45,7 +45,7 @@ pub fn core_with_document(bytes: &[u8], name: &str) -> Result<Core, String> {
     let mut core = Core::new(documents);
     let (notify, ready) = std::sync::mpsc::channel();
     core.set_facts(Facts::start(&Threads, Arc::new(move || { let _ = notify.send(()); })).map_err(|error| error.0)?);
-    READY.with(|cell| cell.borrow_mut().insert(id.serial(), ready));
+    READY.with(|cell| cell.borrow_mut().insert(id.get(), ready));
     // The published generations come from an engine that opened the same file and publishes the session's tree at each
     // revision, as K-doc's publication does.
     let engine = styk_engine::Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
@@ -56,7 +56,7 @@ pub fn core_with_document(bytes: &[u8], name: &str) -> Result<Core, String> {
     let lineage = opened.lineage();
     let published = Arc::new(Published { engine, lineage, generations: Mutex::new(HashMap::new()) });
     core.set_source(id, published.clone());
-    SOURCES.with(|sources| sources.borrow_mut().insert(id.serial(), published));
+    SOURCES.with(|sources| sources.borrow_mut().insert(id.get(), published));
     publish(&mut core)?;
     core.refresh();
     Ok(core)
@@ -82,7 +82,7 @@ pub fn publish(core: &mut Core) -> Result<(), String> {
     let document = core.documents.active().ok_or("no document is open")?;
     let (id, revision) = (document.id(), document.revision());
     let tree = document.records().map_err(|error| error.to_string())?.clone();
-    let source = SOURCES.with(|sources| sources.borrow().get(&id.serial()).cloned()).ok_or("the document has no test source")?;
+    let source = SOURCES.with(|sources| sources.borrow().get(&id.get()).cloned()).ok_or("the document has no test source")?;
     source.engine.publish_tree(source.lineage, tree, revision).map_err(|error| error.message)?.ok_or("the test engine holds another document")?;
     let generation = source.engine.generation().ok_or("nothing was published")?;
     source.generations.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(revision, generation);
@@ -102,7 +102,7 @@ pub fn settle_facts(core: &mut Core) -> Result<(), String> {
 /// Waits for the facts lane to answer what is asked now (one answer; an "unpublished" one counts), without publishing.
 pub fn wait_facts(core: &mut Core) -> Result<(), String> {
     core.refresh();
-    let id = core.documents.active().ok_or("no document is open")?.id().serial();
+    let id = core.documents.active().ok_or("no document is open")?.id().get();
     if core.facts().is_some_and(Facts::in_flight) {
         READY.with(|cell| cell.borrow().get(&id).map(|ready| ready.recv_timeout(std::time::Duration::from_secs(30))))
             .ok_or("the document has no facts lane")?

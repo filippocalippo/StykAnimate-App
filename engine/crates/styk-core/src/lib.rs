@@ -11,6 +11,7 @@
 pub mod answers;
 pub mod app;
 pub mod audio;
+pub mod automation;
 pub mod camera_actions;
 pub mod clipboard;
 pub mod commands;
@@ -32,13 +33,14 @@ pub mod number;
 pub mod range;
 pub mod roving;
 pub mod selection_actions;
+pub mod shell;
 pub mod text_entry;
 pub mod text;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod view_state;
 
-pub use launch::{Launch, LaunchError, USAGE};
+pub use launch::{ClockMode, Launch, LaunchError, USAGE};
 
 /// Service contracts exposed to views through the application core.
 pub use styk_services as services;

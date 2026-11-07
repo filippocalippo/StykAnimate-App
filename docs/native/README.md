@@ -78,13 +78,13 @@ native `styk-cli video` export with today's (FP's floor: bytes not equal, sizes 
 | K-frames | Astra | **merged `48c424ef`**: the frame scheduler over one shared frame builder (`docs/native/frames.md`) |
 | K-dev | Astra | review fixed (release isolation by resolved features and linked symbols, profiled export under the picture budget, release profiles); merging `native-app` after K-guards |
 | R-slice | Opus | review: a blocker (refresh builds geometry on the interface thread: derived facts move to the frame workers, revision-stamped) and majors (a leaked gesture, a stale model across a document switch, Edit together's ticks, align over the range, missing controls, the focus contract, a locale-aware presentation for 27 languages with a language-neutral catalogue, real screenshot references), command handlers in their feature modules, one clipboard owner; fixing, then one re-check |
-| K-shell | Sonnet | review: a refused open dropped on the interface thread, arrows during Ctrl+Tab, drops outside the strip, today's Home rule, one clock with `--clock fixed`, the script read bounded, no failed-save dot; references recaptured with ClearType; K-doc's open host replaces its stand-in; fixing |
-| K-stage | Astra | running: the stage host (`perf/briefs/native/K-stage.md`) |
+| K-shell | Sonnet | **merged `4228bdea`**: the window and the top band (today's layout and folds, tabs, the Ctrl+Tab switcher, today's workspace and Home rules, one clock with `--clock fixed`), opens through K-doc's host, `styk_core::automation` (the one automation language), four band screens in `docs/native/screens/limits.toml` (references captured with ClearType; baseline limits, only tightened). Open: band commands until K-cmd, menus until K-widgets, English literals until R-slice's labels |
+| K-stage | Astra | done at `285dcdc2` (`docs/native/stage.md`): navigation, transforms, picking (169 frozen answers), frame requests, the worker-owned painter (equal to export's frame), renderer byte admission, iced's GPU-policy hook; release scenario p95 1,406 ms on one scene against p50 31 ms (the frame key's view inputs in question); in review, GPT-6.1 Sol xhigh |
 | K-rec | Astra | running: recovery and autosave (`perf/briefs/native/K-rec-recovery.md`) |
 | K-cmd, K-widgets, K-dock, stage widget | Astra, Sonnet | after R-slice merges |
 
-The automation mode is one language, `styk_core::automation` (K-shell's, header `styk-auto/1`); K-dev's runners port onto
-it. Then the skeleton gate (full suites, parity, the native smokes, screenshots, the benchmark, `cargo xtask check --wasm`).
+The automation mode is one language, `styk_core::automation` (merged with K-shell, header `styk-auto/1`); K-dev's runners,
+K-stage's steps and R-slice's panel test move onto it. Then the skeleton gate (full suites, parity, the native smokes, screenshots, the benchmark, `cargo xtask check --wasm`).
 
 **Kept off the branches on purpose.** `t3/fix-save-differs` and `t3/resave-keeps-layout` change saved bytes: the owner's
 decision, unmerged. `t3/speed-joint-drag-frame` is an unfinished optimisation with no measured gain: not this phase's.

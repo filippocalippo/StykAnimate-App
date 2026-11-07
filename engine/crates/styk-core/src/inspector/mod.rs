@@ -250,7 +250,7 @@ impl Panel {
             self.shown = Shown::default();
             return;
         };
-        let key = FactsKey::new(document.id().serial(), document.revision(), facts::tick(document), &selection.uids);
+        let key = FactsKey::new(document.id().get(), document.revision(), facts::tick(document), &selection.uids);
         // Take what landed first (an "unpublished" answer frees the key to be asked again), then ask for this state.
         facts.latest();
         if let Some(source) = source {

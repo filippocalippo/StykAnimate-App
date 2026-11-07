@@ -12,11 +12,12 @@ pub mod component_sheet;
 pub mod inspector;
 pub mod message;
 pub mod screens;
+pub mod shell;
 
 pub use message::Message;
 
-use iced::widget::{column, container, row, space, stack};
-use iced::{Element, Fill, Length, Widget, theme};
+use iced::widget::{container, space};
+use iced::{Element, Fill, Widget, theme};
 use styk_design::Theme;
 use styk_design::warm_up::Ready;
 
@@ -24,6 +25,19 @@ use styk_design::warm_up::Ready;
 pub fn window_style(theme: Theme) -> theme::Style {
     let palette = theme.palette();
     theme::Style { background_color: palette.surface_field.into(), text_color: palette.text_1.into() }
+}
+
+/// The colour of the window until the program knows its theme and has its fonts (`--surface-prepaint`, SH-001): the dark
+/// ink of the window behind, so a start never flashes light and then dark.
+pub fn prepaint_style() -> theme::Style {
+    theme::Style { background_color: styk_design::tokens::primitives::SURFACE_PREPAINT.into(), text_color: styk_design::tokens::primitives::SURFACE_PREPAINT.into() }
+}
+
+/// What the window shows before the fonts are ready: the prepaint colour, filling it, and no text (the same rule as
+/// [`loading`], which this replaces until the theme is known).
+pub fn prepaint<'a, Message: 'a>() -> Element<'a, Message> {
+    let colour = styk_design::tokens::primitives::SURFACE_PREPAINT;
+    container(space()).width(Fill).height(Fill).style(move |_| container::Style::default().background(iced::Color::from(colour))).boxed()
 }
 
 /// The iced theme the toolkit's own widgets start from, matching the design theme.
@@ -49,21 +63,16 @@ pub fn view<'a, Message: 'a>(theme: Theme, _ready: Ready) -> Element<'a, Message
     loading(theme)
 }
 
-/// The window as it is now: the top band holding the window controls at its right edge, and the field below. Every
-/// other screen is built into this as it lands; the band's other clusters (the mark, the project tabs, the
-/// workspaces, history, Save and Export) arrive with the shell chunk of the interface.
-pub fn shell<'a, Message: 'a>(theme: Theme, _ready: Ready, band_height: f32, controls: Element<'a, Message>) -> Element<'a, Message> {
-    let palette = theme.palette();
-    let (surface, line) = (iced::Color::from(palette.surface), iced::Color::from(palette.line_1));
-    let band = container(row![space().width(Fill), controls]).width(Fill).height(Length::Fixed(band_height)).style(move |_| container::Style::default().background(surface));
-    // `box-shadow: inset 0 -1px 0 var(--line-1)`: a line over the band's last pixel row.
-    let rule = container(container(space()).width(Fill).height(Length::Fixed(1.0)).style(move |_| container::Style::default().background(line))).width(Fill).height(Length::Fixed(band_height)).align_bottom(Length::Fixed(band_height));
-    column![stack![band, rule].boxed(), loading(theme)].boxed()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_starts_on_the_prepaint_colour_in_either_theme() {
+        let style = prepaint_style();
+        assert_eq!(style.background_color.into_rgba8(), [10, 11, 15, 255], "#0a0b0f, whatever the theme will be");
+        assert_ne!(style.background_color, window_style(Theme::Light).background_color);
+    }
 
     #[test]
     fn the_window_is_the_themes_field_with_its_text_colour() {

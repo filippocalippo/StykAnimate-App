@@ -13,6 +13,8 @@ use styk_edit::session::Session;
 use styk_engine::document::{OpenOptions, OpenSource, OpenedDocument};
 
 mod host;
+mod tabs;
+pub use tabs::drop_index;
 pub use host::{CloseChoice, Dispatch, Effect, HostError, HostOptions, JobId, PromptId, Request};
 use styk_services::files::FileTarget;
 
@@ -25,8 +27,15 @@ pub const MAX_OPEN_PROJECTS: usize = 12;
 pub struct DocumentId(u64);
 
 impl DocumentId {
-    /// The identity as a number, for keys that cross to workers (facts, frames).
-    pub fn serial(self) -> u64 { self.0 }
+    /// The identity as a number, for the interface's own keys (focus targets); it means nothing else.
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// An identity for a band shown without open projects (`Shell::preview`) and for tests of logic that only holds ids.
+    pub const fn preview(serial: u64) -> DocumentId {
+        DocumentId(serial)
+    }
 }
 
 /// A fully prepared session. Construct on the open worker; installing it only moves ownership.
