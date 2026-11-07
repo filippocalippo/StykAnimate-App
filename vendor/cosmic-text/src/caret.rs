@@ -87,6 +87,7 @@ mod tests {
             end,
             font_size: 10.0,
             font_weight: fontdb::Weight::NORMAL,
+            font_optical_size: crate::OpticalSize::DEFAULT,
             line_height_opt: None,
             font_id: fontdb::ID::dummy(),
             glyph_id: 0,
