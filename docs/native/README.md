@@ -67,8 +67,8 @@ those are ours (`styk-design`, `styk-core`) plus a few small fork patches; Inter
 
 **Next, in order.** After FP merges: chunk RM, the renderer's and engine's memory (`perf/briefs/native/RM-render-memory.md`: at 4K our export process holds 1.2 GiB next to the encoder's 0.7, against a 1.5 GiB total; a 256 MiB sprite atlas and a one-time 265 MiB renderer allocation among it). After S3 merges: compare the native `styk-cli video` export
 with today's export of the same documents (FP's bytes are still not equal; sizes within 0.2 %). After the spikes pass: the
-skeleton (`perf/briefs/native/skeleton-plan.md`, implementers by N8): running K-guards (Astra: the guards of
-`cargo xtask check`), K-doc (Astra: documents and the engine host; milestone 1, the session seam of
+skeleton (`perf/briefs/native/skeleton-plan.md`, implementers by N8): K-guards (Astra: the guards of `cargo xtask check`)
+done at `3b1d3b09` (eight guards with 16 failing fixtures, the tree at zero, warm check 4.7 s; in review, GPT-6.1 Sol high), K-doc (Astra: documents and the engine host; milestone 1, the session seam of
 `docs/native/documents.md`, **merged `bd9e9d2a`**; the rest running) and R-slice (the one Opus implementer: the interface
 architecture and the Inspector, `patterns.md`; started on `bd9e9d2a`), K-shell (Sonnet) after S6; running too: K-frames (Astra xhigh, frame scheduling) and K-dev (Astra high, the developer
 tools' engine, `perf/briefs/native/K-dev-engine.md`); then K-rec, K-cmd, K-widgets,
