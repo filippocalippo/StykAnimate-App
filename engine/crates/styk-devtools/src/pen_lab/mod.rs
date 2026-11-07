@@ -43,7 +43,7 @@ pub enum Message {
     Opened(window::Id),
     Attached(Attached),
     Frame,
-    Origin((i32, i32)),
+    Origin((i32, i32), bool),
     Brush(BrushChange),
     Switch(SwitchChange),
     Clear,
@@ -99,6 +99,8 @@ struct Lab {
     hover_target: bool,
     hover_enters: u64,
     frames: u64,
+    /// Nothing covers the window: injected input will reach it.
+    window_clear: bool,
     error: Option<String>,
     exit_code: Arc<Mutex<i32>>,
 }
@@ -121,6 +123,7 @@ impl Lab {
             hover_target: false,
             hover_enters: 0,
             frames: 0,
+            window_clear: false,
             error: None,
             exit_code,
         }
@@ -166,15 +169,16 @@ impl Lab {
                 }
                 Task::none()
             }
-            Message::Origin(origin) => {
+            Message::Origin(origin, clear) => {
                 self.client_origin = origin;
+                self.window_clear = clear;
                 Task::none()
             }
             Message::Frame => {
                 self.frames += 1;
                 // The window may still be moving into place when it attaches: keep the client origin current.
                 let refresh = match (self.window, self.frames % 15 == 0) {
-                    (Some(id), true) => window::run(id, |w| Message::Origin(styk_platform::windows::input::client_origin(w).unwrap_or((0, 0)))),
+                    (Some(id), true) => window::run(id, |w| Message::Origin(styk_platform::windows::input::client_origin(w).unwrap_or((0, 0)), styk_platform::windows::inject::covers_client_area(w))),
                     _ => Task::none(),
                 };
                 // The window's client origin moves with the window; ask again each second or so.
@@ -186,6 +190,7 @@ impl Lab {
                     out_dir: self.out_dir.as_deref(),
                     hover_enters: self.hover_enters,
                     client_origin: self.client_origin,
+                    window_clear: self.window_clear,
                 };
                 match runner.step(&context) {
                     self_test::Step::Continue => refresh,

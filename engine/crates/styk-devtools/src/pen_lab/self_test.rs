@@ -66,6 +66,8 @@ pub struct Context<'a> {
     pub out_dir: Option<&'a Path>,
     pub hover_enters: u64,
     pub client_origin: (i32, i32),
+    /// The window is the topmost one over its whole client area: injected input will reach it and nothing else.
+    pub window_clear: bool,
 }
 
 pub enum Step {
@@ -178,9 +180,9 @@ impl Runner {
             Phase_::Warmup(frames) => {
                 *frames += 1;
                 let pad = cx.core.gpu_stats().pad_px;
-                if *frames < WARMUP_FRAMES || pad.0 <= 0.0 || cx.counters.is_none() {
+                if *frames < WARMUP_FRAMES || pad.0 <= 0.0 || cx.counters.is_none() || (!cx.window_clear && self.test.kind != TestKind::Stress) {
                     if *frames > WARMUP_FRAMES * 20 {
-                        let _ = writeln!(self.summary, "FAIL setup: the window never drew a pad or the input source never attached");
+                        let _ = writeln!(self.summary, "FAIL setup: the window never drew a pad, the input source never attached, or another window covered the test window (nothing was injected)");
                         self.failures += 1;
                         self.phase = Phase_::Done(2);
                     }

@@ -14,7 +14,7 @@ use windows_sys::Win32::UI::Input::Pointer::{
     InjectSyntheticPointerInput, POINTER_FLAG_FIRSTBUTTON, POINTER_FLAG_DOWN, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_FLAG_NEW, POINTER_FLAG_SECONDBUTTON, POINTER_FLAG_UP, POINTER_FLAG_UPDATE,
     POINTER_PEN_INFO, POINTER_TOUCH_INFO,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{PEN_FLAG_BARREL, PEN_MASK_PRESSURE, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PT_PEN, PT_TOUCH, TOUCH_MASK_CONTACTAREA, TOUCH_MASK_PRESSURE};
+use windows_sys::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, PEN_FLAG_BARREL, PEN_MASK_PRESSURE, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PT_PEN, PT_TOUCH, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, TOUCH_MASK_CONTACTAREA, TOUCH_MASK_PRESSURE};
 
 /// Why injection failed: what was called, and the system's error code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,8 +79,38 @@ pub fn make_nearly_invisible(window: &dyn raw_window_handle::HasWindowHandle, al
         if SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA) == 0 {
             return Err(InjectError { call: "SetLayeredWindowAttributes", code: last_error(), step: None });
         }
+        // Above every other window, so the input aimed at it is not taken by whatever is beneath the corner.
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
     Ok(())
+}
+
+/// Whether the window is the topmost window at nine points of its client area. Injected input goes to whatever is at
+/// the pointer's screen position; a test must not inject while another window covers the place it aims at.
+pub fn covers_client_area(window: &dyn raw_window_handle::HasWindowHandle) -> bool {
+    use raw_window_handle::RawWindowHandle;
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GA_ROOT, GetAncestor, GetClientRect, WindowFromPoint};
+    let Ok(handle) = window.window_handle() else { return false };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else { return false };
+    let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+    // SAFETY: plain queries on a live window of this process, with structures that outlive the calls.
+    unsafe {
+        let mut client: RECT = std::mem::zeroed();
+        if GetClientRect(hwnd, &mut client) == 0 || client.right < 40 || client.bottom < 40 {
+            return false;
+        }
+        let mut origin = POINT { x: 0, y: 0 };
+        ClientToScreen(hwnd, &mut origin);
+        [0.05, 0.5, 0.95].iter().all(|fy| {
+            [0.05, 0.5, 0.95].iter().all(|fx| {
+                let point = POINT { x: origin.x + (client.right as f64 * fx) as i32, y: origin.y + (client.bottom as f64 * fy) as i32 };
+                let found = WindowFromPoint(point);
+                !found.is_null() && GetAncestor(found, GA_ROOT) == hwnd
+            })
+        })
+    }
 }
 
 /// A synthetic finger: one contact that presses at a screen position, drags and lifts.
