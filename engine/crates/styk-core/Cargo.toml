@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 styk-doc = { path = "../styk-doc" }
+styk-engine = { path = "../styk-engine" }
+styk-eval = { path = "../styk-eval" }
 styk-drawing = { path = "../styk-drawing" }
 styk-math = { path = "../styk-math" }
 styk-services = { path = "../styk-services" }

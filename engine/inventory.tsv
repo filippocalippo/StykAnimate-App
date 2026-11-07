@@ -399,7 +399,7 @@ src/playback-software-size.mjs	engine	styk-engine::playback	removed	deleted with
 src/playback-tween-cache.mjs	engine	styk-engine::playback	removed	deleted: only the JavaScript motion-path sampling used it (1243 bytes)
 src/playback-upload.mjs	engine	styk-engine::playback	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/playback-vector-cache.mjs	engine	styk-engine::playback	removed	deleted: only the removed playback resources used it (1337 bytes)
-src/playback-window.mjs	engine	styk-engine::playback	js	scheduling, budgets
+src/playback-window.mjs	engine	styk-core::frames	partial	Rust: native bounded lookahead over a half-open range, with looping; timeline range UI and startup policy await native integration
 src/playback-worker.mjs	engine	styk-engine::playback	removed	deleted: the engine prepares frames on its worker threads (styk-engine frames)
 src/playback.mjs	engine	styk-engine::playback	removed	deleted: the engine prepares playback on its worker threads and the app reads its tickets (src/engine/engine-playback.mjs)
 src/polygon-draft.mjs	engine	styk-edit	js	
