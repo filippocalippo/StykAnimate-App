@@ -21,6 +21,7 @@ iced_winit = { path = "../../../vendor/iced/winit", optional = true }
 png = "0.18"
 pollster = "0.4"
 styk-core = { path = "../styk-core" }
+styk-alloc = { path = "../styk-alloc" }
 styk-design = { path = "../styk-design", features = ["widgets"] }
 styk-devtools = { path = "../styk-devtools", optional = true }
 styk-platform = { path = "../styk-platform" }

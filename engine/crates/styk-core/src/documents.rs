@@ -6,16 +6,15 @@
 
 use std::sync::Arc;
 
-pub use styk_doc::Value;
-pub use styk_edit::session::{NativeCall as CallAnswer, SessionView as DocumentView};
-pub use styk_edit::{EditError, Selection};
-pub use styk_engine::document::OpenError;
-pub use styk_eval::doc::Document as TypedDocument;
+use crate::engine::{Value, CallAnswer, DocumentView, EditError, Selection, OpenError, TypedDocument, Engine};
 
 use styk_doc::Obj;
 use styk_edit::session::Session;
-use styk_engine::Engine;
 use styk_engine::document::{OpenOptions, OpenSource, OpenedDocument};
+
+mod host;
+pub use host::{CloseChoice, Dispatch, Effect, HostError, HostOptions, JobId, PromptId, Request};
+use styk_services::files::FileTarget;
 
 /// Today's project-tab limit (`src/project-tabs.mjs`).
 pub const MAX_OPEN_PROJECTS: usize = 12;
@@ -50,6 +49,10 @@ impl PreparedDocument {
     /// Worker-only adoption of an engine open (also used for new projects and decoded imports).
     /// Index creation in `start_session` stays on this worker, never on tab installation.
     pub fn from_opened(opened: OpenedDocument, cancel: &dyn Fn() -> bool) -> Result<Self, OpenError> {
+        Self::prepare(opened, false, cancel)
+    }
+
+    fn prepare(opened: OpenedDocument, application_open: bool, cancel: &dyn Fn() -> bool) -> Result<Self, OpenError> {
         check_cancel(cancel)?;
         let mut state = Obj::new();
         state.set("propertyChannels", Value::Bool(true));
@@ -57,7 +60,11 @@ impl PreparedDocument {
         state.set("layerRevision", Value::Num(1.0));
         state.set("nextFrameIdentity", Value::Num(opened.indexes.next_frame_identity));
         state.set("nextUid", Value::Num(opened.indexes.next_uid));
-        let selected = opened.tree.get("keyframes").and_then(|frames| frames.item(0))
+        let index = if application_open && opened.kind == "piv" && !opened.indexes.saved_draft { opened.tree.get("keyframes").and_then(Value::array_len).unwrap_or(1).saturating_sub(1) } else { 0 };
+        let tick = if index == 0 { 0.0 } else { styk_edit::timeline_rows(&opened.tree).get(index).map_or(0.0, |row| row.0) };
+        state.set("frameIndex", Value::Num(index as f64));
+        state.set("tick", Value::Num(tick));
+        let selected = opened.tree.get("keyframes").and_then(|frames| frames.item(index))
             .and_then(|frame| frame.get("objects").and_then(|objects| objects.item(0)))
             .and_then(|object| object.get("unique_id").cloned()).unwrap_or(Value::Null);
         state.set("selectedUid", selected.clone());
@@ -68,9 +75,12 @@ impl PreparedDocument {
         session.set_memory_gate(|bytes| styk_alloc::admit(bytes).is_ok());
         session.call_native("@revisions", &[Value::Num(1.0), Value::Num(1.0), Value::Num(1.0)], &Value::Null)
             .result.map_err(|error| OpenError::refused(&error.to_string()))?;
+        if application_open && opened.indexes.repairs > 0 {
+            session.call_native("@touch", &[], &Value::Null).result.map_err(|error| OpenError::refused(&error.to_string()))?;
+        }
         check_cancel(cancel)?;
         // `_publishLoadedReport`: remove only these extensions, then the stored name, then the default.
-        let name = opened.name.rsplit_once('.').filter(|(_, extension)| ["piv", "stk", "styk"].iter().any(|known| extension.eq_ignore_ascii_case(known)))
+        let name = opened.name.rsplit_once('.').filter(|(_, extension)| ["piv", "stk", "styk"].iter().any(|known| extension.eq_ignore_ascii_case(known)) || application_open && ["stkz", "stykmov", "json", "nodes", "nodemc", "stknds"].iter().any(|known| extension.eq_ignore_ascii_case(known)))
             .map_or(opened.name.as_str(), |(stem, _)| stem);
         let name = if name.is_empty() { opened.tree.path(&["_styk", "name"]).and_then(Value::as_str).filter(|name| !name.is_empty()).unwrap_or("Untitled animation") } else { name };
         Ok(Self {
@@ -87,6 +97,12 @@ impl PreparedDocument {
     pub fn set_clock(&mut self, clock: fn() -> f64) {
         self.session.set_clock(clock);
     }
+
+    fn open_application(engine: &Engine, bytes: Arc<[u8]>, name: &str, cancel: &dyn Fn() -> bool) -> Result<Self, OpenError> {
+        let mut opened = engine.open_document(OpenSource::File { bytes: &bytes, name }, OpenOptions { layer_timeline: true }, cancel)?;
+        if opened.source.is_some() { opened.attach_source(bytes)?; }
+        Self::prepare(opened, true, cancel)
+    }
 }
 
 fn check_cancel(cancel: &dyn Fn() -> bool) -> Result<(), OpenError> {
@@ -100,6 +116,11 @@ fn check_cancel(cancel: &dyn Fn() -> bool) -> Result<(), OpenError> {
 pub struct Document {
     id: DocumentId,
     prepared: PreparedDocument,
+    scopes: Vec<host::Scope>,
+    target: Option<FileTarget>,
+    blank: bool,
+    epoch: u64,
+    saved_at: Option<f64>,
 }
 
 impl Document {
@@ -112,6 +133,12 @@ impl Document {
     pub fn source_kind(&self) -> &'static str { self.prepared.kind }
     pub fn original_first(&self) -> bool { self.prepared.original_first }
     pub fn repairs(&self) -> usize { self.prepared.repairs }
+    pub fn target(&self) -> Option<&FileTarget> { self.target.as_ref() }
+    pub fn saved_at(&self) -> Option<f64> { self.saved_at }
+    pub fn scope_depth(&self) -> usize { self.scopes.len() }
+    pub fn project_name(&self) -> &str { self.scopes.first().map_or(self.name(), |scope| &scope.parent.name) }
+    pub fn dirty(&self) -> bool { self.view().dirty || self.scopes.iter().any(|scope| scope.parent.session.view().dirty) }
+    pub fn title(&self) -> String { format!("{}{} — StykAnimate", if self.dirty() { "• " } else { "" }, self.project_name()) }
 
     /// Borrow the canonical store for core logic such as save preparation. Never an editable mirror.
     pub fn records(&self) -> &Value { self.prepared.session.report() }
@@ -133,6 +160,7 @@ pub enum DocumentsError {
     FinishEdit,
     TabLimit,
     IdentityExhausted,
+    Busy,
 }
 
 impl DocumentsError {
@@ -141,8 +169,9 @@ impl DocumentsError {
             Self::NotOpen => "errors.editorSessions.thisProjectIsNoLongerOpen",
             Self::FinishEdit => "errors.editorSessions.finishTheCurrentEditFirst",
             Self::TabLimit => "errors.projectTabs.closeAProjectToOpenAnother",
-            Self::NotActive => "The project is not active.",
-            Self::IdentityExhausted => "No project identity is available.",
+            Self::NotActive => "errors.editorSessions.thisProjectIsNotActive",
+            Self::IdentityExhausted => "errors.editorSessions.noProjectIdentityIsAvailable",
+            Self::Busy => "errors.editorSessions.finishTheCurrentOperationFirst",
         }
     }
 }
@@ -157,7 +186,12 @@ pub struct Documents {
     tabs: Vec<Document>,
     active: Option<DocumentId>,
     serial: u64,
+    recent: Vec<DocumentId>,
+    host: Option<host::Host>,
+    clipboards: std::collections::HashMap<&'static str, Clipboard>,
 }
+
+struct Clipboard { source: (DocumentId, u64), holder: (DocumentId, u64), value: Value }
 
 impl Documents {
     pub fn new() -> Self { Self::default() }
@@ -166,6 +200,7 @@ impl Documents {
     pub fn active(&self) -> Option<&Document> { self.active.and_then(|id| self.get(id)) }
 
     fn can_switch(&self) -> Result<(), DocumentsError> {
+        if self.host.as_ref().is_some_and(host::Host::blocks_switch) { return Err(DocumentsError::Busy); }
         if self.active().is_some_and(|tab| tab.view().editing) { Err(DocumentsError::FinishEdit) } else { Ok(()) }
     }
 
@@ -179,9 +214,11 @@ impl Documents {
         };
         let id = DocumentId(serial);
         let at = self.active.and_then(|active| self.tabs.iter().position(|tab| tab.id == active)).map_or(self.tabs.len(), |at| at + 1);
-        self.tabs.insert(at, Document { id, prepared });
+        self.tabs.insert(at, Document { id, prepared, scopes: Vec::new(), target: None, blank: false, epoch: 0, saved_at: None });
         self.serial = serial;
         self.active = Some(id);
+        self.recent.insert(0, id);
+        if let Some(host) = self.host.as_mut() { host.publication_needed = true; }
         Ok(id)
     }
 
@@ -191,15 +228,49 @@ impl Documents {
         if self.active == Some(id) { return Ok(false); }
         self.can_switch()?;
         self.active = Some(id);
+        self.recent.retain(|other| *other != id);
+        self.recent.insert(0, id);
+        if let Some(host) = self.host.as_mut() { host.publication_needed = true; }
         Ok(true)
     }
 
     /// Today's command name/arguments and optional view inputs. A session refusal is `answer.result`,
     /// with its original `EditError` and events. A host refusal means no session was called.
     pub fn call(&mut self, id: DocumentId, method: &str, args: &[Value], view: &Value) -> Result<CallAnswer, DocumentsError> {
+        if matches!(method, "copySelection" | "cutSelection" | "sheetCopyFrames" | "copyCameraMotion" | "copyCamera" | "copySegmentValues" | "copyVfxClip" | "copyAudioClip" | "cutAudioClip" | "pasteSelection" | "pasteFiguresInFrames" | "sheetPasteFrames" | "pasteCamera" | "pasteCameraMotion" | "pasteSegmentValues" | "pasteAudioClip" | "pasteVfxClip")
+            && self.host.as_mut().is_some_and(|host| !host.allow_clipboard()) { return Err(DocumentsError::Busy); }
         let tab = self.tabs.iter_mut().find(|tab| tab.id == id).ok_or(DocumentsError::NotOpen)?;
         if self.active != Some(id) { return Err(DocumentsError::NotActive); }
-        Ok(tab.prepared.session.call_native(method, args, view))
+        let before = tab.revision();
+        let before_tree = tab.records().clone();
+        let paste = match method {
+            "pasteSelection" | "pasteFiguresInFrames" => Some("figures"), "sheetPasteFrames" => Some("sheet"), "pasteCamera" => Some("camera"),
+            "pasteCameraMotion" => Some("cameraMotion"), "pasteSegmentValues" => Some("segmentValues"),
+            "pasteAudioClip" => Some("audio"), "pasteVfxClip" => Some("vfxClip"), _ => None,
+        };
+        if let Some(kind) = paste && let Some(clipboard) = self.clipboards.get_mut(kind) && clipboard.holder != (id, tab.lineage()) {
+            let answer = tab.prepared.session.call_native("@setClipboard", &[Value::str(kind), clipboard.value.clone(), Value::Bool(clipboard.source != (id, tab.lineage()))], &Value::Null);
+            if answer.result.is_err() { return Ok(answer); }
+            clipboard.holder = (id, tab.lineage());
+        }
+        let mut view = view.clone();
+        if let Some(fields) = view.make_obj() { fields.set("outerDepth", Value::Num(tab.scopes.len() as f64)); }
+        tab.prepared.session.set_outer_depth(tab.scopes.len());
+        let result = tab.prepared.session.call_native(method, args, &view);
+        if tab.revision() != before || !tab.records().same_node(&before_tree) {
+            tab.epoch = tab.epoch.wrapping_add(1);
+            tab.blank = false;
+            if let Some(host) = self.host.as_mut() { host.publication_needed = true; }
+        }
+        if let Some((kind, _)) = &result.clipboard && let Some(value) = tab.prepared.session.clipboard(kind) {
+            let old = self.clipboards.insert(kind, Clipboard { source: (id, tab.lineage()), holder: (id, tab.lineage()), value });
+            if let Some(host) = self.host.as_mut() { host.retire_clipboard(old); }
+        }
+        if paste == Some("figures") && result.result.is_ok() && let Some(clipboard) = self.clipboards.get_mut("figures") && let Some(value) = tab.prepared.session.clipboard("figures") {
+            let old = std::mem::replace(&mut clipboard.value, value);
+            if let Some(host) = self.host.as_mut() { host.retire_value(old); }
+        }
+        Ok(result)
     }
 
     pub fn undo(&mut self, id: DocumentId) -> Result<CallAnswer, DocumentsError> { self.call(id, "undo", &[], &Value::Null) }

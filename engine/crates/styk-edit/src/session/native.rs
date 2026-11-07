@@ -34,6 +34,23 @@ pub struct SessionView<'a> {
 }
 
 impl Session {
+    /// The same movieclip open operands used by the browser host, sharing the tree until the worker reserves its copy.
+    pub fn movieclip_document(&self, type_id: f64) -> Result<(Value, String), EditError> {
+        let refused = || EditError::Invalid("errors.editorMovieclips.chooseAMovieclip".into());
+        let figure = self.report().get("figure_types").and_then(Value::elements)
+            .and_then(|figures| figures.iter().find(|figure| figure.get("figure_type_id").and_then(Value::as_f64) == Some(type_id))).ok_or_else(refused)?;
+        let asset = figure.path(&["_styk", "movieclip"]).filter(|asset| asset.is_object()).ok_or_else(refused)?;
+        if asset.get("spatialMeshes").is_some_and(Value::truthy) { return Err(EditError::Invalid("errors.editorMovieclips.thisIsAnAttachedMeshPoseItsParent".into())); }
+        let document = asset.get("document").filter(|document| document.is_object()).ok_or_else(refused)?;
+        Ok((document.clone(), figure.get("name").and_then(Value::as_str).unwrap_or("").to_string()))
+    }
+
+    /// Restore today's shared clipboards when a project becomes active, without serializing a read view.
+    pub fn clipboard(&self, kind: &str) -> Option<Value> { self.editor.clipboard_wire(kind) }
+
+    /// The nesting depth belongs to the document host; every command observes it, including null-view calls.
+    pub fn set_outer_depth(&mut self, depth: usize) { self.editor.outer_depth = depth; }
+
     /// Run today's command and arguments directly, on this session's owner thread.
     /// `view` has the same meaning as in `call_values`; null retains the session's current view.
     /// Values are native (including non-finite numbers); no JSON argument encoding or document patch is needed.

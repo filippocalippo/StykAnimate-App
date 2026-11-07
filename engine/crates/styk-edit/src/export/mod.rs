@@ -27,6 +27,13 @@ use styk_eval::records::Records;
 pub use figure::FigureRequest;
 pub use save::{Openable, Projected, check_openable, check_scene, fold_movieclip, prepare_project, project_document};
 
+/// Worker preparation of the operands used when leaving an edited movieclip, exactly `storedFrameReport` and its duration.
+pub fn movieclip_edit_document(tree: &Value) -> Result<(Value, f64), EditError> {
+    let stored = pivot::stored_frame_report(tree)?;
+    let duration = crate::timeline::total_ticks(&crate::timeline::rows(tree)).max(1.0);
+    Ok((stored, duration))
+}
+
 use crate::{EditError, Editor, Options};
 
 /// The file formats of an export of the open document.

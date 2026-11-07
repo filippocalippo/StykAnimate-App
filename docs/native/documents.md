@@ -1,8 +1,13 @@
-# Native documents: panel seam (K-doc, milestone 1)
+# Native documents and engine host (K-doc)
 
 `styk_core::documents::Documents` holds the tabs, each owning one `styk-edit::session::Session`.
 The session owns the document, selection/playhead, gesture and history. There is no report mirror,
-JSON patch, duplicate selection or duplicate dirty flag. This milestone writes no file.
+JSON patch, duplicate selection or duplicate dirty flag.
+
+Engine type re-exports live only in **`styk_core::engine`**: `Value`, `CallAnswer` (`NativeCall`),
+`DocumentView` (`SessionView`), `EditError`, `Selection`, `OpenError`, `TypedDocument`, `Engine` and `Budgets`.
+Core panel logic may name that module; views must not. Views receive plain view models and messages.
+`documents` exposes the core's own document identities, owners, requests and effects.
 
 ## Preparing and installing a document
 
@@ -13,16 +18,17 @@ documents and decoded imports. Both entries finish constructing the session on t
 its indexes, reusing the prepared typed views. Only the small start options use the existing JSON
 initializer; the document is never serialized again.
 
-These are **synchronous worker preparation entries**, not interface-thread open commands. The later
-K-doc dispatcher will schedule them and handle cancellation/stale replies. `Documents::open` only
+These are **synchronous worker preparation entries**, not interface-thread open commands.
+`Documents::dispatch` schedules application opens and handles cancellation/stale replies. `Documents::open` only
 moves the ready session into a tab beside the active one: no decode, normalization, evaluation,
 publication or index construction. A refusal returns the prepared document for retry or worker disposal.
 
 Initial selection and names follow `_publishLoadedReport`: select the first keyframe's first figure;
 drop `.piv`, `.stk` or `.styk` case insensitively, then fall back to the stored name and `Untitled animation`.
 A fresh session has revision/saved revision 1 and empty history. `PreparedDocument::set_clock` injects
-the budgeted-read clock. Commands use the allocator's admission gate; setting its machine limit and
-installing the counting allocator remain the later engine-host work.
+the budgeted-read clock. The asynchronous application path additionally follows `acceptImport`: Pivot
+opens at the last frame unless it stored a draft, all supported import extensions are removed from
+the name, and repairs mark the session dirty. The milestone-1 preparation defaults remain unchanged.
 
 ## Commands and reads
 
@@ -50,7 +56,69 @@ restores earlier ones. Live frames also depend on playhead, view inputs and draf
 alone cannot identify a preview. The session owns those caches; core adds none. Each session is boxed
 once so moving tabs does not move its large state.
 
-## Verification and remaining integration
+## Asynchronous effects and resources
+
+Attach `HostOptions` before accepting requests. It injects the engine, `Spawner`, asynchronous `Files`,
+startup document, clock and an event-loop notifier. The host owns that engine's worker lifetime;
+other owners submit work to it but do not stop it independently. One bounded document lane feeds at most one job
+to `Engine::spawn`; two engine workers leave one available for frame preparation. Dispatch, polling,
+cancellation and retirement exchanges use nonblocking access. `poll` handles at most one completion.
+Refusals return the original request and its payload. Busy callers retry that request; a prompt response
+is not consumed when submission is refused. The host does not start a second open/save behind a running one.
+
+`OpenFile`, `OpenBytes` and `OpenDocument` use the existing engine decoders/normalizers. Native projects,
+legacy JSON, Pivot projects and figure/movieclip containers are supported. Figure files import into
+the active session with the existing `importFigure` command. Canonical Stick Nodes trees enter through
+`OpenDocument`; raw Stick Nodes decoding still belongs to the import owner (the existing engine inventory
+marks its decoder as JavaScript). No new serializer or raw Stick Nodes decoder is hidden in this host.
+
+`Save` and `SaveAll` leave movieclip scopes first, as `performNativeSave` does, then snapshot the root
+and call the engine's existing `save_project`. Each scope contributes one parent history entry. The
+snapshot's document identity, revision, mutation epoch and depth must still match before marking saved.
+A committed older snapshot may update the target but leaves newer work dirty (`Saved { current: false }`).
+Undo and redo keep their original relationship to the saved revision. Save-as always asks for a target.
+The platform writes a short, uniquely created sibling stage, flushes it, crosses the cancellation commit
+boundary and replaces the destination by rename. Failure/cancellation preserves the existing file and
+unsaved work; cleanup removes only the stage this call created. File input reserves both byte buffers
+and scratch before reading; decoding retains the engine's own reservations.
+
+Open/save dialogs, close confirmation and quit confirmation are effects. Close activates the requested
+tab, asks Save/Discard/Cancel when dirty and selects its most recently used predecessor afterwards.
+Closing the last tab or replacing an untouched blank keeps that tab's identity. Close Saved keeps the
+front and dirty tabs. Save All visits other dirty tabs in band order, then the original front tab; a
+cancel/failure ends the sequence. Quit uses the same saving sequence after one confirmation.
+Renaming trims the name, uses `Untitled` for an empty input and marks an edit without adding history.
+
+`published()` is the accepted stored-document generation for the stage, guarded by the current tab
+and head. A stale worker generation is never returned as current. Session commands and live-frame
+reads keep the milestone-1 interface-thread seam; the existing import and movieclip publication commands
+still commit through that seam. Their parsing, open preparation, stored-frame projection and engine
+activation run on workers. Drawing barriers and displayed live drafts belong to their existing owners.
+
+Closed tabs, replaced scope sessions, superseded clipboards and rejected results return to the document
+worker for reclamation. Dropping the owner cancels its active operation and hands over its remaining
+tabs/clipboards without joining. `Cancel` wakes a waiting asynchronous file service and does not wait
+for a concurrent waker registration. Local file I/O checks cancellation between bounded chunks.
+
+## Native memory
+
+`styk-app` installs `styk_alloc::Counting` before startup. `styk-platform::memory` reads machine facts;
+the service policy chooses the smaller of half the physical memory and three quarters of available
+memory at startup, with a checked conversion for 32-bit hosts and a 1 GiB fallback when the query fails.
+Admission retains its existing extra sixteenth for small allocations that cannot refuse. This is a native policy;
+the browser's largest-reservable WebAssembly maximum is not a physical-memory policy.
+
+The explicit ignored release tests `allocator_drag_system` and `allocator_drag_counted` use the same
+in-place input and 120 moves/frame reads per sample on its densest frame with all figures selected,
+one warm-up and three samples. They assert cancellation
+restores the original head and that counting is active only in the counted process.
+An exclusive timing result remains the orchestrator's batch measurement, as required by the machine queue.
+The Windows diagnostic exercised 848 figures with both allocators, with successful moves and restored heads.
+It ran in a shared `probe` slot, so it does not establish an overhead figure; exact accounting is retained
+pending the exclusive gate. `documents_memory` verifies counted open refusal, movieclip allocation
+refusal without a changed head, and successful retries. Tiny metadata edits do not use that allocation gate.
+
+## Verification and integration
 
 `styk-core/tests/documents.rs` opens repository legacy JSON and binary `.styk` fixtures. It checks
 typed/record identity reuse, initial state, command results/refusals, live drafts, one-entry gestures,
@@ -58,7 +126,21 @@ cancel, undo/redo, isolated tabs, failed/cancelled opens and the limit of 12. Th
 compare document bytes, selection, playhead, history labels and events with frozen gesture/layer
 tapes, and results/refusals/view inputs with the existing JSON boundary. Fixtures are never regenerated.
 
-Remaining K-doc work: asynchronous open/save/publication dispatch, stage activation, format/import
-services, save targets/atomic files, close/quit prompts, movieclip scopes, tab reordering/recency,
-empty-tab replacement, cross-tab clipboard transfer, and resource reclamation. Recovery/autosave
-belong to K-rec. The panel seam needs none of those services to edit and read a real session.
+`documents_host` checks formats, imports, saves, failures, prompts, scopes, tab order and shared clipboards;
+`documents_jobs` holds a file future pending to prove dispatch returns, cancellation wakes it, a subsequent
+open succeeds and owner disposal runs off the interface thread. `styk-platform/tests/document_files.rs`
+checks actual Windows replacement, read-only failure and staging cleanup.
+
+The explicit save oracle runs today's owned editor and export worker twice before writing expected bytes
+under ignored `artifacts/`. Native tests compare every byte after open/edit/undo/redo, using the same inputs.
+Run with `node --test tests/native-documents-save-reference.test.mjs`, `STYK_REFERENCE_ROOT` naming the
+pinned reference checkout (including its matching WASM package), and `STYK_NATIVE_SAVE_ORACLE` naming
+that artifacts directory; the matching ignored Rust test requires the latter. The reference checkout
+is read only. Comparing against native-app's changed JavaScript paired with an older WASM is invalid.
+Nothing writes frozen fixtures. Recovery/autosave, raw import decoding, the window's dialogs and stage
+presentation remain the respective owners' integrations. The panel seam needs none of those services to edit.
+
+The `movieclip-bake` command (inventory CMD-009/TL-095) still needs its command owner's integration with
+the engine's exclusive `WorkerSession` capability. Do not run the synchronous `bakeMovieclip` entry on
+the interface. This document host does not introduce a second editing session or a read-view mirror
+to run that job beside the fixed milestone-1 borrowed-read seam; asynchronous bake dispatch remains open.

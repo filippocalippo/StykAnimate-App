@@ -24,3 +24,6 @@ pub use clock::{Clock, FixedClock, SystemClock};
 pub use spawn::{Job, ManualSpawner, SpawnError, Spawner};
 
 pub mod fonts;
+pub mod files;
+pub mod worker;
+pub mod memory;

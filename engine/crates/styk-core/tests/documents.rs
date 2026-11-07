@@ -1,7 +1,8 @@
 //! Milestone 1's public seam, with real engine opens and sessions and no window.
 use std::sync::Arc;
 
-use styk_core::documents::{DocumentId, Documents, DocumentsError, EditError, MAX_OPEN_PROJECTS, PreparedDocument, Value};
+use styk_core::documents::{DocumentId, Documents, DocumentsError, MAX_OPEN_PROJECTS, PreparedDocument};
+use styk_core::engine::{EditError, Value};
 use styk_doc::json;
 use styk_engine::{Budgets, Engine};
 

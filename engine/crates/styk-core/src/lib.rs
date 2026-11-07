@@ -12,6 +12,7 @@ pub mod audio;
 pub mod clipboard;
 pub mod controls;
 pub mod documents;
+pub mod engine;
 pub mod drawing;
 pub mod export;
 pub mod field;

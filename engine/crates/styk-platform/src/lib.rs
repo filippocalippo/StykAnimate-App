@@ -21,3 +21,6 @@ pub mod window;
 pub mod fonts;
 #[cfg(windows)]
 pub mod windows;
+#[cfg(windows)]
+pub mod files;
+pub mod memory;

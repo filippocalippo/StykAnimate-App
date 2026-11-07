@@ -10,6 +10,7 @@ the command's result/refusal and events, without a JSON read-view response. `Ses
 selection and history state; `with_document` and `frame_records` use the session's existing caches.
 The panel-facing owner and its worker-preparation boundary are documented in
 [`native/documents.md`](../native/documents.md). The JavaScript session protocol is unchanged.
+Core logic names re-exported engine types through `styk_core::engine`; views must not name that module.
 
 ## Where it starts
 

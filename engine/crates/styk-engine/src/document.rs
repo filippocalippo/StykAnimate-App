@@ -587,6 +587,25 @@ impl Engine {
         self.publish_tree_with(lineage, tree, revision, None)
     }
 
+    /// Worker-only native activation/publication from the session's immutable head. The session stays on its owner
+    /// thread; no open-time tree or loader must be kept alive just to activate a resting project later.
+    pub fn activate_tree_with(&self, lineage: u64, tree: Value, revision: u64, made: Option<Arc<Prepared>>) -> Result<Committed, OpenError> {
+        let mut store = styk_doc::lock::spinning(&self.inner.store);
+        if store.lineage != lineage {
+            store.loader = Loader::new();
+            store.lineage = lineage;
+            store.assets = None;
+            store.prepared = None;
+            store.tree = Value::Null;
+        }
+        let views = if tree.same_node(&store.tree) {
+            store.prepared.clone().map_or(Views::Convert, Views::Same)
+        } else {
+            made.map_or(Views::Convert, Views::Made)
+        };
+        self.publish_locked(store, tree, revision, views)
+    }
+
     /// [`Engine::publish_tree`] with the typed views the caller already made of `tree` (the editing session converts the
     /// document for its own reads): they are published as they are, and the document is converted once.
     pub fn publish_tree_with(&self, lineage: u64, tree: Value, revision: u64, made: Option<Arc<Prepared>>) -> Result<Option<Committed>, OpenError> {
