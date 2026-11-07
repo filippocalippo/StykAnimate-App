@@ -69,6 +69,10 @@ those are ours (`styk-design`, `styk-core`) plus a few small fork patches; Inter
 at 4K the export process holds 1.2 GiB beside the encoder's 0.7, against a 1.5 GiB total). With the stage: compare the
 native `styk-cli video` export with today's (FP's floor: bytes not equal, sizes within 0.2 %).
 
+**Merging** (N8, 2026-11-08): reviewed chunks merge onto `native-app` three or four in a row, then one combined pass
+(`bash perf/train-pass.sh <merged sha> <changed crates>`); high-risk or overlapping chunks merge alone with their own pass;
+a failed pass stops merges until fixed; no catch-up merges into branches without a conflict or a dependency.
+
 **Skeleton** (`perf/briefs/native/skeleton-plan.md`, implementers by N8):
 
 | Chunk | Implementer | State |
