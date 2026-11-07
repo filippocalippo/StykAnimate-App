@@ -4,7 +4,8 @@
 // back. After every few gestures the project is written by the real export worker (Save, or the recovery copy that folds the movieclips in)
 // and opened with the real reader; what must hold is that the file opens, needs no repair, and is the project that was saved.
 //
-//   node scripts/fuzz-movieclips-docs.mjs --regression            # the fixed set below: every refused save found so far, in a few minutes
+//   node scripts/fuzz-movieclips-docs.mjs --regression            # the fixed set below: every refused save found so far, in a few minutes; ends in
+//                                                                  # failure after FUZZ_DEADLINE_MS (ten minutes) whatever it is doing
 //   node scripts/fuzz-movieclips-docs.mjs <doc|all> <seedFrom> [seedTo] [steps=40] [every=3]
 //
 // Environment: FLUSH=1 publishes the drawings after each gesture, NODRAW=1 draws nothing, CONT=1 goes on after a failure, EXTRA=save|rec also
@@ -13,6 +14,7 @@
 // `scripts/fuzz-movieclips.mjs` is the other half: one editor from the demo or a chosen start, many seeds, fast.
 import '../tests/support/register-engine.mjs';
 import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {Editor} from '../src/editor.mjs';
@@ -39,6 +41,14 @@ const REGRESSION = [['sheet-movieclip', 1], ['sheet-movieclip', 62], ['sheet-mov
   ['sheet-movieclip', 226], ['sheet-movieclip', 4], ['clip-create-joined-sheet', 7], ['builder', 11], ['joined-chain', 3]];
 const args = process.argv.slice(2), regression = args.includes('--regression');
 if (regression) process.env.FLUSH = '1';
+// The fixed set runs in a process of its own with a deadline the process cannot keep from ending it: a hang is a failure, not a wait.
+if (regression && !process.env.FUZZ_CHILD) {
+  const deadline = Number(process.env.FUZZ_DEADLINE_MS ?? 10 * 60 * 1000);
+  const run = spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...args], {stdio: 'inherit', timeout: deadline, killSignal: 'SIGKILL', env: {...process.env, FUZZ_CHILD: '1'}});
+  if (run.error?.code === 'ETIMEDOUT') console.error(`FAILED: the regression set did not finish in ${Math.round(deadline / 1000)} s`);
+  else if (run.error) console.error(`FAILED: ${run.error.message}`);
+  process.exit(run.error ? 1 : (run.status ?? 1));
+}
 const docArg = args[0] ?? 'demo', seedFrom = Number(args[1] ?? 1), seedTo = Number(args[2] ?? seedFrom), steps = regression ? 40 : Number(args[3] ?? 40), every = regression ? 3 : Number(args[4] ?? 3);
 const verify = !process.env.NOVERIFY;
 const failDir = fileURLToPath(new URL('../artifacts/fuzz-movieclips-docs', import.meta.url)); mkdirSync(failDir, {recursive: true});
@@ -109,6 +119,7 @@ async function runSeed(docName, seed) {
   const isClip = f => Boolean(f?._styk?.movieclip);
   const objects = () => e().evaluatedFrame?.objects ?? [], clips = () => (e().report.figure_types ?? []).filter(isClip);
   const oneNoCel = () => { const o = objects().filter(x => !e().report.figure_types.find(f => f.figure_type_id === x.figure_type_id)?._styk?.drawing); if (!o.length) return null; const u = pick(o).unique_id; e().select(u, -1); return u; };
+  const oneJoint = () => { const o = objects(); if (!o.length) return null; const u = pick(o).unique_id; e().select(u, 0); return u; };
   const one = () => { const o = objects(); if (!o.length) return null; const u = pick(o).unique_id; e().select(u, -1); return u; };
   let audioN = 0, stroke = 0;
   const G = {
@@ -151,8 +162,9 @@ async function runSeed(docName, seed) {
     drawFrame() { e().addDrawingFrame?.(); },
     async draw() { const w = {pixelsPerUnit: 1, world: {x: int(0, 60), y: int(0, 60)}}; logging = false; try { let target; try { target = e().prepareDrawingCel(w); } catch { e().createDrawingLayer(); target = e().prepareDrawingCel(w); } const surface = await e().drawingResources.surface(target.figure);
       const b = new DrawingStroke(surface.store, {size: 8, pressureSize: false, seed: ++stroke}); const pts = [{x: int(5, 55), y: int(5, 55)}, {x: int(5, 55), y: int(5, 55)}]; b.sample(pts[0]); b.sample(pts[1]); e().commitDrawingPixels(target, b.finish()); OPS.push({op: 'draw', i: cur.id, w, pts: pts, seed: stroke}); } finally { logging = true; } },
-    addSegment() { oneNoCel(); e().addSegment?.(); }, delSegment() { oneNoCel(); e().deleteSegment?.(int(1, 3)); }, splitSeg() { oneNoCel(); e().splitSegment?.(int(1, 3)); },
-    segValues() { oneNoCel(); e().setSegmentValues?.(int(1, 3), {length: int(10, 60)}); }, mirror() { oneNoCel(); e().mirrorFigure?.(); },
+    // The gestures that edit a figure's segments act on the joint of any figure, a drawing cel included (a cel refuses what would break it), with arguments they take.
+    addSegment() { oneJoint(); e().addSegment?.(); }, delSegment() { oneJoint(); e().deleteSegment?.(); }, splitSeg() { oneJoint(); e().splitSegment?.(0.1 + rnd() * 0.8); },
+    segValues() { oneJoint(); e().setSegmentValues?.(rnd() < 0.5 ? {length: int(10, 60)} : {angle: int(-170, 170)}); }, mirror() { oneJoint(); e().mirrorSegment?.(); },
     color() { one(); e().setFigureColor?.([int(0, 255), int(0, 255), int(0, 255)]); },
     undo() { const n = int(1, 6); for (let i = 0; i < n; i++) e().undo(); return n; }, redo() { const n = int(1, 6); for (let i = 0; i < n; i++) e().redo(); return n; },
     deleteInstances() { const c = clips(); if (!c.length) return; const id = pick(c).figure_type_id; for (const o of objects()) if (o.figure_type_id === id) { e().select(o.unique_id, -1); e().deleteSelection(); } },

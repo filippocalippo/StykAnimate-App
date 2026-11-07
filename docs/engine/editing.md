@@ -735,8 +735,13 @@ it on the editor, for every document.
   A figure that is not a drawing cel pasted or imported while a drawing layer is active is placed on it, as it has always been; the repair opening makes
   of a figure assigned to a drawing layer moves only one that a frame the layer keys shows beside its cel (what opening refuses), so a save opens as written.
   Freeing a session starts the engine's drain of closed documents where it has no worker threads (`engine.pump`).
-  A drawing cel is one image segment that carries its pixels: no gesture that edits the segments of a figure (add, split, delete, duplicate, mirror) works
-  on one (`errors.editorDrawing.aDrawingHasNoSegmentsToEdit`), and copying a drawing's key forks only the cels the frame shows, not the figure a cel is joined to.
+  A drawing cel is one image segment that carries its pixels. A topology edit that would leave it with another segment, a split one, none, or an image segment of
+  another kind is refused after it is made and undone (`errors.editorDrawing.aDrawingKeepsItsOneImage`, `validate_topology`); mirroring or flipping it and
+  changing the length or the angle of its image segment keep it a cel and are allowed, as they always were. Every definition a command adds (an import, a paste, a
+  foreign clipboard) must keep its image too, checked where definitions are committed (`publish`). A project written by a build that let a segment be added to a cel
+  is mended when it opens (`drawings::repair_cels`): the cel keeps its image segment and its picture, the other segments, the polygons and the poses and controllers
+  of what went are dropped, in the project and in every movieclip it holds, one repair for each definition. Copying a drawing's key forks only the cels the frame shows,
+  not the figure a cel is joined to.
   The fuzz that keeps this honest: `node scripts/fuzz-movieclips-docs.mjs --regression` runs a fixed set of seeds (each refused save found so far, and
   a few more starts) in about a minute; `scripts/fuzz-movieclips.mjs <seed> --doc=<fixture>` is the same idea for one editor and any number of seeds.
   A movieclip made inside a clip retains the scene the outer clip retains cut down to its own figures (`prune_retained`: poses,

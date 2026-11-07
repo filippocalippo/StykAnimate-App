@@ -8,12 +8,16 @@ import {readFileSync} from 'node:fs';
 import {snapshotDocument} from '../src/engine/engine-owner.mjs';
 import {makeProjectFile} from '../src/engine/engine-document-export.mjs';
 import {openBytes} from '../src/engine/engine-open.mjs';
-import {DrawingResources} from '../src/drawing-resources.mjs';
+import {DrawingResources, drawingResourcesFor} from '../src/drawing-resources.mjs';
 import {drawingEngineOperation} from '../src/engine/engine-drawing-worker.mjs';
 import {DrawingStroke} from './support/sketch-stroke.mjs';
 import {ownedEditorSync} from './support/owned-editor.mjs';
 import './support/engine-node.mjs';
 
+const REFUSED = 'errors.editorDrawing.aDrawingKeepsItsOneImage';
+// Deleting the only segment of any figure has a refusal of its own, which a cel has too.
+const LAST_SEGMENT = 'errors.editorBuilderTopology.aFigureNeedsAtLeastOneSegmentDelete';
+const refusal = (gesture, error) => ['deleteSegment', 'deleteSingleSegment'].includes(gesture) ? [REFUSED, LAST_SEGMENT] : [REFUSED];
 const options = {demo: false, layerTimeline: true, propertyChannels: true};
 const fixture = JSON.parse(readFileSync(new URL('../engine/tests/edit/sheet-movieclip.document.json', import.meta.url), 'utf8'));
 const worker = {async request(kind, data) {
@@ -66,25 +70,32 @@ test('another segment cannot be added to a drawing cel, and the cel stays a file
   try {
     await draw(s, {x: 38, y: 17}, [{x: 19, y: 22}, {x: 40, y: 8}], 1);
     const before = JSON.stringify(editor.report);
-    assert.throws(() => editor.addSegment(), error => error.messageKey === 'errors.editorDrawing.aDrawingHasNoSegmentsToEdit', 'the edit is refused');
+    assert.throws(() => editor.addSegment(), error => error.messageKey === REFUSED, 'the edit is refused');
     assert.equal(JSON.stringify(editor.report), before, 'and changes nothing');
     await opens(editor);
   } finally { s.resources.dispose(); }
 });
 
-// Seed 403 (on the sheet-movieclip and the rig fixtures): the same refused save with other gestures first. The rig one splits a segment of the cel, then
-// adds one (after a copy of the drawing, so it is the second cel that is selected); the sheet-movieclip one draws on a new drawing layer, then adds one.
-const SEGMENT_GESTURES = [
-  ['addSegment', []], ['addSegments', [[{}]]], ['splitSegment', [0.5]], ['splitSegmentBranch', [0.5]], ['splitBuilderSegments', []], ['deleteSegment', []],
-  ['deleteSingleSegment', []], ['unsplitSegment', []], ['duplicateSegment', []], ['duplicateSegmentBranch', []], ['mirrorSegment', []],
-  ['mirrorSegmentBranch', []],
+// Seed 403 (on the sheet-movieclip and the rig fixtures) is the refused save of 132 again with other gestures first: the rig one splits a segment of the cel and
+// adds one (after a copy of the drawing, so it is the second cel that is selected); the sheet-movieclip one draws on a new drawing layer and adds one. What a cel
+// refuses is what breaks it: another segment, a split, a removal. What keeps it a cel (mirroring or flipping it, changing the length or the angle of its image
+// segment) is allowed, as it is in the editor of every build before. Each gesture runs with the joint of the cel selected (a gesture with no joint selected
+// does nothing, and tests nothing), with arguments it takes.
+const BREAKS = [
+  ['addSegment', []], ['addSegments', [[{}]]], ['splitSegment', [0.5]], ['splitSegmentBranch', [0.5]], ['deleteSegment', []], ['deleteSingleSegment', []],
+  ['duplicateSegment', []], ['duplicateSegmentBranch', []],
 ];
-// These two check what they are given (two joints, anchors) before they reach the figure: any refusal will do, and the document is the same.
-const BY_ARGUMENTS = [['addConnector', []], ['addWeightedJoint', []]];
-const REFUSED = 'errors.editorDrawing.aDrawingHasNoSegmentsToEdit';
+const KEEPS = [['mirrorSegment', []], ['mirrorSegmentBranch', []]];
+// These check what they are given (two joints, anchors, a parent) before they reach the figure: any refusal will do, and the cel is a cel afterwards.
+const BY_ARGUMENTS = [['addConnector', []], ['addWeightedJoint', []], ['unsplitSegment', []], ['splitBuilderSegments', [{fraction: 0.5}]], ['moveBuilderSegment', []]];
+
+const celsOf = editor => editor.report.figure_types.filter(figure => figure._styk?.drawing);
+const keepsItsImage = figure => figure.segments.length === 1 && figure.segments[0].segment_type === 'image' && figure.image_assets.length === 1;
+const selectCel = editor => { const uid = editor.object.unique_id; editor.select(uid, 0); assert.equal(editor.selectedJoint, 0, 'the joint of the cel is selected'); return uid; };
+const ensureResources = editor => drawingResourcesFor(editor.report) ?? new DrawingResources(editor.report, {worker, onPublished: figure => editor._drawingPublished(figure)});
 
 for (const [fixtureName, prelude] of [['sheet-movieclip', async () => {}], ['rig', async ({editor}) => { editor.sheetDuplicateFrameAfter(); }]]) {
-  test(`no gesture that edits the segments of a figure changes a drawing cel (${fixtureName}), and the project saves as a file that opens`, async () => {
+  test(`what breaks a drawing cel is refused and what keeps it one is allowed (${fixtureName}), history and the clipboard included, and the project saves as a file that opens`, async () => {
     const document = JSON.parse(readFileSync(new URL(`../engine/tests/edit/${fixtureName}.document.json`, import.meta.url), 'utf8'));
     const {editor} = ownedEditorSync(options, document, {verify: false, recorded: false});
     const resources = new DrawingResources(editor.report, {worker, onPublished: figure => editor._drawingPublished(figure)});
@@ -92,20 +103,66 @@ for (const [fixtureName, prelude] of [['sheet-movieclip', async () => {}], ['rig
     try {
       await draw(s, {x: 30, y: 1}, [{x: 22, y: 49}, {x: 6, y: 28}], 1);
       await prelude(s);
-      const cel = editor.object;
-      assert.ok(cel && editor.report.figure_types.find(figure => figure.figure_type_id === cel.figure_type_id)?._styk?.drawing, 'the cel is selected');
-      for (const [gesture, args] of SEGMENT_GESTURES) {
+      selectCel(editor);
+      for (const [gesture, args] of BREAKS) {
+        selectCel(editor);
         const before = JSON.stringify(editor.report);
-        // Refused with the cel's own message, or (a gesture that finds nothing of the figure to work on) answering that it did nothing: the document is the same.
-        try { editor[gesture](...args); } catch (error) { assert.equal(error.messageKey, REFUSED, `${gesture}: ${error.message}`); }
+        try { editor[gesture](...args); } catch (error) { assert.ok(refusal(gesture).includes(error.messageKey), `${gesture}: ${error.message}`); }
         assert.equal(JSON.stringify(editor.report), before, `${gesture} changes nothing`);
+      }
+      // The gestures that must say so: not merely do nothing.
+      for (const [gesture, args] of BREAKS.filter(([name]) => ['addSegment', 'splitSegment', 'deleteSegment', 'duplicateSegment'].includes(name))) {
+        selectCel(editor);
+        assert.throws(() => editor[gesture](...args), error => refusal(gesture).includes(error.messageKey), `${gesture} is refused`);
       }
       for (const [gesture, args] of BY_ARGUMENTS) {
+        selectCel(editor);
         const before = JSON.stringify(editor.report);
         try { editor[gesture](...args); } catch { /* refused */ }
-        assert.equal(JSON.stringify(editor.report), before, `${gesture} changes nothing`);
+        assert.ok(celsOf(editor).every(keepsItsImage), `${gesture} leaves the cels cels`);
+        if (!celsOf(editor).every(keepsItsImage)) assert.equal(JSON.stringify(editor.report), before);
       }
+      // What keeps it a cel is allowed, one step of history each, and undone and redone it still is one.
+      const depth = editor._undo.length;
+      for (const [gesture, args] of KEEPS) { selectCel(editor); editor[gesture](...args); assert.ok(celsOf(editor).every(keepsItsImage), `${gesture} keeps the cels`); }
+      selectCel(editor);
+      editor.setSegmentValues({length: 40});
+      assert.ok(celsOf(editor).every(keepsItsImage), 'a length keeps the cel');
+      selectCel(editor);
+      editor.setSegmentValues({angle: 10});
+      assert.ok(celsOf(editor).every(keepsItsImage), 'an angle keeps the cel');
+      const steps = editor._undo.length - depth;
+      assert.ok(steps > 0, 'the edits are in the history');
+      const edited = JSON.stringify(editor.report);
+      for (let step = 0; step < steps; step++) { await editor.undo(); assert.ok(celsOf(editor).every(keepsItsImage), 'undone, the cel is a cel'); }
+      for (let step = 0; step < steps; step++) { await editor.redo(); assert.ok(celsOf(editor).every(keepsItsImage), 'redone, the cel is a cel'); }
+      assert.equal(JSON.stringify(editor.report), edited, 'redone, the project is as it was edited');
+      await opens(editor);
+      // The clipboard: a cel copied and pasted is a cel of its own, and the project saves.
+      selectCel(editor);
+      editor.copySelection();
+      editor.setActiveLayer('layer-1'); // a drawing layer takes one cel at a time
+      editor.pasteSelection();
+      assert.ok(celsOf(editor).every(keepsItsImage), 'a pasted cel is a cel');
       await opens(editor);
     } finally { resources.dispose(); }
   });
 }
+
+test('what breaks a drawing cel is refused inside a movieclip that is entered too, and the project saves as a file that opens', async () => {
+  const s = session(), {editor} = s;
+  try {
+    const clip = editor.report.figure_types.find(figure => figure._styk?.movieclip);
+    editor.enterMovieclip(clip.figure_type_id);
+    const inside = {editor, resources: ensureResources(editor)};
+    await draw(inside, {x: 30, y: 1}, [{x: 22, y: 49}, {x: 6, y: 28}], 1);
+    selectCel(editor);
+    for (const [gesture, args] of BREAKS.filter(([name]) => ['addSegment', 'splitSegment', 'deleteSegment'].includes(name))) {
+      selectCel(editor);
+      assert.throws(() => editor[gesture](...args), error => refusal(gesture).includes(error.messageKey), `${gesture} is refused in the clip`);
+    }
+    assert.ok(celsOf(editor).every(keepsItsImage));
+    editor.leaveMovieclip();
+    await opens(editor);
+  } finally { s.resources.dispose(); }
+});

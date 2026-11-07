@@ -535,10 +535,6 @@ impl Editor {
         if figure.path(&["_styk", "movieclip"]).is_some_and(Value::truthy) {
             return Err(invalid("errors.editor.openTheMovieclipToEditItsFigures"));
         }
-        // A drawing cel is one image segment that carries its pixels: another segment, or one fewer, is a drawing no file can hold.
-        if figure.path(&["_styk", "drawing"]).is_some_and(Value::truthy) {
-            return Err(invalid("errors.editorDrawing.aDrawingHasNoSegmentsToEdit"));
-        }
         if self.report.path(&["_styk", "simpleFrameDraft"]).is_some() {
             return Err(EditError::Unported("topology edits with a frame draft".into()));
         }
@@ -860,6 +856,11 @@ impl Editor {
     /// handles, numbers, hierarchy, rig and polygons, and its poses and joins.
     fn validate_topology(&self, index: usize, before: &Snapshot) -> Result<(), EditError> {
         let figure = self.report.get("figure_types").and_then(|f| f.item(index)).unwrap_or(Value::Null);
+        // A drawing cel is one image segment that carries its pixels: an edit that adds a segment to it, splits it, removes it or changes its kind makes a
+        // drawing no file can hold, and is refused. Mirroring, flipping and changing the length or angle of the image segment keep it a cel.
+        if figure.path(&["_styk", "drawing"]).is_some_and(Value::truthy) && crate::load::drawing_keeps_its_image(&before.figure) && !crate::load::drawing_keeps_its_image(&figure) {
+            return Err(invalid("errors.editorDrawing.aDrawingKeepsItsOneImage"));
+        }
         let type_id = figure.get("figure_type_id").cloned().unwrap_or(Value::Null);
         let segments = validate_definition(&figure)?;
         crate::load::validate_figure_extensions(&figure)?;
