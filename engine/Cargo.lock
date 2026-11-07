@@ -2670,6 +2670,7 @@ dependencies = [
 name = "styk-design"
 version = "0.1.0"
 dependencies = [
+ "cryoglyph",
  "iced",
  "styk-platform",
  "windows",
@@ -2818,6 +2819,7 @@ dependencies = [
  "raw-window-handle",
  "sha2",
  "styk-services",
+ "windows",
  "windows-sys",
 ]
 
@@ -2855,6 +2857,7 @@ dependencies = [
  "cryoglyph",
  "iced",
  "iced_runtime",
+ "iced_wgpu",
  "png",
  "pollster",
  "styk-design",

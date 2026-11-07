@@ -120,9 +120,23 @@ pub struct Rendering {
     pub subpixel: Option<SubpixelOrder>,
     /// Skia's luminance-dependent coverage adjustment: `(contrast, gamma)`, or `None` for none.
     pub adjustment: Option<(f32, f32)>,
-    /// Draw glyph masks with DirectWrite on a worker thread (Windows), the rasterizer the browser uses there. A frame
-    /// then lacks the glyphs the worker has not drawn yet: see [`glyphs_pending`] and [`set_glyph_notifier`].
-    pub direct_write: bool,
+    /// Who draws the glyph masks. With a worker, a frame is a candidate that is complete only once the worker has drawn
+    /// its glyphs: see [`candidate_incomplete`] and [`set_glyph_notifier`].
+    pub glyphs: GlyphDrawing,
+    /// Draw glyphs without antialiasing: the system draws text unsmoothed.
+    pub aliased: bool,
+}
+
+/// Who draws the glyph masks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GlyphDrawing {
+    /// swash, on the thread that prepares the text.
+    #[default]
+    Inline,
+    /// swash, on a worker thread.
+    Worker,
+    /// DirectWrite on a worker thread (Windows; swash for what it cannot draw, and elsewhere).
+    DirectWrite,
 }
 
 /// The order of the subpixels of the display.
@@ -134,27 +148,32 @@ pub enum SubpixelOrder {
     Bgr,
 }
 
-static RENDERING: RwLock<Rendering> = RwLock::new(Rendering { subpixel: None, adjustment: None, direct_write: false });
+static RENDERING: RwLock<Rendering> = RwLock::new(Rendering { subpixel: None, adjustment: None, glyphs: GlyphDrawing::Inline, aliased: false });
 
 type GlyphNotifier = std::sync::Arc<dyn Fn() + Send + Sync>;
-type GlyphSource = (fn() -> usize, fn(GlyphNotifier));
 
-static GLYPH_SOURCE: OnceLock<GlyphSource> = OnceLock::new();
+static GLYPH_SOURCE: OnceLock<fn(GlyphNotifier)> = OnceLock::new();
 static GLYPH_NOTIFIER: std::sync::Mutex<Option<GlyphNotifier>> = std::sync::Mutex::new(None);
+static CANDIDATE_INCOMPLETE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// The renderer tells the text stack where glyph masks come from when they are drawn off the calling thread.
-pub fn install_glyph_source(pending: fn() -> usize, set_notifier: fn(GlyphNotifier)) {
-    if GLYPH_SOURCE.set((pending, set_notifier)).is_ok() {
+/// The renderer tells the text stack where the worker that draws glyph masks tells it they are ready.
+pub fn install_glyph_source(set_notifier: fn(GlyphNotifier)) {
+    if GLYPH_SOURCE.set(set_notifier).is_ok() {
         if let Some(notifier) = GLYPH_NOTIFIER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone() {
             set_notifier(notifier);
         }
     }
 }
 
-/// How many glyphs a worker has been asked for and the renderer has not picked up: zero when the text on screen is
-/// complete (and always zero where masks are drawn on the calling thread).
-pub fn glyphs_pending() -> usize {
-    GLYPH_SOURCE.get().map_or(0, |(pending, _)| pending())
+/// The renderer reports, after it has prepared a frame, whether glyphs a worker is still drawing were left out of it.
+pub fn set_candidate_incomplete(incomplete: bool) {
+    CANDIDATE_INCOMPLETE.store(incomplete, std::sync::atomic::Ordering::Release);
+}
+
+/// Whether the frame the renderer prepared last lacked glyphs a worker is still drawing (never, where masks are drawn
+/// on the calling thread). A program that captures a frame draws again until this is false.
+pub fn candidate_incomplete() -> bool {
+    CANDIDATE_INCOMPLETE.load(std::sync::atomic::Ordering::Acquire)
 }
 
 /// Calls `notifier`, from the worker's thread, whenever glyphs have been drawn: the program asks its window for another
@@ -162,7 +181,7 @@ pub fn glyphs_pending() -> usize {
 pub fn set_glyph_notifier(notifier: impl Fn() + Send + Sync + 'static) {
     let notifier: GlyphNotifier = std::sync::Arc::new(notifier);
     *GLYPH_NOTIFIER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(notifier.clone());
-    if let Some((_, set)) = GLYPH_SOURCE.get() {
+    if let Some(set) = GLYPH_SOURCE.get() {
         set(notifier);
     }
 }

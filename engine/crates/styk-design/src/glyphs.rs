@@ -1,17 +1,17 @@
 //! Glyphs drawn off the interface thread.
 //!
-//! On Windows glyph masks come from DirectWrite, drawn on a worker thread (`docs/native/typography.md`, section 6). A
-//! frame that needs a glyph the worker has not drawn yet leaves it out; the worker then asks for another frame
-//! ([`ready`]), which has it. A program that captures a frame (a screenshot, the typography check) waits until
-//! [`pending`] is zero.
+//! Glyph masks are drawn by a worker thread, on Windows with DirectWrite (`docs/native/typography.md`, section 6). A
+//! frame that needs a glyph the worker has not drawn yet is not shown: the window keeps its last complete frame, and
+//! the worker asks for another frame ([`ready`]) when the glyphs are there. A program that captures a frame (a
+//! screenshot, the typography check) draws again until [`incomplete`] is false.
 
 use iced::Subscription;
 use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, StreamExt};
 
-/// How many glyphs have been asked of the worker and no frame has used yet: zero when the text on screen is complete.
-pub fn pending() -> usize {
-    iced::advanced::graphics::text::glyphs_pending()
+/// Whether the frame drawn last lacked glyphs the worker is still drawing.
+pub fn incomplete() -> bool {
+    iced::advanced::graphics::text::candidate_incomplete()
 }
 
 /// A message each time the worker has drawn glyphs: handling it asks the window for another frame, which draws them.

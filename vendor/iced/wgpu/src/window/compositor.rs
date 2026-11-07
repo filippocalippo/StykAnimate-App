@@ -236,18 +236,24 @@ pub fn present(
     background_color: Color,
     on_pre_present: impl FnOnce(),
 ) -> Result<(), compositor::SurfaceError> {
+    // The frame is prepared before the surface's texture is acquired. A frame whose text lacks glyphs a worker is still
+    // drawing is not shown: the window keeps its last complete frame and is drawn again when the glyphs are ready, or
+    // when the wait ends. The texture is never acquired for it: one that is acquired and dropped without being
+    // presented stalls the swap chain (every later acquire times out).
+    let candidate = renderer.prepare_candidate(viewport);
+
+    if let Some(until) = renderer.hold_frame() {
+        let _ = renderer.drop_candidate(candidate);
+        return Err(compositor::SurfaceError::Withheld(until));
+    }
+
     match surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(frame) => {
             let view = &frame
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
 
-            let _submission = renderer.present(
-                Some(background_color),
-                frame.texture.format(),
-                view,
-                viewport,
-            );
+            let _submission = renderer.show_candidate(candidate, Some(background_color), view, viewport);
 
             // Present the frame
             on_pre_present();
@@ -255,13 +261,16 @@ pub fn present(
 
             Ok(())
         }
-        wgpu::CurrentSurfaceTexture::Suboptimal(_) | wgpu::CurrentSurfaceTexture::Outdated => {
-            Err(compositor::SurfaceError::Outdated)
+        other => {
+            let _ = renderer.drop_candidate(candidate);
+            Err(match other {
+                wgpu::CurrentSurfaceTexture::Suboptimal(_) | wgpu::CurrentSurfaceTexture::Outdated => compositor::SurfaceError::Outdated,
+                wgpu::CurrentSurfaceTexture::Timeout => compositor::SurfaceError::Timeout,
+                wgpu::CurrentSurfaceTexture::Occluded => compositor::SurfaceError::Occluded,
+                wgpu::CurrentSurfaceTexture::Lost => compositor::SurfaceError::Lost,
+                _ => compositor::SurfaceError::Other,
+            })
         }
-        wgpu::CurrentSurfaceTexture::Timeout => Err(compositor::SurfaceError::Timeout),
-        wgpu::CurrentSurfaceTexture::Occluded => Err(compositor::SurfaceError::Occluded),
-        wgpu::CurrentSurfaceTexture::Lost => Err(compositor::SurfaceError::Lost),
-        wgpu::CurrentSurfaceTexture::Validation => Err(compositor::SurfaceError::Other),
     }
 }
 

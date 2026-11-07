@@ -15,6 +15,8 @@ bitflags::bitflags! {
         const PIXEL_FONT = 4;
         /// Rasterize with subpixel (LCD) coverage: red, green and blue coverage per pixel
         const LCD = 8;
+        /// Rasterize without antialiasing: every pixel is covered or not (the system draws text unsmoothed)
+        const ALIASED = 16;
     }
 }
 

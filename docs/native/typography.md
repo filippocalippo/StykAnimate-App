@@ -142,11 +142,19 @@ true on the machine this was measured on). The native interface drew grayscale o
 mask to a mask. Chromium also bends glyph coverage by the colour of the text (Skia's `SkMaskGamma`, the "contrast and
 gamma hack"), so light text on a dark surface keeps the weight of its font: natively it was 14 % lighter.
 
-**What is built.** On Windows with ClearType on, the native interface draws subpixel text; with it off, and on every other
-platform, grayscale; both with Skia's coverage adjustment.
+**What is built.** On Windows with ClearType on, the native interface draws subpixel text; with smoothing on but not
+ClearType, and on every other platform, grayscale; with smoothing off, aliased text; the smoothed kinds with Skia's
+coverage adjustment.
 
-- `styk_platform::font_smoothing::current()` reads `SPI_GETFONTSMOOTHING`, `SPI_GETFONTSMOOTHINGTYPE`,
-  `SPI_GETFONTSMOOTHINGORIENTATION` (RGB or BGR) and the contrast and gamma the system reports.
+- `styk_platform::font_smoothing::current()` follows Chromium's precedence (`font_render_params_win.cc`,
+  `font_util_win.cc`): `SPI_GETFONTSMOOTHING` off means **aliased** text (no antialiasing, carried in the glyph cache
+  key); on but not ClearType (`SPI_GETFONTSMOOTHINGTYPE`) means grayscale; ClearType takes the order of the subpixels
+  from the primary display's `PixelStructure` under `HKCU\SOFTWARE\Microsoft\Avalon.Graphics\DISPLAYn` when it has one
+  (1 RGB, 2 BGR, anything else including 0 means none, which draws grayscale) and otherwise from
+  `SPI_GETFONTSMOOTHINGORIENTATION`. The contrast and gamma of the coverage adjustment are DirectWrite's values for the
+  primary display, clamped to Skia's range, only when that registry key exists (the person ran the ClearType tuner), and
+  the application's defaults (0.5 and 1.8) otherwise; the system's own 1.2 contrast of `SPI` is never applied. The raw
+  values go through `font_smoothing::decode`, which the tests feed faked values: they never change the system's.
   `styk_design::typography::apply_system_text_rendering()` turns them into the program's text rendering
   (`graphics::text::set_rendering`); `warm_up::install_bundled` calls it, so the application, the headless path and the
   typography check all draw the same way.
@@ -177,8 +185,9 @@ platform, grayscale; both with Skia's coverage adjustment.
 **What the numbers decided.** The contrast and the gamma were swept against Chromium's ClearType captures
 (`cargo xtask fonts`, the four combinations):
 
-- The system's ClearType contrast (1.2 here) is *not* what Chromium draws with: against Chromium the error is least at
-  Skia's own default 0.5 (`CONTRAST`) and several times larger at 1.2. The system values are read but not applied.
+- The system's ClearType contrast (1.2 here, `SPI_GETFONTSMOOTHINGCONTRAST`) is *not* what Chromium draws with: against
+  Chromium the error is least at Skia's own default 0.5 (`CONTRAST`) and several times larger at 1.2. Chromium uses the
+  contrast and gamma of the ClearType tuner when the person has one (above), and Skia's defaults otherwise.
 - The gamma (`GAMMA` 1.8): least at 1.8 for light text on dark (insensitive to the contrast) and 1.2 to 1.8 for dark text
   on light. The paint gamma and the device gamma of Skia make no difference for the near-black and near-white text the
   app uses (the colour is quantized to a level that is 0 or 1 in any gamma), so there is one gamma.
@@ -222,12 +231,33 @@ for none of them) and with `STYK_TEXT_RASTERIZER=swash`. Shaping, layout and wid
   size. Assuming Chromium draws without grid fitting (as with `HINTING_NONE`) was tried first and was wrong for the
   fallback fonts: the error of the Chinese rows was 0.53 and of the Arabic 0.15, against 0.01 and 0.03 with Skia's
   tree.
-- **Off the interface thread.** Rasterizing is not done in `prepare`. The first frame that needs a glyph asks the
-  worker (`cryoglyph::raster`, thread "glyphs"), leaves the glyph out and reports the text incomplete; iced prepares a
-  cached upload again while it is incomplete; the worker wakes the program (`styk_design::glyphs::ready`, a
-  subscription) when it has glyphs, and the next frame draws them. A program that captures a frame (a screenshot, the
-  typography check, the headless path) draws until `glyphs::pending()` is zero. The atlas grows by copying its texture,
-  not by drawing every glyph again.
+- **Off the interface thread, and never half drawn.** Nothing is rasterized in `prepare`: a glyph the atlas lacks is
+  asked of the worker (`cryoglyph::raster`, thread "glyphs") and left out of that candidate frame, which is then
+  *incomplete*. The window keeps showing its last complete frame (`iced_wgpu::presentation::Gate`: the compositor
+  prepares the frame before it acquires the swap chain's texture, and for an incomplete one never acquires it and returns
+  `SurfaceError::Withheld`; a texture acquired and not presented stalls every later acquire), the worker wakes the program (`styk_design::glyphs::ready`, a subscription) when
+  it has glyphs, iced prepares the incomplete uploads again, and the whole frame is shown. The wait is bounded: after
+  150 ms (`presentation::LIMIT`) the incomplete frame is shown, so a worker that never delivers cannot freeze a
+  window, and the window asks for a redraw at that time. A program that captures a frame (a screenshot, the typography
+  check, the headless path) draws until `glyphs::incomplete()` is false, and fails if it never is.
+- **The protocol** is the interface thread's own bookkeeping plus two bounded queues. A frame is a *candidate*
+  (`begin_candidate`, `end_candidate`): what it asks for is its to wait for, and whatever it did not ask for again is
+  obsolete when it ends (the worker skips the job if it has not started; a result that arrives is thrown away), so a
+  superseded screen or a changed scale never leaves a request pending. Requests go through a queue with nonblocking
+  admission (256 jobs and 2 MB of estimated masks outstanding per interface thread; a request not admitted is asked
+  again by the next candidate); results come back on a channel the interface thread drains, with at most 8 MB
+  waiting. No lock is shared with the worker. The worker draws the glyphs DirectWrite cannot (colour fonts, a failure)
+  and those with synthetic italic, unhinted or pixel-snapped flags with swash, on the same thread. It keeps one copy of
+  each font file for all of its weights and optical sizes, at most 48 face instances and 64 MB of font files that no
+  face instance uses (least recently used first).
+- **The fixed repertoire is drawn ahead.** `styk_design::repertoire::prewarm` runs once the font system is ready
+  (`warm_up`): every type role of the stylesheet at its size and weight, printable ASCII and the symbols of numbers and
+  labels in the four subpixel positions, and for the roles most text is set in the characters of the person's language
+  (Latin-1 and Latin Extended-A for Latin-script languages, Cyrillic, Greek, Vietnamese; none for the shaped or very large
+  scripts, whose text goes through the worker as it appears), at the system's scale. The results wait (16 MB at most) for
+  the first frame that uses them. A project name in Japanese, or a window on a monitor of another scale, still waits
+  for the worker once, within the bound above.
+- The atlas grows by copying its texture, not by drawing every glyph again.
 
 **Result** (`cargo xtask fonts`, Windows 11, ClearType on, the Inter rows, 90 per combination):
 

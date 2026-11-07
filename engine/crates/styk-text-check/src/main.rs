@@ -36,7 +36,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             let factor = scale(factor)?;
             let report = compare::compare(Path::new(matrix), Path::new(dir), chromium, &format!("{theme}-{factor}"), factor)?;
             print!("{}", report.text);
-            Ok(report.widths_hold)
+            Ok(report.passes())
         }
         _ => Err(USAGE.to_string()),
     }

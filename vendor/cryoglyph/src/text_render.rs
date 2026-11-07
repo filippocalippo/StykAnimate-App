@@ -53,7 +53,8 @@ impl TextRenderer {
     }
 
     /// Whether the last `prepare` left glyphs out because a worker was still drawing them: the text is complete once
-    /// `glyphs_pending()` is zero and the text is prepared again.
+    /// the worker has drawn them and the text is prepared again (`begin_candidate` and `end_candidate` say it for a
+    /// whole frame).
     pub fn incomplete(&self) -> bool {
         self.incomplete
     }
@@ -74,7 +75,8 @@ impl TextRenderer {
         self.staging_belt.recall();
         self.glyph_vertices.clear();
         self.incomplete = false;
-        let direct_write = viewport.direct_write();
+        let drawing = viewport.glyph_drawing();
+        let aliased = viewport.aliased();
 
         let resolution = viewport.resolution();
 
@@ -103,7 +105,9 @@ impl TextRenderer {
                     let mut physical_glyph =
                         glyph.physical((text_area.left, text_area.top), text_area.scale);
 
-                    if subpixel {
+                    if aliased {
+                        physical_glyph.cache_key.flags |= CacheKeyFlags::ALIASED;
+                    } else if subpixel {
                         physical_glyph.cache_key.flags |= CacheKeyFlags::LCD;
                     }
                     let cache_key = physical_glyph.cache_key;
@@ -121,17 +125,17 @@ impl TextRenderer {
                         details.last_used = color_generation;
                         details
                     } else {
-                        let image = if direct_write {
-                            match crate::raster::pick_up(&cache_key, || font_system.get_font_instance(cache_key.font_id, cache_key.font_weight, cache_key.font_optical_size)) {
-                                Some(crate::raster::Outcome::Image(image)) => Some(image),
-                                Some(crate::raster::Outcome::Unsupported) => cache.get_image_uncached(font_system, cache_key),
-                                None => {
+                        let image = if drawing == crate::GlyphDrawing::Inline {
+                            cache.get_image_uncached(font_system, cache_key)
+                        } else {
+                            match crate::raster::lookup(&cache_key, || font_system.get_font_instance(cache_key.font_id, cache_key.font_weight, cache_key.font_optical_size), drawing == crate::GlyphDrawing::DirectWrite) {
+                                crate::raster::Lookup::Ready(image) => Some(image),
+                                crate::raster::Lookup::Missing => {
                                     self.incomplete = true;
                                     None
                                 }
+                                crate::raster::Lookup::Absent => None,
                             }
-                        } else {
-                            cache.get_image_uncached(font_system, cache_key)
                         };
                         let Some(image) = image else {
                             continue;

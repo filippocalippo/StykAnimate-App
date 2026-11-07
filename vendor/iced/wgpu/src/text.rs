@@ -268,7 +268,12 @@ impl Viewport {
             cryoglyph::TextRendering {
                 bgr: rendering.subpixel == Some(crate::graphics::text::SubpixelOrder::Bgr),
                 adjustment: rendering.adjustment.map(|(contrast, gamma)| cryoglyph::CoverageAdjustment { contrast, gamma }),
-                direct_write: rendering.direct_write,
+                glyphs: match rendering.glyphs {
+                    crate::graphics::text::GlyphDrawing::Inline => cryoglyph::GlyphDrawing::Inline,
+                    crate::graphics::text::GlyphDrawing::Worker => cryoglyph::GlyphDrawing::Worker,
+                    crate::graphics::text::GlyphDrawing::DirectWrite => cryoglyph::GlyphDrawing::DirectWrite,
+                },
+                aliased: rendering.aliased,
             },
         );
     }
@@ -293,7 +298,7 @@ pub struct Pipeline {
 
 impl Pipeline {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
-        crate::graphics::text::install_glyph_source(cryoglyph::glyphs_pending, |notifier| cryoglyph::set_glyph_notifier(move || notifier()));
+        crate::graphics::text::install_glyph_source(|notifier| cryoglyph::set_glyph_notifier(move || notifier()));
         let cache = cryoglyph::Cache::new(device);
         let atlas =
             cryoglyph::TextAtlas::with_color_mode(device, queue, &cache, format, COLOR_MODE);

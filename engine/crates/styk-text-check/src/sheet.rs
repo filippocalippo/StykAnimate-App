@@ -92,7 +92,7 @@ impl Sheet {
                 }
             }
             Message::Frame => {
-                if self.fonts_ready && styk_design::glyphs::pending() > 0 {
+                if self.fonts_ready && styk_design::glyphs::incomplete() {
                     // A frame that lacks glyphs the worker is still drawing is not the one to capture.
                     self.frames = 0;
                 }

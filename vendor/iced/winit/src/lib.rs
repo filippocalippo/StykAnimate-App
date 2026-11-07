@@ -956,6 +956,14 @@ async fn run_instance<P>(
 
                                     // Do nothing and wait for window to become visible again
                                 }
+                                compositor::SurfaceError::Withheld(until) => {
+                                    present_span.finish();
+
+                                    // The window keeps its last complete frame while a worker draws the glyphs of
+                                    // this one. The worker asks for another frame when they are ready; this is the
+                                    // end of the wait.
+                                    window.request_redraw(window::RedrawRequest::At(until));
+                                }
                                 compositor::SurfaceError::Timeout => {
                                     present_span.finish();
 

@@ -64,8 +64,16 @@ fn swash_image(
         log::warn!("did not find font {:?}", cache_key.font_id);
         return None;
     };
+    swash_image_of(&font, context, cache_key)
+}
 
-    let mut scaler = scaler_for(context, &font, &cache_key);
+/// The glyph of `cache_key` drawn from `font`, which must be the face instance the key names.
+fn swash_image_of(
+    font: &crate::Font,
+    context: &mut ScaleContext,
+    cache_key: CacheKey,
+) -> Option<SwashImage> {
+    let mut scaler = scaler_for(context, font, &cache_key);
 
     // Compute the fractional offset-- you'll likely want to quantize this
     // in a real renderer
@@ -112,6 +120,12 @@ fn swash_image(
         if image.content == Content::SubpixelMask {
             for pixel in image.data.chunks_exact_mut(4) {
                 pixel.swap(0, 2);
+            }
+        }
+        // Unsmoothed text: a pixel is covered when more than half of it is.
+        if cache_key.flags.contains(CacheKeyFlags::ALIASED) && image.content == Content::Mask {
+            for coverage in &mut image.data {
+                *coverage = if *coverage >= 128 { 255 } else { 0 };
             }
         }
         image
@@ -185,6 +199,12 @@ impl SwashCache {
         cache_key: CacheKey,
     ) -> Option<SwashImage> {
         swash_image(font_system, &mut self.context, cache_key)
+    }
+
+    /// Create a swash Image from a cache key and the font instance it names, without caching results and without a
+    /// font system: for a thread that holds the font (a glyph worker) and must not wait for the font system.
+    pub fn get_image_of_font(&mut self, font: &crate::Font, cache_key: CacheKey) -> Option<SwashImage> {
+        swash_image_of(font, &mut self.context, cache_key)
     }
 
     /// Create a swash Image from a cache key, caching results

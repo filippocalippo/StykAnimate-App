@@ -1,4 +1,4 @@
-use crate::{Cache, Params, Resolution};
+use crate::{Cache, GlyphDrawing, Params, Resolution};
 
 use wgpu::{BindGroup, Buffer, BufferDescriptor, BufferUsages, Device, Queue};
 
@@ -22,13 +22,15 @@ pub struct TextRendering {
     pub bgr: bool,
     /// The coverage adjustment, if any.
     pub adjustment: Option<CoverageAdjustment>,
-    /// Draw glyph masks with DirectWrite (Windows) on a worker thread instead of with swash on the calling thread.
-    pub direct_write: bool,
+    /// Who draws the glyph masks.
+    pub glyphs: GlyphDrawing,
+    /// Draw glyphs without antialiasing (the system draws text unsmoothed): a pixel is covered or not.
+    pub aliased: bool,
 }
 
 #[derive(Debug)]
 pub struct Viewport {
-    direct_write: bool,
+    rendering: TextRendering,
     params: Params,
     params_buffer: Buffer,
     pub(crate) bind_group: BindGroup,
@@ -57,7 +59,7 @@ impl Viewport {
         let bind_group = cache.create_uniforms_bind_group(device, &params_buffer);
 
         Self {
-            direct_write: false,
+            rendering: TextRendering::default(),
             params,
             params_buffer,
             bind_group,
@@ -73,7 +75,7 @@ impl Viewport {
 
     /// Sets how glyphs are rasterized and blended: the order of the subpixels and the coverage adjustment.
     pub fn set_rendering(&mut self, queue: &Queue, rendering: TextRendering) {
-        self.direct_write = rendering.direct_write;
+        self.rendering = rendering;
         let mut params = self.params;
         params.flags = u32::from(rendering.bgr) | (u32::from(rendering.adjustment.is_some()) << 1);
         if let Some(adjustment) = rendering.adjustment {
@@ -92,9 +94,14 @@ impl Viewport {
         });
     }
 
-    /// Whether glyph masks come from DirectWrite on a worker thread.
-    pub fn direct_write(&self) -> bool {
-        self.direct_write
+    /// Who draws the glyph masks.
+    pub fn glyph_drawing(&self) -> GlyphDrawing {
+        self.rendering.glyphs
+    }
+
+    /// Whether glyphs are drawn without antialiasing.
+    pub fn aliased(&self) -> bool {
+        self.rendering.aliased
     }
 
     pub fn resolution(&self) -> Resolution {

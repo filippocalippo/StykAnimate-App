@@ -24,6 +24,8 @@ pub mod glyphs;
 #[cfg(feature = "widgets")]
 pub mod grayscale;
 #[cfg(feature = "widgets")]
+pub mod repertoire;
+#[cfg(feature = "widgets")]
 pub mod typography;
 #[cfg(feature = "widgets")]
 pub mod warm_up;

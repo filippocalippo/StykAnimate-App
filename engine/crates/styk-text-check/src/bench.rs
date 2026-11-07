@@ -52,10 +52,13 @@ pub fn run(theme_name: &str, scale_factor: f32, frames: usize) -> Result<(), Str
     for _ in 0..400 {
         interface.draw(&mut renderer, &iced_theme, &renderer::Style { text_color: ink }, mouse::Cursor::Unavailable);
         let _ = Headless::screenshot(&mut renderer, physical, scale_factor, background);
-        if styk_design::glyphs::pending() == 0 {
+        if !styk_design::glyphs::incomplete() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    if styk_design::glyphs::incomplete() {
+        return Err("the glyph worker did not deliver the text's glyphs in two seconds".to_string());
     }
     let settled = settling.elapsed().as_secs_f64() * 1000.0;
     let mut times = Vec::with_capacity(frames);

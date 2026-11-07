@@ -192,6 +192,17 @@ pub struct Report {
     pub text: String,
     /// Whether every width and font check held.
     pub widths_hold: bool,
+    /// Whether the ink error of the Inter rows is below the mark (Chromium's grayscale against its ClearType), true when
+    /// there is no mark to compare with.
+    pub below_mark: bool,
+}
+
+impl Report {
+    /// Whether the comparison passes: the widths and fonts hold and the ink is closer to Chromium's ClearType than its
+    /// grayscale is.
+    pub fn passes(&self) -> bool {
+        self.widths_hold && self.below_mark
+    }
 }
 
 /// Compares `native-<label>` with `<chromium>-<label>` in `dir`, where `label` is `<theme>-<scale>`.
@@ -203,6 +214,7 @@ pub fn compare(matrix_path: &Path, dir: &Path, chromium: &str, label: &str, scal
 
     let mut text = String::new();
     let mut widths_hold = true;
+    let mut below_mark = true;
     let _ = writeln!(text, "== {chromium} against native, {label} ==");
     let _ = writeln!(text, "{:<34} {:>8} {:>8} {:>7} {:>6} {:>6} {:>7}  {}", "row", "chromium", "native", "dwidth", "ink", "best", "shift", "ink box delta (l t r b) / fonts");
 
@@ -257,11 +269,12 @@ pub fn compare(matrix_path: &Path, dir: &Path, chromium: &str, label: &str, scal
     if chromium == "chromium" {
         if let Some(gap) = clear_type_gap(&items, dir, label, scale) {
             let native = by_class.get("Inter").map(|rows| rows.iter().map(|row| row.1).sum::<f32>() / rows.len() as f32).unwrap_or(0.0);
-            let _ = writeln!(text, "Inter ink error: native against Chromium's ClearType {native:.3}; Chromium's grayscale against its ClearType {gap:.3} (the mark to beat): {}", if native < gap { "below" } else { "ABOVE" });
+            below_mark = native < gap;
+            let _ = writeln!(text, "Inter ink error: native against Chromium's ClearType {native:.3}; Chromium's grayscale against its ClearType {gap:.3} (the mark to beat): {}", if below_mark { "below" } else { "ABOVE" });
         }
     }
     let _ = writeln!(text, "widths {}", if widths_hold { "hold" } else { "DO NOT HOLD" });
-    Ok(Report { text, widths_hold })
+    Ok(Report { text, widths_hold, below_mark })
 }
 
 /// The mean ink error of the Inter rows between Chromium's ClearType and grayscale captures, when both exist.
@@ -318,6 +331,58 @@ mod tests {
         // Chromium names the face (\`Segoe UI Semibold\`), the native stack names the family (\`Segoe UI\`), in another order.
         let dir = directory("fonts-agree", "Segoe UI Semibold:12|Inter:5", "Inter:5|Segoe UI:12");
         assert!(holds(&dir));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A directory with one Inter row: Chromium's ClearType picture has a dark block, its grayscale picture a lighter one
+    /// at the same place, and the native picture has `native_value` in the block at `native_x`.
+    fn inter_directory(name: &str, native_x: usize, native_value: u8) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("styk-text-check-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("matrix.tsv"), "#theme\tlight\t#eceff4\t#0c0d12\nweights/ui/400\tui\t400\t13\t18\t0\t-\tHello\n").unwrap();
+        for prefix in ["chromium", "native"] {
+            std::fs::write(dir.join(format!("{prefix}-light-1.tsv")), "weights/ui/400\t30.00\tInter:5\n").unwrap();
+        }
+        let picture = |file: &str, x: usize, value: u8| {
+            let (width, height) = (PAGE_WIDTH as usize, (PAGE_ROWS as f32 * ROW_HEIGHT) as usize);
+            let mut rgba = vec![240u8; width * height * 4];
+            for y in 10..20 {
+                for x in x..x + 40 {
+                    rgba[(y * width + x) * 4..][..3].fill(value);
+                }
+            }
+            let file = std::fs::File::create(dir.join(file)).unwrap();
+            let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width as u32, height as u32);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
+        };
+        picture("chromium-light-1-p0.png", 10, 30);
+        picture("chromium-gray-light-1-p0.png", 10, 90);
+        picture("native-light-1-p0.png", native_x, native_value);
+        dir
+    }
+
+    fn passes(dir: &std::path::Path) -> (bool, String) {
+        let report = compare(&dir.join("matrix.tsv"), dir, "chromium", "light-1", 1.0).unwrap();
+        (report.passes(), report.text)
+    }
+
+    #[test]
+    fn ink_further_from_clear_type_than_its_grayscale_fails_the_comparison() {
+        // The native ink is somewhere else altogether: further from Chromium's ClearType than Chromium's grayscale is.
+        let dir = inter_directory("ink-above", 300, 30);
+        let (passes, text) = passes(&dir);
+        assert!(text.contains("ABOVE"), "{text}");
+        assert!(!passes, "the widths hold, but the ink is above the mark");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ink_closer_to_clear_type_than_its_grayscale_passes() {
+        let dir = inter_directory("ink-below", 10, 30);
+        let (passes, text) = passes(&dir);
+        assert!(text.contains("below") && passes, "{text}");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

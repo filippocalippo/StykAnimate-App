@@ -4,7 +4,7 @@
 //! glyph of an installed font is drawn another way, by DirectWrite's own GDI bitmap render target from the system font
 //! collection, with rendering parameters that add no gamma or contrast, and the two must agree pixel for pixel.
 
-use iced::advanced::graphics::text::cosmic_text::dwrite::{DirectWrite, Rasterized};
+use iced::advanced::graphics::text::cosmic_text::dwrite::{DirectWrite, Rasterized, Smoothing};
 use iced::advanced::graphics::text::cosmic_text::fontdb::{Style, Weight as FontWeight};
 use iced::advanced::graphics::text::cosmic_text::{OpticalSize, Weight};
 use iced::advanced::graphics::text::font_system;
@@ -85,7 +85,7 @@ fn drawn_by_the_text_stack(character: char) -> Option<(i32, i32, u32, u32, Vec<u
     let font = system.raw().get_font_instance(id, Weight::NORMAL, OpticalSize::DEFAULT)?;
     let glyph = font.as_swash().charmap().map(character);
     let mut direct_write = DirectWrite::new()?;
-    match direct_write.rasterize(&font, glyph, SIZE, 400, OpticalSize::DEFAULT, 0.0, true) {
+    match direct_write.rasterize(&font, glyph, SIZE, 400, OpticalSize::DEFAULT, 0.0, Smoothing::ClearType) {
         Rasterized::Mask(mask) if mask.lcd => Some((mask.left, mask.top, mask.width, mask.height, mask.data)),
         _ => None,
     }
@@ -94,10 +94,9 @@ fn drawn_by_the_text_stack(character: char) -> Option<(i32, i32, u32, u32, Vec<u
 #[test]
 fn a_mask_is_what_directwrite_draws_directly() {
     for character in ['P', 'e', 'g', 'W'] {
-        let (Some(direct), Some((left, top, width, height, data))) = (drawn_directly(character), drawn_by_the_text_stack(character)) else {
-            eprintln!("skipped: no Segoe UI or no DirectWrite 5 on this machine");
-            return;
-        };
+        // Windows ships Segoe UI and DirectWrite 5: a failure to draw is a failure of the test, not a reason to skip it.
+        let direct = drawn_directly(character).unwrap_or_else(|| panic!("{character}: DirectWrite's own drawing of Segoe UI failed"));
+        let (left, top, width, height, data) = drawn_by_the_text_stack(character).unwrap_or_else(|| panic!("{character}: the text stack's DirectWrite mask of Segoe UI failed"));
         let (mut compared, mut worst) = (0, 0u8);
         for y in 0..height as i32 {
             for x in 0..width as i32 {
@@ -120,4 +119,26 @@ fn a_mask_is_what_directwrite_draws_directly() {
         }).map(|(_, pixel)| u32::from(pixel.iter().max().copied().unwrap_or(0))).sum();
         assert!(outside <= 40, "{character}: DirectWrite drew ink outside the mask's bounds ({outside})");
     }
+}
+
+#[test]
+fn the_instances_of_a_variable_font_share_one_file_and_the_unused_are_evicted() {
+    use iced::advanced::graphics::text::cosmic_text::dwrite::MAX_FACES;
+    crate::warm_up::install_bundled();
+    let mut system = font_system().write().unwrap();
+    let id = system.raw().db().faces().find(|face| face.families.iter().any(|(name, _)| name == "Inter") && matches!(face.source, iced::advanced::graphics::text::cosmic_text::fontdb::Source::Binary(_))).expect("the bundled Inter").id;
+    let mut direct_write = DirectWrite::new().expect("DirectWrite 5");
+    let (mut drawn, mut most_faces) = (0, 0);
+    // Eighty-one weights of one variable file: more instances than are kept.
+    for weight in (100..=900).step_by(10) {
+        let font = system.raw().get_font_instance(id, Weight(weight), OpticalSize::DEFAULT).expect("an instance of Inter");
+        let glyph = font.as_swash().charmap().map('A');
+        if matches!(direct_write.rasterize(&font, glyph, 13.0, weight, OpticalSize::DEFAULT, 0.0, Smoothing::ClearType), Rasterized::Mask(_)) {
+            drawn += 1;
+        }
+        most_faces = most_faces.max(direct_write.held().0);
+    }
+    assert_eq!(drawn, 81, "every weight drew");
+    assert!(most_faces <= MAX_FACES, "{most_faces} face instances were held at once");
+    assert_eq!(direct_write.held().1, 1, "one copy of the font file served all of them");
 }

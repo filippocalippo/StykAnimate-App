@@ -92,6 +92,8 @@ fn build_on_worker() {
 fn build() {
     let _ = install_bundled();
     READY.store(true, Ordering::Release);
+    // The interface's own glyphs, drawn while the first screens are built.
+    let _ = crate::repertoire::prewarm(styk_platform::environment::system_scale(), styk_platform::environment::user_locale());
 }
 
 /// Makes the bundled Inter and Inter Tight the only faces of those families.

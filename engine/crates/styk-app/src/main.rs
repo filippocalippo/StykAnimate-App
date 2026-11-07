@@ -89,7 +89,7 @@ impl App {
             Message::GlyphsReady => Task::none(),
             Message::Frame => {
                 // A frame that lacks glyphs the worker is still drawing is not the one to capture.
-                if glyphs::pending() > 0 {
+                if glyphs::incomplete() {
                     self.frames = 0;
                     return Task::none();
                 }

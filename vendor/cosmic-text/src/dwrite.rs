@@ -16,16 +16,15 @@
 use crate::{Font, OpticalSize};
 use alloc::vec::Vec;
 use core::mem::ManuallyDrop;
-use linebender_resource_handle::Blob;
 use std::collections::HashMap;
 use windows::core::{Interface, BOOL};
 use windows::Win32::Graphics::DirectWrite::{
-    DWriteCreateFactory, IDWriteFactory, IDWriteFactory2, IDWriteFactory5, IDWriteFactory6, IDWriteFontFace, IDWriteInMemoryFontFileLoader,
+    DWriteCreateFactory, IDWriteFactory, IDWriteFactory2, IDWriteFactory5, IDWriteFactory6, IDWriteFontFace, IDWriteFontResource, IDWriteInMemoryFontFileLoader,
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_AXIS_TAG_OPTICAL_SIZE, DWRITE_FONT_AXIS_TAG_WEIGHT,
     DWRITE_FONT_AXIS_VALUE, DWRITE_FONT_SIMULATIONS_NONE, DWRITE_GLYPH_OFFSET, DWRITE_GLYPH_RUN,
-    DWRITE_GRID_FIT_MODE, DWRITE_GRID_FIT_MODE_ENABLED, DWRITE_MATRIX, DWRITE_RENDERING_MODE, DWRITE_RENDERING_MODE_NATURAL, DWRITE_MEASURING_MODE_NATURAL,
+    DWRITE_GRID_FIT_MODE, DWRITE_GRID_FIT_MODE_ENABLED, DWRITE_MATRIX, DWRITE_RENDERING_MODE, DWRITE_RENDERING_MODE_NATURAL, DWRITE_RENDERING_MODE_ALIASED, DWRITE_MEASURING_MODE_GDI_CLASSIC, DWRITE_MEASURING_MODE_NATURAL,
     DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC, DWRITE_TEXTURE_ALIASED_1x1, DWRITE_TEXTURE_CLEARTYPE_3x1,
-    DWRITE_TEXT_ANTIALIAS_MODE_CLEARTYPE, DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+    DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE,
 };
 
 /// What DirectWrite made of a glyph.
@@ -100,14 +99,40 @@ impl Hints {
     }
 }
 
-struct Face {
-    hints: Hints,
-    face: IDWriteFontFace,
-    /// A face with colour tables (COLR, SVG, bitmaps): DirectWrite's alpha texture would draw it as one colour.
-    color: bool,
-    /// The font's bytes, which the file reference points into for as long as the face exists.
-    _data: Blob<u8>,
+/// How the edges of a glyph are drawn.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Smoothing {
+    /// ClearType: red, green and blue coverage per pixel.
+    ClearType,
+    /// Grayscale antialiasing: one coverage per pixel.
+    Grayscale,
+    /// No antialiasing: a pixel is covered (255) or not (0).
+    Aliased,
 }
+
+/// A font file DirectWrite holds: its bytes (copied once, shared by every face instance of it), what Skia reads of it,
+/// and when it was last used.
+struct File {
+    resource: IDWriteFontResource,
+    hints: alloc::sync::Arc<Hints>,
+    /// A font with colour tables (COLR, SVG, bitmaps): DirectWrite's alpha texture would draw it as one colour.
+    color: bool,
+    /// The size of the bytes DirectWrite copied.
+    bytes: usize,
+    used: u64,
+}
+
+/// A face instance of a file at a weight and optical size, and when it was last used.
+struct Face {
+    face: IDWriteFontFace,
+    used: u64,
+}
+
+/// How many face instances a [`DirectWrite`] keeps; the least recently used go first.
+pub const MAX_FACES: usize = 48;
+/// How many bytes of font files a [`DirectWrite`] keeps; the least recently used file without a face instance goes
+/// first, and a file with one is never evicted.
+pub const MAX_FILE_BYTES: usize = 64 << 20;
 
 /// DirectWrite, ready to draw glyph masks.
 pub struct DirectWrite {
@@ -115,7 +140,10 @@ pub struct DirectWrite {
     resources: IDWriteFactory6,
     analysis: IDWriteFactory2,
     loader: IDWriteInMemoryFontFileLoader,
-    faces: HashMap<FaceKey, Option<Face>>,
+    /// Font files by font; `None` for a font DirectWrite cannot load.
+    files: HashMap<fontdb::ID, Option<File>>,
+    faces: HashMap<FaceKey, Face>,
+    clock: u64,
 }
 
 impl DirectWrite {
@@ -128,67 +156,121 @@ impl DirectWrite {
             let resources = factory.cast::<IDWriteFactory6>().ok()?;
             let loader = factory.CreateInMemoryFontFileLoader().ok()?;
             factory.RegisterFontFileLoader(&loader).ok()?;
-            Some(Self { factory, resources, analysis, loader, faces: HashMap::new() })
+            Some(Self { factory, resources, analysis, loader, files: HashMap::new(), faces: HashMap::new(), clock: 0 })
         }
     }
 
-    fn face(&mut self, font: &Font, weight: u16, optical_size: OpticalSize) -> Option<&Face> {
-        let key = FaceKey { font: font.id(), weight, optical_size };
-        if !self.faces.contains_key(&key) {
-            let face = self.make_face(font, weight, optical_size);
-            self.faces.insert(key, face);
-        }
-        self.faces.get(&key).and_then(Option::as_ref)
+    /// How many face instances and font files are held.
+    pub fn held(&self) -> (usize, usize) {
+        (self.faces.len(), self.files.values().flatten().count())
     }
 
-    fn make_face(&self, font: &Font, weight: u16, optical_size: OpticalSize) -> Option<Face> {
-        let data = font.font_data().data.clone();
+    fn make_file(&self, font: &Font) -> Option<File> {
         let index = font.font_data().index;
         let bytes: &[u8] = font.data();
-        let color = skrifa::FontRef::from_index(bytes, index).map_or(true, |font_ref| {
+        let font_ref = skrifa::FontRef::from_index(bytes, index).ok()?;
+        let color = {
             use skrifa::raw::TableProvider as _;
             font_ref.colr().is_ok() || font_ref.svg().is_ok() || font_ref.sbix().is_ok() || font_ref.cbdt().is_ok()
-        });
-        // SAFETY: the file reference points into `data`, which the face keeps alive.
+        };
+        // SAFETY: DirectWrite copies the bytes (no owner is given), so nothing points into `bytes` afterwards.
         unsafe {
-            let file = self.loader.CreateInMemoryFontFileReference(&self.factory, bytes.as_ptr().cast(), bytes.len() as u32, None::<&windows::core::IUnknown>).ok()?;
+            let file = self.loader.CreateInMemoryFontFileReference(&self.factory, bytes.as_ptr().cast(), u32::try_from(bytes.len()).ok()?, None::<&windows::core::IUnknown>).ok()?;
             let resource = self.resources.CreateFontResource(&file, index).ok()?;
-            let count = resource.GetFontAxisCount() as usize;
-            let mut axes = alloc::vec![DWRITE_FONT_AXIS_VALUE::default(); count];
-            if count > 0 {
-                resource.GetDefaultFontAxisValues(&mut axes).ok()?;
-            }
-            for axis in &mut axes {
-                if axis.axisTag == DWRITE_FONT_AXIS_TAG_WEIGHT {
-                    axis.value = f32::from(weight);
-                } else if axis.axisTag == DWRITE_FONT_AXIS_TAG_OPTICAL_SIZE {
-                    if let Some(pixels) = optical_size.pixels() {
-                        axis.value = pixels;
+            Some(File { resource, hints: alloc::sync::Arc::new(Hints::of(&font_ref)), color, bytes: bytes.len(), used: 0 })
+        }
+    }
+
+    /// The face instance of `font` at the weight and optical size, with what its file says.
+    fn face(&mut self, font: &Font, weight: u16, optical_size: OpticalSize) -> Option<(IDWriteFontFace, alloc::sync::Arc<Hints>, bool)> {
+        let key = FaceKey { font: font.id(), weight, optical_size };
+        if !self.files.contains_key(&key.font) {
+            let file = self.make_file(font);
+            self.files.insert(key.font, file);
+        }
+        self.clock += 1;
+        let clock = self.clock;
+        let file = self.files.get_mut(&key.font)?.as_mut()?;
+        file.used = clock;
+        if !self.faces.contains_key(&key) {
+            // SAFETY: plain calls on the font resource.
+            let face = unsafe {
+                let count = file.resource.GetFontAxisCount() as usize;
+                let mut axes = alloc::vec![DWRITE_FONT_AXIS_VALUE::default(); count];
+                if count > 0 {
+                    file.resource.GetDefaultFontAxisValues(&mut axes).ok()?;
+                }
+                for axis in &mut axes {
+                    if axis.axisTag == DWRITE_FONT_AXIS_TAG_WEIGHT {
+                        axis.value = f32::from(weight);
+                    } else if axis.axisTag == DWRITE_FONT_AXIS_TAG_OPTICAL_SIZE {
+                        if let Some(pixels) = optical_size.pixels() {
+                            axis.value = pixels;
+                        }
                     }
                 }
+                file.resource.CreateFontFace(DWRITE_FONT_SIMULATIONS_NONE, &axes).ok()?.cast::<IDWriteFontFace>().ok()?
+            };
+            self.faces.insert(key, Face { face, used: clock });
+            self.evict(key);
+        }
+        let entry = self.faces.get_mut(&key)?;
+        entry.used = clock;
+        let file = self.files.get(&key.font)?.as_ref()?;
+        Some((entry.face.clone(), file.hints.clone(), file.color))
+    }
+
+    /// Drops the least recently used face instances beyond [`MAX_FACES`], then the least recently used files without a
+    /// face instance beyond [`MAX_FILE_BYTES`]. `keep` is the face just made.
+    fn evict(&mut self, keep: FaceKey) {
+        while self.faces.len() > MAX_FACES {
+            let Some(oldest) = self.faces.iter().filter(|(key, _)| **key != keep).min_by_key(|(_, face)| face.used).map(|(key, _)| *key) else {
+                break;
+            };
+            self.faces.remove(&oldest);
+        }
+        loop {
+            let held: usize = self.files.values().flatten().map(|file| file.bytes).sum();
+            if held <= MAX_FILE_BYTES {
+                break;
             }
-            let face = resource.CreateFontFace(DWRITE_FONT_SIMULATIONS_NONE, &axes).ok()?;
-            let hints = skrifa::FontRef::from_index(bytes, index).map(|font_ref| Hints::of(&font_ref)).unwrap_or_default();
-            Some(Face { hints, face: face.cast().ok()?, color, _data: data })
+            let idle = self
+                .files
+                .iter()
+                .filter(|(id, file)| file.is_some() && !self.faces.keys().any(|key| key.font == **id))
+                .min_by_key(|(_, file)| file.as_ref().map_or(0, |file| file.used))
+                .map(|(id, _)| *id);
+            match idle {
+                Some(id) => {
+                    self.files.remove(&id);
+                }
+                None => break,
+            }
         }
     }
 
     /// Draws `glyph` of `font` at `size` device pixels, `x_offset` pixels (0 to 1) to the right of its origin.
-    /// `lcd` asks for ClearType coverage, otherwise grayscale.
-    pub fn rasterize(&mut self, font: &Font, glyph: u16, size: f32, weight: u16, optical_size: OpticalSize, x_offset: f32, lcd: bool) -> Rasterized {
+    pub fn rasterize(&mut self, font: &Font, glyph: u16, size: f32, weight: u16, optical_size: OpticalSize, x_offset: f32, smoothing: Smoothing) -> Rasterized {
         let analysis = self.analysis.clone();
         let factory: IDWriteFactory = self.factory.cast().expect("a factory 5 is a factory");
-        let Some(face) = self.face(font, weight, optical_size) else {
+        let Some((face, hints, color)) = self.face(font, weight, optical_size) else {
             return Rasterized::Unsupported;
         };
-        if face.color {
+        if color {
             return Rasterized::Unsupported;
         }
-        let (mode, render_size, grid_fit) = scaler_choice(&face.hints, size);
+        let (mode, render_size, grid_fit) = scaler_choice(&hints, size);
+        let lcd = smoothing == Smoothing::ClearType;
+        // Skia's bi-level branch: aliased rendering of the size rounded to 1/64 pixel, measured the GDI way.
+        let (mode, render_size, measuring) = if smoothing == Smoothing::Aliased {
+            (DWRITE_RENDERING_MODE_ALIASED, ((size * 64.0).round() / 64.0).max(1.0 / 64.0), DWRITE_MEASURING_MODE_GDI_CLASSIC)
+        } else {
+            (mode, render_size, DWRITE_MEASURING_MODE_NATURAL)
+        };
         let advance = 0.0f32;
         let offset = DWRITE_GLYPH_OFFSET::default();
         let run = DWRITE_GLYPH_RUN {
-            fontFace: ManuallyDrop::new(Some(face.face.clone())),
+            fontFace: ManuallyDrop::new(Some(face)),
             fontEmSize: render_size,
             glyphCount: 1,
             glyphIndices: &glyph,
@@ -198,16 +280,16 @@ impl DirectWrite {
             bidiLevel: 0,
         };
         let matrix = DWRITE_MATRIX { m11: 1.0, m12: 0.0, m21: 0.0, m22: 1.0, dx: x_offset, dy: 0.0 };
-        let (texture, antialias) = if lcd { (DWRITE_TEXTURE_CLEARTYPE_3x1, DWRITE_TEXT_ANTIALIAS_MODE_CLEARTYPE) } else { (DWRITE_TEXTURE_ALIASED_1x1, DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE) };
+        let texture = if lcd { DWRITE_TEXTURE_CLEARTYPE_3x1 } else { DWRITE_TEXTURE_ALIASED_1x1 };
         // SAFETY: `run` points at locals that outlive the calls; the font face reference it holds is released below.
         let result = unsafe {
             let result = (|| {
-                // Skia: the grid fit and anti-alias mode arguments of DirectWrite 2 only where grid fitting is off or the
-                // text is grayscale; otherwise the original call.
-                let analysis = if !lcd {
-                    analysis.CreateGlyphRunAnalysis(&run, Some(&matrix), mode, DWRITE_MEASURING_MODE_NATURAL, grid_fit, antialias, 0.0, 0.0).ok()?
+                // Skia: the grid fit and anti-alias mode arguments of DirectWrite 2 for grayscale text; otherwise the
+                // original call.
+                let analysis = if smoothing == Smoothing::Grayscale {
+                    analysis.CreateGlyphRunAnalysis(&run, Some(&matrix), mode, measuring, grid_fit, DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE, 0.0, 0.0).ok()?
                 } else {
-                    factory.CreateGlyphRunAnalysis(&run, 1.0, Some(&matrix), mode, DWRITE_MEASURING_MODE_NATURAL, 0.0, 0.0).ok()?
+                    factory.CreateGlyphRunAnalysis(&run, 1.0, Some(&matrix), mode, measuring, 0.0, 0.0).ok()?
                 };
                 let bounds = analysis.GetAlphaTextureBounds(texture).ok()?;
                 if bounds.left >= bounds.right || bounds.top >= bounds.bottom {
@@ -216,6 +298,11 @@ impl DirectWrite {
                 let (width, height) = ((bounds.right - bounds.left) as u32, (bounds.bottom - bounds.top) as u32);
                 let mut data = alloc::vec![0u8; width as usize * height as usize * if lcd { 3 } else { 1 }];
                 analysis.CreateAlphaTexture(texture, &bounds, &mut data).ok()?;
+                if smoothing == Smoothing::Aliased {
+                    for coverage in &mut data {
+                        *coverage = if *coverage >= 128 { 255 } else { 0 };
+                    }
+                }
                 Some(Rasterized::Mask(Mask { left: bounds.left, top: -bounds.top, width, height, lcd, data }))
             })();
             drop(ManuallyDrop::into_inner(run.fontFace));
@@ -253,13 +340,14 @@ fn scaler_choice(hints: &Hints, size: f32) -> (DWRITE_RENDERING_MODE, f32, DWRIT
 
 impl core::fmt::Debug for DirectWrite {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("DirectWrite").field("faces", &self.faces.len()).finish_non_exhaustive()
+        f.debug_struct("DirectWrite").field("faces", &self.faces.len()).field("files", &self.files.len()).finish_non_exhaustive()
     }
 }
 
 impl Drop for DirectWrite {
     fn drop(&mut self) {
         self.faces.clear();
+        self.files.clear();
         // SAFETY: unregisters the loader registered in `new`.
         unsafe {
             let _ = self.factory.UnregisterFontFileLoader(&self.loader);
