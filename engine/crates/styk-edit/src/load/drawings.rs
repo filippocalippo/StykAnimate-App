@@ -75,6 +75,127 @@ fn atob(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Whether a drawing figure keeps what makes it a drawing: one segment, which is an image, and the one picture it carries.
+pub(crate) fn keeps_its_image(figure: &Value) -> bool {
+    let segments = items(figure.get("segments"));
+    segments.len() == 1 && text(get(segments.first(), "segment_type")) == Some("image") && items(figure.get("image_assets")).len() == 1
+}
+
+/// What a damaged cel needs of its objects: how many segments it had, where its image segment was, and that segment's identity.
+struct CelRepair {
+    segments: usize,
+    kept: usize,
+    segment_id: Option<Value>,
+}
+
+/// A cel that has more than its one image segment (a build that let another be added to it wrote files opening refused) keeps the image segment
+/// and its picture: the other segments, the polygons and what refers to them go, in the definition and in the poses of every object of it. Says
+/// how many definitions it mended (each is one repair); runs on every document the project holds, as the other repairs do.
+pub(super) fn repair_cels(report: &mut Value) -> usize {
+    let mut definitions = items(report.get("figure_types"));
+    let mut specs: std::collections::HashMap<u64, CelRepair> = std::collections::HashMap::new();
+    let mut mended = 0usize;
+    for figure in definitions.iter_mut() {
+        if !truthy(path(Some(figure), &["_styk", "drawing"])) {
+            continue;
+        }
+        let Some(id) = num(figure.get("figure_type_id")) else { continue };
+        let segments = items(figure.get("segments"));
+        if segments.len() == 1 {
+            // Whole already (or mended by a parent whose figures this document inherits): its objects may still carry the poses of the segments it had.
+            specs.entry(id_key(id)).or_insert(CelRepair { segments: 0, kept: 0, segment_id: segments[0].get("segment_id").cloned() });
+            continue;
+        }
+        let Some(kept) = segments.iter().position(|segment| text(segment.get("segment_type")) == Some("image")) else { continue };
+        let mut image = segments[kept].clone();
+        if let Some(segment) = image.make_obj() {
+            segment.set("parent_id", Value::Num(0.0));
+        }
+        let segment_id = image.get("segment_id").cloned();
+        if let Some(record) = figure.make_obj() {
+            record.set("segments", Value::array(vec![image]));
+            record.set("segment_count", Value::Num(1.0));
+            record.set("polyfills", Value::array(Vec::new()));
+        }
+        specs.insert(id_key(id), CelRepair { segments: segments.len(), kept, segment_id });
+        mended += 1;
+    }
+    if specs.is_empty() {
+        return 0;
+    }
+    // The poses: an array that has one entry for each of the segments the cel had keeps the entry of its image segment; a longer one keeps its first.
+    let pose = |object: &Value, spec: &CelRepair| -> Option<Value> {
+        let mut changed = false;
+        let mut record = object.as_obj().cloned()?;
+        for key in ["angles", "lengths", "bends"] {
+            let values = items(record.get(key));
+            if values.len() > 1 {
+                let at = if values.len() == spec.segments { spec.kept } else { 0 };
+                record.set(key, Value::array(vec![values[at.min(values.len() - 1)].clone()]));
+                changed = true;
+            }
+        }
+        if let Some(controllers) = record.get("_stykIK").and_then(Value::as_obj).filter(|controllers| controllers.len() > 0) {
+            let kept: Vec<(String, Value)> = controllers
+                .iter()
+                .filter(|(key, _)| spec.segment_id.as_ref().and_then(Value::as_f64).is_some_and(|id| key.parse::<f64>().ok() == Some(id)))
+                .map(|(key, value)| (key.to_string(), value.clone()))
+                .collect();
+            if kept.len() != controllers.len() {
+                let mut next = styk_doc::Obj::new();
+                for (key, value) in kept {
+                    next.set(&key, value);
+                }
+                record.set("_stykIK", Value::object(next));
+                changed = true;
+            }
+        }
+        changed.then(|| Value::object(record))
+    };
+    let frame = |frame: &Value| -> Option<Value> {
+        let objects = items(frame.get("objects"));
+        let mut changed = false;
+        let next: Vec<Value> = objects
+            .into_iter()
+            .map(|object| match num(object.get("figure_type_id")).and_then(|id| specs.get(&id_key(id))).and_then(|spec| pose(&object, spec)) {
+                Some(fixed) => {
+                    changed = true;
+                    fixed
+                }
+                None => object,
+            })
+            .collect();
+        if !changed {
+            return None;
+        }
+        let mut record = frame.as_obj().cloned()?;
+        record.set("objects", Value::array(next));
+        Some(Value::object(record))
+    };
+    let mut pose_changed = false;
+    let keyframes: Vec<Value> = items(report.get("keyframes")).into_iter().map(|each| frame(&each).inspect(|_| pose_changed = true).unwrap_or(each)).collect();
+    let sources: Vec<(String, Value)> = entries(path(Some(report), &["_styk", "frameSources"])).into_iter().map(|(id, each)| (id.to_string(), frame(each).inspect(|_| pose_changed = true).unwrap_or_else(|| each.clone()))).collect();
+    let Some(record) = report.make_obj() else { return mended };
+    if mended > 0 {
+        record.set("figure_types", Value::array(definitions));
+    }
+    if pose_changed {
+        record.set("keyframes", Value::array(keyframes));
+        if let Some(styk) = record.get_mut("_styk").and_then(Value::make_obj)
+            && let Some(table) = styk.get_mut("frameSources").and_then(Value::make_obj)
+        {
+            for (id, each) in sources {
+                table.set(&id, each);
+            }
+        }
+        // Poses mended in a document whose definition was whole already (a retained scene, inheriting its figures) are a repair of their own.
+        if mended == 0 {
+            mended = 1;
+        }
+    }
+    mended
+}
+
 /// `validateDrawingFigure(figure)`.
 fn drawing_figure(figure: &Value) -> Result<(), EditError> {
     let d = path(Some(figure), &["_styk", "drawing"]);
@@ -354,5 +475,56 @@ mod tests {
         report.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap()[0].make_obj().unwrap().remove("_styk");
         assert_eq!(repair_assignments(&mut report), 1);
         assert_eq!(report.path(&["_styk", "layers", "assignments", "5"]).and_then(Value::as_str), Some("layer-1"));
+    }
+
+    /// A project with a cel that has a second segment (appended, with an entry in the poses of every object of the cel), as the build that let one be added wrote it.
+    fn damaged() -> Value {
+        styk_doc::json::parse(
+            br#"{"figure_types":[{"figure_type_id":7,"segment_count":2,"polyfills":[{"polygon_id":1}],
+                  "segments":[{"segment_id":1,"parent_id":0,"segment_type":"image","length":256},{"segment_id":99,"parent_id":1,"segment_type":"line","length":30}],
+                  "image_assets":[{"width":1,"height":1}],"_styk":{"drawing":{"version":2,"celId":"cel-a","pixelsPerUnit":1,"revision":1,"bounds":null}}}],
+                "keyframes":[{"objects":[{"unique_id":5,"figure_type_id":7,"angles":[0.5,0.25],"len_flag":1,"lengths":[256,30],"_stykIK":{"1":{"enabled":false},"99":{"enabled":false}}}]}],
+                "_styk":{"frameSources":{"pose":{"objects":[{"unique_id":5,"figure_type_id":7,"angles":[0.75,0]}]}}}}"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_cel_with_a_second_segment_keeps_its_image_and_the_poses_of_it_and_is_whole_afterwards() {
+        let mut report = damaged();
+        assert!(!keeps_its_image(&items(report.get("figure_types"))[0]));
+        assert_eq!(repair_cels(&mut report), 1, "one definition mended");
+        let cel = items(report.get("figure_types"))[0].clone();
+        assert!(keeps_its_image(&cel));
+        assert_eq!(styk_doc::json::to_string(cel.get("segments").unwrap()), r#"[{"segment_id":1,"parent_id":0,"segment_type":"image","length":256}]"#, "the image segment is kept as it was");
+        assert_eq!(cel.get("segment_count").and_then(Value::as_f64), Some(1.0));
+        assert!(items(cel.get("polyfills")).is_empty(), "what a drawing cannot hold goes");
+        let object = items(items(report.get("keyframes"))[0].get("objects"))[0].clone();
+        assert_eq!(styk_doc::json::to_string(object.get("angles").unwrap()), "[0.5]");
+        assert_eq!(styk_doc::json::to_string(object.get("lengths").unwrap()), "[256]");
+        assert_eq!(styk_doc::json::to_string(object.get("_stykIK").unwrap()), r#"{"1":{"enabled":false}}"#, "and the controllers of the segments that went");
+        assert_eq!(styk_doc::json::to_string(report.path(&["_styk", "frameSources", "pose", "objects"]).and_then(|objects| objects.item(0)).unwrap().get("angles").unwrap()), "[0.75]", "the retained poses too");
+        assert_eq!(repair_cels(&mut report), 0, "and there is nothing left to mend");
+    }
+
+    #[test]
+    fn the_poses_of_a_scene_that_inherits_the_figures_of_a_mended_cel_are_mended_with_them() {
+        // A retained scene has no figures of its own: the cel is whole there (its parent mended it), and its objects still carry the entries of the segments it had.
+        let mut report = damaged();
+        report.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap()[0].make_obj().unwrap().set("segments", Value::array(vec![styk_doc::json::parse(br#"{"segment_id":1,"parent_id":0,"segment_type":"image"}"#).unwrap()]));
+        assert_eq!(repair_cels(&mut report), 1);
+        let object = items(items(report.get("keyframes"))[0].get("objects"))[0].clone();
+        assert_eq!(styk_doc::json::to_string(object.get("angles").unwrap()), "[0.5]");
+    }
+
+    #[test]
+    fn a_figure_that_is_not_a_cel_and_a_cel_with_no_image_are_left_as_they_are() {
+        let mut report = damaged();
+        report.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap()[0].make_obj().unwrap().remove("_styk");
+        assert_eq!(repair_cels(&mut report), 0, "a figure with two segments that is no drawing is not touched");
+        let mut report = damaged();
+        let segments = report.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap()[0].make_obj().unwrap().get_mut("segments").unwrap().make_arr().unwrap();
+        segments[0].make_obj().unwrap().set("segment_type", Value::str("line"));
+        assert_eq!(repair_cels(&mut report), 0, "a cel with no image segment is left for opening to refuse: there is no picture to keep");
     }
 }
