@@ -80,6 +80,110 @@ test('entering a clip the engine cannot take is refused, and the project stays o
   assert.equal(editor._movieclipScopes.length, 1, 'and it enters once there is room');
 });
 
+/** A project holding a movieclip of `count` figures: the copy of the clip's list of objects alone is a request the engine refuses when it reaches into its reserve. */
+function projectWithBigClip(count) {
+  const small = emptyDocument();
+  small.keyframes = [createFrame(Array.from({length: 2}, (_, slot) => createObject(small.figure_types[0], slot + 1, 100 + slot * 40, 100)), 1)];
+  const made = ownedEditorSync(options, small, {verify: false});
+  made.editor.select(null);
+  const clip = made.editor.createMovieclip({start: 0, end: 1, uids: []});
+  const project = JSON.parse(made.owner.session().report_json());
+  const frame = project.figure_types.find(figure => figure.figure_type_id === clip.figure_type_id)._styk.movieclip.document.keyframes[0];
+  const template = frame.objects[0];
+  frame.objects = Array.from({length: count}, (_, index) => ({...template, unique_id: index + 1, object_slot: index, root_x: index}));
+  frame.object_draw_order = frame.objects.map((_, index) => index);
+  frame.object_draw_order_unique_ids = frame.objects.map((_, index) => index + 1);
+  made.owner.release();
+  return {project, clipId: clip.figure_type_id};
+}
+
+test('entering a clip with no room even to copy it is refused before anything is copied, and the project stays open', async () => {
+  // The copy was made before the memory was asked for: the module trapped, and answered "recursive use of an object" to every call after it.
+  const {project, clipId} = projectWithBigClip(20000);
+  const {editor, owner} = ownedEditorSync(options, project, {verify: false});
+  const report = editor.report;
+  await withHeadroom(1024, () => {
+    assert.throws(() => editor.enterMovieclip(clipId), /not enough memory/);
+  });
+  assert.equal(editor.report, report, 'still the project');
+  assert.equal(owner.sessions(), 1);
+  // The session is alive: the next call runs, and so does the entry once there is room.
+  editor.select(editor.evaluatedFrame.objects[0].unique_id, -1);
+  editor.moveSelection(3, 4);
+  editor.enterMovieclip(clipId);
+  assert.equal(editor._movieclipScopes.length, 1);
+});
+
+test('leaving a clip of 20,000 figures is refused cleanly with no room, and runs with the reservation of the call and little more', async () => {
+  const {project, clipId} = projectWithBigClip(20000);
+  const {editor, owner} = ownedEditorSync(options, project, {verify: false});
+  editor.enterMovieclip(clipId);
+  const inside = editor.report;
+  editor.select(editor.evaluatedFrame.objects[0].unique_id, -1);
+  editor.moveSelection(25, 10);
+  const edited = owner.session().report_json();
+  await withHeadroom(1024, () => {
+    assert.throws(() => editor.leaveMovieclip(), /not enough memory/);
+  });
+  assert.equal(editor.report, inside, 'still in the clip');
+  assert.equal(editor._movieclipScopes.length, 1);
+  // The next call or read of the clip is the clip session's again.
+  assert.ok(owner.ready());
+  assert.equal(owner.session().report_json(), edited, 'with the edit it had');
+  // The copy of the clip is part of what the call reserves, not memory on top of it: with the call's own reservation and little more, leaving runs
+  // (the copy was made first and then the reservation was asked for, which failed here), and the edit reaches the project.
+  await withHeadroom(66 * MiB, () => editor.leaveMovieclip());
+  assert.equal(editor._movieclipScopes.length, 0);
+  assert.equal(editor.undoLabel, 'Edit movieclip');
+});
+
+test('a clip of two million small arrays, which its text does not show, is refused cleanly when entered and left with too little room', async () => {
+  // The copy that gives the text's arrays allocates for each of them (a header, a list, an owner): two million arrays of one number are a few
+  // megabytes of text and hundreds of megabytes of copy, and the reservation was sized from the text (the module trapped inside the copy).
+  const {project, clipId} = projectWithBigClip(40);
+  project.figure_types.find(figure => figure.figure_type_id === clipId)._styk.movieclip.document._styk.padding = Array.from({length: 2_000_000}, () => [0]);
+  const {editor, owner} = ownedEditorSync(options, project, {verify: false});
+  const report = editor.report;
+  editor.enterMovieclip(clipId);
+  const inside = editor.report;
+  editor.select(editor.evaluatedFrame.objects[0].unique_id, -1);
+  editor.moveSelection(25, 10);
+  await withHeadroom(66 * MiB, () => {
+    assert.throws(() => editor.leaveMovieclip(), /not enough memory/);
+  });
+  assert.equal(editor.report, inside, 'still in the clip');
+  // The sessions are alive: the next call is answered (a trapped module answers "recursive use of an object"), and leaving runs with room.
+  assert.ok(owner.ready());
+  editor.select(editor.evaluatedFrame.objects[0].unique_id, -1);
+  editor.leaveMovieclip();
+  assert.equal(editor._movieclipScopes.length, 0);
+  assert.equal(editor.report, report);
+  // Entering it needs as much room, which it says it does not have.
+  await withHeadroom(150 * MiB, () => {
+    assert.throws(() => editor.enterMovieclip(clipId), /not enough memory/);
+  });
+  assert.equal(editor.report, report, 'still the project');
+  editor.select(editor.evaluatedFrame.objects[0].unique_id, -1);
+  editor.moveSelection(3, 4);
+});
+
+test('entering and leaving a clip twenty times returns the memory of the engine to its level', async () => {
+  // A closed session's document is dropped by the engine's workers; where the engine has none, its work runs in slices that closing a session
+  // has to start. Before that, each cycle left the clip's document in memory until something else started the slices.
+  const {project, clipId} = projectWithBigClip(3000);
+  const {editor} = ownedEditorSync(options, project, {verify: false});
+  const engine = registeredEngine(), settle = async () => { for (let turn = 0; turn < 6; turn++) await new Promise(resolve => setTimeout(resolve, 50)); };
+  editor.enterMovieclip(clipId); editor.leaveMovieclip(); await settle();
+  const level = engine.memory().liveBytes;
+  for (let cycle = 0; cycle < 20; cycle++) {
+    editor.enterMovieclip(clipId);
+    editor.leaveMovieclip();
+  }
+  await settle();
+  const grown = engine.memory().liveBytes - level;
+  assert.ok(grown < 4 * MiB, `the engine holds ${(grown / MiB).toFixed(1)} MiB more than before the twenty cycles`);
+});
+
 test('a clip whose edit the project cannot take stays open with the edit, to leave again', async () => {
   const {editor, owner} = session(4);
   editor.select(null);

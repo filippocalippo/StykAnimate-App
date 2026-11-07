@@ -45,3 +45,30 @@ opt-level = 3
 opt-level = 3
 [profile.dev]
 opt-level = 1
+
+# The app's quick iteration profile (`cargo build --profile quick -p styk-app`): incremental, the workspace's crates at
+# opt-level 1 and every dependency at 3 (the dev profile's own rule), never measured. Release is what ships.
+[profile.quick]
+inherits = "dev"
+incremental = true
+
+# iced and its pre-release git dependencies are vendored under ../vendor (docs/native/decisions/0002-vendored-iced.md);
+# these patches make every git source in the dependency graph resolve to those copies, so Cargo.lock holds no git source
+# (`cargo xtask lock` checks it).
+[patch."https://github.com/iced-rs/winit.git"]
+winit = { path = "../vendor/winit" }
+[patch."https://github.com/iced-rs/cryoglyph.git"]
+cryoglyph = { path = "../vendor/cryoglyph" }
+[patch."https://github.com/hecrj/cosmic-text.git"]
+cosmic-text = { path = "../vendor/cosmic-text" }
+
+[workspace.dependencies]
+iced = { path = "../vendor/iced", default-features = false, features = [
+    "wgpu",
+    "web-colors",
+    "crisp",
+    "thread-pool",
+    "advanced",
+    "canvas",
+    "svg",
+] }

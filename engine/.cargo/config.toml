@@ -1,0 +1,3 @@
+# Cargo settings for commands run from engine/ (the repository-root settings are found one folder up).
+[alias]
+xtask = "run --quiet -p xtask --"

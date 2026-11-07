@@ -148,3 +148,27 @@ test('cache recovery re-encodes legacy PNGs with oversized ancillary data within
     assert.ok(tile.png.byteLength<1024*1024,'the publication retains a compact exact PNG');
   }finally{f.resources.dispose();}
 });
+
+test('a run of edits publishes once, after it, and a run that never stops still publishes',async t=>{
+  // A clock and timers of the test's own: nothing here depends on how fast the machine runs.
+  let clock=0,timers=[];
+  t.mock.method(performance,'now',()=>clock);
+  t.mock.method(globalThis,'setTimeout',(callback,ms)=>{const timer={callback,at:clock+ms};timers.push(timer);return timer;});
+  t.mock.method(globalThis,'clearTimeout',timer=>{timers=timers.filter(held=>held!==timer);});
+  const advance=ms=>{
+    const end=clock+ms;
+    for(;;){const next=timers.filter(timer=>timer.at<=end).sort((x,y)=>x.at-y.at)[0];if(!next)break;timers=timers.filter(held=>held!==next);clock=next.at;next.callback();}
+    clock=end;
+  };
+  const resources=new DrawingResources({figure_types:[]},{history:false});
+  let flushes=0;resources.flush=async()=>{flushes++;};resources.quietMs=60;resources.maxWaitMs=200;
+  // Edits every 30 ms: the pauses are shorter than the quiet time, so nothing is published while they go on.
+  for(let i=0;i<4;i++){resources.schedule();advance(30);}
+  assert.equal(flushes,0,'no publication in the pauses of a run of edits');
+  advance(60);
+  assert.equal(flushes,1,'one, after the edits stopped');
+  // Edits that never stop for longer than the longest wait: published anyway, at the longest wait.
+  for(let i=0;i<12;i++){resources.schedule();advance(30);}
+  assert.equal(flushes,2,'a run that never stops is published once the longest wait has passed');
+  advance(60);resources.disposed=true;
+});

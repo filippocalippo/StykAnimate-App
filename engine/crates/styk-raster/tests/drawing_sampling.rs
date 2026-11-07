@@ -38,7 +38,7 @@ fn images() -> (Assets, Vec<DecodedImage>, styk_raster::Images) {
                 rgba.extend(pixel);
             }
         }
-        decoded.push(DecodedImage { index, drawing: true, soft: false, width: 68, height: 68, rgba });
+        decoded.push(DecodedImage { index, drawing: true, soft: false, width: 68, height: 68, rgba, placement: 0 });
     }
     assets.pages = 1;
     let mut cpu = styk_raster::Images::default();

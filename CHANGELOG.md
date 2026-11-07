@@ -60,6 +60,7 @@ What's new in each version of StykAnimate.
 - Timeline and asset library previews appear almost instantly, and large projects use less memory, while they are shown and once opened.
 - Smoother playback for animations with parallax layers, a following camera, moved figure origins, Stick Nodes sprites, turning 3D drawings or animated properties.
 - Undoing and redoing big movieclip edits is much faster.
+- Drawing for a long time no longer keeps growing the memory StykAnimate uses.
 - Stepping through frames with the keyboard shows the next frame sooner on large animations.
 
 ### Removed

@@ -35,30 +35,41 @@ pub struct EntryCosts {
     redo: Vec<usize>,
 }
 
+/// Where a history stands: how many entries it can undo and redo, and the revision the newest entry to undo leads to. A history that is full
+/// drops its oldest entry as it takes a new one, so its depth does not say that an entry was made; the newest revision does.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HistoryMarks {
+    pub undo: usize,
+    pub redo: usize,
+    pub newest: Option<u64>,
+}
+
 impl EntryCosts {
     /// What redoing the entry on top of the redo stack needs.
     pub fn redo(&self) -> usize {
         self.redo.last().copied().unwrap_or(0)
     }
 
-    /// After `method` ran with the stacks at `before` (undo, redo) and left them at `after`; `took` is what the call took.
-    pub fn note(&mut self, method: &str, before: (usize, usize), after: (usize, usize), took: usize) {
+    /// After `method` ran with the history at `before` and left it at `after`; `took` is what the call took.
+    pub fn note(&mut self, method: &str, before: HistoryMarks, after: HistoryMarks, took: usize) {
         match method {
-            "undo" if after.0 < before.0 => { if let Some(cost) = self.undo.pop() { self.redo.push(cost.max(took)); } }
-            "redo" if after.1 < before.1 => { if let Some(cost) = self.redo.pop() { self.undo.push(cost); } }
+            "undo" if after.undo < before.undo => { if let Some(cost) = self.undo.pop() { self.redo.push(cost.max(took)); } }
+            "redo" if after.redo < before.redo => { if let Some(cost) = self.redo.pop() { self.undo.push(cost); } }
             "undo" | "redo" => {}
             _ => {
-                // A call that made entries gives the last one what it took; one that made none leaves the stacks as they are.
-                if after.0 > before.0 {
-                    self.undo.resize(before.0.min(self.undo.len()), 0);
-                    self.undo.resize(after.0 - 1, 0);
+                // A call that made entries gives the last one what it took; one that made none leaves the stacks as they are. A full history
+                // drops its oldest entry for a new one, and keeps its depth.
+                if after.undo > before.undo || after.newest != before.newest {
+                    let made = after.undo.saturating_sub(before.undo).max(1);
+                    self.undo.resize(before.undo.min(self.undo.len()), 0);
+                    self.undo.resize(self.undo.len() + made - 1, 0);
                     self.undo.push(took);
                 }
-                if after.1 == 0 { self.redo.clear(); }
+                if after.redo == 0 { self.redo.clear(); }
             }
         }
         // A history trimmed from its oldest end loses the same numbers; one that grew another way has none for the new ones.
-        for (stack, depth) in [(&mut self.undo, after.0), (&mut self.redo, after.1)] {
+        for (stack, depth) in [(&mut self.undo, after.undo), (&mut self.redo, after.redo)] {
             if stack.len() > depth { stack.drain(..stack.len() - depth); }
             while stack.len() < depth { stack.insert(0, 0); }
         }
@@ -688,46 +699,61 @@ impl Editor {
 
 #[cfg(test)]
 mod entry_cost_tests {
-    use super::EntryCosts;
+    use super::{EntryCosts, HistoryMarks};
+
+    /// The history at (entries to undo, entries to redo); the newest entry is told by how many were made (`edits`) unless a test says.
+    fn at(undo: usize, redo: usize) -> HistoryMarks { HistoryMarks { undo, redo, newest: Some(undo as u64) } }
 
     #[test]
     fn an_entry_keeps_what_its_call_took_through_undo_and_redo() {
         let mut costs = EntryCosts::default();
-        costs.note("moveSelection", (0, 0), (1, 0), 10);
-        costs.note("createMovieclip", (1, 0), (2, 0), 900);
+        costs.note("moveSelection", at(0, 0), at(1, 0), 10);
+        costs.note("createMovieclip", at(1, 0), at(2, 0), 900);
         assert_eq!(costs.redo(), 0, "nothing to redo yet");
-        costs.note("undo", (2, 0), (1, 1), 5);
+        costs.note("undo", at(2, 0), at(1, 1), 5);
         assert_eq!(costs.redo(), 900, "the entry undone is the one that took 900");
-        costs.note("undo", (1, 1), (0, 2), 5);
+        costs.note("undo", at(1, 1), at(0, 2), 5);
         assert_eq!(costs.redo(), 10);
-        costs.note("redo", (0, 2), (1, 1), 3);
-        costs.note("redo", (1, 1), (2, 0), 3);
+        costs.note("redo", at(0, 2), at(1, 1), 3);
+        costs.note("redo", at(1, 1), at(2, 0), 3);
         assert_eq!(costs.redo(), 0);
-        costs.note("undo", (2, 0), (1, 1), 7);
+        costs.note("undo", at(2, 0), at(1, 1), 7);
         assert_eq!(costs.redo(), 900, "and it still does after it was redone");
     }
 
     #[test]
     fn a_new_edit_clears_the_redo_costs_and_a_refused_call_changes_nothing() {
         let mut costs = EntryCosts::default();
-        costs.note("createMovieclip", (0, 0), (1, 0), 900);
-        costs.note("undo", (1, 0), (0, 1), 1);
-        costs.note("redo", (0, 1), (0, 1), 1);
+        costs.note("createMovieclip", at(0, 0), at(1, 0), 900);
+        costs.note("undo", at(1, 0), at(0, 1), 1);
+        costs.note("redo", at(0, 1), at(0, 1), 1);
         assert_eq!(costs.redo(), 900, "a redo that changed nothing leaves the entry's cost");
-        costs.note("moveSelection", (0, 1), (1, 0), 4);
+        costs.note("moveSelection", at(0, 1), at(1, 0), 4);
         assert_eq!(costs.redo(), 0, "an edit after an undo ends the redo history");
     }
 
     #[test]
     fn a_history_trimmed_from_its_oldest_end_loses_the_oldest_costs() {
         let mut costs = EntryCosts::default();
-        for took in [1, 2, 3] { let at = (costs_len(&costs), 0); costs.note("edit", at, (at.0 + 1, 0), took); }
+        for took in [1, 2, 3] { let depth = costs_len(&costs); costs.note("edit", at(depth, 0), at(depth + 1, 0), took); }
         // The history now holds two entries: the oldest went.
-        costs.note("@limits", (3, 0), (2, 0), 0);
-        costs.note("undo", (2, 0), (1, 1), 0);
+        let newest = Some(3);
+        costs.note("@limits", HistoryMarks { undo: 3, redo: 0, newest }, HistoryMarks { undo: 2, redo: 0, newest }, 0);
+        costs.note("undo", at(2, 0), at(1, 1), 0);
         assert_eq!(costs.redo(), 3);
-        costs.note("undo", (1, 1), (0, 2), 0);
+        costs.note("undo", at(1, 1), at(0, 2), 0);
         assert_eq!(costs.redo(), 2);
+    }
+
+    #[test]
+    fn an_entry_made_when_the_history_is_full_keeps_what_its_call_took() {
+        // The history holds its limit; a new entry displaces the oldest, so the depth stays and the newest revision moves.
+        let mut costs = EntryCosts::default();
+        let full = |newest: u64| HistoryMarks { undo: super::HISTORY_LIMIT, redo: 0, newest: Some(newest) };
+        for depth in 0..super::HISTORY_LIMIT { costs.note("moveSelection", at(depth, 0), at(depth + 1, 0), 10); }
+        costs.note("createMovieclip", full(1000), full(1001), 900);
+        costs.note("undo", full(1001), HistoryMarks { undo: super::HISTORY_LIMIT - 1, redo: 1, newest: Some(1000) }, 5);
+        assert_eq!(costs.redo(), 900, "the entry that displaced the oldest is the one that took 900");
     }
 
     fn costs_len(costs: &EntryCosts) -> usize { costs.undo.len() }

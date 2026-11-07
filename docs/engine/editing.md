@@ -554,6 +554,11 @@ step 0.02 ms, commits 5.0–9.0 ms, undo 2.1 ms.
 
 Not measured: WebAssembly, and the boundary (arguments in, changed records out).
 
+A stroke's undo in the app (directional): in a dev build the session call of the first undo took 5.4 ms against 0.66 ms for the second, and the
+same editor call is about 0.09 ms natively on 80 entries of history; a release build shows no such penalty (19.7, 26.4 and 19.9 ms for the
+first undo against 21.0, 26.4 and 21.3 for later ones), so the cost is a development-build effect (a function compiled on its first call)
+and nothing warms it. Copying the history stacks into the call's snapshot is not the cost: taking them out of the snapshot changed nothing.
+
 ## Arithmetic
 
 A ported command must round every stored result as the editor does. The platform's
@@ -714,6 +719,16 @@ it on the editor, for every document.
   (`OpenSource::Tree`), not from text the page read from a record of the project and wrote out again; the open is reserved at three times the
   clip's text (`open_tree_estimate`), not sixteen. The clip's pose arrays are unshared as its text would have given them (the saved bytes are
   those of the project opened from text). Reading the definition to enter fetched a record as large as the project into the page.
+  Entering a clip hands the open the clip's document as the project holds it; the open reserves its memory (`open_tree_estimate`) and only then makes
+  the copy that gives the text's arrays (`OpenSource::Tree`), so a clip the engine cannot take is refused and not trapped. The replacement tracks are
+  caches that the page's thread and the workers both fill: each is taken with one attempt (`styk_doc::lock::once`) and built with no lock held (D7).
+  An entry's cost (what redoing it needs) follows the entry, also when a full history displaces its oldest to take it (`HistoryMarks`: the newest
+  revision tells a new entry from a displaced one). A retained scene's replacements keep naming only figures their cut pose still holds (`prune_patches`).
+  The copy a call is given of another session's document (leaving a clip) and the copy the open of a tree makes are sized from what they allocate
+  (`Value::unshared_cost`: every packed array, the containers that hold one, and the list of copies every container allocates while it looks), not from the text, which says little of a tree of many small arrays or strings.
+  A figure that is not a drawing cel pasted or imported while a drawing layer is active is placed on it, as it has always been; the repair opening makes
+  of a figure assigned to a drawing layer moves only one that a frame the layer keys shows beside its cel (what opening refuses), so a save opens as written.
+  Freeing a session starts the engine's drain of closed documents where it has no worker threads (`engine.pump`).
   A movieclip made inside a clip retains the scene the outer clip retains cut down to its own figures (`prune_retained`: poses,
   effect clips and imported animation, down the chain of `movieclipSource` documents). An older retained scene numbers its figures on its own, and shares
   the definitions of the clip that holds it, so only objects of a definition the new clip holds stay in it (a figure of the older scene with the

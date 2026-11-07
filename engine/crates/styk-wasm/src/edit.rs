@@ -99,7 +99,8 @@ impl EditSession {
         self.session.as_ref().expect("a session is open until it is dropped")
     }
 
-    /// The document of movieclip `type_id` of the session's project, as text would give it, and its name; or the message that says why not.
+    /// The document of movieclip `type_id` of the session's project, as the project holds it (sharing its arrays: nothing is copied before the
+    /// open has reserved the memory for the copy, `OpenSource::Tree`), and its name; or the message that says why not.
     pub(crate) fn movieclip_document(&self, type_id: f64) -> Result<(Value, String), &'static str> {
         let report = self.session().report();
         let figure = report.get("figure_types").and_then(Value::elements).and_then(|figures| figures.iter().find(|figure| figure.get("figure_type_id").and_then(Value::as_f64) == Some(type_id)));
@@ -109,7 +110,7 @@ impl EditSession {
         }
         let document = asset.get("document").filter(|document| document.is_object()).ok_or("errors.editorMovieclips.chooseAMovieclip")?;
         let name = figure.as_ref().and_then(|figure| figure.get("name")).and_then(Value::as_str).unwrap_or("").to_string();
-        Ok((document.unshared(), name))
+        Ok((document.clone(), name))
     }
 
     /// Publishes the session's tree when a call changed it or moved its revision (a document marked as
@@ -245,7 +246,7 @@ impl EditSession {
         let Ok(_working) = styk_alloc::reserve(base.max(self.working.get(method).copied().unwrap_or(0)).max(redoing)) else { return out_of_memory_answer() };
         styk_alloc::reset_peak();
         let began = styk_alloc::live_bytes();
-        let depths = self.session().history_depths();
+        let depths = self.session().history_marks();
         let answer = self.session.as_mut().expect("a session is open until it is dropped").call(method, args, view);
         self.publish();
         // What this call took (and whatever the workers took meanwhile) is what the next may need.
@@ -253,7 +254,7 @@ impl EditSession {
         let wanted = (took + took / 4).min(styk_alloc::ceiling() / 2);
         let learned = self.working.entry(method.to_string()).or_default();
         *learned = (*learned).max(wanted);
-        let after = self.session().history_depths();
+        let after = self.session().history_marks();
         self.costs.note(method, depths, after, wanted);
         answer
     }
@@ -264,20 +265,24 @@ impl EditSession {
     pub fn call_with_document(&mut self, method: &str, args: &str, view: &str, document: &EditSession) -> String {
         let (Ok(mut args), Ok(view)) = (json::parse(args.as_bytes()), json::parse(view.as_bytes())) else { return "{\"status\":\"error\",\"error\":\"the call's arguments are not JSON\"}".to_string() };
         let Some(mut list) = args.elements().map(|items| items.iter().collect::<Vec<Value>>()).filter(|items| items.len() >= 2) else { return "{\"status\":\"error\",\"error\":\"a call with a document takes it as its second argument\"}".to_string() };
+        // The copy is asked for with the call's working memory, from the size of what is copied, before any of it is made: a clip as large as the
+        // project it was made from is hundreds of megabytes.
+        let copy = document.session().report().unshared_cost();
+        let copy = copy.saturating_add(copy / 4);
+        let Ok(_working) = styk_alloc::reserve(CALL_WORKING_BYTES.max(self.working.get(method).copied().unwrap_or(0)).max(copy)) else { return out_of_memory_answer() };
         // The tree as text would give it: a pose array the clip's records share is one array in each place it sits, as a file saves it.
         list[1] = document.session().report().unshared();
         args = Value::array(list);
-        let Ok(_working) = styk_alloc::reserve(CALL_WORKING_BYTES.max(self.working.get(method).copied().unwrap_or(0))) else { return out_of_memory_answer() };
         styk_alloc::reset_peak();
         let began = styk_alloc::live_bytes();
-        let depths = self.session().history_depths();
+        let depths = self.session().history_marks();
         let answer = json::to_string(&self.session.as_mut().expect("a session is open until it is dropped").call_values(method, &args, &view));
         self.publish();
         let took = styk_alloc::peak_bytes().saturating_sub(began);
         let wanted = (took + took / 4).min(styk_alloc::ceiling() / 2);
         let learned = self.working.entry(method.to_string()).or_default();
         *learned = (*learned).max(wanted);
-        let after = self.session().history_depths();
+        let after = self.session().history_marks();
         self.costs.note(method, depths, after, wanted);
         answer
     }

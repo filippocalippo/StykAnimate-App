@@ -38,8 +38,9 @@ pub enum OpenSource<'a> {
     Owned { bytes: Vec<u8>, name: &'a str },
     /// A document as JSON text, and the name it is shown under.
     Json { bytes: &'a [u8], name: &'a str },
-    /// A document already in memory as a tree, and the name it is shown under: a movieclip's own, taken from the project that holds it. Nothing is
-    /// read from text, so what the open makes is the normalized document and its views.
+    /// A document already in memory as a tree, and the name it is shown under: a movieclip's own, taken from the project that holds it (as the
+    /// project holds it: its arrays shared with the project's other records, which the open unshares once its memory is reserved, so that the
+    /// document is the one its text would give). Nothing is read from text, so what the open makes is the normalized document and its views.
     Tree { document: Value, name: &'a str },
 }
 
@@ -125,7 +126,8 @@ pub const OPEN_BYTES_PER_TREE_BYTE: usize = 3;
 /// What opening `tree` may take, for the reservation that precedes the open.
 pub fn open_tree_estimate(tree: &Value) -> usize {
     let text = styk_doc::json::utf16_units_checked::<std::convert::Infallible>(tree, || Ok(())).unwrap_or(0);
-    text.saturating_mul(OPEN_BYTES_PER_TREE_BYTE).max(OPEN_MINIMUM_BYTES)
+    // The copy that gives the text's arrays (`Value::unshared`) is made once the memory is reserved, and what it allocates is not what the text says.
+    text.saturating_mul(OPEN_BYTES_PER_TREE_BYTE).saturating_add(tree.unshared_cost()).max(OPEN_MINIMUM_BYTES)
 }
 
 /// What opening a document of `file_bytes` bytes may take, for the reservation that precedes the open.
@@ -471,6 +473,8 @@ impl Engine {
                 },
             },
             OpenSource::Tree { document, name } => {
+                // Copied only now that the open holds the memory it asked for: the copy is as large as the text of the document.
+                let document = document.unshared();
                 let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
                 (document, "json", version, name.to_string(), None)
             }
@@ -610,8 +614,9 @@ impl Engine {
         let (prepared, assets, converted) = match views {
             Views::Same(prepared) => (prepared, store.assets.clone().expect("an activated document has its atlas"), Default::default()),
             Views::Made(prepared) => {
+                let quiet = self.pictures_settled();
                 let assets = Arc::new(match &store.assets {
-                    Some(previous) => previous.extended(&prepared.doc),
+                    Some(previous) => previous.extended_inheriting(&prepared.doc, quiet),
                     None => Assets::build(&prepared.doc),
                 });
                 (prepared, assets, Default::default())
@@ -620,8 +625,9 @@ impl Engine {
                 let name = tree.path(&["_styk", "name"]).and_then(Value::as_str).unwrap_or("").to_string();
                 let document = store.loader.document(&tree, &name).map_err(|error| OpenError { stage: OpenStage::Prepare, ..OpenError::decode(error.to_string()) })?;
                 let converted = store.loader.converted;
+                let quiet = self.pictures_settled();
                 let assets = Arc::new(match &store.assets {
-                    Some(previous) => previous.extended(&document),
+                    Some(previous) => previous.extended_inheriting(&document, quiet),
                     None => Assets::build(&document),
                 });
                 (Arc::new(Prepared::new(Arc::new(document))), assets, converted)

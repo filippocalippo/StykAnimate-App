@@ -1,0 +1,158 @@
+//! Operate on widgets that have text input.
+use crate::Rectangle;
+use crate::text;
+use crate::widget::Id;
+use crate::widget::operation::Operation;
+
+/// The internal state of a widget that has text input.
+pub trait TextInput {
+    /// Returns the current _visible_ text of the text input.
+    ///
+    /// Normally, this is either its value or its placeholder.
+    fn text(&self) -> text::Fragment<'_>;
+
+    /// Moves the cursor of the text input to the front of the input text.
+    fn move_cursor_to_front(&mut self);
+
+    /// Moves the cursor of the text input to the end of the input text.
+    fn move_cursor_to_end(&mut self);
+
+    /// Moves the cursor of the text input to an arbitrary location.
+    fn move_cursor_to(&mut self, location: text::Position);
+
+    /// Selects all the content of the text input.
+    fn select_all(&mut self);
+
+    /// Selects the given content range of the text input.
+    fn select_range(&mut self, start: text::Position, end: text::Position);
+}
+
+/// Produces an [`Operation`] that moves the cursor of the widget with the given [`Id`] to the
+/// front.
+pub fn move_cursor_to_front<T>(target: Id) -> impl Operation<T> {
+    struct MoveCursor {
+        target: Id,
+    }
+
+    impl<T> Operation<T> for MoveCursor {
+        fn text_input(&mut self, id: Option<&Id>, _bounds: Rectangle, state: &mut dyn TextInput) {
+            match id {
+                Some(id) if id == &self.target => {
+                    state.move_cursor_to_front();
+                }
+                _ => {}
+            }
+        }
+
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<T>)) {
+            operate(self);
+        }
+    }
+
+    MoveCursor { target }
+}
+
+/// Produces an [`Operation`] that moves the cursor of the widget with the given [`Id`] to the
+/// end.
+pub fn move_cursor_to_end<T>(target: Id) -> impl Operation<T> {
+    struct MoveCursor {
+        target: Id,
+    }
+
+    impl<T> Operation<T> for MoveCursor {
+        fn text_input(&mut self, id: Option<&Id>, _bounds: Rectangle, state: &mut dyn TextInput) {
+            match id {
+                Some(id) if id == &self.target => {
+                    state.move_cursor_to_end();
+                }
+                _ => {}
+            }
+        }
+
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<T>)) {
+            operate(self);
+        }
+    }
+
+    MoveCursor { target }
+}
+
+/// Produces an [`Operation`] that moves the cursor of the widget with the given [`Id`] to the
+/// provided position.
+pub fn move_cursor_to<T>(target: Id, position: text::Position) -> impl Operation<T> {
+    struct MoveCursor {
+        target: Id,
+        position: text::Position,
+    }
+
+    impl<T> Operation<T> for MoveCursor {
+        fn text_input(&mut self, id: Option<&Id>, _bounds: Rectangle, state: &mut dyn TextInput) {
+            match id {
+                Some(id) if id == &self.target => {
+                    state.move_cursor_to(self.position);
+                }
+                _ => {}
+            }
+        }
+
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<T>)) {
+            operate(self);
+        }
+    }
+
+    MoveCursor { target, position }
+}
+
+/// Produces an [`Operation`] that selects all the content of the widget with the given [`Id`].
+pub fn select_all<T>(target: Id) -> impl Operation<T> {
+    struct MoveCursor {
+        target: Id,
+    }
+
+    impl<T> Operation<T> for MoveCursor {
+        fn text_input(&mut self, id: Option<&Id>, _bounds: Rectangle, state: &mut dyn TextInput) {
+            match id {
+                Some(id) if id == &self.target => {
+                    state.select_all();
+                }
+                _ => {}
+            }
+        }
+
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<T>)) {
+            operate(self);
+        }
+    }
+
+    MoveCursor { target }
+}
+
+/// Produces an [`Operation`] that selects the given content range of the widget with the given [`Id`].
+pub fn select_range<T>(
+    target: Id,
+    start: text::Position,
+    end: text::Position,
+) -> impl Operation<T> {
+    struct SelectRange {
+        target: Id,
+        start: text::Position,
+        end: text::Position,
+    }
+
+    impl<T> Operation<T> for SelectRange {
+        fn text_input(&mut self, id: Option<&Id>, _bounds: Rectangle, state: &mut dyn TextInput) {
+            match id {
+                Some(id) if id == &self.target => {
+                    state.select_range(self.start, self.end);
+                }
+                _ => {}
+            }
+        }
+
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<T>)) {
+            operate(self);
+        }
+    }
+
+    SelectRange { target, start, end }
+}

@@ -512,9 +512,9 @@ impl Session {
         self.editor.memory_gate = Some(gate);
     }
 
-    /// How many entries the history can undo and redo.
-    pub fn history_depths(&self) -> (usize, usize) {
-        (self.editor.undo.len(), self.editor.redo.len())
+    /// Where the history stands: how many entries it can undo and redo, and the revision the newest leads to.
+    pub fn history_marks(&self) -> crate::HistoryMarks {
+        crate::HistoryMarks { undo: self.editor.undo.len(), redo: self.editor.redo.len(), newest: self.editor.undo.last().map(|entry| entry.after_revision) }
     }
 
     /// The clock reads that are given a time to take are held to (milliseconds).
@@ -988,7 +988,8 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     if view.get("patch") == Some(&Value::Bool(true)) {
         let (ops, named) = {
             let _scope = crate::prof::scope("patch::diff");
-            let mut ops = crate::patch::diff(&before, report);
+            // The owner's `@publishCel` hands the session a payload the read view holds already: its answer repeats nothing.
+            let mut ops = if method == "@publishCel" { Value::array(Vec::new()) } else { crate::patch::diff(&before, report) };
             // A view that fetches the records of its tables on demand holds some of them: the others come whole.
             if let Some(known) = crate::patch::known(&view) {
                 ops = crate::patch::for_lazy(ops, report, &known);

@@ -29,7 +29,7 @@
  * place shows as a difference.
  */
 import {applyDocumentPatch} from './engine-patch.mjs';
-import {openMovieclipNow, payloadText} from './engine-open.mjs';
+import {openMovieclipNow, payloadText, registeredEngine} from './engine-open.mjs';
 import {fetchedRecords, holdAllRecords, holdingAll, recordsOf, tableOf} from '../lazy-table.mjs';
 import {messageError} from '../localized-error.mjs';
 import {validationLabel} from '../validation-labels.mjs';
@@ -510,7 +510,12 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   /** Frees a session that is closed. The clipboards read what they keep in it first (a copied audio clip's recording) and name
    * it no more, so a freed session is never called. Every session of a closed project or a left movieclip ends here. */
   const end = (ended, closed) => {
-    try { clipboards.surrender(ended, readClipboard); } finally { recordsOf(closed)?.close(ended); ended.free(); }
+    try { clipboards.surrender(ended, readClipboard); } finally {
+      recordsOf(closed)?.close(ended); ended.free();
+      // A closed session's document is dropped by the engine's own workers (never on this thread); an engine without worker threads runs that work
+      // in slices that something has to start, or the document of a movieclip left stays in memory until the next open or export does.
+      registeredEngine()?.pump?.();
+    }
   };
   /** Ends the session of a document that is closed (or a movieclip that is left), whether it is the open one or parked. */
   const forget = closed => {

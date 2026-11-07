@@ -35,6 +35,7 @@ use crate::EditError;
 
 pub use self::js::{CANCELLED, TYPE_ERROR, WORKER_LOST};
 pub(crate) use self::object::{object_pose as validate_object_pose, spatial_pose};
+pub(crate) use self::layer_state::Sources as PoseSources;
 pub(crate) use self::scene::projected_drawing;
 pub(crate) use self::sheet::initialize as initialize_layer_sheet;
 
