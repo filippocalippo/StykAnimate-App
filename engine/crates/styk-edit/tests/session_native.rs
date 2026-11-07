@@ -87,3 +87,39 @@ fn native_answers_refusals_and_view_inputs_match_the_json_host() {
         }
     }
 }
+
+#[test]
+fn native_worker_bake_restores_all_heads_when_commit_is_refused() {
+    let report = json::parse(include_bytes!("../../../tests/edit/startup.document.json")).unwrap();
+    let mut session = Session::start(report, r#"{"propertyChannels":true,"layerTimeline":true,"nextUid":2,"nextFrameIdentity":2,"selectedUid":1,"selectedUids":[1],"selectedJoint":-1}"#).unwrap();
+    session.call_native("createMovieclip", &[parse(r#"{"start":0,"end":4,"replace":true,"name":"Clip"}"#)], &Value::Null).result.unwrap();
+    let report = session.report().clone();
+    let revision = session.revision(); let history = session.view().history;
+    let selection = session.view().selection.clone();
+    let frame = session.frame_records().unwrap();
+    let mut worker = session.into_worker();
+    let mut checks = 0;
+    let refused = worker.call_native_long("bakeMovieclip", &[], &Value::Null, &mut || { checks += 1; Ok(()) }, || Err(EditError::Invalid("cancelled at commit".into())));
+    assert!(matches!(refused, Err(EditError::Invalid(ref error)) if error == "cancelled at commit"));
+    assert!(checks > 4, "cancellation crosses the real sampling/publication path");
+    let session = worker.into_session();
+    assert!(session.report().same_node(&report)); assert_eq!(session.revision(), revision);
+    assert_eq!(session.view().history, history); assert_eq!(session.view().selection, &selection);
+    assert!(session.frame_records().unwrap().same_node(&frame));
+    let mut worker = session.into_worker(); let mut checks = 0;
+    let interrupted = worker.call_native_long("bakeMovieclip", &[], &Value::Null, &mut || {
+        checks += 1; if checks == 5 { Err(EditError::Invalid("one-shot budget refusal".into())) } else { Ok(()) }
+    }, || panic!("a one-shot refusal must not commit"));
+    assert!(matches!(interrupted, Err(EditError::Invalid(ref error)) if error == "one-shot budget refusal"));
+    let mut session = worker.into_session();
+    assert!(session.report().same_node(&report)); assert_eq!(session.view().history, history);
+    // A refused copy and invalid handoff retain the previous typed clipboard by move.
+    session.call_native("copySelection", &[], &Value::Null).result.unwrap();
+    let clipboard = session.clipboard("figures").unwrap();
+    let bad = session.call_native("@setClipboard", &[Value::str("figures"), Value::Num(1.0)], &Value::Null);
+    assert!(bad.result.is_err()); assert!(bad.retired_clipboard.is_none());
+    assert_eq!(session.clipboard("figures").unwrap(), clipboard);
+    session.call_native("select", &[Value::Null, Value::Num(-1.0)], &Value::Null).result.unwrap();
+    let empty = session.call_native("copySelection", &[], &Value::Null);
+    assert!(empty.retired_clipboard.is_none()); assert_eq!(session.clipboard("figures").unwrap(), clipboard);
+}

@@ -1,15 +1,16 @@
-//! Derived facts a panel shows that need evaluation or geometry (a selection's bounds), made on a worker from the
-//! document's published generation and handed to the interface ready and stamped with what they were made for.
+//! Derived facts a panel shows that need evaluation or geometry (a selection's bounds), made on a background lane from
+//! the document's published generation and handed to the interface ready and stamped with what they were made for.
 //!
 //! The interface thread never builds geometry (D7). A panel asks for the facts of a [`FactsKey`] (document, revision,
-//! tick, selection), keeps showing the last ready value meanwhile, and takes the new one when it lands. Requests and
-//! results cross through one small slot each: the interface only ever `try_lock`s it (a request it cannot place waits
-//! in an outbox for the next refresh), the worker alone waits. The generation comes from the same seam the frame
-//! scheduler reads, [`crate::frames::FrameDocument`], so facts and frames describe the same published document.
+//! tick, selection), keeps showing the last ready value meanwhile, and takes the new one when it lands. The lane is the
+//! documents host's [`styk_services::worker::Worker`]: one input and one output, exchanged with `try_lock` only. While
+//! it is busy the newest request waits here (an older waiting one is replaced: only the latest state matters). The
+//! generation comes from the seam the frame scheduler reads, [`crate::frames::FrameDocument`], so facts and frames
+//! describe the same published document.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, TryLockError};
+use std::sync::Arc;
 
+use styk_services::worker::Worker;
 use styk_services::{SpawnError, Spawner};
 
 use crate::frames::{FrameDocument, Wake};
@@ -36,149 +37,102 @@ impl FactsKey {
 pub struct Ready {
     pub key: FactsKey,
     /// The app's `selectionBounds()`: `[minX, minY, maxX, maxY]` of the selected figures' `boundsOf` at the tick, `None`
-    /// when none of them is drawn there or the generation for the revision could not be had.
+    /// when none of them is drawn there.
     pub bounds: Option<[f64; 4]>,
 }
 
-struct Request {
+/// What the lane answers: facts, or that the revision's generation is not published yet (K-doc publishes after the
+/// edit): not a result, so the panel keeps what it shows and asks again at its next refresh.
+pub enum Answer {
+    Ready(Ready),
+    Unpublished(FactsKey),
+}
+
+/// What the lane is given.
+pub struct Request {
     key: FactsKey,
     source: Arc<dyn FrameDocument>,
 }
 
-#[derive(Default)]
-struct Slot {
-    request: Option<Request>,
-    ready: Option<Ready>,
-}
-
-struct Shared {
-    slot: Mutex<Slot>,
-    changed: Condvar,
-    closed: AtomicBool,
-    wake: Wake,
-}
-
-impl Shared {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Slot> {
-        // A worker that panicked mid-update leaves a value that is still a whole request or result.
-        self.slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    /// Takes the pending request, computes its facts outside the lock and publishes them. `false` when there was none.
-    fn step(&self) -> bool {
-        let Some(request) = self.lock().request.take() else { return false };
-        let bounds = request.source.snapshot(request.key.revision, 0).and_then(|generation| bounds(&generation, &request.key));
-        let ready = Ready { key: request.key, bounds };
-        self.lock().ready = Some(ready);
-        (self.wake)();
-        true
-    }
-
-    fn run(&self) {
-        loop {
-            {
-                let mut slot = self.lock();
-                while slot.request.is_none() && !self.closed.load(Ordering::Acquire) {
-                    slot = self.changed.wait(slot).unwrap_or_else(|poisoned| poisoned.into_inner());
-                }
-                if self.closed.load(Ordering::Acquire) {
-                    return;
-                }
-            }
-            self.step();
-        }
-    }
-}
-
 /// The selection's bounds at the key's tick, from the generation: the same evaluation, geometry and effect reach the
-/// app's `boundsOf` measures (`styk_eval::drawlist::app_bounds_of`), for the selected figures only.
-fn bounds(generation: &styk_engine::Generation, key: &FactsKey) -> Option<[f64; 4]> {
-    let prepared = &generation.prepared;
-    let frame = prepared.evaluate(f64::from_bits(key.tick));
-    let slots: Vec<usize> = frame.objects.iter().enumerate().filter(|(_, object)| key.uids.contains(&object.uid)).map(|(slot, _)| slot).collect();
-    if slots.is_empty() {
-        return None;
-    }
-    let scene = styk_eval::geometry::build_only_measured(&prepared.doc, &frame, &slots);
-    let measured = styk_eval::drawlist::app_bounds_of(&scene, prepared.doc.as_ref(), &slots);
-    slots.iter().filter_map(|slot| measured.get(*slot).copied().flatten()).fold(None, |union: Option<[f64; 4]>, b| {
-        Some(union.map_or(b, |u| [u[0].min(b[0]), u[1].min(b[1]), u[2].max(b[2]), u[3].max(b[3])]))
-    })
+/// app's `boundsOf` measures (`styk_eval::drawlist::app_bounds_of`), for the selected figures only. Lane-only.
+fn make(request: Request) -> Answer {
+    let Request { key, source } = request;
+    let Some(generation) = source.snapshot(key.revision, 0) else { return Answer::Unpublished(key) };
+    let bounds = {
+        let prepared = &generation.prepared;
+        let frame = prepared.evaluate(f64::from_bits(key.tick));
+        let slots: Vec<usize> = frame.objects.iter().enumerate().filter(|(_, object)| key.uids.contains(&object.uid)).map(|(slot, _)| slot).collect();
+        let scene = styk_eval::geometry::build_only_measured(&prepared.doc, &frame, &slots);
+        // (No selected figure drawn at the tick measures to nothing.)
+        let measured = styk_eval::drawlist::app_bounds_of(&scene, prepared.doc.as_ref(), &slots);
+        slots.iter().filter_map(|slot| measured.get(*slot).copied().flatten()).fold(None, |union: Option<[f64; 4]>, b| {
+            Some(union.map_or(b, |u| [u[0].min(b[0]), u[1].min(b[1]), u[2].max(b[2]), u[3].max(b[3])]))
+        })
+    };
+    Answer::Ready(Ready { key, bounds })
 }
 
-/// The interface's handle on the facts worker.
+/// The interface's handle on the facts lane.
 pub struct Facts {
-    shared: Arc<Shared>,
-    /// A request the interface could not place (the worker held the slot); placed at the next [`Facts::flush`].
-    outbox: Option<Request>,
+    lane: Worker<Request, Answer>,
+    /// The newest request, waiting while the lane works on an older one.
+    waiting: Option<Request>,
     /// What was last asked for, so the same key is not asked again.
     asked: Option<FactsKey>,
+    /// The lane holds a request whose result has not been taken.
+    submitted: bool,
     latest: Option<Ready>,
 }
 
 impl Facts {
-    /// Starts the worker through the host's spawner. `wake` is called (on the worker) when facts are ready; the host
-    /// turns it into an event, never a synchronous call back into update.
+    /// Starts the lane through the host's spawner. `wake` is called on the lane when facts are ready; the host turns it
+    /// into an event, never a synchronous call back into update.
     pub fn start(spawner: &dyn Spawner, wake: Wake) -> Result<Facts, SpawnError> {
-        let shared = Arc::new(Shared { slot: Mutex::new(Slot::default()), changed: Condvar::new(), closed: AtomicBool::new(false), wake });
-        let worker = shared.clone();
-        spawner.spawn("styk-facts", Box::new(move || worker.run()))?;
-        Ok(Facts { shared, outbox: None, asked: None, latest: None })
+        Ok(Facts { lane: Worker::start(spawner, "styk-facts", make, wake)?, waiting: None, asked: None, submitted: false, latest: None })
     }
 
-    /// Facts for `key`, made from `source`. A newer request replaces an older one that has not started.
+    /// Facts for `key`, made from `source`. A newer request replaces an older one still waiting.
     pub fn request(&mut self, key: FactsKey, source: Arc<dyn FrameDocument>) {
         if self.asked.as_ref() == Some(&key) {
             return;
         }
         self.asked = Some(key.clone());
-        self.outbox = Some(Request { key, source });
+        self.waiting = Some(Request { key, source });
         self.flush();
     }
 
-    /// Places the outbox's request if the slot is free right now; never waits.
-    pub fn flush(&mut self) -> bool {
-        let Some(request) = self.outbox.take() else { return true };
-        match self.shared.slot.try_lock() {
-            Ok(mut slot) => {
-                slot.request = Some(request);
-                drop(slot);
-                self.shared.changed.notify_one();
-                true
-            }
-            Err(TryLockError::Poisoned(poisoned)) => {
-                poisoned.into_inner().request = Some(request);
-                self.shared.changed.notify_one();
-                true
-            }
-            Err(TryLockError::WouldBlock) => {
-                self.outbox = Some(request);
-                false
+    /// Hands the waiting request to the lane if it takes one right now; never waits.
+    pub fn flush(&mut self) {
+        if let Some(request) = self.waiting.take() {
+            match self.lane.submit(request) {
+                Ok(()) => self.submitted = true,
+                Err(request) => self.waiting = Some(request),
             }
         }
     }
 
-    /// The newest ready facts, taking any the worker published since the last call; never waits.
+    /// The newest ready facts, taking a completion of the lane if there is one; never waits.
     pub fn latest(&mut self) -> Option<&Ready> {
-        if let Ok(mut slot) = self.shared.slot.try_lock()
-            && let Some(ready) = slot.ready.take()
-        {
-            self.latest = Some(ready);
+        if let Some(answer) = self.lane.take() {
+            self.submitted = false;
+            match answer {
+                Answer::Ready(ready) => self.latest = Some(ready),
+                // Not published yet: forget it was asked, so the next refresh asks again.
+                Answer::Unpublished(key) => {
+                    if self.asked.as_ref() == Some(&key) {
+                        self.asked = None;
+                    }
+                }
+            }
+            // The lane is free again: the request that waited behind it goes now.
+            self.flush();
         }
         self.latest.as_ref()
     }
 
-    /// Runs one pending request on the calling thread: for hosts that drive the work themselves (tests, a cooperative
-    /// pool). `false` when there was nothing to do.
-    pub fn work_once(&self) -> bool {
-        self.shared.step()
-    }
-}
-
-impl Drop for Facts {
-    /// Never joins: the worker sees the flag, wakes and leaves.
-    fn drop(&mut self) {
-        self.shared.closed.store(true, Ordering::Release);
-        self.shared.changed.notify_all();
+    /// Whether a request is waiting or being worked on.
+    pub fn in_flight(&self) -> bool {
+        self.waiting.is_some() || self.submitted
     }
 }

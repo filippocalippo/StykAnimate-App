@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use styk_core::app::Core;
 use styk_core::commands::{Command, CommandId, Effect};
-use styk_core::documents::Value;
+use styk_core::engine::Value;
 use styk_core::i18n::{Label, english};
 use styk_core::inspector::model::{Inspector, Kind, Place, Row, Toggle};
 use styk_core::inspector::property::PropertyKey;
@@ -67,11 +67,11 @@ fn run(core: &mut Core, command: CommandId) -> Vec<Effect> {
 }
 
 fn undo_depth(core: &Core) -> usize {
-    core.documents.active().unwrap().view().history.undo
+    core.documents.active().unwrap().view().unwrap().history.undo
 }
 
 fn records(core: &Core) -> String {
-    json::to_string(core.documents.active().unwrap().records())
+    json::to_string(core.documents.active().unwrap().records().unwrap())
 }
 
 fn section_ids(inspector: &Inspector) -> Vec<&'static str> {
@@ -253,7 +253,7 @@ fn escape_cancels_a_scrub_and_leaves_no_entry() {
     assert_eq!(undo_depth(&core), 0);
     assert_eq!(records(&core), before);
     assert_eq!(value(&core, PropertyKey::Rotation), 0.0);
-    assert!(!core.documents.active().unwrap().view().editing, "the session's gesture is closed");
+    assert!(!core.documents.active().unwrap().view().unwrap().editing, "the session's gesture is closed");
 }
 
 #[test]
@@ -396,13 +396,14 @@ fn edit_together_reaches_every_chosen_frame_in_one_entry() {
     core.dispatch(Command::Inspector(Event::Toggle(Toggle::ApplyRange, true)));
     core.refresh();
     let inspector = model(&core);
-    assert_eq!(inspector.scope.as_ref().map(|scope| english(&scope.label)).as_deref(), Some("Editing frames 1–2"));
+    // Ticks 0 and 6 are not consecutive: the scope line counts them (`scopeLine`).
+    assert_eq!(inspector.scope.as_ref().map(|scope| english(&scope.label)).as_deref(), Some("Editing 2 frames"));
     field(&mut core, PropertyKey::RootX, FieldEvent::Focus);
     field(&mut core, PropertyKey::RootX, FieldEvent::Input("123".into()));
     field(&mut core, PropertyKey::RootX, FieldEvent::Blur);
     assert_eq!(undo_depth(&core), 1);
     // Every chosen frame shows the value where it starts on the timeline.
-    let starts: Vec<f64> = styk_edit::timeline_rows(core.documents.active().unwrap().records()).iter().take(2).map(|row| row.0).collect();
+    let starts: Vec<f64> = styk_edit::timeline_rows(core.documents.active().unwrap().records().unwrap()).iter().take(2).map(|row| row.0).collect();
     for tick in starts {
         session(&mut core, "seek", &format!("[{tick}]"));
         let frame = core.documents.active().unwrap().frame_records().unwrap();

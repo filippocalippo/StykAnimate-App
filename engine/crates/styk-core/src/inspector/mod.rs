@@ -245,12 +245,14 @@ impl Panel {
     /// Asks for the facts of the active document's selection and takes what is ready; never waits.
     fn facts(&mut self, documents: &Documents, facts: Option<&mut Facts>, source: Option<Arc<dyn FrameDocument>>) {
         let Some(document) = documents.active() else { return };
-        let selection = document.selection();
+        let selection = facts::selection(document);
         let (Some(facts), true) = (facts, selection.uids.len() > 1) else {
             self.shown = Shown::default();
             return;
         };
-        let key = FactsKey::new(document.id().serial(), document.revision(), document.view().tick, &selection.uids);
+        let key = FactsKey::new(document.id().serial(), document.revision(), facts::tick(document), &selection.uids);
+        // Take what landed first (an "unpublished" answer frees the key to be asked again), then ask for this state.
+        facts.latest();
         if let Some(source) = source {
             facts.request(key.clone(), source);
         }
@@ -281,6 +283,10 @@ impl Panel {
         if self.gesture_open() && self.model.is_some() {
             return;
         }
+        // A session that is busy (an open or a save in progress) keeps the model it had.
+        if self.model.is_some() && documents.active().is_some_and(|document| document.view().is_err()) {
+            return;
+        }
         self.facts(documents, facts, source);
         let Some(document) = documents.active() else {
             self.model = None;
@@ -288,18 +294,18 @@ impl Panel {
             return;
         };
         let frame = document.frame_records().unwrap_or(Value::Null);
-        let selection = document.selection();
+        let selection = facts::selection(document);
         let key = Key {
             document: document.id(),
             revision: document.revision(),
             frame: frame.clone(),
             selection: (selection.uid, selection.uids.clone(), selection.joint),
-            tick: document.view().tick.to_bits(),
+            tick: facts::tick(document).to_bits(),
             view: view.version(),
             memory: self.memory.version(),
             panel: self.state.version,
             facts: self.shown.key.clone(),
-            paste: crate::camera_actions::can_paste(document),
+            paste: crate::camera_actions::can_paste(documents),
         };
         let same = self.key.as_ref().is_some_and(|old| old.frame.same_node(&key.frame) && Key { frame: Value::Null, ..old.clone() } == Key { frame: Value::Null, ..key.clone() });
         if same && self.model.is_some() {
@@ -442,7 +448,7 @@ impl Panel {
                 let result = match choice {
                     Choice::SegmentShape => answers::call(documents, id, "convertSegment", &[Value::str(&value)], session).map(|_| ()),
                     Choice::FigureLayer => {
-                        let uids = documents.get(id).map(|document| document.selection().uids.iter().map(|uid| Value::Num(f64::from(*uid))).collect()).unwrap_or_default();
+                        let uids = documents.get(id).map(|document| facts::selection(document).uids.iter().map(|uid| Value::Num(f64::from(*uid))).collect()).unwrap_or_default();
                         answers::call(documents, id, "assignFiguresToLayer", &[Value::array(uids), Value::str(&value)], session).and_then(|changed| {
                             if changed.truthy() {
                                 answers::call(documents, id, "setActiveLayer", &[Value::str(&value)], session)?;
@@ -557,7 +563,7 @@ impl Panel {
                 let result = match rename.target {
                     RenameTarget::Figure => answers::call(documents, id, "updateFigureStyle", &[object(&[("name", Value::str(&text))])], session),
                     RenameTarget::Layer => {
-                        let layer = documents.get(id).map(|document| facts::active_layer(document.records())).unwrap_or_else(|| Arc::from("layer-1"));
+                        let layer = documents.get(id).map(|document| facts::active_layer(facts::records(document))).unwrap_or_else(|| Arc::from("layer-1"));
                         answers::call(documents, id, "renameLayer", &[Value::str(&layer), Value::str(&text)], session)
                     }
                 };

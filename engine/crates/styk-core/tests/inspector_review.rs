@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use styk_core::app::Core;
 use styk_core::commands::{Command, CommandId, Effect};
-use styk_core::documents::Value;
+use styk_core::engine::Value;
 use styk_core::i18n::english;
 use styk_core::inspector::model::Inspector;
 use styk_core::inspector::property::PropertyKey;
@@ -14,6 +14,7 @@ use styk_doc::json;
 
 const STARTUP: &[u8] = include_bytes!("../../../tests/edit/startup.document.json");
 const SHEET: &[u8] = include_bytes!("../../../tests/edit/property-sheet.document.json");
+const SPRITE: &[u8] = include_bytes!("../../../tests/edit/sprite-segment-sparse-native.document.json");
 const NATIVE: &[u8] = include_bytes!("../../../tests/edit/selection-metadata-plain-native.document.json");
 
 fn core_with(bytes: &[u8]) -> Core {
@@ -102,13 +103,13 @@ fn switching_documents_finishes_the_edit_and_shows_the_new_document() {
     session(&mut core, "select", "[1,-1]");
     field(&mut core, PropertyKey::RootX, FieldEvent::Focus);
     field(&mut core, PropertyKey::RootX, FieldEvent::Input("300".into()));
-    assert!(core.documents.get(first).unwrap().view().editing);
+    assert!(core.documents.get(first).unwrap().view().unwrap().editing);
     let effects = core.dispatch(Command::Activate(second));
     core.refresh();
     assert!(notices(&effects).is_empty(), "{:?}", notices(&effects));
     assert_eq!(core.documents.active().unwrap().id(), second);
-    assert!(!core.documents.get(first).unwrap().view().editing);
-    assert_eq!(core.documents.get(first).unwrap().view().history.undo, 2, "the frame rate and the move");
+    assert!(!core.documents.get(first).unwrap().view().unwrap().editing);
+    assert_eq!(core.documents.get(first).unwrap().view().unwrap().history.undo, 2, "the frame rate and the move");
 }
 
 /// Finding 4: on a layer sheet Edit together reaches the chosen ticks and the playhead's own (`rangeFrames()`:
@@ -139,30 +140,29 @@ fn edit_together_keys_the_chosen_ticks_and_the_playhead() {
 /// Finding 5: alignment over Edit together's frames is one entry that moves the figures in every chosen frame.
 #[test]
 fn align_reaches_every_chosen_frame_in_one_entry() {
-    // Two figures that are in both keyframes and not joined (a joined assembly aligns as one).
-    let mut document = json::parse(SHEET).unwrap();
-    for frame in document.make_obj().unwrap().get_mut("keyframes").unwrap().make_arr().unwrap() {
-        for object in frame.make_obj().unwrap().get_mut("objects").unwrap().make_arr().unwrap() {
-            object.make_obj().unwrap().set("join", Value::Null);
-        }
-    }
-    let mut core = core_with(json::to_string(&document).as_bytes());
-    session(&mut core, "selectMany", "[[1,2]]");
-    let rows = styk_edit::timeline_rows(core.documents.active().unwrap().records());
-    let (first, second) = (rows[0].0, rows[1].0);
+    // Figures 1 and 3 are not joined and both shown through ticks 0 to 5; a pose of figure 1 of its own at tick 3 makes
+    // what an edit writes there visible.
+    let mut core = core_with(SPRITE);
+    session(&mut core, "select", "[1,-1]");
+    session(&mut core, "seek", "[3]");
+    field(&mut core, PropertyKey::RootX, FieldEvent::Focus);
+    field(&mut core, PropertyKey::RootX, FieldEvent::Input("200".into()));
+    field(&mut core, PropertyKey::RootX, FieldEvent::Blur);
     let at = |core: &mut Core, tick: f64| {
         session(core, "seek", &format!("[{tick}]"));
         object_value(core, 1.0, "root_x")
     };
-    let before = (at(&mut core, first), at(&mut core, second));
-    session(&mut core, "seek", &format!("[{first}]"));
-    core.view_state_mut().set_range(vec![first as usize, second as usize]);
+    let before = (at(&mut core, 0.0), at(&mut core, 3.0));
+    assert_eq!(before.1, 200.0);
+    session(&mut core, "seek", "[0]");
+    session(&mut core, "selectMany", "[[1,3]]");
+    core.view_state_mut().set_range(vec![0, 3]);
     core.view_state_mut().set_apply_range(true);
     core.refresh();
     let effects = run(&mut core, CommandId::AlignRight);
     assert!(notices(&effects).is_empty(), "{:?}", notices(&effects));
-    assert_eq!(testing::undo_depth(&core), 1);
-    let after = (at(&mut core, first), at(&mut core, second));
+    assert_eq!(testing::undo_depth(&core), 2, "the move, then one entry for the alignment");
+    let after = (at(&mut core, 0.0), at(&mut core, 3.0));
     assert_ne!(after.0, before.0, "aligned on the frame on show");
     assert_ne!(after.1, before.1, "and on the other chosen frame");
 }
@@ -226,8 +226,8 @@ fn bounds_are_made_on_the_worker_and_shown_until_newer_ones_land() {
     field(&mut core, PropertyKey::GroupX, FieldEvent::Focus);
     field(&mut core, PropertyKey::GroupX, FieldEvent::Input(format!("{}", first[0] + 50.0)));
     field(&mut core, PropertyKey::GroupX, FieldEvent::Blur);
-    testing::publish(&mut core).unwrap();
-    core.refresh();
+    // The lane is asked before the new revision is published: that is not an answer, the old bounds stay.
+    testing::wait_facts(&mut core).unwrap();
     assert_eq!(core.inspector().shown().bounds, Some(first));
     assert!(core.inspector().shown().stale);
     testing::settle_facts(&mut core).unwrap();
@@ -235,3 +235,4 @@ fn bounds_are_made_on_the_worker_and_shown_until_newer_ones_land() {
     assert!((moved[0] - (first[0] + 50.0)).abs() < 1e-6, "{moved:?}");
     assert!(!core.inspector().shown().stale);
 }
+

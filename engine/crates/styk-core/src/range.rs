@@ -19,25 +19,25 @@ pub struct Range {
 }
 
 fn sheet(document: &Document) -> bool {
-    document.records().path(&["_styk", "layerSheet"]).is_some_and(Value::is_object)
+    crate::inspector::facts::records(document).path(&["_styk", "layerSheet"]).is_some_and(Value::is_object)
 }
 
 impl Range {
     /// `rangeFrames()`: `None` unless Edit together is on and two or more frames are chosen.
     pub fn of(view: &ViewState, document: &Document) -> Option<Range> {
         let chosen = view.range_frames()?;
-        let session = document.view();
+        let (tick, frame_index) = (crate::inspector::facts::tick(document), crate::inspector::facts::frame_index(document));
         if sheet(document) {
             let mut ticks: Vec<f64> = Vec::with_capacity(chosen.len() + 1);
-            for tick in chosen.iter().map(|tick| *tick as f64).chain(std::iter::once(session.tick)) {
+            for tick in chosen.iter().map(|tick| *tick as f64).chain(std::iter::once(tick)) {
                 if !ticks.iter().any(|seen| *seen == tick) {
                     ticks.push(tick);
                 }
             }
-            return Some(Range { indices: vec![session.frame_index], sheet_ticks: Some(ticks) });
+            return Some(Range { indices: vec![frame_index], sheet_ticks: Some(ticks) });
         }
         let mut indices: Vec<usize> = Vec::with_capacity(chosen.len() + 1);
-        for index in chosen.iter().map(|frame| *frame as usize).chain(std::iter::once(session.frame_index)) {
+        for index in chosen.iter().map(|frame| *frame as usize).chain(std::iter::once(frame_index)) {
             if !indices.contains(&index) {
                 indices.push(index);
             }
@@ -65,7 +65,7 @@ impl Range {
         match &self.sheet_ticks {
             Some(ticks) => ticks.clone(),
             None => {
-                let rows = styk_edit::timeline_rows(document.records());
+                let rows = styk_edit::timeline_rows(crate::inspector::facts::records(document));
                 let mut indices = self.indices.clone();
                 indices.sort_unstable();
                 indices.iter().filter_map(|index| rows.get(*index).map(|row| row.0)).collect()

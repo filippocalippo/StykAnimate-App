@@ -240,7 +240,7 @@ pub(crate) struct Selected {
 }
 
 pub(crate) fn selected(document: &Document) -> Selected {
-    let selection = document.selection();
+    let selection = super::facts::selection(document);
     let found = super::facts::figure_of_selection(document);
     let (segment_id, has_secondary, movieclip, figure_type, polygons, drawables) = found
         .as_ref()
@@ -264,7 +264,7 @@ pub(crate) fn selected(document: &Document) -> Selected {
         segment_id,
         has_secondary,
         movieclip,
-        sheet: document.records().path(&["_styk", "layerSheet"]).is_some_and(Value::is_object),
+        sheet: super::facts::records(document).path(&["_styk", "layerSheet"]).is_some_and(Value::is_object),
         polygons,
         drawables,
     }
@@ -335,8 +335,8 @@ fn route(key: PropertyKey, selected: &Selected, document: &Document) -> Result<R
         }
         K::Fps | K::CanvasWidth | K::CanvasHeight => Route::Project,
         K::Duration if selected.sheet => {
-            let layer = document.records().path(&["_styk", "layers", "activeId"]).cloned().unwrap_or(Value::str("layer-1"));
-            Route::SheetDuration { layer, tick: document.view().tick }
+            let layer = super::facts::records(document).path(&["_styk", "layers", "activeId"]).cloned().unwrap_or(Value::str("layer-1"));
+            Route::SheetDuration { layer, tick: super::facts::tick(document) }
         }
         K::RootX | K::RootY | K::GroupX | K::GroupY => Route::Pose { translation: true },
         K::Scale | K::Rotation | K::FigureOpacity | K::FigureZOrder | K::GroupWidth | K::GroupHeight | K::JointAngle | K::JointLength | K::JointBend => Route::Pose { translation: false },
@@ -354,7 +354,7 @@ impl Gesture {
             return Err(Msg::new("errors.nativePropertyEdit.theSelectedPropertyHasNoFiniteValue"));
         }
         let selected = selected(document);
-        let tick = document.view().tick;
+        let tick = super::facts::tick(document);
         let route = route(key, &selected, document)?;
         if matches!(route, Route::Pose { .. }) && selected.uid.is_none() {
             return Err(Msg::new("errors.nativePropertyEdit.chooseAFigureFirst"));
@@ -384,8 +384,8 @@ impl Gesture {
 
     fn current(&self, documents: &Documents) -> Result<(), Msg> {
         let document = documents.get(self.document).ok_or_else(|| Msg::new("errors.nativePropertyEdit.thisPropertyGestureHasEnded"))?;
-        let selection = document.selection();
-        if (selection.uid, selection.joint) != self.selection || document.view().tick != self.tick {
+        let selection = super::facts::selection(document);
+        if (selection.uid, selection.joint) != self.selection || super::facts::tick(document) != self.tick {
             return Err(Msg::new("errors.nativePropertyEdit.theSelectedPropertyChangedDuringTheGesture"));
         }
         Ok(())

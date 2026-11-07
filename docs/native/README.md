@@ -65,25 +65,26 @@ the pen reaches iced only as touch with pressure, so a `WM_POINTER` subclass rea
 timestamps) into a ring; iced has no right-to-left layout, Tab order or focus ring, and its Windows IME is IMM32 only:
 those are ours (`styk-design`, `styk-core`) plus a few small fork patches; Inter must be converted from WOFF2 to TTF.
 
-**Next, in order.** After FP merges: chunk RM, the renderer's and engine's memory (`perf/briefs/native/RM-render-memory.md`: at 4K our export process holds 1.2 GiB next to the encoder's 0.7, against a 1.5 GiB total; a 256 MiB sprite atlas and a one-time 265 MiB renderer allocation among it). After S3 merges: compare the native `styk-cli video` export
-with today's export of the same documents (FP's bytes are still not equal; sizes within 0.2 %). After the spikes pass: the
-skeleton (`perf/briefs/native/skeleton-plan.md`, implementers by N8): K-guards (Astra: the guards of `cargo xtask check`) **merged `3f147585`** (dependency direction,
-Windows code only in `styk-platform`, interface-crate rules, the engine boundary through `styk_core::engine`, the
-wasm constraints, the dependency allow list `engine/deps-allow.toml` the orchestrator keeps, screenshot limits), K-doc (Astra: documents and the engine host; milestone 1, the session seam of
-`docs/native/documents.md`, **merged `bd9e9d2a`**; the rest done at `b3ead141`: async open, save and publication jobs, atomic saves, close and quit effects, movieclip scopes, tab order and recency, shared clipboards, memory admission, engine types in `styk_core::engine`; 32 save states byte-equal to today's and reopened; review: an over-budget document still opens (admission by compressed size), a clipboard handoff drops payloads on the interface thread, bake synchronous through `call`; fixing; open: the counting allocator's measured cost (gate)) and R-slice (the one Opus implementer: the interface
-architecture and the Inspector, `patterns.md`; started on `bd9e9d2a`), K-shell (Sonnet: the window and the top band, `perf/briefs/native/K-shell.md`) done at `399a34d0`: the band's layout and folds
-equal today's stylesheets at 12 widths, tabs, the Ctrl+Tab switcher, the workspace rules, `styk_core::automation`; review:
-a refused open dropped on the interface thread, arrows during Ctrl+Tab, drops outside the strip, today's Home rule, one
-clock with `--clock fixed`, the script read bounded, no failed-save dot; references recaptured with ClearType; fixing; K-frames (Astra xhigh: the frame scheduler over one shared frame builder) **merged `48c424ef`** and K-dev (Astra high, the developer
-tools' engine, `perf/briefs/native/K-dev-engine.md`; done at `e82a1b66`: injected trace clocks, byte-bounded captures, the
-current-user control pipe, inspection APIs, schemas, budgets, `profile`/`compare-profile`; review: the release guard scans for a
-string and passed a binary with tracing compiled in, a profiled export stalls under the picture budget, task-runner
-profiles are debug and cannot be compared; fixing); the reference slice done at `5c9a83dd`; review: a blocker (refresh builds selection geometry on the interface thread: derived
-facts move to the frame workers as revision-stamped facts, the pattern every panel copies) and majors (a leaked gesture, a
-stale model across a document switch, Edit together's playhead tick, align over the range, missing controls, the focus
-contract, a locale-aware presentation with a language-neutral catalogue for 27 languages, real screenshot references),
-plus command handlers in their feature modules and one clipboard owner; fixing, then one re-check; K-stage's core (Astra xhigh: the stage host, `perf/briefs/native/K-stage.md`) started;
-then K-rec, K-cmd, K-widgets, K-dock, the stage's shader widget; then the skeleton gate. No interface work starts until S1 and S2a pass in a native window.
+**Next, in order.** After FP: chunk RM, the renderer's and engine's memory (`perf/briefs/native/RM-render-memory.md`:
+at 4K the export process holds 1.2 GiB beside the encoder's 0.7, against a 1.5 GiB total). With the stage: compare the
+native `styk-cli video` export with today's (FP's floor: bytes not equal, sizes within 0.2 %).
+
+**Skeleton** (`perf/briefs/native/skeleton-plan.md`, implementers by N8):
+
+| Chunk | Implementer | State |
+| --- | --- | --- |
+| K-guards | Astra | **merged `3f147585`**: the guards of `cargo xtask check` (dependency direction, Windows code only in `styk-platform`, interface-crate rules, the engine boundary `styk_core::engine`, the wasm constraints, the allow list `engine/deps-allow.toml` the orchestrator keeps, screenshot limits) |
+| K-doc | Astra | **merged `22c40c9f`**: the documents host (`docs/native/documents.md`): async open, save, publication and bake, atomic saves, close and quit effects, tabs, shared clipboards, memory admission by the real work, the `styk_services::worker::Worker` lane; 36 save states byte-equal to today's. Open: the counting allocator's measured cost (gate) |
+| K-frames | Astra | **merged `48c424ef`**: the frame scheduler over one shared frame builder (`docs/native/frames.md`) |
+| K-dev | Astra | review fixed (release isolation by resolved features and linked symbols, profiled export under the picture budget, release profiles); merging `native-app` after K-guards |
+| R-slice | Opus | review: a blocker (refresh builds geometry on the interface thread: derived facts move to the frame workers, revision-stamped) and majors (a leaked gesture, a stale model across a document switch, Edit together's ticks, align over the range, missing controls, the focus contract, a locale-aware presentation for 27 languages with a language-neutral catalogue, real screenshot references), command handlers in their feature modules, one clipboard owner; fixing, then one re-check |
+| K-shell | Sonnet | review: a refused open dropped on the interface thread, arrows during Ctrl+Tab, drops outside the strip, today's Home rule, one clock with `--clock fixed`, the script read bounded, no failed-save dot; references recaptured with ClearType; K-doc's open host replaces its stand-in; fixing |
+| K-stage | Astra | running: the stage host (`perf/briefs/native/K-stage.md`) |
+| K-rec | Astra | running: recovery and autosave (`perf/briefs/native/K-rec-recovery.md`) |
+| K-cmd, K-widgets, K-dock, stage widget | Astra, Sonnet | after R-slice merges |
+
+The automation mode is one language, `styk_core::automation` (K-shell's, header `styk-auto/1`); K-dev's runners port onto
+it. Then the skeleton gate (full suites, parity, the native smokes, screenshots, the benchmark, `cargo xtask check --wasm`).
 
 **Kept off the branches on purpose.** `t3/fix-save-differs` and `t3/resave-keeps-layout` change saved bytes: the owner's
 decision, unmerged. `t3/speed-joint-drag-frame` is an unfinished optimisation with no measured gain: not this phase's.

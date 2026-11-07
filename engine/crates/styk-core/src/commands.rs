@@ -7,7 +7,8 @@
 //! feature has no handler yet answers [`Effect::NotAvailable`], typed, so nothing pretends to have run.
 
 use crate::answers::Session;
-use crate::documents::{Documents, EditError};
+use crate::documents::Documents;
+use crate::engine::EditError;
 use crate::i18n::{Arg, Msg};
 use crate::inspector;
 use crate::view_state::ViewState;

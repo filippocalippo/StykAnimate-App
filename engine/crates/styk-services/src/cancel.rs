@@ -3,8 +3,9 @@
 //! A flag nobody reads in time is not cancellation: a writer blocked in a pipe write, a producer waiting for a free
 //! buffer or a thread waiting for a child to exit never looks at a flag. [`Cancel`] holds the flag and a list of
 //! *wakers*. Whatever can block registers a waker when it starts (end the child process, notify the condition
-//! variable); [`Cancel::cancel`] sets the flag and runs them on the calling thread, so it returns at once and does not
-//! depend on the thread that is blocked.
+//! variable); [`Cancel::cancel`] sets the flag and runs ready wakers on the calling thread. If it races a registration,
+//! that registering worker delivers the pending wakes after unlocking; cancellation never waits for its lock.
+//! Wakers themselves must not block.
 //!
 //! A job also has a **commit boundary**: [`Cancel::begin_commit`] succeeds only if the job was not cancelled, and from
 //! then on a cancel is too late (it changes nothing and runs no waker). The flush of a finished file happens before the
@@ -45,26 +46,28 @@ impl Cancel {
     /// Runs `waker` when the cancellation happens: at once when it already has. Each waker runs once.
     pub fn on_cancel(&self, waker: impl FnOnce() + Send + 'static) {
         let mut wakers = self.inner.wakers.lock().unwrap_or_else(|e| e.into_inner());
-        if self.is_cancelled() {
-            drop(wakers);
-            waker();
-        } else {
-            wakers.push(Box::new(waker));
-        }
+        wakers.push(Box::new(waker));
+        // Cancellation never waits for registration's lock. The registering worker delivers every
+        // pending wake if cancellation raced it, including wakes registered before this one.
+        drop(wakers);
+        // Test after releasing the lock: a cancel between the test and unlock must not lose wakes.
+        if self.is_cancelled() { self.cancel(); }
     }
 
-    /// Cancels: sets the flag, then runs every waker registered so far on this thread. Cancelling twice is harmless.
+    /// Cancels without waiting for registration. Ready wakers run here; a racing registration delivers the rest.
+    /// Cancelling twice is harmless.
     /// Returns whether the job is cancelled; it is not when the commit boundary was already crossed (too late).
     pub fn cancel(&self) -> bool {
         match self.inner.state.compare_exchange(RUNNING, CANCELLED, Ordering::SeqCst, Ordering::SeqCst) {
-            Ok(_) => {
-                let wakers = std::mem::take(&mut *self.inner.wakers.lock().unwrap_or_else(|e| e.into_inner()));
-                for waker in wakers {
-                    waker();
+            Ok(_) | Err(CANCELLED) => {
+                if let Ok(mut registered) = self.inner.wakers.try_lock() {
+                    let wakers = std::mem::take(&mut *registered);
+                    drop(registered);
+                    for waker in wakers { waker(); }
                 }
                 true
             }
-            Err(state) => state == CANCELLED,
+            Err(_) => false,
         }
     }
 
@@ -79,6 +82,22 @@ impl Cancel {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn cancel_never_waits_for_a_worker_registering_its_waker() {
+        let cancel = Cancel::new();
+        let registered = cancel.inner.wakers.lock().unwrap();
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker = cancel.clone();
+        let thread = std::thread::spawn(move || { send.send(worker.cancel()).unwrap(); });
+        let result = receive.recv_timeout(std::time::Duration::from_secs(1));
+        drop(registered);
+        thread.join().unwrap();
+        assert_eq!(result, Ok(true), "the cancel returns while the registration lock is held");
+        let woken = Arc::new(AtomicUsize::new(0)); let seen = woken.clone();
+        cancel.on_cancel(move || { seen.fetch_add(1, Ordering::SeqCst); });
+        assert_eq!(woken.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn wakers_run_once_on_the_cancelling_thread_and_late_ones_run_at_once() {

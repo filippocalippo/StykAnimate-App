@@ -292,7 +292,7 @@ impl Presentation {
         let english = index.and_then(|index| self.tables.entry(0, index));
         let translated = localized.is_some();
         let template: String = match localized.as_ref().or(english.as_ref()) {
-            Some(Entry::Plain(text)) => text.to_owned(),
+            Some(Entry::Plain(text)) => (*text).to_owned(),
             Some(Entry::Plural(forms)) => {
                 let rules = if translated { &self.plurals } else { &self.english_plurals };
                 let wanted = count.map_or("other", |count| category(rules, count));
@@ -305,7 +305,7 @@ impl Presentation {
                 pick(forms, wanted)
                     .or_else(|| english_forms.and_then(|english| pick(english, count.map_or("other", |count| category(&self.english_plurals, count))).or_else(|| pick(english, "other"))))
                     .or_else(|| pick(forms, "other"))
-                    .unwrap_or(&msg.key)
+                    .unwrap_or(msg.key.as_ref())
                     .to_owned()
             }
             None => msg.key.to_string(),

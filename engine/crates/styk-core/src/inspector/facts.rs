@@ -8,6 +8,28 @@ use styk_doc::Value;
 use styk_eval::doc::Figure;
 
 use crate::documents::Document;
+use crate::engine::Selection;
+
+/// The session's reads while it is busy (an asynchronous open, a save in progress) are empty, never an error the
+/// panel has to thread through: a busy active document keeps the panel's previous model ([`super::Panel::refresh`]).
+static NO_SELECTION: Selection = Selection { uid: None, uids: Vec::new(), joint: -1 };
+static NO_RECORDS: Value = Value::Null;
+
+pub(crate) fn selection(document: &Document) -> &Selection {
+    document.selection().unwrap_or(&NO_SELECTION)
+}
+
+pub(crate) fn records(document: &Document) -> &Value {
+    document.records().unwrap_or(&NO_RECORDS)
+}
+
+pub(crate) fn tick(document: &Document) -> f64 {
+    document.view().map_or(0.0, |view| view.tick)
+}
+
+pub(crate) fn frame_index(document: &Document) -> usize {
+    document.view().map_or(0, |view| view.frame_index)
+}
 
 pub(crate) fn num(value: Option<&Value>) -> Option<f64> {
     value.and_then(Value::as_f64)
@@ -33,7 +55,7 @@ fn uid_of(object: &Value) -> Option<u32> {
 
 /// `editor.object`: the selected figure's pose in the frame on show, else the last selected one there.
 pub(crate) fn selected_object(document: &Document, frame: &Value) -> Option<Value> {
-    let selection = document.selection();
+    let selection = self::selection(document);
     let objects = frame_objects(frame);
     let by_uid = |uid: u32| objects.iter().find(|object| uid_of(object) == Some(uid)).cloned();
     selection.uid.and_then(by_uid).or_else(|| selection.uids.iter().rev().find_map(|uid| by_uid(*uid)))
@@ -41,7 +63,7 @@ pub(crate) fn selected_object(document: &Document, frame: &Value) -> Option<Valu
 
 /// `editor.selectedObjects`: every selected figure's pose in the frame on show, in frame order.
 pub(crate) fn selected_objects(document: &Document, frame: &Value) -> Vec<Value> {
-    let selection = document.selection();
+    let selection = self::selection(document);
     frame_objects(frame).into_iter().filter(|object| uid_of(object).is_some_and(|uid| selection.uids.contains(&uid))).collect()
 }
 

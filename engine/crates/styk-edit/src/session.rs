@@ -25,6 +25,7 @@ mod worker;
 pub use worker::{WorkerFrame, WorkerPrepared, WorkerSession};
 mod native;
 pub use native::{NativeCall, SessionView};
+pub use crate::clipboards::RetiredClipboard;
 
 /// Exact counters supplied by the existing history owner during worker handoff.
 #[derive(Clone, Copy, Debug)]

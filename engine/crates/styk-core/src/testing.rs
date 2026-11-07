@@ -12,6 +12,8 @@ use crate::frames::FrameDocument;
 
 /// The published generations of one test document, by revision: what K-doc's publication will supply.
 struct Published {
+    engine: styk_engine::Engine,
+    lineage: u64,
     generations: Mutex<HashMap<u64, Arc<styk_engine::Generation>>>,
 }
 
@@ -28,10 +30,31 @@ pub fn core_with_document(bytes: &[u8], name: &str) -> Result<Core, String> {
     let prepared = PreparedDocument::open_bytes(&opener, Arc::from(bytes), name, &|| false).map_err(|error| error.message)?;
     let mut documents = Documents::new();
     let id = documents.open(prepared).map_err(|(error, _)| error.to_string())?;
+    // The documents services (shared clipboards, jobs), as the application attaches them.
+    let startup = styk_doc::json::parse(bytes).unwrap_or(styk_doc::Value::Null);
+    documents
+        .attach_host(crate::documents::HostOptions {
+            engine: opener,
+            spawner: Arc::new(Threads),
+            files: Arc::new(styk_services::files::fake::MemoryFiles::default()),
+            startup,
+            clock: || 0.0,
+            notify: Arc::new(|| {}),
+        })
+        .map_err(|error| format!("{error:?}"))?;
     let mut core = Core::new(documents);
-    let spawner = styk_services::ManualSpawner::new();
-    core.set_facts(Facts::start(&spawner, Arc::new(|| {})).map_err(|error| error.0)?);
-    let published = Arc::new(Published { generations: Mutex::new(HashMap::new()) });
+    let (notify, ready) = std::sync::mpsc::channel();
+    core.set_facts(Facts::start(&Threads, Arc::new(move || { let _ = notify.send(()); })).map_err(|error| error.0)?);
+    READY.with(|cell| cell.borrow_mut().insert(id.serial(), ready));
+    // The published generations come from an engine that opened the same file and publishes the session's tree at each
+    // revision, as K-doc's publication does.
+    let engine = styk_engine::Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
+    let opened = engine
+        .open_document(styk_engine::document::OpenSource::File { bytes, name }, styk_engine::document::OpenOptions { layer_timeline: true }, &|| false)
+        .map_err(|error| error.message)?;
+    engine.activate(&opened.typed, &opened.tree, 0).map_err(|error| error.message)?;
+    let lineage = opened.lineage();
+    let published = Arc::new(Published { engine, lineage, generations: Mutex::new(HashMap::new()) });
     core.set_source(id, published.clone());
     SOURCES.with(|sources| sources.borrow_mut().insert(id.serial(), published));
     publish(&mut core)?;
@@ -39,32 +62,53 @@ pub fn core_with_document(bytes: &[u8], name: &str) -> Result<Core, String> {
     Ok(core)
 }
 
+/// Starts test lanes on threads of their own (the application's spawner lives in `styk-platform`).
+struct Threads;
+
+impl styk_services::Spawner for Threads {
+    fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+        std::thread::Builder::new().name(name.to_owned()).spawn(job).map(|_| ()).map_err(|error| styk_services::SpawnError(error.to_string()))
+    }
+}
+
 thread_local! {
+    static READY: std::cell::RefCell<HashMap<u64, std::sync::mpsc::Receiver<()>>> = std::cell::RefCell::new(HashMap::new());
     static SOURCES: std::cell::RefCell<HashMap<u64, Arc<Published>>> = std::cell::RefCell::new(HashMap::new());
 }
 
-/// Publishes the active document's current state as a generation for its revision, as K-doc's publication will: here by
-/// opening the session's records in an engine of its own (test-only work on the test's thread).
+/// Publishes the active document's current state as a generation for its revision, as K-doc's publication does
+/// (test-only work on the test's thread).
 pub fn publish(core: &mut Core) -> Result<(), String> {
     let document = core.documents.active().ok_or("no document is open")?;
     let (id, revision) = (document.id(), document.revision());
-    let text = styk_doc::json::to_string(document.records());
+    let tree = document.records().map_err(|error| error.to_string())?.clone();
     let source = SOURCES.with(|sources| sources.borrow().get(&id.serial()).cloned()).ok_or("the document has no test source")?;
-    let engine = styk_engine::Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
-    engine.open(text.as_bytes(), "json", "published").map_err(|error| error.to_string())?;
-    let generation = engine.generation().ok_or("nothing was published")?;
+    source.engine.publish_tree(source.lineage, tree, revision).map_err(|error| error.message)?.ok_or("the test engine holds another document")?;
+    let generation = source.engine.generation().ok_or("nothing was published")?;
     source.generations.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(revision, generation);
     Ok(())
 }
 
-/// Lets the facts worker answer what the panels asked for: publish, request, one worker step, take the result.
+/// Lets the facts lane answer what the panels asked for: publish, request, wait for the lane (test-only), take it.
 pub fn settle_facts(core: &mut Core) -> Result<(), String> {
     publish(core)?;
-    core.refresh();
-    if let Some(facts) = core.facts() {
-        facts.work_once();
+    // An answer for an earlier request may come first; three rounds cover it and the one asked now.
+    for _ in 0..3 {
+        wait_facts(core)?;
     }
+    Ok(())
+}
+
+/// Waits for the facts lane to answer what is asked now (one answer; an "unpublished" one counts), without publishing.
+pub fn wait_facts(core: &mut Core) -> Result<(), String> {
     core.refresh();
+    let id = core.documents.active().ok_or("no document is open")?.id().serial();
+    if core.facts().is_some_and(Facts::in_flight) {
+        READY.with(|cell| cell.borrow().get(&id).map(|ready| ready.recv_timeout(std::time::Duration::from_secs(30))))
+            .ok_or("the document has no facts lane")?
+            .map_err(|_| "the facts lane did not answer in 30 s")?;
+        core.refresh();
+    }
     Ok(())
 }
 
@@ -89,10 +133,10 @@ pub fn select_all(core: &mut Core) -> Result<usize, String> {
 
 /// How many entries the active document's undo history holds.
 pub fn undo_depth(core: &Core) -> usize {
-    core.documents.active().map_or(0, |document| document.view().history.undo)
+    core.documents.active().map_or(0, |document| document.view().map_or(0, |view| view.history.undo))
 }
 
 /// Whether the active document's session has a gesture open.
 pub fn editing(core: &Core) -> bool {
-    core.documents.active().is_some_and(|document| document.view().editing)
+    core.documents.active().is_some_and(|document| document.view().is_ok_and(|view| view.editing))
 }

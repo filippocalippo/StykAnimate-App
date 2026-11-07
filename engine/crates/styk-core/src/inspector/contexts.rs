@@ -196,10 +196,10 @@ fn resolve(view: &ViewState, has_object: bool) -> InspectorContext {
 
 /// The Inspector for `document` in this view state.
 pub(crate) fn build(document: &Document, inputs: &Inputs<'_>) -> Inspector {
-    let records = document.records();
+    let records = facts::records(document);
     let frame = document.frame_records().unwrap_or(Value::Null);
     let object = facts::selected_object(document, &frame);
-    let count = document.selection().uids.len();
+    let count = facts::selection(document).uids.len();
     if let Some(tool) = inputs.view.drawing() {
         return drawing(tool);
     }
@@ -215,7 +215,7 @@ pub(crate) fn build(document: &Document, inputs: &Inputs<'_>) -> Inspector {
             Some(_) if count > 1 => figures(document, records, &frame, inputs, count),
             Some(figure) if spatial_origin(records, figure.id) => spatial_rig(&figure, &object),
             Some(figure) => {
-                let joint = document.selection().joint;
+                let joint = facts::selection(document).joint;
                 match usize::try_from(joint).ok().and_then(|joint| figure.segments.get(joint)) {
                     Some(segment) => joint_context(document, records, &figure, &object, segment, inputs),
                     None => figure_context(document, records, &frame, &figure, &object, inputs),
@@ -336,8 +336,8 @@ fn camera(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<'
     let scale = channel(document, &camera_target, "scale", 1.0).unwrap_or(scale);
     let angle = channel(document, &camera_target, "rotation", 1.0).unwrap_or(angle);
     let motion = inputs.panel.camera_tab == CameraTab::Motion;
-    let selected = !document.selection().uids.is_empty();
-    let view = document.view();
+    let selected = !facts::selection(document).uids.is_empty();
+    let frame_index = facts::frame_index(document);
     let keyframes = records.get("keyframes").and_then(Value::array_len).unwrap_or(0);
     let canvas = format!("{} × {}", crate::i18n::format_number(num(records.get("canvas_width")).unwrap_or(0.0)), crate::i18n::format_number(num(records.get("canvas_height")).unwrap_or(0.0)));
     let zoom: f64 = crate::number::format(100.0 / scale, 2).parse().unwrap_or(100.0);
@@ -375,8 +375,8 @@ fn camera(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<'
                     items: vec![
                         button(CommandId::CameraCenterX, Some("align-horizontal-center"), "inspectorView.centerCameraHorizontally").disabled(!selected),
                         button(CommandId::CameraCenterY, Some("align-vertical-center"), "inspectorView.centerCameraVertically").disabled(!selected),
-                        button(CommandId::CameraLocatePrevious, Some("chevron-left"), "inspectorView.matchPreviousCameraPose").disabled(view.frame_index == 0),
-                        button(CommandId::CameraLocateNext, Some("chevron-right"), "inspectorView.matchNextCameraPose").disabled(view.frame_index + 1 >= keyframes),
+                        button(CommandId::CameraLocatePrevious, Some("chevron-left"), "inspectorView.matchPreviousCameraPose").disabled(frame_index == 0),
+                        button(CommandId::CameraLocateNext, Some("chevron-right"), "inspectorView.matchNextCameraPose").disabled(frame_index + 1 >= keyframes),
                         button(CommandId::CameraApplyFigures, Some("check"), "inspectorView.applyCameraTransformToFigures"),
                     ],
                 }),
@@ -389,16 +389,16 @@ fn camera(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<'
 
 /// A keyframe's hold (classic documents) or a sheet frame's exposure (layer sheets).
 fn frame_context(document: &Document, records: &Value) -> Inspector {
-    let view = document.view();
+    let frame_index = facts::frame_index(document);
     if let Some(sheet) = records.path(&["_styk", "layerSheet"]).filter(|sheet| sheet.is_object()) {
         let layer_id = facts::active_layer(records);
         let track = sheet.get("tracks").and_then(|tracks| tracks.get(&layer_id));
         let keys: Vec<f64> = track.and_then(|track| track.get("keys")).and_then(Value::elements).map(|keys| keys.iter().filter_map(|key| num(key.get("tick"))).collect()).unwrap_or_default();
         // `sheetKeyAt`: the key at or before the playhead and the next one.
-        let at = keys.iter().copied().filter(|tick| *tick <= view.tick).fold(None, |last: Option<f64>, tick| Some(last.map_or(tick, |last| last.max(tick))));
-        let next = keys.iter().copied().filter(|tick| *tick > view.tick).fold(None, |first: Option<f64>, tick| Some(first.map_or(tick, |first| first.min(tick))));
-        let end = next.or_else(|| track.and_then(|track| num(track.get("end")))).unwrap_or(view.tick + 1.0);
-        let exposure = end - at.unwrap_or(view.tick);
+        let at = keys.iter().copied().filter(|tick| *tick <= facts::tick(document)).fold(None, |last: Option<f64>, tick| Some(last.map_or(tick, |last| last.max(tick))));
+        let next = keys.iter().copied().filter(|tick| *tick > facts::tick(document)).fold(None, |first: Option<f64>, tick| Some(first.map_or(tick, |first| first.min(tick))));
+        let end = next.or_else(|| track.and_then(|track| num(track.get("end")))).unwrap_or(facts::tick(document) + 1.0);
+        let exposure = end - at.unwrap_or(facts::tick(document));
         let name = facts::layers(records).into_iter().find(|layer| layer.id == layer_id).map_or_else(|| Label::key("inspectorView.layer"), |layer| Label::Plain(layer.name));
         let mut exposure = section("exposure", None, vec![grid(vec![Row::Number(number(PropertyKey::Duration, msg("inspectorView.exposure"), exposure, "frames").range(1.0, 65535.0))])])
             .actions(vec![button(CommandId::AddFrame, Some("frame-plus"), "inspectorView.insertKeyframeF6").tip("inspectorView.addFrame")]);
@@ -406,16 +406,16 @@ fn frame_context(document: &Document, records: &Value) -> Inspector {
         exposure.title = Some(name);
         return Inspector {
             kind: Kind::Frame,
-            target: target("inspectorView.timing", Label::Msg(Msg::new("filmstrip.card").with("frame", view.tick + 1.0)), None, "frame"),
+            target: target("inspectorView.timing", Label::Msg(Msg::new("filmstrip.card").with("frame", facts::tick(document) + 1.0)), None, "frame"),
             scope: None,
             quick: None,
             sections: vec![exposure],
         };
     }
-    let duration = records.get("keyframes").and_then(|frames| frames.item(view.frame_index)).and_then(|frame| num(frame.get("duration_raw"))).unwrap_or(1.0);
+    let duration = records.get("keyframes").and_then(|frames| frames.item(frame_index)).and_then(|frame| num(frame.get("duration_raw"))).unwrap_or(1.0);
     Inspector {
         kind: Kind::Keyframe,
-        target: target("inspectorView.timing", Label::Msg(Msg::new("inspectorView.keyframe").with("frame", view.frame_index + 1)), None, "frame"),
+        target: target("inspectorView.timing", Label::Msg(Msg::new("inspectorView.keyframe").with("frame", frame_index + 1)), None, "frame"),
         scope: None,
         quick: None,
         sections: vec![section("timing", Some(msg("inspectorView.timing")), vec![grid(vec![Row::Number(number(PropertyKey::Duration, msg("inspectorView.duration"), duration, "ticks").range(0.0, 65535.0))])])],
@@ -443,7 +443,7 @@ fn layer(records: &Value) -> Inspector {
 
 /// A figure's Layer select: Mixed across layers, locked layers disabled, the label left out when the name says it is a layer.
 fn layer_select(document: &Document, records: &Value, span: bool) -> Row {
-    let selection = document.selection();
+    let selection = facts::selection(document);
     let mut ids: Vec<Arc<str>> = selection.uids.iter().map(|uid| facts::layer_of(records, *uid)).collect();
     ids.sort();
     ids.dedup();
@@ -536,7 +536,7 @@ fn figure_context(document: &Document, records: &Value, frame: &Value, figure: &
     let slot = num(object.get("object_slot"));
     let children = objects.iter().any(|part| slot.is_some() && part.path(&["join", "target_object_slot"]).and_then(Value::as_f64) == slot);
     let parent = object.get("join").filter(|join| join.is_object()).and_then(|join| num(join.get("target_object_slot"))).and_then(|slot| objects.get(slot as usize).cloned());
-    let palette = if document.selection().joint < 0 { palette(version, figure, object) } else { Vec::new() };
+    let palette = if facts::selection(document).joint < 0 { palette(version, figure, object) } else { Vec::new() };
     let own = palette.first().map_or([0, 0, 0], |entry| entry.0);
     let (glyph, kind_id) = match kind {
         FigureKind::Text => ("text", Kind::Text),
@@ -611,7 +611,7 @@ fn figure_context(document: &Document, records: &Value, frame: &Value, figure: &
             .titled(parent.is_some()),
         );
     }
-    if document.selection().joint < 0 {
+    if facts::selection(document).joint < 0 {
         sections.push(colours(document, &palette, figure, object, version, inputs.panel));
     }
     Inspector {
@@ -813,7 +813,7 @@ fn shape(prim: Prim) -> &'static str {
 
 /// A joint in Animate: Joint (angle, length, bend, Static), IK, Style, Second colour and its figure's Layer.
 fn joint_context(document: &Document, records: &Value, figure: &Figure, object: &Value, segment: &Segment, inputs: &Inputs<'_>) -> Inspector {
-    let joint = document.selection().joint as usize;
+    let joint = facts::selection(document).joint as usize;
     let version = num(records.get("version")).unwrap_or(0.0);
     let connector = segment.rig.as_ref().is_some_and(|rig| rig.connector.is_some());
     let part = connector.then_some(inputs.panel.connector_part);

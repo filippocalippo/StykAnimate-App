@@ -1,17 +1,17 @@
-//! The camera's copy and paste. The copied pose is the session's own clipboard (`editor._cameraClipboard`): there is no
-//! second copy here; whether Paste can run is a read of that clipboard.
+//! The camera's copy and paste. The copied pose lives in the documents' shared clipboards (`Documents::call` keeps
+//! them across tabs): there is no second copy here; whether Paste can run is a read of that clipboard.
 
 use styk_doc::Value;
 
 use crate::answers;
 use crate::commands::{CommandId, Context};
-use crate::documents::Document;
+use crate::documents::Documents;
 use crate::i18n::Msg;
 use crate::range::Range;
 
-/// Whether the session holds a copied camera pose.
-pub fn can_paste(document: &Document) -> bool {
-    matches!(document.read("clipboard", &Value::array(vec![Value::str("camera")])), Some(Ok(Some(value))) if !value.is_null())
+/// Whether a copied camera pose can be pasted.
+pub fn can_paste(documents: &Documents) -> bool {
+    documents.has_clipboard("camera")
 }
 
 pub fn run(context: &mut Context<'_>, id: CommandId) -> Result<(), Msg> {

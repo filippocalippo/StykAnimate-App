@@ -7,7 +7,8 @@
 use styk_doc::Value;
 
 use crate::commands::refusal;
-use crate::documents::{CallAnswer, DocumentId, Documents};
+use crate::documents::{DocumentId, Documents};
+use crate::engine::CallAnswer;
 use crate::i18n::Msg;
 
 /// What the session reported during one dispatch, besides results: kept for the consumers that act on it (the stage,
@@ -24,7 +25,8 @@ pub struct Session {
 impl Session {
     /// Takes an answer apart: its reports are kept, its result returned.
     pub fn take(&mut self, answer: CallAnswer) -> Result<Value, Msg> {
-        let CallAnswer { result, events, drawing_forks, drawing_retired, clipboard, draws_left: _ } = answer;
+        // A retired clipboard was already handed to the documents host's reclamation by `Documents::call`.
+        let CallAnswer { result, events, drawing_forks, drawing_retired, clipboard, draws_left: _, retired_clipboard: _ } = answer;
         self.events.extend(events);
         self.drawing_forks.extend(drawing_forks);
         self.drawing_retired |= drawing_retired;
@@ -47,7 +49,7 @@ pub fn call(documents: &mut Documents, id: DocumentId, method: &str, args: &[Val
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::documents::EditError;
+    use crate::engine::EditError;
 
     #[test]
     fn a_refusal_keeps_its_events_and_reports() {
@@ -59,6 +61,7 @@ mod tests {
             drawing_retired: true,
             clipboard: None,
             draws_left: None,
+            retired_clipboard: None,
         };
         let error = session.take(refused).unwrap_err();
         assert_eq!(error.key, "errors.editorSelection.alignmentAxisMustBeXOrY");
