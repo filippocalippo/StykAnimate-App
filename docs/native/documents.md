@@ -58,6 +58,10 @@ cancel, undo/redo, isolated tabs, failed/cancelled opens and the limit of 12. Th
 compare document bytes, selection, playhead, history labels and events with frozen gesture/layer
 tapes, and results/refusals/view inputs with the existing JSON boundary. Fixtures are never regenerated.
 
+Tab order, recency and reordering landed with the band (K-shell, `documents/tabs.rs`: `recency`, `successor`, `neighbour`, `move_tab`,
+`drop_index`; `Documents` keeps one list and a recency list of ids, no second copy; [shell-band.md](shell-band.md)). K-doc's close must forget a
+closed id from `recent` (`recency()` already skips ids that are gone) and send `shell::Event::Closed`.
+
 Remaining K-doc work: asynchronous open/save/publication dispatch, stage activation, format/import
 services, save targets/atomic files, close/quit prompts, movieclip scopes, tab reordering/recency,
 empty-tab replacement, cross-tab clipboard transfer, and resource reclamation. Recovery/autosave

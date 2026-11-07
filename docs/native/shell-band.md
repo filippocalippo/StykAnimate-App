@@ -88,8 +88,10 @@ Each is marked in the code and goes when its chunk does.
 
 ## The automation mode (shell steps)
 
-`stykanimate --automation script.txt` runs one step per line against the real window, on its frames (see
-`styk_core::automation` for the grammar): `open`, `click`, `key`, `drag-tab`, `edit`, `session`, `theme`, `resize`,
+`stykanimate --automation script` runs one step per line against the real window, on its frames. The language is
+`styk_core::automation`, the app's one parser: an optional `styk-auto/1` header on the first line (another version is
+refused), line-numbered errors, scripts of at most 64 KiB, step types that are `#[non_exhaustive]` so each feature adds
+its own. The shell's steps are `open`, `click`, `key`, `drag-tab`, `edit`, `session`, `theme`, `resize`,
 `wait`, `expect` and `screenshot`. It exits 0 when every `expect` held, 1 with the failures listed otherwise. The steps send
 the same `shell::Event`s the views send; the stage's pointer and pen steps join the language with the stage.
 
@@ -98,5 +100,11 @@ the same `shell::Event`s the views send; the stage's pointer and pen steps join 
 A page per scenario in Chromium (the real stylesheets, `measureBand`, `resolveTiers` and `installProjectTabs` over the real
 `index.html` header) and the native window at the same width and theme, the band's rows compared pixel by pixel: the
 widths are the wide window, each fold step of three tabs (903, 879, 851, 813, 789, 720, 610, 522, 490) and the narrowest
-(400), light and dark, plus Build, movieclip and camera sessions, one tab and twelve tabs. The scores are in the chunk's
-report.
+(400), light and dark, plus Build, movieclip and camera sessions, one tab and twelve tabs. The scores (PSNR over the band's rows, 22 scenarios, 2026-11-07, debug build): 18.7 to 29.1 dB, never more than 5.9 % of
+pixels differing by more than 24 levels. What remains is text: Chromium draws grayscale where the native window draws
+ClearType-style text (S2c), and the dots, glyph edges and shadows differ by a pixel. Each scenario also asserts the
+window width and the fold steps Chromium applied (`expect width`, `expect folds`), all of which hold.
+
+The interaction script is `engine/crates/styk-app/automation/shell-interaction.script`: three projects opened, Ctrl+Tab
+held and released, a reorder by drag, Undo and Redo on the dot, the three workspaces, Home, and a narrow window's folds.
+The Chromium side of the comparison is a harness over the real page that is not kept in the repository.
