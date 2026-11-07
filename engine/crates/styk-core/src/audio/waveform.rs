@@ -65,18 +65,25 @@ impl<V> WaveformCache<V> {
         })
     }
 
-    pub fn insert(&mut self, key: WaveformKey, value: V, bytes: usize) {
+    /// Caches `value` (`bytes` big). A value that alone is over the byte limit is refused (`false`) and the entry it would have
+    /// replaced is gone: the limit has no exemption for the last entry.
+    pub fn insert(&mut self, key: WaveformKey, value: V, bytes: usize) -> bool {
         self.clock += 1;
-        if let Some((_, old, _)) = self.entries.insert(key, (value, bytes, self.clock)) {
+        if let Some((_, old, _)) = self.entries.remove(&key) {
             self.bytes -= old;
         }
+        if bytes > self.max_bytes || self.max_entries == 0 {
+            return false;
+        }
+        self.entries.insert(key, (value, bytes, self.clock));
         self.bytes += bytes;
-        while self.entries.len() > self.max_entries || (self.bytes > self.max_bytes && self.entries.len() > 1) {
+        while self.entries.len() > self.max_entries || self.bytes > self.max_bytes {
             let oldest = self.entries.iter().min_by_key(|(_, e)| e.2).map(|(k, _)| k.clone()).expect("an entry to evict");
             if let Some((_, old, _)) = self.entries.remove(&oldest) {
                 self.bytes -= old;
             }
         }
+        true
     }
 
     pub fn len(&self) -> usize {
@@ -127,12 +134,25 @@ mod tests {
         let undone = clip(0.0, 3.0, 1.0);
         assert_eq!(cache.get(&key(&undone, false)), Some(&vec![1]), "undo returns the first key");
         cache.insert(key(&clip(1.0, 1.0, 1.0), false), vec![3], 40);
-        assert!(cache.bytes() <= 100 || cache.len() == 1, "bounded by bytes");
+        assert!(cache.bytes() <= 100, "bounded by bytes");
         assert!(cache.get(&key(&edited, false)).is_none(), "the least recently used went first");
         assert!(cache.get(&key(&undone, false)).is_some());
         for i in 0..10 {
             cache.insert(key(&clip(i as f64, 1.0, 1.0), true), vec![0], 1);
         }
         assert!(cache.len() <= 3, "bounded by entries");
+    }
+
+    #[test]
+    fn a_value_over_the_byte_limit_is_refused_not_kept_as_the_one_exempt_entry() {
+        let mut cache: WaveformCache<Vec<u8>> = WaveformCache::new(8, 100);
+        let first = key(&clip(0.0, 3.0, 1.0), false);
+        cache.insert(first.clone(), vec![1], 40);
+        cache.insert(first.clone(), vec![2; 1 << 20], 1 << 20);
+        assert!(cache.get(&first).is_none(), "the oversized value is not cached, and it replaced the old one");
+        assert_eq!((cache.len(), cache.bytes()), (0, 0));
+        let other = key(&clip(1.0, 1.0, 1.0), false);
+        cache.insert(other.clone(), vec![3], 100);
+        assert!(cache.get(&other).is_some(), "a value that fits exactly is kept");
     }
 }

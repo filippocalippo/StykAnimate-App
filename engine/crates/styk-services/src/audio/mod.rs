@@ -14,7 +14,7 @@ pub mod driver;
 pub mod fake;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub use clock::{Reading, Segment, StreamClock};
 pub use driver::{Endpoint, StreamDriver};
@@ -30,6 +30,8 @@ pub enum AudioError {
     DeviceLost,
     /// A device call failed.
     Device(String),
+    /// A device call failed on the output thread: the system code only, so no text is built where nothing may allocate.
+    Hresult(i32),
     /// The decoder could not decode the recording; the text is its message.
     Decode(String),
     Cancelled,
@@ -42,6 +44,7 @@ impl std::fmt::Display for AudioError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AudioError::Unavailable(m) | AudioError::Device(m) | AudioError::Decode(m) | AudioError::Io(m) => f.write_str(m),
+            AudioError::Hresult(code) => write!(f, "the audio device failed (0x{:08x})", *code as u32),
             AudioError::DeviceLost => f.write_str("the audio device was disconnected"),
             AudioError::Cancelled => f.write_str("audio operation cancelled"),
             AudioError::OverBudget { limit, .. } => write!(f, "the active audio mix exceeds the {} MiB limit", limit >> 20),
@@ -88,6 +91,14 @@ pub trait RenderSource: Send {
     /// Applies a waiting transport command without making sound, so a stop or a new play takes effect at the next wake even when
     /// the device has no room for a block. `Restart` or `Idle` when the command ends the current playing, otherwise `Continue`.
     fn poll(&mut self) -> RenderResult;
+
+    /// Takes back `frames` of project time from the block that was just rendered and discarded (the stream was flushed and
+    /// re-anchored because the device ran dry around its submission), so no sound is skipped.
+    fn rewind(&mut self, frames: u32);
+
+    /// The device thread is ending: hands over whatever the renderer holds (the plan it plays) so that it is freed elsewhere, not
+    /// on this thread. The renderer plays nothing afterwards.
+    fn retire(&mut self) -> Box<dyn Send>;
 }
 
 /// How the stream was opened.
@@ -120,11 +131,13 @@ pub struct StreamControl {
     shutdown: AtomicBool,
     lost: AtomicBool,
     waker: OnceLock<Box<dyn Fn() + Send + Sync>>,
+    /// What the device thread handed over when it ended: freed by whoever closes the output, off every audio thread.
+    graveyard: Mutex<Vec<Box<dyn Send>>>,
 }
 
 impl StreamControl {
     pub fn new() -> Arc<StreamControl> {
-        Arc::new(StreamControl { active: AtomicBool::new(false), shutdown: AtomicBool::new(false), lost: AtomicBool::new(false), waker: OnceLock::new() })
+        Arc::new(StreamControl { active: AtomicBool::new(false), shutdown: AtomicBool::new(false), lost: AtomicBool::new(false), waker: OnceLock::new(), graveyard: Mutex::new(Vec::new()) })
     }
 
     /// The device sets how to wake its thread, once.
@@ -165,6 +178,16 @@ impl StreamControl {
 
     pub fn is_lost(&self) -> bool {
         self.lost.load(Ordering::SeqCst)
+    }
+
+    /// The device thread, on its way out: leaves what it must not free.
+    pub fn bury(&self, junk: Box<dyn Send>) {
+        self.graveyard.lock().unwrap_or_else(|e| e.into_inner()).push(junk);
+    }
+
+    /// Whoever closes the output takes what was left, to free it on a thread of its own.
+    pub fn take_graveyard(&self) -> Vec<Box<dyn Send>> {
+        std::mem::take(&mut *self.graveyard.lock().unwrap_or_else(|e| e.into_inner()))
     }
 }
 

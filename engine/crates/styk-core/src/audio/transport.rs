@@ -9,11 +9,12 @@
 //! messages (the clock's generation and underrun count, the control's lost flag), so none can be dropped.
 //! Design: `docs/native/audio.md`.
 
+use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
 use styk_services::audio::clock::Reading;
@@ -159,6 +160,15 @@ impl Renderer {
 }
 
 impl RenderSource for Renderer {
+    fn rewind(&mut self, frames: u32) {
+        self.next_sample = self.next_sample.saturating_sub(frames as u64);
+    }
+
+    fn retire(&mut self) -> Box<dyn Send> {
+        self.playing = false;
+        Box::new(self.plan.take())
+    }
+
     fn poll(&mut self) -> RenderResult {
         let next = self.apply_command();
         RenderResult { next, generation: self.generation, playing_frames: 0, project_start: 0, held_at: self.end_sample as i64 }
@@ -191,10 +201,14 @@ impl RenderSource for Renderer {
     }
 }
 
-/// Frees what the two realtime-adjacent threads must not.
+/// Frees what the two realtime-adjacent threads must not, and does it in bounded steps: the queue to the freeing thread is
+/// bounded, what does not fit waits in a backlog of its own that is bounded too, and each call hands over a fixed number of
+/// items. Past the backlog the oldest item is freed on the caller, and counted: the failure is visible and the transport goes on.
 struct Reclaimer {
-    tx: Option<Sender<Reclaim>>,
+    tx: Option<SyncSender<Reclaim>>,
     thread: Option<JoinHandle<()>>,
+    backlog: VecDeque<Reclaim>,
+    overflows: u64,
 }
 
 enum Reclaim {
@@ -202,16 +216,40 @@ enum Reclaim {
     Plan(#[allow(dead_code)] Arc<MixPlan>),
 }
 
+/// Items the freeing thread's queue holds, the backlog beyond it, and how many go over per call.
+const RECLAIM_QUEUE: usize = 256;
+const RECLAIM_BACKLOG: usize = 256;
+const RECLAIM_PER_CALL: usize = 64;
+
 impl Reclaimer {
     fn new() -> Reclaimer {
-        let (tx, rx) = channel::<Reclaim>();
+        let (tx, rx) = sync_channel::<Reclaim>(RECLAIM_QUEUE);
         let thread = std::thread::Builder::new().name("styk audio reclaim".into()).spawn(move || for item in rx { drop(item) }).expect("a thread to free audio buffers");
-        Reclaimer { tx: Some(tx), thread: Some(thread) }
+        Reclaimer { tx: Some(tx), thread: Some(thread), backlog: VecDeque::new(), overflows: 0 }
     }
 
-    fn give(&self, item: Reclaim) {
-        if let Some(tx) = &self.tx {
-            let _ = tx.send(item);
+    fn give(&mut self, item: Reclaim) {
+        self.backlog.push_back(item);
+        self.flush();
+    }
+
+    /// Hands the backlog over, at most [`RECLAIM_PER_CALL`] items, never waiting.
+    fn flush(&mut self) {
+        for _ in 0..RECLAIM_PER_CALL {
+            let Some(item) = self.backlog.pop_front() else { break };
+            match self.tx.as_ref().map(|tx| tx.try_send(item)) {
+                Some(Ok(())) => {}
+                Some(Err(TrySendError::Full(item))) => {
+                    self.backlog.push_front(item);
+                    break;
+                }
+                Some(Err(TrySendError::Disconnected(item))) => drop(item),
+                None => break,
+            }
+        }
+        while self.backlog.len() > RECLAIM_BACKLOG {
+            self.backlog.pop_front();
+            self.overflows += 1;
         }
     }
 }
@@ -238,9 +276,82 @@ pub enum Event {
     DeviceLost,
 }
 
+type Prepared = (JobId, Result<Arc<MixPlan>, AudioError>);
+
+struct Job {
+    id: JobId,
+    state: AudioState,
+    start: f64,
+    end: f64,
+    cancel: Cancel,
+}
+
+#[derive(Default)]
+struct Slot {
+    /// The newest request waiting for the worker (a newer one replaces it).
+    next: Option<Job>,
+    /// The request the worker is on.
+    running: Option<(JobId, Cancel)>,
+    /// The newest result (an unpolled older one is replaced).
+    done: Option<Prepared>,
+    shutdown: bool,
+}
+
+/// Preparation: one worker thread, one request waiting, one result waiting. However many prepares are asked for, the process
+/// has this one thread, and each handoff holds one item.
+struct Jobs {
+    slot: Mutex<Slot>,
+    wake: Condvar,
+}
+
+impl Jobs {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Slot> {
+        self.slot.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Cancels the job named `id`, wherever it is. No other job is touched.
+    fn cancel(slot: &mut Slot, id: JobId) {
+        if slot.next.as_ref().is_some_and(|job| job.id == id) {
+            if let Some(job) = slot.next.take() {
+                job.cancel.cancel();
+            }
+        }
+        if let Some((running, cancel)) = &slot.running {
+            if *running == id {
+                cancel.cancel();
+            }
+        }
+    }
+
+    fn worker(self: Arc<Jobs>, store: Arc<SourceStore>) {
+        loop {
+            let job = {
+                let mut slot = self.lock();
+                loop {
+                    if slot.shutdown {
+                        return;
+                    }
+                    if let Some(job) = slot.next.take() {
+                        slot.running = Some((job.id, job.cancel.clone()));
+                        break job;
+                    }
+                    slot = self.wake.wait(slot).unwrap_or_else(|e| e.into_inner());
+                }
+            };
+            let result = build_plan(&store, &job.state, job.start, job.end, &job.cancel);
+            let replaced = {
+                let mut slot = self.lock();
+                slot.running = None;
+                slot.done.replace((job.id, result))
+            };
+            // An older result nobody polled is freed here, on the worker.
+            drop(replaced);
+        }
+    }
+}
+
 struct Pending {
     id: JobId,
-    cancel: Cancel,
     then: Then,
 }
 
@@ -254,12 +365,12 @@ pub struct AudioTransport {
     control: Arc<StreamControl>,
     clock: Arc<StreamClock>,
     host: Arc<dyn HostClock>,
-    reclaimer: Reclaimer,
+    reclaimer: ManuallyDrop<Reclaimer>,
     output: Option<Box<dyn AudioOutput>>,
     info: Option<OutputInfo>,
     store: ManuallyDrop<Arc<SourceStore>>,
-    results_tx: Sender<(JobId, Result<Arc<MixPlan>, AudioError>)>,
-    results: Receiver<(JobId, Result<Arc<MixPlan>, AudioError>)>,
+    jobs: ManuallyDrop<Arc<Jobs>>,
+    worker: Option<JoinHandle<()>>,
     /// The generation of the last command issued.
     generation: u64,
     next_job: JobId,
@@ -275,18 +386,23 @@ impl AudioTransport {
         let shared = Shared::new();
         let renderer = Renderer { shared: shared.clone(), plan: None, playing: false, next_sample: 0, end_sample: 0, generation: 0 };
         let info = output.open(Box::new(renderer))?;
-        let (results_tx, results) = channel();
+        let store = SourceStore::new(Budget::new(budget_bytes), decoder);
+        let jobs = Arc::new(Jobs { slot: Mutex::new(Slot::default()), wake: Condvar::new() });
+        let worker = {
+            let (jobs, store) = (jobs.clone(), store.clone());
+            std::thread::Builder::new().name("styk audio prepare".into()).spawn(move || jobs.worker(store)).map_err(|e| AudioError::Io(e.to_string()))?
+        };
         Ok(AudioTransport {
             shared: ManuallyDrop::new(shared),
             control: output.control(),
             clock: output.clock(),
             host,
-            reclaimer: Reclaimer::new(),
+            reclaimer: ManuallyDrop::new(Reclaimer::new()),
             output: Some(output),
             info: Some(info),
-            store: ManuallyDrop::new(SourceStore::new(Budget::new(budget_bytes), decoder)),
-            results_tx,
-            results,
+            store: ManuallyDrop::new(store),
+            jobs: ManuallyDrop::new(jobs),
+            worker: Some(worker),
             generation: 0,
             next_job: 0,
             pending: None,
@@ -304,11 +420,22 @@ impl AudioTransport {
         &self.store
     }
 
-    /// Frees what the output thread has finished with, off the realtime thread.
-    fn reclaim_spent(&self) {
+    /// Items waiting to be handed to the freeing thread, and items that had to be freed on the caller because even the backlog
+    /// was full. Both stay small; the second is zero unless the freeing thread is stuck.
+    pub fn reclaim_backlog(&self) -> usize {
+        self.reclaimer.backlog.len()
+    }
+
+    pub fn reclaim_overflows(&self) -> u64 {
+        self.reclaimer.overflows
+    }
+
+    /// Hands what the output thread has finished with to the freeing thread: a bounded number of items per call.
+    fn reclaim_spent(&mut self) {
         for envelope in self.shared.take_spent() {
-            self.reclaimer.give(Reclaim::Envelope(envelope));
+            self.reclaimer.backlog.push_back(Reclaim::Envelope(envelope));
         }
+        self.reclaimer.flush();
     }
 
     fn post(&mut self, command: Command) {
@@ -318,24 +445,21 @@ impl AudioTransport {
         self.reclaim_spent();
     }
 
-    /// Starts preparing the plan for `[start, end)` seconds of `state`. A prepare in progress is cancelled (that one job, by its
-    /// identity); a result that is no longer the current job is dropped, never played.
+    /// Starts preparing the plan for `[start, end)` seconds of `state`. The prepare before it, if still unfinished, is cancelled
+    /// (that one job, by its identity); a result that is no longer the current job is dropped, never played.
     pub fn prepare(&mut self, state: &AudioState, start: f64, end: f64, then: Then) -> JobId {
-        if let Some(previous) = self.pending.take() {
-            previous.cancel.cancel();
-        }
         self.next_job += 1;
         let id = self.next_job;
         let cancel = Cancel::new();
-        self.pending = Some(Pending { id, cancel: cancel.clone(), then });
-        let (store, state, tx) = (self.store.clone(), state.clone(), self.results_tx.clone());
-        std::thread::Builder::new()
-            .name("styk audio prepare".into())
-            .spawn(move || {
-                let plan = build_plan(&store, &state, start, end, &cancel);
-                let _ = tx.send((id, plan));
-            })
-            .expect("a thread to prepare audio");
+        {
+            let mut slot = self.jobs.lock();
+            if let Some(previous) = self.pending.take() {
+                Jobs::cancel(&mut slot, previous.id);
+            }
+            slot.next = Some(Job { id, state: state.clone(), start, end, cancel });
+        }
+        self.jobs.wake.notify_one();
+        self.pending = Some(Pending { id, then });
         id
     }
 
@@ -357,7 +481,7 @@ impl AudioTransport {
     /// Stops: the preparing job is cancelled, the queued sound is discarded now, the stream goes idle.
     pub fn stop(&mut self) {
         if let Some(pending) = self.pending.take() {
-            pending.cancel.cancel();
+            Jobs::cancel(&mut self.jobs.lock(), pending.id);
         }
         self.generation += 1;
         let generation = self.generation;
@@ -366,11 +490,11 @@ impl AudioTransport {
         self.control.wake();
     }
 
-    /// A scrub slice at `time` seconds (`app.mjs` `scrubAudio`): at most once per 100 ms, an 80 ms slice with a hard cut.
-    /// `None` when it is too soon.
+    /// A scrub slice at `time` seconds (`app.mjs` `scrubAudio`): needs more than 100 ms since the last one, an 80 ms slice with a
+    /// hard cut. `None` when it is too soon. Like today's `audioScrubAt`, the time of the last slice is kept when a scrub ends.
     pub fn scrub(&mut self, state: &AudioState, time: f64) -> Option<JobId> {
         let now = self.host.now_ns();
-        if self.last_scrub_ns.is_some_and(|last| now < last + SCRUB_INTERVAL_NS) {
+        if self.last_scrub_ns.is_some_and(|last| now <= last.saturating_add(SCRUB_INTERVAL_NS)) {
             return None;
         }
         self.last_scrub_ns = Some(now);
@@ -378,32 +502,30 @@ impl AudioTransport {
         Some(self.prepare(state, time, time + SCRUB_SAMPLES as f64 / RATE as f64, Then::Play { from, end: from + SCRUB_SAMPLES }))
     }
 
-    /// The end of a scrub gesture.
+    /// The end of a scrub gesture (`stopAudioScrub`): the sound stops; the retrigger throttle is not reset.
     pub fn end_scrub(&mut self) {
-        self.last_scrub_ns = None;
         self.stop();
     }
 
-    /// Collects finished jobs and reports them; call once per frame. Never blocks.
+    /// Collects the finished job and reports it; call once per frame. Never blocks, and does a fixed amount of work: one result
+    /// at most, and a bounded number of items handed to the freeing thread.
     pub fn poll(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
-        while let Ok((id, result)) = self.results.try_recv() {
-            let current = self.pending.as_ref().is_some_and(|pending| pending.id == id);
-            if !current {
+        let done = self.jobs.lock().done.take();
+        if let Some((id, result)) = done {
+            if self.pending.as_ref().is_some_and(|pending| pending.id == id) {
+                let pending = self.pending.take().expect("the job is current");
+                match (result, pending.then) {
+                    (Ok(plan), Then::Hold) => events.push(Event::Ready { job: id, plan }),
+                    (Ok(plan), Then::Play { from, end }) => {
+                        self.play(plan, from, end);
+                        events.push(Event::Started { job: id });
+                    }
+                    (Err(error), _) => events.push(Event::Failed { job: id, error }),
+                }
+            } else if let Ok(plan) = result {
                 // A superseded or cancelled job: whatever it made is freed elsewhere and never reaches the output.
-                if let Ok(plan) = result {
-                    self.reclaimer.give(Reclaim::Plan(plan));
-                }
-                continue;
-            }
-            let pending = self.pending.take().expect("the job is current");
-            match (result, pending.then) {
-                (Ok(plan), Then::Hold) => events.push(Event::Ready { job: id, plan }),
-                (Ok(plan), Then::Play { from, end }) => {
-                    self.play(plan, from, end);
-                    events.push(Event::Started { job: id });
-                }
-                (Err(error), _) => events.push(Event::Failed { job: id, error }),
+                self.reclaimer.give(Reclaim::Plan(plan));
             }
         }
         if self.control.is_lost() && !self.reported_lost {
@@ -443,22 +565,43 @@ impl AudioTransport {
 
 impl Drop for AudioTransport {
     fn drop(&mut self) {
+        // Everything that can hold decoded audio leaves for a thread of its own: the output, the plans queued in the mailbox and
+        // in the command envelopes, the preparing worker and the result it may hold, the cache, the freeing thread's backlog and
+        // what the output thread left in the control block's graveyard. None of it is freed on the interface thread.
         if let Some(pending) = self.pending.take() {
-            pending.cancel.cancel();
+            Jobs::cancel(&mut self.jobs.lock(), pending.id);
         }
-        // The device thread is ended and the buffers are freed on a thread of their own, never on the interface thread.
         let mut output = self.output.take();
-        let reclaimer = std::mem::replace(&mut self.reclaimer, Reclaimer { tx: None, thread: None });
-        // SAFETY: `drop` runs once and nothing reads these two fields afterwards.
-        let (shared, store) = unsafe { (ManuallyDrop::take(&mut self.shared), ManuallyDrop::take(&mut self.store)) };
+        let worker = self.worker.take();
+        let control = self.control.clone();
+        // SAFETY: `drop` runs once and nothing reads these fields afterwards.
+        let (shared, store, jobs, reclaimer) = unsafe { (ManuallyDrop::take(&mut self.shared), ManuallyDrop::take(&mut self.store), ManuallyDrop::take(&mut self.jobs), ManuallyDrop::take(&mut self.reclaimer)) };
         let _ = std::thread::Builder::new().name("styk audio close".into()).spawn(move || {
+            {
+                let mut slot = jobs.lock();
+                slot.shutdown = true;
+                if let Some(job) = slot.next.take() {
+                    job.cancel.cancel();
+                }
+                if let Some((_, cancel)) = &slot.running {
+                    cancel.cancel();
+                }
+            }
+            jobs.wake.notify_all();
+            if let Some(worker) = worker {
+                let _ = worker.join();
+            }
             if let Some(output) = output.as_mut() {
                 output.close();
             }
+            let junk = control.take_graveyard();
+            drop(junk);
             drop(output);
             drop(shared);
             drop(store);
-            let Reclaimer { tx, thread } = reclaimer;
+            drop(jobs);
+            let Reclaimer { tx, thread, backlog, .. } = reclaimer;
+            drop(backlog);
             drop(tx);
             if let Some(thread) = thread {
                 let _ = thread.join();

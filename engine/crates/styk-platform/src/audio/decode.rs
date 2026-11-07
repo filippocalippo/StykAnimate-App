@@ -23,6 +23,9 @@ use crate::video::process;
 const MAX_INPUT: usize = 32 * 1024 * 1024;
 const MAX_OUTPUT: u64 = 48_000 * 2 * 2 * 3600 + 4096;
 const TIMEOUT: Duration = Duration::from_secs(120);
+/// The diagnostics kept of the decoder (the last bytes of its standard error) and the scratch they are read through.
+const TAIL: usize = 2048;
+const SCRATCH: usize = 8192;
 const PREFIX: &str = "stykanimate-audio-";
 /// A folder this old belongs to a run that is gone.
 const STALE: Duration = Duration::from_secs(3600);
@@ -106,10 +109,19 @@ impl AudioDecoder for FfmpegAudioDecoder {
         let stdout = pipes.stdout.take().map(|mut pipe| std::thread::spawn(move || std::io::copy(&mut pipe, &mut std::io::sink())));
         let stderr = pipes.stderr.take().map(|mut pipe| {
             std::thread::spawn(move || {
-                let mut text = Vec::new();
-                let _ = pipe.read_to_end(&mut text);
-                let keep = text.len().saturating_sub(2048);
-                String::from_utf8_lossy(&text[keep..]).into_owned()
+                // Drained through a fixed scratch; only the last 2,048 bytes are kept, as today's service keeps them.
+                let mut tail: Vec<u8> = Vec::with_capacity(TAIL + SCRATCH);
+                let mut scratch = [0u8; SCRATCH];
+                while let Ok(n) = pipe.read(&mut scratch) {
+                    if n == 0 {
+                        break;
+                    }
+                    tail.extend_from_slice(&scratch[..n]);
+                    if tail.len() > TAIL {
+                        tail.drain(..tail.len() - TAIL);
+                    }
+                }
+                String::from_utf8_lossy(&tail).into_owned()
             })
         });
         let timed_out = Arc::new(AtomicBool::new(false));

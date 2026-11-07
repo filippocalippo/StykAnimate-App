@@ -57,6 +57,15 @@ struct Device {
     starts: u64,
     captured: Vec<f32>,
     written_frames: u64,
+    /// Every kept block with the device frame (in this epoch) it was placed at, when capturing: the truth the clock is held to.
+    placed: Vec<(u64, Vec<f32>)>,
+}
+
+/// One-shot delays inside a wake, in frames of stream time: the thread was preempted between two device calls.
+#[derive(Default)]
+struct Delays {
+    in_padding: u64,
+    in_write: u64,
 }
 
 struct Inner {
@@ -69,30 +78,40 @@ struct Inner {
     driver: Option<StreamDriver>,
     control: Arc<StreamControl>,
     capture: bool,
+    delays: Delays,
+    host_cell: Arc<AtomicU64>,
 }
 
 struct FakeEndpoint<'a> {
     config: &'a FakeConfig,
-    host_ns: u64,
+    host_ns: &'a mut u64,
+    delays: &'a mut Delays,
+    host_cell: &'a AtomicU64,
     device: &'a mut Device,
     capture: bool,
 }
 
 impl FakeEndpoint<'_> {
+    /// Time passes inside a device call.
+    fn pass(&mut self, frames: u64) {
+        *self.host_ns += frames * 1_000_000_000 / RATE as u64;
+        self.host_cell.store(*self.host_ns, Ordering::SeqCst);
+    }
+
     /// Plays the model forward to the host time.
     fn sync(&mut self) {
         let device = &mut *self.device;
         let elapsed = self.host_ns.saturating_sub(device.synced_ns);
-        device.synced_ns = self.host_ns;
+        device.synced_ns = *self.host_ns;
         if !device.started {
             return;
         }
         let begins = device.started_at_ns + self.config.latency_ns;
-        if self.host_ns <= begins {
+        if *self.host_ns <= begins {
             return;
         }
         // Only the time past the start latency plays.
-        let elapsed = elapsed.min(self.host_ns - begins);
+        let elapsed = elapsed.min(*self.host_ns - begins);
         let frames = elapsed as f64 * RATE as f64 / 1e9 + device.carry;
         let whole = frames.floor();
         device.carry = frames - whole;
@@ -114,12 +133,18 @@ impl Endpoint for FakeEndpoint<'_> {
     }
 
     fn padding(&mut self) -> Result<u32, AudioError> {
+        let delay = std::mem::take(&mut self.delays.in_padding);
+        self.pass(delay);
         self.sync();
         Ok(self.device.queued as u32)
     }
 
-    fn write(&mut self, frames: u32, fill: &mut dyn FnMut(&mut [f32]) -> bool) -> Result<(), AudioError> {
+    fn write(&mut self, frames: u32, fill: &mut dyn FnMut(&mut [f32]) -> bool) -> Result<u64, AudioError> {
+        let delay = std::mem::take(&mut self.delays.in_write);
+        self.pass(delay);
         self.sync();
+        let placed_at = self.device.consumed + self.device.dry + self.device.queued;
+        let submitted_ns = *self.host_ns;
         assert!(self.device.queued + frames as u64 <= self.config.buffer_frames as u64, "the driver wrote more than the buffer's free space");
         let mut block = vec![0.0f32; frames as usize * 2];
         let kept = fill(&mut block);
@@ -130,20 +155,21 @@ impl Endpoint for FakeEndpoint<'_> {
         self.device.written_frames += frames as u64;
         if self.capture && kept {
             self.device.captured.extend_from_slice(&block);
+            self.device.placed.push((placed_at, block));
         }
-        Ok(())
+        Ok(submitted_ns)
     }
 
     fn position(&mut self) -> Result<(u64, u64), AudioError> {
         self.sync();
         let frames = self.device.consumed + if self.config.position_advances_in_underrun { self.device.dry } else { 0 };
-        Ok((frames * self.config.clock_frequency / RATE as u64, self.host_ns))
+        Ok((frames * self.config.clock_frequency / RATE as u64, *self.host_ns))
     }
 
     fn start(&mut self) -> Result<(), AudioError> {
         self.sync();
         self.device.started = true;
-        self.device.started_at_ns = self.host_ns;
+        self.device.started_at_ns = *self.host_ns;
         self.device.starts += 1;
         Ok(())
     }
@@ -156,6 +182,7 @@ impl Endpoint for FakeEndpoint<'_> {
         device.consumed = 0;
         device.dry = 0;
         device.carry = 0.0;
+        device.placed.clear();
         device.resets += 1;
         Ok(())
     }
@@ -168,8 +195,11 @@ impl Inner {
             return;
         }
         let Some(driver) = self.driver.as_mut() else { return };
-        let mut endpoint = FakeEndpoint { config: &self.config, host_ns: self.host_ns, device: &mut self.device, capture: self.capture };
-        if driver.wake(&mut endpoint).is_err() {
+        let mut host = self.host_ns;
+        let mut endpoint = FakeEndpoint { config: &self.config, host_ns: &mut host, delays: &mut self.delays, host_cell: &self.host_cell, device: &mut self.device, capture: self.capture };
+        let failed = driver.wake(&mut endpoint).is_err();
+        self.host_ns = host;
+        if failed {
             self.lost = true;
             self.control.mark_lost();
         }
@@ -228,6 +258,31 @@ impl FakeHandle {
         self.inner.lock().unwrap().lost = true;
         self.pending_wake.store(true, Ordering::SeqCst);
         self.advance(0);
+    }
+
+    /// The next padding query takes `frames` of stream time (the thread was preempted after it read the position).
+    pub fn delay_in_padding(&self, frames: u64) {
+        self.inner.lock().unwrap().delays.in_padding = frames;
+    }
+
+    /// The next write is submitted `frames` of stream time late (preempted inside the call).
+    pub fn delay_in_write(&self, frames: u64) {
+        self.inner.lock().unwrap().delays.in_write = frames;
+    }
+
+    /// The stereo frame the device is playing now (needs `capture`): the truth a clock reading is held to. `None` while it plays
+    /// silence that was not written.
+    pub fn heard_content_now(&self) -> Option<[f32; 2]> {
+        let mut inner = self.inner.lock().unwrap();
+        let inner = &mut *inner;
+        let mut host = inner.host_ns;
+        let mut endpoint = FakeEndpoint { config: &inner.config, host_ns: &mut host, delays: &mut inner.delays, host_cell: &self.host, device: &mut inner.device, capture: inner.capture };
+        endpoint.sync();
+        let at = endpoint.device.consumed + endpoint.device.dry;
+        inner.device.placed.iter().find(|(start, block)| at >= *start && at < start + block.len() as u64 / 2).map(|(start, block)| {
+            let i = (at - start) as usize * 2;
+            [block[i], block[i + 1]]
+        })
     }
 
     pub fn set_latency_ns(&self, ns: u64) {
@@ -296,8 +351,9 @@ impl FakeOutput {
             control.set_waker(move || flag.store(true, Ordering::SeqCst));
         }
         let period_ns = config.period_frames as u64 * 1_000_000_000 / RATE as u64;
-        let inner = Arc::new(Mutex::new(Inner { config, host_ns: 0, next_wake_ns: period_ns, skip_wakes: 0, lost: false, device: Device::default(), driver: None, control: control.clone(), capture }));
-        let handle = FakeHandle { inner: inner.clone(), pending_wake, host: Arc::new(AtomicU64::new(0)) };
+        let host = Arc::new(AtomicU64::new(0));
+        let inner = Arc::new(Mutex::new(Inner { config, host_ns: 0, next_wake_ns: period_ns, skip_wakes: 0, lost: false, device: Device::default(), driver: None, control: control.clone(), capture, delays: Delays::default(), host_cell: host.clone() }));
+        let handle = FakeHandle { inner: inner.clone(), pending_wake, host };
         (FakeOutput { inner, clock: StreamClock::new(), control, fail_open: None }, handle)
     }
 }
@@ -331,6 +387,8 @@ impl AudioOutput for FakeOutput {
 
     fn close(&mut self) {
         self.control.shutdown();
-        self.inner.lock().unwrap().driver = None;
+        if let Some(driver) = self.inner.lock().unwrap().driver.take() {
+            driver.retire();
+        }
     }
 }

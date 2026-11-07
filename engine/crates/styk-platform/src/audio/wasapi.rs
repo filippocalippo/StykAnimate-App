@@ -58,6 +58,16 @@ impl Drop for Event {
     }
 }
 
+/// An error on the output thread: the system code, no text (nothing is allocated where the device thread runs).
+fn raw_error(error: windows::core::Error) -> AudioError {
+    let code = error.code();
+    if code == AUDCLNT_E_DEVICE_INVALIDATED || code.0 == RESOURCES_INVALIDATED {
+        AudioError::DeviceLost
+    } else {
+        AudioError::Hresult(code.0)
+    }
+}
+
 fn device_error(error: windows::core::Error) -> AudioError {
     let code = error.code();
     if code == AUDCLNT_E_DEVICE_INVALIDATED || code.0 == RESOURCES_INVALIDATED {
@@ -111,6 +121,7 @@ struct Stream {
     /// Stereo scratch for a direct stream with other than two channels.
     scratch: Vec<f32>,
     info: OutputInfo,
+    clock: QpcClock,
 }
 
 impl Stream {
@@ -166,7 +177,7 @@ impl Stream {
         let latency = unsafe { client.GetStreamLatency() }.unwrap_or(0).max(0) as u64 * 100;
         let info = OutputInfo { device_name: "Default audio output".into(), path, endpoint_rate: rate, endpoint_channels: channels, period_frames: period, buffer_frames, stream_latency_ns: latency };
         let scratch = if channels == 2 { Vec::new() } else { Vec::with_capacity(buffer_frames as usize * 2) };
-        Ok(Stream { client, render, position, buffer_event, buffer_frames, frequency, channels, mask, scratch, info })
+        Ok(Stream { client, render, position, buffer_event, buffer_frames, frequency, channels, mask, scratch, info, clock: QpcClock::new() })
     }
 }
 
@@ -181,13 +192,13 @@ impl Endpoint for Stream {
 
     fn padding(&mut self) -> Result<u32, AudioError> {
         // SAFETY: called on the output thread that owns the client.
-        unsafe { self.client.GetCurrentPadding() }.map_err(device_error)
+        unsafe { self.client.GetCurrentPadding() }.map_err(raw_error)
     }
 
-    fn write(&mut self, frames: u32, fill: &mut dyn FnMut(&mut [f32]) -> bool) -> Result<(), AudioError> {
+    fn write(&mut self, frames: u32, fill: &mut dyn FnMut(&mut [f32]) -> bool) -> Result<u64, AudioError> {
         // SAFETY: the buffer GetBuffer returns holds `frames` frames of the stream's format until ReleaseBuffer.
         unsafe {
-            let data = self.render.GetBuffer(frames).map_err(device_error)?;
+            let data = self.render.GetBuffer(frames).map_err(raw_error)?;
             let kept = if self.channels == 2 {
                 fill(std::slice::from_raw_parts_mut(data as *mut f32, frames as usize * 2))
             } else {
@@ -197,28 +208,30 @@ impl Endpoint for Stream {
                 map_channels(&self.scratch, std::slice::from_raw_parts_mut(data as *mut f32, frames as usize * self.channels as usize), self.channels, self.mask);
                 kept
             };
-            self.render.ReleaseBuffer(frames, if kept { 0 } else { AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 }).map_err(device_error)
+            let submitted = self.clock.now_ns();
+            self.render.ReleaseBuffer(frames, if kept { 0 } else { AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 }).map_err(raw_error)?;
+            Ok(submitted)
         }
     }
 
     fn position(&mut self) -> Result<(u64, u64), AudioError> {
         let (mut position, mut qpc) = (0u64, 0u64);
         // SAFETY: writes two u64.
-        unsafe { self.position.GetPosition(&mut position, Some(&mut qpc)) }.map_err(device_error)?;
+        unsafe { self.position.GetPosition(&mut position, Some(&mut qpc)) }.map_err(raw_error)?;
         // The pair's time is QPC in 100 ns units.
         Ok((position, qpc * 100))
     }
 
     fn start(&mut self) -> Result<(), AudioError> {
         // SAFETY: the output thread owns the client.
-        unsafe { self.client.Start() }.map_err(device_error)
+        unsafe { self.client.Start() }.map_err(raw_error)
     }
 
     fn stop_and_reset(&mut self) -> Result<(), AudioError> {
         // SAFETY: as above. Reset needs a stopped stream.
         unsafe {
-            self.client.Stop().map_err(device_error)?;
-            self.client.Reset().map_err(device_error)
+            self.client.Stop().map_err(raw_error)?;
+            self.client.Reset().map_err(raw_error)
         }
     }
 }
@@ -275,6 +288,8 @@ fn run(allow_direct: bool, source: Box<dyn RenderSource>, clock: Arc<StreamClock
                     }
                 }
                 let _ = stream.client.Stop();
+                // Whatever the renderer holds leaves for the thread that closes the output, on every way out of the loop.
+                driver.retire();
             }
         }
         if let Some(handle) = mmcss {

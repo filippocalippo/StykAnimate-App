@@ -29,8 +29,9 @@ that is a whole number of frames, 1 sample to 3600 s). `decode_source` is today'
 original bytes; on any error run FFmpeg to a WAV in a private temporary folder and `inspect_wave` that. A plain WAV is
 mixed at its own rate with linear interpolation; everything else is 48 kHz stereo `s16` from FFmpeg.
 
-Embedded assets are the document's `_styk.audio.assets` (chunks of base64). The chunks are joined once per decode, which
-needs the whole original (at most 32 MiB) in memory, as today's worker does.
+Embedded assets are the document's `_styk.audio.assets` (chunks of base64). The chunks are joined once per decode into **one buffer
+of the stated size, reserved first**: each base64 chunk is decoded straight into it, so no second copy of the original exists
+(the original, at most 32 MiB, is in memory as in today's worker). Peak new allocation is measured against the reservation.
 
 ### Memory (decoded buffers)
 
@@ -147,14 +148,18 @@ output simply stays `Starting` longer; the frame scheduler follows the clock and
 
 ### Underruns
 
-An underrun is a deadline missed by the output thread or the renderer. The driver detects it per wake: the padding is 0
-while frames had been rendered (the device ran dry), or the device position passed `rendered_frames` (the device played
-frames nobody wrote). The gap in stream frames is `max(0, position_frames - rendered_frames)` (or, when the padding is 0,
-the time since the last write at the stream rate). Recovery: write a `Held` segment for the gap (media time does not advance,
-so the video holds with it), then continue the project from where the renderer was, so no sound is skipped; the counter
-`underruns` increases and the transport exposes it. The fake device injects late wakes; the real device is stressed under
-frame preparation, decoding and an export (below). The mixer itself cannot miss a deadline for I/O: all sources are resident
-before `Play` is accepted (a late *prepare* delays the start, it never reaches the output thread).
+An underrun is a deadline missed by the output thread or the renderer, and it can open **anywhere in a wake**: between the
+position read and the padding query, or between the padding query and the submit. A gap whose extent is unknown must not be
+mapped, so the driver never guesses it: it checks three times and **flushes and re-anchors** when any says the device ran dry.
+(1) The device position is past what was written. (2) The padding is 0 while the stream was running. (3) After the submit, the
+position is read again: the device cannot have played any of the new frames before they were submitted, so a position past what
+was written before the block, by more than the time since the submit allows, is silence the device played (`Endpoint::write`
+returns the submit time for this). Re-anchoring is a new epoch (stop, reset, refill, start) where the renderer is; in case (3) the
+block that went into the flushed device is given back to the renderer (`RenderSource::rewind`), so no sound is skipped. The clock
+reads `Starting` until the first new frame is heard, so the video holds meanwhile (`media_time()` is `None`), and the `underruns`
+counter rises. Where a device's position stops with its data nothing is mapped wrongly and nothing needs doing. The fake device
+injects delays inside a wake (before the padding query, before the submit) and holds the clock to the sample the device is
+playing. The mixer itself cannot miss a deadline for I/O: all sources are resident before `Play` is accepted.
 
 ### Device loss
 
@@ -178,12 +183,22 @@ The output thread never locks, allocates, frees a large block or waits.
   drops them. Large buffers are therefore freed neither on the output thread nor on the interface thread.
 - **Events.** The renderer publishes state, not messages: `applied_generation`, `ended_generation`, `underruns`,
   `device_lost`. State cannot overflow and a terminal event cannot be dropped.
-- **Prepare jobs.** `prepare` returns a job identity; starting another prepare cancels **that one job** (its `Cancel`
-  wakes a blocked FFmpeg wait and kills the process); a finished job is accepted only if its identity is the transport's
-  current one, otherwise the plan is reclaimed and never reaches the output ("prepare A, then stop or edit, then A completes"
-  starts nothing).
-- **Scrub.** `scrub(tick)` is a throttled `prepare` plus `Play { from: tick time, end: from + 80 ms }` with no ramps; at most
-  one retrigger per 100 ms; the release is `Stop`. Scrubbing and playing use the same renderer and the same mixer.
+- **Prepare jobs.** One worker thread, one request waiting (a newer one replaces it), one result waiting (an unpolled older one
+  is replaced and freed on the worker): however many prepares are asked for, the process has one thread and each handoff holds
+  one item. `prepare` returns a job identity; starting another prepare cancels **that one job** (its `Cancel` wakes a blocked
+  FFmpeg wait and kills the process); a finished job is accepted only if its identity is the transport's current one, otherwise
+  the plan is reclaimed and never reaches the output ("prepare A, then stop or edit, then A completes" starts nothing). `poll`
+  takes at most one result and hands a bounded number of items (64) to the freeing thread.
+- **Reclamation is bounded.** The freeing thread's queue holds 256 items; what does not fit waits in a backlog of at most 256;
+  past that the oldest is freed on the caller and counted (`reclaim_overflows`): visible and recoverable, never a block, and zero
+  at the pace of a person.
+- **Every exit hands its plans over.** The device thread, on any way out of its loop (close, device lost), leaves the renderer's
+  plan in the control block's graveyard (`RenderSource::retire`); the closer frees it. Closing the transport moves the output, the
+  mailbox, the cache, the worker (and the result it may hold) and the freeing thread's backlog to a closing thread. Errors on the
+  output thread carry the system code only (`AudioError::Hresult`), so no text is built where nothing may allocate.
+- **Scrub.** `scrub(tick)` is a throttled `prepare` plus `Play { from: tick time, end: from + 80 ms }` with no ramps; a retrigger
+  needs **more than** 100 ms since the last (`performance.now() - audioScrubAt > 100`), and the time of the last one is kept when
+  the gesture ends (`stopAudioScrub()` leaves `audioScrubAt` alone); the release is `Stop`. Scrubbing and playing use the same renderer and the same mixer.
 
 ## Export
 
@@ -198,7 +213,7 @@ rounded to 4 decimals) and stored in the asset unchanged. The drawn bars depend 
 cached by `WaveformKey`: asset id and revision (size and duration of the asset), the clip's **source offset**, **duration**,
 the **effective gain** (clip gain times track gain, which sets the bar height), fade in, fade out, the track's mute (alpha),
 the horizontal scale (pixels per second) and the clip's pixel width. Two clips sharing an asset with different trims differ
-by key; undo and redo return the same key and hit the same entry. The cache is bounded by bytes and entries.
+by key; undo and redo return the same key and hit the same entry. The cache is bounded by bytes and entries, with no exemption: a value that alone is over the byte limit is refused.
 
 ## Verification
 

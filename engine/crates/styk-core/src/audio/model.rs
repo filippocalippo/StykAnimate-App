@@ -44,13 +44,30 @@ pub struct Asset {
 }
 
 impl Asset {
-    /// The original file, the chunks joined. `None` when a chunk is not base64.
+    /// The original file, the chunks joined, in one buffer of the size the asset states: a base64 chunk is decoded straight into
+    /// it (no copy of the decoded bytes is made first), a chunk held as bytes is appended. `None` when a chunk is not base64 or
+    /// the chunks do not add up to the stated size. The caller reserves `size` bytes first; nothing larger is allocated.
     pub fn original(&self) -> Option<Vec<u8>> {
-        let mut bytes = Vec::with_capacity(self.size as usize);
+        let size = self.size as usize;
+        // A few bytes of slack: the decoder sizes its output by the text, which a final chunk's padding makes up to two bytes long.
+        let mut out = Vec::with_capacity(size + 3);
         for chunk in &self.chunks {
-            bytes.extend_from_slice(&chunk.get("data_base64")?.payload_bytes()?);
+            match chunk.get("data_base64")? {
+                Value::Blob(blob) if blob.prefix.is_empty() => {
+                    if out.len() + blob.bytes.len() > size {
+                        return None;
+                    }
+                    out.extend_from_slice(&blob.bytes);
+                }
+                Value::Str(text) => {
+                    if out.len() + text.len() / 4 * 3 > size + 2 || !styk_doc::json::base64_append(text, &mut out) {
+                        return None;
+                    }
+                }
+                _ => return None,
+            }
         }
-        Some(bytes)
+        (out.len() == size).then_some(out)
     }
 
     /// Tells recordings apart in a cache: the id never names two different files in one document.

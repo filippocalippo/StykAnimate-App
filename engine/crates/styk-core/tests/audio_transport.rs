@@ -14,173 +14,9 @@ use styk_services::audio::fake::{FakeConfig, FakeHandle, FakeOutput};
 use styk_services::audio::{AudioDecoder, AudioError, HostClock};
 use styk_services::Cancel;
 
-const RATE: f64 = 48_000.0;
 
-// ---- fixtures -------------------------------------------------------------------------------------------------------
-
-fn tone(seconds: f64) -> Vec<u8> {
-    let frames = (seconds * RATE) as usize;
-    let samples: Vec<f32> = (0..frames).flat_map(|i| {
-        let v = (0.5 * (2.0 * std::f64::consts::PI * 440.0 * i as f64 / RATE).sin()) as f32;
-        [v, -v * 0.5]
-    }).collect();
-    pcm_wave(&samples, 48_000)
-}
-
-fn base64(bytes: &[u8]) -> String {
-    let mut out = Vec::new();
-    styk_doc::json::base64_into(bytes, &mut out);
-    String::from_utf8(out).unwrap()
-}
-
-/// A document's audio state: `assets` are (id, original file bytes, duration); `clips` are (asset, start, offset, duration, gain).
-fn state(assets: &[(&str, &[u8], f64)], clips: &[(&str, f64, f64, f64, f64)]) -> AudioState {
-    let assets_json: Vec<String> = assets.iter().map(|(id, bytes, duration)| format!(r#""{id}":{{"id":"{id}","name":"{id}.wav","size":{},"duration":{duration},"chunks":[{{"data_base64":"{}"}}],"peaks":[0.5]}}"#, bytes.len(), base64(bytes))).collect();
-    let clips_json: Vec<String> = clips.iter().enumerate().map(|(i, (asset, start, offset, duration, gain))| format!(r#"{{"id":"c{i}","assetId":"{asset}","start":{start},"offset":{offset},"duration":{duration},"gain":{gain},"fadeIn":0,"fadeOut":0}}"#)).collect();
-    let text = format!(r#"{{"version":1,"assets":{{{}}},"tracks":[{{"id":"t1","name":"Track","gain":1,"mute":false,"solo":false,"clips":[{}]}}]}}"#, assets_json.join(","), clips_json.join(","));
-    AudioState::from_value(&styk_doc::json::parse(text.as_bytes()).unwrap()).expect("a state")
-}
-
-/// What a decoder does when asked.
-enum Behavior {
-    /// A 48 kHz stereo 16-bit WAV of the asset's duration (what FFmpeg makes), after asking to reserve its size.
-    Silence,
-    /// Wait until the gate opens, then as `Silence`.
-    Gated,
-    /// Block until cancelled.
-    UntilCancelled,
-}
-
-struct TestDecoder {
-    behavior: Behavior,
-    gate: (Mutex<bool>, Condvar),
-    calls: AtomicUsize,
-    cancelled: AtomicBool,
-    reserved: Mutex<Vec<u64>>,
-}
-
-impl TestDecoder {
-    fn new(behavior: Behavior) -> Arc<TestDecoder> {
-        Arc::new(TestDecoder { behavior, gate: (Mutex::new(false), Condvar::new()), calls: AtomicUsize::new(0), cancelled: AtomicBool::new(false), reserved: Mutex::new(Vec::new()) })
-    }
-
-    fn open_gate(&self) {
-        *self.gate.0.lock().unwrap() = true;
-        self.gate.1.notify_all();
-    }
-}
-
-fn decoded_wav(seconds: f64) -> Vec<u8> {
-    let frames = (seconds * RATE) as usize;
-    let mut bytes = Vec::with_capacity(44 + frames * 4);
-    bytes.extend_from_slice(b"RIFF");
-    bytes.extend_from_slice(&(36 + frames as u32 * 4).to_le_bytes());
-    bytes.extend_from_slice(b"WAVEfmt ");
-    bytes.extend_from_slice(&16u32.to_le_bytes());
-    bytes.extend_from_slice(&1u16.to_le_bytes());
-    bytes.extend_from_slice(&2u16.to_le_bytes());
-    bytes.extend_from_slice(&48_000u32.to_le_bytes());
-    bytes.extend_from_slice(&(48_000u32 * 4).to_le_bytes());
-    bytes.extend_from_slice(&4u16.to_le_bytes());
-    bytes.extend_from_slice(&16u16.to_le_bytes());
-    bytes.extend_from_slice(b"data");
-    bytes.extend_from_slice(&(frames as u32 * 4).to_le_bytes());
-    bytes.resize(44 + frames * 4, 0);
-    bytes
-}
-
-impl AudioDecoder for TestDecoder {
-    fn decode(&self, _original: &[u8], seconds: f64, reserve: &mut dyn FnMut(u64) -> Result<(), AudioError>, cancel: &Cancel) -> Result<Vec<u8>, AudioError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        match self.behavior {
-            Behavior::UntilCancelled => {
-                let pair = Arc::new((Mutex::new(false), Condvar::new()));
-                let waker = pair.clone();
-                cancel.on_cancel(move || {
-                    *waker.0.lock().unwrap() = true;
-                    waker.1.notify_all();
-                });
-                let mut woken = pair.0.lock().unwrap();
-                while !*woken {
-                    woken = pair.1.wait(woken).unwrap();
-                }
-                self.cancelled.store(true, Ordering::SeqCst);
-                return Err(AudioError::Cancelled);
-            }
-            Behavior::Gated => {
-                let mut open = self.gate.0.lock().unwrap();
-                while !*open {
-                    open = self.gate.1.wait(open).unwrap();
-                }
-            }
-            Behavior::Silence => {}
-        }
-        let wav = decoded_wav(seconds);
-        self.reserved.lock().unwrap().push(wav.len() as u64);
-        reserve(wav.len() as u64)?;
-        Ok(wav)
-    }
-}
-
-struct Rig {
-    transport: AudioTransport,
-    fake: FakeHandle,
-}
-
-const BIG: u64 = 768 << 20;
-
-fn rig_with(config: FakeConfig, decoder: Arc<dyn AudioDecoder>, budget: u64, capture: bool) -> Rig {
-    let (output, fake) = FakeOutput::new(config, capture);
-    let transport = AudioTransport::new(Box::new(output), fake.host_clock(), decoder, budget).expect("the fake opens");
-    Rig { transport, fake }
-}
-
-fn rig(config: FakeConfig) -> Rig {
-    rig_with(config, TestDecoder::new(Behavior::Silence), BIG, true)
-}
-
-impl Rig {
-    /// Polls until the job's plan is playing (the worker runs in real time).
-    fn until_started(&mut self) {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            for event in self.transport.poll() {
-                match event {
-                    Event::Started { .. } => return,
-                    Event::Failed { error, .. } => panic!("the prepare failed: {error}"),
-                    _ => {}
-                }
-            }
-            assert!(Instant::now() < deadline, "the prepare did not finish");
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
-
-    fn step_ms(&mut self, ms: u64) {
-        self.fake.advance_ms(ms);
-        self.transport.poll();
-    }
-
-    fn running(&self) -> Option<(f64, bool)> {
-        match self.transport.reading() {
-            Reading::Running { sample, held } => Some((sample, held)),
-            _ => None,
-        }
-    }
-}
-
-fn config() -> FakeConfig {
-    FakeConfig::default()
-}
-
-fn same_bits(a: &[f32], b: &[f32]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits())
-}
-
-fn plan_of(state: &AudioState, start: f64, end: f64) -> Arc<MixPlan> {
-    let store_less = styk_core::audio::SourceStore::new(styk_core::audio::Budget::new(BIG), TestDecoder::new(Behavior::Silence));
-    styk_core::audio::build_plan(&store_less, state, start, end, &Cancel::new()).expect("a plan")
-}
+mod support;
+use support::audio::*;
 
 // ---- the clock --------------------------------------------------------------------------------------------------------
 
@@ -302,7 +138,7 @@ fn the_range_end_holds_the_media_time_in_silence_until_stopped() {
 }
 
 #[test]
-fn a_late_callback_leaves_a_gap_that_holds_the_media_time_and_skips_no_sound() {
+fn a_late_callback_flushes_and_re_anchors_without_the_media_time_jumping_or_sound_being_skipped() {
     for advances in [true, false] {
         let audio = state(&[("a", &tone(4.0), 4.0)], &[("a", 0.0, 0.0, 4.0, 1.0)]);
         let mut rig = rig(FakeConfig { position_advances_in_underrun: advances, ..config() });
@@ -314,11 +150,13 @@ fn a_late_callback_leaves_a_gap_that_holds_the_media_time_and_skips_no_sound() {
         let before = rig.running().unwrap().0;
         rig.fake.skip_wakes(10);
         rig.fake.advance_ms(105);
-        rig.fake.advance_ms(30);
+        // The first wake after the stall sees the dry device; the stream is flushed and anchored afresh, and the clock reads again
+        // once the first new frame is heard.
+        rig.fake.advance_ms(90);
         assert!(rig.transport.underruns() >= 1, "advances={advances}: the dry device was seen");
         let (during, _) = rig.running().unwrap();
         // The media time moved only for what was heard: not by the 135 ms of wall time that passed.
-        assert!(during - before < 48.0 * 100.0, "advances={advances}: {before} -> {during}");
+        assert!(during - before < 48.0 * 120.0, "advances={advances}: {before} -> {during}");
         // And it carries on: no sound was skipped, so later audio is contiguous project samples.
         rig.fake.take_captured();
         rig.fake.advance_ms(500);
@@ -330,7 +168,7 @@ fn a_late_callback_leaves_a_gap_that_holds_the_media_time_and_skips_no_sound() {
 }
 
 #[test]
-fn a_gap_is_mapped_as_held_and_the_sound_after_it_continues_where_it_left_off() {
+fn after_a_late_callback_the_sound_continues_where_the_renderer_was() {
     // Drive the clock cell directly through the transport on a fake whose position keeps counting through the dry stretch.
     let audio = state(&[("a", &tone(4.0), 4.0)], &[("a", 0.0, 0.0, 4.0, 1.0)]);
     let mut rig = rig(config());
@@ -725,4 +563,99 @@ fn a_stall_stops_the_sound_and_the_restart_re_anchors_at_the_current_tick() {
     rig.fake.advance(restarted_at + 20_000_000 + 80_000_000 - rig.fake.host_ns());
     let (sample, held) = rig.running().unwrap();
     assert!(!held && (sample - (tick * RATE + 80.0 * 48.0)).abs() <= 2.0, "{sample} from tick {tick}");
+}
+
+// ---- the clock when the thread is preempted inside a wake ------------------------------------------------------------------
+
+/// The clock names the project sample the device is playing: the frame the fake plays now is that sample of the mix.
+fn assert_the_clock_is_true(rig: &Rig, plan: &MixPlan, what: &str) {
+    let Some((sample, _)) = rig.running() else { panic!("{what}: the clock is not running: {:?}", rig.transport.reading()) };
+    let heard = rig.fake.heard_content_now().unwrap_or_else(|| panic!("{what}: the device plays nothing that was written"));
+    let first = (sample.floor() as i64 - 3).max(0) as u64;
+    let mut window = vec![0.0f32; 12];
+    plan.mix(first, &mut window).unwrap();
+    let found = (0..6).any(|i| window[i * 2].to_bits() == heard[0].to_bits() && window[i * 2 + 1].to_bits() == heard[1].to_bits());
+    assert!(found, "{what}: the clock says sample {sample} but the device is playing a different one");
+}
+
+fn playing_steadily() -> (Rig, Arc<MixPlan>) {
+    let audio = state(&[("a", &tone(6.0), 6.0)], &[("a", 0.0, 0.0, 6.0, 1.0)]);
+    let plan = plan_of(&audio, 0.0, 6.0);
+    let mut rig = rig(config());
+    rig.transport.play_range(&audio, 0.0, 6.0);
+    rig.until_started();
+    rig.fake.advance_ms(300);
+    assert_the_clock_is_true(&rig, &plan, "before any fault");
+    (rig, plan)
+}
+
+#[test]
+fn a_preemption_after_the_position_read_does_not_misalign_the_clock() {
+    // 480 frames are queued when the wake reads the position; the padding query then takes 700 frames of time, so the device
+    // plays them and 220 frames of silence before the thread looks again.
+    let (mut rig, plan) = playing_steadily();
+    rig.fake.delay_in_padding(700);
+    rig.fake.advance_ms(40);
+    assert!(rig.transport.underruns() >= 1);
+    rig.fake.advance_ms(150);
+    assert_the_clock_is_true(&rig, &plan, "after a delay inside the padding query");
+    rig.step_ms(400);
+    assert_the_clock_is_true(&rig, &plan, "400 ms later");
+}
+
+#[test]
+fn a_preemption_before_the_submit_does_not_misalign_the_clock() {
+    // The wake saw a healthy queue (480 frames); the thread is preempted for 700 frames before it submits the block.
+    let (mut rig, plan) = playing_steadily();
+    rig.fake.delay_in_write(700);
+    rig.fake.advance_ms(40);
+    assert!(rig.transport.underruns() >= 1, "the dry device was noticed");
+    rig.fake.advance_ms(150);
+    assert_the_clock_is_true(&rig, &plan, "after a delay before the submit");
+    rig.step_ms(400);
+    assert_the_clock_is_true(&rig, &plan, "400 ms later");
+}
+
+#[test]
+fn the_scrub_throttle_is_kept_across_releases_and_its_boundary_is_strict() {
+    // Today: the retrigger needs more than 100 ms since the last one, and stopAudioScrub() leaves audioScrubAt alone.
+    let audio = state(&[("a", &tone(3.0), 3.0)], &[("a", 0.0, 0.0, 3.0, 1.0)]);
+    let mut rig = rig(config());
+    assert!(rig.transport.scrub(&audio, 1.0).is_some());
+    rig.until_started();
+    rig.step_ms(20);
+    rig.transport.end_scrub();
+    assert!(rig.transport.scrub(&audio, 1.0).is_none(), "released and started again 20 ms later: still throttled");
+    rig.step_ms(80);
+    assert!(rig.transport.scrub(&audio, 1.0).is_none(), "exactly 100 ms is not more than 100 ms");
+    rig.step_ms(1);
+    assert!(rig.transport.scrub(&audio, 1.0).is_some(), "101 ms is");
+}
+
+#[test]
+fn a_stalled_output_and_thousands_of_commands_keep_the_reclaim_backlog_bounded_and_free_every_plan() {
+    let audio = state(&[("a", &tone(2.0), 2.0)], &[("a", 0.0, 0.0, 2.0, 1.0)]);
+    let mut rig = rig(config());
+    let plan = plan_of(&audio, 0.0, 2.0);
+    // The output thread never wakes: every command replaces the unread one, and the replaced command comes back to be freed.
+    rig.fake.skip_wakes(1_000_000);
+    let mut most = 0;
+    for i in 0..20_000u64 {
+        rig.transport.play(plan.clone(), i, 96_000);
+        most = most.max(rig.transport.reclaim_backlog());
+    }
+    assert!(most <= 256, "the backlog reached {most}");
+    // A burst faster than the freeing thread can drain is visible (counted) and recoverable; at the pace of a person it never happens.
+    let burst_overflows = rig.transport.reclaim_overflows();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Arc::strong_count(&plan) > 2 {
+        assert!(Instant::now() < deadline, "{} references are still held", Arc::strong_count(&plan));
+        rig.transport.poll();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    for i in 0..500u64 {
+        rig.transport.play(plan.clone(), i, 96_000);
+        std::thread::sleep(Duration::from_micros(300));
+    }
+    assert_eq!(rig.transport.reclaim_overflows(), burst_overflows, "at a human pace nothing is freed on the caller");
 }

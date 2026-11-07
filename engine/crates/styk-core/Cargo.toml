@@ -14,3 +14,6 @@ unicode-normalization = "=0.1.23"
 [dev-dependencies]
 sha2 = "0.10"
 zstd = "0.13"
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
