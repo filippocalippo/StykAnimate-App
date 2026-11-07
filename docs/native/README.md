@@ -79,7 +79,7 @@ native `styk-cli video` export with today's (FP's floor: bytes not equal, sizes 
 | K-dev | Astra | review fixed (release isolation by resolved features and linked symbols, profiled export under the picture budget, release profiles); merging `native-app` after K-guards |
 | R-slice | Opus | review: a blocker (refresh builds geometry on the interface thread: derived facts move to the frame workers, revision-stamped) and majors (a leaked gesture, a stale model across a document switch, Edit together's ticks, align over the range, missing controls, the focus contract, a locale-aware presentation for 27 languages with a language-neutral catalogue, real screenshot references), command handlers in their feature modules, one clipboard owner; fixing, then one re-check |
 | K-shell | Sonnet | review: a refused open dropped on the interface thread, arrows during Ctrl+Tab, drops outside the strip, today's Home rule, one clock with `--clock fixed`, the script read bounded, no failed-save dot; references recaptured with ClearType; K-doc's open host replaces its stand-in; fixing |
-| K-stage | Astra | running: the stage host (`perf/briefs/native/K-stage.md`) |
+| K-stage | Astra | done at `285dcdc2` (`docs/native/stage.md`): navigation, transforms, picking (169 frozen answers), frame requests, the worker-owned painter (equal to export's frame), renderer byte admission, iced's GPU-policy hook; release scenario p95 1,406 ms on one scene against p50 31 ms (the frame key's view inputs in question); in review, GPT-6.1 Sol xhigh |
 | K-rec | Astra | running: recovery and autosave (`perf/briefs/native/K-rec-recovery.md`) |
 | K-cmd, K-widgets, K-dock, stage widget | Astra, Sonnet | after R-slice merges |
 
