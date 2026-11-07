@@ -1,22 +1,39 @@
-# N8. Windows only in this phase; checking scaled to risk
+# N8. Windows only in this phase; who builds what; checking scaled to risk
 
-**Date:** 2026-11-07 (the owner). **Status:** accepted; overrides the phase prompt and the briefs where they conflict.
+**Date:** 2026-11-07 (the owner; the final working rules of the same day replace the first version where they differ).
+**Status:** accepted; overrides the phase prompt and the briefs where they conflict.
 
 **Scope.** Every feature of today's app and every new one (docking, the new Settings, the developer tools, the
-design-studio hooks), shipped and verified on Windows. macOS, Linux and the web build are not tested, run, measured or
-packaged in this phase; their spikes and CI legs stop (S5 is wrapped up with the constraints it found). Adding them later
-must be a port: every OS call behind `styk-platform` traits, no Windows types or `cfg(windows)` outside it, no threading or
-file assumptions only Windows allows, the GPU through wgpu only, nothing in the core or the engine a wasm32 or Unix target
-could not build. A near-free `cargo check` for wasm32 at gates is the only check.
+design-studio hooks), shipped and verified on Windows. macOS, Linux and the web build are not tested, run or packaged in
+this phase (S5 is wrapped up with its constraints, `docs/native/web.md`). Adding them later is a port: every OS call behind
+`styk-platform` traits, the GPU through wgpu only, nothing in the core or the engine a wasm32 or Unix target could not
+build; a `cargo check` for wasm32 at gates.
 
-**Roles.** The orchestrator (Opus) plans, cuts medium-sized chunks and writes precise briefs, and reads every diff before
-merging (architecture, hot-path performance, obvious bugs). Sonnet implements; no Sonnet checkers. GPT-6.1 Sol is the only
-reviewer: xhigh for high-risk work (saves, recovery, formats and bytes, undo and history, the document and session,
-threading and locks, input, playback and audio sync, export, memory and resource lifetimes, the engine), high and one round
-for widgets with behaviour (fields, docking, the timeline's interactions), none by default for interface replication
-(screens, panels, menus, dialogs, styling), which is done when the build, clippy and tests are clean and the screenshot
-matches today's. A re-check only after a blocker, or in a high-risk area.
+**Roles.** The orchestrator (Opus) plans, cuts medium-sized chunks, writes the briefs, chooses each chunk's implementer
+and reviewer, owns the architecture and has the last word on every merge; GPT-6 Astra (xhigh, read only) gives second
+opinions on architecture or strategy. One Opus implementer, once: the reference slice (the interface architecture and the
+Inspector on it, with `docs/native/patterns.md`). GPT-6 Astra implements most back-end and logic work (the engine host and
+documents, `styk-platform` and `styk-services`, the developer tools' engine and `xtask`, export and audio plumbing, the
+updater, the library, network services, and the logic behind screens in `styk-core`), never views. Sonnet implements
+screens, panels, dialogs, menus and styling, and easy back-end work; interface fan-out starts after the reference slice
+merges. GPT-6.1 Sol is the only reviewer, of back-end and logic work and of complex interactions, not of plain screens.
 
-**Proof** is proportionate: no exhaustive sweeps unless a real failure calls for one, representative scenes for
-performance, full suites only at gates. **Overhead:** short Handoff updates at merges, decision records only for real
-decisions, no findings documents for routine things.
+**Logic out of the screens.** Every feature is its logic (`styk-core` or the services) and its view; a view shows state and
+sends messages, never decides behaviour or calls the engine. A view that hides logic is rejected at the merge.
+
+**Checks by risk.** High risk (saving, recovery, formats and bytes, undo and history, the session, threading and locks,
+input, playback and audio sync, export, memory and resource lifetimes): Astra implements, Sol xhigh reviews (one re-check
+after a blocker), tests that fail without the change, byte checks where bytes matter, the orchestrator reads the whole
+diff. Normal back-end: Sol high once; the orchestrator reads the findings and the architectural parts. Complex interaction
+(the timeline, stage tools, the docking view, text fields): Sonnet on the core logic, Sol high once. Plain screens: a
+screenshot compared with today's and one automated interaction through the automation mode; the orchestrator reads the
+report and spot-checks the diff.
+
+**Automatic guards** in `cargo xtask check`, early in the skeleton: dependency direction; no `windows` crate, Win32 types
+or `cfg(windows)` outside `styk-platform`; no `unwrap`, `expect` or ignored `Result` in interface crates outside tests;
+clippy `disallowed_methods` for file I/O, `sleep` and blocking waits in interface crates; views never import the engine; new
+dependencies only from an allow list the orchestrator keeps; a screenshot difference limit per screen.
+
+**Proof** proportionate to risk (no exhaustive sweeps unless a real failure calls for one; representative scenes; full
+suites at gates). **Reports** of about 30 lines (what changed, checks and results, screenshot scores, departures from the
+brief, risks). Short Handoff updates at merges; decision records only for real decisions.

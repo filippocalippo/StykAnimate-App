@@ -82,9 +82,27 @@ impl LayoutRun<'_> {
             let cluster = &self.text[glyph.start..glyph.end];
             let total = cluster.grapheme_indices(true).count().max(1);
             let c_w = glyph.w / total as f32;
-            let mut c_x = glyph.x;
 
-            for (i, c) in cluster.grapheme_indices(true) {
+            // The graphemes of a ligature are divided in the glyph's own direction, so a right-to-left ligature's
+            // first grapheme is its right part; they are walked left to right.
+            let rtl = glyph.level.is_rtl();
+            let mut graphemes: Vec<(usize, &str, f32)> = cluster
+                .grapheme_indices(true)
+                .enumerate()
+                .map(|(k, (i, c))| {
+                    let x = if rtl {
+                        glyph.x + glyph.w - (k as f32 + 1.0) * c_w
+                    } else {
+                        glyph.x + k as f32 * c_w
+                    };
+                    (i, c, x)
+                })
+                .collect();
+            if rtl {
+                graphemes.reverse();
+            }
+
+            for (i, c, c_x) in graphemes {
                 let c_start = glyph.start + i;
                 let c_end = glyph.start + i + c.len();
 
@@ -102,8 +120,6 @@ impl LayoutRun<'_> {
                         results.push((min_x, width));
                     }
                 }
-
-                c_x += c_w;
             }
         }
 
@@ -1209,9 +1225,14 @@ impl Buffer {
 
                         let cluster = &run.text[glyph.start..glyph.end];
                         let total = cluster.grapheme_indices(true).count();
-                        let mut egc_x = glyph.x;
                         let egc_w = glyph.w / (total as f32);
-                        for (egc_i, egc) in cluster.grapheme_indices(true) {
+                        for (egc_k, (egc_i, egc)) in cluster.grapheme_indices(true).enumerate() {
+                            // A right-to-left ligature is divided from its right part.
+                            let egc_x = if glyph.level.is_rtl() {
+                                glyph.x + glyph.w - (egc_k as f32 + 1.0) * egc_w
+                            } else {
+                                glyph.x + egc_k as f32 * egc_w
+                            };
                             if x >= egc_x && x <= egc_x + egc_w {
                                 new_cursor_char = egc_i;
 
@@ -1223,7 +1244,6 @@ impl Buffer {
                                 }
                                 break 'hit;
                             }
-                            egc_x += egc_w;
                         }
 
                         let right_half = x >= glyph.x + glyph.w / 2.0;

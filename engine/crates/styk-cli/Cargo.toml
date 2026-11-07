@@ -24,3 +24,14 @@ styk-export = { path = "../styk-export" }
 pollster = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 sha2 = "0.10"
+styk-core = { path = "../styk-core", optional = true }
+styk-services = { path = "../styk-services", optional = true }
+styk-platform = { path = "../styk-platform", optional = true }
+
+[features]
+# The headless tools that drive the app's own services (`styk video`). Off by default: the engine-side tools reach no
+# platform crate, and `cargo xtask deps` holds this to being the only way in (decision Q2).
+app-tools = ["dep:styk-core", "dep:styk-services", "dep:styk-platform"]
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }

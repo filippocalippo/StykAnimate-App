@@ -152,24 +152,30 @@ impl editor::Editor for Editor {
                 let layout = line.layout_opt()?;
 
                 let empty_offset = match internal.alignment {
+                    // An empty right-to-left field starts at its right edge.
+                    Alignment::Default
+                        if buffer.direction() == cosmic_text::Direction::RightToLeft =>
+                    {
+                        internal.bounds.width
+                    }
                     Alignment::Default | Alignment::Left | Alignment::Justified => 0.0,
                     Alignment::Center => internal.bounds.width / 2.0,
                     Alignment::Right => internal.bounds.width,
                 };
 
+                let text = line.text();
+
+                // The visual line holding the caret, found by the byte range its glyphs cover (the first visual glyph
+                // of a right-to-left line is its last logical one), and the caret's x from the grapheme boxes, which
+                // are right in lines that mix directions and in ligatures.
                 let (visual_line, offset) = layout
                     .iter()
                     .enumerate()
-                    .find_map(|(i, line)| {
-                        let (start, offset) = line
-                            .glyphs
-                            .first()
-                            .map(|glyph| (glyph.start, glyph.x))
-                            .unwrap_or((0, empty_offset));
+                    .find_map(|(i, visual)| {
+                        let start = visual.glyphs.iter().map(|glyph| glyph.start).min().unwrap_or(0);
+                        let end = visual.glyphs.iter().map(|glyph| glyph.end).max().unwrap_or(0);
 
-                        let end = line.glyphs.last().map(|glyph| glyph.end).unwrap_or(0);
-
-                        let is_cursor_before_start = start > cursor.index;
+                        let is_cursor_before_start = start > cursor.index && i > 0;
 
                         let is_cursor_before_end = match cursor.affinity {
                             cosmic_text::Affinity::Before => cursor.index <= end,
@@ -177,41 +183,33 @@ impl editor::Editor for Editor {
                         };
 
                         if is_cursor_before_start {
-                            // Sometimes, the glyph we are looking for is right
-                            // between lines. This can happen when a line wraps
-                            // on a space.
-                            // In that case, we can assume the cursor is at the
-                            // end of the previous line.
-                            // i is guaranteed to be > 0 because `start` is always
-                            // 0 for the first line, so there is no way for the
-                            // cursor to be before it.
-                            Some((i - 1, layout[i - 1].w + offset))
-                        } else if is_cursor_before_end {
-                            let x: f32 = line
-                                .glyphs
-                                .iter()
-                                .take_while(|glyph| cursor.index > glyph.start)
-                                .map(|glyph| glyph.w)
-                                .sum();
+                            // The cursor sits between lines (a line wrapped on a space): it is at the end of the
+                            // previous line.
+                            let x = cosmic_text::extent_end(&layout[i - 1].glyphs)
+                                .unwrap_or(layout[i - 1].w);
 
-                            Some((i, x + offset))
+                            Some((i - 1, x))
+                        } else if is_cursor_before_end {
+                            let x = cosmic_text::caret_x_at(
+                                text,
+                                &visual.glyphs,
+                                cursor.index,
+                                cursor.affinity,
+                            )
+                            .unwrap_or(empty_offset);
+
+                            Some((i, x))
                         } else {
                             None
                         }
                     })
                     .unwrap_or_else(|| {
+                        let glyphs = layout.last().map(|visual| visual.glyphs.as_slice()).unwrap_or_default();
+
                         (
                             layout.len().saturating_sub(1),
-                            layout
-                                .last()
-                                .map(|line| {
-                                    line.w
-                                        + line
-                                            .glyphs
-                                            .first()
-                                            .map(|glyph| glyph.x)
-                                            .unwrap_or(empty_offset)
-                                })
+                            cosmic_text::caret_x_at(text, glyphs, cursor.index, cursor.affinity)
+                                .or_else(|| cosmic_text::extent_end(glyphs))
                                 .unwrap_or(empty_offset),
                         )
                     });
@@ -260,8 +258,15 @@ impl editor::Editor for Editor {
 
     fn perform(&mut self, action: Action) {
         let mut font_system = text::font_system().write().expect("Write font system");
+        let is_typing = matches!(&action, Action::Edit(Edit::Insert(_) | Edit::Type(_)));
+        // Moving the caret, selecting or clicking ends the typing group in progress.
+        let ends_typing_group = !matches!(&action, Action::Edit(_) | Action::Scroll { .. });
 
         self.with_internal_mut(|internal| {
+            if ends_typing_group {
+                internal.history.seal();
+            }
+
             let editor = &mut internal.editor;
 
             match action {
@@ -382,7 +387,7 @@ impl editor::Editor for Editor {
                         Edit::Insert(c) => {
                             editor.action(font_system.raw(), cosmic_text::Action::Insert(c));
                         }
-                        Edit::Paste(text) => {
+                        Edit::Type(text) | Edit::Paste(text) => {
                             editor.insert_string(&text, None);
                         }
                         Edit::Indent => {
@@ -453,6 +458,8 @@ impl editor::Editor for Editor {
                             editor.action(font_system.raw(), cosmic_text::Action::Delete);
                         }
                         Edit::Undo => {
+                            internal.history.seal();
+
                             if let Some(change) = internal.history.undo() {
                                 let mut change = change.clone();
                                 change.reverse();
@@ -461,6 +468,8 @@ impl editor::Editor for Editor {
                             }
                         }
                         Edit::Redo => {
+                            internal.history.seal();
+
                             if let Some(change) = internal.history.redo() {
                                 let _ = editor.apply_change(change);
                             }
@@ -549,8 +558,11 @@ impl editor::Editor for Editor {
             if let Some(change) = editor.finish_change()
                 && !change.items.is_empty()
             {
-                internal.history.push(change);
+                internal.history.push(change, is_typing);
             }
+
+            // Words that were not used again for this many edits leave the cache of shaped words.
+            font_system.raw().shape_run_cache.trim(SHAPE_CACHE_AGES);
         });
     }
 
@@ -579,6 +591,25 @@ impl editor::Editor for Editor {
 
     fn bounds(&self) -> Size {
         self.internal().bounds
+    }
+
+    fn seal_history(&mut self) {
+        self.with_internal_mut(|internal| internal.history.seal());
+    }
+
+    fn set_base_direction(&mut self, direction: editor::BaseDirection) {
+        let direction = match direction {
+            editor::BaseDirection::Auto => cosmic_text::Direction::Auto,
+            editor::BaseDirection::LeftToRight => cosmic_text::Direction::LeftToRight,
+            editor::BaseDirection::RightToLeft => cosmic_text::Direction::RightToLeft,
+        };
+
+        if buffer_from_editor(&self.internal().editor).direction() != direction {
+            self.with_internal_mut(|internal| {
+                buffer_mut_from_editor(&mut internal.editor).set_direction(direction);
+                internal.topmost_line_changed = Some(0);
+            });
+        }
     }
 
     fn min_bounds(&self) -> Size {
@@ -723,6 +754,9 @@ impl editor::Editor for Editor {
                 cosmic_text::Shaping::Advanced,
                 text::to_align(internal.alignment),
             );
+
+            // The value changed under the field: its edits no longer apply to this text.
+            internal.history = History::new();
 
             let line = cursor.line.min(buffer.lines.len().saturating_sub(1));
 
@@ -994,15 +1028,60 @@ fn shape_until_cursor(
     }
 }
 
+/// How many edits a shaped word stays in the cache after it was last used.
+const SHAPE_CACHE_AGES: u64 = 1024;
+
+/// The most changes a field remembers; the oldest is dropped beyond it.
+const HISTORY_LIMIT: usize = 200;
+
+/// The most text (in bytes, with a small cost per item) the history keeps; the oldest steps are dropped beyond it, so a few
+/// large pastes cannot hold megabytes of undo.
+const HISTORY_BYTES: usize = 1 << 20;
+
+/// The most items of one coalesced typing group: a long run of typing is not one undo step without end.
+const GROUP_ITEMS: usize = 1024;
+
+/// What one item of a change costs besides its text.
+const ITEM_COST: usize = 64;
+
+/// Typed insertions that continue each other within this long are one step of the history.
+const TYPING_GROUP: std::time::Duration = std::time::Duration::from_secs(1);
+
+struct Entry {
+    change: cosmic_text::Change,
+    /// Made of typed insertions, so the next typed insertion may join it.
+    typing: bool,
+    at: std::time::Instant,
+    /// What the entry holds, for the history's budget.
+    bytes: usize,
+}
+
 #[derive(Default)]
 struct History {
-    changes: Vec<cosmic_text::Change>,
+    changes: Vec<Entry>,
     current: usize,
+    /// The sum of the entries' `bytes`.
+    retained: usize,
+}
+
+fn cost(change: &cosmic_text::Change) -> usize {
+    change
+        .items
+        .iter()
+        .map(|item| item.text.len() + ITEM_COST)
+        .sum()
 }
 
 impl History {
     fn new() -> Self {
         Self::default()
+    }
+
+    /// Ends the current typing group: the next edit starts a step of its own.
+    fn seal(&mut self) {
+        for entry in &mut self.changes {
+            entry.typing = false;
+        }
     }
 
     fn undo(&mut self) -> Option<&cosmic_text::Change> {
@@ -1011,7 +1090,7 @@ impl History {
         }
 
         self.current = self.current.saturating_sub(1);
-        self.changes.get(self.current)
+        self.changes.get(self.current).map(|entry| &entry.change)
     }
 
     fn redo(&mut self) -> Option<&cosmic_text::Change> {
@@ -1019,14 +1098,71 @@ impl History {
             return None;
         }
 
-        let change = self.changes.get(self.current);
+        let change = self.changes.get(self.current).map(|entry| &entry.change);
         self.current += 1;
         change
     }
 
-    fn push(&mut self, change: cosmic_text::Change) {
-        self.changes.truncate(self.current);
-        self.changes.push(change);
-        self.current += 1;
+    fn push(&mut self, change: cosmic_text::Change, typing: bool) {
+        let now = std::time::Instant::now();
+
+        for dropped in self.changes.drain(self.current..) {
+            self.retained -= dropped.bytes;
+        }
+
+        let bytes = cost(&change);
+
+        if typing
+            && let Some(last) = self.changes.last_mut()
+            && last.typing
+            && last.change.items.len() < GROUP_ITEMS
+            && now.duration_since(last.at) < TYPING_GROUP
+            && continues(&last.change, &change)
+        {
+            last.change.items.extend(change.items);
+            last.at = now;
+            last.bytes += bytes;
+            self.retained += bytes;
+            self.evict();
+            return;
+        }
+
+        self.changes.push(Entry {
+            change,
+            typing,
+            at: now,
+            bytes,
+        });
+        self.retained += bytes;
+
+        while self.changes.len() > HISTORY_LIMIT {
+            let dropped = self.changes.remove(0);
+            self.retained -= dropped.bytes;
+        }
+
+        self.current = self.changes.len();
+        self.evict();
+    }
+
+    /// Drops the oldest steps while the history holds more than its budget (the newest step always stays).
+    fn evict(&mut self) {
+        while self.retained > HISTORY_BYTES && self.changes.len() > 1 {
+            let dropped = self.changes.remove(0);
+            self.retained -= dropped.bytes;
+            self.current = self.current.saturating_sub(1);
+        }
+    }
+}
+
+/// Whether `next` is an insertion that starts where `previous` ended.
+fn continues(previous: &cosmic_text::Change, next: &cosmic_text::Change) -> bool {
+    match (previous.items.last(), next.items.first()) {
+        (Some(last), Some(first)) => {
+            last.insert
+                && first.insert
+                && last.end.line == first.start.line
+                && last.end.index == first.start.index
+        }
+        _ => false,
     }
 }

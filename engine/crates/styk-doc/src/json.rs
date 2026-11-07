@@ -955,6 +955,18 @@ pub fn base64_into(bytes: &[u8], out: &mut Vec<u8>) {
     base64::engine::general_purpose::STANDARD.encode_slice(bytes, &mut out[start..]).expect("the output was sized for the input");
 }
 
+/// Decodes standard, padded base64 and appends the bytes to `out`, which should have room for them (the decoded size is at most
+/// three quarters of the text): nothing else is allocated. `false` if `text` is not valid base64; `out` is left as it was then.
+pub fn base64_append(text: &str, out: &mut Vec<u8>) -> bool {
+    let before = out.len();
+    if base64::engine::general_purpose::STANDARD.decode_vec(text, out).is_ok() {
+        true
+    } else {
+        out.truncate(before);
+        false
+    }
+}
+
 /// Decodes standard, padded base64 as the app does: `None` unless `text` is
 /// exactly the canonical encoding of the returned bytes.
 pub fn base64_strict(text: &str) -> Option<Vec<u8>> {

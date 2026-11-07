@@ -7,6 +7,8 @@
 //!
 //! It may depend on the core, the interface, the design system and `styk-trace`; nothing else may depend on it.
 
+pub mod pen_lab;
+
 use styk_trace::{RecordKind, snapshot};
 
 /// The recent events of every thread, one per line: when, which thread, what and (for spans) how long.

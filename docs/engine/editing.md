@@ -5,6 +5,12 @@ How editing moves from the JavaScript `Editor` (`src/editor.mjs` and about 80
 changing the interface or breaking the app at any commit. The plan is
 [`../RUST-ENGINE-PORT.md`](../RUST-ENGINE-PORT.md); the decision is D15.
 
+The native host calls the same session directly through `Session::call_native`: native arguments,
+the command's result/refusal and events, without a JSON read-view response. `Session::view` borrows
+selection and history state; `with_document` and `frame_records` use the session's existing caches.
+The panel-facing owner and its worker-preparation boundary are documented in
+[`native/documents.md`](../native/documents.md). The JavaScript session protocol is unchanged.
+
 ## Where it starts
 
 The editor owned the document as JavaScript objects and ran every command; the engine
