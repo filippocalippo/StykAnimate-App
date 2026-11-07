@@ -80,6 +80,13 @@ fn run(command: &mut Command, what: &str) {
 /// Builds a Setup with the sandbox defines.
 fn build(sandbox: &Sandbox, script: &Path, version: &str, source: &Path, out: &Path, extra: &[String]) {
     let mut command = Command::new(makensis());
+    if script.file_name().is_some_and(|n| n == "installer.nsi") {
+        // The Setup installs the files of a generated list and writes the manifest of them: the same tool that packages it.
+        let list = out.with_extension("files.nsh");
+        let example = payload_exe().with_file_name("release_feed.exe");
+        run(Command::new(example).arg("files-script").arg("--source").arg(source).arg("--out").arg(&list), "release_feed files-script");
+        command.arg(format!("/DFILES_SCRIPT={}", list.display()));
+    }
     command.arg(format!("/DVERSION={version}")).arg(format!("/DSOURCE_DIR={}", source.display())).arg(format!("/DOUTFILE={}", out.display())).arg(format!("/DSANDBOX={}", sandbox.id)).arg(format!("/DSANDBOX_DIR={}", sandbox.dir.join("profile").display()));
     for arg in extra {
         command.arg(arg);
@@ -316,6 +323,180 @@ fn two_setups_started_together_do_not_both_work_on_the_install() {
     assert!(first.success(), "the first Setup is not disturbed");
     assert_eq!(sandbox.registry.read_text(&format!("{UNINSTALL}\\{APP_GUID}"), "DisplayVersion").as_deref(), Some("2.0.0"));
     assert!(install.join("StykAnimate.exe").exists() && !install.join("resources").exists());
+}
+
+fn electron_install_machine(sandbox: &Sandbox, at: &Path) {
+    let files = sandbox.dir.join("electron-files-machine");
+    lay_out(&files, &[("resources\\app.asar", "old"), ("chrome_100_percent.pak", "old")]);
+    let setup = sandbox.dir.join("Electron-Setup-machine.exe");
+    build(sandbox, &repo_root().join("packaging/windows/test/electron-fixture.nsi"), "1.1.0", &files, &setup, &["/DMACHINE".to_string()]);
+    run_setup(&setup, &["/S"], at);
+}
+
+fn set_text(sandbox: &Sandbox, key: &str, name: &str, value: &str) {
+    use styk_services::shell::associations::{RegOp, Registry, Value};
+    let mut registry = sandbox.registry.clone();
+    registry.apply(&[RegOp::Set { key: key.to_string(), name: name.to_string(), value: Value::Text(value.to_string()) }]).unwrap();
+}
+
+#[test]
+#[ignore = "builds and runs Setups with makensis (sandboxed); run with --ignored"]
+fn an_uninstall_record_pointed_at_an_unrelated_folder_deletes_nothing() {
+    // The reproduction: install at A, copy its uninstaller beside someone's file in B, point only UninstallString at B, then
+    // run the Setup for C. The old uninstaller (which deletes recursively) must never be run on B.
+    let sandbox = Sandbox::new("record");
+    let root = sandbox.dir.join("Programs");
+    let (a, b, c) = (root.join("A"), root.join("B"), root.join("C"));
+    let guid_key = format!("{UNINSTALL}\\{APP_GUID}");
+    electron_install(&sandbox, &a);
+    std::fs::create_dir_all(&b).unwrap();
+    std::fs::copy(a.join("Uninstall StykAnimate.exe"), b.join("Uninstall StykAnimate.exe")).unwrap();
+    std::fs::write(b.join("keep.txt"), "a personal file").unwrap();
+    set_text(&sandbox, &guid_key, "UninstallString", &format!("\"{}\" /currentuser", b.join("Uninstall StykAnimate.exe").display()));
+    let setup = native_setup(&sandbox, "record", "2.0.0");
+
+    let status = setup_command(&setup, &["--updated", "/S", "/currentuser"], &c).status().unwrap();
+    assert_eq!(status.code(), Some(5), "a record whose uninstaller is in another folder than InstallLocation is refused");
+    assert_eq!(std::fs::read_to_string(b.join("keep.txt")).unwrap(), "a personal file", "B's file is still there");
+    assert!(a.join("StykAnimate.exe").exists() && a.join("resources").join("app.asar").exists(), "A is untouched");
+    assert!(!c.exists(), "nothing was installed");
+
+    // The other inconsistencies, each refused with nothing deleted: InstallLocation naming B while the uninstaller is in A;
+    // a consistent record for a folder that has no sign of being an installation of ours; an uninstaller with another name.
+    set_text(&sandbox, &guid_key, "UninstallString", &format!("\"{}\" /currentuser", a.join("Uninstall StykAnimate.exe").display()));
+    set_text(&sandbox, &format!("Software\\{APP_GUID}"), "InstallLocation", b.to_str().unwrap());
+    assert_eq!(setup_command(&setup, &["--updated", "/S", "/currentuser"], &c).status().unwrap().code(), Some(5), "InstallLocation and the uninstaller disagree");
+
+    std::fs::copy(payload_exe(), b.join("StykAnimate.exe")).unwrap();
+    set_text(&sandbox, &guid_key, "UninstallString", &format!("\"{}\" /currentuser", b.join("Uninstall StykAnimate.exe").display()));
+    assert_eq!(setup_command(&setup, &["--updated", "/S", "/currentuser"], &c).status().unwrap().code(), Some(5), "a consistent record for a folder with no installation evidence");
+
+    std::fs::copy(b.join("Uninstall StykAnimate.exe"), b.join("Other.exe")).unwrap();
+    set_text(&sandbox, &guid_key, "UninstallString", &format!("\"{}\" /currentuser", b.join("Other.exe").display()));
+    assert_eq!(setup_command(&setup, &["--updated", "/S", "/currentuser"], &c).status().unwrap().code(), Some(5), "an uninstaller that is not today's");
+
+    assert_eq!(std::fs::read_to_string(b.join("keep.txt")).unwrap(), "a personal file");
+    assert!(a.join("resources").join("app.asar").exists() && !c.exists());
+}
+
+#[test]
+#[ignore = "builds and runs Setups with makensis (sandboxed); run with --ignored"]
+fn a_portable_copy_beside_a_personal_file_is_not_an_installation_to_replace_or_remove() {
+    let sandbox = Sandbox::new("portable");
+    let b = sandbox.dir.join("Documents").join("tools");
+    std::fs::create_dir_all(&b).unwrap();
+    std::fs::copy(payload_exe(), b.join("StykAnimate.exe")).unwrap();
+    std::fs::write(b.join("thesis.txt"), "my thesis").unwrap();
+    let setup = native_setup(&sandbox, "portable", "2.0.0");
+    let status = setup_command(&setup, &["/S", "/currentuser"], &b).status().unwrap();
+    assert_eq!(status.code(), Some(3), "a folder with files in it that is not the installation being replaced is refused");
+    assert_eq!(std::fs::read_to_string(b.join("thesis.txt")).unwrap(), "my thesis");
+    assert!(b.join("StykAnimate.exe").exists());
+    assert!(!sandbox.registry.key_exists(&format!("{UNINSTALL}\\{APP_GUID}")), "nothing was registered against it");
+}
+
+#[test]
+#[ignore = "builds and runs Setups with makensis (sandboxed); run with --ignored"]
+fn the_native_uninstaller_removes_what_the_setup_installed_and_nothing_else() {
+    let sandbox = Sandbox::new("manifest");
+    let a = sandbox.dir.join("Programs").join("A");
+    let files = sandbox.dir.join("files-manifest");
+    lay_out(&files, &[("LICENSE", "l"), ("assets\\fonts\\inter.ttf", "f"), ("assets\\logo.svg", "s")]);
+    let setup = sandbox.dir.join("Setup.exe");
+    build(&sandbox, &repo_root().join("packaging/windows/installer.nsi"), "2.0.0", &files, &setup, &plugins().map(|p| vec![format!("/DPLUGIN_DIR={}", p.display())]).unwrap_or_default());
+    run_setup(&setup, &["/S", "/currentuser"], &a);
+    assert!(a.join("assets").join("fonts").join("inter.ttf").exists() && a.join("StykAnimate.files").exists());
+
+    // The user adds their own files, in the program's folder and in a folder of the program's.
+    std::fs::write(a.join("notes.txt"), "mine").unwrap();
+    std::fs::create_dir_all(a.join("sub")).unwrap();
+    std::fs::write(a.join("sub").join("mine.txt"), "mine too").unwrap();
+    std::fs::write(a.join("assets").join("my-logo.png"), "mine").unwrap();
+
+    // A copy of the uninstaller run from a folder with a personal file and no manifest deletes nothing there, and does not
+    // unregister the real installation either.
+    let x = sandbox.dir.join("elsewhere");
+    std::fs::create_dir_all(&x).unwrap();
+    std::fs::copy(a.join("Uninstall StykAnimate.exe"), x.join("Uninstall StykAnimate.exe")).unwrap();
+    std::fs::write(x.join("keep.txt"), "keep").unwrap();
+    let mut stray = Command::new(x.join("Uninstall StykAnimate.exe"));
+    stray.arg("/currentuser").arg("/S").raw_arg(format!("_?={}", x.display()));
+    run(&mut stray, "the uninstaller run from another folder");
+    assert_eq!(std::fs::read_to_string(x.join("keep.txt")).unwrap(), "keep");
+    assert!(sandbox.registry.key_exists(&format!("{UNINSTALL}\\{APP_GUID}")), "the real installation is still registered");
+
+    let mut uninstall = Command::new(a.join("Uninstall StykAnimate.exe"));
+    uninstall.arg("/currentuser").arg("/S").raw_arg(format!("_?={}", a.display()));
+    run(&mut uninstall, "the uninstaller");
+    assert!(!a.join("StykAnimate.exe").exists() && !a.join("LICENSE").exists() && !a.join("assets").join("fonts").exists() && !a.join("assets").join("logo.svg").exists(), "the program's own files are gone");
+    assert_eq!(std::fs::read_to_string(a.join("notes.txt")).unwrap(), "mine");
+    assert_eq!(std::fs::read_to_string(a.join("sub").join("mine.txt")).unwrap(), "mine too");
+    assert_eq!(std::fs::read_to_string(a.join("assets").join("my-logo.png")).unwrap(), "mine", "a folder that still holds a personal file stays");
+    assert!(!sandbox.registry.key_exists(&format!("{UNINSTALL}\\{APP_GUID}")));
+}
+
+#[test]
+#[ignore = "builds and runs Setups with makensis (sandboxed); run with --ignored"]
+fn with_both_scopes_installed_a_legacy_updater_naming_the_machine_install_replaces_that_one() {
+    // Today's Electron updater passes /D=<running installation> and no scope flag. The scope is the one whose registration
+    // names that folder: the machine's install is replaced, the user's install is left alone.
+    let sandbox = Sandbox::new("scopes");
+    let (user, machine) = (sandbox.dir.join("Programs").join("user"), sandbox.dir.join("Programs").join("machine"));
+    electron_install(&sandbox, &user);
+    electron_install_machine(&sandbox, &machine);
+    let setup = native_setup(&sandbox, "scopes", "2.0.0");
+    let guid_key = format!("{UNINSTALL}\\{APP_GUID}");
+    run_setup(&setup, &["--updated", "/S"], &machine);
+
+    assert!(machine.join("StykAnimate.exe").exists() && !machine.join("resources").exists(), "the machine install was replaced");
+    assert_eq!(sandbox.registry.read_text(&format!("HKLM\\{guid_key}"), "DisplayVersion").as_deref(), Some("2.0.0"));
+    assert_eq!(sandbox.registry.read_text(&format!("HKLM\\Software\\{APP_GUID}"), "InstallLocation").as_deref(), Some(machine.to_str().unwrap()));
+    assert!(user.join("resources").join("app.asar").exists(), "the user's install was not removed");
+    assert_eq!(sandbox.registry.read_text(&guid_key, "DisplayVersion").as_deref(), Some("1.1.0"), "and is still registered as it was");
+    assert_eq!(sandbox.registry.read_text(&format!("Software\\{APP_GUID}"), "InstallLocation").as_deref(), Some(user.to_str().unwrap()));
+
+    // An explicit scope without a destination keeps that scope's own folder.
+    run(Command::new(&setup).args(["--updated", "/S", "/currentuser"]), "the Setup");
+    assert!(user.join("StykAnimate.exe").exists() && !user.join("resources").exists(), "/currentuser updated the user's install in the user's folder");
+    assert_eq!(sandbox.registry.read_text(&guid_key, "DisplayVersion").as_deref(), Some("2.0.0"));
+    assert_eq!(sandbox.registry.read_text(&format!("Software\\{APP_GUID}"), "InstallLocation").as_deref(), Some(user.to_str().unwrap()));
+}
+
+#[test]
+#[ignore = "builds and runs Setups with makensis (sandboxed); run with --ignored"]
+fn a_lock_that_cannot_be_taken_stops_the_setup_before_it_changes_anything() {
+    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
+    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    let sandbox = Sandbox::new("lock");
+    let install = sandbox.dir.join("Programs").join("StykAnimate");
+    let setup = native_setup(&sandbox, "lock", "2.0.0");
+    // Somebody holds the Setup's lock name with an access list that lets nobody else open it: acquiring it fails, and a
+    // Setup that goes on regardless would be working unprotected.
+    let user = std::env::var("USERNAME").unwrap();
+    let name: Vec<u16> = format!("Global\\StykAnimateSetup-user-{user}-{APP_GUID}-{}\0", sandbox.id).encode_utf16().collect();
+    let sddl: Vec<u16> = "D:P\0".encode_utf16().collect();
+    // SAFETY: a descriptor from a fixed string, a mutex made with it, both released at the end of the test.
+    let (mutex, descriptor) = unsafe {
+        let mut descriptor = std::ptr::null_mut();
+        assert_ne!(ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut descriptor, std::ptr::null_mut()), 0);
+        let attributes = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: descriptor, bInheritHandle: 0 };
+        (CreateMutexW(&attributes, 0, name.as_ptr()), descriptor)
+    };
+    assert!(!mutex.is_null());
+    let status = setup_command(&setup, &["/S", "/currentuser"], &install).status().unwrap();
+    // SAFETY: closing what was made above.
+    unsafe {
+        CloseHandle(mutex);
+        LocalFree(descriptor);
+    }
+    assert_eq!(status.code(), Some(6), "an exclusion that cannot be taken is a refusal");
+    assert!(!install.exists(), "nothing was installed");
+    assert!(!sandbox.registry.key_exists(&format!("{UNINSTALL}\\{APP_GUID}")));
+    // Once nobody holds it, the same Setup works.
+    run_setup(&setup, &["/S", "/currentuser"], &install);
+    assert!(install.join("StykAnimate.exe").exists());
 }
 
 /// A release server for one version: the "latest" alias redirects to the tag; the feed, its signature and the Setup are

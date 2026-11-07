@@ -45,10 +45,16 @@ pub fn package(root: &Path, args: &[&str]) -> Result<(), String> {
         std::fs::copy(root.join(notice), payload.join(notice)).map_err(|e| format!("copying {notice}: {e}"))?;
     }
 
+    // The Setup installs exactly the files of this list and writes the manifest the uninstaller removes by.
+    let list = out.join("files.nsh");
+    run(
+        Command::new("cargo").current_dir(root.join("engine")).args(["run", "--quiet", "-p", "styk-platform", "--example", "release_feed", "--", "files-script"]).arg("--source").arg(&payload).arg("--out").arg(&list),
+        "listing the files",
+    )?;
     let setup = out.join(format!("StykAnimate-{version}-Setup-x64.exe"));
     let makensis = makensis()?;
     let mut command = Command::new(&makensis);
-    command.arg(format!("/DVERSION={version}")).arg(format!("/DSOURCE_DIR={}", payload.display())).arg(format!("/DOUTFILE={}", setup.display()));
+    command.arg(format!("/DVERSION={version}")).arg(format!("/DFILES_SCRIPT={}", list.display())).arg(format!("/DOUTFILE={}", setup.display()));
     command.arg(format!("/DICON_FILE={}", root.join("desktop").join("assets").join("stykanimate.ico").display()));
     if let Some(plugins) = winshell_plugins() {
         command.arg(format!("/DPLUGIN_DIR={}", plugins.display()));

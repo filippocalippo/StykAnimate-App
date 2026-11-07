@@ -19,6 +19,14 @@ SilentUnInstall silent
 
 !define APP_GUID "da89159e-9653-5b0d-96ae-4aeef8dc5497"
 !define REG "Software\StykAnimateSandbox\${SANDBOX}\"
+; MACHINE: the install of "all users", whose keys the Setup's sandbox build keeps under <prefix>HKLM\.
+!ifdef MACHINE
+  !define PFX "${REG}HKLM\"
+  !define SCOPE "/allusers"
+!else
+  !define PFX "${REG}"
+  !define SCOPE "/currentuser"
+!endif
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}"
 !define INSTALL_KEY "Software\${APP_GUID}"
 
@@ -27,13 +35,13 @@ OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\StykAnimate"
 
 !macro associate EXT NAME
-  WriteRegStr HKCU "${REG}Software\Classes\.${EXT}" "" "${NAME}"
-  WriteRegNone HKCU "${REG}Software\Classes\.${EXT}\OpenWithProgids" "${NAME}"
-  WriteRegStr HKCU "${REG}Software\Classes\${NAME}" "" "${NAME}"
-  WriteRegStr HKCU "${REG}Software\Classes\${NAME}\DefaultIcon" "" '"$INSTDIR\StykAnimate.exe,0"'
-  WriteRegStr HKCU "${REG}Software\Classes\${NAME}\shell" "" "open"
-  WriteRegStr HKCU "${REG}Software\Classes\${NAME}\shell\open" "" "Open with StykAnimate"
-  WriteRegStr HKCU "${REG}Software\Classes\${NAME}\shell\open\command" "" '"$INSTDIR\StykAnimate.exe" "%1"'
+  WriteRegStr HKCU "${PFX}Software\Classes\.${EXT}" "" "${NAME}"
+  WriteRegNone HKCU "${PFX}Software\Classes\.${EXT}\OpenWithProgids" "${NAME}"
+  WriteRegStr HKCU "${PFX}Software\Classes\${NAME}" "" "${NAME}"
+  WriteRegStr HKCU "${PFX}Software\Classes\${NAME}\DefaultIcon" "" '"$INSTDIR\StykAnimate.exe,0"'
+  WriteRegStr HKCU "${PFX}Software\Classes\${NAME}\shell" "" "open"
+  WriteRegStr HKCU "${PFX}Software\Classes\${NAME}\shell\open" "" "Open with StykAnimate"
+  WriteRegStr HKCU "${PFX}Software\Classes\${NAME}\shell\open\command" "" '"$INSTDIR\StykAnimate.exe" "%1"'
 !macroend
 
 Function .onInit
@@ -53,14 +61,14 @@ Section "Install"
   SetOutPath $INSTDIR
   File /r "${SOURCE_DIR}\*"
   WriteUninstaller "$INSTDIR\Uninstall StykAnimate.exe"
-  WriteRegStr HKCU "${REG}${INSTALL_KEY}" InstallLocation "$INSTDIR"
-  WriteRegStr HKCU "${REG}${INSTALL_KEY}" KeepShortcuts "true"
-  WriteRegStr HKCU "${REG}${INSTALL_KEY}" ShortcutName "StykAnimate"
-  WriteRegStr HKCU "${REG}${UNINSTALL_KEY}" DisplayName "StykAnimate ${VERSION}"
-  WriteRegStr HKCU "${REG}${UNINSTALL_KEY}" UninstallString '"$INSTDIR\Uninstall StykAnimate.exe" /currentuser'
-  WriteRegStr HKCU "${REG}${UNINSTALL_KEY}" QuietUninstallString '"$INSTDIR\Uninstall StykAnimate.exe" /currentuser /S'
-  WriteRegStr HKCU "${REG}${UNINSTALL_KEY}" DisplayVersion "${VERSION}"
-  WriteRegStr HKCU "${REG}${UNINSTALL_KEY}" DisplayIcon "$INSTDIR\StykAnimate.exe,0"
+  WriteRegStr HKCU "${PFX}${INSTALL_KEY}" InstallLocation "$INSTDIR"
+  WriteRegStr HKCU "${PFX}${INSTALL_KEY}" KeepShortcuts "true"
+  WriteRegStr HKCU "${PFX}${INSTALL_KEY}" ShortcutName "StykAnimate"
+  WriteRegStr HKCU "${PFX}${UNINSTALL_KEY}" DisplayName "StykAnimate ${VERSION}"
+  WriteRegStr HKCU "${PFX}${UNINSTALL_KEY}" UninstallString '"$INSTDIR\Uninstall StykAnimate.exe" ${SCOPE}'
+  WriteRegStr HKCU "${PFX}${UNINSTALL_KEY}" QuietUninstallString '"$INSTDIR\Uninstall StykAnimate.exe" ${SCOPE} /S'
+  WriteRegStr HKCU "${PFX}${UNINSTALL_KEY}" DisplayVersion "${VERSION}"
+  WriteRegStr HKCU "${PFX}${UNINSTALL_KEY}" DisplayIcon "$INSTDIR\StykAnimate.exe,0"
   !insertmacro associate "nodes" "Stick Nodes figure"
   !insertmacro associate "nodemc" "Stick Nodes movie clip"
   !insertmacro associate "stknds" "Stick Nodes project"
@@ -70,9 +78,9 @@ Section "Install"
   !insertmacro associate "stkz" "StykAnimate figure"
   !insertmacro associate "styk" "StykAnimate project"
   ; The link, as the Electron app registers it at run time (setAsDefaultProtocolClient).
-  WriteRegStr HKCU "${REG}Software\Classes\stykanimate" "" "URL:stykanimate"
-  WriteRegStr HKCU "${REG}Software\Classes\stykanimate" "URL Protocol" ""
-  WriteRegStr HKCU "${REG}Software\Classes\stykanimate\shell\open\command" "" `"$INSTDIR\StykAnimate.exe" "%1"`
+  WriteRegStr HKCU "${PFX}Software\Classes\stykanimate" "" "URL:stykanimate"
+  WriteRegStr HKCU "${PFX}Software\Classes\stykanimate" "URL Protocol" ""
+  WriteRegStr HKCU "${PFX}Software\Classes\stykanimate\shell\open\command" "" `"$INSTDIR\StykAnimate.exe" "%1"`
   CreateDirectory "${SANDBOX_DIR}\StartMenu"
   CreateDirectory "${SANDBOX_DIR}\Desktop"
   CreateShortCut "${SANDBOX_DIR}\StartMenu\StykAnimate.lnk" "$INSTDIR\StykAnimate.exe"
@@ -81,8 +89,8 @@ Section "Install"
 SectionEnd
 
 !macro unassociate EXT NAME
-  DeleteRegValue HKCU "${REG}Software\Classes\.${EXT}\OpenWithProgids" "${NAME}"
-  DeleteRegKey HKCU "${REG}Software\Classes\${NAME}"
+  DeleteRegValue HKCU "${PFX}Software\Classes\.${EXT}\OpenWithProgids" "${NAME}"
+  DeleteRegKey HKCU "${PFX}Software\Classes\${NAME}"
 !macroend
 
 Section "Uninstall"
@@ -94,8 +102,8 @@ Section "Uninstall"
   !insertmacro unassociate "stykmov" "StykAnimate movieclip"
   !insertmacro unassociate "stkz" "StykAnimate figure"
   !insertmacro unassociate "styk" "StykAnimate project"
-  DeleteRegKey HKCU "${REG}${UNINSTALL_KEY}"
-  DeleteRegKey HKCU "${REG}${INSTALL_KEY}"
+  DeleteRegKey HKCU "${PFX}${UNINSTALL_KEY}"
+  DeleteRegKey HKCU "${PFX}${INSTALL_KEY}"
   Delete "${SANDBOX_DIR}\StartMenu\StykAnimate.lnk"
   Delete "${SANDBOX_DIR}\Desktop\StykAnimate.lnk"
   Delete "$INSTDIR\Uninstall StykAnimate.exe"

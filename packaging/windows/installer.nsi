@@ -2,18 +2,30 @@
 ;
 ; It keeps the upgrade path of the Electron installer: the same uninstall key (the v5 UUID electron-builder derives from
 ; app.stykanimate.desktop), the same install-location key, the same file-association ProgIDs, the same shortcut names and
-; the same arguments an installed copy's updater passes (--updated /S --force-run /D=<dir>). An existing install is
-; removed with its own uninstaller first, silently, as electron-builder's installer does for its own upgrades.
+; the same arguments an installed copy's updater passes (--updated /S --force-run /D=<dir>).
+;
+; Deleting is the dangerous part, and it is bounded here at its root:
+;  - THIS uninstaller never deletes a folder recursively. The Setup writes a manifest of the files it installed into the
+;    installation; the uninstaller removes exactly those and the folders they leave empty. Anything else stays, whatever
+;    folder it was pointed at.
+;  - The Electron uninstaller (electron-builder's) deletes recursively, so it is run only on a registration that agrees
+;    with itself and with the folder: InstallLocation is the folder of UninstallString, the uninstaller has today's name,
+;    the folder holds the Electron installation's evidence (the program and resources\app-update.yml or app.asar), and the
+;    key is today's GUID in the scope being replaced. Anything else is refused, with an exit code and nothing deleted.
+;  - A destination that is not empty is refused unless it is the validated installation being replaced.
+;
+; Exit codes: 2 the previous version could not be removed, 3 the destination is not empty, 4 another Setup is working on
+; this install, 5 the registration is inconsistent, 6 the exclusion could not be taken, 740 elevation refused.
 ;
 ; Defines (makensis /D...):
 ;   VERSION      the version being installed (required)
-;   SOURCE_DIR   the folder whose contents are installed (required)
+;   FILES_SCRIPT the generated list of files to install and the manifest writes (required; release_feed files-script)
 ;   OUTFILE      the Setup to write (required)
 ;   ICON_FILE    the .ico of the Setup and the uninstaller (optional)
-;   PLUGIN_DIR   a folder holding x86-unicode\WinShell.dll (shortcut application id); electron-builder's cache has one
-;   SANDBOX      a test build: every registry key goes under HKCU\Software\StykAnimateSandbox\<SANDBOX>\, shortcuts and the
-;                library go under SANDBOX_DIR, no process is waited for and Explorer is not notified; nothing outside
-;                the sandbox is touched
+;   PLUGIN_DIR   a folder holding x86-unicode\ StdUtils, UserInfo, WinShell; electron-builder's cache has them
+;   SANDBOX      a test build: every registry key goes under HKCU\Software\StykAnimateSandbox\<SANDBOX>\ (all-users keys
+;                under ...\HKLM\), shortcuts and the library go under SANDBOX_DIR, no process is waited for and Explorer
+;                is not notified; nothing outside the sandbox is touched
 ;   SANDBOX_DIR  with SANDBOX: the folder standing in for the profile's Start menu, desktop and Documents
 
 Unicode true
@@ -24,8 +36,8 @@ ManifestDPIAware true
 !ifndef VERSION
   !error "define VERSION"
 !endif
-!ifndef SOURCE_DIR
-  !error "define SOURCE_DIR"
+!ifndef FILES_SCRIPT
+  !error "define FILES_SCRIPT"
 !endif
 !ifndef OUTFILE
   !error "define OUTFILE"
@@ -34,15 +46,19 @@ ManifestDPIAware true
 !define PRODUCT_NAME "StykAnimate"
 !define APP_EXE "StykAnimate.exe"
 !define UNINSTALL_EXE "Uninstall StykAnimate.exe"
+!define MANIFEST "StykAnimate.files"
 !define APP_ID "app.stykanimate.desktop"
 !define APP_GUID "da89159e-9653-5b0d-96ae-4aeef8dc5497"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}"
 !define INSTALL_KEY "Software\${APP_GUID}"
+!define DEFAULT_DIR "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
 
 !ifdef SANDBOX
   !define REG "Software\StykAnimateSandbox\${SANDBOX}\"
+  !define MUTEX_TAG "-${SANDBOX}"
 !else
   !define REG ""
+  !define MUTEX_TAG ""
 !endif
 
 !include "MUI2.nsh"
@@ -59,16 +75,10 @@ ManifestDPIAware true
   !endif
 !endif
 
-!ifdef SANDBOX
-  !define MUTEX_TAG "-${SANDBOX}"
-!else
-  !define MUTEX_TAG ""
-!endif
-
 Name "${PRODUCT_NAME}"
 BrandingText "${PRODUCT_NAME} ${VERSION}"
 OutFile "${OUTFILE}"
-InstallDir "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
+InstallDir "${DEFAULT_DIR}"
 ShowInstDetails nevershow
 
 VIProductVersion "${VERSION}.0"
@@ -80,13 +90,15 @@ VIAddVersionKey "FileDescription" "${PRODUCT_NAME} Setup"
 Var installMode      ; "CurrentUser" or "all"
 Var isUpdated
 Var forceRun
-Var oldDir
-Var oldUninstaller
+Var dirGiven         ; "1" when /D= named the destination
+Var oldDir           ; the validated installation being replaced, or ""
+Var oldUninstaller   ; its uninstaller, or ""
 Var startMenuDir
 Var desktopDir
 Var docsDir
 Var modeAll
 Var modeMe
+Var manifest
 
 ; Where things go. In a sandbox build they are folders of the sandbox.
 !macro setLocations
@@ -110,10 +122,15 @@ Var modeMe
   !endif
 !macroend
 
-; The registry root of the install mode. A sandbox build always uses the current user's hive under its prefix.
+; The registry of the install mode. A sandbox build keeps the current user's keys under its prefix and the machine's
+; under <prefix>HKLM\, both in the current user's hive, so both scopes can be present without touching the real one.
 !macro writeStr KEY NAME VALUE
   !ifdef SANDBOX
-    WriteRegStr HKCU "${REG}${KEY}" "${NAME}" `${VALUE}`
+    ${If} $installMode == "all"
+      WriteRegStr HKCU "${REG}HKLM\${KEY}" "${NAME}" `${VALUE}`
+    ${Else}
+      WriteRegStr HKCU "${REG}${KEY}" "${NAME}" `${VALUE}`
+    ${EndIf}
   !else
     ${If} $installMode == "all"
       WriteRegStr HKLM "${KEY}" "${NAME}" `${VALUE}`
@@ -125,7 +142,11 @@ Var modeMe
 
 !macro writeNone KEY NAME
   !ifdef SANDBOX
-    WriteRegNone HKCU "${REG}${KEY}" "${NAME}"
+    ${If} $installMode == "all"
+      WriteRegNone HKCU "${REG}HKLM\${KEY}" "${NAME}"
+    ${Else}
+      WriteRegNone HKCU "${REG}${KEY}" "${NAME}"
+    ${EndIf}
   !else
     ${If} $installMode == "all"
       WriteRegNone HKLM "${KEY}" "${NAME}"
@@ -135,25 +156,34 @@ Var modeMe
   !endif
 !macroend
 
-!macro readStr OUT ROOT KEY NAME
+; Reads a value of one scope's registration: HIVE is HKLM (all users) or HKCU (the current user).
+!macro readStr OUT HIVE KEY NAME
   !ifdef SANDBOX
-    ReadRegStr ${OUT} HKCU "${REG}${KEY}" "${NAME}"
+    !if "${HIVE}" == "HKLM"
+      ReadRegStr ${OUT} HKCU "${REG}HKLM\${KEY}" "${NAME}"
+    !else
+      ReadRegStr ${OUT} HKCU "${REG}${KEY}" "${NAME}"
+    !endif
   !else
-    ReadRegStr ${OUT} ${ROOT} "${KEY}" "${NAME}"
+    ReadRegStr ${OUT} ${HIVE} "${KEY}" "${NAME}"
   !endif
 !macroend
 
-; Reads from the hive of the install mode (the current user, or the machine for all users).
+; Reads from the scope of the install mode.
 !macro readModeStr OUT KEY NAME
-  !ifdef SANDBOX
-    ReadRegStr ${OUT} HKCU "${REG}${KEY}" "${NAME}"
-  !else
-    ${If} $installMode == "all"
-      ReadRegStr ${OUT} HKLM "${KEY}" "${NAME}"
-    ${Else}
-      ReadRegStr ${OUT} HKCU "${KEY}" "${NAME}"
-    ${EndIf}
-  !endif
+  ${If} $installMode == "all"
+    !insertmacro readStr ${OUT} HKLM "${KEY}" "${NAME}"
+  ${Else}
+    !insertmacro readStr ${OUT} HKCU "${KEY}" "${NAME}"
+  ${EndIf}
+!macroend
+
+; A folder name without its trailing backslash, so two spellings of one folder compare equal.
+!macro stripSlash VAR
+  StrCpy $R9 ${VAR} 1 -1
+  ${If} $R9 == "\"
+    StrCpy ${VAR} ${VAR} -1
+  ${EndIf}
 !macroend
 
 ; One file type: the ProgID is the association's name, as electron-builder writes it.
@@ -227,7 +257,7 @@ Function modePageLeave
     Call EnsureAdministrator
   ${Else}
     StrCpy $installMode "CurrentUser"
-    StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
+    StrCpy $INSTDIR "${DEFAULT_DIR}"
   ${EndIf}
 FunctionEnd
 
@@ -240,9 +270,9 @@ FunctionEnd
 ; ---- Start ----
 
 ; An install for all users writes the machine's registry and Program Files: if this Setup is not an administrator's, it
-; starts itself again elevated (the elevation prompt), with the same arguments and destination, and ends. A declined
-; prompt ends it with the error the prompt gave. The elevated copy installs; the program it starts afterwards is started
-; as the user (below), not elevated.
+; starts itself again elevated (the elevation prompt), with the same arguments and destination, and ends. It has taken no
+; exclusion by then (the Setup that works takes it, in the install section), so the elevated copy finds it free. A
+; declined prompt ends it with an error.
 Function EnsureAdministrator
   !ifndef SANDBOX
     UserInfo::GetAccountType
@@ -263,22 +293,19 @@ Function EnsureAdministrator
   !endif
 FunctionEnd
 
+; Stops with a message and an exit code. The exit code is in $R8, the message in $R7.
+Function Refuse
+  ${IfNot} ${Silent}
+    MessageBox MB_OK|MB_ICONSTOP "$R7"
+  ${EndIf}
+  SetErrorLevel $R8
+  Quit
+FunctionEnd
+
 Function .onInit
   ; The 64-bit view of the registry, where the Electron install, the uninstaller and the program look.
   ${If} ${RunningX64}
     SetRegView 64
-  ${EndIf}
-
-  ; One Setup at a time works on the install (electron-builder's installer has a mutex for the same reason). The handle
-  ; is kept for the life of this process.
-  System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\StykAnimateSetup-${APP_GUID}${MUTEX_TAG}") p .r8 ?e'
-  Pop $9
-  ${If} $9 = 183
-    ${IfNot} ${Silent}
-      MessageBox MB_OK|MB_ICONEXCLAMATION "Another ${PRODUCT_NAME} Setup is already running."
-    ${EndIf}
-    SetErrorLevel 4
-    Quit
   ${EndIf}
 
   ${GetParameters} $R0
@@ -295,55 +322,161 @@ Function .onInit
   ${EndIf}
   ClearErrors
 
-  ; The mode: an explicit flag, else the install that is there (an update stays where it is), else the current user.
+  ; The scope and the destination are resolved together, from what is registered. NSIS has put /D= in $INSTDIR already.
+  StrCpy $dirGiven "0"
+  ${If} "$INSTDIR" != "${DEFAULT_DIR}"
+    StrCpy $dirGiven "1"
+  ${EndIf}
+  !insertmacro readStr $R4 HKCU "${INSTALL_KEY}" "InstallLocation"
+  !insertmacro readStr $R5 HKLM "${INSTALL_KEY}" "InstallLocation"
+  !insertmacro stripSlash $R4
+  !insertmacro stripSlash $R5
+  StrCpy $R6 "$INSTDIR"
+  !insertmacro stripSlash $R6
+
   StrCpy $installMode "CurrentUser"
-  !insertmacro readStr $0 HKLM "${INSTALL_KEY}" "InstallLocation"
-  !ifndef SANDBOX
-    ReadRegStr $1 HKCU "${INSTALL_KEY}" "InstallLocation"
-    ${If} $0 != ""
-    ${AndIf} $1 == ""
+  StrCpy $R1 ""
+  ${GetOptions} $R0 "/allusers" $R2
+  ${IfNot} ${Errors}
+    StrCpy $R1 "all"
+  ${EndIf}
+  ClearErrors
+  ${GetOptions} $R0 "/currentuser" $R2
+  ${IfNot} ${Errors}
+    StrCpy $R1 "CurrentUser"
+  ${EndIf}
+  ClearErrors
+
+  ${If} $R1 != ""
+    ; An explicit scope is the scope.
+    StrCpy $installMode $R1
+  ${ElseIf} $dirGiven == "1"
+    ; A legacy updater names the running installation and no scope: it is the scope whose registration names that folder.
+    ; Nothing registered there is a new installation, which is for the current user unless asked otherwise.
+    ${If} $R5 != ""
+    ${AndIf} "$R6" == "$R5"
       StrCpy $installMode "all"
     ${EndIf}
-    ${If} $1 != ""
-      StrCpy $oldDir $1
-    ${ElseIf} $0 != ""
-      StrCpy $oldDir $0
-    ${EndIf}
-  !else
-    StrCpy $oldDir $0
-  !endif
-  ${GetOptions} $R0 "/allusers" $R1
-  ${IfNot} ${Errors}
+  ${ElseIf} $R5 != ""
+  ${AndIf} $R4 == ""
     StrCpy $installMode "all"
   ${EndIf}
-  ClearErrors
-  ${GetOptions} $R0 "/currentuser" $R1
-  ${IfNot} ${Errors}
-    StrCpy $installMode "CurrentUser"
-  ${EndIf}
-  ClearErrors
 
-  ; An explicit /D= wins; otherwise an update stays where the install is.
-  ${If} $oldDir != ""
-  ${AndIf} $INSTDIR == "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
-    StrCpy $INSTDIR $oldDir
-  ${ElseIf} $INSTDIR == "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
-  ${AndIf} $installMode == "all"
-    StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCT_NAME}"
+  ${If} $dirGiven == "0"
+    ; No destination named: the scope's registered installation, else the scope's default folder.
+    ${If} $installMode == "all"
+      ${If} $R5 != ""
+        StrCpy $INSTDIR $R5
+      ${Else}
+        StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCT_NAME}"
+      ${EndIf}
+    ${ElseIf} $R4 != ""
+      StrCpy $INSTDIR $R4
+    ${EndIf}
   ${EndIf}
-
-  ; The previous installation is the one of the install mode: its own folder is what its uninstaller runs in.
-  !insertmacro readModeStr $oldDir "${INSTALL_KEY}" "InstallLocation"
 
   ${If} $installMode == "all"
     Call EnsureAdministrator
   ${EndIf}
 FunctionEnd
 
+; The exclusion of the install transaction: one Setup at a time works on an install, across sessions (a named mutex in
+; the global namespace, taken by the Setup that actually works, which is the elevated one). For all users it admits only
+; administrators and SYSTEM. Not being able to take it is a refusal, never a reason to go on.
+Function TakeSetupLock
+  ${If} $installMode == "all"
+    System::Call 'advapi32::ConvertStringSecurityDescriptorToSecurityDescriptorW(w "D:P(A;;GA;;;BA)(A;;GA;;;SY)", i 1, *p .r2, p 0) i .r3'
+    ${If} $3 = 0
+      StrCpy $R7 "The Setup could not secure its lock (error)."
+      StrCpy $R8 6
+      Call Refuse
+    ${EndIf}
+    System::Call '*(i 12, p r2, i 0) p .r4'
+    System::Call 'kernel32::CreateMutexW(p r4, i 0, w "Global\StykAnimateSetup-machine-${APP_GUID}${MUTEX_TAG}") p .r8 ?e'
+  ${Else}
+    ReadEnvStr $R7 USERNAME
+    System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Global\StykAnimateSetup-user-$R7-${APP_GUID}${MUTEX_TAG}") p .r8 ?e'
+  ${EndIf}
+  Pop $9
+  ${If} $8 = 0
+    StrCpy $R7 "Another Setup holds this installation, or the Setup could not take its lock (error $9)."
+    StrCpy $R8 6
+    Call Refuse
+  ${EndIf}
+  ${If} $9 = 183
+    StrCpy $R7 "Another ${PRODUCT_NAME} Setup is already working on this installation."
+    StrCpy $R8 4
+    Call Refuse
+  ${EndIf}
+  ; The handle in $8 stays open for the life of this process.
+FunctionEnd
+
+; Finds the installation this Setup replaces, and refuses a registration it cannot trust. Sets $oldDir and $oldUninstaller
+; (both empty for a fresh install). The old uninstaller may be electron-builder's, which deletes recursively, so it runs
+; only on a record that agrees with itself and with the folder it names.
+Function FindPrevious
+  StrCpy $oldDir ""
+  StrCpy $oldUninstaller ""
+  !insertmacro readModeStr $R0 "${INSTALL_KEY}" "InstallLocation"
+  !insertmacro readModeStr $R1 "${UNINSTALL_KEY}" "UninstallString"
+  ${If} $R0 == ""
+  ${AndIf} $R1 == ""
+    Return
+  ${EndIf}
+  StrCpy $R7 "The installed ${PRODUCT_NAME} is registered inconsistently, so it will not be touched. Remove it from Settings, Apps, then run this Setup again."
+  StrCpy $R8 5
+  ${If} $R0 == ""
+  ${OrIf} $R1 == ""
+    Call Refuse
+  ${EndIf}
+  ; The command is '"<path>" /currentuser' or '"<path>" /allusers'; take the quoted path.
+  StrCpy $R2 $R1 1
+  ${If} $R2 != '"'
+    Call Refuse
+  ${EndIf}
+  StrCpy $R2 $R1 "" 1
+  StrCpy $R3 0
+  findQuote:
+    StrCpy $R4 $R2 1 $R3
+    ${If} $R4 != '"'
+    ${AndIf} $R4 != ""
+      IntOp $R3 $R3 + 1
+      Goto findQuote
+    ${EndIf}
+  ${If} $R4 == ""
+    Call Refuse
+  ${EndIf}
+  StrCpy $R2 $R2 $R3
+  ; The uninstaller must be today's, in the folder InstallLocation names.
+  ${GetFileName} "$R2" $R3
+  ${GetParent} "$R2" $R4
+  !insertmacro stripSlash $R0
+  !insertmacro stripSlash $R4
+  ${If} "$R3" != "${UNINSTALL_EXE}"
+  ${OrIf} "$R4" != "$R0"
+  ${OrIfNot} ${FileExists} "$R2"
+    Call Refuse
+  ${EndIf}
+  ; And the folder must be an installation of this program: one of ours (it has our manifest), or the Electron
+  ; installation (the program, and electron-builder's own files).
+  ${IfNot} ${FileExists} "$R0\${APP_EXE}"
+    Call Refuse
+  ${EndIf}
+  ${IfNot} ${FileExists} "$R0\${MANIFEST}"
+    ${IfNot} ${FileExists} "$R0\resources\app-update.yml"
+    ${AndIfNot} ${FileExists} "$R0\resources\app.asar"
+      Call Refuse
+    ${EndIf}
+  ${EndIf}
+  StrCpy $oldDir $R0
+  StrCpy $oldUninstaller $R2
+FunctionEnd
+
 ; ---- The install ----
 
 Section "Install"
   !insertmacro setLocations
+  Call TakeSetupLock
 
   !ifndef SANDBOX
     ; The program may still be shutting down after the update asked to be replaced: wait for it, never kill it.
@@ -359,42 +492,15 @@ Section "Install"
   !endif
 
   ; ---- The previous installation, and the destination ----
-  ; The previous installation's uninstall command names its own program; the folder that program is in is where its
-  ; uninstaller runs (_?=), whatever the new destination is. The destination is checked first, so a refused Setup has
-  ; changed nothing.
-  !insertmacro readModeStr $oldUninstaller "${UNINSTALL_KEY}" "UninstallString"
-  StrCpy $R4 ""
-  StrCpy $oldDir ""
-  ${If} $oldUninstaller != ""
-    ; The command is '"<path>" /currentuser' or '"<path>" /allusers'; take the quoted path.
-    StrCpy $R0 $oldUninstaller 1
-    ${If} $R0 == '"'
-      StrCpy $R1 $oldUninstaller "" 1
-      StrCpy $R2 0
-      findQuote:
-        StrCpy $R3 $R1 1 $R2
-        ${If} $R3 != '"'
-        ${AndIf} $R3 != ""
-          IntOp $R2 $R2 + 1
-          Goto findQuote
-        ${EndIf}
-      StrCpy $R4 $R1 $R2
-    ${Else}
-      StrCpy $R4 $oldUninstaller
-    ${EndIf}
-    ${If} ${FileExists} "$R4"
-      ${GetParent} "$R4" $oldDir
-    ${Else}
-      StrCpy $R4 ""
-    ${EndIf}
-  ${EndIf}
+  Call FindPrevious
 
-  ; The destination must be empty, absent, the old installation's own folder, or already ours (it has our program):
-  ; our uninstaller removes the folder, so it must never be a folder with somebody else's files in it.
-  ${If} "$INSTDIR" != "$oldDir"
+  ; The destination must be empty or absent, or be the validated installation being replaced.
+  StrCpy $R6 "$INSTDIR"
+  StrCpy $R5 "$oldDir"
+  !insertmacro stripSlash $R6
+  ${If} "$R6" != "$R5"
     StrCpy $R7 0
     ${If} ${FileExists} "$INSTDIR\*.*"
-    ${AndIfNot} ${FileExists} "$INSTDIR\${APP_EXE}"
       FindFirst $R8 $R9 "$INSTDIR\*.*"
       checkLoop:
         StrCmp $R9 "" checkDone
@@ -409,18 +515,17 @@ Section "Install"
       FindClose $R8
     ${EndIf}
     ${If} $R7 == 1
-      ${IfNot} ${Silent}
-        MessageBox MB_OK|MB_ICONSTOP "The folder $INSTDIR already holds other files. Choose an empty folder, or a new one."
-      ${EndIf}
-      SetErrorLevel 3
-      Quit
+      StrCpy $R7 "The folder $INSTDIR already holds files. Choose an empty folder, or a new one."
+      StrCpy $R8 3
+      Call Refuse
     ${EndIf}
   ${EndIf}
 
-  ; Remove the previous installation with its own uninstaller, silently, from a copy (it deletes its own folder).
-  ${If} $R4 != ""
+  ; Remove the previous installation with its own uninstaller, silently, from a copy (it cannot delete itself where it
+  ; runs). It runs in the folder that was validated, never in the destination.
+  ${If} $oldUninstaller != ""
     InitPluginsDir
-    CopyFiles /SILENT "$R4" "$PLUGINSDIR\old-uninstaller.exe"
+    CopyFiles /SILENT "$oldUninstaller" "$PLUGINSDIR\old-uninstaller.exe"
     ${If} $installMode == "all"
       StrCpy $R5 "/allusers"
     ${Else}
@@ -428,11 +533,9 @@ Section "Install"
     ${EndIf}
     ExecWait '"$PLUGINSDIR\old-uninstaller.exe" /S /KEEP_APP_DATA $R5 --updated _?=$oldDir' $R6
     ${If} $R6 != 0
-      ${IfNot} ${Silent}
-        MessageBox MB_OK|MB_ICONEXCLAMATION "The previous version could not be removed (error $R6)."
-      ${EndIf}
-      SetErrorLevel 2
-      Quit
+      StrCpy $R7 "The previous version could not be removed (error $R6)."
+      StrCpy $R8 2
+      Call Refuse
     ${EndIf}
     ; The old uninstaller was run in place (_?=) and could not delete itself.
     Delete "$oldDir\${UNINSTALL_EXE}"
@@ -440,7 +543,10 @@ Section "Install"
   ${EndIf}
 
   SetOutPath $INSTDIR
-  File /r "${SOURCE_DIR}\*"
+  ; The files, and the manifest of exactly these.
+  FileOpen $manifest "$INSTDIR\${MANIFEST}" w
+  !include "${FILES_SCRIPT}"
+  FileClose $manifest
   WriteUninstaller "$INSTDIR\${UNINSTALL_EXE}"
 
   ; Where this install lives, and the entry in Settings > Apps.
@@ -499,9 +605,6 @@ SectionEnd
 
 ; ---- The uninstaller ----
 
-!ifdef BUILD_UNINSTALLER
-!endif
-
 Function un.onInit
   ${If} ${RunningX64}
     SetRegView 64
@@ -520,65 +623,147 @@ Function un.onInit
   ClearErrors
 FunctionEnd
 
-!macro unWriteRoot
-!macroend
+; Whether the manifest path in $R1 is a plain path below the installation: not rooted, no drive, no parent step, no
+; wildcard. $R1 becomes "" if it is not.
+Function un.PlainRelativePath
+  StrCpy $0 $R1 1
+  ${If} $0 == "\"
+  ${OrIf} $0 == "/"
+  ${OrIf} $R1 == ""
+    StrCpy $R1 ""
+    Return
+  ${EndIf}
+  StrLen $1 $R1
+  StrCpy $2 0
+  scan:
+    ${If} $2 >= $1
+      Return
+    ${EndIf}
+    StrCpy $3 $R1 1 $2
+    ${If} $3 == ":"
+    ${OrIf} $3 == "*"
+    ${OrIf} $3 == "?"
+    ${OrIf} $3 == '"'
+    ${OrIf} $3 == "<"
+    ${OrIf} $3 == ">"
+    ${OrIf} $3 == "|"
+      StrCpy $R1 ""
+      Return
+    ${EndIf}
+    ${If} $3 == "."
+      IntOp $4 $2 + 1
+      StrCpy $5 $R1 1 $4
+      ${If} $5 == "."
+        StrCpy $R1 ""
+        Return
+      ${EndIf}
+    ${EndIf}
+    IntOp $2 $2 + 1
+    Goto scan
+FunctionEnd
 
 Section "Uninstall"
-  ; Registry: the same keys the install wrote.
-  !macro unDeleteKey KEY
+  ; The registry and the shortcuts are this installation's only if the registration names this folder: a copy of the
+  ; uninstaller run from anywhere else removes neither the registration of the real installation nor anything else.
+  StrCpy $R8 "$INSTDIR"
+  !insertmacro stripSlash $R8
+  !insertmacro readModeStr $R0 "${INSTALL_KEY}" "InstallLocation"
+  !insertmacro stripSlash $R0
+  ${If} "$R0" == "$R8"
+    !macro unDeleteKey KEY
+      !ifdef SANDBOX
+        ${If} $installMode == "all"
+          DeleteRegKey HKCU "${REG}HKLM\${KEY}"
+        ${Else}
+          DeleteRegKey HKCU "${REG}${KEY}"
+        ${EndIf}
+      !else
+        ${If} $installMode == "all"
+          DeleteRegKey HKLM "${KEY}"
+        ${Else}
+          DeleteRegKey HKCU "${KEY}"
+        ${EndIf}
+      !endif
+    !macroend
+    !macro unDeleteValue KEY NAME
+      !ifdef SANDBOX
+        ${If} $installMode == "all"
+          DeleteRegValue HKCU "${REG}HKLM\${KEY}" "${NAME}"
+        ${Else}
+          DeleteRegValue HKCU "${REG}${KEY}" "${NAME}"
+        ${EndIf}
+      !else
+        ${If} $installMode == "all"
+          DeleteRegValue HKLM "${KEY}" "${NAME}"
+        ${Else}
+          DeleteRegValue HKCU "${KEY}" "${NAME}"
+        ${EndIf}
+      !endif
+    !macroend
+    !macro unAssociate EXT PROGID
+      !insertmacro unDeleteValue "Software\Classes\.${EXT}\OpenWithProgids" "${PROGID}"
+      !insertmacro unDeleteKey "Software\Classes\${PROGID}"
+    !macroend
+    !insertmacro unAssociate "nodes" "Stick Nodes figure"
+    !insertmacro unAssociate "nodemc" "Stick Nodes movie clip"
+    !insertmacro unAssociate "stknds" "Stick Nodes project"
+    !insertmacro unAssociate "piv" "Pivot animation"
+    !insertmacro unAssociate "stk" "Pivot stick figure"
+    !insertmacro unAssociate "stykmov" "StykAnimate movieclip"
+    !insertmacro unAssociate "stkz" "StykAnimate figure"
+    !insertmacro unAssociate "styk" "StykAnimate project"
+    !insertmacro unDeleteKey "Software\Classes\stykanimate"
+    !insertmacro unDeleteKey "${UNINSTALL_KEY}"
+    !insertmacro unDeleteKey "${INSTALL_KEY}"
+
     !ifdef SANDBOX
-      DeleteRegKey HKCU "${REG}${KEY}"
+      Delete "${SANDBOX_DIR}\StartMenu\${PRODUCT_NAME}.lnk"
+      Delete "${SANDBOX_DIR}\Desktop\${PRODUCT_NAME}.lnk"
     !else
       ${If} $installMode == "all"
-        DeleteRegKey HKLM "${KEY}"
-      ${Else}
-        DeleteRegKey HKCU "${KEY}"
+        SetShellVarContext all
       ${EndIf}
+      Delete "$SMPROGRAMS\${PRODUCT_NAME}.lnk"
+      Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
+      SetShellVarContext current
     !endif
-  !macroend
-  !macro unDeleteValue KEY NAME
-    !ifdef SANDBOX
-      DeleteRegValue HKCU "${REG}${KEY}" "${NAME}"
-    !else
-      ${If} $installMode == "all"
-        DeleteRegValue HKLM "${KEY}" "${NAME}"
-      ${Else}
-        DeleteRegValue HKCU "${KEY}" "${NAME}"
+  ${EndIf}
+
+  ; The program's files: exactly those the Setup listed, then the folders they leave empty. Nothing is deleted
+  ; recursively, and a file that is not in the manifest is not touched. The library in Documents is the user's.
+  FileOpen $R9 "$INSTDIR\${MANIFEST}" r
+  ${IfNot} ${Errors}
+    manifestLoop:
+      ClearErrors
+      FileRead $R9 $R0
+      ${If} ${Errors}
+        Goto manifestDone
       ${EndIf}
-    !endif
-  !macroend
-  !macro unAssociate EXT PROGID
-    !insertmacro unDeleteValue "Software\Classes\.${EXT}\OpenWithProgids" "${PROGID}"
-    !insertmacro unDeleteKey "Software\Classes\${PROGID}"
-  !macroend
-  !insertmacro unAssociate "nodes" "Stick Nodes figure"
-  !insertmacro unAssociate "nodemc" "Stick Nodes movie clip"
-  !insertmacro unAssociate "stknds" "Stick Nodes project"
-  !insertmacro unAssociate "piv" "Pivot animation"
-  !insertmacro unAssociate "stk" "Pivot stick figure"
-  !insertmacro unAssociate "stykmov" "StykAnimate movieclip"
-  !insertmacro unAssociate "stkz" "StykAnimate figure"
-  !insertmacro unAssociate "styk" "StykAnimate project"
-  !insertmacro unDeleteKey "Software\Classes\stykanimate"
-  !insertmacro unDeleteKey "${UNINSTALL_KEY}"
-  !insertmacro unDeleteKey "${INSTALL_KEY}"
-
-  ; Shortcuts.
-  !ifdef SANDBOX
-    Delete "${SANDBOX_DIR}\StartMenu\${PRODUCT_NAME}.lnk"
-    Delete "${SANDBOX_DIR}\Desktop\${PRODUCT_NAME}.lnk"
-  !else
-    ${If} $installMode == "all"
-      SetShellVarContext all
-    ${EndIf}
-    Delete "$SMPROGRAMS\${PRODUCT_NAME}.lnk"
-    Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
-    SetShellVarContext current
-  !endif
-
-  ; The program's files; the library in Documents is the user's and stays.
+      ; Drop the line ending.
+      trimLine:
+        StrCpy $R1 $R0 1 -1
+        ${If} $R1 == "$\r"
+        ${OrIf} $R1 == "$\n"
+          StrCpy $R0 $R0 -1
+          Goto trimLine
+        ${EndIf}
+      StrCpy $R2 $R0 1
+      StrCpy $R1 $R0 "" 2
+      Call un.PlainRelativePath
+      ${If} $R1 != ""
+        ${If} $R2 == "F"
+          Delete "$INSTDIR\$R1"
+        ${ElseIf} $R2 == "D"
+          RMDir "$INSTDIR\$R1"
+        ${EndIf}
+      ${EndIf}
+      Goto manifestLoop
+    manifestDone:
+    FileClose $R9
+  ${EndIf}
+  Delete "$INSTDIR\${MANIFEST}"
   Delete "$INSTDIR\${UNINSTALL_EXE}"
-  RMDir /r "$INSTDIR"
+  RMDir "$INSTDIR"
   !ifndef SANDBOX
     System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)'
   !endif

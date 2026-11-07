@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! release_feed keygen <seed-file>                      writes a new signing seed, prints the public key as Rust bytes
+//! release_feed files-script --source <dir> --out <file>   writes the NSIS statements that install a folder and its manifest
 //! release_feed publish --installer <exe> --version <v> --out <dir> [--key-seed <seed-file>]
 //!                                                      writes latest.yml, latest.yml.sig (with a seed) and SHA256SUMS.txt
 //! ```
@@ -26,6 +27,18 @@ fn unhex(text: &str) -> Option<Vec<u8>> {
     (0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok()).collect()
 }
 
+fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            walk(root, &path, out)?;
+        } else if let Ok(relative) = path.strip_prefix(root) {
+            out.push(relative.to_string_lossy().replace('/', "\\"));
+        }
+    }
+    Ok(())
+}
+
 fn keypair(seed_file: &Path) -> Result<Ed25519KeyPair, String> {
     let seed = unhex(&std::fs::read_to_string(seed_file).map_err(|e| format!("{}: {e}", seed_file.display()))?).ok_or("the seed file is not hexadecimal")?;
     Ed25519KeyPair::from_seed_unchecked(&seed).map_err(|_| "the seed must be 32 bytes".to_string())
@@ -44,6 +57,23 @@ fn run(args: &[String]) -> Result<(), String> {
             let pair = Ed25519KeyPair::from_seed_unchecked(&seed).map_err(|_| "bad seed")?;
             println!("public key for UPDATE_PUBLIC_KEY: {:?}", pair.public_key().as_ref());
             Ok(())
+        }
+        Some("files-script") => {
+            // The Setup's file list: the NSIS statements that install every file under --source and write the manifest.
+            let (mut source, mut out) = (None, None);
+            let mut rest = args[1..].iter();
+            while let Some(arg) = rest.next() {
+                let value = rest.next().ok_or_else(|| format!("{arg} needs a value"))?;
+                match arg.as_str() {
+                    "--source" => source = Some(PathBuf::from(value)),
+                    "--out" => out = Some(PathBuf::from(value)),
+                    other => return Err(format!("unknown option {other}")),
+                }
+            }
+            let (source, out) = (source.ok_or("--source")?, out.ok_or("--out")?);
+            let mut files = Vec::new();
+            walk(&source, &source, &mut files).map_err(|e| e.to_string())?;
+            std::fs::write(out, styk_services::installer::files_script(&source.to_string_lossy(), &files)).map_err(|e| e.to_string())
         }
         Some("publish") => {
             let (mut installer, mut version, mut out, mut seed) = (None, None, None, None);

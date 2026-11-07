@@ -9,6 +9,7 @@
 //! needs it, not before.
 
 pub mod clock;
+pub mod installer;
 pub mod shell;
 pub mod updates;
 
