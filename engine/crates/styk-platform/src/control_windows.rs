@@ -88,7 +88,12 @@ fn endpoint(name: &str) -> Result<Vec<u16>, String> {
     }
     Ok(wide(&format!(r"\\.\pipe\{name}")))
 }
-struct Stop(Arc<Owned>, Arc<AtomicBool>);
+struct Stop {
+    signal: Arc<Owned>,
+    finished: Arc<AtomicBool>,
+    // A completed reply still occupies the caller's bounded completion slot.
+    _admission: Arc<Admission>,
+}
 struct Finished(Arc<AtomicBool>);
 impl Drop for Finished {
     fn drop(&mut self) {
@@ -98,11 +103,11 @@ impl Drop for Finished {
 impl Running for Stop {
     fn cancel(&self) {
         unsafe {
-            SetEvent(self.0.0);
+            SetEvent(self.signal.0);
         }
     }
     fn is_finished(&self) -> bool {
-        self.1.load(Ordering::Acquire)
+        self.finished.load(Ordering::Acquire)
     }
 }
 impl Drop for Stop {
@@ -240,7 +245,8 @@ impl Transport for LocalControl {
         name: &str,
         inbox: Arc<Inbox>,
     ) -> Result<Box<dyn Running>, String> {
-        let admission = Admission::reserve()?;
+        let admission = Arc::new(Admission::reserve()?);
+        let worker_admission = admission.clone();
         let name = endpoint(name)?;
         let sddl = wide(&pipe_sddl().map_err(|e| e.to_string())?);
         let pipe = create_instance(&name, &sddl, true).map_err(|e| e.to_string())?;
@@ -252,8 +258,8 @@ impl Transport for LocalControl {
             .spawn(
                 "devtools.pipe",
                 Box::new(move || {
-                    let _admission = admission;
                     let _finished = Finished(finish);
+                    let _admission = worker_admission;
                     while !stopped(&shutdown) {
                         let accepted = unsafe {
                             overlapped_io(
@@ -342,7 +348,11 @@ impl Transport for LocalControl {
                 }),
             )
             .map_err(|e| e.to_string())?;
-        Ok(Box::new(Stop(stop, finished)))
+        Ok(Box::new(Stop {
+            signal: stop,
+            finished,
+            _admission: admission,
+        }))
     }
     fn request(
         &self,
@@ -359,7 +369,8 @@ impl Transport for LocalControl {
         {
             return Err("one bounded JSON line required".into());
         }
-        let admission = Admission::reserve()?;
+        let admission = Arc::new(Admission::reserve()?);
+        let worker_admission = admission.clone();
         let name = endpoint(name)?;
         let stop = Arc::new(event().map_err(|e| e.to_string())?);
         let shutdown = stop.clone();
@@ -371,8 +382,8 @@ impl Transport for LocalControl {
             .spawn(
                 "devtools.client",
                 Box::new(move || {
-                    let _admission = admission;
                     let _finished = Finished(finish);
+                    let _admission = worker_admission;
                     let outcome = (|| {
                         let pipe = connect(&name)?;
                         message.reserve_exact(1);
@@ -408,18 +419,63 @@ impl Transport for LocalControl {
             .map_err(|e| e.to_string())?;
         Ok(Operation {
             completion,
-            cancel: Box::new(Stop(stop, finished)),
+            cancel: Box::new(Stop {
+                signal: stop,
+                finished,
+                _admission: admission,
+            }),
         })
     }
 }
 #[cfg(test)]
 mod dev_control_tests {
     use super::*;
+    static SERIAL: Mutex<()> = Mutex::new(());
     fn name(tag: &str) -> String {
         format!("stykanimate-dev-{}-{tag}", std::process::id())
     }
     #[test]
+    fn completed_replies_keep_their_byte_admission_until_the_caller_releases_them() {
+        let _serial = SERIAL.lock().unwrap();
+        let wait = |condition: &dyn Fn() -> bool| {
+            let end = Instant::now() + DEADLINE;
+            while !condition() {
+                assert!(Instant::now() < end, "transport did not settle");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        wait(&|| LocalControl::accounting().0 == 0);
+        let endpoint = name("retained-reply");
+        let inbox = Arc::new(Inbox::default());
+        let spawner = crate::spawn::ThreadSpawner;
+        let server = LocalControl
+            .serve(&spawner, &endpoint, inbox.clone())
+            .unwrap();
+        let client = LocalControl
+            .request(&spawner, &endpoint, b"{}".to_vec())
+            .unwrap();
+        let end = Instant::now() + DEADLINE;
+        loop {
+            if let Some(request) = inbox.pop() {
+                request.respond(b"{}".to_vec()).unwrap();
+                break;
+            }
+            assert!(Instant::now() < end);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        wait(&|| client.cancel.is_finished());
+        assert_eq!(LocalControl::accounting().0, 2 * CONNECTION_BYTES);
+        assert!(client.take().unwrap().is_ok());
+        drop(client);
+        assert_eq!(LocalControl::accounting().0, CONNECTION_BYTES);
+        server.cancel();
+        wait(&|| server.is_finished());
+        drop(server);
+        assert_eq!(LocalControl::accounting().0, 0);
+    }
+    #[test]
     fn current_user_identity_and_bounded_roundtrip() {
+        let _serial = SERIAL.lock().unwrap();
         assert!(process_is_current_user(std::process::id()));
         assert!(!process_is_current_user(0));
         assert!(pipe_sddl().unwrap().starts_with("D:P(A;;GA;;;S-1-"));
@@ -459,6 +515,7 @@ mod dev_control_tests {
     }
     #[test]
     fn cancelling_a_silent_host_wakes_the_client() {
+        let _serial = SERIAL.lock().unwrap();
         let spawner = crate::spawn::ThreadSpawner;
         let inbox = Arc::new(Inbox::default());
         let name = name("cancel");
@@ -480,6 +537,7 @@ mod dev_control_tests {
     }
     #[test]
     fn the_actual_pipe_acl_is_current_user_only() {
+        let _serial = SERIAL.lock().unwrap();
         use windows_sys::Win32::Security::Authorization::{
             ConvertSecurityDescriptorToStringSecurityDescriptorW, GetSecurityInfo, SE_KERNEL_OBJECT,
         };
@@ -527,6 +585,7 @@ mod dev_control_tests {
     }
     #[test]
     fn the_client_only_allows_identification_impersonation() {
+        let _serial = SERIAL.lock().unwrap();
         use windows_sys::Win32::Security::{
             GetTokenInformation, RevertToSelf, TOKEN_QUERY, TokenImpersonationLevel,
         };
@@ -577,6 +636,7 @@ mod dev_control_tests {
     }
     #[test]
     fn cancellation_wakes_accept_partial_read_and_blocked_write() {
+        let _serial = SERIAL.lock().unwrap();
         for mode in ["accept", "read", "write"] {
             let name = name(mode);
             let inbox = Arc::new(Inbox::default());

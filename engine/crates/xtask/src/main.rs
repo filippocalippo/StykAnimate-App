@@ -12,6 +12,9 @@
 //!
 //! It depends on `std` alone, so it builds in seconds and can never become a way for a toolkit to reach the engine.
 
+mod dev_reads;
+mod dev_tasks;
+mod dev_trace;
 mod dev_features;
 mod dev_release;
 mod css;
@@ -44,6 +47,8 @@ fn run(args: &[String]) -> Result<(), String> {
         ["design", "check"] => design::check(&root),
         ["deps"] => deps::deps(&root),
         ["lock"] => deps::lock(&root),
+        ["read-apis"] => dev_reads::run(&root,false),
+        ["check-read-apis"] => dev_reads::run(&root,true),
         ["check-features"] => dev_features::check(&root),
         ["check-release", ..] => dev_release::run(&args[1..]),
         ["fonts"] => fonts::check(&root),
@@ -51,12 +56,16 @@ fn run(args: &[String]) -> Result<(), String> {
         ["fonts", "surfaces"] => fonts::surfaces(&root),
         ["package", options @ ..] => package::package(&root, options),
         ["check"] => design::check(&root).and_then(|()| deps::deps(&root)).and_then(|()| deps::lock(&root)),
+        ["build" | "test" | "scenario" | "profile" | "compare" | "screenshot" | "doctor" | "check-trace" | "check-schema" | "flags" | "design-export" | "renderdoc" | "serve-web", ..] => dev_tasks::run(&root,args),
         _ => Err(USAGE.to_string()),
     }
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--json") {
+        return if dev_tasks::run_json(&root(), &args) { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+    }
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {

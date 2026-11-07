@@ -25,13 +25,25 @@ pub fn compare(a: &Value, b: &Value) -> Result<Value, String> {
             return Err(format!("incomparable {key}"));
         }
     }
+    for key in ["scenario_hash", "machine"] {
+        if a.get(key) != b.get(key) {
+            return Err(format!("incomparable {key}"));
+        }
+    }
     if a["build_profile"] != "release" || a["clock"] != "real" {
         return Err("comparison requires release builds and a real measurement clock".into());
     }
+    if a["format"] != "stykprofile/1" {
+        return Err("incomparable profile format".into());
+    }
+    let budget_missed = b
+        .get("budgets")
+        .and_then(Value::as_array)
+        .is_some_and(|rows| rows.iter().any(|row| row["met"] == false));
     let samples = |v: &Value| -> Result<Vec<f64>, String> {
         let rows = v["samples_ms"].as_array().ok_or("missing samples_ms")?;
-        if rows.len() < 3 || rows.len() > 100_000 {
-            return Err("comparison needs 3..100000 samples".into());
+        if rows.len() < 3 || rows.len() > 32 {
+            return Err("comparison needs 3..32 samples".into());
         }
         rows.iter()
             .map(|v| v.as_f64().ok_or_else(|| "invalid sample".into()))
@@ -61,7 +73,7 @@ pub fn compare(a: &Value, b: &Value) -> Result<Value, String> {
     };
     let changed = delta.abs() > floor && significant;
     Ok(
-        json!({"a":sa,"b":sb,"delta_ms":delta,"floor_ms":floor,"regression":changed && delta>0.0,"verdict":if !changed {"within noise"} else if delta>0.0 {"regression"} else {"improvement"}}),
+        json!({"a":sa,"b":sb,"delta_ms":delta,"floor_ms":floor,"regression":(changed && delta>0.0)||budget_missed,"budget_missed":budget_missed,"verdict":if budget_missed {"budget regression"} else if !changed {"within noise"} else if delta>0.0 {"regression"} else {"improvement"}}),
     )
 }
 #[cfg(test)]
@@ -80,6 +92,14 @@ mod tests {
     fn noise_floor_distinguishes_shifts() {
         let profile = |samples: Vec<f64>| json!({"format":"stykprofile/1","scenario":"open","input_hash":"test","clock":"real","build_profile":"release","samples_ms":samples});
         let baseline = profile(vec![99.0, 100.0, 101.0]);
+        assert!(compare(&baseline, &profile(vec![100.0; 33])).is_err());
+        let mut missed = baseline.clone();
+        missed["budgets"] = json!([{"met":false}]);
+        assert_eq!(
+            compare(&baseline, &missed).unwrap()["verdict"],
+            "budget regression"
+        );
+        assert_eq!(compare(&baseline, &missed).unwrap()["regression"], true);
         assert_eq!(
             compare(&baseline, &profile(vec![104.0, 105.0, 106.0])).unwrap()["regression"],
             true

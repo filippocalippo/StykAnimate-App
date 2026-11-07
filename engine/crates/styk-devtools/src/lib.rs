@@ -9,12 +9,21 @@
 
 #[cfg(feature = "ui")]
 pub mod pen_lab;
+/// Install before any instrumented workers start.
+pub fn initialize() {
+    initialize_with(std::sync::Arc::new(styk_services::clock::SystemClock::new()));
+}
+pub fn initialize_with(clock: std::sync::Arc<dyn styk_services::clock::Clock>) {
+    let _ = styk_trace::clock::install(clock);
+}
 pub mod capture;
 pub mod protocol;
-pub mod stats;
 pub mod scenario;
+pub mod stats;
 
 use styk_trace::{RecordKind, snapshot};
+#[cfg(test)]
+pub(crate) static TRACE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// The recent events of every thread, one per line: when, which thread, what and (for spans) how long.
 pub fn trace_report() -> String {
@@ -30,7 +39,16 @@ fn format_records(records: &[styk_trace::Record]) -> String {
             RecordKind::Counter(value) => format!("counter {value}"),
             RecordKind::Mark => "mark".to_string(),
         };
-        out.push_str(&format!("{when:>10.3} ms  {:<16} {:<24} {what}\n", record.thread_name, record.name));
+        let row = format!(
+            "{when:>10.3} ms  {:<16} {:<24} {what}\n",
+            record.thread_name,
+            answer::text(record.name)
+        );
+        if out.len() + row.len() + 32 > answer::SHORT_BYTES {
+            out.push_str("[truncated; capture for more]\n");
+            break;
+        }
+        out.push_str(&row);
     }
     out
 }
@@ -42,6 +60,8 @@ mod tests {
 
     #[test]
     fn the_report_names_each_event_on_its_thread() {
+        let _serial = TRACE_TEST_LOCK.lock().unwrap();
+        initialize();
         let report = std::thread::Builder::new()
             .name("report-test".into())
             .spawn(|| {
@@ -55,12 +75,34 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
-        let lines: Vec<&str> = report.lines().filter(|line| line.contains("report-test")).collect();
+        let lines: Vec<&str> = report
+            .lines()
+            .filter(|line| line.contains("report-test"))
+            .collect();
         assert_eq!(lines.len(), 3, "{report}");
-        assert!(lines.iter().any(|line| line.contains("report.span") && line.contains("span ") && line.ends_with(" ms")));
-        assert!(lines.iter().any(|line| line.contains("report.counter") && line.ends_with("counter 3")));
-        assert!(lines.iter().any(|line| line.contains("report.mark") && line.ends_with("mark")));
+        assert!(lines.iter().any(|line| line.contains("report.span")
+            && line.contains("span ")
+            && line.ends_with(" ms")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("report.counter") && line.ends_with("counter 3"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("report.mark") && line.ends_with("mark"))
+        );
     }
 }
 
-pub fn capture_events() -> Vec<styk_trace::Record> { snapshot() }
+pub fn capture_events() -> Vec<styk_trace::Record> {
+    snapshot()
+}
+pub mod drain;
+
+pub mod answer;
+pub mod budget;
+
+pub mod channel;
+pub mod schema;

@@ -527,6 +527,8 @@ fn capture(id: iced_window::Id) -> Task<Message> {
 }
 
 fn main() -> ExitCode {
+    #[cfg(feature = "devtools")]
+    styk_devtools::initialize();
     mark!("startup");
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let launch = match Launch::parse(shell::without_links(&arguments)) {
@@ -547,6 +549,23 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    #[cfg(feature = "devtools")]
+    let _control = if launch.control {
+        match styk_devtools::channel::shell_reader() {
+            Ok(reader) => Some(reader),
+            Err(error) => {
+                eprintln!("control channel: {error}");
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        None
+    };
+    #[cfg(not(feature = "devtools"))]
+    if launch.control {
+        eprintln!("--control requires a developer build");
+        return ExitCode::from(2);
+    }
     let screen = match launch.screen.as_deref().map(|id| (id, Screen::from_id(id))) {
         Some((id, None)) => {
             eprintln!("unknown screen {id:?}: the catalogue has {}", Screen::ids());

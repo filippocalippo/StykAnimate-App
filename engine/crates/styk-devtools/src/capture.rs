@@ -1,13 +1,31 @@
 //! Bounded, recoverable capture stream. File I/O belongs to the caller's worker.
 use serde_json::{Value, json};
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 pub const MAX_CHUNK: usize = 64 * 1024;
 pub const MAX_CAPTURE: usize = 256 * 1024 * 1024;
+/// Two full captures plus each reader's chunk and JSON validation scratch.
+pub const TOTAL_CAPTURE_BYTES: usize = 2 * (MAX_CAPTURE + 2 * MAX_CHUNK);
+static USED: AtomicUsize = AtomicUsize::new(0);
+static REFUSED: AtomicU64 = AtomicU64::new(0);
+struct Reservation(usize);
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        USED.fetch_sub(self.0, Ordering::AcqRel);
+    }
+}
+pub fn accounting() -> (usize, u64) {
+    (
+        USED.load(Ordering::Relaxed),
+        REFUSED.load(Ordering::Relaxed),
+    )
+}
 const MAGIC: &[u8] = b"styktrace/1\n";
 
 /// A capture is complete chunks only. A partial trailing chunk is recoverable.
 pub struct Capture {
+    _reservation: Reservation,
     data: Vec<u8>,
     bytes: usize,
     cap: usize,
@@ -19,11 +37,24 @@ impl Capture {
         if !(MAGIC.len()..=MAX_CAPTURE).contains(&cap) {
             return Err("capture cap outside supported range".into());
         }
+        let charge = cap + 2 * MAX_CHUNK;
+        if USED
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                used.checked_add(charge)
+                    .filter(|n| *n <= TOTAL_CAPTURE_BYTES)
+            })
+            .is_err()
+        {
+            REFUSED.fetch_add(1, Ordering::Relaxed);
+            return Err("total capture byte budget exhausted".into());
+        }
+        let reservation = Reservation(charge);
         let mut data = Vec::new();
         data.try_reserve_exact(cap)
             .map_err(|_| "capture allocation refused")?;
         data.extend_from_slice(MAGIC);
         Ok(Self {
+            _reservation: reservation,
             data,
             bytes: MAGIC.len(),
             cap,
@@ -52,7 +83,8 @@ impl Capture {
             self.dropped += 1;
             return Err("capture byte budget exhausted".into());
         }
-        serde_json::from_slice::<Value>(json).map_err(|e| e.to_string())?;
+        // Validate without materializing an arbitrarily wide tree of owned JSON values.
+        serde_json::from_slice::<serde::de::IgnoredAny>(json).map_err(|e| e.to_string())?;
         self.bytes += json.len() + 4;
         self.data
             .extend_from_slice(&(json.len() as u32).to_le_bytes());
@@ -116,7 +148,11 @@ impl Capture {
     }
 }
 pub fn event(record: &styk_trace::Record) -> Value {
-    let mut value = json!({"name":record.name,"pid":1,"tid":record.thread,"ts":record.start_ns as f64 / 1000.0});
+    let mut end = record.name.len().min(2048);
+    while !record.name.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut value = json!({"name":&record.name[..end],"pid":1,"tid":record.thread,"ts":record.start_ns as f64 / 1000.0});
     match record.kind {
         styk_trace::RecordKind::Span => {
             value["ph"] = json!("X");

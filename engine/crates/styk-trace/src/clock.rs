@@ -14,7 +14,8 @@ pub fn install(clock: Arc<dyn Clock>) -> Result<(), Arc<dyn Clock>> {
 pub fn missing_reads() -> u64 {
     MISSING.load(Ordering::Relaxed)
 }
-pub(crate) fn current() -> Option<Arc<dyn Clock>> {
+/// The clock installed by the host, or the calling worker's scoped override.
+pub fn current() -> Option<Arc<dyn Clock>> {
     LOCAL.with(|slot| slot.borrow().as_ref().or_else(|| CLOCK.get()).cloned())
 }
 pub(crate) fn read(clock: &Option<Arc<dyn Clock>>) -> u64 {

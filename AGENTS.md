@@ -86,17 +86,30 @@ Run `npm run check` after JavaScript changes and tests covering affected behavio
 - Shipping includes exact-artifact verification and the history update. Implementing a feature alone does not authorize publishing. When shipping is authorized, complete the documented process without redundant approval. Tag pushes can publish immediately.
 ## Native developer tools (headless)
 
-The `styk-devtools` default feature set contains no views. `ui` enables the existing pen lab;
-`styk-app --features devtools` selects it. The CLI's non-default `app-tools` feature enables
-headless tools.
+The default tools crate has no views; the app's optional devtools feature includes the existing
+pen lab. CLI tools require app-tools. Run all builds, tests and measurements through the machine
+queue. Heavy xtask commands use STYK_QUEUE_CMD (or recognize STYK_QUEUE_ACTIVE); otherwise they
+use an advisory lock. Separate shipping and developer build invocations prevent Cargo feature
+unification from contaminating the shipping app. The quick profile is for iteration only.
 
-- `cargo xtask check-features`: check the optional view dependency boundary.
-- `cargo xtask check-release <stykanimate.exe> [stykanimate.pdb]`: scan already-built shipping
-  artifacts for developer markers, including matches crossing read chunks. Missing files fail.
-- `styk profile <file> open|frame --out <new-directory>`: three offline runs, a summary,
-  `profile.json`, `trace.styktrace`, and an independently readable Perfetto JSON export.
-- `styk compare-profile <A/profile.json> <B/profile.json>`: noise-aware comparison of matching
-  release runs; quick/debug builds are refused. A regression returns exit code 1.
+- cargo xtask build --profile quick|release [--devtools]: app and CLI artifact paths and sizes.
+- cargo xtask test -p <crate> or --changed: targeted crates, including reverse dependencies.
+- cargo xtask scenario open|frame|export --out <new-dir>: repository fixture scripts.
+- cargo xtask profile <input> open|frame|export|<script.styk-auto> --out <new-dir> [--runs 3..32].
+- cargo xtask compare <A/profile.json> <B/profile.json>: matching release measurements.
+- cargo xtask screenshot <screen-id> [--against <PNG>] [--size <WxH>] [--scale <number>].
+- cargo xtask doctor: tools, disk and GPU capabilities; never cleans other tasks' resources.
+- cargo xtask check-release <shipping.exe> [shipping.pdb]: bounded marker scan; never builds.
+- cargo xtask check-features, check-trace, check-schema, check-read-apis: developer guards.
+- cargo xtask read-apis and styk devtools-schema: regenerate inspection inventory and schemas.
+- cargo xtask flags, design-export [--check], renderdoc: registry and design/capture conveniences.
+- styk attach <pid> '<JSON request>': explicit local developer process, current-user pipe only.
 
-Run builds/tests through the machine queue. The artifact scanner never builds implicitly.
-The `quick` Cargo profile is for iteration only; it is not a performance measurement profile.
+All xtask commands accept --json for a bounded machine-readable result with truncation reported.
+CLI profile/compare emit JSON; statuses are 0 success, 1 regression/budget miss, 2 error,
+3 incomparable. Profiles include a capture, Perfetto export, measurements and median budget
+judgements. Use budget lines such as 'budget export.ms <= 50ms' only with an established contract;
+never tune thresholds to pass. Frozen fixtures remain unchanged. No input contents enter default
+answers. GPU timing, Tracy, window scenarios and renderer debugging await K-stage; uninstalled
+owner adapters and experiment registries fail explicitly. N8 prohibits serve-web in this phase.
+See docs/native/devtools-engine.md for bounds, schemas and the exact implemented capabilities.

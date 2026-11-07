@@ -1,52 +1,142 @@
-# Developer tools engine: implemented foundation
+# Developer tools engine
 
-This document describes the implemented API, not the complete reviewed developer-tools design.
-There are no new views.
+The optional `styk-devtools` crate has no views by default. `styk-app/devtools` adds the existing
+pen lab; `styk-cli/app-tools` enables the headless tools. Build shipping and developer binaries
+in separate Cargo invocations: feature unification must not enable tracing in a shipping app.
+The `quick` profile is for iteration; only release profiles are comparable measurements.
 
-`styk-devtools` has an empty default feature set. Its existing pen lab requires `ui`; the app's
-`devtools` feature enables it. The optional CLI `app-tools` feature uses the toolkit-free modules.
+## Instrumentation and byte admission
 
-## Captures
+`styk-trace/enabled` records static sites into per-thread atomic rings. Disabled macros evaluate
+neither names nor arguments and have no dependency on services. Hosts install an injected
+`styk_services::clock::Clock` before starting workers; scenario workers scope their measurement
+clock. Spans retain the clock on which they started. A missing clock produces a visible counter,
+not an implicit wall-clock fallback. No `Instant` is used by the trace crate.
 
-`capture::Capture` stores a `styktrace/1\n` header followed by chunks: a little-endian u32 byte
-length and a JSON event. A chunk is at most 64 KiB; the caller chooses a capture wire-byte cap
-up to 256 MiB. One contiguous allocation reserves that cap before recording; chunk headers count toward it. Unknown versions and oversized lengths fail before allocating the payload.
-A truncated final chunk is discarded with `recovered = true`; malformed complete JSON is an error.
-Perfetto export streams those events in a Chrome trace `traceEvents` array.
-This initial format is uncompressed and does not yet persist overflow metadata or drain continuously.
+Admission reserves the whole ring before allocation, including its 64 open-span slots and
+bounded thread name, under a process-wide 24 MiB budget. Registry contention refuses a cold
+registration without blocking. Ring overwrite, admission refusal, archive eviction and truncated
+snapshots increment the drop counter. The archive keeps 4096 records, with room reserved for one
+4096-record transfer. A snapshot has a 24 MiB byte allowance including retained thread names.
+`threads`, `open_spans`, `ring_snapshot`, `counters` and `gauges` expose bounded worker reads.
 
-## Protocol seam
+Captures reserve their entire capacity before recording: at most 256 MiB each and 512 MiB of capture storage across
+live captures, plus 128 KiB of validation/read scratch per capture. `styktrace/1\n` is followed by little-endian u32 lengths and JSON chunks of at most
+64 KiB. Header and chunk prefixes count against the cap. Full captures reject new events and
+count them; they preserve earlier events. Unknown versions and oversized lengths fail. An
+incomplete final chunk is recoverable; invalid complete JSON is an error. Perfetto output streams
+these events in a `traceEvents` array, without copying a complete second capture.
 
-`protocol::Decoder` accepts bytes incrementally and holds at most a 16 KiB line. Overflow
-permanently closes that decoder. `respond` serializes at most 24 KiB and returns a structured
-error on overflow. IDs are unsigned integers; hello negotiates version 1. Supported host seams
-are `state.get`, `metrics.get`, `trace.start`, `trace.stop`. The host supplies snapshots/effects;
-this layer does not inspect documents or expose paths. Unknown operations fail.
-This is not yet a network endpoint: named-pipe transport, current-user ACL, discovery,
-request cancellation/timeouts, paging, and schema generation remain to be implemented.
+`drain::Drain` starts through `Spawner`, wakes every 100 ms or immediately on stop/drop, and
+never joins its worker from a caller. At most two drains reserve their snapshot, archive scratch,
+encoding scratch and 1 MiB cursor allowance before starting. Thread/sequence cursors deduplicate
+live-ring/archive overlap and repeated polls. A reserved footer records capture drops, ring drops
+and missing clock reads. `capture::accounting`, `drain::accounting` and protocol `metrics.get`
+report reservations/refusals. Taking the completed capture uses `try_lock`.
 
-## Scenarios and profiles
+## Owner inspection
 
-`scenario::start` schedules exactly one task through `Spawner`, with one completion slot. An
-interface caller must poll using `try_lock`; only the offline CLI waits. The versioned prefix
-`styk-auto/1` accepts `open`, `frame <tick>`, `export`, and `advance <nanoseconds>`, with at most
-1024 steps/64 KiB. Only `advance` changes logical time; measurement uses a separately injected
-`Clock`. Owners implement `Host` through their normal operations. The CLI currently adapts the
-newly merged core Documents seam for normalized open, session installation, seek and frame
-records. It does not claim GPU rendering, presentation, or save-byte parity. Export fails explicitly.
+Inspection is opt-in through each owner's `inspect` feature. The generated
+`devtools-read-apis.toml` inventories its public read functions; `xtask check-read-apis` checks
+that tools import owners through those modules (the pre-existing pen lab is explicitly exempt).
 
-The CLI writes to a new directory, never alongside input automatically, and emits an input hash
-rather than the owner's path or file contents. `compare-profile` preserves the existing `compare`
-command's reference-parity semantics. It reports nearest-rank quantiles, a 3%/0.05 ms/MAD noise floor, an exact tied-rank permutation
-test for 5..32 runs per side (a within-side range test for 3..4), and refuses incompatible
-inputs, fewer than three samples, nonfinite values, and non-release measurements. Budgets, interleaved comparisons, machine metadata, and attribution remain pending.
-Regressions return exit code 1.
+- Edit sessions publish an O(1) immutable canonical-record ticket and revision. Tree/node traversal
+  and retained-byte counting run on a tool worker. Pages hold at most 50 rows and 128-byte previews;
+  blobs never expand into base64. History pages copy labels and revision IDs, not undo payloads.
+- Core exposes document state, focus state and document/history tickets. Inspection does not
+  alter session history or saved records. A fixed 4096-byte service slot publishes small owner
+  snapshots using `try_lock`; failed publication preserves the last complete snapshot.
+- Engine snapshots queue depths, retirement, current revision and frame/picture counters using
+  `try_lock`; contention returns unavailable immediately.
+- Evaluation uses the normal evaluator on a worker; draw-list summaries are paged.
+- Renderer reads its existing memory and pass counters without device polling or readback.
 
-## Verification boundaries
+The native shell's optional `--control` reader currently publishes shell state only. Document
+contents require an explicitly supplied owner ticket; they are never discovered by the transport.
+The shell has no editor host adapter yet. Missing command/job/history adapters return structured
+errors, not fabricated empty results. Docking/widget trees, live theme/icon reload, renderer debug
+views/shader reload, and command/parameter/experiment registries belong to their forthcoming owners.
+GPU timestamp collection and Tracy forwarding are explicitly left for **K-stage**. No listener or
+GPU wait is introduced here.
 
-`xtask check-release` is a bounded artifact marker scan, with a deliberate leak regression.
-It does not yet provide same-source binary/assembly comparisons, symbol listing, or feature graph
-proof for a shipping artifact. The existing trace ring still requires total-budget admission,
-nonblocking cold registration, injected time, open-span snapshots and a capture drain. Disabled
-macro arguments are now type-checked without evaluation, including their name expressions. GPU timing,
-Tracy conversion, owner read APIs and remaining task runner commands are pending.
+## Local control channel
+
+The Windows implementation is entirely in `styk-platform`. `stykanimate --control` (developer
+build only) serves `\\.\pipe\stykanimate-dev-<pid>`. `styk attach <pid> '<JSON request>'` addresses
+that explicit process; there is no automatic file/instance discovery. The protected DACL contains
+only the current user, rejects remote clients, and uses first-instance pipe creation. Client opens
+use `SECURITY_IDENTIFICATION`, then verify the server PID belongs to the current user, using the
+same identity and overlapped-I/O helpers as S6's single-instance transport.
+
+Requests are one JSON line, at most 16 KiB; answers are at most 24 KiB plus a newline. A connection
+handles one request/response and a receipt acknowledgement before disconnect. Pipelining is
+rejected. The inbox admits bytes (64 KiB including the reserved answer); connections reserve
+128 KiB each under a 4 MiB process budget. Completed unread replies retain their reservation until the caller releases the operation. Busy/timeout errors are explicit. Cancellation signals
+wake accept, partial read, answer wait, write and acknowledgement waits. Caller drop never joins.
+Connection errors carry a null ID because no request has been decoded at that layer.
+
+`hello` negotiates version 1. The operation registry and schemas are generated together. Short
+answers are at most 4 KiB, full answers at most 24 KiB, strings at most 2 KiB, and pages at most
+50 rows. Truncation carries a marker and a continuation offset; document paging can pin revision.
+Errors carry `what`, `where`, `input`, `cause`, `hint`. Host adapters must construct bounded
+results before calling the envelope writer; the writer is not an allocator for arbitrary owner data.
+`devtools-protocol.json` and `devtools-profile.json` are checked by `xtask check-schema`.
+
+## Scenarios, budgets and profiles
+
+The one application language and parser belong to `styk_core::automation` (K-shell). Until that
+parser merges, `scenario` contains only a private-to-the-tooling transitional parser seam; it is
+not a second supported language. After the K-shell handoff, move `frame`, `export` and `advance`
+into the core step enum/parser and consume those steps here. Keep measurement and budget judging
+in the developer runner. Do not add shell, input or window syntax to the transitional parser.
+
+`styk-auto/1` supports `file <repository fixture>`, `open`, `frame <tick>`, `export`,
+`advance <nanoseconds>`, comments and budget lines. Scripts are at most 64 KiB/1024 steps and
+64 budgets. Only `advance` changes logical time. Measurement uses a separate real `Clock`.
+One scenario task starts through `Spawner`; interface callers poll the single completion slot.
+Only the offline CLI waits. Repository scenarios cover open, a headless frame and CPU export.
+
+`styk profile <input> open|frame|export|<script.styk-auto> --out <new-dir> [--runs 3..32]`
+uses the core Documents seam and the normal evaluator/exporter. Export runs through `styk-export`,
+pins the document revision and writes the first run's PNG; subsequent runs must have identical
+pixel hashes. The CLI writes a profile, a bounded capture, Perfetto JSON and a short summary.
+It hashes the input rather than exposing its path or contents. Existing output directories fail.
+The export regression first exports twice through the existing CLI path to establish a byte-stable
+baseline, then compares the scenario PNG bytes with that baseline.
+
+Budget syntax: `budget <metric> <operator> <value><unit> [floor:<reason>]`, for example
+`budget export.ms <= 50ms`. Operators are `< <= == >= >`; time units convert to milliseconds,
+size units to bytes, and `%` to percentage points. Built-in metrics are `scenario.ms`, `open.ms`,
+`frame.ms`, `export.ms`. Missing/nonfinite metrics are errors. Budgets judge the median of runs,
+retain their source line, and fail the command on a miss. No production threshold is invented by
+the toolkit. Logical determinism does not make wall-clock timing deterministic.
+
+`compare-profile` preserves the old `compare` parity command. It checks input/scenario hashes,
+machine, clock and release profile compatibility, then uses nearest-rank quantiles, the accepted
+3%/0.05 ms/MAD noise floor, exact tied-rank permutations for 5..32 samples (range comparison for
+3..4), and budget misses. Exit statuses are 0 success, 1 regression/budget miss, 2 tool error,
+3 incomparable. Quick/debug profiles are refused. Shared-machine fixture runs are diagnostic
+smokes, not performance acceptance evidence.
+
+## Task runner and verification boundary
+
+Developer tasks live in separate `xtask` modules so guards can evolve independently. Heavy
+commands use `STYK_QUEUE_CMD` unless already inside the queue; otherwise a create-new advisory
+lock prevents overlap. Subprocess stdout/stderr are drained concurrently into bounded 64 KiB
+tails. `test --changed` selects changed crates and reverse dependencies from the merge base.
+`build`, `test`, `scenario`, `profile`, `compare`, `screenshot`, `doctor`, `check-trace`,
+`check-schema`, `read-apis`, `check-read-apis`, `flags`, `design-export`, `renderdoc` are routed.
+Screenshots use the existing catalogue and exact PNG comparison, with no tuned threshold.
+
+Branch/flag/parameter experiments need the corresponding registries and isolated measured builds;
+`compare` currently accepts completed profile files. Window scenarios/theme overrides need their
+catalogue/stage adapters. `flags` reports an empty registry until flags exist. `serve-web` refuses
+under N8; `--tracy` reports K-stage. Doctor reports tools, disk and adapter timestamp support, but
+does not enumerate or clean other agents' targets/processes. These are explicit capability errors,
+not successful placeholder runs. Default diagnostics are bounded; all xtask commands accept --json for a bounded result envelope.
+CLI profile/compare produce structured JSON directly.
+
+`check-release` scans already-built shipping artifacts in bounded chunks for developer markers,
+including chunk-boundary matches. It is an artifact isolation check, not a disassembler or proof of
+identical machine code. Disabled-macro tests cover argument non-evaluation; optional-feature checks
+cover the headless dependency boundary. Frozen fixtures and parity thresholds remain unchanged.

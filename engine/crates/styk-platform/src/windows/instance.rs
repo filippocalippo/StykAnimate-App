@@ -35,6 +35,7 @@ const ACK_GRACE: Duration = Duration::from_millis(1000);
 
 /// An owned kernel handle.
 pub(crate) struct Owned(pub(crate) HANDLE);
+#[cfg(feature = "dev-control")]
 impl Owned { pub(crate) fn raw(&self)->HANDLE { self.0 } }
 
 // SAFETY: a kernel handle may be used and closed from any thread.

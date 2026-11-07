@@ -54,6 +54,14 @@ fn main() {
 #[cfg(feature = "app-tools")]
         Some("profile") => profile::run(&args[1..]),
         #[cfg(feature = "app-tools")]
+        Some("devtools-schema") => profile::schema(&args[1..]),
+        #[cfg(feature = "app-tools")]
+        Some("devtools-doctor") => profile::doctor(),
+        #[cfg(feature = "app-tools")]
+        Some("devtools-png-compare") => profile::png_compare(&args[1..]),
+        #[cfg(feature = "app-tools")]
+        Some("attach") => profile::attach(&args[1..]),
+        #[cfg(feature = "app-tools")]
         Some("compare-profile") => profile::compare(&args[1..]),
         Some("container") if args.len() >= 3 && args[1] == "roundtrip" => container::roundtrip(&args[2], &args[3..]),
         Some("container") if args.len() >= 4 && args[1] == "json" => container::json(&args[2], &args[3]),

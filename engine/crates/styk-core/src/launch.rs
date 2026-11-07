@@ -9,6 +9,8 @@ pub const USAGE: &str = "usage: stykanimate [file...] [--automation <script>] [-
 /// What the command line asked for.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Launch {
+    /// Opt-in current-user developer control channel. Rejected by shipping builds.
+    pub control: bool,
     /// The documents to open, in order (the Electron app opens every one it is given).
     pub files: Vec<PathBuf>,
     /// A script of timestamped steps to run against the real interface.
@@ -64,6 +66,7 @@ impl Launch {
             };
             let mut value = |name: &str| inline.clone().or_else(|| args.next()).ok_or_else(|| LaunchError(format!("{name} needs a value")));
             match flag.as_str() {
+                "--control" => launch.control = true,
                 "--automation" => launch.automation = Some(PathBuf::from(value("--automation")?)),
                 "--screenshot" => launch.screenshot = Some(PathBuf::from(value("--screenshot")?)),
                 "--screen" => launch.screen = Some(value("--screen")?),

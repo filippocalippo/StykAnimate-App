@@ -8,6 +8,13 @@ pub const OPS: &[&str] = &[
     "state.get",
     "trace.start",
     "trace.stop",
+    "trace.ring",
+    "doc.tree",
+    "doc.node",
+    "history.list",
+    "jobs.get",
+    "threads.get",
+    "cmd.list",
 ];
 /// A connection decoder. An oversized line closes the connection; it is never silently truncated.
 #[derive(Default)]
@@ -56,29 +63,21 @@ pub fn respond(request: Value, host: &mut impl Host) -> Vec<u8> {
         Err(format!("unknown operation; supported: {}", OPS.join(", ")))
     };
     let value = match result {
-        Ok(value) => json!({"id":id,"ok":true,"result":value,"truncated":false}),
+        Ok(value) => crate::answer::envelope(id, value, request["detail"] == "full"),
         Err(reason) => {
-            json!({"id":id,"ok":false,"error":{"what":"request failed","where":"protocol","cause":reason.chars().take(512).collect::<String>(),"hint":"check operation and host availability"}})
+            json!({"id":id,"ok":false,"error":crate::answer::error("request failed","protocol",json!({"op":crate::answer::text(op)}),&reason,"check operation and host availability")})
         }
     };
-    let mut out = Vec::new();
-    // Serialization refuses while writing, before allocating an unbounded answer.
-    struct Limited<'a>(&'a mut Vec<u8>);
-    impl std::io::Write for Limited<'_> {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            if bytes.len() > MAX_RESPONSE - self.0.len() {
-                return Err(std::io::Error::other("answer too large"));
-            }
-            self.0.extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    if serde_json::to_writer(Limited(&mut out), &value).is_err() {
-        out = format!("{{\"id\":{},\"ok\":false,\"error\":{{\"what\":\"answer exceeds 24 KiB\",\"hint\":\"request a smaller page\"}}}}", id.map_or("null".into(), |n| n.to_string())).into_bytes();
-    }
+    let cap = if request["detail"] == "full" {
+        MAX_RESPONSE
+    } else {
+        crate::answer::SHORT_BYTES
+    };
+    let mut out=crate::answer::encode(&value,cap).unwrap_or_else(|_|{
+        let error=json!({"id":id,"ok":false,"error":crate::answer::error("answer exceeds byte limit","protocol",Value::Null,"request or result is too wide","request a smaller page")});
+        error.to_string().into_bytes()
+    });
+    out.reserve_exact(1);
     out.push(b'\n');
     out
 }
@@ -88,7 +87,11 @@ mod tests {
     struct Fake;
     impl Host for Fake {
         fn request(&mut self, _: &str, _: &Value) -> Result<Value, String> {
-            Ok(json!("x".repeat(MAX_RESPONSE * 2)))
+            Ok(Value::Object(
+                (0..60)
+                    .map(|n| (n.to_string(), json!("x".repeat(MAX_RESPONSE))))
+                    .collect(),
+            ))
         }
     }
     #[test]

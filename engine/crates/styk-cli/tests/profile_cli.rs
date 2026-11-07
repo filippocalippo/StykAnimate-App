@@ -76,3 +76,114 @@ fn comparison_regressions_reach_the_exit_status() {
     std::fs::remove_file(b).unwrap();
     std::fs::remove_dir(dir).unwrap();
 }
+
+#[test]
+fn export_scenario_matches_two_existing_export_runs_byte_for_byte() {
+    let dir = root().join(format!(
+        "artifacts/profile/export-scenario-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let a = dir.join("a.png");
+    let b = dir.join("b.png");
+    for path in [&a, &b] {
+        let output = Command::new(env!("CARGO_BIN_EXE_styk"))
+            .current_dir(root())
+            .args(["export", "engine/tests/edit/startup.document.json", "0"])
+            .arg(path)
+            .arg("--cpu")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert_eq!(
+        std::fs::read(&a).unwrap(),
+        std::fs::read(&b).unwrap(),
+        "old-versus-old baseline must be deterministic"
+    );
+    let profile = dir.join("profile");
+    let output = Command::new(env!("CARGO_BIN_EXE_styk"))
+        .current_dir(root())
+        .args([
+            "profile",
+            "engine/tests/edit/startup.document.json",
+            "export",
+            "--out",
+        ])
+        .arg(&profile)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read(&a).unwrap(),
+        std::fs::read(profile.join("export.png")).unwrap(),
+        "native scenario must preserve every export byte"
+    );
+    let report: Value =
+        serde_json::from_slice(&std::fs::read(profile.join("profile.json")).unwrap()).unwrap();
+    let hashes = report["export_hashes"].as_array().unwrap();
+    assert_eq!(hashes.len(), 3);
+    assert!(hashes.windows(2).all(|v| v[0] == v[1]));
+    for name in [
+        "export.png",
+        "profile.json",
+        "summary.txt",
+        "trace.styktrace",
+        "trace.perfetto.json",
+    ] {
+        std::fs::remove_file(profile.join(name)).unwrap();
+    }
+    std::fs::remove_dir(profile).unwrap();
+    std::fs::remove_file(a).unwrap();
+    std::fs::remove_file(b).unwrap();
+    std::fs::remove_dir(dir).unwrap();
+}
+
+#[test]
+fn a_budget_miss_is_exit_one_with_a_structured_error() {
+    let dir = root().join(format!(
+        "artifacts/profile/budget-scenario-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("miss.styk-auto");
+    // Zero is deliberately impossible for a measured open, testing exit semantics rather than tuning a performance target.
+    std::fs::write(&script, "styk-auto/1\nbudget scenario.ms <= 0ms\nopen\n").unwrap();
+    let profile = dir.join("profile");
+    let output = Command::new(env!("CARGO_BIN_EXE_styk"))
+        .current_dir(root())
+        .args(["profile", "engine/tests/edit/startup.document.json"])
+        .arg(&script)
+        .arg("--out")
+        .arg(&profile)
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["what"], "BUDGET missed");
+    assert_eq!(error["input"]["line"], 2);
+    for name in [
+        "profile.json",
+        "summary.txt",
+        "trace.styktrace",
+        "trace.perfetto.json",
+    ] {
+        std::fs::remove_file(profile.join(name)).unwrap();
+    }
+    std::fs::remove_dir(profile).unwrap();
+    std::fs::remove_file(script).unwrap();
+    std::fs::remove_dir(dir).unwrap();
+}

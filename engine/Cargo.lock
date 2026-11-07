@@ -2843,6 +2843,7 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "png",
+ "serde",
  "serde_json",
  "styk-core",
  "styk-design",

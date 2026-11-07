@@ -14,7 +14,14 @@ pub enum Step {
     Advance(u64),
 }
 /// A small versioned prefix of the automation language; unsupported steps fail visibly.
+pub struct Script {
+    pub steps: Vec<Step>,
+    pub budgets: Vec<crate::budget::Budget>,
+}
 pub fn parse(text: &str) -> Result<Vec<Step>, String> {
+    Ok(parse_script(text)?.steps)
+}
+pub fn parse_script(text: &str) -> Result<Script, String> {
     if text.len() > 64 * 1024 {
         return Err("scenario exceeds 64 KiB".into());
     }
@@ -23,7 +30,24 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
         return Err("expected styk-auto/1".into());
     }
     let mut steps = Vec::new();
+    let mut budgets = Vec::new();
     for (line, text) in lines.enumerate() {
+        if let Some(path) = text.strip_prefix("file ") {
+            if path.len() > 4096 {
+                return Err("scenario input path too long".into());
+            }
+            continue;
+        }
+        if text.trim_start().starts_with("budget ") {
+            if budgets.len() == 64 {
+                return Err("scenario exceeds 64 budgets".into());
+            }
+            budgets.push(crate::budget::Budget::parse(text, line + 2)?);
+            continue;
+        }
+        if text.trim_start().starts_with('#') {
+            continue;
+        }
         let fields: Vec<_> = text.split_whitespace().collect();
         let step = match fields.as_slice() {
             [] => continue,
@@ -45,7 +69,7 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
         }
         steps.push(step);
     }
-    Ok(steps)
+    Ok(Script { steps, budgets })
 }
 pub trait Host: Send + 'static {
     fn step(&mut self, step: &Step, logical_time: Duration) -> Result<(), String>;
@@ -72,6 +96,7 @@ pub fn start(
         .spawn(
             "devtools.scenario",
             Box::new(move || {
+                let _clock = styk_trace::clock::scoped(clock.clone());
                 let logical = FixedClock::new();
                 let run = || -> Result<Vec<Sample>, String> {
                     let mut samples = Vec::new();
@@ -96,6 +121,7 @@ pub fn start(
                     Ok(samples)
                 };
                 let outcome = run();
+                drop(host);
                 if let Ok(mut slot) = result.lock() {
                     *slot = Some(outcome);
                 }
@@ -116,6 +142,7 @@ mod tests {
     }
     #[test]
     fn clock_advances_only_at_script_barriers() {
+        let _serial = crate::TRACE_TEST_LOCK.lock().unwrap();
         let spawner = styk_services::ManualSpawner::new();
         let steps = parse("styk-auto/1\nadvance 17\nopen\nframe 0\nexport").unwrap();
         let done = start(&spawner, Arc::new(FixedClock::new()), steps, Fake).unwrap();

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path, sync::Arc, time::Duration};
 use styk_devtools::{
-    capture::{Capture, event},
+    drain::Drain,
     scenario::{self, Host, Step},
     stats,
 };
@@ -24,6 +24,9 @@ struct EngineHost {
     path: String,
     documents: styk_core::documents::Documents,
     clock: Arc<dyn Clock>,
+    engine: Option<styk_engine::Engine>,
+    export_path: Option<std::path::PathBuf>,
+    export_hash: Arc<std::sync::Mutex<Option<String>>>,
 }
 impl Host for EngineHost {
     fn step(&mut self, step: &Step, _: Duration) -> Result<(), String> {
@@ -45,30 +48,39 @@ impl Host for EngineHost {
                     .file_name()
                     .and_then(|s| s.to_str())
                     .ok_or("invalid file name")?;
-                let mut prepared = if path.extension().is_some_and(|s| s == "json") {
-                    let opened = engine
-                        .open_document(
-                            styk_engine::document::OpenSource::Json {
-                                bytes: &bytes,
-                                name,
-                            },
-                            styk_engine::document::OpenOptions {
-                                layer_timeline: true,
-                            },
-                            &|| false,
-                        )
-                        .map_err(|e| e.to_string())?;
-                    styk_core::documents::PreparedDocument::from_opened(opened, &|| false)
-                        .map_err(|e| e.to_string())?
-                } else {
-                    styk_core::documents::PreparedDocument::open_bytes(
-                        &engine,
-                        bytes.into(),
+                let source = if path.extension().is_some_and(|s| s == "json") {
+                    styk_engine::document::OpenSource::Json {
+                        bytes: &bytes,
                         name,
+                    }
+                } else {
+                    styk_engine::document::OpenSource::File {
+                        bytes: &bytes,
+                        name,
+                    }
+                };
+                let mut opened = engine
+                    .open_document(
+                        source,
+                        styk_engine::document::OpenOptions {
+                            layer_timeline: true,
+                        },
                         &|| false,
                     )
-                    .map_err(|e| e.to_string())?
-                };
+                    .map_err(|e| e.to_string())?;
+                if opened.source.is_some() {
+                    opened
+                        .attach_source(bytes.into())
+                        .map_err(|e| e.to_string())?;
+                }
+                engine
+                    .activate(&opened.typed, &opened.tree, 0)
+                    .map_err(|e| e.to_string())?;
+                let mut prepared =
+                    styk_core::documents::PreparedDocument::from_opened(opened, &|| false)
+                        .map_err(|e| e.to_string())?;
+                self.engine = Some(engine);
+                // This seam is the deadline clock for budgeted reads, not animation time.
                 prepared.set_clock(engine_clock);
                 self.documents
                     .open(prepared)
@@ -99,10 +111,50 @@ impl Host for EngineHost {
                 std::hint::black_box(frame);
             }
             Step::Export => {
-                return Err(
-                    "export scenario awaits the core export adapter; use styk video or styk export"
-                        .into(),
+                let document = self.documents.active().ok_or("export needs open first")?;
+                let engine = self.engine.as_ref().ok_or("export needs engine")?;
+                engine
+                    .publish_tree(
+                        document.lineage(),
+                        document.records().clone(),
+                        document.revision(),
+                    )
+                    .map_err(|e| e.to_string())?
+                    .ok_or("export lost document lineage")?;
+                let frames = engine.export_frames(document.revision())?;
+                let generation = frames.generation();
+                let doc = &generation.prepared.doc;
+                let settings = styk_export::Settings::new(
+                    doc.canvas[0],
+                    doc.canvas[1],
+                    styk_export::Smoothing::Edges,
+                    styk_export::settings::MAX_PIXELS,
+                )?;
+                frames.decode_images();
+                while engine.step() {}
+                let mut renderer = styk_export::CpuExport::new(settings, styk_export::TILE_SIDE);
+                renderer.upload_images(
+                    &generation.assets,
+                    frames.take_images(usize::MAX).iter().cloned(),
                 );
+                let tick = document.view().tick.max(0.) as u32;
+                let frame = frames.take(tick).ok_or("export frame unavailable")?;
+                let pixels = renderer.frame(doc, &frame.list, frame.camera.as_ref(), false)?;
+                let hash = format!("{:x}", Sha256::digest(&pixels));
+                if let Some(path) = self.export_path.take() {
+                    image::save_buffer(
+                        path,
+                        &pixels,
+                        settings.width,
+                        settings.height,
+                        image::ColorType::Rgba8,
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+                *self
+                    .export_hash
+                    .lock()
+                    .map_err(|_| "export hash slot unavailable")? = Some(hash);
             }
             Step::Advance(_) => {}
         }
@@ -111,15 +163,20 @@ impl Host for EngineHost {
 }
 
 fn error(what: &str) -> i32 {
-    eprintln!(
-        "{}",
-        json!({"what":what,"where":"profile","hint":"profile <file> open|frame [--out <new-directory>]"})
+    let error = styk_devtools::answer::error(
+        "developer command failed",
+        "profile",
+        Value::Null,
+        what,
+        "profile <file> open|frame|export|scenario.styk-auto [--out new-directory] [--runs 3..32]",
     );
+    eprintln!("{error}");
+    println!("Developer command failed; see the JSON error on stderr.");
     2
 }
 fn read_json(path: &str) -> Result<Value, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(1024 * 1024 + 1);
     file.take(1024 * 1024 + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
@@ -129,40 +186,80 @@ fn read_json(path: &str) -> Result<Value, String> {
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 pub fn compare(args: &[String]) -> i32 {
-    if args.len() != 2 {
+    let paths: Vec<_> = args
+        .iter()
+        .filter(|s| !matches!(s.as_str(), "--json" | "--full"))
+        .collect();
+    if paths.len() != 2 {
         return error("compare-profile needs two profile.json files");
     }
-    match read_json(&args[0]).and_then(|a| read_json(&args[1]).and_then(|b| stats::compare(&a, &b)))
+    match read_json(paths[0]).and_then(|a| read_json(paths[1]).and_then(|b| stats::compare(&a, &b)))
     {
         Ok(value) => {
             println!("{value}");
             i32::from(value["regression"] == true)
         }
-        Err(e) => error(&e),
+        Err(e) => {
+            let incomparable =
+                e.starts_with("incomparable") || e.starts_with("comparison requires");
+            error(&e);
+            if incomparable { 3 } else { 2 }
+        }
     }
 }
 pub fn run(args: &[String]) -> i32 {
     match profile(args) {
-        Ok(()) => 0,
+        Ok(missed) => i32::from(missed),
         Err(e) => error(&e),
     }
 }
-fn profile(args: &[String]) -> Result<(), String> {
-    if args.len() != 2 && !(args.len() == 4 && args[2] == "--out") {
-        return Err("invalid profile arguments".into());
+fn profile(args: &[String]) -> Result<bool, String> {
+    if args.len() < 2 {
+        return Err("file and scenario required".into());
+    }
+    let mut out = "artifacts/profile/headless";
+    let mut runs = 3usize;
+    let mut at = 2;
+    while at < args.len() {
+        match args[at].as_str() {
+            "--out" => {
+                at += 1;
+                out = args.get(at).ok_or("--out needs a directory")?;
+            }
+            "--runs" => {
+                at += 1;
+                runs = args
+                    .get(at)
+                    .ok_or("--runs needs a count")?
+                    .parse()
+                    .map_err(|_| "invalid run count")?;
+            }
+            "--json" | "--full" => {}
+            _ => return Err("unknown profile option".into()),
+        }
+        at += 1;
+    }
+    if !(3..=32).contains(&runs) {
+        return Err("profile needs 3..32 runs".into());
     }
     let text = match args[1].as_str() {
-        "open" => "styk-auto/1\nopen",
-        "frame" => "styk-auto/1\nopen\nframe 0",
-        _ => return Err("supported scenarios: open, frame".into()),
+        "open" => "styk-auto/1\nopen".into(),
+        "frame" => "styk-auto/1\nopen\nframe 0".into(),
+        "export" => "styk-auto/1\nopen\nexport".into(),
+        path if path.ends_with(".styk-auto") => {
+            let mut text = String::with_capacity(65537);
+            std::fs::File::open(path)
+                .map_err(|e| e.to_string())?
+                .take(65537)
+                .read_to_string(&mut text)
+                .map_err(|e| e.to_string())?;
+            text
+        }
+        _ => return Err("supported scenarios: open, frame, export, or .styk-auto script".into()),
     };
-    let out = Path::new(if args.len() == 4 {
-        args[3].as_str()
-    } else {
-        "artifacts/profile/headless"
-    });
-    // Never replace an existing capture or create output beside a private input.
-    std::fs::create_dir_all(out.parent().ok_or("output needs a parent directory")?)
+    let script = scenario::parse_script(&text)?;
+    let out = Path::new(out);
+    std::fs::create_dir_all(out.parent().ok_or("output needs parent")?)
         .map_err(|e| e.to_string())?;
     std::fs::create_dir(out).map_err(|e| format!("output must be a new directory: {e}"))?;
     let mut input = std::fs::File::open(&args[0]).map_err(|e| e.to_string())?;
@@ -176,54 +273,262 @@ fn profile(args: &[String]) -> Result<(), String> {
         hash.update(&scratch[..n]);
     }
     let clock: Arc<dyn Clock> = Arc::new(SystemClock::new());
-    let mut samples = Vec::new();
-    for _ in 0..3 {
+    styk_devtools::initialize_with(clock.clone());
+    let drain = Drain::start(
+        &styk_platform::spawn::ThreadSpawner,
+        clock.clone(),
+        8 * 1024 * 1024,
+    )?;
+    let mut samples = Vec::with_capacity(runs);
+    let mut metrics = Vec::with_capacity(runs);
+    let mut export_hashes = Vec::with_capacity(runs);
+    for run in 0..runs {
+        let export_hash = Arc::new(std::sync::Mutex::new(None));
         let done = scenario::start(
             &styk_platform::spawn::ThreadSpawner,
             clock.clone(),
-            scenario::parse(text)?,
+            script.steps.clone(),
             EngineHost {
                 path: args[0].clone(),
                 documents: styk_core::documents::Documents::new(),
                 clock: clock.clone(),
+                engine: None,
+                export_path: (run == 0).then(|| out.join("export.png")),
+                export_hash: export_hash.clone(),
             },
         )?;
-        // Offline CLI only. The shared runner never blocks an interface caller.
+        let deadline = clock.now() + Duration::from_secs(120);
         loop {
-            if let Some(result) = done
-                .lock()
-                .map_err(|_| "scenario completion poisoned")?
-                .take()
-            {
-                samples.push(
-                    result?
-                        .iter()
-                        .map(|s| s.elapsed.as_secs_f64() * 1000.0)
-                        .sum::<f64>(),
-                );
+            if let Some(result) = done.try_lock().ok().and_then(|mut slot| slot.take()) {
+                let result = result?;
+                let mut open = 0.;
+                let mut frame = 0.;
+                let mut export = 0.;
+                for sample in &result {
+                    let ms = sample.elapsed.as_secs_f64() * 1000.;
+                    match sample.step {
+                        Step::Open => open += ms,
+                        Step::Frame(_) => frame += ms,
+                        Step::Export => export += ms,
+                        Step::Advance(_) => {}
+                    }
+                }
+                samples.push(open + frame + export);
+                metrics.push(json!({"scenario":{"ms":open+frame+export},"open":{"ms":open},"frame":{"ms":frame},"export":{"ms":export}}));
+                if let Some(hash) = export_hash
+                    .lock()
+                    .map_err(|_| "export completion unavailable")?
+                    .take()
+                {
+                    export_hashes.push(hash);
+                }
                 break;
             }
-            if clock.now() > Duration::from_secs(120) {
+            if clock.now() > deadline {
                 return Err("scenario timed out".into());
             }
             std::thread::sleep(Duration::from_millis(1));
         }
     }
-    let report = json!({"format":"stykprofile/1","scenario":args[1],"input_hash":format!("{:x}",hash.finalize()),"clock":"real","build_profile":env!("STYK_BUILD_PROFILE"),"samples_ms":samples,"summary":stats::summary(&samples)?,"scope":"core session open and frame evaluation; no presentation or GPU timing"});
-    std::fs::write(out.join("profile.json"), report.to_string()).map_err(|e| e.to_string())?;
-    let mut capture = Capture::new(8 * 1024 * 1024)?;
-    for record in styk_trace_snapshot() {
-        capture.push(&serde_json::to_vec(&record).map_err(|e| e.to_string())?)?;
+    if export_hashes.windows(2).any(|pair| pair[0] != pair[1]) {
+        return Err("export pixels differ between runs".into());
     }
+    drain.stop();
+    let deadline = clock.now() + Duration::from_secs(5);
+    let capture = loop {
+        if let Some(result) = drain.take() {
+            break result?;
+        }
+        if clock.now() > deadline {
+            return Err("capture drain timed out".into());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    let budgets: Vec<_> = script
+        .budgets
+        .iter()
+        .map(|budget| budget.judge(&metrics))
+        .collect::<Result<_, _>>()?;
+    let missed = budgets.iter().any(|b| b["met"] == false);
+    let scenario = if args[1].ends_with(".styk-auto") {
+        "script"
+    } else {
+        args[1].as_str()
+    };
+    let machine = json!({"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"logical_cpus":std::thread::available_parallelism().map(|n|n.get()).unwrap_or(1),"host_hash":format!("{:x}",Sha256::digest(std::env::var("COMPUTERNAME").unwrap_or_default().as_bytes()))});
+    let report = json!({"machine":machine,"measurement_environment":"shared heavy queue; diagnostic smoke, not a performance gate","format":"stykprofile/1","scenario":scenario,"scenario_hash":format!("{:x}",Sha256::digest(text.as_bytes())),"input_hash":format!("{:x}",hash.finalize()),"clock":"real","logical_clock":"fixed","build_profile":env!("STYK_BUILD_PROFILE"),"samples_ms":samples,"summary":stats::summary(&samples)?,"metrics":metrics,"budgets":budgets,"export_hashes":export_hashes,"capture":{"bytes":capture.bytes(),"dropped":capture.dropped},"scope":"core session open and evaluation; CPU export; no presentation or GPU timing"});
+    std::fs::write(out.join("profile.json"), report.to_string()).map_err(|e| e.to_string())?;
     capture
         .write(std::fs::File::create(out.join("trace.styktrace")).map_err(|e| e.to_string())?)?;
     capture.perfetto(
         std::fs::File::create(out.join("trace.perfetto.json")).map_err(|e| e.to_string())?,
     )?;
-    std::fs::write(out.join("summary.txt"), report.to_string()).map_err(|e| e.to_string())?;
-    println!("{report}");
-    Ok(())
+    let mut short = report.clone();
+    short
+        .as_object_mut()
+        .ok_or("invalid report")?
+        .remove("metrics");
+    short
+        .as_object_mut()
+        .ok_or("invalid report")?
+        .remove("export_hashes");
+    short["truncated"] = json!(true);
+    short["more"] = json!("profile.json");
+    let bytes=styk_devtools::answer::encode(&short,styk_devtools::answer::SHORT_BYTES).unwrap_or_else(|_|json!({"format":"stykprofile/1","summary":report["summary"],"budget_missed":missed,"truncated":true,"more":"profile.json"}).to_string().into_bytes());
+    std::fs::write(out.join("summary.txt"), &bytes).map_err(|e| e.to_string())?;
+    if args.iter().any(|s| s == "--full") {
+        let full = styk_devtools::answer::encode(&report, styk_devtools::answer::FULL_BYTES)?;
+        println!("{}", String::from_utf8_lossy(&full));
+    } else {
+        println!("{}", String::from_utf8_lossy(&bytes));
+    }
+    for budget in budgets.iter().filter(|b| b["met"] == false) {
+        eprintln!(
+            "{}",
+            styk_devtools::answer::error(
+                "BUDGET missed",
+                "scenario",
+                json!({"line":budget["line"],"metric":budget["metric"]}),
+                &format!(
+                    "median {} {} {} ({} runs)",
+                    budget["median"], budget["op"], budget["limit"], runs
+                ),
+                "inspect profile.json; thresholds were not changed"
+            )
+        );
+    }
+    Ok(missed)
 }
-fn styk_trace_snapshot() -> Vec<Value> {
-    styk_devtools::capture_events().iter().map(event).collect()
+
+pub fn schema(args: &[String]) -> i32 {
+    let check = args.iter().any(|a| a == "--check");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    for (name, value) in [
+        ("devtools-protocol.json", styk_devtools::schema::protocol()),
+        ("devtools-profile.json", styk_devtools::schema::profile()),
+    ] {
+        let path = root.join("docs/native").join(name);
+        let bytes = styk_devtools::schema::bytes(&value);
+        if check {
+            if std::fs::read(&path).ok().as_ref() != Some(&bytes) {
+                return error("developer schema is stale");
+            }
+        } else if let Err(e) = std::fs::write(path, bytes) {
+            return error(&e.to_string());
+        }
+    }
+    println!("schemas: protocol and profile are current");
+    0
+}
+pub fn attach(args: &[String]) -> i32 {
+    use styk_services::control::Transport;
+    if args.len() != 2 {
+        return error("attach <pid> '<JSON request>'");
+    }
+    let Ok(pid) = args[0].parse::<u32>() else {
+        return error("invalid pid");
+    };
+    let operation = match styk_platform::LocalControl.request(
+        &styk_platform::spawn::ThreadSpawner,
+        &format!("stykanimate-dev-{pid}"),
+        args[1].as_bytes().to_vec(),
+    ) {
+        Ok(operation) => operation,
+        Err(e) => return error(&e),
+    };
+    let clock = SystemClock::new();
+    loop {
+        if let Some(result) = operation.take() {
+            return match result {
+                Ok(bytes) => {
+                    let ok = serde_json::from_slice::<Value>(&bytes)
+                        .ok()
+                        .is_some_and(|value| value["ok"] == true);
+                    println!("{}", String::from_utf8_lossy(&bytes));
+                    if ok { 0 } else { 2 }
+                }
+                Err(e) => error(&e),
+            };
+        }
+        if clock.now() > Duration::from_secs(5) {
+            return error("attach timed out");
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+pub fn doctor() -> i32 {
+    let disk = match styk_platform::LocalControl::free_disk_bytes() {
+        Ok(bytes) => bytes,
+        Err(e) => return error(&e),
+    };
+    let instance = styk_render::wgpu::Instance::new(
+        styk_render::wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+    );
+    let adapter = pollster::block_on(
+        instance.request_adapter(&styk_render::wgpu::RequestAdapterOptions::default()),
+    );
+    let gpu = match adapter {
+        Ok(adapter) => {
+            json!({"name":adapter.get_info().name,"timestamp_query":adapter.features().contains(styk_render::wgpu::Features::TIMESTAMP_QUERY)})
+        }
+        Err(e) => json!({"unavailable":e.to_string()}),
+    };
+    let tools = std::env::var_os("USERPROFILE")
+        .map(|home| Path::new(&home).join(".styk-tools/env.sh").is_file())
+        .unwrap_or(false);
+    println!(
+        "{}",
+        json!({"disk_free_bytes":disk,"disk_warning":disk<15*1024*1024*1024,"gpu":gpu,"tool_environment":tools,"renderdoc":"run renderdoccmd --version to verify an optional install","pix":"capture integration deferred to K-stage","process_cleanup":"never stops or deletes other tasks' processes or targets"})
+    );
+    if disk < 15 * 1024 * 1024 * 1024 { 1 } else { 0 }
+}
+pub fn png_compare(args: &[String]) -> i32 {
+    fn run(args: &[String]) -> Result<bool, String> {
+        if args.len() != 3 {
+            return Err("devtools-png-compare <A.png> <B.png> <new-diff.png>".into());
+        }
+        let load = |path: &str| -> Result<image::RgbaImage, String> {
+            let mut reader = image::ImageReader::open(path).map_err(|e| e.to_string())?;
+            let mut limits = image::Limits::default();
+            limits.max_alloc = Some(64 * 1024 * 1024);
+            reader.limits(limits);
+            reader
+                .decode()
+                .map(|image| image.to_rgba8())
+                .map_err(|e| e.to_string())
+        };
+        let a = load(&args[0])?;
+        let b = load(&args[1])?;
+        if a.dimensions() != b.dimensions() {
+            return Err("screenshot dimensions differ".into());
+        }
+        let mut diff = image::RgbaImage::new(a.width(), a.height());
+        let mut changed = 0u64;
+        for ((a, b), out) in a.pixels().zip(b.pixels()).zip(diff.pixels_mut()) {
+            let differs = a != b;
+            changed += u64::from(differs);
+            *out = if differs {
+                image::Rgba([255, 0, 64, 255])
+            } else {
+                image::Rgba([0, 0, 0, 255])
+            };
+        }
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&args[2])
+            .map_err(|e| e.to_string())?;
+        image::DynamicImage::ImageRgba8(diff)
+            .write_to(&mut std::io::BufWriter::new(file), image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+        println!(
+            "{}",
+            json!({"pixels":a.width() as u64*a.height() as u64,"differing":changed,"differing_percent":changed as f64*100./(a.width() as f64*a.height() as f64),"rule":"exact RGBA bytes; no tuned threshold"})
+        );
+        Ok(changed > 0)
+    }
+    match run(args) {
+        Ok(changed) => i32::from(changed),
+        Err(e) => error(&e),
+    }
 }
