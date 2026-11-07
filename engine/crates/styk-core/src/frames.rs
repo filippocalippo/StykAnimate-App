@@ -12,8 +12,7 @@ use styk_engine::frame_builder::{FrameBuilder, Options};
 use styk_engine::{FrameData, Generation};
 use styk_services::{Clock, SpawnError, Spawner};
 
-pub use styk_engine::frame_builder::Onion;
-pub use styk_engine::frame_builder::Options as SceneOptions;
+use crate::engine::Onion;
 
 pub const LOOKAHEAD: usize = 48;
 pub const ONIONS: usize = 48;

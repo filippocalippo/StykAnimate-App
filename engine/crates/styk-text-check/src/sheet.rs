@@ -25,7 +25,7 @@ const SETTLE_FRAMES: u32 = 4;
 enum Message {
     Opened(window::Id),
     Shown,
-    FontsReady,
+    FontsReady(Result<(), String>),
     Frame,
     Captured(Result<Image, String>),
 }
@@ -74,7 +74,8 @@ impl Sheet {
                 }
             }
             Message::Shown => Task::none(),
-            Message::FontsReady => {
+            Message::FontsReady(Err(error)) => { eprintln!("{error}"); std::process::exit(1); }
+            Message::FontsReady(Ok(())) => {
                 self.fonts_ready = true;
                 eprintln!("text rendering: {:?}", iced::advanced::graphics::text::rendering());
                 if warm_up::built_early() {
@@ -255,15 +256,12 @@ pub fn run(matrix_path: &Path, out_dir: &Path, theme_name: &str, scale: f32, gat
     };
     if strategy.is_some() {
         settings.position = window::Position::Specific(iced::Point::new(-20000.0, -20000.0));
-        #[cfg(windows)]
-        {
-            settings.platform_specific.skip_taskbar = true;
-        }
+        // styk-platform applies the tool-window style before showing this hidden window.
     }
     let palette = theme.palette();
     let (background_color, text_color): (iced::Color, iced::Color) = (palette.surface_field.into(), palette.text_1.into());
     iced::application(
-        move || (sheet.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the sheet starts once"), warm_up::warm_up_after(delay).map(|()| Message::FontsReady)),
+        move || (sheet.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the sheet starts once"), warm_up::warm_up_after(delay, std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(styk_platform::clock::SystemClock::new()), std::sync::Arc::new(styk_platform::font_smoothing::NativeTextEnvironment)).map(Message::FontsReady)),
         Sheet::update,
         Sheet::view,
     )

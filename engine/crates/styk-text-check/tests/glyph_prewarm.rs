@@ -20,7 +20,7 @@ fn the_interfaces_fixed_glyphs_are_ready_before_its_first_frame() {
         eprintln!("skipped: no graphics adapter");
         return;
     };
-    let feeder = repertoire::prewarm(1.0, "it-IT".to_string()).expect("a glyph worker");
+    let feeder = feed::start(repertoire::prepare(1.0, "it-IT").expect("a glyph worker"));
     feeder.join().expect("the feeder ends");
     let started = Instant::now();
     while cryoglyph::worker_state().0 > 0 && started.elapsed() < Duration::from_secs(30) {
@@ -38,3 +38,6 @@ fn the_interfaces_fixed_glyphs_are_ready_before_its_first_frame() {
     assert!(!window.renderer.text_incomplete(), "no glyph of the fixed repertoire had to be waited for");
     assert!(ink(&window.shown) > 300);
 }
+
+#[path = "support/feed.rs"]
+mod feed;

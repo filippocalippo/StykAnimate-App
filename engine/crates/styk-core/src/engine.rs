@@ -5,3 +5,4 @@ pub use styk_edit::{EditError, Selection};
 pub use styk_engine::document::OpenError;
 pub use styk_engine::{Budgets, Engine};
 pub use styk_eval::doc::Document as TypedDocument;
+pub use styk_engine::frame_builder::{Onion, Options as SceneOptions};

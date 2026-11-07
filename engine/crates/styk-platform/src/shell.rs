@@ -1,6 +1,6 @@
 //! The program's shell: which instance this is, where the window goes, its chrome, and what later starts ask of it.
 //!
-//! The contracts are `styk_services::shell`; the Windows implementations are `styk_platform::windows`. This module wires
+//! The contracts are `styk_services::shell`; the Windows implementations are `crate::windows`. This module wires
 //! them to the application: it decides at start whether to go on at all (a start that only hands a link to the running
 //! program ends here), what frame the window opens at, and keeps the window's frame saved. Unattended runs
 //! (`STYK_BACKGROUND_WINDOW`) touch none of it: they take no instance, read no window state and write none.
@@ -12,9 +12,9 @@ use styk_services::shell::protocol::looks_like_link;
 use styk_services::shell::window_state::{SaveDebounce, SetupKey, WindowFrame, WindowStateFile, default_frame, fit_to_monitors};
 
 #[cfg(windows)]
-pub use styk_platform::windows::{chrome::Chrome, monitors::Sample};
+pub use crate::windows::{chrome::Chrome, monitors::Sample};
 #[cfg(windows)]
-use styk_platform::windows::{
+use crate::windows::{
     instance::{self, Primary, Role},
     monitors::{self, FrameTracker},
 };
@@ -58,26 +58,15 @@ pub enum Wake {
     SaveCheck,
 }
 
-/// Sends wake-ups to the event loop without blocking: when the channel is full a wake is already pending, and what it
-/// is for (the chrome's state, the inbox) is read, not replayed.
-///
-/// There is one sender, shared: every extra sender of a futures channel brings a slot of its own, so cloning a sender per
-/// wake-up would make the channel unbounded.
+/// The application supplies a bounded, nonblocking notification callback.
 #[derive(Clone)]
-pub struct Wakes(std::sync::Arc<std::sync::Mutex<iced::futures::channel::mpsc::Sender<Wake>>>);
-
+pub struct Wakes(pub std::sync::Arc<dyn Fn(Wake) + Send + Sync>);
 impl Wakes {
-    /// A sender and the receiver the event loop listens to.
-    pub fn channel() -> (Wakes, iced::futures::channel::mpsc::Receiver<Wake>) {
-        let (sender, receiver) = iced::futures::channel::mpsc::channel(16);
-        (Wakes(std::sync::Arc::new(std::sync::Mutex::new(sender))), receiver)
-    }
-
-    /// Wakes the loop.
-    pub fn send(&self, wake: Wake) {
-        let _ = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).try_send(wake);
-    }
+    pub fn send(&self, wake: Wake) { (self.0)(wake); }
 }
+
+pub type SaveCompletion = Box<dyn FnOnce(Result<(), String>) + Send>;
+pub type SaveJob = Box<dyn FnOnce(SaveCompletion) + Send>;
 
 /// The user data folder: `STYK_USER_DATA_DIR`, else the Electron app's own (`%APPDATA%\StykAnimate`), so settings and
 /// recovery files carry over.
@@ -140,7 +129,10 @@ pub fn start(arguments: &[String], unattended: bool, wakes: &Wakes) -> Start {
         return Start::Run(Box::new(shell));
     }
     let profile = profile_dir();
-    let _ = std::fs::create_dir_all(&profile);
+    if let Err(error) = std::fs::create_dir_all(&profile) {
+        eprintln!("could not create profile: {error}");
+        return Start::End(ExitCode::FAILURE);
+    }
     #[cfg(windows)]
     {
         use styk_services::shell::instance::ProfileId;
@@ -171,7 +163,7 @@ pub fn start(arguments: &[String], unattended: bool, wakes: &Wakes) -> Start {
 
 #[cfg(windows)]
 fn workspace_directory(profile: &std::path::Path) -> Option<PathBuf> {
-    use styk_platform::windows::updates::process_alive;
+    use crate::windows::updates::process_alive;
     use styk_services::shell::instance::{RenameFailure, WorkspaceEntry, WorkspaceFs, workspace_directory};
     struct RealFs;
     impl WorkspaceFs for RealFs {
@@ -237,19 +229,16 @@ impl Shell {
 
     /// The window is closing: a worker saves what is pending, and the receiver says when it is written (the program must
     /// not end before; the interface thread must not do the writing). `None` when there is nothing to save.
-    pub fn save_for_close(&mut self) -> Option<iced::futures::channel::oneshot::Receiver<()>> {
+    pub fn save_for_close(&mut self) -> Option<SaveJob> {
         if !self.debounce.pending() {
             return None;
         }
         let _ = self.debounce.due(u64::MAX);
-        let (done, receiver) = iced::futures::channel::oneshot::channel();
         match self.snapshot() {
             Some((path, frame)) => {
-                std::thread::spawn(move || {
-                    write_state(&path, frame);
-                    let _ = done.send(());
-                });
-                Some(receiver)
+                Some(Box::new(move |done| {
+                    std::thread::spawn(move || done(write_state(&path, frame)));
+                }))
             }
             None => None,
         }
@@ -264,7 +253,9 @@ impl Shell {
 
     fn save_in_background(&self) {
         if let Some((path, frame)) = self.snapshot() {
-            std::thread::spawn(move || write_state(&path, frame));
+            std::thread::spawn(move || {
+                if let Err(error) = write_state(&path, frame) { eprintln!("{error}"); }
+            });
         }
     }
 
@@ -286,7 +277,7 @@ impl Shell {
 }
 
 /// Reads the file, records the frame, and replaces the file atomically (a temporary file, then a rename).
-fn write_state(path: &std::path::Path, frame: WindowFrame) {
+fn write_state(path: &std::path::Path, frame: WindowFrame) -> Result<(), String> {
     #[cfg(windows)]
     {
         let monitors = monitors::monitors();
@@ -294,12 +285,14 @@ fn write_state(path: &std::path::Path, frame: WindowFrame) {
         file.record(SetupKey::of(&monitors), frame);
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let temporary = path.with_extension(format!("tmp{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
-        if std::fs::write(&temporary, file.to_text()).and_then(|()| std::fs::rename(&temporary, path)).is_err() {
+        if let Err(error) = std::fs::write(&temporary, file.to_text()).and_then(|()| std::fs::rename(&temporary, path)) {
             let _ = std::fs::remove_file(&temporary);
+            return Err(format!("could not save window state: {error}"));
         }
     }
     #[cfg(not(windows))]
     let _ = (path, frame);
+    Ok(())
 }
 
 /// What attaching the shell to the open window produced.
@@ -322,8 +315,8 @@ impl std::fmt::Debug for Attached {
 /// Attaches the chrome to the window; when `show` says this run owns the showing, puts the window at `frame` (else where it is) and shows it.
 /// Runs on the window's thread.
 #[cfg(windows)]
-pub fn attach(window: &dyn iced::window::Window, frame: Option<WindowFrame>, show: bool) -> Result<Attached, String> {
-    let chrome = styk_platform::windows::chrome::attach(window).map_err(|e| e.to_string())?;
+pub fn attach(window: &dyn raw_window_handle::HasWindowHandle, frame: Option<WindowFrame>, show: bool) -> Result<Attached, String> {
+    let chrome = crate::windows::chrome::attach(window).map_err(|e| e.to_string())?;
     let hwnd = monitors::hwnd_of(window).ok_or("not a Windows window")?;
     let applied = if show {
         match frame {
@@ -344,7 +337,7 @@ pub fn attach(window: &dyn iced::window::Window, frame: Option<WindowFrame>, sho
 
 /// No shell on this platform yet.
 #[cfg(not(windows))]
-pub fn attach(_: &dyn iced::window::Window, _: Option<WindowFrame>, _: bool) -> Result<Attached, String> {
+pub fn attach(_: &dyn raw_window_handle::HasWindowHandle, _: Option<WindowFrame>, _: bool) -> Result<Attached, String> {
     Ok(Attached { chrome: Chrome, sample: Sample, applied: None })
 }
 
@@ -368,7 +361,7 @@ mod tests {
     fn a_saved_frame_comes_back_exactly_for_this_monitor_setup() {
         let dir = temp("roundtrip");
         let path = dir.join("window-state.txt");
-        write_state(&path, frame(111));
+        write_state(&path, frame(111)).unwrap();
         let file = WindowStateFile::parse(&std::fs::read_to_string(&path).unwrap());
         assert_eq!(file.frame_for(SetupKey::of(&monitors::monitors())), Some(frame(111)));
         let _ = std::fs::remove_dir_all(dir);
@@ -383,7 +376,7 @@ mod tests {
                 let path = path.clone();
                 scope.spawn(move || {
                     for n in 0..40 {
-                        write_state(&path, frame(worker * 1000 + n));
+                        write_state(&path, frame(worker * 1000 + n)).unwrap();
                     }
                 });
             }
@@ -394,35 +387,38 @@ mod tests {
     }
 
     #[test]
-    fn wake_ups_are_bounded_however_many_are_sent_and_nobody_reads() {
-        let (wakes, mut receiver) = Wakes::channel();
-        for _ in 0..10_000 {
-            wakes.send(Wake::Chrome);
-            wakes.clone().send(Wake::Instance);
-        }
-        let mut held = 0;
-        while receiver.try_recv().is_ok() {
-            held += 1;
-        }
-        assert!(held <= 32, "{held} wake-ups were held for a reader that never came");
-    }
-
-    #[test]
     fn closing_saves_on_a_worker_and_says_when_the_file_is_written() {
         let dir = temp("close");
         let path = dir.join("window-state.txt");
-        let (wakes, _receiver) = Wakes::channel();
+        let wakes = Wakes(std::sync::Arc::new(|_| {}));
         let Start::Run(mut shell) = start(&[], true, &wakes) else { panic!("an unattended start runs") };
         shell.state_path = Some(path.clone());
         shell.assume(&frame(321));
         assert!(shell.save_for_close().is_none(), "nothing changed: nothing to save");
         shell.changed(&wakes);
         let done = shell.save_for_close().expect("a change is pending");
-        iced::futures::executor::block_on(done).expect("the worker reported");
+        let (send, receive) = std::sync::mpsc::channel();
+        done(Box::new(move |result| send.send(result).unwrap()));
+        receive.recv().unwrap().unwrap();
         let file = WindowStateFile::parse(&std::fs::read_to_string(&path).unwrap());
         assert_eq!(file.last, Some(frame(321)));
         assert!(shell.save_for_close().is_none(), "saved once");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn closing_reports_a_failed_state_write() {
+        let dir = temp("failed-close");
+        let wakes = Wakes(std::sync::Arc::new(|_| {}));
+        let Start::Run(mut shell) = start(&[], true, &wakes) else { panic!("unattended") };
+        shell.state_path = Some(dir.clone()); // A directory cannot be replaced by a file.
+        shell.assume(&frame(123));
+        shell.changed(&wakes);
+        let (send, receive) = std::sync::mpsc::channel();
+        shell.save_for_close().unwrap()(Box::new(move |result| send.send(result).unwrap()));
+        assert!(receive.recv().unwrap().unwrap_err().contains("could not save window state"));
+        assert!(dir.is_dir());
+        std::fs::remove_dir(dir).unwrap();
     }
 
     #[test]
@@ -431,3 +427,24 @@ mod tests {
         assert_eq!(without_links(&arguments), vec!["a.piv".to_string()]);
     }
 }
+
+/// Window samples and rectangles never expose an OS handle to the application.
+pub fn sample(window: &dyn raw_window_handle::HasWindowHandle) -> Option<Sample> {
+    #[cfg(windows)]
+    return monitors::hwnd_of(window).map(monitors::sample);
+    #[cfg(not(windows))]
+    { let _ = window; None }
+}
+pub fn window_rect(window: &dyn raw_window_handle::HasWindowHandle) -> Option<styk_services::shell::Rect> {
+    #[cfg(windows)]
+    return monitors::hwnd_of(window).and_then(monitors::window_rect);
+    #[cfg(not(windows))]
+    { let _ = window; None }
+}
+pub fn foreground() -> isize {
+    #[cfg(windows)]
+    return crate::windows::probe::foreground();
+    #[cfg(not(windows))]
+    0
+}
+pub const fn owns_show() -> bool { cfg!(windows) }

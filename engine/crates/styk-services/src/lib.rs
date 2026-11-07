@@ -20,10 +20,15 @@ pub mod video;
 pub mod video_limits;
 
 pub use cancel::Cancel;
-pub use clock::{Clock, FixedClock, SystemClock};
+pub use clock::{Clock, FixedClock};
+pub mod diagnostics;
+#[cfg(any(test, feature = "test-fakes"))]
+pub use clock::SystemClock;
 pub use spawn::{Job, ManualSpawner, SpawnError, Spawner};
 
 pub mod fonts;
 pub mod files;
 pub mod worker;
 pub mod memory;
+
+pub mod text_environment;

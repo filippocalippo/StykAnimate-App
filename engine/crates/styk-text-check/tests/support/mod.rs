@@ -29,7 +29,7 @@ impl Window {
     pub fn open(size: Size) -> Option<Self> {
         let settings = iced::Settings { font: widgets::INTER, ..iced::Settings::default() };
         let renderer = pollster::block_on(<iced_wgpu::Renderer as Headless>::new(renderer::Settings::from(&settings), None))?;
-        let _ready = warm_up::install_bundled();
+        let _ready = warm_up::install_bundled(styk_platform::font_smoothing::current());
         let blank = vec![255u8; (size.width as usize) * (size.height as usize) * 4];
         Some(Window { renderer, size, shown: blank, held: 0 })
     }
