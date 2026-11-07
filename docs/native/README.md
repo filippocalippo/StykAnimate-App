@@ -19,6 +19,14 @@ tasks and they resumed on 2026-11-07 12:37 (none had lost work: the spikes had o
 The orchestrator's briefs and tools live outside the repository in `perf/` (`perf/briefs/native-common.md` for every
 agent, `perf/briefs/native/<chunk>.md` per chunk, `perf/merge.sh <sha> <message> [native-app|engine-rust]`).
 
+**The owner's decisions of 2026-11-07** ([N5](decisions/0005-electron-is-the-reference.md)): today's Electron app is only the
+reference for parity. `engine-rust` stays at b13 (`99c62189`); the engine cleanup chunks merge into `native-app` only;
+engine chunks are verified with the Rust tests, the parity suites and the save byte checks; browser- or Electron-only work
+stops (X2, Electron 4K memory runs, fuzz-harness node crashes unless engine code, the `styk-wasm` locks and the 250 MB
+file's binding error) and becomes native acceptance criteria. Each commit is built once: implementer, checker and reviewer
+share the implementer's worktree and build; reviewers only read and run one small check; full suites only at gates; the
+seed store `wt/shared-target` is back (crates.io dependencies; `node perf/make-seed.mjs <checkout>...` adds to it).
+
 **In flight.**
 
 | Chunk | What | Where | State |
@@ -28,7 +36,7 @@ agent, `perf/briefs/native/<chunk>.md` per chunk, `perf/merge.sh <sha> <message>
 | M2 | two more refused saves found by a drawing-publishing fuzz (seeds 62, 132), the repository fuzz made to catch that class, intermittent node segfaults under load | `t3/movieclip-drawing-saves` from `d69d5a25`, Sonnet | running |
 | D | drawing-undo atlas work, its compile fix, the polygon cache removed | `t3/drawing-undo` `c8987efd` | done: merged cleanly, `placement: 0`, polygon cache removed; "two frames matched no state" not reproduced in 30 runs (new probe); in review (GPT-6.1 Sol xhigh, Sonnet checker) |
 | X | export frames independent of export order, picture and cel residency in exports | `t3/native-export-performance` `39d10510` | done: the cause was the lone-glyph mask atlas (a mask's place in it moved edge sampling by a level), now placed afresh per export frame; regression test fails without it. GPT-6.1 Sol found two majors (a refused cel decode marked complete over stale tiles; the glyph atlas keeping its layer count past its 64 MiB budget): back with the implementer; Sonnet checker running |
-| X2 | tdd2 ticks 183-188 differ between identical runs of the browser export (two hashes recur per tick: a binary cause, browser-side) | `t3/browser-export-determinism` from `5a19177e`, Sonnet | running |
+| X2 | tdd2 ticks 183-188 differ between identical runs of the browser export (two hashes recur per tick) | stopped (N5): browser-side; notes in `perf/native/findings/X2-browser-export-determinism.md`; native criterion: identical frames across runs |
 | I | the inventory | `docs/native/INVENTORY.md` | done: 1,270 rows, all todo; regenerate the appendices with `perf/native/tools/` |
 | N0 | the foundation: vendored iced and its git dependencies, the nine crates, the off-screen window (headless where a window cannot be hidden), PrintWindow screenshots, tokens (460 colours equal to Chromium's; dynamic geometry as functions), icons, Inter 4.001 and Inter Tight 3.004 | **merged into `native-app` `59a39d7c`** | reviewed by GPT-6.1 Sol, findings fixed. Empty window 197 MB private (target 150), start to first PNG about 0.9 s (directional) |
 | S1, S2a, S2t, S2b, S3 | spikes: pen; fields, focus, IME, RTL; typography; the text tool compiler; video export | T3 worktrees, Sonnet, on N0 | running |
@@ -41,7 +49,7 @@ the pen reaches iced only as touch with pressure, so a `WM_POINTER` subclass rea
 timestamps) into a ring; iced has no right-to-left layout, Tab order or focus ring, and its Windows IME is IMM32 only:
 those are ours (`styk-design`, `styk-core`) plus a few small fork patches; Inter must be converted from WOFF2 to TTF.
 
-**Next, in order.** L and P start from M's head when the D and X checkers finish (at most about ten Sonnet agents at once: more trips the API rate limit): L (the blocking locks in `styk-wasm/src/open.rs` and `stage.rs`, the 250 MB Pivot file
+**Next, in order.** L (now: the 250 MB very compressible Pivot file opened natively, memory released on close; the `styk-wasm` locks and its binding error stopped under N5) and P (the padded `.piv` export refused) start from M's head when the D and X checkers finish (at most about ten Sonnet agents at once: more trips the API rate limit): L (the blocking locks in `styk-wasm/src/open.rs` and `stage.rs`, the 250 MB Pivot file
 that fails and the memory it keeps) and P (the padded `.piv` export that is refused). Then the remaining spikes: S4 audio, S5 the web build, S6 the shell (briefs to write from their reviewed designs).
 No interface work starts until S1 and S2a pass in a native window.
 
