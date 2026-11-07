@@ -31,20 +31,20 @@ fn a_clip_the_host_cannot_take_is_refused_with_nothing_changed() {
     let mut session = started();
     call(&mut session, "@select", "[1,-1]");
     let before = json::to_string(session.report());
-    let depths = session.history_depths();
+    let depths = session.history_marks();
     session.set_memory_gate(|_| false);
     let refused = call(&mut session, "createMovieclip", CREATE);
     assert_eq!(refused.get("status").and_then(Value::as_str), Some("error"), "{refused:?}");
     assert_eq!(refused.get("error").and_then(Value::as_str), Some("errors.engine.outOfMemory"));
     assert_eq!(json::to_string(session.report()), before, "the document is as it was");
-    assert_eq!(session.history_depths(), depths, "no entry was made");
+    assert_eq!(session.history_marks(), depths, "no entry was made");
     assert_eq!(refused.get("events").unwrap().array_len(), Some(0), "nothing was announced");
     // The session is alive: the same call runs once the host can take it.
     session.set_memory_gate(|_| true);
     let made = call(&mut session, "createMovieclip", CREATE);
     assert_eq!(made.get("status").and_then(Value::as_str), Some("ok"), "{made:?}");
     assert_ne!(json::to_string(session.report()), before);
-    assert_eq!(session.history_depths().0, depths.0 + 1);
+    assert_eq!(session.history_marks().undo, depths.undo + 1);
 }
 
 #[test]

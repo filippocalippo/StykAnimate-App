@@ -512,9 +512,9 @@ impl Session {
         self.editor.memory_gate = Some(gate);
     }
 
-    /// How many entries the history can undo and redo.
-    pub fn history_depths(&self) -> (usize, usize) {
-        (self.editor.undo.len(), self.editor.redo.len())
+    /// Where the history stands: how many entries it can undo and redo, and the revision the newest leads to.
+    pub fn history_marks(&self) -> crate::HistoryMarks {
+        crate::HistoryMarks { undo: self.editor.undo.len(), redo: self.editor.redo.len(), newest: self.editor.undo.last().map(|entry| entry.after_revision) }
     }
 
     /// The clock reads that are given a time to take are held to (milliseconds).

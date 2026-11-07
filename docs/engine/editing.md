@@ -714,6 +714,13 @@ it on the editor, for every document.
   (`OpenSource::Tree`), not from text the page read from a record of the project and wrote out again; the open is reserved at three times the
   clip's text (`open_tree_estimate`), not sixteen. The clip's pose arrays are unshared as its text would have given them (the saved bytes are
   those of the project opened from text). Reading the definition to enter fetched a record as large as the project into the page.
+  Entering a clip hands the open the clip's document as the project holds it; the open reserves its memory (`open_tree_estimate`) and only then makes
+  the copy that gives the text's arrays (`OpenSource::Tree`), so a clip the engine cannot take is refused and not trapped. The replacement tracks are
+  caches that the page's thread and the workers both fill: each is taken with one attempt (`styk_doc::lock::once`) and built with no lock held (D7).
+  An entry's cost (what redoing it needs) follows the entry, also when a full history displaces its oldest to take it (`HistoryMarks`: the newest
+  revision tells a new entry from a displaced one). A retained scene's replacements keep naming only figures their cut pose still holds (`prune_patches`).
+  A figure that is not a drawing cel is not pasted or imported onto a drawing layer (the clip a `.stykmov` file holds included): a file saved so would
+  be mended when it opens.
   A movieclip made inside a clip retains the scene the outer clip retains cut down to its own figures (`prune_retained`: poses,
   effect clips and imported animation, down the chain of `movieclipSource` documents). An older retained scene numbers its figures on its own, and shares
   the definitions of the clip that holds it, so only objects of a definition the new clip holds stay in it (a figure of the older scene with the

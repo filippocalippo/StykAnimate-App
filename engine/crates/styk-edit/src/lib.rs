@@ -138,7 +138,7 @@ pub fn timeline_rows(report: &Value) -> Vec<(f64, f64)> {
     timeline::rows(report).into_iter().map(|row| (row.start, row.count)).collect()
 }
 
-pub use history::{Command, CommandKind, EntryCosts, HistoryLimits};
+pub use history::{Command, CommandKind, EntryCosts, HistoryLimits, HistoryMarks};
 pub use frame::FrameSlice;
 pub use onion_skins::{Ghost, OnionSet, MAX_GHOSTS};
 pub use layer_focus::FocusLock;

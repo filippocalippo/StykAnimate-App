@@ -314,7 +314,7 @@ pub(super) fn validate_sheet(report: &Value) -> Result<(), EditError> {
 }
 
 /// `poseSourceFrame(report, id)`: a retained pose source, or the keyframe that carries the identity.
-struct Sources<'a> {
+pub(crate) struct Sources<'a> {
     retained: Option<&'a Value>,
     frames: Vec<Value>,
     by_id: std::cell::OnceCell<HashMap<String, usize>>,
@@ -325,7 +325,12 @@ impl<'a> Sources<'a> {
         Sources { retained: path(Some(report), &["_styk", "frameSources"]), frames: items(report.get("keyframes")), by_id: Default::default() }
     }
 
-    fn frame(&self, id: V) -> Option<Value> {
+    /// The pose sources of a document that keeps `retained` (its `_styk.frameSources`) and `frames` (its keyframes).
+    pub(crate) fn of(retained: Option<&'a Value>, frames: Vec<Value>) -> Sources<'a> {
+        Sources { retained, frames, by_id: Default::default() }
+    }
+
+    pub(crate) fn frame(&self, id: V) -> Option<Value> {
         let id = text(id)?;
         if let Some(found) = get(self.retained, id).filter(|_| has_own(self.retained, id)).filter(|f| f.truthy()) {
             return Some(found.clone());

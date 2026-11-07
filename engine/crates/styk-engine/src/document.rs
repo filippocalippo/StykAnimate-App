@@ -38,8 +38,9 @@ pub enum OpenSource<'a> {
     Owned { bytes: Vec<u8>, name: &'a str },
     /// A document as JSON text, and the name it is shown under.
     Json { bytes: &'a [u8], name: &'a str },
-    /// A document already in memory as a tree, and the name it is shown under: a movieclip's own, taken from the project that holds it. Nothing is
-    /// read from text, so what the open makes is the normalized document and its views.
+    /// A document already in memory as a tree, and the name it is shown under: a movieclip's own, taken from the project that holds it (as the
+    /// project holds it: its arrays shared with the project's other records, which the open unshares once its memory is reserved, so that the
+    /// document is the one its text would give). Nothing is read from text, so what the open makes is the normalized document and its views.
     Tree { document: Value, name: &'a str },
 }
 
@@ -471,6 +472,8 @@ impl Engine {
                 },
             },
             OpenSource::Tree { document, name } => {
+                // Copied only now that the open holds the memory it asked for: the copy is as large as the text of the document.
+                let document = document.unshared();
                 let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
                 (document, "json", version, name.to_string(), None)
             }
