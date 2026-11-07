@@ -39,6 +39,7 @@ impl Layer {
         transformation: Transformation,
     ) {
         let paragraph = Text::Paragraph {
+            grayscale: true,
             paragraph: paragraph.downgrade(),
             position,
             color,
@@ -58,6 +59,7 @@ impl Layer {
         transformation: Transformation,
     ) {
         let editor = Text::Editor {
+            grayscale: true,
             editor: editor.downgrade(),
             position,
             color,
@@ -77,6 +79,7 @@ impl Layer {
         transformation: Transformation,
     ) {
         let text = Text::Cached {
+            grayscale: true,
             content: text.content,
             bounds: Rectangle::new(position, text.bounds) * transformation,
             color,

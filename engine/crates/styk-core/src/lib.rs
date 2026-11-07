@@ -18,6 +18,7 @@ pub mod drawing;
 pub mod export;
 pub mod field;
 pub mod focus;
+pub mod frames;
 pub mod i18n;
 pub mod inspector;
 pub mod launch;
