@@ -61,20 +61,17 @@ impl Cels {
         for (index, entry) in assets.drawing.iter().enumerate().filter(|(_, entry)| entry.valid) {
             cels.slots.insert(place(entry.layer, entry.x, entry.y), index as u32);
         }
-        for (&cel, (tiles, starts)) in &assets.cels {
+        for (&cel, (_, tile_slots)) in &assets.cels {
             let mut pages: Vec<u32> = Vec::new();
             let mut slots: Vec<u32> = Vec::new();
-            for (level, drawn) in tiles.levels.iter().enumerate() {
-                let Some(&start) = starts.get(level) else { continue };
-                for i in 0..drawn.len() {
-                    let slot = start as usize + i;
-                    if let Some(owner) = cels.owner.get_mut(slot) {
-                        *owner = cel;
-                    }
-                    slots.push(slot as u32);
-                    if let Some(entry) = assets.drawing.get(slot).filter(|entry| entry.valid) {
-                        pages.push(entry.layer);
-                    }
+            // Every drawn tile has a slot of its own ([`Assets::cel_slots`]).
+            for &slot in tile_slots.iter().flatten() {
+                if let Some(owner) = cels.owner.get_mut(slot as usize) {
+                    *owner = cel;
+                }
+                slots.push(slot);
+                if let Some(entry) = assets.drawing.get(slot as usize).filter(|entry| entry.valid) {
+                    pages.push(entry.layer);
                 }
             }
             pages.sort_unstable();
@@ -231,7 +228,7 @@ impl Resident {
     fn clear_cel(&mut self, gpu: &mut GpuExport, assets: &Assets, cel: usize) -> bool {
         let slots = self.cels.slots_of.get(&cel).map(Vec::as_slice).unwrap_or_default();
         let side = styk_eval::drawing::TILE + 2 * styk_eval::drawing::BORDER;
-        let mut blank = styk_eval::assets::DecodedImage { index: 0, drawing: true, soft: false, width: side, height: side, rgba: vec![0; side as usize * side as usize * 4] };
+        let mut blank = styk_eval::assets::DecodedImage { index: 0, drawing: true, soft: false, width: side, height: side, rgba: vec![0; side as usize * side as usize * 4], placement: 0 };
         for &slot in slots {
             blank.index = slot;
             gpu.upload_images(assets, [&blank]);

@@ -106,7 +106,7 @@ impl Images {
 
     /// Adds a decoded image (`styk_eval::assets::decode_image` / `decode_cel`), copied.
     pub fn add(&mut self, assets: &Assets, image: &DecodedImage) {
-        self.add_shared(assets, Arc::new(DecodedImage { index: image.index, drawing: image.drawing, soft: image.soft, width: image.width, height: image.height, rgba: image.rgba.clone() }));
+        self.add_shared(assets, Arc::new(DecodedImage { index: image.index, drawing: image.drawing, soft: image.soft, width: image.width, height: image.height, rgba: image.rgba.clone(), placement: image.placement }));
     }
 
     /// Adds a decoded image the engine already holds. Over the budget, the least recently used are dropped.
@@ -196,6 +196,13 @@ impl Images {
         for &place in &places {
             let held = if place.0 { self.tiles.get_mut(&place.1) } else { self.sprites.get_mut(&place.1) };
             match held {
+                // A tile of a cel the document replaced: its slot is another cel's now (`Assets::extended`), and what is held is the old cel's.
+                Some(held) if place.0 && held.image.placement != 0 && !assets.holds_placement(held.image.placement) => {
+                    if let Some(old) = self.tiles.remove(&place.1) {
+                        self.bytes -= old.image.rgba.len();
+                    }
+                    missing.push(place);
+                }
                 Some(held) => held.used = clock,
                 None if !self.failed.contains(&place) => missing.push(place),
                 None => {}
@@ -267,6 +274,28 @@ impl Images {
     }
 }
 
+/// What a device holds of the pictures of an atlas, by place: the placement ([`DecodedImage::placement`]) of the tile written there, 0 for a sprite.
+/// A place is lacking when it holds nothing, or the tile of a cel that no longer has the slot.
+#[derive(Default)]
+pub struct Uploads(HashMap<Place, u64>);
+
+impl Uploads {
+    /// The device was allocated again, or the atlas laid out anew: it holds nothing.
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// The pictures of `places` that `images` holds and the device does not hold as they are now.
+    pub fn lacking<'a>(&self, places: impl IntoIterator<Item = Place>, images: &'a Images) -> Vec<(Place, &'a Arc<DecodedImage>)> {
+        places.into_iter().filter_map(|place| images.get(place).map(|image| (place, image))).filter(|(place, image)| self.0.get(place) != Some(&image.placement)).collect()
+    }
+
+    /// `images` were written to the device.
+    pub fn record<'a>(&mut self, written: impl IntoIterator<Item = (Place, &'a Arc<DecodedImage>)>) {
+        self.0.extend(written.into_iter().map(|(place, image)| (place, image.placement)));
+    }
+}
+
 /// Whether two pictures are the same one.
 fn same(a: Picture, b: Picture) -> bool {
     match (a, b) {
@@ -282,13 +311,10 @@ fn sources(assets: &Assets) -> HashMap<Place, Picture> {
     for (index, entry) in assets.atlas.iter().enumerate().filter(|(_, entry)| entry.valid) {
         sources.insert(Place(false, (entry.layer, entry.x, entry.y)), Picture::Image(index));
     }
-    for (cel, (tiles, starts)) in &assets.cels {
-        for (level, drawn) in tiles.levels.iter().enumerate() {
-            let Some(&first) = starts.get(level) else { continue };
-            for slot in first as usize..first as usize + drawn.len() {
-                if let Some(entry) = assets.drawing.get(slot).filter(|entry| entry.valid) {
-                    sources.insert(Place(true, (entry.layer, entry.x, entry.y)), Picture::Cel(*cel));
-                }
+    for (cel, (_, slots)) in &assets.cels {
+        for &slot in slots.iter().flatten() {
+            if let Some(entry) = assets.drawing.get(slot as usize).filter(|entry| entry.valid) {
+                sources.insert(Place(true, (entry.layer, entry.x, entry.y)), Picture::Cel(*cel));
             }
         }
     }

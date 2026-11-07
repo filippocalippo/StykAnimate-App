@@ -9,7 +9,7 @@ use styk_eval::assets::{Assets, AtlasEntry, DecodedImage, PAGE};
 fn tile(index: u32, x: u32) -> (AtlasEntry, DecodedImage) {
     let entry = AtlasEntry { layer: 0, x, y: 2, w: 64, h: 64, source_w: 64, source_h: 64, valid: true };
     let rgba = [255u8, 0, 0, 255].repeat(68 * 68);
-    (entry, DecodedImage { index, drawing: true, soft: false, width: 68, height: 68, rgba })
+    (entry, DecodedImage { index, drawing: true, soft: false, width: 68, height: 68, rgba, placement: 0 })
 }
 
 #[test]

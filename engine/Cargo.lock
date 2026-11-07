@@ -2644,6 +2644,7 @@ dependencies = [
 name = "styk-raster"
 version = "0.1.0"
 dependencies = [
+ "image",
  "pollster",
  "styk-alloc",
  "styk-draw",

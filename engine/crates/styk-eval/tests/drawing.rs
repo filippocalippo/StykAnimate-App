@@ -54,7 +54,7 @@ fn parent_tiles_cover_negative_coordinates_in_the_right_quadrant() {
     cel.levels = styk_eval::drawing::level_tiles(&cel.tiles);
     let prepared = styk_eval::prepare(doc);
     let assets = Assets::build(&prepared.doc);
-    let (cel, starts) = assets.cels.values().next().unwrap();
+    let (cel, slots) = assets.cels.values().next().unwrap();
     let decoded = decode_cel(&assets, cel);
     let decoded_indices: Vec<_> = decoded.iter().map(|image| image.index).collect();
     let scene = build(&prepared.doc, &prepared.evaluate(0.0));
@@ -72,9 +72,9 @@ fn parent_tiles_cover_negative_coordinates_in_the_right_quadrant() {
             }
             let row = list.paints[p.paint as usize];
             let parent = assets.drawing.iter().find(|entry| entry.layer as f32 == row[0] && entry.x as f32 == row[1] && entry.y as f32 == row[2]).expect("parent atlas slot");
-            let parent_index = assets.drawing.iter().position(|entry| std::ptr::eq(entry, parent)).unwrap() as u32 - starts[level + 1];
-            let parent_slot = starts[level + 1] + parent_index;
-            let child_slot = starts[level] + i as u32;
+            let parent_slot = assets.drawing.iter().position(|entry| std::ptr::eq(entry, parent)).unwrap() as u32;
+            let parent_index = slots[level + 1].iter().position(|&slot| slot == parent_slot).expect("the parent's slot is one of the next level's") as u32;
+            let child_slot = slots[level][i];
             let parent_decoded = decoded_indices.iter().position(|&index| index == parent_slot).expect("every named parent is decoded");
             let child_decoded = decoded_indices.iter().position(|&index| index == child_slot).expect("every child is decoded");
             assert!(parent_decoded > child_decoded, "the engine's LIFO image queue uploads parent level {} before child level {level}", level + 1);

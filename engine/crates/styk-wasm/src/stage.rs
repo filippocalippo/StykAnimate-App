@@ -517,13 +517,20 @@ impl Stage {
     /// since (the camera monitor and thumbnails sample the same atlas).
     pub(crate) fn sync_images(&mut self, generation: &Arc<Generation>) {
         self.sync_atlas(generation);
+        self.uploaded.observe(&generation.assets);
         self.flush_live();
         // A frame waiting for its pictures takes every one that is decoded; otherwise a slice a frame, and a picture
         // larger than the slice goes in over several frames (a 4K picture is 64 MiB).
         let waiting = self.loading.waiting();
         // A slice a frame: smaller while a stroke is being drawn and just after (the interface thread has a frame to keep).
-        let slice = self.live.picture_budget(crate::clock(), IMAGE_UPLOAD_BYTES);
+        let now = crate::clock();
+        let slice = self.live.picture_budget(now, IMAGE_UPLOAD_BYTES);
         self.upload_bytes = 0;
+        // A stroke, an undo or a move changed a live cel a moment ago: the pictures that can wait (the published copy of what the live
+        // cel shows is the largest) are taken in once it has been quiet, and at once by a frame that needs them.
+        if !waiting && self.live.changing(now) {
+            return;
+        }
         // What this call uploads is in the table the shaders read from the next frame on.
         let flush = |stage: &mut Stage| stage.renderer.flush_pictures();
         if let Some((image, done)) = self.partial.take() {
@@ -683,6 +690,15 @@ impl Stage {
         let ready = self.pictures_ready(generation, list).or_else(|| self.residency.is_none().then(Vec::new));
         (self.sync_ms, self.ready_ms) = (synced - started, crate::clock() - synced);
         let Some(pages) = ready else { return Ok(false) };
+        // A cel the document replaced is drawn from its predecessor's slots, which the new tiles are written over: the picture on show stays
+        // until they are all in, and is never a mix of the two.
+        if self.uploaded.refilling_in(list) {
+            let (decoding, decoded) = self.engine.images_backlog();
+            if decoding + decoded > 0 || self.partial.is_some() {
+                self.pictures = if decoded > 0 || self.partial.is_some() { PICTURES_DECODED } else { PICTURES_DECODING };
+                return Ok(false);
+            }
+        }
         let doc = &generation.prepared.doc;
         // The Draw view turns and mirrors about the artboard's centre, after the scene camera.
         let orientation = styk_eval::view::orientation(self.rotation, self.flip, [pan[0] + doc.canvas[0] as f64 * zoom / 2.0, pan[1] + doc.canvas[1] as f64 * zoom / 2.0]);
