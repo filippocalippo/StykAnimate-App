@@ -35,10 +35,7 @@ pub fn settings(launch: &Launch, strategy: Option<Strategy>) -> window::Settings
     };
     if strategy.is_some() {
         settings.position = window::Position::Specific(Point::new(OFF_SCREEN, OFF_SCREEN));
-        #[cfg(windows)]
-        {
-            settings.platform_specific.skip_taskbar = true;
-        }
+        // styk-platform applies the tool-window style before showing this hidden window.
         #[cfg(target_os = "linux")]
         if strategy == Some(Strategy::OverrideRedirectWindow) {
             // The window manager never sees an override-redirect window: it takes no focus and gets no taskbar entry.
@@ -82,13 +79,6 @@ mod tests {
         assert!(!settings(&Launch::default(), Some(Strategy::HiddenWindow)).visible);
         assert!(settings(&Launch::default(), Some(Strategy::OverrideRedirectWindow)).visible);
         assert!(settings(&Launch::default(), None).visible);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_hidden_window_has_no_taskbar_entry() {
-        assert!(settings(&Launch::default(), Some(Strategy::HiddenWindow)).platform_specific.skip_taskbar);
-        assert!(!settings(&Launch::default(), None).platform_specific.skip_taskbar);
     }
 
     #[cfg(target_os = "linux")]

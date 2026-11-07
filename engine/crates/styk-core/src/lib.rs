@@ -24,3 +24,6 @@ pub mod text_entry;
 pub mod text;
 
 pub use launch::{Launch, LaunchError, USAGE};
+
+/// Service contracts exposed to views through the application core.
+pub use styk_services as services;

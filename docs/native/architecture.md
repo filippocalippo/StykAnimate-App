@@ -15,7 +15,7 @@ Everything is one Cargo workspace (`engine/`, members `engine/crates/*`). The en
 | `styk-services` | The platform service traits and their plain data types: files, dialogs, clipboard, fonts, storage, recovery, updates, audio output, video encoding, image codecs, telemetry, support, shell (single instance, protocol, associations, window state), input devices, network. Test fakes for each. No OS code. | std |
 | `styk-platform` | The implementations of `styk-services` per target: `windows/`, `macos/`, `linux/`, `web/`. | `styk-services`, OS crates |
 | `styk-core` | The application core, plain Rust, no toolkit: app and view state (documents, tabs, selection, tools, playhead, panels), every command and shortcut and undo grouping, the docking layout model and its solver, settings, the view models panels display, the stage's view (zoom, pan, hit-testing, drag sessions), frame scheduling, the automation mode. | engine crates, `styk-services`, `styk-trace` |
-| `styk-design` | The design system: tokens (both themes), icons, bundled fonts (Inter, Inter Tight), and the shared iced widgets in their every state. Generates the CSS custom properties, the SVG sprite and the component sheet for the design studio. | iced (widgets only behind its `widgets` feature) |
+| `styk-design` | The design system: tokens (both themes), icons, bundled fonts (Inter, Inter Tight), and the shared iced widgets in their every state. Generates the CSS custom properties, the SVG sprite and the component sheet for the design studio. | iced and `styk-core` for shared focus and field state (behind `widgets`) |
 | `styk-ui` | The iced front end: lays out and draws what the core holds and turns input into core commands. Shell, docking widgets, stage, timeline, inspector, panels, dialogs, Home, Settings, drawing, build, text input. | `styk-core`, `styk-design`, iced |
 | `styk-devtools` | The developer tools ([devtools.md](devtools.md)). Compiled only with the app's `devtools` feature. | `styk-core`, `styk-ui`, `styk-design`, `styk-trace` |
 | `styk-app` | The binary `stykanimate`: command line, startup, wiring of platform services into the core, the window. Feature `devtools`. | everything above |
@@ -130,3 +130,39 @@ build and mobile come later as ports, not rewrites: every OS call is behind a `s
 wgpu, and nothing in the core or the engine that a wasm32 or Unix target could not build (a `cargo check` for wasm32 at
 gates). Input, layout tiers and platform services stay behind traits a touch build can implement
 ([../TOUCH.md](../TOUCH.md)). Constraints found for the web build are in `web.md`.
+
+## The automatic guards
+
+`cargo xtask check` checks generated design files, the Cargo metadata dependency graph (all features and targets),
+registry package users against `engine/deps-allow.toml`, and production Rust tokens for Windows code outside
+`styk-platform`. Frozen evidence and integration tests are excluded by path; `cfg(test)` items are skipped.
+Only the orchestrator edits the dependency allow list after its initial baseline. Core state in shared design
+widgets is allowed; views cannot import engine crates. The existing non-default CLI `app-tools` boundary remains.
+`cargo test --manifest-path engine/Cargo.toml -p xtask --test native_guards` runs the violating fixtures, including
+a real scratch-crate Clippy check and the screenshot failure path, through the existing Node prerequisite.
+
+Clippy checks the app, UI, developer tools and design widgets for unwrap/expect, ignored results, file I/O and
+blocking calls using `engine/guard-clippy/clippy.toml`. Tests may unwrap. Device polling is conservatively disallowed
+in these interfaces, even for non-wait polls. Diagnostic output runs off the event loop; its filesystem and
+process operations belong to `styk-platform`. Design font warm-up is outside the widget-module guard, but starts
+through the injected `Spawner` and returns failures. The pen pad state belongs to core; its scripted diagnostic
+workload belongs to `styk-text-check`, injected into the developer tool through the core probe protocol.
+
+The web constraint guard rejects direct thread spawning and wall/monotonic clock construction in portable libraries.
+Text jobs use `Spawner`; closing cancels and wakes the worker without joining the interface thread. The production
+clock lives in platform; services exposes a real-time clock only behind its explicit `test-fakes` feature for tests.
+The document crate's `StdThreads` is likewise a test fake: only dev-dependencies may enable `test-fakes`.
+Named native exceptions in the guard must also be inside `cfg(not(target_arch = "wasm32"))`: the export GPU disposal
+and wait helpers (web drops in place and uses mapping callbacks), and the optional edit profiler (web has no-op
+scope/take). Host binaries, tracing and standalone test modules are outside this portable-library rule.
+The renderer receives the platform choice from its caller; it does not inspect Windows configuration itself.
+
+`docs/native/screens/limits.toml` names reference captures from today's app, dimensions and the maximum fraction of
+pixels with any RGBA channel difference. The screen IDs come from the catalogue's `id()` function. Missing reference
+assignments are reported; assigned but missing images, dimension differences and exceeded limits fail. When a
+reference exists, the guard renders through `stykanimate --screen` in headless mode and uses `styk image-diff`.
+No window opens, no reference is generated or updated, and no threshold is inferred from the result.
+
+`cargo xtask check --wasm` additionally checks the engine libraries, core and services for
+`wasm32-unknown-unknown`. This is an optional gate, not part of an implementer's Windows verification.
+Native tool binaries are excluded from that library portability gate; the browser binding is included.

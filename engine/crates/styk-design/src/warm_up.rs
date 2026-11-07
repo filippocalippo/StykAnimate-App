@@ -57,26 +57,23 @@ pub fn ready() -> bool {
 
 /// Builds the font system on a worker and resolves when [`ready`]; the worker starts after
 /// [`delay_from_environment`].
-pub fn warm_up() -> Task<()> {
-    warm_up_after(delay_from_environment())
+pub fn warm_up(spawner: std::sync::Arc<dyn styk_core::services::Spawner>) -> Task<Result<(), String>> {
+    warm_up_after(delay_from_environment(), spawner)
 }
 
 /// [`warm_up`] that starts building after `delay`.
-pub fn warm_up_after(delay: Duration) -> Task<()> {
-    Task::future(async move {
-        let (sender, receiver) = iced::futures::channel::oneshot::channel();
-        let spawned = std::thread::Builder::new().name("fonts".into()).spawn(move || {
-            std::thread::sleep(delay);
-            build_on_worker();
-            let _ = sender.send(());
-        });
-        if spawned.is_ok() {
-            let _ = receiver.await;
-        } else {
-            // No worker could be started: build here, once; the interface is the only thing left to wait.
-            build_on_worker();
-        }
-    })
+pub fn warm_up_after(delay: Duration, spawner: std::sync::Arc<dyn styk_core::services::Spawner>) -> Task<Result<(), String>> {
+    Task::future(start_worker(delay, spawner))
+}
+
+async fn start_worker(delay: Duration, spawner: std::sync::Arc<dyn styk_core::services::Spawner>) -> Result<(), String> {
+    let (sender, receiver) = iced::futures::channel::oneshot::channel();
+    spawner.spawn("fonts", Box::new(move || {
+        std::thread::sleep(delay);
+        build_on_worker();
+        if sender.send(()).is_err() { eprintln!("font readiness receiver closed"); }
+    })).map_err(|error| error.to_string())?;
+    receiver.await.map_err(|error| error.to_string())
 }
 
 /// What the worker does: notes whether the system already existed (the interface thread built it first), builds it if
@@ -166,6 +163,22 @@ fn drop_installed(database: &mut Database) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_or_abandoned_font_job_reports_failure_without_inline_work() {
+        use styk_core::services::{Job, SpawnError, Spawner};
+        use std::{future::Future, sync::Arc, task::{Context, Poll, Waker}};
+        struct Host(bool);
+        impl Spawner for Host {
+            fn spawn(&self, _: &str, _: Job) -> Result<(), SpawnError> {
+                if self.0 { Err(SpawnError("host refused".into())) } else { Ok(()) }
+            }
+        }
+        for refused in [true, false] {
+            let mut future = Box::pin(start_worker(Duration::ZERO, Arc::new(Host(refused))));
+            assert!(matches!(future.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(Err(_))));
+        }
+    }
 
     #[test]
     fn nothing_is_ready_until_the_worker_has_loaded_the_bundled_fonts() {

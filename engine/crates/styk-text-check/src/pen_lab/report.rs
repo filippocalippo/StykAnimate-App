@@ -4,8 +4,8 @@
 
 use std::collections::HashSet;
 use std::fmt::Write;
-use styk_services::input::{PenButtons, Phase, SampleFlags, Script, Tool};
-use styk_ui::ink_pad::{FrameRow, SampleRow};
+use styk_core::services::input::{PenButtons, Phase, SampleFlags, Script, Tool};
+use styk_core::drawing::pad::{FrameRow, SampleRow};
 
 /// Percentiles of a set of durations.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -195,7 +195,7 @@ impl Report {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use styk_services::input::ScriptSpec;
+    use styk_core::services::input::ScriptSpec;
 
     fn script() -> Script {
         Script::generate(&ScriptSpec::standard(240.0, 1.0, 400.0, 300.0), 1)

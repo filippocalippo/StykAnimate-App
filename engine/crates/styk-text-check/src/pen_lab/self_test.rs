@@ -7,13 +7,12 @@
 
 use super::report::{self, Report};
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
-use styk_services::input::InputDiagnostics;
-use styk_services::input::{InputEvent, Modifiers, PenButtons, PenSample, Phase, Script, ScriptSpec, ScriptStep, Tool, Valid};
-use styk_ui::ink_pad::{FrameRow, PadCore, Switches, View};
+use styk_core::services::input::{InputEvent, Modifiers, PenButtons, PenSample, Phase, Script, ScriptSpec, ScriptStep, Tool, Valid};
+use styk_core::drawing::pad::{FrameRow, PadCore, Switches, View};
 
 /// Frames to let the window settle before the script starts.
 const WARMUP_FRAMES: u32 = 60;
@@ -61,18 +60,7 @@ impl SelfTest {
     }
 }
 
-pub struct Context<'a> {
-    pub core: &'a Arc<PadCore>,
-    pub counters: Option<&'a Arc<dyn InputDiagnostics>>,
-    pub refresh_hz: f64,
-    pub out_dir: Option<&'a Path>,
-}
-
-pub enum Step {
-    Continue,
-    Capture(PathBuf),
-    Done(i32),
-}
+use styk_core::drawing::probe::{Context, Step};
 
 enum Phase_ {
     Warmup(u32),
@@ -467,7 +455,7 @@ impl Runner {
     }
 }
 
-fn write_csvs(dir: &Path, samples: &[styk_ui::ink_pad::SampleRow], frames: &[FrameRow], pushed: &[u64]) {
+fn write_csvs(dir: &Path, samples: &[styk_core::drawing::pad::SampleRow], frames: &[FrameRow], pushed: &[u64]) {
     let mut out = String::from("time_ns,pointer,tool,phase,x,y,pressure,raw_pressure,tilt_x,tilt_y,buttons,flags,modifiers,received_ns\n");
     for r in samples {
         let s = &r.sample;
@@ -498,4 +486,9 @@ mod tests {
         assert!(SelfTest::parse("fast").unwrap_err().contains("unknown self-test"));
         assert!(SelfTest::parse("standard:0").unwrap_err().contains("positive"));
     }
+}
+
+impl styk_core::drawing::probe::PenProbe for Runner {
+ fn step(&mut self, context: &Context) -> Step { Runner::step(self, context) }
+ fn captured(&mut self) { Runner::captured(self); }
 }

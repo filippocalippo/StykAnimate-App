@@ -5,16 +5,7 @@
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-/// A captured window: tightly packed RGBA, top row first, alpha opaque.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Image {
-    /// Width in pixels.
-    pub width: u32,
-    /// Height in pixels.
-    pub height: u32,
-    /// `width * height * 4` bytes.
-    pub rgba: Vec<u8>,
-}
+pub use styk_services::diagnostics::Image;
 
 /// Why a window could not be shown or captured.
 #[derive(Clone, Debug, PartialEq, Eq)]

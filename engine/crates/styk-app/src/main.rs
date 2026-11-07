@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::let_underscore_must_use, unused_must_use, clippy::disallowed_methods))]
 //! `stykanimate`: the StykAnimate program.
 //!
 //! ```text
@@ -16,12 +17,12 @@
 #[cfg(feature = "devtools")]
 mod input_check;
 mod headless;
-mod screenshot;
+use styk_platform::screenshot;
 mod window;
 
 use iced::{Subscription, Task, Widget as _, window as iced_window};
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, SyncSender};
 use std::time::Duration;
 use styk_core::Launch;
 use styk_design::{Theme, warm_up, widgets};
@@ -53,8 +54,9 @@ enum Message {
     Shown(Result<(), WindowError>),
     Frame,
     /// The font system is built and holds the bundled fonts: text may be laid out.
-    FontsReady,
+    FontsReady(Result<(), String>),
     Captured(Result<Image, String>),
+    Saved(Result<(), String>),
 }
 
 struct App {
@@ -78,11 +80,11 @@ struct App {
     /// Frames the event loop has started since the window was shown.
     frames: u32,
     capturing: bool,
-    outcome: Arc<Mutex<Outcome>>,
+    outcome: SyncSender<Outcome>,
 }
 
 impl App {
-    fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: Arc<Mutex<Outcome>>) -> App {
+    fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: SyncSender<Outcome>) -> App {
         let sheet = screen.map(|Screen::ComponentSheet| {
             let mut sheet = Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr);
             sheet.button_probe = Some(styk_platform::input::primary_button_down);
@@ -134,7 +136,8 @@ impl App {
             }
             Message::Shown(Ok(())) => Task::none(),
             Message::Shown(Err(error)) => self.finish(Outcome::Failed(format!("could not show the window: {error}"))),
-            Message::FontsReady => {
+            Message::FontsReady(Err(error)) => self.finish(Outcome::Failed(error)),
+            Message::FontsReady(Ok(())) => {
                 self.fonts_ready = true;
                 Task::none()
             }
@@ -156,12 +159,13 @@ impl App {
                 }
             }
             Message::Captured(Ok(image)) => {
-                let path = self.launch.screenshot.clone().expect("a capture is only requested with --screenshot");
-                match screenshot::write(&path, &image) {
-                    Ok(()) => self.finish(Outcome::Done),
-                    Err(error) => self.finish(Outcome::Failed(error)),
-                }
+                let Some(path) = self.launch.screenshot.clone() else {
+                    return self.finish(Outcome::Failed("capture has no output path".into()));
+                };
+                output_task(move || screenshot::write(&path, &image))
             }
+            Message::Saved(Ok(())) => self.finish(Outcome::Done),
+            Message::Saved(Err(error)) => self.finish(Outcome::Failed(error)),
             Message::Captured(Err(error)) => self.finish(Outcome::Failed(format!("could not capture the window: {error}"))),
         }
     }
@@ -204,17 +208,18 @@ impl App {
             input_check::Step::Finish => {
                 let body: Vec<String> = self.report.iter().map(|line| format!("  {:?}", line)).collect();
                 let json = format!("[\n{}\n]\n", body.join(",\n"));
-                let path = self.launch.input_check.clone().expect("the check only runs with --input-check");
-                match std::fs::write(&path, json) {
-                    Ok(()) => self.finish(Outcome::Done),
-                    Err(error) => self.finish(Outcome::Failed(format!("{}: {error}", path.display()))),
-                }
+                let Some(path) = self.launch.input_check.clone() else {
+                    return self.finish(Outcome::Failed("input check has no output path".into()));
+                };
+                output_task(move || styk_platform::diagnostics::write_report(&path, &json))
             }
         }
     }
 
     fn finish(&mut self, outcome: Outcome) -> Task<Message> {
-        *self.outcome.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = outcome;
+        if self.outcome.try_send(outcome).is_err() {
+            eprintln!("application outcome receiver was closed");
+        }
         iced::exit()
     }
 
@@ -295,19 +300,21 @@ fn main() -> ExitCode {
     if strategy == Some(Strategy::Headless) {
         return run_headless(&launch, screen);
     }
-    let outcome = Arc::new(Mutex::new(Outcome::Running));
-    if launch.screenshot.is_some() {
-        watchdog(outcome.clone());
-    }
+    let (outcome, receiver) = mpsc::sync_channel(1);
+    let _deadline = if launch.screenshot.is_some() {
+        match styk_platform::diagnostics::deadline(SCREENSHOT_DEADLINE) {
+            Ok(deadline) => Some(deadline),
+            Err(error) => { eprintln!("{error}"); return ExitCode::FAILURE; }
+        }
+    } else { None };
     #[cfg(feature = "devtools")]
     let trace_path = launch.screenshot.as_ref().map(|path| path.with_extension("trace.txt"));
     let scale = launch.scale.unwrap_or(1.0) as f32;
     let settings = window::settings(&launch, strategy);
-    let app = Mutex::new(Some(App::new(launch, screen, strategy, outcome.clone())));
     // The font system is built on a worker from the first moment (styk_design::warm_up); the bundled fonts are
     // loaded there, never through iced::Settings::fonts, which the runtime would load on the event loop.
     let result = iced::application(
-        move || (app.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the application starts once"), warm_up::warm_up().map(|()| Message::FontsReady)),
+        move || (App::new(launch.clone(), screen, strategy, outcome.clone()), warm_up::warm_up(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner)).map(Message::FontsReady)),
         App::update,
         App::view,
     )
@@ -325,9 +332,11 @@ fn main() -> ExitCode {
     }
     #[cfg(feature = "devtools")]
     if let Some(path) = trace_path {
-        let _ = std::fs::write(path, styk_devtools::trace_report());
+        if let Err(error) = styk_platform::diagnostics::write_report(&path, &styk_devtools::trace_report()) {
+            eprintln!("{error}"); return ExitCode::FAILURE;
+        }
     }
-    let outcome = std::mem::take(&mut *outcome.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+    let outcome = receiver.try_recv().unwrap_or(Outcome::Running);
     match (result, outcome) {
         (Err(error), _) => {
             eprintln!("the window failed: {error}");
@@ -341,21 +350,11 @@ fn main() -> ExitCode {
     }
 }
 
-/// Ends the process if a `--screenshot` run is still going after [`SCREENSHOT_DEADLINE`].
-fn watchdog(outcome: Arc<Mutex<Outcome>>) {
-    std::thread::spawn(move || {
-        std::thread::sleep(SCREENSHOT_DEADLINE);
-        if matches!(*outcome.lock().unwrap_or_else(|poisoned| poisoned.into_inner()), Outcome::Running) {
-            eprintln!("--screenshot: the window drew no frame within {} s", SCREENSHOT_DEADLINE.as_secs());
-            std::process::exit(1);
-        }
-    });
-}
-
 /// The pen lab (developer build): a drawing pad on the real input path, and its self-test.
 #[cfg(feature = "devtools")]
 fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
-    use styk_devtools::pen_lab::{self, LabOptions, SelfTest};
+    use styk_devtools::pen_lab::{self, LabOptions};
+    use styk_text_check::pen_lab::self_test::{SelfTest, Runner};
     if strategy == Some(Strategy::Headless) {
         eprintln!("the pen lab needs a window; it cannot run headless");
         return ExitCode::from(2);
@@ -368,12 +367,12 @@ fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
         }
     };
     if let Some(dir) = &launch.out {
-        if let Err(error) = std::fs::create_dir_all(dir) {
+        if let Err(error) = styk_platform::diagnostics::create_output_directory(dir) {
             eprintln!("{}: {error}", dir.display());
             return ExitCode::from(2);
         }
     }
-    let options = LabOptions { window: window::settings(launch, strategy), scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test, out_dir: launch.out.clone(), input: styk_platform::input::host(), spawner: std::sync::Arc::new(styk_platform::spawn::ThreadSpawner) };
+    let options = LabOptions { window: window::settings(launch, strategy), scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test: self_test.map(|test| Box::new(Runner::new(test)) as Box<dyn styk_core::drawing::probe::PenProbe>), out_dir: launch.out.clone(), input: styk_platform::input::host(), spawner: std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), diagnostics: std::sync::Arc::new(styk_platform::diagnostics::NativeDiagnostics) };
     match pen_lab::run(options) {
         Ok(0) => ExitCode::SUCCESS,
         Ok(code) => ExitCode::from(code.clamp(1, 255) as u8),
@@ -403,7 +402,9 @@ fn run_headless(launch: &Launch, screen: Option<Screen>) -> ExitCode {
         screenshot::write(path, &image)
     });
     #[cfg(feature = "devtools")]
-    let _ = std::fs::write(path.with_extension("trace.txt"), styk_devtools::trace_report());
+    if let Err(error) = styk_platform::diagnostics::write_report(&path.with_extension("trace.txt"), &styk_devtools::trace_report()) {
+        eprintln!("{error}"); return ExitCode::FAILURE;
+    }
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -411,4 +412,14 @@ fn run_headless(launch: &Launch, screen: Option<Screen>) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn output_task(job: impl FnOnce() -> Result<(), String> + Send + 'static) -> Task<Message> {
+    Task::perform(async move {
+        let (sender, receiver) = iced::futures::channel::oneshot::channel();
+        styk_platform::diagnostics::spawn(move || {
+            if sender.send(job()).is_err() { eprintln!("diagnostic output receiver was closed"); }
+        })?;
+        receiver.await.map_err(|error| error.to_string())?
+    }, Message::Saved)
 }

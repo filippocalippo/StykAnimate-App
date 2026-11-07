@@ -3,7 +3,7 @@
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
-use styk_platform::window::Image;
+use crate::window::Image;
 
 /// Writes `image` to `path`, replacing the file only once it is complete.
 pub fn write(path: &Path, image: &Image) -> Result<(), String> {

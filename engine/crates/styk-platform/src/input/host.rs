@@ -21,7 +21,8 @@ mod unsupported {
     use raw_window_handle::HasWindowHandle;
     use std::sync::Arc;
     use styk_services::input::{AttachedInput, InputHost, InputQueue};
-    use styk_services::{Clock, SystemClock};
+    use styk_services::Clock;
+    use crate::clock::SystemClock;
 
     pub struct NoInputHost;
 

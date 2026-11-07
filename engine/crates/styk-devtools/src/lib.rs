@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::let_underscore_must_use, unused_must_use, clippy::disallowed_methods))]
 //! The developer tools.
 //!
 //! Compiled only into the app's `devtools` build, which has the same optimisation as release but records the

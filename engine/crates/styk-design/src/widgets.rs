@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::let_underscore_must_use, unused_must_use, clippy::disallowed_methods))]
 //! The iced side of the design system: conversions, font handles and the icon widget.
 //!
 //! iced is built with its `web-colors` feature in this workspace, so a token passed through here blends in sRGB space

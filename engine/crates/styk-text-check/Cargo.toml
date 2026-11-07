@@ -11,6 +11,7 @@ name = "styk-text-check"
 path = "src/main.rs"
 
 [dependencies]
+styk-core = { path = "../styk-core" }
 iced = { workspace = true }
 png = "0.18"
 styk-design = { path = "../styk-design", features = ["widgets"] }
