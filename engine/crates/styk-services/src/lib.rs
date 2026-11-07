@@ -12,7 +12,10 @@ pub mod audio;
 pub mod cancel;
 pub mod clock;
 pub mod input;
+pub mod installer;
+pub mod shell;
 pub mod spawn;
+pub mod updates;
 pub mod video;
 pub mod video_limits;
 

@@ -730,4 +730,49 @@ mod chain_tests {
         // SAFETY: this thread made the window.
         unsafe { DestroyWindow(hwnd) };
     }
+
+    #[test]
+    fn the_window_chrome_answers_the_non_client_hit_test_and_passes_everything_else_through_the_chain() {
+        use crate::windows::chrome;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{HTCLIENT, WM_NCHITTEST};
+        let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+        // SAFETY: a plain message-only window of a system class owned by this thread, never on the screen.
+        let hwnd = unsafe { CreateWindowExW(0, class.as_ptr(), std::ptr::null(), 0, 0, 0, 0, 0, HWND_MESSAGE, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null()) };
+        assert!(!hwnd.is_null());
+        let handle = Handle(hwnd);
+        // The chain, innermost first: a recorder, the pointer source, the chrome, a recorder.
+        assert_ne!(unsafe { SetWindowSubclass(hwnd, Some(recorder), INNER, 0) }, 0);
+        let queue = InputQueue::new();
+        let source = WindowsInput::attach(&handle, queue.clone()).expect("the pointer source attaches");
+        let chrome = chrome::attach_hwnd(hwnd).expect("the chrome attaches beside the pointer source");
+        assert_ne!(unsafe { SetWindowSubclass(hwnd, Some(recorder), OUTER, 0) }, 0);
+        let ids = [INNER, OUTER, super::super::subclass_id::POINTER, super::super::subclass_id::CHROME];
+        assert_eq!(ids.iter().collect::<std::collections::BTreeSet<_>>().len(), 4, "four owners, four ids");
+
+        SEEN.with(|seen| seen.borrow_mut().clear());
+        // SAFETY: plain messages to our own window on its own thread.
+        let answer = unsafe { SendMessageW(hwnd, WM_NCHITTEST, 0, 0) };
+        assert_eq!(answer, HTCLIENT as isize, "the chrome answered");
+        let hit_test: Vec<usize> = SEEN.with(|seen| seen.borrow().iter().filter(|s| s.1 == WM_NCHITTEST).map(|s| s.0).collect());
+        assert_eq!(hit_test, [OUTER], "the hit test went to the outer subclass and stopped at the chrome, which owns it");
+
+        // SAFETY: as above.
+        unsafe {
+            SendMessageW(hwnd, WM_KEYDOWN, 0x42, 0);
+            SendMessageW(hwnd, WM_LBUTTONDOWN, 1, (20 << 16) | 10);
+        }
+        let seen = SEEN.with(|seen| seen.borrow().clone());
+        for message in [WM_KEYDOWN, WM_LBUTTONDOWN] {
+            let order: Vec<usize> = seen.iter().filter(|s| s.1 == message).map(|s| s.0).collect();
+            assert_eq!(order, [OUTER, INNER], "message {message:#x} went through the chrome and the pointer source to the inner subclass: {seen:?}");
+        }
+        let mut events = Vec::new();
+        queue.drain(&mut events);
+        assert!(events.iter().any(|e| matches!(e, InputEvent::Sample(s) if s.tool == Tool::Mouse && s.phase == Phase::Down)), "and the pointer source still sampled the press: {events:?}");
+
+        chrome.detach();
+        drop(source);
+        // SAFETY: this thread made the window.
+        unsafe { DestroyWindow(hwnd) };
+    }
 }
