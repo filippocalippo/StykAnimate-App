@@ -487,6 +487,13 @@ waited for tile by tile only as far as it reaches. `styk prims <file> [tick…]`
 
 ## Encoding over the last frame
 
+Native frame workers use `styk_engine::frame_builder::FrameBuilder`, the same
+evaluate/build/encode pipeline used by the engine cache's fresh path. Within a
+worker burst it reuses plain geometry and encoded object runs; it retires that
+reuse state before sleeping. Camera, effects, hidden identities, per-onion scope,
+background and figure translations are explicit inputs. See the
+[native scheduling contract](../native/frames.md) for cache admission and lifetime.
+
 A gesture changes a few objects of a frame of hundreds. The edit frame is the session's `ShownScene`
 ([evaluation.md](evaluation.md#the-interfaces-frame)), built over the one before it, and its scene says which build made each
 object's geometry (`Scene::built_in`, numbered across every memory). `EditScene` keeps what the last frame was encoded as
