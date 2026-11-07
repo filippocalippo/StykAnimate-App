@@ -97,15 +97,27 @@ Run from the repository root (`cargo xtask` also works from `engine/`); the work
 - **Tasks** (`cargo xtask check`): `design check` (generated tokens and icons are current; see
   [design-system.md](design-system.md)), `deps` (the engine and the core reach no iced, `styk-ui` or `styk-devtools`) and
   `lock` (`engine/Cargo.lock` holds no git source).
-- **Unattended runs**: `STYK_BACKGROUND_WINDOW=1 stykanimate --screenshot out.png` opens the window off-screen, without
-  focus and without a taskbar entry, waits for its first complete frame, writes it and exits.
+- **Unattended runs**: `STYK_BACKGROUND_WINDOW=1 stykanimate --screenshot out.png` keeps the run off the desktop of
+  the person at the computer, as far as each platform allows (`styk_platform::unattended`), waits for the first complete
+  frame, writes it and exits:
+
+  | Platform | What it does |
+  | --- | --- |
+  | Windows | Window created hidden and off-screen, shown without activation as a tool window: no focus, no taskbar button. Captured with PrintWindow. |
+  | Linux, X11 | Override-redirect window, off-screen: the window manager never sees it, so no focus and no taskbar entry. Captured from iced's renderer. |
+  | Linux, Wayland | No window. A compositor ignores the requested position, so the interface is drawn offscreen by the same renderer. |
+  | macOS | No window: the system activates an application as it opens its first window, and AppKit keeps windows on a screen. Drawn offscreen. |
+
+  `STYK_BACKGROUND_WINDOW=headless` draws offscreen on every platform. Any other value is an error, so a typo cannot open a
+  window. A run with no window needs `--screenshot` (or, later, `--automation`) to produce anything.
 
 `npm run engine:test` leaves out the iced crates (`styk-app`, `styk-ui`, `styk-devtools`) so the engine suites stay
 fast; test those with `cargo test --release -p styk-app -p styk-ui`.
 
 ## Platforms
 
-Windows is first-class and packaged. macOS and Linux build and run from the same code in CI and pass the smoke tests.
+Windows is first-class and packaged. macOS and Linux build and run from the same code in CI and pass the smoke tests. On
+Linux iced is built with both display backends (X11 and Wayland, loaded at run time).
 Mobile is not shipped: input, layout tiers and platform services stay behind traits a touch build can implement
 ([../TOUCH.md](../TOUCH.md)). The browser editor keeps working at every gate (see the README's platform section for
 which web build serves it).
