@@ -36,6 +36,8 @@ pub mod effects;
 pub mod paint;
 #[cfg(feature = "gpu")]
 mod frame;
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+pub mod native_gpu;
 #[cfg(feature = "gpu")]
 mod glyphs;
 #[cfg(feature = "gpu")]
@@ -65,26 +67,6 @@ pub use effects::plan::DrawingGrid;
 use isolation::LayerAtlas;
 #[cfg(feature = "gpu")]
 use resources::{buffer, prims_bytes, GpuPrim, Table};
-
-/// The instance a native host draws frames with, so that they equal the ones today's app draws (docs/native/frame-parity.md).
-///
-/// Chromium's WebGPU draws on Direct3D 12 on Windows. The same frame drawn through Vulkan differs from it in more pixels
-/// (by a level at the most, a few by more) than through Direct3D 12, whose shaders go through the Windows compiler (FXC)
-/// that the Direct3D build ships with: so on Windows the instance is Direct3D 12 with FXC, never a DXC that happens to be on
-/// the search path. `WGPU_BACKEND` and `WGPU_DX12_COMPILER` still choose when set; elsewhere wgpu's own choice stands.
-#[cfg(feature = "gpu")]
-pub fn native_instance_descriptor() -> wgpu::InstanceDescriptor {
-    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
-    if cfg!(windows) {
-        if wgpu::Backends::from_env().is_none() {
-            descriptor.backends = wgpu::Backends::DX12;
-        }
-        if wgpu::Dx12Compiler::from_env().is_none() {
-            descriptor.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::Fxc;
-        }
-    }
-    descriptor
-}
 
 /// Samples per pixel of smooth edges (triangles; analytic shapes cover by distance).
 pub const SAMPLES: u32 = 4;

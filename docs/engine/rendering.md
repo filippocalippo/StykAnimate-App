@@ -222,8 +222,9 @@ same output as before the warming; native wgpu gave the same bytes in 3,200 rend
 
 **Clip position and backends.** The vertex stage's clip position is written as a division followed by a doubling
 (`clip_pos`, `tests/clip_position.rs`): the DX12 compiler folded `t / size * 2` into a reciprocal product, which moved the edges of
-thin triangles by a sample against Vulkan and Chromium's WebGPU. Native hosts take Direct3D 12 with FXC on Windows
-(`native_instance_descriptor`). What is left against Chromium's frames, and how it was measured: `docs/native/frame-parity.md`.
+thin triangles by a sample against Vulkan and Chromium's WebGPU. The test draws thousands of thin triangles on Direct3D 12 (FXC)
+and on Vulkan and requires equal frames. Native hosts take Direct3D 12 with FXC first on Windows and fall back to the other
+backends (`styk_render::native_gpu`). What is left against Chromium's frames, and how it was measured: `docs/native/frame-parity.md`.
 
 ## Text
 
