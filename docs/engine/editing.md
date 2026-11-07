@@ -699,12 +699,40 @@ it on the editor, for every document.
   time (`Editor::replace_each_at`: the key's patches written together, the layer's membership worked out once from all of them) and the
   frame record of a layer whose key replaces many figures is sampled from the two keys round the tick (`Records::sample`); both were
   quadratic in the figures. `replace_each_at` of a list is `replace_at` called for each in turn (the last patch of a figure named twice wins).
-  **Limit, not fixed:** a clip of every figure of a large project still holds a second copy of the scene as values and as typed views
-  (about 500 to 900 MiB of the engine's 2 GiB for the projects measured, and the history entry keeps both), so entering it, undoing and
-  redoing it, or making another can run the engine out of memory (`errors.engine.outOfMemory`, or a trap when the allocation was not
-  asked for first).
+  **Where a clip's memory went** (traced natively with a counting allocator, `styk-engine/tests/clip_memory.rs`, on a clip of every figure of
+  a large project, 122,402 figure records and 18,141 distinct figures): the copied records were 80 MiB and the typed views of the clip 50 MiB, but
+  the views of the project once the clip was placed took 905 MiB, because `Prepared::new` made a replacement track for each replaced figure on its
+  layer (18,141 tracks of 590 keys, about 50 KB each) and a redo made them again. The tracks are made when a tweened sample asks for one
+  (`Prepared::patch_track`), from an index of the keys that replace each figure, and figures replaced the same way share one (`patch_seqs`):
+  that clip took 1,173 MiB to make and now 270 MiB, and its redo 1,035 MiB and now 131 MiB (24 frames: 1,357 MiB and now 468 MiB).
+  **Refusal, not a trap.** The module is limited to 2 GiB (`MAX_MEMORY` in `scripts/engine-build.mjs`: one shared memory for every thread, fixed
+  when it links), and an allocation past it traps the module and loses the open project. A command that copies much of the document asks the host
+  first (`Editor::admit`, the `memory_gate` the binding sets to the allocator's headroom): `createMovieclip` asks for 2 KiB for each record it
+  copies and 512 bytes for each replacement it writes (a figure at the clip's first frame and at each key of its layer inside the clip), and a
+  refusal is `errors.engine.outOfMemory` with nothing changed. A clip of every figure for the whole length of a project is refused: it is a
+  record for each of 18,141 figures at each of 589 keys, 10.7 million, which the layer sheet stores and the engine cannot hold. The session
+  remembers what the call that made each history entry took (`EntryCosts`) and a redo asks for that much before it begins, so it is
+  refused rather than run the module out of memory; what each kind of call may need is learned by the call's name, not as one number for all
+  of them (one big clip made every later edit wait for as much room). Entering a clip is refused when the open cannot be reserved, and
+  leaving it when the project cannot take its edit keeps the clip open with the edit (the editor puts the clip back before it raises).
+  **Entering** (`openMovieclipNow`, `EngineHandle::open_movieclip`): the engine opens the clip from the tree the project's session holds
+  (`OpenSource::Tree`), not from text the page read from a record of the project and wrote out again; the open is reserved at three times the
+  clip's text (`open_tree_estimate`), not sixteen. The clip's pose arrays are unshared as its text would have given them (the saved bytes are
+  those of the project opened from text). Reading the definition to enter fetched a record as large as the project into the page.
+  Entering a clip hands the open the clip's document as the project holds it; the open reserves its memory (`open_tree_estimate`) and only then makes
+  the copy that gives the text's arrays (`OpenSource::Tree`), so a clip the engine cannot take is refused and not trapped. The replacement tracks are
+  caches that the page's thread and the workers both fill: each is taken with one attempt (`styk_doc::lock::once`) and built with no lock held (D7).
+  An entry's cost (what redoing it needs) follows the entry, also when a full history displaces its oldest to take it (`HistoryMarks`: the newest
+  revision tells a new entry from a displaced one). A retained scene's replacements keep naming only figures their cut pose still holds (`prune_patches`).
+  The copy a call is given of another session's document (leaving a clip) and the copy the open of a tree makes are sized from what they allocate
+  (`Value::unshared_cost`: every packed array, the containers that hold one, and the list of copies every container allocates while it looks), not from the text, which says little of a tree of many small arrays or strings.
+  A figure that is not a drawing cel pasted or imported while a drawing layer is active is placed on it, as it has always been; the repair opening makes
+  of a figure assigned to a drawing layer moves only one that a frame the layer keys shows beside its cel (what opening refuses), so a save opens as written.
+  Freeing a session starts the engine's drain of closed documents where it has no worker threads (`engine.pump`).
   A movieclip made inside a clip retains the scene the outer clip retains cut down to its own figures (`prune_retained`: poses,
-  effect clips and imported animation, down the chain of `movieclipSource` documents).
+  effect clips and imported animation, down the chain of `movieclipSource` documents). An older retained scene numbers its figures on its own, and shares
+  the definitions of the clip that holds it, so only objects of a definition the new clip holds stay in it (a figure of the older scene with the
+  number of one of the clip's was kept, and the file was refused as an unknown figure).
 - **Working frames.** The interface never starts one on a layer sheet. `disableFrameDrafts` (the
   timeline mounting in Advanced mode) commits what is open and converts a draft a file was saved with when
   it is an Update (`frame_draft.rs`); `beginFrameDraftPreview` and `endFrameDraftPreview` answer false.

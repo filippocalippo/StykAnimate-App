@@ -19,6 +19,7 @@ Everything is one Cargo workspace (`engine/`, members `engine/crates/*`). The en
 | `styk-ui` | The iced front end: lays out and draws what the core holds and turns input into core commands. Shell, docking widgets, stage, timeline, inspector, panels, dialogs, Home, Settings, drawing, build, text input. | `styk-core`, `styk-design`, iced |
 | `styk-devtools` | The developer tools ([devtools.md](devtools.md)). Compiled only with the app's `devtools` feature. | `styk-core`, `styk-ui`, `styk-design`, `styk-trace` |
 | `styk-app` | The binary `stykanimate`: command line, startup, wiring of platform services into the core, the window. Feature `devtools`. | everything above |
+| `styk-cli` | The headless tools (`styk` binary); its `video` command (feature `app-tools`, off by default) drives a video export of a document through the core's planning and flow, the engine's frame source and the platform's encoder services. `cargo xtask deps` lets it reach `styk-core`, `styk-services` and `styk-platform` only through that feature. | engine crates; `styk-core`, `styk-services`, `styk-platform` with `app-tools` |
 | `xtask` | The task runner (`cargo xtask ...`, alias in the repository's `.cargo/config.toml`). | std |
 
 Dependencies point one way: `styk-app` → `styk-ui` → `styk-core` → engine crates and `styk-services`. Nothing in the
@@ -73,6 +74,11 @@ by bytes and released by resource lifetime; pictures are paged with the engine's
 The drag split (the frame cut into what is below and above the dragged figure, only that figure rebuilt per move)
 becomes an engine feature used by dragging, drawing over heavy scenes and previews.
 
+The device comes from `styk_render::native_instance_descriptor()`: on Windows DX12 with the FXC shader compiler, the
+backend whose frames match Chromium's bit for bit on pictures and translucent fills (`frame-parity.md`, from chunk FP);
+the shell creates iced's compositor from that descriptor, so the stage, previews and exports draw on one backend. The web
+build keeps the browser's WebGPU.
+
 ## The automation mode and the benchmark
 
 `stykanimate --automation <script>` runs a script of timestamped steps (commands, pointer and pen samples at stage
@@ -117,8 +123,9 @@ fast; test those with `cargo test --release -p styk-app -p styk-ui`.
 
 ## Platforms
 
-Windows is first-class and packaged. macOS and Linux build and run from the same code in CI and pass the smoke tests. On
-Linux iced is built with both display backends (X11 and Wayland, loaded at run time).
-Mobile is not shipped: input, layout tiers and platform services stay behind traits a touch build can implement
-([../TOUCH.md](../TOUCH.md)). The browser editor keeps working at every gate (see the README's platform section for
-which web build serves it).
+This phase ships and verifies Windows only ([N8](decisions/0008-windows-only-review-by-risk.md)). macOS, Linux, the web
+build and mobile come later as ports, not rewrites: every OS call is behind a `styk-platform` trait, no Windows type or
+`cfg(windows)` appears outside `styk-platform`, no threading or file assumption only Windows allows, the GPU only through
+wgpu, and nothing in the core or the engine that a wasm32 or Unix target could not build (a `cargo check` for wasm32 at
+gates). Input, layout tiers and platform services stay behind traits a touch build can implement
+([../TOUCH.md](../TOUCH.md)). Constraints found for the web build are in `web.md`.

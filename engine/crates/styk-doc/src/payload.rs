@@ -46,7 +46,7 @@ struct Registry {
 static REGISTRY: Mutex<Option<Registry>> = Mutex::new(None);
 
 fn registry<T>(then: impl FnOnce(&mut Registry) -> T) -> T {
-    let mut guard = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = crate::lock::spinning(&REGISTRY);
     then(guard.get_or_insert_with(Registry::default))
 }
 

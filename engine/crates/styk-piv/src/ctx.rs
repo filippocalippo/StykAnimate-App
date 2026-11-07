@@ -43,6 +43,12 @@ impl<'a> Ctx<'a> {
         self.payload.as_ref().filter(|payload| std::ptr::eq(payload.as_ptr(), data.as_ptr()) && payload.len() == data.len())
     }
 
+    /// Whether the host asked to stop.
+    #[inline]
+    pub fn stopped(&self) -> bool {
+        (self.cancel)()
+    }
+
     /// Fails with the cancellation error once the host asked to stop.
     #[inline]
     pub fn checkpoint(&self) -> PyResult<()> {

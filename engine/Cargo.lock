@@ -2633,6 +2633,7 @@ dependencies = [
  "pollster",
  "rayon",
  "sha2",
+ "styk-core",
  "styk-doc",
  "styk-edit",
  "styk-engine",
@@ -2640,8 +2641,10 @@ dependencies = [
  "styk-export",
  "styk-formats",
  "styk-piv",
+ "styk-platform",
  "styk-raster",
  "styk-render",
+ "styk-services",
 ]
 
 [[package]]
@@ -2661,6 +2664,7 @@ version = "0.1.0"
 dependencies = [
  "sha2",
  "styk-doc",
+ "styk-services",
  "unicode-normalization",
  "zstd",
 ]
@@ -2812,6 +2816,7 @@ name = "styk-platform"
 version = "0.1.0"
 dependencies = [
  "icu_collator",
+ "image",
  "raw-window-handle",
  "sha2",
  "styk-services",

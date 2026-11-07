@@ -42,11 +42,20 @@ async function trace(document, steps, digits) {
 
 /** The steps give the same document, answers and history in the owned editor as the references of an editor alone, and the session takes every call.
  * `digits`: numbers are compared to that many digits, where an IK solution may differ in its last bits between the two solvers. */
-async function agree(take, document, steps, {digits} = {}) {
+async function agree(take, document, steps, {digits, retainedOrigins = true} = {}) {
   const alone = take('alone');
   const owned = await trace(document, steps, digits), ownedKept = canonical(owned.kept);
   assert.equal(ownedKept.length, alone.kept.length);
-  alone.kept.forEach((entry, at) => assert.deepEqual(ownedKept[at], entry, `step ${at} (${entry.label ?? 'start'})`));
+  // `retainedOrigins: false`: the recording is an editor alone that broke figures with an animation origin out of a movieclip and left the poses
+  // the layer sheet retains without the origin's position, so the file saved afterwards was refused when it opened. The session places it
+  // (tests/movieclip_drawing_layers.rs), so the retained poses' origins are left out of both sides; the live frames are compared as recorded.
+  const without = entry => {
+    if (retainedOrigins || typeof entry.document !== 'string') return entry;
+    const document = JSON.parse(entry.document);
+    for (const frame of Object.values(document._styk?.frameSources ?? {})) for (const object of frame.objects ?? []) delete object._stykAnimationOrigin;
+    return {...entry, document: JSON.stringify(document)};
+  };
+  alone.kept.forEach((entry, at) => assert.deepEqual(without(ownedKept[at]), without(entry), `step ${at} (${entry.label ?? 'start'})`));
   assert.deepEqual(owned.refused, [], 'the session refused a call');
   assert.ok(alone.depth > 0, 'the steps changed the document');
   return alone;
@@ -196,6 +205,6 @@ refs.test('a movieclip holding figures with IK limbs, rigs and origins breaks ap
     editor.select(clip.unique_id, -1);
   };
   const breakApart = [['seek', 2], ['selectMany', [1, 2]], ['createMovieclip', {start: 0, end: 6, replace: true, name: 'Clip'}], ['seek', 3], selectClip, ['breakApartMovieclip']];
-  await agree(take, fixture('origin-pose-support-pinned-sheet'), breakApart, {digits: 9});
-  await agree(take, fixture('origin-rig-pose-support-sheet'), breakApart, {digits: 9});
+  await agree(take, fixture('origin-pose-support-pinned-sheet'), breakApart, {digits: 9, retainedOrigins: false});
+  await agree(take, fixture('origin-rig-pose-support-sheet'), breakApart, {digits: 9, retainedOrigins: false});
 });

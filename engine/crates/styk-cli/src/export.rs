@@ -3,7 +3,7 @@
 //! app's path where no GPU device is available).
 //!
 //!   styk export <file> <tick | first-last> <out.png | folder> [--size WxH] [--smoothing edges|none|sprites]
-//!               [--matte] [--tile N] [--cpu] [--repeat N] [--verify N]
+//!               [--matte] [--transparent] [--tile N] [--cpu] [--repeat N] [--verify N]
 //!
 //! `--verify N` draws the whole range N times in a row and reports every frame whose pixels differ from the first pass (the same
 //! input must give the same bytes); the exit code is 1 when any does.
@@ -65,6 +65,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
     let smoothing = Smoothing::parse(option(rest, "--smoothing").unwrap_or("edges")).ok_or("--smoothing is edges, none or sprites")?;
     let settings = Settings::new(width, height, smoothing, styk_export::settings::MAX_PIXELS)?;
     let matte = rest.iter().any(|a| a == "--matte");
+    let transparent = rest.iter().any(|a| a == "--transparent");
     let repeat = option(rest, "--repeat").and_then(|n| n.parse::<usize>().ok()).unwrap_or(1).max(1);
     let open_ms = started.elapsed().as_secs_f64() * 1000.0;
 
@@ -109,9 +110,10 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
             let t0 = Instant::now();
             let frame = frames.take(tick).ok_or("no frame")?;
             let t1 = Instant::now();
+            let list = if transparent { styk_export::without_background(&frame.list) } else { frame.list.clone() };
             let pixels = match (gpu.as_mut(), cpu_export.as_mut()) {
-                (Some(exporter), _) => exporter.frame_blocking(doc, &frame.list, frame.camera.as_ref(), matte)?,
-                (None, Some(exporter)) => exporter.frame(doc, &frame.list, frame.camera.as_ref(), matte)?,
+                (Some(exporter), _) => exporter.frame_blocking(doc, &list, frame.camera.as_ref(), matte)?,
+                (None, Some(exporter)) => exporter.frame(doc, &list, frame.camera.as_ref(), matte)?,
                 (None, None) => unreachable!("one renderer is set up"),
             };
             let t2 = Instant::now();
