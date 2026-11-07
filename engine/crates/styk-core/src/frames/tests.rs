@@ -508,8 +508,10 @@ fn signed_zero_keys_share_a_fingerprint() {
     let first = frames
         .request(Consumer::Stage, -0.0, Arc::new(View::default()))
         .unwrap();
-    let mut view = View::default();
-    view.pan = [-0.0; 2];
+    let view = View {
+        pan: [-0.0; 2],
+        ..View::default()
+    };
     let second = frames
         .request(Consumer::Stage, 0.0, Arc::new(view))
         .unwrap();
