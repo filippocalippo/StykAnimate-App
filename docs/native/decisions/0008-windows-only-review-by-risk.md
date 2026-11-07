@@ -40,7 +40,14 @@ own tests, review and the orchestrator's diff read done on their branches) merge
 row, then one combined pass runs on the result (build, the changed crates' tests, `cargo xtask check`). High-risk chunks
 and chunks that touch the same files or crates merge alone, with their own pass on the merged result. A failed pass stops
 all merges until it is fixed (the culprit by the failing area, reverted if the fix is not quick); nothing is pushed or
-branched from an untested train head. **Cheap checks while coding**: implementers iterate with `cargo check` and
+branched from an untested train head. When a combined pass fails and the failure is small,
+a fresh fixer (Astra for back-end and logic, Sonnet for interface code and mechanical breaks) gets the merged chunks, the
+failing check with its output and the files; it finds the culprit and fixes it at the owner, never weakening a test,
+touching frozen tapes and fixtures, loosening a threshold or adding a special case, and stops and reports when the real
+fix is large, unclear or changes the design. Its diff gets the orchestrator's read (and Sol when it touches back-end,
+logic or a high-risk area), then the pass runs again; other merges wait only during a small fix. The chunk is reverted
+and sent back with the failure instead when the failure is in a high-risk area, the cause is unclear after one attempt,
+or the fix would change the design. **Cheap checks while coding**: implementers iterate with `cargo check` and
 `cargo clippy` on the crates they touch and build and test when a piece is done, only the changed crates; every chunk still
 ends with its full done criteria.
 
