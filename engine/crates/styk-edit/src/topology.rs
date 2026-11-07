@@ -535,6 +535,10 @@ impl Editor {
         if figure.path(&["_styk", "movieclip"]).is_some_and(Value::truthy) {
             return Err(invalid("errors.editor.openTheMovieclipToEditItsFigures"));
         }
+        // A drawing cel is one image segment that carries its pixels: another segment, or one fewer, is a drawing no file can hold.
+        if figure.path(&["_styk", "drawing"]).is_some_and(Value::truthy) {
+            return Err(invalid("errors.editorDrawing.aDrawingHasNoSegmentsToEdit"));
+        }
         if self.report.path(&["_styk", "simpleFrameDraft"]).is_some() {
             return Err(EditError::Unported("topology edits with a frame draft".into()));
         }
