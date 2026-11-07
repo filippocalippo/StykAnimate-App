@@ -5,7 +5,7 @@ mod platform_spawn;
 
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::time::Duration;
-use styk_core::frames::{Config, Consumer, FrameDocument, Frames, Status, View};
+use styk_core::frames::{Config, Consumer, FrameDocument, Frames, Key, Status, View};
 use styk_engine::{Budgets, Engine, Generation};
 use styk_services::{Clock, SystemClock};
 
@@ -40,12 +40,15 @@ fn pool(
     (frames, receiver)
 }
 
-fn ready(frames: &mut Frames, wake: &mpsc::Receiver<()>, clock: &dyn Clock) {
+fn ready(frames: &mut Frames, wake: &mpsc::Receiver<()>, clock: &dyn Clock) -> Key {
     let start = clock.now();
     loop {
         frames.flush();
-        match frames.with_ready(Consumer::Stage, |_| {}) {
-            Status::Ready => return,
+        // Copy the small presentation identity during the successful borrow.
+        // A second read can legitimately be Busy even after this one is Ready.
+        let mut observed = None;
+        match frames.with_ready(Consumer::Stage, |ready| observed = Some(ready.key.clone())) {
+            Status::Ready => return observed.expect("ready callback ran"),
             Status::Pending | Status::Busy => {}
             status => panic!("stage failed: {status:?}"),
         }
@@ -130,13 +133,9 @@ fn platform_workers_deliver_the_last_view_and_close_while_a_snapshot_is_stalled(
     }
     *gate.0.lock().unwrap() = true;
     gate.1.notify_all();
-    ready(&mut frames, &wake, clock.as_ref());
     assert_eq!(
-        frames.with_ready(Consumer::Stage, |ready| assert_eq!(
-            ready.key.view.pan[0],
-            1000.0
-        )),
-        Status::Ready
+        ready(&mut frames, &wake, clock.as_ref()).view.pan[0],
+        1000.0
     );
     while waiting.try_recv().is_ok() {}
     *gate.0.lock().unwrap() = false;
@@ -222,11 +221,7 @@ fn representative_native_frame_readiness() {
         let key = frames
             .request(Consumer::Stage, 0.0, Arc::new(view.clone()))
             .unwrap();
-        ready(&mut frames, &wake, clock.as_ref());
-        assert_eq!(
-            frames.with_ready(Consumer::Stage, |ready| assert_eq!(*ready.key, key)),
-            Status::Ready
-        );
+        assert_eq!(ready(&mut frames, &wake, clock.as_ref()), key);
         latencies.push(clock.now().saturating_sub(start).as_secs_f64() * 1000.0);
     }
     latencies.sort_by(f64::total_cmp);
