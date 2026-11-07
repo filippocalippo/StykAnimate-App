@@ -2274,6 +2274,9 @@ dependencies = [
 [[package]]
 name = "styk-core"
 version = "0.1.0"
+dependencies = [
+ "styk-services",
+]
 
 [[package]]
 name = "styk-design"
