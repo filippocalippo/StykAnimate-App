@@ -10,5 +10,6 @@
 
 pub mod unattended;
 pub mod window;
+pub mod fonts;
 #[cfg(windows)]
 pub mod windows;

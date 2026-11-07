@@ -13,3 +13,5 @@ pub mod shell;
 pub mod updates;
 
 pub use clock::{Clock, FixedClock, SystemClock};
+
+pub mod fonts;
