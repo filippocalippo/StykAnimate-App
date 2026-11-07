@@ -35,9 +35,9 @@ seed store `wt/shared-target` is back (crates.io dependencies; `node perf/make-s
 | M | movieclip save fix merged, the rest of the movieclip branch, the refused gesture sequence | `t3/movieclips-native-phase` `d69d5a25` | done: conflicts with `3b15fc79` resolved (original kept in the document, `keep_last` for repaired files), `OpenSource::Tree` fixed, the nested-clip pruning cause fixed (figures kept by definition too); in review (GPT-6.1 Sol xhigh, Sonnet checker) |
 | M2 | two more refused saves found by a drawing-publishing fuzz (seeds 62, 132), the repository fuzz made to catch that class, intermittent node segfaults under load | `t3/movieclip-drawing-saves` from `d69d5a25`, Sonnet | running |
 | D | drawing-undo atlas work, its compile fix, the polygon cache removed | **merged into `native-app` `7881b55b`** | review fixes: a refused replacement decode blanks the places it reused (lazily, within the renderer's budget) and leaves none waiting, on the stage and in exports (resident exports through X's `clear_cel`, once); decoded bounds and ink shared by every view of a tile payload; dedup across the whole list. 547 tests of six crates; parity at the next gate |
-| LP | the very compressible 250 MB Pivot file opened natively with its memory released on close; the padded `.piv` export refused | T3 worktree, Sonnet | running |
 | S4 | audio: WASAPI output, FFmpeg decoding as today, the mixer in document order, the clock the frames follow | T3 worktree, Sonnet | running |
 | S6 | the shell: frameless chrome, snap layouts, DPI, window state per monitor setup, single instance, associations with today's ProgIDs, the updater, the installer | T3 worktree, Sonnet | running |
+| LP | the 250 MB Pivot file natively (opens, memory released: the browser's held gigabyte is the WebAssembly allocator's high-water mark); the padded `.piv` export (`Codec::export_tree` from the tree, bytes equal to the service's, reserving 4x the retained bytes first) | `t3/native-large-pivot-files` `881fa2fd` | done; in review (GPT-6.1 Sol xhigh, Sonnet checker) |
 | X | export frames independent of export order, picture and cel residency in exports | **merged into `native-app` `3961a119`** | the cause was the lone-glyph mask atlas (now placed afresh per export frame); review fixes: a refused cel decode is blank, the glyph atlas resets its layers on a page-size change, a stale decode attempt never touches a newer one, a dropped export releases what landed. Checked natively: four documents, 1080p and 4K, whole layout and paged, every order identical to alone |
 | FP | the native renderer draws today's frames (native wgpu against Chromium's WebGPU on the same document and tick: S3 found sub-level differences, PSNR 66-68 dB) | T3 worktree, Sonnet | running |
 | X2 | tdd2 ticks 183-188 differ between identical runs of the browser export (two hashes recur per tick) | stopped (N5): browser-side; notes in `perf/native/findings/X2-browser-export-determinism.md`; native criterion: identical frames across runs |
@@ -67,6 +67,13 @@ decision, unmerged. `t3/speed-joint-drag-frame` is an unfinished optimisation wi
 The Electron-only leftovers of `t3/export-timeout-performance` (the keep-alive, `desktop/video-export-service.cjs`
 timeouts, Electron benchmark rows) are not fixed in Electron; their problems are acceptance criteria for the native
 export.
+
+**Carried into later chunks** (found on the way; each is an acceptance criterion where it applies): the native app sets
+`styk_alloc`'s memory limit from the machine (natively there is none, so engine reservations refuse nothing until it is
+set: engine host chunk); export frames identical across runs (X2, `perf/native/findings/X2-browser-export-determinism.md`);
+bounded export memory at 4K, with WebM alpha's VP9 encoder share a floor candidate (S3); no lock the interface thread can
+wait on and a clean open of the 250 MB Pivot file (`perf/native/findings/LP-styk-wasm.md`); the movieclip enter/leave
+leak (chunk M); AyameDemo's stale `total_output_frames` in the editor (`perf/native/findings/M-total-frames.md`).
 
 **Manual checks for the owner** (cannot be automated on this machine without touching the owner's screen or system,
 decision N6): a pass with a real pen or tablet in the pen lab (developer build); a pass with real input methods (Microsoft
