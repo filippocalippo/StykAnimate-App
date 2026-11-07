@@ -93,7 +93,7 @@ fn the_native_pen_path_matches_todays_app_on_the_same_events() {
         let end = field(&scenario, "end").as_str().unwrap().to_string();
         let worker = Worker::spawn(Vec::new(), Arc::new(|| {}));
         let mut input = StrokeInput::new();
-        let context = Context { tool: ToolMode::Brush, space_held: false, playing: false, finger: FingerDraw::Never, mapping: &mapping, continue_from: None };
+        let context = Context { tool: ToolMode::Brush, space_held: false, playing: false, finger: FingerDraw::Never, mapping: &mapping, continue_from: None, region: None };
         let mut commands = Vec::new();
         let base = 1_000_000_000u64;
         let mut last_ns = base;

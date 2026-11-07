@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use styk_services::input::{InputCaps, InputEvent, InputQueue, InputSource, InterruptReason, Modifiers, PenButtons, PenSample, Phase, SampleFlags, Tool, Valid};
+use styk_services::input::{EntryTime, history_times, InputCaps, InputEvent, InputQueue, InputSource, InterruptReason, Modifiers, PenButtons, PenSample, Phase, SampleFlags, Tool, Valid};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT};
@@ -33,7 +33,7 @@ use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWi
 use windows_sys::Win32::UI::TabletPC::{TABLET_DISABLE_FLICKS, TABLET_DISABLE_PENBARRELFEEDBACK, TABLET_DISABLE_PENTAPFEEDBACK, TABLET_DISABLE_PRESSANDHOLD};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, GetMessageExtraInfo, PEN_FLAG_BARREL, PEN_FLAG_ERASER, PEN_FLAG_INVERTED, PEN_MASK_PRESSURE, PEN_MASK_ROTATION, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PT_PEN, PT_TOUCH, RemovePropW, SetPropW,
-    WM_ACTIVATE, WM_CANCELMODE, WM_CONTEXTMENU, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_POINTERCAPTURECHANGED, WM_POINTERDOWN, WM_POINTERENTER, WM_POINTERUP, WM_POINTERUPDATE,
+    WM_ACTIVATE, WM_CANCELMODE, WM_CAPTURECHANGED, WM_CONTEXTMENU, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_POINTERCAPTURECHANGED, WM_POINTERDOWN, WM_POINTERENTER, WM_POINTERUP, WM_POINTERUPDATE,
     WM_RBUTTONDOWN, WM_RBUTTONUP,
 };
 
@@ -101,6 +101,11 @@ pub fn promotion(extra_info: isize) -> Promotion {
     } else {
         Promotion::Pen
     }
+}
+
+/// Whether an entry's flags say the system cancelled the contact (a palm, a gesture it took over): with or without a lift.
+pub fn cancels(flags: u32) -> bool {
+    flags & POINTER_FLAG_CANCELED != 0
 }
 
 /// The phase a pointer entry's flags describe.
@@ -242,13 +247,16 @@ impl Hook {
             return;
         }
         let keys = modifiers();
-        let now = super::qpc::now_ns();
         let total = (count as usize).min(entries.len());
-        // Newest first from the system; the application wants them oldest first.
+        // Newest first from the system; the application wants them oldest first, each with a time of its own.
+        let times = history_times(
+            &entries[..total].iter().rev().map(|entry| EntryTime { counter_ns: super::qpc::counter_ns(entry.pointerInfo.PerformanceCount), millis: entry.pointerInfo.dwTime }).collect::<Vec<_>>(),
+            super::qpc::now_ns(),
+        );
         for (index, entry) in entries[..total].iter().rev().enumerate() {
             let flags = entry.pointerInfo.pointerFlags;
-            let time_ns = if entry.pointerInfo.PerformanceCount != 0 { super::qpc::counter_ns(entry.pointerInfo.PerformanceCount) } else { now };
-            if flags & POINTER_FLAG_UP != 0 && flags & POINTER_FLAG_CANCELED != 0 {
+            let time_ns = times[index];
+            if cancels(flags) {
                 self.contacts.borrow_mut().retain(|p| *p != pointer);
                 self.counters.interrupts.fetch_add(1, Ordering::Relaxed);
                 self.queue.push(InputEvent::Interrupted { pointer, time_ns, reason: InterruptReason::Canceled });
@@ -298,7 +306,13 @@ impl Hook {
             return;
         }
         let (x, y) = Self::position(hwnd, &info);
-        let time_ns = if info.PerformanceCount != 0 { super::qpc::counter_ns(info.PerformanceCount) } else { super::qpc::now_ns() };
+        let time_ns = history_times(&[EntryTime { counter_ns: super::qpc::counter_ns(info.PerformanceCount), millis: info.dwTime }], super::qpc::now_ns())[0];
+        if cancels(info.pointerFlags) {
+            self.contacts.borrow_mut().retain(|p| *p != pointer);
+            self.counters.interrupts.fetch_add(1, Ordering::Relaxed);
+            self.queue.push(InputEvent::Interrupted { pointer, time_ns, reason: InterruptReason::Canceled });
+            return;
+        }
         let mut sample = PenSample::at(time_ns, pointer, Tool::Touch, x, y);
         sample.phase = phase_of(info.pointerFlags);
         if sample.phase != Phase::Hover && sample.phase != Phase::Up {
@@ -320,6 +334,13 @@ impl Hook {
         if self.mouse_down.replace(false) {
             self.counters.interrupts.fetch_add(1, Ordering::Relaxed);
             self.queue.push(InputEvent::Interrupted { pointer: MOUSE_POINTER, time_ns, reason });
+        }
+    }
+
+    fn interrupt_mouse(&self, reason: InterruptReason) {
+        if self.mouse_down.replace(false) {
+            self.counters.interrupts.fetch_add(1, Ordering::Relaxed);
+            self.queue.push(InputEvent::Interrupted { pointer: MOUSE_POINTER, time_ns: super::qpc::now_ns(), reason });
         }
     }
 
@@ -404,6 +425,8 @@ unsafe extern "system" fn subclass_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
         }
         WM_POINTERCAPTURECHANGED => hook.capture_lost((wparam & 0xFFFF) as u32),
         WM_CANCELMODE => hook.interrupt_all(InterruptReason::CaptureLost),
+        // Another window took the mouse: the stroke it was drawing is over, wherever the button is released.
+        WM_CAPTURECHANGED if lparam as isize != hwnd as isize => hook.interrupt_mouse(InterruptReason::CaptureLost),
         WM_KILLFOCUS => hook.interrupt_all(InterruptReason::FocusLost),
         WM_ACTIVATE if wparam & 0xFFFF == 0 => hook.interrupt_all(InterruptReason::FocusLost),
         WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MOUSEMOVE => hook.mouse(msg, lparam),
@@ -513,6 +536,13 @@ mod tests {
         assert_eq!(promotion(0xFF51_5780u32 as isize), Promotion::Touch);
         assert_eq!(promotion(0xFF51_5701u32 as isize), Promotion::Pen, "the low bits carry the pointer, not the kind");
         assert_eq!(promotion(0xFF51_5600u32 as isize), Promotion::No);
+    }
+
+    #[test]
+    fn a_cancel_is_read_with_or_without_a_lift() {
+        assert!(cancels(POINTER_FLAG_UP | POINTER_FLAG_CANCELED));
+        assert!(cancels(POINTER_FLAG_UPDATE | POINTER_FLAG_INCONTACT | POINTER_FLAG_CANCELED), "Windows also cancels with an update");
+        assert!(!cancels(POINTER_FLAG_UP | POINTER_FLAG_INRANGE));
     }
 
     #[test]

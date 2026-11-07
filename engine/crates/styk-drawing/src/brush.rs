@@ -551,6 +551,10 @@ pub struct StrokePath {
     anchor: Option<Shared>,
     raw_last: Option<Shared>,
     pub closed: bool,
+    /// Set by a caller on another thread to say the stroke is being discarded: the long loops of a sample (the steps of a curve
+    /// and the dabs along it) stop at their next check instead of running a whole gap to its end. A stroke that was told to stop
+    /// is incomplete and must not be kept; this never changes what an unstopped stroke produces.
+    pub abort: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl StrokePath {
@@ -575,7 +579,12 @@ impl StrokePath {
             anchor: None,
             raw_last: None,
             closed: false,
+            abort: None,
         }
+    }
+
+    fn aborted(&self) -> bool {
+        self.abort.as_ref().is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     /// Dab spacing at this pressure before the 0.25 px floor.
@@ -689,6 +698,9 @@ impl StrokePath {
         let steps = if steps.is_nan() { 0 } else { steps as usize };
         let mut prev = a;
         for i in 1..=steps {
+            if self.aborted() {
+                return;
+            }
             let p = q(i as f64 / steps as f64);
             let seg = styk_math::hypot(p.x - prev.x, p.y - prev.y);
             if seg > 0.0 {
@@ -696,7 +708,15 @@ impl StrokePath {
             }
             let step = min(spacing_at(self, prev.pressure), spacing_at(self, p.pressure));
             let mut pos = (1.0 - self.remaining) * step;
+            let mut since_check = 0u32;
             while seg > 0.0 && seg >= pos {
+                since_check += 1;
+                if since_check == 4096 {
+                    since_check = 0;
+                    if self.aborted() {
+                        return;
+                    }
+                }
                 let dab = shared(lerp(&prev, &p, pos / seg));
                 let dist = self.dist + pos;
                 self.out(&dab, dist, emit);

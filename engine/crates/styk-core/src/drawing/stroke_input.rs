@@ -72,6 +72,16 @@ pub struct Context<'a> {
     pub mapping: &'a Mapping,
     /// Where the previous stroke on this cel ended, in window pixels, for a Shift press to continue from.
     pub continue_from: Option<(f64, f64)>,
+    /// The part of the window the drawing surface occupies, `(left, top, right, bottom)` in window pixels: a press or a barrel
+    /// press outside it belongs to something else (a slider, a button) and starts nothing. A gesture already open goes on
+    /// anywhere. `None` is the whole window.
+    pub region: Option<(f64, f64, f64, f64)>,
+}
+
+impl Context<'_> {
+    fn contains(&self, x: f64, y: f64) -> bool {
+        self.region.is_none_or(|(left, top, right, bottom)| x >= left && x < right && y >= top && y < bottom)
+    }
 }
 
 /// A gesture of the drawing tool other than painting.
@@ -267,7 +277,7 @@ impl StrokeInput {
 
     fn hover(&mut self, sample: &PenSample, context: &Context, out: &mut Vec<StrokeCommand>) {
         let barrel = sample.buttons.contains(PenButtons::BARREL);
-        if barrel && !self.barrel_held && self.active.is_none() && Self::paints(context) && !context.playing {
+        if barrel && !self.barrel_held && self.active.is_none() && Self::paints(context) && !context.playing && context.contains(sample.x, sample.y) {
             out.push(StrokeCommand::Action(Action::OpenPalette { x: sample.x, y: sample.y }));
         }
         self.barrel_held = barrel;
@@ -276,7 +286,7 @@ impl StrokeInput {
     fn press(&mut self, sample: &PenSample, context: &Context, out: &mut Vec<StrokeCommand>) {
         // A pointer arriving while another gesture is open is ignored, as is any press while playing, over the pan tool or
         // with Space held; a finger that does not draw belongs to the stage's navigation.
-        if self.active.is_some() || context.playing || context.space_held || context.tool == ToolMode::Pan {
+        if self.active.is_some() || context.playing || context.space_held || context.tool == ToolMode::Pan || !context.contains(sample.x, sample.y) {
             return;
         }
         if sample.tool == Tool::Touch {
@@ -374,7 +384,7 @@ mod tests {
     use styk_services::input::{InputQueue, Script, ScriptSpec};
 
     fn context(mapping: &Mapping) -> Context<'_> {
-        Context { tool: ToolMode::Brush, space_held: false, playing: false, finger: FingerDraw::Never, mapping, continue_from: None }
+        Context { tool: ToolMode::Brush, space_held: false, playing: false, finger: FingerDraw::Never, mapping, continue_from: None, region: None }
     }
 
     fn sample(time_ms: u64, phase: Phase) -> PenSample {
@@ -665,6 +675,52 @@ mod tests {
         let out = run(&mut input, &context(&mapping), &[sample(2, Phase::Down), mouse, mouse_move]);
         assert_eq!(out.iter().filter(|c| matches!(c, StrokeCommand::Begin { .. })).count(), 1);
         assert_eq!(samples(&out).len(), 1);
+    }
+
+    #[test]
+    fn a_press_outside_the_drawing_surface_starts_nothing_and_a_stroke_may_leave_it() {
+        let mapping = Mapping::default();
+        let mut ctx = context(&mapping);
+        ctx.region = Some((0.0, 0.0, 200.0, 200.0));
+        // x = 100 + time: the press at t=150 is at x=250, outside; the one at t=2 is inside.
+        let mut input = StrokeInput::new();
+        assert!(run(&mut input, &ctx, &[sample(150, Phase::Down), sample(151, Phase::Move), sample(152, Phase::Up)]).is_empty(), "a slider's press draws nothing, nor does its drag back over the pad");
+        let out = run(&mut input, &ctx, &[sample(2, Phase::Down), sample(100, Phase::Move), sample(160, Phase::Move), sample(300, Phase::Move), sample(301, Phase::Up)]);
+        assert!(matches!(out[0], StrokeCommand::Begin { .. }));
+        assert_eq!(samples(&out).len(), 4, "a stroke it owns goes on outside");
+        // The barrel over the controls opens no palette.
+        let mut barrel = sample(300, Phase::Hover);
+        barrel.buttons = PenButtons::BARREL;
+        assert!(run(&mut StrokeInput::new(), &ctx, &[sample(299, Phase::Hover), barrel]).is_empty());
+    }
+
+    #[test]
+    fn history_entries_that_share_a_millisecond_are_all_kept_when_their_times_are_made_distinct() {
+        use styk_services::input::{EntryTime, history_times};
+        let mapping = Mapping::default();
+        // Five entries of one message, stamped to the millisecond only (no counter): 100, 100, 101, 101, 101.
+        let entries: Vec<EntryTime> = [100u32, 100, 101, 101, 101].iter().map(|&millis| EntryTime { counter_ns: 0, millis }).collect();
+        let feed = |times: &[u64]| {
+            let mut input = StrokeInput::new();
+            let samples: Vec<PenSample> = times
+                .iter()
+                .enumerate()
+                .map(|(i, &t)| {
+                    let mut s = sample(0, if i == 0 { Phase::Down } else { Phase::Move });
+                    s.time_ns = t;
+                    s.x += i as f64 * 3.0;
+                    s
+                })
+                .collect();
+            samples_of(&run(&mut input, &context(&mapping), &samples)).len()
+        };
+        assert_eq!(feed(&history_times(&entries, 9_000_000_000)), 5, "every recovered entry becomes a sample");
+        // What the source did before: every entry without a counter took the time of the message.
+        assert_eq!(feed(&[9_000_000_000; 5]), 1, "the others were skipped as duplicates of the first");
+    }
+
+    fn samples_of(commands: &[StrokeCommand]) -> Vec<(f64, f64, f64)> {
+        samples(commands)
     }
 
     #[test]

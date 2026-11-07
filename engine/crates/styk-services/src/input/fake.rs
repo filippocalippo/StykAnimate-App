@@ -109,10 +109,14 @@ mod tests {
     fn an_interrupt_is_its_own_event_and_a_detached_source_is_silent() {
         let queue = InputQueue::new();
         let mut source = FakeSource::new(queue.clone());
+        // Past the press, so the pointer has a gesture to interrupt.
+        let script = script();
+        source.play_until(&script, 0, script.steps[10].t_ns, Modifiers::NONE);
+        drained(&queue);
         source.interrupt(3, 77, InterruptReason::CaptureLost);
         source.detach();
         source.interrupt(3, 78, InterruptReason::Canceled);
-        assert_eq!(source.play_all(&script(), 0), 0);
+        assert_eq!(source.play_all(&script, 0), 0);
         let events = drained(&queue);
         assert_eq!(events, [InputEvent::Interrupted { pointer: 3, time_ns: 77, reason: InterruptReason::CaptureLost }]);
         assert!(source.caps().history);

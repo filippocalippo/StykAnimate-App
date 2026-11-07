@@ -13,6 +13,9 @@ use std::sync::Arc;
 /// A wet segment older than this many frames retires whatever the tiles say (the JavaScript wet ink's age limit).
 pub const MAX_AGE_FRAMES: u64 = 30;
 
+/// Dabs the ledger holds at most; the oldest batches go first (they are the ones whose tiles are already on their way).
+pub const MAX_DABS: usize = 32_768;
+
 #[derive(Clone, Debug)]
 struct Batch {
     stroke: u64,
@@ -33,6 +36,8 @@ pub struct LedgerStats {
     pub dropped: u64,
     /// Replies ignored because they belonged to a stroke already gone.
     pub stale: u64,
+    /// Batches dropped because the ledger held more than [`MAX_DABS`].
+    pub over_cap: u64,
 }
 
 /// The wet batches of the strokes in flight.
@@ -94,7 +99,13 @@ impl WetLedger {
     pub fn dabs(&mut self, stroke: u64, seq: u64, dabs: Vec<WetDab>, newest_ns: u64) {
         match self.is_open(stroke) {
             None => self.stats.stale += 1,
-            Some(true) if !dabs.is_empty() => self.batches.push_back(Batch { stroke, seq, dabs: dabs.into(), born: self.frame, newest_ns }),
+            Some(true) if !dabs.is_empty() => {
+                self.batches.push_back(Batch { stroke, seq, dabs: dabs.into(), born: self.frame, newest_ns });
+                while self.visible_dabs() > MAX_DABS && self.batches.len() > 1 {
+                    self.batches.pop_front();
+                    self.stats.over_cap += 1;
+                }
+            }
             Some(_) => {}
         }
     }
@@ -104,8 +115,7 @@ impl WetLedger {
         self.batches.iter().map(|b| b.newest_ns).max().unwrap_or(0)
     }
 
-    /// The worker reported a batch's tiles, `queued` of which wait for upload (the others are already on the GPU or the
-    /// batch changed none). Returns false for a reply of a stroke that is gone.
+    /// The worker reported a batch's tiles. Returns false for a reply of a stroke that is gone.
     pub fn tiles_received(&mut self, stroke: u64, seq: u64) -> bool {
         if self.is_open(stroke).is_none() {
             self.stats.stale += 1;
@@ -115,8 +125,8 @@ impl WetLedger {
         true
     }
 
-    /// The upload queue now holds tiles of batches from `oldest_waiting` on (`None` when it is empty); everything before
-    /// that is on the GPU. Retires the batches whose tiles are all there, in this same frame.
+    /// The upload queue now holds batches from `oldest_waiting` on (`None` when it is empty); every batch before that is on
+    /// the GPU, installed whole in this same frame (a batch is never partly there). Retires them.
     pub fn uploaded(&mut self, oldest_waiting: Option<u64>) {
         self.uploaded_seq = match oldest_waiting {
             Some(seq) => seq.saturating_sub(1),
@@ -236,6 +246,18 @@ mod tests {
         assert!(ledger.tiles_received(1, 1));
     }
 
+    #[test]
+    fn the_ledger_holds_no_more_dabs_than_its_cap_and_drops_the_oldest_batch_first() {
+        let mut ledger = WetLedger::new();
+        ledger.stroke_started(1, true);
+        for seq in 1..=10u64 {
+            ledger.dabs(1, seq, (0..(MAX_DABS / 4)).map(|i| dab(i + seq as usize * 1_000_000)).collect(), 0);
+        }
+        assert!(ledger.visible_dabs() <= MAX_DABS, "{}", ledger.visible_dabs());
+        assert_eq!(ledger.stats().over_cap, 6);
+        assert_eq!(ledger.visible().next().unwrap()[0].x, (7 * 1_000_000) as f32, "the oldest six batches went");
+    }
+
     /// Every dab is in the preview or in the uploaded tiles at every frame, and in only one of them: the rule, checked
     /// over many arrival patterns with a small upload budget.
     #[test]
@@ -267,7 +289,7 @@ mod tests {
             let tiles_per_batch: Vec<usize> = (0..batches).map(|_| 1 + next(5) as usize).collect();
             let mut waiting: VecDeque<(u64, usize)> = VecDeque::new();
             let mut on_gpu = vec![false; batches];
-            let budget = 2;
+            let budget = 4;
             for frame in 1..=(at + 40) {
                 ledger.begin_frame();
                 for i in 0..batches {
@@ -279,16 +301,15 @@ mod tests {
                         waiting.push_back((i as u64 + 1, tiles_per_batch[i]));
                     }
                 }
+                // Whole batches only: a batch is installed in one frame or not at all, and at least one goes each frame.
                 let mut spent = 0;
-                while spent < budget {
-                    let Some(front) = waiting.front_mut() else { break };
-                    let take = front.1.min(budget - spent);
-                    front.1 -= take;
-                    spent += take;
-                    if front.1 == 0 {
-                        on_gpu[front.0 as usize - 1] = true;
-                        waiting.pop_front();
+                while let Some(front) = waiting.front() {
+                    if spent > 0 && spent + front.1 > budget {
+                        break;
                     }
+                    spent += front.1;
+                    on_gpu[front.0 as usize - 1] = true;
+                    waiting.pop_front();
                 }
                 ledger.uploaded(waiting.front().map(|w| w.0));
                 let shown: Vec<f32> = ledger.visible().flat_map(|b| b.iter().map(|d| d.x)).collect();

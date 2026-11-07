@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::{Condvar, Mutex};
 use styk_services::input::Modifiers;
 
 const WAIT: Duration = Duration::from_secs(20);
@@ -28,6 +29,10 @@ fn until(worker: &Worker, done: impl Fn(&Reply) -> bool) -> Vec<Reply> {
     let mut seen = Vec::new();
     loop {
         let reply = worker.wait(WAIT).expect("the worker answers");
+        // A consumer acknowledges the batches it has installed; these tests install nothing, so each one is acknowledged at once.
+        if let Reply::Tiles { seq, .. } = &reply {
+            worker.ack(*seq);
+        }
         let end = done(&reply);
         seen.push(reply);
         if end {
@@ -41,6 +46,14 @@ fn snapshot(worker: &Worker, token: u64) -> Vec<(i64, i64, Vec<u8>)> {
     let replies = until(worker, |r| matches!(r, Reply::Snapshot { .. }));
     let Some(Reply::Snapshot { mut tiles, .. }) = replies.into_iter().last() else { unreachable!() };
     tiles.sort_by_key(|t| (t.1, t.0));
+    tiles
+}
+
+/// The pixels of some tiles, asked for as the consumer does.
+fn fetch(worker: &Worker, tiles: &[(i64, i64)]) -> Vec<TileUpdate> {
+    worker.send(Request::Fetch { tiles: tiles.to_vec() });
+    let replies = until(worker, |r| matches!(r, Reply::Pixels { .. }));
+    let Some(Reply::Pixels { tiles }) = replies.into_iter().last() else { unreachable!() };
     tiles
 }
 
@@ -130,12 +143,13 @@ fn undo_and_redo_restore_the_cel_exactly() {
     let drawn = snapshot(&worker, 2);
     assert!(!drawn.is_empty());
     worker.send(Request::Undo);
-    let replaced = until(&worker, |r| matches!(r, Reply::Replaced { .. }));
-    let Some(Reply::Replaced { tiles }) = replaced.last() else { unreachable!() };
-    assert!(tiles.iter().all(|t| t.2.is_none()), "undo of the only stroke empties every tile it touched");
+    let replaced = until(&worker, |r| matches!(r, Reply::Changed { .. }));
+    let Some(Reply::Changed { tiles }) = replaced.last() else { unreachable!() };
+    assert!(!tiles.is_empty());
+    assert!(fetch(&worker, tiles).iter().all(|t| t.2.is_none()), "undo of the only stroke empties every tile it touched");
     assert!(snapshot(&worker, 3).is_empty());
     worker.send(Request::Redo);
-    until(&worker, |r| matches!(r, Reply::Replaced { .. }));
+    until(&worker, |r| matches!(r, Reply::Changed { .. }));
     assert!(snapshot(&worker, 4) == drawn, "redo restores the same pixels");
 }
 
@@ -157,7 +171,7 @@ fn a_cancelled_stroke_leaves_the_cel_untouched_and_names_the_tiles_to_restore() 
     let Some(Reply::Cancelled { stroke, restore }) = replies.last() else { unreachable!() };
     assert_eq!(*stroke, 2);
     assert!(!restore.is_empty());
-    assert!(restore.iter().all(|(tx, ty, pixels)| before.iter().find(|t| (t.0, t.1) == (*tx, *ty)).map(|t| &t.2) == pixels.as_ref()));
+    assert!(fetch(&worker, restore).iter().all(|(tx, ty, pixels)| before.iter().find(|t| (t.0, t.1) == (*tx, *ty)).map(|t| &t.2) == pixels.as_ref()), "the cel still holds what it held");
     assert!(snapshot(&worker, 2) == before);
 }
 
@@ -174,7 +188,7 @@ fn an_interrupted_stroke_ends_and_keeps_its_ink_as_one_undo_step() {
     until(&worker, |r| matches!(r, Reply::Finished { .. }));
     assert!(!snapshot(&worker, 1).is_empty());
     worker.send(Request::Undo);
-    until(&worker, |r| matches!(r, Reply::Replaced { .. }));
+    until(&worker, |r| matches!(r, Reply::Changed { .. }));
     assert!(snapshot(&worker, 2).is_empty(), "one undo removes all of it");
 }
 
@@ -189,7 +203,7 @@ fn a_mirrored_stroke_paints_both_sides_in_one_undo_step() {
     // x 20..60 is tile 0; the mirror at 100 puts the other half at x 140..180 (tiles 2 and 3).
     assert!(columns.contains(&0) && columns.contains(&2), "{columns:?}");
     worker.send(Request::Undo);
-    until(&worker, |r| matches!(r, Reply::Replaced { .. }));
+    until(&worker, |r| matches!(r, Reply::Changed { .. }));
     assert!(snapshot(&worker, 2).is_empty());
 }
 
@@ -247,4 +261,138 @@ fn the_cel_survives_a_save_and_reopen_through_a_snapshot() {
     let after = snapshot(&reopened, 2);
     assert!(after.len() >= saved.len());
     assert!(saved.iter().all(|t| after.iter().any(|a| (a.0, a.1) == (t.0, t.1))));
+}
+
+#[test]
+fn cancelling_a_later_stroke_does_not_truncate_an_earlier_queued_one() {
+    let worker = worker();
+    let settings = settings(",\"size\":2");
+    // A long first stroke keeps the worker busy while the rest queues behind it.
+    begin(&worker, 10, false, Mapping::default(), &settings);
+    worker.command(StrokeCommand::Sample { id: 10, x: 0.0, y: 400.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
+    worker.command(StrokeCommand::Sample { id: 10, x: 60_000.0, y: 400.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
+    stroke(&worker, 11, &line(), &settings, Mapping::default());
+    begin(&worker, 12, false, Mapping::default(), &settings);
+    worker.command(StrokeCommand::Sample { id: 12, x: 30.0, y: 30.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
+    worker.command(StrokeCommand::Cancel { id: 12 }, &settings);
+    let replies = until(&worker, |r| matches!(r, Reply::Finished { stroke: 11, .. } | Reply::Failed { stroke: 11, .. }));
+    let Some(Reply::Finished { changed_tiles, dabs, .. }) = replies.last() else { panic!("stroke 11 did not finish: {replies:?}") };
+    assert!(*changed_tiles > 0 && *dabs > 0, "the earlier stroke kept its ink: {changed_tiles} tiles, {dabs} dabs");
+}
+
+#[test]
+fn dropping_the_worker_does_not_wait_for_the_work_it_has_queued() {
+    let worker = worker();
+    let settings = settings(",\"size\":2");
+    begin(&worker, 1, false, Mapping::default(), &settings);
+    worker.command(StrokeCommand::Sample { id: 1, x: 0.0, y: 0.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
+    worker.command(StrokeCommand::Sample { id: 1, x: 400_000.0, y: 0.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
+    std::thread::sleep(Duration::from_millis(100));
+    let started = Instant::now();
+    drop(worker);
+    let took = started.elapsed();
+    assert!(took < Duration::from_millis(250), "closing waited {took:?} for the stroke in progress");
+}
+
+/// Queues commands behind a held worker, then releases it.
+fn held(worker: &Worker) -> Arc<(Mutex<bool>, Condvar)> {
+    let hold = Arc::new((Mutex::new(false), Condvar::new()));
+    worker.send(Request::Hold(hold.clone()));
+    hold
+}
+
+fn release(hold: &Arc<(Mutex<bool>, Condvar)>) {
+    *hold.0.lock().unwrap() = true;
+    hold.1.notify_all();
+}
+
+#[test]
+fn a_cancel_behind_a_held_worker_leaves_the_stroke_queued_before_it_whole() {
+    let worker = worker();
+    let settings = settings("");
+    let hold = held(&worker);
+    stroke(&worker, 1, &line(), &settings, Mapping::default());
+    begin(&worker, 2, false, Mapping::default(), &settings);
+    worker.command(StrokeCommand::Sample { id: 2, x: 30.0, y: 30.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
+    worker.command(StrokeCommand::Cancel { id: 2 }, &settings);
+    release(&hold);
+    let replies = until(&worker, |r| matches!(r, Reply::Cancelled { stroke: 2, .. }));
+    let finished = replies.iter().find_map(|r| if let Reply::Finished { stroke: 1, changed_tiles, dabs } = r { Some((*changed_tiles, *dabs)) } else { None });
+    assert!(finished.is_some_and(|(tiles, dabs)| tiles > 0 && dabs > 0), "{finished:?}");
+}
+
+#[test]
+fn the_worker_stays_within_its_outstanding_batches_until_they_are_acknowledged() {
+    let worker = worker();
+    let settings = settings(",\"size\":2");
+    begin(&worker, 1, false, Mapping::default(), &settings);
+    worker.command(StrokeCommand::Sample { id: 1, x: 0.0, y: 30.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
+    worker.command(StrokeCommand::Sample { id: 1, x: 30_000.0, y: 30.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
+    std::thread::sleep(Duration::from_millis(600));
+    let mut tiles_replies = Vec::new();
+    while let Some(reply) = worker.wait(Duration::from_millis(50)) {
+        if let Reply::Tiles { seq, tiles, .. } = reply {
+            assert!(tiles.len() <= MAX_BATCH_TILES, "a batch carries at most {MAX_BATCH_TILES} tiles, this one {}", tiles.len());
+            tiles_replies.push(seq);
+        }
+    }
+    assert_eq!(tiles_replies.len() as u64, MAX_OUTSTANDING, "{tiles_replies:?}: the batches ahead of the consumer are bounded");
+    // An acknowledgement lets it go on; a cancel wakes it at once.
+    worker.ack(*tiles_replies.last().unwrap());
+    std::thread::sleep(Duration::from_millis(200));
+    let started = Instant::now();
+    worker.command(StrokeCommand::Cancel { id: 1 }, &settings);
+    until(&worker, |r| matches!(r, Reply::Cancelled { .. }));
+    assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+}
+
+#[test]
+fn the_time_to_generate_dabs_is_the_time_the_brush_took() {
+    let worker = worker();
+    let settings = settings(",\"size\":2");
+    // The same gap, timed around the brush itself.
+    let mut value = json::parse(settings.as_bytes()).unwrap();
+    let object = value.make_obj().unwrap();
+    object.set("erase", Value::Bool(false));
+    object.set("seed", Value::Num(1.0));
+    let brush = Brush::normalize(&value).unwrap();
+    let mut path = BrushStroke::new(brush.clone(), Some(brush.seed));
+    let started = Instant::now();
+    for (i, x) in [0.0, 20_000.0].into_iter().enumerate() {
+        path.sample(&Sample { x, y: 30.0, pressure: Some(1.0), time: Some(i as f64), ax: Some(0.0), ay: Some(0.0) }, &mut |_| {}).unwrap();
+    }
+    let direct_ms = started.elapsed().as_secs_f64() * 1e3;
+    begin(&worker, 1, false, Mapping::default(), &settings);
+    worker.command(StrokeCommand::Sample { id: 1, x: 0.0, y: 30.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
+    worker.command(StrokeCommand::Sample { id: 1, x: 20_000.0, y: 30.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
+    worker.command(StrokeCommand::End { id: 1 }, &settings);
+    let replies = until(&worker, |r| matches!(r, Reply::Finished { .. }));
+    let reported: f64 = replies.iter().filter_map(|r| if let Reply::Dabs { generate_ms, .. } = r { Some(*generate_ms) } else { None }).sum();
+    assert!(direct_ms > 5.0, "the gap is long enough to time: {direct_ms} ms");
+    assert!(reported >= direct_ms * 0.5, "the worker reported {reported} ms of generation for a gap the brush took {direct_ms} ms to make");
+}
+
+#[test]
+fn a_worker_too_far_behind_refuses_samples_and_says_so() {
+    let worker = worker();
+    let settings = settings("");
+    let hold = held(&worker);
+    begin(&worker, 1, false, Mapping::default(), &settings);
+    let sample = |i: usize| StrokeCommand::Sample { id: 1, x: i as f64 * 0.01, y: 5.0, pressure: 1.0, time_ms: i as f64, lean: None };
+    let refused = (0..MAX_QUEUED_SAMPLES + 50).filter(|&i| !worker.command(sample(i), &settings)).count();
+    assert_eq!(refused, 50);
+    assert_eq!(worker.refused(), 50);
+    assert_eq!(worker.queued(), MAX_QUEUED_SAMPLES);
+    // An end is never refused.
+    assert!(worker.command(StrokeCommand::End { id: 1 }, &settings));
+    worker.command(StrokeCommand::Cancel { id: 1 }, &settings);
+    release(&hold);
+    until(&worker, |r| matches!(r, Reply::Cancelled { .. } | Reply::Finished { .. }));
+}
+
+#[test]
+fn a_fetch_returns_at_most_the_fetch_limit() {
+    let worker = worker();
+    let tiles: Vec<(i64, i64)> = (0..(FETCH_LIMIT as i64 + 30)).map(|i| (i, 0)).collect();
+    assert_eq!(fetch(&worker, &tiles).len(), FETCH_LIMIT);
 }

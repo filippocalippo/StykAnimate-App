@@ -13,6 +13,10 @@ pub const CAPACITY: usize = 4096;
 /// Room kept beyond [`CAPACITY`] for terminal events and the overflow notice, so a gesture can always end.
 pub const RESERVE: usize = 64;
 
+/// Gestures the queue keeps open at once. Each may need one terminal event, and there is one overflow notice, so
+/// `MAX_GESTURES + 1` fits in the reserve and the queue never holds more than `CAPACITY + RESERVE` events.
+pub const MAX_GESTURES: usize = RESERVE - 1;
+
 /// What the queue has done since it was made.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct QueueStats {
@@ -28,12 +32,16 @@ pub struct QueueStats {
     pub refused_downs: u64,
     /// Overflow notices queued.
     pub overflows: u64,
+    /// Lifts, interrupts and contact samples of a gesture the queue never admitted: redundant, so not queued.
+    pub ignored: u64,
 }
 
 struct Inner {
     events: VecDeque<InputEvent>,
     /// Events lost since the last drain, for the notice.
     lost: u32,
+    /// Pointers whose press was admitted and whose end has not been.
+    open: Vec<u32>,
     /// Whether the notice for the current run of losses is already queued.
     noticed: bool,
     stats: QueueStats,
@@ -46,9 +54,11 @@ struct Inner {
 /// **Overflow protocol.** Below [`CAPACITY`] every event is kept in order. At capacity a hover sample is dropped
 /// (the oldest queued hover makes room for a new one), a contact sample is dropped and counted, and a press is refused;
 /// the first loss queues one [`InputEvent::Overflowed`], which the consumer reads as "the stroke in progress is
-/// damaged": it ends and keeps its ink, and the next press starts clean. A terminal event (a pen lifting, an interrupt,
-/// the notice itself) is always accepted, into the reserve, evicting the oldest queued non-terminal sample if the
-/// reserve is exhausted too.
+/// damaged": it ends and keeps its ink, and the next press starts clean. The queue tracks the gestures it has admitted: the
+/// end of an admitted gesture (a pen lifting, an interrupt) is always accepted, into a reserve that holds exactly one end per
+/// open gesture ([`MAX_GESTURES`], more presses are refused and said so) and the notice, so the queue never holds more than
+/// `CAPACITY + RESERVE` events and nothing is ever evicted to make room. An end for a gesture that was never admitted is
+/// redundant and only counted.
 #[derive(Clone)]
 pub struct InputQueue {
     inner: Arc<Mutex<Inner>>,
@@ -75,7 +85,7 @@ impl InputQueue {
     /// A queue that sheds after `capacity` events (tests use a small one).
     pub fn with_capacity(capacity: usize) -> InputQueue {
         InputQueue {
-            inner: Arc::new(Mutex::new(Inner { events: VecDeque::new(), lost: 0, noticed: false, stats: QueueStats::default(), waker: None })),
+            inner: Arc::new(Mutex::new(Inner { events: VecDeque::new(), lost: 0, open: Vec::new(), noticed: false, stats: QueueStats::default(), waker: None })),
             capacity,
         }
     }
@@ -106,41 +116,81 @@ impl InputQueue {
     }
 
     fn admit(&self, inner: &mut Inner, event: InputEvent) -> bool {
-        if event.is_terminal() {
-            if inner.events.len() >= self.capacity + RESERVE {
-                // The reserve is gone too: a terminal event still gets in, at the cost of the oldest sample that is not one.
-                if let Some(at) = inner.events.iter().position(|queued| !queued.is_terminal()) {
-                    inner.events.remove(at);
-                }
-            }
-            inner.events.push_back(event);
-            return true;
-        }
-        if inner.events.len() < self.capacity {
-            inner.events.push_back(event);
-            return true;
-        }
-        let InputEvent::Sample(sample) = event else { return false };
-        match sample.phase {
-            Phase::Hover => {
-                inner.stats.dropped_hover += 1;
-                if let Some(at) = inner.events.iter().position(|queued| matches!(queued, InputEvent::Sample(s) if s.phase == Phase::Hover)) {
-                    inner.events.remove(at);
+        match event {
+            InputEvent::Overflowed { .. } => false,
+            InputEvent::Interrupted { pointer, .. } => {
+                // The end of a gesture the queue admitted always fits (the reserve is kept for exactly these); one it never
+                // admitted is redundant: nothing is open for it.
+                if Self::close(inner, pointer) {
                     inner.events.push_back(event);
-                    return true;
+                    true
+                } else {
+                    inner.stats.ignored += 1;
+                    false
                 }
-                false
             }
-            Phase::Down => {
-                inner.stats.refused_downs += 1;
-                self.note_loss(inner);
-                false
+            InputEvent::Sample(sample) => match sample.phase {
+                Phase::Up => {
+                    if Self::close(inner, sample.pointer) {
+                        inner.events.push_back(event);
+                        true
+                    } else {
+                        inner.stats.ignored += 1;
+                        false
+                    }
+                }
+                Phase::Down => {
+                    if inner.events.len() < self.capacity && inner.open.len() < MAX_GESTURES && !inner.open.contains(&sample.pointer) {
+                        inner.open.push(sample.pointer);
+                        inner.events.push_back(event);
+                        true
+                    } else {
+                        inner.stats.refused_downs += 1;
+                        self.note_loss(inner);
+                        false
+                    }
+                }
+                Phase::Move => {
+                    if !inner.open.contains(&sample.pointer) {
+                        // Its press was refused (and said so): the rest of that stroke is not queued.
+                        inner.stats.ignored += 1;
+                        false
+                    } else if inner.events.len() < self.capacity {
+                        inner.events.push_back(event);
+                        true
+                    } else {
+                        inner.stats.dropped_moves += 1;
+                        self.note_loss(inner);
+                        false
+                    }
+                }
+                Phase::Hover => {
+                    if inner.events.len() < self.capacity {
+                        inner.events.push_back(event);
+                        return true;
+                    }
+                    inner.stats.dropped_hover += 1;
+                    match inner.events.iter().position(|queued| matches!(queued, InputEvent::Sample(s) if s.phase == Phase::Hover)) {
+                        Some(at) => {
+                            inner.events.remove(at);
+                            inner.events.push_back(event);
+                            true
+                        }
+                        None => false,
+                    }
+                }
+            },
+        }
+    }
+
+    /// Takes a pointer out of the open gestures; whether it was open.
+    fn close(inner: &mut Inner, pointer: u32) -> bool {
+        match inner.open.iter().position(|p| *p == pointer) {
+            Some(at) => {
+                inner.open.swap_remove(at);
+                true
             }
-            Phase::Move | Phase::Up => {
-                inner.stats.dropped_moves += 1;
-                self.note_loss(inner);
-                false
-            }
+            None => false,
         }
     }
 
@@ -222,18 +272,54 @@ mod tests {
         assert_eq!((stats.dropped_moves, stats.overflows), (2, 1));
     }
 
+    fn pointer_sample(pointer: u32, time_ns: u64, phase: Phase) -> InputEvent {
+        let mut sample = PenSample::at(time_ns, pointer, Tool::Pen, 0.0, 0.0);
+        sample.phase = phase;
+        InputEvent::Sample(sample)
+    }
+
     #[test]
-    fn terminal_events_survive_even_when_the_reserve_is_gone() {
-        let queue = InputQueue::with_capacity(2);
-        queue.push(sample(0, Phase::Down));
-        queue.push(sample(1, Phase::Move));
-        for pointer in 0..(RESERVE as u32 + 20) {
-            queue.push(InputEvent::Interrupted { pointer, time_ns: 9, reason: InterruptReason::CaptureLost });
+    fn terminal_events_never_grow_the_queue_past_its_bound() {
+        let queue = InputQueue::with_capacity(8);
+        // Every pointer that is let in may end; nothing else may ride the reserve.
+        for pointer in 0..10 {
+            queue.push(pointer_sample(pointer, pointer as u64, Phase::Down));
         }
-        queue.push(sample(100, Phase::Up));
+        for pointer in 0..10_000u32 {
+            queue.push(InputEvent::Interrupted { pointer, time_ns: 1, reason: InterruptReason::CaptureLost });
+            queue.push(pointer_sample(pointer % 50, 5, Phase::Up));
+        }
+        assert!(queue.stats().high_water <= 8 + RESERVE, "{:?}", queue.stats());
+        assert!(queue.stats().queued <= 8 + RESERVE);
+    }
+
+    #[test]
+    fn a_terminal_event_never_removes_a_press_or_a_move() {
+        let queue = InputQueue::with_capacity(4);
+        queue.push(pointer_sample(1, 1, Phase::Down));
+        queue.push(pointer_sample(1, 2, Phase::Move));
+        queue.push(pointer_sample(1, 3, Phase::Move));
+        queue.push(pointer_sample(1, 4, Phase::Move));
+        for pointer in 100..(100 + 2 * RESERVE as u32) {
+            queue.push(InputEvent::Interrupted { pointer, time_ns: 9, reason: InterruptReason::Canceled });
+        }
+        queue.push(pointer_sample(1, 10, Phase::Up));
         let events = drained(&queue);
-        assert!(matches!(events.last(), Some(InputEvent::Sample(s)) if s.phase == Phase::Up));
-        assert!(events.iter().filter(|e| matches!(e, InputEvent::Interrupted { .. })).count() >= RESERVE);
+        let times: Vec<u64> = events.iter().filter_map(|e| if let InputEvent::Sample(s) = e { Some(s.time_ns) } else { None }).collect();
+        assert_eq!(times, [1, 2, 3, 4, 10], "the stroke is whole and its lift is last");
+    }
+
+    #[test]
+    fn a_lift_or_interrupt_of_a_gesture_that_was_never_admitted_is_counted_not_queued() {
+        let queue = InputQueue::with_capacity(2);
+        queue.push(pointer_sample(1, 1, Phase::Hover));
+        queue.push(pointer_sample(1, 2, Phase::Hover));
+        assert!(!queue.push(pointer_sample(5, 3, Phase::Down)), "a press with no room is refused, and said so");
+        assert!(!queue.push(pointer_sample(5, 4, Phase::Up)));
+        assert!(!queue.push(InputEvent::Interrupted { pointer: 5, time_ns: 5, reason: InterruptReason::FocusLost }));
+        let events = drained(&queue);
+        assert_eq!(events.iter().filter(|e| matches!(e, InputEvent::Overflowed { .. })).count(), 1);
+        assert!(queue.stats().ignored >= 2);
     }
 
     #[test]

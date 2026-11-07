@@ -200,6 +200,39 @@ impl InputEvent {
     }
 }
 
+/// One history entry of a pointer message, as the system reported its time: the high-resolution counter converted to
+/// nanoseconds (0 when the system gave none) and the millisecond clock (`dwTime`, which wraps at 2^32).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EntryTime {
+    pub counter_ns: u64,
+    pub millis: u32,
+}
+
+/// The times of a message's history entries, oldest first, on the application's clock, strictly increasing.
+///
+/// An entry with a counter keeps it. One without is placed by its millisecond stamp relative to the newest entry's, counted
+/// back from `now_ns` (the time the message arrived), so recovered history keeps its spacing. Entries that would share a time
+/// (millisecond stamps, or a counter that did not advance) are one nanosecond apart, in order: the stroke rules skip a sample
+/// whose time is not after the last, and a recovered entry must not be skipped as a duplicate of its neighbour.
+pub fn history_times(entries: &[EntryTime], now_ns: u64) -> Vec<u64> {
+    let Some(newest) = entries.last() else { return Vec::new() };
+    let mut times = Vec::with_capacity(entries.len());
+    let mut previous: Option<u64> = None;
+    for entry in entries {
+        let mut time = if entry.counter_ns != 0 {
+            entry.counter_ns
+        } else {
+            now_ns.saturating_sub(u64::from(newest.millis.wrapping_sub(entry.millis)) * 1_000_000)
+        };
+        if let Some(previous) = previous {
+            time = time.max(previous + 1);
+        }
+        previous = Some(time);
+        times.push(time);
+    }
+    times
+}
+
 /// What a source can report.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputCaps {
@@ -226,6 +259,30 @@ pub trait InputSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_without_a_counter_keeps_its_order_and_its_spacing() {
+        let entries: Vec<EntryTime> = [100u32, 100, 101, 103, 103].iter().map(|&millis| EntryTime { counter_ns: 0, millis }).collect();
+        let times = history_times(&entries, 50_000_000);
+        assert!(times.windows(2).all(|pair| pair[1] > pair[0]), "{times:?}");
+        assert_eq!(times[0], 47_000_000);
+        assert_eq!(times[3], 50_000_000 - 0);
+        assert!(times[4] - times[3] <= 1, "entries of one millisecond are a nanosecond apart");
+    }
+
+    #[test]
+    fn a_millisecond_clock_that_wrapped_still_orders_the_history() {
+        let entries = [EntryTime { counter_ns: 0, millis: u32::MAX - 1 }, EntryTime { counter_ns: 0, millis: 1 }];
+        let times = history_times(&entries, 100_000_000);
+        assert_eq!(times[1] - times[0], 3_000_000);
+    }
+
+    #[test]
+    fn entries_with_a_counter_keep_it_and_an_empty_history_is_empty() {
+        let entries = [EntryTime { counter_ns: 5_000, millis: 9 }, EntryTime { counter_ns: 9_000, millis: 9 }];
+        assert_eq!(history_times(&entries, 1), [5_000, 9_000]);
+        assert!(history_times(&[], 1).is_empty());
+    }
 
     #[test]
     fn flags_combine_and_test() {
