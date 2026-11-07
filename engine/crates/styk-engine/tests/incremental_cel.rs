@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use styk_doc::{json, Value};
+use styk_doc::Value;
 use styk_engine::document::{OpenOptions, OpenSource};
 use styk_engine::{Budgets, Engine, Uploaded};
 
