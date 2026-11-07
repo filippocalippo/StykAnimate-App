@@ -15,6 +15,7 @@ use styk_engine::edit::{EditOptions, EditScene};
 use styk_engine::export::{ExportFrames, AHEAD};
 use styk_engine::Engine;
 use styk_eval::doc::Camera;
+use styk_export::resident::{self, Resident};
 use styk_export::{CpuExport, GpuExport, Settings, Smoothing};
 use styk_render::{wgpu, Edges, Renderer};
 use wasm_bindgen::prelude::*;
@@ -133,6 +134,11 @@ pub struct ExportRenderer {
     edit: EditScene,
     /// The frame being exported: its draw list and the camera it is seen through.
     current: Option<(Arc<DrawList>, Option<Camera>)>,
+    /// The tick `current` is, when it is one of the document's (not the editor's pose), and the last tick of the export.
+    tick: Option<u32>,
+    last: u32,
+    /// The sprite layers of an export of a document with many pages ([`styk_export::resident`]); none for the other documents.
+    resident: Option<Resident>,
     frames_drawn: u32,
     last_evaluate_ms: f64,
 }
@@ -160,10 +166,16 @@ impl ExportRenderer {
         let mut device = device;
         let mut gpu = GpuExport::with_renderer(&device.device, &device.queue, settings, tile, device.renderer.take());
         let generation = frames.generation().clone();
-        gpu.prepare_sprites(generation.lineage, &generation.assets);
-        frames.decode_images();
+        // A document of many pages keeps only the pages its frames draw from in the sprite texture; the others, the whole layout.
+        let resident = if resident::wanted(&generation.assets) {
+            Some(Resident::begin(&mut gpu, &frames))
+        } else {
+            gpu.prepare_sprites(generation.lineage, &generation.assets);
+            frames.decode_images();
+            None
+        };
         let backend = Backend::Gpu { gpu: Box::new(gpu), device: device.device.clone(), _surface: device.surface.take(), failure: device.failure.clone(), start_ms: device.start_ms, polled: device.polled };
-        Ok(ExportRenderer { frames, backend, backend_name: device.backend.clone(), edit: EditScene::default(), current: None, frames_drawn: 0, last_evaluate_ms: 0.0 })
+        Ok(ExportRenderer { frames, backend, backend_name: device.backend.clone(), edit: EditScene::default(), current: None, tick: None, last: 0, resident, frames_drawn: 0, last_evaluate_ms: 0.0 })
     }
 
     /// Starts an export as [`ExportRenderer::create`] does, drawn by the CPU rasterizer
@@ -175,7 +187,7 @@ impl ExportRenderer {
         let mut cpu = CpuExport::new(settings, tile);
         cpu.use_assets(frames.generation().assets.clone());
         let backend = Backend::Cpu(cpu);
-        Ok(ExportRenderer { frames, backend, backend_name: "CPU · styk-raster".into(), edit: EditScene::default(), current: None, frames_drawn: 0, last_evaluate_ms: 0.0 })
+        Ok(ExportRenderer { frames, backend, backend_name: "CPU · styk-raster".into(), edit: EditScene::default(), current: None, tick: None, last: 0, resident: None, frames_drawn: 0, last_evaluate_ms: 0.0 })
     }
 
     /// The graphics backend and adapter, for reports.
@@ -187,6 +199,10 @@ impl ExportRenderer {
     /// drawn only once every picture is in (an export never shows a frame without one).
     pub fn upload_images(&mut self) -> u32 {
         let generation = self.frames.generation().clone();
+        if let (Some(resident), Backend::Gpu { gpu, .. }) = (&mut self.resident, &mut self.backend) {
+            // Only the drawing cels are waited for here; a frame waits for its own pictures ([`ExportRenderer::pictures_ready`]).
+            return resident.upload(gpu, &self.frames, IMAGE_UPLOAD_BYTES) as u32;
+        }
         match &mut self.backend {
             Backend::Gpu { gpu, .. } => {
                 let images = self.frames.take_images(IMAGE_UPLOAD_BYTES);
@@ -207,10 +223,16 @@ impl ExportRenderer {
         if tick >= self.frames.ticks() {
             return Err(js_error(format!("Choose an export frame inside this animation (tick {tick} of {}).", self.frames.ticks())));
         }
+        // Asked again while its pictures load: the frame is taken once.
+        if self.resident.is_some() && self.tick == Some(tick) && self.current.is_some() {
+            return Ok(true);
+        }
         let started = clock();
         let Some(frame) = self.frames.take(tick) else { return Ok(false) };
         self.last_evaluate_ms = clock() - started;
         self.current = Some((frame.list.clone(), frame.camera));
+        self.tick = Some(tick);
+        self.last = last;
         let ahead = (tick + 1..=last.min(tick + AHEAD as u32)).collect::<Vec<_>>();
         self.frames.prefetch(ahead);
         Ok(true)
@@ -226,8 +248,17 @@ impl ExportRenderer {
         let options = EditOptions { camera: true, prepare_camera: true, clock: None, anchor_budget_ms: f64::INFINITY, ..Default::default() };
         let list = self.edit.draw_list(&generation, &options).map_err(js_error)?.ok_or_else(|| js_error("the pose has no frame"))?;
         self.current = Some((list, self.edit.camera()));
+        self.tick = None;
         self.last_evaluate_ms = clock() - started;
         Ok(())
+    }
+
+    /// Whether every picture of the prepared frame is sharp in the sprite texture, so it can be drawn: always, for a document whose
+    /// whole layout is on the device. Otherwise what is missing is asked for and the answer is `false` until it has landed: wait for
+    /// the engine's progress and ask again. The pictures of the frames after it are asked for ahead.
+    pub fn pictures_ready(&mut self) -> bool {
+        let (Some(resident), Backend::Gpu { gpu, .. }, Some((list, _))) = (&mut self.resident, &mut self.backend, &self.current) else { return true };
+        resident.ready(gpu, &self.frames, list, self.tick, self.last)
     }
 
     /// The prepared frame as SVG: vector artwork where the frame has a vector form, else one
@@ -377,9 +408,14 @@ impl ExportRenderer {
             Backend::Gpu { gpu, device, .. } => {
                 let queue = gpu.queue().clone();
                 **gpu = GpuExport::new(device, &queue, settings, tile);
-                gpu.prepare_sprites(generation.lineage, &generation.assets);
                 self.frames.forget();
-                self.frames.decode_images();
+                if self.resident.is_some() {
+                    // The new device holds nothing: the pages are laid out and asked for again.
+                    self.resident = Some(Resident::begin(gpu, &self.frames));
+                } else {
+                    gpu.prepare_sprites(generation.lineage, &generation.assets);
+                    self.frames.decode_images();
+                }
             }
             // The pictures already taken stay.
             Backend::Cpu(cpu) => cpu.retile(tile),
@@ -403,8 +439,16 @@ impl ExportRenderer {
         match &self.backend {
             Backend::Gpu { gpu, start_ms, .. } => {
                 let s = gpu.stats();
+                // The sprite texture: its layers, and for a document of many pages the pages in it now and the pages loaded and evicted.
+                let sprites = match &self.resident {
+                    Some(resident) => {
+                        let (_, pages, loads, evictions) = resident.stats();
+                        format!(",\"spriteLayers\":{},\"pagesIn\":{pages},\"pageLoads\":{loads},\"pageEvictions\":{evictions}", gpu.sprite_layers())
+                    }
+                    None => format!(",\"spriteLayers\":{}", gpu.sprite_layers()),
+                };
                 format!(
-                    "{{{head},\"startMs\":[{:.1},{:.1},{:.1}],\"prims\":{},\"passes\":{},\"rounds\":{},\"layerBytes\":{},\"effectBytes\":{},\"depthBytes\":{},\"glyphBytes\":{}}}",
+                    "{{{head},\"startMs\":[{:.1},{:.1},{:.1}],\"prims\":{},\"passes\":{},\"rounds\":{},\"layerBytes\":{},\"effectBytes\":{},\"depthBytes\":{},\"glyphBytes\":{}{sprites}}}",
                     start_ms[0], start_ms[1], start_ms[2], s.prims, s.passes, s.rounds, s.layer_bytes, s.effect_bytes, s.depth_bytes, s.glyph_bytes
                 )
             }

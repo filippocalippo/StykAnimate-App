@@ -38,6 +38,8 @@ pub struct Executor {
     records: Vec<Uniform>,
     /// Frames since one needed slots of the current size (shrinks after a while).
     idle: u32,
+    /// Slots are sized by the frame alone, never by the largest seen before ([`Executor::set_exact`]).
+    exact: bool,
     pub stats: Stats,
 }
 
@@ -119,8 +121,17 @@ impl Executor {
             binds: HashMap::new(),
             records: Vec::new(),
             idle: 0,
+            exact: false,
             stats: Stats::default(),
         }
+    }
+
+    /// Sizes the slots by each frame alone. The effect passes address the slots by texel (`texel` = 1 / the slot size), so a
+    /// slot kept from a larger frame changes the last bit of the positions they sample, and with it a pixel here and there:
+    /// a frame would then depend on the frames drawn before it. The stage keeps its slots (reallocating them is the
+    /// cost); an export asks for the exact size.
+    pub fn set_exact(&mut self, exact: bool) {
+        self.exact = exact;
     }
 
     /// Starts a frame's recording.
@@ -147,6 +158,14 @@ impl Executor {
             return;
         }
         let bucket = |n: u32| n.div_ceil(256) * 256;
+        if self.exact {
+            let size = [bucket(largest[0]), bucket(largest[1])];
+            if size != self.slot_size {
+                self.release();
+                self.slot_size = size;
+            }
+            self.idle = 0;
+        } else {
         let fits = self.slot_size[0] >= largest[0] && self.slot_size[1] >= largest[1];
         // Shrink when this frame needs less than a quarter of the area for a while.
         let small = (largest[0] as u64 * largest[1] as u64) * 4 < self.slot_size[0] as u64 * self.slot_size[1] as u64;
@@ -156,6 +175,7 @@ impl Executor {
             self.release();
             self.slot_size = size;
             self.idle = 0;
+        }
         }
         let texel = [1.0 / self.slot_size[0].max(1) as f32, 1.0 / self.slot_size[1].max(1) as f32];
         for record in &mut self.records {

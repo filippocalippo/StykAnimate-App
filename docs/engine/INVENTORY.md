@@ -12,14 +12,14 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | Rust owner | Modules | Source at start | js | partial | ported | verified | removed | Covered by Rust | Partly covered | Deleted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `styk-doc` | 2 | 20 KiB | 1 | 1 | 0 | 0 | 0 | 0 % | 14 % | 0 % |
-| `styk-drawing` | 36 | 163 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 24 % | 4 % |
+| `styk-drawing` | 36 | 164 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
 | `styk-edit` | 93 | 598 KiB | 22 | 11 | 1 | 4 | 55 | 67 % | 9 % | 63 % |
 | `styk-engine` | 24 | 31 KiB | 6 | 0 | 0 | 0 | 18 | 56 % | 0 % | 56 % |
 | `styk-eval` | 80 | 303 KiB | 10 | 32 | 2 | 2 | 34 | 32 % | 55 % | 19 % |
-| `styk-export` | 14 | 58 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
-| `styk-formats` | 55 | 717 KiB | 21 | 7 | 1 | 22 | 4 | 67 % | 9 % | 7 % |
+| `styk-export` | 14 | 59 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
+| `styk-formats` | 55 | 721 KiB | 21 | 7 | 1 | 22 | 4 | 67 % | 9 % | 7 % |
 | `styk-render` | 51 | 76 KiB | 4 | 1 | 0 | 0 | 46 | 35 % | 29 % | 35 % |
-| **Total** | 355 | 1967 KiB | 81 | 61 | 12 | 28 | 173 | 54 % | 18 % | 27 % |
+| **Total** | 355 | 1972 KiB | 81 | 61 | 12 | 28 | 173 | 54 % | 18 % | 27 % |
 
 ## Engine modules
 
@@ -391,6 +391,7 @@ Browser, Electron or operating-system service: stays in JS (or native), driven b
 | --- | --- | --- | --- |
 | `desktop/appimage-updater.cjs` |  | stays | Electron shell and services |
 | `desktop/audio-service.cjs` |  | stays | Electron shell and services |
+| `desktop/export-destinations.cjs` |  | stays | Electron shell and services |
 | `desktop/file-streams.cjs` |  | stays | Electron shell and services |
 | `desktop/font-service.cjs` |  | stays | Electron shell and services |
 | `desktop/gpu-switches.cjs` |  | stays | Electron shell and services |
@@ -429,6 +430,7 @@ Browser, Electron or operating-system service: stays in JS (or native), driven b
 | `src/yield-task.mjs` |  | stays | gives the browser its turn between slices of work (scheduler.yield, else a message) |
 | `src/audio-encode.mjs` | `styk-export` | js | encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine |
 | `src/export-capabilities.mjs` | `styk-export` | js | encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine |
+| `src/export-guard.mjs` | `styk-export` | js | progress guard over the export workers (stall watch, keep-alive); frames come from the engine |
 | `src/export-sink.mjs` | `styk-export` | js | encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine |
 | `src/mp4-muxer.mjs` | `styk-export` | js | encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine |
 | `src/native-video-export.mjs` | `styk-export` | js | encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine |

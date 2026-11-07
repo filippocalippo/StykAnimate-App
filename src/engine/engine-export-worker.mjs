@@ -136,6 +136,15 @@ async function settled(read) {
   return read;
 }
 
+/**
+ * Waits until every picture of the prepared frame is sharp in the sprite texture. A document of many pages keeps only the pages its
+ * frames draw from there (styk-export `resident`), asks for a frame's pictures when it is the next to draw and draws it only when they
+ * are all in; for any other document this answers at once.
+ */
+async function picturesIn() {
+  for (let seen = Atomics.load(progress, 0); !renderer.pictures_ready(); seen = Atomics.load(progress, 0)) { await whenProgress(seen); check(); }
+}
+
 /** Draws tiles `first`… of the prepared frame into free slots: `[{index, slot, read}]`. */
 function draw(first, count) {
   const drawn = [];
@@ -182,6 +191,7 @@ async function render(message) {
     await discardAhead();
     if (pose) renderer.prepare_pose(JSON.stringify(pose, (key, value) => STRIP.has(key) ? undefined : value));
     else for (let seen = Atomics.load(progress, 0); !renderer.prepare(message.tick, last); seen = Atomics.load(progress, 0)) { await whenProgress(seen); check(); }
+    await picturesIn();
     drawn = draw(0, count);
   }
   const evaluated = performance.now();
@@ -189,7 +199,7 @@ async function render(message) {
   // (now, and again once this frame's tiles are read and more frames are prepared).
   const speculate = () => {
     if (pose || drawn.length < count) return;
-    const prepared = next => { try { return renderer.prepare(next, last); } catch { return false; } };
+    const prepared = next => { try { return renderer.prepare(next, last) && renderer.pictures_ready(); } catch { return false; } };
     for (let next = Math.max(message.tick, ...ahead.keys()) + 1; next <= last && ahead.size < AHEAD && free.length >= count && prepared(next); next++) ahead.set(next, draw(0, count));
   };
   speculate();

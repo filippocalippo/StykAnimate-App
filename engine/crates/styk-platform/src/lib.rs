@@ -11,3 +11,4 @@
 pub mod font_smoothing;
 pub mod unattended;
 pub mod window;
+pub mod fonts;
