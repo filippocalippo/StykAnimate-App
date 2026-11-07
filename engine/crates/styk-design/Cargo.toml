@@ -7,9 +7,14 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-# The iced side: conversions to iced types, the font handles and the icon widget. Without it the crate is plain data
-# (tokens, icon bytes, font bytes) that tools and tests read without a toolkit.
-widgets = ["dep:iced"]
+# The iced side: conversions to iced types, the font handles and the icon widget, the focus and field widgets. Without it
+# the crate is plain data (tokens, icon bytes, font bytes) that tools and tests read without a toolkit.
+widgets = ["dep:iced", "dep:styk-core"]
+# The headless driver the widget tests (and the interface's) run on: a user interface with explicit clipboard and focus
+# effects, drawn by the software renderer.
+testing = ["widgets", "dep:iced_test", "iced/tiny-skia"]
 
 [dependencies]
 iced = { workspace = true, optional = true }
+iced_test = { path = "../../../vendor/iced/test", optional = true }
+styk-core = { path = "../styk-core", optional = true }

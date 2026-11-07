@@ -24,6 +24,7 @@ pub struct Input<R: text::Renderer> {
     placeholder: paragraph::Plain<R::Paragraph>,
     padding: Padding,
     multiline: Option<Wrapping>,
+    intake: Option<editor::Intake>,
 }
 
 pub struct Layout<'a> {
@@ -37,6 +38,7 @@ pub struct Layout<'a> {
     pub alignment: Alignment,
     pub multiline: Option<Wrapping>,
     pub is_secure: bool,
+    pub base_direction: editor::BaseDirection,
 }
 
 impl<R: text::Renderer> Input<R> {
@@ -48,7 +50,18 @@ impl<R: text::Renderer> Input<R> {
             placeholder: paragraph::Plain::default(),
             padding: Padding::default(),
             multiline: None,
+            intake: None,
         }
+    }
+
+    /// Sets what the input takes of typed, pasted and committed text before it edits (see [`editor::Intake`]).
+    pub fn set_intake(&mut self, intake: Option<editor::Intake>) {
+        self.intake = intake;
+    }
+
+    /// Whether an input method has a composition open in this input.
+    pub fn is_composing(&self) -> bool {
+        self.state.is_composing()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -98,6 +111,8 @@ impl<R: text::Renderer> Input<R> {
         }
 
         let editor = self.secure.as_mut().unwrap_or(&mut self.editor);
+
+        editor.set_base_direction(layout.base_direction);
 
         editor.update(
             limits.bounds(),
@@ -191,8 +206,8 @@ impl<R: text::Renderer> Input<R> {
                     shell.write_clipboard(text);
                     shell.capture_event();
                 }
-                editor::Update::Paste => {
-                    shell.read_clipboard(clipboard::Kind::Text);
+                editor::Update::Paste(id) => {
+                    shell.read_clipboard_as(clipboard::Kind::Text, id);
                     shell.capture_event();
                 }
                 editor::Update::RedrawAt(at) => {
@@ -227,6 +242,11 @@ impl<R: text::Renderer> Input<R> {
             .state
             .update(editor, event, bounds, self.padding, cursor, key_binding)?;
 
+        let update = match &self.intake {
+            Some(intake) => admit(intake, self.secure.as_ref().unwrap_or(&self.editor), update),
+            None => update,
+        };
+
         if let Some(secure) = &mut self.secure {
             fn apply_secure<Message>(
                 editor: &mut impl Editor,
@@ -238,6 +258,11 @@ impl<R: text::Renderer> Input<R> {
                         let action = match action {
                             editor::Action::Edit(editor::Edit::Insert(_)) => {
                                 editor::Action::Edit(editor::Edit::Insert(SECURE_CHAR))
+                            }
+                            editor::Action::Edit(editor::Edit::Type(text)) => {
+                                let text = protect(text, is_multiline);
+
+                                editor::Action::Edit(editor::Edit::Type(Arc::new(text)))
                             }
                             editor::Action::Edit(editor::Edit::Paste(text)) => {
                                 let text = protect(text, is_multiline);
@@ -393,6 +418,46 @@ impl<R: text::Renderer> TextInput for Input<R> {
 
     fn select_range(&mut self, start: Position, end: Position) {
         self.editor.select_range(start, end);
+    }
+}
+
+/// Cuts the text of the edits in `update` to what `intake` takes. An edit that takes nothing disappears whole (no history
+/// entry, no shaping, no message); the event is still handled, so a refused key reaches nothing else.
+fn admit<Message, E: Editor>(
+    intake: &editor::Intake,
+    editor: &E,
+    update: editor::Update<Message>,
+) -> editor::Update<Message> {
+    use editor::{Action, Edit as E_, Update};
+
+    match update {
+        Update::Action(Action::Edit(edit @ (E_::Insert(_) | E_::Type(_) | E_::Paste(_)))) => {
+            let selected = editor.copy().map_or(0, |selection| selection.chars().count());
+            let lines = editor.line_count();
+            let chars = editor.lines().map(|line| line.text.chars().count()).sum::<usize>()
+                + lines.saturating_sub(1);
+            let room = editor::Room { chars, selected };
+
+            let (incoming, is_paste) = match &edit {
+                E_::Insert(c) => (c.to_string(), false),
+                E_::Type(text) => (text.to_string(), false),
+                E_::Paste(text) => (text.to_string(), true),
+                _ => unreachable!("matched above"),
+            };
+
+            match intake.admit(room, &incoming) {
+                Some(taken) if is_paste => Update::Action(Action::Edit(E_::Paste(Arc::new(taken)))),
+                Some(taken) => Update::Action(Action::Edit(E_::Type(Arc::new(taken)))),
+                None => Update::Focus,
+            }
+        }
+        Update::Sequence(updates) => Update::Sequence(
+            updates
+                .into_iter()
+                .map(|update| admit(intake, editor, update))
+                .collect(),
+        ),
+        update => update,
     }
 }
 

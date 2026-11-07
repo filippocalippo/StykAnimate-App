@@ -1912,13 +1912,13 @@ fn run_clipboard<Message: Send>(
     requests: core::Clipboard,
     window: window::Id,
 ) {
-    for kind in requests.reads {
+    for (kind, id) in requests.reads {
         let proxy = proxy.clone();
 
         clipboard.read(kind, move |result| {
             proxy.send_action(Action::Event {
                 window,
-                event: core::Event::Clipboard(core::clipboard::Event::Read(result.map(Arc::new))),
+                event: core::Event::Clipboard(core::clipboard::Event::Read(result.map(Arc::new), id)),
             });
         });
     }

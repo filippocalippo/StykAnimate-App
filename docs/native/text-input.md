@@ -52,7 +52,7 @@ The vendored iced editor stack (`vendor/iced/core/src/text/{editor,input}.rs`, `
    History holds at most 200 changes (the oldest drops), and an external `overwrite` (the value changed under the
    field) clears it.
 4. **Ctrl+Shift+Z redoes** (Ctrl+Y as well).
-5. **Per-run caret motion and ligature selection** (section 7).
+5. **Caret and selection geometry across mixed runs and ligatures** (section 7). Caret *motion* needed no patch: it already matches Chromium.
 6. **A forced bidi base direction** for fields that follow the UI direction rather than their first strong character
    (section 7).
 7. **Clipboard requests carry IDs** (section 5).
@@ -146,16 +146,22 @@ a second press. One gesture is one history entry (the core groups it; the widget
 - **Text**: cosmic shapes with the Unicode bidirectional algorithm per line; the base direction is the first strong
   character. A field that follows the UI direction (search, name fields; an empty field's caret side) passes a base
   level to the layout instead of a hidden mark character.
-- **Caret and selection in mixed runs** (as Chromium does). Arrow keys are visual. The editor builds, for the layout
-  line, the visual list of *grapheme boxes* (a ligature's glyph is divided among its graphemes in the glyph's own
-  direction, so the first grapheme of a right-to-left ligature is its right part). Left moves the caret across the
-  visually left neighbouring box and lands on that box's left edge; Right is the mirror; a boundary between runs of
-  different direction has two logical positions and the landing one is the edge of the box just crossed. So Left inside
-  Arabic digits never goes right, Home goes to the visual start of the line (right edge in an RTL paragraph), and a
-  ligature is stepped through and selected per grapheme. The caret's x and the selection rectangles come from the same
-  boxes. Pure left-to-right lines keep the toolkit's logical motion.
-- **Verification** is against Chromium for the same strings: caret stop sequences from `Selection.modify` and
-  `getClientRects` of collapsed ranges in an Electron page, selection rectangles from `Range.getClientRects`.
+- **Caret motion is logical, in the paragraph's direction, as Chromium's is on Windows.** The review of the first
+  design assumed visual arrow keys. Measured in the Electron the app ships (an `<input dir=auto>` and a contenteditable
+  give identical results, `engine/crates/styk-design/tests/fixtures/chromium-caret.txt`): in a right-to-left
+  paragraph Left visits the UTF-16 offsets 0, 1, 2, ... N in order, through embedded Latin and digits too (it moves
+  *right* inside "123"), and Right does nothing at offset 0; in a left-to-right paragraph holding Arabic, Right visits
+  0..N and Left N..0; a lam-alef ligature is stepped per grapheme (three stops for two characters). cosmic-text's
+  `Motion::Left/Right` already do exactly this, so motion is unchanged and a visual-order implementation would have been
+  a deviation.
+- **Caret x and selection geometry follow the runs.** The editor divides a glyph's cluster among its graphemes in the
+  glyph's own direction (the first grapheme of a right-to-left ligature is its right part): `cosmic_text::grapheme_boxes`.
+  The caret's x (`caret_x`: the trailing edge of the grapheme before it, or the leading edge of the one after, by
+  affinity, so a run boundary has two carets), the selection rectangles and a click inside a ligature all come from the
+  same division. Before, the caret x summed glyph widths left to right (wrong in right-to-left lines and at index 0,
+  where it underflowed) and a right-to-left ligature's graphemes were laid out mirrored.
+- **Verification** is against Chromium for the same strings: the offset sequences of repeated arrow presses
+  (`Input.dispatchKeyEvent` through the DevTools protocol in an off-screen Electron window) against the native editor's.
 
 ## 8. Test surface
 

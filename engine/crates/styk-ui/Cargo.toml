@@ -8,4 +8,9 @@ publish.workspace = true
 
 [dependencies]
 iced = { workspace = true }
+styk-core = { path = "../styk-core" }
 styk-design = { path = "../styk-design", features = ["widgets"] }
+
+[dev-dependencies]
+png = "0.18"
+styk-design = { path = "../styk-design", features = ["widgets", "testing"] }

@@ -426,8 +426,8 @@ where
                     shell.write_clipboard(clipboard::Content::Text(content));
                     shell.capture_event();
                 }
-                editor::Update::Paste => {
-                    shell.read_clipboard(clipboard::Kind::Text);
+                editor::Update::Paste(id) => {
+                    shell.read_clipboard_as(clipboard::Kind::Text, id);
                     shell.capture_event();
                 }
                 editor::Update::RedrawAt(at) => {

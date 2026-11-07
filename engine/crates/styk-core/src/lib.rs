@@ -9,6 +9,8 @@
 //! iced, `styk-ui` or `styk-devtools` (`cargo xtask deps` fails the build if it does).
 
 pub mod clipboard;
+pub mod controls;
+pub mod field;
 pub mod focus;
 pub mod launch;
 pub mod limits;

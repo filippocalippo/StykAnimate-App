@@ -5,8 +5,8 @@ use std::sync::Arc;
 /// A set of clipboard requests.
 #[derive(Debug, Clone)]
 pub struct Clipboard {
-    /// The read requests the runtime must fulfill.
-    pub reads: Vec<Kind>,
+    /// The read requests the runtime must fulfill, each with the [`RequestId`] its reply carries.
+    pub reads: Vec<(Kind, RequestId)>,
     /// The content that must be written to the clipboard by the runtime,
     /// if any.
     pub write: Option<Content>,
@@ -34,11 +34,30 @@ impl Default for Clipboard {
     }
 }
 
+/// The identity of a clipboard read: the reply carries the ID of the request it answers, so a widget can tell its own
+/// reply from another's and drop one that arrives after it lost focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RequestId(pub u64);
+
+impl RequestId {
+    /// The ID of a request nobody tracks (`Shell::read_clipboard`).
+    pub const ANONYMOUS: RequestId = RequestId(0);
+
+    /// A new ID, unique in the process.
+    pub fn next() -> RequestId {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+
+        RequestId(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
 /// A clipboard event.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    /// The clipboard was read.
-    Read(Result<Arc<Content>, Error>),
+    /// The clipboard was read; the reply to the request with this [`RequestId`].
+    Read(Result<Arc<Content>, Error>, RequestId),
 
     /// The clipboard was written.
     Written(Result<(), Error>),

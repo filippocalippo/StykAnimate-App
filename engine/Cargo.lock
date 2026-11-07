@@ -949,6 +949,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "iced_selector"
+version = "0.15.0-dev"
+dependencies = [
+ "iced_core",
+]
+
+[[package]]
+name = "iced_test"
+version = "0.15.0-dev"
+dependencies = [
+ "iced_futures",
+ "iced_program",
+ "iced_renderer",
+ "iced_runtime",
+ "iced_selector",
+ "nom",
+ "png",
+ "sha2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "iced_tiny_skia"
 version = "0.15.0-dev"
 dependencies = [
@@ -1399,6 +1421,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys 0.3.1",
+]
+
+[[package]]
+name = "nom"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -2280,6 +2311,8 @@ name = "styk-design"
 version = "0.1.0"
 dependencies = [
  "iced",
+ "iced_test",
+ "styk-core",
 ]
 
 [[package]]
@@ -2457,6 +2490,8 @@ name = "styk-ui"
 version = "0.1.0"
 dependencies = [
  "iced",
+ "png",
+ "styk-core",
  "styk-design",
 ]
 

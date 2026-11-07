@@ -96,6 +96,11 @@ where
     on_input: Option<Box<dyn Fn(String) -> Message + 'a>>,
     on_paste: Option<Box<dyn Fn(String) -> Message + 'a>>,
     on_submit: Option<Message>,
+    on_focus_change: Option<Box<dyn Fn(bool) -> Message + 'a>>,
+    on_compose: Option<Box<dyn Fn(bool) -> Message + 'a>>,
+    key_binding: Option<Box<dyn Fn(&editor::KeyPress) -> Option<editor::Binding<Message>> + 'a>>,
+    intake: Option<editor::Intake>,
+    base_direction: editor::BaseDirection,
     class: Theme::Class<'a>,
     last_status: Option<Status>,
 }
@@ -130,9 +135,50 @@ where
             on_input: None,
             on_paste: None,
             on_submit: None,
+            on_focus_change: None,
+            on_compose: None,
+            key_binding: None,
+            intake: None,
+            base_direction: editor::BaseDirection::Auto,
             class: Theme::default(),
             last_status: None,
         }
+    }
+
+    /// Sets the message produced when the [`TextInput`] gains (`true`) or loses (`false`) focus, however that
+    /// happens: a click, a key, or a focus operation.
+    pub fn on_focus_change(mut self, on_focus_change: impl Fn(bool) -> Message + 'a) -> Self {
+        self.on_focus_change = Some(Box::new(on_focus_change));
+        self
+    }
+
+    /// Sets the message produced when an input method opens (`true`) or closes (`false`) a composition.
+    pub fn on_compose(mut self, on_compose: impl Fn(bool) -> Message + 'a) -> Self {
+        self.on_compose = Some(Box::new(on_compose));
+        self
+    }
+
+    /// Sets a key binding that is asked before the default one: the first `Some` wins. It decides what Enter, Escape
+    /// and the other keys do for this field's role.
+    pub fn key_binding(
+        mut self,
+        key_binding: impl Fn(&editor::KeyPress) -> Option<editor::Binding<Message>> + 'a,
+    ) -> Self {
+        self.key_binding = Some(Box::new(key_binding));
+        self
+    }
+
+    /// Forces the base direction of the text, for a field that follows the interface's direction rather than its first
+    /// strong character.
+    pub fn base_direction(mut self, direction: editor::BaseDirection) -> Self {
+        self.base_direction = direction;
+        self
+    }
+
+    /// Sets what the [`TextInput`] takes of typed, pasted and committed text before it edits.
+    pub fn intake(mut self, intake: editor::Intake) -> Self {
+        self.intake = Some(intake);
+        self
     }
 
     /// Sets the [`widget::Id`] of the [`TextInput`].
@@ -293,6 +339,8 @@ where
             state.value = self.value.clone().into_owned();
         }
 
+        state.input.set_intake(self.intake.clone());
+
         tree.size = state.input.layout(
             renderer,
             limits,
@@ -307,6 +355,7 @@ where
                 alignment: self.alignment,
                 multiline: self.multiline,
                 is_secure: self.is_secure,
+                base_direction: self.base_direction,
             },
         );
     }
@@ -321,8 +370,11 @@ where
     ) {
         let state = tree.state.downcast_mut::<State<Renderer>>();
 
-        operation.text_input(self.id.as_ref(), layout.bounds(), state);
-        operation.focusable(self.id.as_ref(), layout.bounds(), state);
+        // A field that takes no input is disabled and cannot hold focus.
+        if self.on_input.is_some() {
+            operation.text_input(self.id.as_ref(), layout.bounds(), state);
+            operation.focusable(self.id.as_ref(), layout.bounds(), state);
+        }
     }
 
     fn update(
@@ -342,6 +394,10 @@ where
             let edit = state
                 .input
                 .update(event, layout.bounds(), cursor, shell, |key_press| {
+                    if let Some(binding) = self.key_binding.as_ref().and_then(|bind| bind(&key_press)) {
+                        return Some(binding);
+                    }
+
                     if let Some(on_submit) = &self.on_submit
                         && key_press.is_focused
                         && key_press.modified_key
@@ -364,6 +420,25 @@ where
 
                 state.value = state.input.value();
                 state.transaction = Some(shell.publish_and_track(on_input(state.value.clone())));
+            }
+        }
+
+        let is_focused = state.input.is_focused();
+        let is_composing = state.input.is_composing();
+
+        if is_focused != state.reported_focus {
+            state.reported_focus = is_focused;
+
+            if let Some(on_focus_change) = &self.on_focus_change {
+                shell.publish(on_focus_change(is_focused));
+            }
+        }
+
+        if is_composing != state.reported_composing {
+            state.reported_composing = is_composing;
+
+            if let Some(on_compose) = &self.on_compose {
+                shell.publish(on_compose(is_composing));
             }
         }
 
@@ -455,6 +530,8 @@ struct State<R: text::Renderer> {
     input: text::Input<R>,
     value: String,
     transaction: Option<shell::Tracking>,
+    reported_focus: bool,
+    reported_composing: bool,
 }
 
 fn state<Renderer: text::Renderer + 'static>(tree: &mut Tree) -> &mut State<Renderer> {
@@ -468,6 +545,8 @@ impl<R: text::Renderer> State<R> {
             input: text::Input::new(),
             value: String::new(),
             transaction: None,
+            reported_focus: false,
+            reported_composing: false,
         }
     }
 }

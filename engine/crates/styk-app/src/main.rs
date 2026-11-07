@@ -10,16 +10,20 @@
 //! `STYK_BACKGROUND_WINDOW=1` opens the window off-screen, without focus and without a taskbar entry. `--screenshot`
 //! waits for the window's first complete frame, writes it as a PNG and exits.
 
+#[cfg(feature = "devtools")]
+mod input_check;
 mod screenshot;
 mod window;
 
-use iced::{Subscription, Task, window as iced_window};
+use iced::{Subscription, Task, Widget as _, window as iced_window};
 use std::borrow::Cow;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use styk_core::Launch;
 use styk_design::{Theme, fonts, widgets};
+use styk_ui::component_sheet::{self, Sheet};
+use styk_ui::screens::Screen;
 use styk_platform::window::{self as platform, Image, WindowError};
 use styk_trace::mark;
 
@@ -38,6 +42,9 @@ enum Outcome {
 
 #[derive(Debug, Clone)]
 enum Message {
+    Sheet(component_sheet::Message),
+    #[cfg(feature = "devtools")]
+    Check(input_check::Step),
     Opened(iced_window::Id),
     Shown(Result<(), WindowError>),
     Frame,
@@ -47,8 +54,14 @@ enum Message {
 struct App {
     launch: Launch,
     theme: Theme,
+    /// The screen of the catalogue being shown instead of the application, if any.
+    sheet: Option<Sheet>,
     background: bool,
     window: Option<iced_window::Id>,
+    /// What the input check has seen so far.
+    report: Vec<String>,
+    /// When each redraw started, for the check's latency figures.
+    frame_times: Vec<std::time::Instant>,
     /// Frames the event loop has started since the window was shown.
     frames: u32,
     capturing: bool,
@@ -56,24 +69,44 @@ struct App {
 }
 
 impl App {
-    fn new(launch: Launch, background: bool, outcome: Arc<Mutex<Outcome>>) -> App {
-        App { launch, theme: Theme::default(), background, window: None, frames: 0, capturing: false, outcome }
+    fn new(launch: Launch, screen: Option<Screen>, background: bool, outcome: Arc<Mutex<Outcome>>) -> App {
+        let sheet = screen.map(|Screen::ComponentSheet| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr));
+        App { launch, theme: Theme::default(), sheet, background, window: None, report: Vec::new(), frame_times: Vec::new(), frames: 0, capturing: false, outcome }
+    }
+
+    fn theme(&self) -> Theme {
+        self.sheet.as_ref().map_or(self.theme, |sheet| sheet.theme)
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Sheet(message) => match self.sheet.as_mut() {
+                Some(sheet) => sheet.update(message).map(Message::Sheet),
+                None => Task::none(),
+            },
+            #[cfg(feature = "devtools")]
+            Message::Check(step) => self.check(step),
             Message::Opened(id) => {
                 self.window = Some(id);
-                if window::shown_after_creation(self.background) {
+                let shown = if window::shown_after_creation(self.background) {
                     iced_window::run(id, |window| platform::show_without_activation(window)).map(Message::Shown)
                 } else {
                     Task::none()
+                };
+                #[cfg(feature = "devtools")]
+                if self.launch.input_check.is_some() && self.sheet.is_some() {
+                    let focus = Task::done(Message::Sheet(component_sheet::Message::Focus(styk_core::focus::FocusId(input_check::FIELD))));
+                    return Task::batch([shown, focus.chain(input_check::script(id).map(Message::Check))]);
                 }
+                shown
             }
             Message::Shown(Ok(())) => Task::none(),
             Message::Shown(Err(error)) => self.finish(Outcome::Failed(format!("could not show the window: {error}"))),
             Message::Frame => {
                 self.frames += 1;
+                if self.launch.input_check.is_some() {
+                    self.frame_times.push(std::time::Instant::now());
+                }
                 // The first frame's event arrives as it is about to be drawn; the second, once that draw is done.
                 match self.window {
                     Some(id) if self.frames == 2 && self.launch.screenshot.is_some() && !self.capturing => {
@@ -95,22 +128,58 @@ impl App {
         }
     }
 
+    /// Records a step of the input check; the last step writes the report and ends the run.
+    #[cfg(feature = "devtools")]
+    fn check(&mut self, step: input_check::Step) -> Task<Message> {
+        let sheet_state = |app: &App| {
+            let sheet = app.sheet.as_ref();
+            format!("name field {:?}, composing {}", sheet.map(|s| s.name.text()).unwrap_or(""), sheet.is_some_and(|s| s.focus.composing()))
+        };
+        match step {
+            input_check::Step::Probe { label } => {
+                let line = format!("{label}: {}", sheet_state(self));
+                self.report.push(line);
+                Task::none()
+            }
+            input_check::Step::Result { label, detail } => {
+                self.report.push(format!("{label}: {detail}"));
+                Task::none()
+            }
+            input_check::Step::Finish => {
+                let latency = input_check::latency_summary(&self.frame_times);
+                self.report.push(format!("keystroke to the start of the redraw that draws it: {latency}"));
+                let body: Vec<String> = self.report.iter().map(|line| format!("  {:?}", line)).collect();
+                let json = format!("[\n{}\n]\n", body.join(",\n"));
+                let path = self.launch.input_check.clone().expect("the check only runs with --input-check");
+                match std::fs::write(&path, json) {
+                    Ok(()) => self.finish(Outcome::Done),
+                    Err(error) => self.finish(Outcome::Failed(format!("{}: {error}", path.display()))),
+                }
+            }
+        }
+    }
+
     fn finish(&mut self, outcome: Outcome) -> Task<Message> {
         *self.outcome.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = outcome;
         iced::exit()
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        styk_ui::view(self.theme)
+        match &self.sheet {
+            Some(sheet) => sheet.view().map(Message::Sheet).boxed(),
+            None => styk_ui::view(self.theme),
+        }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let opened = iced_window::open_events().map(Message::Opened);
-        if self.launch.screenshot.is_some() && !self.capturing {
-            Subscription::batch([opened, iced_window::frames().map(|_| Message::Frame)])
-        } else {
-            opened
+        let mut subscriptions = vec![iced_window::open_events().map(Message::Opened)];
+        if let Some(sheet) = &self.sheet {
+            subscriptions.push(sheet.subscription().map(Message::Sheet));
         }
+        if (self.launch.screenshot.is_some() && !self.capturing) || self.launch.input_check.is_some() {
+            subscriptions.push(iced_window::frames().map(|_| Message::Frame));
+        }
+        Subscription::batch(subscriptions)
     }
 }
 
@@ -135,6 +204,22 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let screen = match launch.screen.as_deref().map(|id| (id, Screen::from_id(id))) {
+        Some((id, None)) => {
+            eprintln!("unknown screen {id:?}: the catalogue has {}", Screen::ids());
+            return ExitCode::from(2);
+        }
+        Some((_, Some(screen))) => Some(screen),
+        None => None,
+    };
+    if launch.input_check.is_some() && !cfg!(feature = "devtools") {
+        eprintln!("--input-check is only in the developer build (--features devtools)");
+        return ExitCode::from(2);
+    }
+    if launch.input_check.is_some() && screen.is_none() {
+        eprintln!("--input-check needs --screen component-sheet");
+        return ExitCode::from(2);
+    }
     if launch.automation.is_some() {
         eprintln!("--automation is not available yet: the automation mode arrives with the stage");
         return ExitCode::from(2);
@@ -148,12 +233,12 @@ fn main() -> ExitCode {
     let trace_path = launch.screenshot.as_ref().map(|path| path.with_extension("trace.txt"));
     let scale = launch.scale.unwrap_or(1.0) as f32;
     let settings = window::settings(&launch, background);
-    let app = Mutex::new(Some(App::new(launch, background, outcome.clone())));
+    let app = Mutex::new(Some(App::new(launch, screen, background, outcome.clone())));
     let result = iced::application(move || app.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the application starts once"), App::update, App::view)
         .subscription(App::subscription)
         .title("StykAnimate")
-        .theme(|app: &App| styk_ui::base_theme(app.theme))
-        .style(|app: &App, _| styk_ui::window_style(app.theme))
+        .theme(|app: &App| styk_ui::base_theme(app.theme()))
+        .style(|app: &App, _| styk_ui::window_style(app.theme()))
         .scale_factor(move |_| scale)
         .font(widgets::INTER)
         .fonts(fonts::ALL.iter().map(|font| Cow::Borrowed(*font)))
