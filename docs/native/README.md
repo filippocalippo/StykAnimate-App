@@ -70,7 +70,8 @@ with today's export of the same documents (FP's bytes are still not equal; sizes
 skeleton (`perf/briefs/native/skeleton-plan.md`, implementers by N8): running K-guards (Astra: the guards of
 `cargo xtask check`) and K-doc (Astra: documents and the engine host; its milestone 1, the session seam, merges first);
 then R-slice (the one Opus implementer: the interface architecture and the Inspector, `patterns.md`) after S1, S2a and
-K-doc milestone 1, K-shell (Sonnet) after S6, K-frames and K-dev (Astra) as slots free; then K-rec, K-cmd, K-widgets,
+K-doc milestone 1, K-shell (Sonnet) after S6; running too: K-frames (Astra xhigh, frame scheduling) and K-dev (Astra high, the developer
+tools' engine, `perf/briefs/native/K-dev-engine.md`); then K-rec, K-cmd, K-widgets,
 K-dock, K-stage; then the skeleton gate. No interface work starts until S1 and S2a pass in a native window.
 
 **Kept off the branches on purpose.** `t3/fix-save-differs` and `t3/resave-keeps-layout` change saved bytes: the owner's
