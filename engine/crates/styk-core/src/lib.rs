@@ -9,5 +9,6 @@
 //! iced, `styk-ui` or `styk-devtools` (`cargo xtask deps` fails the build if it does).
 
 pub mod launch;
+pub mod text;
 
 pub use launch::{Launch, LaunchError, USAGE};
