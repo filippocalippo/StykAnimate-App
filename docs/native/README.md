@@ -27,10 +27,11 @@ file's binding error) and becomes native acceptance criteria. Each commit is bui
 share the implementer's worktree and build; reviewers only read and run one small check; full suites only at gates; the
 seed store `wt/shared-target` is back (crates.io dependencies; `node perf/make-seed.mjs <checkout>...` adds to it).
 
-**The owner's second decision of 2026-11-07** ([N8](decisions/0008-windows-only-review-by-risk.md)): Windows only in this
-phase (macOS, Linux and the web build not tested or run; the architecture stays portable); Sonnet implements, no Sonnet
-checkers; GPT-6.1 Sol reviews by risk; the orchestrator reads every diff before merging; proof proportionate to risk.
-In-flight chunks finish with no new review round unless a finding is a blocker.
+**The owner's second decision of 2026-11-07, with its final rules** ([N8](decisions/0008-windows-only-review-by-risk.md)):
+Windows only (the architecture stays portable). GPT-6 Astra implements back-end and logic, Sonnet the screens, one Opus
+implementer the reference slice (the interface architecture and the Inspector, `docs/native/patterns.md`); GPT-6.1 Sol is
+the only reviewer, by risk; logic stays out of the views; `cargo xtask check` guards the rules. In-flight chunks finish with
+no new review round unless a finding is a blocker.
 
 **In flight.**
 
