@@ -23,8 +23,12 @@ role and becomes a field of `Palette`; the rest are theme-independent. Every `va
   custom property in both themes: no difference.
 - **Shadows** (`--elevation-*`, `--shadow-*`, `--primary-shadow`) are `&[BoxShadow]`, including `inset`.
 - **Type roles** (`--type-*`) are `TypeRole { weight, size, line_height, family }`, with the line height in pixels.
-- Declarations that are not constants (`calc()`, `max()`, `env()`) and the touch and compact-chrome overrides are
-  listed at the top of the generated file. The native interface lays out with its own units; read the CSS for those.
+- **Length expressions** (`max()`, `min()`, `clamp()`, `calc()`) become functions of the run-time properties they read:
+  `--topbar-h: max(52px, calc(44px / var(--ui-scale)))` is `scale::topbar_h(ui_scale)`. Only pixel lengths and numbers
+  are understood.
+- **Nothing is skipped silently.** A declaration in a rule the generator follows that it cannot turn into a value (`env()`,
+  a unit that is not pixels, a new function) fails `design generate` and `design check` with the token's name. Whole
+  rules for touch input and compact chrome are not followed; the generated file lists them with their property counts.
 
 Each constant's doc comment names its CSS custom property. A port reads `--surface-field` in the CSS and finds
 `Palette::surface_field` (field names are the property names with `_` for `-`).
