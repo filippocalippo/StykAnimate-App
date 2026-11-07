@@ -7,7 +7,11 @@
 //! It depends on the core, the design system and iced, and on nothing that touches the operating system.
 
 pub mod component_sheet;
+pub mod inspector;
+pub mod message;
 pub mod screens;
+
+pub use message::Message;
 
 use iced::widget::{container, space};
 use iced::{Element, Fill, Widget, theme};

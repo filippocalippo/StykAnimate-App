@@ -124,6 +124,12 @@ impl Document {
 
     /// Current frame records, shared with the session (live drafts and previews included).
     pub fn frame_records(&self) -> Result<Value, EditError> { self.prepared.session.frame_records() }
+
+    /// The selected figures' bounds in the frame on show (`selectionBounds()`), measured by the session.
+    pub fn selection_bounds(&self) -> Result<Option<[f64; 4]>, EditError> { self.prepared.session.selection_bounds() }
+
+    /// A named read of the session (`animationValue`, ...); `None` when the session does not answer that name.
+    pub fn read(&self, name: &str, args: &Value) -> Option<Result<Option<Value>, EditError>> { self.prepared.session.read(name, args) }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

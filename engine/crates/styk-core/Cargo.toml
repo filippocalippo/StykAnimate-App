@@ -6,6 +6,10 @@ version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# `styk_core::testing`: what the interface's tests need to open a document without naming an engine crate.
+testing = []
+
 [dependencies]
 styk-alloc = { path = "../styk-alloc" }
 styk-doc = { path = "../styk-doc" }

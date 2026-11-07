@@ -14,6 +14,7 @@ styk-design = { path = "../styk-design", features = ["widgets"] }
 styk-services = { path = "../styk-services" }
 
 [dev-dependencies]
+styk-core = { path = "../styk-core", features = ["testing"] }
 png = "0.18"
 pollster = "0.4"
 styk-platform = { path = "../styk-platform" }
