@@ -315,7 +315,10 @@ impl Runner {
         let expected = script.steps.len() as f64;
         let counters = cx.counters.expect("the source is attached");
         let inspector = cx.core.inspector();
-        self.check("A2 count", (report.delivered as f64 - expected).abs() <= 2.0, format!("{} delivered of {} injected", report.delivered, report.injected));
+        // Hover reports are partly the system's own and, injected with a millisecond clock and whole-pixel positions, sometimes
+        // identical; the samples in contact are the ones a stroke is made of.
+        self.check("A2 count of samples in contact", report.delivered_contact == report.injected_contact, format!("{} delivered of {} injected", report.delivered_contact, report.injected_contact));
+        self.check("A2 count of all samples within 2", (report.delivered as f64 - expected).abs() <= 2.0, format!("{} delivered of {} injected", report.delivered, report.injected));
         self.check("A2 no duplicates", report.duplicates == 0, report.duplicates);
         self.check("A2 monotonic", report.monotonic, report.monotonic);
         if self.test.kind == TestKind::Standard {

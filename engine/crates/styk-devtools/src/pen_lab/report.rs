@@ -33,6 +33,9 @@ impl Percentiles {
 pub struct Report {
     pub injected: usize,
     pub delivered: usize,
+    /// Samples in contact (press, drag, lift): the script's and the delivered.
+    pub injected_contact: usize,
+    pub delivered_contact: usize,
     /// Samples identical to an earlier one in pointer, time, position, pressure and phase: a re-delivery.
     pub duplicates: usize,
     /// Samples sharing a timestamp with an earlier, different one (injected input is stamped to the millisecond).
@@ -85,6 +88,8 @@ pub fn analyse(script: &Script, injected_ns: &[u64], samples: &[SampleRow], fram
     };
     let contact_steps = script.steps.iter().filter(|s| contact(s.phase)).count();
     let contact_samples = samples.iter().filter(|s| contact(s.sample.phase)).count();
+    report.injected_contact = contact_steps;
+    report.delivered_contact = contact_samples;
     report.aligned = contact_steps == contact_samples && report.duplicates == 0;
     if report.aligned {
         for &(k, j) in &pairs {
@@ -170,7 +175,7 @@ impl Report {
     pub fn text(&self, refresh_hz: f64, present_mode: &str, slices_us: (u64, u64)) -> String {
         let mut out = String::new();
         let _ = writeln!(out, "display {refresh_hz:.0} Hz, present mode {present_mode}, measured frame period {:.2} ms, frames {}, frame gaps over 2x {}", self.frame_period_ms, self.frames, self.frame_gaps_over_2x);
-        let _ = writeln!(out, "injected {} delivered {} re-delivered {} same-timestamp {} history-recovered {} monotonic {} median gap {:.3} ms", self.injected, self.delivered, self.duplicates, self.same_stamp, self.history_samples, self.monotonic, self.median_gap_ms);
+        let _ = writeln!(out, "injected {} delivered {} (in contact: {} of {}) re-delivered {} same-timestamp {} history-recovered {} monotonic {} median gap {:.3} ms", self.injected, self.delivered, self.delivered_contact, self.injected_contact, self.duplicates, self.same_stamp, self.history_samples, self.monotonic, self.median_gap_ms);
         if self.aligned {
             let _ = writeln!(
                 out,
