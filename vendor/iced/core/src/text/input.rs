@@ -496,8 +496,8 @@ fn admit<Message, E: Editor>(
     }
 }
 
-/// What the editor tells an intake: its size, its selection, the text around the edit and, if asked, the distinct
-/// UTF-16 units of the text that stays.
+/// What the editor tells an intake: its size, its selection and, if asked, the distinct UTF-16 units of the text that
+/// stays.
 fn room<E: Editor>(editor: &E, with_units: bool) -> editor::Room {
     let cursor = editor.cursor();
     let lines = editor.line_count();
@@ -512,26 +512,12 @@ fn room<E: Editor>(editor: &E, with_units: bool) -> editor::Room {
         None => (cursor.position, cursor.position),
     };
 
-    let selection = editor.copy().unwrap_or_default();
+    let selected = editor.copy().map_or(0, |selection| selection.chars().count());
     let chars = editor
         .lines()
         .map(|line| line.text.chars().count())
         .sum::<usize>()
         + lines.saturating_sub(1);
-
-    let before = editor
-        .line(start.line)
-        .and_then(|line| line.text.get(..start.index).map(|text| tail(text, editor::Room::CONTEXT)))
-        .unwrap_or_default();
-
-    let after = editor
-        .line(end.line)
-        .and_then(|line| {
-            line.text
-                .get(end.index..)
-                .map(|text| text.chars().take(editor::Room::CONTEXT).collect::<String>())
-        })
-        .unwrap_or_default();
 
     let units = if with_units {
         let mut units: Vec<u16> = Vec::new();
@@ -539,24 +525,17 @@ fn room<E: Editor>(editor: &E, with_units: bool) -> editor::Room {
         for (i, line) in editor.lines().enumerate() {
             let text = line.text;
 
-            let kept = if i < start.line || i > end.line {
-                text.get(..).into_iter().collect::<Vec<_>>()
-            } else {
-                let mut parts = Vec::new();
+            if i < start.line || i > end.line {
+                units.extend(text.encode_utf16());
+                continue;
+            }
 
-                if i == start.line {
-                    parts.extend(text.get(..start.index));
-                }
+            if i == start.line {
+                units.extend(text.get(..start.index).unwrap_or_default().encode_utf16());
+            }
 
-                if i == end.line {
-                    parts.extend(text.get(end.index..));
-                }
-
-                parts
-            };
-
-            for part in kept {
-                units.extend(part.encode_utf16());
+            if i == end.line {
+                units.extend(text.get(end.index..).unwrap_or_default().encode_utf16());
             }
         }
 
@@ -567,34 +546,11 @@ fn room<E: Editor>(editor: &E, with_units: bool) -> editor::Room {
         Vec::new()
     };
 
-    let before_chars = editor
-        .line(start.line)
-        .and_then(|line| line.text.get(..start.index).map(|text| text.chars().count()))
-        .unwrap_or_default();
-
-    let after_chars = editor
-        .line(end.line)
-        .and_then(|line| line.text.get(end.index..).map(|text| text.chars().count()))
-        .unwrap_or_default();
-
     editor::Room {
-        before_chars,
-        after_chars,
         chars,
-        selected: selection.chars().count(),
-        lines,
-        selected_breaks: selection.matches('\n').count(),
-        before,
-        after,
+        selected,
         units,
     }
-}
-
-/// The last `count` characters of `text`.
-fn tail(text: &str, count: usize) -> String {
-    let skip = text.chars().count().saturating_sub(count);
-
-    text.chars().skip(skip).collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

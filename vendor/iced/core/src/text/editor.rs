@@ -854,25 +854,8 @@ pub struct Room {
     pub chars: usize,
     /// The characters of the selection, which the incoming text replaces.
     pub selected: usize,
-    /// The lines in the editor.
-    pub lines: usize,
-    /// The line breaks inside the selection.
-    pub selected_breaks: usize,
-    /// The characters of the edit's line before the edit, all of them.
-    pub before_chars: usize,
-    /// The characters of the edit's line after the edit, all of them.
-    pub after_chars: usize,
-    /// The text before the edit on its line: its last [`Room::CONTEXT`] characters, or all of it.
-    pub before: String,
-    /// The text after the edit on its line: its first [`Room::CONTEXT`] characters, or all of it.
-    pub after: String,
     /// The distinct UTF-16 units of the text that stays, sorted; only when the [`Intake`] asks for them.
     pub units: Vec<u16>,
-}
-
-impl Room {
-    /// How many characters of the line around the edit an [`Intake`] gets to see on each side.
-    pub const CONTEXT: usize = 2112;
 }
 
 /// What an editor takes of incoming text (typed, pasted or committed by an input method) *before* it edits: the

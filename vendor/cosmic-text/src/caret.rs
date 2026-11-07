@@ -43,14 +43,16 @@ impl GraphemeBox {
 }
 
 /// The grapheme boxes of `glyphs` (a laid out line of `text`) in visual order.
-pub fn grapheme_boxes(text: &str, glyphs: &[LayoutGlyph]) -> Vec<GraphemeBox> {
+pub fn grapheme_boxes<'g>(text: &str, glyphs: impl IntoIterator<Item = &'g LayoutGlyph>) -> Vec<GraphemeBox> {
     // A cluster can be drawn by several glyphs (a base and its marks): they are one extent, divided among the cluster's
     // graphemes, not one division per glyph.
     let mut clusters: Vec<(usize, usize, bool, f32, f32)> = Vec::new();
     for glyph in glyphs {
         let rtl = glyph.level.is_rtl();
         let (left, right) = (glyph.x, glyph.x + glyph.w);
-        match clusters.iter_mut().find(|c| c.0 == glyph.start && c.1 == glyph.end && c.2 == rtl) {
+        // The glyphs of one cluster are adjacent, so only the last cluster can be the one (a search of all of them is
+        // quadratic in the glyphs of a long line).
+        match clusters.last_mut().filter(|c| c.0 == glyph.start && c.1 == glyph.end && c.2 == rtl) {
             Some(cluster) => {
                 cluster.3 = cluster.3.min(left);
                 cluster.4 = cluster.4.max(right);
@@ -73,6 +75,17 @@ pub fn grapheme_boxes(text: &str, glyphs: &[LayoutGlyph]) -> Vec<GraphemeBox> {
     }
     boxes.sort_by(|a, b| a.x.total_cmp(&b.x));
     boxes
+}
+
+/// The x of the caret at byte `index` with `affinity`, from the glyphs of its line: only the clusters that touch `index`
+/// are divided, so the cost is one pass over the glyphs however long the line is.
+pub fn caret_x_at(text: &str, glyphs: &[LayoutGlyph], index: usize, affinity: Affinity) -> Option<f32> {
+    caret_x(&grapheme_boxes(text, glyphs.iter().filter(|glyph| glyph.start <= index && index <= glyph.end)), index, affinity)
+}
+
+/// The right end of the glyphs of a line (the x where the text stops), or `None` for a line without glyphs.
+pub fn extent_end(glyphs: &[LayoutGlyph]) -> Option<f32> {
+    glyphs.iter().map(|glyph| glyph.x + glyph.w).fold(None, |end: Option<f32>, x| Some(end.map_or(x, |e| e.max(x))))
 }
 
 /// The x of the caret at byte `index` with `affinity`: the trailing edge of the grapheme ending there for
@@ -154,6 +167,19 @@ mod tests {
         // Index 2 is both the end of "ab" (its left edge, x 30) and the start of "123" (its left edge, x 0).
         assert_eq!(caret_x(&boxes, 2, Affinity::Before), Some(30.0));
         assert_eq!(caret_x(&boxes, 2, Affinity::After), Some(0.0));
+    }
+
+    #[test]
+    fn the_caret_of_a_long_line_costs_one_pass_not_a_pass_per_glyph() {
+        // 20,000 glyphs, one per byte: the previous search over the clusters made this quadratic.
+        let text = "x".repeat(20_000);
+        let glyphs: Vec<LayoutGlyph> = (0..20_000).map(|i| glyph(i, i + 1, i as f32 * 5.0, 5.0, false)).collect();
+        let started = std::time::Instant::now();
+        assert_eq!(caret_x_at(&text, &glyphs, 12_345, Affinity::Before), Some(12_345.0 * 5.0));
+        assert_eq!(caret_x_at(&text, &glyphs, 0, Affinity::After), Some(0.0));
+        assert_eq!(caret_x_at(&text, &glyphs, 20_000, Affinity::Before), Some(100_000.0));
+        assert!(started.elapsed() < std::time::Duration::from_millis(10), "{:?}", started.elapsed());
+        assert_eq!(grapheme_boxes(&text, &glyphs).len(), 20_000);
     }
 
     #[test]

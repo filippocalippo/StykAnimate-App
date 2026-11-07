@@ -105,7 +105,7 @@ fn text_of(result: Result<(), styk_platform::window::WindowError>) -> String {
 }
 
 /// Types letters into the focused field, one every `LATENCY_GAP_MS`, recording when each was posted.
-fn typing(id: window::Id, label: &'static str, field: Which, fill: Sheet, focus: Sheet) -> Task<Step> {
+fn typing(id: window::Id, label: &'static str, field: Which, fill: Sheet, focus: Sheet, keys: usize) -> Task<Step> {
     // The caret goes to the end of the line (the field was filled by the model, and a one-line field selects its text
     // when it takes focus), so every key is an insertion into the text that is there.
     let vk_end = 0x23;
@@ -123,7 +123,7 @@ fn typing(id: window::Id, label: &'static str, field: Which, fill: Sheet, focus:
     .chain(pause(300))
     .chain(Task::done(Step::LatencyStart { field }))
     .chain(pause(150));
-    for n in 0..LATENCY_KEYS {
+    for n in 0..keys {
         let vk = 0x41 + (n % 26) as u16;
         task = task
             .chain(quietly(id, move |w| {
@@ -187,6 +187,7 @@ pub fn script(id: window::Id) -> Task<Step> {
             Which::Name,
             Sheet::Input(Which::Name, "x".repeat(200)),
             Sheet::Focus(ids::NAME),
+            LATENCY_KEYS,
         ))
         .chain(typing(
             id,
@@ -194,19 +195,37 @@ pub fn script(id: window::Id) -> Task<Step> {
             Which::Notes,
             Sheet::Input(Which::Notes, lines(16100, 80)),
             Sheet::Focus(ids::NOTES),
+            LATENCY_KEYS,
         ))
         .chain(typing(
             id,
-            "keystroke into 15,600 characters in four paragraphs of 3,900 (the longest a field takes)",
+            "keystroke into 15,600 characters in four paragraphs of 3,900",
             Which::Notes,
             Sheet::Input(Which::Notes, long_paragraphs(4, 3900, 1800)),
             Sheet::Focus(ids::NOTES),
+            LATENCY_KEYS,
+        ))
+        // The field has room for 84 more characters of its 16,384, so these two post 80 keys.
+        .chain(typing(
+            id,
+            "keystroke into 16,300 characters on one line (one word)",
+            Which::Notes,
+            Sheet::Input(Which::Notes, "x".repeat(16_300)),
+            Sheet::Focus(ids::NOTES),
+            80,
+        ))
+        .chain(typing(
+            id,
+            "keystroke into one letter and 16,299 combining marks",
+            Which::Notes,
+            Sheet::Input(Which::Notes, format!("a{}", "́".repeat(16_299))),
+            Sheet::Focus(ids::NOTES),
+            80,
         ))
         .chain(Task::done(Step::Finish))
 }
 
-/// `count` paragraphs of `length` characters each, made of words of `word` characters (a field takes paragraphs up to 4,096
-/// characters and words up to 2,048).
+/// `count` paragraphs of `length` characters each, made of words of `word` characters.
 fn long_paragraphs(count: usize, length: usize, word: usize) -> String {
     let paragraph = {
         let mut text = String::new();

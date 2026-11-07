@@ -185,18 +185,18 @@ impl editor::Editor for Editor {
                         if is_cursor_before_start {
                             // The cursor sits between lines (a line wrapped on a space): it is at the end of the
                             // previous line.
-                            let boxes = cosmic_text::grapheme_boxes(text, &layout[i - 1].glyphs);
-                            let x = boxes
-                                .iter()
-                                .map(|b| b.x + b.w)
-                                .fold(f32::MIN, f32::max);
+                            let x = cosmic_text::extent_end(&layout[i - 1].glyphs)
+                                .unwrap_or(layout[i - 1].w);
 
-                            Some((i - 1, if boxes.is_empty() { layout[i - 1].w } else { x }))
+                            Some((i - 1, x))
                         } else if is_cursor_before_end {
-                            let boxes = cosmic_text::grapheme_boxes(text, &visual.glyphs);
-
-                            let x = cosmic_text::caret_x(&boxes, cursor.index, cursor.affinity)
-                                .unwrap_or(empty_offset);
+                            let x = cosmic_text::caret_x_at(
+                                text,
+                                &visual.glyphs,
+                                cursor.index,
+                                cursor.affinity,
+                            )
+                            .unwrap_or(empty_offset);
 
                             Some((i, x))
                         } else {
@@ -204,20 +204,12 @@ impl editor::Editor for Editor {
                         }
                     })
                     .unwrap_or_else(|| {
-                        let last = layout.last();
-                        let boxes = last
-                            .map(|visual| cosmic_text::grapheme_boxes(text, &visual.glyphs))
-                            .unwrap_or_default();
+                        let glyphs = layout.last().map(|visual| visual.glyphs.as_slice()).unwrap_or_default();
 
                         (
                             layout.len().saturating_sub(1),
-                            cosmic_text::caret_x(&boxes, cursor.index, cursor.affinity)
-                                .or_else(|| {
-                                    boxes
-                                        .iter()
-                                        .map(|b| b.x + b.w)
-                                        .fold(None, |max: Option<f32>, x| Some(max.map_or(x, |m| m.max(x))))
-                                })
+                            cosmic_text::caret_x_at(text, glyphs, cursor.index, cursor.affinity)
+                                .or_else(|| cosmic_text::extent_end(glyphs))
                                 .unwrap_or(empty_offset),
                         )
                     });
@@ -568,6 +560,9 @@ impl editor::Editor for Editor {
             {
                 internal.history.push(change, is_typing);
             }
+
+            // Words that were not used again for this many edits leave the cache of shaped words.
+            font_system.raw().shape_run_cache.trim(SHAPE_CACHE_AGES);
         });
     }
 
@@ -1032,6 +1027,9 @@ fn shape_until_cursor(
         });
     }
 }
+
+/// How many edits a shaped word stays in the cache after it was last used.
+const SHAPE_CACHE_AGES: u64 = 1024;
 
 /// The most changes a field remembers; the oldest is dropped beyond it.
 const HISTORY_LIMIT: usize = 200;

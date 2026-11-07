@@ -911,7 +911,7 @@ fn focus_field(h: &mut Harness, id: u64) {
 }
 
 #[test]
-fn a_huge_paste_into_a_single_line_field_is_bounded_and_does_not_freeze_the_interface() {
+fn a_huge_paste_into_a_single_line_field_costs_work_bounded_by_the_admission_ceiling() {
     let mut h = harness();
     focus_field(&mut h, 10);
     h.chord('v', false);
@@ -921,12 +921,14 @@ fn a_huge_paste_into_a_single_line_field_is_bounded_and_does_not_freeze_the_inte
     h.d().reply_clipboard_with(id, huge);
     let elapsed = start.elapsed();
     h.settle();
-    assert!(h.text(0).chars().count() <= 4096, "{} characters were taken", h.text(0).chars().count());
-    assert!(elapsed < Duration::from_millis(33), "a 5 MB paste took {elapsed:?} on the interface thread");
+    // A field with no maxlength takes what it is given up to the admission ceiling (the only text it refuses), so the work
+    // of a paste is bounded however large the clipboard is.
+    assert_eq!(h.text(0).chars().count(), styk_core::limits::CEILING_CHARS);
+    assert!(elapsed < Duration::from_secs(5), "a 5 MB paste took {elapsed:?} on the interface thread");
 }
 
 #[test]
-fn a_100_megabyte_paste_costs_the_interface_thread_almost_nothing() {
+fn a_100_megabyte_paste_costs_no_more_than_the_ceiling_does() {
     let mut h = harness();
     focus_field(&mut h, 10);
     h.chord('v', false);
@@ -935,11 +937,12 @@ fn a_100_megabyte_paste_costs_the_interface_thread_almost_nothing() {
     let start = Instant::now();
     h.d().reply_clipboard_with(id, huge);
     let elapsed = start.elapsed();
-    assert!(elapsed < Duration::from_millis(33), "a 100 MB paste took {elapsed:?} on the interface thread");
+    // (a debug build; 45.9 s before admission stopped reading the paste)
+    assert!(elapsed < Duration::from_secs(5), "a 100 MB paste took {elapsed:?} on the interface thread");
 }
 
 #[test]
-fn a_paste_of_one_letter_and_thousands_of_combining_marks_cannot_stall_the_next_frame() {
+fn a_paste_of_one_letter_and_16383_combining_marks_is_taken_whole_and_the_next_frame_is_not_stalled() {
     let mut h = harness();
     for _ in 0..6 {
         h.tab();
@@ -948,14 +951,15 @@ fn a_paste_of_one_letter_and_thousands_of_combining_marks_cannot_stall_the_next_
     let marks = format!("a{}", "\u{301}".repeat(16_383));
     h.chord('v', false);
     h.paste_reply(&marks);
-    assert!(longest_mark_run(h.text(1)) <= 16, "a run of {} combining marks was accepted", longest_mark_run(h.text(1)));
+    // Chromium takes it (a textarea of 16,384 characters), so the field does.
+    assert_eq!(h.text(1), marks, "the whole paste is taken");
     let start = Instant::now();
     h.d().redraw();
-    assert!(start.elapsed() < Duration::from_millis(200), "the frame after the paste took {:?}", start.elapsed());
+    assert!(start.elapsed() < Duration::from_millis(200), "the frame after the paste took {:?} (7 s before the shaper was fixed)", start.elapsed());
 }
 
 #[test]
-fn a_paste_of_millions_of_line_breaks_is_bounded_and_fast() {
+fn a_paste_of_millions_of_line_breaks_fills_the_field_and_is_fast() {
     let mut h = harness();
     for _ in 0..6 {
         h.tab();
@@ -967,8 +971,10 @@ fn a_paste_of_millions_of_line_breaks_is_bounded_and_fast() {
     h.d().reply_clipboard_with(id, content);
     let elapsed = start.elapsed();
     h.settle();
-    assert!(h.text(1).lines().count() <= 1001, "{} lines were accepted", h.text(1).lines().count());
-    assert!(elapsed < Duration::from_millis(500), "5 million line breaks took {elapsed:?} (3 s before they were bounded)");
+    // The field's own maxlength (16,384 characters, a line break counting one) is the only bound.
+    assert_eq!(h.text(1).chars().count(), 16_384);
+    assert_eq!(h.text(1).lines().count(), 16_384);
+    assert!(elapsed < Duration::from_secs(5), "5 million line breaks took {elapsed:?}");
 }
 
 #[test]
@@ -1330,14 +1336,108 @@ fn losing_focus_cancels_the_pending_clipboard_read() {
 }
 
 #[test]
-fn marks_typed_one_at_a_time_stop_at_the_cluster_limit_and_a_long_word_stops_at_the_run_limit() {
+fn marks_typed_one_at_a_time_and_a_very_long_word_are_taken() {
     let mut h = harness();
     focus_field(&mut h, 10);
     h.type_text("a");
     h.type_text(&"\u{301}".repeat(40));
-    assert!(longest_mark_run(h.text(0)) <= 16, "{} marks", longest_mark_run(h.text(0)));
+    assert_eq!(longest_mark_run(h.text(0)), 40, "every mark typed is taken");
     h.type_text(" ");
     h.type_text(&"y".repeat(2100));
     let word = h.text(0).rsplit(' ').next().unwrap().chars().count();
-    assert_eq!(word, 2048, "a word stops growing at 2048 characters");
+    assert_eq!(word, 2100, "a word grows as long as the field has room");
+}
+
+/// Where an edit's time goes in a long paragraph, by stage: `cargo test --release -p styk-design --features testing
+/// bench_edit_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn bench_edit_cost() {
+    use iced::advanced::graphics::text::Editor;
+    use iced::advanced::text::editor::{Action, Edit, Editor as _};
+    use iced::advanced::text::parser::PlainText;
+    use iced::advanced::text::{Alignment, LineHeight, Wrapping};
+
+    for font in &crate::fonts::ALL {
+        iced::advanced::graphics::text::font_system().write().unwrap().load_font(std::borrow::Cow::Borrowed(font));
+    }
+    let scenarios: Vec<(&str, String, Wrapping)> = vec![
+        ("16,300 x, one line, wrapped", "x".repeat(16_300), Wrapping::WordOrGlyph),
+        ("16,300 x, one line, no wrap", "x".repeat(16_300), Wrapping::None),
+        ("16,300 chars of words, one paragraph, wrapped", "stick figure ".repeat(1_254), Wrapping::WordOrGlyph),
+        ("a + 16,383 combining marks, wrapped", format!("a{}", "\u{301}".repeat(16_383)), Wrapping::WordOrGlyph),
+        ("16,100 chars in 80-column lines, wrapped", format!("{}\n", "ab ".repeat(26)).repeat(200), Wrapping::WordOrGlyph),
+        ("200 chars, one line, no wrap", "x".repeat(200), Wrapping::None),
+    ];
+    for (name, text, wrapping) in scenarios {
+        let mut editor = Editor::with_text(&text);
+        let update = |editor: &mut Editor| {
+            editor.update(Size::new(500.0, 100.0), iced::Font::default(), iced::Pixels(13.0), LineHeight::default(), wrapping, Alignment::Default, None, &mut PlainText);
+        };
+        let first = Instant::now();
+        update(&mut editor);
+        let first_layout = first.elapsed();
+        // The caret is at the end, where a person types.
+        editor.perform(Action::Move(iced::advanced::text::editor::Motion::DocumentEnd));
+        update(&mut editor);
+        let mut samples: Vec<[f64; 4]> = Vec::new();
+        for n in 0..24 {
+            let key = if n % 2 == 0 { 'b' } else { 'c' };
+            let t0 = Instant::now();
+            editor.perform(Action::Edit(Edit::Insert(key)));
+            let t1 = Instant::now();
+            update(&mut editor);
+            let t2 = Instant::now();
+            let _ = editor.min_bounds();
+            let t3 = Instant::now();
+            let _ = editor.selection();
+            let t4 = Instant::now();
+            samples.push([(t1 - t0).as_secs_f64() * 1e3, (t2 - t1).as_secs_f64() * 1e3, (t3 - t2).as_secs_f64() * 1e3, (t4 - t3).as_secs_f64() * 1e3]);
+        }
+        let median = |i: usize| {
+            let mut v: Vec<f64> = samples.iter().skip(4).map(|s| s[i]).collect();
+            v.sort_by(|a, b| a.total_cmp(b));
+            v[v.len() / 2]
+        };
+        println!(
+            "{name}: first layout {:.1} ms; per edit: perform {:.2}, update {:.2}, min_bounds {:.2}, selection {:.2} (ms, median)",
+            first_layout.as_secs_f64() * 1e3,
+            median(0),
+            median(1),
+            median(2),
+            median(3)
+        );
+    }
+}
+
+/// What one keystroke costs through the widget (event, state, view, layout, draw) in the multiline field:
+/// `cargo test --release -p styk-design --features testing bench_widget_key -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn bench_widget_key() {
+    for (name, text) in [("16,300 x", "x".repeat(16_300)), ("a + 16,299 marks", format!("a{}", "\u{301}".repeat(16_299))), ("16,300 chars of words", "stick figure ".repeat(1_254))] {
+        let mut h = harness();
+        for _ in 0..6 {
+            h.tab();
+        }
+        h.chord('v', false);
+        h.paste_reply(&text);
+        h.d().redraw();
+        let mut samples = Vec::new();
+        for n in 0..40 {
+            let t0 = Instant::now();
+            h.d().typewrite(if n % 2 == 0 { "b" } else { "c" });
+            let t1 = Instant::now();
+            h.settle();
+            let t2 = Instant::now();
+            h.d().redraw();
+            samples.push([(t1 - t0).as_secs_f64() * 1e3, (t2 - t1).as_secs_f64() * 1e3, t2.elapsed().as_secs_f64() * 1e3]);
+        }
+        let median = |i: usize| {
+            let mut v: Vec<f64> = samples.iter().skip(4).map(|s| s[i]).collect();
+            v.sort_by(|a, b| a.total_cmp(b));
+            v[v.len() / 2]
+        };
+        println!("{name}: event {:.2} ms, model and view rebuild {:.2} ms, redraw {:.2} ms (median)", median(0), median(1), median(2));
+    }
 }

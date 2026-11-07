@@ -20,12 +20,6 @@ pub fn intake(limits: Limits) -> Intake {
         let context = Context {
             chars: room.chars,
             selected: room.selected,
-            lines: room.lines,
-            selected_breaks: room.selected_breaks,
-            before_chars: room.before_chars,
-            after_chars: room.after_chars,
-            before: room.before.clone(),
-            after: room.after.clone(),
             units: room.units.clone(),
         };
         limits.admit_in(&context, incoming)

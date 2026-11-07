@@ -36,15 +36,16 @@ A field has a **role**. The role fixes what Enter, Escape, Tab and undo do. One 
   Ctrl+Shift+Z and Ctrl+Y route by focus alone: when `FocusState::text_entry` is set the document's undo is not
   reachable. When the field's history is exhausted Ctrl+Z does nothing.
 - Limits (the contract, `limits.rs`) are enforced **before the editor mutates** (section 2), never by rejecting the value
-  after `on_input`: iced edits, shapes and records history before it publishes. **Every role is bounded**, because the
-  shaper's cost grows with each of these and a field that is unbounded in one can be frozen with a paste: characters
-  (16,384 at most; a one-line field 4,096), line breaks (1,000), the length of a paragraph (4,096: the editor shapes the whole paragraph being edited on every edit, so one line of 16,000 characters cost 32 ms an edit and four of 3,900 cost 14), the run of characters without a space (2,048: shaping works
-  word by word, and one 16,000-character word took 30 ms an edit), marks piled on one base character (16: 16,000 of them took
-  seven seconds a frame), and for the text tool the distinct UTF-16 units (255, counted over the text that stays plus what
-  comes in) and the alphabet (BMP). Enter is an insertion like any other and is admitted the same way. A lone CR in a paste is
-  a line break (a textarea normalises CR and CRLF to LF). The clipboard's own worker cuts text to 1 MiB before it reaches the
-  interface thread, the editor cuts again what it is given, and the admission scan stops after 256 Ki characters: a 100 MB
-  clipboard costs the interface thread well under a frame.
+  after `on_input`: iced edits, shapes and records history before it publishes. **No field refuses text that today's app
+  accepts and handles.** A field's limits are the ones it has today: its `maxlength` (16,384 in the text tool and in a
+  multiline field), the alphabet (BMP, and 255 distinct UTF-16 units counted over the text that stays plus what comes in, for
+  the text tool) and, in a one-line field, no line breaks. There is no limit on the length of a paragraph, of a word, of the
+  line breaks or of the marks on a base character: a long paragraph is made cheap to edit instead (section 2, patch 10). The one
+  deviation is a field with no `maxlength`, which takes up to 65,536 characters (`CEILING_CHARS`), so that a paste is bounded work.
+  Enter is an insertion like any other and is admitted the same way. A lone CR in a paste is a line break (a textarea
+  normalises CR and CRLF to LF). The clipboard's own worker cuts text to 1 MiB before it reaches the interface thread, the
+  editor cuts again what it is given, and the admission scan stops after 256 Ki characters: both only cap the work on an input
+  larger than any field takes.
 
 ## 2. The editor patches the fields need
 
@@ -74,6 +75,14 @@ The vendored iced editor stack (`vendor/iced/core/src/text/{editor,input}.rs`, `
    disabled loses focus then and there, so enabling it again does not bring focus or a paste back.
 9. **Keys the field owns are handled.** Ctrl+C and Ctrl+X with nothing selected, and a second Ctrl+V while a paste is
    pending, are captured: they never reach the document's copy and paste.
+10. **Long paragraphs are cheap to edit** (`cosmic-text`, `shape.rs`, `shape_run_cache.rs`). The editor reshapes the whole
+    paragraph on every edit; the cost was in shaping every word again. The shaped-run cache (cosmic's own `shape-run-cache`
+    feature, on, keyed also by direction, bounded by run size and entry count, trimmed by the editor) holds the words, so an
+    edit shapes the words it touches. A run longer than 1,024 bytes (one very long word, or text without spaces) is cut into
+    chunks of about 256 bytes at grapheme boundaries, which the cache holds in the same way (not for scripts that join letters),
+    and a base with more than 32 combining marks is cut into segments of 32. The caret's x is found in one pass over the
+    glyphs of its line (it was a pass per glyph in a line without wrapping). Reshaping only the touched words inside the
+    editor needed no patch beyond this.
 
 ## 3. Focus model (`styk-core::focus`)
 
@@ -248,21 +257,19 @@ the latency numbers are directional.
 
 | Check | Result |
 | --- | --- |
-| Pure models (`styk-core`: focus and scopes, text entry, roving, number gestures, limits, field roles, clipboard table, slider and select keys) | 68 tests pass |
+| Pure models (`styk-core`: focus and scopes, text entry, roving, number gestures, limits, field roles, clipboard table, slider and select keys) | 65 tests pass |
 | Widgets on the headless driver with explicit clipboard and focus effects (`styk-design`, feature `testing`) | 82 tests pass. Each finding of the review and of the checker has a test that failed on the code it was found in (that run: 7 core, 19 widget and 1 sheet tests failed, among them a 100 MB paste that took 45.9 s on the interface thread) |
 | Caret motion against Chromium | The native editor's offset sequences equal those Chromium (Electron on Windows 11) visits, for six strings, both directions, both ends (`tests/fixtures/chromium-caret.txt`; rerun 2026-11-07: identical). Chromium moves logically in the paragraph's direction |
 | Caret geometry | Per-cluster extents (a base and its marks drawn by several glyphs are one cluster), run-boundary carets, right-to-left ligatures: 5 tests in `cosmic-text` |
 | Clipboard | One bounded worker: a full queue answers at once with `ClipboardOccupied` (a test in `iced_winit`); cancelled requests are noted once and the memory is bounded (a test in `iced_core`); a field that loses focus cancels its pending read (a widget test) |
 | Arabic and Hebrew keys in the real window | The Arabic layout's `B` key reaches the field as both scalars of lam-alef and the Hebrew `A` key as shin (posted to the window's own message queue on its UI thread). The one-line field had selected its text when it took focus, so the typed characters replaced it, as after a Tab into a field |
 | Input method | Not run for real: no IME is installed here (section 6); the manual pass is listed there. The candidate window was asked for the caret's rectangle (1 x 18 px, inside the field) |
-| Keystroke to presentation, release build, 150 keys, every key accepted (150 of 150), two runs | **200-character field:** to the start of the redraw p50 7.2 to 7.3 ms (a refresh is 6.9 ms), p95 7.9 to 9.0; to presentation p50 13.6, p95 14.4 to 14.7, p99 15.4 to 15.8, max 15.4 to 18.1. **16,100 characters in 80-character lines:** presentation p50 13.5 to 13.6, p95 14.5 to 14.6, max 16.4 to 21.2. **15,600 characters in four paragraphs of 3,900 (the longest a field takes):** presentation p50 13.7 to 14.1, p95 15.8 to 16.3, p99 16.6 to 18.9, max 17.3 to 23.3 |
+| Keystroke to presentation, release build, every key accepted (the 16,300-character and marks rows post 80 keys: the field has room for 84 more) | **200-character field:** to the start of the redraw p50 7.4 ms (a refresh is 6.9 ms), p95 9.2; to presentation p50 13.5, p95 14.9, max 15.6. **16,100 characters in 80-character lines:** presentation p50 13.3, p95 17.8, max 31.7. **15,600 characters in four paragraphs of 3,900:** presentation p50 13.5, p95 15.1, max 18.4. **16,300 characters on one line (one word):** presentation p50 13.4, p95 15.8, max 23.9. **One letter and 16,299 combining marks:** presentation p50 14.1, p95 16.5, max 17.3 |
 | Chromium, same machine, key event to the second animation frame after `input` (rerun) | `<input>` with 200 characters: p50 5.3 ms, p95 8.8, p99 10.1. `<textarea>` with 16,300 characters: p50 5.7, p95 9.8, p99 11.8 |
 
 Reading the latency rows: C1 (p95 at most one frame plus 4 ms, 20.7 ms at 60 Hz) and C2 (p95 at most 33 ms, no frame over
 50 ms) pass in every case above. The native figure to presentation includes the surface's wait for the display (`present`
 returns once the frame is queued behind the previous one); Chromium's stops at the second animation frame, before its
 own presentation, so the two are not equal measures: the native number is about one refresh above where Chromium's would
-be with the same wait. The failure of the first run, one paragraph of 16,000 characters at 32 ms an edit, is no longer a
-state a field can be in: the editor shapes a whole paragraph on every edit, so a paragraph is bounded (4,096 characters),
-like the other things the shaper is slow on (section 1). The harness posts keys only into text the field has room for and
+be with the same wait. Before the limits were removed and the editor made cheap on long text (section 2, patch 10), one edit of a 16,300-character word took 34 ms in the widget (20 ms of it shaping), a base with 16,383 marks 45 ms, and the caret of a line without wrapping 72 ms; they take 3.5, 4.4 and 0.2 ms now (release, the widget bench `bench_widget_key` and `bench_edit_cost`, `--ignored`). The harness posts keys only into text the field has room for and
 reports how many were accepted, so a run in which a key was refused says it is invalid instead of measuring rejections.
