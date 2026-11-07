@@ -15,3 +15,4 @@ styk-trace = { path = "../styk-trace" }
 
 [dev-dependencies]
 sha2 = "0.10"
+styk-formats = { path = "../styk-formats" }

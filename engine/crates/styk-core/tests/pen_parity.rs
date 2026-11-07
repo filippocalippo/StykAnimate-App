@@ -9,7 +9,9 @@
 //! The capture's `oldVersusOld` lists the fields that differed between two runs of today's app on the same events; only
 //! those may differ here.
 
-use sha2::{Digest, Sha256};
+mod common;
+
+use common::{hashes, save_and_reopen, settle};
 use std::sync::Arc;
 use std::time::Duration;
 use styk_core::drawing::mapping::Mapping;
@@ -36,33 +38,6 @@ fn tiles_of(value: &Value) -> Vec<(i64, i64, String)> {
             (items[0].as_f64().unwrap() as i64, items[1].as_f64().unwrap() as i64, items[2].as_str().unwrap().to_string())
         })
         .collect()
-}
-
-fn hashes(worker: &Worker, token: u64) -> Vec<(i64, i64, String)> {
-    worker.send(Request::Snapshot { token });
-    loop {
-        match worker.wait(Duration::from_secs(30)).expect("the worker answers") {
-            Reply::Snapshot { tiles, .. } => {
-                let mut rows: Vec<(i64, i64, String)> = tiles.iter().map(|(tx, ty, pixels)| (*tx, *ty, hex(&Sha256::digest(pixels)))).collect();
-                rows.sort_by_key(|r| (r.1, r.0));
-                return rows;
-            }
-            _ => {}
-        }
-    }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn settle(worker: &Worker) {
-    worker.send(Request::Ping { token: 9 });
-    loop {
-        if let Reply::Pong { .. } = worker.wait(Duration::from_secs(60)).expect("the worker answers") {
-            return;
-        }
-    }
 }
 
 #[test]
@@ -149,15 +124,16 @@ fn the_native_pen_path_matches_todays_app_on_the_same_events() {
             worker.send(Request::Redo);
             settle(&worker);
             check("redo", hashes(&worker, 3));
-            // Save and reopen: a worker started from the saved tiles.
+            // Save and reopen through the engine: the tile codec, the document, the container written and read back.
             worker.send(Request::Snapshot { token: 4 });
             let saved = loop {
-                if let Reply::Snapshot { tiles, .. } = worker.wait(Duration::from_secs(30)).unwrap() {
-                    break tiles;
+                match worker.wait(Duration::from_secs(30)).unwrap() {
+                    Reply::Snapshot { tiles, .. } => break tiles,
+                    Reply::Tiles { seq, .. } => worker.ack(seq),
+                    _ => {}
                 }
             };
-            let reopened = Worker::spawn(saved, Arc::new(|| {}));
-            check("reopen", hashes(&reopened, 5));
+            check("reopen", save_and_reopen(&saved));
         } else {
             let expected_empty = tiles_of(field(expect, "commit")).is_empty();
             assert_eq!(hashes(&worker, 6).is_empty(), expected_empty, "{name}: a discarded stroke leaves the cel as it was");

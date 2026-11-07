@@ -2495,6 +2495,7 @@ dependencies = [
  "sha2",
  "styk-doc",
  "styk-drawing",
+ "styk-formats",
  "styk-math",
  "styk-services",
  "styk-trace",
