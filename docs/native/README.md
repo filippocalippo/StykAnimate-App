@@ -71,8 +71,8 @@ skeleton (`perf/briefs/native/skeleton-plan.md`, implementers by N8): K-guards (
 done at `3b1d3b09` (eight guards with 16 failing fixtures, the tree at zero, warm check 4.7 s); review: seven ways a mistake slips through (macros, blocking through traits, re-exports, test-like names, a self-approving allow list, qualified clocks) and the pen lab's blocking self-test; fixing, with the engine types the core passes on gathered in `styk_core::engine`, K-doc (Astra: documents and the engine host; milestone 1, the session seam of
 `docs/native/documents.md`, **merged `bd9e9d2a`**; the rest done at `b3ead141`: async open, save and publication jobs, atomic saves, close and quit effects, movieclip scopes, tab order and recency, shared clipboards, memory admission, engine types in `styk_core::engine`; 32 save states byte-equal to today's and reopened; open: async bake dispatch, the counting allocator's measured cost; in review, GPT-6.1 Sol xhigh) and R-slice (the one Opus implementer: the interface
 architecture and the Inspector, `patterns.md`; started on `bd9e9d2a`), K-shell (Sonnet: the window and the top band, `perf/briefs/native/K-shell.md`) started on `06b0c9fe`; K-frames (Astra xhigh: the frame scheduler over one shared frame builder) **merged `48c424ef`** and K-dev (Astra high, the developer
-tools' engine, `perf/briefs/native/K-dev-engine.md`); then K-rec, K-cmd, K-widgets,
-K-dock, K-stage; then the skeleton gate. No interface work starts until S1 and S2a pass in a native window.
+tools' engine, `perf/briefs/native/K-dev-engine.md`); K-stage's core (Astra xhigh: the stage host, `perf/briefs/native/K-stage.md`) started;
+then K-rec, K-cmd, K-widgets, K-dock, the stage's shader widget; then the skeleton gate. No interface work starts until S1 and S2a pass in a native window.
 
 **Kept off the branches on purpose.** `t3/fix-save-differs` and `t3/resave-keeps-layout` change saved bytes: the owner's
 decision, unmerged. `t3/speed-joint-drag-frame` is an unfinished optimisation with no measured gain: not this phase's.
