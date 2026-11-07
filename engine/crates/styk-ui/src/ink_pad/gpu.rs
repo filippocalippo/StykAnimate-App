@@ -15,6 +15,9 @@ use styk_core::drawing::worker::{Reply, TileUpdate};
 
 /// Tiles uploaded in one frame at most (the JavaScript stage's `96 tiles a call`).
 pub const TILES_PER_FRAME: usize = 96;
+/// Nanoseconds one frame may spend uploading tiles before the rest wait for the next (the JavaScript stage's 6 ms for the
+/// calls of a frame, halved: the frame still has to draw).
+const UPLOAD_NS: u64 = 3_000_000;
 /// Atlas width in tiles; the atlas holds `ATLAS_TILES^2` tiles of 64 x 64 texels.
 const ATLAS_TILES: u32 = 32;
 const TILE: u32 = 64;
@@ -305,7 +308,7 @@ impl shader::Primitive for InkPrimitive {
         let mut budget = TILES_PER_FRAME;
         while let Some(front) = pipeline.pending.front() {
             let cost = usize::from(front.seq != 0 && front.tile.is_some());
-            if cost > budget {
+            if cost > budget || (uploaded_now > 0 && self.core.now_ns() - started > UPLOAD_NS) {
                 break;
             }
             let item = pipeline.pending.pop_front().expect("the queue has a front");

@@ -225,3 +225,38 @@ the display's refresh rate and the present mode.
 ## 5. Out of scope here
 
 The pressure-curve editor, the Draw workspace, macOS and Linux sources (designed above), WinTab (designed above).
+
+## 6. What building it showed (corrections to the design above)
+
+- **The pen reaches the toolkit without winit.** The subclass handles every pen pointer message itself (`WM_POINTERENTER`,
+  `DOWN`, `UPDATE`, `UP`) and calls `DefWindowProc`; Windows then promotes the pen to mouse messages (extra-info signature
+  `0xFF515700`), which reach winit and iced so hover and buttons work. A pen hovering over a toolkit widget raises its
+  hover event, and no promoted message ever becomes a stroke sample. A small number of mouse messages arrive without the
+  signature while a pen is in use (the system's own, at capture changes); they are `Hover` samples of the mouse and never
+  start a stroke.
+- **History is real and needed.** Even with the interface thread running freely, about 40 % of the samples of a 240 Hz
+  stroke arrive as history entries of a later message (the system coalesces pointer updates like mouse moves). The history
+  of a message sometimes repeats an entry already delivered; the source remembers the last 64 reports and drops a repeat.
+- **The stage is in `styk-core`'s `Mapping`,** which holds the stage's offset and size ratio and the camera matrix
+  and inverts them in `screenToWorld`'s order, then the cel's inverse pixel matrix and the symmetry mirrors. Deriving a
+  window-to-world affine by probing two points, as an earlier version did, differs from the JavaScript in the last bits,
+  which changes a few pixels.
+- **Pen events as the browser delivers them are not the events a script sends:** Chrome rounds positions and pressure to
+  single precision and stamps its own times. The parity capture records the events the page received.
+- **Wet ink is limited to full-opacity strokes** (`BrushConfig::wet_eligible`): the preview draws discs, which would
+  double-darken a translucent stroke. Translucent strokes show exact pixels only until the preview has a union layer.
+- **The wet ink and the tiles share one pass but not one frame by construction:** the ledger (`styk_core::drawing::wet`)
+  makes it one frame: a batch leaves the preview in the frame whose `prepare` uploaded the last of its tiles, a rule tested
+  against random reply delays and a small upload budget (no dab missing, none painted twice).
+- **The lab draws every frame** (the frame subscription keeps the window redrawing), so the queue is drained at least
+  once a frame without a wake-up; the queue's waker is for the real application, whose stage draws only on demand.
+- **Synthetic input is not a real tablet.** `InjectSyntheticPointerInput` stamps reports with a millisecond clock (a
+  `PerformanceCount` of its own is refused with error 87), gives the lift the position of the last contact, adds a report
+  of its own when the pen enters range, carries the barrel button but drops the eraser and inverted flags (and refuses a
+  lift that carries them), and needs the target window on the screen: a window at the off-screen position of an unattended
+  run is never hit. The self-test therefore places a small window, all but invisible (`--inject-on-screen`), in the
+  screen's corner for the seconds it runs. The eraser end is tested through the field mapping (`pen_sample`) and the
+  stroke rules; a real tablet run is the only way to see the eraser flags from a driver.
+- **The system sometimes refuses a report of a script** (error 87, about one run in three here, at the start or during a
+  block of the interface thread) for a reason it does not give; the self-test starts the script again, up to three times,
+  and says so.
