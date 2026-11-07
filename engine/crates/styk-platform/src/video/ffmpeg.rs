@@ -106,6 +106,8 @@ impl VideoService for FfmpegVideoService {
             return Err(VideoError::Unavailable("This service encodes with FFmpeg.".into()));
         };
         check_service(&raw_config(request))?;
+        // The destination first: a folder that cannot be written is refused before the encoder is even asked.
+        let stage = Stage::create(destination)?;
         let (capabilities, encoders) = self.probe();
         let support = capabilities.codecs.iter().find(|c| c.container == request.container && c.codec == request.codec);
         if !support.is_some_and(|c| c.supported) {
@@ -117,7 +119,6 @@ impl VideoService for FfmpegVideoService {
                 return Err(VideoError::Unavailable(format!("This encoder does not support {audio_codec} audio.")));
             }
         }
-        let stage = Stage::create(destination)?;
         let extension = request.container.extension();
         let output = stage.path(&format!("video.{extension}"));
         let (encoded_width, encoded_height, edge) = codec_dimensions(request.codec, request.width, request.height);

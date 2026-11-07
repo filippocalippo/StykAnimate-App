@@ -171,3 +171,15 @@ const write = (path, lines) => {
 };
 write('engine/crates/styk-platform/tests/fixtures/ffmpeg-arguments.tsv', argumentLines);
 write('engine/crates/styk-core/tests/fixtures/video-export-jobs.tsv', jobLines);
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The Windows codec helper's frame: rgbaToVfwBgr24 on an image that holds every colour at every alpha (x: colour, y: alpha).
+{
+  const {rgbaToVfwBgr24} = await import(new URL('src/vfw-pixels.mjs', root));
+  const rgba = new Uint8Array(256 * 256 * 4);
+  for (let a = 0; a < 256; a++) for (let c = 0; c < 256; c++) rgba.set([c, (c * 3) & 255, (c * 7 + 1) & 255, a], (a * 256 + c) * 4);
+  const {bytes} = rgbaToVfwBgr24(rgba, 256, 256);
+  const file = new URL('engine/crates/styk-platform/tests/fixtures/vfw-bgr24.bin', root);
+  writeFileSync(file, bytes);
+  console.log(`engine/crates/styk-platform/tests/fixtures/vfw-bgr24.bin: ${bytes.length} bytes`);
+}
