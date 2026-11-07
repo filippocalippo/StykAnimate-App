@@ -114,7 +114,11 @@ impl App {
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        styk_ui::view(self.theme)
+        // Text is laid out only once the font system is ready: until then the view holds none.
+        match warm_up::proof() {
+            Some(ready) => styk_ui::view(self.theme, ready),
+            None => styk_ui::loading(self.theme),
+        }
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -186,6 +190,10 @@ fn main() -> ExitCode {
         .font(widgets::INTER)
         .window(settings)
         .run();
+    if warm_up::built_early() {
+        eprintln!("the interface thread built the font system before the warm-up worker did: a text widget was laid out before the fonts were ready");
+        return ExitCode::FAILURE;
+    }
     #[cfg(feature = "devtools")]
     if let Some(path) = trace_path {
         let _ = std::fs::write(path, styk_devtools::trace_report());

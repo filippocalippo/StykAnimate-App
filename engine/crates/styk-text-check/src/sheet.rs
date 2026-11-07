@@ -39,6 +39,8 @@ struct Sheet {
     label: String,
     window: Option<window::Id>,
     fonts_ready: bool,
+    /// Whether the view waits for the fonts. Off only for the negative control (`--no-font-gate`), which must be caught.
+    gate: bool,
     /// The warm-up's artificial delay, to show the event loop keeps drawing while the fonts load.
     delay: Duration,
     /// Frames drawn before the fonts were ready, the time of the last one and the longest wait between two.
@@ -74,6 +76,9 @@ impl Sheet {
             Message::Shown => Task::none(),
             Message::FontsReady => {
                 self.fonts_ready = true;
+                if warm_up::built_early() {
+                    return self.fail("the interface thread built the font system before the warm-up worker did".to_string());
+                }
                 if !self.delay.is_zero() {
                     eprintln!("warm-up delayed by {} ms: {} frames drawn before the fonts were ready, longest wait between two {} ms", self.delay.as_millis(), self.early_frames, self.longest_gap.as_millis());
                     if self.early_frames < 5 || self.longest_gap > Duration::from_millis(100) {
@@ -127,7 +132,7 @@ impl Sheet {
     fn view(&self) -> Element<'_, Message> {
         let palette = self.theme.palette();
         let ink: iced::Color = palette.text_1.into();
-        let rows = if self.fonts_ready && self.page < self.pages() {
+        let rows = if (self.fonts_ready || !self.gate) && self.page < self.pages() {
             let first = self.page * PAGE_ROWS;
             self.items[first..(first + PAGE_ROWS).min(self.items.len())]
                 .iter()
@@ -200,7 +205,7 @@ fn write_png(path: &Path, image: &Image) -> Result<(), String> {
 }
 
 /// Runs the sheet for one theme and scale.
-pub fn run(matrix_path: &Path, out_dir: &Path, theme_name: &str, scale: f32) -> Result<(), String> {
+pub fn run(matrix_path: &Path, out_dir: &Path, theme_name: &str, scale: f32, gate: bool) -> Result<(), String> {
     let tsv = std::fs::read_to_string(matrix_path).map_err(|error| format!("{}: {error}", matrix_path.display()))?;
     let items = matrix::from_tsv(&tsv)?;
     let theme = match theme_name {
@@ -210,7 +215,7 @@ pub fn run(matrix_path: &Path, out_dir: &Path, theme_name: &str, scale: f32) -> 
     };
     std::fs::create_dir_all(out_dir).map_err(|error| error.to_string())?;
     // A cold start of a machine with thousands of fonts, reproduced: the worker waits this long before it starts.
-    let delay = Duration::from_millis(std::env::var("STYK_FONT_WARMUP_DELAY_MS").ok().and_then(|value| value.parse().ok()).unwrap_or(0));
+    let delay = warm_up::delay_from_environment();
     let strategy = unattended::requested_by_environment()?;
     if strategy == Some(Strategy::Headless) {
         return Err("the typography sheet is captured from a window: use STYK_BACKGROUND_WINDOW=1".to_string());
@@ -225,6 +230,7 @@ pub fn run(matrix_path: &Path, out_dir: &Path, theme_name: &str, scale: f32) -> 
         label: format!("{theme_name}-{scale}"),
         window: None,
         fonts_ready: false,
+        gate,
         delay,
         early_frames: 0,
         last_frame: None,

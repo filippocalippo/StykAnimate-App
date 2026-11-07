@@ -19,11 +19,11 @@ pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32) -> Result<Image, S
     let settings = iced::Settings { font: widgets::INTER, text_size: Pixels(16.0), ..iced::Settings::default() };
     let mut renderer = pollster::block_on(<iced::Renderer as Headless>::new(renderer::Settings::from(&settings), None)).ok_or("no graphics adapter is available to draw offscreen")?;
     // Nothing here is an event loop to keep responsive: the font system is built and the bundled fonts installed in place.
-    warm_up::install_bundled();
+    let ready = warm_up::install_bundled();
     let bounds = Size::new(size.0 as f32, size.1 as f32);
     let style = styk_ui::window_style(theme);
     let iced_theme = styk_ui::base_theme(theme);
-    let mut interface: UserInterface<'_, (), iced::Theme, iced::Renderer> = UserInterface::build(styk_ui::view(theme), bounds, Cache::default(), &mut renderer);
+    let mut interface: UserInterface<'_, (), iced::Theme, iced::Renderer> = UserInterface::build(styk_ui::view(theme, ready), bounds, Cache::default(), &mut renderer);
     // One redraw, so widgets that lay themselves out on their first frame have.
     let _ = interface.update(
         &window::Headless,

@@ -17,7 +17,7 @@ use crate::fonts;
 use crate::tokens::scale;
 use iced::advanced::graphics::text::cosmic_text::fontdb::{Database, Source};
 use iced::advanced::graphics::text::cosmic_text::{Fallback, PlatformFallback, Script};
-use iced::advanced::graphics::text::font_system;
+use iced::advanced::graphics::text::{font_system, font_system_if_built};
 use iced::Task;
 use std::borrow::Cow;
 use std::sync::OnceLock;
@@ -25,39 +25,72 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 static READY: AtomicBool = AtomicBool::new(false);
+static BUILT_EARLY: AtomicBool = AtomicBool::new(false);
+
+/// Proof that the font system is ready. The code that lays out text asks for one: the view's text-bearing part takes a
+/// `Ready` argument, so a screen that needs fonts cannot be built before [`warm_up`] has finished.
+#[derive(Clone, Copy, Debug)]
+pub struct Ready(());
+
+/// The proof, once the font system is ready.
+pub fn proof() -> Option<Ready> {
+    ready().then_some(Ready(()))
+}
+
+/// Whether the font system was built by someone other than the warm-up worker: the interface thread reached it first
+/// and waited for the scan. A run that ends with this true has a defect (`styk-text-check` and the application fail it).
+pub fn built_early() -> bool {
+    BUILT_EARLY.load(Ordering::Acquire)
+}
+
+/// How long the warm-up worker waits before it starts, from `STYK_FONT_WARMUP_DELAY_MS` (milliseconds, default 0): the
+/// cold start of a machine with thousands of fonts, reproduced, so that a run shows what the interface does and does
+/// not touch while the fonts load.
+pub fn delay_from_environment() -> Duration {
+    Duration::from_millis(std::env::var("STYK_FONT_WARMUP_DELAY_MS").ok().and_then(|value| value.parse().ok()).unwrap_or(0))
+}
 
 /// Whether the font system is built and holds the bundled fonts, so text can be laid out without waiting.
 pub fn ready() -> bool {
     READY.load(Ordering::Acquire)
 }
 
-/// Builds the font system on a worker and resolves when [`ready`].
+/// Builds the font system on a worker and resolves when [`ready`]; the worker starts after
+/// [`delay_from_environment`].
 pub fn warm_up() -> Task<()> {
-    warm_up_after(Duration::ZERO)
+    warm_up_after(delay_from_environment())
 }
 
-/// [`warm_up`] that starts building after `delay`: the cold start of a machine with thousands of fonts, reproduced for
-/// the tests that show the interface stays responsive and shows no text until the fonts are there.
+/// [`warm_up`] that starts building after `delay`.
 pub fn warm_up_after(delay: Duration) -> Task<()> {
     Task::future(async move {
         let (sender, receiver) = iced::futures::channel::oneshot::channel();
         let spawned = std::thread::Builder::new().name("fonts".into()).spawn(move || {
             std::thread::sleep(delay);
-            build();
+            build_on_worker();
             let _ = sender.send(());
         });
         if spawned.is_ok() {
             let _ = receiver.await;
         } else {
             // No worker could be started: build here, once; the interface is the only thing left to wait.
-            build();
+            build_on_worker();
         }
     })
 }
 
+/// What the worker does: notes whether the system already existed (the interface thread built it first), builds it if
+/// not, installs the bundled fonts and marks it ready.
+fn build_on_worker() {
+    if font_system_if_built().is_some() {
+        BUILT_EARLY.store(true, Ordering::Release);
+    }
+    build();
+}
+
 /// Builds the system (the first call to it does) and installs the bundled fonts, then marks it ready.
 fn build() {
-    install_bundled();
+    let _ = install_bundled();
     READY.store(true, Ordering::Release);
 }
 
@@ -67,13 +100,14 @@ fn build() {
 /// "Inter" with that file: no `wght` or `opsz` axis, other metrics. A web font beats an installed font of the same
 /// name in the browser; here the bundled one does, by dropping the installed faces of those two families first.
 /// Calling it again changes nothing.
-pub fn install_bundled() {
+pub fn install_bundled() -> Ready {
     let mut system = font_system().write().unwrap_or_else(|poisoned| poisoned.into_inner());
     drop_installed(system.raw().db_mut());
     for font in fonts::ALL {
         system.load_font(Cow::Borrowed(font));
     }
     system.raw().set_fallback(StylesheetFallback);
+    Ready(())
 }
 
 /// The families after Inter in `--font-ui`, in the stylesheet's order, with the emoji and symbol faces a browser

@@ -72,10 +72,12 @@ Each is an entry in the vendored crate's `VENDOR.md` with its reason.
   (face, weight, optical size) and a face without an `opsz` axis is one instance whatever the size; swash gets
   `wght` **and** `opsz` coordinates (review finding 14: instance cache, glyph cache and rasterizer all carry the
   variation, and a test draws one string at two sizes at once); `LayoutRun` reports the line's ascent and descent;
-  fallback families are matched at their nearest weight; `FontSystem::set_fallback`.
+  fallback families are matched at their nearest weight; `FontSystem::set_fallback`; the basic shaper reads
+  advances at the face's variation coordinates and spans with different features are separate shaping runs.
 - **cryoglyph**: the baseline rule (section 4).
 - **iced**: `Font` gains `Weight::Value`, `optical_size`, `features`, `tracking`; `to_attributes_sized`;
-  `font_system_if_built`.
+  `font_system_if_built`; `Shaping::Auto` shapes in full for a named family or a font with features (the basic shaper
+  has neither features nor kerning), so a default `text(..)` widget follows the typography too.
 
 The text editor and text input (`text/editor.rs`, `core/src/text/input.rs`) are another spike's and keep calling
 `to_attributes(font)`: an `OpticalSize::Auto` font there stays at the default coordinate, which is the right one up to
@@ -160,9 +162,13 @@ iced builds its global font system on first use: it scans every installed font a
 waits for it. `styk_design::warm_up` is the program's first task: a worker builds the system, installs the bundled
 fonts and the stylesheet fallback, and only then marks it ready; the view holds no text until `FontsReady`, and the
 runtime's own font loading (`Settings::fonts`, which would build the system on the event loop) is not used.
-`styk-app` starts it first and waits for it before a `--screenshot` capture.
+`styk-app` starts it first, shows `styk_ui::loading` (no text) until ready, builds `styk_ui::view` only from a `warm_up::Ready` proof (a
+screen that sets text cannot be built earlier, by type), and waits for it before a `--screenshot` capture. If the interface thread
+builds the font system first, the worker records it (`warm_up::built_early`) and the application and the check fail the run.
 
 Tested: `warm_up` unit tests (not ready before the worker has loaded the fonts; the caller kept polling meanwhile; an
 installed Inter never answers for the bundled one), and a run of the real window with a deliberately delayed worker:
-`STYK_FONT_WARMUP_DELAY_MS=1500 styk-text-check sheet ...` draws frames throughout and fails if fewer than 5 frames
-were drawn before the fonts were ready or any gap between two frames exceeded 100 ms.
+`STYK_FONT_WARMUP_DELAY_MS=1500 styk-text-check sheet ...` (a window whose view sets text) draws frames throughout and fails if
+fewer than 5 frames were drawn before the fonts were ready, any gap exceeded 100 ms or the font system was built early. Its
+negative control, `--no-font-gate` (the view sets text at once), must fail with "built the font system":
+`tests/font_gate.rs` runs both.

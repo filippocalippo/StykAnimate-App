@@ -399,10 +399,12 @@ fn to_align(alignment: Alignment) -> Option<cosmic_text::Align> {
 }
 
 /// Converts some [`Shaping`] strategy to a [`cosmic_text::Shaping`] strategy.
-pub fn to_shaping(shaping: Shaping, text: &str) -> cosmic_text::Shaping {
+pub fn to_shaping(shaping: Shaping, text: &str, font: Font) -> cosmic_text::Shaping {
     match shaping {
         Shaping::Auto => {
-            if text.is_ascii() {
+            // The basic shaper applies no OpenType feature and no kerning: a font that asks for features, or a bundled
+            // family whose text the browser kerns, is always shaped in full.
+            if text.is_ascii() && font.features.is_empty() && !matches!(font.family, font::Family::Name(_)) {
                 cosmic_text::Shaping::Basic
             } else {
                 cosmic_text::Shaping::Advanced

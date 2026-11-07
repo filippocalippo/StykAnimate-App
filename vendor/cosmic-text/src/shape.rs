@@ -568,9 +568,10 @@ fn shape_skip(
 
         if let Some(fb_font) = fb_iter.next() {
             let fb_swash = fb_font.as_swash();
+            let fb_coordinates: Vec<i16> = fb_font.shaper_instance().coords().iter().map(|coordinate| coordinate.to_bits()).collect();
             let fb_charmap = fb_swash.charmap();
-            let fb_metrics = fb_swash.metrics(&[]);
-            let fb_glyph_metrics = fb_swash.glyph_metrics(&[]).scale(1.0);
+            let fb_metrics = fb_swash.metrics(&fb_coordinates);
+            let fb_glyph_metrics = fb_swash.glyph_metrics(&fb_coordinates).scale(1.0);
             let fb_scale = f32::from(fb_metrics.units_per_em);
 
             for glyph in glyphs[glyph_start..].iter_mut() {
@@ -614,9 +615,11 @@ fn shape_skip_glyphs(
     let font_monospace_em_width = font.monospace_em_width();
     let swash_font = font.as_swash();
 
+    // The face's variation coordinates (weight, optical size), so the advances are the ones the glyphs are rasterized at.
+    let coordinates: Vec<i16> = font.shaper_instance().coords().iter().map(|coordinate| coordinate.to_bits()).collect();
     let charmap = swash_font.charmap();
-    let metrics = swash_font.metrics(&[]);
-    let glyph_metrics = swash_font.glyph_metrics(&[]).scale(1.0);
+    let metrics = swash_font.metrics(&coordinates);
+    let glyph_metrics = swash_font.glyph_metrics(&coordinates).scale(1.0);
 
     let ascent = metrics.ascent / f32::from(metrics.units_per_em);
     let descent = metrics.descent / f32::from(metrics.units_per_em);

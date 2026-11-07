@@ -2,12 +2,12 @@
 //!
 //! ```text
 //! styk-text-check matrix <matrix.tsv>
-//! styk-text-check sheet <matrix.tsv> <out-dir> <light|dark> <scale>
+//! styk-text-check sheet <matrix.tsv> <out-dir> <light|dark> <scale> [--no-font-gate]
 //! styk-text-check compare <matrix.tsv> <dir> <chromium|chromium-gray> <light|dark> <scale>
 //! ```
 //!
 //! `matrix` writes what both renderers draw; `sheet` draws it in an iced window (off-screen under
-//! `STYK_BACKGROUND_WINDOW=1`) and writes `native-<theme>-<scale>*.png` and `.tsv`; `compare` sets those against
+//! `STYK_BACKGROUND_WINDOW=1`; `--no-font-gate` is the negative control of the font-readiness check) and writes `native-<theme>-<scale>*.png` and `.tsv`; `compare` sets those against
 //! the files `fonts-chromium.mjs` wrote and prints the table, exiting 1 when a width or a font choice is out of
 //! tolerance.
 
@@ -27,7 +27,8 @@ fn run(args: &[String]) -> Result<bool, String> {
             std::fs::write(path, matrix::to_tsv(&matrix::items())).map_err(|error| format!("{path}: {error}"))?;
             Ok(true)
         }
-        ["sheet", matrix, out_dir, theme, factor] => sheet::run(Path::new(matrix), Path::new(out_dir), theme, scale(factor)?).map(|()| true),
+        ["sheet", matrix, out_dir, theme, factor] => sheet::run(Path::new(matrix), Path::new(out_dir), theme, scale(factor)?, true).map(|()| true),
+        ["sheet", matrix, out_dir, theme, factor, "--no-font-gate"] => sheet::run(Path::new(matrix), Path::new(out_dir), theme, scale(factor)?, false).map(|()| true),
         ["compare", matrix, dir, chromium, theme, factor] => {
             let factor = scale(factor)?;
             let report = compare::compare(Path::new(matrix), Path::new(dir), chromium, &format!("{theme}-{factor}"), factor)?;

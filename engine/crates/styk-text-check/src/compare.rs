@@ -73,6 +73,32 @@ impl Picture {
     }
 }
 
+/// The family a platform font name belongs to: Chromium names the face (`Segoe UI Semibold`), the native stack the family
+/// (`Segoe UI`).
+fn family(name: &str) -> &str {
+    for style in [" Semibold", " Semilight", " Light", " Bold", " Black", " Medium", " Regular"] {
+        if let Some(family) = name.strip_suffix(style) {
+            return family;
+        }
+    }
+    name
+}
+
+/// The fonts of a row as (family, glyphs) pairs, whichever order and face names the renderer reported them in.
+fn font_identities(fonts: &str) -> BTreeMap<String, usize> {
+    let mut identities = BTreeMap::new();
+    for entry in fonts.split('|').filter(|entry| !entry.is_empty()) {
+        let (name, glyphs) = entry.rsplit_once(':').unwrap_or((entry, "0"));
+        *identities.entry(family(name).to_string()).or_default() += glyphs.parse::<usize>().unwrap_or(0);
+    }
+    identities
+}
+
+/// Whether two renderers drew a row with the same fonts, as many glyphs from each.
+fn same_fonts(chromium: &str, native: &str) -> bool {
+    font_identities(chromium) == font_identities(native)
+}
+
 /// What the pixels of one row say.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Ink {
@@ -198,7 +224,8 @@ pub fn compare(matrix_path: &Path, dir: &Path, chromium: &str, label: &str, scal
         let delta = n.width - c.width;
         let class = item.class();
         let tolerance = if class == "Inter" { WIDTH_TOLERANCE } else { FALLBACK_TOLERANCE };
-        let width_ok = delta.abs() <= tolerance;
+        let fonts_ok = same_fonts(&c.fonts, &n.fonts);
+        let width_ok = delta.abs() <= tolerance && fonts_ok;
         widths_hold &= width_ok;
         by_class.entry(class).or_default().push((delta.abs(), ink.error));
         if ink.shift != (0, 0) {
@@ -208,11 +235,11 @@ pub fn compare(matrix_path: &Path, dir: &Path, chromium: &str, label: &str, scal
         chroma_native += ink.native_chroma;
         chroma_rows += 1;
         ratios.push(ink.ink_ratio);
-        let fonts = if class == "Inter" { String::new() } else { format!("  chromium [{}] native [{}]", c.fonts, n.fonts) };
+        let fonts = if class == "Inter" && fonts_ok { String::new() } else { format!("  chromium [{}] native [{}]", c.fonts, n.fonts) };
         let _ = writeln!(
             text,
             "{:<34} {:>8.2} {:>8.2} {:>+7.2} {:>6.3} {:>6.3} {:>3},{:<3} {:?}{}{}",
-            item.id, c.width, n.width, delta, ink.error, ink.best_error, ink.shift.0, ink.shift.1, ink.bounds_delta, if width_ok { "" } else { "  WIDTH" }, fonts
+            item.id, c.width, n.width, delta, ink.error, ink.best_error, ink.shift.0, ink.shift.1, ink.bounds_delta, if delta.abs() > tolerance { "  WIDTH" } else if !fonts_ok { "  FONTS" } else { "" }, fonts
         );
     }
     let _ = writeln!(text, "-- by class: rows, max |dwidth|, mean ink error --");
@@ -227,4 +254,46 @@ pub fn compare(matrix_path: &Path, dir: &Path, chromium: &str, label: &str, scal
     let _ = writeln!(text, "native ink over chromium ink (mean of rows): {mean_ratio:.3}");
     let _ = writeln!(text, "widths {}", if widths_hold { "hold" } else { "DO NOT HOLD" });
     Ok(Report { text, widths_hold })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A comparison directory holding one fallback row whose two renderers agree on the width and say which fonts they used.
+    fn directory(name: &str, chromium_fonts: &str, native_fonts: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("styk-text-check-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("matrix.tsv"), "#theme\tlight\t#eceff4\t#0c0d12\nfallback/ui/arabic\tui\t500\t13\t18\t0\t-\tمرحبا\n").unwrap();
+        std::fs::write(dir.join("chromium-light-1.tsv"), format!("fallback/ui/arabic\t91.47\t{chromium_fonts}\n")).unwrap();
+        std::fs::write(dir.join("native-light-1.tsv"), format!("fallback/ui/arabic\t91.47\t{native_fonts}\n")).unwrap();
+        for prefix in ["chromium", "native"] {
+            let file = std::fs::File::create(dir.join(format!("{prefix}-light-1-p0.png"))).unwrap();
+            let (width, height) = (PAGE_WIDTH as u32, (PAGE_ROWS as f32 * ROW_HEIGHT) as u32);
+            let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.write_header().unwrap().write_image_data(&vec![200u8; (width * height * 4) as usize]).unwrap();
+        }
+        dir
+    }
+
+    fn holds(dir: &std::path::Path) -> bool {
+        compare(&dir.join("matrix.tsv"), dir, "chromium", "light-1", 1.0).unwrap().widths_hold
+    }
+
+    #[test]
+    fn a_different_fallback_font_fails_the_comparison() {
+        let dir = directory("fonts-differ", "Segoe UI Semibold:12|Inter:5", "Arial:12|Inter:5");
+        assert!(!holds(&dir), "Arial where Chromium used Segoe UI must fail even when the widths agree");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_same_fonts_under_another_face_name_pass() {
+        // Chromium names the face (\`Segoe UI Semibold\`), the native stack names the family (\`Segoe UI\`), in another order.
+        let dir = directory("fonts-agree", "Segoe UI Semibold:12|Inter:5", "Inter:5|Segoe UI:12");
+        assert!(holds(&dir));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

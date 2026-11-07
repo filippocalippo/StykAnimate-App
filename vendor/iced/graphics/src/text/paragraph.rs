@@ -107,7 +107,7 @@ impl core::text::Paragraph for Paragraph {
         buffer.set_text(
             text.content,
             &text::to_attributes_sized(text.font, f32::from(text.size)),
-            text::to_shaping(text.shaping, text.content),
+            text::to_shaping(text.shaping, text.content, text.font),
             None,
         );
         buffer.shape_until_scroll(font_system.raw(), false);

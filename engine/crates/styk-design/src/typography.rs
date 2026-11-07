@@ -79,6 +79,10 @@ mod tests {
     }
 
     fn paragraph(content: &str, font: Font, size: f32) -> Paragraph {
+        shaped(content, font, size, Shaping::Advanced)
+    }
+
+    fn shaped(content: &str, font: Font, size: f32, shaping: Shaping) -> Paragraph {
         load_fonts();
         Paragraph::with_text(Text {
             content,
@@ -88,7 +92,7 @@ mod tests {
             font,
             align_x: Alignment::Default,
             align_y: alignment::Vertical::Top,
-            shaping: Shaping::Advanced,
+            shaping,
             wrapping: Wrapping::None,
             ellipsis: Ellipsis::None,
             hint_factor: None,
@@ -188,6 +192,61 @@ mod tests {
         if database.faces().any(|face| face.families.iter().any(|(name, _)| name == "Segoe UI")) {
             assert!(families.contains("Segoe UI") && !families.contains("Arial"), "{families:?}");
         }
+    }
+
+    /// The advances of the glyphs of the first line, in logical pixels.
+    fn advances(paragraph: &Paragraph) -> Vec<f32> {
+        paragraph.buffer().layout_runs().flat_map(|run| run.glyphs.iter().map(|glyph| glyph.w).collect::<Vec<_>>()).collect()
+    }
+
+    #[test]
+    fn a_default_widget_shapes_ascii_text_with_the_requested_axes_and_features() {
+        // `Shaping::Auto` is what a plain `text(..)` widget has, and it picks the basic shaper for ASCII. The basic
+        // shaper read advances at the font's default coordinates and applied no features, while the glyphs were
+        // rasterized with the requested ones.
+        let font = inter().weight(Weight::Value(760)).optical_size(OpticalSize::Auto).features(TABULAR);
+        let automatic = shaped("0123456789", font, 28.0, Shaping::Auto);
+        let advanced = shaped("0123456789", font, 28.0, Shaping::Advanced);
+        assert_eq!(advances(&automatic), advances(&advanced));
+        let digits = advances(&automatic);
+        assert!(digits.windows(2).all(|pair| pair[0] == pair[1]), "tabular digits: {digits:?}");
+    }
+
+    #[test]
+    fn explicit_basic_shaping_follows_the_axes_too() {
+        // No kerning pair in a run of zeros: only the axes can make the two shapers differ.
+        let at = |weight, shaping| advances(&shaped("0000", inter().weight(Weight::Value(weight)).optical_size(OpticalSize::Auto), 28.0, shaping));
+        // Swash interpolates the advance in floating point and HarfBuzz rounds it to a font unit: a few thousandths of a pixel.
+        let (basic, advanced) = (at(760, Shaping::Basic), at(760, Shaping::Advanced));
+        assert!(basic.iter().zip(&advanced).all(|(a, b)| (a - b).abs() < 0.01), "{basic:?} against {advanced:?}");
+        assert!(basic[0] > at(400, Shaping::Basic)[0] + 0.5, "the weight must change the advance");
+    }
+
+    #[test]
+    fn spans_with_different_features_are_shaped_with_their_own() {
+        // "1111" proportional then "1111" tabular, inside one word: the second span's features were lost when the
+        // two spans were merged into one shaping run that used the first span's.
+        use iced::advanced::text::{Paragraph as _, Span};
+        load_fonts();
+        let plain = inter().weight(Weight::Value(450));
+        let tabular = plain.features(TABULAR);
+        let spans = [Span::<()>::new("1111").font(plain), Span::<()>::new("1111").font(tabular)];
+        let paragraph = Paragraph::with_spans(Text {
+            content: spans.as_slice(),
+            bounds: Size::new(f32::INFINITY, f32::INFINITY),
+            size: Pixels(28.0),
+            line_height: LineHeight::Absolute(Pixels(40.0)),
+            font: plain,
+            align_x: Alignment::Default,
+            align_y: alignment::Vertical::Top,
+            shaping: Shaping::Advanced,
+            wrapping: Wrapping::None,
+            ellipsis: Ellipsis::None,
+            hint_factor: None,
+        });
+        let expected = width("1111", plain, 28.0) + width("1111", tabular, 28.0);
+        assert!(width("1111", tabular, 28.0) > width("1111", plain, 28.0), "the fixture must tell the features apart");
+        assert!((paragraph.min_width() - expected).abs() < 0.01, "{} against {expected}", paragraph.min_width());
     }
 
     #[test]

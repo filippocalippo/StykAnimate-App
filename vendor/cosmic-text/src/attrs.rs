@@ -530,6 +530,7 @@ impl<'a> Attrs<'a> {
             && self.style == other.style
             && self.weight == other.weight
             && self.optical_size == other.optical_size
+            && self.font_features == other.font_features
     }
 }
 
