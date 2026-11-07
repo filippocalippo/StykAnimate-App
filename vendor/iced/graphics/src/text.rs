@@ -120,6 +120,9 @@ pub struct Rendering {
     pub subpixel: Option<SubpixelOrder>,
     /// Skia's luminance-dependent coverage adjustment: `(contrast, gamma)`, or `None` for none.
     pub adjustment: Option<(f32, f32)>,
+    /// Draw glyph masks with DirectWrite on a worker thread (Windows), the rasterizer the browser uses there. A frame
+    /// then lacks the glyphs the worker has not drawn yet: see [`glyphs_pending`] and [`set_glyph_notifier`].
+    pub direct_write: bool,
 }
 
 /// The order of the subpixels of the display.
@@ -131,7 +134,38 @@ pub enum SubpixelOrder {
     Bgr,
 }
 
-static RENDERING: RwLock<Rendering> = RwLock::new(Rendering { subpixel: None, adjustment: None });
+static RENDERING: RwLock<Rendering> = RwLock::new(Rendering { subpixel: None, adjustment: None, direct_write: false });
+
+type GlyphNotifier = std::sync::Arc<dyn Fn() + Send + Sync>;
+type GlyphSource = (fn() -> usize, fn(GlyphNotifier));
+
+static GLYPH_SOURCE: OnceLock<GlyphSource> = OnceLock::new();
+static GLYPH_NOTIFIER: std::sync::Mutex<Option<GlyphNotifier>> = std::sync::Mutex::new(None);
+
+/// The renderer tells the text stack where glyph masks come from when they are drawn off the calling thread.
+pub fn install_glyph_source(pending: fn() -> usize, set_notifier: fn(GlyphNotifier)) {
+    if GLYPH_SOURCE.set((pending, set_notifier)).is_ok() {
+        if let Some(notifier) = GLYPH_NOTIFIER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone() {
+            set_notifier(notifier);
+        }
+    }
+}
+
+/// How many glyphs a worker has been asked for and the renderer has not picked up: zero when the text on screen is
+/// complete (and always zero where masks are drawn on the calling thread).
+pub fn glyphs_pending() -> usize {
+    GLYPH_SOURCE.get().map_or(0, |(pending, _)| pending())
+}
+
+/// Calls `notifier`, from the worker's thread, whenever glyphs have been drawn: the program asks its window for another
+/// frame, which picks them up.
+pub fn set_glyph_notifier(notifier: impl Fn() + Send + Sync + 'static) {
+    let notifier: GlyphNotifier = std::sync::Arc::new(notifier);
+    *GLYPH_NOTIFIER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(notifier.clone());
+    if let Some((_, set)) = GLYPH_SOURCE.get() {
+        set(notifier);
+    }
+}
 
 /// Sets how glyphs are rasterized and blended, for every window.
 pub fn set_rendering(rendering: Rendering) {

@@ -135,6 +135,9 @@ mod shape_run_cache;
 
 #[cfg(feature = "swash")]
 pub use self::swash::*;
+
+#[cfg(all(windows, feature = "std", feature = "swash"))]
+pub mod dwrite;
 #[cfg(feature = "swash")]
 mod swash;
 

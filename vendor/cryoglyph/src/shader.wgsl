@@ -135,6 +135,27 @@ fn vs_main(in_vert: VertexInput) -> VertexOutput {
 // Skia's coverage adjustment (SkMaskGamma): the glyph's coverage is bent according to the text colour's luminance so that
 // the blend of the text on its opposite looks as heavy as the font's own weight, with the contrast the platform asks
 // for. `src` is a channel (or the luminance) of the text colour, quantized to three bits as Skia does.
+// Skia's luminance curves: gamma 0 is sRGB's, anything else a power.
+fn to_luma(x: f32) -> f32 {
+    if params.gamma == 0.0 {
+        if x <= 0.04045 {
+            return x / 12.92;
+        }
+        return pow((x + 0.055) / 1.055, 2.4);
+    }
+    return pow(x, params.gamma);
+}
+
+fn from_luma(x: f32) -> f32 {
+    if params.gamma == 0.0 {
+        if x <= 0.0031308 {
+            return x * 12.92;
+        }
+        return 1.055 * pow(x, 1.0 / 2.4) - 0.055;
+    }
+    return pow(x, 1.0 / params.gamma);
+}
+
 fn quantize(c: f32) -> f32 {
     let v = u32(round(clamp(c, 0.0, 1.0) * 255.0)) >> 5u;
     let q = (v << 5u) | (v << 2u) | (v >> 1u);
@@ -150,19 +171,19 @@ fn adjust(coverage: f32, channel: f32) -> f32 {
     if abs(src - dst) < (1.0 / 256.0) {
         return coverage;
     }
-    let lin_src = pow(src, params.gamma);
-    let lin_dst = pow(dst, params.gamma);
+    let lin_src = to_luma(src);
+    let lin_dst = to_luma(dst);
     let contrast = params.contrast * lin_dst;
     let srca = coverage + (1.0 - coverage) * contrast * coverage;
     let dsta = 1.0 - srca;
     let lin_out = lin_src * srca + dsta * lin_dst;
-    let out = pow(lin_out, 1.0 / params.gamma);
+    let out = from_luma(lin_out);
     return clamp((out - dst) / (src - dst), 0.0, 1.0);
 }
 
 fn luminance(color: vec3<f32>) -> f32 {
-    let linear = vec3<f32>(pow(color.r, params.gamma), pow(color.g, params.gamma), pow(color.b, params.gamma));
-    return pow(dot(linear, vec3<f32>(0.2126, 0.7152, 0.0722)), 1.0 / params.gamma);
+    let linear = vec3<f32>(to_luma(color.r), to_luma(color.g), to_luma(color.b));
+    return from_luma(dot(linear, vec3<f32>(0.2126, 0.7152, 0.0722)));
 }
 
 //@dual:begin
@@ -210,9 +231,7 @@ fn fs_main(in_frag: VertexOutput) -> FragmentOutput {
                 textureLoad(mask_atlas_texture, texel + vec2<i32>(1, 0), 0).x,
                 textureLoad(mask_atlas_texture, texel + vec2<i32>(2, 0), 0).x,
             );
-            // swash's subpixel mask is blue first (its channel 0 samples the glyph 0.3 pixels to the right of the pixel's centre,
-            // where a red subpixel of an RGB display is on the left): an RGB display takes the channels reversed.
-            if (params.flags & 1u) == 0u {
+            if (params.flags & 1u) != 0u {
                 coverage = coverage.bgr;
             }
             let adjusted = vec3<f32>(

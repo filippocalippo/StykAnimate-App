@@ -37,6 +37,8 @@ pub fn rendering_for(smoothing: styk_platform::font_smoothing::FontSmoothing) ->
                 Order::Bgr => SubpixelOrder::Bgr,
             }),
             adjustment: Some((CONTRAST, GAMMA)),
+            // DirectWrite draws the glyph masks where there is one: Chromium's rasterizer on Windows.
+            direct_write: cfg!(windows),
         },
     }
 }
@@ -44,13 +46,16 @@ pub fn rendering_for(smoothing: styk_platform::font_smoothing::FontSmoothing) ->
 /// Reads the system's text smoothing and applies it to every window's text (`graphics::text::set_rendering`).
 ///
 /// Diagnostics for the typography check can override it through the environment: `STYK_TEXT_SUBPIXEL=0` draws
-/// grayscale, `STYK_TEXT_ADJUST=0` draws no coverage adjustment, `STYK_TEXT_CONTRAST` and `STYK_TEXT_GAMMA` set the
+/// grayscale, `STYK_TEXT_RASTERIZER=swash` draws the masks with swash instead of DirectWrite, `STYK_TEXT_ADJUST=0` draws no coverage adjustment, `STYK_TEXT_CONTRAST` and `STYK_TEXT_GAMMA` set the
 /// adjustment's parameters.
 pub fn apply_system_text_rendering() -> iced::advanced::graphics::text::Rendering {
     let mut rendering = rendering_for(styk_platform::font_smoothing::current());
     let number = |name: &str| std::env::var(name).ok().and_then(|value| value.parse::<f32>().ok());
     if std::env::var("STYK_TEXT_SUBPIXEL").is_ok_and(|value| value == "0") {
         rendering.subpixel = None;
+    }
+    if std::env::var("STYK_TEXT_RASTERIZER").is_ok_and(|value| value == "swash") {
+        rendering.direct_write = false;
     }
     if std::env::var("STYK_TEXT_ADJUST").is_ok_and(|value| value == "0") {
         rendering.adjustment = None;

@@ -1,15 +1,11 @@
-use crate::{
-    Cache, CacheKey, FontSystem, GlyphDetails, GpuCacheStatus, SwashCache, text_render::ContentType,
-};
+use crate::{Cache, CacheKey, GlyphDetails, text_render::ContentType};
 use etagere::{Allocation, BucketedAtlasAllocator, size2};
 use lru::LruCache;
 use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 use wgpu::{
-    BindGroup, DepthStencilState, Device, Extent3d, MultisampleState, Origin3d, Queue,
-    RenderPipeline, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture, TextureAspect,
-    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
-    TextureViewDescriptor,
+    BindGroup, DepthStencilState, Device, Extent3d, MultisampleState, Queue, RenderPipeline, Texture,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
 };
 
 type Hasher = BuildHasherDefault<FxHasher>;
@@ -49,7 +45,7 @@ impl InnerAtlas {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: kind.texture_format(),
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
 
@@ -108,13 +104,9 @@ impl InnerAtlas {
         self.kind.num_channels()
     }
 
-    pub(crate) fn grow(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        font_system: &mut FontSystem,
-        cache: &mut SwashCache,
-    ) -> bool {
+    /// Doubles the atlas, keeping every glyph where it is: the old texture is copied into the corner of the new one (a
+    /// glyph is never drawn again, which with a worker rasterizer would be work to wait for).
+    pub(crate) fn grow(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
         if self.size >= self.max_texture_dimension_2d {
             return false;
         }
@@ -126,59 +118,26 @@ impl InnerAtlas {
 
         self.packer.grow(size2(new_size as i32, new_size as i32));
 
-        // Create a texture to use for our atlas
-        self.texture = device.create_texture(&TextureDescriptor {
+        let texture = device.create_texture(&TextureDescriptor {
             label: Some("glyphon atlas"),
-            size: Extent3d {
-                width: new_size,
-                height: new_size,
-                depth_or_array_layers: 1,
-            },
+            size: Extent3d { width: new_size, height: new_size, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: self.kind.texture_format(),
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
 
-        // Re-upload glyphs
-        for (&cache_key, glyph) in &self.glyph_cache {
-            let (x, y) = match glyph.gpu_cache {
-                GpuCacheStatus::InAtlas { x, y, .. } => (x, y),
-                GpuCacheStatus::SkipRasterization => continue,
-            };
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("glyphon atlas growth") });
+        encoder.copy_texture_to_texture(
+            self.texture.as_image_copy(),
+            texture.as_image_copy(),
+            Extent3d { width: self.size, height: self.size, depth_or_array_layers: 1 },
+        );
+        queue.submit([encoder.finish()]);
 
-            let image = cache.get_image_uncached(font_system, cache_key).unwrap();
-
-            let height = image.placement.height as usize;
-            let (data, width) = crate::text_render::atlas_texels(&image);
-
-            queue.write_texture(
-                TexelCopyTextureInfo {
-                    texture: &self.texture,
-                    mip_level: 0,
-                    origin: Origin3d {
-                        x: x as u32,
-                        y: y as u32,
-                        z: 0,
-                    },
-                    aspect: TextureAspect::All,
-                },
-                &data,
-                TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(width as u32 * self.kind.num_channels() as u32),
-                    rows_per_image: None,
-                },
-                Extent3d {
-                    width: width as u32,
-                    height: height as u32,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
-
+        self.texture = texture;
         self.texture_view = self.texture.create_view(&TextureViewDescriptor::default());
         self.size = new_size;
 
@@ -307,17 +266,10 @@ impl TextAtlas {
         self.color_atlas.trim();
     }
 
-    pub(crate) fn grow(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        font_system: &mut FontSystem,
-        cache: &mut SwashCache,
-        content_type: ContentType,
-    ) -> bool {
+    pub(crate) fn grow(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, content_type: ContentType) -> bool {
         let did_grow = match content_type {
-            ContentType::Mask | ContentType::Lcd => self.mask_atlas.grow(device, queue, font_system, cache),
-            ContentType::Color => self.color_atlas.grow(device, queue, font_system, cache),
+            ContentType::Mask | ContentType::Lcd => self.mask_atlas.grow(device, queue),
+            ContentType::Color => self.color_atlas.grow(device, queue),
         };
 
         if did_grow {

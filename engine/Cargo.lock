@@ -380,6 +380,7 @@ dependencies = [
  "unicode-linebreak",
  "unicode-script",
  "unicode-segmentation",
+ "windows",
 ]
 
 [[package]]
@@ -2498,6 +2499,7 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "styk-platform",
+ "windows",
 ]
 
 [[package]]

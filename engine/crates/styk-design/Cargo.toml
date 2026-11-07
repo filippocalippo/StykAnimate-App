@@ -18,3 +18,7 @@ styk-platform = { path = "../styk-platform", optional = true }
 # The same Linux display backends as styk-app and styk-ui, so `-p styk-design --features widgets` builds there too.
 [target.'cfg(target_os = "linux")'.dependencies]
 iced = { workspace = true, optional = true, features = ["x11", "wayland", "wayland-dlopen", "wayland-decorations"] }
+
+# The DirectWrite mask test draws a glyph the other way, through DirectWrite's own GDI bitmap render target.
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.62", default-features = false, features = ["Win32_Graphics_DirectWrite", "Win32_Graphics_Gdi", "Win32_Foundation"] }

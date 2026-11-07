@@ -92,6 +92,10 @@ impl Sheet {
                 }
             }
             Message::Frame => {
+                if self.fonts_ready && styk_design::glyphs::pending() > 0 {
+                    // A frame that lacks glyphs the worker is still drawing is not the one to capture.
+                    self.frames = 0;
+                }
                 if !self.fonts_ready {
                     let now = Instant::now();
                     if let Some(last) = self.last_frame {

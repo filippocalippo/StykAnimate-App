@@ -5,12 +5,14 @@
 //! [etagere]: https://github.com/nical/etagere
 
 mod cache;
+mod raster;
 mod error;
 mod text_atlas;
 mod text_render;
 mod viewport;
 
 pub use cache::Cache;
+pub use raster::{glyphs_pending, set_glyph_notifier};
 pub use error::{PrepareError, RenderError};
 pub use text_atlas::{ColorMode, TextAtlas};
 pub use text_render::TextRenderer;

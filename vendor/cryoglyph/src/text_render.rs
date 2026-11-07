@@ -20,6 +20,7 @@ pub struct TextRenderer {
     pipeline: RenderPipeline,
     glyph_vertices: Vec<GlyphToRender>,
     glyphs_to_render: u32,
+    incomplete: bool,
 }
 
 impl TextRenderer {
@@ -47,7 +48,14 @@ impl TextRenderer {
             pipeline,
             glyph_vertices: Vec::new(),
             glyphs_to_render: 0,
+            incomplete: false,
         }
+    }
+
+    /// Whether the last `prepare` left glyphs out because a worker was still drawing them: the text is complete once
+    /// `glyphs_pending()` is zero and the text is prepared again.
+    pub fn incomplete(&self) -> bool {
+        self.incomplete
     }
 
     /// Prepares all of the provided text areas for rendering.
@@ -65,6 +73,8 @@ impl TextRenderer {
     ) -> Result<(), PrepareError> {
         self.staging_belt.recall();
         self.glyph_vertices.clear();
+        self.incomplete = false;
+        let direct_write = viewport.direct_write();
 
         let resolution = viewport.resolution();
 
@@ -111,9 +121,19 @@ impl TextRenderer {
                         details.last_used = color_generation;
                         details
                     } else {
-                        let Some(image) =
-                            cache.get_image_uncached(font_system, physical_glyph.cache_key)
-                        else {
+                        let image = if direct_write {
+                            match crate::raster::pick_up(&cache_key, || font_system.get_font_instance(cache_key.font_id, cache_key.font_weight, cache_key.font_optical_size)) {
+                                Some(crate::raster::Outcome::Image(image)) => Some(image),
+                                Some(crate::raster::Outcome::Unsupported) => cache.get_image_uncached(font_system, cache_key),
+                                None => {
+                                    self.incomplete = true;
+                                    None
+                                }
+                            }
+                        } else {
+                            cache.get_image_uncached(font_system, cache_key)
+                        };
+                        let Some(image) = image else {
                             continue;
                         };
 
@@ -137,13 +157,7 @@ impl TextRenderer {
                                 match inner.try_allocate(atlas_width, height) {
                                     Some(a) => break a,
                                     None => {
-                                        if !atlas.grow(
-                                            device,
-                                            queue,
-                                            font_system,
-                                            cache,
-                                            content_type,
-                                        ) {
+                                        if !atlas.grow(device, queue, content_type) {
                                             return Err(PrepareError::AtlasFull);
                                         }
 

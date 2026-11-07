@@ -33,9 +33,18 @@ pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32) -> Result<Image, S
         &mut renderer,
         &mut shell::Bus::new(),
     );
-    interface.draw(&mut renderer, &iced_theme, &renderer::Style { text_color: style.text_color }, mouse::Cursor::Unavailable);
     let physical = Size::new((bounds.width * scale).round() as u32, (bounds.height * scale).round() as u32);
-    let rgba = Headless::screenshot(&mut renderer, physical, scale, style.background_color);
+    // Glyphs a worker is drawing are left out of a frame: draw again until none is pending, then once more.
+    let mut rgba = Vec::new();
+    for attempt in 0..400 {
+        interface.draw(&mut renderer, &iced_theme, &renderer::Style { text_color: style.text_color }, mouse::Cursor::Unavailable);
+        let complete = styk_design::glyphs::pending() == 0;
+        rgba = Headless::screenshot(&mut renderer, physical, scale, style.background_color);
+        if complete && attempt > 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     Ok(Image { width: physical.width, height: physical.height, rgba })
 }
 

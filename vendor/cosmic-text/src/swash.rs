@@ -89,7 +89,8 @@ fn swash_image(
     ])
     // Select a subpixel format
     .format(if cache_key.flags.contains(CacheKeyFlags::LCD) {
-        // One sample per subpixel: a third of a pixel apart. The first channel is blue's (the mask is read blue first).
+        // One sample per subpixel: a third of a pixel apart. The first channel samples to the right of the pixel's centre,
+        // where a red subpixel of an RGB display is on the left: the mask is swapped to red first below.
         Format::CustomSubpixel([-1.0 / 3.0, 0.0, 1.0 / 3.0])
     } else {
         Format::Alpha
@@ -106,6 +107,15 @@ fn swash_image(
     })
     // Render the image
     .render(&mut scaler, cache_key.glyph_id)
+    .map(|mut image| {
+        // The mask comes out blue first: hand it over red, green, blue, as DirectWrite's does.
+        if image.content == Content::SubpixelMask {
+            for pixel in image.data.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+        }
+        image
+    })
 }
 
 fn swash_outline_commands(

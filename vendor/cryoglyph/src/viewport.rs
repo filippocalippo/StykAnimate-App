@@ -22,10 +22,13 @@ pub struct TextRendering {
     pub bgr: bool,
     /// The coverage adjustment, if any.
     pub adjustment: Option<CoverageAdjustment>,
+    /// Draw glyph masks with DirectWrite (Windows) on a worker thread instead of with swash on the calling thread.
+    pub direct_write: bool,
 }
 
 #[derive(Debug)]
 pub struct Viewport {
+    direct_write: bool,
     params: Params,
     params_buffer: Buffer,
     pub(crate) bind_group: BindGroup,
@@ -54,6 +57,7 @@ impl Viewport {
         let bind_group = cache.create_uniforms_bind_group(device, &params_buffer);
 
         Self {
+            direct_write: false,
             params,
             params_buffer,
             bind_group,
@@ -69,6 +73,7 @@ impl Viewport {
 
     /// Sets how glyphs are rasterized and blended: the order of the subpixels and the coverage adjustment.
     pub fn set_rendering(&mut self, queue: &Queue, rendering: TextRendering) {
+        self.direct_write = rendering.direct_write;
         let mut params = self.params;
         params.flags = u32::from(rendering.bgr) | (u32::from(rendering.adjustment.is_some()) << 1);
         if let Some(adjustment) = rendering.adjustment {
@@ -85,6 +90,11 @@ impl Viewport {
         queue.write_buffer(&self.params_buffer, 0, unsafe {
             slice::from_raw_parts(&self.params as *const Params as *const u8, mem::size_of::<Params>())
         });
+    }
+
+    /// Whether glyph masks come from DirectWrite on a worker thread.
+    pub fn direct_write(&self) -> bool {
+        self.direct_write
     }
 
     pub fn resolution(&self) -> Resolution {

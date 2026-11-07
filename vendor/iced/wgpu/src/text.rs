@@ -164,7 +164,8 @@ impl Storage {
                     group.should_trim = group.should_trim || upload.version != cache.version;
 
                     upload.text = Arc::downgrade(&cache.text);
-                    upload.version = cache.version;
+                    // Glyphs a worker is still drawing are missing from the upload: prepare it again next frame.
+                    upload.version = if upload.renderer.incomplete() { usize::MAX } else { cache.version };
                     upload.group_version = group.version;
                     upload.transformation = new_transformation;
 
@@ -196,11 +197,13 @@ impl Storage {
                     );
                 }
 
+                let version = if renderer.incomplete() { usize::MAX } else { 0 };
+
                 let _ = entry.insert(Upload {
                     renderer,
                     buffer_cache,
                     transformation: new_transformation,
-                    version: 0,
+                    version,
                     group_version: group.version,
                     text: Arc::downgrade(&cache.text),
                     _atlas: Arc::downgrade(&group.handle),
@@ -265,6 +268,7 @@ impl Viewport {
             cryoglyph::TextRendering {
                 bgr: rendering.subpixel == Some(crate::graphics::text::SubpixelOrder::Bgr),
                 adjustment: rendering.adjustment.map(|(contrast, gamma)| cryoglyph::CoverageAdjustment { contrast, gamma }),
+                direct_write: rendering.direct_write,
             },
         );
     }
@@ -289,6 +293,7 @@ pub struct Pipeline {
 
 impl Pipeline {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+        crate::graphics::text::install_glyph_source(cryoglyph::glyphs_pending, |notifier| cryoglyph::set_glyph_notifier(move || notifier()));
         let cache = cryoglyph::Cache::new(device);
         let atlas =
             cryoglyph::TextAtlas::with_color_mode(device, queue, &cache, format, COLOR_MODE);

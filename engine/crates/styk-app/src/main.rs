@@ -22,7 +22,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use styk_core::Launch;
-use styk_design::{Theme, warm_up, widgets};
+use styk_design::{Theme, glyphs, warm_up, widgets};
 use styk_platform::unattended::{self, Strategy};
 use styk_platform::window::{self as platform, Image, WindowError};
 use styk_trace::mark;
@@ -47,6 +47,8 @@ enum Message {
     Frame,
     /// The font system is built and holds the bundled fonts: text may be laid out.
     FontsReady,
+    /// The glyph worker has drawn glyphs: the frame this message asks for has them.
+    GlyphsReady,
     Captured(Result<Image, String>),
 }
 
@@ -84,7 +86,13 @@ impl App {
                 self.fonts_ready = true;
                 Task::none()
             }
+            Message::GlyphsReady => Task::none(),
             Message::Frame => {
+                // A frame that lacks glyphs the worker is still drawing is not the one to capture.
+                if glyphs::pending() > 0 {
+                    self.frames = 0;
+                    return Task::none();
+                }
                 self.frames += 1;
                 // The first frame's event arrives as it is about to be drawn; the second, once that draw is done and
                 // the text it shows can be laid out.
@@ -122,7 +130,7 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let opened = iced_window::open_events().map(Message::Opened);
+        let opened = Subscription::batch([iced_window::open_events().map(Message::Opened), glyphs::ready().map(|()| Message::GlyphsReady)]);
         if self.launch.screenshot.is_some() && !self.capturing {
             Subscription::batch([opened, iced_window::frames().map(|_| Message::Frame)])
         } else {
