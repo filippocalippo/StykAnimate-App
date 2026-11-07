@@ -3,7 +3,7 @@
 //! nothing in them is a command yet.
 
 use super::controls::{color, elevation};
-use super::{Message, Params};
+use super::{Message, Params, text as words};
 use iced::widget::{column, container, pin, row, space, text};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Widget as _};
 use styk_core::shell::Menu;
@@ -16,11 +16,6 @@ const OFFSET: f32 = 6.0;
 /// A menu is at least this wide (`.ui-popover`).
 const LEAST: f32 = 248.0;
 
-/// The StykAnimate menu's leading rows: the six application menus, each a submenu.
-const APPLICATION: [&str; 6] = ["File", "Edit", "View", "Joint", "Animation", "Help"];
-/// A project tab's menu: the one in front, and a resting one.
-const FRONT: [&str; 5] = ["Save", "Save as…", "Rename", "Close project", "Close saved projects"];
-const RESTING: [&str; 2] = ["Switch to this project", "Close project"];
 
 pub(crate) fn view(params: &Params<'_>, menu: Menu) -> Element<'static, Message> {
     let shell = params.shell;
@@ -28,10 +23,10 @@ pub(crate) fn view(params: &Params<'_>, menu: Menu) -> Element<'static, Message>
     let layout = shell.layout();
     let style = TextStyle::from_role(&tokens::scale::TYPE_UI);
     let (anchor, rows, submenus): (_, Vec<&str>, bool) = match menu {
-        Menu::Mark => (layout.find(|item| matches!(item, styk_core::shell::band::Item::Mark)), APPLICATION.to_vec(), true),
+        Menu::Mark => (layout.find(|item| matches!(item, styk_core::shell::band::Item::Mark)), words::APPLICATION_MENUS.to_vec(), true),
         Menu::Tab(id) => {
             let front = shell.tabs().iter().any(|tab| tab.id == id && tab.front);
-            (layout.find(|item| matches!(item, styk_core::shell::band::Item::Tab(over, _) if *over == id)), if front { FRONT.to_vec() } else { RESTING.to_vec() }, false)
+            (layout.find(|item| matches!(item, styk_core::shell::band::Item::Tab(over, _) if *over == id)), if front { words::TAB_MENU_FRONT.to_vec() } else { words::TAB_MENU_RESTING.to_vec() }, false)
         }
     };
     let Some(anchor) = anchor else { return space().boxed() };

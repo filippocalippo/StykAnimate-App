@@ -7,7 +7,7 @@ use super::controls::{color, elevation};
 use super::{Message, controls};
 use iced::advanced::text::{Ellipsis, Wrapping};
 use iced::keyboard::{self, Key, key::Named};
-use iced::widget::{button, container, mouse_area, row, space, text};
+use iced::widget::{button, container, mouse_area, pin, row, space, stack, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Shadow, Theme as IcedTheme, Widget as _};
 use styk_core::focus::FocusArea;
 use styk_core::shell::band::{Frame, TabEnd, TabLook};
@@ -54,17 +54,10 @@ fn key_of(event: &keyboard::Event) -> Option<TabKey> {
     }
 }
 
-/// The dot of a state: neutral for unsaved changes and a running save, success for a save that just landed, danger when
-/// the last save failed.
+/// The dot of a state: neutral for unsaved changes and a running save, success for a save that just landed.
 fn dot_color(palette: &tokens::Palette, view: &TabView) -> Option<Color> {
     let state = view.state?;
-    Some(color(if view.failed {
-        palette.danger_dot
-    } else if state == TabState::Saved {
-        palette.success_dot
-    } else {
-        palette.neutral_dot
-    }))
+    Some(color(if state == TabState::Saved { palette.success_dot } else { palette.neutral_dot }))
 }
 
 pub(crate) fn tab(view: &TabView, look: TabLook, frame: Frame, hover: Option<Hover>, theme: Theme) -> Element<'static, Message> {
@@ -85,10 +78,10 @@ pub(crate) fn tab(view: &TabView, look: TabLook, frame: Frame, hover: Option<Hov
     if look.name {
         let name = text(view.name.clone()).font(style.font).size(style.size).line_height(style.line()).color(fg).wrapping(Wrapping::None).ellipsis(Ellipsis::End).width(Length::Fill);
         front.push(name.boxed());
-    } else {
-        front.push(space().width(Length::Fill).boxed());
     }
-    let left = mouse_area(container(row(front).spacing(GAP).align_y(Alignment::Center).width(Length::Fill)).padding(Padding { left: PAD_START, right: GAP, ..Padding::ZERO }).center_y(Length::Fixed(frame.height)).width(Length::Fill))
+    // With the name gone the picture keeps its natural place and the state slot follows it, clipped by the tab as in the page.
+    let left_width = if look.name { Length::Fill } else { Length::Fixed(PAD_START + ART.0 + GAP) };
+    let left = mouse_area(container(row(front).spacing(GAP).align_y(Alignment::Center).width(Length::Fill)).padding(Padding { left: PAD_START, right: GAP, ..Padding::ZERO }).center_y(Length::Fixed(frame.height)).width(left_width))
         .on_press(Message::Shell(Event::TabPressed(id)))
         .on_enter(controls::hover(Hover::Tab(id)))
         .on_exit(controls::unhover())
@@ -126,7 +119,13 @@ pub(crate) fn tab(view: &TabView, look: TabLook, frame: Frame, hover: Option<Hov
         (None, None, Shadow::default())
     };
     let radius = tokens::scale::RADIUS_MD;
-    let body = container(row![left, right].align_y(Alignment::Center))
+    let content: Element<'static, Message> = if look.name {
+        row![left, right].align_y(Alignment::Center).boxed()
+    } else {
+        stack![pin(left).x(0.0), pin(right).x(PAD_START + ART.0 + GAP)].boxed()
+    };
+    let body = container(content)
+        .clip(true)
         .width(Length::Fixed(frame.width))
         .height(Length::Fixed(frame.height))
         .style(move |_| container::Style { background: background.map(Background::Color), border: Border { color: ring.map_or(Color::TRANSPARENT, |(c, _)| scaled(c, alpha)), width: ring.map_or(0.0, |(_, w)| w), radius: radius.into() }, shadow: tab_shadow, ..container::Style::default() });

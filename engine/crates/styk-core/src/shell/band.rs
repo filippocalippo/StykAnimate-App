@@ -337,10 +337,10 @@ impl Layout {
         self.items.iter().find(|placed| matches(&placed.item)).map(|placed| placed.frame)
     }
 
-    /// The tab under a point, with whether the point is on its far half.
-    pub fn tab_at(&self, x: f32) -> Option<(DocumentId, bool)> {
+    /// The tab under a point, with whether the point is on its far half: the point must be inside the tab's rectangle.
+    pub fn tab_at(&self, x: f32, y: f32) -> Option<(DocumentId, bool)> {
         self.items.iter().find_map(|placed| match placed.item {
-            Item::Tab(id, _) if x >= placed.frame.x && x < placed.frame.right() => Some((id, x >= placed.frame.x + placed.frame.width / 2.0)),
+            Item::Tab(id, _) if placed.frame.contains(x, y) => Some((id, x >= placed.frame.x + placed.frame.width / 2.0)),
             _ => None,
         })
     }
@@ -1082,9 +1082,12 @@ mod tests {
         let layout = solve(&input(1560.0, &tabs, Session::None));
         let frames: Vec<Frame> = layout.tabs().map(|(_, _, f)| f).collect();
         let (first, second) = (frames[0], frames[1]);
-        assert_eq!(layout.tab_at(first.x + 1.0), Some((id(1), false)));
-        assert_eq!(layout.tab_at(first.right() - 1.0), Some((id(1), true)));
-        assert_eq!(layout.tab_at(second.x + second.width * 0.75), Some((id(2), true)));
-        assert_eq!(layout.tab_at(2.0), None);
+        let y = first.y + 4.0;
+        assert_eq!(layout.tab_at(first.x + 1.0, y), Some((id(1), false)));
+        assert_eq!(layout.tab_at(first.right() - 1.0, y), Some((id(1), true)));
+        assert_eq!(layout.tab_at(second.x + second.width * 0.75, y), Some((id(2), true)));
+        assert_eq!(layout.tab_at(2.0, y), None);
+        assert_eq!(layout.tab_at(first.x + 1.0, first.y + first.height + 1.0), None, "below the tab is not on it");
+        assert_eq!(layout.tab_at(first.x + 1.0, first.y - 1.0), None, "above it neither");
     }
 }

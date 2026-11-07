@@ -54,11 +54,11 @@ twelve widths and three sessions are tests in `band.rs`.
   tab (`drop_index`). A press the pointer never left is a click even though the window reported no position. Arrows,
   Home and End move focus around the strip without switching, Enter and Space switch, Delete closes, F2 renames, the Menu
   key opens the tab's menu. Ctrl+Page Up and Down step through the tabs.
-- **The dot.** Saving, then unsaved changes, then "saved" for 2.2 s after a save lands; the neutral dot, the success dot,
-  and the danger dot when the last save failed. `Shell::next_deadline` says when the strip next changes by itself.
+- **The dot.** Saving, then unsaved changes, then "saved" for 2.2 s of the application clock after a save lands; the neutral dot, the success dot,
+  and and nothing more for a save that fails (the ordinary edited dot; the error policy reports why, as today). `Shell::next_deadline` says when the strip next changes by itself.
 - **Ctrl+Tab.** Pressed and released: the project used before. Held: the board of cards, most recently used first, Tab and
   the arrows move, releasing the modifier switches, Escape stays, a click switches, losing focus closes it.
-- **Home.** Pressed while it shows; no workspace is. A workspace, a tab, Undo, Redo and New send it away.
+- **Home.** Pressed while it shows; no workspace is. Home steps aside for the commands that work on the animation (`home.before`: everything but `HOME_COMMANDS`, so Export, Properties, Undo, Redo, New and the session commands clear it, Save and the menu do not), for a project brought to the front and for a project opened; a workspace change is not a command there and leaves it.
 
 ## Stand-ins until their owners land
 
@@ -80,7 +80,6 @@ Each is marked in the code and goes when its chunk does.
 
 - The window controls are 44 x 36 and centred in the band, as in the page (the S6 design said "the band's height"); the
   hit regions keep the whole band height so the snap-layouts flyout works at the top edge.
-- A failed save shows the danger dot on the tab (today's app has no tab state for it).
 - The press feedback (`transform: scale(.97)`), the hover transitions and the tab-dragging cursor are not drawn.
 - Keyboard focus reaches the mark, Home, the tab strip (one stop), New, the workspaces, history, Save, Export and the
   session buttons; the minimize and close buttons are not focus targets yet.
@@ -100,11 +99,25 @@ the same `shell::Event`s the views send; the stage's pointer and pen steps join 
 A page per scenario in Chromium (the real stylesheets, `measureBand`, `resolveTiers` and `installProjectTabs` over the real
 `index.html` header) and the native window at the same width and theme, the band's rows compared pixel by pixel: the
 widths are the wide window, each fold step of three tabs (903, 879, 851, 813, 789, 720, 610, 522, 490) and the narrowest
-(400), light and dark, plus Build, movieclip and camera sessions, one tab and twelve tabs. The scores (PSNR over the band's rows, 22 scenarios, 2026-11-07, debug build): 18.7 to 29.1 dB, never more than 5.9 % of
-pixels differing by more than 24 levels. What remains is text: Chromium draws grayscale where the native window draws
-ClearType-style text (S2c), and the dots, glyph edges and shadows differ by a pixel. Each scenario also asserts the
-window width and the fold steps Chromium applied (`expect width`, `expect folds`), all of which hold.
+(400), light and dark, plus Build, movieclip and camera sessions, one tab and twelve tabs. The references are captured the way `engine/crates/xtask/fonts-chromium.mjs` captures its own: bundled Chromium through
+Playwright with LCD text on and opaque surfaces, so its text is ClearType like the native window's. The harness is in
+`engine/crates/styk-app/automation/band-reference/` (`shots.mjs`, `make-script.mjs`, `compare.mjs`); the references and
+limits are recorded in `engine/crates/styk-app/automation/band-limits.toml` (they move to `docs/native/screens/limits.toml`
+when K-guards lands it). Scores (PSNR over the band's rows, 22 scenarios, debug build): 20.9 to 30.6 dB, never more than
+3.8 % of pixels differing by more than 24 levels; what remains is a pixel at glyph edges, dots and shadows. Each scenario
+also asserts the window width and the fold steps Chromium applied (`expect width`, `expect folds`), all of which hold.
 
-The interaction script is `engine/crates/styk-app/automation/shell-interaction.script`: three projects opened, Ctrl+Tab
-held and released, a reorder by drag, Undo and Redo on the dot, the three workspaces, Home, and a narrow window's folds.
-The Chromium side of the comparison is a harness over the real page that is not kept in the repository.
+The interaction script is `engine/crates/styk-app/automation/shell-interaction.script` (run with `--clock fixed`): three
+projects opened, Ctrl+Tab held and released, a reorder by drag, Undo and Redo on the dot, the three workspaces, Home, a
+save that landed and the 2.2 s of the clock that a script advances, and a narrow window's folds.
+
+## One clock, and refused projects
+
+Every deadline of the band (the "saved" dot's 2.2 s) and the automated run's work read the one application clock
+(`styk_services::clock::Clock`, injected into `TopBand`). `--clock fixed` gives a clock that moves only when a script
+says `advance <nanoseconds>`; the engine's own clock for budgeted reads follows it. No wall clock is read anywhere in the
+band's wiring. A project the tabs refuse (the thirteenth) is handed to a worker to be dropped through
+`styk_services::Spawner`, never dropped on the interface thread; if no worker can take it, it is kept and offered again.
+A script is read through a limit of `MAX_SCRIPT_BYTES + 1` bytes. The band's words are English literals, each at its one
+site in `styk-ui/src/shell/text.rs`, until the localisation chunk moves them to `styk_core::i18n::Label`.
+

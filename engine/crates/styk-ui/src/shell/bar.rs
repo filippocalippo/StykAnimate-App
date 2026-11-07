@@ -4,7 +4,7 @@
 //! are what the solver left, and a dragged tab's drop line sits in the gap beside the tab it would land next to.
 
 use super::controls::{self, IconButton, Segment, Tone, WordButton, color};
-use super::{Message, Params, strip};
+use super::{Message, Params, strip, text};
 use crate::band::{Controls, Hot, window_controls};
 use iced::widget::{container, pin, row, space, stack, svg};
 use iced::{Alignment, Border, Element, Length, Padding, Widget as _};
@@ -25,9 +25,9 @@ const LINE_HEIGHT: f32 = 24.0;
 
 fn name_of(workspace: Workspace) -> &'static str {
     match workspace {
-        Workspace::Animate => "Animate",
-        Workspace::Draw => "Draw",
-        Workspace::Build => "Build",
+        Workspace::Animate => text::ANIMATE,
+        Workspace::Draw => text::DRAW,
+        Workspace::Build => text::BUILD,
     }
 }
 
@@ -169,7 +169,7 @@ pub(crate) fn view(params: &Params<'_>) -> Element<'static, Message> {
                 frame.x,
                 controls::word_button(WordButton {
                     tone: if look == ExportLook::Primary { Tone::Primary } else { Tone::Ghost },
-                    label: "Export",
+                    label: text::EXPORT,
                     glyph: Some("export"),
                     folded: shape == ButtonShape::Glyph,
                     width: frame.width,
@@ -184,17 +184,17 @@ pub(crate) fn view(params: &Params<'_>) -> Element<'static, Message> {
             ),
             Item::Cancel => (
                 frame.x,
-                controls::word_button(WordButton { tone: Tone::Ghost, label: "Cancel", glyph: None, folded: false, width: frame.width, height: frame.height, hovered: hovered(Hover::Cancel), target: Hover::Cancel, press: Message::Shell(Event::Cancel), focus: ids::CANCEL, theme }),
+                controls::word_button(WordButton { tone: Tone::Ghost, label: text::CANCEL, glyph: None, folded: false, width: frame.width, height: frame.height, hovered: hovered(Hover::Cancel), target: Hover::Cancel, press: Message::Shell(Event::Cancel), focus: ids::CANCEL, theme }),
                 frame.right(),
             ),
             Item::TestRig(shape) => (
                 frame.x,
-                controls::word_button(WordButton { tone: Tone::Ghost, label: "Test rig", glyph: Some("test-rig"), folded: shape == ButtonShape::Glyph, width: frame.width, height: frame.height, hovered: hovered(Hover::TestRig), target: Hover::TestRig, press: Message::Shell(Event::TestRig), focus: ids::TEST_RIG, theme }),
+                controls::word_button(WordButton { tone: Tone::Ghost, label: text::TEST_RIG, glyph: Some("test-rig"), folded: shape == ButtonShape::Glyph, width: frame.width, height: frame.height, hovered: hovered(Hover::TestRig), target: Hover::TestRig, press: Message::Shell(Event::TestRig), focus: ids::TEST_RIG, theme }),
                 frame.right(),
             ),
             Item::Done(done, shape) => (
                 frame.x,
-                controls::word_button(WordButton { tone: Tone::Primary, label: "Done", glyph: Some("check"), folded: shape == ButtonShape::Glyph, width: frame.width, height: frame.height, hovered: hovered(Hover::Done(done)), target: Hover::Done(done), press: Message::Shell(Event::Done(done)), focus: ids::DONE, theme }),
+                controls::word_button(WordButton { tone: Tone::Primary, label: text::DONE, glyph: Some("check"), folded: shape == ButtonShape::Glyph, width: frame.width, height: frame.height, hovered: hovered(Hover::Done(done)), target: Hover::Done(done), press: Message::Shell(Event::Done(done)), focus: ids::DONE, theme }),
                 frame.right(),
             ),
             Item::Minimize => {

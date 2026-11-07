@@ -127,8 +127,6 @@ pub struct TabView {
     pub front: bool,
     /// Its dot.
     pub state: Option<TabState>,
-    /// Its last save failed.
-    pub failed: bool,
     /// It is being dragged.
     pub dragging: bool,
     /// A line shows on this side of it: the dragged tab would land there.
@@ -185,8 +183,8 @@ pub enum Event {
     New,
     /// The primary button went down on a tab.
     TabPressed(DocumentId),
-    /// The pointer moved to window x while a tab is pressed.
-    PointerMoved(f32),
+    /// The pointer moved to window position (x, y) while a tab is pressed.
+    PointerMoved(f32, f32),
     /// The primary button came up while a tab is pressed.
     PointerReleased,
     /// The drag was given up.
@@ -250,8 +248,10 @@ pub enum Event {
     SaveStarted(DocumentId),
     /// A save landed.
     SaveLanded(DocumentId, u64),
-    /// A save failed.
-    SaveFailed(DocumentId),
+    /// A save ended without landing (failed or cancelled): the error policy says why, the tab shows what it showed.
+    SaveEnded(DocumentId),
+    /// A project opened as a tab (it is in front).
+    Opened(DocumentId),
     /// A project closed.
     Closed(DocumentId),
 }
@@ -296,6 +296,38 @@ pub enum Command {
     CancelMovieclip,
     /// Finish a session.
     Done(Done),
+}
+
+/// The commands that run with Home staying where it is: they open something of their own or act on the window
+/// (`HOME_COMMANDS` in `src/home/home.mjs`; the ones the band can send are here). Every other command works on the
+/// animation, so Home steps aside before it runs.
+pub const HOME_COMMANDS: &[&str] = &[
+    "home", "tutorials", "menu", "command-palette", "settings", "privacy", "feedback", "check-updates", "release-notes", "donate", "website", "help", "about",
+    "performance", "minimize", "maximize", "close", "new-window", "open", "open-recent", "save", "save-as", "save-all", "save-and-close", "save-and-update",
+    "restart-update",
+];
+
+/// The name today's command wrapper gives what an event does, for the events that are commands (`data-action` of the
+/// band's buttons). The workspace switch and Build's Done are not commands there (`changeMode`), and neither are the
+/// tabs' own clicks: they do not run it.
+fn command_name(event: &Event) -> Option<&'static str> {
+    Some(match event {
+        Event::Home => "home",
+        Event::Mark => "menu",
+        Event::New => "new",
+        Event::Undo => "undo",
+        Event::Redo => "redo",
+        Event::Save => "save",
+        Event::Export => "export",
+        Event::Properties => "panel-toggle-properties",
+        Event::Cancel => "movieclip-cancel",
+        Event::TestRig => "rig-test",
+        Event::Done(Done::Movieclip) => "movieclip-done",
+        Event::Done(Done::Camera) => "camera-done",
+        Event::TabClose(_) => "close-project",
+        Event::TabRename(_) => "rename-project",
+        _ => return None,
+    })
 }
 
 /// The shell.
@@ -432,7 +464,6 @@ impl Shell {
                     name: document.name().to_string(),
                     front: Some(id) == front,
                     state: self.strip.saves.state(id, document.view().dirty),
-                    failed: self.strip.saves.has_failed(id),
                     dragging: drag.is_some_and(|d| d.moving && d.id == id),
                     drop: drag.and_then(|d| d.over).filter(|(over, _)| *over == id).map(|(_, side)| side),
                 }
@@ -464,7 +495,11 @@ impl Shell {
     /// Handles one event, then lays the band out again.
     pub fn handle(&mut self, documents: &mut Documents, event: Event) -> Vec<Effect> {
         let mut effects = Vec::new();
-        let keeps_menu = matches!(event, Event::Hover(_) | Event::Mark | Event::TabMenu(_) | Event::Tick(_) | Event::Resized(_) | Event::Labels(_) | Event::PointerMoved(_) | Event::SaveStarted(_) | Event::SaveLanded(..) | Event::SaveFailed(_) | Event::Report(_) | Event::Session(_));
+        // The one place Home is sent away by a command (`home.before` in `src/app.mjs`'s command wrapper).
+        if let Some(command) = command_name(&event) {
+            self.before_command(command);
+        }
+        let keeps_menu = matches!(event, Event::Hover(_) | Event::Mark | Event::TabMenu(_) | Event::Tick(_) | Event::Resized(_) | Event::Labels(_) | Event::PointerMoved(..) | Event::SaveStarted(_) | Event::SaveLanded(..) | Event::SaveEnded(_) | Event::Report(_) | Event::Session(_));
         if !keeps_menu {
             self.menu = None;
         }
@@ -473,11 +508,10 @@ impl Shell {
             Event::Mark => self.menu = if self.menu == Some(Menu::Mark) { None } else { Some(Menu::Mark) },
             Event::Home => self.home = !self.home,
             Event::New => {
-                self.home = false;
                 effects.push(Effect::Command(Command::New));
             }
             Event::TabPressed(id) => self.strip.press(id),
-            Event::PointerMoved(x) => self.strip.moved(x, &self.layout),
+            Event::PointerMoved(x, y) => self.strip.moved(x, y, &self.layout),
             Event::PointerReleased => {
                 let order: Vec<DocumentId> = documents.tabs().iter().map(|document| document.id()).collect();
                 match self.strip.released(&self.layout, &order) {
@@ -506,12 +540,10 @@ impl Shell {
             Event::TabRename(id) => effects.push(Effect::Command(Command::Rename(id))),
             Event::TabMenu(id) => self.menu = Some(Menu::Tab(id)),
             Event::Workspace(workspace) => {
-                self.home = false;
                 effects.extend(self.workspaces.choose(workspace).into_iter().map(Effect::Workspace));
             }
             Event::Report(report) => effects.extend(self.workspaces.report(report).into_iter().map(Effect::Workspace)),
             Event::Undo | Event::Redo => {
-                self.home = false;
                 if let Some(id) = documents.active().map(|document| document.id()) {
                     let can = if event == Event::Undo { self.history.undo } else { self.history.redo };
                     if can {
@@ -566,17 +598,28 @@ impl Shell {
             Event::Tick(now) => self.strip.saves.tick(now),
             Event::SaveStarted(id) => self.strip.saves.started(id),
             Event::SaveLanded(id, now) => self.strip.saves.landed(id, now),
-            Event::SaveFailed(id) => self.strip.saves.failed(id),
+            Event::SaveEnded(id) => self.strip.saves.ended(id),
+            Event::Opened(_) => self.home = false,
             Event::Closed(id) => self.strip.forget(id),
         }
         self.sync(documents);
         effects
     }
 
+    /// `home.before(command)`: a command that works on the animation sends Home away; the ones in [`HOME_COMMANDS`] leave it.
+    fn before_command(&mut self, command: &str) {
+        if !HOME_COMMANDS.contains(&command) {
+            self.home = false;
+        }
+    }
+
     fn activate(&mut self, documents: &mut Documents, id: DocumentId, effects: &mut Vec<Effect>) {
-        self.home = false;
         match documents.activate(id) {
-            Ok(true) => effects.push(Effect::Activated(id)),
+            Ok(true) => {
+                // A project brought to the front is what Home's page gives way to.
+                self.home = false;
+                effects.push(Effect::Activated(id));
+            }
             Ok(false) => {}
             Err(error) => effects.push(Effect::Refused(error)),
         }
@@ -642,10 +685,42 @@ mod tests {
         shell.handle(&mut documents, Event::Home);
         assert!(shell.home());
         assert_eq!(shell.pressed(), None);
-        // A workspace sends Home away, as a document command does.
+        // A workspace change is not a command in today's wrapper: Home stays (and no workspace is pressed).
         shell.handle(&mut documents, Event::Workspace(Workspace::Draw));
+        assert!(shell.home());
+        assert_eq!(shell.pressed(), None);
+        // A command that works on the animation sends it away.
+        shell.handle(&mut documents, Event::Export);
         assert!(!shell.home());
-        assert_eq!(shell.pressed(), Some(Workspace::Animate), "Draw is asked for, not yet entered");
+        assert_eq!(shell.pressed(), Some(Workspace::Animate), "Draw was asked for, not yet entered");
+    }
+
+    /// `HOME_COMMANDS` and `home.before` in `src/home/home.mjs`: a command that works on the animation sends Home away,
+    /// and the ones that open something of their own or act on the window leave it.
+    #[test]
+    fn export_and_the_session_commands_send_home_away_and_save_and_the_workspaces_leave_it() {
+        let mut documents = Documents::new();
+        for (event, clears) in [
+            (Event::Export, true),
+            (Event::Properties, true),
+            (Event::Cancel, true),
+            (Event::TestRig, true),
+            (Event::Done(Done::Movieclip), true),
+            (Event::Done(Done::Camera), true),
+            (Event::Undo, true),
+            (Event::Redo, true),
+            (Event::New, true),
+            (Event::Save, false),
+            (Event::Mark, false),
+            (Event::Workspace(Workspace::Draw), false),
+            (Event::Done(Done::Build), false),
+        ] {
+            let mut shell = shell(1560.0);
+            shell.handle(&mut documents, Event::Home);
+            assert!(shell.home());
+            shell.handle(&mut documents, event.clone());
+            assert_eq!(shell.home(), !clears, "{event:?}");
+        }
     }
 
     #[test]

@@ -32,6 +32,9 @@ fn order(documents: &Documents) -> Vec<DocumentId> {
     documents.tabs().iter().map(|tab| tab.id()).collect()
 }
 
+/// A height inside the tabs.
+const Y: f32 = 26.0;
+
 fn window(width: f32) -> Window {
     Window { width, height: 1000.0, ui_scale: 1.0, controls: true }
 }
@@ -144,13 +147,13 @@ fn dragging_a_tab_across_another_reorders_the_strip_and_a_click_switches() {
     let x = frames[0].x + 20.0;
     shell.handle(&mut documents, Event::TabPressed(a));
     assert!(shell.tracking());
-    shell.handle(&mut documents, Event::PointerMoved(x));
+    shell.handle(&mut documents, Event::PointerMoved(x, Y));
     assert_eq!(shell.handle(&mut documents, Event::PointerReleased), [Effect::Activated(a)]);
     assert!(!shell.tracking());
     // A drag of the first tab onto the far half of the last one puts it last, and the line shows on the way.
     shell.handle(&mut documents, Event::TabPressed(a));
-    shell.handle(&mut documents, Event::PointerMoved(x));
-    shell.handle(&mut documents, Event::PointerMoved(frames[2].right() - 4.0));
+    shell.handle(&mut documents, Event::PointerMoved(x, Y));
+    shell.handle(&mut documents, Event::PointerMoved(frames[2].right() - 4.0, Y));
     assert!(shell.tabs()[0].dragging);
     assert_eq!(shell.tabs()[2].drop, Some(styk_core::shell::strip::Side::After));
     let effects = shell.handle(&mut documents, Event::PointerReleased);
@@ -184,9 +187,8 @@ fn a_tab_shows_unsaved_changes_and_undo_and_redo_run_on_the_project_in_front() {
     // A save in progress, then landed for a moment, then quiet.
     shell.handle(&mut documents, Event::SaveStarted(a));
     assert_eq!(shell.tabs()[0].state, Some(TabState::Saving));
-    shell.handle(&mut documents, Event::SaveFailed(a));
-    assert!(shell.tabs()[0].failed);
-    assert_eq!(shell.tabs()[0].state, Some(TabState::Edited), "the project is still unsaved");
+    shell.handle(&mut documents, Event::SaveEnded(a));
+    assert_eq!(shell.tabs()[0].state, Some(TabState::Edited), "a save that did not land shows today's edited dot, nothing else");
 }
 
 #[test]
@@ -217,4 +219,51 @@ fn the_band_lays_out_one_tab_per_open_project_and_none_beyond_the_dot_step() {
     shell.handle(&mut documents, Event::Resized(window(520.0)));
     assert_eq!(shell.layout().tabs().count(), 1);
     assert!(shell.layout().find(|item| matches!(item, Item::AddTab)).is_none());
+}
+
+#[test]
+fn a_tab_brought_to_the_front_and_a_project_opened_send_home_away_but_a_workspace_does_not() {
+    let engine = engine();
+    let mut documents = Documents::new();
+    let a = open(&mut documents, &engine, "A.styk");
+    let b = open(&mut documents, &engine, "B.styk");
+    let mut shell = Shell::new(window(1560.0), Metrics::TODAY, LABELS);
+    shell.sync(&documents);
+    shell.handle(&mut documents, Event::Home);
+    shell.handle(&mut documents, Event::Workspace(Workspace::Draw));
+    assert!(shell.home(), "a workspace is not a command in today's wrapper");
+    shell.handle(&mut documents, Event::Neighbour(-1));
+    assert_eq!(documents.active().unwrap().id(), a);
+    assert!(!shell.home(), "the project that came to the front is what Home gives way to");
+    shell.handle(&mut documents, Event::Home);
+    shell.handle(&mut documents, Event::Opened(b));
+    assert!(!shell.home(), "a project opened gives way too");
+    shell.handle(&mut documents, Event::Home);
+    shell.handle(&mut documents, Event::Save);
+    assert!(shell.home(), "Save works with Home showing");
+}
+
+#[test]
+fn a_release_below_the_band_neither_clicks_nor_drops() {
+    let engine = engine();
+    let mut documents = Documents::new();
+    let a = open(&mut documents, &engine, "A.styk");
+    let b = open(&mut documents, &engine, "B.styk");
+    let c = open(&mut documents, &engine, "C.styk");
+    let mut shell = Shell::new(window(1560.0), Metrics::TODAY, LABELS);
+    shell.sync(&documents);
+    let frames: Vec<_> = shell.layout().tabs().map(|(_, _, frame)| frame).collect();
+    let below = shell.layout().height + 50.0;
+    // Dragged over the last tab's column and released on the stage: the order stays.
+    shell.handle(&mut documents, Event::TabPressed(a));
+    shell.handle(&mut documents, Event::PointerMoved(frames[0].x + 20.0, Y));
+    shell.handle(&mut documents, Event::PointerMoved(frames[2].right() - 4.0, below));
+    assert!(shell.handle(&mut documents, Event::PointerReleased).is_empty());
+    assert_eq!(order(&documents), [a, b, c]);
+    // A click that ended on the stage does not switch.
+    shell.handle(&mut documents, Event::TabPressed(a));
+    shell.handle(&mut documents, Event::PointerMoved(frames[0].x + 20.0, Y));
+    shell.handle(&mut documents, Event::PointerMoved(frames[0].x + 20.0, below));
+    assert!(shell.handle(&mut documents, Event::PointerReleased).is_empty());
+    assert_eq!(documents.active().unwrap().id(), c);
 }

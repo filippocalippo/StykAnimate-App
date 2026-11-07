@@ -2,7 +2,8 @@
 //! drag to reorder (`src/shell/project-tabs-view.mjs`, `docs/PROJECT-TABS.md`).
 //!
 //! What a tab shows is the dot: neutral for unsaved changes, never red; the success tone for a moment after a save
-//! lands (`SAVED_FOR_MS`); the danger tone when the last save failed. While a save runs the dot stays. Under the
+//! lands (`SAVED_FOR_MS`). While a save runs the dot stays. A save that fails shows the ordinary dot for unsaved changes and
+//! is reported through the error policy, not on the tab. Under the
 //! pointer, and on the tab in front while it has nothing unsaved, Close takes the dot's place. The arrow keys move focus
 //! along the tabs without switching, as switching is not free.
 
@@ -31,14 +32,12 @@ pub enum TabState {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Saves {
     saving: Vec<DocumentId>,
-    failed: Vec<DocumentId>,
     saved: Vec<(DocumentId, u64)>,
 }
 
 impl Saves {
     /// A save of the project began.
     pub fn started(&mut self, id: DocumentId) {
-        self.failed.retain(|other| *other != id);
         if !self.saving.contains(&id) {
             self.saving.push(id);
         }
@@ -47,23 +46,19 @@ impl Saves {
     /// A save landed at `now` (milliseconds on the application's clock).
     pub fn landed(&mut self, id: DocumentId, now: u64) {
         self.saving.retain(|other| *other != id);
-        self.failed.retain(|other| *other != id);
         self.saved.retain(|(other, _)| *other != id);
         self.saved.push((id, now));
     }
 
-    /// A save failed: the project is still unsaved.
-    pub fn failed(&mut self, id: DocumentId) {
+    /// A save ended without landing (it failed or was cancelled): the project is as unsaved as before, and the error
+    /// policy says why.
+    pub fn ended(&mut self, id: DocumentId) {
         self.saving.retain(|other| *other != id);
-        if !self.failed.contains(&id) {
-            self.failed.push(id);
-        }
     }
 
     /// The project closed.
     pub fn forget(&mut self, id: DocumentId) {
         self.saving.retain(|other| *other != id);
-        self.failed.retain(|other| *other != id);
         self.saved.retain(|(other, _)| *other != id);
     }
 
@@ -90,10 +85,6 @@ impl Saves {
         }
     }
 
-    /// The project's last save failed.
-    pub fn has_failed(&self, id: DocumentId) -> bool {
-        self.failed.contains(&id)
-    }
 }
 
 /// The keys a focused tab answers.
@@ -175,8 +166,8 @@ pub struct Drag {
     pub id: DocumentId,
     /// Where the pointer first was after the press (the window reports positions only as it moves).
     pub origin: Option<f32>,
-    /// Where the pointer was last.
-    pub last: Option<f32>,
+    /// Where the pointer was last, in window coordinates.
+    pub last: Option<(f32, f32)>,
     /// The pointer moved far enough: this is a drag, not a click.
     pub moving: bool,
     /// The tab under the pointer and the side of it, while dragging.
@@ -201,7 +192,7 @@ fn side(after: bool) -> Side {
 /// The tab strip's state.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Strip {
-    /// Saving, saved and failed.
+    /// Saving and saved.
     pub saves: Saves,
     drag: Option<Drag>,
 }
@@ -227,33 +218,34 @@ impl Strip {
         self.drag = Some(Drag { id, origin: None, last: None, moving: false, over: None });
     }
 
-    /// The pointer moved to window x `x` with a tab pressed.
-    pub fn moved(&mut self, x: f32, layout: &Layout) {
+    /// The pointer moved to window position (`x`, `y`) with a tab pressed.
+    pub fn moved(&mut self, x: f32, y: f32, layout: &Layout) {
         let Some(drag) = &mut self.drag else { return };
         let origin = *drag.origin.get_or_insert(x);
-        drag.last = Some(x);
+        drag.last = Some((x, y));
         if !drag.moving && (x - origin).abs() >= DRAG_THRESHOLD {
             drag.moving = true;
         }
         if drag.moving {
             // The tab being dragged shows no line on itself.
-            drag.over = layout.tab_at(x).filter(|(id, _)| *id != drag.id).map(|(id, after)| (id, side(after)));
+            drag.over = layout.tab_at(x, y).filter(|(id, _)| *id != drag.id).map(|(id, after)| (id, side(after)));
         }
     }
 
     /// The primary button came up where the pointer last was; `order` is the tabs now. A press the pointer never left
-    /// is a click on its tab.
+    /// is a click on its tab. A click or a drop counts only where the pointer is inside the tab's rectangle, as a click
+    /// and a drop do in the page: released above, below or beside the strip nothing happens.
     pub fn released(&mut self, layout: &Layout, order: &[DocumentId]) -> Dropped {
         let Some(drag) = self.drag.take() else { return Dropped::None };
         if !drag.moving {
             // A click lands on the tab it started on.
             return match drag.last {
                 None => Dropped::Click(drag.id),
-                Some(x) if layout.tab_at(x).is_some_and(|(id, _)| id == drag.id) => Dropped::Click(drag.id),
+                Some((x, y)) if layout.tab_at(x, y).is_some_and(|(id, _)| id == drag.id) => Dropped::Click(drag.id),
                 Some(_) => Dropped::None,
             };
         }
-        let Some((target, after)) = drag.last.and_then(|x| layout.tab_at(x)) else { return Dropped::None };
+        let Some((target, after)) = drag.last.and_then(|(x, y)| layout.tab_at(x, y)) else { return Dropped::None };
         let (Some(from), Some(at)) = (order.iter().position(|id| *id == drag.id), order.iter().position(|id| *id == target)) else { return Dropped::None };
         let to = drop_index(from, at, after);
         if to == from { Dropped::None } else { Dropped::Move(drag.id, to) }
@@ -290,6 +282,9 @@ mod tests {
         (solve(&input), (1..=count).map(id).collect())
     }
 
+    /// A height inside the band's tabs.
+    const MID: f32 = 26.0;
+
     fn frames(layout: &Layout) -> Vec<super::super::band::Frame> {
         layout.tabs().map(|(_, _, frame)| frame).collect()
     }
@@ -312,17 +307,43 @@ mod tests {
     }
 
     #[test]
-    fn a_save_that_fails_leaves_the_project_unsaved_and_says_so() {
+    fn a_save_that_ends_without_landing_shows_the_ordinary_unsaved_dot() {
         let mut saves = Saves::default();
         saves.started(id(2));
-        saves.failed(id(2));
-        assert!(saves.has_failed(id(2)));
-        assert_eq!(saves.state(id(2), true), Some(TabState::Edited));
+        assert_eq!(saves.state(id(2), true), Some(TabState::Saving));
+        saves.ended(id(2));
+        assert_eq!(saves.state(id(2), true), Some(TabState::Edited), "today shows edited, not a failure state");
+        assert_eq!(saves.state(id(2), false), None, "and nothing for a project with nothing unsaved");
         saves.started(id(2));
-        assert!(!saves.has_failed(id(2)), "a new attempt clears the failure");
         saves.landed(id(2), 1);
         saves.forget(id(2));
         assert_eq!(saves.state(id(2), false), None);
+    }
+
+    #[test]
+    fn a_click_or_a_drop_released_outside_the_tabs_rectangle_does_nothing() {
+        let (layout, order) = layout(3);
+        let frames = frames(&layout);
+        let below = layout.height + 40.0;
+        // A click: pressed on the first tab, released far below the band.
+        let mut strip = Strip::default();
+        strip.press(id(1));
+        strip.moved(frames[0].x + 10.0, MID, &layout);
+        strip.moved(frames[0].x + 10.0, below, &layout);
+        assert_eq!(strip.released(&layout, &order), Dropped::None, "a click ends where it began, not under the stage");
+        // A drop: dragged over the far half of the last tab's x range but released below it.
+        strip.press(id(1));
+        strip.moved(frames[0].x + 10.0, MID, &layout);
+        strip.moved(frames[2].right() - 3.0, MID, &layout);
+        strip.moved(frames[2].right() - 3.0, below, &layout);
+        assert_eq!(strip.released(&layout, &order), Dropped::None, "the drop target is the tab under the pointer, not the column it is in");
+        // The line shows only while the pointer is over the tab.
+        strip.press(id(1));
+        strip.moved(frames[0].x + 10.0, MID, &layout);
+        strip.moved(frames[1].x + 10.0, MID, &layout);
+        assert_eq!(strip.drag().and_then(|d| d.over), Some((id(2), Side::Before)));
+        strip.moved(frames[1].x + 10.0, below, &layout);
+        assert_eq!(strip.drag().and_then(|d| d.over), None);
     }
 
     #[test]
@@ -351,8 +372,8 @@ mod tests {
         let x = frames(&layout)[0].x + 20.0;
         let mut strip = Strip::default();
         strip.press(id(1));
-        strip.moved(x, &layout);
-        strip.moved(x + 2.0, &layout);
+        strip.moved(x, MID, &layout);
+        strip.moved(x + 2.0, MID, &layout);
         assert!(!strip.dragging(), "under the threshold");
         assert_eq!(strip.released(&layout, &order), Dropped::Click(id(1)));
         assert!(strip.drag().is_none());
@@ -373,7 +394,7 @@ mod tests {
         let frames = frames(&layout);
         let mut strip = Strip::default();
         strip.press(id(1));
-        strip.moved(frames[0].right() + 1.0, &layout);
+        strip.moved(frames[0].right() + 1.0, MID, &layout);
         assert!(!strip.dragging());
         assert_eq!(strip.released(&layout, &order), Dropped::None);
     }
@@ -384,13 +405,13 @@ mod tests {
         let frames = frames(&layout);
         let mut strip = Strip::default();
         strip.press(id(1));
-        strip.moved(frames[0].x + 10.0, &layout);
-        strip.moved(frames[1].x + 5.0, &layout);
+        strip.moved(frames[0].x + 10.0, MID, &layout);
+        strip.moved(frames[1].x + 5.0, MID, &layout);
         assert!(strip.dragging());
         assert_eq!(strip.drag().and_then(|d| d.over), Some((id(2), Side::Before)));
-        strip.moved(frames[1].right() - 5.0, &layout);
+        strip.moved(frames[1].right() - 5.0, MID, &layout);
         assert_eq!(strip.drag().and_then(|d| d.over), Some((id(2), Side::After)));
-        strip.moved(frames[0].x + 10.0, &layout);
+        strip.moved(frames[0].x + 10.0, MID, &layout);
         assert_eq!(strip.drag().and_then(|d| d.over), None, "no line on the tab being dragged");
     }
 
@@ -400,8 +421,8 @@ mod tests {
         let frames = frames(&layout);
         let mut strip = Strip::default();
         strip.press(id(1));
-        strip.moved(frames[0].x + 10.0, &layout);
-        strip.moved(frames[2].right() - 3.0, &layout);
+        strip.moved(frames[0].x + 10.0, MID, &layout);
+        strip.moved(frames[2].right() - 3.0, MID, &layout);
         assert_eq!(strip.released(&layout, &order), Dropped::Move(id(1), 2));
     }
 
@@ -411,16 +432,16 @@ mod tests {
         let frames = frames(&layout);
         let mut strip = Strip::default();
         strip.press(id(2));
-        strip.moved(frames[1].x + 10.0, &layout);
-        strip.moved(frames[1].x + 40.0, &layout);
+        strip.moved(frames[1].x + 10.0, MID, &layout);
+        strip.moved(frames[1].x + 40.0, MID, &layout);
         assert_eq!(strip.released(&layout, &order), Dropped::None, "onto itself");
         strip.press(id(2));
-        strip.moved(frames[1].x + 10.0, &layout);
-        strip.moved(30.0, &layout);
+        strip.moved(frames[1].x + 10.0, MID, &layout);
+        strip.moved(30.0, MID, &layout);
         assert_eq!(strip.released(&layout, &order), Dropped::None, "onto the mark");
         strip.press(id(2));
-        strip.moved(frames[1].x + 10.0, &layout);
-        strip.moved(frames[1].x + 60.0, &layout);
+        strip.moved(frames[1].x + 10.0, MID, &layout);
+        strip.moved(frames[1].x + 60.0, MID, &layout);
         strip.cancel();
         assert_eq!(strip.released(&layout, &order), Dropped::None, "a cancelled drag has no drop");
     }
@@ -430,8 +451,8 @@ mod tests {
         let (layout, _) = layout(2);
         let mut strip = Strip::default();
         strip.press(id(2));
-        strip.moved(200.0, &layout);
-        strip.moved(250.0, &layout);
+        strip.moved(200.0, MID, &layout);
+        strip.moved(250.0, MID, &layout);
         strip.forget(id(2));
         assert!(strip.drag().is_none());
     }

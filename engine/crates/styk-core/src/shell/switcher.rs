@@ -18,6 +18,34 @@ pub enum Key {
     Escape,
 }
 
+/// The keys the interface reports while the board shows (every key belongs to it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoardKey {
+    /// Tab.
+    Tab,
+    /// Left or up.
+    Back,
+    /// Right or down.
+    Forward,
+    /// Enter or Space.
+    Commit,
+    /// Escape.
+    Escape,
+}
+
+/// What a key does on the open board (`keydown` in `project-switcher.mjs`): Tab (Shift for backwards) and the arrows step
+/// whether Control is held or not, Enter and Space commit, Escape stays. Control+Tab steps again like Tab; every other
+/// key is the board's too, and does nothing.
+pub fn board_key(key: BoardKey, shift: bool) -> Option<Key> {
+    Some(match key {
+        BoardKey::Tab => Key::Step(if shift { -1 } else { 1 }),
+        BoardKey::Back => Key::Step(-1),
+        BoardKey::Forward => Key::Step(1),
+        BoardKey::Commit => Key::Commit,
+        BoardKey::Escape => Key::Escape,
+    })
+}
+
 /// What the owner does after an input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -208,6 +236,18 @@ mod tests {
         assert_eq!(switcher.pick(9), Outcome::None, "a card that is not there");
         assert_eq!(switcher.blur(), Outcome::Closed);
         assert_eq!(switcher.blur(), Outcome::None);
+    }
+
+    #[test]
+    fn the_arrows_step_the_board_with_or_without_control_and_shift_reverses_tab() {
+        // The held modifier is not an input of the mapping: today's switcher steps on an arrow either way.
+        assert_eq!(board_key(BoardKey::Forward, false), Some(Key::Step(1)));
+        assert_eq!(board_key(BoardKey::Back, false), Some(Key::Step(-1)));
+        assert_eq!(board_key(BoardKey::Tab, false), Some(Key::Step(1)));
+        assert_eq!(board_key(BoardKey::Tab, true), Some(Key::Step(-1)));
+        assert_eq!(board_key(BoardKey::Forward, true), Some(Key::Step(1)), "Shift reverses Tab only");
+        assert_eq!(board_key(BoardKey::Commit, false), Some(Key::Commit));
+        assert_eq!(board_key(BoardKey::Escape, false), Some(Key::Escape));
     }
 
     #[test]

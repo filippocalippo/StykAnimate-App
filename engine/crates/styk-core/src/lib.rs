@@ -26,4 +26,4 @@ pub mod shell;
 pub mod text_entry;
 pub mod text;
 
-pub use launch::{Launch, LaunchError, USAGE};
+pub use launch::{ClockMode, Launch, LaunchError, USAGE};

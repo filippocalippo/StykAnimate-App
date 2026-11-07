@@ -12,21 +12,24 @@
 use iced::advanced::widget::operate;
 use iced::keyboard::{self, Key, key::Named};
 use iced::{Event, Size, Subscription, Task, Widget as _, event, mouse, window};
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use styk_core::automation::{self, Expect, Script, Step, Target};
-use styk_core::documents::{DocumentId, Documents, PreparedDocument, Value};
+use styk_core::automation::{self, Expect, MAX_SCRIPT_BYTES, Script, Step, Target};
+use styk_core::documents::{DocumentId, Documents, DocumentsError, PreparedDocument, Value};
 use styk_core::focus::FocusId;
 use styk_core::shell::band::{Fold, Frame};
 use styk_core::shell::session::{ExportLook, Session};
 use styk_core::shell::strip::TabState;
-use styk_core::shell::switcher;
+use styk_core::shell::switcher::{self, BoardKey};
 use styk_core::shell::workspace::{self, Workspace};
 use styk_core::shell::{self, Effect, ids};
 use styk_design::widgets::focus;
 use styk_design::{Theme, warm_up};
 use styk_engine::{Budgets, Engine};
+use styk_services::Spawner;
+use styk_services::clock::{Clock, FixedClock};
 use styk_services::shell::Rect;
 use styk_services::shell::chrome::MaxButtonState;
 use styk_ui::shell as view;
@@ -53,8 +56,8 @@ pub enum Message {
     Opened(Handoff),
     /// A key, a button or the window losing focus; the flag says no widget used the event.
     Raw(Event, bool),
-    /// The pointer moved to this window x while a tab is pressed.
-    Cursor(f32),
+    /// The pointer moved to this window position while a tab is pressed.
+    Cursor(f32, f32),
     /// The primary button came up while a tab is pressed.
     Released,
     /// The focus state of the tree after an update.
@@ -98,7 +101,14 @@ pub struct TopBand {
     /// The projects in the order they were opened, which is how scripts number them.
     opened: Vec<DocumentId>,
     opening: usize,
-    epoch: Instant,
+    /// The one application clock: every deadline of the band and the automation's work read it.
+    clock: Arc<dyn Clock>,
+    /// The same clock when it is the fixed one, so a script can advance it.
+    fixed: Option<FixedClock>,
+    /// Where a project the tabs refused is disposed of: never on the interface thread.
+    spawner: Arc<dyn Spawner>,
+    /// Refused projects no worker could take yet; tried again on the next update.
+    parked: Vec<PreparedDocument>,
     run: Option<Run>,
     /// The band's words are measured: the layout is the real one.
     measured: bool,
@@ -110,21 +120,62 @@ enum Answer {
     Session(Session),
 }
 
-/// The engine's clock, in milliseconds since the program started.
-fn clock() -> f64 {
-    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-    START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
+/// The engine's clock for budgeted reads, in milliseconds: the application clock as the band last read it (`TopBand::now`),
+/// so the engine runs on the one clock too. It is only ever stored by the interface thread.
+static ENGINE_NOW_BITS: AtomicU64 = AtomicU64::new(0);
+
+fn engine_clock() -> f64 {
+    f64::from_bits(ENGINE_NOW_BITS.load(Ordering::Relaxed))
 }
 
-/// Opens a project file on a worker. Stand-in for K-doc's files service and engine host, which will own the engine and
-/// the reading of files.
-async fn open_file(path: PathBuf) -> Handoff {
+/// Opens a project file on a worker: the one stand-in for K-doc's files service and engine host. When that host merges,
+/// this function is what is replaced (its call sites hold only the `Handoff` it returns).
+async fn open_project(path: PathBuf) -> Handoff {
     let result = std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display())).and_then(|bytes| {
         let name = path.file_name().map_or_else(|| "Untitled".to_string(), |name| name.to_string_lossy().into_owned());
-        let engine = Engine::new(clock, Budgets::for_device(None));
-        PreparedDocument::open_bytes(&engine, Arc::from(bytes), &name, &|| false).map_err(|error| format!("{}: {}", path.display(), error.message))
+        prepare(bytes, &name).map_err(|message| format!("{}: {message}", path.display()))
     });
     Handoff(Arc::new(Mutex::new(Some(result))))
+}
+
+/// A project's bytes made ready to become a tab.
+fn prepare(bytes: Vec<u8>, name: &str) -> Result<PreparedDocument, String> {
+    let engine = Engine::new(engine_clock, Budgets::for_device(None));
+    PreparedDocument::open_bytes(&engine, Arc::from(bytes), name, &|| false).map_err(|error| error.message)
+}
+
+/// Reads at most `MAX_SCRIPT_BYTES + 1` bytes of a script and refuses one that is longer, so a huge file is never read
+/// whole.
+fn read_script(reader: impl Read) -> Result<String, String> {
+    let mut bytes = Vec::new();
+    reader.take(MAX_SCRIPT_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    if bytes.len() > MAX_SCRIPT_BYTES {
+        return Err(format!("the script is longer than {MAX_SCRIPT_BYTES} bytes"));
+    }
+    String::from_utf8(bytes).map_err(|_| "the script is not UTF-8 text".to_string())
+}
+
+/// Gives a project to a tab. A refused project is handed to a worker to be disposed of: dropping a large session on
+/// the interface thread would stall it (D7). If no worker can take it, it is kept for the next try, never dropped here.
+fn install(documents: &mut Documents, prepared: PreparedDocument, spawner: &dyn Spawner, parked: &mut Vec<PreparedDocument>) -> Result<DocumentId, DocumentsError> {
+    match documents.open(prepared) {
+        Ok(id) => Ok(id),
+        Err((error, refused)) => {
+            dispose(refused, spawner, parked);
+            Err(error)
+        }
+    }
+}
+
+fn dispose(prepared: PreparedDocument, spawner: &dyn Spawner, parked: &mut Vec<PreparedDocument>) {
+    let cell = Arc::new(Mutex::new(Some(prepared)));
+    let job_cell = cell.clone();
+    let job: styk_services::Job = Box::new(move || drop(job_cell.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take()));
+    if spawner.spawn("dispose project", job).is_err()
+        && let Some(prepared) = cell.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take()
+    {
+        parked.push(prepared);
+    }
 }
 
 fn fold_name(fold: Fold) -> &'static str {
@@ -153,15 +204,16 @@ fn workspace_named(name: &str) -> Workspace {
 }
 
 impl TopBand {
-    pub fn new(window_size: Size) -> TopBand {
+    pub fn new(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>) -> TopBand {
         let window = shell::Window { width: window_size.width, height: window_size.height, ui_scale: 1.0, controls: !cfg!(target_os = "macos") };
         let unmeasured = shell::band::Labels { animate: 0.0, draw: 0.0, build: 0.0, export: 0.0, cancel: 0.0, test_rig: 0.0, done: 0.0 };
-        TopBand { documents: Documents::new(), shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), opening: 0, epoch: Instant::now(), run: None, measured: false }
+        TopBand { documents: Documents::new(), shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), opening: 0, clock, fixed, spawner, parked: Vec::new(), run: None, measured: false }
     }
 
     /// Starts the script the command line named.
     pub fn run_script(&mut self, path: &Path) -> Result<(), String> {
-        let text = std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
+        let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
+        let text = read_script(file).map_err(|error| format!("{}: {error}", path.display()))?;
         let script = Script::parse(&text).map_err(|error| format!("{}: {error}", path.display()))?;
         let base = path.parent().map(Path::to_path_buf).unwrap_or_default();
         self.run = Some(Run { steps: script.steps, next: 0, settle: SETTLE_FRAMES, base, failures: Vec::new(), capturing: false });
@@ -173,7 +225,7 @@ impl TopBand {
         let mut task = Task::none();
         for file in files {
             self.opening += 1;
-            task = task.chain(Task::perform(open_file(file.clone()), Message::Opened));
+            task = task.chain(Task::perform(open_project(file.clone()), Message::Opened));
         }
         task
     }
@@ -224,7 +276,7 @@ impl TopBand {
         })];
         if self.shell.tracking() {
             subscriptions.push(event::listen_with(|event, _, _| match event {
-                Event::Mouse(mouse::Event::CursorMoved { position }) => Some(Message::Cursor(position.x)),
+                Event::Mouse(mouse::Event::CursorMoved { position }) => Some(Message::Cursor(position.x, position.y)),
                 Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => Some(Message::Released),
                 _ => None,
             }));
@@ -235,8 +287,11 @@ impl TopBand {
         Subscription::batch(subscriptions)
     }
 
+    /// The application clock in milliseconds; the engine's clock follows it.
     fn now(&self) -> u64 {
-        self.epoch.elapsed().as_millis() as u64
+        let millis = self.clock.now().as_millis() as u64;
+        ENGINE_NOW_BITS.store((millis as f64).to_bits(), Ordering::Relaxed);
+        millis
     }
 
     fn snapshot() -> Task<Message> {
@@ -282,7 +337,7 @@ impl TopBand {
 
     pub fn update(&mut self, message: Message) -> (Vec<Request>, Task<Message>) {
         // The tree's focus state is read after anything that can change the tree.
-        let reads_focus = !matches!(message, Message::Cursor(_) | Message::Frame | Message::Snapshot(_));
+        let reads_focus = !matches!(message, Message::Cursor(..) | Message::Frame | Message::Snapshot(_));
         let (requests, task) = match message {
             Message::Ui(view::Message::Shell(event)) => (Vec::new(), self.dispatch(event)),
             Message::Ui(view::Message::Minimize) => (vec![Request::Minimize], Task::none()),
@@ -290,19 +345,24 @@ impl TopBand {
             Message::Opened(handoff) => {
                 self.opening = self.opening.saturating_sub(1);
                 let result = handoff.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+                let mut task = Task::none();
                 match result {
-                    Some(Ok(prepared)) => match self.documents.open(prepared) {
-                        Ok(id) => self.opened.push(id),
-                        Err((error, _)) => self.fail(format!("a project could not be opened as a tab: {error}")),
+                    Some(Ok(prepared)) => match install(&mut self.documents, prepared, self.spawner.as_ref(), &mut self.parked) {
+                        Ok(id) => {
+                            self.opened.push(id);
+                            task = self.dispatch(shell::Event::Opened(id));
+                        }
+                        Err(error) => self.fail(format!("a project could not be opened as a tab: {error}")),
                     },
                     Some(Err(error)) => self.fail(error),
                     None => {}
                 }
+                self.retry_disposals();
                 self.shell.sync(&self.documents);
-                (Vec::new(), Task::none())
+                (Vec::new(), task)
             }
             Message::Raw(event, ignored) => (Vec::new(), self.raw(&event, ignored)),
-            Message::Cursor(x) => (Vec::new(), self.dispatch(shell::Event::PointerMoved(x))),
+            Message::Cursor(x, y) => (Vec::new(), self.dispatch(shell::Event::PointerMoved(x, y))),
             Message::Released => (Vec::new(), self.dispatch(shell::Event::PointerReleased)),
             Message::Snapshot(snapshot) => {
                 let synced = focus::sync(&mut self.shell.focus, &snapshot);
@@ -313,6 +373,13 @@ impl TopBand {
         };
         let task = if reads_focus { Task::batch([task, TopBand::snapshot()]) } else { task };
         (requests, task)
+    }
+
+    /// Hands the refused projects no worker could take to a worker again.
+    fn retry_disposals(&mut self) {
+        for prepared in std::mem::take(&mut self.parked) {
+            dispose(prepared, self.spawner.as_ref(), &mut self.parked);
+        }
     }
 
     fn fail(&mut self, message: String) {
@@ -328,21 +395,19 @@ impl TopBand {
         match event {
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                 if self.shell.board_open() {
-                    // While the board shows, every key belongs to it.
-                    let step = match key.as_ref() {
-                        Key::Named(Named::Tab) => Some(if modifiers.shift() { -1 } else { 1 }),
-                        Key::Named(Named::ArrowRight | Named::ArrowDown) => Some(1),
-                        Key::Named(Named::ArrowLeft | Named::ArrowUp) => Some(-1),
+                    // While the board shows, every key belongs to it: Tab and the arrows step with or without Control.
+                    let board_key = match key.as_ref() {
+                        Key::Named(Named::Tab) => Some(BoardKey::Tab),
+                        Key::Named(Named::ArrowRight | Named::ArrowDown) => Some(BoardKey::Forward),
+                        Key::Named(Named::ArrowLeft | Named::ArrowUp) => Some(BoardKey::Back),
+                        Key::Named(Named::Enter | Named::Space) => Some(BoardKey::Commit),
+                        Key::Named(Named::Escape) => Some(BoardKey::Escape),
                         _ => None,
                     };
-                    let event = match (key.as_ref(), step) {
-                        (_, Some(by)) if !modifiers.control() => E::SwitcherKey(switcher::Key::Step(by)),
-                        (Key::Named(Named::Enter | Named::Space), _) => E::SwitcherKey(switcher::Key::Commit),
-                        (Key::Named(Named::Escape), _) => E::SwitcherKey(switcher::Key::Escape),
-                        (Key::Named(Named::Tab), _) => E::CtrlTab { backwards: modifiers.shift(), held: true },
-                        _ => return Task::none(),
+                    return match board_key.and_then(|key| switcher::board_key(key, modifiers.shift())) {
+                        Some(key) => self.dispatch(E::SwitcherKey(key)),
+                        None => Task::none(),
                     };
-                    return self.dispatch(event);
                 }
                 match key.as_ref() {
                     Key::Named(Named::Tab) if modifiers.control() => self.dispatch(E::CtrlTab { backwards: modifiers.shift(), held: true }),
@@ -420,7 +485,7 @@ impl TopBand {
             Ok(match step {
                 Step::Open(path) => {
                     self.opening += 1;
-                    (Vec::new(), Task::perform(open_file(resolved(path)), Message::Opened))
+                    (Vec::new(), Task::perform(open_project(resolved(path)), Message::Opened))
                 }
                 Step::Wait(frames) => {
                     if let Some(run) = &mut self.run {
@@ -446,7 +511,8 @@ impl TopBand {
                     let (a, b) = (self.tab_frame(from)?, self.tab_frame(to)?);
                     let x0 = a.x + a.width / 2.0;
                     let x1 = if after { b.right() - 3.0 } else { b.x + 3.0 };
-                    let tasks: Vec<Task<Message>> = [E::TabPressed(from), E::PointerMoved(x0), E::PointerMoved(x1), E::PointerReleased].into_iter().map(|event| self.dispatch(event)).collect();
+                    let y = a.y + a.height / 2.0;
+                    let tasks: Vec<Task<Message>> = [E::TabPressed(from), E::PointerMoved(x0, y), E::PointerMoved(x1, y), E::PointerReleased].into_iter().map(|event| self.dispatch(event)).collect();
                     (Vec::new(), Task::batch(tasks))
                 }
                 Step::Edit(fps) => {
@@ -455,6 +521,18 @@ impl TopBand {
                     answer.result.map_err(|error| error.to_string())?;
                     self.shell.sync(&self.documents);
                     (Vec::new(), Task::none())
+                }
+                Step::Advance(nanos) => {
+                    let Some(fixed) = &self.fixed else { return Err("advance needs --clock fixed: the system clock cannot be moved".to_string()) };
+                    fixed.advance(std::time::Duration::from_nanos(nanos));
+                    // The strip's deadlines follow the clock at once, not at the next frame.
+                    let now = self.now();
+                    (Vec::new(), self.dispatch(E::Tick(now)))
+                }
+                Step::SaveLanded => {
+                    let id = self.documents.active().map(|document| document.id()).ok_or("no project is open")?;
+                    let now = self.now();
+                    (Vec::new(), self.dispatch(E::SaveLanded(id, now)))
                 }
                 Step::Expect(expectation) => {
                     self.expect(&expectation)?;
@@ -481,7 +559,7 @@ impl TopBand {
             Target::Tab(number) => {
                 let id = self.id_of(number)?;
                 let frame = self.tab_frame(id)?;
-                vec![E::TabPressed(id), E::PointerMoved(frame.x + frame.width / 2.0), E::PointerReleased]
+                vec![E::TabPressed(id), E::PointerMoved(frame.x + frame.width / 2.0, frame.y + frame.height / 2.0), E::PointerReleased]
             }
             Target::New => vec![E::New],
             Target::Home => vec![E::Home],
@@ -536,6 +614,16 @@ impl TopBand {
                 let found = self.shell.tabs().iter().find(|tab| tab.id == id).is_some_and(|tab| matches!(tab.state, Some(TabState::Edited)));
                 same(&format!("tab {n} unsaved"), dirty.to_string(), found.to_string())
             }
+            Expect::Tab(n, state) => {
+                let id = self.id_of(*n)?;
+                let found = match self.shell.tabs().iter().find(|tab| tab.id == id).and_then(|tab| tab.state) {
+                    None => "none",
+                    Some(TabState::Edited) => "edited",
+                    Some(TabState::Saving) => "saving",
+                    Some(TabState::Saved) => "saved",
+                };
+                same(&format!("tab {n}'s dot"), state.clone(), found.to_string())
+            }
             Expect::Width(width) => same("the window width", width.to_string(), format!("{}", self.shell.window().width.round() as u32)),
             Expect::Export(look) => {
                 let found = self.shell.layout().items.iter().find_map(|p| match p.item {
@@ -546,5 +634,151 @@ impl TopBand {
             }
             other => Err(format!("this build cannot check {other:?}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::keyboard::{Location, Modifiers, key::{NativeCode, Physical}};
+    use std::time::Duration;
+    use styk_core::shell::strip::TabState;
+    use styk_services::{Job, SpawnError};
+
+    const STARTUP: &[u8] = include_bytes!("../../../tests/edit/startup.document.json");
+
+    /// A spawner that keeps the jobs it was given (or refuses them), so a test sees where work would run.
+    #[derive(Default)]
+    struct Recording {
+        jobs: Mutex<Vec<(String, Job)>>,
+        refuse: bool,
+    }
+
+    impl Spawner for Recording {
+        fn spawn(&self, name: &str, job: Job) -> Result<(), SpawnError> {
+            if self.refuse {
+                return Err(SpawnError("no worker".into()));
+            }
+            self.jobs.lock().unwrap().push((name.to_string(), job));
+            Ok(())
+        }
+    }
+
+    fn prepared(name: &str) -> PreparedDocument {
+        prepare(STARTUP.to_vec(), name).expect("the fixture opens")
+    }
+
+    fn band(spawner: Arc<dyn Spawner>) -> (TopBand, FixedClock) {
+        let fixed = FixedClock::new();
+        (TopBand::new(Size::new(1560.0, 900.0), Arc::new(fixed.clone()), Some(fixed.clone()), spawner), fixed)
+    }
+
+    fn open(top: &mut TopBand, name: &str) {
+        let handoff = Handoff(Arc::new(Mutex::new(Some(Ok(prepared(name))))));
+        top.opening += 1;
+        let _ = top.update(Message::Opened(handoff));
+    }
+
+    #[test]
+    fn a_refused_project_goes_to_a_worker_to_be_dropped_not_dropped_on_the_interface_thread() {
+        let spawner = Arc::new(Recording::default());
+        let mut documents = Documents::new();
+        let mut parked = Vec::new();
+        for n in 0..styk_core::documents::MAX_OPEN_PROJECTS {
+            install(&mut documents, prepared(&format!("{n}.styk")), spawner.as_ref(), &mut parked).expect("room for twelve");
+        }
+        assert!(spawner.jobs.lock().unwrap().is_empty(), "an accepted project needs no disposal");
+        let refused = install(&mut documents, prepared("Thirteenth.styk"), spawner.as_ref(), &mut parked);
+        assert_eq!(refused, Err(DocumentsError::TabLimit));
+        let jobs: Vec<(String, Job)> = std::mem::take(&mut *spawner.jobs.lock().unwrap());
+        assert_eq!(jobs.len(), 1, "the refused session was handed to a worker");
+        assert!(parked.is_empty());
+        // Running the job is what drops it, on whichever thread the spawner chose.
+        std::thread::spawn(move || {
+            for (_, job) in jobs {
+                job();
+            }
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn when_no_worker_can_take_a_refused_project_it_is_kept_not_dropped_and_tried_again() {
+        let spawner = Arc::new(Recording { refuse: true, ..Recording::default() });
+        let mut documents = Documents::new();
+        let mut parked = Vec::new();
+        for n in 0..styk_core::documents::MAX_OPEN_PROJECTS {
+            install(&mut documents, prepared(&format!("{n}.styk")), spawner.as_ref(), &mut parked).unwrap();
+        }
+        assert!(install(&mut documents, prepared("Thirteenth.styk"), spawner.as_ref(), &mut parked).is_err());
+        assert_eq!(parked.len(), 1, "kept, to be handed over later");
+    }
+
+    #[test]
+    fn a_script_over_the_limit_is_refused_after_reading_one_byte_past_it() {
+        struct Counting(usize, std::cell::Cell<usize>);
+        impl Read for &Counting {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let left = self.0 - self.1.get();
+                let n = left.min(buffer.len());
+                buffer[..n].fill(b'#');
+                self.1.set(self.1.get() + n);
+                Ok(n)
+            }
+        }
+        let huge = Counting(10 * MAX_SCRIPT_BYTES, std::cell::Cell::new(0));
+        let error = read_script(&huge).unwrap_err();
+        assert!(error.contains("longer than"), "{error}");
+        assert_eq!(huge.1.get(), MAX_SCRIPT_BYTES + 1, "no more than one byte past the limit was read");
+        let exact = Counting(MAX_SCRIPT_BYTES, std::cell::Cell::new(0));
+        assert_eq!(read_script(&exact).unwrap().len(), MAX_SCRIPT_BYTES);
+        assert!(read_script(&b"\xff\xfe"[..]).unwrap_err().contains("UTF-8"));
+    }
+
+    #[test]
+    fn every_deadline_runs_on_the_one_injected_clock_and_only_a_fixed_clock_can_be_advanced() {
+        let (mut top, fixed) = band(Arc::new(Recording::default()));
+        open(&mut top, "A.styk");
+        open(&mut top, "B.styk");
+        assert_eq!(top.opened.len(), 2);
+        assert!(matches!(top.execute(2, Step::SaveLanded), (requests, _) if requests.is_empty()));
+        assert_eq!(top.shell.tabs()[1].state, Some(TabState::Saved), "a save landed at the clock's time");
+        // Nothing moves until the script moves the clock: a frame does not.
+        let _ = top.update(Message::Frame);
+        assert_eq!(top.shell.tabs()[1].state, Some(TabState::Saved));
+        let _ = top.execute(3, Step::Advance(2_199_999_999));
+        assert_eq!(top.shell.tabs()[1].state, Some(TabState::Saved), "2.2 s less a nanosecond");
+        let _ = top.execute(4, Step::Advance(1));
+        assert_eq!(top.shell.tabs()[1].state, None, "2.2 s on the clock the script holds");
+        assert_eq!(fixed.now(), Duration::from_millis(2200));
+        assert_eq!(engine_clock(), 2200.0, "the engine reads the same clock");
+        // With the real clock there is nothing to advance, and saying so is a failure, not a no-op.
+        let mut real = TopBand::new(Size::new(1560.0, 900.0), Arc::new(styk_services::clock::SystemClock::new()), None, Arc::new(Recording::default()));
+        real.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false });
+        let _ = real.execute(7, Step::Advance(1));
+        assert!(real.run.as_ref().unwrap().failures[0].contains("--clock fixed"));
+    }
+
+    fn arrow(named: Named, modifiers: Modifiers) -> Event {
+        Event::Keyboard(keyboard::Event::KeyPressed { key: Key::Named(named), modified_key: Key::Named(named), physical_key: Physical::Unidentified(NativeCode::Unidentified), location: Location::Standard, modifiers, text: None, repeat: false })
+    }
+
+    #[test]
+    fn arrows_step_the_board_whether_control_is_held_or_not() {
+        let (mut top, _) = band(Arc::new(Recording::default()));
+        for name in ["A.styk", "B.styk", "C.styk", "D.styk"] {
+            open(&mut top, name);
+        }
+        let _ = top.dispatch(shell::Event::CtrlTab { backwards: false, held: true });
+        let selected = |top: &TopBand| top.shell.board().and_then(|cards| cards.iter().position(|card| card.selected));
+        assert_eq!(selected(&top), Some(1));
+        // The modifier is still down as the arrow is pressed: today's switcher steps anyway.
+        let _ = top.raw(&arrow(Named::ArrowRight, Modifiers::CTRL), true);
+        assert_eq!(selected(&top), Some(2));
+        let _ = top.raw(&arrow(Named::ArrowLeft, Modifiers::CTRL), true);
+        assert_eq!(selected(&top), Some(1));
+        let _ = top.raw(&arrow(Named::ArrowDown, Modifiers::default()), true);
+        assert_eq!(selected(&top), Some(2));
     }
 }

@@ -3,7 +3,7 @@
 //! has drawn one), the name and whether the project is edited.
 
 use super::controls::{color, elevation};
-use super::{Message, Params, controls};
+use super::{Message, Params, controls, text as words};
 use iced::advanced::text::{Ellipsis, Wrapping};
 use iced::widget::{column, container, mouse_area, pin, row, space, text};
 use iced::{Alignment, Border, Color, Element, Length, Padding, Widget as _};
@@ -16,7 +16,6 @@ use styk_design::tokens;
 const WIDEST: f32 = 716.0;
 /// The popover opens this far under the tab strip.
 const OFFSET: f32 = 6.0;
-const HINT: &str = "Tab moves to the next project. Release to switch, Esc to stay.";
 
 pub(crate) fn view(params: &Params<'_>, cards: &[Card]) -> Element<'static, Message> {
     let shell = params.shell;
@@ -52,7 +51,7 @@ pub(crate) fn view(params: &Params<'_>, cards: &[Card]) -> Element<'static, Mess
                     let index = row_index * columns + column_index;
                     let art = container(space()).width(Length::Fill).height(art_height).style(move |_| container::Style::default().background(placeholder).border(Border { color: ring, width: 1.0, radius: tokens::scale::RADIUS_SM.into() }));
                     let name = text(card.name.clone()).font(name_style.font).size(name_style.size).line_height(name_style.line()).color(color(palette.text_1)).wrapping(Wrapping::None).ellipsis(Ellipsis::End).width(Length::Fill);
-                    let state = text(if card.edited { "Edited" } else { "Saved" }).font(state_style.font).size(state_style.size).line_height(state_style.line()).color(color(palette.text_3));
+                    let state = text(if card.edited { words::EDITED } else { words::SAVED }).font(state_style.font).size(state_style.size).line_height(state_style.line()).color(color(palette.text_3));
                     let body = column![art, space().height(tokens::scale::SPACE_1 - tokens::scale::SPACE_0_5), name, state].spacing(tokens::scale::SPACE_0_5);
                     let selected = card.selected;
                     let hot = hover == Some(Hover::Card(index));
@@ -75,7 +74,7 @@ pub(crate) fn view(params: &Params<'_>, cards: &[Card]) -> Element<'static, Mess
         .collect();
 
     let grid = column(rows).spacing(gap);
-    let hint = text(HINT).font(state_style.font).size(state_style.size).line_height(state_style.line()).color(color(palette.text_3));
+    let hint = text(words::SWITCHER_HINT).font(state_style.font).size(state_style.size).line_height(state_style.line()).color(color(palette.text_3));
     let line = color(palette.line_1);
     let foot = container(row![space().width(Length::Fill), hint]).padding(Padding { top: tokens::scale::SPACE_2_5, left: tokens::scale::SPACE_3, right: tokens::scale::SPACE_3, bottom: tokens::scale::SPACE_3 }).width(Length::Fill);
     let rule = container(space()).width(Length::Fill).height(1.0).style(move |_| container::Style::default().background(line));

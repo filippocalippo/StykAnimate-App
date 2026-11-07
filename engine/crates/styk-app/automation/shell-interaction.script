@@ -1,7 +1,7 @@
 styk-auto/1
 # The band's interaction check (docs/native/shell-band.md): two projects, Ctrl+Tab, a tab reorder, the workspace switch,
 # Undo and Redo. Run from the repository root:
-#   STYK_BACKGROUND_WINDOW=1 stykanimate --size 600x900 --automation engine/crates/styk-app/automation/shell-interaction.script
+#   STYK_BACKGROUND_WINDOW=1 stykanimate --size 600x900 --clock fixed --automation engine/crates/styk-app/automation/shell-interaction.script
 open ../../../tests/edit/startup.document.json
 open ../../../tests/containers/project-channels.styk
 open ../../../tests/edit/startup.document.json
@@ -54,6 +54,15 @@ expect workspace animate
 expect export primary
 click home
 expect workspace home
+
+# A save that landed shows saved for 2.2 s of the application clock, which only a script moves (--clock fixed).
+click tab:2
+save-landed
+expect tab 2 saved
+advance 2199999999
+expect tab 2 saved
+advance 1
+expect tab 2 none
 
 # A narrow window folds the band.
 resize 700 900

@@ -101,6 +101,8 @@ pub enum Expect {
     Dirty(usize, bool),
     /// Export's look: `primary` or `ghost`.
     Export(String),
+    /// A tab's dot, by number: `none`, `edited`, `saving` or `saved`.
+    Tab(usize, String),
     /// The window's width as the shell knows it, in logical pixels.
     Width(u32),
 }
@@ -134,6 +136,10 @@ pub enum Step {
     },
     /// An edit that makes the project in front unsaved: sets its frame rate.
     Edit(u32),
+    /// Move the fixed clock (`--clock fixed`) forward by this many nanoseconds; with the system clock it is an error.
+    Advance(u64),
+    /// Stand in for K-doc's save: a save of the project in front landed now.
+    SaveLanded,
     /// Check something.
     Expect(Expect),
     /// Write the window to a PNG (relative to the script).
@@ -215,8 +221,9 @@ fn expectation(words: &[&str], line: usize) -> Result<Expect, ScriptError> {
         ["dirty", n, "yes"] => Expect::Dirty(number(n, line, "dirty")?, true),
         ["dirty", n, "no"] => Expect::Dirty(number(n, line, "dirty")?, false),
         ["export", look @ ("primary" | "ghost")] => Expect::Export((*look).to_string()),
+        ["tab", n, state @ ("none" | "edited" | "saving" | "saved")] => Expect::Tab(number(n, line, "tab")?, (*state).to_string()),
         ["width", n] => Expect::Width(n.parse().map_err(|_| bad("width wants a number"))?),
-        _ => return Err(bad("expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, export <primary|ghost> or width <n>")),
+        _ => return Err(bad("expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, tab <n> <none|edited|saving|saved>, export <primary|ghost> or width <n>")),
     })
 }
 
@@ -267,6 +274,8 @@ impl Script {
                     [from, to, side @ ("before" | "after")] => Step::DragTab { from: number(from, line, "drag-tab")?, to: number(to, line, "drag-tab")?, after: *side == "after" },
                     _ => return Err(wants("<from> <to> <before|after>")),
                 },
+                "advance" => Step::Advance(words.first().and_then(|w| w.parse().ok()).ok_or_else(|| wants("a number of nanoseconds"))?),
+                "save-landed" => Step::SaveLanded,
                 "edit" => Step::Edit(words.first().and_then(|w| w.parse().ok()).ok_or_else(|| wants("a frame rate"))?),
                 "expect" => Step::Expect(expectation(&words, line)?),
                 "screenshot" if !rest.is_empty() => Step::Screenshot(PathBuf::from(rest)),
@@ -358,6 +367,15 @@ styk-auto/1
         assert!(error.message.contains("65536"), "{error}");
         assert!(Script::parse(&"wait 1
 ".repeat(MAX_SCRIPT_BYTES / 7 - 1)).is_ok());
+    }
+
+    #[test]
+    fn the_clock_and_save_steps_are_read() {
+        let script = Script::parse("advance 2200000000\nsave-landed\nexpect tab 2 saved\n").unwrap();
+        let steps: Vec<&Step> = script.steps.iter().map(|(_, step)| step).collect();
+        assert_eq!(steps, [&Step::Advance(2_200_000_000), &Step::SaveLanded, &Step::Expect(Expect::Tab(2, "saved".into()))]);
+        assert!(Script::parse("advance soon\n").is_err());
+        assert!(Script::parse("expect tab 2 sparkling\n").is_err());
     }
 
     #[test]

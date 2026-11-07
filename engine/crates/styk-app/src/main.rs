@@ -159,6 +159,7 @@ impl App {
             sheet.button_probe = Some(styk_platform::input::primary_button_down);
             sheet
         });
+        let clock_mode = launch.clock;
         App {
             sheet,
             #[cfg(feature = "devtools")]
@@ -179,7 +180,17 @@ impl App {
             wakes,
             chrome: None,
             max_button: MaxButtonState::Idle,
-            band: top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32)),
+            band: {
+                // The one application clock: the real one, or the fixed one a script advances (`--clock fixed`).
+                let (clock, fixed): (Arc<dyn styk_services::clock::Clock>, Option<styk_services::clock::FixedClock>) = match clock_mode {
+                    styk_core::ClockMode::Fixed => {
+                        let fixed = styk_services::clock::FixedClock::new();
+                        (Arc::new(fixed.clone()), Some(fixed))
+                    }
+                    styk_core::ClockMode::System => (Arc::new(styk_services::clock::SystemClock::new()), None),
+                };
+                top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, Arc::new(styk_platform::spawn::ThreadSpawner))
+            },
             capture_path: None,
             closing: false,
             logical: Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32),

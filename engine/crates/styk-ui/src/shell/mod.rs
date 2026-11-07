@@ -9,6 +9,7 @@ mod board;
 mod controls;
 mod menu;
 mod strip;
+mod text;
 
 use iced::advanced::graphics::text::Paragraph;
 use iced::advanced::text::{Alignment, Ellipsis, Paragraph as _, Shaping, Text, Wrapping};
@@ -85,13 +86,13 @@ pub fn measure_labels(_ready: Ready) -> Labels {
     };
     let (name, button) = (name_style(), button_style());
     Labels {
-        animate: width("Animate", name),
-        draw: width("Draw", name),
-        build: width("Build", name),
-        export: width("Export", button),
-        cancel: width("Cancel", button),
-        test_rig: width("Test rig", button),
-        done: width("Done", button),
+        animate: width(text::ANIMATE, name),
+        draw: width(text::DRAW, name),
+        build: width(text::BUILD, name),
+        export: width(text::EXPORT, button),
+        cancel: width(text::CANCEL, button),
+        test_rig: width(text::TEST_RIG, button),
+        done: width(text::DONE, button),
     }
 }
 
@@ -139,7 +140,7 @@ mod tests {
 
     fn shell(width: f32, session: Session, tabs: usize) -> Shell {
         let mut shell = Shell::new(Window { width, height: 900.0, ui_scale: 1.0, controls: true }, metrics(), LABELS);
-        let views = (1..=tabs as u64).map(|n| TabView { id: DocumentId::preview(n), name: format!("Project {n}"), front: n == 2.min(tabs as u64), state: (n == 2).then_some(TabState::Edited), failed: false, dragging: false, drop: None }).collect();
+        let views = (1..=tabs as u64).map(|n| TabView { id: DocumentId::preview(n), name: format!("Project {n}"), front: n == 2.min(tabs as u64), state: (n == 2).then_some(TabState::Edited), dragging: false, drop: None }).collect();
         shell.preview(Some(views));
         shell.handle(&mut styk_core::documents::Documents::new(), Event::Session(session));
         shell
