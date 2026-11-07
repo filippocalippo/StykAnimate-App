@@ -2491,6 +2491,9 @@ dependencies = [
 [[package]]
 name = "styk-core"
 version = "0.1.0"
+dependencies = [
+ "styk-services",
+]
 
 [[package]]
 name = "styk-design"
@@ -2636,7 +2639,9 @@ dependencies = [
 name = "styk-platform"
 version = "0.1.0"
 dependencies = [
+ "image",
  "raw-window-handle",
+ "styk-services",
  "windows-sys",
 ]
 
@@ -2687,6 +2692,20 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "styk-design",
+]
+
+[[package]]
+name = "styk-video"
+version = "0.1.0"
+dependencies = [
+ "pollster",
+ "sha2",
+ "styk-core",
+ "styk-engine",
+ "styk-export",
+ "styk-platform",
+ "styk-render",
+ "styk-services",
 ]
 
 [[package]]
