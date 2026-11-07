@@ -98,7 +98,8 @@ Only the offline CLI waits. Repository scenarios cover open, a headless frame an
 
 `styk profile <input> open|frame|export|<script.styk-auto> --out <new-dir> [--runs 3..32]`
 uses the core Documents seam and the normal evaluator/exporter. Export runs through `styk-export`,
-pins the document revision and writes the first run's PNG; subsequent runs must have identical
+pins the document revision, alternates bounded picture uploads with engine progress until decoding
+finishes, and writes the first run's PNG; subsequent runs must have identical
 pixel hashes. The CLI writes a profile, a bounded capture, Perfetto JSON and a short summary.
 It hashes the input rather than exposing its path or contents. Existing output directories fail.
 The export regression first exports twice through the existing CLI path to establish a byte-stable
@@ -134,7 +135,8 @@ catalogue/stage adapters. `flags` reports an empty registry until flags exist. `
 under N8; `--tracy` reports K-stage. Doctor reports tools, disk and adapter timestamp support, but
 does not enumerate or clean other agents' targets/processes. These are explicit capability errors,
 not successful placeholder runs. Default diagnostics are bounded; all xtask commands accept --json for a bounded result envelope.
-CLI profile/compare produce structured JSON directly.
+CLI profile/compare produce structured JSON directly. The measuring `xtask profile` and
+`xtask scenario` tasks explicitly run the CLI with `--release`; non-measuring tools retain the dev build.
 
 Shipping isolation has two required checks. `check-shipping-features` reads Cargo's resolved
 normal/build feature graph for each separate shipping package, default features, and the actual

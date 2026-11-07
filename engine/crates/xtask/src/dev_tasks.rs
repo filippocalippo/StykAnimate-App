@@ -152,6 +152,11 @@ fn cli(root: &Path, args: &[String]) -> Result<(), String> {
         "app-tools".into(),
         "--".into(),
     ];
+    // Both `profile` and `scenario` dispatch the measuring CLI operation here.
+    // Inspection/schema/compare commands do not measure and keep their fast dev build.
+    if args.first().is_some_and(|arg| arg == "profile") {
+        run.insert(1, "--release".into());
+    }
     run.extend_from_slice(args);
     cargo(root, run)
 }
