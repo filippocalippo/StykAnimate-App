@@ -97,3 +97,25 @@ fn a_pivot_export_that_is_cancelled_writes_nothing() {
     let refused = engine.export_document(revision, &request(), &Output::Pivot { format: "piv".into() }, &|| true);
     assert!(matches!(refused, Err(styk_engine::document_export::DocumentExportError::Cancelled)), "{refused:?}");
 }
+
+#[test]
+fn a_pivot_export_the_memory_cannot_hold_is_refused_before_it_writes_anything() {
+    use styk_engine::document_export::DocumentExportError;
+    use styk_engine::save::SaveError;
+    let file = padded_with_noise(24 << 20);
+    let (engine, revision) = edited(&file);
+    let expected = pivot(&engine, revision);
+    // The export asks for several times what the document retains (the padding, as hex and as bytes, the original, the file written):
+    // a memory of 100 MiB does not have it, and says so with the message of a save that ran out of memory.
+    let refused = styk_alloc::with_limit(100 << 20, || engine.export_document(revision, &request(), &Output::Pivot { format: "piv".into() }, &|| false));
+    match refused {
+        Err(DocumentExportError::Save(SaveError::OutOfMemory(memory))) => assert!(memory.requested > memory.available, "{memory:?}"),
+        other => panic!("expected a refusal for lack of memory, got {:?}", other.map(|made| made.bytes.len())),
+    }
+    // A refusal holds nothing back: with room the same export writes the same file.
+    let written = styk_alloc::with_limit(3 << 30, || engine.export_document(revision, &request(), &Output::Pivot { format: "piv".into() }, &|| false)).unwrap().bytes;
+    assert!(written == expected);
+    // The export in the codec's request form is not asked for the memory (the browser's path reserves nothing here).
+    let request_body = styk_alloc::with_limit(100 << 20, || engine.export_document(revision, &request(), &Output::CodecRequest { format: "piv".into() }, &|| false));
+    assert!(request_body.is_ok());
+}
