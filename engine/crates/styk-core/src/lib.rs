@@ -8,8 +8,10 @@
 //! Dependencies point one way: the core may depend on the engine crates, `styk-services` and `styk-trace`, and must never depend on
 //! iced, `styk-ui` or `styk-devtools` (`cargo xtask deps` fails the build if it does).
 
+pub mod audio;
 pub mod clipboard;
 pub mod controls;
+pub mod documents;
 pub mod drawing;
 pub mod export;
 pub mod field;

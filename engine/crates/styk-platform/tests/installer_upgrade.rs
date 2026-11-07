@@ -509,7 +509,7 @@ fn the_uninstaller_never_removes_through_a_junction() {
     let sandbox = Sandbox::new("junction");
     let a = sandbox.dir.join("Programs").join("A");
     let files = sandbox.dir.join("files-junction");
-    lay_out(&files, &[("LICENSE", "l"), ("assets\fonts\inter.ttf", "f"), ("assets\logo.svg", "s")]);
+    lay_out(&files, &[("LICENSE", "l"), ("assets\\fonts\\inter.ttf", "f"), ("assets\\logo.svg", "s")]);
     let setup = sandbox.dir.join("Setup.exe");
     build(&sandbox, &repo_root().join("packaging/windows/installer.nsi"), "2.0.0", &files, &setup, &plugins().map(|p| vec![format!("/DPLUGIN_DIR={}", p.display())]).unwrap_or_default());
     run_setup(&setup, &["/S", "/currentuser"], &a);
@@ -541,7 +541,7 @@ fn the_uninstaller_never_removes_through_a_junction() {
     let status = through.status().unwrap();
     assert_eq!(status.code(), Some(7), "an uninstaller run through a link refuses");
     assert!(real.join("StykAnimate.exe").exists() && real.join("StykAnimate.files").exists(), "nothing behind the link was removed");
-    assert!(sandbox.registry.key_exists(&format!("{UNINSTALL}\{APP_GUID}")), "and the registration is untouched");
+    assert!(sandbox.registry.key_exists(&format!("{UNINSTALL}\\{APP_GUID}")), "and the registration is untouched");
 }
 
 /// A release server for one version: the "latest" alias redirects to the tag; the feed, its signature and the Setup are

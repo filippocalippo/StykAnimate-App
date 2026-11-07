@@ -8,6 +8,7 @@
 //! It must never depend on the engine, the core, a toolkit or an OS crate. A service is added when a chunk first
 //! needs it, not before.
 
+pub mod audio;
 pub mod cancel;
 pub mod clock;
 pub mod input;

@@ -646,24 +646,32 @@ mod tests {
         let dir = root.join("1.2.0");
         fs::create_dir_all(&dir).unwrap();
         let _holder = try_lock(&dir.join(LOCK_FILE)).unwrap().expect("the lock was free");
-        // The bound is on the cancel, not on the run: how long the wait loop takes to notice a cancel and return, from the moment
-        // the cancel is signalled. How long the polls before it took depends on the load of the machine and is not measured.
-        let signalled: Cell<Option<Instant>> = Cell::new(None);
-        let polls = Cell::new(0);
-        let outcome = stage(&server, &root).obtain("v1.2.0", "1.2.0", &info, &mut |_, _| {}, &|| {
-            polls.set(polls.get() + 1);
-            if polls.get() > 5 {
-                if signalled.get().is_none() {
-                    signalled.set(Some(Instant::now()));
-                }
-                return true;
+        // The bound is on the cancel, not on the run: another thread signals the cancel while the caller waits on the lock,
+        // and the time from that instant to the return is measured. How long the wait before it took (it depends on the
+        // load of the machine) is not. A stall of the machine can delay one measurement past the bound; a wait loop that has
+        // become slow is slow every time, at the same phase, so the best of three is the measure.
+        let mut best = Duration::MAX;
+        for _ in 0..3 {
+            let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let signalled = std::sync::Arc::new(Mutex::new(None::<Instant>));
+            let signaller = {
+                let (cancel, signalled) = (cancel.clone(), signalled.clone());
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(400));
+                    *signalled.lock().unwrap() = Some(Instant::now());
+                    cancel.store(true, Ordering::SeqCst);
+                })
+            };
+            let outcome = stage(&server, &root).obtain("v1.2.0", "1.2.0", &info, &mut |_, _| {}, &|| cancel.load(Ordering::SeqCst));
+            let returned = Instant::now();
+            signaller.join().unwrap();
+            assert_eq!(outcome, Err(StageError::Cancelled));
+            best = best.min(returned.duration_since(signalled.lock().unwrap().expect("the cancel was signalled")));
+            if best < Duration::from_secs(1) {
+                break;
             }
-            false
-        });
-        let returned = Instant::now();
-        assert_eq!(outcome, Err(StageError::Cancelled));
-        let honoured = returned.duration_since(signalled.get().expect("the cancel was signalled"));
-        assert!(honoured < Duration::from_secs(1), "a cancel took {honoured:?} to be honoured");
+        }
+        assert!(best < Duration::from_secs(1), "a cancel took {best:?} to be honoured, three times");
         assert_eq!(server.file_hits.load(Ordering::SeqCst), 0, "a live holder is never raced");
         let _ = fs::remove_dir_all(root);
     }
