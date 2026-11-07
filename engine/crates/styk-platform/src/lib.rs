@@ -21,3 +21,11 @@ pub mod window;
 pub mod fonts;
 #[cfg(windows)]
 pub mod windows;
+#[cfg(all(windows, feature = "dev-control"))]
+mod control_windows;
+#[cfg(all(windows, feature = "dev-control"))]
+pub use control_windows::LocalControl;
+#[cfg(all(not(windows), feature = "dev-control"))]
+mod control_unavailable;
+#[cfg(all(not(windows), feature = "dev-control"))]
+pub use control_unavailable::LocalControl;
