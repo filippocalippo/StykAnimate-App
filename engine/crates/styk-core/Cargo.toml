@@ -5,3 +5,11 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+styk-doc = { path = "../styk-doc" }
+unicode-normalization = "=0.1.23"
+
+[dev-dependencies]
+sha2 = "0.10"
+zstd = "0.13"
