@@ -52,9 +52,9 @@ Reclamation of buffers never happens on the output thread (see Handoff).
 ## The mix plan
 
 `MixPlan` = the audible clips (`audibleClips`: track not muted, soloed if any is, `track.gain > 0`, `clip.gain > 0`,
-`gain = clip.gain * track.gain`) **in document order**, each with its source, a start-sorted index that only finds
-**candidates** (clips that can overlap a block); the candidates are then mixed in document order. This is the fix for review
-finding 3: the sum rounds to `f32` after each contribution, so order changes bits (amplitudes 1, 2^-24 and -1 starting
+`gain = clip.gain * track.gain`) **in document order**, each with its source. A block is a scan of the clips in that order
+(at most 4096 of them, microseconds per block; a start-sorted index would only find candidates and was not needed). This is
+the fix for review finding 3: the sum rounds to `f32` after each contribution, so order changes bits (amplitudes 1, 2^-24 and -1 starting
 at .02, 0 and .01 give `[0, 0]` at sample 1440 in document order and `5.96e-8` sorted by start). The three-clip case is a
 golden. The plan is immutable and shared by `Arc`; building it is a worker job.
 
@@ -129,7 +129,10 @@ the thread runs in the MMCSS "Pro Audio" class.
 ### Stream driver and the three kinds of stop
 
 One `StreamDriver` (in `styk-services`) holds the protocol and runs against an `Endpoint` (WASAPI, or the fake). Per wake it
-reads the padding, asks the renderer for `available` frames, writes them, publishes the clock cell. The renderer answers
+first lets the renderer **apply a waiting command** (`RenderSource::poll`), so a stop or a new play takes effect at the next
+wake even when the device buffer is full and has no room for a block (found by the fake: the first version asked only when
+there was room, and a stop waited for the buffer to drain); then it reads the padding, asks the renderer for the free frames,
+writes them and publishes the clock cell. The renderer answers
 `Continue`, `Restart` or `Idle`:
 
 | Kind | What happens to what is queued | Used for |
@@ -184,8 +187,8 @@ The output thread never locks, allocates, frees a large block or waits.
 
 ## Export
 
-`OfflineMixer` mixes a range in 12,000-frame chunks with the same `mix` (the same code, the same order), for the video
-export (S3) to mux. `styk audio <project> <out.wav> [--start s] [--duration s]` mixes a document's soundtrack to a float32
+`OfflineMixer` mixes a range in 12,000-frame chunks with the same `mix` (the same code, the same order); it is the
+`AudioSource` that `styk_core::export::flow::run_video_export` (S3) streams to the encoder. `styk audio <project> <out.wav> [--start s] [--duration s]` mixes a document's soundtrack to a float32
 WAV the way `pcmWave` writes it; it is how the goldens are checked end to end.
 
 ## Waveform cache key
@@ -206,4 +209,13 @@ by key; undo and redo return the same key and hit the same entry. The cache is b
 | Clock across nonzero starts, seeks, loops, silence, stalls, underruns, units (frequency 44100, 96000, 10 MHz), 44.1/48/96 kHz and multichannel endpoints | `styk-core` and `styk-services` tests with the fake device |
 | Handoff: stop priority, stale prepare, saturated mailbox, reclamation off the output thread | `styk-core` tests |
 | Memory: oversubscription, cancellation, concurrent prepares, resident bytes | `styk-core` tests |
-| Real device: 44.1/48/96 kHz endpoints on this machine, stress under frame preparation, decoding and an export, scrub latency with a time-coded signal | `styk-platform` tests, `--ignored`, loopback capture |
+| Real device: the endpoint this machine has (format, path, period), the clock against a loopback capture of clicks, stress under load, decoding and an export, scrub latency with a time-coded signal | `styk-cli` tests (`--features app-tools`, `--ignored`), loopback capture of the same endpoint |
+| The FFmpeg decoder: today's arguments and bytes, limits, cancel and timeout waking a child that never exits, temporary folders swept | `styk-platform` test `audio_decode` (the bundled FFmpeg; it fails, not skips, without it) |
+| A saved project's soundtrack through `styk audio` equals the goldens byte for byte | `styk-cli` test `audio_cli` |
+
+## Notes for the wiring
+
+- `WasapiOutput::open` waits for the device thread to report the opened stream (tens of milliseconds, more with a slow driver):
+  the app builds its `AudioTransport` on a job thread, never in `update`/`view` (D7).
+- Children of the decoder die with the app through the job object that `styk_platform::video::process::spawn` joins them to
+  (S3's chunk); the audio decoder uses that function and adds none of its own.

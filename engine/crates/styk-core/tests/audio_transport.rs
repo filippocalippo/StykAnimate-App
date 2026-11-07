@@ -8,7 +8,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use styk_core::audio::wav::parse_wave;
-use styk_core::audio::{pcm_wave, AudioState, AudioTransport, Event, MediaClock, MixPlan, PlanClip, SourceBytes, Then, WavSource, WallClock};
+use styk_core::audio::{pcm_wave, Budget, AudioState, CACHE_BYTES, AudioTransport, Event, MediaClock, MixPlan, PlanClip, SourceBytes, Then, WavSource, WallClock};
 use styk_services::audio::clock::Reading;
 use styk_services::audio::fake::{FakeConfig, FakeHandle, FakeOutput};
 use styk_services::audio::{AudioDecoder, AudioError, HostClock};
@@ -682,4 +682,47 @@ fn a_decode_refused_by_the_budget_never_allocates_its_output() {
     assert!(matches!(result.err(), Some(AudioError::OverBudget { .. })));
     assert_eq!(store.budget().used(), 0);
     assert_eq!(decoder.calls.load(Ordering::SeqCst), 0, "refused before the decoder was started: the estimate alone does not fit");
+}
+
+#[test]
+fn at_the_real_limit_two_thirty_minute_recordings_fit_and_a_third_is_refused_with_todays_message() {
+    use styk_core::audio::store::decoded_bytes;
+    // Three 30-minute recordings are about 989 MiB decoded, over the 768 MiB limit (review finding 5); nothing is allocated here,
+    // the budget counts.
+    let budget = Budget::new(CACHE_BYTES);
+    let thirty_minutes = decoded_bytes(1800.0);
+    let first = budget.reserve(thirty_minutes).expect("one fits");
+    let _second = budget.reserve(thirty_minutes).expect("two fit (691 MB of 805 MB)");
+    let refused = budget.reserve(thirty_minutes).err().expect("three do not");
+    assert!(matches!(refused, AudioError::OverBudget { limit, .. } if limit == CACHE_BYTES));
+    assert_eq!(refused.to_string(), "the active audio mix exceeds the 768 MiB limit");
+    assert_eq!(budget.used(), 2 * thirty_minutes, "a refusal takes nothing");
+    drop(first);
+    assert!(budget.reserve(thirty_minutes).is_ok(), "what was given back can be used again");
+}
+
+#[test]
+fn a_stall_stops_the_sound_and_the_restart_re_anchors_at_the_current_tick() {
+    let audio = state(&[("a", &tone(4.0), 4.0)], &[("a", 0.0, 0.0, 4.0, 1.0)]);
+    let mut rig = rig(config());
+    rig.transport.play_range(&audio, 0.0, 4.0);
+    rig.until_started();
+    rig.fake.advance_ms(400);
+    let (before, _) = rig.running().unwrap();
+    // The next frame is not ready: the transport stops the audio and holds the frame for half a second.
+    rig.transport.stop();
+    rig.fake.advance_ms(500);
+    assert_eq!(rig.transport.media_time(), None);
+    assert_eq!(rig.transport.reading(), Reading::Stopped);
+    assert_eq!(rig.fake.queued_frames(), 0);
+    // The frame is ready: play again from the tick the frame holds. The clock is valid again after the start latency.
+    let tick = (before / RATE * 24.0).floor() / 24.0;
+    rig.transport.play_range(&audio, tick, 4.0);
+    rig.until_started();
+    let restarted_at = rig.fake.host_ns();
+    rig.fake.advance_ms(1);
+    assert_eq!(rig.transport.reading(), Reading::Starting);
+    rig.fake.advance(restarted_at + 20_000_000 + 80_000_000 - rig.fake.host_ns());
+    let (sample, held) = rig.running().unwrap();
+    assert!(!held && (sample - (tick * RATE + 80.0 * 48.0)).abs() <= 2.0, "{sample} from tick {tick}");
 }

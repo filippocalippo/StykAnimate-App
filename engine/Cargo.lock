@@ -2466,6 +2466,7 @@ dependencies = [
  "pollster",
  "rayon",
  "sha2",
+ "styk-core",
  "styk-doc",
  "styk-edit",
  "styk-engine",
@@ -2473,8 +2474,11 @@ dependencies = [
  "styk-export",
  "styk-formats",
  "styk-piv",
+ "styk-platform",
  "styk-raster",
  "styk-render",
+ "styk-services",
+ "windows",
 ]
 
 [[package]]
@@ -2643,6 +2647,7 @@ dependencies = [
  "image",
  "raw-window-handle",
  "styk-services",
+ "windows",
  "windows-sys",
 ]
 
