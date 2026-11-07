@@ -27,14 +27,14 @@ struct EngineHost {
     engine: Option<styk_engine::Engine>,
     export_path: Option<std::path::PathBuf>,
     export_hash: Arc<std::sync::Mutex<Option<String>>>,
+    budgets: styk_engine::Budgets,
 }
 impl Host for EngineHost {
     fn step(&mut self, step: &Step, _: Duration) -> Result<(), String> {
         match step {
             Step::Open => {
                 MEASUREMENT_CLOCK.with(|clock| *clock.borrow_mut() = Some(self.clock.clone()));
-                let engine =
-                    styk_engine::Engine::new(engine_clock, styk_engine::Budgets::for_device(None));
+                let engine = styk_engine::Engine::new(engine_clock, self.budgets);
                 let size = std::fs::metadata(&self.path)
                     .map_err(|e| e.to_string())?
                     .len();
@@ -130,13 +130,18 @@ impl Host for EngineHost {
                     styk_export::Smoothing::Edges,
                     styk_export::settings::MAX_PIXELS,
                 )?;
-                frames.decode_images();
-                while engine.step() {}
                 let mut renderer = styk_export::CpuExport::new(settings, styk_export::TILE_SIDE);
-                renderer.upload_images(
-                    &generation.assets,
-                    frames.take_images(usize::MAX).iter().cloned(),
-                );
+                renderer.use_assets(generation.assets.clone());
+                frames.decode_images();
+                while frames.images_pending() != 0 {
+                    // Taking a batch releases pending-picture admission and schedules the next
+                    // decodes. Do not wait for all decoding before consuming that bounded queue.
+                    // The engine admits one oversized picture alone, as in the normal export path.
+                    renderer.upload_images(&generation.assets, frames.take_images(4 * 1024 * 1024));
+                    if frames.images_pending() != 0 && !engine.step() {
+                        return Err("export picture decoding made no progress".into());
+                    }
+                }
                 let tick = document.view().tick.max(0.) as u32;
                 let frame = frames.take(tick).ok_or("export frame unavailable")?;
                 let pixels = renderer.frame(doc, &frame.list, frame.camera.as_ref(), false)?;
@@ -295,6 +300,7 @@ fn profile(args: &[String]) -> Result<bool, String> {
                 engine: None,
                 export_path: (run == 0).then(|| out.join("export.png")),
                 export_hash: export_hash.clone(),
+                budgets: styk_engine::Budgets::for_device(None),
             },
         )?;
         let deadline = clock.now() + Duration::from_secs(120);
@@ -530,5 +536,65 @@ pub fn png_compare(args: &[String]) -> i32 {
     match run(args) {
         Ok(changed) => i32::from(changed),
         Err(e) => error(&e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn profiled_export_drains_pictures_under_pressure() {
+        fn export(budget: usize) -> String {
+            let clock: Arc<dyn Clock> = Arc::new(SystemClock::new());
+            let hash = Arc::new(std::sync::Mutex::new(None));
+            let mut host = EngineHost {
+                path: Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/data/profile-pictures.json")
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+                documents: styk_core::documents::Documents::new(),
+                clock,
+                engine: None,
+                export_path: None,
+                export_hash: hash.clone(),
+                budgets: styk_engine::Budgets {
+                    picture_bytes: budget,
+                    ..styk_engine::Budgets::for_device(None)
+                },
+            };
+            host.step(&Step::Open, Duration::ZERO).unwrap();
+            let generation = host.engine.as_ref().unwrap().generation().unwrap();
+            assert_eq!(generation.prepared.doc.images.len(), 3);
+            let decoded: Vec<_> = generation
+                .prepared
+                .doc
+                .images
+                .iter()
+                .map(|picture| {
+                    image::load_from_memory(&picture.bytes)
+                        .unwrap()
+                        .to_rgba8()
+                        .as_raw()
+                        .len()
+                })
+                .collect();
+            assert!(decoded.iter().all(|bytes| *bytes <= 512));
+            assert!(
+                decoded.iter().sum::<usize>() > 512,
+                "fixture must exceed the pressure budget"
+            );
+            host.step(&Step::Export, Duration::ZERO).unwrap();
+            let result = hash.lock().unwrap().take().unwrap();
+            result
+        }
+        // Three 8x8 RGBA pictures exceed 512 bytes; each fits individually.
+        let first = export(4096);
+        assert_eq!(first, export(4096), "old-versus-old pixel baseline");
+        assert_eq!(
+            first,
+            export(512),
+            "all pictures must survive bounded handoff"
+        );
     }
 }
