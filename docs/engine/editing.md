@@ -720,7 +720,7 @@ it on the editor, for every document.
   An entry's cost (what redoing it needs) follows the entry, also when a full history displaces its oldest to take it (`HistoryMarks`: the newest
   revision tells a new entry from a displaced one). A retained scene's replacements keep naming only figures their cut pose still holds (`prune_patches`).
   The copy a call is given of another session's document (leaving a clip) and the copy the open of a tree makes are sized from what they allocate
-  (`Value::unshared_cost`: every packed array, and the containers that hold one), not from the text, which says little of a tree of many small arrays.
+  (`Value::unshared_cost`: every packed array, the containers that hold one, and the list of copies every container allocates while it looks), not from the text, which says little of a tree of many small arrays or strings.
   A figure that is not a drawing cel pasted or imported while a drawing layer is active is placed on it, as it has always been; the repair opening makes
   of a figure assigned to a drawing layer moves only one that a frame the layer keys shows beside its cel (what opening refuses), so a save opens as written.
   Freeing a session starts the engine's drain of closed documents where it has no worker threads (`engine.pump`).

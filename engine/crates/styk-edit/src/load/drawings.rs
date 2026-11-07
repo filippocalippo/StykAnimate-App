@@ -272,7 +272,7 @@ fn refused_on_drawing_layers(report: &Value, drawing_layers: &HashSet<String>, d
                 .filter_map(|object| {
                     let uid = object.get("unique_id").and_then(property_name)?;
                     let assigned = get(assignments, &uid).is_some_and(|layer| layer.as_str() == Some(id.as_str()));
-                    assigned.then(|| (uid, num(object.get("figure_type_id")).is_some_and(|kind| drawn.contains(&kind.to_bits()))))
+                    assigned.then(|| (uid, num(object.get("figure_type_id")).is_some_and(|kind| drawn.contains(&id_key(kind)))))
                 })
                 .collect();
             if here.len() > 1 || here.iter().any(|(_, cel)| !cel) {
@@ -296,14 +296,14 @@ pub(super) fn repair_assignments(report: &mut Value) -> usize {
     }
     let default = path(Some(report), &["_styk", "layers", "defaultLayerId"]).and_then(Value::as_str).filter(|id| !drawing_layers.contains(*id)).map(str::to_string);
     let Some(default) = default else { return 0 };
-    let drawn: HashSet<u64> = items(report.get("figure_types")).iter().filter(|f| truthy(path(Some(f), &["_styk", "drawing"]))).filter_map(|f| num(f.get("figure_type_id")).map(f64::to_bits)).collect();
+    let drawn: HashSet<u64> = items(report.get("figure_types")).iter().filter(|f| truthy(path(Some(f), &["_styk", "drawing"]))).filter_map(|f| num(f.get("figure_type_id")).map(id_key)).collect();
     let mut figures: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     let frames = items(report.get("keyframes")).into_iter().chain(entries(path(Some(report), &["_styk", "frameSources"])).into_iter().map(|(_, frame)| frame.clone()));
     for frame in frames {
         for object in items(frame.get("objects")) {
             if let (Some(uid), Some(type_id)) = (object.get("unique_id").and_then(property_name), num(object.get("figure_type_id"))) {
                 let entry = figures.entry(uid).or_insert(true);
-                *entry &= drawn.contains(&type_id.to_bits());
+                *entry &= drawn.contains(&id_key(type_id));
             }
         }
     }
@@ -320,4 +320,39 @@ pub(super) fn repair_assignments(report: &mut Value) -> usize {
         }
     }
     wrong.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A project whose drawing layer keys a frame that shows its cel: the cel's definition has the figure id 0, and the instance in the frame
+    /// names it -0 (both are the number zero, and opening takes them for one figure).
+    fn project() -> Value {
+        let mut report = styk_doc::json::parse(
+            br#"{"figure_types":[{"figure_type_id":0,"segments":[],"_styk":{"drawing":{"version":2,"celId":"cel-a","pixelsPerUnit":1,"revision":0,"bounds":null}}}],
+                "keyframes":[{"_styk":{"frameId":"f1"},"objects":[{"unique_id":5,"figure_type_id":0}]}],
+                "_styk":{"layers":{"byId":{"layer-1":{"name":"Layer 1"},"layer-2":{"name":"Layer 2","drawing":{"version":1}}},"defaultLayerId":"layer-1","assignments":{"5":"layer-2"}},
+                  "layerSheet":{"tracks":{"layer-2":{"keys":[{"id":"cell-1","tick":0,"value":{"frameId":"f1"}}]}}}}}"#,
+        ).unwrap();
+        let objects = report.make_obj().unwrap().get_mut("keyframes").unwrap().make_arr().unwrap()[0].make_obj().unwrap().get_mut("objects").unwrap().make_arr().unwrap();
+        objects[0].make_obj().unwrap().set("figure_type_id", Value::Num(-0.0));
+        report
+    }
+
+    #[test]
+    fn a_cel_whose_instance_names_it_with_a_signed_zero_stays_on_its_drawing_layer() {
+        let mut report = project();
+        assert_eq!(repair_assignments(&mut report), 0, "the cel is a cel: nothing is moved");
+        assert_eq!(report.path(&["_styk", "layers", "assignments", "5"]).and_then(Value::as_str), Some("layer-2"));
+    }
+
+    #[test]
+    fn a_figure_that_is_not_a_cel_is_still_moved_off_a_drawing_layer_when_opening_refuses_it() {
+        let mut report = project();
+        // The definition is no cel any more: the keyed frame shows a figure beside no cel, which opening refuses.
+        report.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap()[0].make_obj().unwrap().remove("_styk");
+        assert_eq!(repair_assignments(&mut report), 1);
+        assert_eq!(report.path(&["_styk", "layers", "assignments", "5"]).and_then(Value::as_str), Some("layer-1"));
+    }
 }
