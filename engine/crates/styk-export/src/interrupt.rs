@@ -1,4 +1,4 @@
-//! A way to end an export frame that is waiting for the GPU.
+//! A way to end an export frame that is waiting for the GPU, and the place a failing wait reports to.
 //!
 //! The wait for a frame's read-back is a wait on a condition variable that the mapping callbacks and
 //! [`Interrupt::interrupt`] both notify, so a cancel from any thread wakes it at once; the GPU's own wait
@@ -17,6 +17,8 @@ struct State {
     expected: usize,
     completed: usize,
     error: Option<String>,
+    /// A failure of the wait itself (the device was lost, the wait errored): terminal, and it wakes the producer at once.
+    failure: Option<String>,
 }
 
 #[derive(Default)]
@@ -51,7 +53,18 @@ impl Interrupt {
 
     /// Starts waiting for `expected` completions.
     pub fn expect(&self, expected: usize) {
-        *self.latch.state.lock().unwrap_or_else(|e| e.into_inner()) = State { expected, completed: 0, error: None };
+        let mut state = self.latch.state.lock().unwrap_or_else(|e| e.into_inner());
+        let failure = state.failure.take();
+        *state = State { expected, completed: 0, error: None, failure };
+    }
+
+    /// The wait for the GPU failed: every wait, now and later, ends with this message. Pending mapping callbacks that
+    /// will never come no longer hold the producer.
+    pub fn fail(&self, message: String) {
+        let mut state = self.latch.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.failure.get_or_insert(message);
+        drop(state);
+        self.latch.changed.notify_all();
     }
 
     /// One completion (a mapped read-back), or its error.
@@ -71,6 +84,9 @@ impl Interrupt {
         loop {
             if self.is_interrupted() {
                 return Err(INTERRUPTED.to_string());
+            }
+            if let Some(failure) = &state.failure {
+                return Err(failure.clone());
             }
             if state.completed >= state.expected {
                 return state.error.take().map_or(Ok(()), Err);
@@ -105,6 +121,24 @@ mod tests {
         interrupt.expect(1);
         interrupt.completed(Err("device lost".into()));
         assert_eq!(interrupt.wait(), Err("device lost".to_string()));
+    }
+
+    #[test]
+    fn a_failure_of_the_wait_ends_it_at_once_and_stays() {
+        let interrupt = Interrupt::new();
+        interrupt.expect(4);
+        let (sender, result) = std::sync::mpsc::channel();
+        {
+            let interrupt = interrupt.clone();
+            std::thread::spawn(move || {
+                let _ = sender.send(interrupt.wait());
+            });
+        }
+        assert!(result.recv_timeout(std::time::Duration::from_millis(100)).is_err());
+        interrupt.fail("device lost".into());
+        assert_eq!(result.recv_timeout(std::time::Duration::from_secs(5)), Ok(Err("device lost".to_string())));
+        interrupt.expect(1);
+        assert_eq!(interrupt.wait(), Err("device lost".to_string()), "terminal for the frames after");
     }
 
     /// The GPU never answers (nothing completes); the interrupt must end the wait.

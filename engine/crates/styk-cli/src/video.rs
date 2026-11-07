@@ -70,6 +70,14 @@ fn json_string(text: &str) -> String {
     out
 }
 
+/// What a drawn frame goes through before it is handed to the session: the mapping of today's canvas step when the layout asks
+/// for it (WebM with transparency; see `styk_export::legacy_canvas`).
+fn finish_frame(layout: &FrameLayout, frame: &mut Vec<u8>) {
+    if layout.legacy_canvas {
+        styk_export::legacy_canvas::apply(frame);
+    }
+}
+
 /// Entry of `styk video` (built with the `app-tools` feature).
 pub fn video(path: &str, ticks: &str, out: &str, rest: &[String]) -> i32 {
     match run(path, ticks, out, rest) {
@@ -126,9 +134,7 @@ impl FrameProducer for Producer {
         let doc = &self.generation.prepared.doc;
         let list = if self.transparent { styk_export::without_background(&frame.list) } else { frame.list.clone() };
         self.renderer.frame_into(doc, &list, frame.camera.as_ref(), layout.matte, out)?;
-        if layout.legacy_canvas {
-            styk_export::legacy_canvas::apply(out);
-        }
+        finish_frame(layout, out);
         let mut timings = self.timings.lock().unwrap();
         timings.evaluate_ms += (drawing - started).as_secs_f64() * 1000.0;
         timings.draw_ms += drawing.elapsed().as_secs_f64() * 1000.0;
@@ -526,7 +532,10 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
 
 #[cfg(test)]
 mod tests {
-    use super::parse_size;
+    use super::*;
+    use image::ImageEncoder;
+    use styk_core::export::flow::run_video_export;
+    use styk_services::video::{Codec, Container, FfmpegRequest, Rate};
 
     #[test]
     fn a_size_is_whole_pixels_or_it_is_refused() {
@@ -536,5 +545,111 @@ mod tests {
             let message = parse_size(bad).expect_err(bad);
             assert!(message.contains("--size") && message.contains("WxH"), "{bad}: {message}");
         }
+    }
+
+    /// The bundled encoder; a missing one fails the test with what to do (it is git-ignored).
+    fn ffmpeg() -> PathBuf {
+        let mut here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        loop {
+            let candidate = here.join("build/video-encoder/ffmpeg.exe");
+            if candidate.is_file() {
+                return candidate;
+            }
+            assert!(here.pop(), "build/video-encoder/ffmpeg.exe was not found: copy the bundled encoder into this checkout (it is git-ignored) to run the video tests");
+        }
+    }
+
+    /// Translucent frames: every alpha level, with colours that vary across the frame and with the frame.
+    fn translucent(index: u32, width: u32, height: u32) -> Vec<u8> {
+        let mut out = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                let alpha = ((x * 256 / width + y * 5 + index * 17) % 256) as u8;
+                out.extend_from_slice(&[(x * 4 + index * 9) as u8, (255 - y * 7) as u8, (x * y + index * 31) as u8, alpha]);
+            }
+        }
+        out
+    }
+
+    struct Frames;
+
+    impl FrameProducer for Frames {
+        fn frame_into(&mut self, index: u32, layout: &FrameLayout, out: &mut Vec<u8>) -> Result<(), String> {
+            out.extend(translucent(index, layout.width, layout.height));
+            finish_frame(layout, out);
+            Ok(())
+        }
+    }
+
+    use styk_core::export::flow::FrameProducer;
+
+    /// The 8 random bytes of a WebM's TrackUID and of its Tags/Targets TagTrackUID: the fields that differ between two runs of
+    /// today's exporter on identical input.
+    fn without_random_uids(mut file: Vec<u8>) -> Vec<u8> {
+        for id in [[0x73, 0xc5, 0x88], [0x63, 0xc5, 0x88]] {
+            let mut at = 0;
+            while at + 11 <= file.len() {
+                if file[at..at + 3] == id {
+                    file[at + 3..at + 11].fill(0);
+                    at += 11;
+                } else {
+                    at += 1;
+                }
+            }
+        }
+        file
+    }
+
+    /// Real documents only exercise opaque WebM frames, so this is where translucent colour is held to today's bytes: the
+    /// frames of today's app pass through the canvas (the measured mapping of `legacy_canvas`) and reach FFmpeg as PNG
+    /// images; the native session must give the same file from the same translucent frames, and the file made without the
+    /// mapping must differ (the mapping is what keeps the bytes).
+    #[test]
+    fn translucent_webm_equals_the_file_made_from_the_canvas_pngs_of_todays_app() {
+        use std::io::Write;
+        let ffmpeg = ffmpeg();
+        let dir = std::env::temp_dir().join(format!("styk-translucent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (width, height, frames) = (64u32, 36u32, 5u32);
+        let request = FfmpegRequest { container: Container::Webm, codec: Codec::Vp9, width, height, fps: 24.0, total_frames: frames, rate: Rate { quality: 0.8, bitrate: None }, max_bytes: 1 << 30, audio: false };
+
+        // The native export, through the same flow and frame policy as `styk video`.
+        let service = FfmpegVideoService::new(&ffmpeg);
+        let native = dir.join("native.webm");
+        run_video_export(&service, &native, &VideoRequest::Ffmpeg(request.clone()), &mut Frames, None, &Cancel::new(), &|session| {
+            assert!(session.layout().legacy_canvas && !session.layout().matte, "WebM with transparency is straight RGBA through the canvas mapping");
+        })
+        .unwrap();
+
+        // Today's: PNG images of the canvas-mapped frames, fed to FFmpeg with today's arguments.
+        let from_pngs = |name: &str, map: bool| {
+            let out = dir.join(name);
+            let mut child = std::process::Command::new(&ffmpeg).args(styk_platform::video::args::encoder_args(&request, &out.to_string_lossy())).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+            let mut stdin = child.stdin.take().unwrap();
+            for index in 0..frames {
+                let mut pixels = translucent(index, width, height);
+                if map {
+                    for pixel in pixels.chunks_exact_mut(4) {
+                        let alpha = pixel[3];
+                        for c in 0..3 {
+                            pixel[c] = styk_export::legacy_canvas::map(pixel[c], alpha);
+                        }
+                    }
+                }
+                let mut png = Vec::new();
+                image::codecs::png::PngEncoder::new(&mut png).write_image(&pixels, width, height, image::ExtendedColorType::Rgba8).unwrap();
+                stdin.write_all(&png).unwrap();
+            }
+            drop(stdin);
+            assert!(child.wait().unwrap().success());
+            without_random_uids(std::fs::read(out).unwrap())
+        };
+        let todays = from_pngs("todays.webm", true);
+        let unmapped = from_pngs("unmapped.webm", false);
+        let native_bytes = without_random_uids(std::fs::read(&native).unwrap());
+        assert!(native_bytes == todays, "the native file differs from today's in {} bytes", native_bytes.iter().zip(&todays).filter(|(a, b)| a != b).count());
+        assert!(native_bytes != unmapped, "without the canvas mapping the file would be the same: the frames have no translucent colour that it changes");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

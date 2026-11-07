@@ -186,3 +186,27 @@ and is the floors rule's to take up (a candidate: the sprite atlas pages and the
 Frames drawn forward, reversed, shuffled and interleaved with frames of another open document, 64 frames at 640 by 360 each,
 on svr_uriel, tdd2, AyameDemo and testingupload: 0 differing frames in every case (the same check found 52 and 29 differing
 frames on svr_uriel before chunk X).
+
+## Fixes after the re-check (2026-11-07)
+
+Windows only in this phase (decision N8): the video module is built on Windows only, and no Unix process code is written.
+`ChildGuard` is the one place a process is ended; a Unix implementation replaces its handle by a stable one (a pidfd on
+Linux) and nothing above it changes.
+
+- **A kept video is not swept.** A commit that lost a race writes a `kept` marker into the stage, naming the process that holds
+  the video. The sweep honours it: while that process lives the stage is not touched; once it is gone, only after the marker has
+  been idle for the two minutes of today's service (which keeps such a file in its reading session and deletes it when the
+  session has been idle that long). A retry claims the stage first (the marker names it and is touched).
+- **A cancel during the flush returns at once.** Today's service renames without flushing; the native one flushes first so that
+  a power cut after the rename cannot leave an empty file, and runs the flush on a helper thread. A cancel wakes the commit
+  while the helper goes on; the helper then closes the file and removes the stage. The destination is still never replaced
+  after a cancel (the commit boundary is after the flush).
+- **Cancelled GPU resources are disposed of elsewhere.** A dropped `GpuExport` hands its device, queue, renderer and buffers
+  to a disposal thread (at most four waiting; more each get a thread of their own), so dropping it never waits for the GPU
+  to go idle. The poller thread owns its own device clone and ends after the wait it is in. A stalled GPU keeps the resources it
+  holds, not the thread that cancelled.
+- **A failing wait for the GPU wakes the producer.** A poll error becomes a terminal error of the frame latch.
+- **A child joins its job before it runs.** It is created suspended, assigned to the kill-on-close job, then resumed.
+- **Translucent WebM is held to today's file in a test** (`styk-cli`, `translucent_webm_equals_the_file_made_from_the_canvas_pngs_of_todays_app`):
+  the canvas-mapped frames of today's app as PNG through today's arguments against the native session, and the same without the
+  mapping, which differs.

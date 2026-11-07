@@ -10,11 +10,19 @@
 //! A stage left behind by a process that was killed is swept by the next export to that folder, under today's rule for
 //! an abandoned job (`desktop/video-export-service.cjs`): untouched for two minutes ([`TTL`]), and in addition its
 //! process must be gone.
+//!
+//! A finished video kept after a commit lost a race is different: today's service keeps such a file in its reading session
+//! and deletes it when the session has been idle for the same two minutes (its idle timer, re-armed by every call, and
+//! never while a call is running). Here the retention is written into the stage as a marker, `kept`, holding the id of the
+//! process that holds the video; the sweep honours it: a kept stage is never swept while that process lives, and once it
+//! is gone only after the marker has been untouched for [`TTL`]. A retry claims the stage first (the marker names the
+//! retrying process and is touched), so another instance's sweep leaves it alone while it flushes.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, SystemTime};
 
 use styk_services::video::VideoError;
@@ -29,6 +37,9 @@ pub const TTL: Duration = Duration::from_secs(120);
 
 const PREFIX: &str = ".styk-";
 const SUFFIX: &str = ".stage";
+
+/// The name of the marker that says a stage holds a finished video kept for another try.
+pub const KEPT: &str = "kept";
 
 /// A job's staging directory. Dropping it removes the directory and everything in it unless [`Stage::keep`] was called.
 pub struct Stage {
@@ -122,9 +133,11 @@ impl Stage {
         &self.dir
     }
 
-    /// Leaves the stage in place when it is dropped (a finished file kept for another commit).
-    pub fn keep(&mut self) {
+    /// Leaves the stage in place when it is dropped (a finished file kept for another commit) and writes the retention
+    /// marker the sweep honours.
+    pub fn keep(&mut self) -> std::io::Result<()> {
         self.keep = true;
+        claim(&self.dir)
     }
 }
 
@@ -138,7 +151,18 @@ impl Drop for Stage {
 
 /// Whether `name` is a file one of our jobs makes in its stage.
 fn ours(name: &str) -> bool {
-    name == "probe" || name == "mix.f32" || name == "animation.avi" || name.starts_with("video.") || name.starts_with("mixed.")
+    name == "probe" || name == KEPT || name == "mix.f32" || name == "animation.avi" || name.starts_with("video.") || name.starts_with("mixed.")
+}
+
+/// Takes (or renews) the retention of a kept stage: the marker names this process and is touched. Called when a video is
+/// kept, and by a retry before it flushes.
+pub fn claim(stage: &Path) -> std::io::Result<()> {
+    fs::write(stage.join(KEPT), std::process::id().to_string())
+}
+
+/// The process named in a stage's retention marker.
+fn holder_of(stage: &Path) -> Option<u32> {
+    fs::read_to_string(stage.join(KEPT)).ok()?.trim().parse().ok()
 }
 
 /// The process that made a stage folder, from its name `.styk-<process in hex>-<unique>.stage`.
@@ -155,9 +179,9 @@ pub fn sweep_stale(folder: &Path) -> usize {
     let mut removed = 0;
     for entry in entries.filter_map(Result::ok) {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(owner) = owner_of(&name) else { continue };
+        let Some(maker) = owner_of(&name) else { continue };
         let path = entry.path();
-        if owner == std::process::id() || process_exists(owner) || !path.is_dir() {
+        if !path.is_dir() {
             continue;
         }
         let Ok(inside) = fs::read_dir(&path) else { continue };
@@ -165,8 +189,17 @@ pub fn sweep_stale(folder: &Path) -> usize {
         if !files.iter().all(|f| ours(&f.file_name().to_string_lossy())) {
             continue;
         }
-        let newest = files.iter().filter_map(|f| f.metadata().ok()?.modified().ok()).chain(path.metadata().ok().and_then(|m| m.modified().ok())).max();
-        if newest.is_some_and(|t| now.duration_since(t).unwrap_or_default() >= TTL) && fs::remove_dir_all(&path).is_ok() {
+        let modified = |p: &Path| p.metadata().ok().and_then(|m| m.modified().ok());
+        let stale = if files.iter().any(|f| f.file_name() == KEPT) {
+            // A finished video kept for another try: while the process that holds it lives it is not ours to touch, and
+            // afterwards it keeps today's idle rule, counted from the marker (the video itself is old by then).
+            let holder = holder_of(&path);
+            holder != Some(std::process::id()) && !holder.is_some_and(process_exists) && modified(&path.join(KEPT)).is_some_and(|t| now.duration_since(t).unwrap_or_default() >= TTL)
+        } else {
+            let newest = files.iter().filter_map(|f| f.metadata().ok()?.modified().ok()).chain(modified(&path)).max();
+            maker != std::process::id() && !process_exists(maker) && newest.is_some_and(|t| now.duration_since(t).unwrap_or_default() >= TTL)
+        };
+        if stale && fs::remove_dir_all(&path).is_ok() {
             removed += 1;
         }
     }
@@ -194,15 +227,54 @@ pub enum CommitError {
     Io(std::io::Error),
 }
 
+/// What wakes a commit that is waiting for the flush of the finished file.
+enum Flush {
+    Done(std::io::Result<u64>),
+    Cancelled,
+}
+
 /// Flushes the finished file and moves it over `destination` (the filesystem's replace: `MoveFileExW` with
-/// `MOVEFILE_REPLACE_EXISTING` on Windows), unless `cancel` fired first. The flush can be slow, so it happens before the
-/// commit boundary (`Cancel::begin_commit`): an edit or a close during it still cancels, and once the boundary is
-/// crossed a cancel is too late and changes nothing. `after_flush` runs between the two (tests hold the flush there).
+/// `MOVEFILE_REPLACE_EXISTING` on Windows), unless `cancel` fired first. Today's service renames without flushing; the
+/// native one flushes first so that a power cut after the rename cannot leave an empty file at the destination, and so
+/// the flush must not make a cancel wait: it runs on a helper thread, and a cancel during it returns `Cancelled` at once
+/// (the helper finishes the flush on its own and then removes the stage, which it is then the owner of). The flush is
+/// before the commit boundary (`Cancel::begin_commit`): an edit or a close during it still cancels, and once the boundary
+/// is crossed a cancel is too late and changes nothing. `after_flush` runs between the two (tests hold the flush there).
 pub fn commit_gated(artifact: &Path, destination: &Path, cancel: &Cancel, after_flush: &dyn Fn()) -> Result<u64, CommitError> {
     let file = OpenOptions::new().write(true).open(artifact).map_err(CommitError::Io)?;
-    file.sync_all().map_err(CommitError::Io)?;
-    let bytes = file.metadata().map_err(CommitError::Io)?.len();
-    drop(file);
+    let stage = artifact.parent().map(Path::to_path_buf);
+    let abandoned = Arc::new(AtomicBool::new(false));
+    let (sender, events) = mpsc::channel();
+    {
+        let sender = sender.clone();
+        cancel.on_cancel(move || {
+            let _ = sender.send(Flush::Cancelled);
+        });
+    }
+    {
+        let abandoned = abandoned.clone();
+        std::thread::Builder::new()
+            .name("styk video flush".into())
+            .spawn(move || {
+                let result = file.sync_all().and_then(|_| file.metadata()).map(|m| m.len());
+                drop(file);
+                // The commit gave up on this flush: the stage is this thread's to remove, now that its file is closed.
+                if abandoned.load(Ordering::SeqCst)
+                    && let Some(stage) = stage
+                {
+                    let _ = fs::remove_dir_all(stage);
+                }
+                let _ = sender.send(Flush::Done(result));
+            })
+            .map_err(CommitError::Io)?;
+    }
+    let bytes = match events.recv() {
+        Ok(Flush::Done(result)) => result.map_err(CommitError::Io)?,
+        Ok(Flush::Cancelled) | Err(_) => {
+            abandoned.store(true, Ordering::SeqCst);
+            return Err(CommitError::Cancelled);
+        }
+    };
     after_flush();
     if !cancel.begin_commit() {
         return Err(CommitError::Cancelled);
@@ -330,6 +402,99 @@ mod tests {
 
         assert_eq!(sweep_stale(&dir), 1);
         assert!(!stale.exists() && fresh.exists() && foreign.exists() && alive.exists() && user.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A stage as a killed (or finished) process leaves it: made by a process id that does not exist, holding a finished video.
+    fn fabricated(dir: &Path, number: u32, holder: Option<u32>) -> PathBuf {
+        let stage = dir.join(format!("{PREFIX}{:x}-{number}{SUFFIX}", u32::MAX - 1));
+        fs::create_dir(&stage).unwrap();
+        fs::write(stage.join("video.mp4"), b"a finished video").unwrap();
+        if let Some(holder) = holder {
+            fs::write(stage.join(KEPT), holder.to_string()).unwrap();
+        }
+        stage
+    }
+
+    /// Review finding 1 of the re-check: a finished video kept for a retry was swept once its process was gone. Today's
+    /// service keeps such a file until its session has been idle for two minutes; the marker says the stage is one.
+    #[test]
+    fn a_kept_video_is_not_swept_while_its_holder_lives_and_afterwards_only_once_idle() {
+        let dir = scratch("kept");
+        let dead = u32::MAX - 1;
+        // Its holder is gone but the marker is fresh: still inside the idle time.
+        let fresh = fabricated(&dir, 1, Some(dead));
+        set_modified(&fresh.join("video.mp4"), SystemTime::now() - Duration::from_secs(3600));
+        // Its holder lives (this process), however old everything is: nobody else's to remove.
+        let held = fabricated(&dir, 2, Some(std::process::id()));
+        age(&held, 3600);
+        // Its holder is gone and the marker has been idle for longer than the two minutes: gone like today's idle session.
+        let idle = fabricated(&dir, 3, Some(dead));
+        age(&idle, 3600);
+        // Without the marker the same stage is the leftover of a killed export, and is swept.
+        let leftover = fabricated(&dir, 4, None);
+        age(&leftover, 3600);
+
+        assert_eq!(sweep_stale(&dir), 2);
+        assert!(fresh.exists() && held.exists() && !idle.exists() && !leftover.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A retry from another instance claims the stage: the marker names it, so the old owner's name on the folder and its
+    /// age no longer make the stage sweepable while the retry flushes.
+    #[test]
+    fn a_retry_claims_the_kept_stage_for_its_own_process() {
+        let dir = scratch("claim");
+        let stage = fabricated(&dir, 1, Some(u32::MAX - 1));
+        age(&stage, 3600);
+        claim(&stage).unwrap();
+        assert_eq!(holder_of(&stage), Some(std::process::id()));
+        assert_eq!(sweep_stale(&dir), 0, "claimed: left alone");
+        assert!(stage.join("video.mp4").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Checker finding A: `sync_all` of a large output cannot be interrupted, and a cancel waited for it (1.6 to 29 s for
+    /// 373 MB). The flush runs on a helper; a cancel returns at once, the destination is untouched, and the helper removes
+    /// the stage when it has finished.
+    #[test]
+    fn a_cancel_during_the_flush_of_a_large_output_returns_at_once_and_leaves_the_destination() {
+        use std::io::Write;
+        let dir = scratch("flush");
+        let stage = dir.join(format!("{PREFIX}{:x}-flush{SUFFIX}", std::process::id()));
+        fs::create_dir(&stage).unwrap();
+        let (artifact, destination) = (stage.join("video.avi"), dir.join("out.avi"));
+        {
+            // 256 MB of data the system still has to write: the flush that follows takes seconds.
+            let mut file = File::create(&artifact).unwrap();
+            let chunk = vec![0x5Au8; 1 << 20];
+            for _ in 0..256 {
+                file.write_all(&chunk).unwrap();
+            }
+        }
+        fs::write(&destination, b"the previous export").unwrap();
+        let cancel = Cancel::new();
+        let committing = {
+            let (artifact, destination, cancel) = (artifact.clone(), destination.clone(), cancel.clone());
+            std::thread::spawn(move || commit_gated(&artifact, &destination, &cancel, &|| {}))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!committing.is_finished(), "the flush is still running");
+        let asked = std::time::Instant::now();
+        cancel.cancel();
+        let result = committing.join().unwrap();
+        let latency = asked.elapsed();
+        assert!(matches!(result, Err(CommitError::Cancelled)), "{result:?}");
+        assert!(latency < Duration::from_millis(250), "the cancel took {latency:?}");
+        assert_eq!(fs::read(&destination).unwrap(), b"the previous export", "a cancel is never followed by a replaced destination");
+        // The helper finishes the flush, closes the file and removes the stage: nothing is left behind.
+        let mut waited = 0;
+        while stage.exists() && waited < 600 {
+            std::thread::sleep(Duration::from_millis(100));
+            waited += 1;
+        }
+        assert!(!stage.exists(), "the stage is removed once the flush has ended");
+        assert_eq!(fs::read(&destination).unwrap(), b"the previous export");
         fs::remove_dir_all(dir).unwrap();
     }
 }

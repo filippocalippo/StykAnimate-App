@@ -141,8 +141,12 @@ impl VideoService for FfmpegVideoService {
     }
 }
 
-/// Moves a finished video kept by a failed commit over `destination` and removes its stage.
+/// Moves a finished video kept by a failed commit over `destination` and removes its stage. The retry claims the stage
+/// first (its marker names this process and is touched), so another instance's sweep leaves it alone while it flushes.
 pub(crate) fn commit_kept(artifact: &Path, destination: &Path) -> Result<Committed, VideoError> {
+    if let Some(stage) = artifact.parent() {
+        staging::claim(stage).map_err(|e| VideoError::Io(format!("The kept video could not be claimed for another try: {e}")))?;
+    }
     let bytes = staging::commit(artifact, destination).map_err(|e| VideoError::CommitFailed { artifact: artifact.to_path_buf(), destination: destination.to_path_buf(), message: e.to_string() })?;
     if let Some(stage) = artifact.parent() {
         let _ = std::fs::remove_dir_all(stage);

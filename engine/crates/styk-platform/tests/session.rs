@@ -391,7 +391,12 @@ fn a_commit_that_loses_a_race_keeps_the_finished_video_for_another_try() {
     assert_eq!(destination, dest);
     assert!(artifact.is_file() && artifact.metadata().unwrap().len() > 100, "the finished video is kept");
     assert_eq!(fs::read(&dest).unwrap(), b"old");
-    assert_eq!(fs::read_dir(artifact.parent().unwrap()).unwrap().count(), 1, "only the finished file is kept in the stage");
+    // The stage carries the retention marker that another export's sweep honours, naming this process; and the sweep leaves it.
+    let stage = artifact.parent().unwrap();
+    assert_eq!(fs::read_to_string(stage.join("kept")).unwrap(), std::process::id().to_string());
+    assert_eq!(fs::read_dir(stage).unwrap().count(), 2, "only the finished file and the retention marker are kept in the stage");
+    assert_eq!(styk_platform::video::staging::sweep_stale(&dir), 0);
+    assert!(artifact.is_file());
     drop(lock);
     let done = service.retry_commit(&artifact, &dest).unwrap();
     assert_eq!(done.path, dest);

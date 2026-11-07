@@ -495,8 +495,9 @@ impl Session {
                         let _ = fs::remove_file(self.stage.path(name));
                     }
                 }
-                self.stage.keep();
-                Err(VideoError::CommitFailed { artifact: self.output.clone(), destination: self.destination.clone(), message: error.to_string() })
+                // The stage is kept with its retention marker, which the sweep of another export honours.
+                let note = self.stage.keep().err().map(|e| format!(" (the video's retention could not be recorded: {e})")).unwrap_or_default();
+                Err(VideoError::CommitFailed { artifact: self.output.clone(), destination: self.destination.clone(), message: format!("{error}{note}") })
             }
         }
     }
