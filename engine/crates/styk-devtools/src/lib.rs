@@ -7,6 +7,7 @@
 //!
 //! It may depend on the core, the interface, the design system and `styk-trace`; nothing else may depend on it.
 
+#[cfg(windows)]
 pub mod pen_lab;
 
 use styk_trace::{RecordKind, snapshot};

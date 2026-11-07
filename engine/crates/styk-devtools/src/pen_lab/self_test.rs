@@ -38,6 +38,25 @@ pub struct SelfTest {
     pub rate_hz: f64,
 }
 
+impl SelfTest {
+    /// Reads `kind[:seconds]`: `standard`, `blocked`, `behaviour` or `stress`, 240 Hz, five seconds unless said.
+    pub fn parse(text: &str) -> Result<SelfTest, String> {
+        let (kind, seconds) = text.split_once(':').map_or((text, None), |(k, s)| (k, Some(s)));
+        let kind = match kind {
+            "standard" => TestKind::Standard,
+            "blocked" => TestKind::Blocked,
+            "behaviour" => TestKind::Behaviour,
+            "stress" => TestKind::Stress,
+            other => return Err(format!("unknown self-test {other:?}: standard, blocked, behaviour or stress")),
+        };
+        let seconds = match seconds {
+            None => 5.0,
+            Some(s) => s.parse::<f64>().ok().filter(|s| *s > 0.0 && s.is_finite()).ok_or_else(|| format!("self-test seconds want a positive number, not {s:?}"))?,
+        };
+        Ok(SelfTest { kind, seconds, rate_hz: 240.0 })
+    }
+}
+
 pub struct Context<'a> {
     pub core: &'a Arc<PadCore>,
     pub counters: Option<&'a Arc<InputCounters>>,
@@ -373,4 +392,18 @@ fn write_csvs(dir: &Path, samples: &[styk_ui::ink_pad::SampleRow], frames: &[sty
         let _ = writeln!(out, "{i},{t}");
     }
     let _ = std::fs::write(dir.join("inject.csv"), out);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_self_test_names_its_kind_and_seconds() {
+        let t = SelfTest::parse("blocked:7.5").unwrap();
+        assert_eq!((t.kind, t.seconds, t.rate_hz), (TestKind::Blocked, 7.5, 240.0));
+        assert_eq!(SelfTest::parse("standard").unwrap().seconds, 5.0);
+        assert!(SelfTest::parse("fast").unwrap_err().contains("unknown self-test"));
+        assert!(SelfTest::parse("standard:0").unwrap_err().contains("positive"));
+    }
 }

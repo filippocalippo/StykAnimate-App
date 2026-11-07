@@ -30,7 +30,8 @@ pub const PANEL_WIDTH: f32 = 360.0;
 pub struct LabOptions {
     pub window: window::Settings,
     pub scale: f32,
-    pub background: bool,
+    /// The window is created hidden and shown without activation (an unattended run on Windows).
+    pub show_after_open: bool,
     pub self_test: Option<SelfTest>,
     pub out_dir: Option<PathBuf>,
 }
@@ -88,7 +89,7 @@ struct Lab {
     window: Option<window::Id>,
     refresh_hz: f64,
     client_origin: (i32, i32),
-    options_background: bool,
+    show_after_open: bool,
     out_dir: Option<PathBuf>,
     test: Option<self_test::Runner>,
     hover_target: bool,
@@ -108,7 +109,7 @@ impl Lab {
             window: None,
             refresh_hz: 0.0,
             client_origin: (0, 0),
-            options_background: options.background,
+            show_after_open: options.show_after_open,
             out_dir: options.out_dir.clone(),
             test: options.self_test.clone().map(self_test::Runner::new),
             hover_target: false,
@@ -123,12 +124,12 @@ impl Lab {
             Message::Opened(id) => {
                 self.window = Some(id);
                 let queue = self.core.queue.clone();
-                let background = self.options_background;
+                let show_after_open = self.show_after_open;
                 let attached = Attached(Arc::new(Mutex::new(None)));
                 let slot = attached.clone();
                 let show = styk_platform::window::show_without_activation;
                 window::run(id, move |window| {
-                    if background && cfg!(windows) {
+                    if show_after_open {
                         let _ = show(window);
                     }
                     let result = WindowsInput::attach(window, queue)
