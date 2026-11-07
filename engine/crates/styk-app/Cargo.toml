@@ -24,6 +24,7 @@ styk-core = { path = "../styk-core" }
 styk-design = { path = "../styk-design", features = ["widgets"] }
 styk-devtools = { path = "../styk-devtools", optional = true }
 styk-platform = { path = "../styk-platform" }
+styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace" }
 styk-ui = { path = "../styk-ui" }
 

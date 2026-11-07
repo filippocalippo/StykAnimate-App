@@ -147,6 +147,16 @@ export function interfaceErrors(source, file) {
   return errors;
 }
 
+// Temporary integration exceptions, exact declarations only.
+// Reason: "K-doc moves these to `styk_core::engine`". No other re-export is approved here.
+const documentEngineExports = new Set([
+  'pub use styk_doc::Value;',
+  'pub use styk_edit::session::{NativeCall as CallAnswer, SessionView as DocumentView};',
+  'pub use styk_edit::{EditError, Selection};',
+  'pub use styk_engine::document::OpenError;',
+  'pub use styk_eval::doc::Document as TypedDocument;',
+].map(s => tokens(s).map(t => t.value).join(' ')));
+
 export function boundaryErrors(source, file) {
   const ts = productionTokens(source), errors = [];
   const engine = /^styk_(?:alloc|doc|draw|drawing|edit|engine|eval|export|formats|math|piv|raster|render|wasm)$/;
@@ -158,7 +168,7 @@ export function boundaryErrors(source, file) {
   for (let i=0;i<ts.length;i++) if (ts[i].value === 'use') {
     let end=i; while(end<ts.length && ts[end].value!==';')end++;
     const declaration = ts.slice(i,end);
-    if(declaration.some(t=>!t.string && windowsNames.has(t.value))) for(const t of declaration) if(!t.string && /^[A-Za-z_]/.test(t.value)) windowsNames.add(t.value);
+    if(!['crate','self','super'].includes(declaration[1]?.value) && declaration.some(t=>!t.string && windowsNames.has(t.value))) for(const t of declaration) if(!t.string && /^[A-Za-z_]/.test(t.value)) windowsNames.add(t.value);
     if(ts[i+1]?.value==='styk_core' && ts[i+2]?.value==='as') coreNames.add(ts[i+3]?.value);
   }
   for(let i=0;i<ts.length;i++) {
@@ -168,12 +178,18 @@ export function boundaryErrors(source, file) {
       let end=i+1; while(end<ts.length && ![';',')','='].includes(ts[end].value))end++;
       if(ts.slice(i+1,end).some(t=>!t.string && t.value==='engine')) errors.push(file+':'+t.line+': views: styk_core::engine is forbidden');
     }
+    if(file.includes('/styk-core/') && !/\/src\/engine(?:\.rs|\/)/.test(file) && t.value==='pub' && ts[i+1]?.value==='use') {
+      let end=i+2; while(end<ts.length && ts[end].value!==';')end++;
+      const item=ts.slice(i,end+1);
+      if(item.some(t=>!t.string && engine.test(t.value)) && !(file==='engine/crates/styk-core/src/documents.rs' && documentEngineExports.has(item.map(t=>t.value).join(' ')))) errors.push(file+':'+t.line+': core-api: engine re-exports belong in styk_core::engine');
+    }
     if(platform && t.value==='pub') {
       let end=i+1; while(end<ts.length && ![';','{'].includes(ts[end].value))end++;
       // Include brace groups in pub use declarations.
       if(ts[i+1]?.value==='use') { end=i+1; while(end<ts.length && ts[end].value!==';')end++; }
       const item=ts.slice(i+1,end);
-      if(['use','type'].includes(item[0]?.value) && item.slice(1).some(t=>!t.string && windowsNames.has(t.value))) errors.push(file+':'+t.line+': platform-api: public Windows re-exports and aliases are forbidden');
+      // A crate-local wrapper (e.g. crate::windows::chrome::Chrome) is not an OS-crate item.
+      if(['use','type'].includes(item[0]?.value) && !(item[0]?.value==='use' && ['crate','self','super'].includes(item[1]?.value)) && item.slice(1).some(t=>!t.string && windowsNames.has(t.value))) errors.push(file+':'+t.line+': platform-api: public Windows re-exports and aliases are forbidden');
     }
   }
   return errors;

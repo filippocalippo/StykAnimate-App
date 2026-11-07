@@ -311,20 +311,23 @@ impl Drop for GpuExport {
                 _retained: std::mem::take(&mut self.retained),
             }
         };
+        // On the web there is nothing to wait for, and wgpu's objects are not `Send` there: they are dropped in place.
+        #[cfg(target_arch = "wasm32")]
+        drop(held);
+        #[cfg(not(target_arch = "wasm32"))]
         dispose(Box::new(held));
     }
 }
 
 /// Cancelled resources waiting for disposal, at most: more than this are each disposed of on a thread of their own, so a
 /// stalled GPU holds the resources it holds and never the thread that cancelled.
+#[cfg(not(target_arch = "wasm32"))]
 const RETAINED: usize = 4;
 
 /// Drops `item` on the disposal thread (on a thread of its own when that one is busy with [`RETAINED`] others): the caller
-/// never waits for the GPU. (On the web there is nothing to wait for, and it is dropped in place.)
+/// never waits for the GPU.
+#[cfg(not(target_arch = "wasm32"))]
 fn dispose(item: Box<dyn Send>) {
-    #[cfg(target_arch = "wasm32")]
-    drop(item);
-    #[cfg(not(target_arch = "wasm32"))]
     {
         use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
         use std::sync::OnceLock;

@@ -1,4 +1,7 @@
 //! The main window's settings: today's `desktop/main.cjs` window, and how an unattended run is kept off the desktop.
+//!
+//! On Windows the window is frameless and made hidden: the shell (`crate::shell`) puts it at its saved frame and shows it, so
+//! it never appears at one place and jumps to another.
 
 use iced::{Point, Size, window};
 use styk_core::Launch;
@@ -19,6 +22,11 @@ pub const fn shown_after_creation(strategy: Option<Strategy>) -> bool {
     matches!(strategy, Some(Strategy::HiddenWindow))
 }
 
+/// Whether the shell shows the window itself, at the frame it chose (every ordinary Windows run).
+pub const fn shell_shows(strategy: Option<Strategy>) -> bool {
+    styk_platform::shell::owns_show() && strategy.is_none()
+}
+
 /// The main window's settings. `strategy` is how an unattended run keeps off the desktop (`styk_platform::unattended`),
 /// or nothing for an ordinary run; the headless strategy opens no window, so it never reaches here.
 pub fn settings(launch: &Launch, strategy: Option<Strategy>) -> window::Settings {
@@ -30,9 +38,12 @@ pub fn settings(launch: &Launch, strategy: Option<Strategy>) -> window::Settings
         // The window controls are drawn by the interface on Windows and Linux (`frame: false` in main.cjs); macOS keeps
         // its title bar until the shell is built.
         decorations: cfg!(target_os = "macos"),
-        visible: !shown_after_creation(strategy),
+        visible: !shown_after_creation(strategy) && !shell_shows(strategy),
+        // The close guard of the core decides when the program ends; until it exists the shell saves and exits.
+        exit_on_close_request: false,
         ..window::Settings::default()
     };
+    styk_platform::shell_window_settings!(settings);
     if strategy.is_some() {
         settings.position = window::Position::Specific(Point::new(OFF_SCREEN, OFF_SCREEN));
         // styk-platform applies the tool-window style before showing this hidden window.
@@ -54,7 +65,8 @@ mod tests {
         let settings = settings(&Launch::default(), None);
         assert_eq!(settings.size, Size::new(1560.0, 1000.0));
         assert_eq!(settings.min_size, Some(Size::new(1000.0, 680.0)));
-        assert!(settings.visible);
+        assert_eq!(settings.visible, !cfg!(windows), "on Windows the shell shows the window at its frame");
+        assert!(!settings.exit_on_close_request);
         assert!(matches!(settings.position, window::Position::Default));
     }
 
@@ -78,7 +90,15 @@ mod tests {
     fn only_the_hidden_window_strategy_is_created_hidden() {
         assert!(!settings(&Launch::default(), Some(Strategy::HiddenWindow)).visible);
         assert!(settings(&Launch::default(), Some(Strategy::OverrideRedirectWindow)).visible);
-        assert!(settings(&Launch::default(), None).visible);
+        assert_eq!(settings(&Launch::default(), None).visible, !cfg!(windows));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_frameless_window_keeps_its_shadow_and_has_no_native_decorations() {
+        let settings = settings(&Launch::default(), None);
+        assert!(!settings.decorations);
+        assert!(settings.platform_specific.undecorated_shadow);
     }
 
     #[cfg(target_os = "linux")]

@@ -40,3 +40,17 @@ macro_rules! video_tools {
 }
 
 pub mod clock;
+#[cfg(windows)]
+pub mod windows;
+
+pub mod shell;
+pub mod shell_check;
+
+#[cfg(windows)]
+#[macro_export]
+macro_rules! shell_window_settings {
+    ($settings:expr) => { $settings.platform_specific.undecorated_shadow = true; };
+}
+#[cfg(not(windows))]
+#[macro_export]
+macro_rules! shell_window_settings { ($settings:expr) => {}; }

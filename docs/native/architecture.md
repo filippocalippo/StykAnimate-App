@@ -22,7 +22,9 @@ Everything is one Cargo workspace (`engine/`, members `engine/crates/*`). The en
 | `styk-cli` | The headless tools (`styk` binary); its `video` command (feature `app-tools`, off by default) drives a video export of a document through the core's planning and flow, the engine's frame source and the platform's encoder services. `cargo xtask deps` lets it reach `styk-core`, `styk-services` and `styk-platform` only through that feature. | engine crates; `styk-core`, `styk-services`, `styk-platform` with `app-tools` |
 | `xtask` | The task runner (`cargo xtask ...`, alias in the repository's `.cargo/config.toml`). | std |
 
-Dependencies point one way: `styk-app` → `styk-ui` → `styk-core` → engine crates and `styk-services`. Nothing in the
+Dependencies point one way: `styk-app` → `styk-ui` → `styk-core` → engine crates and `styk-services`. The engine types
+the core passes on to its own logic are re-exported in one place, `styk_core::engine`; `styk-ui` and the developer tools'
+views never name it or an engine crate, and see only plain view models (`cargo xtask check` enforces it). Nothing in the
 engine or the core depends on iced, `styk-ui` or `styk-devtools`. A different front end (a touch layout, Slint, a newer
 toolkit) sits on `styk-core` without rewriting a feature; the core's features are tested without a window.
 
@@ -141,8 +143,12 @@ Feature-gated test helpers live under `tests/support/` and cannot be enabled by 
 The dependency allow list requires its ownership header and must equal its version at the merge base with
 `native-app`: the orchestrator approves changes at the merge, including the initial baseline. Core state in shared
 design widgets is allowed; UI and developer-tool views cannot use direct engine paths or `styk_core::engine`.
-Platform public re-exports and type aliases cannot expose Windows items. These are textual checks, not a type resolver.
-The existing non-default CLI `app-tools` boundary remains.
+Platform public re-exports and type aliases cannot expose external Windows-crate items; crate-local platform wrappers
+are allowed. Core engine re-exports belong in `styk_core::engine`. Five exact declarations in `documents.rs` have the
+temporary named exception "K-doc moves these to `styk_core::engine`"; adding a name to one is still a violation.
+These are textual checks, not a type resolver.
+The existing non-default CLI `app-tools` boundary remains. The app may depend on services to compose S6's shell;
+its UI reads the portable chrome types through core's existing `services` facade.
 `cargo test --manifest-path engine/Cargo.toml -p xtask --test native_guards` runs the violating fixtures, including
 a real scratch-crate Clippy check and the screenshot failure path, through the existing Node prerequisite.
 
@@ -159,6 +165,11 @@ lints. Analysis, feeder waits, Behaviour's 800 ms pause and report/CSV writes ru
 the interface. The named platform `disturb_blocked_probe` is the sole
 intentional interface sleep, requested only by the explicit Blocked self-test. Capture encoding/writes remain in
 the asynchronous platform diagnostic service. The worker never joins on the interface thread.
+The shell's instance, profile I/O, save workers, native window helpers and in-process diagnostics live in
+`styk-platform::{shell,shell_check}`. The app passes raw-window-handle interfaces and receives plain samples;
+its three wake reasons coalesce in atomic bits with an async waker, without a mutex or an unbounded queue.
+Closing awaits a worker callback and reports write failures. The platform capability macro sets iced's native
+shadow field at the composition site without importing iced into platform.
 
 The web constraint guard rejects direct thread spawning and wall/monotonic clock construction in portable libraries,
 including qualified clock paths and same-file clock aliases.

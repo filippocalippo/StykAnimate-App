@@ -11,7 +11,7 @@ import {TOOLCHAIN, THREADED_WASM_ARGS, threadedWasmEnv} from './engine-wasm-conf
 const frontend = new Set(['styk-app', 'styk-ui', 'styk-design', 'styk-devtools', 'styk-platform', 'styk-text-check', 'xtask']);
 const toolkit = name => /^(iced|winit|cryoglyph)([_-]|$)/.test(name);
 const nativeEdges = {
-  'styk-app': ['styk-core', 'styk-ui', 'styk-design', 'styk-platform', 'styk-devtools', 'styk-trace', 'styk-text-check'],
+  'styk-app': ['styk-core', 'styk-ui', 'styk-design', 'styk-platform', 'styk-devtools', 'styk-trace', 'styk-text-check', 'styk-services'],
   'styk-ui': ['styk-core', 'styk-design'],
   // Shared field widgets use core's portable focus and text state (S2a).
   'styk-design': ['styk-core'],
