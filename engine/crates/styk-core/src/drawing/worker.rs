@@ -171,6 +171,12 @@ impl Worker {
         Worker { requests, replies: Mutex::new(replies), shared }
     }
 
+    /// A weak handle on the state the thread holds: it is gone once the thread has ended.
+    #[cfg(test)]
+    fn alive(&self) -> std::sync::Weak<Shared> {
+        Arc::downgrade(&self.shared)
+    }
+
     /// Samples sent and not yet taken by the worker.
     pub fn queued(&self) -> usize {
         self.shared.queued.load(Ordering::Relaxed)

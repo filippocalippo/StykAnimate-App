@@ -217,9 +217,13 @@ fn a_huge_gap_costs_the_worker_not_the_caller_and_a_cancel_still_lands() {
     worker.command(StrokeCommand::Sample { id: 1, x: 200_000.0, y: 0.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
     let send_time = sent.elapsed();
     assert!(send_time < Duration::from_millis(5), "the interface thread only queued: {send_time:?}");
+    // The worker is inside the brush's call for the gap when the cancel comes.
+    std::thread::sleep(Duration::from_millis(30));
+    let asked = Instant::now();
     worker.command(StrokeCommand::Cancel { id: 1 }, &settings);
     let replies = until(&worker, |r| matches!(r, Reply::Cancelled { .. } | Reply::Failed { .. }));
     assert!(matches!(replies.last(), Some(Reply::Cancelled { stroke: 1, .. })));
+    assert!(asked.elapsed() < Duration::from_millis(150), "the cancel landed after {:?}: the brush kept generating the gap", asked.elapsed());
     // The worker is usable again.
     stroke(&worker, 2, &line(), &settings, Mapping::default());
     until(&worker, |r| matches!(r, Reply::Finished { stroke: 2, .. }));
@@ -287,11 +291,18 @@ fn dropping_the_worker_does_not_wait_for_the_work_it_has_queued() {
     begin(&worker, 1, false, Mapping::default(), &settings);
     worker.command(StrokeCommand::Sample { id: 1, x: 0.0, y: 0.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
     worker.command(StrokeCommand::Sample { id: 1, x: 400_000.0, y: 0.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
-    std::thread::sleep(Duration::from_millis(100));
+    std::thread::sleep(Duration::from_millis(30));
+    let alive = worker.alive();
     let started = Instant::now();
     drop(worker);
     let took = started.elapsed();
     assert!(took < Duration::from_millis(250), "closing waited {took:?} for the stroke in progress");
+    // And the thread itself stops within moments, not when the 400,000 pixel gap is finished.
+    let deadline = Instant::now() + Duration::from_millis(150);
+    while alive.upgrade().is_some() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(alive.upgrade().is_none(), "the worker thread was still running 150 ms after it was told to stop");
 }
 
 /// Queues commands behind a held worker, then releases it.
