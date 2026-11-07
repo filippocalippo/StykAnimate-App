@@ -541,3 +541,30 @@ mod tests {
         assert_eq!(scale_himetric(500, (500, 1500), (1920, 3840)), 1920.0, "a second monitor's origin");
     }
 }
+
+/// Where the window's client area starts on the screen, in physical pixels.
+pub fn client_origin(window: &dyn HasWindowHandle) -> Result<(i32, i32), InputError> {
+    let RawWindowHandle::Win32(handle) = window.window_handle().map_err(|_| InputError::NoWindow)?.as_raw() else {
+        return Err(InputError::NoWindow);
+    };
+    Ok(Hook::client_origin(handle.hwnd.get() as HWND))
+}
+
+/// The refresh rate of the display the window is on, in hertz (0 when the system does not say).
+pub fn refresh_hz(window: &dyn HasWindowHandle) -> f64 {
+    use windows_sys::Win32::Graphics::Gdi::{DEVMODEW, ENUM_CURRENT_SETTINGS, EnumDisplaySettingsW, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFOEXW, MonitorFromWindow};
+    let Ok(handle) = window.window_handle() else { return 0.0 };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else { return 0.0 };
+    // SAFETY: the structures outlive the calls and carry their size fields as the API requires.
+    unsafe {
+        let monitor = MonitorFromWindow(handle.hwnd.get() as HWND, MONITOR_DEFAULTTONEAREST);
+        let mut info: MONITORINFOEXW = zeroed();
+        info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+        if GetMonitorInfoW(monitor, &mut info as *mut MONITORINFOEXW as *mut _) == 0 {
+            return 0.0;
+        }
+        let mut mode: DEVMODEW = zeroed();
+        mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+        if EnumDisplaySettingsW(info.szDevice.as_ptr(), ENUM_CURRENT_SETTINGS, &mut mode) == 0 { 0.0 } else { mode.dmDisplayFrequency as f64 }
+    }
+}

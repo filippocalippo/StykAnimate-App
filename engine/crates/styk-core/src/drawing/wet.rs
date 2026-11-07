@@ -19,6 +19,7 @@ struct Batch {
     seq: u64,
     dabs: Arc<[WetDab]>,
     born: u64,
+    newest_ns: u64,
 }
 
 /// What the preview shows, and why batches left it.
@@ -38,8 +39,8 @@ pub struct LedgerStats {
 #[derive(Debug, Default)]
 pub struct WetLedger {
     batches: VecDeque<Batch>,
-    /// Strokes the ledger has heard of and not seen end, to recognise stale replies.
-    open: Vec<u64>,
+    /// Strokes the ledger has heard of and not seen end, to recognise stale replies, and whether each may show a preview.
+    open: Vec<(u64, bool)>,
     /// The highest sequence whose tiles are all on the GPU.
     uploaded_seq: u64,
     /// The highest sequence whose tiles have been received (uploaded or waiting).
@@ -77,29 +78,36 @@ impl WetLedger {
         self.batches.len()
     }
 
-    /// A stroke began.
-    pub fn stroke_started(&mut self, stroke: u64) {
-        if !self.open.contains(&stroke) {
-            self.open.push(stroke);
+    /// A stroke began. `eligible` is false for brushes the preview cannot match closely (erase, smudge, special
+    /// blends): their exact pixels only.
+    pub fn stroke_started(&mut self, stroke: u64, eligible: bool) {
+        if !self.open.iter().any(|(s, _)| *s == stroke) {
+            self.open.push((stroke, eligible));
         }
     }
 
-    /// The worker reported a batch's dabs. `eligible` is false for brushes the preview cannot match closely (erase,
-    /// smudge, special blends): their exact pixels only.
-    pub fn dabs(&mut self, stroke: u64, seq: u64, dabs: Vec<WetDab>, eligible: bool) {
-        if !self.open.contains(&stroke) {
-            self.stats.stale += 1;
-            return;
+    fn is_open(&self, stroke: u64) -> Option<bool> {
+        self.open.iter().find(|(s, _)| *s == stroke).map(|(_, eligible)| *eligible)
+    }
+
+    /// The worker reported a batch's dabs, the newest of whose samples was taken at `newest_ns`.
+    pub fn dabs(&mut self, stroke: u64, seq: u64, dabs: Vec<WetDab>, newest_ns: u64) {
+        match self.is_open(stroke) {
+            None => self.stats.stale += 1,
+            Some(true) if !dabs.is_empty() => self.batches.push_back(Batch { stroke, seq, dabs: dabs.into(), born: self.frame, newest_ns }),
+            Some(_) => {}
         }
-        if eligible && !dabs.is_empty() {
-            self.batches.push_back(Batch { stroke, seq, dabs: dabs.into(), born: self.frame });
-        }
+    }
+
+    /// The newest sample time any visible batch includes.
+    pub fn newest_ns(&self) -> u64 {
+        self.batches.iter().map(|b| b.newest_ns).max().unwrap_or(0)
     }
 
     /// The worker reported a batch's tiles, `queued` of which wait for upload (the others are already on the GPU or the
     /// batch changed none). Returns false for a reply of a stroke that is gone.
     pub fn tiles_received(&mut self, stroke: u64, seq: u64) -> bool {
-        if !self.open.contains(&stroke) {
+        if self.is_open(stroke).is_none() {
             self.stats.stale += 1;
             return false;
         }
@@ -130,7 +138,7 @@ impl WetLedger {
 
     /// A stroke ended (kept or discarded): replies for it after this are stale.
     pub fn stroke_ended(&mut self, stroke: u64) {
-        self.open.retain(|s| *s != stroke);
+        self.open.retain(|(s, _)| *s != stroke);
     }
 
     /// A stroke was cancelled or failed: its preview goes at once.
@@ -153,9 +161,9 @@ mod tests {
     #[test]
     fn a_batch_is_shown_from_its_dabs_until_the_frame_its_tiles_are_uploaded() {
         let mut ledger = WetLedger::new();
-        ledger.stroke_started(1);
+        ledger.stroke_started(1, true);
         ledger.begin_frame();
-        ledger.dabs(1, 1, vec![dab(0), dab(1)], true);
+        ledger.dabs(1, 1, vec![dab(0), dab(1)], 0);
         ledger.uploaded(None);
         assert_eq!(ledger.visible_dabs(), 2, "the tiles have not arrived");
         ledger.begin_frame();
@@ -168,10 +176,10 @@ mod tests {
     #[test]
     fn a_partial_upload_keeps_the_older_batch_until_all_of_its_tiles_are_there() {
         let mut ledger = WetLedger::new();
-        ledger.stroke_started(1);
+        ledger.stroke_started(1, true);
         ledger.begin_frame();
-        ledger.dabs(1, 1, vec![dab(0)], true);
-        ledger.dabs(1, 2, vec![dab(1)], true);
+        ledger.dabs(1, 1, vec![dab(0)], 0);
+        ledger.dabs(1, 2, vec![dab(1)], 0);
         ledger.tiles_received(1, 1);
         ledger.tiles_received(1, 2);
         // The upload budget took only part of batch 1's tiles: the queue still starts at batch 1.
@@ -189,9 +197,9 @@ mod tests {
     #[test]
     fn a_delayed_reply_is_covered_by_the_preview_until_the_age_limit() {
         let mut ledger = WetLedger::new();
-        ledger.stroke_started(1);
+        ledger.stroke_started(1, true);
         ledger.begin_frame();
-        ledger.dabs(1, 1, vec![dab(0)], true);
+        ledger.dabs(1, 1, vec![dab(0)], 0);
         for _ in 0..(MAX_AGE_FRAMES - 1) {
             ledger.begin_frame();
             ledger.uploaded(None);
@@ -207,12 +215,12 @@ mod tests {
     #[test]
     fn a_cancelled_stroke_loses_its_preview_and_its_late_replies_are_stale() {
         let mut ledger = WetLedger::new();
-        ledger.stroke_started(1);
+        ledger.stroke_started(1, true);
         ledger.begin_frame();
-        ledger.dabs(1, 1, vec![dab(0)], true);
+        ledger.dabs(1, 1, vec![dab(0)], 0);
         ledger.stroke_dropped(1);
         assert_eq!(ledger.batches(), 0);
-        ledger.dabs(1, 2, vec![dab(1)], true);
+        ledger.dabs(1, 2, vec![dab(1)], 0);
         assert!(!ledger.tiles_received(1, 2));
         assert_eq!(ledger.batches(), 0);
         assert_eq!(ledger.stats(), LedgerStats { dropped: 1, stale: 2, ..LedgerStats::default() });
@@ -221,9 +229,9 @@ mod tests {
     #[test]
     fn an_ineligible_brush_never_shows_a_preview() {
         let mut ledger = WetLedger::new();
-        ledger.stroke_started(1);
+        ledger.stroke_started(1, false);
         ledger.begin_frame();
-        ledger.dabs(1, 1, vec![dab(0)], false);
+        ledger.dabs(1, 1, vec![dab(0)], 0);
         assert_eq!(ledger.batches(), 0);
         assert!(ledger.tiles_received(1, 1));
     }
@@ -242,7 +250,7 @@ mod tests {
         };
         for _ in 0..200 {
             let mut ledger = WetLedger::new();
-            ledger.stroke_started(1);
+            ledger.stroke_started(1, true);
             let batches = 1 + next(12) as usize;
             // Replies in flight: (frame they arrive, tiles) in worker order.
             let mut dab_arrival: Vec<u64> = Vec::new();
@@ -264,7 +272,7 @@ mod tests {
                 ledger.begin_frame();
                 for i in 0..batches {
                     if dab_arrival[i] + 1 == frame {
-                        ledger.dabs(1, i as u64 + 1, vec![dab(i)], true);
+                        ledger.dabs(1, i as u64 + 1, vec![dab(i)], 0);
                     }
                     if tile_arrival[i] + 1 == frame {
                         ledger.tiles_received(1, i as u64 + 1);

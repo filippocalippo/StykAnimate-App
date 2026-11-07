@@ -61,9 +61,9 @@ pub struct WetDab {
 pub enum Reply {
     /// The dabs of batch `seq`, known before the batch is rasterised: the wet ink shows them until `Tiles` with a
     /// sequence of at least `seq` is on the screen.
-    Dabs { stroke: u64, seq: u64, dabs: Vec<WetDab>, generate_ms: f64 },
+    Dabs { stroke: u64, seq: u64, dabs: Vec<WetDab>, generate_ms: f64, newest_ns: u64 },
     /// The tiles batch `seq` changed, with their pixels now.
-    Tiles { stroke: u64, seq: u64, tiles: Vec<(i64, i64, Vec<u8>)>, raster_ms: f64 },
+    Tiles { stroke: u64, seq: u64, tiles: Vec<(i64, i64, Vec<u8>)>, raster_ms: f64, newest_ns: u64 },
     /// The stroke ended and is one undo step; its tiles were all sent in `Tiles`.
     Finished { stroke: u64, changed_tiles: usize, dabs: usize },
     /// The stroke was discarded: these tiles go back to what the cel holds.
@@ -169,6 +169,8 @@ struct Current {
     tail_version: u64,
     batch_limit: usize,
     dabs: usize,
+    /// The device time of the newest sample the batches so far include.
+    newest_ns: u64,
 }
 
 struct State {
@@ -269,11 +271,12 @@ impl State {
         // Batches are at most `max(512, min(8192, floor(262144 / (2.2 * r * 2 + 2)^2)))` dabs, as in the JavaScript controller.
         let diameter = 2.2 * brush.size + 2.0;
         let batch_limit = (262_144.0 / (diameter * diameter)).floor().clamp(512.0, 8192.0) as usize;
-        self.current = Some(Current { id, mapping, paths, pending: Vec::new(), seeded: HashSet::new(), tail_version: 0, batch_limit, dabs: 0 });
+        self.current = Some(Current { id, mapping, paths, pending: Vec::new(), seeded: HashSet::new(), tail_version: 0, batch_limit, dabs: 0, newest_ns: 0 });
     }
 
     fn sample(&mut self, id: u64, window: (f64, f64), pressure: f64, time_ms: f64, lean: Option<(f64, f64)>) {
         let Some(current) = self.current.as_mut().filter(|c| c.id == id) else { return };
+        current.newest_ns = (time_ms * 1e6).round() as u64;
         for path in &mut current.paths {
             let Some((x, y, ax, ay)) = current.mapping.cel_sample(path.flips, window, lean) else { continue };
             let input = Sample { x, y, pressure: Some(pressure), time: Some(time_ms), ax: Some(ax), ay: Some(ay) };
@@ -320,12 +323,13 @@ impl State {
             let seq = self.seq;
             let wet = dabs.iter().map(|d| WetDab { x: d.x as f32, y: d.y as f32, radius: d.radius as f32, opacity: (d.opacity * d.flow) as f32 }).collect();
             let generate_ms = generated.elapsed().as_secs_f64() * 1e3;
-            self.reply(Reply::Dabs { stroke: id, seq, dabs: wet, generate_ms });
+            let newest_ns = self.current.as_ref().map_or(0, |c| c.newest_ns);
+            self.reply(Reply::Dabs { stroke: id, seq, dabs: wet, generate_ms, newest_ns });
             let started = Instant::now();
             match self.engine.dabs(id, seq as f64, &dabs, seeds, tail.as_deref()) {
                 Ok(Some(result)) => {
                     let raster_ms = started.elapsed().as_secs_f64() * 1e3;
-                    self.reply(Reply::Tiles { stroke: id, seq, tiles: result.tiles, raster_ms });
+                    self.reply(Reply::Tiles { stroke: id, seq, tiles: result.tiles, raster_ms, newest_ns });
                 }
                 Ok(None) => {}
                 Err(error) => return self.fail(id, error.to_string()),
