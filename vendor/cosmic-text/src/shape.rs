@@ -57,18 +57,7 @@ impl Shaping {
         match self {
             #[cfg(feature = "swash")]
             Self::Basic => shape_skip(font_system, glyphs, line, attrs_list, start_run, end_run),
-            #[cfg(not(feature = "shape-run-cache"))]
-            Self::Advanced => shape_run(
-                glyphs,
-                font_system,
-                line,
-                attrs_list,
-                start_run,
-                end_run,
-                span_rtl,
-            ),
-            #[cfg(feature = "shape-run-cache")]
-            Self::Advanced => shape_run_cached(
+            Self::Advanced => shape_run_segmented(
                 glyphs,
                 font_system,
                 line,
@@ -79,6 +68,132 @@ impl Shaping {
             ),
         }
     }
+}
+
+/// A base with more combining marks than this is shaped in segments of this many marks.
+const MARK_SEGMENT: usize = 32;
+
+/// A run longer than this (bytes) is shaped in chunks of about [`CHUNK_BYTES`].
+const LONG_RUN_BYTES: usize = 1024;
+
+/// The size of the chunks of a long run, which is also what the run cache holds.
+const CHUNK_BYTES: usize = 256;
+
+/// Whether `c` belongs to a script whose letters join their neighbours (a chunk seam inside a word would break the join).
+fn joins(c: char) -> bool {
+    matches!(c, '؀'..='ࣿ' | '᠀'..='᢯' | 'ﭐ'..='﷿' | 'ﹰ'..='﻿')
+}
+
+/// Where a run is cut: inside trains of combining marks, and, in a run longer than [`LONG_RUN_BYTES`] (one very long word,
+/// or text without spaces), about every [`CHUNK_BYTES`] at the next grapheme boundary. The chunks are held by the run cache,
+/// so an edit at the end of a long word shapes one chunk instead of the whole word (shaping is linear in the word, with a
+/// constant that made one edit of a 16,000 character word cost 18 ms). The cost is that kerning and ligatures do not cross a
+/// seam (one pair in about 250 characters of a word that long); scripts that join letters are not cut except in mark trains.
+fn run_cuts(line: &str, start_run: usize, end_run: usize) -> Vec<usize> {
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let mut cuts = mark_train_cuts(line, start_run, end_run);
+    let run = &line[start_run..end_run];
+    if run.len() > LONG_RUN_BYTES && !run.chars().any(joins) {
+        let mut chunked = Vec::new();
+        let mut last = 0;
+        for (offset, _) in run.grapheme_indices(true) {
+            if offset - last >= CHUNK_BYTES {
+                chunked.push(start_run + offset);
+                last = offset;
+            }
+        }
+        cuts.extend(chunked);
+        cuts.sort_unstable();
+        cuts.dedup();
+    }
+    cuts
+}
+
+/// The byte offsets inside `line[start_run..end_run]` where a train of more than [`MARK_SEGMENT`] combining marks is cut:
+/// before the mark that follows each full segment. Text that is written (a base and up to a dozen marks) has none, so its
+/// shaping is untouched; a pasted base with thousands of marks, which the shaper takes time proportional to the train
+/// times a large constant for and which an edit would shape again whole, becomes identical segments the run cache holds.
+fn mark_train_cuts(line: &str, start_run: usize, end_run: usize) -> Vec<usize> {
+    use unicode_bidi::{bidi_class, BidiClass};
+
+    let mut cuts = Vec::new();
+    let mut marks = 0;
+    for (offset, c) in line[start_run..end_run].char_indices() {
+        // No combining mark is below U+0300.
+        if c >= '̀' && bidi_class(c) == BidiClass::NSM {
+            marks += 1;
+            if marks > MARK_SEGMENT && (marks - 1) % MARK_SEGMENT == 0 {
+                cuts.push(start_run + offset);
+            }
+        } else {
+            marks = 0;
+        }
+    }
+    cuts
+}
+
+fn shape_run_segmented(
+    glyphs: &mut Vec<ShapeGlyph>,
+    font_system: &mut FontSystem,
+    line: &str,
+    attrs_list: &AttrsList,
+    start_run: usize,
+    end_run: usize,
+    span_rtl: bool,
+) {
+    let cuts = if end_run - start_run > 2 * MARK_SEGMENT {
+        run_cuts(line, start_run, end_run)
+    } else {
+        Vec::new()
+    };
+
+    if cuts.is_empty() {
+        return shape_run_whole(glyphs, font_system, line, attrs_list, start_run, end_run, span_rtl);
+    }
+
+    // The segments are shaped in the order of the text; a right-to-left run holds its glyphs in reverse.
+    let mut bounds = vec![start_run];
+    bounds.extend(cuts);
+    bounds.push(end_run);
+    let mut segments = Vec::with_capacity(bounds.len() - 1);
+    for pair in bounds.windows(2) {
+        let mut part = Vec::new();
+        shape_run_whole(&mut part, font_system, line, attrs_list, pair[0], pair[1], span_rtl);
+        segments.push(part);
+    }
+    if span_rtl {
+        segments.reverse();
+    }
+    for part in segments {
+        glyphs.extend(part);
+    }
+}
+
+#[cfg(not(feature = "shape-run-cache"))]
+fn shape_run_whole(
+    glyphs: &mut Vec<ShapeGlyph>,
+    font_system: &mut FontSystem,
+    line: &str,
+    attrs_list: &AttrsList,
+    start_run: usize,
+    end_run: usize,
+    span_rtl: bool,
+) {
+    shape_run(glyphs, font_system, line, attrs_list, start_run, end_run, span_rtl);
+}
+
+#[cfg(feature = "shape-run-cache")]
+fn shape_run_whole(
+    glyphs: &mut Vec<ShapeGlyph>,
+    font_system: &mut FontSystem,
+    line: &str,
+    attrs_list: &AttrsList,
+    start_run: usize,
+    end_run: usize,
+    span_rtl: bool,
+) {
+    shape_run_cached(glyphs, font_system, line, attrs_list, start_run, end_run, span_rtl);
 }
 
 /// The base direction (paragraph level) used when shaping text.
@@ -459,11 +574,19 @@ fn shape_run_cached(
 ) {
     use crate::{AttrsOwned, ShapeRunKey};
 
+    // A long run (one very long word) is not cached: an edit changes its text, so it would never be found again, and an
+    // entry would hold a glyph for every character of it.
+    if end_run - start_run > crate::MAX_CACHED_RUN_BYTES {
+        shape_run(glyphs, font_system, line, attrs_list, start_run, end_run, span_rtl);
+        return;
+    }
+
     let run_range = start_run..end_run;
     let mut key = ShapeRunKey {
         text: line[run_range.clone()].to_string(),
         default_attrs: AttrsOwned::new(&attrs_list.defaults()),
         attrs_spans: Vec::new(),
+        rtl: span_rtl,
     };
     for (attrs_range, attrs) in attrs_list.spans.overlapping(&run_range) {
         if attrs == &key.default_attrs {
@@ -3458,5 +3581,49 @@ impl ShapeLine {
         scratch.visual_lines.append(&mut cached_visual_lines);
         scratch.cached_visual_lines = cached_visual_lines;
         scratch.glyph_sets = cached_glyph_sets;
+    }
+}
+
+#[cfg(test)]
+mod mark_train_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_train_longer_than_a_segment_is_cut_and_each_cut_follows_a_full_segment() {
+        let train = |n: usize| format!("a{}b", "\u{301}".repeat(n));
+        for n in [0, 1, 12, MARK_SEGMENT] {
+            let text = train(n);
+            assert_eq!(mark_train_cuts(&text, 0, text.len()), Vec::<usize>::new(), "{n} marks are not cut");
+        }
+        let text = train(MARK_SEGMENT + 1);
+        // The cut is before the 33rd mark: after "a" (1 byte) and 32 marks (2 bytes each).
+        assert_eq!(mark_train_cuts(&text, 0, text.len()), vec![1 + 2 * MARK_SEGMENT]);
+        let text = train(3 * MARK_SEGMENT);
+        assert_eq!(mark_train_cuts(&text, 0, text.len()), vec![1 + 2 * MARK_SEGMENT, 1 + 4 * MARK_SEGMENT]);
+        // A train that restarts after a base is counted from there.
+        let text = format!("{}{}", train(MARK_SEGMENT), train(MARK_SEGMENT));
+        assert_eq!(mark_train_cuts(&text, 0, text.len()), Vec::<usize>::new());
+    }
+}
+
+#[cfg(test)]
+mod long_run_tests {
+    use super::*;
+
+    #[test]
+    fn a_long_run_is_cut_every_chunk_at_a_grapheme_boundary_and_a_short_one_is_not() {
+        let short = "x".repeat(LONG_RUN_BYTES);
+        assert!(run_cuts(&short, 0, short.len()).is_empty());
+        let long = "x".repeat(LONG_RUN_BYTES + 1);
+        let cuts = run_cuts(&long, 0, long.len());
+        assert_eq!(cuts[0], CHUNK_BYTES);
+        assert!(cuts.windows(2).all(|w| w[1] - w[0] == CHUNK_BYTES));
+        // A base and its mark are never parted by a chunk seam.
+        let text = format!("{}\u{301}{}", "x".repeat(CHUNK_BYTES - 1), "y".repeat(LONG_RUN_BYTES));
+        let cuts = run_cuts(&text, 0, text.len());
+        assert!(!cuts.contains(&CHUNK_BYTES), "{cuts:?}");
+        // Letters that join are left whole.
+        let arabic = "\u{628}".repeat(LONG_RUN_BYTES);
+        assert!(run_cuts(&arabic, 0, arabic.len()).is_empty());
     }
 }
