@@ -66,9 +66,9 @@ those are ours (`styk-design`, `styk-core`) plus a few small fork patches; Inter
 
 **Next, in order.** After FP merges: chunk RM, the renderer's and engine's memory (`perf/briefs/native/RM-render-memory.md`: at 4K our export process holds 1.2 GiB next to the encoder's 0.7, against a 1.5 GiB total; a 256 MiB sprite atlas and a one-time 265 MiB renderer allocation among it). After S3 merges: compare the native `styk-cli video` export
 with today's export of the same documents (FP's bytes are still not equal; sizes within 0.2 %). After the spikes pass: the
-skeleton (the window and shell, the design-system widgets, the engine host with documents, tabs, open, save, recovery and
-autosave, the stage with the automation mode and the benchmark, the developer tools' foundation), each from its reviewed
-design in `perf/native/designs/` and the spikes' code. No interface work starts until S1 and S2a pass in a native window.
+skeleton in ten chunks (`perf/briefs/native/skeleton-plan.md`): wave 1 K-doc (documents and the engine host), K-frames
+(frame scheduling), K-cmd (commands and shortcuts), K-widgets-a (controls); wave 2 K-rec (recovery and autosave),
+K-widgets-b (menus, popovers, dialogs), K-stage, then K-dock, K-shell, K-dev; then the skeleton gate. No interface work starts until S1 and S2a pass in a native window.
 
 **Kept off the branches on purpose.** `t3/fix-save-differs` and `t3/resave-keeps-layout` change saved bytes: the owner's
 decision, unmerged. `t3/speed-joint-drag-frame` is an unfinished optimisation with no measured gain: not this phase's.
