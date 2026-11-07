@@ -14,6 +14,7 @@ pub trait Clock: Send + Sync {
 }
 
 #[cfg(any(test, feature = "test-fakes"))]
+#[path = "../tests/support/clock.rs"]
 pub mod test_fakes;
 #[cfg(any(test, feature = "test-fakes"))]
 pub use test_fakes::SystemClock;

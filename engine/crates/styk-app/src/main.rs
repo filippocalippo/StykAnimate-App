@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::let_underscore_must_use, unused_must_use, clippy::disallowed_methods))]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::let_underscore_must_use, unused_must_use, clippy::disallowed_methods, clippy::disallowed_types))]
 //! `stykanimate`: the StykAnimate program.
 //!
 //! ```text
@@ -372,7 +372,11 @@ fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
             return ExitCode::from(2);
         }
     }
-    let options = LabOptions { window: window::settings(launch, strategy), scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test: self_test.map(|test| Box::new(Runner::new(test)) as Box<dyn styk_core::drawing::probe::PenProbe>), out_dir: launch.out.clone(), input: styk_platform::input::host(), spawner: std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), diagnostics: std::sync::Arc::new(styk_platform::diagnostics::NativeDiagnostics) };
+    let self_test = match self_test.map(|test| Runner::new(test, std::sync::Arc::new(styk_platform::spawn::ThreadSpawner))).transpose() {
+        Ok(probe) => probe.map(|probe| Box::new(probe) as Box<dyn styk_core::drawing::probe::PenProbe>),
+        Err(error) => { eprintln!("{error}"); return ExitCode::FAILURE; }
+    };
+    let options = LabOptions { window: window::settings(launch, strategy), scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test, out_dir: launch.out.clone(), input: styk_platform::input::host(), spawner: std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), diagnostics: std::sync::Arc::new(styk_platform::diagnostics::NativeDiagnostics) };
     match pen_lab::run(options) {
         Ok(0) => ExitCode::SUCCESS,
         Ok(code) => ExitCode::from(code.clamp(1, 255) as u8),

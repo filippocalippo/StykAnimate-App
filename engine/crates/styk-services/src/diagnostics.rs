@@ -10,6 +10,8 @@ pub struct Image {
 }
 
 pub trait DiagnosticWindows: Send + Sync {
+    /// Deliberate 50 ms UI disturbance, only for the explicitly selected Blocked probe.
+    fn disturb_blocked_probe(&self);
     fn show(&self, window: &dyn HasWindowHandle) -> Result<(), String>;
     fn capture(&self, window: &dyn HasWindowHandle) -> Result<Image, String>;
     /// Starts output off the interface thread and reports its terminal result once.

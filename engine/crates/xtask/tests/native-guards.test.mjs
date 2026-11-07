@@ -87,6 +87,11 @@ pub fn bad(m: &std::sync::Mutex<()>, r: &std::sync::RwLock<()>, c: &std::sync::C
     drop(h.join());
     drop(rx.recv());
     drop(rx.recv_timeout(std::time::Duration::ZERO));
+    let mut empty = &b""[..]; drop(std::io::Read::read(&mut empty, &mut [0]));
+    drop(rx.iter().next());
+}
+pub fn file_read(file: &mut AliasedFile) {
+    drop(std::io::Read::read(file, &mut [0]));
 }`;
     writeFileSync(join(root, 'src/lib.rs'), source);
     const args = ['clippy', '--manifest-path', join(root, 'Cargo.toml'), '--offline', '--message-format=json'];
@@ -94,8 +99,8 @@ pub fn bad(m: &std::sync::Mutex<()>, r: &std::sync::RwLock<()>, c: &std::sync::C
     const result = spawnSync('cargo', args, options);
     assert.equal(result.status, 101, result.stderr);
     const diagnostics = result.stdout.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)).filter(d => d.reason === 'compiler-message').map(d => d.message);
-    for (const code of ['clippy::unwrap_used', 'clippy::expect_used', 'clippy::let_underscore_must_use', 'unused_must_use', 'clippy::disallowed_methods']) assert.ok(diagnostics.some(d => d.code?.code === code), `${code}: ${result.stdout}`);
-    for (const line of [8,9,10,11,12,13,14,15,16]) assert.ok(diagnostics.some(d => d.level === 'error' && d.spans.some(s => s.is_primary && s.line_start === line)), `unguarded line ${line}: ${result.stdout}`);
+    for (const code of ['clippy::unwrap_used', 'clippy::expect_used', 'clippy::let_underscore_must_use', 'unused_must_use', 'clippy::disallowed_methods', 'clippy::disallowed_types']) assert.ok(diagnostics.some(d => d.code?.code === code), `${code}: ${result.stdout}`);
+    for (const line of [8,9,10,11,12,13,14,15,16,17,18,21]) assert.ok(diagnostics.some(d => d.code?.code === 'clippy::disallowed_methods' && d.level === 'error' && d.spans.some(s => s.is_primary && s.line_start === line)), `unguarded line ${line}: ${result.stdout}`);
     writeFileSync(join(root, 'src/lib.rs'), `${lint}\n#[cfg(test)] mod tests { #[test] fn permitted() { None::<()>.unwrap(); } }`);
     const clean = spawnSync('cargo', [...args, '--tests'], options);
     assert.equal(clean.status, 0, clean.stdout + clean.stderr);

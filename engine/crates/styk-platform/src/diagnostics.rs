@@ -109,6 +109,10 @@ pub fn create_output_directory(path: &std::path::Path) -> Result<(), String> {
 
 pub struct NativeDiagnostics;
 impl styk_services::diagnostics::DiagnosticWindows for NativeDiagnostics {
+    fn disturb_blocked_probe(&self) {
+        // The sole intentional interface stall: the Blocked diagnostic tests recovery.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
     fn show(&self, window: &dyn raw_window_handle::HasWindowHandle) -> Result<(), String> {
         crate::window::show_without_activation(window).map_err(|error| error.to_string())
     }

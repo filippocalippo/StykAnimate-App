@@ -164,6 +164,7 @@ impl<R> Started<R> {
 }
 
 #[cfg(any(test, feature = "test-fakes"))]
+#[path = "../tests/support/fanout.rs"]
 mod test_fakes;
 #[cfg(any(test, feature = "test-fakes"))]
 pub use test_fakes::StdThreads;

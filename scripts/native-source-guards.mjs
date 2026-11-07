@@ -1,5 +1,5 @@
 import {readFileSync, readdirSync} from 'node:fs';
-import {join, relative} from 'node:path';
+import {join, relative, dirname, basename} from 'node:path';
 
 // A token scanner, not a grep: comments (including nested block comments), raw
 // strings, ordinary strings and character literals cannot introduce code.
@@ -52,7 +52,7 @@ export function productionTokens(source) {
       const attr = input.slice(i + 2, end).map(t => t.value).join('');
       // Only cfg(test) and all(test, ...) are definitely test-only; not(test)
       // and any(test, feature) still contain production code.
-      if (attr === 'cfg(test)' || /^cfg\(all\(test[,)]/.test(attr)) {
+      if (attr.startsWith('cfg(') && requiresTest(attr.slice(4, -1))) {
         let cursor = end + 1;
         while (cursor < input.length && !['{', ';'].includes(input[cursor].value)) cursor++;
         if (input[cursor]?.value === '{') {
@@ -98,32 +98,114 @@ export function windowsErrors(source, file) {
   return errors;
 }
 
-export function sourceErrors(root) {
-  const errors = [];
-  function walk(dir) {
-    for (const entry of readdirSync(dir, {withFileTypes: true})) {
-      const path = join(dir, entry.name), rel = relative(root, path).replaceAll('\\', '/');
-      // Frozen evidence must never be rewritten to satisfy a new guard. All
-      // integration tests are also outside the non-test Windows-code rule.
-      if (rel.startsWith('engine/tests/') || /engine\/crates\/[^/]+\/tests(?:\/|$)/.test(rel) || rel.startsWith('tests/fixtures/owner-references/')) continue;
-      if (rel.startsWith('engine/crates/styk-platform/')) continue;
-      if (entry.isDirectory()) walk(path);
-      // Standalone unit-test modules and test drivers are compiled only by tests.
-      else if (/^(?:tests|.*_tests)\.rs$/.test(entry.name) || rel === 'engine/crates/styk-design/src/widgets/testing.rs') continue;
-      else if (entry.name.endsWith('.rs')) {
-        const source = readFileSync(path, 'utf8');
-        errors.push(...windowsErrors(source, rel));
-        // Binaries, tracing and host tools are not portable engine libraries.
-        if (!/engine\/crates\/(?:styk-app|styk-cli|styk-devtools|styk-text-check|styk-trace|xtask)\//.test(rel) && !rel.includes('/src/bin/')) {
-          // This real-time clock exists only for explicitly enabled test fakes;
-          // production clocks are supplied by styk-platform.
-          // StdThreads has only codec/edit test callers; production injects Fanout.
-          if (!['engine/crates/styk-services/src/clock/test_fakes.rs', 'engine/crates/styk-doc/src/fanout/test_fakes.rs'].includes(rel)) errors.push(...webErrors(source, rel));
-        }
+// A small declaration scan: filenames never establish test-only status.
+function requiresTest(expr) {
+  if (expr === 'test') return true;
+  const m = /^(all|any)\((.*)\)$/.exec(expr);
+  if (!m) return false;
+  let depth = 0, start = 0; const args = [];
+  for (let i = 0; i <= m[2].length; i++) {
+    const c = m[2][i];
+    if (c === '(') depth++; if (c === ')') depth--;
+    if (i === m[2].length || c === ',' && depth === 0) { if (i > start) args.push(m[2].slice(start,i)); start = i + 1; }
+  }
+  return args.length > 0 && (m[1] === 'all' ? args.some(requiresTest) : args.every(requiresTest));
+}
+
+function moduleDeclarations(source, file) {
+  const ts = tokens(source), production = new Set(productionTokens(source).filter(t => t.value === 'mod').map(t => t.line));
+  const out = [];
+  function scan(start, end, dir) {
+    let override;
+    for (let i = start; i < end; i++) {
+      if (ts[i].string) continue;
+      if (ts[i].value === '#' && ts[i+1]?.value === '[') {
+        let stop = i+2; while (stop < end && ts[stop].value !== ']') stop++;
+        if (ts[i+2]?.value === 'path' && ts[i+3]?.value === '=' && ts[i+4]?.string) override = ts[i+4].value;
+        i = stop; continue;
       }
+      if (ts[i].value !== 'mod') { if (['fn','struct','enum','impl','use'].includes(ts[i].value)) override = undefined; continue; }
+      const name = ts[i+1]?.value, next = ts[i+2]?.value;
+      if (next === ';') out.push({candidates: override ? [join(dirname(file), override)] : [join(dir, name+'.rs'), join(dir,name,'mod.rs')], test: !production.has(ts[i].line)});
+      if (next === '{') {
+        let stop = i+3, depth = 1;
+        while (stop < end && depth) { if (!ts[stop].string) { if(ts[stop].value === '{')depth++; if(ts[stop].value === '}')depth--; } stop++; }
+        scan(i+3, stop-1, join(dir,name)); i = stop-1;
+      }
+      override = undefined;
     }
   }
-  walk(join(root, 'engine/crates'));
+  const dir = ['lib.rs','main.rs','mod.rs'].includes(basename(file)) ? dirname(file) : join(dirname(file),basename(file,'.rs'));
+  scan(0,ts.length,dir); return out;
+}
+
+export function interfaceErrors(source, file) {
+  const ts = productionTokens(source), errors = [];
+  for (let i=0;i<ts.length;i++) if (!ts[i].string && ts[i].value === '.' && ['unwrap','expect'].includes(ts[i+1]?.value) && ts[i+2]?.value === '(') {
+    errors.push(file+':'+ts[i].line+': interface: .'+ts[i+1].value+' is forbidden, including local macro bodies');
+  }
+  return errors;
+}
+
+export function boundaryErrors(source, file) {
+  const ts = productionTokens(source), errors = [];
+  const engine = /^styk_(?:alloc|doc|draw|drawing|edit|engine|eval|export|formats|math|piv|raster|render|wasm)$/;
+  const views = /engine\/crates\/styk-(ui|devtools)\//.test(file);
+  const platform = file.includes('/styk-platform/');
+  const windowsNames = new Set(['windows','windows_sys','winapi']);
+  const coreNames = new Set(['styk_core']);
+  // Local use declarations suffice for ordinary aliases; this is not a resolver.
+  for (let i=0;i<ts.length;i++) if (ts[i].value === 'use') {
+    let end=i; while(end<ts.length && ts[end].value!==';')end++;
+    const declaration = ts.slice(i,end);
+    if(declaration.some(t=>!t.string && windowsNames.has(t.value))) for(const t of declaration) if(!t.string && /^[A-Za-z_]/.test(t.value)) windowsNames.add(t.value);
+    if(ts[i+1]?.value==='styk_core' && ts[i+2]?.value==='as') coreNames.add(ts[i+3]?.value);
+  }
+  for(let i=0;i<ts.length;i++) {
+    const t=ts[i]; if(t.string)continue;
+    if(views && engine.test(t.value)) errors.push(file+':'+t.line+': views: direct engine paths are forbidden');
+    if(views && coreNames.has(t.value)) {
+      let end=i+1; while(end<ts.length && ![';',')','='].includes(ts[end].value))end++;
+      if(ts.slice(i+1,end).some(t=>!t.string && t.value==='engine')) errors.push(file+':'+t.line+': views: styk_core::engine is forbidden');
+    }
+    if(platform && t.value==='pub') {
+      let end=i+1; while(end<ts.length && ![';','{'].includes(ts[end].value))end++;
+      // Include brace groups in pub use declarations.
+      if(ts[i+1]?.value==='use') { end=i+1; while(end<ts.length && ts[end].value!==';')end++; }
+      const item=ts.slice(i+1,end);
+      if(['use','type'].includes(item[0]?.value) && item.slice(1).some(t=>!t.string && windowsNames.has(t.value))) errors.push(file+':'+t.line+': platform-api: public Windows re-exports and aliases are forbidden');
+    }
+  }
+  return errors;
+}
+
+export function sourceErrors(root) {
+  const files = new Map(), errors = [];
+  function walk(dir) {
+    for(const entry of readdirSync(dir,{withFileTypes:true})) {
+      const path=join(dir,entry.name), rel=relative(root,path).replaceAll('\\','/');
+      // Frozen evidence, integration fixtures and benchmark harnesses stay untouched.
+      if(/\/(tests|benches)(\/|$)/.test(rel))continue;
+      if(entry.isDirectory())walk(path); else if(entry.name.endsWith('.rs'))files.set(path,readFileSync(path,'utf8'));
+    }
+  }
+  walk(join(root,'engine/crates'));
+  const incoming=new Map();
+  for(const [path,source] of files) for(const decl of moduleDeclarations(source,path)) {
+    const target=decl.candidates.find(p=>files.has(p)); if(!target)continue;
+    if(!incoming.has(target))incoming.set(target,[]); incoming.get(target).push({parent:path,test:decl.test});
+  }
+  const tests=new Set(); let changed=true;
+  while(changed) { changed=false; for(const [path,decls] of incoming) if(!tests.has(path) && decls.every(d=>d.test||tests.has(d.parent))) { tests.add(path); changed=true; } }
+  for(const [path,source] of files) {
+    if(tests.has(path))continue;
+    const rel=relative(root,path).replaceAll('\\','/');
+    errors.push(...boundaryErrors(source,rel));
+    if(rel.includes('/styk-platform/'))continue;
+    errors.push(...windowsErrors(source,rel));
+    if(/\/styk-(ui|app|devtools)\//.test(rel) || /\/styk-design\/src\/widgets(?:\.rs|\/)/.test(rel) || rel.includes('/styk-text-check/src/pen_lab/')) errors.push(...interfaceErrors(source,rel));
+    if(!/engine\/crates\/(?:styk-app|styk-cli|styk-devtools|styk-text-check|styk-trace|xtask)\//.test(rel) && !rel.includes('/src/bin/')) errors.push(...webErrors(source,rel));
+  }
   return errors;
 }
 
@@ -151,6 +233,7 @@ export function webErrors(source, file) {
   }
   const names = new Set(['Instant', 'SystemTime']), threads = new Set(['thread']);
   for (let i = 0; i < ts.length; i++) {
+    if (ts[i].value === 'type' && ts[i+2]?.value === '=') { let end=i+3; while(end<ts.length && ts[end].value!==';')end++; if(ts.slice(i+3,end).some(t=>!t.string && names.has(t.value))) names.add(ts[i+1]?.value); }
     if (names.has(ts[i].value) && ts[i + 1]?.value === 'as') names.add(ts[i + 2]?.value);
     if (threads.has(ts[i].value) && ts[i + 1]?.value === 'as') threads.add(ts[i + 2]?.value);
     if (['fn', 'mod'].includes(ts[i].value) && nativeHelpers.get(file)?.includes(ts[i + 1]?.value)) helpers.push(body(i + 2));
@@ -163,7 +246,8 @@ export function webErrors(source, file) {
   for (let i = 0; i < ts.length; i++) {
     const t = ts[i];
     if (t.string) continue;
-    const clock = names.has(t.value) && ts[i + 1]?.value === ':' && ts[i + 2]?.value === ':' && ts[i + 3]?.value === 'now';
+    const after = ts[i+1]?.value === '>' ? i+2 : i+1;
+    const clock = names.has(t.value) && ts[after]?.value === ':' && ts[after+1]?.value === ':' && ts[after+2]?.value === 'now';
     // Also reject imports (including renamed imports), so an alias cannot hide a spawn.
     let thread = false;
     if (threads.has(t.value) && ts[i + 1]?.value === ':' && ts[i + 2]?.value === ':') {

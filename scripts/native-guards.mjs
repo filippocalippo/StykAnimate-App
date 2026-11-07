@@ -146,6 +146,20 @@ export function wasmPackages(metadata) {
   return metadata.packages.filter(p => members.has(p.id) && !frontend.has(p.name) && p.name !== 'styk-cli').map(p => p.name).sort();
 }
 
+export function allowSealErrors(current, approved) {
+  const errors = [];
+  if (!current.split(/\r?\n/).some(line => line.startsWith('#') && line.includes('Only the orchestrator may edit this file.'))) errors.push('engine/deps-allow.toml:1: allow-list: required ownership header is missing');
+  if (approved === null || current.replaceAll('\r\n','\n') !== approved.replaceAll('\r\n','\n')) errors.push('engine/deps-allow.toml:1: allow-list: differs from the merge base with native-app; the orchestrator approves dependency changes at the merge');
+  return errors;
+}
+
+export function approvedAllow(root) {
+  const git = args => execFileSync('git', args, {cwd:root, encoding:'utf8', stdio:['ignore','pipe','pipe']});
+  const base = git(['merge-base','HEAD','native-app']).trim();
+  if (!git(['ls-tree','--name-only',base,'--','engine/deps-allow.toml']).trim()) return null;
+  return git(['show',`${base}:engine/deps-allow.toml`]);
+}
+
 export function check(root, wasm = false) {
   const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--manifest-path', 'engine/Cargo.toml', '--format-version', '1', '--all-features', '--locked', '--offline'], {cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024}));
   const errors = directionErrors(metadata).map(e => {
@@ -154,19 +168,22 @@ export function check(root, wasm = false) {
     return `${relative(root, e.package.manifest_path)}:${Math.max(1, line)}: ${e.rule}: ${e.message}`;
   });
   const allowSource = readFileSync(resolve(root, 'engine/deps-allow.toml'), 'utf8');
+  const approvalErrors = allowSealErrors(allowSource, approvedAllow(root));
   errors.push(...allowErrors(metadata, parseAllow(allowSource), readFileSync(resolve(root, 'engine/Cargo.lock'), 'utf8'), allowSource));
   errors.push(...sourceErrors(root));
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`metadata: dependency direction and registry allow-list pass (${metadata.packages.length} packages)`);
-  console.log('source: Windows isolation and web Clock/Spawner constraints pass');
+  console.log('source: Windows isolation, view boundaries, macro unwrap/expect and web Clock/Spawner constraints pass');
   // Check both builds: cfg(not(feature = "devtools")) must not hide violations.
   for (const features of ['styk-design/widgets', 'styk-app/devtools,styk-design/widgets']) {
-    execFileSync('cargo', ['clippy', '--manifest-path', 'engine/Cargo.toml', '--locked', '--no-deps', '-p', 'styk-app', '-p', 'styk-ui', '-p', 'styk-devtools', '-p', 'styk-design', '--features', features], {
+    execFileSync('cargo', ['clippy', '--manifest-path', 'engine/Cargo.toml', '--locked', '--no-deps', '-p', 'styk-app', '-p', 'styk-ui', '-p', 'styk-devtools', '-p', 'styk-design', '-p', 'styk-text-check', '--lib', '--bins', '--features', features], {
       cwd: root, stdio: 'inherit', env: {...process.env, CLIPPY_CONF_DIR: resolve(root, 'engine/guard-clippy')},
     });
   }
   console.log('interface: clippy guards pass');
   screenCheck(root, execFileSync, metadata.target_directory);
+  // Still verify every independent rule when a branch awaits merge approval.
+  if (approvalErrors.length) throw new Error(approvalErrors.join('\n'));
   if (wasm) {
     const args = ['check', '--manifest-path', 'engine/Cargo.toml', '--locked', '--lib', '--target', 'wasm32-unknown-unknown'];
     for (const name of wasmPackages(metadata)) args.push('-p', name);

@@ -47,6 +47,7 @@ pub enum Message {
     Opened(window::Id),
     Attached(Attached),
     Frame,
+    Probe(Result<self_test::Step, String>),
     Brush(BrushChange),
     Switch(SwitchChange),
     Clear,
@@ -99,6 +100,8 @@ struct Lab {
     show_after_open: bool,
     out_dir: Option<PathBuf>,
     test: Option<Box<dyn PenProbe>>,
+    probe_pending: bool,
+    captured: bool,
     hover_target: bool,
     hover_enters: u64,
     frames: u64,
@@ -122,6 +125,8 @@ impl Lab {
             show_after_open: options.show_after_open,
             out_dir: options.out_dir.clone(),
             test: options.self_test.take(),
+            probe_pending: false,
+            captured: false,
             hover_target: false,
             hover_enters: 0,
             frames: 0,
@@ -161,16 +166,34 @@ impl Lab {
             }
             Message::Frame => {
                 self.frames += 1;
+                if self.probe_pending { return Task::none(); }
                 let Some(runner) = self.test.as_mut() else { return Task::none() };
                 let context = self_test::Context {
-                    core: &self.core,
-                    counters: self.counters.as_ref(),
+                    core: self.core.clone(),
+                    counters: self.counters.clone(),
                     refresh_hz: self.refresh_hz,
-                    out_dir: self.out_dir.as_deref(),
+                    out_dir: self.out_dir.clone(),
                 };
-                match runner.step(&context) {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                let captured = std::mem::take(&mut self.captured);
+                match runner.step(context, captured, Box::new(move |result| {
+                    if sender.send(result).is_err() { eprintln!("pen probe receiver closed"); }
+                })) {
+                    Ok(()) => { self.probe_pending = true; Task::perform(async move { receiver.await.map_err(|e| e.to_string())? }, Message::Probe) }
+                    Err(error) => Task::done(Message::Finished(Err(error))),
+                }
+            }
+            Message::Probe(Err(error)) => { self.probe_pending = false; Task::done(Message::Finished(Err(error))) }
+            Message::Probe(Ok(step)) => {
+                self.probe_pending = false;
+                match step {
                     self_test::Step::Continue => Task::none(),
+                    self_test::Step::DisturbBlockedProbe => {
+                        self.diagnostics.disturb_blocked_probe();
+                        Task::none()
+                    }
                     self_test::Step::Capture(path) => {
+                        self.probe_pending = true;
                         let id = self.window;
                         match id {
                             Some(id) => {
@@ -199,14 +222,14 @@ impl Lab {
                 }
             }
             Message::Finished(Err(error)) => {
+                eprintln!("pen probe failed: {error}");
                 self.error = Some(error);
                 self.exit_code.store(1, Ordering::Release);
                 iced::exit()
             }
             Message::Finished(Ok(())) => {
-                if let Some(runner) = self.test.as_mut() {
-                    runner.captured();
-                }
+                self.probe_pending = false;
+                self.captured = true;
                 Task::none()
             }
             Message::Brush(change) => {

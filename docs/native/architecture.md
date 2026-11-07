@@ -135,20 +135,33 @@ gates). Input, layout tiers and platform services stay behind traits a touch bui
 
 `cargo xtask check` checks generated design files, the Cargo metadata dependency graph (all features and targets),
 registry package users against `engine/deps-allow.toml`, and production Rust tokens for Windows code outside
-`styk-platform`. Frozen evidence and integration tests are excluded by path; `cfg(test)` items are skipped.
-Only the orchestrator edits the dependency allow list after its initial baseline. Core state in shared design
-widgets is allowed; views cannot import engine crates. The existing non-default CLI `app-tools` boundary remains.
+`styk-platform`. Frozen evidence, `tests/` and `benches/` are excluded by path; `cfg(test)` items are skipped.
+A separate test module is exempt only when its module declaration requires `test`, never because of its filename.
+Feature-gated test helpers live under `tests/support/` and cannot be enabled by production dependencies.
+The dependency allow list requires its ownership header and must equal its version at the merge base with
+`native-app`: the orchestrator approves changes at the merge, including the initial baseline. Core state in shared
+design widgets is allowed; UI and developer-tool views cannot use direct engine paths or `styk_core::engine`.
+Platform public re-exports and type aliases cannot expose Windows items. These are textual checks, not a type resolver.
+The existing non-default CLI `app-tools` boundary remains.
 `cargo test --manifest-path engine/Cargo.toml -p xtask --test native_guards` runs the violating fixtures, including
 a real scratch-crate Clippy check and the screenshot failure path, through the existing Node prerequisite.
 
-Clippy checks the app, UI, developer tools and design widgets for unwrap/expect, ignored results, file I/O and
-blocking calls using `engine/guard-clippy/clippy.toml`. Tests may unwrap. Device polling is conservatively disallowed
-in these interfaces, even for non-wait polls. Diagnostic output runs off the event loop; its filesystem and
-process operations belong to `styk-platform`. Design font warm-up is outside the widget-module guard, but starts
+Clippy checks the app, UI, developer tools, design widgets and the diagnostic library for unwrap/expect, ignored
+results, file I/O and blocking calls using `engine/guard-clippy/clippy.toml`. A source scan also catches unwrap/expect
+inside local macro bodies. Tests may unwrap. File handles and synchronous receivers are forbidden types; trait
+Read/Write methods and receiver iterators are forbidden calls. Device polling is conservatively disallowed
+in these interfaces, even for non-wait polls. Design font warm-up is outside the widget-module guard, but starts
 through the injected `Spawner` and returns failures. The pen pad state belongs to core; its scripted diagnostic
 workload belongs to `styk-text-check`, injected into the developer tool through the core probe protocol.
+The probe submits to a bounded worker mailbox through `Spawner` and returns completion messages. Only named task
+functions in its private worker module allow blocking I/O and waits; its start/submit entry points retain the interface
+lints. Analysis, feeder waits, Behaviour's 800 ms pause and report/CSV writes run there; write and spawn failures reach
+the interface. The named platform `disturb_blocked_probe` is the sole
+intentional interface sleep, requested only by the explicit Blocked self-test. Capture encoding/writes remain in
+the asynchronous platform diagnostic service. The worker never joins on the interface thread.
 
-The web constraint guard rejects direct thread spawning and wall/monotonic clock construction in portable libraries.
+The web constraint guard rejects direct thread spawning and wall/monotonic clock construction in portable libraries,
+including qualified clock paths and same-file clock aliases.
 Text jobs use `Spawner`; closing cancels and wakes the worker without joining the interface thread. The production
 clock lives in platform; services exposes a real-time clock only behind its explicit `test-fakes` feature for tests.
 The document crate's `StdThreads` is likewise a test fake: only dev-dependencies may enable `test-fakes`.

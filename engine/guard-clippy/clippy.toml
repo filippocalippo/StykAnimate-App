@@ -1,5 +1,16 @@
 # Interface-only checks; Device::poll is conservatively forbidden in views, including non-wait polls.
 disallowed-methods = [
+  { path = "std::io::Read::read", reason = "N8: potentially blocking I/O belongs off the interface thread" },
+  { path = "std::io::Read::read_vectored", reason = "N8: potentially blocking I/O belongs off the interface thread" },
+  { path = "std::io::Read::read_to_end", reason = "N8: potentially blocking I/O belongs off the interface thread" },
+  { path = "std::io::Read::read_to_string", reason = "N8: potentially blocking I/O belongs off the interface thread" },
+  { path = "std::io::Read::read_exact", reason = "N8: potentially blocking I/O belongs off the interface thread" },
+  { path = "std::io::Write::write", reason = "N8: potentially blocking I/O belongs off the interface thread" },
+  { path = "std::io::Write::write_vectored", reason = "N8: potentially blocking I/O belongs off the interface thread" },
+  { path = "std::io::Write::write_all", reason = "N8: potentially blocking I/O belongs off the interface thread" },
+  { path = "std::io::Write::write_fmt", reason = "N8: potentially blocking I/O belongs off the interface thread" },
+  { path = "std::io::Write::flush", reason = "N8: potentially blocking I/O belongs off the interface thread" },
+  { path = "std::sync::mpsc::Receiver::iter", reason = "N8: potentially blocking I/O belongs off the interface thread" },
   { path = "std::fs::exists", reason = "N8: filesystem queries belong in platform services" },
   { path = "std::fs::File::metadata", reason = "N8: filesystem queries belong in platform services" },
   { path = "std::fs::File::sync_all", reason = "N8: file I/O belongs in platform services" },
@@ -43,4 +54,11 @@ disallowed-methods = [
   { path = "std::sync::mpsc::Receiver::recv", reason = "N8: file I/O and blocking waits belong in platform services, never the interface" },
   { path = "std::sync::mpsc::Receiver::recv_timeout", reason = "N8: file I/O and blocking waits belong in platform services, never the interface" },
   { path = "wgpu::Device::poll", reason = "N8: file I/O and blocking waits belong in platform services, never the interface" },
+]
+
+# Receiver::into_iter and its Iterator::next have no reachable inherent function
+# for Clippy's method list. Ban the Receiver type in interfaces instead (R2).
+disallowed-types = [
+ { path = "std::fs::File", reason = "N8: no file handles in interface code" },
+ { path = "std::sync::mpsc::Receiver", reason = "N8: use asynchronous completion messages" },
 ]

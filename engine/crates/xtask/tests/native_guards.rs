@@ -4,7 +4,7 @@
 fn native_guards_reject_violating_fixtures() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let status = std::process::Command::new("node")
-        .args(["--test", "engine/crates/xtask/tests/native-guards.test.mjs"])
+        .args(["--test", "engine/crates/xtask/tests/native-guards.test.mjs", "engine/crates/xtask/tests/review-guards.test.mjs"])
         .current_dir(root)
         .status()
         .expect("Node is required by cargo xtask check");
