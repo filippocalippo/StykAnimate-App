@@ -467,6 +467,11 @@ pub trait VideoSession: Send {
 
     fn progress(&self) -> Arc<Progress>;
 
+    /// The encoder process, for tools that measure or disturb it.
+    fn encoder_pid(&self) -> Option<u32> {
+        None
+    }
+
     /// Closes the input, waits for the encoder, adds the sound, checks the result and moves it over the destination.
     fn finish(self: Box<Self>) -> Result<Committed, VideoError>;
 

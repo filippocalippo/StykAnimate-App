@@ -85,7 +85,7 @@ for (const config of configs) {
       const service = new VideoExportService({encoderPath: 'C:\\ffmpeg.exe', tempRoot: 'C:\\temp'});
       const expected = Math.round(validated.totalFrames / validated.fps * 48000) * 8;
       const job = {config: validated, output: `V/video.${validated.format === 'wmv' ? 'wmv' : validated.format}`, directory: 'V', audioPath: 'V/mix.f32', audioBytes: expected, audioHandle: {close: async () => {}}};
-      return service.muxAudio(job).then(() => ({validated, args, mux: spawned[0]}));
+      return service.muxAudio(job).then(() => ({validated, args, mux: spawned[0].map(argument => argument.replaceAll('\\', '/'))}));
     }
     return {validated, args, mux};
   });

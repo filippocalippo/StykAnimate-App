@@ -109,15 +109,23 @@ impl CpuExport {
 
     /// The whole frame as output pixels (straight RGBA of the output size).
     pub fn frame(&mut self, doc: &Document, list: &DrawList, camera: Option<&Camera>, matte: bool) -> Result<Vec<u8>, String> {
+        let mut out = Vec::new();
+        self.frame_into(doc, list, camera, matte, &mut out)?;
+        Ok(out)
+    }
+
+    /// [`CpuExport::frame`] into `out` (cleared and filled), allocating nothing per frame.
+    pub fn frame_into(&mut self, doc: &Document, list: &DrawList, camera: Option<&Camera>, matte: bool, out: &mut Vec<u8>) -> Result<(), String> {
         let (width, factor) = (self.settings.width as usize, self.settings.smoothing.factor());
-        let mut out = vec![0u8; width * self.settings.height as usize * 4];
+        out.clear();
+        out.resize(width * self.settings.height as usize * 4, 0);
         for index in 0..self.tiles.len() {
             self.draw(doc, list, camera, index, 0)?;
             let tile = self.tiles[index];
             let pixels = self.resolve(index, 0, matte)?;
-            crate::gpu::place(&mut out, width, &tile, factor, pixels);
+            crate::gpu::place(out, width, &tile, factor, pixels);
         }
-        Ok(out)
+        Ok(())
     }
 
     /// What the renderer drew last: layers, effect passes, peak target bytes, glyph masks.

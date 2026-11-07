@@ -2249,6 +2249,7 @@ dependencies = [
  "pollster",
  "rayon",
  "sha2",
+ "styk-core",
  "styk-doc",
  "styk-edit",
  "styk-engine",
@@ -2256,8 +2257,10 @@ dependencies = [
  "styk-export",
  "styk-formats",
  "styk-piv",
+ "styk-platform",
  "styk-raster",
  "styk-render",
+ "styk-services",
 ]
 
 [[package]]
@@ -2422,6 +2425,7 @@ name = "styk-platform"
 version = "0.1.0"
 dependencies = [
  "raw-window-handle",
+ "styk-services",
  "windows-sys",
 ]
 

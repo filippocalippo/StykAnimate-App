@@ -166,6 +166,44 @@ impl GpuExport {
         Ok(out)
     }
 
+    /// Renders a whole frame natively into `out` (cleared and filled with straight RGBA of the output size; over black
+    /// with `matte`), allocating nothing per frame. Tiles are drawn a batch at a time, as many as there are read-back
+    /// slots, and all mapped by one wait, so the GPU draws the next tiles while the first are being read. The pixels
+    /// are those of [`GpuExport::frame_blocking`].
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn frame_into(&mut self, doc: &Document, list: &Arc<DrawList>, camera: Option<&Camera>, matte: bool, out: &mut Vec<u8>) -> Result<(), String> {
+        let (width, height) = (self.settings.width as usize, self.settings.height as usize);
+        let factor = self.settings.smoothing.factor();
+        out.clear();
+        out.resize(width * height * 4, 0);
+        let slots = self.readbacks.len();
+        let mut first = 0;
+        while first < self.tiles.len() {
+            let batch = slots.min(self.tiles.len() - first);
+            for k in 0..batch {
+                self.draw(doc, list, camera, first + k, k);
+            }
+            let (sender, receiver) = std::sync::mpsc::channel();
+            for k in 0..batch {
+                let sender = sender.clone();
+                self.readbacks[k].slice(..).map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = sender.send(result);
+                });
+            }
+            let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+            for _ in 0..batch {
+                receiver.recv().map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+            }
+            for k in 0..batch {
+                let tile = self.tiles[first + k];
+                let pixels = self.resolve(first + k, k, matte)?;
+                place(out, width, &tile, factor, pixels);
+            }
+            first += batch;
+        }
+        Ok(())
+    }
+
     /// The renderer's statistics for the last tile drawn.
     pub fn stats(&self) -> &styk_render::Stats {
         &self.renderer.stats

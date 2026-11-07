@@ -24,7 +24,8 @@ pub trait AudioSource {
     fn next_chunk(&mut self, out: &mut Vec<f32>) -> Result<bool, String>;
 }
 
-/// Runs a video export of `frames` frames to `destination`.
+/// Runs a video export of `frames` frames to `destination`. `on_start` sees the session once it has begun (a tool
+/// reads its encoder process and progress there).
 ///
 /// Any failure and any cancellation ends the encoder and removes what the job made, except a commit that lost a race
 /// with another program: that returns [`VideoError::CommitFailed`] with the finished file kept, for
@@ -37,8 +38,10 @@ pub fn run_video_export(
     producer: &mut dyn FrameProducer,
     audio: Option<&mut dyn AudioSource>,
     cancel: &Cancel,
+    on_start: &dyn Fn(&dyn VideoSession),
 ) -> Result<Committed, VideoError> {
     let mut session = service.begin(destination, request, cancel)?;
+    on_start(&*session);
     let progress = session.progress();
     match render(&mut *session, frames, producer, audio, cancel, &progress) {
         Ok(()) => session.finish(),
@@ -166,7 +169,7 @@ mod tests {
     fn frames_arrive_in_order_and_the_export_commits() {
         let service = FakeVideoService::default();
         let mut producer = Numbers { drawn: 0, cancel_at: None };
-        let done = run_video_export(&service, Path::new("out.mp4"), &request(), 5, &mut producer, None, &Cancel::new()).unwrap();
+        let done = run_video_export(&service, Path::new("out.mp4"), &request(), 5, &mut producer, None, &Cancel::new(), &|_| {}).unwrap();
         assert_eq!(done.frames, 5);
         let recording = service.recording.lock().unwrap();
         assert_eq!(recording.frames.iter().map(|f| f[0]).collect::<Vec<_>>(), [0, 1, 2, 3, 4]);
@@ -178,7 +181,7 @@ mod tests {
         let service = FakeVideoService::default();
         let cancel = Cancel::new();
         let mut producer = Numbers { drawn: 0, cancel_at: Some((2, cancel.clone())) };
-        let error = run_video_export(&service, Path::new("out.mp4"), &request(), 5, &mut producer, None, &cancel).unwrap_err();
+        let error = run_video_export(&service, Path::new("out.mp4"), &request(), 5, &mut producer, None, &cancel, &|_| {}).unwrap_err();
         assert_eq!(error, VideoError::Cancelled);
         assert_eq!(producer.drawn, 3);
         let recording = service.recording.lock().unwrap();
@@ -189,7 +192,7 @@ mod tests {
     fn an_encoder_failure_aborts_the_job() {
         let service = FakeVideoService { fail_after: Some(1), ..Default::default() };
         let mut producer = Numbers { drawn: 0, cancel_at: None };
-        let error = run_video_export(&service, Path::new("out.mp4"), &request(), 5, &mut producer, None, &Cancel::new()).unwrap_err();
+        let error = run_video_export(&service, Path::new("out.mp4"), &request(), 5, &mut producer, None, &Cancel::new(), &|_| {}).unwrap_err();
         assert!(matches!(error, VideoError::Encoder(_)));
         assert!(service.recording.lock().unwrap().aborted);
     }
