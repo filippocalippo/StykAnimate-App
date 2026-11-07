@@ -104,6 +104,10 @@ struct TileSet {
     tiles: Vec<(i32, i32, Arc<[u8]>)>,
     levels: Vec<Vec<(i32, i32)>>,
     identity: Arc<()>,
+    /// What decoding the pixels resolves ([`DrawingTiles::decoded_bounds`], [`DrawingTiles::tile_ink`]): a property of the payload, so every
+    /// view of it shares them.
+    decoded_bounds: Arc<std::sync::OnceLock<Option<[f64; 4]>>>,
+    tile_ink: Arc<std::sync::OnceLock<Arc<HashMap<(i32, i32), [i64; 4]>>>>,
 }
 
 /// The payload of an image field, held without keeping it alive (as [`Source`] does for records).
@@ -784,12 +788,12 @@ impl Loader {
                 None => {
                     let tiles = crate::drawing::parse_tiles(&field.payload_bytes()?)?;
                     let levels = crate::drawing::level_tiles(&tiles);
-                    let set = Arc::new(TileSet { tiles, levels, identity: Arc::new(()) });
+                    let set = Arc::new(TileSet { tiles, levels, identity: Arc::new(()), decoded_bounds: Arc::default(), tile_ink: Arc::default() });
                     self.tile_sets.insert(identity, (payload, set.clone()));
                     set
                 }
             };
-            Some(Arc::new(DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: Default::default(), tile_ink: Default::default(), inherited_ink: Default::default(), tiles: set.tiles.clone(), levels: set.levels.clone(), identity: set.identity.clone() }))
+            Some(Arc::new(DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: set.decoded_bounds.clone(), tile_ink: set.tile_ink.clone(), inherited_ink: Default::default(), tiles: set.tiles.clone(), levels: set.levels.clone(), identity: set.identity.clone() }))
         });
         let image = if tiles.is_some() { None } else { self.image(a, &["data_url", "data_base64", "data_uri"]) };
         let size = match (num(a, "width"), num(a, "height")) {

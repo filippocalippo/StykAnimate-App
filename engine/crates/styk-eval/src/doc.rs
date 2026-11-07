@@ -183,15 +183,18 @@ pub struct DrawingTiles {
     /// They anchor effect rasters; whole-tile coverage only places drawing quads.
     pub bounds: Option<[f64; 4]>,
     /// Tight bounds resolved by the existing background PNG decode. No pixel cache
-    /// and no document mutation: a loaded store's nonempty bounds supersede metadata.
-    pub decoded_bounds: OnceLock<Option<[f64; 4]>>,
+    /// and no document mutation: a loaded store's nonempty bounds supersede metadata. Shared by every view made from the same tile
+    /// payload (like [`DrawingTiles::identity`]): a decode that finishes for an earlier revision resolves them for the revision in front,
+    /// and an edit that leaves the pixels alone (a name, a style) leaves them resolved.
+    pub decoded_bounds: Arc<OnceLock<Option<[f64; 4]>>>,
     /// Level-0 tiles: `(tx, ty, PNG bytes)` in tile coordinates (64 cel pixels per tile).
     pub tiles: Vec<(i32, i32, Arc<[u8]>)>,
     /// The tiles drawn at each display level 0–8 ([`crate::drawing::level_tiles`]).
     pub levels: Vec<Vec<(i32, i32)>>,
     /// The ink of each level-0 tile that has some, `[x0, y0, x1, y1)` in cel pixels: set by the decode that resolved `decoded_bounds`.
     /// A cel that replaces this one starts its own bounds from it ([`DrawingTiles::inherited_ink`]) so that it decodes only the tiles that changed.
-    pub tile_ink: OnceLock<Arc<HashMap<(i32, i32), [i64; 4]>>>,
+    /// Shared like `decoded_bounds`.
+    pub tile_ink: Arc<OnceLock<Arc<HashMap<(i32, i32), [i64; 4]>>>>,
     /// The ink of the tiles this cel shares with the cel it replaced (`Assets::extended`): what an incremental decode does not decode again.
     pub inherited_ink: OnceLock<Arc<HashMap<(i32, i32), [i64; 4]>>>,
     /// Which pixels these are: every view made from the same tile payload shares it, whatever else about the cel changed (its
@@ -202,7 +205,7 @@ pub struct DrawingTiles {
 impl DrawingTiles {
     /// A cel of its own pixels.
     pub fn new(anchor: [f64; 2], pixels_per_unit: f64, bounds: Option<[f64; 4]>, tiles: Vec<(i32, i32, Arc<[u8]>)>, levels: Vec<Vec<(i32, i32)>>) -> DrawingTiles {
-        DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: OnceLock::new(), tile_ink: OnceLock::new(), inherited_ink: OnceLock::new(), tiles, levels, identity: Arc::new(()) }
+        DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: Arc::default(), tile_ink: Arc::default(), inherited_ink: OnceLock::new(), tiles, levels, identity: Arc::new(()) }
     }
 
     /// What the atlas and the engine's decoding know the cel's pixels by.

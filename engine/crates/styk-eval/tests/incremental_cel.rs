@@ -127,3 +127,43 @@ fn a_placed_cel_that_replaces_another_keeps_the_slots_of_the_tiles_they_share() 
     assert!(whole.cel_dirty(new.key()).is_none());
     assert_eq!(decode_cel_changed(&whole, &new).len(), whole.cel_slots(&new).unwrap().iter().map(Vec::len).sum::<usize>());
 }
+
+/// A document whose first figure draws `cels` in that order, one image each.
+fn drawing_cels(base: &styk_eval::doc::Document, cels: &[&Arc<DrawingTiles>]) -> styk_eval::doc::Document {
+    let mut document = base.clone();
+    let mut figure = (*document.figures[0]).clone();
+    let template = figure.images.iter().find(|image| image.tiles.is_some()).unwrap().clone();
+    figure.images = cels.iter().map(|cel| styk_eval::doc::ImageAsset { tiles: Some((*cel).clone()), ..template.clone() }).collect();
+    document.figures[0] = Arc::new(figure);
+    document
+}
+
+/// A payload the document draws more than once, with another between the draws (A, B, A), is placed once: the second draw of A taking slots of
+/// its own would overwrite the first's placement and leave its slots held by nobody, for good.
+#[test]
+fn a_payload_drawn_twice_with_another_between_is_placed_once_however_often_it_comes_and_goes() {
+    use styk_eval::load::Loader;
+    let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drawlist/drawing-cel.json");
+    let base = Loader::new().document(&styk_doc::json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
+    let a = cel((0..6).map(|n| (n, 0, tile(&mut rng))).collect());
+    let b = cel((0..4).map(|n| (n, 3, tile(&mut rng))).collect());
+    let slots_of = |assets: &Assets| assets.cels.values().map(|(_, slots)| slots.iter().map(Vec::len).sum::<usize>()).sum::<usize>();
+    let unique = |cels: &[&Arc<DrawingTiles>]| {
+        let mut seen = std::collections::HashSet::new();
+        cels.iter().filter(|cel| seen.insert(cel.key())).map(|cel| cel.levels.iter().map(Vec::len).sum::<usize>()).sum::<usize>()
+    };
+    let (with, without) = (drawing_cels(&base, &[&a, &b, &a]), drawing_cels(&base, &[&b]));
+    let mut assets = Assets::build(&with);
+    assert_eq!(assets.cels.len(), 2, "the two payloads are placed");
+    assert_eq!(slots_of(&assets), unique(&[&a, &b]), "each payload has its tiles' slots, once");
+    let allocated = assets.drawing.len();
+    assert_eq!(allocated, slots_of(&assets), "and nothing else is allocated");
+    for round in 0..8 {
+        assets = assets.extended(&without);
+        assert_eq!(assets.cels.len(), 1, "round {round}: A is gone");
+        assets = assets.extended(&with);
+        assert_eq!(slots_of(&assets), unique(&[&a, &b]), "round {round}: A is back, once");
+        assert_eq!(assets.drawing.len(), allocated, "round {round}: removing and restoring a cel does not grow the atlas");
+    }
+}

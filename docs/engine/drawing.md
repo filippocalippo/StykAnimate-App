@@ -158,7 +158,7 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
   longer holds (`Engine::take_images`, `decode_picture`): they would write over the cel that has the slots now.
   The slots hold the old cel's pixels until the new tiles are written, so `Uploaded::observe` marks the places a placement new since
   the last assets seen writes as being refilled and `Stage::draw` does not draw a list that samples one while pictures are on their way: the
-  picture on show stays and is replaced whole, never a mix (a refused picture cannot hold a frame: nothing pending, nothing held). While a
+  picture on show stays and is replaced whole, never a mix. A decode the memory refuses writes nothing, so for a cel that replaced another the engine hands the renderer blank tiles for the places the placement writes that were slots before it (`styk_eval::assets::blank_cel_changed`, from `Engine::decode_pixels`): the cel is not shown, like a picture that cannot be decoded, and its places stop waiting instead of drawing the old cel's pixels (an export writes over a refused cel the same way). A payload the document draws more than once is placed once, wherever its draws are in the order of the document. While a
   live cel changed in the last 250 ms (`LiveCels::changing`) `sync_images` takes no pictures unless a frame is waiting for them: the
   published copy of the live cel is the largest and is not what the frame shows.
 * A live cel draws what the published cel of the same pixels draws: the same quads, levels,

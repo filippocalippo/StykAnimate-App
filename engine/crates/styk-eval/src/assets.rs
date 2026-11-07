@@ -84,6 +84,9 @@ struct Placement {
     serial: u64,
     id: Option<Arc<str>>,
     dirty: Option<Vec<Vec<bool>>>,
+    /// The slots below this number existed before the placement was made: they may hold the pixels of a cel the document had. Those from it
+    /// on are new and hold nothing.
+    reused_below: u32,
 }
 
 /// Numbers the placements of cels.
@@ -216,8 +219,9 @@ impl Assets {
                 given_back.push((placement.id, tiles, slots));
             }
         }
-        cels.retain(|(_, cel)| !assets.cels.contains_key(&cel.key()));
-        cels.dedup_by(|a, b| a.1.key() == b.1.key());
+        // A payload the document draws more than once (the same cel at several places, not next to each other) is placed once.
+        let mut placing: HashSet<usize> = HashSet::new();
+        cels.retain(|(_, cel)| !assets.cels.contains_key(&cel.key()) && placing.insert(cel.key()));
         let placed = !cels.is_empty() || !gone.is_empty();
         // A cel that replaces one given back keeps the slots of the tiles they share, when the one it replaces is all in the atlas.
         let mut inherited_slots: HashSet<u32> = HashSet::new();
@@ -261,7 +265,7 @@ impl Assets {
                 .collect();
             let serial = NEXT_PLACEMENT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             assets.serials.insert(serial);
-            assets.placements.insert(cel.key(), Placement { serial, id, dirty });
+            assets.placements.insert(cel.key(), Placement { serial, id, dirty, reused_below: held.1 as u32 });
             assets.cels.insert(cel.key(), (cel, slots));
         }
         assets.pages = if assets.cursor.used { assets.cursor.layer + 1 } else { 0 };
@@ -631,6 +635,27 @@ pub fn decode_cel_changed(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<Decod
         .into_iter()
         .map(|(level, index, rgba)| DecodedImage { index: slots[level as usize][index as usize], drawing: true, soft: false, width: side, height: side, rgba, placement })
         .collect()
+}
+
+/// [`decode_cel_changed`]'s tiles with nothing in them, for the slots that were there before the cel was placed: the pictures to write over
+/// the places of a cel whose decode was refused (the memory could not hold its work). Those slots hold the pixels of a cel the document had,
+/// which is not the cel in front: it is not shown, as a picture that cannot be decoded is not, and a frame must not draw the old pixels in
+/// its place. A slot made for the cel holds nothing and is left alone.
+pub fn blank_cel_changed(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<DecodedImage> {
+    let Some(slots) = assets.cel_slots(cel) else { return Vec::new() };
+    let dirty = assets.cel_dirty(cel.key());
+    let placement = assets.placement(cel.key());
+    let reused_below = assets.placements.get(&cel.key()).map_or(0, |placement| placement.reused_below);
+    let side = crate::drawing::TILE + 2 * crate::drawing::BORDER;
+    let mut blanks = Vec::new();
+    for (level, tiles) in slots.iter().enumerate() {
+        for (index, &slot) in tiles.iter().enumerate() {
+            if slot < reused_below && dirty.is_none_or(|dirty| dirty[level][index]) {
+                blanks.push(DecodedImage { index: slot, drawing: true, soft: false, width: side, height: side, rgba: vec![0; side as usize * side as usize * 4], placement });
+            }
+        }
+    }
+    blanks
 }
 
 /// One picture to decode: an image of the document, or a drawing cel (every display level of it).

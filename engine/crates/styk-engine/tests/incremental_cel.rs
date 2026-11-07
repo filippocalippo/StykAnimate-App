@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use styk_doc::{json, Value};
 use styk_engine::document::{OpenOptions, OpenSource};
-use styk_engine::{Budgets, Engine};
+use styk_engine::{Budgets, Engine, Uploaded};
 
 fn opened() -> (Engine, styk_engine::document::OpenedDocument) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/drawlist/drawing-cel.json");
@@ -87,4 +87,40 @@ fn an_export_that_keeps_an_earlier_generations_pictures_is_given_the_cel_that_re
     let images = frames.take_images(usize::MAX);
     let tiles: usize = assets.cel_slots(&after).unwrap().iter().map(Vec::len).sum();
     assert_eq!(images.iter().filter(|image| image.drawing).count(), tiles, "every tile of the new cel is decoded for the export");
+}
+
+/// A cel whose decode is refused (the memory cannot hold its work) is written over with nothing: the places it was given are the cel before's
+/// until written, and a frame that drew them would show the old pixels among the new.
+#[test]
+fn a_refused_decode_of_a_cel_that_replaced_another_leaves_none_of_its_places_waiting_for_pixels() {
+    let (engine, opened) = opened();
+    while engine.step() {}
+    let mut uploaded = Uploaded::default();
+    uploaded.observe(&engine.generation().unwrap().assets);
+    for image in engine.take_images(usize::MAX) {
+        uploaded.record(&engine.generation().unwrap().assets, &image);
+    }
+    assert_eq!(uploaded.refilling(), 0);
+    // The first publication's pictures are decoded and taken, so the atlas holds nothing the next may share: it is written whole.
+    engine.publish_tree(opened.lineage(), republished(&opened.tree), 2).unwrap().expect("the document is the engine's");
+    let assets = engine.generation().unwrap().assets.clone();
+    let after = cel(&engine);
+    assert!(assets.cel_dirty(after.key()).is_some_and(|dirty| dirty.iter().flatten().all(|dirty| !dirty)), "the atlas holds the tiles");
+    // A change the atlas cannot share: the pictures of the second publication are still waiting when the third arrives.
+    engine.publish_tree(opened.lineage(), republished(&opened.tree), 3).unwrap().expect("the document is the engine's");
+    let assets = engine.generation().unwrap().assets.clone();
+    let after = cel(&engine);
+    assert!(assets.cel_dirty(after.key()).is_none(), "the cel is written whole");
+    uploaded.observe(&assets);
+    let tiles: usize = assets.cel_slots(&after).unwrap().iter().map(Vec::len).sum();
+    assert_eq!(uploaded.refilling(), tiles, "every place of the cel waits for its pixels");
+    styk_alloc::with_limit(1 << 20, || while engine.step() {});
+    assert!(engine.pictures_refused() > 0, "the decode was refused");
+    let images = engine.take_images(usize::MAX);
+    assert_eq!(images.iter().filter(|image| image.drawing).count(), tiles, "every place of the cel is written");
+    assert!(images.iter().all(|image| image.rgba.iter().all(|byte| *byte == 0)), "with nothing");
+    for image in &images {
+        uploaded.record(&assets, image);
+    }
+    assert_eq!(uploaded.refilling(), 0, "so none waits, and a frame may draw the cel");
 }

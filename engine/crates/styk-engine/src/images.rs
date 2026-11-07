@@ -85,6 +85,11 @@ impl Uploaded {
             })
     }
 
+    /// How many places are waiting for the pixels of the cel that replaced the one they held.
+    pub fn refilling(&self) -> usize {
+        self.refilling.len()
+    }
+
     /// A live drawing slot was written at the corner `(x, y)` of page `layer`.
     pub fn mark(&mut self, layer: u32, x: u32, y: u32) {
         self.places.insert(place(layer, x, y));
@@ -276,7 +281,12 @@ impl Engine {
             }
             Err(_) => {
                 self.inner.pictures_refused.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                Vec::new()
+                // A cel that replaced another is drawn from the slots of the one before, which hold its pixels until its own are written: a
+                // refused cel is written over with nothing, like a picture that cannot be decoded is not shown, so a frame never draws the old.
+                match picture {
+                    Picture::CelChanged(cel) => generation.assets.cels.get(&cel).map_or_else(Vec::new, |(tiles, _)| styk_eval::assets::blank_cel_changed(&generation.assets, tiles)),
+                    _ => Vec::new(),
+                }
             }
         }
     }
