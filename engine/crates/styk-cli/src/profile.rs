@@ -117,7 +117,7 @@ impl Host for EngineHost {
                 engine
                     .publish_tree(
                         document.lineage(),
-                        document.records().clone(),
+                        document.records().map_err(|e| e.to_string())?.clone(),
                         document.revision(),
                     )
                     .map_err(|e| e.to_string())?
@@ -143,7 +143,7 @@ impl Host for EngineHost {
                         return Err("export picture decoding made no progress".into());
                     }
                 }
-                let tick = document.view().tick.max(0.) as u32;
+                let tick = document.view().map_err(|e| e.to_string())?.tick.max(0.) as u32;
                 let frame = frames.take(tick).ok_or("export frame unavailable")?;
                 let pixels = renderer.frame(doc, &frame.list, frame.camera.as_ref(), false)?;
                 let hash = format!("{:x}", Sha256::digest(&pixels));

@@ -89,7 +89,7 @@ pub fn focus(owner: &FocusState) -> Focus {
         keyboard: owner.focus_visible(),
     }
 }
-pub fn state(owner: &Documents) -> State {
+pub fn state(owner: &Documents) -> Result<State, crate::documents::DocumentsError> {
     owner.inspection_state()
 }
 /// These owners have not landed; callers must display unavailability, not an empty fabricated tree.
@@ -108,7 +108,7 @@ mod tests {
     use super::*;
     #[test]
     fn empty_owner_and_focus_are_real_snapshots() {
-        let state = state(&Documents::new());
+        let state = state(&Documents::new()).unwrap();
         assert!(state.documents.is_empty());
         assert!(state.active.is_none());
         let focus = focus(&FocusState::new());
@@ -117,7 +117,7 @@ mod tests {
     }
     #[test]
     fn inspection_pins_a_revision_without_changing_history_or_saved_records() {
-        use crate::documents::{PreparedDocument, Value};
+        use crate::{documents::PreparedDocument, engine::Value};
         let engine = styk_engine::Engine::new(|| 0., styk_engine::Budgets::for_device(None));
         let bytes = include_bytes!("../../../tests/edit/startup.document.json");
         let prepared =
@@ -127,8 +127,8 @@ mod tests {
             .unwrap();
         let mut owner = Documents::new();
         let id = owner.open(prepared).map_err(|(error, _)| error).unwrap();
-        let before = owner.active().unwrap().inspection();
-        let original = styk_doc::json::to_string(owner.active().unwrap().records());
+        let before = owner.active().unwrap().inspection().unwrap();
+        let original = styk_doc::json::to_string(owner.active().unwrap().records().unwrap());
         assert_eq!(
             before.node_raw(&["fps"]).unwrap().value.as_deref(),
             Some("24")
@@ -140,7 +140,7 @@ mod tests {
             .unwrap()
             .result
             .unwrap();
-        let after = owner.active().unwrap().inspection();
+        let after = owner.active().unwrap().inspection().unwrap();
         assert_ne!(before.revision, after.revision);
         assert_eq!(
             before.node_raw(&["fps"]).unwrap().value.as_deref(),
@@ -150,16 +150,16 @@ mod tests {
             after.node_raw(&["fps"]).unwrap().value.as_deref(),
             Some("30")
         );
-        let history = owner.active().unwrap().inspect_history(0);
+        let history = owner.active().unwrap().inspect_history(0).unwrap();
         assert_eq!(history.rows.len(), 1);
         assert_eq!(history.rows[0].revision, after.revision);
         owner.undo(id).unwrap().result.unwrap();
         assert_eq!(
-            styk_doc::json::to_string(owner.active().unwrap().records()),
+            styk_doc::json::to_string(owner.active().unwrap().records().unwrap()),
             original
         );
         assert_eq!(
-            owner.active().unwrap().inspect_history(0).rows[0].redo,
+            owner.active().unwrap().inspect_history(0).unwrap().rows[0].redo,
             true
         );
     }

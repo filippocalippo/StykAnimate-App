@@ -30,5 +30,8 @@ pub mod fonts;
 pub mod control;
 
 pub mod inspection;
+pub mod files;
+pub mod worker;
+pub mod memory;
 
 pub mod text_environment;

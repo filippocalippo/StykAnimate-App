@@ -2922,6 +2922,7 @@ dependencies = [
  "styk-eval",
  "styk-formats",
  "styk-piv",
+ "styk-services",
  "zstd",
 ]
 

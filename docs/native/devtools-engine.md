@@ -47,7 +47,9 @@ that tools import owners through those modules (the pre-existing pen lab is expl
   blobs never expand into base64. History pages copy labels and revision IDs, not undo payloads.
 - Core exposes its own document state, focus state and document/history ticket types; engine
   records stay behind a private adapter. Inspection does not
-  alter session history or saved records. A fixed 4096-byte service slot publishes small owner
+  alter session history or saved records. If K-doc has handed the session to its worker, new
+  document/history/state reads return `DocumentsError::Busy` immediately; callers retain their last
+  complete state. Existing revision-pinned tickets remain readable. A fixed 4096-byte service slot publishes small owner
   snapshots using `try_lock`; failed publication preserves the last complete snapshot.
 - Engine snapshots queue depths, retirement, current revision and frame/picture counters using
   `try_lock`; contention returns unavailable immediately.

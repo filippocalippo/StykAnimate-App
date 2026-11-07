@@ -52,6 +52,9 @@ pub use control_windows::LocalControl;
 mod control_unavailable;
 #[cfg(all(not(windows), feature = "dev-control"))]
 pub use control_unavailable::LocalControl;
+#[cfg(windows)]
+pub mod files;
+pub mod memory;
 
 pub mod shell;
 pub mod shell_check;
