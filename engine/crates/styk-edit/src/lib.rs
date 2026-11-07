@@ -608,11 +608,15 @@ impl Editor {
             can_redo: !self.redo.is_empty(),
             undo_label: self.undo.last().map(|c| c.label.clone()).unwrap_or_default(),
             redo_label: self.redo.last().map(|c| c.label.clone()).unwrap_or_default(),
-            dirty: self.revision != self.saved_revision || self.drag.as_ref().is_some_and(|d| d.changed) || self.property_edit.as_ref().is_some_and(|e| e.changed),
+            dirty: self.dirty(),
             layer_revision: self.layer_revision,
             next_frame_identity: self.next_frame_identity,
             next_uid: self.next_uid,
         }
+    }
+
+    pub(crate) fn dirty(&self) -> bool {
+        self.revision != self.saved_revision || self.drag.as_ref().is_some_and(|d| d.changed) || self.property_edit.as_ref().is_some_and(|e| e.changed)
     }
 
     /// `editor.autoKey`, which the app sets from its settings.
