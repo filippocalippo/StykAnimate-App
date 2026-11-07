@@ -15,22 +15,33 @@
 //! - [`cpu`]: the same tiles drawn by the CPU rasterizer (styk-raster), for a worker
 //!   without a GPU device.
 //! - [`svg`]: the frame's draw list written as vector SVG (the export that is not pixels).
+//! - [`legacy_canvas`]: the mapping of today's canvas step on translucent colour, kept for WebM's bytes.
 //! - [`pick`]: the figure whose artwork a point of a frame touches, drawn on the CPU (a click on the stage).
 //!
 //! Encoders (PNG, GIF, APNG, ZIP, WebCodecs, FFmpeg) stay platform services of the
 //! interface; see `docs/engine/rendering.md` (Exports) and `docs/export-sampling.md`.
 
+pub mod background;
 pub mod cpu;
 pub mod gpu;
+pub mod interrupt;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod legacy_canvas;
 pub mod pick;
 pub mod pixels;
 pub mod resident;
 pub mod settings;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod source;
 pub mod svg;
 pub mod tiles;
 pub mod view;
 
+pub use background::without_background;
 pub use cpu::CpuExport;
+pub use interrupt::Interrupt;
 pub use gpu::GpuExport;
 pub use settings::{Settings, Smoothing};
+#[cfg(not(target_arch = "wasm32"))]
+pub use source::FrameRenderer;
 pub use tiles::{Tile, TILE_SIDE};

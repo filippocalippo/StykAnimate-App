@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 raw-window-handle = "0.6"
+image = { version = "0.25", default-features = false, features = ["png"] }
 sha2 = "0.10"
 styk-services = { path = "../styk-services" }
 icu_collator = "=1.4.0"
@@ -18,5 +19,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_Graphics_Gdi",
     "Win32_Storage_FileSystem",
     "Win32_Storage_Xps",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
 ] }
