@@ -44,6 +44,9 @@ macro_rules! video_tools {
 pub mod clock;
 #[cfg(windows)]
 pub mod windows;
+#[cfg(windows)]
+pub mod files;
+pub mod memory;
 
 pub mod shell;
 pub mod shell_check;

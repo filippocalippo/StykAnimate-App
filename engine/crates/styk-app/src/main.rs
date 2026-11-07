@@ -54,6 +54,9 @@ const CHECK_SETTLE_FRAMES: u32 = 12;
 /// The window's height under which the chrome is compact (`layout-solver.mjs`: windows under 801 px tall).
 const COMPACT_BELOW: f32 = 801.0;
 
+#[global_allocator]
+static ALLOCATOR: styk_core::engine::Counting = styk_core::engine::Counting;
+
 /// How an unattended run ended, read after the event loop returns.
 #[derive(Debug, Default)]
 enum Outcome {
@@ -516,6 +519,7 @@ fn capture(id: iced_window::Id) -> Task<Message> {
 }
 
 fn main() -> ExitCode {
+    styk_core::engine::set_memory_limit(styk_platform::memory::document_memory_limit());
     mark!("startup");
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let launch = match Launch::parse(shell::without_links(&arguments)) {

@@ -147,6 +147,14 @@ documents of one editor, so `holdsRevision` (the document identity the engine re
 engine holds a given document at a given state; the stage never brings the engine up to date itself.
 A document in a background tab keeps its session; coming to the front activates it again.
 
+The native document host queues activation through its bounded engine job lane.
+`Engine::activate_tree_with` accepts the current session tree, lineage, revision and cached typed views;
+it does not require retaining the original opening or serializing the document. It runs on a worker,
+including loader/asset replacement and publication. `styk_core::documents::published()` exposes only a
+completed generation whose tab, revision and mutation epoch still match. Save snapshots use the same
+engine writer after leaving nested movieclip scopes; the host marks saved only after atomic replacement
+and a matching snapshot. See [`native/documents.md`](../native/documents.md) for effects and lifetimes.
+
 Nothing but the session changes the document. Two things the interface does outside a command are told to it at once, by the
 owner (`owner.rs`, [editing.md](editing.md#phase-3-the-engine-owns-the-document), "Bookkeeping"): a document marked as changed
 (`editor.dirty = true`: `@touch`, a new revision with the tree untouched, published without converting anything), and the
