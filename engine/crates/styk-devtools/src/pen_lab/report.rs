@@ -1,4 +1,4 @@
-//! What a pen-lab self-test measured, from the recorded samples, frames and injection times.
+//! What a pen-lab self-test measured, from the recorded samples, frames and push times.
 //!
 //! Everything here is arithmetic over recorded rows, so it is tested with made-up rows; the lab only feeds it.
 
@@ -31,6 +31,7 @@ impl Percentiles {
 /// The measured run.
 #[derive(Clone, Debug, Default)]
 pub struct Report {
+    /// Samples the script pushed.
     pub injected: usize,
     pub delivered: usize,
     /// Samples in contact (press, drag, lift): the script's and the delivered.
@@ -38,7 +39,7 @@ pub struct Report {
     pub delivered_contact: usize,
     /// Samples identical to an earlier one in pointer, time, position, pressure and phase: a re-delivery.
     pub duplicates: usize,
-    /// Samples sharing a timestamp with an earlier, different one (injected input is stamped to the millisecond).
+    /// Samples sharing a timestamp with an earlier, different one.
     pub same_stamp: usize,
     pub history_samples: usize,
     pub monotonic: bool,
@@ -105,11 +106,8 @@ pub fn analyse(script: &Script, injected_ns: &[u64], samples: &[SampleRow], fram
             }
             report.max_tilt_error = report.max_tilt_error.max((s.tilt_x as f64 - step.tilt_x as f64).abs()).max((s.tilt_y as f64 - step.tilt_y as f64).abs());
             report.max_pressure_error = report.max_pressure_error.max((s.raw_pressure as f64 - step.raw_pressure as f64).abs());
-            // A lift reports where the contact last was, not the position the lift was injected at.
-            if step.phase != Phase::Up {
-                let (ex, ey) = (step.x.round() + offset.0, step.y.round() + offset.1);
-                report.max_position_error = report.max_position_error.max(((s.x - ex).powi(2) + (s.y - ey).powi(2)).sqrt());
-            }
+            let (ex, ey) = (step.x + offset.0, step.y + offset.1);
+            report.max_position_error = report.max_position_error.max(((s.x - ex).powi(2) + (s.y - ey).powi(2)).sqrt());
         }
     }
 
@@ -209,8 +207,8 @@ mod tests {
             .iter()
             .map(|step| {
                 let mut sample = step.sample(1, base);
-                sample.x = step.x.round() + offset.0;
-                sample.y = step.y.round() + offset.1;
+                sample.x = step.x + offset.0;
+                sample.y = step.y + offset.1;
                 SampleRow { sample, received_ns: base + step.t_ns + 300_000 }
             })
             .collect()
