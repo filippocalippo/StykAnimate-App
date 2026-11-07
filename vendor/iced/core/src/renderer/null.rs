@@ -1,0 +1,288 @@
+use crate::alignment;
+use crate::image::{self, Image};
+use crate::renderer::{self, Renderer};
+use crate::svg;
+use crate::text::highlighter;
+use crate::text::{self, Text};
+use crate::{Background, Color, Font, Pixels, Point, Rectangle, Size, Transformation};
+
+impl Renderer for () {
+    fn start_layer(&mut self, _bounds: Rectangle) {}
+
+    fn end_layer(&mut self) {}
+
+    fn start_transformation(&mut self, _transformation: Transformation) {}
+
+    fn end_transformation(&mut self) {}
+
+    fn fill_quad(&mut self, _quad: renderer::Quad, _background: impl Into<Background>) {}
+
+    fn allocate_image(
+        &self,
+        handle: &image::Handle,
+        callback: impl FnOnce(Result<image::Allocation, image::Error>) + Send + 'static,
+    ) {
+        #[allow(unsafe_code)]
+        callback(Ok(unsafe { image::allocate(handle, Size::new(100, 100)) }));
+    }
+
+    fn hint(&mut self, _scale: renderer::Scale) {}
+
+    fn scale(&self) -> Option<renderer::Scale> {
+        None
+    }
+
+    fn reset(&mut self, _new_bounds: Rectangle) {}
+
+    fn settings(&self) -> renderer::Settings {
+        renderer::Settings::default()
+    }
+}
+
+impl text::Renderer for () {
+    type Paragraph = ();
+    type Editor = ();
+
+    const ICON_FONT: Font = Font::DEFAULT;
+    const CHECKMARK_ICON: char = '0';
+    const ARROW_DOWN_ICON: char = '0';
+    const SCROLL_UP_ICON: char = '0';
+    const SCROLL_DOWN_ICON: char = '0';
+    const SCROLL_LEFT_ICON: char = '0';
+    const SCROLL_RIGHT_ICON: char = '0';
+    const ICED_LOGO: char = '0';
+
+    fn fill_paragraph(
+        &mut self,
+        _paragraph: &Self::Paragraph,
+        _position: Point,
+        _color: Color,
+        _clip_bounds: Rectangle,
+    ) {
+    }
+
+    fn fill_editor(
+        &mut self,
+        _editor: &Self::Editor,
+        _position: Point,
+        _color: Color,
+        _clip_bounds: Rectangle,
+    ) {
+    }
+
+    fn fill_text(
+        &mut self,
+        _paragraph: Text,
+        _position: Point,
+        _color: Color,
+        _clip_bounds: Rectangle,
+    ) {
+    }
+}
+
+impl text::Paragraph for () {
+    fn with_text(_text: Text<&str>) -> Self {}
+
+    fn with_spans<Link>(_text: Text<&[text::Span<'_, Link>]>) -> Self {}
+
+    fn resize(&mut self, _new_bounds: Size) {}
+
+    fn compare(&self, _text: Text<()>) -> text::Difference {
+        text::Difference::None
+    }
+
+    fn hint_factor(&self) -> Option<f32> {
+        None
+    }
+
+    fn size(&self) -> Pixels {
+        Pixels(16.0)
+    }
+
+    fn font(&self) -> Font {
+        Font::DEFAULT
+    }
+
+    fn line_height(&self) -> text::LineHeight {
+        text::LineHeight::default()
+    }
+
+    fn align_x(&self) -> text::Alignment {
+        text::Alignment::Default
+    }
+
+    fn align_y(&self) -> alignment::Vertical {
+        alignment::Vertical::Top
+    }
+
+    fn wrapping(&self) -> text::Wrapping {
+        text::Wrapping::default()
+    }
+
+    fn ellipsis(&self) -> text::Ellipsis {
+        text::Ellipsis::default()
+    }
+
+    fn shaping(&self) -> text::Shaping {
+        text::Shaping::default()
+    }
+
+    fn bounds(&self) -> Size {
+        Size::ZERO
+    }
+
+    fn min_bounds(&self) -> Size {
+        Size::ZERO
+    }
+
+    fn hit_test(&self, _point: Point) -> Option<text::Hit> {
+        None
+    }
+
+    fn hit_span(&self, _point: Point) -> Option<usize> {
+        None
+    }
+
+    fn span_bounds(&self, _index: usize) -> Vec<Rectangle> {
+        vec![]
+    }
+
+    fn select(&mut self, _start: Point, _end: Point, _target: text::Target) {}
+    fn select_all(&mut self) {}
+    fn deselect(&mut self) {}
+
+    fn selection(&self) -> &[Rectangle] {
+        &[]
+    }
+
+    fn copy(&mut self) -> Option<String> {
+        None
+    }
+}
+
+impl text::Editor for () {
+    fn with_text(_text: &str) -> Self {}
+
+    fn is_empty(&self) -> bool {
+        true
+    }
+
+    fn cursor(&self) -> text::editor::Cursor {
+        text::editor::Cursor {
+            position: text::Position { line: 0, index: 0 },
+            selection: None,
+        }
+    }
+
+    fn selection(&self) -> Option<text::editor::Selection> {
+        None
+    }
+
+    fn copy(&self) -> Option<String> {
+        None
+    }
+
+    fn line(&self, _index: usize) -> Option<text::editor::Line<'_>> {
+        None
+    }
+
+    fn line_count(&self) -> usize {
+        0
+    }
+
+    fn perform(&mut self, _action: text::editor::Action) {}
+
+    fn move_to(&mut self, _cursor: text::editor::Cursor) {}
+
+    fn bounds(&self) -> Size {
+        Size::ZERO
+    }
+
+    fn hint_factor(&self) -> Option<f32> {
+        None
+    }
+
+    fn min_bounds(&self) -> Size {
+        Size::ZERO
+    }
+
+    fn update(
+        &mut self,
+        _new_bounds: Size,
+        _new_font: Font,
+        _new_size: Pixels,
+        _new_line_height: text::LineHeight,
+        _new_wrapping: text::Wrapping,
+        _new_alignment: text::Alignment,
+        _new_hint_factor: Option<f32>,
+        _new_parser: &mut impl text::Parser,
+    ) {
+    }
+
+    fn overwrite(&mut self, _new_text: &str) {}
+
+    fn highlight<P: text::Parser>(
+        &mut self,
+        _font: Font,
+        _parser: &mut P,
+        _highlighter: impl Fn(P::Output) -> highlighter::Style,
+    ) {
+    }
+
+    fn text_size(&self) -> Pixels {
+        Pixels(0.0)
+    }
+
+    fn line_height(&self) -> text::LineHeight {
+        text::LineHeight::default()
+    }
+
+    fn font(&self) -> Font {
+        Font::default()
+    }
+}
+
+impl image::Renderer for () {
+    type Handle = image::Handle;
+
+    fn load_image(&self, handle: &Self::Handle) -> Result<image::Allocation, image::Error> {
+        #[allow(unsafe_code)]
+        Ok(unsafe { image::allocate(handle, Size::new(100, 100)) })
+    }
+
+    fn measure_image(&self, _handle: &Self::Handle) -> Option<Size<u32>> {
+        Some(Size::new(100, 100))
+    }
+
+    fn draw_image(&mut self, _image: Image, _bounds: Rectangle, _clip_bounds: Rectangle) {}
+}
+
+impl svg::Renderer for () {
+    fn measure_svg(&self, _handle: &svg::Handle) -> Size<u32> {
+        Size::default()
+    }
+
+    fn draw_svg(&mut self, _svg: svg::Svg, _bounds: Rectangle, _clip_bounds: Rectangle) {}
+}
+
+impl renderer::Headless for () {
+    async fn new(_settings: renderer::Settings, _backend: Option<&str>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        Some(())
+    }
+
+    fn name(&self) -> String {
+        "null renderer".to_owned()
+    }
+
+    fn screenshot(
+        &mut self,
+        _size: Size<u32>,
+        _scale_factor: f32,
+        _background_color: Color,
+    ) -> Vec<u8> {
+        Vec::new()
+    }
+}

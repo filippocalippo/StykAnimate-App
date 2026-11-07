@@ -10,6 +10,8 @@ nothing here should need re-deriving.
   and [`engine/history-map.tsv`](../engine/history-map.tsv) gives the commit each became.
 - **Status in one line:** the cutover is complete: the Rust engine is the app's only engine
   (2026-10-25); the performance phase is in progress (running record below).
+- **Native phase (from 2026-11-06, branch `native-app`):** Electron is being replaced by a native Rust app; its plan and
+  Handoff are in [native/README.md](native/README.md). This page stays the engine's record.
 - **Handoff:** the next two sections: the performance phase's running record, then how the app works
   now, gate results, what remains and known differences. The milestone log stops at the cutover; git
   history has the rest.

@@ -1,0 +1,51 @@
+[package]
+name = "iced_wgpu"
+description = "A renderer for iced on top of wgpu"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
+[features]
+default = ["wgpu/default"]
+geometry = ["iced_graphics/geometry", "lyon"]
+image = ["iced_graphics/image", "guillotiere"]
+svg = ["iced_graphics/svg", "resvg", "guillotiere"]
+svg-text = ["svg", "resvg/text", "resvg/system-fonts", "resvg/memmap-fonts"]
+svg-raster-images = ["svg", "resvg/raster-images"]
+web-colors = ["iced_graphics/web-colors"]
+webgl = ["wgpu/webgl"]
+strict-assertions = []
+
+[dependencies]
+iced_debug.workspace = true
+iced_graphics.workspace = true
+
+bitflags.workspace = true
+bytemuck.workspace = true
+futures.workspace = true
+cryoglyph.workspace = true
+log.workspace = true
+rustc-hash.workspace = true
+thiserror.workspace = true
+wgpu.workspace = true
+
+lyon.workspace = true
+lyon.optional = true
+
+guillotiere.workspace = true
+guillotiere.optional = true
+
+resvg.workspace = true
+resvg.optional = true

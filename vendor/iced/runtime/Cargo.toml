@@ -1,0 +1,31 @@
+[package]
+name = "iced_runtime"
+description = "A renderer-agnostic runtime for iced"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+
+[features]
+selector = ["dep:iced_selector"]
+image = ["iced_core/image"]
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes.workspace = true
+iced_core.workspace = true
+iced_futures.workspace = true
+
+thiserror.workspace = true
+
+sipper.workspace = true
+sipper.optional = true
+
+iced_selector.workspace = true
+iced_selector.optional = true
