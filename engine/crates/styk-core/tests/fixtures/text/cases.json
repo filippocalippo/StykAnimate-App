@@ -1,0 +1,1687 @@
+{
+ "cases": [
+  {
+   "id": "hello-regular",
+   "font": "noto:0",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": false,
+      "italic": false,
+      "text": "Hello, World",
+      "fontSize": 47.3
+     },
+     "expected": "hello-regular-0.json"
+    }
+   ]
+  },
+  {
+   "id": "kerning-regular",
+   "font": "noto:0",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": false,
+      "italic": false,
+      "text": "AV To AVATAR\nTo.",
+      "fontSize": 100
+     },
+     "expected": "kerning-regular-0.json"
+    }
+   ]
+  },
+  {
+   "id": "lines-regular",
+   "font": "noto:0",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": false,
+      "italic": false,
+      "text": "Long\nHi\nThird",
+      "alignment": "center",
+      "lineHeight": 1.5,
+      "fontSize": 40
+     },
+     "expected": "lines-regular-0.json"
+    },
+    {
+     "options": {
+      "bold": false,
+      "italic": false,
+      "text": "Long\nHi\nThird",
+      "alignment": "right",
+      "lineHeight": 1.5,
+      "fontSize": 40
+     },
+     "expected": "lines-regular-1.json"
+    }
+   ]
+  },
+  {
+   "id": "tab-regular",
+   "font": "noto:0",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": false,
+      "italic": false,
+      "text": "A\tB\tAV\n\tx",
+      "fontSize": 33.3
+     },
+     "expected": "tab-regular-0.json"
+    }
+   ]
+  },
+  {
+   "id": "hello-bold",
+   "font": "noto:1",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": true,
+      "italic": false,
+      "text": "Hello, World",
+      "fontSize": 47.3
+     },
+     "expected": "hello-bold-0.json"
+    }
+   ]
+  },
+  {
+   "id": "kerning-bold",
+   "font": "noto:1",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": true,
+      "italic": false,
+      "text": "AV To AVATAR\nTo.",
+      "fontSize": 100
+     },
+     "expected": "kerning-bold-0.json"
+    }
+   ]
+  },
+  {
+   "id": "lines-bold",
+   "font": "noto:1",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": true,
+      "italic": false,
+      "text": "Long\nHi\nThird",
+      "alignment": "center",
+      "lineHeight": 1.5,
+      "fontSize": 40
+     },
+     "expected": "lines-bold-0.json"
+    },
+    {
+     "options": {
+      "bold": true,
+      "italic": false,
+      "text": "Long\nHi\nThird",
+      "alignment": "right",
+      "lineHeight": 1.5,
+      "fontSize": 40
+     },
+     "expected": "lines-bold-1.json"
+    }
+   ]
+  },
+  {
+   "id": "tab-bold",
+   "font": "noto:1",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": true,
+      "italic": false,
+      "text": "A\tB\tAV\n\tx",
+      "fontSize": 33.3
+     },
+     "expected": "tab-bold-0.json"
+    }
+   ]
+  },
+  {
+   "id": "hello-italic",
+   "font": "noto:2",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": false,
+      "italic": true,
+      "text": "Hello, World",
+      "fontSize": 47.3
+     },
+     "expected": "hello-italic-0.json"
+    }
+   ]
+  },
+  {
+   "id": "kerning-italic",
+   "font": "noto:2",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": false,
+      "italic": true,
+      "text": "AV To AVATAR\nTo.",
+      "fontSize": 100
+     },
+     "expected": "kerning-italic-0.json"
+    }
+   ]
+  },
+  {
+   "id": "lines-italic",
+   "font": "noto:2",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": false,
+      "italic": true,
+      "text": "Long\nHi\nThird",
+      "alignment": "center",
+      "lineHeight": 1.5,
+      "fontSize": 40
+     },
+     "expected": "lines-italic-0.json"
+    },
+    {
+     "options": {
+      "bold": false,
+      "italic": true,
+      "text": "Long\nHi\nThird",
+      "alignment": "right",
+      "lineHeight": 1.5,
+      "fontSize": 40
+     },
+     "expected": "lines-italic-1.json"
+    }
+   ]
+  },
+  {
+   "id": "tab-italic",
+   "font": "noto:2",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": false,
+      "italic": true,
+      "text": "A\tB\tAV\n\tx",
+      "fontSize": 33.3
+     },
+     "expected": "tab-italic-0.json"
+    }
+   ]
+  },
+  {
+   "id": "hello-bolditalic",
+   "font": "noto:3",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": true,
+      "italic": true,
+      "text": "Hello, World",
+      "fontSize": 47.3
+     },
+     "expected": "hello-bolditalic-0.json"
+    }
+   ]
+  },
+  {
+   "id": "kerning-bolditalic",
+   "font": "noto:3",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": true,
+      "italic": true,
+      "text": "AV To AVATAR\nTo.",
+      "fontSize": 100
+     },
+     "expected": "kerning-bolditalic-0.json"
+    }
+   ]
+  },
+  {
+   "id": "lines-bolditalic",
+   "font": "noto:3",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": true,
+      "italic": true,
+      "text": "Long\nHi\nThird",
+      "alignment": "center",
+      "lineHeight": 1.5,
+      "fontSize": 40
+     },
+     "expected": "lines-bolditalic-0.json"
+    },
+    {
+     "options": {
+      "bold": true,
+      "italic": true,
+      "text": "Long\nHi\nThird",
+      "alignment": "right",
+      "lineHeight": 1.5,
+      "fontSize": 40
+     },
+     "expected": "lines-bolditalic-1.json"
+    }
+   ]
+  },
+  {
+   "id": "tab-bolditalic",
+   "font": "noto:3",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "bold": true,
+      "italic": true,
+      "text": "A\tB\tAV\n\tx",
+      "fontSize": 33.3
+     },
+     "expected": "tab-bolditalic-0.json"
+    }
+   ]
+  },
+  {
+   "id": "nfc",
+   "font": "noto:0",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "text": "café é Å\r\nfin\rend",
+      "name": "Title 動画 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+     },
+     "expected": "nfc-0.json"
+    }
+   ]
+  },
+  {
+   "id": "paint-and-style",
+   "font": "noto:1",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "text": "Abg",
+      "opacity": 0.75,
+      "gradientColor": [
+       220,
+       130,
+       30
+      ],
+      "outlineWidth": 2.5,
+      "outlineColor": [
+       20,
+       40,
+       60
+      ],
+      "figureTypeId": 77,
+      "name": "",
+      "lineHeight": 0.5,
+      "fontSize": 1
+     },
+     "expected": "paint-and-style-0.json"
+    },
+    {
+     "options": {
+      "text": "Abg",
+      "fontSize": 2048,
+      "lineHeight": 5,
+      "opacity": 0,
+      "color": [
+       255,
+       0,
+       128
+      ]
+     },
+     "expected": "paint-and-style-1.json"
+    },
+    {
+     "options": {
+      "text": "Wide",
+      "fontSize": 64,
+      "gradientColor": [
+       1,
+       2,
+       3
+      ],
+      "paint": {
+       "type": "linear",
+       "angle": 45,
+       "stops": [
+        {
+         "offset": 1,
+         "color": [
+          10.4,
+          20.5,
+          30.6
+         ],
+         "opacity": 0.25
+        },
+        {
+         "offset": 0,
+         "color": [
+          255,
+          0,
+          0
+         ],
+         "opacity": 1
+        }
+       ]
+      }
+     },
+     "expected": "paint-and-style-2.json"
+    },
+    {
+     "options": {
+      "text": "Wide",
+      "fontSize": 64,
+      "paint": {
+       "type": "solid",
+       "stops": [
+        {
+         "offset": 0,
+         "color": [
+          1,
+          2,
+          3
+         ],
+         "opacity": 0.5
+        }
+       ]
+      }
+     },
+     "expected": "paint-and-style-3.json"
+    }
+   ]
+  },
+  {
+   "id": "limits-255",
+   "font": "noto:0",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "text": "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿĀāĂăĄąĆćĈĉĊċČčĎďĐđĒēĔĕĖėĘęĚěĜĝĞğĠġĢģĤĥĦħĨĩĪīĬĭĮįİıĲĳĴĵĶķĸĹĺĻļĽľĿŀŁ",
+      "fontSize": 20
+     },
+     "digest": "b8c74ef29e0133d266f1796989d3508bcf274bcb0d7b00885704575a6192413f"
+    }
+   ]
+  },
+  {
+   "id": "limits-256",
+   "font": "noto:0",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "text": "ĀāĂăĄąĆćĈĉĊċČčĎďĐđĒēĔĕĖėĘęĚěĜĝĞğĠġĢģĤĥĦħĨĩĪīĬĭĮįİıĲĳĴĵĶķĸĹĺĻļĽľĿŀŁłŃńŅņŇňŉŊŋŌōŎŏŐőŒœŔŕŖŗŘřŚśŜŝŞşŠšŢţŤťŦŧŨũŪūŬŭŮůŰűŲųŴŵŶŷŸŹźŻżŽžſƀƁƂƃƄƅƆƇƈƉƊƋƌƍƎƏƐƑƒƓƔƕƖƗƘƙƚƛƜƝƞƟƠơƢƣƤƥƦƧƨƩƪƫƬƭƮƯưƱƲƳƴƵƶƷƸƹƺƻƼƽƾƿǀǁǂǃǄǅǆǇǈǉǊǋǌǍǎǏǐǑǒǓǔǕǖǗǘǙǚǛǜǝǞǟǠǡǢǣǤǥǦǧǨǩǪǫǬǭǮǯǰǱǲǳǴǵǶǷǸǹǺǻǼǽǾǿ"
+     },
+     "error": {
+      "name": "Error",
+      "message": "Pivot text supports at most 255 distinct UTF-16 characters in one figure.",
+      "messageKey": "errors.textAuthoring.pivotTextSupportsAtMost255DistinctUtf",
+      "messageParams": {}
+     }
+    }
+   ]
+  },
+  {
+   "id": "limits-16384",
+   "font": "noto:0",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fontSize": 10
+     },
+     "digest": "999ac61c4a72976d74110535d5316c871d2b8bc0f09fbd8f1b3009af95563a9c"
+    }
+   ]
+  },
+  {
+   "id": "limits-16385",
+   "font": "noto:0",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     "error": {
+      "name": "Error",
+      "message": "Text must contain at most 16.384 characters.",
+      "messageKey": "errors.textAuthoring.textMustContainAtMostCharacters",
+      "messageParams": {
+       "value": "16.384"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "limit-errors",
+   "font": "noto:0",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "text": ""
+     },
+     "error": {
+      "name": "Error",
+      "message": "Enter visible text.",
+      "messageKey": "errors.textAuthoring.enterVisibleText",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": " \t\n"
+     },
+     "error": {
+      "name": "Error",
+      "message": "Enter visible text.",
+      "messageKey": "errors.textAuthoring.enterVisibleText",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "😀"
+     },
+     "error": {
+      "name": "Error",
+      "message": "This text contains characters outside the supported Unicode BMP range.",
+      "messageKey": "errors.textAuthoring.thisTextContainsCharactersOutsideTheSupportedUnicode",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "a\u0001"
+     },
+     "error": {
+      "name": "Error",
+      "message": "Text contains unsupported control characters.",
+      "messageKey": "errors.textAuthoring.textContainsUnsupportedControlCharacters",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "a"
+     },
+     "error": {
+      "name": "Error",
+      "message": "Text contains unsupported control characters.",
+      "messageKey": "errors.textAuthoring.textContainsUnsupportedControlCharacters",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "alignment": "middle"
+     },
+     "error": {
+      "name": "Error",
+      "message": "Text alignment must be left, center, or right.",
+      "messageKey": "errors.textAuthoring.textAlignmentMustBeLeftCenterOrRight",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "fontSize": 0
+     },
+     "error": {
+      "name": "Error",
+      "message": "Font size must be between 1 and 2048.",
+      "messageKey": "errors.cameraMotion.mustBeBetweenAnd",
+      "messageParams": {
+       "label": {
+        "messageKey": "errors.validationLabels.fontSize",
+        "diagnosticValue": "Font size"
+       },
+       "min": 1,
+       "max": 2048
+      }
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "fontSize": 2049
+     },
+     "error": {
+      "name": "Error",
+      "message": "Font size must be between 1 and 2048.",
+      "messageKey": "errors.cameraMotion.mustBeBetweenAnd",
+      "messageParams": {
+       "label": {
+        "messageKey": "errors.validationLabels.fontSize",
+        "diagnosticValue": "Font size"
+       },
+       "min": 1,
+       "max": 2048
+      }
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "lineHeight": 0.4
+     },
+     "error": {
+      "name": "Error",
+      "message": "Line height must be between 0.5 and 5.",
+      "messageKey": "errors.cameraMotion.mustBeBetweenAnd",
+      "messageParams": {
+       "label": {
+        "messageKey": "errors.validationLabels.lineHeight",
+        "diagnosticValue": "Line height"
+       },
+       "min": 0.5,
+       "max": 5
+      }
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "color": [
+       256,
+       0,
+       0
+      ]
+     },
+     "error": {
+      "name": "Error",
+      "message": "Text color must contain three RGB bytes.",
+      "messageKey": "errors.textAuthoring.mustContainThreeRgbBytes",
+      "messageParams": {
+       "label": {
+        "messageKey": "errors.validationLabels.textColor",
+        "diagnosticValue": "Text color"
+       }
+      }
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "color": [
+       1.5,
+       0,
+       0
+      ]
+     },
+     "error": {
+      "name": "Error",
+      "message": "Text color must contain three RGB bytes.",
+      "messageKey": "errors.textAuthoring.mustContainThreeRgbBytes",
+      "messageParams": {
+       "label": {
+        "messageKey": "errors.validationLabels.textColor",
+        "diagnosticValue": "Text color"
+       }
+      }
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "opacity": 1.5
+     },
+     "error": {
+      "name": "Error",
+      "message": "Opacity must be between 0 and 1.",
+      "messageKey": "errors.cameraMotion.mustBeBetweenAnd",
+      "messageParams": {
+       "label": {
+        "messageKey": "errors.validationLabels.opacity",
+        "diagnosticValue": "Opacity"
+       },
+       "min": 0,
+       "max": 1
+      }
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "gradientColor": [
+       0,
+       0,
+       -1
+      ]
+     },
+     "error": {
+      "name": "Error",
+      "message": "Gradient color must contain three RGB bytes.",
+      "messageKey": "errors.textAuthoring.mustContainThreeRgbBytes",
+      "messageParams": {
+       "label": {
+        "messageKey": "errors.validationLabels.gradientColor",
+        "diagnosticValue": "Gradient color"
+       }
+      }
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "outlineWidth": 129
+     },
+     "error": {
+      "name": "Error",
+      "message": "Outline width must be between 0 and 128.",
+      "messageKey": "errors.cameraMotion.mustBeBetweenAnd",
+      "messageParams": {
+       "label": {
+        "messageKey": "errors.validationLabels.outlineWidth",
+        "diagnosticValue": "Outline width"
+       },
+       "min": 0,
+       "max": 128
+      }
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "outlineColor": [
+       0,
+       0
+      ]
+     },
+     "error": {
+      "name": "Error",
+      "message": "Outline color must contain three RGB bytes.",
+      "messageKey": "errors.textAuthoring.mustContainThreeRgbBytes",
+      "messageParams": {
+       "label": {
+        "messageKey": "errors.validationLabels.outlineColor",
+        "diagnosticValue": "Outline color"
+       }
+      }
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "figureTypeId": 0
+     },
+     "error": {
+      "name": "Error",
+      "message": "Figure ID must be between 1 and 65535.",
+      "messageKey": "errors.textAuthoring.figureIdMustBeBetween1And65535",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "figureTypeId": 65536
+     },
+     "error": {
+      "name": "Error",
+      "message": "Figure ID must be between 1 and 65535.",
+      "messageKey": "errors.textAuthoring.figureIdMustBeBetween1And65535",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "figureTypeId": 1.5
+     },
+     "error": {
+      "name": "Error",
+      "message": "Figure ID must be between 1 and 65535.",
+      "messageKey": "errors.textAuthoring.figureIdMustBeBetween1And65535",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "paint": {
+       "type": "conic",
+       "stops": []
+      }
+     },
+     "error": {
+      "name": "Error",
+      "message": "Invalid paint type.",
+      "messageKey": "errors.paint.invalidPaintType",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "paint": {
+       "type": "linear",
+       "stops": [
+        {
+         "offset": 0,
+         "color": [
+          0,
+          0,
+          0
+         ],
+         "opacity": 1
+        }
+       ]
+      }
+     },
+     "error": {
+      "name": "Error",
+      "message": "Use between 2 and 32 gradient stops.",
+      "messageKey": "errors.paint.useBetween2And32GradientStops",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "paint": {
+       "type": "solid",
+       "stops": [
+        {
+         "offset": 2,
+         "color": [
+          0,
+          0,
+          0
+         ],
+         "opacity": 1
+        }
+       ]
+      }
+     },
+     "error": {
+      "name": "Error",
+      "message": "Invalid paint value.",
+      "messageKey": "errors.paint.invalidPaintValue",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "paint": {
+       "type": "solid",
+       "stops": [
+        {
+         "offset": 0,
+         "color": [
+          0,
+          0
+         ],
+         "opacity": 1
+        }
+       ]
+      }
+     },
+     "error": {
+      "name": "Error",
+      "message": "Invalid RGB color.",
+      "messageKey": "errors.paint.invalidRgbColor",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": "a",
+      "bold": "yes"
+     },
+     "error": {
+      "name": "Error",
+      "message": "Bold and italic must be true or false.",
+      "messageKey": "errors.textAuthoring.boldAndItalicMustBeTrueOrFalse",
+      "messageParams": {}
+     }
+    },
+    {
+     "options": {
+      "text": " ."
+     },
+     "expected": "limit-errors-23.json"
+    },
+    {
+     "options": {
+      "text": "日",
+      "fontSize": 20
+     },
+     "error": {
+      "name": "Error",
+      "message": "Noto Sans does not contain 日 (U+65E5).",
+      "messageKey": "errors.textAuthoring.doesNotContainU",
+      "messageParams": {
+       "family": "Noto Sans",
+       "char": "日",
+       "value": "65E5"
+      }
+     }
+    },
+    {
+     "options": {
+      "text": " x"
+     },
+     "expected": "limit-errors-25.json"
+    }
+   ]
+  },
+  {
+   "id": "spaces-only-visible",
+   "font": "noto:0",
+   "face": null,
+   "steps": [
+    {
+     "options": {
+      "text": ".\n   \n."
+     },
+     "expected": "spaces-only-visible-0.json"
+    },
+    {
+     "options": {
+      "text": " ",
+      "fontSize": 20
+     },
+     "error": {
+      "name": "Error",
+      "message": "Enter visible text.",
+      "messageKey": "errors.textAuthoring.enterVisibleText",
+      "messageParams": {}
+     }
+    }
+   ]
+  },
+  {
+   "id": "fira",
+   "font": "file:vendor/iced/graphics/fonts/FiraSans-Regular.ttf",
+   "face": {
+    "family": "Fira Sans",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "Kerning AVATAR Ty To",
+      "fontSize": 72
+     },
+     "expected": "fira-0.json"
+    },
+    {
+     "options": {
+      "text": "ffi fl 123",
+      "fontSize": 30,
+      "alignment": "center"
+     },
+     "expected": "fira-1.json"
+    }
+   ]
+  },
+  {
+   "id": "inter",
+   "font": "file:engine/crates/styk-design/fonts/Inter.ttf",
+   "face": {
+    "family": "Inter",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "Variable AVATAR Ty",
+      "fontSize": 64
+     },
+     "expected": "inter-0.json"
+    }
+   ]
+  },
+  {
+   "id": "both-tables",
+   "font": "recipe:both-tables",
+   "face": {
+    "family": "Noto Sans",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "AV To AVATAR",
+      "fontSize": 80
+     },
+     "expected": "both-tables-0.json"
+    }
+   ]
+  },
+  {
+   "id": "kern-only",
+   "font": "recipe:kern-only",
+   "face": {
+    "family": "Noto Sans",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "AV To AVATAR",
+      "fontSize": 80
+     },
+     "expected": "kern-only-0.json"
+    }
+   ]
+  },
+  {
+   "id": "empty-gpos",
+   "font": "recipe:empty-gpos",
+   "face": {
+    "family": "Noto Sans",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "AV To AVATAR",
+      "fontSize": 80
+     },
+     "expected": "empty-gpos-0.json"
+    }
+   ]
+  },
+  {
+   "id": "symbol",
+   "font": "recipe:symbol",
+   "face": {
+    "family": "Noto Sans",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "ABC 123",
+      "fontSize": 50
+     },
+     "expected": "symbol-0.json"
+    },
+    {
+     "options": {
+      "text": "abc"
+     },
+     "error": {
+      "name": "Error",
+      "message": "Noto Sans does not contain a (U+0061).",
+      "messageKey": "errors.textAuthoring.doesNotContainU",
+      "messageParams": {
+       "family": "Noto Sans",
+       "char": "a",
+       "value": "0061"
+      }
+     }
+    },
+    {
+     "options": {
+      "text": " "
+     },
+     "error": {
+      "name": "Error",
+      "message": "Enter visible text.",
+      "messageKey": "errors.textAuthoring.enterVisibleText",
+      "messageParams": {}
+     }
+    }
+   ]
+  },
+  {
+   "id": "cff",
+   "font": "synthetic-cff",
+   "face": {
+    "family": "Prefam",
+    "style": "Regular",
+    "bold": true,
+    "italic": true
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "AB\nCV",
+      "fontSize": 100
+     },
+     "expected": "cff-0.json"
+    },
+    {
+     "options": {
+      "text": "A\tB V",
+      "fontSize": 100
+     },
+     "expected": "cff-1.json"
+    },
+    {
+     "options": {
+      "text": "A\tB",
+      "fontSize": 100
+     },
+     "expected": "cff-2.json"
+    },
+    {
+     "options": {
+      "text": "AV\nVA",
+      "fontSize": 50,
+      "alignment": "right"
+     },
+     "expected": "cff-3.json"
+    },
+    {
+     "options": {
+      "text": "A\tB",
+      "fontSize": 100
+     },
+     "expected": "cff-4.json"
+    },
+    {
+     "options": {
+      "text": "x"
+     },
+     "error": {
+      "name": "Error",
+      "message": "Prefam does not contain x (U+0078).",
+      "messageKey": "errors.textAuthoring.doesNotContainU",
+      "messageParams": {
+       "family": "Prefam",
+       "char": "x",
+       "value": "0078"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "cff-fresh-tab",
+   "font": "synthetic-cff",
+   "face": {
+    "family": "Prefam",
+    "style": "Regular",
+    "bold": true,
+    "italic": true
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "A\tB",
+      "fontSize": 100
+     },
+     "expected": "cff-fresh-tab-0.json"
+    }
+   ]
+  },
+  {
+   "id": "cff-superseded",
+   "font": "synthetic-cff",
+   "face": {
+    "family": "Prefam",
+    "style": "Regular",
+    "bold": true,
+    "italic": true
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "A ",
+      "fontSize": 100
+     },
+     "superseded": true,
+     "expected": "cff-superseded-0.json"
+    },
+    {
+     "options": {
+      "text": "A\tB",
+      "fontSize": 100
+     },
+     "expected": "cff-superseded-1.json"
+    }
+   ]
+  },
+  {
+   "id": "cmap4-overwritten",
+   "font": "recipe:cmap4-overwritten",
+   "face": {
+    "family": "Noto Sans",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "AB",
+      "fontSize": 50
+     },
+     "expected": "cmap4-overwritten-0.json"
+    }
+   ]
+  },
+  {
+   "id": "cmap12-overwritten",
+   "font": "recipe:cmap12-overwritten",
+   "face": {
+    "family": "Noto Sans",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "AB",
+      "fontSize": 50
+     },
+     "expected": "cmap12-overwritten-0.json"
+    }
+   ]
+  },
+  {
+   "id": "composite-dag",
+   "font": "fixture:synthetic-composite.ttf",
+   "face": {
+    "family": "Styk Composite",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "A",
+      "fontSize": 100
+     },
+     "expected": "composite-dag-0.json"
+    }
+   ]
+  }
+ ],
+ "native": [
+  {
+   "id": "native-noop",
+   "source": "native-noop-source.json",
+   "readOptions": {
+    "text": "Hello\nWorld",
+    "name": "Text",
+    "fontFamily": "Noto Sans",
+    "fontSize": 60,
+    "fontSizeKnown": true,
+    "embeddedScale": 100,
+    "fontOrigin": "bundled",
+    "bold": true,
+    "italic": false,
+    "alignment": "center",
+    "lineHeight": 1.3,
+    "color": [
+     200,
+     30,
+     30
+    ],
+    "opacity": 1,
+    "gradientColor": [
+     0,
+     0,
+     255
+    ],
+    "outlineWidth": 3,
+    "outlineColor": [
+     0,
+     0,
+     0
+    ],
+    "figureTypeId": 1,
+    "assetIndex": 0
+   },
+   "steps": [
+    {
+     "options": {},
+     "expected": "native-noop-0.json"
+    }
+   ],
+   "replaceSteps": []
+  },
+  {
+   "id": "native-size",
+   "source": "native-size-source.json",
+   "readOptions": {
+    "text": "Hello\nWorld",
+    "name": "Text",
+    "fontFamily": "Noto Sans",
+    "fontSize": 60,
+    "fontSizeKnown": true,
+    "embeddedScale": 100,
+    "fontOrigin": "bundled",
+    "bold": true,
+    "italic": false,
+    "alignment": "center",
+    "lineHeight": 1.3,
+    "color": [
+     200,
+     30,
+     30
+    ],
+    "opacity": 1,
+    "gradientColor": [
+     0,
+     0,
+     255
+    ],
+    "outlineWidth": 3,
+    "outlineColor": [
+     0,
+     0,
+     0
+    ],
+    "figureTypeId": 1,
+    "assetIndex": 0
+   },
+   "steps": [
+    {
+     "options": {
+      "fontSize": 120
+     },
+     "expected": "native-size-0.json"
+    },
+    {
+     "options": {
+      "fontSize": 30.5,
+      "color": [
+       1,
+       2,
+       3
+      ],
+      "opacity": 0.5
+     },
+     "expected": "native-size-1.json"
+    }
+   ],
+   "replaceSteps": []
+  },
+  {
+   "id": "native-text",
+   "source": "native-text-source.json",
+   "readOptions": {
+    "text": "Hello\nWorld",
+    "name": "Text",
+    "fontFamily": "Noto Sans",
+    "fontSize": 60,
+    "fontSizeKnown": true,
+    "embeddedScale": 100,
+    "fontOrigin": "bundled",
+    "bold": true,
+    "italic": false,
+    "alignment": "center",
+    "lineHeight": 1.3,
+    "color": [
+     200,
+     30,
+     30
+    ],
+    "opacity": 1,
+    "gradientColor": [
+     0,
+     0,
+     255
+    ],
+    "outlineWidth": 3,
+    "outlineColor": [
+     0,
+     0,
+     0
+    ],
+    "figureTypeId": 1,
+    "assetIndex": 0
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "Hello\nWorld!!\nHeo"
+     },
+     "error": {
+      "name": "MissingTextGlyphsError",
+      "message": "Choose a font to add “!”. The file only includes the characters used by Noto Sans.",
+      "missing": [
+       "!"
+      ]
+     }
+    },
+    {
+     "options": {
+      "text": "Hello\nWorld",
+      "alignment": "right"
+     },
+     "expected": "native-text-1.json"
+    },
+    {
+     "options": {
+      "text": "World Hello",
+      "lineHeight": 2
+     },
+     "expected": "native-text-2.json"
+    }
+   ],
+   "replaceSteps": []
+  },
+  {
+   "id": "native-stripped",
+   "source": "native-stripped-source.json",
+   "readOptions": {
+    "text": "Hello\nWorld",
+    "name": "Text",
+    "fontFamily": "Noto Sans",
+    "fontSize": 60,
+    "fontSizeKnown": true,
+    "embeddedScale": 100,
+    "fontOrigin": "embedded",
+    "bold": true,
+    "italic": false,
+    "alignment": "center",
+    "lineHeight": 1.2,
+    "color": [
+     200,
+     30,
+     30
+    ],
+    "opacity": 1,
+    "gradientColor": [
+     0,
+     0,
+     255
+    ],
+    "outlineWidth": 3,
+    "outlineColor": [
+     0,
+     0,
+     0
+    ],
+    "figureTypeId": 1,
+    "assetIndex": 0
+   },
+   "steps": [
+    {
+     "options": {},
+     "expected": "native-stripped-0.json"
+    },
+    {
+     "options": {
+      "embeddedScale": 150
+     },
+     "expected": "native-stripped-1.json"
+    },
+    {
+     "options": {
+      "text": "Hello World!",
+      "embeddedScale": 50
+     },
+     "error": {
+      "name": "MissingTextGlyphsError",
+      "message": "Choose a font to add “!”. The file only includes the characters used by Noto Sans.",
+      "missing": [
+       "!"
+      ]
+     }
+    },
+    {
+     "options": {
+      "text": "o\to",
+      "alignment": "center"
+     },
+     "expected": "native-stripped-3.json"
+    },
+    {
+     "options": {
+      "embeddedScale": 0
+     },
+     "expected": "native-stripped-4.json"
+    },
+    {
+     "options": {
+      "embeddedScale": 4001
+     },
+     "expected": "native-stripped-5.json"
+    }
+   ],
+   "replaceSteps": []
+  },
+  {
+   "id": "native-plain-stripped",
+   "source": "native-plain-stripped-source.json",
+   "readOptions": {
+    "text": "AV To",
+    "name": "Text",
+    "fontFamily": "Noto Sans",
+    "fontSize": 80,
+    "fontSizeKnown": true,
+    "embeddedScale": 100,
+    "fontOrigin": "embedded",
+    "bold": false,
+    "italic": false,
+    "alignment": "left",
+    "lineHeight": 1.2,
+    "color": [
+     43,
+     43,
+     43
+    ],
+    "opacity": 1,
+    "gradientColor": null,
+    "outlineWidth": 0,
+    "outlineColor": [
+     0,
+     0,
+     0
+    ],
+    "figureTypeId": 1,
+    "assetIndex": 0
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "AV VA T",
+      "embeddedScale": 100
+     },
+     "expected": "native-plain-stripped-0.json"
+    },
+    {
+     "options": {
+      "text": "x"
+     },
+     "error": {
+      "name": "MissingTextGlyphsError",
+      "message": "Choose a font to add “x”. The file only includes the characters used by Noto Sans.",
+      "missing": [
+       "x"
+      ]
+     }
+    },
+    {
+     "options": {
+      "text": "AV To",
+      "bold": true
+     },
+     "error": {
+      "name": "Error",
+      "message": "Choose a font face to change bold or italic. Embedded glyph outlines retain their original style.",
+      "messageKey": "errors.nativeTextAuthoring.chooseAFontFaceToChangeBoldOr",
+      "messageParams": {}
+     }
+    }
+   ],
+   "replaceSteps": []
+  },
+  {
+   "id": "native-missing",
+   "source": "native-missing-source.json",
+   "readOptions": {
+    "text": "Hello\nWorld",
+    "name": "Text",
+    "fontFamily": "Noto Sans",
+    "fontSize": 60,
+    "fontSizeKnown": true,
+    "embeddedScale": 100,
+    "fontOrigin": "bundled",
+    "bold": true,
+    "italic": false,
+    "alignment": "center",
+    "lineHeight": 1.3,
+    "color": [
+     200,
+     30,
+     30
+    ],
+    "opacity": 1,
+    "gradientColor": [
+     0,
+     0,
+     255
+    ],
+    "outlineWidth": 3,
+    "outlineColor": [
+     0,
+     0,
+     0
+    ],
+    "figureTypeId": 1,
+    "assetIndex": 0
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "Hello Wörld 日本"
+     },
+     "error": {
+      "name": "MissingTextGlyphsError",
+      "message": "Choose a font to add “ö”, “日”, “本”. The file only includes the characters used by Noto Sans.",
+      "missing": [
+       "ö",
+       "日",
+       "本"
+      ]
+     }
+    }
+   ],
+   "replaceSteps": []
+  },
+  {
+   "id": "native-mixed",
+   "source": "native-mixed-source.json",
+   "readOptions": {
+    "text": "AV To",
+    "name": "Text",
+    "fontFamily": "Noto Sans",
+    "fontSize": 80,
+    "fontSizeKnown": true,
+    "embeddedScale": 100,
+    "fontOrigin": "bundled",
+    "bold": false,
+    "italic": false,
+    "alignment": "left",
+    "lineHeight": 1.2,
+    "color": [
+     43,
+     43,
+     43
+    ],
+    "opacity": 1,
+    "gradientColor": null,
+    "outlineWidth": 0,
+    "outlineColor": [
+     0,
+     0,
+     0
+    ],
+    "figureTypeId": 1,
+    "assetIndex": 0
+   },
+   "steps": [
+    {
+     "options": {},
+     "expected": "native-mixed-0.json"
+    },
+    {
+     "options": {
+      "text": "To AV",
+      "fontSize": 40
+     },
+     "expected": "native-mixed-1.json"
+    }
+   ],
+   "replaceSteps": [
+    {
+     "font": "file:vendor/iced/graphics/fonts/FiraSans-Regular.ttf",
+     "options": {
+      "text": "Replaced",
+      "fontSize": 50,
+      "assetIndex": 0
+     },
+     "expected": "native-mixed-replace-0.json"
+    },
+    {
+     "font": "noto:2",
+     "options": {
+      "text": "AV To",
+      "fontSize": 33,
+      "alignment": "right",
+      "italic": true,
+      "assetIndex": 0
+     },
+     "expected": "native-mixed-replace-1.json"
+    }
+   ]
+  }
+ ],
+ "sweep": "nfc-sweep.json",
+ "rejected": [
+  "recipe:cmap4-bad",
+  "recipe:cmap12-bad"
+ ]
+}
