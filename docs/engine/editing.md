@@ -715,7 +715,9 @@ it on the editor, for every document.
   clip's text (`open_tree_estimate`), not sixteen. The clip's pose arrays are unshared as its text would have given them (the saved bytes are
   those of the project opened from text). Reading the definition to enter fetched a record as large as the project into the page.
   A movieclip made inside a clip retains the scene the outer clip retains cut down to its own figures (`prune_retained`: poses,
-  effect clips and imported animation, down the chain of `movieclipSource` documents).
+  effect clips and imported animation, down the chain of `movieclipSource` documents). An older retained scene numbers its figures on its own, and shares
+  the definitions of the clip that holds it, so only objects of a definition the new clip holds stay in it (a figure of the older scene with the
+  number of one of the clip's was kept, and the file was refused as an unknown figure).
 - **Working frames.** The interface never starts one on a layer sheet. `disableFrameDrafts` (the
   timeline mounting in Advanced mode) commits what is open and converts a draft a file was saved with when
   it is an Update (`frame_draft.rs`); `beginFrameDraftPreview` and `endFrameDraftPreview` answer false.

@@ -309,11 +309,15 @@ fn prune_patches(styk: &mut Obj, selected: &HashSet<u32>) {
     }
 }
 /// `captureMovieclip`'s `prune`: a clip made inside a movieclip retains the scene the outer clip retains (a chain of `movieclipSource`
-/// documents), cut down to the figures the new clip holds: their poses, effect clips and imported animation.
-fn prune_retained(document: &mut Value, selected: &HashSet<u32>, layers: &HashSet<String>) {
+/// documents), cut down to the figures the new clip holds: their poses, effect clips and imported animation. A retained scene is an older
+/// scene, whose identities are its own: an object of it that shares a number with a figure of the clip is not that figure, and a scene
+/// shares the clip's definitions (`inheritFigures`), so only objects of a definition the clip holds (`types`) stay in it.
+fn prune_retained(document: &mut Value, selected: &HashSet<u32>, layers: &HashSet<String>, types: &HashSet<u32>) {
     let Some(document) = document.make_obj() else { return };
+    // The figures of the clip a frame of this scene holds: of a definition the clip holds, and named by the clip's identity.
+    let held = |frame: &Value| -> HashSet<u32> { objects_of(frame).iter().filter(|o| num(o, "figure_type_id").is_some_and(|kind| types.contains(&(kind as u32)))).filter_map(uid).filter(|u| selected.contains(u)).collect() };
     if let Some(frames) = document.get("keyframes") {
-        let frames = items(Some(frames)).iter().map(|frame| cut_frame(frame, selected)).collect();
+        let frames = items(Some(frames)).iter().map(|frame| cut_frame(frame, &held(frame))).collect();
         document.set("keyframes", Value::array(frames));
     }
     let Some(styk) = document.get_mut("_styk").and_then(Value::make_obj) else { return };
@@ -321,7 +325,7 @@ fn prune_retained(document: &mut Value, selected: &HashSet<u32>, layers: &HashSe
         keep_vfx_clips(vfx, selected);
     }
     if let Some(sources) = styk.get_mut("frameSources").filter(|v| v.truthy()).and_then(Value::make_obj) {
-        let filtered: Vec<(String, Value)> = sources.iter().map(|(id, frame)| (id.to_string(), cut_frame(frame, selected))).collect();
+        let filtered: Vec<(String, Value)> = sources.iter().map(|(id, frame)| (id.to_string(), cut_frame(frame, &held(frame)))).collect();
         for (id, frame) in filtered {
             sources.set(&id, frame);
         }
@@ -331,7 +335,7 @@ fn prune_retained(document: &mut Value, selected: &HashSet<u32>, layers: &HashSe
     }
     prune_patches(styk, selected);
     if let Some(retained) = styk.get_mut("movieclipSource").filter(|v| v.truthy()).and_then(Value::make_obj).and_then(|source| source.get_mut("document")) {
-        prune_retained(retained, selected, layers);
+        prune_retained(retained, selected, layers, types);
     }
 }
 
@@ -609,7 +613,7 @@ impl Editor {
         prune_patches(&mut metadata, &selected);
         // What the clip it is made in retains is cut down to its figures too.
         if let Some(retained) = metadata.get_mut("movieclipSource").and_then(Value::make_obj).and_then(|source| source.get_mut("document")) {
-            prune_retained(retained, &selected, &selected_layers);
+            prune_retained(retained, &selected, &selected_layers, &used_types);
         }
         if let Some(layers) = metadata.get_mut("layers").and_then(Value::make_obj) {
             // A drawing layer holds only drawing cels: a figure the project had assigned to one (a movieclip placed while one was active) is
@@ -1052,5 +1056,24 @@ mod tests {
         let mut cut = sheet(r#"[{"uid":9,"frameId":"a","replacementUid":5},{"uid":1,"frameId":"a","replacementUid":1}]"#);
         prune_patches(&mut cut, &keep);
         assert_eq!(text(&cut), text(&sheet(r#"[{"uid":9,"frameId":"a"},{"uid":1,"frameId":"a","replacementUid":1}]"#)));
+    }
+
+    /// A scene a clip retains numbers its figures on its own: an object of it with the number of a figure the clip holds, of a definition the clip
+    /// does not hold, goes with the rest, at every level of the chain (it would be an unknown figure to the file's reader).
+    #[test]
+    fn a_retained_scene_keeps_only_figures_of_definitions_the_clip_holds() {
+        let scene = |inner: &str| frame(&format!(
+            r#"{{"keyframes":[{{"duration_raw":1,"objects":[
+                {{"object_slot":0,"unique_id":1,"figure_type_id":1,"join":null}},
+                {{"object_slot":1,"unique_id":2,"figure_type_id":4,"join":null}}],"object_draw_order":[0,1],"object_draw_order_unique_ids":[1,2]}}],
+              "_styk":{{"frameSources":{{"pose":{{"duration_raw":1,"objects":[{{"object_slot":0,"unique_id":1,"figure_type_id":1,"join":null}}]}}}}{inner}}}}}"#
+        ));
+        let mut retained = scene(&format!(r#","movieclipSource":{{"inheritFigures":true,"document":{}}}"#, styk_doc::json::to_string(&scene(""))));
+        prune_retained(&mut retained, &[1, 2].into_iter().collect(), &HashSet::new(), &[4].into_iter().collect());
+        let kinds = |document: &Value| -> Vec<u32> { items(document.get("keyframes")).iter().flat_map(objects_of).filter_map(|o| num(&o, "figure_type_id")).map(|n| n as u32).collect() };
+        let sources = |document: &Value| -> usize { document.path(&["_styk", "frameSources", "pose"]).map_or(0, |pose| objects_of(pose).len()) };
+        let inner = retained.path(&["_styk", "movieclipSource", "document"]).unwrap();
+        assert_eq!((kinds(&retained), sources(&retained)), (vec![4], 0), "the scene");
+        assert_eq!((kinds(inner), sources(inner)), (vec![4], 0), "and the scene it retains");
     }
 }
