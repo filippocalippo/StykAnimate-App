@@ -12,6 +12,7 @@ pub mod screens;
 use iced::widget::{container, space};
 use iced::{Element, Fill, Widget, theme};
 use styk_design::Theme;
+use styk_design::warm_up::Ready;
 
 /// The window's colours: the field the panels will float on, and the default text.
 pub fn window_style(theme: Theme) -> theme::Style {
@@ -27,10 +28,19 @@ pub fn base_theme(theme: Theme) -> iced::Theme {
     }
 }
 
-/// What the window shows: for now only the window field, filling it.
-pub fn view<'a, Message: 'a>(theme: Theme) -> Element<'a, Message> {
+/// What the window shows until the font system is ready: the window field, filling it, and no text.
+///
+/// Nothing here may reach the font system (any text widget would): the first layout of text builds it on the calling
+/// thread if the warm-up worker has not, and the window would freeze for the scan (`styk_design::warm_up`).
+pub fn loading<'a, Message: 'a>(theme: Theme) -> Element<'a, Message> {
     let field = theme.palette().surface_field;
     container(space()).width(Fill).height(Fill).style(move |_| container::Style::default().background(iced::Color::from(field))).boxed()
+}
+
+/// What the window shows once the fonts are ready, which the `Ready` proves: for now only the window field. Every
+/// screen that sets text is built here or below, never in [`loading`].
+pub fn view<'a, Message: 'a>(theme: Theme, _ready: Ready) -> Element<'a, Message> {
+    loading(theme)
 }
 
 #[cfg(test)]

@@ -20,12 +20,11 @@ mod screenshot;
 mod window;
 
 use iced::{Subscription, Task, Widget as _, window as iced_window};
-use std::borrow::Cow;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use styk_core::Launch;
-use styk_design::{Theme, fonts, widgets};
+use styk_design::{Theme, warm_up, widgets};
 use styk_platform::unattended::{self, Strategy};
 use styk_ui::component_sheet::{self, Sheet};
 use styk_ui::screens::Screen;
@@ -53,6 +52,8 @@ enum Message {
     Opened(iced_window::Id),
     Shown(Result<(), WindowError>),
     Frame,
+    /// The font system is built and holds the bundled fonts: text may be laid out.
+    FontsReady,
     Captured(Result<Image, String>),
 }
 
@@ -69,6 +70,8 @@ struct App {
     /// When each redraw started, for the check's latency figures.
     #[cfg(feature = "devtools")]
     frame_times: Vec<std::time::Instant>,
+    /// Whether the font system is ready. Until it is, the view holds no text (`styk_design::warm_up`).
+    fonts_ready: bool,
     /// Frames the event loop has started since the window was shown.
     frames: u32,
     capturing: bool,
@@ -78,7 +81,21 @@ struct App {
 impl App {
     fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: Arc<Mutex<Outcome>>) -> App {
         let sheet = screen.map(|Screen::ComponentSheet| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr));
-        App { launch, theme: Theme::default(), sheet, strategy, window: None, #[cfg(feature = "devtools")] report: Vec::new(), #[cfg(feature = "devtools")] frame_times: Vec::new(), frames: 0, capturing: false, outcome }
+        App {
+            launch,
+            theme: Theme::default(),
+            sheet,
+            strategy,
+            window: None,
+            #[cfg(feature = "devtools")]
+            report: Vec::new(),
+            #[cfg(feature = "devtools")]
+            frame_times: Vec::new(),
+            fonts_ready: false,
+            frames: 0,
+            capturing: false,
+            outcome,
+        }
     }
 
     fn theme(&self) -> Theme {
@@ -108,15 +125,20 @@ impl App {
             }
             Message::Shown(Ok(())) => Task::none(),
             Message::Shown(Err(error)) => self.finish(Outcome::Failed(format!("could not show the window: {error}"))),
+            Message::FontsReady => {
+                self.fonts_ready = true;
+                Task::none()
+            }
             Message::Frame => {
                 self.frames += 1;
                 #[cfg(feature = "devtools")]
                 if self.launch.input_check.is_some() {
                     self.frame_times.push(std::time::Instant::now());
                 }
-                // The first frame's event arrives as it is about to be drawn; the second, once that draw is done.
+                // The first frame's event arrives as it is about to be drawn; the second, once that draw is done and
+                // the text it shows can be laid out.
                 match self.window {
-                    Some(id) if self.frames == 2 && self.launch.screenshot.is_some() && !self.capturing => {
+                    Some(id) if self.frames >= 2 && self.fonts_ready && self.launch.screenshot.is_some() && !self.capturing => {
                         self.capturing = true;
                         mark!("first-frame");
                         capture(id)
@@ -186,9 +208,13 @@ impl App {
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        match &self.sheet {
-            Some(sheet) => sheet.view().map(Message::Sheet).boxed(),
-            None => styk_ui::view(self.theme),
+        // Text is laid out only once the font system is ready: until then the view holds none.
+        match warm_up::proof() {
+            Some(ready) => match &self.sheet {
+                Some(sheet) => sheet.view().map(Message::Sheet).boxed(),
+                None => styk_ui::view(self.theme, ready),
+            },
+            None => styk_ui::loading(self.theme),
         }
     }
 
@@ -264,16 +290,25 @@ fn main() -> ExitCode {
     let scale = launch.scale.unwrap_or(1.0) as f32;
     let settings = window::settings(&launch, strategy);
     let app = Mutex::new(Some(App::new(launch, screen, strategy, outcome.clone())));
-    let result = iced::application(move || app.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the application starts once"), App::update, App::view)
+    // The font system is built on a worker from the first moment (styk_design::warm_up); the bundled fonts are
+    // loaded there, never through iced::Settings::fonts, which the runtime would load on the event loop.
+    let result = iced::application(
+        move || (app.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the application starts once"), warm_up::warm_up().map(|()| Message::FontsReady)),
+        App::update,
+        App::view,
+    )
         .subscription(App::subscription)
         .title("StykAnimate")
         .theme(|app: &App| styk_ui::base_theme(app.theme()))
         .style(|app: &App, _| styk_ui::window_style(app.theme()))
         .scale_factor(move |_| scale)
         .font(widgets::INTER)
-        .fonts(fonts::ALL.iter().map(|font| Cow::Borrowed(*font)))
         .window(settings)
         .run();
+    if warm_up::built_early() {
+        eprintln!("the interface thread built the font system before the warm-up worker did: a text widget was laid out before the fonts were ready");
+        return ExitCode::FAILURE;
+    }
     #[cfg(feature = "devtools")]
     if let Some(path) = trace_path {
         let _ = std::fs::write(path, styk_devtools::trace_report());

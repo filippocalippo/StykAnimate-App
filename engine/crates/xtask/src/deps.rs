@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// Crates the engine side must never reach.
-const FRONT_END: &[&str] = &["styk-ui", "styk-devtools", "styk-design", "styk-platform", "styk-app", "xtask"];
+const FRONT_END: &[&str] = &["styk-ui", "styk-devtools", "styk-design", "styk-platform", "styk-app", "styk-text-check", "xtask"];
 
 /// Name prefixes of the windowing toolkit: iced and its own forks.
 const TOOLKIT: &[&str] = &["iced", "winit", "cryoglyph"];

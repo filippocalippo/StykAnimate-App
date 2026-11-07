@@ -6,7 +6,7 @@ use crate::fallback::FontFallbackIter;
 use crate::{
     math, Align, Attrs, AttrsList, CacheKeyFlags, Color, DecorationMetrics, DecorationSpan,
     Ellipsize, EllipsizeHeightLimit, Family, Font, FontSystem, GlyphDecorationData, Hinting,
-    LayoutGlyph, LayoutLine, Metrics, SpanPadding, Wrap,
+    LayoutGlyph, LayoutLine, Metrics, OpticalSize, SpanPadding, Wrap,
 };
 #[cfg(not(feature = "std"))]
 use alloc::{format, vec, vec::Vec};
@@ -258,6 +258,7 @@ fn shape_fallback(
             font_monospace_em_width: font.monospace_em_width(),
             font_id: font.id(),
             font_weight: attrs.weight,
+            font_optical_size: attrs.optical_size,
             glyph_id: info.glyph_id.try_into().expect("failed to cast glyph ID"),
             //TODO: color should not be related to shaping
             color_opt: attrs.color_opt,
@@ -567,9 +568,10 @@ fn shape_skip(
 
         if let Some(fb_font) = fb_iter.next() {
             let fb_swash = fb_font.as_swash();
+            let fb_coordinates: Vec<i16> = fb_font.shaper_instance().coords().iter().map(|coordinate| coordinate.to_bits()).collect();
             let fb_charmap = fb_swash.charmap();
-            let fb_metrics = fb_swash.metrics(&[]);
-            let fb_glyph_metrics = fb_swash.glyph_metrics(&[]).scale(1.0);
+            let fb_metrics = fb_swash.metrics(&fb_coordinates);
+            let fb_glyph_metrics = fb_swash.glyph_metrics(&fb_coordinates).scale(1.0);
             let fb_scale = f32::from(fb_metrics.units_per_em);
 
             for glyph in glyphs[glyph_start..].iter_mut() {
@@ -613,9 +615,11 @@ fn shape_skip_glyphs(
     let font_monospace_em_width = font.monospace_em_width();
     let swash_font = font.as_swash();
 
+    // The face's variation coordinates (weight, optical size), so the advances are the ones the glyphs are rasterized at.
+    let coordinates: Vec<i16> = font.shaper_instance().coords().iter().map(|coordinate| coordinate.to_bits()).collect();
     let charmap = swash_font.charmap();
-    let metrics = swash_font.metrics(&[]);
-    let glyph_metrics = swash_font.glyph_metrics(&[]).scale(1.0);
+    let metrics = swash_font.metrics(&coordinates);
+    let glyph_metrics = swash_font.glyph_metrics(&coordinates).scale(1.0);
 
     let ascent = metrics.ascent / f32::from(metrics.units_per_em);
     let descent = metrics.descent / f32::from(metrics.units_per_em);
@@ -644,6 +648,7 @@ fn shape_skip_glyphs(
                     font_monospace_em_width,
                     font_id,
                     font_weight: attrs.weight,
+                    font_optical_size: attrs.optical_size,
                     glyph_id,
                     color_opt: attrs.color_opt,
                     metadata: attrs.metadata,
@@ -680,6 +685,7 @@ pub struct ShapeGlyph {
     pub font_monospace_em_width: Option<f32>,
     pub font_id: fontdb::ID,
     pub font_weight: fontdb::Weight,
+    pub font_optical_size: OpticalSize,
     pub glyph_id: u16,
     pub color_opt: Option<Color>,
     pub metadata: usize,
@@ -704,6 +710,7 @@ impl ShapeGlyph {
             line_height_opt,
             font_id: self.font_id,
             font_weight: self.font_weight,
+            font_optical_size: self.font_optical_size,
             glyph_id: self.glyph_id,
             x,
             y,

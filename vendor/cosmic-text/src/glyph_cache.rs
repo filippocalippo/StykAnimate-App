@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+use crate::OpticalSize;
+
 bitflags::bitflags! {
     /// Flags that change rendering
     #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -29,6 +31,8 @@ pub struct CacheKey {
     pub y_bin: SubpixelBin,
     /// Font weight
     pub font_weight: fontdb::Weight,
+    /// Optical size
+    pub font_optical_size: OpticalSize,
     /// [`CacheKeyFlags`]
     pub flags: CacheKeyFlags,
 }
@@ -40,6 +44,7 @@ impl CacheKey {
         font_size: f32,
         pos: (f32, f32),
         weight: fontdb::Weight,
+        optical_size: OpticalSize,
         flags: CacheKeyFlags,
     ) -> (Self, i32, i32) {
         let (x, x_bin) = SubpixelBin::new(pos.0);
@@ -53,6 +58,7 @@ impl CacheKey {
                 y_bin,
                 flags,
                 font_weight: weight,
+                font_optical_size: optical_size,
             },
             x,
             y,

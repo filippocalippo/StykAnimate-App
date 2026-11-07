@@ -9,7 +9,7 @@ use iced::advanced::shell;
 use iced::{Pixels, Size, Widget as _, mouse, window};
 use iced_runtime::UserInterface;
 use iced_runtime::user_interface::Cache;
-use styk_design::{Theme, fonts, widgets};
+use styk_design::{Theme, warm_up, widgets};
 use styk_platform::window::Image;
 use styk_ui::component_sheet::Sheet;
 
@@ -19,18 +19,14 @@ use styk_ui::component_sheet::Sheet;
 pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>) -> Result<Image, String> {
     let settings = iced::Settings { font: widgets::INTER, text_size: Pixels(16.0), ..iced::Settings::default() };
     let mut renderer = pollster::block_on(<iced::Renderer as Headless>::new(renderer::Settings::from(&settings), None)).ok_or("no graphics adapter is available to draw offscreen")?;
-    {
-        let mut system = iced::advanced::graphics::text::font_system().write().map_err(|_| "the font system is poisoned")?;
-        for font in fonts::ALL {
-            system.load_font(std::borrow::Cow::Borrowed(font));
-        }
-    }
+    // Nothing here is an event loop to keep responsive: the font system is built and the bundled fonts installed in place.
+    let ready = warm_up::install_bundled();
     let bounds = Size::new(size.0 as f32, size.1 as f32);
     let style = styk_ui::window_style(theme);
     let iced_theme = styk_ui::base_theme(theme);
     let view: iced::Element<'_, ()> = match sheet {
         Some(sheet) => sheet.view().map(|_| ()).boxed(),
-        None => styk_ui::view(theme),
+        None => styk_ui::view(theme, ready),
     };
     let mut interface: UserInterface<'_, (), iced::Theme, iced::Renderer> = UserInterface::build(view, bounds, Cache::default(), &mut renderer);
     // One redraw, so widgets that lay themselves out on their first frame have.

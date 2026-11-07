@@ -48,6 +48,10 @@ pub struct LayoutRun<'a> {
     pub decorations: &'a [DecorationSpan],
     /// Y offset to baseline of line
     pub line_y: f32,
+    /// Distance from the baseline to the top of the line's tallest font, before any leading is added
+    pub line_ascent: f32,
+    /// Distance from the baseline to the bottom of the line's deepest font
+    pub line_descent: f32,
     /// Y offset to top of line
     pub line_top: f32,
     /// Y offset to next line
@@ -293,6 +297,8 @@ impl<'b> Iterator for LayoutRunIter<'b> {
                     glyphs: &layout_line.glyphs,
                     decorations: &layout_line.decorations,
                     line_y,
+                    line_ascent: layout_line.max_ascent,
+                    line_descent: layout_line.max_descent,
                     line_top,
                     line_height,
                     line_w: layout_line.w,

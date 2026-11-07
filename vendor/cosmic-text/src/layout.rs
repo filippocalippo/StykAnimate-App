@@ -4,7 +4,7 @@ use core::fmt::Display;
 
 use core::ops::Range;
 
-use crate::{math, CacheKey, CacheKeyFlags, Color, GlyphDecorationData};
+use crate::{math, CacheKey, CacheKeyFlags, Color, GlyphDecorationData, OpticalSize};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
@@ -22,6 +22,8 @@ pub struct LayoutGlyph {
     pub font_size: f32,
     /// Font weight of the glyph
     pub font_weight: fontdb::Weight,
+    /// Optical size of the glyph, kept in the glyph cache key so rasterization draws the same instance as shaping
+    pub font_optical_size: OpticalSize,
     /// Line height of the glyph, will override buffer setting
     pub line_height_opt: Option<f32>,
     /// Font id of the glyph
@@ -105,6 +107,7 @@ impl LayoutGlyph {
                 math::truncf((self.y - y_offset).mul_add(scale, offset.1)), // Hinting in Y axis
             ),
             self.font_weight,
+            self.font_optical_size,
             self.cache_key_flags,
         );
 
