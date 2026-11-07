@@ -28,6 +28,7 @@ pub mod gpu;
 pub mod legacy_canvas;
 pub mod pick;
 pub mod pixels;
+pub mod resident;
 pub mod settings;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod source;

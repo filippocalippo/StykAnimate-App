@@ -97,7 +97,8 @@ Run from the repository root (`cargo xtask` also works from `engine/`); the work
   rebuild every crate of a target folder once, which would cost every other build on a shared machine.
 - **Tasks** (`cargo xtask check`): `design check` (generated tokens and icons are current; see
   [design-system.md](design-system.md)), `deps` (the engine and the core reach no iced, `styk-ui` or `styk-devtools`) and
-  `lock` (`engine/Cargo.lock` holds no git source).
+  `lock` (`engine/Cargo.lock` holds no git source). `cargo xtask fonts` is the typography check against Chromium
+  ([typography.md](typography.md)); it needs a GPU and Chromium, so it is not part of `check`.
 - **Unattended runs**: `STYK_BACKGROUND_WINDOW=1 stykanimate --screenshot out.png` keeps the run off the desktop of
   the person at the computer, as far as each platform allows (`styk_platform::unattended`), waits for the first complete
   frame, writes it and exits:

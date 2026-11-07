@@ -15,11 +15,12 @@ use core::fmt;
 use alloc::sync::Arc;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+use crate::OpticalSize;
 use fontdb::Style;
 use self_cell::self_cell;
 
 pub mod fallback;
-pub use fallback::{Fallback, PlatformFallback};
+pub use fallback::{Fallback, PlatformFallback, Script};
 
 pub use self::system::*;
 mod system;
@@ -58,6 +59,7 @@ pub struct Font {
     id: fontdb::ID,
     monospace_fallback: Option<FontMonospaceFallback>,
     pub(crate) italic_or_oblique: bool,
+    has_optical_size_axis: bool,
 }
 
 impl fmt::Debug for Font {
@@ -87,6 +89,11 @@ impl Font {
         self.monospace_fallback
             .as_ref()
             .map_or(&[], |x| &x.unicode_codepoints)
+    }
+
+    /// Whether the face has an `opsz` axis, so that an [`OpticalSize`] changes its glyphs.
+    pub const fn has_optical_size_axis(&self) -> bool {
+        self.has_optical_size_axis
     }
 
     pub fn data(&self) -> &[u8] {
@@ -122,7 +129,12 @@ impl Font {
 }
 
 impl Font {
-    pub fn new(db: &fontdb::Database, id: fontdb::ID, weight: fontdb::Weight) -> Option<Self> {
+    pub fn new(
+        db: &fontdb::Database,
+        id: fontdb::ID,
+        weight: fontdb::Weight,
+        optical_size: OpticalSize,
+    ) -> Option<Self> {
         let info = db.face(id)?;
 
         let data = match &info.source {
@@ -141,9 +153,13 @@ impl Font {
         // `ShaperData`, and once to create the persistent `FontRef` tied to the
         // lifetime of the face data.
         let font_ref = FontRef::from_index((*data).as_ref(), info.index).ok()?;
-        let location = font_ref
-            .axes()
-            .location([(Tag::new(b"wght"), weight.0 as f32)]);
+        let has_optical_size_axis = font_ref.axes().get_by_tag(Tag::new(b"opsz")).is_some();
+        let location = match optical_size.pixels() {
+            Some(opsz) if has_optical_size_axis => font_ref
+                .axes()
+                .location([(Tag::new(b"wght"), weight.0 as f32), (Tag::new(b"opsz"), opsz)]),
+            _ => font_ref.axes().location([(Tag::new(b"wght"), weight.0 as f32)]),
+        };
         let metrics = font_ref.metrics(Size::unscaled(), &location);
 
         let monospace_fallback = if cfg!(feature = "monospace_fallback") {
@@ -239,6 +255,7 @@ impl Font {
             .ok()?,
             data: FontData::new(Blob::new(data), info.index),
             italic_or_oblique: info.style == Style::Italic || info.style == Style::Oblique,
+            has_optical_size_axis,
         })
     }
 }

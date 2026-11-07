@@ -131,8 +131,9 @@ fn draw_painted(pass: &mut wgpu::RenderPass<'_>, base: &wgpu::RenderPipeline, de
 
 impl Renderer {
     /// A depth buffer of `size` with `samples` per pixel for passes with depth runs.
-    fn depth_buffer(device: &wgpu::Device, slot: &mut Option<(wgpu::Texture, [u32; 2])>, size: [u32; 2], samples: u32) -> wgpu::TextureView {
+    fn depth_buffer(device: &wgpu::Device, slot: &mut Option<(wgpu::Texture, [u32; 2])>, size: [u32; 2], samples: u32, exact: bool) -> wgpu::TextureView {
         if slot.as_ref().is_none_or(|s| s.1 != size) {
+            Self::let_go(slot, exact);
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("styk depth"),
                 size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
@@ -146,6 +147,16 @@ impl Renderer {
             *slot = Some((texture, size));
         }
         slot.as_ref().unwrap().0.create_view(&Default::default())
+    }
+
+    /// A target a new size replaces. A browser frees a texture that was only dropped when it collects it, not when the last use
+    /// ends, so a renderer that changes sizes often (an export that sizes its targets by each frame) would hold every one it
+    /// made: its textures are destroyed instead. The stage's are not: one encoder may still hold the old texture when the next
+    /// size is asked for, and the stage's sizes only grow.
+    fn let_go(slot: &mut Option<(wgpu::Texture, [u32; 2])>, exact: bool) {
+        if exact && let Some((old, _)) = slot.take() {
+            old.destroy();
+        }
     }
 
     pub(crate) fn ensure_output(&mut self, size: [u32; 2]) {
@@ -175,8 +186,9 @@ impl Renderer {
     }
 
     /// The multisampled target of passes with `samples` per pixel (more than one).
-    pub(crate) fn msaa(device: &wgpu::Device, slot: &mut Option<(wgpu::Texture, [u32; 2])>, size: [u32; 2], samples: u32) -> wgpu::TextureView {
+    pub(crate) fn msaa(device: &wgpu::Device, slot: &mut Option<(wgpu::Texture, [u32; 2])>, size: [u32; 2], samples: u32, exact: bool) -> wgpu::TextureView {
         if slot.as_ref().is_none_or(|s| s.1 != size) {
+            Self::let_go(slot, exact);
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("styk msaa"),
                 size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
@@ -241,7 +253,8 @@ impl Renderer {
             self.page = size;
             self.page_small = 0;
         }
-        self.page = [self.page[0].max(wanted[0]), self.page[1].max(wanted[1])];
+        // An export sizes its pages by the frame alone (a frame must not depend on the frames drawn before it); the stage grows them.
+        self.page = if self.exact_sizes { wanted } else { [self.page[0].max(wanted[0]), self.page[1].max(wanted[1])] };
         let page = self.page;
         let rounds = plan_rounds(&list, &sizes, page);
         let mut slots: Vec<Option<Slot>> = vec![None; n];
@@ -264,7 +277,8 @@ impl Renderer {
         // Effect runs: recorded now (their uniforms are written once), encoded after their depth's layer pass.
         let mut work: Vec<Work> = Vec::new();
         if list.layers.iter().any(|layer| layer.effects.is_some()) {
-            let executor = self.executor.get_or_insert_with(|| Executor::new(&self.device));
+            let exact = self.exact_sizes;
+            let executor = self.executor.get_or_insert_with(|| { let mut executor = Executor::new(&self.device); executor.set_exact(exact); executor });
             executor.begin();
             let mut biggest = [0u32, 0u32];
             for (r, round) in rounds.iter().enumerate() {
@@ -406,9 +420,9 @@ impl Renderer {
                         ..Default::default()
                     });
                     // With one sample a pixel the pass draws straight into its atlas page.
-                    let msaa = (self.samples > 1).then(|| Self::msaa(&self.device, &mut self.msaa_layer, page, self.samples));
+                    let msaa = (self.samples > 1).then(|| Self::msaa(&self.device, &mut self.msaa_layer, page, self.samples, self.exact_sizes));
                     let face_runs = depth_runs.as_ref().filter(|r| r.within(start..end));
-                    let depth_view = face_runs.map(|_| Self::depth_buffer(&self.device, &mut self.depth_layer, page, self.samples));
+                    let depth_view = face_runs.map(|_| Self::depth_buffer(&self.device, &mut self.depth_layer, page, self.samples, self.exact_sizes));
                     layer_depth |= depth_view.is_some();
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("styk layer pass"),
@@ -451,10 +465,10 @@ impl Renderer {
             let last = r + 1 == rounds.len();
             let until = if last { root.1 } else { stops[r] };
             // With one sample a pixel the frame is drawn straight into the output, kept between rounds.
-            let msaa = (self.samples > 1).then(|| Self::msaa(&self.device, &mut self.msaa_main, size, self.samples));
+            let msaa = (self.samples > 1).then(|| Self::msaa(&self.device, &mut self.msaa_main, size, self.samples, self.exact_sizes));
             // Faces sit in raster entries, so a frame pass seldom holds any.
             let face_runs = depth_runs.as_ref().filter(|r| r.within(root.0..root.1));
-            let depth_view = face_runs.map(|_| Self::depth_buffer(&self.device, &mut self.depth_main, size, self.samples));
+            let depth_view = face_runs.map(|_| Self::depth_buffer(&self.device, &mut self.depth_main, size, self.samples, self.exact_sizes));
             frame_depth |= depth_view.is_some();
             let output = &self.output.as_ref().unwrap().1;
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

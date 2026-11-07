@@ -7,6 +7,7 @@
 //! | `deps` | Fails if the engine or the core depends, even through other crates, on iced, `styk-ui` or `styk-devtools`. |
 //! | `lock` | Fails if `engine/Cargo.lock` holds a git source. |
 //! | `check` | `design check`, `deps` and `lock`. |
+//! | `fonts` | The typography check: the type matrix in Chromium and natively, widths, fallback fonts and pixels compared (needs Playwright's Chromium and a GPU; not part of `check`). |
 //!
 //! It depends on `std` alone, so it builds in seconds and can never become a way for a toolkit to reach the engine.
 
@@ -14,12 +15,13 @@ mod css;
 mod deps;
 mod design;
 mod expr;
+mod fonts;
 mod tokens;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: cargo xtask <design generate | design check | deps | lock | check>";
+const USAGE: &str = "usage: cargo xtask <design generate | design check | deps | lock | check | fonts | fonts verify>";
 
 fn root() -> PathBuf {
     // engine/crates/xtask -> the repository root.
@@ -38,6 +40,8 @@ fn run(args: &[String]) -> Result<(), String> {
         ["design", "check"] => design::check(&root),
         ["deps"] => deps::deps(&root),
         ["lock"] => deps::lock(&root),
+        ["fonts"] => fonts::check(&root),
+        ["fonts", "verify"] => fonts::verify(&root),
         ["check"] => design::check(&root).and_then(|()| deps::deps(&root)).and_then(|()| deps::lock(&root)),
         _ => Err(USAGE.to_string()),
     }
