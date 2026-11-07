@@ -46,6 +46,9 @@ pub struct Loader {
     pub notes: Vec<String>,
     /// Image index by the address of its payload (a blob's bytes or a string's text), while the payload exists.
     image_of: HashMap<usize, (Payload, u32)>,
+    /// The tiles of a drawing cel by the address of the payload they were read from (a figure record that changed only in
+    /// its bounds or revision names the same payload): read once, shared by every view of them.
+    tile_sets: HashMap<usize, (Payload, Arc<TileSet>)>,
     /// The images with the same length and hash, to find an image whose payload was made anew.
     images_by_content: HashMap<(usize, u64), Vec<u32>>,
     /// Typed views by the address of the record they were built from. The source
@@ -94,6 +97,17 @@ impl Source {
     fn held(&self) -> bool {
         self.0.strong_count() > 0
     }
+}
+
+/// A drawing cel's tile payload, read: its tiles, the tiles drawn at each level and the identity of the pixels.
+struct TileSet {
+    tiles: Vec<(i32, i32, Arc<[u8]>)>,
+    levels: Vec<Vec<(i32, i32)>>,
+    identity: Arc<()>,
+    /// What decoding the pixels resolves ([`DrawingTiles::decoded_bounds`], [`DrawingTiles::tile_ink`]): a property of the payload, so every
+    /// view of it shares them.
+    decoded_bounds: Arc<std::sync::OnceLock<Option<[f64; 4]>>>,
+    tile_ink: Arc<std::sync::OnceLock<Arc<HashMap<(i32, i32), [i64; 4]>>>>,
 }
 
 /// The payload of an image field, held without keeping it alive (as [`Source`] does for records).
@@ -233,6 +247,7 @@ impl Loader {
             images: Vec::new(),
             notes: Vec::new(),
             image_of: HashMap::new(),
+            tile_sets: HashMap::new(),
             images_by_content: HashMap::new(),
             figures: HashMap::new(),
             keyframes: HashMap::new(),
@@ -572,6 +587,7 @@ impl Loader {
         self.animations.retain(|_, (source, _)| source.held());
         self.tracks.retain(|_, (source, _)| source.held());
         self.image_of.retain(|_, (payload, _)| payload.held());
+        self.tile_sets.retain(|_, (payload, _)| payload.held());
         let live: std::collections::HashSet<usize> = self.figures.values().map(|(_, figure)| Arc::as_ptr(figure) as usize).collect();
         self.styled.retain(|(base, _), _| live.contains(base));
     }
@@ -760,12 +776,24 @@ impl Loader {
             (Some(w), Some(h)) => Some([w, h]),
             _ => None,
         };
-        let tiles = a.get("styk_tiles").and_then(Value::payload_bytes).and_then(|bytes| {
+        let tiles = a.get("styk_tiles").and_then(|field| {
             let anchor = point(a.get("drawing_anchor")).unwrap_or(start);
-            crate::drawing::parse_tiles(&bytes).map(|tiles| {
-                let levels = crate::drawing::level_tiles(&tiles);
-                Arc::new(DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: Default::default(), tiles, levels })
-            })
+            let (identity, payload) = match field {
+                Value::Blob(blob) => (blob.bytes.as_ptr() as usize, Payload::Bytes(Arc::downgrade(&blob.bytes))),
+                Value::Str(text) => (text.as_ptr() as usize, Payload::Text(Arc::downgrade(text))),
+                _ => return None,
+            };
+            let set = match self.tile_sets.get(&identity) {
+                Some((_, set)) => set.clone(),
+                None => {
+                    let tiles = crate::drawing::parse_tiles(&field.payload_bytes()?)?;
+                    let levels = crate::drawing::level_tiles(&tiles);
+                    let set = Arc::new(TileSet { tiles, levels, identity: Arc::new(()), decoded_bounds: Arc::default(), tile_ink: Arc::default() });
+                    self.tile_sets.insert(identity, (payload, set.clone()));
+                    set
+                }
+            };
+            Some(Arc::new(DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: set.decoded_bounds.clone(), tile_ink: set.tile_ink.clone(), inherited_ink: Default::default(), tiles: set.tiles.clone(), levels: set.levels.clone(), identity: set.identity.clone() }))
         });
         let image = if tiles.is_some() { None } else { self.image(a, &["data_url", "data_base64", "data_uri"]) };
         let size = match (num(a, "width"), num(a, "height")) {
