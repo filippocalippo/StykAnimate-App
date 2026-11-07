@@ -19,7 +19,7 @@ use iced::{Element, Font, Length, Subscription, Task, Widget, window};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use styk_core::drawing::worker::{Request, Worker};
+use styk_core::drawing::worker::{HistoryOp, Worker};
 use styk_platform::windows::input::{InputCounters, WindowsInput, refresh_hz};
 use styk_platform::windows::qpc::QpcClock;
 use styk_ui::ink_pad::{PadCore, ink_pad};
@@ -218,15 +218,15 @@ impl Lab {
                 Task::none()
             }
             Message::Clear => {
-                self.core.worker.send(Request::Clear);
+                self.core.history(HistoryOp::Clear);
                 Task::none()
             }
             Message::Undo => {
-                self.core.worker.send(Request::Undo);
+                self.core.history(HistoryOp::Undo);
                 Task::none()
             }
             Message::Redo => {
-                self.core.worker.send(Request::Redo);
+                self.core.history(HistoryOp::Redo);
                 Task::none()
             }
             Message::ToggleRecording => {
@@ -280,7 +280,7 @@ impl Lab {
             .push(line(format!("strokes {}  interrupted {}  palette {}  pick {}  resize {}", inspector.strokes, inspector.interrupts, inspector.palette_opens, inspector.color_picks, inspector.resizes)))
             .push(line(String::new()))
             .push(line(format!("worker queue {}  generate {:.2} ms (max {:.2})  raster {:.2} ms (max {:.2})", inspector.worker_queued, inspector.last_generate_ms, inspector.max_generate_ms, inspector.last_raster_ms, inspector.max_raster_ms)))
-            .push(line(format!("tiles resident {}  uploaded {}  batches waiting {}  evicted {}  unshown {}  hidden {}  superseded {}", gpu.tiles_resident, gpu.tiles_uploaded, gpu.batches_waiting, gpu.sync.evicted, gpu.sync.unshown, gpu.sync.hidden, gpu.sync.superseded)))
+            .push(line(format!("tiles resident {}  uploaded {}  batches waiting {}  evicted {}  refused {}  hidden {}  superseded {}", gpu.tiles_resident, gpu.tiles_uploaded, gpu.batches_waiting, gpu.sync.evicted, gpu.sync.refused, gpu.sync.hidden, gpu.sync.superseded)))
             .push(line(format!("wet dabs {}  batches retired {} by tiles {} by age  dropped {}  stale {}", gpu.wet_instances, gpu.ledger.retired_by_tiles, gpu.ledger.retired_by_age, gpu.ledger.dropped, gpu.ledger.stale)))
             .push(line(format!("frames {}  prepare {} us (max {}) of which graphics API {} us (max {})  update {} us (max {})", gpu.frames, gpu.prepare_last_us, gpu.prepare_max_us, gpu.wgpu_last_us, gpu.wgpu_max_us, inspector.update_last_us, inspector.update_max_us)))
             .push(line(format!("display {:.0} Hz  recording {}", self.refresh_hz, self.core.recording())));

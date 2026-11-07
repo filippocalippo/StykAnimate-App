@@ -107,11 +107,14 @@ subclass runs on the interface thread, before winit's procedure, and does the fo
   `Interrupted` events with the pointer id and a reason.
 - Press-and-hold, flicks and the pen tap feedback are switched off for the window with the tablet-service window property,
   so Windows does not turn a held tip into a right click at all.
-- Times of history entries are made by `styk_services::input::HistoryClock`, one per pointer. An entry with a QPC keeps it. An
-  entry with only the millisecond stamp (`dwTime`, wrapping at 2^32) is placed by a mapping fixed once for the pointer (the first
-  message's newest entry is the moment it arrived, every other entry is that moment plus its distance in milliseconds), so the
-  same entry carried by two messages gets the same time however late the second came, is recognised by `(time, content)` and
-  delivered once, and entries of one millisecond get distinct increasing times. The mapping is fixed again only if it drifts a
+- Times of history entries are made by `styk_services::input::HistoryClock`, one per pointer. **Identity** is the system's own stamp
+  and what the entry says, never a time this clock made: entries come oldest first and time only moves forward, so an entry
+  older than the newest one delivered is a replay and is rejected (not re-timed), and one as new as the newest is delivered
+  unless the same content was (two entries of one millisecond are both kept). Only the entries of the newest stamp are remembered,
+  so a history of any length, and a repeat that arrives after the mapping below was fixed again, are recognised. **Time**: an
+  entry with a QPC keeps it; one with only the millisecond stamp (`dwTime`, wrapping at 2^32) is placed by a mapping fixed once
+  for the pointer (the first message's newest entry is the moment it arrived, every other entry is that moment plus its distance
+  in milliseconds); entries of one millisecond get distinct increasing times. The mapping is fixed again only if it drifts a
   quarter of a second from the arrival times. Pressure is `raw / 1024` for `penMask` pressure,
   tilt is the reported degrees, and the pointer id is the OS pointer id.
 - Time is QPC. `QpcClock` implements `styk_services::Clock` and stamps the sample queue; the input thread and the stroke
@@ -176,8 +179,18 @@ mirror (seeds `seed + index * 7919` as today), the engine's `StrokeEngine` and t
   is sent and by shutdown; the brush's loops read it (every curve step and every 4096 dabs), as do the batch loop and the gate. A
   cancel for an id that is not the open stroke changes nothing, and never touches another stroke's queued work.
 - **Versions.** Every tile the worker reports carries a stamp that only grows: a stroke batch's, or the one an undo, redo, clear,
-  cancel or commit gave it. A fetch answers with the tile as the cel will hold it once the open stroke is kept (the stroke's own
-  pixels where it touched the tile) and its stamp, so a view that moves over ink drawn out of sight shows it.
+  cancel, failure or commit gave it. A fetch answers with the tile as the cel will hold it once the open stroke is kept (the
+  stroke's own pixels where it touched the tile), its stamp, and `upto`, the newest batch rasterised when it was made, so a view
+  that moves over ink drawn out of sight shows it.
+- **A history change during an open stroke cancels the stroke first**, as today's controller does (`drawing-controller.mjs`: a
+  `history` change cancels the gesture): the stroke was rasterised over pixels the undo, redo or clear is about to replace, and
+  ending it afterwards would bring the undone ink back. The cancel is announced (`Cancelled`, with its stamp) before the change.
+- **A failed stroke is restored like a cancelled one.** `Failed` names the tiles the stroke had reached and a stamp; batches of it
+  may already be in the view, and the consumer fetches the cel's own pixels back. A press that fails to begin is forgotten, so it
+  does not hold one of the 16 places.
+- **History the worker refuses is kept.** `HistoryOutbox` keeps an undo, redo or clear the worker refused (its request queue is
+  full) and sends it, in order, first thing in the next `prepare`; one that does not fit the outbox (64) is counted and shown in
+  the inspector. A fetch the worker refused is given back, so its tiles are asked for again.
 - **Shutdown never joins.** Dropping the handle raises every abort flag, wakes the gate and the channel and returns; the
   thread ends by itself, within a curve step of the call it was in.
 - **Generation time** is the time spent inside the brush's calls, less the time spent rasterising within them, reported with each
@@ -193,7 +206,11 @@ joined by the raw pointer and the predicted point of the stroke being drawn (and
 eligibility was decided when it began, from its own tool), with today's eligibility rules. There is no desynchronised canvas and
 no second surface. A uniform block that did not change is not written again.
 
-**Residency (`styk_core::drawing::tile_sync`).** The GPU holds the tiles the view shows, in an atlas of 2048 slots (32 MiB).
+**Residency (`styk_core::drawing::tile_sync`)** follows today's model (`src/drawing-resources.mjs` `reserve`): the tiles the view shows and
+the batch being staged are the *required set*; the atlas holds it above its soft budget by growing and refuses visibly above the
+hard budget. The atlas is a texture array of pages of 2048 tiles (32 MiB a page); the first page is the soft budget and it grows
+a page at a time (the texture is copied into a larger one) up to 4 pages (128 MiB, 8192 tiles). A tile the view shows is never
+evicted, nothing is written in place over a tile the view shows, and there is no "declined" state to outlive its cause.
 
 - *No gate on replies.* Every reply is taken as it comes: what waits is bounded by the worker's 4-batch window, and a cancel or an
   undo is never held behind tile data (a full queue used to hide the very reply that would have emptied it).
@@ -202,17 +219,20 @@ no second surface. A uniform block that did not change is not written again.
 - *Atomic within a budget.* A stroke batch appears all at once, so the atlas never shows part of a batch while the preview still
   shows all of it. Its tiles are written into **new** slots, a few a call within the frame's 96 tiles and time (every call places
   at least one), and the batch is flipped into the view in the call that writes its last tile; a tile it replaces keeps showing
-  its old pixels until then.
+  its old pixels until then. The tiles of a staged batch are protected from eviction.
+- *Slots.* A tile needs a slot when it is shown and not resident: a free one, else the one of the least recently used tile out of
+  view (and not in the staged batch), else a new page. Above the hard budget the tile is refused: counted (`refused`), reported in
+  the inspector as "drawing memory is full", and not asked for again until a slot is freed or the view changes. The batch is
+  acknowledged all the same, so the worker never waits on a full atlas.
 - *Versions by order.* The worker answers in order and numbers what it changes, so everything queued here is older than the reply
-  being accepted: an undo, redo, clear, cancel or fetched tile removes its tiles from every queued and half-written batch.
-  A late batch can never cover newer pixels and a changed tile is always fetched again.
-- *Eviction without stalls.* A tile needs a slot when it is shown and not resident. None free: tiles outside the view go, least
-  recently used first. A stroke batch (the person is drawing there) may then take the slot of the least recently used visible tile
-  that is not in the batch; a fetched tile may not, and is declined and counted (`unshown`) until the view changes. A view that
-  pins more inked tiles than the atlas holds therefore degrades to showing the nearest ones; it never leaves a batch
-  unacknowledged and the worker waiting.
-- Tiles that enter the view and tiles changed by undo, redo, clear or a cancel are fetched from the worker, 64 at a time; a tile
-  known to be empty is not asked for again.
+  being accepted: an undo, redo, clear, cancel, failure or fetched tile removes its tiles from every queued and half-written
+  batch. A late batch can never cover newer pixels and a changed tile is always fetched again.
+- *A fetched tile of the open stroke waits for its batches.* It holds the ink of every batch up to `upto`, whose preview is still
+  shown until those batches are in the view; it is installed in the frame the last of them is, so the preview is never painted
+  over it. Today's controller overlaps the preview and the tiles for one presented frame on purpose; here the preview leaves in
+  the frame its tiles arrive, so no frame is darker than the finished cel (tested on the GPU by comparing every frame).
+- Tiles that enter the view and tiles changed by undo, redo, clear or a cancelled or failed stroke are fetched from the worker, 64
+  at a time; a tile known to be empty is not asked for again.
 
 **Retirement is tied to the real asynchronous tile path, by sequence.** Every dab carries the batch sequence it was sent in.
 A wet segment retires in the frame whose `prepare` installed the tile batch with a sequence at least its own, and only

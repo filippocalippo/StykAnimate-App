@@ -54,7 +54,7 @@ fn snapshot(worker: &Worker, token: u64) -> Vec<(i64, i64, Vec<u8>)> {
 fn fetch(worker: &Worker, tiles: &[(i64, i64)]) -> Vec<TileUpdate> {
     worker.send(Request::Fetch { tiles: tiles.to_vec() });
     let replies = until(worker, |r| matches!(r, Reply::Pixels { .. }));
-    let Some(Reply::Pixels { tiles }) = replies.into_iter().last() else { unreachable!() };
+    let Some(Reply::Pixels { tiles, .. }) = replies.into_iter().last() else { unreachable!() };
     tiles
 }
 
@@ -590,4 +590,131 @@ fn a_fetch_during_a_stroke_returns_its_ink_and_stamps_only_grow_through_undo() {
     for t in fetch(&worker, tiles) {
         assert_eq!(t.3, *stamp);
     }
+}
+
+// Finding 2 of the second re-check: a history change during an open stroke cancels the stroke first, as today's controller does.
+fn history_during_a_stroke(op: HistoryOp, after_undo: bool) {
+    let worker = worker();
+    let settings = settings("");
+    stroke(&worker, 1, &line(), &settings, Mapping::default());
+    until(&worker, |r| matches!(r, Reply::Finished { .. }));
+    let drawn = snapshot(&worker, 1);
+    if after_undo {
+        worker.send(Request::Undo);
+        until(&worker, |r| matches!(r, Reply::Changed { .. }));
+    }
+    // Stroke 2 is begun over the same tiles and rasterised.
+    begin(&worker, 2, false, Mapping::default(), &settings);
+    for (i, &(x, y)) in line().iter().enumerate() {
+        worker.command(StrokeCommand::Sample { id: 2, x, y: y + 4.0, pressure: 0.8, time_ms: i as f64, lean: None }, &settings);
+    }
+    until(&worker, |r| matches!(r, Reply::Tiles { stroke: 2, last: true, .. }));
+    worker.send(op.request());
+    let replies = until(&worker, |r| matches!(r, Reply::Changed { .. }));
+    let cancelled = replies.iter().position(|r| matches!(r, Reply::Cancelled { stroke: 2, .. }));
+    let changed = replies.iter().position(|r| matches!(r, Reply::Changed { .. }));
+    assert!(cancelled.is_some() && cancelled < changed, "the stroke is cancelled before the history change is announced: {replies:?}");
+    let Some(Reply::Changed { tiles, stamp }) = replies.last() else { unreachable!() };
+    let Some(Reply::Cancelled { stamp: cancel_stamp, .. }) = cancelled.map(|i| &replies[i]) else { unreachable!() };
+    assert!(stamp > cancel_stamp);
+    // The rest of the press does nothing: the undone ink does not come back when it ends.
+    for (i, &(x, y)) in line().iter().enumerate() {
+        worker.command(StrokeCommand::Sample { id: 2, x, y, pressure: 0.8, time_ms: 100.0 + i as f64, lean: None }, &settings);
+    }
+    worker.command(StrokeCommand::End { id: 2 }, &settings);
+    let after = snapshot(&worker, 2);
+    match op {
+        HistoryOp::Undo => assert!(after.is_empty(), "undo of the only stroke leaves the cel empty, not stroke 2's ink over it"),
+        HistoryOp::Clear => assert!(after.is_empty()),
+        HistoryOp::Redo => assert!(after == drawn, "redo brings stroke 1 back and not stroke 2 over it"),
+    }
+    for t in fetch(&worker, tiles) {
+        assert_eq!(t.2.is_some(), after.iter().any(|a| (a.0, a.1) == (t.0, t.1)), "the fetch holds what the cel holds");
+        assert_eq!(t.3, *stamp);
+    }
+}
+
+#[test]
+fn undo_during_an_open_stroke_cancels_it_first_and_its_ink_does_not_come_back() {
+    history_during_a_stroke(HistoryOp::Undo, false);
+}
+
+#[test]
+fn clear_during_an_open_stroke_cancels_it_first() {
+    history_during_a_stroke(HistoryOp::Clear, false);
+}
+
+#[test]
+fn redo_during_an_open_stroke_cancels_it_first() {
+    history_during_a_stroke(HistoryOp::Redo, true);
+}
+
+// Finding 8 of the second re-check.
+#[test]
+fn a_failed_stroke_names_the_tiles_it_reached_and_a_stamp_to_restore_them() {
+    let worker = worker();
+    let settings = settings(",\"size\":300,\"workingBytes\":20000");
+    begin(&worker, 1, false, Mapping::default(), &settings);
+    worker.command(StrokeCommand::Sample { id: 1, x: 500.0, y: 500.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
+    worker.command(StrokeCommand::End { id: 1 }, &settings);
+    let replies = until(&worker, |r| matches!(r, Reply::Failed { .. }));
+    let Some(Reply::Failed { restore, stamp, .. }) = replies.last() else { unreachable!() };
+    assert!(!restore.is_empty() && *stamp > 0, "{restore:?} at {stamp}");
+    for t in fetch(&worker, restore) {
+        assert!(t.2.is_none(), "the cel holds nothing where the failed stroke reached");
+        assert_eq!(t.3, *stamp);
+    }
+}
+
+#[test]
+fn a_stroke_that_failed_to_begin_is_forgotten_and_does_not_use_up_the_open_strokes() {
+    let worker = worker();
+    for id in 1..=(MAX_OPEN as u64 * 2) {
+        stroke(&worker, id, &line(), &Arc::from("not json"), Mapping::default());
+        until(&worker, |r| matches!(r, Reply::Failed { stroke, .. } if *stroke == id));
+    }
+    assert_eq!(worker.refused(), 0, "no failed press holds a place");
+    stroke(&worker, 99, &line(), &settings(""), Mapping::default());
+    until(&worker, |r| matches!(r, Reply::Finished { stroke: 99, .. }));
+}
+
+// Finding 5 of the second re-check: a refused undo, redo or clear is kept and sent in order, never lost silently.
+#[test]
+fn history_the_worker_refused_is_kept_and_sent_in_order_and_what_cannot_be_kept_is_counted() {
+    let worker = worker();
+    let settings = settings("");
+    stroke(&worker, 1, &line(), &settings, Mapping::default());
+    until(&worker, |r| matches!(r, Reply::Finished { .. }));
+    let drawn = snapshot(&worker, 1);
+    let hold = held(&worker);
+    while worker.send(Request::Ping { token: 1 }) {}
+    let mut outbox = HistoryOutbox::default();
+    assert!(!worker.send(Request::Undo), "the queue is saturated");
+    assert!(outbox.submit(&worker, HistoryOp::Undo));
+    assert!(outbox.submit(&worker, HistoryOp::Redo));
+    assert_eq!(outbox.kept(), 2);
+    release(&hold);
+    // Room again once the pings are answered.
+    let mut pongs = 0;
+    while pongs < MAX_QUEUED_CONTROL - 1 {
+        if matches!(worker.wait(WAIT), Some(Reply::Pong { .. })) {
+            pongs += 1;
+        }
+    }
+    outbox.flush(&worker);
+    assert_eq!(outbox.kept(), 0);
+    let replies = until(&worker, |r| matches!(r, Reply::Changed { .. }));
+    assert!(matches!(replies.last(), Some(Reply::Changed { .. })), "the undo was applied");
+    until(&worker, |r| matches!(r, Reply::Changed { .. }));
+    assert!(snapshot(&worker, 2) == drawn, "the undo and the redo were applied in order: the stroke is back");
+    // A full outbox counts what it cannot keep.
+    let mut full = HistoryOutbox::default();
+    let hold = held(&worker);
+    while worker.send(Request::Ping { token: 2 }) {}
+    for _ in 0..MAX_KEPT_HISTORY {
+        assert!(full.submit(&worker, HistoryOp::Undo));
+    }
+    assert!(!full.submit(&worker, HistoryOp::Undo));
+    assert_eq!(full.lost, 1);
+    release(&hold);
 }

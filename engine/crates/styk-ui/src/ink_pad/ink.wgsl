@@ -5,7 +5,7 @@ struct Uniforms {
     size: vec2<f32>,     // the pad, physical pixels
     pan: vec2<f32>,      // cel pixel at the pad's top-left
     zoom: f32,           // physical pixels per cel pixel
-    atlas_w: f32,        // the atlas texture's size in texels
+    atlas_w: f32,        // one atlas page's size in texels
     atlas_h: f32,
     srgb: f32,           // 1 when the target converts sRGB on write
     color: vec4<f32>,    // the wet ink's colour
@@ -14,7 +14,7 @@ struct Uniforms {
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
-@group(0) @binding(1) var atlas_tex: texture_2d<f32>;
+@group(0) @binding(1) var atlas_tex: texture_2d_array<f32>;
 @group(0) @binding(2) var atlas_smp: sampler;
 
 const CORNERS = array<vec2<f32>, 6>(
@@ -47,12 +47,14 @@ struct TileIn {
     @location(1) size: vec2<f32>,
     @location(2) texel: vec2<f32>,
     @location(3) solid: f32,
+    @location(4) page: f32,
 };
 
 struct TileOut {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) solid: f32,
+    @location(2) @interpolate(flat) page: i32,
 };
 
 @vertex
@@ -62,12 +64,13 @@ fn tile_vs(in: TileIn) -> TileOut {
     out.position = to_clip(in.origin + c * in.size);
     out.uv = (in.texel + c * 64.0) / vec2<f32>(u.atlas_w, u.atlas_h);
     out.solid = in.solid;
+    out.page = i32(in.page);
     return out;
 }
 
 @fragment
 fn tile_fs(in: TileOut) -> @location(0) vec4<f32> {
-    let texel = textureSampleLevel(atlas_tex, atlas_smp, in.uv, 0.0);
+    let texel = textureSampleLevel(atlas_tex, atlas_smp, in.uv, in.page, 0.0);
     if (in.solid > 0.5) {
         return output(u.paper.rgb, u.paper.a);
     }

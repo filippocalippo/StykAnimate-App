@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use styk_core::drawing::wet::{LedgerStats, WetLedger};
-use styk_core::drawing::worker::Worker;
+use styk_core::drawing::worker::{HistoryOp, HistoryOutbox, Worker};
 use styk_services::Clock;
 use styk_services::input::{InputQueue, PenSample, QueueStats};
 
@@ -161,6 +161,9 @@ pub struct Inspector {
     pub worker_errors: Vec<String>,
     pub update_max_us: u64,
     pub update_last_us: u64,
+    /// Undo, redo or clear the worker refused that are kept to be sent, and ones that could not even be kept.
+    pub history_kept: usize,
+    pub history_lost: u64,
 }
 
 impl Inspector {
@@ -197,6 +200,8 @@ pub struct GpuStats {
     pub wet_instances: usize,
     pub wet_overflow: u64,
     /// The whole `prepare`, microseconds.
+    /// Pages the atlas has grown to (its soft budget is the first).
+    pub pages: usize,
     pub prepare_last_us: u64,
     pub prepare_max_us: u64,
     /// The `prepare` less the graphics API's queue calls: the pad's own work, which its budget governs.
@@ -231,6 +236,7 @@ pub struct PadCore {
     /// Set by Escape or the lab's button: the stroke in progress is discarded.
     discard: AtomicBool,
     frame: AtomicU64,
+    history: Mutex<HistoryOutbox>,
     /// How long the application took to build its view last (the lab sets it), for a frame's record.
     view_us: AtomicU64,
 }
@@ -264,6 +270,7 @@ impl PadCore {
             scale: AtomicU32::new(1.0f32.to_bits()),
             discard: AtomicBool::new(false),
             frame: AtomicU64::new(0),
+            history: Mutex::new(HistoryOutbox::default()),
             view_us: AtomicU64::new(0),
         })
     }
@@ -386,6 +393,43 @@ impl PadCore {
 
     pub fn with_live<R>(&self, f: impl FnOnce(&mut Live) -> R) -> R {
         f(&mut lock(&self.live))
+    }
+
+    /// Clears the preview's pointer position if it belongs to `stroke` (a stroke that ended, was cancelled or was refused; another
+    /// stroke's preview is not touched).
+    pub fn clear_live_of(&self, stroke: u64) {
+        self.with_live(|live| {
+            if live.stroke == stroke {
+                *live = Live::default();
+            }
+        });
+    }
+
+    /// Undo, redo or clear: sent after any the worker refused earlier; a refusal is kept for `retry_history` and reported in the
+    /// inspector, never dropped silently.
+    pub fn history(&self, op: HistoryOp) {
+        let (kept, lost) = {
+            let mut outbox = lock(&self.history);
+            outbox.submit(&self.worker, op);
+            (outbox.kept(), outbox.lost)
+        };
+        self.with_inspector(|inspector| {
+            inspector.history_kept = kept;
+            inspector.history_lost = lost;
+        });
+    }
+
+    /// Sends the history changes the worker refused, in order, until it refuses one again.
+    pub fn retry_history(&self) {
+        let kept = {
+            let mut outbox = lock(&self.history);
+            if outbox.kept() == 0 {
+                return;
+            }
+            outbox.flush(&self.worker);
+            outbox.kept()
+        };
+        self.with_inspector(|inspector| inspector.history_kept = kept);
     }
 }
 

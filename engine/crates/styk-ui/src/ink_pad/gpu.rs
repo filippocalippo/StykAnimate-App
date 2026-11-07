@@ -24,11 +24,16 @@ pub const TILES_PER_FRAME: usize = 96;
 pub const PREPARE_NS: u64 = 3_000_000;
 /// Replies one `prepare` takes at most.
 const MAX_REPLIES: usize = 64;
-/// The atlas: columns by rows of 64 x 64 texel tiles (2048 tiles, 32 MiB).
+/// The atlas: pages of columns by rows of 64 x 64 texel tiles (2048 tiles, 32 MiB a page). The first page is the soft budget; the
+/// atlas grows a page at a time, to hold every tile the view shows and the batch being staged, up to the hard budget (today's
+/// `reserve` in `drawing-resources.mjs`: hold the required set above the soft budget, refuse visibly above the hard one).
 const ATLAS_COLS: u32 = 64;
 const ATLAS_ROWS: u32 = 32;
 const TILE: u32 = 64;
 const ATLAS_TEXELS: (u32, u32) = (ATLAS_COLS * TILE, ATLAS_ROWS * TILE);
+const PAGE_SLOTS: u32 = ATLAS_COLS * ATLAS_ROWS;
+/// Pages at most: 128 MiB of tiles, 8192 tiles.
+pub const MAX_PAGES: usize = 4;
 /// Wet dabs one frame draws at most.
 const WET_CAPACITY: usize = styk_core::drawing::wet::MAX_DABS;
 /// Dabs drawn between the last dab and the newest pointer position, at most.
@@ -41,7 +46,7 @@ struct TileInstance {
     size: [f32; 2],
     texel: [f32; 2],
     solid: f32,
-    pad: f32,
+    page: f32,
 }
 
 #[repr(C)]
@@ -87,6 +92,11 @@ pub struct InkPipeline {
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     atlas: wgpu::Texture,
+    atlas_pages: u32,
+    layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    /// Memory-full tiles already reported, so a report is made when the count grows.
+    reported_refused: u64,
     tile_instances: wgpu::Buffer,
     wet_instances: wgpu::Buffer,
     tile_count: u32,
@@ -99,17 +109,7 @@ pub struct InkPipeline {
 impl shader::Pipeline for InkPipeline {
     fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> InkPipeline {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("styk.ink_pad"), source: wgpu::ShaderSource::Wgsl(include_str!("ink.wgsl").into()) });
-        let atlas = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("styk.ink_pad.atlas"),
-            size: wgpu::Extent3d { width: ATLAS_TEXELS.0, height: ATLAS_TEXELS.1, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let view = atlas.create_view(&wgpu::TextureViewDescriptor::default());
+        let atlas = create_atlas(device, 1);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor { mag_filter: wgpu::FilterMode::Nearest, min_filter: wgpu::FilterMode::Nearest, ..Default::default() });
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("styk.ink_pad.uniforms"),
@@ -129,21 +129,13 @@ impl shader::Pipeline for InkPipeline {
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+                    ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2Array, multisampled: false },
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
             ],
         });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("styk.ink_pad.bind_group"),
-            layout: &layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: uniforms.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&sampler) },
-            ],
-        });
+        let bind_group = make_bind_group(device, &layout, &uniforms, &atlas, &sampler);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("styk.ink_pad.pipeline_layout"), bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
         let target = [Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })];
         let make = |label: &str, vs: &str, fs: &str, attributes: &[wgpu::VertexAttribute], stride: u64| {
@@ -164,7 +156,7 @@ impl shader::Pipeline for InkPipeline {
                 cache: None,
             })
         };
-        let tile_pipeline = make("styk.ink_pad.tiles", "tile_vs", "tile_fs", &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Float32], std::mem::size_of::<TileInstance>() as u64);
+        let tile_pipeline = make("styk.ink_pad.tiles", "tile_vs", "tile_fs", &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Float32, 4 => Float32], std::mem::size_of::<TileInstance>() as u64);
         let wet_pipeline = make("styk.ink_pad.wet", "wet_vs", "wet_fs", &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32, 2 => Float32], std::mem::size_of::<WetInstance>() as u64);
         let buffer = |label: &str, size: usize| {
             device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: size as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false })
@@ -176,22 +168,45 @@ impl shader::Pipeline for InkPipeline {
             uniforms,
             bind_group,
             atlas,
+            atlas_pages: 1,
+            layout,
+            sampler,
+            reported_refused: 0,
             tile_instances: buffer("styk.ink_pad.tile_instances", (ATLAS_COLS * ATLAS_ROWS + 1) as usize * std::mem::size_of::<TileInstance>()),
             wet_instances: buffer("styk.ink_pad.wet_instances", WET_CAPACITY * std::mem::size_of::<WetInstance>()),
             tile_count: 0,
             wet_count: 0,
-            sync: TileSync::new((ATLAS_COLS * ATLAS_ROWS) as usize),
+            sync: TileSync::new(PAGE_SLOTS as usize, MAX_PAGES),
             last_uniforms: None,
         }
     }
 }
 
 impl InkPipeline {
+    /// Grows the texture to `pages` layers, keeping what the pages it had hold.
+    fn ensure_pages(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, pages: u32) {
+        if pages <= self.atlas_pages {
+            return;
+        }
+        let grown = create_atlas(device, pages);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("styk.ink_pad.grow") });
+        encoder.copy_texture_to_texture(
+            self.atlas.as_image_copy(),
+            grown.as_image_copy(),
+            wgpu::Extent3d { width: ATLAS_TEXELS.0, height: ATLAS_TEXELS.1, depth_or_array_layers: self.atlas_pages },
+        );
+        queue.submit([encoder.finish()]);
+        self.atlas = grown;
+        self.atlas_pages = pages;
+        self.bind_group = make_bind_group(device, &self.layout, &self.uniforms, &self.atlas, &self.sampler);
+    }
+
     /// Writes a tile into its atlas slot.
     fn write_tile(&self, queue: &wgpu::Queue, write: &Write) {
-        let (sx, sy) = (write.slot % ATLAS_COLS, write.slot / ATLAS_COLS);
+        let (page, local) = (write.slot / PAGE_SLOTS, write.slot % PAGE_SLOTS);
+        let (sx, sy) = (local % ATLAS_COLS, local / ATLAS_COLS);
         queue.write_texture(
-            wgpu::TexelCopyTextureInfo { texture: &self.atlas, mip_level: 0, origin: wgpu::Origin3d { x: sx * TILE, y: sy * TILE, z: 0 }, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyTextureInfo { texture: &self.atlas, mip_level: 0, origin: wgpu::Origin3d { x: sx * TILE, y: sy * TILE, z: page }, aspect: wgpu::TextureAspect::All },
             &write.pixels,
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(TILE * 4), rows_per_image: Some(TILE) },
             wgpu::Extent3d { width: TILE, height: TILE, depth_or_array_layers: 1 },
@@ -200,14 +215,14 @@ impl InkPipeline {
 
     fn tile_list(&self) -> Vec<TileInstance> {
         let mut list = Vec::with_capacity(self.sync.resident_count() + 1);
-        list.push(TileInstance { origin: [-1.0e6, -1.0e6], size: [2.0e6, 2.0e6], texel: [0.0, 0.0], solid: 1.0, pad: 0.0 });
+        list.push(TileInstance { origin: [-1.0e6, -1.0e6], size: [2.0e6, 2.0e6], texel: [0.0, 0.0], solid: 1.0, page: 0.0 });
         for ((tx, ty), slot) in self.sync.resident() {
             list.push(TileInstance {
                 origin: [(tx * TILE as i64) as f32, (ty * TILE as i64) as f32],
                 size: [TILE as f32, TILE as f32],
-                texel: [((slot % ATLAS_COLS) * TILE) as f32, ((slot / ATLAS_COLS) * TILE) as f32],
+                texel: [(((slot % PAGE_SLOTS) % ATLAS_COLS) * TILE) as f32, (((slot % PAGE_SLOTS) / ATLAS_COLS) * TILE) as f32],
                 solid: 0.0,
-                pad: 0.0,
+                page: (slot / PAGE_SLOTS) as f32,
             });
         }
         list
@@ -217,13 +232,15 @@ impl InkPipeline {
 impl shader::Primitive for InkPrimitive {
     type Pipeline = InkPipeline;
 
-    fn prepare(&self, pipeline: &mut InkPipeline, _device: &wgpu::Device, queue: &wgpu::Queue, bounds: &Rectangle, viewport: &Viewport) {
+    fn prepare(&self, pipeline: &mut InkPipeline, device: &wgpu::Device, queue: &wgpu::Queue, bounds: &Rectangle, viewport: &Viewport) {
         let core = &self.core;
         let started = core.now_ns();
         // The whole of this call is budgeted: nothing below loops past it except the first batch of tiles, which a frame
         // always installs so the queue advances.
         let deadline = started + PREPARE_NS;
         let late = || core.now_ns() > deadline;
+        // A history change the worker refused earlier goes first, in order.
+        core.retry_history();
         let frame = core.next_frame();
         let scale = viewport.scale_factor();
         core.set_scale(scale);
@@ -253,7 +270,12 @@ impl shader::Primitive for InkPrimitive {
                 Reply::Dabs { generate_ms: g, .. } => generate_ms = Some(*g),
                 Reply::Tiles { raster_ms: r, .. } => raster_ms = Some(*r),
                 Reply::Finished { .. } => finished += 1,
-                Reply::Failed { message, .. } => errors.push(message.clone()),
+                Reply::Failed { message, stroke, .. } => {
+                    errors.push(message.clone());
+                    core.clear_live_of(*stroke);
+                }
+                // A stroke the worker discarded (a cancel, or a history change during it) leaves no raw preview behind.
+                Reply::Cancelled { stroke, .. } => core.clear_live_of(*stroke),
                 _ => {}
             }
             let worker = &core.worker;
@@ -265,9 +287,11 @@ impl shader::Primitive for InkPrimitive {
         let worker = &core.worker;
         pipeline.sync.install(TILES_PER_FRAME, &mut || late(), &mut |seq| worker.ack(seq));
         let asked = pipeline.sync.plan_fetch(FETCH_LIMIT);
-        if !asked.is_empty() {
-            core.worker.send(Request::Fetch { tiles: asked });
+        if !asked.is_empty() && !core.worker.send(Request::Fetch { tiles: asked.clone() }) {
+            // Too many requests are waiting: the tiles were never asked for, so they are asked for again.
+            pipeline.sync.fetch_refused(&asked);
         }
+        pipeline.ensure_pages(device, queue, pipeline.sync.pages() as u32);
         let writes = pipeline.sync.take_writes();
         let uploaded_now = writes.len() as u32;
         let mut wgpu_ns = 0u64;
@@ -300,7 +324,9 @@ impl shader::Primitive for InkPrimitive {
         });
         let live = core.with_live(|live| *live);
         let mut newest_wet_ns = if wet.is_empty() { 0 } else { newest_wet };
-        if switches.wet_ink && live.show && live.eligible {
+        // A raw preview belongs to a stroke the worker still has open: not to one it cancelled or refused.
+        let live_open = live.show && live.eligible && core.with_ledger(|ledger| ledger.is_stroke_open(live.stroke));
+        if switches.wet_ink && live_open {
             // The anchor is the last dab of this stroke: a dab of an earlier stroke is never bridged from.
             let anchor = pipeline.sync.anchor().filter(|a| a.0 == live.stroke);
             let radius = anchor.map_or((brush.size as f32) / 2.0, |a| a.3);
@@ -352,6 +378,8 @@ impl shader::Primitive for InkPrimitive {
 
         let ended = core.now_ns();
         let sync_stats = pipeline.sync.stats();
+        let memory_full = sync_stats.refused > pipeline.reported_refused;
+        pipeline.reported_refused = sync_stats.refused;
         let resident = pipeline.sync.resident_count();
         let waiting = pipeline.sync.waiting();
         let exact_ns = pipeline.sync.exact_ns();
@@ -360,6 +388,7 @@ impl shader::Primitive for InkPrimitive {
             gpu.frames = frame;
             gpu.tiles_uploaded += uploaded_now as u64;
             gpu.tiles_resident = resident;
+            gpu.pages = pipeline.sync.pages();
             gpu.sync = sync_stats;
             gpu.replies_left = replies_left;
             gpu.batches_waiting = waiting;
@@ -384,6 +413,11 @@ impl shader::Primitive for InkPrimitive {
                 inspector.max_raster_ms = inspector.max_raster_ms.max(r);
             }
             inspector.worker_errors.extend(errors);
+            if memory_full {
+                inspector.worker_errors.push(format!("drawing memory is full: {} tiles were not shown (the atlas is at its {} page limit)", sync_stats.refused, MAX_PAGES));
+            }
+            let extra = inspector.worker_errors.len().saturating_sub(32);
+            inspector.worker_errors.drain(..extra);
             inspector.finished_strokes += finished;
         });
         core.record_frame(FrameRow {
@@ -415,6 +449,32 @@ impl shader::Primitive for InkPrimitive {
         }
         true
     }
+}
+
+fn create_atlas(device: &wgpu::Device, pages: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("styk.ink_pad.atlas"),
+        size: wgpu::Extent3d { width: ATLAS_TEXELS.0, height: ATLAS_TEXELS.1, depth_or_array_layers: pages },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
+}
+
+fn make_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, uniforms: &wgpu::Buffer, atlas: &wgpu::Texture, sampler: &wgpu::Sampler) -> wgpu::BindGroup {
+    let view = atlas.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("styk.ink_pad.bind_group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: uniforms.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
+        ],
+    })
 }
 
 /// The pad on a real GPU device, drawn offscreen: skipped (and said so) on a machine with no adapter.
@@ -603,9 +663,16 @@ mod tests {
         let send = |command: StrokeCommand| {
             core.worker.command(command, &brush);
         };
+        // Every frame drawn once the view is over the ink, to compare with today's sequence: the preview of a batch overlaps its tiles
+        // for one presented frame at most, so no frame is ever darker than the finished cel (a double paint darkens a soft edge).
+        let shown: std::cell::RefCell<Vec<Vec<u8>>> = std::cell::RefCell::new(Vec::new());
+        let moved = std::cell::Cell::new(false);
         let settle = |pipeline: &mut InkPipeline, frames: usize| {
             for _ in 0..frames {
-                frame(&gpu, pipeline, &primitive);
+                let image = frame(&gpu, pipeline, &primitive);
+                if moved.get() {
+                    shown.borrow_mut().push(image);
+                }
                 std::thread::sleep(Duration::from_millis(5));
             }
         };
@@ -618,6 +685,7 @@ mod tests {
         settle(&mut pipeline, 60);
         // The view moves over them while the stroke is still open, and the stroke goes on.
         core.set_view(crate::ink_pad::View { zoom: 1.0, pan: (256.0, 0.0) });
+        moved.set(true);
         settle(&mut pipeline, 60);
         for i in 15..30 {
             send(sample(i));
@@ -626,6 +694,7 @@ mod tests {
         let mut last = Vec::new();
         for _ in 0..400 {
             last = frame(&gpu, &mut pipeline, &primitive);
+            shown.borrow_mut().push(last.clone());
             if core.inspector().finished_strokes >= 1 && core.gpu_stats().batches_waiting == 0 && core.with_ledger(|l| l.visible_dabs()) == 0 {
                 break;
             }
@@ -643,6 +712,52 @@ mod tests {
         assert!(ink > 300, "the first half of the stroke is in the view: {ink} dark pixels");
         let wrong = last.chunks_exact(4).zip(want.chunks_exact(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| (*x as i32 - *y as i32).abs() > 2)).count();
         assert_eq!(wrong, 0, "{wrong} pixels of the frame differ from the cel: ink drawn before the view arrived is missing");
+        let darker: usize = shown.borrow().iter().map(|image| image.chunks_exact(4).zip(want.chunks_exact(4)).filter(|(a, b)| (0..3).any(|c| (a[c] as i32) < (b[c] as i32) - 2)).count()).sum();
+        assert_eq!(darker, 0, "{darker} pixels over {} frames were darker than the finished cel: ink was painted twice", shown.borrow().len());
+    }
+
+    // Today's model: the view's tiles are held above the soft budget by growing the atlas a page at a time; nothing visible is evicted.
+    #[test]
+    fn a_view_that_shows_more_tiles_than_a_page_holds_grows_the_texture_and_draws_every_tile() {
+        let Some(gpu) = gpu() else {
+            eprintln!("no GPU adapter on this machine: the pad's drawing is not checked here");
+            return;
+        };
+        let core = core();
+        let mut pipeline = InkPipeline::new(&gpu.device, &gpu.queue, wgpu::TextureFormat::Rgba8Unorm);
+        // A page of two tiles: the stroke below inks far more than that in the 4 x 4 tiles the view shows.
+        pipeline.sync = TileSync::new(2, 8);
+        let primitive = InkPrimitive { core: core.clone() };
+        core.with_ledger(|ledger| ledger.stroke_started(1, true));
+        let brush = BrushConfig { size: 14.0, hardness: 1.0, ..BrushConfig::default() }.to_json();
+        let send = |command: StrokeCommand| {
+            core.worker.command(command, &brush);
+        };
+        send(StrokeCommand::Begin { id: 1, erase: false, mapping: Mapping::default(), modifiers: Modifiers::NONE });
+        for i in 0..30 {
+            send(StrokeCommand::Sample { id: 1, x: 20.0 + i as f64 * 7.0, y: 100.0 + (i as f64 * 0.4).sin() * 30.0, pressure: 1.0, time_ms: i as f64, lean: None });
+        }
+        send(StrokeCommand::End { id: 1 });
+        let mut last = Vec::new();
+        for _ in 0..400 {
+            last = frame(&gpu, &mut pipeline, &primitive);
+            if core.inspector().finished_strokes >= 1 && core.gpu_stats().batches_waiting == 0 && core.with_ledger(|l| l.visible_dabs()) == 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        core.worker.send(styk_core::drawing::worker::Request::Snapshot { token: 1 });
+        let snapshot = loop {
+            if let styk_core::drawing::worker::Reply::Snapshot { tiles, .. } = core.worker.wait(Duration::from_secs(10)).expect("the worker answers") {
+                break tiles;
+            }
+        };
+        assert!(snapshot.len() > 2, "the stroke inks more tiles than a page holds: {}", snapshot.len());
+        assert!(core.gpu_stats().pages > 1 && pipeline.atlas_pages as usize == core.gpu_stats().pages, "the atlas grew: {} pages", core.gpu_stats().pages);
+        assert_eq!(core.gpu_stats().sync.refused, 0);
+        let want = expected(&snapshot);
+        let wrong = last.chunks_exact(4).zip(want.chunks_exact(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| (*x as i32 - *y as i32).abs() > 2)).count();
+        assert_eq!(wrong, 0, "{wrong} pixels of the frame differ from the cel: a tile on a later page is missing or wrong");
     }
 
     #[test]

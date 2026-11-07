@@ -1,4 +1,4 @@
-# Pen and tablet input: what was measured (spike S1, revised 2026-11-07 after the diff review, the re-check and the checker)
+# Pen and tablet input: what was measured (spike S1, revised 2026-11-07 after the diff review, the re-check, the checker and the second re-check)
 
 The design is [input.md](input.md); this page is what the code did against its acceptance criteria. Latencies are measured
 with the display at **144 Hz (6.94 ms a frame), present mode Fifo** (iced's `AutoVsync`; the compositor's
@@ -23,12 +23,12 @@ tiles reach a real GPU texture. It writes `samples.csv`, `frames.csv`, `pushed.c
 | A2 | Interface thread blocked 50 ms twenty times | **Pass**: all 1200 delivered in order, queue high-water 16, nothing dropped; the 27 frame gaps over twice the median are the blocks |
 | A3 | Same events, native against today's app | **Pass**: see "Parity" (7 scenarios, 25 stages compared against a committed capture) |
 | A4 | Latency | see "Latency"; no display-latency gate is claimed |
-| A5 | Interface thread never blocks (D7) | **Pass** (standard and stress runs): `update` max 70 and 30 us; the `prepare`'s **own work** max 363 and 567 us against a 3 ms budget (the whole `prepare` including the graphics API's queue calls 1369 and 670 us: one first-frame texture write took 1.3 ms of it, which is the driver's time and is now reported apart); the 200,000 px gap is generated on the worker (longest generation 91 ms, longest raster 3.5 ms) |
-| A5 | No frame skipped while the worker works (stress, 64x zoom and mirror, then a huge gap) | **Pass**: median frame 6.95 ms, worst 8.10 ms over 128 frames; 0 frames over twice the median |
+| A5 | Interface thread never blocks (D7) | **Pass** (standard and stress runs): `update` max 94 and 59 us; the `prepare`'s **own work** max 2270 and 368 us against a 3 ms budget (the standard run's 2.3 ms is higher than the earlier runs' 0.4 ms; the machine was loaded by three other heavy jobs and it is still inside the budget); the 200,000 px gap is generated on the worker (longest generation 101 ms, longest raster 2.9 ms) |
+| A5 | No frame skipped while the worker works (stress, 64x zoom and mirror, then a huge gap) | **Pass in 2 of 3 runs**: median 6.95 ms, worst 11.08 and 16.10 ms (143 and 151 frames). **One run failed**: worst frame 46.76 ms, one long frame, none of it in `prepare` (0.49 ms), `update` (2 us) or the lab's view: outside all three, as the 27 to 31 ms frames of the first version were (see below); the same binary passed both reruns straight after |
 | A6 | Stroke logic | 22 unit tests of `StrokeInput` plus the parity run |
 | A7 | Behaviour (scripted samples) | **Pass**: barrel over the pad opens the palette once; a press that begins on a control starts no stroke; a finger alone draws when the setting says so; a finger within 700 ms of the pen is ignored |
 | A8 | Queue saturation, release, a new stroke | **Pass** (unit tests; the queue is bounded at `CAPACITY + RESERVE` whatever the terminals do) |
-| A9 | Retirement: no gap, no double paint, delays, staged installs, cancel, stale | **Pass**: logic tests (`wet`, `tile_sync`) and two tests that draw the pad on the real GPU and compare it with the cel pixel for pixel, through clear, undo, a moved view and a view that moves over a stroke's ink mid-stroke |
+| A9 | Retirement: no gap, no double paint, delays, staged installs, cancel, stale, intermediate frames | **Pass**: logic tests (`wet`, `tile_sync`) and two tests that draw the pad on the real GPU and compare it with the cel pixel for pixel, through clear, undo, a moved view and a view that moves over a stroke's ink mid-stroke, where **every frame** after the view moved is compared with the finished cel and none is darker (a double paint would be): the preview leaves in the frame its tiles arrive, which is never more overlap than today's one presented frame |
 | A10 | A real tablet | **Not run** |
 | not tested | Hover reaching a toolkit widget, press-and-hold, the eraser flags a driver reports, `WM_POINTER` history on a real device | need the operating system's own input: by hand with a tablet |
 
@@ -39,13 +39,29 @@ otherwise. The first twelve are the diff review's (head 08d30f1e, fixed in the p
 round's: the re-check's R1 to R8 and the checker's B1 to B7 (the review's twelve that the re-check found holding are listed
 for completeness).
 
+### The second re-check (finding numbers of `S1-pen-recheck2.md`)
+
+The atlas follows today's model (`src/drawing-resources.mjs` `reserve`), which removes findings 1, 3 and 4 at the root: the required set (every visible tile and the batch being staged) is held above the soft budget (one page of 2048 tiles) by growing a page at a time up to the hard budget (4 pages, 8192 tiles, 128 MiB), only tiles out of view are evicted, and above the hard budget a tile is refused visibly. The in-place fallback and the "declined" state are gone.
+
+| # | Finding | Fix | Regression test and what it showed |
+| --- | --- | --- | --- |
+| 1 | One slot could belong to two tiles (eviction ignored the staged batch's keys) | evictions never take a tile the staged batch will replace; no visible tile is ever evicted | `a_tile_the_view_has_left_is_not_evicted_by_its_own_update_and_no_slot_is_shared` with an invariant check on every slot (**mutation** of the protection: fails) |
+| 2 | A history change during an open stroke let the stroke bring undone ink back | the worker cancels the open stroke first (`Cancelled` announced before `Changed`), as `drawing-controller.mjs:119` does | `undo_`, `redo_` and `clear_during_an_open_stroke_cancels_it_first` (**mutation**: all three fail) |
+| 3 | Atomic publication bypass: staging overwrote resident slots in place | staging always takes a new slot; the atlas grows instead | `a_batch_that_updates_every_resident_tile_of_a_full_atlas_is_staged_in_new_slots_and_shown_whole` (**mutation** without growth: fails), `a_view_that_pins_more_than_a_page_holds_grows_the_atlas_and_keeps_every_visible_tile`; on the GPU `a_view_that_shows_more_tiles_than_a_page_holds_grows_the_texture_and_draws_every_tile` (a page of two tiles: the frame equals the cel pixel for pixel) |
+| 4 | Permanent blank tiles after a declined fetch | no declined state for visible tiles; a refusal (only above the hard budget) is cleared when a slot is freed or the view changes | `a_fetch_that_arrives_while_a_batch_is_staged_leaves_no_tile_blank`, `a_refused_tile_is_asked_for_again_once_a_slot_is_free` (**mutation**: fails) |
+| 5 | A refused send was never recovered (fetch reservations; undo, redo, clear) | `fetch_refused` gives the reservations back; `HistoryOutbox` keeps refused history and sends it first thing in the next `prepare`, counting (and showing) what does not fit | `a_fetch_the_worker_refused_is_asked_for_again` (**mutation**: fails), `history_the_worker_refused_is_kept_and_sent_in_order_and_what_cannot_be_kept_is_counted` (**mutation**: fails) |
+| 6 | Recovered history duplicated after a rebase and with more than 64 entries | identity is the system's stamp and content, independent of the clock mapping; an entry older than the newest delivered is rejected, not re-timed | `a_repeat_delivered_after_the_mapping_was_rebased_is_still_rejected`, `a_long_overlapping_history_is_rejected_whole_and_never_re_timed` (**both failed** on the previous implementation, run with the new tests) |
+| 7 | A refused press leaked a ledger entry and the raw preview | the ledger hears of a stroke only after the worker took its press; the preview is cleared by identity; a raw preview needs a stroke the ledger has open | `a_press_the_worker_refuses_leaves_nothing_in_the_ledger_and_clears_only_its_own_preview` (**mutation**: fails) |
+| 8 | A failed stroke left ghost ink | `Failed` names the tiles reached and a stamp, like `Cancelled`; a press that fails to begin is also forgotten (it held one of the 16 places) | `a_failed_stroke_restores_the_tiles_its_batches_reached_through_the_stamped_path`, `a_failed_stroke_names_the_tiles_it_reached_and_a_stamp_to_restore_them` (**mutation**: fails), `a_stroke_that_failed_to_begin_is_forgotten_and_does_not_use_up_the_open_strokes` (**mutation**: fails) |
+| 9 | A9 "no double paint" unsupported for transient frames | a fetched tile of the open stroke carries `upto` and is installed in the frame the batches it includes are, so the preview is never painted over it; the GPU test compares every frame with the finished cel | `a_fetched_tile_of_the_open_stroke_waits_for_the_batches_it_includes_so_the_preview_is_not_painted_over_it` (**mutation**: fails); the all-frames comparison in `a_view_that_moves_over_the_open_strokes_ink_shows_it_and_keeps_it`. Today's controller overlaps the preview for one presented frame on purpose; here the overlap is zero frames, so no extra overlap was found to fix |
+
 ### This round: the re-check (R) and the checker (B)
 
 | # | Finding | Fix | Regression test and what it showed |
 | --- | --- | --- | --- |
 | R1 | Worker memory unbounded: the brush collected its points and dabs for a whole gap before the gate ran | the brush streams: each dab goes to a bounded batcher and a full batch is rasterised before the brush makes more; no list of points or dabs exists | `generation_stops_after_a_few_batches_while_nothing_is_acknowledged_however_long_the_gap` (a 200,000 px gap, nothing acknowledged: at most 6 batches of dabs are made, not 800,000). **Mutation** (gate off): fails |
 | R2 / B1 | Pending batches could resurrect undone ink; a fetch in a stroke returned the cel and erased the stroke's ink | worker: every change carries a stamp, a fetch answers from the open stroke; atlas: a reply that gives a tile back (undo, redo, clear, cancel, fetch) removes it from every queued and half-written batch | `an_undo_removes_its_tiles_from_the_batches_still_waiting`, `fetched_pixels_replace_the_older_queued_batch_for_that_tile_and_a_later_batch_follows_them`, `a_cancel_removes_its_restored_tiles_from_other_queued_batches` (**mutation**: all three fail); `a_fetch_during_a_stroke_returns_its_ink_and_stamps_only_grow_through_undo` (**mutation**: fails); on the GPU `a_view_that_moves_over_the_open_strokes_ink_shows_it_and_keeps_it` (**mutation**: 877 pixels of the frame differ from the cel) |
-| R3 / B2 | A full pending queue hid the `Cancelled` reply; a view that pinned more inked tiles than the atlas held deferred a batch forever | no gate on replies (what waits is bounded by the worker's window); hidden tiles dropped on arrival; a stroke batch takes the slot of the least recently used visible tile, a fetched tile is declined and counted | `a_cancel_is_taken_and_frees_the_worker_even_when_the_atlas_is_pinned_and_batches_are_waiting`, `a_stroke_batch_takes_the_slots_of_the_least_recently_used_visible_tiles_when_the_view_pins_more_than_the_atlas_holds` (**mutation**: fails), `a_batch_larger_than_the_whole_atlas_shows_what_fits_and_is_acknowledged`, `a_fetched_tile_is_declined_not_retried_while_every_slot_holds_a_shown_tile`, `tiles_the_view_does_not_show_are_dropped_on_arrival` (**mutation**: fails) |
+| R3 / B2 | A full pending queue hid the `Cancelled` reply; a view that pinned more inked tiles than the atlas held deferred a batch forever | no gate on replies (what waits is bounded by the worker's window); hidden tiles dropped on arrival; the slot policy of that round (a stroke batch evicting the least recently used visible tile, a fetch declined) was **replaced** by today's model in the second re-check below | `a_cancel_is_taken_and_frees_the_worker_even_when_the_atlas_is_pinned_and_batches_are_waiting`, `a_stroke_batch_takes_the_slots_of_the_least_recently_used_visible_tiles_when_the_view_pins_more_than_the_atlas_holds` (**mutation**: fails), `a_batch_larger_than_the_whole_atlas_shows_what_fits_and_is_acknowledged`, `a_fetched_tile_is_declined_not_retried_while_every_slot_holds_a_shown_tile`, `tiles_the_view_does_not_show_are_dropped_on_arrival` (**mutation**: fails) |
 | R4 | A cancel's acknowledgement of a later batch let five batches out | the acknowledgement is a contiguous frontier | `the_worker_stays_within_its_outstanding_batches_until_they_are_acknowledged` now acknowledges the newest alone and requires nothing to come out, then closes the gap. **Mutation** (old prefix rule): fails |
 | R5 | The request queue was unbounded (Begin, End, settings, other requests) | at most 16 open strokes, a stroke ends once, ends of strokes never admitted dropped where made, other requests past 1,024 refused; all counted | `presses_and_requests_past_the_limits_are_refused_and_counted_and_a_stroke_ends_once` (**mutation**: fails) |
 | R6 | The 64-tile limit had bypasses (a huge first dab, the provisional tail, the first install of a frame) | the batcher cuts at 64 tiles and a single huge dab is a batch of its own, sent in parts of at most 64 (`part`, `last`); the atlas writes a few tiles a call (at least one) and flips the batch whole | `one_huge_dab_is_sent_in_parts_of_at_most_the_tile_limit_and_the_batch_ends_once` (**mutation**: fails), `a_batch_gathers_dabs_up_to_the_tile_limit_and_a_single_dab_goes_alone` (**mutation**: fails), `a_big_batch_is_written_over_several_calls_and_appears_whole_in_the_last`, `every_call_places_at_least_one_tile_whatever_the_budgets`, `a_batch_arriving_in_parts_is_not_complete_until_the_last_and_its_preview_stays_until_then` |
@@ -124,12 +140,12 @@ the first stroke: the script's second stroke is an eraser stroke and is not prev
 
 | Run | Queue read p50 | Preview p50 / p95 / p99 / max (ms) | Exact tiles p50 / p95 / p99 / max (ms) |
 | --- | --- | --- | --- |
-| standard (this round) | 3.31 | 8.85 / 11.84 / 12.84 / 20.10 | 8.81 / 11.78 / 12.59 / 20.10 |
-| blocked (50 ms blocks) | 4.23 | 9.92 / 41.24 / 53.62 / 63.30 | 9.93 / 42.47 / 53.74 / 63.30 |
+| standard (this round) | 3.26 | 8.41 / 11.31 / 12.56 / 26.70 | 8.53 / 11.99 / 13.32 / 26.70 |
+| blocked (50 ms blocks) | 4.61 | 9.55 / 43.36 / 53.79 / 57.59 | 9.64 / 44.58 / 54.38 / 61.60 |
 
-One run of each this round, in a `probe` slot beside other jobs; the previous round's three standard runs (p50 8.65 to 9.72) agree.
-The median is 1.27 to 1.43 frames; the preview and the exact tiles appear in the same frame (the worker returns the tiles of a
-12 px brush before the frame is prepared). Under a blocked interface thread the tail is the block (50 ms), by construction. The 20 ms maximum of the standard run is a frame wait on a loaded machine; it is not in the pad's own work (max 363 us). The
+One run of each this round, in a `probe` slot beside other jobs; the earlier rounds' standard runs (p50 8.65 to 9.85) agree.
+The median is 1.21 to 1.38 frames; the preview and the exact tiles appear in the same frame (the worker returns the tiles of a
+12 px brush before the frame is prepared). Under a blocked interface thread the tail is the block (50 ms), by construction. The 27 ms maximum of the standard run is a frame wait on a loaded machine. The
 browser row of the first version of this page (`tests/drawing-latency.browser.mjs`, p50 36.7 to 49.0 ms) measured CDP mouse
 input on the exact scene, not the same workload; the comparison it made is not repeated here.
 
@@ -138,9 +154,10 @@ input on the exact scene, not the same workload; the comparison it made is not r
 - A real tablet pass: the `WM_POINTER` source on a device, history from a driver, the eraser flags, hover over a widget,
   press-and-hold.
 - Wet ink for translucent strokes (a union layer). Today a stroke below full opacity shows exact pixels only.
-- A view that moves over a stroke's ink mid-stroke can show a soft edge painted twice for the few frames until the batch that
-  covers it is installed (the fetched tile already holds the stroke's dabs and the preview still shows them). It is transient and
-  needs a wet stroke and a view change at the same moment; not measured.
+- The atlas does not give pages back once grown (the hard budget is 4 pages); shrinking when the view needs less is left to the
+  memory phase, with the budgets themselves (the page count is a first value, not a measured one).
+- Between the moment a view reaches tiles a stroke inked out of sight and the arrival of the fetch for them, those tiles are
+  blank where the preview has already retired (a round trip to the worker, a frame or two).
 - The parity save step starts a session on the reopened document but does not redraw it: the cel's pose is checked as the object
   record, not by pixels of the reopened animation.
 - WinTab, macOS and Linux sources (designed in [input.md](input.md), not built); the pen-lab inspector as the developer

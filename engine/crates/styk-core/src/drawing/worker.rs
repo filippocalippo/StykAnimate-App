@@ -31,7 +31,7 @@
 
 use super::mapping::Mapping;
 use super::stroke_input::StrokeCommand;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -91,6 +91,65 @@ pub enum Request {
     Hold(Arc<(Mutex<bool>, Condvar)>),
 }
 
+/// A change of the cel's history: the three requests a person can lose by a refusal, so the caller keeps them (see [`Worker::send`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryOp {
+    Undo,
+    Redo,
+    Clear,
+}
+
+impl HistoryOp {
+    pub fn request(self) -> Request {
+        match self {
+            HistoryOp::Undo => Request::Undo,
+            HistoryOp::Redo => Request::Redo,
+            HistoryOp::Clear => Request::Clear,
+        }
+    }
+}
+
+/// History changes the worker refused (too many requests waiting), kept for a later try, in order. A person's undo is never dropped
+/// silently: what does not fit the outbox is counted in `lost` for the caller to report.
+#[derive(Debug, Default)]
+pub struct HistoryOutbox {
+    kept: VecDeque<HistoryOp>,
+    pub lost: u64,
+}
+
+/// Changes an outbox keeps at most.
+pub const MAX_KEPT_HISTORY: usize = 64;
+
+impl HistoryOutbox {
+    pub fn kept(&self) -> usize {
+        self.kept.len()
+    }
+
+    /// Sends `op` after any kept before it. Returns false if it was lost (the outbox is full too).
+    pub fn submit(&mut self, worker: &Worker, op: HistoryOp) -> bool {
+        self.flush(worker);
+        if self.kept.is_empty() && worker.send(op.request()) {
+            return true;
+        }
+        if self.kept.len() >= MAX_KEPT_HISTORY {
+            self.lost += 1;
+            return false;
+        }
+        self.kept.push_back(op);
+        true
+    }
+
+    /// Sends the kept changes, in order, until the worker refuses one.
+    pub fn flush(&mut self, worker: &Worker) {
+        while let Some(op) = self.kept.front().copied() {
+            if !worker.send(op.request()) {
+                break;
+            }
+            self.kept.pop_front();
+        }
+    }
+}
+
 /// One dab as the wet ink draws it: in cel pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WetDab {
@@ -116,9 +175,13 @@ pub enum Reply {
     Cancelled { stroke: u64, restore: Vec<(i64, i64)>, stamp: u64 },
     /// Undo, redo or clear changed these tiles, at `stamp` (fetch the ones shown).
     Changed { tiles: Vec<(i64, i64)>, stamp: u64 },
-    /// The answer to a [`Request::Fetch`].
-    Pixels { tiles: Vec<TileUpdate> },
-    Failed { stroke: u64, message: String },
+    /// The answer to a [`Request::Fetch`]. `upto` is the newest stroke batch rasterised when it was made: a tile of the open stroke
+    /// holds the ink of every batch up to it, so the consumer shows it only once those batches are in the view (or it would paint
+    /// them over their own preview).
+    Pixels { tiles: Vec<TileUpdate>, upto: u64 },
+    /// The stroke failed (a bad brush, the working budget): the engine dropped it. The cel holds its own pixels in the tiles the
+    /// stroke had reached, from `stamp` on, exactly as after a cancel: the consumer fetches the ones it shows.
+    Failed { stroke: u64, message: String, restore: Vec<(i64, i64)>, stamp: u64 },
     Snapshot { token: u64, tiles: Vec<(i64, i64, Vec<u8>)> },
     Pong { token: u64 },
 }
@@ -517,7 +580,7 @@ impl State {
                         (tx, ty, pixels, self.tile_stamp.get(&(tx, ty)).copied().unwrap_or(0))
                     })
                     .collect();
-                self.reply(Reply::Pixels { tiles });
+                self.reply(Reply::Pixels { tiles, upto: self.seq });
             }
             Request::Snapshot { token } => {
                 let tiles = self.cel.iter().map(|tile| (tile.tx as i64, tile.ty as i64, tile.pixels.to_vec())).collect();
@@ -537,10 +600,18 @@ impl State {
     }
 
     fn fail(&mut self, stroke: u64, message: impl Into<String>) {
-        self.current = None;
-        self.shared.forget(stroke);
+        let seeded = self.current.take().map(|c| c.sink.seeded).unwrap_or_default();
         self.engine.cancel(stroke);
-        self.reply(Reply::Failed { stroke, message: message.into() });
+        self.failed(stroke, message.into(), seeded);
+    }
+
+    /// Reports a stroke that failed: it is forgotten, and the tiles it had reached are restored through the same stamped path as a
+    /// cancel (batches of it may be in the view already).
+    fn failed(&mut self, stroke: u64, message: String, seeded: impl IntoIterator<Item = (i64, i64)>) {
+        self.shared.forget(stroke);
+        let restore: Vec<(i64, i64)> = seeded.into_iter().collect();
+        let stamp = if restore.is_empty() { 0 } else { self.restamp(&restore) };
+        self.reply(Reply::Failed { stroke, message, restore, stamp });
     }
 
     fn begin(&mut self, id: u64, erase: bool, mapping: Mapping, settings: &str) {
@@ -558,14 +629,14 @@ impl State {
         });
         let value = match parsed {
             Ok(value) => value,
-            Err(message) => return self.reply(Reply::Failed { stroke: id, message }),
+            Err(message) => return self.failed(id, message, []),
         };
         let brush = match Brush::normalize(&value) {
             Ok(brush) => brush,
-            Err(error) => return self.reply(Reply::Failed { stroke: id, message: error.to_string() }),
+            Err(error) => return self.failed(id, error.to_string(), []),
         };
         if let Err(error) = self.engine.begin(id, &value, None) {
-            return self.reply(Reply::Failed { stroke: id, message: error.to_string() });
+            return self.failed(id, error.to_string(), []);
         }
         let abort = self.shared.flag(id).unwrap_or_default();
         let paths = mapping
@@ -750,7 +821,7 @@ impl State {
         self.shared.forget(id);
         if let Some(message) = current.sink.failure.take() {
             self.engine.cancel(id);
-            return self.reply(Reply::Failed { stroke: id, message });
+            return self.failed(id, message, current.sink.seeded);
         }
         if self.shared.stopped(&current.sink.abort) {
             // Told to stop while ending: the stroke is discarded like a cancelled one (its `Cancel` finds nothing open).
@@ -763,7 +834,7 @@ impl State {
             Ok(Some(changes)) => {
                 let changed_tiles = changes.len();
                 if apply_tile_changes(&mut self.cel, &changes, true).is_err() {
-                    return self.reply(Reply::Failed { stroke: id, message: "the stroke's tiles could not be applied".into() });
+                    return self.failed(id, "the stroke's tiles could not be applied".into(), current.sink.seeded);
                 }
                 let keys: Vec<(i64, i64)> = changes.iter().map(|c| (c.tx as i64, c.ty as i64)).collect();
                 self.restamp(&keys);
@@ -774,7 +845,7 @@ impl State {
                 self.reply(Reply::Finished { stroke: id, changed_tiles, dabs: current.sink.dabs });
             }
             Ok(None) => {}
-            Err(error) => self.reply(Reply::Failed { stroke: id, message: error.to_string() }),
+            Err(error) => self.failed(id, error.to_string(), current.sink.seeded),
         }
     }
 
@@ -800,7 +871,19 @@ impl State {
         self.reply(Reply::Cancelled { stroke: id, restore, stamp });
     }
 
+    /// A history change discards the open stroke first, as today's controller does (`drawing-controller.mjs`: a `history` change
+    /// cancels the gesture): the stroke was rasterised over pixels the change is about to replace.
+    fn cancel_open_for_history(&mut self) {
+        if let Some(open) = self.current.as_ref().map(|c| c.sink.id) {
+            self.cancel(open);
+        }
+    }
+
     fn step(&mut self, undo: bool) {
+        if (if undo { &self.undo } else { &self.redo }).is_empty() {
+            return;
+        }
+        self.cancel_open_for_history();
         let (from, to) = if undo { (&mut self.undo, &mut self.redo) } else { (&mut self.redo, &mut self.undo) };
         let Some(changes) = from.pop() else { return };
         if apply_tile_changes(&mut self.cel, &changes, !undo).is_err() {
@@ -813,6 +896,10 @@ impl State {
     }
 
     fn clear(&mut self) {
+        if self.cel.iter().next().is_none() {
+            return;
+        }
+        self.cancel_open_for_history();
         let before: Vec<Tile> = self.cel.iter().cloned().collect();
         let changes: Vec<TileChange> = before.iter().filter_map(|tile| change_of(tile.tx, tile.ty, Some(&tile.pixels), None)).collect();
         if changes.is_empty() || apply_tile_changes(&mut self.cel, &changes, true).is_err() {

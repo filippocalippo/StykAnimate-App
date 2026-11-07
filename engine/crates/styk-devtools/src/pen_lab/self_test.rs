@@ -415,7 +415,7 @@ impl Runner {
         self.check("A5 prepare slice (the pad's own work) under 4 ms", gpu.own_max_us < 4000, format!("own {} us; whole {} us of which graphics API {} us", gpu.own_max_us, gpu.prepare_max_us, gpu.wgpu_max_us));
         self.check("A5 no frame skipped while the worker works", worst < median * 2.5 + 2.0, format!("median frame {median:.2} ms, worst {worst:.2} ms over {} frames", rows.len()));
         let _ = writeln!(self.summary, "worker: longest dab generation {:.1} ms, longest raster {:.1} ms; display {:.0} Hz", inspector.max_generate_ms, inspector.max_raster_ms, cx.refresh_hz);
-        let _ = writeln!(self.summary, "tiles: resident {}, evicted {}, unshown {}, hidden {}, superseded {}, fetched {}; uniform writes skipped {}", gpu.tiles_resident, gpu.sync.evicted, gpu.sync.unshown, gpu.sync.hidden, gpu.sync.superseded, gpu.sync.fetched, gpu.uniform_writes_skipped);
+        let _ = writeln!(self.summary, "tiles: resident {}, evicted {}, refused {}, hidden {}, superseded {}, fetched {}; uniform writes skipped {}", gpu.tiles_resident, gpu.sync.evicted, gpu.sync.refused, gpu.sync.hidden, gpu.sync.superseded, gpu.sync.fetched, gpu.uniform_writes_skipped);
         self.long_frames(&rows, median);
         self.phase = Phase_::Done(i32::from(self.failures > 0));
         Step::Continue

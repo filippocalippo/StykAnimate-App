@@ -1,8 +1,14 @@
 //! Which of the cel's tiles are on the GPU, and how the worker's replies get there: the residency of the pad's tile atlas.
 //!
-//! The cel lives in the drawing worker; the GPU holds only the tiles the view shows (a bounded atlas of `capacity` slots).
-//! This type is the whole policy, with no GPU in it, so it is tested on its own; the pad's `prepare` only performs the
-//! [`Write`]s it plans.
+//! The cel lives in the drawing worker; the GPU holds the tiles the view shows, in an atlas of pages. This type is the whole
+//! policy, with no GPU in it, so it is tested on its own; the pad's `prepare` only performs the [`Write`]s it plans and grows the
+//! texture to the pages it asks for.
+//!
+//! The model is today's (`src/drawing-resources.mjs` `reserve`): the tiles the view shows, and the batches being staged, are the
+//! *required set*. The atlas holds the required set above its soft budget (one page) by growing a page at a time up to the hard
+//! budget; only tiles out of view are ever evicted (least recently used first); above the hard budget a tile is refused, visibly
+//! (`refused` in [`SyncStats`], which the pad reports). A visible tile is never evicted, so a view never loses a tile to make room
+//! for another, and nothing is written in place over a tile the view shows.
 //!
 //! - **Bounded without a gate.** Every reply is taken as it comes: the worker rasterises at most
 //!   [`MAX_OUTSTANDING`](super::worker::MAX_OUTSTANDING) batches ahead of the ones acknowledged, so what waits here is
@@ -11,19 +17,18 @@
 //! - **Atomic batches within a budget.** A batch of tiles from a stroke appears all at once, so the atlas never shows part of
 //!   a batch while the wet ink still shows all of it (a soft edge would paint twice). Its tiles are written into *new* slots a
 //!   few at a time over as many frames as the tile and time budgets need, and the batch is flipped into the view in the call
-//!   that writes the last of them; every call places at least one tile, so the queue always advances.
+//!   that writes the last of them; every call places at least one tile, so the queue always advances. The tiles of a batch are
+//!   protected from eviction while it is staged.
 //! - **Versions by order.** The worker numbers what it changes and answers in order. Everything this type has queued is
-//!   older than the reply being accepted, so an undo, redo, clear, cancel or fetched tile removes the tile from every queued
-//!   batch: a late batch can never cover newer pixels, and a tile is never left stale.
-//! - **Eviction.** A tile needs a slot when it is shown and not resident. When none is free, tiles outside the view go first
-//!   (least recently used first). The tiles of a stroke batch, which the person is drawing, may then take the slot of the least
-//!   recently used visible tile; a fetched tile may not, and is declined (counted) until the view changes, so a view that pins
-//!   more inked tiles than the atlas holds degrades to a view of the nearest ones instead of stalling or thrashing.
-//! - **Residency by request.** Tiles that enter the view, and tiles changed by undo, redo, clear or a cancelled stroke, are
-//!   fetched from the worker, [`FETCH_LIMIT`] at a time; a tile known to be empty is not asked for again.
+//!   older than the reply being accepted, so an undo, redo, clear, cancel, failure or fetched tile removes the tile from every
+//!   queued batch: a late batch can never cover newer pixels. A fetched tile of the open stroke holds the ink of every batch up
+//!   to the one the reply names, so it waits until those batches are in the view (it would paint them over their preview).
+//! - **Residency by request.** Tiles that enter the view, and tiles changed by undo, redo, clear or a cancelled or failed stroke,
+//!   are fetched from the worker, [`FETCH_LIMIT`] at a time; a tile known to be empty is not asked for again. A request the
+//!   worker refused is given back ([`TileSync::fetch_refused`]).
 
 use super::wet::WetLedger;
-use super::worker::{FETCH_LIMIT, Reply};
+use super::worker::{FETCH_LIMIT, Reply, TileUpdate};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
@@ -75,14 +80,17 @@ pub struct Write {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SyncStats {
     pub installed_tiles: u64,
+    /// Tiles out of view that gave their slot to another.
     pub evicted: u64,
-    /// Tiles that could not be given a slot: every slot held a tile the view shows (counted when declined).
-    pub unshown: u64,
+    /// Tiles refused a slot because the required set is above the hard budget: the memory is full (shown to the person).
+    pub refused: u64,
     /// Tiles of stroke batches dropped on arrival because the view neither shows them nor holds them.
     pub hidden: u64,
     pub fetched: u64,
     /// Tiles removed from queued batches because a newer version of them had arrived (undo, redo, clear, cancel, fetch).
     pub superseded: u64,
+    /// Pages the atlas grew by.
+    pub pages_grown: u64,
 }
 
 struct Entry {
@@ -107,9 +115,17 @@ struct Staging {
     keys: Arc<HashSet<(i64, i64)>>,
 }
 
+/// Fetched tiles of the open stroke waiting for the batches they include to be in the view.
+struct Held {
+    upto: u64,
+    tiles: Vec<TileUpdate>,
+}
+
 /// The residency of the tile atlas and the queue that feeds it.
 pub struct TileSync {
-    capacity: usize,
+    page_slots: usize,
+    max_pages: usize,
+    pages: usize,
     resident: HashMap<(i64, i64), Entry>,
     free: Vec<u32>,
     visible: TileRect,
@@ -117,9 +133,10 @@ pub struct TileSync {
     assembling: Option<Batch>,
     pending: VecDeque<Batch>,
     staging: Option<Staging>,
+    held: Vec<Held>,
     requested: HashSet<(i64, i64)>,
     empty: HashSet<(i64, i64)>,
-    declined: HashSet<(i64, i64)>,
+    refused: HashSet<(i64, i64)>,
     stale: Vec<(i64, i64)>,
     writes: Vec<Write>,
     exact_ns: u64,
@@ -129,19 +146,23 @@ pub struct TileSync {
 }
 
 impl TileSync {
-    pub fn new(capacity: usize) -> TileSync {
+    /// An atlas of one page of `page_slots` tiles (the soft budget) that may grow to `max_pages` (the hard budget).
+    pub fn new(page_slots: usize, max_pages: usize) -> TileSync {
         TileSync {
-            capacity,
+            page_slots,
+            max_pages: max_pages.max(1),
+            pages: 1,
             resident: HashMap::new(),
-            free: (0..capacity as u32).rev().collect(),
+            free: (0..page_slots as u32).rev().collect(),
             visible: TileRect { x0: 0, y0: 0, x1: -1, y1: -1 },
             clock: 0,
             assembling: None,
             pending: VecDeque::new(),
             staging: None,
+            held: Vec::new(),
             requested: HashSet::new(),
             empty: HashSet::new(),
-            declined: HashSet::new(),
+            refused: HashSet::new(),
             stale: Vec::new(),
             writes: Vec::new(),
             exact_ns: 0,
@@ -159,8 +180,18 @@ impl TileSync {
         self.resident.len()
     }
 
+    /// Slots the atlas has now (the pages it has grown to).
     pub fn capacity(&self) -> usize {
-        self.capacity
+        self.pages * self.page_slots
+    }
+
+    /// Pages the atlas has now: the texture must have at least this many layers before the writes are performed.
+    pub fn pages(&self) -> usize {
+        self.pages
+    }
+
+    pub fn page_slots(&self) -> usize {
+        self.page_slots
     }
 
     /// Batches not yet in the view: being assembled, queued or being written.
@@ -205,12 +236,18 @@ impl TileSync {
         }
         self.visible = rect;
         self.clock += 1;
-        self.declined.clear();
+        self.refused.clear();
         for (key, entry) in self.resident.iter_mut() {
             if rect.contains(key.0, key.1) {
                 entry.used = self.clock;
             }
         }
+    }
+
+    /// Gives a slot back. A refusal may have been for want of it, so refused tiles are asked for again.
+    fn release_slot(&mut self, slot: u32) {
+        self.free.push(slot);
+        self.refused.clear();
     }
 
     /// Tiles whose newest version the worker has: whatever this type has queued for them is older.
@@ -228,6 +265,7 @@ impl TileSync {
         for batch in self.pending.iter_mut() {
             strip(batch);
         }
+        let mut freed = Vec::new();
         if let Some(staging) = self.staging.as_mut() {
             // Tiles not yet placed go; placed ones give their new slot back (the flip skips them).
             let tail = staging.batch.tiles.split_off(staging.next);
@@ -237,7 +275,7 @@ impl TileSync {
             let mut kept = Vec::new();
             for placed in std::mem::take(&mut staging.placed) {
                 if keys.contains(&placed.0) {
-                    self.free.push(placed.1);
+                    freed.push(placed.1);
                     removed += 1;
                 } else {
                     kept.push(placed);
@@ -245,6 +283,14 @@ impl TileSync {
             }
             staging.placed = kept;
         }
+        for slot in freed {
+            self.release_slot(slot);
+        }
+        // Fetched tiles still held are older than what arrived.
+        for held in self.held.iter_mut() {
+            held.tiles.retain(|(tx, ty, _, _)| !keys.contains(&(*tx, *ty)));
+        }
+        self.held.retain(|held| !held.tiles.is_empty());
         self.stats.superseded += removed;
     }
 
@@ -252,7 +298,7 @@ impl TileSync {
         self.supersede(tiles);
         for &key in tiles {
             self.empty.remove(&key);
-            self.declined.remove(&key);
+            self.refused.remove(&key);
             if (self.resident.contains_key(&key) || self.visible.contains(key.0, key.1)) && !self.stale.contains(&key) {
                 self.stale.push(key);
             }
@@ -276,10 +322,22 @@ impl TileSync {
         if self.staging.as_ref().is_some_and(|s| s.batch.stroke == stroke) {
             let staging = self.staging.take().expect("staging");
             for (_, slot, _) in staging.placed {
-                self.free.push(slot);
+                self.release_slot(slot);
             }
             ack(staging.batch.seq);
         }
+    }
+
+    /// The end of a stroke that was cancelled or failed: its preview and queued batches go, and the tiles it had reached (some of
+    /// its batches may be in the view) are given back to the cel's own pixels.
+    fn stroke_discarded(&mut self, stroke: u64, restore: &[(i64, i64)], ledger: &mut WetLedger, ack: &mut dyn FnMut(u64)) {
+        ledger.stroke_dropped(stroke);
+        self.drop_pending_of(stroke, ack);
+        if self.anchor.is_some_and(|a| a.0 == stroke) {
+            self.anchor = None;
+        }
+        self.mark_changed(restore);
+        self.release_held();
     }
 
     /// Takes one reply of the worker.
@@ -319,30 +377,29 @@ impl TileSync {
                     self.anchor = None;
                 }
             }
-            Reply::Failed { stroke, .. } => {
-                ledger.stroke_dropped(stroke);
-                self.drop_pending_of(stroke, ack);
-                if self.anchor.is_some_and(|a| a.0 == stroke) {
-                    self.anchor = None;
-                }
-            }
-            Reply::Cancelled { stroke, restore, .. } => {
-                ledger.stroke_dropped(stroke);
-                self.drop_pending_of(stroke, ack);
-                if self.anchor.is_some_and(|a| a.0 == stroke) {
-                    self.anchor = None;
-                }
-                self.mark_changed(&restore);
-            }
+            Reply::Failed { stroke, restore, .. } => self.stroke_discarded(stroke, &restore, ledger, ack),
+            Reply::Cancelled { stroke, restore, .. } => self.stroke_discarded(stroke, &restore, ledger, ack),
             Reply::Changed { tiles, .. } => self.mark_changed(&tiles),
-            Reply::Pixels { tiles } => {
+            Reply::Pixels { tiles, upto } => {
                 let keys: Vec<(i64, i64)> = tiles.iter().map(|t| (t.0, t.1)).collect();
                 self.supersede(&keys);
-                for (tx, ty, pixels, _) in tiles {
-                    self.install_fetched((tx, ty), pixels);
-                }
+                self.held.push(Held { upto, tiles });
+                self.release_held();
             }
             Reply::Snapshot { .. } | Reply::Pong { .. } => {}
+        }
+    }
+
+    /// Installs the fetched tiles whose batches are all in the view: a tile of the open stroke holds the ink of every batch up to
+    /// `upto`, and while any of them is still to appear the preview shows it, so the tile would paint it twice.
+    fn release_held(&mut self) {
+        let waiting = self.waiting_seq();
+        let (ready, kept): (Vec<Held>, Vec<Held>) = std::mem::take(&mut self.held).into_iter().partition(|held| held.upto == 0 || waiting.is_none_or(|w| held.upto < w));
+        self.held = kept;
+        for held in ready {
+            for (tx, ty, pixels, _) in held.tiles {
+                self.install_fetched((tx, ty), pixels);
+            }
         }
     }
 
@@ -351,7 +408,7 @@ impl TileSync {
         match pixels {
             None => {
                 if let Some(entry) = self.resident.remove(&key) {
-                    self.free.push(entry.slot);
+                    self.release_slot(entry.slot);
                     self.dirty = true;
                 }
                 if self.empty.len() >= EMPTY_MEMORY {
@@ -362,14 +419,14 @@ impl TileSync {
             Some(pixels) => {
                 self.empty.remove(&key);
                 let allocate = self.visible.contains(key.0, key.1);
-                match self.slot_for(key, allocate, None) {
+                match self.slot_for(key, allocate) {
                     Some(slot) => {
                         self.writes.push(Write { slot, tx: key.0, ty: key.1, pixels });
                         self.stats.fetched += 1;
                     }
                     None if allocate => {
-                        self.declined.insert(key);
-                        self.stats.unshown += 1;
+                        self.refused.insert(key);
+                        self.stats.refused += 1;
                     }
                     None => {}
                 }
@@ -377,10 +434,8 @@ impl TileSync {
         }
     }
 
-    /// A slot for a tile: its own if resident, else a free one, else one taken from the least recently used tile outside the
-    /// view. With `priority` (the keys of a stroke batch) the least recently used visible tile outside those keys may go too.
-    /// `None` when no slot can be had.
-    fn slot_for(&mut self, key: (i64, i64), allocate: bool, priority: Option<&HashSet<(i64, i64)>>) -> Option<u32> {
+    /// A slot for a tile: its own if resident, else a new one (see [`new_slot`](Self::new_slot)) when `allocate`.
+    fn slot_for(&mut self, key: (i64, i64), allocate: bool) -> Option<u32> {
         if let Some(entry) = self.resident.get_mut(&key) {
             entry.used = self.clock;
             return Some(entry.slot);
@@ -388,29 +443,51 @@ impl TileSync {
         if !allocate {
             return None;
         }
-        let slot = self.new_slot(priority)?;
+        let slot = self.new_slot()?;
         self.resident.insert(key, Entry { slot, used: self.clock });
         self.dirty = true;
         Some(slot)
     }
 
-    /// A free slot, or one freed by evicting (see [`slot_for`](Self::slot_for)).
-    fn new_slot(&mut self, priority: Option<&HashSet<(i64, i64)>>) -> Option<u32> {
+    /// A free slot; else the slot of the least recently used tile out of view that no staged batch is about to replace; else a new
+    /// page, up to the hard budget. `None` above it: the memory is full. A tile the view shows is never evicted.
+    fn new_slot(&mut self) -> Option<u32> {
         if let Some(slot) = self.free.pop() {
             return Some(slot);
         }
-        let outside = self.resident.iter().filter(|(k, _)| !self.visible.contains(k.0, k.1)).min_by_key(|(k, e)| (self.visible.near(k.0, k.1), e.used)).map(|(k, _)| *k);
-        let victim = outside.or_else(|| priority.and_then(|keys| self.resident.iter().filter(|(k, _)| !keys.contains(*k)).min_by_key(|(_, e)| e.used).map(|(k, _)| *k)))?;
-        let entry = self.resident.remove(&victim).expect("the victim is resident");
-        self.stats.evicted += 1;
-        self.dirty = true;
-        Some(entry.slot)
+        let protect = self.staging.as_ref().map(|s| Arc::clone(&s.keys));
+        let victim = self
+            .resident
+            .iter()
+            .filter(|(k, _)| !self.visible.contains(k.0, k.1) && !protect.as_ref().is_some_and(|keys| keys.contains(*k)))
+            .min_by_key(|(k, e)| (self.visible.near(k.0, k.1), e.used))
+            .map(|(k, _)| *k);
+        if let Some(victim) = victim {
+            let entry = self.resident.remove(&victim).expect("the victim is resident");
+            self.stats.evicted += 1;
+            self.dirty = true;
+            return Some(entry.slot);
+        }
+        if self.pages < self.max_pages {
+            let first = (self.pages * self.page_slots) as u32;
+            self.pages += 1;
+            self.stats.pages_grown += 1;
+            self.free.extend((first..first + self.page_slots as u32).rev());
+            return self.free.pop();
+        }
+        None
     }
 
     /// Writes waiting batches into the atlas: at least one tile a call, then while the tiles placed stay within `max_tiles` and
     /// `out_of_time` says no. A batch goes into the view in the call that places its last tile, and is acknowledged then.
     /// Returns how many tiles were written.
     pub fn install(&mut self, max_tiles: usize, out_of_time: &mut dyn FnMut() -> bool, ack: &mut dyn FnMut(u64)) -> usize {
+        let written = self.install_batches(max_tiles, out_of_time, ack);
+        self.release_held();
+        written
+    }
+
+    fn install_batches(&mut self, max_tiles: usize, out_of_time: &mut dyn FnMut() -> bool, ack: &mut dyn FnMut(u64)) -> usize {
         let mut written = 0;
         loop {
             if self.staging.is_none() {
@@ -437,25 +514,18 @@ impl TileSync {
                     (tile.0, tile.1, std::mem::take(&mut tile.2))
                 };
                 let key = (tx, ty);
-                let keys = Arc::clone(&self.staging.as_ref().expect("staging").keys);
                 self.empty.remove(&key);
                 if !self.visible.contains(tx, ty) && !self.resident.contains_key(&key) {
                     continue;
                 }
-                // A new slot, so the tile appears with the whole batch; in place (not atomic) only when there is no spare slot.
-                let replaced = self.resident.get(&key).map(|e| e.slot);
-                let fresh = self.new_slot_for_stage(&keys);
-                match (fresh, replaced) {
-                    (Some(slot), old) => {
-                        self.writes.push(Write { slot, tx, ty, pixels });
-                        self.staging.as_mut().expect("staging").placed.push((key, slot, old));
-                    }
-                    (None, Some(slot)) => self.writes.push(Write { slot, tx, ty, pixels }),
-                    (None, None) => {
-                        self.stats.unshown += 1;
-                        continue;
-                    }
-                }
+                // Always a new slot, so the tile appears with the whole batch and the old pixels show until then.
+                let Some(slot) = self.new_slot() else {
+                    self.stats.refused += 1;
+                    continue;
+                };
+                let old = self.resident.get(&key).map(|e| e.slot);
+                self.writes.push(Write { slot, tx, ty, pixels });
+                self.staging.as_mut().expect("staging").placed.push((key, slot, old));
                 written += 1;
                 self.stats.installed_tiles += 1;
             }
@@ -463,7 +533,7 @@ impl TileSync {
             let staging = self.staging.take().expect("staging");
             for (key, slot, old) in staging.placed {
                 if let Some(old) = old {
-                    self.free.push(old);
+                    self.release_slot(old);
                 }
                 self.resident.insert(key, Entry { slot, used: self.clock });
             }
@@ -474,13 +544,8 @@ impl TileSync {
         written
     }
 
-    /// A slot for a staged tile; the victims never include a tile of the batch.
-    fn new_slot_for_stage(&mut self, keys: &HashSet<(i64, i64)>) -> Option<u32> {
-        self.new_slot(Some(keys))
-    }
-
     /// The tiles to ask the worker for now: changed ones that are resident or shown, then shown ones that are neither resident,
-    /// asked for, declined nor known to be empty, at most `limit` (and [`FETCH_LIMIT`]).
+    /// asked for, refused nor known to be empty, at most `limit` (and [`FETCH_LIMIT`]).
     pub fn plan_fetch(&mut self, limit: usize) -> Vec<(i64, i64)> {
         let limit = limit.min(FETCH_LIMIT);
         let mut out: Vec<(i64, i64)> = Vec::new();
@@ -494,7 +559,7 @@ impl TileSync {
             'scan: for ty in self.visible.y0..=self.visible.y1 {
                 for tx in self.visible.x0..=self.visible.x1 {
                     let key = (tx, ty);
-                    if !self.resident.contains_key(&key) && !self.requested.contains(&key) && !self.empty.contains(&key) && !self.declined.contains(&key) && !out.contains(&key) {
+                    if !self.resident.contains_key(&key) && !self.requested.contains(&key) && !self.empty.contains(&key) && !self.refused.contains(&key) && !out.contains(&key) {
                         out.push(key);
                         if out.len() >= limit {
                             break 'scan;
@@ -507,6 +572,16 @@ impl TileSync {
             self.requested.insert(*key);
         }
         out
+    }
+
+    /// The worker refused the request for these tiles (too many waiting): they were never asked for, so they are asked for again.
+    pub fn fetch_refused(&mut self, keys: &[(i64, i64)]) {
+        for key in keys {
+            self.requested.remove(key);
+            if !self.stale.contains(key) {
+                self.stale.push(*key);
+            }
+        }
     }
 }
 

@@ -136,6 +136,28 @@ impl Pad {
     }
 }
 
+/// Sends the commands of one update to the worker, in order. A stroke is made known to the wet ink's ledger only once the worker has
+/// taken its press, so a press the worker refused leaves nothing behind. Returns the stroke the worker was too far behind to take
+/// (its press, or a sample of it), if any.
+fn send_commands(core: &PadCore, commands: &mut Vec<StrokeCommand>, begins: &[(u64, bool)], json: &Arc<str>) -> Option<u64> {
+    let mut refused = None;
+    for command in commands.drain(..) {
+        let (id, begun) = match &command {
+            StrokeCommand::Sample { id, .. } => (Some(*id), None),
+            StrokeCommand::Begin { id, .. } => (Some(*id), begins.iter().find(|b| b.0 == *id).map(|b| b.1)),
+            _ => (None, None),
+        };
+        if core.worker.command(command, json) {
+            if let (Some(id), Some(eligible)) = (id, begun) {
+                core.with_ledger(|ledger| ledger.stroke_started(id, eligible));
+            }
+        } else {
+            refused = id;
+        }
+    }
+    refused
+}
+
 impl<Message> shader::Program<Message> for Pad {
     type State = PadState;
     type Primitive = gpu::InkPrimitive;
@@ -158,6 +180,8 @@ impl<Message> shader::Program<Message> for Pad {
         let switches = self.core.switches();
         let mapping_now = self.mapping(bounds);
         let scale = self.core.scale() as f64;
+        // The strokes this call begins, and whether each may be previewed: the ledger hears of a stroke only once the worker has taken it.
+        let mut begins: Vec<(u64, bool)> = Vec::new();
         self.core.with_inspector(|inspector| {
             for input in &events {
                 self.note(inspector, state, input, started);
@@ -183,7 +207,7 @@ impl<Message> shader::Program<Message> for Pad {
                             state.brush_json = Some(brush.to_json());
                             state.stroke_id = *id;
                             state.eligible = brush.wet_eligible(*erase) && switches.wet_ink;
-                            self.core.with_ledger(|ledger| ledger.stroke_started(*id, state.eligible));
+                            begins.push((*id, state.eligible));
                             self.clear_live(state);
                         }
                         StrokeCommand::Sample { x, y, time_ms, .. } => {
@@ -203,20 +227,17 @@ impl<Message> shader::Program<Message> for Pad {
         });
         // The commands reach the worker in order, after the bookkeeping.
         let json = state.brush_json.clone().unwrap_or(json);
-        let mut refused_stroke = None;
-        for command in commands.drain(..) {
-            let id = if let StrokeCommand::Sample { id, .. } | StrokeCommand::Begin { id, .. } = &command { Some(*id) } else { None };
-            if !self.core.worker.command(command, &json) {
-                refused_stroke = id;
-            }
-        }
-        // The worker is too far behind to take this stroke (or more of it): it ends here and keeps what it has.
-        if refused_stroke.is_some() {
+        let refused_stroke = send_commands(&self.core, &mut commands, &begins, &json);
+        // The worker is too far behind to take this stroke (or more of it): it ends here and keeps what it has, and the raw preview
+        // of that stroke (by identity, not another's) goes with it.
+        if let Some(id) = refused_stroke {
             let mut ending = Vec::new();
             state.input.finish(&mut ending);
             for command in ending {
                 self.core.worker.command(command, &json);
             }
+            state.recent.clear();
+            self.core.clear_live_of(id);
             self.core.with_inspector(|inspector| inspector.worker_refusals += 1);
         }
         let gpu = self.core.gpu_stats();
@@ -237,5 +258,47 @@ impl<Message> shader::Program<Message> for Pad {
 
     fn mouse_interaction(&self, _state: &PadState, bounds: Rectangle, cursor: mouse::Cursor) -> mouse::Interaction {
         if cursor.is_over(bounds) { mouse::Interaction::Crosshair } else { mouse::Interaction::default() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use styk_core::drawing::mapping::Mapping;
+    use styk_core::drawing::worker::{MAX_OPEN, Worker};
+    use styk_services::input::{InputQueue, Modifiers};
+    use styk_services::{Clock, FixedClock};
+
+    fn core() -> Arc<PadCore> {
+        let clock: Arc<dyn Clock> = Arc::new(FixedClock::new());
+        PadCore::new(InputQueue::new(), Worker::spawn(Vec::new(), Arc::new(|| {})), clock)
+    }
+
+    fn begin(id: u64) -> StrokeCommand {
+        StrokeCommand::Begin { id, erase: false, mapping: Mapping::default(), modifiers: Modifiers::NONE }
+    }
+
+    // Finding 7 of the second re-check: a refused press must not leave a ledger entry or a raw preview behind.
+    #[test]
+    fn a_press_the_worker_refuses_leaves_nothing_in_the_ledger_and_clears_only_its_own_preview() {
+        let core = core();
+        let json: Arc<str> = BrushConfig::default().to_json().into();
+        for id in 1..=MAX_OPEN as u64 {
+            let mut commands = vec![begin(id)];
+            assert_eq!(send_commands(&core, &mut commands, &[(id, true)], &json), None);
+            assert!(core.with_ledger(|l| l.is_stroke_open(id)));
+        }
+        // Every further press is refused, and none of them is in the ledger.
+        for id in 100..200u64 {
+            let mut commands = vec![begin(id)];
+            assert_eq!(send_commands(&core, &mut commands, &[(id, true)], &json), Some(id));
+            assert!(!core.with_ledger(|l| l.is_stroke_open(id)), "stroke {id} was refused and must not be known to the ledger");
+        }
+        // The raw preview goes by identity: the refused stroke's, not an open stroke's.
+        core.with_live(|live| *live = Live { raw: Some((1.0, 1.0, 5)), show: true, stroke: 3, eligible: true, ..Live::default() });
+        core.clear_live_of(150);
+        assert_eq!(core.with_live(|live| live.stroke), 3, "another stroke's preview is left alone");
+        core.clear_live_of(3);
+        assert_eq!(core.with_live(|live| live.raw), None);
     }
 }
