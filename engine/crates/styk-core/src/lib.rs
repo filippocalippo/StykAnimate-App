@@ -10,6 +10,7 @@
 
 pub mod clipboard;
 pub mod controls;
+pub mod drawing;
 pub mod export;
 pub mod field;
 pub mod focus;

@@ -289,6 +289,9 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if launch.pen_lab {
+        return run_pen_lab(&launch, strategy);
+    }
     if strategy == Some(Strategy::Headless) {
         return run_headless(&launch, screen);
     }
@@ -347,6 +350,44 @@ fn watchdog(outcome: Arc<Mutex<Outcome>>) {
             std::process::exit(1);
         }
     });
+}
+
+/// The pen lab (developer build): a drawing pad on the real input path, and its self-test.
+#[cfg(feature = "devtools")]
+fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
+    use styk_devtools::pen_lab::{self, LabOptions, SelfTest};
+    if strategy == Some(Strategy::Headless) {
+        eprintln!("the pen lab needs a window; it cannot run headless");
+        return ExitCode::from(2);
+    }
+    let self_test = match launch.self_test.as_deref().map(SelfTest::parse).transpose() {
+        Ok(test) => test,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(2);
+        }
+    };
+    if let Some(dir) = &launch.out {
+        if let Err(error) = std::fs::create_dir_all(dir) {
+            eprintln!("{}: {error}", dir.display());
+            return ExitCode::from(2);
+        }
+    }
+    let options = LabOptions { window: window::settings(launch, strategy), scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test, out_dir: launch.out.clone(), input: styk_platform::input::host(), spawner: std::sync::Arc::new(styk_platform::spawn::ThreadSpawner) };
+    match pen_lab::run(options) {
+        Ok(0) => ExitCode::SUCCESS,
+        Ok(code) => ExitCode::from(code.clamp(1, 255) as u8),
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(not(feature = "devtools"))]
+fn run_pen_lab(_: &Launch, _: Option<Strategy>) -> ExitCode {
+    eprintln!("the pen lab is in the developer build (cargo build --features devtools)");
+    ExitCode::from(2)
 }
 
 /// An unattended run with no window: draws the interface offscreen into the `--screenshot` picture and exits.

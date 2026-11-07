@@ -3,7 +3,8 @@
 use std::path::PathBuf;
 
 /// The command line's shape, shown with every parse error.
-pub const USAGE: &str = "usage: stykanimate [file] [--automation <script>] [--screenshot <png>] [--screen <id>] [--input-check <json>] [--size WxH] [--scale <factor>]";
+pub const USAGE: &str = "usage: stykanimate [file] [--automation <script>] [--screenshot <png>] [--screen <id>] [--input-check <json>] [--size WxH] [--scale <factor>]
+       (developer build) stykanimate --pen-lab [--self-test standard|blocked|behaviour|stress[:seconds]] [--out <folder>]";
 
 /// What the command line asked for.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -24,6 +25,12 @@ pub struct Launch {
     pub size: Option<(u32, u32)>,
     /// The interface scale factor, instead of the display's.
     pub scale: Option<f64>,
+    /// Open the pen lab (developer build) instead of the application.
+    pub pen_lab: bool,
+    /// Run a pen-lab self-test: its kind and, optionally, its length in seconds.
+    pub self_test: Option<String>,
+    /// Where a self-test writes what it recorded.
+    pub out: Option<PathBuf>,
 }
 
 /// A command line that cannot be run.
@@ -60,6 +67,12 @@ impl Launch {
                 "--input-check" => launch.input_check = Some(PathBuf::from(value("--input-check")?)),
                 "--size" => launch.size = Some(parse_size(&value("--size")?)?),
                 "--scale" => launch.scale = Some(parse_scale(&value("--scale")?)?),
+                "--pen-lab" => launch.pen_lab = true,
+                "--self-test" => {
+                    launch.pen_lab = true;
+                    launch.self_test = Some(value("--self-test")?);
+                }
+                "--out" => launch.out = Some(PathBuf::from(value("--out")?)),
                 other if other.starts_with("--") => return Err(LaunchError(format!("unknown option {other}"))),
                 _ => {
                     if launch.file.is_some() {
@@ -110,6 +123,16 @@ mod tests {
         assert_eq!(launch.screenshot, Some(PathBuf::from("out.png")));
         assert_eq!(launch.size, Some((1280, 800)));
         assert_eq!(launch.scale, Some(1.5));
+    }
+
+    #[test]
+    fn the_pen_lab_and_its_self_test_are_read() {
+        let launch = parse(&["--pen-lab", "--out", "lab"]).unwrap();
+        assert!(launch.pen_lab && launch.self_test.is_none());
+        assert_eq!(launch.out, Some(PathBuf::from("lab")));
+        let launch = parse(&["--self-test=standard:5"]).unwrap();
+        assert!(launch.pen_lab, "a self-test opens the lab");
+        assert_eq!(launch.self_test.as_deref(), Some("standard:5"));
     }
 
     #[test]

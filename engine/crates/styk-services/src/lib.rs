@@ -10,10 +10,13 @@
 
 pub mod cancel;
 pub mod clock;
+pub mod input;
+pub mod spawn;
 pub mod video;
 pub mod video_limits;
 
 pub use cancel::Cancel;
 pub use clock::{Clock, FixedClock, SystemClock};
+pub use spawn::{Job, ManualSpawner, SpawnError, Spawner};
 
 pub mod fonts;

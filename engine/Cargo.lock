@@ -2687,7 +2687,12 @@ version = "0.1.0"
 dependencies = [
  "sha2",
  "styk-doc",
+ "styk-drawing",
+ "styk-edit",
+ "styk-formats",
+ "styk-math",
  "styk-services",
+ "styk-trace",
  "unicode-normalization",
  "zstd",
 ]
@@ -2705,7 +2710,14 @@ dependencies = [
 name = "styk-devtools"
 version = "0.1.0"
 dependencies = [
+ "iced",
+ "png",
+ "styk-core",
+ "styk-design",
+ "styk-platform",
+ "styk-services",
  "styk-trace",
+ "styk-ui",
 ]
 
 [[package]]
@@ -2874,6 +2886,9 @@ dependencies = [
 [[package]]
 name = "styk-services"
 version = "0.1.0"
+dependencies = [
+ "raw-window-handle",
+]
 
 [[package]]
 name = "styk-text-check"
@@ -2893,10 +2908,14 @@ version = "0.1.0"
 name = "styk-ui"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "iced",
  "png",
+ "pollster",
  "styk-core",
  "styk-design",
+ "styk-platform",
+ "styk-services",
 ]
 
 [[package]]

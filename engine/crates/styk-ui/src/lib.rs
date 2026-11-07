@@ -55,3 +55,5 @@ mod tests {
         assert_ne!(window_style(Theme::Dark).background_color, light.background_color);
     }
 }
+
+pub mod ink_pad;
