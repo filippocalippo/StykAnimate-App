@@ -150,8 +150,10 @@ impl GlyphMasks {
 
     /// Makes room for `pages` pages, keeping the masks already filled.
     fn grow(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, pages: u32) {
-        let layers = self.texture.depth_or_array_layers();
-        if pages <= layers && self.texture.width() == self.side {
+        // Layers carry over only between textures of one side: pages of 1,024 texels grown to dozens must not become dozens of 4,096.
+        let same_side = self.texture.width() == self.side;
+        let layers = if same_side { self.texture.depth_or_array_layers() } else { 0 };
+        if same_side && pages <= layers {
             return;
         }
         let (texture, view) = atlas(device, self.side, pages.max(layers));

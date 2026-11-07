@@ -18,3 +18,4 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 [dev-dependencies]
 styk-doc = { path = "../styk-doc" }
 pollster = "0.4"
+styk-alloc = { path = "../styk-alloc" }

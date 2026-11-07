@@ -353,6 +353,130 @@ fn a_frame_of_glyphs_is_the_same_alone_and_after_other_frames() {
     }
 }
 
+
+/// The drawing-cel fixture with `pictures` more pictures of 4,094² pixels: each takes a 4,096² page of its own, so the cel's page and
+/// theirs compete for the layers of an export that keeps two.
+fn cel_document(pictures: u32) -> Vec<u8> {
+    use base64::Engine as _;
+    let text = std::fs::read_to_string(repository("engine/crates/styk-eval/tests/fixtures/drawlist/drawing-cel.json")).unwrap();
+    let start = text.find("\"image_assets\":[").unwrap();
+    let end = start + text[start..].find("}],\"text_assets\"").unwrap() + 1;
+    let extra: String = (1..=pictures)
+        .map(|i| {
+            let mut png = Vec::new();
+            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(4094, 4094, image::Rgba([(i * 70) as u8, 255 - (i * 70) as u8, 90, 255])))
+                .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .unwrap();
+            let url = base64::engine::general_purpose::STANDARD.encode(png);
+            format!(
+                ",{{\"kind\":\"image\",\"asset_index\":{i},\"table_index\":{i},\"mime_type\":\"image/png\",\"width\":4094,\"height\":4094,\"data_url\":\"data:image/png;base64,{url}\",\"anchor_start\":{{\"x\":0,\"y\":0}},\"anchor_end\":{{\"x\":256,\"y\":0}},\"anchor_length\":256,\"anchor_angle_rad\":0,\"display_width\":300,\"display_height\":300}}"
+            )
+        })
+        .collect();
+    format!("{}{}{}", &text[..end], extra, &text[end..]).into_bytes()
+}
+
+/// A list that draws only `picture` of the document's images (a record naming its place, as the encoder writes one).
+fn picture_list(assets: &styk_eval::assets::Assets, picture: usize) -> std::sync::Arc<styk_draw::DrawList> {
+    use styk_draw::{DrawList, Group, Pass, Prim, K_IMAGE, NO_LAYER, NO_PAINT};
+    let entry = &assets.atlas[picture];
+    let prim = Prim { kind: K_IMAGE, group: 0, color: 0xffff_ffff, paint: NO_PAINT, a: [0.0, 0.0, 10.0, 0.0], b: [0.0, 0.0, entry.layer as f32, 0.0], c: entry.uv() };
+    let list = DrawList { prims: vec![prim], groups: vec![Group { parent: 0, depth: 0, opacity: 1.0, bounds: [0.0, 0.0, 960.0, 540.0], layer: NO_LAYER }], passes: vec![Pass { depth: 0, start: 0, end: 1 }], ..Default::default() };
+    std::sync::Arc::new(list)
+}
+
+/// The frame of the cel in a document of several pages, exported in two layers: two pictures take both, then the cel's page takes the layer
+/// of the one shown longest ago (which holds that picture's pixels), then the cel is decoded `refused` (the memory cannot hold its work) or
+/// not. With `again`, the pictures come back (the cel's page leaves) and the cel is asked for a second time, with the memory as it was.
+fn cel_frame_in_two_layers(gpu: &Gpu, refused: bool, again: bool) -> Vec<u8> {
+    let engine = Engine::new(clock, Budgets::for_device(None));
+    engine.open(&cel_document(3), "json", "test").unwrap();
+    let frames = engine.export_frames(0).unwrap();
+    let generation = frames.generation().clone();
+    let settings = Settings::new(960, 540, Smoothing::Edges, MAX_PIXELS).unwrap();
+    let mut exporter = GpuExport::new(&gpu.device, &gpu.queue, settings, styk_export::TILE_SIDE);
+    let mut resident = styk_export::resident::Resident::begin_with_layers(&mut exporter, &frames, 2);
+    let cel_pages: Vec<u32> = generation.assets.drawing.iter().filter(|entry| entry.valid).map(|entry| entry.layer).collect();
+    let mut seen = Vec::new();
+    let pictures: Vec<usize> = (0..generation.assets.atlas.len())
+        .filter(|&index| {
+            let entry = &generation.assets.atlas[index];
+            let fresh = entry.valid && entry.w > 4000 && !cel_pages.contains(&entry.layer) && !seen.contains(&entry.layer);
+            if fresh {
+                seen.push(entry.layer);
+            }
+            fresh
+        })
+        .collect();
+    assert!(pictures.len() >= 2, "two pictures on pages of their own, apart from the cel's: {pictures:?} {cel_pages:?}");
+    let cel = loop {
+        resident.upload(&mut exporter, &frames, styk_export::resident::UPLOAD_BYTES);
+        if let Some(frame) = frames.take(0) {
+            break frame;
+        }
+        assert!(engine.step(), "tick 0 never came");
+    };
+    let shown = |index: usize| picture_list(&generation.assets, pictures[index]);
+    let mut settle = |exporter: &mut GpuExport, list: &std::sync::Arc<styk_draw::DrawList>, limit: Option<usize>| {
+        for _ in 0..4000 {
+            if resident.ready(exporter, &frames, list, None, 0) {
+                return;
+            }
+            match limit {
+                Some(bytes) => styk_alloc::with_limit(bytes, || engine.step()),
+                None => engine.step(),
+            };
+        }
+        panic!("the frame never became ready");
+    };
+    settle(&mut exporter, &shown(0), None);
+    settle(&mut exporter, &shown(1), None);
+    settle(&mut exporter, &cel.list, refused.then_some(1024));
+    if again {
+        settle(&mut exporter, &shown(0), None);
+        settle(&mut exporter, &shown(1), None);
+        settle(&mut exporter, &cel.list, None);
+    }
+    exporter.frame_blocking(&generation.prepared.doc, &cel.list, cel.camera.as_ref(), false).unwrap()
+}
+
+/// A drawing cel the engine refused to decode (its memory could not hold the work) is not shown, as a picture that cannot be decoded is not:
+/// its places in the texture are written over, because the layer its page took held another page's pixels (a frame was drawn from the
+/// stale texels). Asked for again once the memory is there, the cel is drawn as if it had never failed.
+#[test]
+fn a_cel_the_engine_refused_to_decode_is_blank_not_the_pixels_its_layer_held_before() {
+    let Some(gpu) = gpu() else {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    };
+    let shown = cel_frame_in_two_layers(&gpu, false, false);
+    // The same frame with nothing in the texture: what an export that could not decode the cel draws.
+    let blank = {
+        let engine = Engine::new(clock, Budgets::for_device(None));
+        engine.open(&cel_document(3), "json", "test").unwrap();
+        let frames = engine.export_frames(0).unwrap();
+        let generation = frames.generation().clone();
+        let settings = Settings::new(960, 540, Smoothing::Edges, MAX_PIXELS).unwrap();
+        let mut exporter = GpuExport::new(&gpu.device, &gpu.queue, settings, styk_export::TILE_SIDE);
+        exporter.prepare_sprites(generation.lineage, &generation.assets);
+        frames.decode_cels();
+        let frame = loop {
+            if let Some(frame) = frames.take(0) {
+                break frame;
+            }
+            assert!(engine.step(), "tick 0 never came");
+        };
+        exporter.frame_blocking(&generation.prepared.doc, &frame.list, frame.camera.as_ref(), false).unwrap()
+    };
+    assert!(differing(&shown, &blank).0 > 100, "the cel is drawn when it is decoded");
+    let refused = cel_frame_in_two_layers(&gpu, true, false);
+    let (count, largest) = differing(&refused, &blank);
+    assert_eq!(count, 0, "a refused cel draws nothing, not its layer's earlier pixels: {count} pixels differ, by up to {largest}");
+    let again = cel_frame_in_two_layers(&gpu, true, true);
+    let (count, largest) = differing(&again, &shown);
+    assert_eq!(count, 0, "asked for again with the memory there, the cel is drawn whole: {count} pixels differ, by up to {largest}");
+}
+
 /// Evaluation, not drawing: the draw list of a tick after the ticks before it against its draw list in a fresh engine.
 /// Printed, not asserted: what it finds is in the notes of docs/engine/rendering.md.
 #[test]
@@ -400,7 +524,7 @@ fn pictures_asked_for_as_frames_need_them_draw_the_frames_the_whole_layout_draws
         ("engine/crates/styk-eval/tests/fixtures/clip-paint/image-identity.json", 3),
         ("engine/crates/styk-eval/tests/fixtures/drawlist/drawing-cel.json", 3),
     ] {
-        let settings = Settings::new(640, 360, Smoothing::Edges, MAX_PIXELS).unwrap();
+        let settings = Settings::new(960, 540, Smoothing::Edges, MAX_PIXELS).unwrap();
         let (_, whole) = open(path);
         let last = last.min(whole.ticks() - 1);
         let expected: Vec<Vec<u8>> = (0..=last).map(|tick| export(&gpu, &open(path).1, settings, styk_export::TILE_SIDE, tick, false).0).collect();

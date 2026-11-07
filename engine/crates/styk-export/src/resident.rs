@@ -51,16 +51,19 @@ struct Cels {
     pages: HashMap<usize, Vec<u32>>,
     /// The cels with tiles on each page.
     on_page: HashMap<u32, Vec<usize>>,
+    /// The slots of each cel's tiles, every level.
+    slots_of: HashMap<usize, Vec<u32>>,
 }
 
 impl Cels {
     fn new(assets: &Assets) -> Cels {
-        let mut cels = Cels { slots: HashMap::new(), owner: vec![usize::MAX; assets.drawing.len()], pages: HashMap::new(), on_page: HashMap::new() };
+        let mut cels = Cels { slots: HashMap::new(), owner: vec![usize::MAX; assets.drawing.len()], pages: HashMap::new(), on_page: HashMap::new(), slots_of: HashMap::new() };
         for (index, entry) in assets.drawing.iter().enumerate().filter(|(_, entry)| entry.valid) {
             cels.slots.insert(place(entry.layer, entry.x, entry.y), index as u32);
         }
         for (&cel, (tiles, starts)) in &assets.cels {
             let mut pages: Vec<u32> = Vec::new();
+            let mut slots: Vec<u32> = Vec::new();
             for (level, drawn) in tiles.levels.iter().enumerate() {
                 let Some(&start) = starts.get(level) else { continue };
                 for i in 0..drawn.len() {
@@ -68,6 +71,7 @@ impl Cels {
                     if let Some(owner) = cels.owner.get_mut(slot) {
                         *owner = cel;
                     }
+                    slots.push(slot as u32);
                     if let Some(entry) = assets.drawing.get(slot).filter(|entry| entry.valid) {
                         pages.push(entry.layer);
                     }
@@ -79,6 +83,7 @@ impl Cels {
                 cels.on_page.entry(page).or_default().push(cel);
             }
             cels.pages.insert(cel, pages);
+            cels.slots_of.insert(cel, slots);
         }
         cels
     }
@@ -130,12 +135,17 @@ impl Resident {
     /// Lays `gpu`'s sprite texture out for the document `frames` exports: two layers, none of the document's pages mapped. The
     /// engine decodes the drawing cels once, for the bounds every frame is made from, and nothing else until a frame needs it.
     pub fn begin(gpu: &mut GpuExport, frames: &ExportFrames) -> Resident {
+        Resident::begin_with_layers(gpu, frames, KEPT_LAYERS)
+    }
+
+    /// [`Resident::begin`] with a working set of `layers` pages (a smaller one makes pages leave sooner).
+    pub fn begin_with_layers(gpu: &mut GpuExport, frames: &ExportFrames, layers: u32) -> Resident {
         let generation = frames.generation().clone();
         let assets = &generation.assets;
         gpu.prepare_sprites_resident(generation.lineage, assets);
         frames.decode_cels();
         Resident {
-            residency: Residency::new(assets.pages, KEPT_LAYERS),
+            residency: Residency::new(assets.pages, layers),
             index: PlaceIndex::new(assets),
             cels: Cels::new(assets),
             uploaded: HashSet::new(),
@@ -209,8 +219,14 @@ impl Resident {
             any = true;
         }
         for (cel, count) in frames.take_landed_cels() {
-            if self.cels_asked.contains(&cel) {
-                self.cel_expected.insert(cel, count);
+            if !self.cels_asked.contains(&cel) {
+                continue;
+            }
+            self.cel_expected.insert(cel, count);
+            if count == 0 {
+                // A cel with tiles that came with none: the engine refused to decode it (the memory could not hold its work). It is not
+                // shown, as a picture that cannot be decoded is not, so its places must not show what their layer held before.
+                any |= self.clear_cel(gpu, assets, cel);
             }
         }
         // A cel is in when every tile of it that was to come has been put in the texture and every page of it still has its layer.
@@ -227,6 +243,19 @@ impl Resident {
             gpu.flush_sprites();
         }
         frames.images_left()
+    }
+
+    /// Writes transparent texels over the places of the tiles of `cel`, whose pages hold what their layers held before. Returns
+    /// whether it wrote any.
+    fn clear_cel(&mut self, gpu: &mut GpuExport, assets: &Assets, cel: usize) -> bool {
+        let slots = self.cels.slots_of.get(&cel).map(Vec::as_slice).unwrap_or_default();
+        let side = styk_eval::drawing::TILE + 2 * styk_eval::drawing::BORDER;
+        let mut blank = styk_eval::assets::DecodedImage { index: 0, drawing: true, soft: false, width: side, height: side, rgba: vec![0; side as usize * side as usize * 4] };
+        for &slot in slots {
+            blank.index = slot;
+            gpu.upload_images(assets, [&blank]);
+        }
+        !slots.is_empty()
     }
 
     /// Gives the pages of `wanted` pictures and `cels` layers and asks the engine for what is not in or on its way. `keep` holds the

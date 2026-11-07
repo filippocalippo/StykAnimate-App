@@ -1008,7 +1008,7 @@ it only for a frame that draws from more pages) when a picture or a cel on it is
 and, ahead of them, of the next six, and the page shown longest ago leaves when another is wanted (`styk_engine::Residency`).
 **A frame is drawn only when every picture and every cel it shows is in the texture (and a picture in the picture table)** (`ExportRenderer::pictures_ready`, which the
 worker waits on before it draws a frame, one drawn ahead included): there is no soft atlas, a frame whose pictures are not in waits, and one
-drawn short of a picture is impossible. A picture the engine cannot decode is not waited for. The frames are the whole layout's to the byte
+drawn short of a picture is impossible. A picture the engine cannot decode is not waited for, and a drawing cel it refuses to decode (the memory cannot hold its work) is not shown: its tiles are written over with transparency, because the layer its page took holds another page's pixels (`Resident::upload`, `clear_cel`). The frames are the whole layout's to the byte
 (the hashes of 40 frames of tdd2 and 41 of the user file at 4320×2160, the whole layout against the resident one, are equal; the Rust
 test draws three fixtures both ways). Measured 2026-11-02, release engine, on a machine other jobs were using (directional): a PNG of
 one frame of tdd2 at 4K took 0.6–1.0 s in two runs (a third took 14.7 s, which nothing measured explains) instead of 2.0–2.4, and added 0.3 GiB instead of 1.7 (the frame draws from no picture: its first
@@ -1036,7 +1036,7 @@ edges of their glyphs; the draw lists were equal and dropping the glyph records 
 atlas and sampled at `(place + position in the mask) / atlas side` (prim.wgsl, `K_GLYPH`): the sum rounds with the size of the place, the
 place depends on which masks were placed before it, and the bilinear weights of an edge pixel move by a level. An export places each
 frame's masks afresh and sizes the atlas pages by that frame's largest mask (`GlyphMasks::prepare`, `exact`), so a mask costs a fill
-each frame it is drawn (the stage keeps its masks). `a_frame_of_glyphs_is_the_same_alone_and_after_other_frames` (styk-export) draws
+each frame it is drawn (the stage keeps its masks). The atlas texture takes its layers over from the one before only when the side of its pages is the same: pages of 1,024 texels grown to dozens must not become dozens of pages of 4,096 (`GlyphMasks::grow`; 80 MiB against the 64 MiB budget). `a_frame_of_glyphs_is_the_same_alone_and_after_other_frames` (styk-export) draws
 three frames of generated glyphs in four orders against each frame drawn alone and fails without the change (19 pixels, up to five levels).
 
 **Cancellation and failure** (`--cancel`, `--integrity`): on Impact-FX-Fight.styk and TDD2 URIEL

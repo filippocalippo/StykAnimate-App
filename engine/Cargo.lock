@@ -1213,6 +1213,7 @@ dependencies = [
  "base64",
  "image",
  "pollster",
+ "styk-alloc",
  "styk-doc",
  "styk-draw",
  "styk-engine",
