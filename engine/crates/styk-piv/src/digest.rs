@@ -16,9 +16,18 @@ use styk_doc::{Obj, Shape, Value};
 use crate::ctx::Ctx;
 use crate::error::PyResult;
 use crate::piv::v5::hex;
-use crate::pyjson::{Origin, write_number, write_string_ascii};
+use crate::pyjson::{Origin, write_number, write_string_ascii, write_string_ascii_body};
 
-struct Emitter {
+/// Bytes of text that wait to be hashed before they are: the fingerprint holds a megabyte of text at most, however long a value is, and asks
+/// whether to stop each time.
+const PENDING: usize = 1 << 20;
+
+/// The longest piece of a long text or blob written before the pending text is hashed (a multiple of 3 bytes for a blob).
+const PIECE: usize = 192 * 1024;
+
+struct Emitter<'a> {
+    ctx: &'a Ctx<'a>,
+    hasher: Sha256,
     out: Vec<u8>,
     canonical: bool,
     origin: Origin,
@@ -26,7 +35,37 @@ struct Emitter {
     orders: HashMap<*const Shape, std::sync::Arc<[u32]>>,
 }
 
-impl Emitter {
+impl Emitter<'_> {
+    /// Hashes the text written so far and asks whether to stop.
+    fn flush(&mut self) -> PyResult<()> {
+        styk_doc::digest::update(&mut self.hasher, &self.out);
+        self.out.clear();
+        self.ctx.checkpoint()
+    }
+
+    /// Hashes the pending text once it is a megabyte.
+    #[inline]
+    fn room(&mut self) -> PyResult<()> {
+        if self.out.len() >= PENDING { self.flush() } else { Ok(()) }
+    }
+
+    /// A text with `ensure_ascii`, in pieces cut at characters.
+    fn string(&mut self, text: &str) -> PyResult<()> {
+        self.out.push(b'"');
+        let mut from = 0;
+        while from < text.len() {
+            let mut to = (from + PIECE).min(text.len());
+            while !text.is_char_boundary(to) {
+                to -= 1;
+            }
+            write_string_ascii_body(&text[from..to], &mut self.out);
+            from = to;
+            self.room()?;
+        }
+        self.out.push(b'"');
+        Ok(())
+    }
+
     fn sorted(&mut self, object: &Obj) -> std::sync::Arc<[u32]> {
         let shape = object.shape();
         self.orders
@@ -47,11 +86,14 @@ impl Emitter {
             Value::Bool(true) => self.out.extend_from_slice(b"true"),
             Value::Bool(false) => self.out.extend_from_slice(b"false"),
             Value::Num(n) => write_number(*n, self.canonical, self.origin, &mut self.out)?,
-            Value::Str(text) => write_string_ascii(text, &mut self.out),
+            Value::Str(text) => self.string(text)?,
             Value::Blob(blob) => {
                 write_string_ascii(&blob.prefix, &mut self.out);
                 self.out.pop();
-                base64_into(&blob.bytes, &mut self.out);
+                for piece in blob.bytes.chunks(PIECE) {
+                    base64_into(piece, &mut self.out);
+                    self.room()?;
+                }
                 self.out.push(b'"');
             }
             Value::Nums(numbers) => {
@@ -61,6 +103,7 @@ impl Emitter {
                         self.out.push(b',');
                     }
                     write_number(n, self.canonical, self.origin, &mut self.out)?;
+                    self.room()?;
                 }
                 self.out.push(b']');
             }
@@ -71,6 +114,7 @@ impl Emitter {
                         self.out.push(b',');
                     }
                     self.value(item, None)?;
+                    self.room()?;
                 }
                 self.out.push(b']');
             }
@@ -92,6 +136,7 @@ impl Emitter {
                     write_string_ascii(key, &mut self.out);
                     self.out.push(b':');
                     self.value(&values[at as usize], None)?;
+                    self.room()?;
                 }
                 self.out.push(b'}');
             }
@@ -123,6 +168,7 @@ impl Emitter {
                             self.out.push(b',');
                         }
                         self.value(item, Some("runtime_segments"))?;
+                        self.room()?;
                     }
                     self.out.push(b']');
                 }
@@ -141,12 +187,11 @@ impl Emitter {
 /// Python held them). `origin` says whether the document was decoded here or
 /// sent by a client, which decides how integers beyond 2^53 are spelled.
 pub(crate) fn document_digest(ctx: &Ctx<'_>, document: &Value, canonical: bool, origin: Origin) -> PyResult<String> {
-    let mut hasher = Sha256::new();
-    let mut emitter = Emitter { out: Vec::new(), canonical, origin, orders: HashMap::new() };
+    let mut emitter = Emitter { ctx, hasher: Sha256::new(), out: Vec::new(), canonical, origin, orders: HashMap::new() };
     let Some(root) = document.as_obj() else {
         emitter.value(document, None)?;
-        styk_doc::digest::update(&mut hasher, &emitter.out);
-        return Ok(hex(&hasher.finalize()));
+        emitter.flush()?;
+        return Ok(hex(&emitter.hasher.finalize()));
     };
     let mut keys: Vec<(&str, &Value)> = root.iter().map(|(key, value)| (&**key, value)).filter(|(key, _)| !matches!(*key, "_stykSource" | "_styk" | "_stykWeb")).collect();
     keys.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
@@ -162,25 +207,22 @@ pub(crate) fn document_digest(ctx: &Ctx<'_>, document: &Value, canonical: bool, 
             ("keyframes", Value::Arr(frames)) => {
                 emitter.out.push(b'[');
                 for (index, frame) in frames.iter().enumerate() {
-                    ctx.checkpoint()?;
                     if index > 0 {
                         emitter.out.push(b',');
                     }
                     emitter.frame(frame, canonical)?;
                     // One frame of text at a time: the fingerprint never holds a second document.
-                    styk_doc::digest::update(&mut hasher, &emitter.out);
-                    emitter.out.clear();
+                    emitter.flush()?;
                 }
                 emitter.out.push(b']');
             }
             (_, other) => emitter.value(other, None)?,
         }
-        styk_doc::digest::update(&mut hasher, &emitter.out);
-        emitter.out.clear();
+        emitter.flush()?;
     }
     emitter.out.push(b'}');
-    styk_doc::digest::update(&mut hasher, &emitter.out);
-    Ok(hex(&hasher.finalize()))
+    emitter.flush()?;
+    Ok(hex(&emitter.hasher.finalize()))
 }
 
 #[cfg(test)]

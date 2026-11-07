@@ -24,6 +24,7 @@ pub struct Input<R: text::Renderer> {
     placeholder: paragraph::Plain<R::Paragraph>,
     padding: Padding,
     multiline: Option<Wrapping>,
+    intake: Option<editor::Intake>,
 }
 
 pub struct Layout<'a> {
@@ -37,6 +38,7 @@ pub struct Layout<'a> {
     pub alignment: Alignment,
     pub multiline: Option<Wrapping>,
     pub is_secure: bool,
+    pub base_direction: editor::BaseDirection,
 }
 
 impl<R: text::Renderer> Input<R> {
@@ -48,7 +50,18 @@ impl<R: text::Renderer> Input<R> {
             placeholder: paragraph::Plain::default(),
             padding: Padding::default(),
             multiline: None,
+            intake: None,
         }
+    }
+
+    /// Sets what the input takes of typed, pasted and committed text before it edits (see [`editor::Intake`]).
+    pub fn set_intake(&mut self, intake: Option<editor::Intake>) {
+        self.intake = intake;
+    }
+
+    /// Whether an input method has a composition open in this input.
+    pub fn is_composing(&self) -> bool {
+        self.state.is_composing()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -99,6 +112,8 @@ impl<R: text::Renderer> Input<R> {
 
         let editor = self.secure.as_mut().unwrap_or(&mut self.editor);
 
+        editor.set_base_direction(layout.base_direction);
+
         editor.update(
             limits.bounds(),
             font,
@@ -118,7 +133,13 @@ impl<R: text::Renderer> Input<R> {
             line_height,
             bounds,
             size,
-            align_x: layout.alignment,
+            align_x: if layout.alignment == Alignment::Default
+                && layout.base_direction == editor::BaseDirection::RightToLeft
+            {
+                Alignment::Right
+            } else {
+                layout.alignment
+            },
             align_y: alignment::Vertical::Top,
             shaping: text::Shaping::Advanced,
             wrapping: text::Wrapping::None,
@@ -130,6 +151,26 @@ impl<R: text::Renderer> Input<R> {
     }
 
     pub fn update<Message>(
+        &mut self,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+        shell: &mut Shell<'_, Message>,
+        key_binding: impl Fn(editor::KeyPress) -> Option<editor::Binding<Message>>,
+    ) -> Option<Edit> {
+        let was_focused = self.state.is_focused();
+
+        let edit = self.update_inner(event, bounds, cursor, shell, key_binding);
+
+        if was_focused && !self.state.is_focused() {
+            // Leaving the field ends the typing group it was in.
+            self.editor.seal_history();
+        }
+
+        edit
+    }
+
+    fn update_inner<Message>(
         &mut self,
         event: &Event,
         bounds: Rectangle,
@@ -179,7 +220,7 @@ impl<R: text::Renderer> Input<R> {
                         has_pasted: is_paste,
                     });
                 }
-                editor::Update::Focus | editor::Update::InputMethod => {
+                editor::Update::Focus | editor::Update::InputMethod | editor::Update::Handled => {
                     shell.request_redraw();
                     shell.capture_event();
                 }
@@ -191,8 +232,8 @@ impl<R: text::Renderer> Input<R> {
                     shell.write_clipboard(text);
                     shell.capture_event();
                 }
-                editor::Update::Paste => {
-                    shell.read_clipboard(clipboard::Kind::Text);
+                editor::Update::Paste(id) => {
+                    shell.read_clipboard_as(clipboard::Kind::Text, id);
                     shell.capture_event();
                 }
                 editor::Update::RedrawAt(at) => {
@@ -227,6 +268,11 @@ impl<R: text::Renderer> Input<R> {
             .state
             .update(editor, event, bounds, self.padding, cursor, key_binding)?;
 
+        let update = match &self.intake {
+            Some(intake) => admit(intake, self.secure.as_ref().unwrap_or(&self.editor), update),
+            None => update,
+        };
+
         if let Some(secure) = &mut self.secure {
             fn apply_secure<Message>(
                 editor: &mut impl Editor,
@@ -238,6 +284,11 @@ impl<R: text::Renderer> Input<R> {
                         let action = match action {
                             editor::Action::Edit(editor::Edit::Insert(_)) => {
                                 editor::Action::Edit(editor::Edit::Insert(SECURE_CHAR))
+                            }
+                            editor::Action::Edit(editor::Edit::Type(text)) => {
+                                let text = protect(text, is_multiline);
+
+                                editor::Action::Edit(editor::Edit::Type(Arc::new(text)))
                             }
                             editor::Action::Edit(editor::Edit::Paste(text)) => {
                                 let text = protect(text, is_multiline);
@@ -359,10 +410,17 @@ impl<R: text::Renderer> Focusable for Input<R> {
 
     fn focus(&mut self) {
         self.state.focus();
+
+        // Focus given by an operation is focus from the keyboard (Tab, F6, a dialog opening): a one-line field then
+        // selects its text, as browsers do. A click does not come through here.
+        if self.multiline.is_none() && !self.editor.is_empty() {
+            self.editor.perform(editor::Action::SelectAll);
+        }
     }
 
     fn unfocus(&mut self) {
         self.state.unfocus();
+        self.editor.seal_history();
     }
 }
 
@@ -393,6 +451,105 @@ impl<R: text::Renderer> TextInput for Input<R> {
 
     fn select_range(&mut self, start: Position, end: Position) {
         self.editor.select_range(start, end);
+    }
+}
+
+/// Cuts the text of the edits in `update` to what `intake` takes. An edit that takes nothing disappears whole (no history
+/// entry, no shaping, no message); the event is still handled, so a refused key reaches nothing else. Typed text, a paste, an
+/// input method's commit and Enter all pass through here, with the editor's context, before anything is changed.
+fn admit<Message, E: Editor>(
+    intake: &editor::Intake,
+    editor: &E,
+    update: editor::Update<Message>,
+) -> editor::Update<Message> {
+    use editor::{Action, Edit as E_, Update};
+    use std::borrow::Cow;
+
+    match update {
+        Update::Action(Action::Edit(
+            edit @ (E_::Insert(_) | E_::Type(_) | E_::Paste(_) | E_::Enter),
+        )) => {
+            let room = room(editor, intake.tracks_units());
+
+            let (incoming, is_paste) = match &edit {
+                E_::Insert(c) => (Cow::Owned(c.to_string()), false),
+                E_::Type(text) => (Cow::Borrowed(text.as_str()), false),
+                E_::Paste(text) => (Cow::Borrowed(text.as_str()), true),
+                E_::Enter => (Cow::Borrowed("\n"), false),
+                _ => unreachable!("matched above"),
+            };
+
+            match intake.admit(&room, &incoming) {
+                Some(_) if matches!(edit, E_::Enter) => Update::Action(Action::Edit(E_::Enter)),
+                Some(taken) if is_paste => Update::Action(Action::Edit(E_::Paste(Arc::new(taken)))),
+                Some(taken) => Update::Action(Action::Edit(E_::Type(Arc::new(taken)))),
+                None => Update::Handled,
+            }
+        }
+        Update::Sequence(updates) => Update::Sequence(
+            updates
+                .into_iter()
+                .map(|update| admit(intake, editor, update))
+                .collect(),
+        ),
+        update => update,
+    }
+}
+
+/// What the editor tells an intake: its size, its selection and, if asked, the distinct UTF-16 units of the text that
+/// stays.
+fn room<E: Editor>(editor: &E, with_units: bool) -> editor::Room {
+    let cursor = editor.cursor();
+    let lines = editor.line_count();
+
+    let (start, end) = match cursor.selection {
+        Some(selection)
+            if (selection.line, selection.index) < (cursor.position.line, cursor.position.index) =>
+        {
+            (selection, cursor.position)
+        }
+        Some(selection) => (cursor.position, selection),
+        None => (cursor.position, cursor.position),
+    };
+
+    let selected = editor.copy().map_or(0, |selection| selection.chars().count());
+    let chars = editor
+        .lines()
+        .map(|line| line.text.chars().count())
+        .sum::<usize>()
+        + lines.saturating_sub(1);
+
+    let units = if with_units {
+        let mut units: Vec<u16> = Vec::new();
+
+        for (i, line) in editor.lines().enumerate() {
+            let text = line.text;
+
+            if i < start.line || i > end.line {
+                units.extend(text.encode_utf16());
+                continue;
+            }
+
+            if i == start.line {
+                units.extend(text.get(..start.index).unwrap_or_default().encode_utf16());
+            }
+
+            if i == end.line {
+                units.extend(text.get(end.index..).unwrap_or_default().encode_utf16());
+            }
+        }
+
+        units.sort_unstable();
+        units.dedup();
+        units
+    } else {
+        Vec::new()
+    };
+
+    editor::Room {
+        chars,
+        selected,
+        units,
     }
 }
 

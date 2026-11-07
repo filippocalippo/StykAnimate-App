@@ -6,6 +6,9 @@
 //!
 //! It depends on the core, the design system and iced, and on nothing that touches the operating system.
 
+pub mod component_sheet;
+pub mod screens;
+
 use iced::widget::{container, space};
 use iced::{Element, Fill, Widget, theme};
 use styk_design::Theme;
@@ -52,3 +55,5 @@ mod tests {
         assert_ne!(window_style(Theme::Dark).background_color, light.background_color);
     }
 }
+
+pub mod ink_pad;

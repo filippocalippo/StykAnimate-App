@@ -1,0 +1,676 @@
+{
+ "sources": {
+  "mono16-44k": "mono16-44k.wav",
+  "stereo16-48k": "stereo16-48k.wav",
+  "stereo24-96k-ext": "stereo24-96k-ext.wav",
+  "mono8-8k": "mono8-8k.wav",
+  "mono32i-22k": "mono32i-22k.wav",
+  "stereo-f32-edge": "stereo-f32-edge.wav",
+  "f32-one": "f32-one.wav",
+  "f32-tiny": "f32-tiny.wav",
+  "f32-minus-one": "f32-minus-one.wav"
+ },
+ "cases": [
+  {
+   "name": "mono16-44k-fades",
+   "start": 0,
+   "frames": 4800,
+   "clips": [
+    {
+     "assetId": "mono16-44k",
+     "start": 0.01,
+     "offset": 0.12,
+     "duration": 0.08,
+     "gain": 0.8,
+     "fadeIn": 0.02,
+     "fadeOut": 0.03
+    }
+   ],
+   "golden": "mono16-44k-fades.f32.wav"
+  },
+  {
+   "name": "stereo16-48k-overlap",
+   "start": 0,
+   "frames": 4800,
+   "clips": [
+    {
+     "assetId": "stereo16-48k",
+     "start": 0,
+     "offset": 0,
+     "duration": 0.1,
+     "gain": 0.5,
+     "fadeIn": 0,
+     "fadeOut": 0
+    },
+    {
+     "assetId": "stereo16-48k",
+     "start": 0.02,
+     "offset": 0.01,
+     "duration": 0.07,
+     "gain": 1.5,
+     "fadeIn": 0.01,
+     "fadeOut": 0
+    }
+   ],
+   "golden": "stereo16-48k-overlap.f32.wav"
+  },
+  {
+   "name": "stereo24-96k-extensible-seek",
+   "start": 480,
+   "frames": 4320,
+   "clips": [
+    {
+     "assetId": "stereo24-96k-ext",
+     "start": 0.0123,
+     "offset": 0.00777,
+     "duration": 0.0777,
+     "gain": 1.1,
+     "fadeIn": 0,
+     "fadeOut": 0.02
+    }
+   ],
+   "golden": "stereo24-96k-extensible-seek.f32.wav"
+  },
+  {
+   "name": "mono8-8k-saturates",
+   "start": 0,
+   "frames": 4800,
+   "clips": [
+    {
+     "assetId": "mono8-8k",
+     "start": 0.003,
+     "offset": 0,
+     "duration": 0.09,
+     "gain": 2,
+     "fadeIn": 0.05,
+     "fadeOut": 0.04
+    }
+   ],
+   "golden": "mono8-8k-saturates.f32.wav"
+  },
+  {
+   "name": "mono32i-22k",
+   "start": 0,
+   "frames": 4800,
+   "clips": [
+    {
+     "assetId": "mono32i-22k",
+     "start": 0,
+     "offset": 0.005,
+     "duration": 0.095,
+     "gain": 0.33,
+     "fadeIn": 0,
+     "fadeOut": 0
+    }
+   ],
+   "golden": "mono32i-22k.f32.wav"
+  },
+  {
+   "name": "float-edge-values",
+   "start": 0,
+   "frames": 2400,
+   "clips": [
+    {
+     "assetId": "stereo-f32-edge",
+     "start": 0,
+     "offset": 0,
+     "duration": 0.05,
+     "gain": 1,
+     "fadeIn": 0,
+     "fadeOut": 0
+    },
+    {
+     "assetId": "stereo-f32-edge",
+     "start": 0.01,
+     "offset": 0.002,
+     "duration": 0.03,
+     "gain": 0.5,
+     "fadeIn": 0,
+     "fadeOut": 0
+    }
+   ],
+   "golden": "float-edge-values.f32.wav"
+  },
+  {
+   "name": "three-clip-cancellation",
+   "start": 0,
+   "frames": 4800,
+   "clips": [
+    {
+     "assetId": "f32-one",
+     "start": 0.02,
+     "offset": 0,
+     "duration": 0.1,
+     "gain": 1,
+     "fadeIn": 0,
+     "fadeOut": 0
+    },
+    {
+     "assetId": "f32-tiny",
+     "start": 0,
+     "offset": 0,
+     "duration": 0.1,
+     "gain": 1,
+     "fadeIn": 0,
+     "fadeOut": 0
+    },
+    {
+     "assetId": "f32-minus-one",
+     "start": 0.01,
+     "offset": 0,
+     "duration": 0.1,
+     "gain": 1,
+     "fadeIn": 0,
+     "fadeOut": 0
+    }
+   ],
+   "golden": "three-clip-cancellation.f32.wav"
+  },
+  {
+   "name": "clip-outside-and-missing",
+   "start": 0,
+   "frames": 2400,
+   "clips": [
+    {
+     "assetId": "nope",
+     "start": 1,
+     "offset": 0,
+     "duration": 0.05,
+     "gain": 1,
+     "fadeIn": 0,
+     "fadeOut": 0
+    },
+    {
+     "assetId": "mono16-44k",
+     "start": 0,
+     "offset": 0,
+     "duration": 0.04,
+     "gain": 0.9,
+     "fadeIn": 0,
+     "fadeOut": 0
+    }
+   ],
+   "golden": "clip-outside-and-missing.f32.wav"
+  },
+  {
+   "name": "late-seek-and-tail",
+   "start": 22050,
+   "frames": 4800,
+   "clips": [
+    {
+     "assetId": "mono16-44k",
+     "start": 0,
+     "offset": 0,
+     "duration": 0.5,
+     "gain": 1,
+     "fadeIn": 0,
+     "fadeOut": 0
+    }
+   ],
+   "golden": "late-seek-and-tail.f32.wav"
+  },
+  {
+   "name": "fractional-times",
+   "start": 100,
+   "frames": 3000,
+   "clips": [
+    {
+     "assetId": "mono16-44k",
+     "start": 0.0003333,
+     "offset": 0.00021,
+     "duration": 0.05,
+     "gain": 1,
+     "fadeIn": 0.01,
+     "fadeOut": 0.01
+    }
+   ],
+   "golden": "fractional-times.f32.wav"
+  },
+  {
+   "name": "clip-on-sample-boundaries",
+   "start": 0,
+   "frames": 4800,
+   "clips": [
+    {
+     "assetId": "stereo16-48k",
+     "start": 0.0125,
+     "offset": 0.005,
+     "duration": 0.05,
+     "gain": 1,
+     "fadeIn": 0,
+     "fadeOut": 0
+    }
+   ],
+   "golden": "clip-on-sample-boundaries.f32.wav"
+  }
+ ],
+ "peaks": {
+  "mono16-44k": {
+   "duration": 0.5,
+   "frames": 22050,
+   "peaks": [
+    0.8836,
+    0.8902,
+    0.8956,
+    0.8928,
+    0.8941,
+    0.8861,
+    0.8852,
+    0.8916,
+    0.896,
+    0.8983,
+    0.8924,
+    0.8992,
+    0.8965,
+    0.8908,
+    0.8855,
+    0.8872,
+    0.895,
+    0.8934,
+    0.8949,
+    0.8892,
+    0.8831,
+    0.8907,
+    0.894,
+    0.8988,
+    0.8941,
+    0.8982,
+    0.8979,
+    0.8912,
+    0.8869,
+    0.8836,
+    0.8938,
+    0.8945,
+    0.895,
+    0.8917,
+    0.8807,
+    0.8893,
+    0.8914,
+    0.8986,
+    0.8963,
+    0.8966
+   ]
+  },
+  "stereo16-48k": {
+   "duration": 0.25,
+   "frames": 12000,
+   "peaks": [
+    0.8955,
+    0.8999,
+    0.8935,
+    0.8921,
+    0.8922,
+    0.8971,
+    0.8932,
+    0.8931,
+    0.8894,
+    0.8887,
+    0.8922,
+    0.8964,
+    0.8974,
+    0.8998,
+    0.8906,
+    0.8958,
+    0.8904,
+    0.8929,
+    0.8967,
+    0.8952
+   ]
+  },
+  "stereo24-96k-ext": {
+   "duration": 0.1,
+   "frames": 9600,
+   "peaks": [
+    0.8974,
+    0.8973,
+    0.8923,
+    0.8931,
+    0.8967,
+    0.8919,
+    0.8927,
+    0.8967
+   ]
+  },
+  "mono8-8k": {
+   "duration": 0.5,
+   "frames": 4000,
+   "peaks": [
+    0.875,
+    0.8828,
+    0.8594,
+    0.8359,
+    0.875,
+    0.8594,
+    0.875,
+    0.8828,
+    0.8672,
+    0.8594,
+    0.8594,
+    0.8516,
+    0.8672,
+    0.8672,
+    0.875,
+    0.875,
+    0.8516,
+    0.8672,
+    0.8516,
+    0.8594,
+    0.8828,
+    0.875,
+    0.8672,
+    0.8828,
+    0.8438,
+    0.8516,
+    0.8828,
+    0.875,
+    0.875,
+    0.8906,
+    0.8516,
+    0.8438,
+    0.875,
+    0.8594,
+    0.875,
+    0.8828,
+    0.8594,
+    0.8594,
+    0.8594,
+    0.8516
+   ]
+  },
+  "mono32i-22k": {
+   "duration": 0.1360544217687075,
+   "frames": 3000,
+   "peaks": [
+    0.8739,
+    0.875,
+    0.8903,
+    0.8772,
+    0.8974,
+    0.8896,
+    0.895,
+    0.8926,
+    0.8832,
+    0.8862,
+    0.874
+   ]
+  },
+  "stereo-f32-edge": {
+   "duration": 0.1,
+   "frames": 4800,
+   "peaks": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ]
+  },
+  "f32-one": {
+   "duration": 0.1,
+   "frames": 4800,
+   "peaks": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ]
+  },
+  "f32-tiny": {
+   "duration": 0.1,
+   "frames": 4800,
+   "peaks": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "f32-minus-one": {
+   "duration": 0.1,
+   "frames": 4800,
+   "peaks": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ]
+  }
+ },
+ "audible": [
+  {
+   "name": "no-solo",
+   "state": {
+    "version": 1,
+    "assets": {},
+    "tracks": [
+     {
+      "id": "t1",
+      "name": "a",
+      "gain": 0.5,
+      "mute": false,
+      "solo": false,
+      "clips": [
+       {
+        "assetId": "x",
+        "start": 0,
+        "offset": 0,
+        "duration": 1,
+        "gain": 1,
+        "fadeIn": 0,
+        "fadeOut": 0
+       },
+       {
+        "assetId": "y",
+        "start": 1,
+        "offset": 0,
+        "duration": 1,
+        "gain": 0,
+        "fadeIn": 0,
+        "fadeOut": 0
+       },
+       {
+        "assetId": "z",
+        "start": 2,
+        "offset": 0,
+        "duration": 1,
+        "gain": 2,
+        "fadeIn": 0,
+        "fadeOut": 0
+       }
+      ]
+     },
+     {
+      "id": "t2",
+      "name": "b",
+      "gain": 1,
+      "mute": true,
+      "solo": false,
+      "clips": [
+       {
+        "assetId": "x",
+        "start": 0,
+        "offset": 0,
+        "duration": 1,
+        "gain": 1,
+        "fadeIn": 0,
+        "fadeOut": 0
+       }
+      ]
+     },
+     {
+      "id": "t3",
+      "name": "c",
+      "gain": 0,
+      "mute": false,
+      "solo": false,
+      "clips": [
+       {
+        "assetId": "x",
+        "start": 0,
+        "offset": 0,
+        "duration": 1,
+        "gain": 1,
+        "fadeIn": 0,
+        "fadeOut": 0
+       }
+      ]
+     },
+     {
+      "id": "t4",
+      "name": "d",
+      "gain": 4,
+      "mute": false,
+      "solo": false,
+      "clips": [
+       {
+        "assetId": "w",
+        "start": 3,
+        "offset": 0,
+        "duration": 1,
+        "gain": 0.3333333333333333,
+        "fadeIn": 0,
+        "fadeOut": 0
+       }
+      ]
+     }
+    ]
+   },
+   "clips": [
+    {
+     "assetId": "x",
+     "start": 0,
+     "offset": 0,
+     "duration": 1,
+     "gain": 0.5,
+     "fadeIn": 0,
+     "fadeOut": 0
+    },
+    {
+     "assetId": "z",
+     "start": 2,
+     "offset": 0,
+     "duration": 1,
+     "gain": 1,
+     "fadeIn": 0,
+     "fadeOut": 0
+    },
+    {
+     "assetId": "w",
+     "start": 3,
+     "offset": 0,
+     "duration": 1,
+     "gain": 1.3333333333333333,
+     "fadeIn": 0,
+     "fadeOut": 0
+    }
+   ]
+  },
+  {
+   "name": "solo",
+   "state": {
+    "version": 1,
+    "assets": {},
+    "tracks": [
+     {
+      "id": "t1",
+      "name": "a",
+      "gain": 0.5,
+      "mute": false,
+      "solo": false,
+      "clips": [
+       {
+        "assetId": "x",
+        "start": 0,
+        "offset": 0,
+        "duration": 1,
+        "gain": 1,
+        "fadeIn": 0,
+        "fadeOut": 0
+       }
+      ]
+     },
+     {
+      "id": "t2",
+      "name": "b",
+      "gain": 0.7,
+      "mute": false,
+      "solo": true,
+      "clips": [
+       {
+        "assetId": "y",
+        "start": 0,
+        "offset": 0,
+        "duration": 1,
+        "gain": 0.9,
+        "fadeIn": 0,
+        "fadeOut": 0
+       },
+       {
+        "assetId": "z",
+        "start": 5,
+        "offset": 1,
+        "duration": 1,
+        "gain": 1,
+        "fadeIn": 0,
+        "fadeOut": 0
+       }
+      ]
+     },
+     {
+      "id": "t3",
+      "name": "c",
+      "gain": 1,
+      "mute": true,
+      "solo": true,
+      "clips": [
+       {
+        "assetId": "x",
+        "start": 0,
+        "offset": 0,
+        "duration": 1,
+        "gain": 1,
+        "fadeIn": 0,
+        "fadeOut": 0
+       }
+      ]
+     }
+    ]
+   },
+   "clips": [
+    {
+     "assetId": "y",
+     "start": 0,
+     "offset": 0,
+     "duration": 1,
+     "gain": 0.63,
+     "fadeIn": 0,
+     "fadeOut": 0
+    },
+    {
+     "assetId": "z",
+     "start": 5,
+     "offset": 1,
+     "duration": 1,
+     "gain": 0.7,
+     "fadeIn": 0,
+     "fadeOut": 0
+    }
+   ]
+  }
+ ]
+}

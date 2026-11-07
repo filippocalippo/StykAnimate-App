@@ -3,7 +3,7 @@
 //! app's path where no GPU device is available).
 //!
 //!   styk export <file> <tick | first-last> <out.png | folder> [--size WxH] [--smoothing edges|none|sprites]
-//!               [--matte] [--tile N] [--cpu] [--repeat N] [--verify N]
+//!               [--matte] [--transparent] [--tile N] [--cpu] [--repeat N] [--verify N]
 //!
 //! `--verify N` draws the whole range N times in a row and reports every frame whose pixels differ from the first pass (the same
 //! input must give the same bytes); the exit code is 1 when any does.
@@ -65,6 +65,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
     let smoothing = Smoothing::parse(option(rest, "--smoothing").unwrap_or("edges")).ok_or("--smoothing is edges, none or sprites")?;
     let settings = Settings::new(width, height, smoothing, styk_export::settings::MAX_PIXELS)?;
     let matte = rest.iter().any(|a| a == "--matte");
+    let transparent = rest.iter().any(|a| a == "--transparent");
     let repeat = option(rest, "--repeat").and_then(|n| n.parse::<usize>().ok()).unwrap_or(1).max(1);
     let open_ms = started.elapsed().as_secs_f64() * 1000.0;
 
@@ -86,10 +87,9 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
         cpu_export = Some(exporter);
         adapter_name = "CPU (styk-raster)".to_string();
     } else {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).map_err(|e| format!("No GPU adapter: {e}"))?;
-        adapter_name = adapter.get_info().name;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("styk export"), required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()), ..Default::default() })).map_err(|e| e.to_string())?;
+        let native = styk_render::native_gpu::native_gpu("styk export", |adapter| wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()))?;
+        adapter_name = format!("{} ({:?}, {})", native.adapter.get_info().name, native.adapter.get_info().backend, native.attempt.name);
+        let (device, queue) = (native.device, native.queue);
         let mut exporter = GpuExport::new(&device, &queue, settings, tile);
         exporter.prepare_sprites(generation.lineage, &generation.assets);
         exporter.upload_images(&generation.assets, images.iter().map(|image| &**image));
@@ -110,9 +110,10 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
             let t0 = Instant::now();
             let frame = frames.take(tick).ok_or("no frame")?;
             let t1 = Instant::now();
+            let list = if transparent { styk_export::without_background(&frame.list) } else { frame.list.clone() };
             let pixels = match (gpu.as_mut(), cpu_export.as_mut()) {
-                (Some(exporter), _) => exporter.frame_blocking(doc, &frame.list, frame.camera.as_ref(), matte)?,
-                (None, Some(exporter)) => exporter.frame(doc, &frame.list, frame.camera.as_ref(), matte)?,
+                (Some(exporter), _) => exporter.frame_blocking(doc, &list, frame.camera.as_ref(), matte)?,
+                (None, Some(exporter)) => exporter.frame(doc, &list, frame.camera.as_ref(), matte)?,
                 (None, None) => unreachable!("one renderer is set up"),
             };
             let t2 = Instant::now();

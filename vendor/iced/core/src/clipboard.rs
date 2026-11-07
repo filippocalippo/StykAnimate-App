@@ -5,8 +5,8 @@ use std::sync::Arc;
 /// A set of clipboard requests.
 #[derive(Debug, Clone)]
 pub struct Clipboard {
-    /// The read requests the runtime must fulfill.
-    pub reads: Vec<Kind>,
+    /// The read requests the runtime must fulfill, each with the [`RequestId`] its reply carries.
+    pub reads: Vec<(Kind, RequestId)>,
     /// The content that must be written to the clipboard by the runtime,
     /// if any.
     pub write: Option<Content>,
@@ -34,11 +34,90 @@ impl Default for Clipboard {
     }
 }
 
+/// The identity of a clipboard read: the reply carries the ID of the request it answers, so a widget can tell its own
+/// reply from another's and drop one that arrives after it lost focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RequestId(pub u64);
+
+impl RequestId {
+    /// The ID of a request nobody tracks (`Shell::read_clipboard`).
+    pub const ANONYMOUS: RequestId = RequestId(0);
+
+    /// A new ID, unique in the process.
+    pub fn next() -> RequestId {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+
+        RequestId(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+/// The most bytes of text a read hands to the interface. The platform's worker cuts what it read to this, and an editor cuts
+/// again what it is given, so a clipboard of any size costs the interface thread a bounded amount.
+pub const MAX_TEXT_BYTES: usize = 1 << 20;
+
+/// How many cancelled requests are remembered.
+const CANCELLED_REMEMBERED: usize = 256;
+
+static CANCELLED: std::sync::Mutex<std::collections::VecDeque<u64>> = std::sync::Mutex::new(std::collections::VecDeque::new());
+
+/// Says nobody waits for the reply to `id` any more (its requester lost focus): the platform's worker skips the read if it
+/// has not started it. The memory of cancelled requests is bounded; the oldest is forgotten first.
+pub fn cancel(id: RequestId) {
+    if id == RequestId::ANONYMOUS {
+        return;
+    }
+
+    if let Ok(mut cancelled) = CANCELLED.lock() {
+        if cancelled.len() >= CANCELLED_REMEMBERED {
+            let _ = cancelled.pop_front();
+        }
+
+        cancelled.push_back(id.0);
+    }
+}
+
+/// Whether `id` was cancelled; asking forgets it.
+pub fn take_cancelled(id: RequestId) -> bool {
+    let Ok(mut cancelled) = CANCELLED.lock() else {
+        return false;
+    };
+
+    match cancelled.iter().position(|cancelled| *cancelled == id.0) {
+        Some(at) => cancelled.remove(at).is_some(),
+        None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cancelled_request_is_noted_once_and_the_memory_is_bounded() {
+        let id = RequestId::next();
+        assert!(!take_cancelled(id));
+        cancel(id);
+        assert!(take_cancelled(id));
+        assert!(!take_cancelled(id));
+
+        let first = RequestId::next();
+        cancel(first);
+        for _ in 0..CANCELLED_REMEMBERED {
+            cancel(RequestId::next());
+        }
+        assert!(!take_cancelled(first), "the oldest note was forgotten");
+        cancel(RequestId::ANONYMOUS);
+        assert!(!take_cancelled(RequestId::ANONYMOUS), "a request nobody tracks is never cancelled");
+    }
+}
+
 /// A clipboard event.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    /// The clipboard was read.
-    Read(Result<Arc<Content>, Error>),
+    /// The clipboard was read; the reply to the request with this [`RequestId`].
+    Read(Result<Arc<Content>, Error>, RequestId),
 
     /// The clipboard was written.
     Written(Result<(), Error>),

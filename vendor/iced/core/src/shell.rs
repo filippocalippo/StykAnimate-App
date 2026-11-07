@@ -155,7 +155,12 @@ impl<'a, Message> Shell<'a, Message> {
     ///
     /// The runtime will produce a [`clipboard::Event::Read`] when the contents have been read.
     pub fn read_clipboard(&mut self, kind: clipboard::Kind) {
-        self.clipboard.reads.push(kind);
+        self.clipboard.reads.push((kind, clipboard::RequestId::ANONYMOUS));
+    }
+
+    /// Like [`Shell::read_clipboard`], and the reply carries `id` so the requester can recognise it.
+    pub fn read_clipboard_as(&mut self, kind: clipboard::Kind, id: clipboard::RequestId) {
+        self.clipboard.reads.push((kind, id));
     }
 
     /// Requests the runtime to write the given [`clipboard::Content`] to the clipboard.

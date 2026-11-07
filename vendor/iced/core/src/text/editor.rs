@@ -117,6 +117,27 @@ pub trait Editor: Sized + Default {
 
     /// Returns the current [`LineHeight`] of the [`Editor`].
     fn line_height(&self) -> LineHeight;
+
+    /// Ends the current group of typed insertions in the undo history: the next edit is a step of its own. Called when
+    /// the caret moves, a selection is made or focus is lost.
+    fn seal_history(&mut self) {}
+
+    /// Sets the base direction of the text of the [`Editor`]: detected from the first strong character
+    /// ([`BaseDirection::Auto`]) or forced, for a field that follows the interface's direction (the caret side of an
+    /// empty field, search and name fields).
+    fn set_base_direction(&mut self, _direction: BaseDirection) {}
+}
+
+/// The base direction of an [`Editor`]'s paragraphs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BaseDirection {
+    /// Each paragraph's direction is its first strong character's.
+    #[default]
+    Auto,
+    /// Left to right.
+    LeftToRight,
+    /// Right to left.
+    RightToLeft,
 }
 
 /// An interaction with an [`Editor`].
@@ -157,6 +178,9 @@ impl Action {
 pub enum Edit {
     /// Insert the given character.
     Insert(char),
+    /// Insert the whole text a key press produced (a key can produce several characters). It is typing: consecutive
+    /// typed insertions are one step of the field's history.
+    Type(Arc<String>),
     /// Paste the given text.
     Paste(Arc<String>),
     /// Break the current line.
@@ -315,6 +339,8 @@ impl LineEnding {
 pub struct State {
     focus: Option<Focus>,
     preedit: Option<input_method::Preedit>,
+    /// The clipboard read this editor is waiting for; only its reply is taken, and only while focused.
+    pending_paste: Option<clipboard::RequestId>,
     last_click: Option<mouse::Click>,
     is_dragging: bool,
     partial_scroll: f32,
@@ -369,7 +395,17 @@ impl State {
                     focus.now + Duration::from_millis(millis_until_redraw as u64),
                 ))
             }
-            Event::Clipboard(clipboard::Event::Read(Ok(content))) => {
+            Event::Clipboard(clipboard::Event::Read(result, id)) => {
+                if self.pending_paste != Some(*id) {
+                    return None;
+                }
+
+                self.pending_paste = None;
+
+                let Ok(content) = result else {
+                    return None;
+                };
+
                 let focus = self.focus.as_ref()?;
 
                 if !focus.is_window_focused {
@@ -380,8 +416,11 @@ impl State {
                     return None;
                 };
 
+                // Whatever the platform's worker handed over, no more than a field could ever take is looked at.
+                let end = text.floor_char_boundary(clipboard::MAX_TEXT_BYTES.min(text.len()));
+
                 Some(Update::Action(Action::Edit(Edit::Paste(Arc::new(
-                    text.clone(),
+                    text[..end].to_owned(),
                 )))))
             }
             Event::Mouse(event) => match event {
@@ -405,7 +444,7 @@ impl State {
                             click.kind(),
                         )))
                     } else if self.focus.is_some() {
-                        self.focus = None;
+                        self.unfocus_now();
 
                         Some(Update::Unfocus)
                     } else {
@@ -471,7 +510,7 @@ impl State {
                             click.kind(),
                         )))
                     } else if self.focus.is_some() {
-                        self.focus = None;
+                        self.unfocus_now();
 
                         Some(Update::Unfocus)
                     } else {
@@ -539,25 +578,40 @@ impl State {
 
                     match binding {
                         Binding::Unfocus => {
-                            state.focus = None;
-                            state.is_dragging = false;
+                            state.unfocus_now();
 
                             None
                         }
                         Binding::Copy => {
-                            let selection = editor.copy()?;
+                            // With nothing selected the field still handles the key: it must not reach a copy of
+                            // something else (the document's).
+                            let Some(selection) = editor.copy() else {
+                                return Some(Update::Handled);
+                            };
 
                             Some(Update::Copy(selection))
                         }
                         Binding::Cut => {
-                            let selection = editor.copy()?;
+                            let Some(selection) = editor.copy() else {
+                                return Some(Update::Handled);
+                            };
 
                             Some(Update::Sequence(vec![
                                 Update::Copy(selection),
                                 edit(Edit::Backspace),
                             ]))
                         }
-                        Binding::Paste => Some(Update::Paste),
+                        Binding::Paste => {
+                            // One request in flight: a second paste before the reply is ignored.
+                            if state.pending_paste.is_some() {
+                                return Some(Update::Handled);
+                            }
+
+                            let id = clipboard::RequestId::next();
+                            state.pending_paste = Some(id);
+
+                            Some(Update::Paste(id))
+                        }
                         Binding::Undo => Some(edit(Edit::Undo)),
                         Binding::Redo => Some(edit(Edit::Redo)),
                         Binding::Move(motion) => Some(action(Action::Move(motion))),
@@ -566,6 +620,7 @@ impl State {
                         Binding::SelectLine => Some(action(Action::SelectLine)),
                         Binding::SelectAll => Some(action(Action::SelectAll)),
                         Binding::Insert(c) => Some(edit(Edit::Insert(c))),
+                        Binding::Type(text) => Some(edit(Edit::Type(Arc::new(text.to_string())))),
                         Binding::Enter => Some(edit(Edit::Enter)),
                         Binding::Backspace => Some(edit(Edit::Backspace)),
                         Binding::BackspaceWord => Some(edit(Edit::BackspaceWord)),
@@ -717,6 +772,22 @@ impl State {
     pub fn is_cursor_visible(&self) -> bool {
         self.focus.as_ref().is_some_and(Focus::is_cursor_visible)
     }
+
+    /// Returns whether an input method has a composition open (a non-empty preedit).
+    pub fn is_composing(&self) -> bool {
+        self.preedit.as_ref().is_some_and(|preedit| !preedit.content.is_empty())
+    }
+
+    /// Loses focus: the pending clipboard request, the drag and any composition die with it.
+    fn unfocus_now(&mut self) {
+        self.focus = None;
+        self.is_dragging = false;
+        if let Some(id) = self.pending_paste.take() {
+            // The platform's worker skips a read nobody is waiting for any more.
+            clipboard::cancel(id);
+        }
+        self.preedit = None;
+    }
 }
 
 /// The visual style of an [`Editor`].
@@ -772,7 +843,58 @@ impl Focusable for State {
     }
 
     fn unfocus(&mut self) {
-        self.focus = None;
+        self.unfocus_now();
+    }
+}
+
+/// What an editor tells an [`Intake`] about itself at the moment of an edit.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Room {
+    /// The characters (Unicode scalar values, a line break counting one) in the editor.
+    pub chars: usize,
+    /// The characters of the selection, which the incoming text replaces.
+    pub selected: usize,
+    /// The distinct UTF-16 units of the text that stays, sorted; only when the [`Intake`] asks for them.
+    pub units: Vec<u16>,
+}
+
+/// What an editor takes of incoming text (typed, pasted or committed by an input method) *before* it edits: the
+/// returned text is what is inserted, `None` means no edit at all (no history entry, no shaping, no message).
+#[derive(Clone)]
+pub struct Intake {
+    admit: Arc<dyn Fn(&Room, &str) -> Option<String> + Send + Sync>,
+    tracks_units: bool,
+}
+
+impl Intake {
+    /// An [`Intake`] from a function.
+    pub fn new(admit: impl Fn(&Room, &str) -> Option<String> + Send + Sync + 'static) -> Self {
+        Self {
+            admit: Arc::new(admit),
+            tracks_units: false,
+        }
+    }
+
+    /// Asks the editor to fill [`Room::units`] (it costs a pass over the text, so only a field that limits them pays it).
+    pub fn with_units(mut self, tracks_units: bool) -> Self {
+        self.tracks_units = tracks_units;
+        self
+    }
+
+    /// Whether [`Room::units`] is wanted.
+    pub fn tracks_units(&self) -> bool {
+        self.tracks_units
+    }
+
+    /// What of `incoming` the editor takes.
+    pub fn admit(&self, room: &Room, incoming: &str) -> Option<String> {
+        (self.admit)(room, incoming)
+    }
+}
+
+impl std::fmt::Debug for Intake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Intake(..)")
     }
 }
 
@@ -803,6 +925,8 @@ pub enum Binding<Message> {
     SelectAll,
     /// Insert the given character.
     Insert(char),
+    /// Insert the whole text of a key press.
+    Type(SmolStr),
     /// Break the current line.
     Enter,
     /// Delete the previous character.
@@ -867,6 +991,7 @@ impl<Message> Binding<Message> {
             Some('x') if modifiers.command() => Some(Self::Cut),
             Some('v') if modifiers.command() && !modifiers.alt() => Some(Self::Paste),
             Some('a') if modifiers.command() => Some(Self::SelectAll),
+            Some('z') if modifiers.command() && modifiers.shift() => Some(Self::Redo),
             Some('z') if modifiers.command() => Some(Self::Undo),
             Some('y') if modifiers.command() => Some(Self::Redo),
             _ => None,
@@ -906,9 +1031,15 @@ impl<Message> Binding<Message> {
             keyboard::Key::Named(key::Named::Escape) => Some(Self::Unfocus),
             _ => {
                 if let Some(text) = text {
-                    let c = text.chars().find(|c| !c.is_control())?;
+                    // A key can produce several characters (a lam-alef key, a dead key's result): all of them are
+                    // typed, not only the first.
+                    let typed: String = text.chars().filter(|c| !c.is_control()).collect();
 
-                    Some(Self::Insert(c))
+                    if typed.is_empty() {
+                        return None;
+                    }
+
+                    Some(Self::Type(SmolStr::new(typed)))
                 } else if let keyboard::Key::Named(named_key) = key.as_ref() {
                     let motion = motion(named_key)?;
 
@@ -945,6 +1076,8 @@ impl<Message> Binding<Message> {
 pub enum Update<Message> {
     /// An [`Action`] must be performed in the [`Editor`].
     Action(Action),
+    /// The key was the editor's but changes nothing (a copy with nothing selected): handled, so it reaches nobody else.
+    Handled,
     /// The [`Editor`] just gained focus.
     Focus,
     /// The [`Editor`] just lost focus.
@@ -955,8 +1088,8 @@ pub enum Update<Message> {
     Release,
     /// The [`Editor`] must copy some text to the clipboard.
     Copy(String),
-    /// The [`Editor`] must paste the clipboard contents.
-    Paste,
+    /// The [`Editor`] must paste the clipboard contents; the reply carries this ID.
+    Paste(clipboard::RequestId),
     /// The [`Editor`] must be redrawn at the given [`Instant`].
     RedrawAt(Instant),
     /// The [`Editor`] produced a custom message that must be published.

@@ -26,16 +26,29 @@ use rayon::prelude::*;
 use styk_eval::eval::Prepared;
 use styk_eval::geometry::build;
 
+#[cfg(feature = "app-tools")]
+mod audio;
 mod container;
 mod export;
 mod load;
 mod prims;
 mod stepbench;
+#[cfg(all(feature = "app-tools", windows))]
+mod video;
+#[cfg(all(feature = "app-tools", windows))]
+mod win;
 mod raster_parity;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
+        #[cfg(feature = "app-tools")]
+        Some("audio") if args.len() >= 3 => audio::audio(&args[1], &args[2], &args[3..]),
+        #[cfg(not(feature = "app-tools"))]
+        Some("audio") => {
+            eprintln!("styk audio needs the app-tools feature: cargo run -p styk-cli --features app-tools -- audio ...");
+            2
+        }
         Some("container") if args.len() >= 3 && args[1] == "roundtrip" => container::roundtrip(&args[2], &args[3..]),
         Some("container") if args.len() >= 4 && args[1] == "json" => container::json(&args[2], &args[3]),
         Some("open") if args.len() >= 2 => load::open(&args[1], &args[2..]),
@@ -62,11 +75,18 @@ fn main() {
         Some("edit-bench") if args.len() >= 4 => edit_bench(&args[1], &args[2], &args[3], &args[4..]),
         Some("diff") if args.len() >= 4 => diff(&args[1], &args[2], &args[3], &args[4..]),
         Some("export") if args.len() >= 4 => export::export(&args[1], &args[2], &args[3], &args[4..]),
+        #[cfg(all(feature = "app-tools", windows))]
+        Some("video") if args.len() >= 4 => video::video(&args[1], &args[2], &args[3], &args[4..]),
+        #[cfg(not(all(feature = "app-tools", windows)))]
+        Some("video") => {
+            eprintln!("styk video needs the app-tools feature and Windows: cargo run -p styk-cli --features app-tools -- video ...");
+            2
+        }
         Some("raster-parity") if args.len() >= 2 => raster_parity::run(&args[1..]),
         Some("prims") if args.len() >= 2 => prims::run(&args[1..]),
         Some("stepbench") if args.len() >= 3 => stepbench::run(&args[1..]),
         _ => {
-            eprintln!("usage: styk info <file> | compare <file> <reference.json> [--verbose] | bench <file> [--frames N] | render <file> <tick> <out.png> [--size WxH] [--zoom Z] [--center X,Y] [--no-clip] [--neutral] [--after T] | gpubench <file> <tick> [--no-effects] | layers <file> <tick> [--all] | edit-replay [--worker [--max-source-bytes N]] <reference.json>... | edit-replay --live-worker <session.json> <returns.json>...");
+            eprintln!("usage: styk info <file> | compare <file> <reference.json> [--verbose] | bench <file> [--frames N] | render <file> <tick> <out.png> [--size WxH] [--zoom Z] [--center X,Y] [--no-clip] [--neutral] [--after T] | gpubench <file> <tick> [--no-effects] | layers <file> <tick> [--all] | edit-replay [--worker [--max-source-bytes N]] <reference.json>... | edit-replay --live-worker <session.json> <returns.json>... | export <file> <ticks> <out> [..]");
             2
         }
     };
