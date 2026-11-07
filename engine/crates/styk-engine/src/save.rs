@@ -200,7 +200,7 @@ pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, ho
     let projected = prepare_project(&document, request.name.as_deref(), &hold)?;
     // The tree it was made from is the session's; what this save holds of it goes now.
     drop(document);
-    let Projected { document: mut document, scene, unmet } = projected;
+    let Projected { mut document, scene, unmet } = projected;
     let prepared = clock();
     // A project opened from Pivot carries its original in the document: it is stored where the app has always stored it.
     let original = if request.original_first { carried_source(&mut document) } else { None };

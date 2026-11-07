@@ -1051,6 +1051,10 @@ impl Editor {
                 }
             }
         }
+        // A definition the command adds that is a drawing keeps what makes it one (an imported or pasted cel from a damaged file, or a foreign clipboard's, does not).
+        if plan.definitions.iter().any(|definition| definition.path(&["_styk", "drawing"]).is_some_and(Value::truthy) && !crate::load::drawing_keeps_its_image(definition)) {
+            return Err(EditError::Invalid("errors.editorDrawing.aDrawingKeepsItsOneImage".into()));
+        }
         self.validate_plan_checked(&mut plan, check)?;
         // The new sheet: the old one with the replaced tracks, counters and length.
         let before = plan.before.clone();

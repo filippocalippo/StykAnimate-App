@@ -117,6 +117,11 @@ impl Editor {
                 let mut objects = items(frame.get("objects"));
                 for object in objects.iter_mut() {
                     let old = figures.iter().chain(added.iter()).find(|f| f.get("figure_type_id") == object.get("figure_type_id")).cloned().ok_or_else(|| EditError::Unported("a drawing of a figure the document lacks".into()))?;
+                    // A figure the frame shows that is not a cel (the figure a cel is joined to) stays the figure it is: it has no pixels to copy,
+                    // and a definition given a cel identity without being a drawing is a file opening refuses.
+                    if !old.path(&["_styk", "drawing"]).is_some_and(Value::truthy) {
+                        continue;
+                    }
                     let cel = format!("cel-{}", self.draw_uuid()?);
                     let mut copy = old.as_obj().cloned().unwrap_or_default();
                     copy.set("figure_type_id", Value::Num(next_type));

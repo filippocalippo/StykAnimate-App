@@ -10,7 +10,7 @@ use styk_doc::Value;
 use crate::base64;
 use crate::ctx::Ctx;
 use crate::error::{PyResult, piv, type_error};
-use crate::piv::v5::{MAX_SEGMENTS, sha256_hex};
+use crate::piv::v5::MAX_SEGMENTS;
 use crate::py::{self, HKey};
 use crate::zlib;
 
