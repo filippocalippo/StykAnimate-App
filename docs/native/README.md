@@ -13,7 +13,8 @@ everything gets faster. The owner decided this on 2026-11-05.
 
 ## Handoff (keep current; read this first to resume)
 
-**Updated 2026-11-06 21:30.** Branch `native-app` from `engine-rust` `99c62189`, pushed. The main checkout is on
+**Updated 2026-11-07 13:45.** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
+tasks and they resumed on 2026-11-07 12:37 (none had lost work: the spikes had only merged N0). Branch `native-app` from `engine-rust` `99c62189`, pushed. The main checkout is on
 `native-app`; merges into `engine-rust` happen in `wt/int-engine-rust` ([N3](decisions/0003-branches-and-integration.md)).
 The orchestrator's briefs and tools live outside the repository in `perf/` (`perf/briefs/native-common.md` for every
 agent, `perf/briefs/native/<chunk>.md` per chunk, `perf/merge.sh <sha> <message> [native-app|engine-rust]`).
@@ -25,9 +26,9 @@ agent, `perf/briefs/native/<chunk>.md` per chunk, `perf/merge.sh <sha> <message>
 | Gate b13 | local `engine-rust` `99c62189` (two merges never run together) | `perf/batches/b13/` | **passed and pushed**: check, `npm test` 2705/2705, Rust workspace, parity, web, every smoke (the video smoke needed the bundled encoder copied into the gate checkout). Benchmark deferred to the cleanup batch (one exclusive run after M, D, X) |
 | M | movieclip save fix merged, the rest of the movieclip branch, the refused gesture sequence | T3 worktree, Sonnet | running |
 | D | drawing-undo atlas work, its compile fix, the polygon cache removed | T3 worktree, Sonnet | running |
-| X | export frames independent of export order, picture and cel residency in exports | `t3/native-export-performance` `39d10510` | done: the cause was the lone-glyph mask atlas (a mask's place in it moved edge sampling by a level), now placed afresh per export frame; regression test fails without it. In review (GPT-6.1 Sol, Sonnet checker), then into `engine-rust` |
+| X | export frames independent of export order, picture and cel residency in exports | `t3/native-export-performance` `39d10510` | done: the cause was the lone-glyph mask atlas (a mask's place in it moved edge sampling by a level), now placed afresh per export frame; regression test fails without it. GPT-6.1 Sol found two majors (a refused cel decode marked complete over stale tiles; the glyph atlas keeping its layer count past its 64 MiB budget): back with the implementer; Sonnet checker running |
 | I | the inventory | `docs/native/INVENTORY.md` | done: 1,270 rows, all todo; regenerate the appendices with `perf/native/tools/` |
-| N0 | the foundation: vendored iced and its git dependencies, the nine crates, the off-screen window, PrintWindow screenshots, tokens (460 colours equal to Chromium's), icons, Inter 4.001 and Inter Tight 3.004 | `t3/native-foundation` `2fff5a53` | done; in review (GPT-6.1 Sol). Empty window 197 MB private (target 150), start to first PNG about 0.9 s (directional) |
+| N0 | the foundation: vendored iced and its git dependencies, the nine crates, the off-screen window, PrintWindow screenshots, tokens (460 colours equal to Chromium's), icons, Inter 4.001 and Inter Tight 3.004 | `t3/native-foundation` `2fff5a53` | GPT-6.1 Sol: vendored sources match the pins exactly; fixes in progress (Linux backends, background mode on every platform, trace rings of finished threads, the screenshot's `GetDIBits` order, dynamic tokens). Empty window 197 MB private (target 150), start to first PNG about 0.9 s (directional) |
 | S1, S2a, S2t, S2b, S3 | spikes: pen; fields, focus, IME, RTL; typography; the text tool compiler; video export | T3 worktrees, Sonnet, on N0 | running |
 | S1-S6 | risk spike designs, in `perf/native/spikes/S*.md` | Sonnet, then GPT-6.1 Sol | reviewed, every finding accepted (`perf/native/spikes/reviews/`); briefs ready in `perf/briefs/native/` (S1, S2a fields, S2t typography, S2b text tool, S3 video), launched when N0 merges |
 | Designs | docking, developer tools, Settings, in `perf/native/designs/` | Sonnet, then GPT-6.1 Sol | reviewed, every finding accepted (`perf/native/designs/reviews/`); decisions in `decisions-on-open-questions.md`; each implementation chunk first revises its design with the review into `docs/native/` |
