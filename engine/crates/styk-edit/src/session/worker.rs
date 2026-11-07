@@ -38,7 +38,7 @@ impl WorkerPrepared {
 /// The existing Session moved into an exclusive worker capability. This is an
 /// ownership boundary, not another editor, baseline, store or evaluation cache.
 pub struct WorkerSession {
-    session: Session,
+    pub(super) session: Session,
     identity: Arc<()>,
     epoch: u64,
 }

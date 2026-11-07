@@ -463,7 +463,7 @@ impl Shell {
                     id,
                     name: document.name().to_string(),
                     front: Some(id) == front,
-                    state: self.strip.saves.state(id, document.view().dirty),
+                    state: self.strip.saves.state(id, document.dirty()),
                     dragging: drag.is_some_and(|d| d.moving && d.id == id),
                     drop: drag.and_then(|d| d.over).filter(|(over, _)| *over == id).map(|(_, side)| side),
                 }
@@ -471,10 +471,8 @@ impl Shell {
             .collect();
         let tabs = self.preview.clone().unwrap_or(tabs);
         self.history = match documents.active() {
-            Some(document) => {
-                let history = document.view().history;
-                History { open: true, undo: history.undo > 0, redo: history.redo > 0 }
-            }
+            // A project on its worker (`Busy`) shows no history until its session is back.
+            Some(document) => document.view().map_or(History { open: true, undo: false, redo: false }, |view| History { open: true, undo: view.history.undo > 0, redo: view.history.redo > 0 }),
             None => History::default(),
         };
         let facts: Vec<TabFacts> = tabs.iter().map(|tab| TabFacts { id: tab.id, front: tab.front, marked: tab.state.is_some() }).collect();
@@ -517,7 +515,7 @@ impl Shell {
                 match self.strip.released(&self.layout, &order) {
                     Dropped::Click(id) => self.activate(documents, id, &mut effects),
                     Dropped::Move(id, to) => {
-                        if documents.move_tab(id, to) {
+                        if documents.reorder(id, to) {
                             effects.push(Effect::Moved(id, to));
                         }
                     }
@@ -570,7 +568,7 @@ impl Shell {
             Event::Resized(window) => self.window = window,
             Event::Labels(labels) => self.labels = labels,
             Event::CtrlTab { backwards, held } => {
-                let outcome = self.switcher.open(documents.recency(), backwards, held);
+                let outcome = self.switcher.open(documents.recency().map(|document| document.id()).collect(), backwards, held);
                 self.switched(documents, outcome, &mut effects);
             }
             Event::SwitcherKey(key) => {

@@ -10,6 +10,7 @@ the command's result/refusal and events, without a JSON read-view response. `Ses
 selection and history state; `with_document` and `frame_records` use the session's existing caches.
 The panel-facing owner and its worker-preparation boundary are documented in
 [`native/documents.md`](../native/documents.md). The JavaScript session protocol is unchanged.
+Core logic names re-exported engine types through `styk_core::engine`; views must not name that module.
 
 ## Where it starts
 
@@ -1005,3 +1006,10 @@ The default context route remains full, as do one-shot and pinned calls. Needed 
 figures and ancestors retain the shape owner’s full-output fallback, and joined graph
 callbacks keep their separate complete scene. This private route changes no public
 API, command admission, cache, stored arithmetic or response field.
+
+The native document host temporarily moves its sole session into `WorkerSession::call_native_long`
+for complete movieclip timeline commands. It reuses the timeline worker and publication rollback heads
+without changing history accounting or constructing another editor. Its commit callback linearizes
+host cancellation; rollback and displaced resources stay on the worker. Native clipboard calls return
+opaque `RetiredClipboard` storage for worker reclamation rather than dropping outgoing typed data.
+See [native documents](../native/documents.md) for the command list and borrowed-query busy contract.

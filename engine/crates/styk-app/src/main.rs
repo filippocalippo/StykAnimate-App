@@ -55,6 +55,9 @@ const CHECK_SETTLE_FRAMES: u32 = 12;
 /// How long `--automation` waits for its script before giving up.
 const AUTOMATION_DEADLINE: Duration = Duration::from_secs(180);
 
+#[global_allocator]
+static ALLOCATOR: styk_core::engine::Counting = styk_core::engine::Counting;
+
 /// How an unattended run ended, read after the event loop returns.
 #[derive(Debug, Default)]
 enum Outcome {
@@ -150,7 +153,7 @@ enum CheckStep {
 }
 
 impl App {
-    fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: SyncSender<Outcome>, shell: Box<shell::Shell>, wakes: wakes::Wakes, foreground_before: isize) -> App {
+    fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: SyncSender<Outcome>, shell: Box<shell::Shell>, wakes: wakes::Wakes, foreground_before: isize) -> Result<App, String> {
         let sheet = (screen == Some(Screen::ComponentSheet)).then(|| {
             let mut sheet = Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr);
             sheet.button_probe = Some(styk_platform::input::primary_button_down);
@@ -158,7 +161,17 @@ impl App {
         });
         let band_screen = screen.filter(|screen| screen.is_band());
         let clock_mode = launch.clock;
-        App {
+        // The one application clock: the real one, or the fixed one a script advances (`--clock fixed`).
+        let (clock, fixed): (Arc<dyn styk_services::clock::Clock>, Option<styk_services::clock::FixedClock>) = match clock_mode {
+            styk_core::ClockMode::Fixed => {
+                let fixed = styk_services::clock::FixedClock::new();
+                (Arc::new(fixed.clone()), Some(fixed))
+            }
+            styk_core::ClockMode::System => (Arc::new(styk_platform::clock::SystemClock::new()), None),
+        };
+        let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, Arc::new(styk_platform::spawn::ThreadSpawner))?;
+        band.show_screen(band_screen);
+        Ok(App {
             sheet,
             #[cfg(feature = "devtools")]
             report: Vec::new(),
@@ -178,19 +191,7 @@ impl App {
             wakes,
             chrome: None,
             max_button: MaxButtonState::Idle,
-            band: {
-                // The one application clock: the real one, or the fixed one a script advances (`--clock fixed`).
-                let (clock, fixed): (Arc<dyn styk_services::clock::Clock>, Option<styk_services::clock::FixedClock>) = match clock_mode {
-                    styk_core::ClockMode::Fixed => {
-                        let fixed = styk_services::clock::FixedClock::new();
-                        (Arc::new(fixed.clone()), Some(fixed))
-                    }
-                    styk_core::ClockMode::System => (Arc::new(styk_platform::clock::SystemClock::new()), None),
-                };
-                let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, Arc::new(styk_platform::spawn::ThreadSpawner));
-                band.show_screen(band_screen);
-                band
-            },
+            band,
             capture_path: None,
             closing: false,
             logical: Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32),
@@ -198,7 +199,7 @@ impl App {
             rescales: Vec::new(),
             foreground_before,
             check: CheckStep::NotRunning,
-        }
+        })
     }
 
     fn theme(&self) -> Theme {
@@ -562,6 +563,7 @@ fn capture(id: iced_window::Id) -> Task<Message> {
 }
 
 fn main() -> ExitCode {
+    styk_core::engine::set_memory_limit(styk_platform::memory::document_memory_limit());
     mark!("startup");
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let launch = match Launch::parse(shell::without_links(&arguments)) {
@@ -622,7 +624,13 @@ fn main() -> ExitCode {
     let scale = launch.scale.unwrap_or(1.0) as f32;
     let settings = window::settings(&launch, strategy);
     let files = launch.files.clone();
-    let mut built = App::new(launch, screen, strategy, outcome.clone(), shell, wakes, foreground_before);
+    let mut built = match App::new(launch, screen, strategy, outcome.clone(), shell, wakes, foreground_before) {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let _automation_deadline = match built.launch.automation.clone() {
         Some(script) => {
             if let Err(error) = built.band.run_script(&script) {
@@ -645,8 +653,8 @@ fn main() -> ExitCode {
     let result = iced::application(
         move || {
             let mut app = match app.borrow_mut().take() { Some(app) => app, None => unreachable!("iced initializes once") };
-            let open = app.band.open_all(&files).map(Message::Band);
-            (app, Task::batch([warm_up::warm_up(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(styk_platform::clock::SystemClock::new()), std::sync::Arc::new(styk_platform::font_smoothing::NativeTextEnvironment)).map(Message::FontsReady), open]))
+            app.band.open_all(&files);
+            (app, warm_up::warm_up(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(styk_platform::clock::SystemClock::new()), std::sync::Arc::new(styk_platform::font_smoothing::NativeTextEnvironment)).map(Message::FontsReady))
         },
         App::update,
         App::view,
@@ -788,7 +796,7 @@ mod capture_tests {
         let shell::Start::Run(shell) = shell::start(&[], true, &wakes.callback()) else { panic!("unattended run") };
         let (outcome, _receiver) = mpsc::sync_channel(1);
         let launch = Launch { screenshot: Some("unused-test-output.png".into()), ..Launch::default() };
-        let mut app = App::new(launch, None, Some(Strategy::HiddenWindow), outcome, shell, wakes, 0);
+        let Ok(mut app) = App::new(launch, None, Some(Strategy::HiddenWindow), outcome, shell, wakes, 0) else { panic!("the app starts") };
         app.window = Some(iced_window::Id::unique());
         app.frames = 20; // Loading frames must not count as a completed content frame.
         drop(app.update(Message::FontsReady(Ok(()))));

@@ -75,12 +75,12 @@ test('wasm check shares the engine nightly and atomics settings without running 
 test('S6 local platform wrappers are not external Windows type exports',()=>{
  assert.deepEqual(exportsScan('pub use crate::windows::{chrome::Chrome, monitors::Sample};','engine/crates/styk-platform/src/shell.rs'),[]);
 });
-test('K-doc engine reexports are confined to engine with exact temporary documents exceptions',()=>{
+test('K-doc engine reexports are confined to engine without documents exceptions',()=>{
  for(const file of ['engine/crates/styk-core/src/lib.rs','engine/crates/styk-core/src/documents.rs']) {
   assert.ok(exportsScan('pub use styk_doc::NewEngineType;',file).length);
  }
  assert.deepEqual(exportsScan('pub use styk_doc::Value;', 'engine/crates/styk-core/src/engine.rs'),[]);
- assert.deepEqual(exportsScan('pub use styk_doc::Value;', 'engine/crates/styk-core/src/documents.rs'),[]);
+ assert.ok(exportsScan('pub use styk_doc::Value;', 'engine/crates/styk-core/src/documents.rs').length);
  assert.ok(exportsScan('pub use styk_doc::{Value, Other};', 'engine/crates/styk-core/src/documents.rs').length);
 });
 test('vendor forks retain their own target predicates without exempting application code',()=>{

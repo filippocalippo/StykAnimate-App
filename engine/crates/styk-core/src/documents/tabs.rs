@@ -1,49 +1,5 @@
-//! What the tab strip needs of the open projects: their order, the order they were last used in, the neighbour of the one
-//! in front and where a dragged tab lands. A port of `src/project-tabs.mjs` (`recency`, `successor`, `neighbour`,
-//! `move`) onto `Documents`, which holds the tabs themselves: there is no second list.
-
-use super::{Document, DocumentId, Documents};
-
-impl Documents {
-    /// The tab's place in the strip.
-    pub fn index_of(&self, id: DocumentId) -> Option<usize> {
-        self.tabs.iter().position(|tab| tab.id == id)
-    }
-
-    /// The open projects, the one in front first, then the others most recently used first (`recency`): the order of
-    /// the Ctrl+Tab board. An id the owner no longer holds is skipped, so a closed project cannot be offered.
-    pub fn recency(&self) -> Vec<DocumentId> {
-        self.recent.iter().copied().filter(|id| self.get(*id).is_some()).collect()
-    }
-
-    /// The project that comes to the front when `id` closes: the one used before it (`successor`).
-    pub fn successor(&self, id: DocumentId) -> Option<DocumentId> {
-        self.recency().into_iter().find(|other| *other != id)
-    }
-
-    /// The tab `step` places from the one in front, around the strip's ends (`neighbour`); none with fewer than two.
-    pub fn neighbour(&self, step: isize) -> Option<DocumentId> {
-        let count = self.tabs.len();
-        let at = self.active.and_then(|active| self.index_of(active))?;
-        if count < 2 {
-            return None;
-        }
-        let to = (at as isize + step).rem_euclid(count as isize) as usize;
-        Some(self.tabs[to].id)
-    }
-
-    /// Moves a tab to `index` in the strip (clamped), `true` when its place changed (`move`).
-    pub fn move_tab(&mut self, id: DocumentId, index: usize) -> bool {
-        let Some(from) = self.index_of(id) else { return false };
-        let to = index.min(self.tabs.len() - 1);
-        if to == from {
-            return false;
-        }
-        let tab: Document = self.tabs.remove(from);
-        self.tabs.insert(to, tab);
-        true
-    }
-}
+//! Where a dragged tab lands. Tab order, recency, the neighbour and the successor are K-doc's (`Documents::recency`,
+//! `successor`, `neighbour`, `reorder`, `documents/host.rs`); the band adds only the drop rule it needs.
 
 /// The place a dragged tab takes when dropped on the half of another tab (`drop` in `project-tabs-view.mjs`): the
 /// target's index, one more after its midpoint, one less when the dragged tab came from before it.

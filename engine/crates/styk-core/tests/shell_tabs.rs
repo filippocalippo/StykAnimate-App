@@ -2,7 +2,8 @@
 //! driving them with the events the interface sends. No window.
 use std::sync::Arc;
 
-use styk_core::documents::{DocumentId, Documents, PreparedDocument, Value};
+use styk_core::documents::{DocumentId, Documents, PreparedDocument};
+use styk_core::engine::Value;
 use styk_core::shell::band::{Item, Labels, Metrics};
 use styk_core::shell::strip::TabState;
 use styk_core::shell::workspace::{Effect as WorkspaceEffect, Report, Workspace};
@@ -37,45 +38,6 @@ const Y: f32 = 26.0;
 
 fn window(width: f32) -> Window {
     Window { width, height: 1000.0, ui_scale: 1.0, controls: true }
-}
-
-#[test]
-fn recency_follows_the_project_in_front_and_the_successor_is_the_one_used_before() {
-    let engine = engine();
-    let mut documents = Documents::new();
-    let a = open(&mut documents, &engine, "A.styk");
-    let b = open(&mut documents, &engine, "B.styk");
-    let c = open(&mut documents, &engine, "C.styk");
-    assert_eq!(documents.recency(), [c, b, a], "a project opened is in front, then the ones before it");
-    documents.activate(a).unwrap();
-    assert_eq!(documents.recency(), [a, c, b]);
-    assert_eq!(documents.successor(a), Some(c));
-    assert_eq!(documents.successor(c), Some(a));
-    documents.activate(b).unwrap();
-    assert_eq!(documents.recency(), [b, a, c]);
-    assert!(!documents.activate(b).unwrap());
-    assert_eq!(documents.recency(), [b, a, c], "activating the project in front changes nothing");
-}
-
-#[test]
-fn neighbour_goes_around_the_strip_and_move_reorders_without_changing_who_is_in_front() {
-    let engine = engine();
-    let mut documents = Documents::new();
-    let a = open(&mut documents, &engine, "A.styk");
-    let b = open(&mut documents, &engine, "B.styk");
-    let c = open(&mut documents, &engine, "C.styk");
-    assert_eq!(order(&documents), [a, b, c]);
-    assert_eq!(documents.neighbour(1), Some(a), "around the end");
-    assert_eq!(documents.neighbour(-1), Some(b));
-    assert!(documents.move_tab(c, 0));
-    assert_eq!(order(&documents), [c, a, b]);
-    assert_eq!(documents.active().unwrap().id(), c, "moving a tab does not switch");
-    assert!(!documents.move_tab(c, 0), "already there");
-    assert!(documents.move_tab(c, 99), "past the end clamps to the end");
-    assert_eq!(order(&documents), [a, b, c]);
-    let mut one = Documents::new();
-    open(&mut one, &engine, "Only.styk");
-    assert_eq!(one.neighbour(1), None);
 }
 
 #[test]

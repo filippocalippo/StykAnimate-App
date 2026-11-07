@@ -11,7 +11,7 @@ behaviour is `src/shell/topbar.mjs`, `project-tabs-view.mjs`, `project-switcher.
 
 | Concern | Logic (no window, tested) | View |
 | --- | --- | --- |
-| Tab order, recency, the switcher's order, move | `styk_core::documents` (`documents/tabs.rs`: `recency`, `successor`, `neighbour`, `move_tab`, `drop_index`) | |
+| Tab order, recency, the switcher's order, move | `styk_core::documents` (K-doc's `recency`, `successor`, `neighbour`, `reorder`); `documents/tabs.rs` adds `drop_index` | |
 | Workspace switch rules (SH-076/077) | `styk_core::shell::workspace` | `styk_ui::shell` (`controls::segment`) |
 | What the band shows, where, what folds (SH-054/055) | `styk_core::shell::band` | `styk_ui::shell::bar` |
 | Session buttons, Export's two looks (SH-079/080) | `styk_core::shell::session` | `bar` |
@@ -64,8 +64,8 @@ twelve widths and three sessions are tests in `band.rs`.
 
 Each is marked in the code and goes when its chunk does.
 
-- **Opening files** (`top_band::open_file`): reads the file and opens it with a fresh engine on a worker. K-doc's files
-  service and engine host replace it.
+- **The startup document** the document host is given (`top_band::STARTUP`): the engine's startup fixture, until the native
+  startup document has an owner; the band does not send New yet.
 - **The drawing and Build sessions** (`top_band::sessions`): answer the workspace machine at once, and Build brings its
   session's buttons. The Draw and Build chunks replace it.
 - **The band's commands** (Save, Export, Close, Rename, New, Test rig, Cancel, Done, Properties) arrive as
@@ -116,8 +116,9 @@ save that landed and the 2.2 s of the clock that a script advances, and a narrow
 Every deadline of the band (the "saved" dot's 2.2 s) and the automated run's work read the one application clock
 (`styk_services::clock::Clock`, injected into `TopBand`). `--clock fixed` gives a clock that moves only when a script
 says `advance <nanoseconds>`; the engine's own clock for budgeted reads follows it. No wall clock is read anywhere in the
-band's wiring. A project the tabs refuse (the thirteenth) is handed to a worker to be dropped through
-`styk_services::Spawner`, never dropped on the interface thread; if no worker can take it, it is kept and offered again.
-A script is read through a limit of `MAX_SCRIPT_BYTES + 1` bytes. The band's words are English literals, each at its one
+band's wiring. Projects open through K-doc's document host (`Request::OpenFile`, one at a time, polled on the frames drawn
+while an open runs); a project the tabs refuse (the thirteenth) is the host's to dispose of on its worker and comes back as
+a failure, so the interface thread never drops a session. A script is read through `diagnostics::read_file` with a limit
+of `MAX_SCRIPT_BYTES`, which reads at most one byte past it. The band's words are English literals, each at its one
 site in `styk-ui/src/shell/text.rs`, until the localisation chunk moves them to `styk_core::i18n::Label`.
 
