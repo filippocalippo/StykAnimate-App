@@ -8,7 +8,11 @@
 //!
 //! It must never depend on the engine, the core or a toolkit: windows reach it as `raw-window-handle` handles.
 
+// Audio decoding and the WASAPI output run the bundled FFmpeg and the Windows device; Windows only in this phase (decision N8).
+#[cfg(windows)]
 pub mod audio;
+// Video export runs the bundled FFmpeg and the Windows codec helper; Windows only in this phase (decision N8).
+#[cfg(windows)]
 pub mod video;
 pub mod unattended;
 pub mod window;

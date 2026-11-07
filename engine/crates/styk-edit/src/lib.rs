@@ -138,7 +138,7 @@ pub fn timeline_rows(report: &Value) -> Vec<(f64, f64)> {
     timeline::rows(report).into_iter().map(|row| (row.start, row.count)).collect()
 }
 
-pub use history::{Command, CommandKind, HistoryLimits};
+pub use history::{Command, CommandKind, EntryCosts, HistoryLimits, HistoryMarks};
 pub use frame::FrameSlice;
 pub use onion_skins::{Ghost, OnionSet, MAX_GHOSTS};
 pub use layer_focus::FocusLock;
@@ -336,6 +336,9 @@ pub struct Editor {
     pub(crate) camera_clipboard: Option<Value>,
     /// `editor.audioRipple` (the app sets it) and `_audioRippling`: frame edits of every layer move the audio.
     pub(crate) audio_ripple: bool,
+    /// How many movieclips the document is inside of (the interface's `_movieclipScopes`): its own movieclips nest that much deeper in the
+    /// project it belongs to, and the limit on how deep they may run is the project's.
+    pub(crate) outer_depth: usize,
     pub(crate) audio_rippling: bool,
     /// The layers Focus and lock holds (`editor.getLayerFocus()` with a lock), as the view of the call in progress has them.
     pub(crate) focus_lock: Option<FocusLock>,
@@ -383,6 +386,9 @@ pub struct Editor {
     pub(crate) camera_views: RefCell<camera_views::Cache>,
     /// The host's clock (milliseconds), which a read that is given a time to take is held to; without one it takes what it needs.
     pub(crate) clock: Option<fn() -> f64>,
+    /// Whether the host can take about this many more bytes (the allocator's headroom): asked before a command copies a large part of the
+    /// document, which refuses the command, nothing changed, rather than run the module out of memory. Without one every command runs.
+    pub(crate) memory_gate: Option<fn(usize) -> bool>,
     /// The last document checked for unported features, and the answer.
     gate: RefCell<Option<(Value, Option<&'static str>)>>,
 }
@@ -487,6 +493,7 @@ impl Editor {
             camera_clipboard: None,
             audio_clipboard: None,
             audio_ripple: false,
+            outer_depth: 0,
             audio_rippling: false,
             focus_lock: None,
             camera_motion_clipboard: None,
@@ -510,6 +517,7 @@ impl Editor {
             onions: RefCell::default(),
             camera_views: RefCell::default(),
             clock: None,
+            memory_gate: None,
             gate: RefCell::new(None),
         }
     }

@@ -11,6 +11,7 @@ use styk_eval::assets::{Assets, DecodedImage};
 use styk_eval::doc::{Camera, Document};
 use styk_raster::{Images, Raster};
 
+use crate::interrupt::Interrupt;
 use crate::pixels::resolve;
 use crate::settings::Settings;
 use crate::tiles::{tiles, Tile};
@@ -34,6 +35,8 @@ pub struct CpuExport {
     slots: Vec<Vec<u8>>,
     /// The last resolved tile, straight RGBA.
     resolved: Vec<u8>,
+    /// Ends a frame between its tiles from any thread ([`CpuExport::interrupt`]).
+    interrupt: Interrupt,
 }
 
 impl CpuExport {
@@ -44,7 +47,12 @@ impl CpuExport {
         // As many slots as one frame has tiles (within the bound): a worker drawing ahead
         // only while slots are free never draws the next frame before this one is read.
         let slots = vec![Vec::new(); tiles.len().clamp(1, MAX_SLOTS)];
-        CpuExport { raster: Raster::new(settings.smoothing.edges()), images: Images::default(), assets: None, settings, tiles, slots, resolved: Vec::new() }
+        CpuExport { raster: Raster::new(settings.smoothing.edges()), images: Images::default(), assets: None, settings, tiles, slots, resolved: Vec::new(), interrupt: Interrupt::new() }
+    }
+
+    /// A handle that ends this exporter's frames from any thread, between tiles; the exporter is then to be dropped.
+    pub fn interrupt(&self) -> Interrupt {
+        self.interrupt.clone()
     }
 
     pub fn settings(&self) -> &Settings {
@@ -120,6 +128,9 @@ impl CpuExport {
         out.clear();
         out.resize(width * self.settings.height as usize * 4, 0);
         for index in 0..self.tiles.len() {
+            if self.interrupt.is_interrupted() {
+                return Err(crate::interrupt::INTERRUPTED.to_string());
+            }
             self.draw(doc, list, camera, index, 0)?;
             let tile = self.tiles[index];
             let pixels = self.resolve(index, 0, matte)?;

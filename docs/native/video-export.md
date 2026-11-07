@@ -14,7 +14,7 @@ the dialogs); this page is the headless export path: request, frames, encoder, d
 | `styk-platform::video` | `FfmpegVideoService` (capability probe, the argument builder, the sidecar session), `VfwVideoService` (the existing `native/bin/*/styk-vfw.exe` helper), `staging` (the destination probe, the staging directory, the commit). |
 | `styk-core::export` | The video part of the export request: validation, limits and the job a request becomes (`export-request.mjs` and `video-export-service.cjs validateConfig`, ported), and the flow state machine. |
 | `styk-export` | The frame source: `FrameRenderer` (GPU or CPU) writing straight or matte RGBA into a buffer the caller owns. |
-| `styk-video` | Drives all of it headless: `styk-video <file> <first-last> <out> ...`. |
+| `styk-cli video` | Drives all of it headless (`cargo run -p styk-cli --features app-tools -- video <file> <first-last> <out> ...`); the `app-tools` feature is the only way `styk-cli` reaches `styk-core`, `styk-services` and `styk-platform` (`cargo xtask deps`). |
 
 ## Rules that hold by construction
 
@@ -67,12 +67,12 @@ the dialogs); this page is the headless export path: request, frames, encoder, d
 The producer thread draws on **its own wgpu device** (`GpuExport`, as the worker does today), so `PollType::wait_indefinitely`
 never waits for the interface's frames. `FrameRenderer::frame_into(buf)` draws the tiles of a frame (all tiles are queued
 before the first is mapped, as many as there are read-back slots) and writes straight RGBA (WebM with alpha, VFW) or RGBA
-over black (every other format, the engine's matte) into `buf`; nothing is allocated per frame. The RGBA goes to FFmpeg as **uncompressed PAM images**
-(`-f image2pipe -c:v pam -framerate F -i pipe:0`) where today it sends PNG; everything else in the argument list is
-today's. The first choice, `-f rawvideo`, gave the same bytes at most sizes and different bytes for WebM at 65 by 33 and
-161 by 91: rawvideo hands the scaler a buffer of exactly `width * 4` bytes a row, and for unaligned rows the scaler rounds
-differently. An image decoder (PNG's or PAM's) allocates aligned buffers, so PAM keeps today's bytes at every size tried and
-costs no compression on the pipe. A header of about 70 bytes per frame is written before the pixels.
+over black (every other format, the engine's matte) into `buf`; nothing is allocated per frame. The writer thread encodes each frame as a PNG (fast compression) and sends it to FFmpeg as today's app does
+(`-f image2pipe -c:v png -framerate F -i pipe:0`): the arguments are today's in full. Two cheaper inputs were tried and
+rejected on evidence. `-f rawvideo` hands the scaler rows of exactly `width * 4` bytes, for which it rounds differently
+(WebM at 65 by 33 and 161 by 91 gave other bytes; a test keeps the observation). Uncompressed PAM images fixed that but made
+the encoder queue whole frames: at 4K it took 350 MiB more than with PNG (H.264 1,097 against 744 MiB, WebM with alpha 2,333
+against 1,984), for 9% more time on H.264 (the PNG encode on the writer thread) and none on WebM. PNG keeps today's bytes and today's encoder memory.
 
 **WebM with transparency keeps today's canvas mapping.** Today's frames go through a canvas, which stores premultiplied
 colour: the colour of a translucent pixel comes out of the PNG changed (alpha is exact, opaque pixels are exact, the colour
@@ -130,7 +130,7 @@ APNG and the picture sequences (same flow, a later chunk); the Save dialog (the 
   8 to 40 ms; during the audio pass, 41 to 51 ms.
 - **No timer.** An encoder suspended for 300 s and a producer paused for 200 s end in the same file, byte for byte.
 - **One reference run against today's app** (`tests/export-4k.desktop.mjs`, its 12-frame document at 3840 by 2160, shared
-  machine, directional): today's app 5.3 s (MP4, Smooth sprites), 7.7 s (WebM), 4.1 s (MP4, no smoothing); `styk-video` on
+  machine, directional): today's app 5.3 s (MP4, Smooth sprites), 7.7 s (WebM), 4.1 s (MP4, no smoothing); `styk-cli video` on
   the same document 4.5 s, 5.6 s and 2.1 s, document open excluded. The files are not byte-equal across the two apps
   (82,699 against 81,639 bytes for the first): the frames come from two GPU stacks (Chromium's WebGPU and wgpu), and the
   decoded videos agree at 66 to 68 dB PSNR. Byte parity holds for the encoder path, from identical frames.
@@ -138,3 +138,75 @@ APNG and the picture sequences (same flow, a later chunk); the Save dialog (the 
   in reverse; engine chunk X fixes it, and the check `--no-encode --frame-hashes --order` is ready for it), the full-disk
   case (needs an administrator to make a small volume), and an input-latency test of the interface during an export (needs
   the shell).
+
+## Fixes after the review and the check (2026-11-07)
+
+Each has a test that fails without it (shown by breaking the fix in turn; the run is in the S3 report).
+
+- **A cancel wakes a frame waiting for the GPU.** The wait is on a condition variable that the mapping callbacks and
+  `Interrupt::interrupt` both notify (`styk-export::interrupt`); the GPU's own wait runs on a poller thread nothing waits
+  for. The job's `Cancel` is wired to it, a producer stopped that way reports the cancel, and the CPU path checks between
+  tiles. An interrupted exporter is dropped, not reused.
+- **A cancel can no longer be followed by a replaced destination.** `Cancel::begin_commit` is the commit boundary: the flush
+  of the finished file happens before it (an edit or close during a slow flush still cancels), the rename after it (a cancel
+  from then on is too late and changes nothing).
+- **The finish waits for the progress reader** before it trusts the frame count and the helper's `complete` line, and on an
+  error it ends the encoder before joining the pipe writer. The flow takes its frame count from the request.
+- **The destination probe tests the real operation:** a file made in the stage is renamed into the destination's folder
+  (a folder that takes subfolders but not files is refused), then once more under a name as long as the destination's (a
+  failure there names the file, not the folder).
+- **The stage name is short** (`.styk-<process>-<unique>.stage`) and independent of the destination's; a destination name
+  over 255 characters is refused naming the file.
+- **Nothing outlives the app.** Every child joins a Windows job object that kills its members when the app's last handle
+  closes, a hard kill included, a suspended encoder included. A stage left by a killed app is swept by the next export to
+  that folder when its process is gone and it has sat untouched for two minutes (today's idle timer); anything else in the
+  folder is left alone. Elsewhere the child is ended by a direct `kill` and reaped by its waiter thread, never waited for by
+  the cancelling thread.
+- **Input is PNG, as today's.** PAM, the first fix for odd sizes, cost the encoder 350 MiB more at 4K (above).
+- **Tests fail loudly without the encoder** instead of passing silently; a bad `--size` is refused with a message.
+- **The headless driver is `styk-cli video`** behind the non-default `app-tools` feature; `cargo xtask deps` allows
+  `styk-cli` to reach `styk-core`, `styk-services` and `styk-platform` only through it (the manifest is read, since the
+  lock file cannot tell a feature from a dependency) and holds those three away from the toolkit and from other front-end crates.
+
+### Memory at 4K (svr_uriel, 120 frames, private bytes)
+
+| | today's service | native |
+| --- | --- | --- |
+| H.264 encoder child | 711 MiB (driver 136) | 744 MiB |
+| WebM with alpha encoder child | 1,896 MiB (driver 121) | 1,984 MiB |
+
+Our process: 140 MiB the document, 67 decoded pictures, 78 adapter, 201 device, 67 exporter, 256 sprite atlas (all before the
+first frame, 773 MiB once the decoded copies are dropped), then 110 MiB for the first frame (three frame buffers, the read-back
+slots, the resolved tile) and, on this document, a one-time 265 MiB at tick 135 that is the same at 1080p (a renderer
+allocation, not the export's). The export's own share is about 110 MiB; the rest is the renderer's and the engine's
+and is the floors rule's to take up (a candidate: the sprite atlas pages and the effect slots).
+
+### Order independence (A9)
+
+Frames drawn forward, reversed, shuffled and interleaved with frames of another open document, 64 frames at 640 by 360 each,
+on svr_uriel, tdd2, AyameDemo and testingupload: 0 differing frames in every case (the same check found 52 and 29 differing
+frames on svr_uriel before chunk X).
+
+## Fixes after the re-check (2026-11-07)
+
+Windows only in this phase (decision N8): the video module is built on Windows only, and no Unix process code is written.
+`ChildGuard` is the one place a process is ended; a Unix implementation replaces its handle by a stable one (a pidfd on
+Linux) and nothing above it changes.
+
+- **A kept video is not swept.** A commit that lost a race writes a `kept` marker into the stage, naming the process that holds
+  the video. The sweep honours it: while that process lives the stage is not touched; once it is gone, only after the marker has
+  been idle for the two minutes of today's service (which keeps such a file in its reading session and deletes it when the
+  session has been idle that long). A retry claims the stage first (the marker names it and is touched).
+- **A cancel during the flush returns at once.** Today's service renames without flushing; the native one flushes first so that
+  a power cut after the rename cannot leave an empty file, and runs the flush on a helper thread. A cancel wakes the commit
+  while the helper goes on; the helper then closes the file and removes the stage. The destination is still never replaced
+  after a cancel (the commit boundary is after the flush).
+- **Cancelled GPU resources are disposed of elsewhere.** A dropped `GpuExport` hands its device, queue, renderer and buffers
+  to a disposal thread (at most four waiting; more each get a thread of their own), so dropping it never waits for the GPU
+  to go idle. The poller thread owns its own device clone and ends after the wait it is in. A stalled GPU keeps the resources it
+  holds, not the thread that cancelled.
+- **A failing wait for the GPU wakes the producer.** A poll error becomes a terminal error of the frame latch.
+- **A child joins its job before it runs.** It is created suspended, assigned to the kill-on-close job, then resumed.
+- **Translucent WebM is held to today's file in a test** (`styk-cli`, `translucent_webm_equals_the_file_made_from_the_canvas_pngs_of_todays_app`):
+  the canvas-mapped frames of today's app as PNG through today's arguments against the native session, and the same without the
+  mapping, which differs.

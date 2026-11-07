@@ -25,7 +25,7 @@ use styk_eval::load::Loader;
 use styk_eval::records::Records;
 
 pub use figure::FigureRequest;
-pub use save::{Projected, check_scene, fold_movieclip, prepare_project, project_document};
+pub use save::{Openable, Projected, check_openable, check_scene, fold_movieclip, prepare_project, project_document};
 
 use crate::{EditError, Editor, Options};
 

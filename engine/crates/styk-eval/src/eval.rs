@@ -78,6 +78,9 @@ pub struct Frame {
     pub parallax: Option<Arc<crate::parallax::Parallax>>,
 }
 
+/// For each figure a layer's keys replace, the keys (by index) that replace it and the pose source each shows, in key order.
+type PatchIndex = HashMap<u32, Vec<(u32, Arc<str>)>>;
+
 /// A document plus the timing tables evaluation needs, built once per revision.
 pub struct Prepared {
     pub doc: Arc<Document>,
@@ -89,8 +92,18 @@ pub struct Prepared {
     pub has_vfx: bool,
     tracks: HashMap<String, Arc<Seq>>,
     imported: HashMap<String, bool>,
-    /// The pose track of each replaced movieclip, by layer and replaced uid (`patchChannels`).
-    patches: HashMap<(String, u32), Arc<Seq>>,
+    /// The pose track of each replaced movieclip, by layer and replaced uid (`patchChannels`), made when a replacement is tweened and
+    /// asks for it ([`Prepared::patch_track`]): a clip of every figure of a project replaces thousands, each with a track as long as the layer's.
+    ///
+    /// These three are caches that the page's thread and the workers both read and fill, so none of them is waited for (D7: a page's thread may
+    /// not wait on a lock): each is taken with one attempt ([`styk_doc::lock::once`]), and where another thread holds it the answer is made
+    /// again and not kept. What is made is made with no lock held.
+    patches: HashMap<(String, u32), std::sync::Mutex<Option<Arc<Seq>>>>,
+    /// Per layer, for each figure its keys replace: the keys that do and the pose source each shows ([`PatchIndex`]), made on first use.
+    patch_index: HashMap<String, std::sync::Mutex<Option<Arc<PatchIndex>>>>,
+    /// The replacement tracks made, by layer and which keys replace the figure with what: the figures of a clip are all replaced the same way
+    /// (but for the one the clip sits at), so thousands of them share one track.
+    patch_seqs: std::sync::Mutex<HashMap<(String, Vec<(u32, Arc<str>)>), Arc<Seq>>>,
     /// Presence-clock spans per movieclip instance: (start, end, elapsed, rate).
     presence: HashMap<u32, Vec<(f64, f64, f64, f64)>>,
     /// Follow camera clips and their shaped paths ([`crate::follow`]).
@@ -739,7 +752,8 @@ impl Prepared {
         let channels = doc.animation.as_ref().map(|animation| crate::channels::Compiled::new(&doc, animation));
         let mut tracks = HashMap::new();
         let mut imported = HashMap::new();
-        let mut patches = HashMap::new();
+        let mut patches: HashMap<(String, u32), std::sync::Mutex<Option<Arc<Seq>>>> = HashMap::new();
+        let mut patch_index = HashMap::new();
         if let Some(sheet) = &doc.sheet {
             rows.retain(|r| r.start < sheet.duration);
             for r in rows.iter_mut() {
@@ -751,9 +765,13 @@ impl Prepared {
             for (id, track) in &sheet.tracks {
                 tracks.insert(id.clone(), Arc::new(pose_track(&doc, id, track)));
                 imported.insert(id.clone(), track.keys.iter().any(|k| matches!(k.value, SheetValue::SourceTick(_))));
+                let mut replaced = std::collections::HashSet::new();
                 for patch in track.keys.iter().flat_map(|k| &k.movieclip_patches) {
-                    patches.entry((id.clone(), patch.uid)).or_insert_with(|| Arc::new(patch_track(&doc, track, patch.uid)));
+                    if replaced.insert(patch.uid) {
+                        patches.insert((id.clone(), patch.uid), Default::default());
+                    }
                 }
+                patch_index.insert(id.clone(), Default::default());
             }
         } else if let Some(last) = rows.last_mut() {
             // A native timeline also lasts until the channels' last frame (`animationEndTick`).
@@ -768,7 +786,7 @@ impl Prepared {
         let follow = crate::follow::Follow::new(&doc);
         let source = doc.movieclip_source.as_ref().map(|source| Arc::new(Prepared::new(source.document.clone())));
         let has_vfx = has_vfx || source.as_ref().is_some_and(|source| source.has_vfx);
-        let mut prepared = Prepared { doc, native, rows, total_ticks, has_vfx, tracks, imported, patches, presence: HashMap::new(), follow, channels, source };
+        let mut prepared = Prepared { doc, native, rows, total_ticks, has_vfx, tracks, imported, patches, patch_index, patch_seqs: Default::default(), presence: HashMap::new(), follow, channels, source };
         prepared.presence = prepared.presence_index();
         prepared
     }
@@ -874,9 +892,45 @@ impl Prepared {
         })
     }
 
+    /// How many figures the sheet's keys replace with a movieclip's frames, how many of them have asked for their track, and how many
+    /// different tracks that made (figures replaced the same way share one): a measurement and a test's witness.
+    pub fn patch_tracks(&self) -> (usize, usize, usize) {
+        let seqs = styk_doc::lock::spinning(&self.patch_seqs).len();
+        (self.patches.len(), self.patches.values().filter(|cell| styk_doc::lock::spinning(cell).is_some()).count(), seqs)
+    }
+
     /// The pose track of what replaces movieclip `uid` on layer `id` (`patchChannels`).
-    pub(crate) fn patch_track(&self, id: &str, uid: u32) -> Option<&Seq> {
-        self.patches.get(&(id.to_string(), uid)).map(|seq| &**seq)
+    ///
+    /// Nothing here waits (the page's thread asks for tracks while workers do): a cache that is busy is skipped, the track is made again from what
+    /// is not busy, and what is made is made with no lock held.
+    pub(crate) fn patch_track(&self, id: &str, uid: u32) -> Option<Arc<Seq>> {
+        let cell = self.patches.get(&(id.to_string(), uid))?;
+        if let Some(seq) = styk_doc::lock::once(cell).and_then(|held| held.clone()) {
+            return Some(seq);
+        }
+        let track = self.doc.sheet.as_ref()?.tracks.get(id)?;
+        let index_cell = self.patch_index.get(id).expect("a layer with replacements has its index");
+        let index = styk_doc::lock::once(index_cell).and_then(|held| held.clone()).unwrap_or_else(|| {
+            let made = Arc::new(patch_index(track));
+            if let Some(mut held) = styk_doc::lock::once(index_cell) {
+                held.get_or_insert_with(|| made.clone());
+            }
+            made
+        });
+        let replaced = index.get(&uid).map(Vec::as_slice).unwrap_or(&[]);
+        let key = (id.to_string(), replaced.to_vec());
+        let shared = styk_doc::lock::once(&self.patch_seqs).and_then(|seqs| seqs.get(&key).cloned());
+        let seq = shared.unwrap_or_else(|| {
+            let made = Arc::new(patch_track(&self.doc, track, replaced));
+            match styk_doc::lock::once(&self.patch_seqs) {
+                Some(mut seqs) => seqs.entry(key).or_insert(made).clone(),
+                None => made,
+            }
+        });
+        if let Some(mut held) = styk_doc::lock::once(cell) {
+            held.get_or_insert_with(|| seq.clone());
+        }
+        Some(seq)
     }
 
     /// One layer's own frame at `tick`, movieclip replacements applied (`sample(id)`).
@@ -1151,15 +1205,17 @@ impl Prepared {
         let Some(key) = at.checked_sub(1).map(|i| &track.keys[i]) else { return frame.map(|frame| (frame, identity)) };
         let next = track.keys.get(at);
         let held = key.easing.map(|e| e.mode) == Some(EasingMode::Constant);
+        // The figures the next key replaces too: read once, not once for each figure this key replaces.
+        let continuing: Option<std::collections::HashSet<u32>> = next.filter(|_| !held && !key.movieclip_patches.is_empty()).map(|n| n.movieclip_patches.iter().map(|p| p.uid).collect());
         for patch in &key.movieclip_patches {
             let source = |fid: &Arc<str>| {
                 let key = self.doc.pose_source(fid)?;
                 Some(frame_of(&KeyRef { frame: key.clone(), duration: 1, easing: None, origin: Some(FrameRef::Source(fid.clone())) }))
             };
             // Consecutive replacements of one movieclip tween like any pose track.
-            let tweened = !held && next.is_some_and(|n| n.movieclip_patches.iter().any(|p| p.uid == patch.uid));
-            let replacement = match self.patches.get(&(id.to_string(), patch.uid)).filter(|_| tweened) {
-                Some(seq) => sample_pose_track(&self.doc, seq, tick),
+            let tweened = !held && continuing.as_ref().is_some_and(|uids| uids.contains(&patch.uid));
+            let replacement = match tweened.then(|| self.patch_track(id, patch.uid)).flatten() {
+                Some(seq) => sample_pose_track(&self.doc, &seq, tick),
                 None => source(&patch.frame_id),
             };
             let Some(replacement) = replacement else { continue };
@@ -1537,9 +1593,24 @@ fn pose_track(doc: &Document, id: &str, track: &SheetTrack) -> Seq {
 
 /// The pose track of what replaces movieclip `uid` on a layer: every key of the
 /// layer, posing the frame it replaces the movieclip with (or nothing).
-fn patch_track(doc: &Document, track: &SheetTrack, uid: u32) -> Seq {
-    let keys = track.keys.iter().map(|k| (k, k.movieclip_patches.iter().find(|p| p.uid == uid).map(|p| &p.frame_id)));
+fn patch_track(doc: &Document, track: &SheetTrack, replaced: &[(u32, Arc<str>)]) -> Seq {
+    let mut next = replaced.iter().peekable();
+    let keys = track.keys.iter().enumerate().map(|(at, k)| (k, next.next_if(|(key, _)| *key as usize == at).map(|(_, frame_id)| frame_id)));
     virtual_track(doc, false, keys.collect())
+}
+
+/// The keys of `track` that replace each figure, in key order, with the first patch a key has for it.
+fn patch_index(track: &SheetTrack) -> PatchIndex {
+    let mut index = PatchIndex::new();
+    for (at, key) in track.keys.iter().enumerate() {
+        for patch in &key.movieclip_patches {
+            let keys = index.entry(patch.uid).or_default();
+            if keys.last().is_none_or(|(last, _)| *last as usize != at) {
+                keys.push((at as u32, patch.frame_id.clone()));
+            }
+        }
+    }
+    index
 }
 
 /// A pose with nothing in it: no figures, the default camera, the first background.
@@ -1666,6 +1737,73 @@ impl Frame {
             if !Arc::ptr_eq(object, kept) && same_figure && now[slot].same_data(&before[slot]) {
                 *object = kept.clone();
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod patch_cache_tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::*;
+
+    fn prepared() -> Arc<Prepared> {
+        let text = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/eval/movieclip-joined.json")).unwrap();
+        let tree = styk_doc::json::parse(&text).unwrap();
+        Arc::new(crate::prepare(crate::from_value(&tree, "").unwrap()))
+    }
+
+    /// The page's thread may not wait (D7): a track is asked for while another thread holds every cache the answer would be kept in, and
+    /// is made all the same, with no one waited for.
+    #[test]
+    fn a_track_is_made_while_the_caches_are_held_by_another_thread() {
+        let prepared = prepared();
+        let (layer, uid) = prepared.patches.keys().next().cloned().expect("the document replaces figures with a movieclip's frames");
+        let asked = {
+            let (held_by_us, wait) = mpsc::channel::<()>();
+            let (done, answer) = mpsc::channel();
+            // Held here, on this thread, until the answer is in.
+            let seqs = prepared.patch_seqs.lock().unwrap();
+            let cell = prepared.patches.get(&(layer.clone(), uid)).unwrap().lock().unwrap();
+            let index = prepared.patch_index.get(&layer).unwrap().lock().unwrap();
+            let asking = prepared.clone();
+            let asker = std::thread::spawn(move || {
+                held_by_us.send(()).ok();
+                done.send(asking.patch_track(&layer, uid).is_some()).ok();
+            });
+            wait.recv().unwrap();
+            let asked = answer.recv_timeout(Duration::from_secs(10));
+            drop((seqs, cell, index));
+            asker.join().unwrap();
+            asked
+        };
+        assert_eq!(asked, Ok(true), "the track was made with the caches busy, not waited for");
+    }
+
+    /// Cold samples from several threads at once give the frames one thread gives, and every track they made is shared as it should be.
+    #[test]
+    fn cold_samples_from_several_threads_give_the_frames_one_thread_gives() {
+        let shape = |frame: &Frame| -> Vec<(u32, u32, u64, u64)> { frame.objects.iter().map(|object| (object.uid, object.figure, object.root[0].to_bits(), object.root[1].to_bits())).collect() };
+        let reference = prepared();
+        let ticks: Vec<f64> = (0..24).map(f64::from).collect();
+        let expected: Vec<Vec<(u32, u32, u64, u64)>> = ticks.iter().map(|tick| shape(&reference.evaluate(*tick))).collect();
+        for _round in 0..8 {
+            let cold = prepared();
+            let results: Vec<Vec<Vec<(u32, u32, u64, u64)>>> = std::thread::scope(|scope| {
+                let threads: Vec<_> = (0..6).map(|offset| {
+                    let (cold, ticks) = (&cold, &ticks);
+                    scope.spawn(move || (0..ticks.len()).map(|i| shape(&cold.evaluate(ticks[(i + offset * 4) % ticks.len()]))).collect::<Vec<_>>())
+                }).collect();
+                threads.into_iter().map(|thread| thread.join().unwrap()).collect()
+            });
+            for (offset, got) in results.iter().enumerate() {
+                for (i, frame) in got.iter().enumerate() {
+                    assert_eq!(frame, &expected[(i + offset * 4) % ticks.len()], "thread {offset}, sample {i}");
+                }
+            }
+            let (replaced, made, distinct) = cold.patch_tracks();
+            assert!(made <= replaced && distinct <= made, "{replaced} replaced, {made} asked, {distinct} different");
         }
     }
 }

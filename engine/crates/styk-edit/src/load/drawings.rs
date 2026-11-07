@@ -211,15 +211,7 @@ pub(super) fn validate(report: &Value) -> Result<(), EditError> {
             if !truthy(frame_id) {
                 continue;
             }
-            let frame_id = frame_id.unwrap();
-            let name = property_name(frame_id);
-            let retained = path(Some(report), &["_styk", "frameSources"]).and_then(|sources| name.as_deref().and_then(|n| sources.get(n)));
-            let by_frame: Option<Value> = if is_given(retained) {
-                retained.cloned()
-            } else {
-                items(report.get("keyframes")).into_iter().rev().find(|f| path(Some(f), &["_styk", "frameId"]) == Some(frame_id))
-            };
-            let Some(frame) = by_frame.filter(|f| !f.is_null()) else { continue };
+            let Some(frame) = keyed_frame(report, frame_id.unwrap()) else { continue };
             let listed = prop(Some(&frame), "objects")?;
             if !is_array(listed) {
                 return Err(refuse(TYPE_ERROR));
@@ -243,11 +235,124 @@ pub(super) fn validate(report: &Value) -> Result<(), EditError> {
     Ok(())
 }
 
+/// The frame a key of a layer shows: the pose a sheet retains under that name, else the last keyframe that carries the identity.
+fn keyed_frame(report: &Value, frame_id: &Value) -> Option<Value> {
+    let name = property_name(frame_id);
+    let retained = path(Some(report), &["_styk", "frameSources"]).and_then(|sources| name.as_deref().and_then(|n| sources.get(n)));
+    let by_frame: Option<Value> = if is_given(retained) {
+        retained.cloned()
+    } else {
+        items(report.get("keyframes")).into_iter().rev().find(|f| path(Some(f), &["_styk", "frameId"]) == Some(frame_id))
+    };
+    by_frame.filter(|f| !f.is_null())
+}
+
 /// The property name a value reads as.
 fn property_name(value: &Value) -> Option<String> {
     match value {
         Value::Str(s) => Some(s.to_string()),
         Value::Num(n) => Some(number_text(*n)),
         _ => None,
+    }
+}
+
+/// Figures that a drawing layer's own frames show beside its cel, or instead of one: what opening refuses (`drawingLayersMustContainOneDrawingCelPer`).
+/// A figure assigned to a drawing layer that no frame the layer keys shows (a movieclip placed while one was active is a replacement, which
+/// is not a key's frame) is not one: opening has always kept it where it was saved, and so does the repair below.
+fn refused_on_drawing_layers(report: &Value, drawing_layers: &HashSet<String>, drawn: &HashSet<u64>) -> HashSet<String> {
+    let mut refused = HashSet::new();
+    let assignments = path(Some(report), &["_styk", "layers", "assignments"]);
+    let sheet = path(Some(report), &["_styk", "layerSheet"]);
+    for id in drawing_layers {
+        for key in items(path(sheet, &["tracks", id.as_str(), "keys"])) {
+            let Some(frame_id) = path(Some(&key), &["value", "frameId"]).filter(|frame_id| truthy(Some(*frame_id))) else { continue };
+            let Some(frame) = keyed_frame(report, frame_id) else { continue };
+            let here: Vec<(String, bool)> = items(frame.get("objects"))
+                .iter()
+                .filter_map(|object| {
+                    let uid = object.get("unique_id").and_then(property_name)?;
+                    let assigned = get(assignments, &uid).is_some_and(|layer| layer.as_str() == Some(id.as_str()));
+                    assigned.then(|| (uid, num(object.get("figure_type_id")).is_some_and(|kind| drawn.contains(&id_key(kind)))))
+                })
+                .collect();
+            if here.len() > 1 || here.iter().any(|(_, cel)| !cel) {
+                refused.extend(here.into_iter().filter(|(_, cel)| !cel).map(|(uid, _)| uid));
+            }
+        }
+    }
+    refused
+}
+
+/// Figures assigned to a drawing layer, which holds only drawing cels (older builds assigned a movieclip placed while one was active), given
+/// the layer new figures go to when opening would refuse the file for them. Says how many assignments it changed.
+pub(super) fn repair_assignments(report: &mut Value) -> usize {
+    let drawing_layers: HashSet<String> = entries(path(Some(report), &["_styk", "layers", "byId"]))
+        .into_iter()
+        .filter(|(_, layer)| truthy(get(Some(layer), "drawing")))
+        .map(|(id, _)| id.to_string())
+        .collect();
+    if drawing_layers.is_empty() {
+        return 0;
+    }
+    let default = path(Some(report), &["_styk", "layers", "defaultLayerId"]).and_then(Value::as_str).filter(|id| !drawing_layers.contains(*id)).map(str::to_string);
+    let Some(default) = default else { return 0 };
+    let drawn: HashSet<u64> = items(report.get("figure_types")).iter().filter(|f| truthy(path(Some(f), &["_styk", "drawing"]))).filter_map(|f| num(f.get("figure_type_id")).map(id_key)).collect();
+    let mut figures: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    let frames = items(report.get("keyframes")).into_iter().chain(entries(path(Some(report), &["_styk", "frameSources"])).into_iter().map(|(_, frame)| frame.clone()));
+    for frame in frames {
+        for object in items(frame.get("objects")) {
+            if let (Some(uid), Some(type_id)) = (object.get("unique_id").and_then(property_name), num(object.get("figure_type_id"))) {
+                let entry = figures.entry(uid).or_insert(true);
+                *entry &= drawn.contains(&id_key(type_id));
+            }
+        }
+    }
+    let refused = refused_on_drawing_layers(report, &drawing_layers, &drawn);
+    let wrong: Vec<String> = entries(path(Some(report), &["_styk", "layers", "assignments"]))
+        .into_iter()
+        .filter(|(uid, layer)| layer.as_str().is_some_and(|layer| drawing_layers.contains(layer)) && figures.get(&**uid) == Some(&false) && refused.contains(&**uid))
+        .map(|(uid, _)| uid.to_string())
+        .collect();
+    let assignments = report.make_obj().and_then(|r| r.get_mut("_styk")).and_then(Value::make_obj).and_then(|s| s.get_mut("layers")).and_then(Value::make_obj).and_then(|l| l.get_mut("assignments")).and_then(Value::make_obj);
+    if let Some(assignments) = assignments {
+        for uid in &wrong {
+            assignments.set(uid, Value::str(&default));
+        }
+    }
+    wrong.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A project whose drawing layer keys a frame that shows its cel: the cel's definition has the figure id 0, and the instance in the frame
+    /// names it -0 (both are the number zero, and opening takes them for one figure).
+    fn project() -> Value {
+        let mut report = styk_doc::json::parse(
+            br#"{"figure_types":[{"figure_type_id":0,"segments":[],"_styk":{"drawing":{"version":2,"celId":"cel-a","pixelsPerUnit":1,"revision":0,"bounds":null}}}],
+                "keyframes":[{"_styk":{"frameId":"f1"},"objects":[{"unique_id":5,"figure_type_id":0}]}],
+                "_styk":{"layers":{"byId":{"layer-1":{"name":"Layer 1"},"layer-2":{"name":"Layer 2","drawing":{"version":1}}},"defaultLayerId":"layer-1","assignments":{"5":"layer-2"}},
+                  "layerSheet":{"tracks":{"layer-2":{"keys":[{"id":"cell-1","tick":0,"value":{"frameId":"f1"}}]}}}}}"#,
+        ).unwrap();
+        let objects = report.make_obj().unwrap().get_mut("keyframes").unwrap().make_arr().unwrap()[0].make_obj().unwrap().get_mut("objects").unwrap().make_arr().unwrap();
+        objects[0].make_obj().unwrap().set("figure_type_id", Value::Num(-0.0));
+        report
+    }
+
+    #[test]
+    fn a_cel_whose_instance_names_it_with_a_signed_zero_stays_on_its_drawing_layer() {
+        let mut report = project();
+        assert_eq!(repair_assignments(&mut report), 0, "the cel is a cel: nothing is moved");
+        assert_eq!(report.path(&["_styk", "layers", "assignments", "5"]).and_then(Value::as_str), Some("layer-2"));
+    }
+
+    #[test]
+    fn a_figure_that_is_not_a_cel_is_still_moved_off_a_drawing_layer_when_opening_refuses_it() {
+        let mut report = project();
+        // The definition is no cel any more: the keyed frame shows a figure beside no cel, which opening refuses.
+        report.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap()[0].make_obj().unwrap().remove("_styk");
+        assert_eq!(repair_assignments(&mut report), 1);
+        assert_eq!(report.path(&["_styk", "layers", "assignments", "5"]).and_then(Value::as_str), Some("layer-1"));
     }
 }

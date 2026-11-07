@@ -5,15 +5,24 @@
 //! *wakers*. Whatever can block registers a waker when it starts (end the child process, notify the condition
 //! variable); [`Cancel::cancel`] sets the flag and runs them on the calling thread, so it returns at once and does not
 //! depend on the thread that is blocked.
+//!
+//! A job also has a **commit boundary**: [`Cancel::begin_commit`] succeeds only if the job was not cancelled, and from
+//! then on a cancel is too late (it changes nothing and runs no waker). The flush of a finished file happens before the
+//! boundary, so an edit during a slow flush still cancels; the replacing rename happens after it, so a cancel can
+//! never be followed by a replaced destination.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 type Waker = Box<dyn FnOnce() + Send>;
 
+const RUNNING: u8 = 0;
+const COMMITTING: u8 = 1;
+const CANCELLED: u8 = 2;
+
 #[derive(Default)]
 struct Inner {
-    cancelled: AtomicBool,
+    state: AtomicU8,
     wakers: Mutex<Vec<Waker>>,
 }
 
@@ -28,8 +37,9 @@ impl Cancel {
         Cancel::default()
     }
 
+    /// Whether the job was cancelled before its commit boundary.
     pub fn is_cancelled(&self) -> bool {
-        self.inner.cancelled.load(Ordering::SeqCst)
+        self.inner.state.load(Ordering::SeqCst) == CANCELLED
     }
 
     /// Runs `waker` when the cancellation happens: at once when it already has. Each waker runs once.
@@ -44,15 +54,24 @@ impl Cancel {
     }
 
     /// Cancels: sets the flag, then runs every waker registered so far on this thread. Cancelling twice is harmless.
-    pub fn cancel(&self) {
-        let wakers = {
-            let mut wakers = self.inner.wakers.lock().unwrap_or_else(|e| e.into_inner());
-            self.inner.cancelled.store(true, Ordering::SeqCst);
-            std::mem::take(&mut *wakers)
-        };
-        for waker in wakers {
-            waker();
+    /// Returns whether the job is cancelled; it is not when the commit boundary was already crossed (too late).
+    pub fn cancel(&self) -> bool {
+        match self.inner.state.compare_exchange(RUNNING, CANCELLED, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => {
+                let wakers = std::mem::take(&mut *self.inner.wakers.lock().unwrap_or_else(|e| e.into_inner()));
+                for waker in wakers {
+                    waker();
+                }
+                true
+            }
+            Err(state) => state == CANCELLED,
         }
+    }
+
+    /// Crosses the commit boundary: `true` when the job may replace its destination (and a cancel is from now on too
+    /// late), `false` when it was cancelled first.
+    pub fn begin_commit(&self) -> bool {
+        self.inner.state.compare_exchange(RUNNING, COMMITTING, Ordering::SeqCst, Ordering::SeqCst).is_ok()
     }
 }
 
@@ -101,5 +120,26 @@ mod tests {
         };
         cancel.cancel();
         blocked.join().unwrap();
+    }
+
+    #[test]
+    fn a_cancel_before_the_commit_boundary_refuses_the_commit() {
+        let cancel = Cancel::new();
+        assert!(cancel.cancel());
+        assert!(!cancel.begin_commit());
+    }
+
+    #[test]
+    fn a_cancel_after_the_commit_boundary_is_too_late_and_wakes_nothing() {
+        let cancel = Cancel::new();
+        let woken = Arc::new(AtomicUsize::new(0));
+        let seen = woken.clone();
+        cancel.on_cancel(move || {
+            seen.fetch_add(1, Ordering::SeqCst);
+        });
+        assert!(cancel.begin_commit());
+        assert!(!cancel.cancel(), "the commit is under way");
+        assert!(!cancel.is_cancelled());
+        assert_eq!(woken.load(Ordering::SeqCst), 0);
     }
 }

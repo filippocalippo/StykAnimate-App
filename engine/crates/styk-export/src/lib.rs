@@ -24,6 +24,7 @@
 pub mod background;
 pub mod cpu;
 pub mod gpu;
+pub mod interrupt;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod legacy_canvas;
 pub mod pick;
@@ -38,6 +39,7 @@ pub mod view;
 
 pub use background::without_background;
 pub use cpu::CpuExport;
+pub use interrupt::Interrupt;
 pub use gpu::GpuExport;
 pub use settings::{Settings, Smoothing};
 #[cfg(not(target_arch = "wasm32"))]

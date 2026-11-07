@@ -18,4 +18,6 @@ pub mod staging;
 pub mod vfw;
 
 pub use ffmpeg::FfmpegVideoService;
+#[doc(hidden)]
+pub use session::ReaderGate;
 pub use vfw::{VfwCodec, VfwVideoService};

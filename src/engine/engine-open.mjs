@@ -111,6 +111,8 @@ export class Opening {
   get version() { return this.meta.version; }
   /** Whether the document stored a frame draft when it was opened. */
   get savedDraft() { return this.meta.savedDraft; }
+  /** How many things the load mended so that the document opens (a file saved by a build that wrote what it could not read back); 0 for a document that needed nothing. */
+  get repairs() { return this.meta.repairs; }
   /** Where the engine's open spent its time (ms): decode, prepare, views, check. */
   get timings() { return this.meta.timings; }
   get lineage() { return this.meta.lineage; }
@@ -333,6 +335,22 @@ export async function prepareLoad(document, {layerTimeline, signal, onProgress, 
   const opening = await openJson(report, undefined, {layerTimeline, signal});
   try { return await opening.read({signal, onProgress, checkCurrent, sliceMs, yieldControl}); }
   catch (error) { opening.dispose(); throw error; }
+}
+
+/**
+ * Opens movieclip `typeId` of the project `session` holds, on this thread, from the project's tree (no text of it is made or read), and gives the
+ * view the editor adopts as the document it loads: `{document, name}`. A refusal is the error `openFailure` words.
+ */
+export function openMovieclipNow(session, typeId, {engine, layerTimeline} = {}) {
+  engine = engineOf(engine);
+  let opening;
+  try { opening = new Opening(engine, engine.handle.open_movieclip(session, typeId, optionsText({layerTimeline}))); }
+  catch (error) { throw openFailure(error); }
+  try {
+    const read = opening.readNow();
+    attachRead(read.report, read);
+    return {document: read.report, name: opening.name};
+  } catch (error) { opening.dispose(); throw error; }
 }
 
 /** [`prepareLoad`] at once, on this thread. */

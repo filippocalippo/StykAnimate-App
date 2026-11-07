@@ -17,6 +17,14 @@ pub enum FrameRenderer {
 }
 
 impl FrameRenderer {
+    /// A handle that ends the frame in progress and every later one, from any thread (wire it to the job's cancel).
+    pub fn interrupt(&self) -> crate::Interrupt {
+        match self {
+            FrameRenderer::Gpu(gpu) => gpu.interrupt(),
+            FrameRenderer::Cpu(cpu) => cpu.interrupt(),
+        }
+    }
+
     /// Draws a frame into `out` (cleared and filled with RGBA of the output size): straight, or over black with
     /// `matte`. `list` must be the draw list of the frame to draw; nothing is allocated per frame.
     pub fn frame_into(&mut self, doc: &Document, list: &Arc<DrawList>, camera: Option<&Camera>, matte: bool, out: &mut Vec<u8>) -> Result<(), String> {

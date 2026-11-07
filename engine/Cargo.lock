@@ -2876,20 +2876,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "styk-video"
-version = "0.1.0"
-dependencies = [
- "pollster",
- "sha2",
- "styk-core",
- "styk-engine",
- "styk-export",
- "styk-platform",
- "styk-render",
- "styk-services",
-]
-
-[[package]]
 name = "styk-wasm"
 version = "0.1.0"
 dependencies = [

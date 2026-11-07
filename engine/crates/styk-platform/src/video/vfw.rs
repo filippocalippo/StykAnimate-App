@@ -160,7 +160,7 @@ impl VideoService for VfwVideoService {
         let output = stage.path("animation.avi");
         let layout = FrameLayout { width: request.width, height: request.height, bytes: request.width as usize * request.height as usize * 4, matte: false, legacy_canvas: false, encoded: (request.width, request.height), edge: None };
         let arguments = encode_args(request, &output.to_string_lossy());
-        Ok(Box::new(Session::start(&helper, arguments, Kind::Vfw(request.clone()), layout, stage, output, destination, cancel)?))
+        Ok(Box::new(Session::start(&helper, arguments, Kind::Vfw(request.clone()), layout, stage, output, destination, cancel, None)?))
     }
 
     fn retry_commit(&self, artifact: &Path, destination: &Path) -> Result<Committed, VideoError> {
