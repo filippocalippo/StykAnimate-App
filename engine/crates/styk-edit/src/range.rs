@@ -865,6 +865,9 @@ impl Editor {
         if movieclip && !movieclip_insertion && !self.sheet() {
             return Err(EditError::Unported("adding a movieclip on a native timeline".into()));
         }
+        if movieclip {
+            self.refuse_on_drawing_layer()?;
+        }
         let mut object = crate::figures::with_origin_pivot(figure, crate::figures::create_object(figure, identity, x, y));
         if movieclip {
             let mut playback = Obj::new();
