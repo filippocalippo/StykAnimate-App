@@ -8,6 +8,8 @@
 //!
 //! It must never depend on the engine, the core or a toolkit: windows reach it as `raw-window-handle` handles.
 
+pub mod environment;
+pub mod font_smoothing;
 // Audio decoding and the WASAPI output run the bundled FFmpeg and the Windows device; Windows only in this phase (decision N8).
 #[cfg(windows)]
 pub mod audio;

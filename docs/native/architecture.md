@@ -88,6 +88,10 @@ build keeps the browser's WebGPU.
 coordinates, keys, waits, measurements, screenshots) against the real app, through the same core commands the
 interface sends. `--clock fixed` and fixed seeds make runs deterministic. The benchmark scenarios are such scripts; the
 same scripts run headless through `styk-cli` where no window is needed. There is no benchmark-only branch in normal paths.
+One language with one parser owns it: `styk_core::automation` (header `styk-auto/1`). Each feature adds its steps there
+(the shell's controls and keys, the stage's pointer and pen, the measurement steps); the developer tools' runners
+(`profile`, `compare`, headless runs, budgets) and every panel's automated test consume those steps and never define a
+script format of their own.
 
 `STYK_BACKGROUND_WINDOW=1` opens every window off-screen, without focus and without a taskbar entry. Screenshots of a
 window are taken with PrintWindow (Windows) by the app itself or by `xtask`, never from the screen.
@@ -139,12 +143,14 @@ gates). Input, layout tiers and platform services stay behind traits a touch bui
 registry package users against `engine/deps-allow.toml`, and production Rust tokens for Windows code outside
 `styk-platform`. Frozen evidence, `tests/` and `benches/` are excluded by path; `cfg(test)` items are skipped.
 A separate test module is exempt only when its module declaration requires `test`, never because of its filename.
+`vendor/` is excluded by path: the forked third-party text/toolkit crates own their target predicates and workers;
+this exemption does not extend to the application crates that use them.
 Feature-gated test helpers live under `tests/support/` and cannot be enabled by production dependencies.
 The dependency allow list requires its ownership header and must equal its version at the merge base with
 `native-app`: the orchestrator approves changes at the merge, including the initial baseline. Core state in shared
 design widgets is allowed; UI and developer-tool views cannot use direct engine paths or `styk_core::engine`.
 Platform public re-exports and type aliases cannot expose external Windows-crate items; crate-local platform wrappers
-are allowed. Core engine re-exports belong in `styk_core::engine`. Five exact declarations in `documents.rs` have the
+are allowed. Core engine re-exports belong in `styk_core::engine`, including K-frames' `Onion` and `SceneOptions`. Five exact declarations in `documents.rs` have the
 temporary named exception "K-doc moves these to `styk_core::engine`"; adding a name to one is still a violation.
 These are textual checks, not a type resolver.
 The existing non-default CLI `app-tools` boundary remains. The app may depend on services to compose S6's shell;
@@ -157,7 +163,10 @@ results, file I/O and blocking calls using `engine/guard-clippy/clippy.toml`. A 
 inside local macro bodies. Tests may unwrap. File handles and synchronous receivers are forbidden types; trait
 Read/Write methods and receiver iterators are forbidden calls. Device polling is conservatively disallowed
 in these interfaces, even for non-wait polls. Design font warm-up is outside the widget-module guard, but starts
-through the injected `Spawner` and returns failures. The pen pad state belongs to core; its scripted diagnostic
+through the injected `Spawner` and returns failures. Text smoothing, scale and locale come through the portable
+`styk_services::text_environment::TextEnvironment` contract, implemented by platform and injected by the host.
+The repertoire feeder also uses injected `Spawner`/`Clock`; it returns spawn failures and never gives the interface
+a join handle. Its existing time and queue-stall budgets are unchanged. The pen pad state belongs to core; its scripted diagnostic
 workload belongs to `styk-text-check`, injected into the developer tool through the core probe protocol.
 The probe submits to a bounded worker mailbox through `Spawner` and returns completion messages. Only named task
 functions in its private worker module allow blocking I/O and waits; its start/submit entry points retain the interface

@@ -315,6 +315,8 @@ impl geometry::frame::Backend for Frame {
                 wrapping: text.wrapping,
                 ellipsis: text.ellipsis,
                 clip_bounds: self.clip_bounds,
+                // A canvas draws grayscale text in the browser, whatever its page does.
+                grayscale: true,
             });
         } else {
             text.draw_with(|path, color| self.fill(&path, color));

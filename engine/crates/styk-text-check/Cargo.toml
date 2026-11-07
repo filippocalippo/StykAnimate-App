@@ -13,6 +13,15 @@ path = "src/main.rs"
 [dependencies]
 styk-core = { path = "../styk-core" }
 iced = { workspace = true }
+iced_runtime = { path = "../../../vendor/iced/runtime" }
 png = "0.18"
+pollster = "0.4"
 styk-design = { path = "../styk-design", features = ["widgets"] }
 styk-platform = { path = "../styk-platform" }
+
+[dev-dependencies]
+# The pipeline tests open a real device and build cryoglyph's text pipeline on it.
+cryoglyph = { git = "https://github.com/iced-rs/cryoglyph.git", rev = "cf38ed5ea0cfe95270b31ced2910560a7fcc5003" }
+# The glyph tests run a window's loop on the wgpu renderer itself (its frame hold-back is renderer API).
+iced_wgpu = { path = "../../../vendor/iced/wgpu", default-features = false }
+wgpu = { version = "30", default-features = false, features = ["wgsl", "dx12", "vulkan", "metal"] }

@@ -77,6 +77,7 @@ impl Sheet {
             Message::FontsReady(Err(error)) => { eprintln!("{error}"); std::process::exit(1); }
             Message::FontsReady(Ok(())) => {
                 self.fonts_ready = true;
+                eprintln!("text rendering: {:?}", iced::advanced::graphics::text::rendering());
                 if warm_up::built_early() {
                     return self.fail("the interface thread built the font system before the warm-up worker did".to_string());
                 }
@@ -92,6 +93,10 @@ impl Sheet {
                 }
             }
             Message::Frame => {
+                if self.fonts_ready && styk_design::glyphs::incomplete() {
+                    // A frame that lacks glyphs the worker is still drawing is not the one to capture.
+                    self.frames = 0;
+                }
                 if !self.fonts_ready {
                     let now = Instant::now();
                     if let Some(last) = self.last_frame {
@@ -256,7 +261,7 @@ pub fn run(matrix_path: &Path, out_dir: &Path, theme_name: &str, scale: f32, gat
     let palette = theme.palette();
     let (background_color, text_color): (iced::Color, iced::Color) = (palette.surface_field.into(), palette.text_1.into());
     iced::application(
-        move || (sheet.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the sheet starts once"), warm_up::warm_up_after(delay, std::sync::Arc::new(styk_platform::spawn::ThreadSpawner)).map(Message::FontsReady)),
+        move || (sheet.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the sheet starts once"), warm_up::warm_up_after(delay, std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(styk_platform::clock::SystemClock::new()), std::sync::Arc::new(styk_platform::font_smoothing::NativeTextEnvironment)).map(Message::FontsReady)),
         Sheet::update,
         Sheet::view,
     )

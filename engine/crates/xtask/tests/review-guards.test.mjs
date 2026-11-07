@@ -83,3 +83,10 @@ test('K-doc engine reexports are confined to engine with exact temporary documen
  assert.deepEqual(exportsScan('pub use styk_doc::Value;', 'engine/crates/styk-core/src/documents.rs'),[]);
  assert.ok(exportsScan('pub use styk_doc::{Value, Other};', 'engine/crates/styk-core/src/documents.rs').length);
 });
+test('vendor forks retain their own target predicates without exempting application code',()=>{
+ const code='#[cfg(windows)] fn f(){ std::thread::spawn(|| std::time::Instant::now()); }';
+ assert.deepEqual(sources.windowsErrors(code,'vendor/cosmic-text/src/dwrite.rs'),[]);
+ assert.deepEqual(sources.webErrors(code,'vendor/cryoglyph/src/worker.rs'),[]);
+ assert.ok(sources.windowsErrors(code,'engine/crates/styk-design/src/live.rs').length);
+ assert.ok(sources.webErrors(code,'engine/crates/styk-design/src/live.rs').length);
+});

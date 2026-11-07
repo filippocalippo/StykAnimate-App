@@ -143,6 +143,12 @@ WebAssembly aborts on a panic: the thread's wasm instance traps, no destructor r
 
 ## Prepared samples
 
+The native host's request owner is [`styk_core::frames`](../native/frames.md).
+Its bounded consumer slots, revision/resource identities, worker-owned ready cache
+and borrowed presentation callback are separate from the browser's existing cache
+controls below. Both prepare through the engine's common `frame_builder` pipeline;
+the native interface never calls a synchronous frame preparation entry.
+
 Fractional interface playback requests use `Engine::try_request_samples` and `frame_at`
 on the existing frame cache. `FrameData::tick` is now `f64`; integer entry points remain
 available. A request does not synchronously prepare a cold sample on the interface.

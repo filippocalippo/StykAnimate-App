@@ -20,8 +20,10 @@ use iced::advanced::graphics::text::cosmic_text::{Fallback, PlatformFallback, Sc
 use iced::advanced::graphics::text::{font_system, font_system_if_built};
 use iced::Task;
 use std::borrow::Cow;
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{OnceLock, Arc};
+use styk_core::services::{Clock, Spawner};
+use styk_core::services::text_environment::{TextEnvironment, FontSmoothing};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 static READY: AtomicBool = AtomicBool::new(false);
@@ -57,38 +59,58 @@ pub fn ready() -> bool {
 
 /// Builds the font system on a worker and resolves when [`ready`]; the worker starts after
 /// [`delay_from_environment`].
-pub fn warm_up(spawner: std::sync::Arc<dyn styk_core::services::Spawner>) -> Task<Result<(), String>> {
-    warm_up_after(delay_from_environment(), spawner)
+pub fn warm_up(spawner: Arc<dyn Spawner>, clock: Arc<dyn Clock>, environment: Arc<dyn TextEnvironment>) -> Task<Result<(), String>> {
+    warm_up_after(delay_from_environment(), spawner, clock, environment)
 }
 
 /// [`warm_up`] that starts building after `delay`.
-pub fn warm_up_after(delay: Duration, spawner: std::sync::Arc<dyn styk_core::services::Spawner>) -> Task<Result<(), String>> {
-    Task::future(start_worker(delay, spawner))
+pub fn warm_up_after(delay: Duration, spawner: Arc<dyn Spawner>, clock: Arc<dyn Clock>, environment: Arc<dyn TextEnvironment>) -> Task<Result<(), String>> {
+    Task::future(start_worker(delay, spawner, clock, environment))
 }
 
-async fn start_worker(delay: Duration, spawner: std::sync::Arc<dyn styk_core::services::Spawner>) -> Result<(), String> {
+async fn start_worker(delay: Duration, spawner: Arc<dyn Spawner>, clock: Arc<dyn Clock>, environment: Arc<dyn TextEnvironment>) -> Result<(), String> {
     let (sender, receiver) = iced::futures::channel::oneshot::channel();
+    let feeder_spawner = spawner.clone();
     spawner.spawn("fonts", Box::new(move || {
         std::thread::sleep(delay);
-        build_on_worker();
-        if sender.send(()).is_err() { eprintln!("font readiness receiver closed"); }
+        let result = build_on_worker(feeder_spawner.as_ref(), clock, environment.as_ref());
+        if sender.send(result).is_err() { eprintln!("font readiness receiver closed"); }
     })).map_err(|error| error.to_string())?;
-    receiver.await.map_err(|error| error.to_string())
+    receiver.await.map_err(|error| error.to_string())?
 }
 
 /// What the worker does: notes whether the system already existed (the interface thread built it first), builds it if
 /// not, installs the bundled fonts and marks it ready.
-fn build_on_worker() {
+fn build_on_worker(spawner: &dyn Spawner, clock: Arc<dyn Clock>, environment: &dyn TextEnvironment) -> Result<(), String> {
     if font_system_if_built().is_some() {
         BUILT_EARLY.store(true, Ordering::Release);
     }
-    build();
+    build(spawner, clock, environment)
 }
 
 /// Builds the system (the first call to it does) and installs the bundled fonts, then marks it ready.
-fn build() {
-    let _ = install_bundled();
+fn build(spawner: &dyn Spawner, clock: Arc<dyn Clock>, environment: &dyn TextEnvironment) -> Result<(), String> {
+    let _ = install_bundled(environment.smoothing());
+    // The interface's own glyphs: everything that needs the font system (the layout of the repertoire, the font
+    // instances) is done here, before readiness lets the interface thread reach it. Feeding the worker comes after and
+    // does not touch it.
+    let prepared = crate::repertoire::prepare(environment.scale(), &environment.locale());
+    PREPARED_AT.store(tick(), Ordering::Release);
     READY.store(true, Ordering::Release);
+    READY_AT.store(tick(), Ordering::Release);
+    if let Some(prepared) = prepared {
+        prepared.feed(spawner, clock).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// A clock of events, to say which came first: the repertoire is prepared before readiness is published.
+static ORDER: AtomicU64 = AtomicU64::new(0);
+static PREPARED_AT: AtomicU64 = AtomicU64::new(0);
+static READY_AT: AtomicU64 = AtomicU64::new(0);
+
+fn tick() -> u64 {
+    ORDER.fetch_add(1, Ordering::AcqRel) + 1
 }
 
 /// Makes the bundled Inter and Inter Tight the only faces of those families.
@@ -97,13 +119,15 @@ fn build() {
 /// "Inter" with that file: no `wght` or `opsz` axis, other metrics. A web font beats an installed font of the same
 /// name in the browser; here the bundled one does, by dropping the installed faces of those two families first.
 /// Calling it again changes nothing.
-pub fn install_bundled() -> Ready {
+pub fn install_bundled(smoothing: FontSmoothing) -> Ready {
     let mut system = font_system().write().unwrap_or_else(|poisoned| poisoned.into_inner());
     drop_installed(system.raw().db_mut());
     for font in fonts::ALL {
         system.load_font(Cow::Borrowed(font));
     }
     system.raw().set_fallback(StylesheetFallback);
+    // The text system's other setup: how glyphs are rasterized and blended (subpixel coverage, contrast).
+    crate::typography::apply_system_text_rendering(smoothing);
     Ready(())
 }
 
@@ -175,7 +199,7 @@ mod tests {
             }
         }
         for refused in [true, false] {
-            let mut future = Box::pin(start_worker(Duration::ZERO, Arc::new(Host(refused))));
+            let mut future = Box::pin(start_worker(Duration::ZERO, Arc::new(Host(refused)), Arc::new(styk_core::services::FixedClock::new()), Arc::new(styk_platform::font_smoothing::NativeTextEnvironment)));
             assert!(matches!(future.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(Err(_))));
         }
     }
@@ -188,7 +212,7 @@ mod tests {
         let (sender, receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(150));
-            build();
+            build(&styk_platform::spawn::ThreadSpawner, Arc::new(styk_platform::clock::SystemClock::new()), &styk_platform::font_smoothing::NativeTextEnvironment).unwrap();
             sender.send(()).unwrap();
         });
         // While the worker is still on its way the caller can poll without ever waiting for it.
@@ -200,6 +224,8 @@ mod tests {
         }
         assert!(polls > 5, "the caller kept running while the font system was built ({polls} polls)");
         assert!(ready());
+        let (prepared, published) = (PREPARED_AT.load(Ordering::Acquire), READY_AT.load(Ordering::Acquire));
+        assert!(prepared > 0 && prepared < published, "the repertoire (which takes the font system) is prepared at {prepared}, before readiness is published at {published}");
         let system = iced::advanced::graphics::text::font_system_if_built().expect("built");
         let families: Vec<String> = system.read().unwrap().families().map(str::to_owned).collect();
         assert!(families.iter().any(|name| name == fonts::INTER_FAMILY), "{families:?}");

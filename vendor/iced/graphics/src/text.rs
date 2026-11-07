@@ -29,6 +29,8 @@ pub enum Text {
         color: Color,
         clip_bounds: Rectangle,
         transformation: Transformation,
+        /// Drawn in grayscale even where subpixel text is on (see [`Grayscale`]).
+        grayscale: bool,
     },
     /// An editor.
     #[allow(missing_docs)]
@@ -38,6 +40,8 @@ pub enum Text {
         color: Color,
         clip_bounds: Rectangle,
         transformation: Transformation,
+        /// Drawn in grayscale even where subpixel text is on (see [`Grayscale`]).
+        grayscale: bool,
     },
     /// Some cached text.
     Cached {
@@ -65,6 +69,8 @@ pub enum Text {
         ellipsis: Ellipsis,
         /// The clip bounds of the text.
         clip_bounds: Rectangle,
+        /// Drawn in grayscale even where subpixel text is on (see [`Grayscale`]).
+        grayscale: bool,
     },
     /// Some raw text.
     #[allow(missing_docs)]
@@ -104,6 +110,158 @@ impl Text {
             Text::Raw { raw, .. } => Some(raw.clip_bounds),
         }
     }
+}
+
+/// How glyphs are rasterized and blended: subpixel (ClearType-style) coverage and the coverage adjustment the platform
+/// asks for (`docs/native/typography.md`, section 6). Set once by the program (`set_rendering`) before it draws.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Rendering {
+    /// Subpixel coverage, with the order of the subpixels, or `None` for grayscale.
+    pub subpixel: Option<SubpixelOrder>,
+    /// Skia's luminance-dependent coverage adjustment: `(contrast, gamma)`, or `None` for none.
+    pub adjustment: Option<(f32, f32)>,
+    /// Who draws the glyph masks. With a worker, a frame is a candidate that is complete only once the worker has drawn
+    /// its glyphs: see [`candidate_incomplete`] and [`set_glyph_notifier`].
+    pub glyphs: GlyphDrawing,
+    /// Draw glyphs without antialiasing: the system draws text unsmoothed.
+    pub aliased: bool,
+}
+
+/// Who draws the glyph masks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GlyphDrawing {
+    /// swash, on the thread that prepares the text.
+    #[default]
+    Inline,
+    /// swash, on a worker thread.
+    Worker,
+    /// DirectWrite on a worker thread (Windows; swash for what it cannot draw, and elsewhere).
+    DirectWrite,
+}
+
+/// The order of the subpixels of the display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubpixelOrder {
+    /// Red, green, blue from left to right.
+    Rgb,
+    /// Blue, green, red.
+    Bgr,
+}
+
+static RENDERING: RwLock<Rendering> = RwLock::new(Rendering { subpixel: None, adjustment: None, glyphs: GlyphDrawing::Inline, aliased: false });
+
+type GlyphNotifier = std::sync::Arc<dyn Fn() + Send + Sync>;
+
+static GLYPH_SOURCE: OnceLock<fn(GlyphNotifier)> = OnceLock::new();
+static GLYPH_NOTIFIER: std::sync::Mutex<Option<GlyphNotifier>> = std::sync::Mutex::new(None);
+static CANDIDATE_INCOMPLETE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The renderer tells the text stack where the worker that draws glyph masks tells it they are ready.
+pub fn install_glyph_source(set_notifier: fn(GlyphNotifier)) {
+    if GLYPH_SOURCE.set(set_notifier).is_ok() {
+        if let Some(notifier) = GLYPH_NOTIFIER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone() {
+            set_notifier(notifier);
+        }
+    }
+}
+
+/// The renderer reports, after it has prepared a frame, whether glyphs a worker is still drawing were left out of it.
+pub fn set_candidate_incomplete(incomplete: bool) {
+    CANDIDATE_INCOMPLETE.store(incomplete, std::sync::atomic::Ordering::Release);
+}
+
+/// How long windows kept their last frame because the next one lacked glyphs a worker was still drawing: for the developer
+/// tools. There is no deadline to the wait (a frame with holes in its text is never shown), so these numbers are how a
+/// slow worker shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HeldFrames {
+    /// Candidate frames kept back, in all.
+    pub frames: u64,
+    /// Waits that ended with a whole frame shown.
+    pub waits: u64,
+    /// The longest of those waits, in milliseconds.
+    pub longest_millis: u64,
+    /// All those waits together, in milliseconds.
+    pub total_millis: u64,
+}
+
+static HELD_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static HELD_WAITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static HELD_LONGEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static HELD_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The renderer counts a candidate frame it kept back.
+pub fn record_held_frame() {
+    let _ = HELD_FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The renderer counts a wait that ended with a whole frame shown.
+pub fn record_wait(waited: std::time::Duration) {
+    let millis = waited.as_millis() as u64;
+    let _ = HELD_WAITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let _ = HELD_TOTAL.fetch_add(millis, std::sync::atomic::Ordering::Relaxed);
+    let _ = HELD_LONGEST.fetch_max(millis, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// What the renderers have kept back so far.
+pub fn held_frames() -> HeldFrames {
+    use std::sync::atomic::Ordering::Relaxed;
+    HeldFrames { frames: HELD_FRAMES.load(Relaxed), waits: HELD_WAITS.load(Relaxed), longest_millis: HELD_LONGEST.load(Relaxed), total_millis: HELD_TOTAL.load(Relaxed) }
+}
+
+/// Whether the frame the renderer prepared last lacked glyphs a worker is still drawing (never, where masks are drawn
+/// on the calling thread). A program that captures a frame draws again until this is false.
+pub fn candidate_incomplete() -> bool {
+    CANDIDATE_INCOMPLETE.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// Calls `notifier`, from the worker's thread, whenever glyphs have been drawn: the program asks its window for another
+/// frame, which picks them up.
+pub fn set_glyph_notifier(notifier: impl Fn() + Send + Sync + 'static) {
+    let notifier: GlyphNotifier = std::sync::Arc::new(notifier);
+    *GLYPH_NOTIFIER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(notifier.clone());
+    if let Some(set) = GLYPH_SOURCE.get() {
+        set(notifier);
+    }
+}
+
+/// Sets how glyphs are rasterized and blended, for every window.
+pub fn set_rendering(rendering: Rendering) {
+    *RENDERING.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = rendering;
+}
+
+/// How glyphs are rasterized and blended.
+pub fn rendering() -> Rendering {
+    *RENDERING.read().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+thread_local! {
+    static GRAYSCALE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// While alive, text drawn on this thread is grayscale whatever [`rendering`] says: a browser draws subpixel text only
+/// on opaque layers, so text under a translucent or composited surface (a faded, disabled panel; canvas text) stays
+/// grayscale there too.
+#[derive(Debug)]
+pub struct Grayscale(());
+
+impl Grayscale {
+    /// Starts a scope of grayscale text.
+    pub fn scope() -> Self {
+        GRAYSCALE_DEPTH.with(|depth| depth.set(depth.get() + 1));
+        Self(())
+    }
+}
+
+impl Drop for Grayscale {
+    fn drop(&mut self) {
+        GRAYSCALE_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+/// Whether a [`Grayscale`] scope is active on this thread.
+pub fn grayscale_active() -> bool {
+    GRAYSCALE_DEPTH.with(|depth| depth.get() > 0)
 }
 
 /// The regular variant of the [Fira Sans] font.

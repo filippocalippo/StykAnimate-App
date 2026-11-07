@@ -71,7 +71,12 @@ export function productionTokens(source) {
   return out;
 }
 
+// Third-party forks own their target predicates and native worker implementations.
+// Application guards do not rewrite vendor/ (S2t cosmic-text/cryoglyph/iced).
+const vendorSource = file => file.replaceAll('\\', '/').startsWith('vendor/');
+
 export function windowsErrors(source, file) {
+  if (vendorSource(file)) return [];
   const ts = productionTokens(source), errors = [];
   const winType = /^(windows_sys|winapi|Win32\w*|HWND|HANDLE|HMODULE|HINSTANCE|HRESULT|DWORD|LPCWSTR|LPWSTR|WPARAM|LPARAM|LRESULT)$/;
   const cfg = new Set();
@@ -140,6 +145,7 @@ function moduleDeclarations(source, file) {
 }
 
 export function interfaceErrors(source, file) {
+  if (vendorSource(file)) return [];
   const ts = productionTokens(source), errors = [];
   for (let i=0;i<ts.length;i++) if (!ts[i].string && ts[i].value === '.' && ['unwrap','expect'].includes(ts[i+1]?.value) && ts[i+2]?.value === '(') {
     errors.push(file+':'+ts[i].line+': interface: .'+ts[i+1].value+' is forbidden, including local macro bodies');
@@ -158,6 +164,7 @@ const documentEngineExports = new Set([
 ].map(s => tokens(s).map(t => t.value).join(' ')));
 
 export function boundaryErrors(source, file) {
+  if (vendorSource(file)) return [];
   const ts = productionTokens(source), errors = [];
   const engine = /^styk_(?:alloc|doc|draw|drawing|edit|engine|eval|export|formats|math|piv|raster|render|wasm)$/;
   const views = /engine\/crates\/styk-(ui|devtools)\//.test(file);
@@ -205,6 +212,7 @@ export function sourceErrors(root) {
       if(entry.isDirectory())walk(path); else if(entry.name.endsWith('.rs'))files.set(path,readFileSync(path,'utf8'));
     }
   }
+  // vendor/ is intentionally outside this first-party source walk (see vendorSource).
   walk(join(root,'engine/crates'));
   const incoming=new Map();
   for(const [path,source] of files) for(const decl of moduleDeclarations(source,path)) {
@@ -234,6 +242,7 @@ const nativeHelpers = new Map([
 ]);
 
 export function webErrors(source, file) {
+  if (vendorSource(file)) return [];
   const ts = productionTokens(source), native = [], helpers = [], errors = [];
   function body(start) {
     let open = start;
