@@ -8,14 +8,17 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// `cargo xtask package [--profile release|quick] [--key-seed <file>]`.
+/// `cargo xtask package [--profile release|quick] [--exe <built program>] [--key-seed <file>]`. `--exe` packages a program
+/// already built (to try the packaging without building).
 pub fn package(root: &Path, args: &[&str]) -> Result<(), String> {
     let mut profile = "release";
     let mut seed: Option<&str> = None;
+    let mut exe: Option<&str> = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match *arg {
             "--profile" => profile = rest.next().copied().ok_or("--profile needs release or quick")?,
+            "--exe" => exe = Some(rest.next().copied().ok_or("--exe needs a path")?),
             "--key-seed" => seed = Some(rest.next().copied().ok_or("--key-seed needs a file")?),
             other => return Err(format!("unknown option {other}")),
         }
@@ -29,9 +32,14 @@ pub fn package(root: &Path, args: &[&str]) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(&payload);
     std::fs::create_dir_all(&payload).map_err(|e| e.to_string())?;
 
-    run(Command::new("cargo").current_dir(root.join("engine")).args(["build", "--profile", profile, "-p", "styk-app"]), "building the program")?;
-    let profile_dir = if profile == "release" { "release" } else { "quick" };
-    let built = root.join("engine").join("target").join(profile_dir).join("stykanimate.exe");
+    let built = match exe {
+        Some(path) => PathBuf::from(path),
+        None => {
+            run(Command::new("cargo").current_dir(root.join("engine")).args(["build", "--profile", profile, "-p", "styk-app"]), "building the program")?;
+            let profile_dir = if profile == "release" { "release" } else { "quick" };
+            root.join("engine").join("target").join(profile_dir).join("stykanimate.exe")
+        }
+    };
     std::fs::copy(&built, payload.join("StykAnimate.exe")).map_err(|e| format!("copying {}: {e}", built.display()))?;
     for notice in ["LICENSE", "THIRD_PARTY_NOTICES.md"] {
         std::fs::copy(root.join(notice), payload.join(notice)).map_err(|e| format!("copying {notice}: {e}"))?;

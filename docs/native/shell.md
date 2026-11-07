@@ -50,7 +50,7 @@ a small state machine (`shell::chrome::MaxButton`, tested on its own): `Idle`, `
 is over the button), cancelled by mouse leave, release outside the button, capture loss (`WM_CAPTURECHANGED`),
 deactivation, fullscreen, the band hiding and `WM_NCDESTROY`. A press takes the mouse capture (so the release arrives even
 outside the window) and activates only on release over the button. The state is an atomic the wndproc writes and the
-interface reads; the wndproc only does a non-blocking `try_send` of a wake-up, so a full channel loses nothing (the
+interface reads, and a click is a counter the interface takes (it then toggles through iced, so no click is lost or doubled); the wndproc only does a non-blocking `try_send` of a wake-up, so a full channel loses nothing (the
 state is read, not replayed) and the wndproc never waits.
 
 `ChromeRegions` is published after each layout by the interface and read by the wndproc under a lock held for one
@@ -87,7 +87,7 @@ Today: the lock is per user-data directory; a second process is an independent e
 
 - `Local\StykAnimate-<ProfileId>` (FNV of the profile directory) is a named mutex; the pipe
   `\\.\pipe\StykAnimate-<ProfileId>` serves requests. **The mutex is not liveness**: a secondary closes its handle at once,
-  and only a primary that answers on the pipe counts. A forwarder that finds the mutex taken connects to the pipe; if the
+  and only a primary that answers on the pipe counts. A forwarder that finds the mutex taken connects to the pipe (the server always keeps a second instance listening, so a start that arrives while another is served never sees a missing name); if the
   pipe is absent or silent (a primary that died, or died mid-forward), it retries with a bounded back-off, and if the
   mutex is released in the meantime it becomes the primary itself and handles the request locally, so no link is lost.
   After the bound it runs as an independent editor.
@@ -150,10 +150,25 @@ electron-builder's own installer does for its upgrades. Portable: a zip, no regi
 `cargo xtask package` builds the release binary, runs `makensis`, and writes `latest.yml`, `latest.yml.sig` (with a key the
 caller supplies) and `SHA256SUMS.txt`. Nothing is signed with a certificate and nothing is uploaded.
 
+## What is checked, and how
+
+| What | Where | How |
+| --- | --- | --- |
+| Pure contracts: protocol links (12+ cases of `handleProtocol`), launch queue and wire format, election with a dead or dying primary, workspace directories, window frames (two monitors, mixed scale, any taskbar edge, a display smaller than the window), hit testing, the maximize button, feed, versions, update flow, install plan, staging names | `cargo test -p styk-services` | fakes only |
+| The window subclass, monitors and restore, single instance over a real pipe (acknowledged delivery, bounds, silent and partial clients, saturation, shutdown, DACL), registry in a sandbox key, updater over HTTP (redirects, signature, resume, two callers, stale locks, cancel) | `cargo test -p styk-platform` | real windows far off-screen, real pipes, a local HTTP server |
+| The Setup: an Electron-style install upgraded the way the updater runs it, then the whole updater (check, download, verify, hand-off, restart) | `cargo test -p styk-platform --test installer_upgrade -- --ignored` | `makensis`; registry under `HKCUSoftwareStykAnimateSandbox<id>`, folders under a temporary directory |
+| The real iced window: hit testing, fullscreen and hidden-band regions, per-monitor-v2 awareness, minimum size, snap-zone rectangles, a synthetic DPI change, no taskbar button, foreground unchanged | `STYK_BACKGROUND_WINDOW=1 stykanimate --shell-check` | messages to the app's own window |
+
+The Electron install in the Setup proof is a **fixture** written to electron-builder's layout (read from its NSIS templates):
+the real 1.1.0 Setup writes the user's real file associations and uninstall entry, and no throwaway Windows account or virtual
+machine can be made without administrator rights here.
+
 ## Manual checks
 
 What only a person at the screen can do (decision N6; no injected input): the snap-layouts flyout on hover and choosing a
 zone; Win+arrow and drag-to-edge snapping; resize cursors on every edge; the look of the shadow, corners and the 1 px line
 against Electron's; moving the window across two real monitors of different scale; a top or left taskbar on real
-hardware; the UAC prompt of an all-users update; the real 1.1.0 Electron Setup upgraded by the native Setup on a
-throwaway Windows account or VM.
+hardware; the UAC prompt of an all-users update and an all-users install and upgrade as a standard user; the real 1.1.0 Electron Setup
+upgraded by the native Setup on a throwaway Windows account or VM, with a default chosen for each format; frame pacing while
+the system moves or sizes the window (that loop needs a real pointer); restoring a maximized window on a real monitor; a
+snap zone narrower than the 1000 px minimum.

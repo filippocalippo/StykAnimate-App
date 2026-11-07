@@ -64,6 +64,7 @@ ShowInstDetails nevershow
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "LegalCopyright" "StykAnimate"
 VIAddVersionKey "FileDescription" "${PRODUCT_NAME} Setup"
 
 Var installMode      ; "CurrentUser" or "all"

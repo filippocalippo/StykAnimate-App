@@ -289,7 +289,8 @@ fn write_state(path: &std::path::Path, frame: WindowFrame) {
         let monitors = monitors::monitors();
         let mut file = std::fs::read_to_string(path).map(|text| WindowStateFile::parse(&text)).unwrap_or_default();
         file.record(SetupKey::of(&monitors), frame);
-        let temporary = path.with_extension(format!("tmp{}", std::process::id()));
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let temporary = path.with_extension(format!("tmp{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         if std::fs::write(&temporary, file.to_text()).and_then(|()| std::fs::rename(&temporary, path)).is_err() {
             let _ = std::fs::remove_file(&temporary);
         }
@@ -342,4 +343,56 @@ pub fn attach(window: &dyn iced::window::Window, frame: Option<WindowFrame>, sho
 #[cfg(not(windows))]
 pub fn attach(_: &dyn iced::window::Window, _: Option<WindowFrame>, _: bool) -> Result<Attached, String> {
     Ok(Attached { chrome: Chrome, sample: Sample, applied: None })
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use styk_services::shell::Rect;
+
+    fn frame(x: i32) -> WindowFrame {
+        WindowFrame { rect: Rect::new(x, 20, 1234, 777), maximized: false, scale_milli: 1000 }
+    }
+
+    fn temp(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("styk-shell-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_saved_frame_comes_back_exactly_for_this_monitor_setup() {
+        let dir = temp("roundtrip");
+        let path = dir.join("window-state.txt");
+        write_state(&path, frame(111));
+        let file = WindowStateFile::parse(&std::fs::read_to_string(&path).unwrap());
+        assert_eq!(file.frame_for(SetupKey::of(&monitors::monitors())), Some(frame(111)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn two_starts_saving_at_the_same_time_leave_a_valid_file() {
+        let dir = temp("race");
+        let path = dir.join("window-state.txt");
+        std::thread::scope(|scope| {
+            for worker in 0..2 {
+                let path = path.clone();
+                scope.spawn(move || {
+                    for n in 0..40 {
+                        write_state(&path, frame(worker * 1000 + n));
+                    }
+                });
+            }
+        });
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(WindowStateFile::parse(&text).last.is_some(), "the file is whole: {text:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_link_is_not_mistaken_for_a_file_on_the_command_line() {
+        let arguments = vec!["stykanimate://library/abcdefghij".to_string(), "a.piv".to_string()];
+        assert_eq!(without_links(&arguments), vec!["a.piv".to_string()]);
+    }
 }

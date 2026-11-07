@@ -224,3 +224,97 @@ fn the_setup_accepts_the_updaters_arguments_and_nothing_in_it_is_signed_or_publi
         assert!(!script.contains(word), "{word}");
     }
 }
+
+/// A release server for one version: the "latest" alias redirects to the tag; the feed, its signature and the Setup are
+/// files of the tag.
+fn serve_release(tag: &'static str, files: Vec<(String, Vec<u8>)>) -> (String, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    let http = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", http.server_addr().to_ip().unwrap());
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let halt = stop.clone();
+    std::thread::spawn(move || {
+        while !halt.load(std::sync::atomic::Ordering::SeqCst) {
+            let Ok(Some(request)) = http.recv_timeout(Duration::from_millis(50)) else { continue };
+            let url = request.url().to_string();
+            if url == "/o/r/releases/latest/download/latest.yml" {
+                let location = format!("/o/r/releases/download/{tag}/latest.yml");
+                let _ = request.respond(tiny_http::Response::empty(302).with_header(tiny_http::Header::from_bytes("Location", location).unwrap()));
+                continue;
+            }
+            let name = url.rsplit('/').next().unwrap_or("");
+            match files.iter().find(|(n, _)| n == name) {
+                Some((_, body)) if url.starts_with(&format!("/o/r/releases/download/{tag}/")) => {
+                    let _ = request.respond(tiny_http::Response::from_data(body.clone()));
+                }
+                _ => {
+                    let _ = request.respond(tiny_http::Response::empty(404));
+                }
+            }
+        }
+    });
+    (base, stop)
+}
+
+#[test]
+#[ignore = "builds and runs a Setup with makensis (sandboxed); run with --ignored"]
+fn the_updater_finds_downloads_verifies_and_runs_the_setup_end_to_end() {
+    use ring::signature::{Ed25519KeyPair, KeyPair};
+    use styk_platform::windows::updates::{Ed25519Integrity, HeldInstaller, HttpFeed, HttpStage, launch_installer, sha512_base64};
+    use styk_services::updates::feed::{Endpoint, Version};
+    use styk_services::updates::flow::{CheckOutcome, run_check};
+    use styk_services::updates::plan::{Handoff, InstallScope, install_plan};
+    use styk_services::updates::state::{UpdateState, UpdateStatus};
+
+    let root = repo_root();
+    let sandbox = Sandbox::new("updater");
+    let install = sandbox.dir.join("Programs").join("StykAnimate");
+    let guid_key = format!("{UNINSTALL}\\{APP_GUID}");
+
+    // The installed copy (an Electron-style 1.1.0) and the release it will update to.
+    let electron_files = sandbox.dir.join("electron-files");
+    lay_out(&electron_files, &[("resources\\app.asar", "old")]);
+    let electron_setup = sandbox.dir.join("Electron-Setup.exe");
+    build(&sandbox, &root.join("packaging/windows/test/electron-fixture.nsi"), "1.1.0", &electron_files, &electron_setup, &[]);
+    run_setup(&electron_setup, &["/S"], &install);
+
+    let native_files = sandbox.dir.join("native-files");
+    lay_out(&native_files, &[("LICENSE", "license")]);
+    let release = sandbox.dir.join("release");
+    std::fs::create_dir_all(&release).unwrap();
+    let setup = release.join("StykAnimate-2.0.0-Setup-x64.exe");
+    build(&sandbox, &root.join("packaging/windows/installer.nsi"), "2.0.0", &native_files, &setup, &[]);
+    let sha512 = sha512_base64(&setup, &|| false).unwrap().unwrap();
+    let size = std::fs::metadata(&setup).unwrap().len();
+    let yml = format!("version: 2.0.0\nfiles:\n  - url: StykAnimate-2.0.0-Setup-x64.exe\n    sha512: {sha512}\n    size: {size}\npath: StykAnimate-2.0.0-Setup-x64.exe\nsha512: {sha512}\n");
+    let pair = Ed25519KeyPair::from_seed_unchecked(&[3u8; 32]).unwrap();
+    let public: [u8; 32] = pair.public_key().as_ref().try_into().unwrap();
+    let signature = pair.sign(yml.as_bytes());
+    let (base, stop) = serve_release("v2.0.0", vec![("latest.yml".into(), yml.into_bytes()), ("latest.yml.sig".into(), signature.as_ref().to_vec()), ("StykAnimate-2.0.0-Setup-x64.exe".into(), std::fs::read(&setup).unwrap())]);
+
+    let endpoint = Endpoint { base, owner: "o".into(), repo: "r".into() };
+    let mut state = UpdateState::new("1.1.0", None);
+    let started = Instant::now();
+    let outcome = run_check(
+        &mut state,
+        &Version::parse("1.1.0").unwrap(),
+        &HttpFeed { endpoint: endpoint.clone() },
+        &Ed25519Integrity::new(Some(public)),
+        &HttpStage { root: sandbox.dir.join("updates"), endpoint },
+        &|| started.elapsed().as_millis() as u64,
+        &|| false,
+        &mut |_| {},
+    );
+    let CheckOutcome::Ready { installer, version } = outcome else { panic!("the check ended with {outcome:?}") };
+    assert_eq!((version.as_str(), state.status), ("2.0.0", UpdateStatus::Ready));
+    println!("check, download and verify of a {size} byte Setup took {:?}", started.elapsed());
+
+    // The restart: the verified file is held, the plan is a current-user install (no elevation), the Setup runs.
+    let held = HeldInstaller::open(&installer).unwrap();
+    let plan = install_plan(InstallScope::CurrentUser, false, install.to_str().unwrap());
+    assert!(!plan.elevate);
+    assert_eq!(launch_installer(&held, &plan), Handoff::Started);
+    assert_eq!(wait_for(&install.join("launched.txt")), "--installer-test", "the new program was started by --force-run");
+    assert_eq!(sandbox.registry.read_text(&guid_key, "DisplayVersion").as_deref(), Some("2.0.0"));
+    assert!(!install.join("resources").exists(), "the old install's files are gone");
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+}
