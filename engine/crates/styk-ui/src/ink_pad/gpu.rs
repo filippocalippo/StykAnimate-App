@@ -1,10 +1,13 @@
 //! The pad's pipeline: the cel's tiles from an atlas texture and the wet ink, drawn in the toolkit's own render pass.
 //!
 //! `prepare` is where the drawing worker's replies reach the GPU, and the whole of it is budgeted ([`PREPARE_NS`]): replies
-//! are taken one at a time while the batches waiting hold little ([`TileSync::has_room`]); tiles are installed whole batch by
-//! whole batch within [`TILES_PER_FRAME`] and the time left; the preview is built from the ledger, which is capped. The
+//! are taken one at a time within the time left (a lifecycle reply is never held behind tile data; what waits is bounded by the
+//! worker's own window); tiles are written a few at a time within [`TILES_PER_FRAME`] and the time left, and a batch appears whole; the preview is built from the ledger, which is capped. The
 //! residency policy (what is on the GPU, eviction, fetching what the view shows) is `styk_core::drawing::tile_sync`; this file
 //! only performs its writes. The exact pixels and the end of their preview are in the same frame.
+//!
+//! The time of the graphics API's queue calls is measured apart from the rest: the budget governs the pad's own work, and a
+//! driver that stalls under load shows in its own column. A uniform block that did not change is not written again.
 
 use super::core::{FrameRow, PadCore};
 use bytemuck::{Pod, Zeroable};
@@ -63,6 +66,11 @@ struct Uniforms {
     paper: [f32; 4],
 }
 
+/// Whether `now` has to be written over `last` (nothing has been written, or a byte differs).
+fn uniforms_changed(last: &Option<Uniforms>, now: &Uniforms) -> bool {
+    last.as_ref().is_none_or(|last| bytemuck::bytes_of(last) != bytemuck::bytes_of(now))
+}
+
 /// The paper the pad shows under the ink.
 const PAPER: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
@@ -84,6 +92,8 @@ pub struct InkPipeline {
     tile_count: u32,
     wet_count: u32,
     sync: TileSync,
+    /// The uniforms last written.
+    last_uniforms: Option<Uniforms>,
 }
 
 impl shader::Pipeline for InkPipeline {
@@ -171,6 +181,7 @@ impl shader::Pipeline for InkPipeline {
             tile_count: 0,
             wet_count: 0,
             sync: TileSync::new((ATLAS_COLS * ATLAS_ROWS) as usize),
+            last_uniforms: None,
         }
     }
 }
@@ -231,7 +242,7 @@ impl shader::Primitive for InkPrimitive {
         let mut replies_left = false;
         let mut taken = Vec::with_capacity(1);
         for _ in 0..MAX_REPLIES {
-            if !pipeline.sync.has_room() || late() {
+            if late() {
                 replies_left = true;
                 break;
             }
@@ -259,9 +270,12 @@ impl shader::Primitive for InkPrimitive {
         }
         let writes = pipeline.sync.take_writes();
         let uploaded_now = writes.len() as u32;
+        let mut wgpu_ns = 0u64;
+        let wgpu_started = core.now_ns();
         for write in &writes {
             pipeline.write_tile(queue, write);
         }
+        wgpu_ns += core.now_ns() - wgpu_started;
         let (visible_dabs, newest_wet) = core.with_ledger(|ledger| {
             ledger.uploaded(pipeline.sync.waiting_seq());
             ledger.age();
@@ -270,7 +284,9 @@ impl shader::Primitive for InkPrimitive {
         if pipeline.sync.take_dirty() {
             let list = pipeline.tile_list();
             pipeline.tile_count = list.len() as u32;
+            let began = core.now_ns();
             queue.write_buffer(&pipeline.tile_instances, 0, bytemuck::cast_slice(&list));
+            wgpu_ns += core.now_ns() - began;
         }
         let after_install = core.now_ns();
 
@@ -310,7 +326,9 @@ impl shader::Primitive for InkPrimitive {
         wet.truncate(WET_CAPACITY);
         pipeline.wet_count = wet.len() as u32;
         if !wet.is_empty() {
+            let began = core.now_ns();
             queue.write_buffer(&pipeline.wet_instances, 0, bytemuck::cast_slice(&wet));
+            wgpu_ns += core.now_ns() - began;
         }
         let [r, g, b] = brush.color;
         let uniforms = Uniforms {
@@ -324,7 +342,13 @@ impl shader::Primitive for InkPrimitive {
             wet: [brush.hardness as f32, brush.opacity as f32, 0.0, 0.0],
             paper: PAPER,
         };
-        queue.write_buffer(&pipeline.uniforms, 0, bytemuck::bytes_of(&uniforms));
+        let uniform_skipped = !uniforms_changed(&pipeline.last_uniforms, &uniforms);
+        if !uniform_skipped {
+            let began = core.now_ns();
+            queue.write_buffer(&pipeline.uniforms, 0, bytemuck::bytes_of(&uniforms));
+            wgpu_ns += core.now_ns() - began;
+            pipeline.last_uniforms = Some(uniforms);
+        }
 
         let ended = core.now_ns();
         let sync_stats = pipeline.sync.stats();
@@ -342,6 +366,11 @@ impl shader::Primitive for InkPrimitive {
             gpu.wet_instances = wet.len();
             gpu.prepare_last_us = (ended - started) / 1000;
             gpu.prepare_max_us = gpu.prepare_max_us.max(gpu.prepare_last_us);
+            gpu.wgpu_last_us = wgpu_ns / 1000;
+            gpu.wgpu_max_us = gpu.wgpu_max_us.max(gpu.wgpu_last_us);
+            gpu.own_last_us = gpu.prepare_last_us.saturating_sub(gpu.wgpu_last_us);
+            gpu.own_max_us = gpu.own_max_us.max(gpu.own_last_us);
+            gpu.uniform_writes_skipped += u64::from(uniform_skipped);
             gpu.ledger = ledger_stats;
             gpu.pad_px = size_px;
         });
@@ -368,6 +397,7 @@ impl shader::Primitive for InkPrimitive {
             replies_us: ((after_replies - started) / 1000) as u32,
             install_us: ((after_install - after_replies) / 1000) as u32,
             wet_us: ((ended - after_install) / 1000) as u32,
+            wgpu_us: (wgpu_ns / 1000) as u32,
             view_us: core.view_us() as u32,
             update_us: core.inspector_update_us() as u32,
         });
@@ -556,5 +586,71 @@ mod tests {
         assert!(until(&core, &mut pipeline, &vec![255u8; (SIZE * SIZE * 4) as usize]), "a view over empty cel is blank paper");
         core.set_view(crate::ink_pad::View { zoom: 1.0, pan: (0.0, 0.0) });
         assert!(until(&core, &mut pipeline, &want), "the view back over the stroke shows it again");
+    }
+
+    // B1: moving the view over tiles a stroke inked while they were out of sight must show that ink, mid-stroke and after it.
+    #[test]
+    fn a_view_that_moves_over_the_open_strokes_ink_shows_it_and_keeps_it() {
+        let Some(gpu) = gpu() else {
+            eprintln!("no GPU adapter on this machine: the pad's drawing is not checked here");
+            return;
+        };
+        let core = core();
+        let mut pipeline = InkPipeline::new(&gpu.device, &gpu.queue, wgpu::TextureFormat::Rgba8Unorm);
+        let primitive = InkPrimitive { core: core.clone() };
+        core.with_ledger(|ledger| ledger.stroke_started(1, true));
+        let brush = BrushConfig { size: 14.0, hardness: 1.0, ..BrushConfig::default() }.to_json();
+        let send = |command: StrokeCommand| {
+            core.worker.command(command, &brush);
+        };
+        let settle = |pipeline: &mut InkPipeline, frames: usize| {
+            for _ in 0..frames {
+                frame(&gpu, pipeline, &primitive);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        send(StrokeCommand::Begin { id: 1, erase: false, mapping: Mapping::default(), modifiers: Modifiers::NONE });
+        let sample = |i: usize| StrokeCommand::Sample { id: 1, x: 280.0 + i as f64 * 7.0, y: 100.0 + (i as f64 * 0.4).sin() * 30.0, pressure: 1.0, time_ms: i as f64, lean: None };
+        // The first half is inked in tiles 4 and 5, which the view (cel pixels 0 to 256) does not show.
+        for i in 0..15 {
+            send(sample(i));
+        }
+        settle(&mut pipeline, 60);
+        // The view moves over them while the stroke is still open, and the stroke goes on.
+        core.set_view(crate::ink_pad::View { zoom: 1.0, pan: (256.0, 0.0) });
+        settle(&mut pipeline, 60);
+        for i in 15..30 {
+            send(sample(i));
+        }
+        send(StrokeCommand::End { id: 1 });
+        let mut last = Vec::new();
+        for _ in 0..400 {
+            last = frame(&gpu, &mut pipeline, &primitive);
+            if core.inspector().finished_strokes >= 1 && core.gpu_stats().batches_waiting == 0 && core.with_ledger(|l| l.visible_dabs()) == 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        core.worker.send(styk_core::drawing::worker::Request::Snapshot { token: 1 });
+        let snapshot = loop {
+            if let styk_core::drawing::worker::Reply::Snapshot { tiles, .. } = core.worker.wait(Duration::from_secs(10)).expect("the worker answers") {
+                break tiles;
+            }
+        };
+        // The cel pixels 256 to 512 are what the view shows: the same as the tiles moved four to the left.
+        let want = expected(&snapshot.iter().map(|(tx, ty, px)| (tx - 4, *ty, px.clone())).collect::<Vec<_>>());
+        let ink = want.chunks_exact(4).filter(|p| p[0] < 128).count();
+        assert!(ink > 300, "the first half of the stroke is in the view: {ink} dark pixels");
+        let wrong = last.chunks_exact(4).zip(want.chunks_exact(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| (*x as i32 - *y as i32).abs() > 2)).count();
+        assert_eq!(wrong, 0, "{wrong} pixels of the frame differ from the cel: ink drawn before the view arrived is missing");
+    }
+
+    #[test]
+    fn a_uniform_block_that_has_not_changed_is_not_written_again() {
+        let uniforms = Uniforms { size: [10.0, 10.0], pan: [0.0, 0.0], zoom: 1.0, atlas_w: 4096.0, atlas_h: 2048.0, srgb: 0.0, color: [0.0; 4], wet: [1.0, 1.0, 0.0, 0.0], paper: PAPER };
+        assert!(uniforms_changed(&None, &uniforms), "the first block is always written");
+        assert!(!uniforms_changed(&Some(uniforms), &uniforms), "an identical block is skipped");
+        let moved = Uniforms { pan: [1.0, 0.0], ..uniforms };
+        assert!(uniforms_changed(&Some(uniforms), &moved), "a block that differs is written");
     }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 use std::sync::{Condvar, Mutex};
 use styk_services::input::Modifiers;
 
@@ -30,7 +31,7 @@ fn until(worker: &Worker, done: impl Fn(&Reply) -> bool) -> Vec<Reply> {
     loop {
         let reply = worker.wait(WAIT).expect("the worker answers");
         // A consumer acknowledges the batches it has installed; these tests install nothing, so each one is acknowledged at once.
-        if let Reply::Tiles { seq, .. } = &reply {
+        if let Reply::Tiles { seq, last: true, .. } = &reply {
             worker.ack(*seq);
         }
         let end = done(&reply);
@@ -144,7 +145,7 @@ fn undo_and_redo_restore_the_cel_exactly() {
     assert!(!drawn.is_empty());
     worker.send(Request::Undo);
     let replaced = until(&worker, |r| matches!(r, Reply::Changed { .. }));
-    let Some(Reply::Changed { tiles }) = replaced.last() else { unreachable!() };
+    let Some(Reply::Changed { tiles, .. }) = replaced.last() else { unreachable!() };
     assert!(!tiles.is_empty());
     assert!(fetch(&worker, tiles).iter().all(|t| t.2.is_none()), "undo of the only stroke empties every tile it touched");
     assert!(snapshot(&worker, 3).is_empty());
@@ -168,10 +169,10 @@ fn a_cancelled_stroke_leaves_the_cel_untouched_and_names_the_tiles_to_restore() 
     until(&worker, |r| matches!(r, Reply::Tiles { stroke: 2, .. }));
     worker.command(StrokeCommand::Cancel { id: 2 }, &settings);
     let replies = until(&worker, |r| matches!(r, Reply::Cancelled { .. }));
-    let Some(Reply::Cancelled { stroke, restore }) = replies.last() else { unreachable!() };
+    let Some(Reply::Cancelled { stroke, restore, .. }) = replies.last() else { unreachable!() };
     assert_eq!(*stroke, 2);
     assert!(!restore.is_empty());
-    assert!(fetch(&worker, restore).iter().all(|(tx, ty, pixels)| before.iter().find(|t| (t.0, t.1) == (*tx, *ty)).map(|t| &t.2) == pixels.as_ref()), "the cel still holds what it held");
+    assert!(fetch(&worker, restore).iter().all(|(tx, ty, pixels, _)| before.iter().find(|t| (t.0, t.1) == (*tx, *ty)).map(|t| &t.2) == pixels.as_ref()), "the cel still holds what it held");
     assert!(snapshot(&worker, 2) == before);
 }
 
@@ -342,15 +343,32 @@ fn the_worker_stays_within_its_outstanding_batches_until_they_are_acknowledged()
     std::thread::sleep(Duration::from_millis(600));
     let mut tiles_replies = Vec::new();
     while let Some(reply) = worker.wait(Duration::from_millis(50)) {
-        if let Reply::Tiles { seq, tiles, .. } = reply {
-            assert!(tiles.len() <= MAX_BATCH_TILES, "a batch carries at most {MAX_BATCH_TILES} tiles, this one {}", tiles.len());
-            tiles_replies.push(seq);
+        if let Reply::Tiles { seq, tiles, last, .. } = reply {
+            assert!(tiles.len() <= MAX_BATCH_TILES, "a reply carries at most {MAX_BATCH_TILES} tiles, this one {}", tiles.len());
+            if last {
+                tiles_replies.push(seq);
+            }
         }
     }
     assert_eq!(tiles_replies.len() as u64, MAX_OUTSTANDING, "{tiles_replies:?}: the batches ahead of the consumer are bounded");
-    // An acknowledgement lets it go on; a cancel wakes it at once.
+    // R4: acknowledging the newest alone (as a cancelled stroke's acknowledgement would) frees nothing: the frontier needs every
+    // earlier batch too.
     worker.ack(*tiles_replies.last().unwrap());
-    std::thread::sleep(Duration::from_millis(200));
+    std::thread::sleep(Duration::from_millis(300));
+    let mut more = 0;
+    while let Some(reply) = worker.wait(Duration::from_millis(50)) {
+        more += usize::from(matches!(reply, Reply::Tiles { last: true, .. }));
+    }
+    assert_eq!(more, 0, "an acknowledgement past a gap let batches out of turn");
+    for seq in &tiles_replies[..tiles_replies.len() - 1] {
+        worker.ack(*seq);
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let mut more = 0;
+    while let Some(reply) = worker.wait(Duration::from_millis(50)) {
+        more += usize::from(matches!(reply, Reply::Tiles { last: true, .. }));
+    }
+    assert_eq!(more as u64, MAX_OUTSTANDING, "with the gap closed it goes on, four batches further");
     let started = Instant::now();
     worker.command(StrokeCommand::Cancel { id: 1 }, &settings);
     until(&worker, |r| matches!(r, Reply::Cancelled { .. }));
@@ -406,4 +424,170 @@ fn a_fetch_returns_at_most_the_fetch_limit() {
     let worker = worker();
     let tiles: Vec<(i64, i64)> = (0..(FETCH_LIMIT as i64 + 30)).map(|i| (i, 0)).collect();
     assert_eq!(fetch(&worker, &tiles).len(), FETCH_LIMIT);
+}
+
+// R1: the brush streams into bounded batches; a long gap never exists as a list of dabs.
+#[test]
+fn generation_stops_after_a_few_batches_while_nothing_is_acknowledged_however_long_the_gap() {
+    let worker = worker();
+    let settings = settings(",\"size\":2");
+    begin(&worker, 1, false, Mapping::default(), &settings);
+    worker.command(StrokeCommand::Sample { id: 1, x: 0.0, y: 30.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
+    // A 200,000 pixel gap is about 800,000 dabs at this size and spacing.
+    worker.command(StrokeCommand::Sample { id: 1, x: 200_000.0, y: 30.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
+    std::thread::sleep(Duration::from_millis(800));
+    let made = worker.shared.generated.load(Ordering::Relaxed);
+    let batches = (MAX_OUTSTANDING + 2) as usize;
+    assert!(made <= batches * 8192, "{made} dabs were made with no acknowledgement: the gap was generated ahead of the consumer");
+    assert!(made > 1000, "and generation did start: {made}");
+    worker.command(StrokeCommand::Cancel { id: 1 }, &settings);
+    until(&worker, |r| matches!(r, Reply::Cancelled { .. }));
+}
+
+// R6: a transfer is bounded whatever one dab covers.
+#[test]
+fn one_huge_dab_is_sent_in_parts_of_at_most_the_tile_limit_and_the_batch_ends_once() {
+    let worker = worker();
+    let settings = settings(",\"size\":900");
+    begin(&worker, 1, false, Mapping::default(), &settings);
+    worker.command(StrokeCommand::Sample { id: 1, x: 500.0, y: 500.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
+    worker.command(StrokeCommand::End { id: 1 }, &settings);
+    let replies = until(&worker, |r| matches!(r, Reply::Finished { .. } | Reply::Failed { .. }));
+    let mut parts: HashMap<u64, Vec<(u32, bool, usize)>> = HashMap::new();
+    for reply in &replies {
+        if let Reply::Tiles { seq, part, last, tiles, .. } = reply {
+            assert!(tiles.len() <= MAX_BATCH_TILES);
+            parts.entry(*seq).or_default().push((*part, *last, tiles.len()));
+        }
+    }
+    let total: usize = parts.values().flatten().map(|p| p.2).sum();
+    assert!(total > MAX_BATCH_TILES, "the dab covers more than one reply's worth: {total}");
+    for (seq, list) in &parts {
+        assert!(list.iter().enumerate().all(|(i, p)| p.0 == i as u32), "batch {seq}: parts in order");
+        assert_eq!(list.iter().filter(|p| p.1).count(), 1, "batch {seq}: one last part");
+        assert!(list.last().unwrap().1, "batch {seq}: the last part is last");
+    }
+}
+
+#[test]
+fn a_batch_gathers_dabs_up_to_the_tile_limit_and_a_single_dab_goes_alone() {
+    let dab = |left: f64, right: f64| Dab { x: (left + right) / 2.0, y: 32.0, radius: (right - left) / 2.0, left, right, top: 0.0, bottom: 64.0, opacity: 1.0, flow: 1.0, cos: 1.0, sin: 0.0 };
+    let mut batcher = Batcher::new(8192);
+    let mut out = Vec::new();
+    // Dabs each one tile wide, 100 of them in a row: batches of 64 tiles.
+    for i in 0..100 {
+        if let Some(batch) = batcher.push(dab(i as f64 * 64.0, i as f64 * 64.0 + 64.0)) {
+            out.push(batch);
+        }
+    }
+    assert!(!out.is_empty() && out.iter().all(|(_, tiles)| tiles.len() <= MAX_BATCH_TILES), "{:?}", out.iter().map(|b| b.1.len()).collect::<Vec<_>>());
+    // One dab that alone covers 100 tiles is a batch of its own, never merged with its neighbours.
+    let mut batcher = Batcher::new(8192);
+    assert!(batcher.push(dab(0.0, 64.0)).is_none());
+    let before = batcher.push(dab(0.0, 6400.0));
+    assert_eq!(before.map(|b| b.0.len()), Some(1));
+    let after = batcher.push(dab(0.0, 64.0));
+    assert_eq!(after.map(|b| b.1.len()), Some(100));
+}
+
+// B3: a cancel names a stroke; any other id changes nothing.
+#[test]
+fn a_cancel_for_a_stroke_that_is_not_open_leaves_the_open_stroke_alone() {
+    let worker = worker();
+    let settings = settings("");
+    begin(&worker, 1, false, Mapping::default(), &settings);
+    for (i, &(x, y)) in line().iter().enumerate() {
+        worker.command(StrokeCommand::Sample { id: 1, x, y, pressure: 0.8, time_ms: i as f64, lean: None }, &settings);
+    }
+    // The command is dropped where it is made; and a cancel that reaches the thread by name is ignored there too.
+    worker.command(StrokeCommand::Cancel { id: 99 }, &settings);
+    worker.requests.send(Request::Cancel { id: 99 }).unwrap();
+    worker.command(StrokeCommand::End { id: 1 }, &settings);
+    let replies = until(&worker, |r| matches!(r, Reply::Finished { .. } | Reply::Cancelled { .. } | Reply::Failed { .. }));
+    assert!(matches!(replies.last(), Some(Reply::Finished { stroke: 1, changed_tiles, .. }) if *changed_tiles > 0), "{:?}", replies.last());
+    assert!(!snapshot(&worker, 1).is_empty());
+}
+
+// R5: strokes, requests and ends are bounded and each stroke ends once.
+#[test]
+fn presses_and_requests_past_the_limits_are_refused_and_counted_and_a_stroke_ends_once() {
+    let worker = worker();
+    let settings = settings("");
+    let hold = held(&worker);
+    let accepted = (0..100u64).filter(|&id| worker.command(StrokeCommand::Begin { id, erase: false, mapping: Mapping::default(), modifiers: Modifiers::NONE }, &settings)).count();
+    assert_eq!(accepted, MAX_OPEN);
+    assert_eq!(worker.refused(), (100 - MAX_OPEN) as u64);
+    // Ends and cancels of strokes never admitted are dropped, not queued; a second end of an admitted one too.
+    for id in 0..100u64 {
+        worker.command(StrokeCommand::End { id }, &settings);
+        worker.command(StrokeCommand::End { id }, &settings);
+        worker.command(StrokeCommand::Cancel { id }, &settings);
+    }
+    let sent = (0..MAX_QUEUED_CONTROL + 10).filter(|_| worker.send(Request::Ping { token: 1 })).count();
+    // (The hold itself is one of the queued requests.)
+    assert_eq!(sent, MAX_QUEUED_CONTROL - 1);
+    release(&hold);
+    let mut pongs = 0;
+    let mut ended = 0;
+    while pongs < MAX_QUEUED_CONTROL - 1 {
+        match worker.wait(WAIT).expect("the worker answers") {
+            Reply::Pong { .. } => pongs += 1,
+            Reply::Finished { .. } | Reply::Cancelled { .. } | Reply::Failed { .. } => ended += 1,
+            _ => {}
+        }
+    }
+    assert!(ended <= MAX_OPEN, "at most one end a stroke: {ended}");
+}
+
+// B5: a brush may ask for a working budget, never for more than the worker allows.
+#[test]
+fn a_brush_cannot_raise_the_strokes_working_budget_above_the_workers() {
+    let worker = worker();
+    // A tiny budget is honoured: one stroke over many tiles fails visibly, the worker goes on.
+    let settings = settings(",\"size\":300,\"workingBytes\":20000");
+    begin(&worker, 1, false, Mapping::default(), &settings);
+    worker.command(StrokeCommand::Sample { id: 1, x: 500.0, y: 500.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
+    worker.command(StrokeCommand::End { id: 1 }, &settings);
+    let replies = until(&worker, |r| matches!(r, Reply::Finished { .. } | Reply::Failed { .. }));
+    assert!(matches!(replies.last(), Some(Reply::Failed { stroke: 1, .. })), "{:?}", replies.last());
+    // A huge one is clamped: the value the engine receives is the worker's own cap.
+    assert_eq!(working_bytes_for(Some(1e18)), WORKING_BYTES);
+    assert_eq!(working_bytes_for(None), WORKING_BYTES);
+    assert_eq!(working_bytes_for(Some(1000.0)), 1000.0);
+}
+
+// B1 (worker half): a fetch during a stroke answers with the stroke's pixels, and stamps only grow.
+#[test]
+fn a_fetch_during_a_stroke_returns_its_ink_and_stamps_only_grow_through_undo() {
+    let worker = worker();
+    let settings = settings("");
+    begin(&worker, 1, false, Mapping::default(), &settings);
+    for (i, &(x, y)) in line().iter().enumerate() {
+        worker.command(StrokeCommand::Sample { id: 1, x, y, pressure: 0.8, time_ms: i as f64, lean: None }, &settings);
+    }
+    let replies = until(&worker, |r| matches!(r, Reply::Tiles { last: true, .. }));
+    let mut sent: HashMap<(i64, i64), (u64, Vec<u8>)> = HashMap::new();
+    for reply in &replies {
+        if let Reply::Tiles { stamp, tiles, .. } = reply {
+            for (tx, ty, pixels) in tiles {
+                sent.insert((*tx, *ty), (*stamp, pixels.clone()));
+            }
+        }
+    }
+    assert!(!sent.is_empty());
+    let keys: Vec<(i64, i64)> = sent.keys().copied().collect();
+    for (tx, ty, pixels, stamp) in fetch(&worker, &keys) {
+        let (sent_stamp, sent_pixels) = &sent[&(tx, ty)];
+        assert_eq!(pixels.as_ref(), Some(sent_pixels), "tile {tx},{ty}: the fetch holds the stroke's ink, not the empty cel");
+        assert_eq!(stamp, *sent_stamp);
+    }
+    worker.command(StrokeCommand::End { id: 1 }, &settings);
+    until(&worker, |r| matches!(r, Reply::Finished { .. }));
+    worker.send(Request::Undo);
+    let undo = until(&worker, |r| matches!(r, Reply::Changed { .. }));
+    let Some(Reply::Changed { stamp, tiles }) = undo.last() else { unreachable!() };
+    assert!(sent.values().all(|(s, _)| s < stamp), "the undo's stamp is newer than every batch's");
+    for t in fetch(&worker, tiles) {
+        assert_eq!(t.3, *stamp);
+    }
 }

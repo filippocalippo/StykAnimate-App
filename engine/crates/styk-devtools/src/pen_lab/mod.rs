@@ -280,9 +280,9 @@ impl Lab {
             .push(line(format!("strokes {}  interrupted {}  palette {}  pick {}  resize {}", inspector.strokes, inspector.interrupts, inspector.palette_opens, inspector.color_picks, inspector.resizes)))
             .push(line(String::new()))
             .push(line(format!("worker queue {}  generate {:.2} ms (max {:.2})  raster {:.2} ms (max {:.2})", inspector.worker_queued, inspector.last_generate_ms, inspector.max_generate_ms, inspector.last_raster_ms, inspector.max_raster_ms)))
-            .push(line(format!("tiles resident {}  uploaded {}  batches waiting {}  evicted {}  deferred {}  dropped {}", gpu.tiles_resident, gpu.tiles_uploaded, gpu.batches_waiting, gpu.sync.evicted, gpu.sync.deferred, gpu.sync.dropped_batches)))
+            .push(line(format!("tiles resident {}  uploaded {}  batches waiting {}  evicted {}  unshown {}  hidden {}  superseded {}", gpu.tiles_resident, gpu.tiles_uploaded, gpu.batches_waiting, gpu.sync.evicted, gpu.sync.unshown, gpu.sync.hidden, gpu.sync.superseded)))
             .push(line(format!("wet dabs {}  batches retired {} by tiles {} by age  dropped {}  stale {}", gpu.wet_instances, gpu.ledger.retired_by_tiles, gpu.ledger.retired_by_age, gpu.ledger.dropped, gpu.ledger.stale)))
-            .push(line(format!("frames {}  prepare {} us (max {})  update {} us (max {})", gpu.frames, gpu.prepare_last_us, gpu.prepare_max_us, inspector.update_last_us, inspector.update_max_us)))
+            .push(line(format!("frames {}  prepare {} us (max {}) of which graphics API {} us (max {})  update {} us (max {})", gpu.frames, gpu.prepare_last_us, gpu.prepare_max_us, gpu.wgpu_last_us, gpu.wgpu_max_us, inspector.update_last_us, inspector.update_max_us)))
             .push(line(format!("display {:.0} Hz  recording {}", self.refresh_hz, self.core.recording())));
         if let Some(counters) = &self.counters {
             use std::sync::atomic::Ordering::Relaxed;

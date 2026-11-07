@@ -759,6 +759,43 @@ impl StrokePath {
     }
 }
 
+/// `taperIn(dist)`.
+fn taper_in_of(brush: &Brush, dist: f64) -> f64 {
+    if brush.taper_in > 0.0 { taper_curve(dist / brush.taper_in) } else { 1.0 }
+}
+
+fn final_dab_of(brush: &Brush, seed: u32, mut p: Point, taper: f64, paint: &mut dyn FnMut(Dab)) {
+    p.taper = taper;
+    if let Some(shape) = dab_shape(brush, &p, seed) {
+        paint(shape);
+    }
+}
+
+/// One path point into the stroke's dabs: straight to `paint`, or held in the taper-out tail until it is past it.
+fn emit_point(brush: &Brush, seed: u32, index: &mut f64, tail: &mut Vec<Point>, tail_version: &mut u64, mut p: Point, paint: &mut dyn FnMut(Dab)) {
+    p.index = *index;
+    *index += 1.0;
+    let length = brush.taper_out;
+    if length.is_nan() || length <= 0.0 {
+        let taper = taper_in_of(brush, p.dist);
+        final_dab_of(brush, seed, p, taper, paint);
+        return;
+    }
+    tail.push(p);
+    *tail_version += 1;
+    let mut n = 0;
+    while n + 1 < tail.len() && p.dist - tail[n].dist >= length {
+        n += 1;
+    }
+    if n > 0 {
+        let done: Vec<Point> = tail.drain(..n).collect();
+        for q in done {
+            let taper = taper_in_of(brush, q.dist);
+            final_dab_of(brush, seed, q, taper, paint);
+        }
+    }
+}
+
 /// `BrushStroke`: pressure curve → path → tapers → dab shapes, in order. With a taper-out
 /// the dabs within `taper_out` of the pen stay provisional (`tail_shapes`) until the end.
 #[derive(Debug)]
@@ -808,43 +845,15 @@ impl BrushStroke {
         if let (Some(map), Some(p)) = (&self.pressure, input.pressure) {
             input.pressure = Some(map.map(p));
         }
-        let mut points = Vec::new();
-        self.path.sample(&input, &mut |p| points.push(p))?;
-        for p in points {
-            self.emit(p, paint);
-        }
-        Ok(())
+        // Each point of the path becomes its dabs as it is made: a long gap never holds its points, only the dabs the caller's
+        // `paint` keeps. (The order of every operation is what it was when the points were gathered first: the path does not
+        // read what shaping a point changes.)
+        let BrushStroke { path, brush, seed, index, tail, tail_version, .. } = self;
+        path.sample(&input, &mut |p| emit_point(brush, *seed, index, tail, tail_version, p, paint))
     }
 
-    fn emit(&mut self, mut p: Point, paint: &mut dyn FnMut(Dab)) {
-        p.index = self.index;
-        self.index += 1.0;
-        let length = self.brush.taper_out;
-        if length.is_nan() || length <= 0.0 {
-            let taper = self.taper_in(p.dist);
-            self.final_dab(p, taper, paint);
-            return;
-        }
-        self.tail.push(p);
-        self.tail_version += 1;
-        let mut n = 0;
-        while n + 1 < self.tail.len() && p.dist - self.tail[n].dist >= length {
-            n += 1;
-        }
-        if n > 0 {
-            let done: Vec<Point> = self.tail.drain(..n).collect();
-            for q in done {
-                let taper = self.taper_in(q.dist);
-                self.final_dab(q, taper, paint);
-            }
-        }
-    }
-
-    fn final_dab(&self, mut p: Point, taper: f64, paint: &mut dyn FnMut(Dab)) {
-        p.taper = taper;
-        if let Some(shape) = dab_shape(&self.brush, &p, self.seed) {
-            paint(shape);
-        }
+    fn final_dab(&self, p: Point, taper: f64, paint: &mut dyn FnMut(Dab)) {
+        final_dab_of(&self.brush, self.seed, p, taper, paint);
     }
 
     /// The provisional shapes of the untapered tail, cached until the tail changes.
@@ -871,10 +880,9 @@ impl BrushStroke {
         if self.closed {
             return;
         }
-        let mut points = Vec::new();
-        self.path.finish(&mut |p| points.push(p));
-        for p in points {
-            self.emit(p, paint);
+        {
+            let BrushStroke { path, brush, seed, index, tail, tail_version, .. } = self;
+            path.finish(&mut |p| emit_point(brush, *seed, index, tail, tail_version, p, paint));
         }
         self.closed = true;
         let tail = std::mem::take(&mut self.tail);

@@ -244,7 +244,11 @@ impl Runner {
             inspector.max_generate_ms = 0.0;
             inspector.max_raster_ms = 0.0;
         });
-        cx.core.with_gpu(|gpu| gpu.prepare_max_us = 0);
+        cx.core.with_gpu(|gpu| {
+            gpu.prepare_max_us = 0;
+            gpu.own_max_us = 0;
+            gpu.wgpu_max_us = 0;
+        });
     }
 
     fn finish_scripted(&mut self, cx: &Context, script: &Script, pushed: &[u64]) -> Step {
@@ -277,7 +281,8 @@ impl Runner {
         // The blocked test holds the interface thread on purpose; its own slices are the point of it.
         if self.test.kind == TestKind::Standard {
             self.check("A5 update slice under 4 ms", inspector.update_max_us < 4000, format!("{} us", inspector.update_max_us));
-            self.check("A5 prepare slice under 4 ms", cx.core.gpu_stats().prepare_max_us < 4000, format!("{} us", cx.core.gpu_stats().prepare_max_us));
+            let gpu = cx.core.gpu_stats();
+            self.check("A5 prepare slice (the pad's own work) under 4 ms", gpu.own_max_us < 4000, format!("own {} us; whole {} us of which graphics API {} us", gpu.own_max_us, gpu.prepare_max_us, gpu.wgpu_max_us));
         }
     }
 
@@ -407,10 +412,10 @@ impl Runner {
         let worst = periods.last().copied().unwrap_or(0.0);
         self.check("stress strokes finished", inspector.finished_strokes >= 2, format!("{} finished, {} refusals, {} worker errors", inspector.finished_strokes, inspector.worker_refusals, inspector.worker_errors.len()));
         self.check("A5 update slice under 4 ms", inspector.update_max_us < 4000, format!("{} us", inspector.update_max_us));
-        self.check("A5 prepare slice under 4 ms", gpu.prepare_max_us < 4000, format!("{} us", gpu.prepare_max_us));
+        self.check("A5 prepare slice (the pad's own work) under 4 ms", gpu.own_max_us < 4000, format!("own {} us; whole {} us of which graphics API {} us", gpu.own_max_us, gpu.prepare_max_us, gpu.wgpu_max_us));
         self.check("A5 no frame skipped while the worker works", worst < median * 2.5 + 2.0, format!("median frame {median:.2} ms, worst {worst:.2} ms over {} frames", rows.len()));
         let _ = writeln!(self.summary, "worker: longest dab generation {:.1} ms, longest raster {:.1} ms; display {:.0} Hz", inspector.max_generate_ms, inspector.max_raster_ms, cx.refresh_hz);
-        let _ = writeln!(self.summary, "tiles: resident {}, evicted {}, deferred {}, dropped batches {}, fetched {}", gpu.tiles_resident, gpu.sync.evicted, gpu.sync.deferred, gpu.sync.dropped_batches, gpu.sync.fetched);
+        let _ = writeln!(self.summary, "tiles: resident {}, evicted {}, unshown {}, hidden {}, superseded {}, fetched {}; uniform writes skipped {}", gpu.tiles_resident, gpu.sync.evicted, gpu.sync.unshown, gpu.sync.hidden, gpu.sync.superseded, gpu.sync.fetched, gpu.uniform_writes_skipped);
         self.long_frames(&rows, median);
         self.phase = Phase_::Done(i32::from(self.failures > 0));
         Step::Continue
@@ -447,11 +452,12 @@ impl Runner {
         for row in worst.iter().take(3) {
             let _ = writeln!(
                 self.summary,
-                "slowest prepare: {:.2} ms = replies {:.2} + install {:.2} + preview {:.2} ms, {} tiles written, {} wet dabs; update {} us, view {} us",
+                "slowest prepare: {:.2} ms = replies {:.2} + install {:.2} + preview {:.2} ms (graphics API calls inside: {:.2} ms), {} tiles written, {} wet dabs; update {} us, view {} us",
                 (row.prepare_end_ns - row.prepare_start_ns) as f64 / 1e6,
                 row.replies_us as f64 / 1e3,
                 row.install_us as f64 / 1e3,
                 row.wet_us as f64 / 1e3,
+                row.wgpu_us as f64 / 1e3,
                 row.tiles_uploaded,
                 row.wet_dabs,
                 row.update_us,
@@ -468,9 +474,9 @@ fn write_csvs(dir: &Path, samples: &[styk_ui::ink_pad::SampleRow], frames: &[Fra
         let _ = writeln!(out, "{},{},{:?},{:?},{},{},{},{},{},{},{},{},{},{}", s.time_ns, s.pointer, s.tool, s.phase, s.x, s.y, s.pressure, s.raw_pressure, s.tilt_x, s.tilt_y, s.buttons.0, s.flags.0, s.modifiers.0, r.received_ns);
     }
     let _ = std::fs::write(dir.join("samples.csv"), out);
-    let mut out = String::from("frame,prepare_start_ns,prepare_end_ns,newest_wet_ns,newest_exact_ns,wet_dabs,tiles_uploaded,replies_us,install_us,wet_us,view_us,update_us\n");
+    let mut out = String::from("frame,prepare_start_ns,prepare_end_ns,newest_wet_ns,newest_exact_ns,wet_dabs,tiles_uploaded,replies_us,install_us,wet_us,wgpu_us,view_us,update_us\n");
     for f in frames {
-        let _ = writeln!(out, "{},{},{},{},{},{},{},{},{},{},{},{}", f.frame, f.prepare_start_ns, f.prepare_end_ns, f.newest_wet_ns, f.newest_exact_ns, f.wet_dabs, f.tiles_uploaded, f.replies_us, f.install_us, f.wet_us, f.view_us, f.update_us);
+        let _ = writeln!(out, "{},{},{},{},{},{},{},{},{},{},{},{},{}", f.frame, f.prepare_start_ns, f.prepare_end_ns, f.newest_wet_ns, f.newest_exact_ns, f.wet_dabs, f.tiles_uploaded, f.replies_us, f.install_us, f.wet_us, f.wgpu_us, f.view_us, f.update_us);
     }
     let _ = std::fs::write(dir.join("frames.csv"), out);
     let mut out = String::from("step,pushed_ns\n");

@@ -91,6 +91,11 @@ impl WetLedger {
         }
     }
 
+    /// Whether the ledger knows the stroke as open (a reply for any other is stale).
+    pub fn is_stroke_open(&self, stroke: u64) -> bool {
+        self.is_open(stroke).is_some()
+    }
+
     fn is_open(&self, stroke: u64) -> Option<bool> {
         self.open.iter().find(|(s, _)| *s == stroke).map(|(_, eligible)| *eligible)
     }

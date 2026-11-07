@@ -121,6 +121,8 @@ pub struct FrameRow {
     pub replies_us: u32,
     pub install_us: u32,
     pub wet_us: u32,
+    /// Of the `prepare`, the microseconds spent inside the graphics API's queue calls (the driver's time, not the pad's own work).
+    pub wgpu_us: u32,
     /// The application's own view build and the pad's last `update`, microseconds, as of this frame.
     pub view_us: u32,
     pub update_us: u32,
@@ -194,8 +196,17 @@ pub struct GpuStats {
     pub batches_waiting: usize,
     pub wet_instances: usize,
     pub wet_overflow: u64,
+    /// The whole `prepare`, microseconds.
     pub prepare_last_us: u64,
     pub prepare_max_us: u64,
+    /// The `prepare` less the graphics API's queue calls: the pad's own work, which its budget governs.
+    pub own_last_us: u64,
+    pub own_max_us: u64,
+    /// The queue calls alone (uploads of tiles, instances and uniforms).
+    pub wgpu_last_us: u64,
+    pub wgpu_max_us: u64,
+    /// Uniform writes skipped because nothing in them changed.
+    pub uniform_writes_skipped: u64,
     pub ledger: LedgerStats,
     /// The pad's size in physical pixels, as the last frame saw it.
     pub pad_px: (f32, f32),
