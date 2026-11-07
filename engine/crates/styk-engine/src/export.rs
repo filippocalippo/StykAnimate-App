@@ -432,6 +432,8 @@ impl Drop for ExportFrames {
         let mut state = self.state.lock();
         state.ready.clear();
         state.images.clear();
+        state.landed_cels.clear();
+        state.image_bytes = 0;
         state.todo.clear();
         state.pending.clear();
         state.inflight.clear();
@@ -568,5 +570,34 @@ mod tests {
         let landed = frames.take_landed_cels(usize::MAX);
         assert_eq!(landed.iter().map(|l| (l.attempt, l.images.len())).collect::<Vec<_>>(), [(2, count), (1, 0)]);
         assert_eq!(frames.pictures_in_flight(), 0);
+    }
+
+    /// An export that ends while one attempt at a cel has landed and another is still to be decoded holds nothing: the queued task
+    /// keeps the export's state alive until it runs (or for good, if the workers stop), so what the state holds must be let go by the drop.
+    #[test]
+    fn dropping_an_export_lets_go_of_the_cel_attempts_that_landed() {
+        let engine = Engine::new(clock, Budgets::for_device(None));
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/drawlist/drawing-cel.json");
+        engine.open(&std::fs::read(file).unwrap(), "json", "pictures").unwrap();
+        while engine.step() {}
+        let _ = engine.take_images(usize::MAX);
+        let frames = engine.export_frames(0).unwrap();
+        let cel = *frames.generation().assets.cels.keys().next().expect("the fixture has a cel");
+        frames.decode_cels();
+        while engine.step() {}
+        frames.request_cels(&[(cel, 1), (cel, 2)]);
+        assert!(engine.step(), "the first attempt runs");
+        let state = frames.state.clone();
+        {
+            let held = state.lock();
+            assert_eq!(held.landed_cels.len(), 1, "the first attempt landed");
+            assert!(held.image_bytes > 0 && held.landed_cels[0].images.iter().all(|image| image.drawing));
+            assert_eq!(held.pictures_left, 1, "the second attempt is still to be decoded");
+        }
+        drop(frames);
+        let held = state.lock();
+        assert!(held.landed_cels.is_empty(), "the landed attempt's images are let go with the export");
+        assert_eq!(held.image_bytes, 0, "and so are their bytes");
+        assert!(held.todo.is_empty() && held.images.is_empty());
     }
 }

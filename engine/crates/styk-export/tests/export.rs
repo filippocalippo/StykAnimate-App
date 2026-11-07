@@ -563,26 +563,6 @@ fn an_older_attempt_to_decode_a_cel_never_touches_a_newer_ones_tiles_or_makes_it
 "));
 }
 
-/// Evaluation, not drawing: the draw list of a tick after the ticks before it against its draw list in a fresh engine.
-/// Printed, not asserted: what it finds is in the notes of docs/engine/rendering.md.
-#[test]
-fn probe_evaluation_history() {
-    for (path, last) in [
-        ("engine/crates/styk-eval/tests/fixtures/generators/explosions.json", 14u32),
-        ("engine/crates/styk-eval/tests/fixtures/vfx/scene-clips.json", 10),
-        ("engine/crates/styk-eval/tests/fixtures/vfx/generators.json", 10),
-        ("engine/crates/styk-eval/tests/fixtures/generators/auras.json", 10),
-    ] {
-        let text = |frame: &styk_engine::FrameData| format!("{:?}{:?}", frame.list, frame.camera);
-        let (_e, after) = open(path);
-        let last = last.min(after.ticks() - 1);
-        let sequential: Vec<String> = (0..=last).map(|tick| text(&after.take(tick).unwrap())).collect();
-        let (_e2, fresh) = open(path);
-        let differ: Vec<u32> = (0..=last).filter(|&tick| text(&fresh.take(tick).unwrap()) != sequential[tick as usize]).collect();
-        eprintln!("PROBE {path}: draw lists that differ between a fresh engine and one that evaluated the ticks before: {differ:?}");
-    }
-}
-
 /// The engine with `path` open and nothing decoded: an export that asks for its pictures decodes the cels, then what its frames draw.
 fn open_bare(path: &str) -> (Engine, styk_engine::export::ExportFrames) {
     let file = repository(path);
