@@ -6,6 +6,7 @@
 //!
 //! It depends on the core, the design system and iced, and on nothing that touches the operating system.
 
+pub mod band;
 pub mod component_sheet;
 pub mod inspector;
 pub mod message;
@@ -13,8 +14,8 @@ pub mod screens;
 
 pub use message::Message;
 
-use iced::widget::{container, space};
-use iced::{Element, Fill, Widget, theme};
+use iced::widget::{column, container, row, space, stack};
+use iced::{Element, Fill, Length, Widget, theme};
 use styk_design::Theme;
 use styk_design::warm_up::Ready;
 
@@ -45,6 +46,18 @@ pub fn loading<'a, Message: 'a>(theme: Theme) -> Element<'a, Message> {
 /// screen that sets text is built here or below, never in [`loading`].
 pub fn view<'a, Message: 'a>(theme: Theme, _ready: Ready) -> Element<'a, Message> {
     loading(theme)
+}
+
+/// The window as it is now: the top band holding the window controls at its right edge, and the field below. Every
+/// other screen is built into this as it lands; the band's other clusters (the mark, the project tabs, the
+/// workspaces, history, Save and Export) arrive with the shell chunk of the interface.
+pub fn shell<'a, Message: 'a>(theme: Theme, _ready: Ready, band_height: f32, controls: Element<'a, Message>) -> Element<'a, Message> {
+    let palette = theme.palette();
+    let (surface, line) = (iced::Color::from(palette.surface), iced::Color::from(palette.line_1));
+    let band = container(row![space().width(Fill), controls]).width(Fill).height(Length::Fixed(band_height)).style(move |_| container::Style::default().background(surface));
+    // `box-shadow: inset 0 -1px 0 var(--line-1)`: a line over the band's last pixel row.
+    let rule = container(container(space()).width(Fill).height(Length::Fixed(1.0)).style(move |_| container::Style::default().background(line))).width(Fill).height(Length::Fixed(band_height)).align_bottom(Length::Fixed(band_height));
+    column![stack![band, rule].boxed(), loading(theme)].boxed()
 }
 
 #[cfg(test)]
