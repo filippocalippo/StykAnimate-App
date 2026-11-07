@@ -101,8 +101,9 @@ consumes another control's keys** (iced's slider takes arrows by hover; the wrap
 **Scrubbing and pointer capture.** A scrub starts on a pointer press on the label and is owned by the label until it
 ends. iced's `mouse_interaction` only chooses a cursor, so the label tracks capture itself: while captured it consumes
 `CursorMoved`/`ButtonReleased` wherever the pointer is (also outside the widget and the window). A scrub ends, once, on:
-release (commit), Escape (rollback), the window losing focus, a touch cancel, the widget being removed from the tree, or
-a second press. One gesture is one history entry (the core groups it; the widget only sends `Begin`, `Delta`, `End`,
+release (commit), Escape (rollback), the window losing focus, a touch cancel, or a second press. (A label removed from
+the tree mid-gesture sends nothing: the owner of the gesture ends it when its next focus snapshot no longer lists the
+label. That rule is not built yet.) One gesture is one history entry (the core groups it; the widget only sends `Begin`, `Delta`, `End`,
 `Cancel`). A drag below `drag_slop` is a click.
 
 ## 5. Clipboard
@@ -130,9 +131,19 @@ a second press. One gesture is one history entry (the core groups it; the widget
   fallback: a text store needs surrounding text, selections, replacement ranges, geometry and lock callbacks, and iced's
   preedit has content, one selection and a size, so a TSF adapter owns a two-way field/text-store contract and is
   designed on its own.
-- Verification uses an in-process automation handler on the window's UI thread (IMM contexts belong to the thread that
-  created them). It sets and completes a composition on the window's `HIMC`, reads the candidate position, and runs only
-  with `STYK_BACKGROUND_WINDOW=1`.
+- Verification uses an in-process automation handler on the window's UI thread (IMM contexts and keyboard layouts belong
+  to the thread that created them): `styk_platform::input`, driven by the developer build's
+  `stykanimate --screen component-sheet --input-check <report.json>`. It never injects system input and never shows a
+  window: it switches its own thread to a layout, posts messages to its own window, sets the composition string on the
+  window's `HIMC` and reads the candidate position the application asked for.
+- **What this machine has.** Keyboard layouts ship with Windows, so the Arabic and Hebrew layouts load with no language
+  pack. No input method is installed (the user's list is Italian and US; the Microsoft Japanese and Pinyin profiles are
+  not registered), so no real IME composition can be run here: with none, nothing sends `WM_IME_COMPOSITION` by itself.
+  The check sets the string and delivers the messages an IME would; winit's handler reads the composition back through
+  `ImmGetCompositionStringW`, which stays empty without one, so no preedit reaches the field from this path. A pass with
+  Microsoft Japanese IME, Pinyin and the Arabic and Hebrew IMEs is **a manual pass for the owner**; the field-side
+  contract (preedit, commit through the limits, `composing`, silenced hotkeys) is proven headless with iced's input-method
+  events.
 
 ## 7. Right to left
 
@@ -174,3 +185,25 @@ a second press. One gesture is one history entry (the core groups it; the widget
   every field role in every state (empty, filled, focused, selected, composing, disabled, error, RTL), the focus ring,
   a roving group, a modal with its Tab boundaries.
 - Real IME, RTL, latency: measured as described in section 6 and 7; the results are in the spike report.
+
+## 9. Results of the spike (2026-11-07)
+
+Measured on the Windows 11 development machine (Ryzen 5 5500, RTX 4070 SUPER, 144 Hz) while other agents were building:
+every number is directional.
+
+| Check | Result |
+| --- | --- |
+| Pure models (`styk-core`: focus, text entry, roving, number, limits, field roles, clipboard table, slider and select keys) | 51 tests pass |
+| Widgets on the headless driver with explicit clipboard and focus effects (`styk-design`, feature `testing`) | 41 tests pass: Tab order and wrap, the roving group as one stop (mirrored in RTL), modal edges and restoration, the ring after the keyboard only, one-key two-scalar text, grouped undo and Ctrl+Shift+Z, bounded history, filtering before mutation (5 MB paste in under 33 ms), refused keys leaving history alone, a paste reply after focus moved, number rollback to the gesture baseline, scrubs ended once by release, Escape, window deactivation and touch cancel, RTL mirror of the roving row, composition and hotkeys |
+| Caret motion against Chromium | The native editor's offset sequences equal those Chromium (Electron on Windows 11) visits, for six strings, both directions, both ends (`tests/fixtures/chromium-caret.txt`). Chromium moves logically in the paragraph's direction; the first design assumed visual motion, which would have been a deviation |
+| Arabic and Hebrew keys in the real window | The Arabic layout's `B` key reaches the field as both scalars of lam-alef, and the Hebrew `A` key as shin (posted to the window's own message queue on its UI thread; the layouts ship with Windows) |
+| Input method | Not run for real: no IME is installed here (section 6). `SCS_SETSTR`, `CPS_COMPLETE` and the window messages succeed; the candidate window was asked for the caret's rectangle (1 x 18 px at the field's padding), inside the field. A real pass is manual |
+| Keystroke to the start of the redraw that draws it, release build, 150 keys, 200-character field | p50 7.2 to 7.3 ms (one refresh is 6.9 ms), p95 7.8 to 9.7 ms in the quiet runs |
+| The same, 16,300 characters in 80-character lines | p50 7.1 to 7.2 ms, p95 9.5 to 10.7 ms: meets C2 |
+| The same, 16,300 characters on **one line** | p50 28 to 36 ms, p95 36 to 60 ms: **fails C2**. The editor reshapes the whole paragraph on every edit; a single 16 K-character line is the worst case. Not fixed here |
+| Chromium, same metric (key event to the second animation frame after `input`), `<input>` with 200 characters | p50 4.9 ms, p95 9.3 ms |
+| Chromium, `<textarea>` with 16,300 characters (one wrapped line) | p50 5.8 ms, p95 9.7 ms |
+
+The native figure stops at the start of the redraw: its own drawing and presenting come after, so it is a floor for
+keystroke to present. Chromium's counts through a second frame, so the two are not equal measures; the single-line
+text-area gap is large enough not to depend on that.
