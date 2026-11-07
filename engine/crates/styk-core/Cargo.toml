@@ -16,5 +16,6 @@ unicode-normalization = "=0.1.23"
 
 [dev-dependencies]
 sha2 = "0.10"
+styk-edit = { path = "../styk-edit" }
 styk-formats = { path = "../styk-formats" }
 zstd = "0.13"

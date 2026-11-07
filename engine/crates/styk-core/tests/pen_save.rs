@@ -1,10 +1,12 @@
 //! A stroke on a moved, scaled and rotated cel, in a rotated and zoomed view, through the pen path and out through the
-//! engine's own save and open: the cel the container holds after the round trip is the cel the worker drew, tile for tile.
+//! engine's own document, save and open: a drawing layer made by the editing session, the cel published into it and the document
+//! written and read back as a file. The reopened document holds the cel the worker drew, tile for tile, at the pose it was placed at,
+//! on the layer it was drawn on.
 //! (The comparison with today's app on the same events is `pen_parity.rs`; this one needs no capture.)
 
 mod common;
 
-use common::{hashes, save_and_reopen, settle};
+use common::{Pose, hashes, save_and_reopen_document, settle};
 use std::sync::Arc;
 use std::time::Duration;
 use styk_core::drawing::mapping::Mapping;
@@ -60,11 +62,16 @@ fn a_stroke_on_a_moved_scaled_and_rotated_cel_survives_the_engines_save_and_open
     let snapshot = loop {
         match worker.wait(Duration::from_secs(30)).expect("the worker answers") {
             Reply::Snapshot { tiles, .. } => break tiles,
-            Reply::Tiles { seq, .. } => worker.ack(seq),
+            Reply::Tiles { seq, last: true, .. } => worker.ack(seq),
             _ => {}
         }
     };
-    assert_eq!(save_and_reopen(&snapshot), drawn, "the cel in the saved and reopened document is the cel that was drawn");
+    let placed = Pose::of_matrix(pose);
+    let reopened = save_and_reopen_document(&snapshot, placed);
+    assert_eq!(reopened.tiles, drawn, "the cel in the saved and reopened document is the cel that was drawn");
+    assert_eq!(reopened.pose, placed, "the cel keeps its place, scale and turn");
+    assert!(reopened.layer_shows_cel, "the layer's key shows the cel");
+    assert!((placed.angle - 32f64.to_radians()).abs() < 1e-12 && (placed.scale - 0.5).abs() < 1e-12 && placed.root == (120.0, 80.0), "the pose is the one the cel was given: {placed:?}");
 
     // Undo and redo: the same pixels come back, and the saved cel of the undone state is empty.
     worker.send(Request::Undo);

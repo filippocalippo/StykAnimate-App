@@ -4,14 +4,15 @@
 //! controller posted, how it maps window pixels to the cel, the events, and a hash of every cel tile after the stroke, after
 //! undo, after redo and after a save and reopen. This test feeds the same events through `StrokeInput`, the mapping and the
 //! drawing worker and compares the tiles. It needs a capture file: `STYK_PEN_PARITY=<capture.json> cargo test -p styk-core
-//! --test pen_parity`; without one it says so and passes nothing (a capture needs Chrome and the built app).
+//! --test pen_parity` replaces the committed capture (`tests/fixtures/pen/capture.json.zst`, the same file compressed) with a newer one;
+//! a capture needs Chrome and the built app (`scripts/pen-parity-capture.mjs`). The test never passes without a capture.
 //!
 //! The capture's `oldVersusOld` lists the fields that differed between two runs of today's app on the same events; only
 //! those may differ here.
 
 mod common;
 
-use common::{hashes, save_and_reopen, settle};
+use common::{Pose, hashes, save_and_reopen_document, settle};
 use std::sync::Arc;
 use std::time::Duration;
 use styk_core::drawing::mapping::Mapping;
@@ -92,13 +93,19 @@ fn feed_events(input: &mut StrokeInput, events: &Value, mapping: &Mapping, end: 
 
 #[test]
 fn the_native_pen_path_matches_todays_app_on_the_same_events() {
-    let Some(path) = std::env::var_os("STYK_PEN_PARITY") else {
-        eprintln!("STYK_PEN_PARITY is not set: no capture of today's app to compare with (see scripts/pen-parity-capture.mjs)");
-        return;
+    let bytes = match std::env::var_os("STYK_PEN_PARITY") {
+        Some(path) => std::fs::read(path).expect("the capture file reads"),
+        None => {
+            let packed = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pen/capture.json.zst")).expect("the committed capture of today's app reads");
+            zstd::decode_all(&packed[..]).expect("the committed capture decompresses")
+        }
     };
-    let capture = json::parse(&std::fs::read(path).expect("the capture file reads")).expect("the capture is JSON");
+    let capture = json::parse(&bytes).expect("the capture is JSON");
+    let scenarios = field(&capture, "scenarios").elements().expect("scenarios");
+    assert!(scenarios.len() >= 7, "the capture holds the scenarios the comparison names: {}", scenarios.len());
+    let mut compared = 0;
     let mut failures = Vec::new();
-    for scenario in field(&capture, "scenarios").elements().expect("scenarios") {
+    for scenario in scenarios {
         let name = field(&scenario, "name").as_str().unwrap().to_string();
         let brush: Arc<str> = field(&scenario, "brush_json").as_str().unwrap().into();
         let mirror = field(&scenario, "mirror").as_bool() == Some(true);
@@ -125,6 +132,7 @@ fn the_native_pen_path_matches_todays_app_on_the_same_events() {
             if baseline.iter().any(|path| path.starts_with(&format!("/expect/{stage}"))) {
                 return;
             }
+            compared += 1;
             if native != expected {
                 let differing: Vec<(i64, i64)> = native.iter().filter(|row| !expected.contains(row)).map(|row| (row.0, row.1)).collect();
                 failures.push(format!("{name} {stage}: {} native tiles, {} in today's app, {} native tiles differ: {differing:?}", native.len(), expected.len(), differing.len()));
@@ -143,15 +151,20 @@ fn the_native_pen_path_matches_todays_app_on_the_same_events() {
             let saved = loop {
                 match worker.wait(Duration::from_secs(30)).unwrap() {
                     Reply::Snapshot { tiles, .. } => break tiles,
-                    Reply::Tiles { seq, .. } => worker.ack(seq),
+                    Reply::Tiles { seq, last: true, .. } => worker.ack(seq),
                     _ => {}
                 }
             };
-            check("reopen", save_and_reopen(&saved));
+            let pose = Pose::of_matrix(mapping.pixel_matrix);
+            let reopened = save_and_reopen_document(&saved, pose);
+            let note = (reopened.pose != pose || !reopened.layer_shows_cel).then(|| format!("{name} reopen: the cel came back at {:?} (shown on its layer: {}), it was placed at {pose:?}", reopened.pose, reopened.layer_shows_cel));
+            check("reopen", reopened.tiles);
+            failures.extend(note);
         } else {
             let expected_empty = tiles_of(field(expect, "commit")).is_empty();
             assert_eq!(hashes(&worker, 6).is_empty(), expected_empty, "{name}: a discarded stroke leaves the cel as it was");
         }
     }
+    assert!(compared >= 25, "the capture was compared at every stage of every scenario: {compared} stages");
     assert!(failures.is_empty(), "the native path differs from today's app:\n{}", failures.join("\n"));
 }
