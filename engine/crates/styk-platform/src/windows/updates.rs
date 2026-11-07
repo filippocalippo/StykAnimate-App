@@ -646,14 +646,24 @@ mod tests {
         let dir = root.join("1.2.0");
         fs::create_dir_all(&dir).unwrap();
         let _holder = try_lock(&dir.join(LOCK_FILE)).unwrap().expect("the lock was free");
-        let started = Instant::now();
+        // The bound is on the cancel, not on the run: how long the wait loop takes to notice a cancel and return, from the moment
+        // the cancel is signalled. How long the polls before it took depends on the load of the machine and is not measured.
+        let signalled: Cell<Option<Instant>> = Cell::new(None);
         let polls = Cell::new(0);
         let outcome = stage(&server, &root).obtain("v1.2.0", "1.2.0", &info, &mut |_, _| {}, &|| {
             polls.set(polls.get() + 1);
-            polls.get() > 5
+            if polls.get() > 5 {
+                if signalled.get().is_none() {
+                    signalled.set(Some(Instant::now()));
+                }
+                return true;
+            }
+            false
         });
+        let returned = Instant::now();
         assert_eq!(outcome, Err(StageError::Cancelled));
-        assert!(started.elapsed() < Duration::from_secs(15));
+        let honoured = returned.duration_since(signalled.get().expect("the cancel was signalled"));
+        assert!(honoured < Duration::from_secs(1), "a cancel took {honoured:?} to be honoured");
         assert_eq!(server.file_hits.load(Ordering::SeqCst), 0, "a live holder is never raced");
         let _ = fs::remove_dir_all(root);
     }

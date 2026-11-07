@@ -499,6 +499,51 @@ fn a_lock_that_cannot_be_taken_stops_the_setup_before_it_changes_anything() {
     assert!(install.join("StykAnimate.exe").exists());
 }
 
+fn junction(link: &Path, target: &Path) {
+    run(Command::new("cmd").args(["/C", "mklink", "/J"]).arg(link).arg(target), "mklink /J");
+}
+
+#[test]
+#[ignore = "builds and runs Setups with makensis (sandboxed); run with --ignored"]
+fn the_uninstaller_never_removes_through_a_junction() {
+    let sandbox = Sandbox::new("junction");
+    let a = sandbox.dir.join("Programs").join("A");
+    let files = sandbox.dir.join("files-junction");
+    lay_out(&files, &[("LICENSE", "l"), ("assets\fonts\inter.ttf", "f"), ("assets\logo.svg", "s")]);
+    let setup = sandbox.dir.join("Setup.exe");
+    build(&sandbox, &repo_root().join("packaging/windows/installer.nsi"), "2.0.0", &files, &setup, &plugins().map(|p| vec![format!("/DPLUGIN_DIR={}", p.display())]).unwrap_or_default());
+    run_setup(&setup, &["/S", "/currentuser"], &a);
+
+    // A listed folder is replaced by a junction to a folder that holds files of the same names that are not the program's.
+    let elsewhere = sandbox.dir.join("elsewhere");
+    std::fs::create_dir_all(elsewhere.join("fonts")).unwrap();
+    std::fs::write(elsewhere.join("fonts").join("inter.ttf"), "not ours").unwrap();
+    std::fs::write(elsewhere.join("logo.svg"), "not ours either").unwrap();
+    std::fs::remove_dir_all(a.join("assets")).unwrap();
+    junction(&a.join("assets"), &elsewhere);
+
+    let mut uninstall = Command::new(a.join("Uninstall StykAnimate.exe"));
+    uninstall.arg("/currentuser").arg("/S").raw_arg(format!("_?={}", a.display()));
+    run(&mut uninstall, "the uninstaller");
+    assert_eq!(std::fs::read_to_string(elsewhere.join("fonts").join("inter.ttf")).unwrap(), "not ours", "a same-named file behind the junction survives");
+    assert_eq!(std::fs::read_to_string(elsewhere.join("logo.svg")).unwrap(), "not ours either");
+    assert!(elsewhere.join("fonts").is_dir(), "and so does the folder behind it");
+    assert!(!a.join("StykAnimate.exe").exists() && !a.join("LICENSE").exists(), "the entries not behind a link are still removed");
+    assert!(std::fs::symlink_metadata(a.join("assets")).is_err(), "the junction, itself a listed entry, was removed as a link");
+
+    // The installation folder itself being a junction: nothing is removed through it.
+    let real = sandbox.dir.join("Programs").join("real");
+    run_setup(&setup, &["/S", "/currentuser"], &real);
+    let linked = sandbox.dir.join("Programs").join("linked");
+    junction(&linked, &real);
+    let mut through = Command::new(linked.join("Uninstall StykAnimate.exe"));
+    through.arg("/currentuser").arg("/S").raw_arg(format!("_?={}", linked.display()));
+    let status = through.status().unwrap();
+    assert_eq!(status.code(), Some(7), "an uninstaller run through a link refuses");
+    assert!(real.join("StykAnimate.exe").exists() && real.join("StykAnimate.files").exists(), "nothing behind the link was removed");
+    assert!(sandbox.registry.key_exists(&format!("{UNINSTALL}\{APP_GUID}")), "and the registration is untouched");
+}
+
 /// A release server for one version: the "latest" alias redirects to the tag; the feed, its signature and the Setup are
 /// files of the tag.
 fn serve_release(tag: &'static str, files: Vec<(String, Vec<u8>)>) -> (String, std::sync::Arc<std::sync::atomic::AtomicBool>) {

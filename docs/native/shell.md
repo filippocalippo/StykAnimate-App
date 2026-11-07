@@ -176,7 +176,16 @@ against Electron's; moving the window across two real monitors of different scal
 hardware; the UAC prompt of an all-users update and an all-users install and upgrade as a standard user; the real 1.1.0 Electron Setup
 upgraded by the native Setup on a throwaway Windows account or VM, with a default chosen for each format; frame pacing while
 the system moves or sizes the window (that loop needs a real pointer); restoring a maximized window on a real monitor; a
-snap zone narrower than the 1000 px minimum.Deleting is bounded at its root. **The native uninstaller never deletes a folder recursively**: the Setup installs the files of a
+snap zone narrower than the 1000 px minimum.**What it protects against.** Mistakes and inconsistent state: a registration that points at the wrong folder, a destination with
+someone else's files, two Setups at once, an update file replaced while it waited, a stale record. It does not defend against a
+process that already has the rights to change the installation folder or the user's registry: that process could replace the
+program itself. The reasoning is decision [N10](decisions/0010-installer-threat-model.md). One consequence is kept on purpose: the
+uninstaller never removes anything through a junction or a symbolic link (every directory on a manifest entry's path, and the
+installation folder itself, is checked for a reparse point; an entry behind one is skipped and counted, and a link that is itself
+listed is removed as the link), because following a link turns a stale or surprising folder into a deletion elsewhere without
+any attacker at all.
+
+Deleting is bounded at its root. **The native uninstaller never deletes a folder recursively**: the Setup installs the files of a
 generated list (`release_feed files-script`) and writes the same list into the installation (`StykAnimate.files`); the uninstaller
 removes those files and the folders they leave empty, nothing else, and only registers or unregisters when the registration names
 its own folder. **The Electron uninstaller** (electron-builder's, the only one that deletes recursively) runs only on a

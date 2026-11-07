@@ -99,6 +99,7 @@ Var docsDir
 Var modeAll
 Var modeMe
 Var manifest
+Var skipped          ; manifest entries left alone because they are reached through a link
 
 ; Where things go. In a sandbox build they are folders of the sandbox.
 !macro setLocations
@@ -662,7 +663,48 @@ Function un.PlainRelativePath
     Goto scan
 FunctionEnd
 
+; Whether the manifest path in $R1 is reached through a link: any directory on the way, the installation folder itself
+; apart (the section checks that first), that is a reparse point (a junction or a symbolic link). If so $R1 becomes ""
+; and $skipped counts it. The entry itself may be a link: it is then removed as the link, never followed.
+Function un.NoLinkOnPath
+  StrLen $1 $R1
+  StrCpy $2 0
+  scanDirs:
+    ${If} $2 >= $1
+      Return
+    ${EndIf}
+    StrCpy $3 $R1 1 $2
+    ${If} $3 == "\"
+    ${OrIf} $3 == "/"
+      StrCpy $4 $R1 $2
+      System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR\$4") i .r5'
+      ${If} $5 != -1
+        IntOp $5 $5 & 0x400
+        ${If} $5 <> 0
+          IntOp $skipped $skipped + 1
+          StrCpy $R1 ""
+          Return
+        ${EndIf}
+      ${EndIf}
+    ${EndIf}
+    IntOp $2 $2 + 1
+    Goto scanDirs
+FunctionEnd
+
 Section "Uninstall"
+  ; The installation folder itself must not be a junction or a symbolic link: nothing under it is ours to remove through one.
+  System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR") i .r0'
+  ${If} $0 != -1
+    IntOp $0 $0 & 0x400
+    ${If} $0 <> 0
+      ${IfNot} ${Silent}
+        MessageBox MB_OK|MB_ICONSTOP "$INSTDIR is a link to another folder, so nothing in it will be removed."
+      ${EndIf}
+      SetErrorLevel 7
+      Quit
+    ${EndIf}
+  ${EndIf}
+
   ; The registry and the shortcuts are this installation's only if the registration names this folder: a copy of the
   ; uninstaller run from anywhere else removes neither the registration of the real installation nor anything else.
   StrCpy $R8 "$INSTDIR"
@@ -751,6 +793,9 @@ Section "Uninstall"
       StrCpy $R1 $R0 "" 2
       Call un.PlainRelativePath
       ${If} $R1 != ""
+        Call un.NoLinkOnPath
+      ${EndIf}
+      ${If} $R1 != ""
         ${If} $R2 == "F"
           Delete "$INSTDIR\$R1"
         ${ElseIf} $R2 == "D"
@@ -764,6 +809,10 @@ Section "Uninstall"
   Delete "$INSTDIR\${MANIFEST}"
   Delete "$INSTDIR\${UNINSTALL_EXE}"
   RMDir "$INSTDIR"
+  ${If} $skipped <> 0
+  ${AndIfNot} ${Silent}
+    MessageBox MB_OK|MB_ICONEXCLAMATION "$skipped item(s) were left alone because they are reached through a link."
+  ${EndIf}
   !ifndef SANDBOX
     System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)'
   !endif
