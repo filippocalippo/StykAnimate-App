@@ -23,6 +23,8 @@ pub struct Session {
 
 mod worker;
 pub use worker::{WorkerFrame, WorkerPrepared, WorkerSession};
+mod native;
+pub use native::{NativeCall, SessionView};
 
 /// Exact counters supplied by the existing history owner during worker handoff.
 #[derive(Clone, Copy, Debug)]
@@ -718,10 +720,7 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     drop(prelude_scope);
     let command_scope = crate::prof::scope("call::command");
     // What the editor drew at random during its own run of the call (D18).
-    editor.set_draws(view.get("draws").unwrap_or(&Value::Null));
-    editor.draw_pool = view.get("drawPool") == Some(&Value::Bool(true));
-    editor.drawing_forks.clear();
-    editor.drawing_retired = false;
+    prepare_call(editor, view);
     // What JSON cannot say (a member set to `undefined`, a non-finite number) arrives encoded (args.rs).
     let decoded;
     let args = if flag(view, "encoded") { decoded = crate::args::decode(args, crate::args::keeps_undefined(method)); &decoded } else { args };
@@ -1052,6 +1051,14 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     }
     answer.push(("drag", editor.drag_value()));
     Ok(response_value(answer))
+}
+
+/// Per-call inputs and effects shared by the JSON host and the native host.
+fn prepare_call(editor: &mut Editor, view: &Value) {
+    editor.set_draws(view.get("draws").unwrap_or(&Value::Null));
+    editor.draw_pool = view.get("drawPool") == Some(&Value::Bool(true));
+    editor.drawing_forks.clear();
+    editor.drawing_retired = false;
 }
 
 #[cfg(test)]
