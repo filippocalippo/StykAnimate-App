@@ -8,7 +8,8 @@
 //!   constant's doc comment names its CSS custom property so a porter can find the stylesheet's use of it.
 //! - [`icons`]: the interface's Lucide icons, as SVG, looked up by the names the JavaScript uses.
 //! - [`fonts`]: Inter and Inter Tight, bundled.
-//! - With the `widgets` feature, [`widgets`]: the iced side (conversions, font handles, the icon widget).
+//! - With the `widgets` feature, [`widgets`]: the iced side (conversions, font handles, the icon widget), and
+//!   [`typography`]: the type roles as iced fonts, sizes and line heights (`docs/native/typography.md`).
 //!
 //! It depends on iced only behind `widgets`, and never on the engine or the core.
 
@@ -16,6 +17,10 @@ pub mod fonts;
 pub mod icons;
 mod icon_table;
 pub mod tokens;
+#[cfg(feature = "widgets")]
+pub mod typography;
+#[cfg(feature = "widgets")]
+pub mod warm_up;
 #[cfg(feature = "widgets")]
 pub mod widgets;
 

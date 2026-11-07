@@ -6,10 +6,11 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::{mem, ops::Range};
 use fontdb::Family;
-use unicode_script::Script;
+pub use unicode_script::Script;
 
 use crate::{
-    Attrs, BuildHasher, Font, FontMatchKey, FontSystem, HashMap, MonoFontMatches, ShapeBuffer,
+    Attrs, BuildHasher, Font, FontMatchKey, FontSystem, HashMap, MonoFontMatches, OpticalSize,
+    ShapeBuffer,
 };
 
 #[cfg(not(any(all(unix, not(target_os = "android")), target_os = "windows")))]
@@ -196,6 +197,7 @@ pub struct FontFallbackIter<'a> {
     other_i: usize,
     end: bool,
     ideal_weight: fontdb::Weight,
+    ideal_optical_size: OpticalSize,
     attrs: &'a Attrs<'a>,
     /// Cached monospace font match data for [`Self::attrs`], lazily fetched.
     mono_matches: Option<Arc<MonoFontMatches>>,
@@ -236,6 +238,7 @@ impl<'a> FontFallbackIter<'a> {
             other_i: 0,
             end: false,
             ideal_weight,
+            ideal_optical_size: attrs.optical_size,
             attrs,
             mono_matches: None,
             mono_idx: 0,
@@ -291,6 +294,18 @@ impl<'a> FontFallbackIter<'a> {
         self.font_system.face_contains_family(id, family_name)
     }
 
+    /// The faces of a fallback family, nearest the requested weight first, heavier first at equal distance (the choice
+    /// DirectWrite, and so Chromium on Windows, makes: Segoe UI Semibold answers a request for 500, not Regular).
+    /// A fallback family is useful at any weight it has, not only at exactly the requested one.
+    fn family_faces(&self, family: &str) -> Vec<fontdb::ID> {
+        let mut keys: Vec<&FontMatchKey> = self.font_match_keys.iter().filter(|m_key| self.face_contains_family(m_key.id, family)).collect();
+        keys.sort_by_key(|m_key| {
+            let exact = m_key.font_weight_diff == 0 || m_key.variable_weight_match;
+            (if exact { 0 } else { m_key.font_weight_diff }, m_key.font_stretch_diff, m_key.font_style_diff, core::cmp::Reverse(m_key.font_weight), m_key.id)
+        });
+        keys.into_iter().map(|m_key| m_key.id).collect()
+    }
+
     fn default_font_match_key(&self) -> Option<&FontMatchKey> {
         let default_family = self.default_families[self.default_i - 1];
         let default_family_name = self.font_system.db().family_name(default_family);
@@ -335,7 +350,7 @@ impl<'a> FontFallbackIter<'a> {
             while self.mono_idx < ranking.len() {
                 let id = ranking[self.mono_idx].id;
                 self.mono_idx += 1;
-                if let Some(font) = self.font_system.get_font(id, self.ideal_weight) {
+                if let Some(font) = self.font_system.get_font_instance(id, self.ideal_weight, self.ideal_optical_size) {
                     return Some(font);
                 }
             }
@@ -349,7 +364,7 @@ impl<'a> FontFallbackIter<'a> {
         if let Some(fallback_info) = self.font_system.monospace_fallbacks_buffer.pop_first() {
             if let Some(font) = self
                 .font_system
-                .get_font(fallback_info.id, self.ideal_weight)
+                .get_font_instance(fallback_info.id, self.ideal_weight, self.ideal_optical_size)
             {
                 return Some(font);
             }
@@ -399,7 +414,7 @@ impl<'a> FontFallbackIter<'a> {
                     break 'DEF_FAM;
                 }
                 (false, Some(m_key)) => {
-                    if let Some(font) = self.font_system.get_font(m_key.id, self.ideal_weight) {
+                    if let Some(font) = self.font_system.get_font_instance(m_key.id, self.ideal_weight, self.ideal_optical_size) {
                         return Some(font);
                     }
                     break 'DEF_FAM;
@@ -414,7 +429,7 @@ impl<'a> FontFallbackIter<'a> {
                         // Otherewise, add to fallbacks set
                         if fallback_info.codepoint_non_matches == Some(0) {
                             if let Some(font) =
-                                self.font_system.get_font(m_key.id, self.ideal_weight)
+                                self.font_system.get_font_instance(m_key.id, self.ideal_weight, self.ideal_optical_size)
                             {
                                 return Some(font);
                             }
@@ -479,7 +494,7 @@ impl<'a> FontFallbackIter<'a> {
             if let Some(fallback_info) = self.font_system.monospace_fallbacks_buffer.pop_first() {
                 if let Some(font) = self
                     .font_system
-                    .get_font(fallback_info.id, self.ideal_weight)
+                    .get_font_instance(fallback_info.id, self.ideal_weight, self.ideal_optical_size)
                 {
                     return Some(font);
                 }
@@ -494,11 +509,9 @@ impl<'a> FontFallbackIter<'a> {
             while self.script_i.1 < script_families.len() {
                 let script_family = script_families[self.script_i.1];
                 self.script_i.1 += 1;
-                for m_key in font_match_keys_iter(false) {
-                    if self.face_contains_family(m_key.id, script_family) {
-                        if let Some(font) = self.font_system.get_font(m_key.id, self.ideal_weight) {
-                            return Some(font);
-                        }
+                for id in self.family_faces(script_family) {
+                    if let Some(font) = self.font_system.get_font_instance(id, self.ideal_weight, self.ideal_optical_size) {
+                        return Some(font);
                     }
                 }
                 log::debug!(
@@ -517,11 +530,9 @@ impl<'a> FontFallbackIter<'a> {
         while self.common_i < common_families.len() {
             let common_family = common_families[self.common_i];
             self.common_i += 1;
-            for m_key in font_match_keys_iter(false) {
-                if self.face_contains_family(m_key.id, common_family) {
-                    if let Some(font) = self.font_system.get_font(m_key.id, self.ideal_weight) {
-                        return Some(font);
-                    }
+            for id in self.family_faces(common_family) {
+                if let Some(font) = self.font_system.get_font_instance(id, self.ideal_weight, self.ideal_optical_size) {
+                    return Some(font);
                 }
             }
             log::debug!("failed to find family '{common_family}'");
@@ -537,7 +548,7 @@ impl<'a> FontFallbackIter<'a> {
                 .iter()
                 .all(|family_name| !self.face_contains_family(id, family_name))
             {
-                if let Some(font) = self.font_system.get_font(id, self.ideal_weight) {
+                if let Some(font) = self.font_system.get_font_instance(id, self.ideal_weight, self.ideal_optical_size) {
                     return Some(font);
                 }
             }

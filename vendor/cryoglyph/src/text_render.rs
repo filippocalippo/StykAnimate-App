@@ -200,8 +200,7 @@ impl TextRenderer {
                     };
 
                     let mut x = physical_glyph.x + details.left as i32;
-                    let mut y = (run.line_y * text_area.scale).round() as i32 + physical_glyph.y
-                        - details.top as i32;
+                    let mut y = baseline(&run, text_area.scale) + physical_glyph.y - details.top as i32;
 
                     let (mut atlas_x, mut atlas_y, content_type) = match details.gpu_cache {
                         GpuCacheStatus::InAtlas { x, y, content_type } => (x, y, content_type),
@@ -372,6 +371,58 @@ impl TextRenderer {
 pub enum ContentType {
     Color = 0,
     Mask = 1,
+}
+
+/// The baseline of a line in physical pixels, placed as Chromium places it so that text sits on the same pixel rows as
+/// in the browser: the font's ascent and descent are rounded to whole logical (CSS) pixels, the leading of the line
+/// height is split with the half above the baseline floored, and the sum is scaled to the pixel grid and rounded.
+/// Measured against Chromium at 100 % and 150 % (`cargo xtask fonts`): rounding at the drawn size instead puts the
+/// text one pixel higher at 150 %.
+fn baseline(run: &cosmic_text::LayoutRun<'_>, scale: f32) -> i32 {
+    let ascent = run.line_ascent.round();
+    let descent = run.line_descent.round();
+    let leading = ((run.line_height - (ascent + descent)) / 2.0).floor();
+    ((run.line_top + ascent + leading) * scale).round() as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A one-line run: Inter at `size` has ascent 0.96875 em and descent 0.2412 em.
+    fn run(size: f32, line_height: f32, line_top: f32) -> cosmic_text::LayoutRun<'static> {
+        cosmic_text::LayoutRun {
+            line_i: 0,
+            text: "",
+            rtl: false,
+            glyphs: &[],
+            decorations: &[],
+            line_y: 0.0,
+            line_ascent: size * 0.96875,
+            line_descent: size * 0.2412,
+            line_top,
+            line_height,
+            line_w: 0.0,
+        }
+    }
+
+    #[test]
+    fn the_baseline_sits_where_chromium_puts_it() {
+        // Measured in Chromium (`cargo xtask fonts`): 13 px on an 18 px line has its baseline 14 px down, 18 px on a
+        // 24 px line 18 px down (the half leading is floored), 11 px on a 15 px line 11 px down.
+        assert_eq!(baseline(&run(13.0, 18.0, 0.0), 1.0), 14);
+        assert_eq!(baseline(&run(18.0, 24.0, 0.0), 1.0), 18);
+        assert_eq!(baseline(&run(11.0, 15.0, 0.0), 1.0), 11);
+        assert_eq!(baseline(&run(13.0, 18.0, 36.0), 1.0), 50, "the second line of a paragraph");
+    }
+
+    #[test]
+    fn the_baseline_at_150_percent_is_the_scaled_logical_baseline() {
+        // Chromium rounds the font's metrics in logical pixels, then scales: 14 * 1.5 = 21. Rounding at the drawn
+        // size (the first version of this code) gave 20, one pixel above Chromium on 70 of the 98 rows measured.
+        assert_eq!(baseline(&run(13.0, 18.0, 0.0), 1.5), 21);
+        assert_eq!(baseline(&run(18.0, 24.0, 0.0), 1.5), 27);
+    }
 }
 
 #[repr(u16)]

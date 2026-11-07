@@ -1,4 +1,4 @@
-use crate::{Attrs, Font, FontMatchAttrs, HashMap, ShapeBuffer};
+use crate::{Attrs, Font, FontMatchAttrs, HashMap, OpticalSize, ShapeBuffer};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::string::String;
@@ -163,7 +163,7 @@ pub struct FontSystem {
     db: fontdb::Database,
 
     /// Cache for loaded fonts from the database.
-    font_cache: HashMap<(fontdb::ID, fontdb::Weight), Option<Arc<Font>>>,
+    font_cache: HashMap<(fontdb::ID, fontdb::Weight, OpticalSize), Option<Arc<Font>>>,
 
     /// Sorted unique ID's of all Monospace fonts in DB
     monospace_font_ids: Vec<fontdb::ID>,
@@ -413,6 +413,12 @@ impl FontSystem {
         &mut self.db
     }
 
+    /// Replaces the font fallback lists, for text laid out from now on.
+    pub fn set_fallback(&mut self, fallback: impl Fallback + 'static) {
+        self.fallbacks = Fallbacks::new(&fallback, &[], &self.locale);
+        self.dyn_fallback = Box::new(fallback);
+    }
+
     /// Consume this [`FontSystem`] and return the locale and database.
     pub fn into_locale_and_db(self) -> (String, fontdb::Database) {
         (self.locale, self.db)
@@ -420,14 +426,32 @@ impl FontSystem {
 
     /// Get a font by its ID and weight.
     pub fn get_font(&mut self, id: fontdb::ID, weight: fontdb::Weight) -> Option<Arc<Font>> {
+        self.get_font_instance(id, weight, OpticalSize::DEFAULT)
+    }
+
+    /// Get a font by its ID, weight and optical size. A face without an `opsz` axis is one instance whatever the
+    /// optical size, so a text at many sizes does not load it many times.
+    pub fn get_font_instance(
+        &mut self,
+        id: fontdb::ID,
+        weight: fontdb::Weight,
+        optical_size: OpticalSize,
+    ) -> Option<Arc<Font>> {
+        if optical_size != OpticalSize::DEFAULT {
+            if let Some(Some(plain)) = self.font_cache.get(&(id, weight, OpticalSize::DEFAULT)) {
+                if !plain.has_optical_size_axis() {
+                    return Some(Arc::clone(plain));
+                }
+            }
+        }
         self.font_cache
-            .entry((id, weight))
+            .entry((id, weight, optical_size))
             .or_insert_with(|| {
                 #[cfg(feature = "std")]
                 unsafe {
                     self.db.make_shared_face_data(id);
                 }
-                if let Some(font) = Font::new(&self.db, id, weight) {
+                if let Some(font) = Font::new(&self.db, id, weight, optical_size) {
                     Some(Arc::new(font))
                 } else {
                     log::warn!(

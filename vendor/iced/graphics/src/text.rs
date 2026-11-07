@@ -115,10 +115,20 @@ impl Text {
 #[cfg(feature = "fira-sans")]
 pub const FIRA_SANS_REGULAR: &[u8] = include_bytes!("../fonts/FiraSans-Regular.ttf").as_slice();
 
-/// Returns the global [`FontSystem`].
-pub fn font_system() -> &'static RwLock<FontSystem> {
-    static FONT_SYSTEM: OnceLock<RwLock<FontSystem>> = OnceLock::new();
+static FONT_SYSTEM: OnceLock<RwLock<FontSystem>> = OnceLock::new();
 
+/// Returns the global [`FontSystem`] if it has been built, and never builds it.
+///
+/// Building it scans every installed font and can take about a second. [`font_system`] does that on first use, on
+/// the calling thread, and any other thread that asks meanwhile waits for it. A program that must not stall its event
+/// loop builds it on a worker (calling [`font_system`] there) and lets nothing on the interface thread reach it
+/// before this returns `Some`.
+pub fn font_system_if_built() -> Option<&'static RwLock<FontSystem>> {
+    FONT_SYSTEM.get()
+}
+
+/// Returns the global [`FontSystem`], building it on first use.
+pub fn font_system() -> &'static RwLock<FontSystem> {
     FONT_SYSTEM.get_or_init(|| {
         #[allow(unused_mut)]
         let mut raw = cosmic_text::FontSystem::new_with_fonts([
@@ -291,13 +301,43 @@ pub fn align(
     min_bounds
 }
 
-/// Returns the attributes of the given [`Font`].
+/// Returns the attributes of the given [`Font`]. An [`OpticalSize::Auto`] has no size to follow here and stays at the
+/// font's default coordinate: use [`to_attributes_sized`] where the size of the text is known.
 pub fn to_attributes(font: Font) -> cosmic_text::Attrs<'static> {
-    cosmic_text::Attrs::new()
+    let mut attributes = cosmic_text::Attrs::new()
         .family(to_family(font.family))
         .weight(to_weight(font.weight))
         .stretch(to_stretch(font.stretch))
-        .style(to_style(font.style))
+        .style(to_style(font.style));
+
+    if font.tracking != 0 {
+        attributes = attributes.letter_spacing(f32::from(font.tracking) / 1000.0);
+    }
+
+    if !font.features.is_empty() {
+        let mut features = cosmic_text::FontFeatures::new();
+
+        for (tag, value) in font.features {
+            let _ = features.set(cosmic_text::FeatureTag::new(tag), *value);
+        }
+
+        attributes = attributes.font_features(features);
+    }
+
+    attributes
+}
+
+/// Returns the attributes of the given [`Font`] for text of the given size in logical pixels, which sets the
+/// optical size an [`OpticalSize::Auto`] font asks for.
+pub fn to_attributes_sized(font: Font, size: f32) -> cosmic_text::Attrs<'static> {
+    let attributes = to_attributes(font);
+
+    match font.optical_size {
+        font::OpticalSize::Default => attributes,
+        font::OpticalSize::Auto => {
+            attributes.optical_size(cosmic_text::OpticalSize::from_pixels(size))
+        }
+    }
 }
 
 fn to_family(family: font::Family) -> cosmic_text::Family<'static> {
@@ -322,6 +362,7 @@ fn to_weight(weight: font::Weight) -> cosmic_text::Weight {
         font::Weight::Bold => cosmic_text::Weight::BOLD,
         font::Weight::ExtraBold => cosmic_text::Weight::EXTRA_BOLD,
         font::Weight::Black => cosmic_text::Weight::BLACK,
+        font::Weight::Value(value) => cosmic_text::Weight(value),
     }
 }
 

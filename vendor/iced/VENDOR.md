@@ -12,3 +12,6 @@ Licences are kept as shipped. Every source file the crates compile, and every fi
 
 None yet. Each fix to this copy gets an entry here: what changed, why, and the upstream issue or pull request link, so
 that the copy can be replaced by a newer upstream revision without losing or forgetting a fix.
+
+- **S2t, typography on `Font`** (`core/src/font.rs`, `graphics/src/text.rs`, `graphics/src/text/{paragraph,cache}.rs`): `Weight::Value(u16)` (any `wght`), `Font::optical_size` (`Default` or `Auto`, resolved from the logical text size by `to_attributes_sized`), `Font::features` (OpenType tags, forwarded to the shaper) and `Font::tracking` (thousandths of an em, cosmic-text's `letter_spacing`); all are part of the paragraph cache key because `Font` is hashed. `to_attributes(font)` stays for the editor and input (another spike's files) and leaves `Auto` at the default coordinate. Why: the interface uses weights 450, 650 and 760, `tnum`, tracking and Inter's optical size, which the nine named weights and an attribute-less `Font` cannot express.
+- **S2t, `text::font_system_if_built()`** (`graphics/src/text.rs`): the global font system as a plain `static` that can be asked, without building it, whether it exists. Why: building it scans every installed font; the program builds it on a worker and lets the interface thread touch it only after (`styk_design::warm_up`).

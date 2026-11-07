@@ -2449,6 +2449,16 @@ name = "styk-services"
 version = "0.1.0"
 
 [[package]]
+name = "styk-text-check"
+version = "0.1.0"
+dependencies = [
+ "iced",
+ "png",
+ "styk-design",
+ "styk-platform",
+]
+
+[[package]]
 name = "styk-trace"
 version = "0.1.0"
 

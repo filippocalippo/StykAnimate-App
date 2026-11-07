@@ -53,7 +53,7 @@ impl Cache {
 
             buffer.set_text(
                 key.content,
-                &text::to_attributes(key.font),
+                &text::to_attributes_sized(key.font, key.size),
                 text::to_shaping(key.shaping, key.content),
                 None,
             );

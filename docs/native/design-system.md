@@ -34,7 +34,9 @@ Each constant's doc comment names its CSS custom property. A port reads `--surfa
 iced's text stack reads TrueType; the web build ships WOFF2 subsets. The bundled `Inter.ttf` and `InterTight.ttf` are
 the same fonts, whole: Inter 4.001 (git `66647c0bb`, axes `opsz` and `wght`) and Inter Tight 3.004, the versions in the
 name tables of the app's own WOFF2 files, and one file per family covers every subset (Latin, Latin Extended,
-Cyrillic, Greek, Vietnamese). A test fails if a file is replaced by another build.
+Cyrillic, Greek, Vietnamese). A test fails if a file is replaced by another build, and `cargo xtask fonts verify` proves every
+code point of every shipped subset has the same advance in them. How the text stack draws them like the browser, the
+fidelity check (`cargo xtask fonts`) and its results: [typography.md](typography.md).
 
 ## Dependencies
 
