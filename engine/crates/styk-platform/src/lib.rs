@@ -12,3 +12,4 @@ pub mod audio;
 pub mod video;
 pub mod unattended;
 pub mod window;
+pub mod fonts;

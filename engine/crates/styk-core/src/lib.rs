@@ -11,5 +11,6 @@
 pub mod audio;
 pub mod export;
 pub mod launch;
+pub mod text;
 
 pub use launch::{Launch, LaunchError, USAGE};

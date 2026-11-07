@@ -74,6 +74,11 @@ by bytes and released by resource lifetime; pictures are paged with the engine's
 The drag split (the frame cut into what is below and above the dragged figure, only that figure rebuilt per move)
 becomes an engine feature used by dragging, drawing over heavy scenes and previews.
 
+The device comes from `styk_render::native_instance_descriptor()`: on Windows DX12 with the FXC shader compiler, the
+backend whose frames match Chromium's bit for bit on pictures and translucent fills (`frame-parity.md`, from chunk FP);
+the shell creates iced's compositor from that descriptor, so the stage, previews and exports draw on one backend. The web
+build keeps the browser's WebGPU.
+
 ## The automation mode and the benchmark
 
 `stykanimate --automation <script>` runs a script of timestamped steps (commands, pointer and pen samples at stage
