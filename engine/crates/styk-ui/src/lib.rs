@@ -7,6 +7,8 @@
 //! It depends on the core, the design system and iced, and on nothing that touches the operating system.
 
 pub mod band;
+pub mod component_sheet;
+pub mod screens;
 
 use iced::widget::{column, container, row, space, stack};
 use iced::{Element, Fill, Length, Widget, theme};
@@ -66,3 +68,5 @@ mod tests {
         assert_ne!(window_style(Theme::Dark).background_color, light.background_color);
     }
 }
+
+pub mod ink_pad;

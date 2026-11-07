@@ -5,3 +5,6 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+raw-window-handle = "0.6"

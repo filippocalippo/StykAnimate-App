@@ -17,6 +17,8 @@
 //! and what later starts ask of it. `--shell-check` asks the real window about it, in process.
 
 mod headless;
+#[cfg(feature = "devtools")]
+mod input_check;
 mod screenshot;
 mod shell;
 #[cfg(windows)]
@@ -35,6 +37,8 @@ use styk_platform::window::{self as platform, Image, WindowError};
 use styk_services::shell::chrome::{MaxButtonState, band_height, band_regions};
 use styk_trace::mark;
 use styk_ui::band::{Controls, Hot, window_controls};
+use styk_ui::component_sheet::{self, Sheet};
+use styk_ui::screens::Screen;
 
 /// How long `--screenshot` waits for a first frame before giving up. A window that never draws is a defect to report,
 /// not a reason to hang a script.
@@ -66,6 +70,9 @@ type CheckLine = (String, Option<String>);
 
 #[derive(Debug, Clone)]
 enum Message {
+    Sheet(component_sheet::Message),
+    #[cfg(feature = "devtools")]
+    Check(input_check::Step),
     Window(iced_window::Id, iced_window::Event),
     Shown(Result<(), WindowError>),
     Attached(Result<shell::Attached, String>),
@@ -106,6 +113,17 @@ struct App {
     frames: u32,
     capturing: bool,
     outcome: Arc<Mutex<Outcome>>,
+    /// The screen of the catalogue being shown instead of the application, if any.
+    sheet: Option<Sheet>,
+    /// What the input check has seen so far.
+    #[cfg(feature = "devtools")]
+    report: Vec<String>,
+    /// When each redraw started, for the check's latency figures.
+    #[cfg(feature = "devtools")]
+    frame_times: Vec<std::time::Instant>,
+    /// The characters the field held when a latency run began.
+    #[cfg(feature = "devtools")]
+    latency_base: usize,
     shell: Box<shell::Shell>,
     wakes: shell::Wakes,
     chrome: Option<shell::Chrome>,
@@ -133,8 +151,20 @@ enum CheckStep {
 }
 
 impl App {
-    fn new(launch: Launch, strategy: Option<Strategy>, outcome: Arc<Mutex<Outcome>>, shell: Box<shell::Shell>, wakes: shell::Wakes, foreground_before: isize) -> App {
+    fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: Arc<Mutex<Outcome>>, shell: Box<shell::Shell>, wakes: shell::Wakes, foreground_before: isize) -> App {
+        let sheet = screen.map(|Screen::ComponentSheet| {
+            let mut sheet = Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr);
+            sheet.button_probe = Some(styk_platform::input::primary_button_down);
+            sheet
+        });
         App {
+            sheet,
+            #[cfg(feature = "devtools")]
+            report: Vec::new(),
+            #[cfg(feature = "devtools")]
+            frame_times: Vec::new(),
+            #[cfg(feature = "devtools")]
+            latency_base: 0,
             launch,
             theme: Theme::default(),
             strategy,
@@ -157,6 +187,10 @@ impl App {
         }
     }
 
+    fn theme(&self) -> Theme {
+        self.sheet.as_ref().map_or(self.theme, |sheet| sheet.theme)
+    }
+
     fn band_height(&self) -> f32 {
         band_height(1.0, self.logical.height < COMPACT_BELOW)
     }
@@ -171,6 +205,12 @@ impl App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Sheet(message) => match self.sheet.as_mut() {
+                Some(sheet) => sheet.update(message).map(Message::Sheet),
+                None => Task::none(),
+            },
+            #[cfg(feature = "devtools")]
+            Message::Check(step) => self.check(step),
             Message::Window(id, event) => self.window_event(id, event),
             Message::Shown(Ok(())) => Task::none(),
             Message::Shown(Err(error)) => self.finish(Outcome::Failed(format!("could not show the window: {error}"))),
@@ -230,11 +270,16 @@ impl App {
                 let owns_show = window::shell_shows(self.strategy);
                 let frame = self.shell.restore;
                 let attach = iced_window::run(id, move |w| shell::attach(w, frame, owns_show)).map(Message::Attached);
-                if window::shown_after_creation(self.strategy) {
+                let shown = if window::shown_after_creation(self.strategy) {
                     Task::batch([iced_window::run(id, |w| platform::show_without_activation(w)).map(Message::Shown), attach])
                 } else {
                     attach
+                };
+                #[cfg(feature = "devtools")]
+                if self.launch.input_check.is_some() && self.sheet.is_some() {
+                    return Task::batch([shown, input_check::script(id).map(Message::Check)]);
                 }
+                shown
             }
             Event::Resized(size) => {
                 self.logical = size;
@@ -308,6 +353,10 @@ impl App {
 
     fn frame(&mut self) -> Task<Message> {
         self.frames += 1;
+        #[cfg(feature = "devtools")]
+        if self.launch.input_check.is_some() {
+            self.frame_times.push(std::time::Instant::now());
+        }
         let Some(id) = self.window else { return Task::none() };
         // The first frame's event arrives as it is about to be drawn; the second, once that draw is done and the text it
         // shows can be laid out.
@@ -370,6 +419,53 @@ impl App {
         self.finish(if failed == 0 { Outcome::Done } else { Outcome::Failed(format!("{failed} shell checks failed")) })
     }
 
+    /// Records a step of the input check; the last step writes the report and ends the run.
+    #[cfg(feature = "devtools")]
+    fn check(&mut self, step: input_check::Step) -> Task<Message> {
+        let sheet_state = |app: &App| {
+            let sheet = app.sheet.as_ref();
+            let bounds = sheet.and_then(|s| s.snapshot.bounds_of(styk_ui::component_sheet::ids::NAME));
+            let text = sheet.map_or(String::new(), |s| {
+                let name: String = s.name.text().chars().take(24).collect();
+                format!("{name:?} ({} characters), notes {} characters", s.name.text().chars().count(), s.notes.text().chars().count())
+            });
+            format!("name field {text}, focused {:?}, composing {}, field bounds {:?}", sheet.and_then(|s| s.focus.focused()), sheet.is_some_and(|s| s.focus.composing()), bounds)
+        };
+        match step {
+            input_check::Step::Probe { label } => {
+                let line = format!("{label}: {}", sheet_state(self));
+                self.report.push(line);
+                Task::none()
+            }
+            input_check::Step::Result { label, detail } => {
+                self.report.push(format!("{label}: {detail}"));
+                Task::none()
+            }
+            input_check::Step::Sheet(message) => Task::done(Message::Sheet(message)),
+            input_check::Step::LatencyStart { field } => {
+                input_check::latency_start();
+                self.frame_times.clear();
+                self.latency_base = self.sheet.as_ref().map_or(0, |sheet| sheet.field_len(field));
+                Task::none()
+            }
+            input_check::Step::LatencyEnd { label, field } => {
+                let now = self.sheet.as_ref().map_or(0, |sheet| sheet.field_len(field));
+                let latency = input_check::latency_summary(&self.frame_times, &input_check::presents(), now.saturating_sub(self.latency_base));
+                self.report.push(format!("{label}: {latency}"));
+                Task::none()
+            }
+            input_check::Step::Finish => {
+                let body: Vec<String> = self.report.iter().map(|line| format!("  {:?}", line)).collect();
+                let json = format!("[\n{}\n]\n", body.join(",\n"));
+                let path = self.launch.input_check.clone().expect("the check only runs with --input-check");
+                match std::fs::write(&path, json) {
+                    Ok(()) => self.finish(Outcome::Done),
+                    Err(error) => self.finish(Outcome::Failed(format!("{}: {error}", path.display()))),
+                }
+            }
+        }
+    }
+
     fn finish(&mut self, outcome: Outcome) -> Task<Message> {
         *self.outcome.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = outcome;
         iced::exit()
@@ -378,6 +474,7 @@ impl App {
     fn view(&self) -> iced::Element<'_, Message> {
         // Text is laid out only once the font system is ready: until then the view holds none.
         match warm_up::proof() {
+            Some(_) if self.sheet.is_some() => self.sheet.as_ref().expect("checked").view().map(Message::Sheet).boxed(),
             Some(ready) => {
                 let height = self.band_height();
                 let controls: iced::Element<'_, Message> = if cfg!(target_os = "macos") {
@@ -393,7 +490,10 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![iced_window::events().map(|(id, event)| Message::Window(id, event)), Subscription::run(wake_stream)];
-        if !self.capturing && (self.launch.screenshot.is_some() || self.launch.shell_check) {
+        if let Some(sheet) = &self.sheet {
+            subscriptions.push(sheet.subscription().map(Message::Sheet));
+        }
+        if (!self.capturing && (self.launch.screenshot.is_some() || self.launch.shell_check)) || self.launch.input_check.is_some() {
             subscriptions.push(iced_window::frames().map(|_| Message::Frame));
         }
         Subscription::batch(subscriptions)
@@ -439,12 +539,31 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let screen = match launch.screen.as_deref().map(|id| (id, Screen::from_id(id))) {
+        Some((id, None)) => {
+            eprintln!("unknown screen {id:?}: the catalogue has {}", Screen::ids());
+            return ExitCode::from(2);
+        }
+        Some((_, Some(screen))) => Some(screen),
+        None => None,
+    };
+    if launch.input_check.is_some() && !cfg!(feature = "devtools") {
+        eprintln!("--input-check is only in the developer build (--features devtools)");
+        return ExitCode::from(2);
+    }
+    if launch.input_check.is_some() && screen.is_none() {
+        eprintln!("--input-check needs --screen component-sheet");
+        return ExitCode::from(2);
+    }
+    if launch.pen_lab {
+        return run_pen_lab(&launch, strategy);
+    }
     if launch.shell_check && !matches!(strategy, Some(Strategy::HiddenWindow)) {
         eprintln!("--shell-check works on the real window of an unattended Windows run: set STYK_BACKGROUND_WINDOW=1");
         return ExitCode::from(2);
     }
     if strategy == Some(Strategy::Headless) {
-        return run_headless(&launch);
+        return run_headless(&launch, screen);
     }
     let (wakes, receiver) = shell::Wakes::channel();
     *WAKES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(receiver);
@@ -467,7 +586,7 @@ fn main() -> ExitCode {
     let trace_path = launch.screenshot.as_ref().map(|path| path.with_extension("trace.txt"));
     let scale = launch.scale.unwrap_or(1.0) as f32;
     let settings = window::settings(&launch, strategy);
-    let app = Mutex::new(Some(App::new(launch, strategy, outcome.clone(), shell, wakes, foreground_before)));
+    let app = Mutex::new(Some(App::new(launch, screen, strategy, outcome.clone(), shell, wakes, foreground_before)));
     // The font system is built on a worker from the first moment (styk_design::warm_up); the bundled fonts are
     // loaded there, never through iced::Settings::fonts, which the runtime would load on the event loop.
     let result = iced::application(
@@ -477,8 +596,8 @@ fn main() -> ExitCode {
     )
     .subscription(App::subscription)
     .title("StykAnimate")
-    .theme(|app: &App| styk_ui::base_theme(app.theme))
-    .style(|app: &App, _| styk_ui::window_style(app.theme))
+    .theme(|app: &App| styk_ui::base_theme(app.theme()))
+    .style(|app: &App, _| styk_ui::window_style(app.theme()))
     .scale_factor(move |_| scale)
     .font(widgets::INTER)
     .window(settings)
@@ -516,14 +635,53 @@ fn watchdog(outcome: Arc<Mutex<Outcome>>, what: &'static str, deadline: Duration
     });
 }
 
+/// The pen lab (developer build): a drawing pad on the real input path, and its self-test.
+#[cfg(feature = "devtools")]
+fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
+    use styk_devtools::pen_lab::{self, LabOptions, SelfTest};
+    if strategy == Some(Strategy::Headless) {
+        eprintln!("the pen lab needs a window; it cannot run headless");
+        return ExitCode::from(2);
+    }
+    let self_test = match launch.self_test.as_deref().map(SelfTest::parse).transpose() {
+        Ok(test) => test,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(2);
+        }
+    };
+    if let Some(dir) = &launch.out {
+        if let Err(error) = std::fs::create_dir_all(dir) {
+            eprintln!("{}: {error}", dir.display());
+            return ExitCode::from(2);
+        }
+    }
+    let options = LabOptions { window: window::settings(launch, strategy), scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test, out_dir: launch.out.clone(), input: styk_platform::input::host(), spawner: std::sync::Arc::new(styk_platform::spawn::ThreadSpawner) };
+    match pen_lab::run(options) {
+        Ok(0) => ExitCode::SUCCESS,
+        Ok(code) => ExitCode::from(code.clamp(1, 255) as u8),
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(not(feature = "devtools"))]
+fn run_pen_lab(_: &Launch, _: Option<Strategy>) -> ExitCode {
+    eprintln!("the pen lab is in the developer build (cargo build --features devtools)");
+    ExitCode::from(2)
+}
+
 /// An unattended run with no window: draws the interface offscreen into the `--screenshot` picture and exits.
-fn run_headless(launch: &Launch) -> ExitCode {
+fn run_headless(launch: &Launch, screen: Option<Screen>) -> ExitCode {
     let Some(path) = &launch.screenshot else {
         eprintln!("an unattended run here opens no window, so it needs --screenshot <png> to produce anything");
         return ExitCode::from(2);
     };
     let size = launch.size.unwrap_or(window::DEFAULT_SIZE);
-    let result = headless::screenshot(Theme::default(), size, launch.scale.unwrap_or(1.0) as f32).and_then(|image| {
+    let sheet = screen.map(|Screen::ComponentSheet| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr));
+    let result = headless::screenshot(Theme::default(), size, launch.scale.unwrap_or(1.0) as f32, sheet.as_ref()).and_then(|image| {
         mark!("first-frame");
         screenshot::write(path, &image)
     });

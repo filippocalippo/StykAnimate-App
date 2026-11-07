@@ -551,6 +551,10 @@ pub struct StrokePath {
     anchor: Option<Shared>,
     raw_last: Option<Shared>,
     pub closed: bool,
+    /// Set by a caller on another thread to say the stroke is being discarded: the long loops of a sample (the steps of a curve
+    /// and the dabs along it) stop at their next check instead of running a whole gap to its end. A stroke that was told to stop
+    /// is incomplete and must not be kept; this never changes what an unstopped stroke produces.
+    pub abort: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl StrokePath {
@@ -575,7 +579,12 @@ impl StrokePath {
             anchor: None,
             raw_last: None,
             closed: false,
+            abort: None,
         }
+    }
+
+    fn aborted(&self) -> bool {
+        self.abort.as_ref().is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     /// Dab spacing at this pressure before the 0.25 px floor.
@@ -689,6 +698,9 @@ impl StrokePath {
         let steps = if steps.is_nan() { 0 } else { steps as usize };
         let mut prev = a;
         for i in 1..=steps {
+            if self.aborted() {
+                return;
+            }
             let p = q(i as f64 / steps as f64);
             let seg = styk_math::hypot(p.x - prev.x, p.y - prev.y);
             if seg > 0.0 {
@@ -696,7 +708,15 @@ impl StrokePath {
             }
             let step = min(spacing_at(self, prev.pressure), spacing_at(self, p.pressure));
             let mut pos = (1.0 - self.remaining) * step;
+            let mut since_check = 0u32;
             while seg > 0.0 && seg >= pos {
+                since_check += 1;
+                if since_check == 4096 {
+                    since_check = 0;
+                    if self.aborted() {
+                        return;
+                    }
+                }
                 let dab = shared(lerp(&prev, &p, pos / seg));
                 let dist = self.dist + pos;
                 self.out(&dab, dist, emit);
@@ -735,6 +755,43 @@ impl StrokePath {
                 let dist = self.dist;
                 self.out(&end, dist, emit);
             }
+        }
+    }
+}
+
+/// `taperIn(dist)`.
+fn taper_in_of(brush: &Brush, dist: f64) -> f64 {
+    if brush.taper_in > 0.0 { taper_curve(dist / brush.taper_in) } else { 1.0 }
+}
+
+fn final_dab_of(brush: &Brush, seed: u32, mut p: Point, taper: f64, paint: &mut dyn FnMut(Dab)) {
+    p.taper = taper;
+    if let Some(shape) = dab_shape(brush, &p, seed) {
+        paint(shape);
+    }
+}
+
+/// One path point into the stroke's dabs: straight to `paint`, or held in the taper-out tail until it is past it.
+fn emit_point(brush: &Brush, seed: u32, index: &mut f64, tail: &mut Vec<Point>, tail_version: &mut u64, mut p: Point, paint: &mut dyn FnMut(Dab)) {
+    p.index = *index;
+    *index += 1.0;
+    let length = brush.taper_out;
+    if length.is_nan() || length <= 0.0 {
+        let taper = taper_in_of(brush, p.dist);
+        final_dab_of(brush, seed, p, taper, paint);
+        return;
+    }
+    tail.push(p);
+    *tail_version += 1;
+    let mut n = 0;
+    while n + 1 < tail.len() && p.dist - tail[n].dist >= length {
+        n += 1;
+    }
+    if n > 0 {
+        let done: Vec<Point> = tail.drain(..n).collect();
+        for q in done {
+            let taper = taper_in_of(brush, q.dist);
+            final_dab_of(brush, seed, q, taper, paint);
         }
     }
 }
@@ -788,43 +845,15 @@ impl BrushStroke {
         if let (Some(map), Some(p)) = (&self.pressure, input.pressure) {
             input.pressure = Some(map.map(p));
         }
-        let mut points = Vec::new();
-        self.path.sample(&input, &mut |p| points.push(p))?;
-        for p in points {
-            self.emit(p, paint);
-        }
-        Ok(())
+        // Each point of the path becomes its dabs as it is made: a long gap never holds its points, only the dabs the caller's
+        // `paint` keeps. (The order of every operation is what it was when the points were gathered first: the path does not
+        // read what shaping a point changes.)
+        let BrushStroke { path, brush, seed, index, tail, tail_version, .. } = self;
+        path.sample(&input, &mut |p| emit_point(brush, *seed, index, tail, tail_version, p, paint))
     }
 
-    fn emit(&mut self, mut p: Point, paint: &mut dyn FnMut(Dab)) {
-        p.index = self.index;
-        self.index += 1.0;
-        let length = self.brush.taper_out;
-        if length.is_nan() || length <= 0.0 {
-            let taper = self.taper_in(p.dist);
-            self.final_dab(p, taper, paint);
-            return;
-        }
-        self.tail.push(p);
-        self.tail_version += 1;
-        let mut n = 0;
-        while n + 1 < self.tail.len() && p.dist - self.tail[n].dist >= length {
-            n += 1;
-        }
-        if n > 0 {
-            let done: Vec<Point> = self.tail.drain(..n).collect();
-            for q in done {
-                let taper = self.taper_in(q.dist);
-                self.final_dab(q, taper, paint);
-            }
-        }
-    }
-
-    fn final_dab(&self, mut p: Point, taper: f64, paint: &mut dyn FnMut(Dab)) {
-        p.taper = taper;
-        if let Some(shape) = dab_shape(&self.brush, &p, self.seed) {
-            paint(shape);
-        }
+    fn final_dab(&self, p: Point, taper: f64, paint: &mut dyn FnMut(Dab)) {
+        final_dab_of(&self.brush, self.seed, p, taper, paint);
     }
 
     /// The provisional shapes of the untapered tail, cached until the tail changes.
@@ -851,10 +880,9 @@ impl BrushStroke {
         if self.closed {
             return;
         }
-        let mut points = Vec::new();
-        self.path.finish(&mut |p| points.push(p));
-        for p in points {
-            self.emit(p, paint);
+        {
+            let BrushStroke { path, brush, seed, index, tail, tail_version, .. } = self;
+            path.finish(&mut |p| emit_point(brush, *seed, index, tail, tail_version, p, paint));
         }
         self.closed = true;
         let tail = std::mem::take(&mut self.tail);

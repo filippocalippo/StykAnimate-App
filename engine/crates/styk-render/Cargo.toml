@@ -20,6 +20,7 @@ bytemuck = { version = "1", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = { version = "30", optional = true }
+pollster = "0.4"
 
 # In a browser: WebGPU where it exists, WebGL2 otherwise.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

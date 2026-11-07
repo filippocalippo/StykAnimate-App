@@ -24,8 +24,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_NCLBUTTONDOWN, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE,
 };
 
-/// The subclass id of this module (any other subclass of the window uses its own).
-const SUBCLASS_ID: usize = 0x5359_4B43; // "SYKC"
+/// The subclass id of this module, registered with the others in one place.
+const SUBCLASS_ID: usize = crate::input::windows::subclass_id::CHROME;
 
 type Wake = Box<dyn Fn() + Send + Sync>;
 

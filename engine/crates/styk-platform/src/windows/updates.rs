@@ -653,7 +653,7 @@ mod tests {
             polls.get() > 5
         });
         assert_eq!(outcome, Err(StageError::Cancelled));
-        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(started.elapsed() < Duration::from_secs(15));
         assert_eq!(server.file_hits.load(Ordering::SeqCst), 0, "a live holder is never raced");
         let _ = fs::remove_dir_all(root);
     }

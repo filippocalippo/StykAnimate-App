@@ -8,6 +8,11 @@
 //!
 //! It must never depend on the engine, the core or a toolkit: windows reach it as `raw-window-handle` handles.
 
+pub mod input;
+pub mod spawn;
+// Video export runs the bundled FFmpeg and the Windows codec helper; Windows only in this phase (decision N8).
+#[cfg(windows)]
+pub mod video;
 pub mod unattended;
 pub mod window;
 pub mod fonts;

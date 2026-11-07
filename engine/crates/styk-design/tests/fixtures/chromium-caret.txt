@@ -1,0 +1,26 @@
+# Caret offsets (UTF-16 units) Chromium (Electron on Windows 11, Segoe UI) visits when an arrow key is pressed repeatedly in an <input dir=auto>
+# and in a contenteditable (identical). Recorded 2026-11-07. Format: name | text | from | key | offsets
+arabic-digits | مرحبا بالعالم 123 | start | ArrowLeft | 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17
+arabic-digits | مرحبا بالعالم 123 | start | ArrowRight | 0
+arabic-digits | مرحبا بالعالم 123 | end | ArrowLeft | 17
+arabic-digits | مرحبا بالعالم 123 | end | ArrowRight | 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+hebrew-digits | שלום עולם 123 | start | ArrowLeft | 0 1 2 3 4 5 6 7 8 9 10 11 12 13
+hebrew-digits | שלום עולם 123 | start | ArrowRight | 0
+hebrew-digits | שלום עולם 123 | end | ArrowLeft | 13
+hebrew-digits | שלום עולם 123 | end | ArrowRight | 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+ltr-with-arabic | abc مرحبا 123 def | start | ArrowLeft | 0
+ltr-with-arabic | abc مرحبا 123 def | start | ArrowRight | 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17
+ltr-with-arabic | abc مرحبا 123 def | end | ArrowLeft | 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+ltr-with-arabic | abc مرحبا 123 def | end | ArrowRight | 17
+rtl-with-latin | مرحبا abc بالعالم | start | ArrowLeft | 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17
+rtl-with-latin | مرحبا abc بالعالم | start | ArrowRight | 0
+rtl-with-latin | مرحبا abc بالعالم | end | ArrowLeft | 17
+rtl-with-latin | مرحبا abc بالعالم | end | ArrowRight | 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+lam-alef | لا | start | ArrowLeft | 0 1 2
+lam-alef | لا | start | ArrowRight | 0
+lam-alef | لا | end | ArrowLeft | 2
+lam-alef | لا | end | ArrowRight | 2 1 0
+alef-lam-alef | ملاك | start | ArrowLeft | 0 1 2 3 4
+alef-lam-alef | ملاك | start | ArrowRight | 0
+alef-lam-alef | ملاك | end | ArrowLeft | 4
+alef-lam-alef | ملاك | end | ArrowRight | 4 3 2 1 0

@@ -176,4 +176,52 @@ against Electron's; moving the window across two real monitors of different scal
 hardware; the UAC prompt of an all-users update and an all-users install and upgrade as a standard user; the real 1.1.0 Electron Setup
 upgraded by the native Setup on a throwaway Windows account or VM, with a default chosen for each format; frame pacing while
 the system moves or sizes the window (that loop needs a real pointer); restoring a maximized window on a real monitor; a
+snap zone narrower than the 1000 px minimum.Deleting is bounded at its root. **The native uninstaller never deletes a folder recursively**: the Setup installs the files of a
+generated list (`release_feed files-script`) and writes the same list into the installation (`StykAnimate.files`); the uninstaller
+removes those files and the folders they leave empty, nothing else, and only registers or unregisters when the registration names
+its own folder. **The Electron uninstaller** (electron-builder's, the only one that deletes recursively) runs only on a
+registration that agrees with itself and with the folder: `InstallLocation` is the folder of `UninstallString`, the uninstaller is
+today's `Uninstall StykAnimate.exe`, the folder holds our manifest or the Electron installation (`StykAnimate.exe` and
+`resourcesapp-update.yml` or `app.asar`), and the key is today's GUID in the scope being replaced; anything else is refused with
+exit code 5 and nothing is deleted. A destination that is not empty is refused (3) unless it is that validated installation.
+The scope and destination are resolved together from what is registered: an explicit `/allusers` or `/currentuser` wins; a
+legacy `/D=` with no flag belongs to the scope whose `InstallLocation` it names (none: a new installation for the current user);
+no `/D=` means the scope's registered folder. The install transaction is excluded by a `Global` mutex taken by the Setup that
+actually works (for all users with a DACL for administrators and SYSTEM), after the elevating wrapper has handed over without
+holding it; failing to create it is a refusal (6), a held one is (4). One Setup, in order: an all-users install from a standard
+user starts itself again elevated (after the mode page, and for a silent upgrade) and ends; the registry is the 64-bit view;
+file types and the `stykanimate` link are written in the hive of the install mode; and `--force-run` starts the program as the user
+(`StdUtils::ExecShellAsUser`), not with the Setup's elevated token. The updater passes `/currentuser` or `/allusers` for the
+install it detected. Upgrade path kept from the Electron install: the same uninstall key (`Software\Microsoft\Windows\CurrentVersion\Uninstall\
+da89159e-9653-5b0d-96ae-4aeef8dc5497`, the v5 UUID of `app.stykanimate.desktop`) and install-location key, the same install
+directory semantics (current user: `%LOCALAPPDATA%\Programs\StykAnimate`; all users: `%ProgramFiles%\StykAnimate`; the
+previous location is read back and reused), the same ProgIDs and protocol, shortcuts named `StykAnimate` in the Start menu
+and on the desktop, `Uninstall StykAnimate.exe`, and the library folder `Documents\StykAnimate\library`, kept on uninstall.
+The old uninstaller is run silently from a copy (`/S /KEEP_APP_DATA /currentuser|/allusers --updated _?=<dir>`), as
+electron-builder's own installer does for its upgrades. Portable: a zip, no registry, no updater.
+
+`cargo xtask package` builds the release binary, runs `makensis`, and writes `latest.yml`, `latest.yml.sig` (with a key the
+caller supplies) and `SHA256SUMS.txt`. Nothing is signed with a certificate and nothing is uploaded.
+
+## What is checked, and how
+
+| What | Where | How |
+| --- | --- | --- |
+| Pure contracts: protocol links (12+ cases of `handleProtocol`), launch queue and wire format, election with a dead or dying primary, workspace directories, window frames (two monitors, mixed scale, any taskbar edge, a display smaller than the window), hit testing, the maximize button, feed, versions, update flow, install plan, staging names | `cargo test -p styk-services` | fakes only |
+| The window subclass, monitors and restore, single instance over a real pipe (acknowledged delivery, bounds, silent and partial clients, saturation, shutdown, DACL), registry in a sandbox key, updater over HTTP (redirects, signature, resume, two callers, stale locks, cancel) | `cargo test -p styk-platform` | real windows far off-screen, real pipes, a local HTTP server |
+| The Setup: an Electron-style install upgraded the way the updater runs it, then the whole updater (check, download, verify, hand-off, restart) | `cargo test -p styk-platform --test installer_upgrade -- --ignored` | `makensis`; registry under `HKCUSoftwareStykAnimateSandbox<id>`, folders under a temporary directory |
+| The real iced window: hit testing, fullscreen and hidden-band regions, per-monitor-v2 awareness, minimum size, snap-zone rectangles, a synthetic DPI change, no taskbar button, foreground unchanged | `STYK_BACKGROUND_WINDOW=1 stykanimate --shell-check` | messages to the app's own window |
+
+The Electron install in the Setup proof is a **fixture** written to electron-builder's layout (read from its NSIS templates):
+the real 1.1.0 Setup writes the user's real file associations and uninstall entry, and no throwaway Windows account or virtual
+machine can be made without administrator rights here.
+
+## Manual checks
+
+What only a person at the screen can do (decision N6; no injected input): the snap-layouts flyout on hover and choosing a
+zone; Win+arrow and drag-to-edge snapping; resize cursors on every edge; the look of the shadow, corners and the 1 px line
+against Electron's; moving the window across two real monitors of different scale; a top or left taskbar on real
+hardware; the UAC prompt of an all-users update and an all-users install and upgrade as a standard user; the real 1.1.0 Electron Setup
+upgraded by the native Setup on a throwaway Windows account or VM, with a default chosen for each format; frame pacing while
+the system moves or sizes the window (that loop needs a real pointer); restoring a maximized window on a real monitor; a
 snap zone narrower than the 1000 px minimum.
