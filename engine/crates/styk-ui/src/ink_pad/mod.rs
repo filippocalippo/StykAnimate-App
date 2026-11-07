@@ -158,7 +158,7 @@ impl<Message> shader::Program<Message> for Pad {
                     tool: if switches.erase_tool { ToolMode::Eraser } else { ToolMode::Brush },
                     space_held: false,
                     playing: false,
-                    finger: FingerDraw::Never,
+                    finger: if switches.finger_draws { FingerDraw::Always } else { FingerDraw::Never },
                     mapping: &mapping_now,
                     continue_from: state.input.last_end(),
                 };

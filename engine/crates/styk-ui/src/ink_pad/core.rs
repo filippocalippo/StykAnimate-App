@@ -74,11 +74,13 @@ pub struct Switches {
     pub erase_tool: bool,
     /// Symmetry across the vertical centre line of the pad.
     pub mirror_x: bool,
+    /// A finger draws (Settings: Draw with a finger).
+    pub finger_draws: bool,
 }
 
 impl Default for Switches {
     fn default() -> Switches {
-        Switches { wet_ink: true, prediction: true, erase_tool: false, mirror_x: false }
+        Switches { wet_ink: true, prediction: true, erase_tool: false, mirror_x: false, finger_draws: false }
     }
 }
 

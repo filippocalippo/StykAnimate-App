@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use styk_platform::windows::inject::PenInjector;
+use styk_platform::windows::inject::{PenInjector, TouchInjector};
 use styk_platform::windows::input::InputCounters;
 use styk_services::input::{InputEvent, Phase, Script, ScriptSpec, ScriptStep, Tool};
 use styk_ui::ink_pad::{PadCore, Switches, View};
@@ -104,6 +104,8 @@ struct Behaviour {
     palette_before: u64,
     menus_before: u64,
     strokes_before: u64,
+    /// (strokes, touch samples) when each of the finger steps began.
+    marks: Vec<(u64, u64)>,
 }
 
 impl Runner {
@@ -124,19 +126,51 @@ impl Runner {
         let _ = writeln!(self.summary, "{} {name}: {detail}", if pass { "PASS" } else { "FAIL" });
     }
 
-    fn spawn_injection(&self, script: Script, origin: (i32, i32)) -> JoinHandle<Injection> {
+    fn spawn_task(&self, task: impl FnOnce() -> Injection + Send + 'static) -> JoinHandle<Injection> {
         let result = self.result.clone();
         std::thread::Builder::new()
             .name("styk-pen-inject".into())
             .spawn(move || {
-                let outcome: Injection = (|| {
-                    let mut injector = PenInjector::new(script.pointer).map_err(|e| e.to_string())?;
-                    injector.play(&script, origin, |_| {}).map_err(|e| e.to_string())
-                })();
+                let outcome = task();
                 *result.lock().unwrap_or_else(|p| p.into_inner()) = Some(outcome.clone());
                 outcome
             })
             .expect("the injection thread starts")
+    }
+
+    fn spawn_injection(&self, script: Script, origin: (i32, i32)) -> JoinHandle<Injection> {
+        self.spawn_task(move || {
+            let mut injector = PenInjector::new(script.pointer).map_err(|e| e.to_string())?;
+            injector.play(&script, origin, |_| {}).map_err(|e| e.to_string())
+        })
+    }
+
+    /// A finger on the pad: presses, drags a little and lifts. With `pen_first`, a pen hovers over the pad 100 ms before.
+    fn spawn_finger(&self, origin: (i32, i32), at: (f64, f64), pen_first: bool) -> JoinHandle<Injection> {
+        self.spawn_task(move || {
+            let screen = (origin.0 + at.0 as i32, origin.1 + at.1 as i32);
+            let pause = |ms| std::thread::sleep(std::time::Duration::from_millis(ms));
+            let _pen = if pen_first {
+                let mut pen = PenInjector::new(7).map_err(|e| e.to_string())?;
+                let hover = ScriptStep { t_ns: 0, x: at.0 - 40.0, y: at.1 - 40.0, tool: Tool::Pen, phase: Phase::Hover, raw_pressure: 0, tilt_x: 0, tilt_y: 0, barrel: false, modifiers: styk_services::input::Modifiers::NONE };
+                pen.inject(&hover, origin).map_err(|e| e.to_string())?;
+                pause(100);
+                Some(pen)
+            } else {
+                // The pen was last used moments ago: wait out the palm window before the finger alone.
+                pause(900);
+                None
+            };
+            let mut finger = TouchInjector::new(9).map_err(|e| e.to_string())?;
+            finger.inject(Phase::Down, screen).map_err(|e| e.to_string())?;
+            for i in 1..=10 {
+                pause(8);
+                finger.inject(Phase::Move, (screen.0 + i * 6, screen.1)).map_err(|e| e.to_string())?;
+            }
+            finger.inject(Phase::Up, (screen.0 + 60, screen.1)).map_err(|e| e.to_string())?;
+            pause(50);
+            Ok(Vec::new())
+        })
     }
 
     pub fn step(&mut self, cx: &Context) -> Step {
@@ -304,13 +338,25 @@ impl Runner {
         let pad = cx.core.gpu_stats().pad_px;
         let counters = cx.counters.expect("the source is attached");
         let inspector = cx.core.inspector();
-        let state = self.behaviour.get_or_insert(Behaviour { step: 0, hover_before: cx.hover_enters, palette_before: inspector.palette_opens, menus_before: counters.context_menus.load(Relaxed), strokes_before: inspector.strokes });
+        let state = self.behaviour.get_or_insert(Behaviour { step: 0, hover_before: cx.hover_enters, palette_before: inspector.palette_opens, menus_before: counters.context_menus.load(Relaxed), strokes_before: inspector.strokes, marks: Vec::new() });
         // The script of the current step, or the verdict of the previous one once its injection has finished.
         if matches!(self.phase, Phase_::Injecting { .. }) {
             return Step::Continue;
         }
         let at = |t: u64, x: f64, y: f64, phase: Phase, barrel: bool, pressure: u32| ScriptStep { t_ns: t, x, y, tool: Tool::Pen, phase, raw_pressure: pressure, tilt_x: 0, tilt_y: 0, barrel, modifiers: styk_services::input::Modifiers::NONE };
         let period = 1_000_000_000u64 / self.test.rate_hz as u64;
+        if state.step == 3 || state.step == 4 {
+            // A finger alone draws once the setting says so; a finger within 700 ms of the pen does not.
+            state.marks.push((inspector.strokes, inspector.touch_samples));
+            state.step += 1;
+            let alone = state.step == 4;
+            if alone {
+                cx.core.set_switches(Switches { finger_draws: true, ..cx.core.switches() });
+            }
+            let thread = self.spawn_finger(cx.client_origin, (pad.0 as f64 / 2.0, pad.1 as f64 / 2.0), !alone);
+            self.phase = Phase_::Injecting { thread, script: Script { pointer: 0, steps: Vec::new() }, blocks_done: 0, frames: 0 };
+            return Step::Continue;
+        }
         let script = match state.step {
             0 => {
                 // Hover from the pad over the toolkit's hover box in the panel.
@@ -331,12 +377,17 @@ impl Runner {
                 Script { pointer: 1, steps }
             }
             _ => {
+                state.marks.push((inspector.strokes, inspector.touch_samples));
+                let marks = state.marks.clone();
                 let enters = cx.hover_enters - state.hover_before;
                 let palette = inspector.palette_opens - state.palette_before;
                 let menus = counters.context_menus.load(Relaxed) - state.menus_before;
-                let strokes = inspector.strokes - state.strokes_before;
+                // Strokes the pen made, up to the moment the finger steps began.
+                let strokes = marks[0].0 - state.strokes_before;
                 self.check("A7 pen hover reaches a toolkit widget", enters >= 1, format!("{enters} enter events"));
                 self.check("A7 barrel press opens the palette once", palette == 1, format!("{palette} palette actions"));
+                self.check("A7 a finger alone draws when the setting says so", marks[1].0 > marks[0].0 && marks[1].1 > marks[0].1, format!("{} strokes, {} touch samples", marks[1].0 - marks[0].0, marks[1].1 - marks[0].1));
+                self.check("A7 a finger within 700 ms of the pen is ignored", marks[2].0 == marks[1].0 && marks[2].1 > marks[1].1, format!("{} strokes, {} touch samples", marks[2].0 - marks[1].0, marks[2].1 - marks[1].1));
                 self.check("A7 a 1.5 s stationary press raises no menu", menus == 0 && strokes >= 1, format!("{menus} context menus, {strokes} strokes"));
                 self.phase = Phase_::Capturing;
                 return match cx.out_dir {

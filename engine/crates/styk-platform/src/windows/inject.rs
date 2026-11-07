@@ -12,9 +12,9 @@ use styk_services::input::{Phase, Script, ScriptStep};
 use windows_sys::Win32::UI::Controls::{CreateSyntheticPointerDevice, DestroySyntheticPointerDevice, HSYNTHETICPOINTERDEVICE, POINTER_FEEDBACK_NONE, POINTER_TYPE_INFO, POINTER_TYPE_INFO_0};
 use windows_sys::Win32::UI::Input::Pointer::{
     InjectSyntheticPointerInput, POINTER_FLAG_FIRSTBUTTON, POINTER_FLAG_DOWN, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_FLAG_NEW, POINTER_FLAG_SECONDBUTTON, POINTER_FLAG_UP, POINTER_FLAG_UPDATE,
-    POINTER_PEN_INFO,
+    POINTER_PEN_INFO, POINTER_TOUCH_INFO,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{PEN_FLAG_BARREL, PEN_MASK_PRESSURE, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PT_PEN};
+use windows_sys::Win32::UI::WindowsAndMessaging::{PEN_FLAG_BARREL, PEN_MASK_PRESSURE, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PT_PEN, PT_TOUCH, TOUCH_MASK_CONTACTAREA, TOUCH_MASK_PRESSURE};
 
 /// Why injection failed: what was called, and the system's error code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +81,53 @@ pub fn make_nearly_invisible(window: &dyn raw_window_handle::HasWindowHandle, al
         }
     }
     Ok(())
+}
+
+/// A synthetic finger: one contact that presses at a screen position, drags and lifts.
+pub struct TouchInjector {
+    device: HSYNTHETICPOINTERDEVICE,
+    pointer: u32,
+}
+
+impl TouchInjector {
+    pub fn new(pointer: u32) -> Result<TouchInjector, InjectError> {
+        // SAFETY: plain call; the device is destroyed in `Drop`.
+        let device = unsafe { CreateSyntheticPointerDevice(PT_TOUCH, 1, POINTER_FEEDBACK_NONE) };
+        if device.is_null() {
+            return Err(InjectError { call: "CreateSyntheticPointerDevice", code: last_error(), step: None });
+        }
+        Ok(TouchInjector { device, pointer })
+    }
+
+    /// One report of the finger at a screen position: `phase` is Down, Move or Up.
+    pub fn inject(&mut self, phase: Phase, screen: (i32, i32)) -> Result<(), InjectError> {
+        let mut touch: POINTER_TOUCH_INFO = unsafe { std::mem::zeroed() };
+        touch.pointerInfo.pointerType = PT_TOUCH;
+        touch.pointerInfo.pointerId = self.pointer;
+        touch.pointerInfo.pointerFlags = match phase {
+            Phase::Down => POINTER_FLAG_NEW | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_FIRSTBUTTON | POINTER_FLAG_DOWN,
+            Phase::Move | Phase::Hover => POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_FIRSTBUTTON | POINTER_FLAG_UPDATE,
+            Phase::Up => POINTER_FLAG_UP,
+        };
+        touch.pointerInfo.ptPixelLocation.x = screen.0;
+        touch.pointerInfo.ptPixelLocation.y = screen.1;
+        touch.touchMask = TOUCH_MASK_CONTACTAREA | TOUCH_MASK_PRESSURE;
+        touch.rcContact = windows_sys::Win32::Foundation::RECT { left: screen.0 - 2, top: screen.1 - 2, right: screen.0 + 2, bottom: screen.1 + 2 };
+        touch.pressure = 512;
+        let frame = POINTER_TYPE_INFO { r#type: PT_TOUCH, Anonymous: POINTER_TYPE_INFO_0 { touchInfo: touch } };
+        // SAFETY: `frame` is a fully initialised frame that outlives the call; one pointer, count one.
+        if unsafe { InjectSyntheticPointerInput(self.device, &frame, 1) } == 0 {
+            return Err(InjectError { call: "InjectSyntheticPointerInput", code: last_error(), step: None });
+        }
+        Ok(())
+    }
+}
+
+impl Drop for TouchInjector {
+    fn drop(&mut self) {
+        // SAFETY: the device was created in `new` and is destroyed once.
+        unsafe { DestroySyntheticPointerDevice(self.device) };
+    }
 }
 
 /// A synthetic pen device.

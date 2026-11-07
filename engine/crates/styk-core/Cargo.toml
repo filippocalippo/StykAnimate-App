@@ -12,3 +12,6 @@ styk-drawing = { path = "../styk-drawing" }
 styk-math = { path = "../styk-math" }
 styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace" }
+
+[dev-dependencies]
+sha2 = "0.10"
