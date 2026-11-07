@@ -193,7 +193,15 @@ fn note(dirty: &mut HashMap<Coord, Dirt>, coord: Coord, before: Option<Vec<u8>>,
 }
 
 fn visible(pixels: &[u8]) -> bool {
-    pixels.chunks_exact(4).any(|texel| texel[3] != 0)
+    // Four texels at a time: the alpha bytes of a 16-byte group.
+    const ALPHA: u128 = 0xff00_0000_ff00_0000_ff00_0000_ff00_0000;
+    let mut groups = pixels.chunks_exact(16);
+    for group in &mut groups {
+        if u128::from_le_bytes(group.try_into().expect("sixteen bytes")) & ALPHA != 0 {
+            return true;
+        }
+    }
+    groups.remainder().chunks_exact(4).any(|texel| texel[3] != 0)
 }
 
 impl Layer {
@@ -259,12 +267,15 @@ impl Layer {
         for (coord, pixels) in changes {
             match pixels.filter(|pixels| pixels.len() == TILE_BYTES && visible(pixels)) {
                 Some(pixels) => {
-                    if self.level0.get(&coord) != Some(&pixels) {
-                        let rect = changed_rect(self.level0.get(&coord).map(Vec::as_slice), Some(pixels.as_slice())).unwrap_or(WHOLE);
-                        let before = self.level0.insert(coord, pixels);
-                        membership |= before.is_none();
-                        note(&mut dirty[0], coord, before, rect);
-                    }
+                    // One pass finds both whether the tile changed and where: a tile that is not there yet changes everywhere it has ink.
+                    let held = self.level0.get(&coord);
+                    let rect = match changed_rect(held.map(Vec::as_slice), Some(pixels.as_slice())) {
+                        None if held.is_some() => continue,
+                        found => found.unwrap_or(WHOLE),
+                    };
+                    let before = self.level0.insert(coord, pixels);
+                    membership |= before.is_none();
+                    note(&mut dirty[0], coord, before, rect);
                 }
                 None => {
                     if let Some(before) = self.level0.remove(&coord) {

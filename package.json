@@ -22,7 +22,7 @@
     "serve": "node scripts/serve.mjs",
     "check": "node scripts/check.mjs",
     "engine:build": "node scripts/engine-build.mjs",
-    "engine:test": "cargo test --manifest-path engine/Cargo.toml --workspace --exclude styk-wasm",
+    "engine:test": "cargo test --manifest-path engine/Cargo.toml --workspace --exclude styk-wasm --exclude styk-app --exclude styk-ui --exclude styk-devtools",
     "engine:parity": "node scripts/engine-parity.mjs",
     "engine:bench": "node scripts/engine-benchmark.mjs",
     "engine:bench:summary": "node scripts/engine-bench-summary.mjs",

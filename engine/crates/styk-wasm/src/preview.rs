@@ -30,7 +30,7 @@ use styk_engine::export::{ExportFrames, AHEAD};
 use styk_engine::thumbnails::library::{fit, fitted, LibraryPreview, Sample, NOWHERE, SAMPLE, SIZE};
 use styk_engine::thumbnails::{card, Framing, CARD, MAX_SIDE};
 use styk_engine::{Engine, Generation};
-use styk_raster::{Edges, Images, Place, Raster};
+use styk_raster::{Edges, Images, Raster, Uploads};
 use styk_render::{DrawingGrid, Renderer, ViewParams, wgpu};
 use wasm_bindgen::prelude::*;
 
@@ -53,7 +53,7 @@ struct Gpu {
     atlas: Option<(u64, u32, usize)>,
     /// The pictures of the pinned document uploaded into the atlas. The device holds them: the CPU keeps only the
     /// ones it is asked to draw with, and decodes again a picture it must upload once more.
-    uploaded: HashSet<Place>,
+    uploaded: Uploads,
 }
 
 /// The open document's frames for thumbnails, and its pictures for the CPU.
@@ -142,7 +142,7 @@ impl Previews {
         };
         surface.configure(&device, &config);
         let renderer = Renderer::new(&device, &queue, format);
-        Ok(Previews::with(Some(Gpu { device, queue, surface, config, renderer, atlas: None, uploaded: HashSet::new() }), format!("{:?} · {}", info.backend, info.name)))
+        Ok(Previews::with(Some(Gpu { device, queue, surface, config, renderer, atlas: None, uploaded: Uploads::default() }), format!("{:?} · {}", info.backend, info.name)))
     }
 
     /// Previews drawn by the CPU rasterizer (styk-raster): every picture is handed over as
@@ -603,9 +603,9 @@ impl Previews {
                 gpu.atlas = Some(layout);
             }
             // ... and the device is given the ones it lacks: it keeps them, so the CPU need not.
-            let lacking: Vec<(Place, &Arc<styk_eval::assets::DecodedImage>)> = Images::places(list).into_iter().filter(|place| !gpu.uploaded.contains(place)).filter_map(|place| Some((place, pictures.images.get(place)?))).collect();
+            let lacking = gpu.uploaded.lacking(Images::places(list), &pictures.images);
             gpu.renderer.upload_images(&generation.assets, lacking.iter().map(|(_, image)| &***image));
-            gpu.uploaded.extend(lacking.into_iter().map(|(place, _)| place));
+            gpu.uploaded.record(lacking);
             gpu.renderer.set_drawing_grid(grid);
             gpu.renderer.set_paint_context(paint);
             gpu.draw(list, view, width, height)?;

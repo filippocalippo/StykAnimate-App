@@ -181,7 +181,11 @@ impl Renderer {
         let pages = pages.max(atlas.pages).min(MAX_LAYER_PAGES);
         let (texture, view) = array_texture(&self.device, "styk layers", size, pages, true);
         self.layer_binds[parity] = Self::layer_bind(&self.device, &self.layout2, &view);
-        self.layers[parity] = LayerAtlas { texture, view, size, pages };
+        let old = std::mem::replace(&mut self.layers[parity], LayerAtlas { texture, view, size, pages });
+        // An export's pages change size with its frames: the browser would keep every one it dropped until it collects them.
+        if self.exact_sizes {
+            old.texture.destroy();
+        }
     }
 
 }
