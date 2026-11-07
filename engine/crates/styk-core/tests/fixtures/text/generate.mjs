@@ -5,7 +5,7 @@
 // a Rust mismatch changes the Rust.
 
 import {mkdir, readFile, readdir, writeFile} from 'node:fs/promises';
-import {basename, join} from 'node:path';
+import {basename, isAbsolute, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parse} from '../../../../../../vendor/text/opentype.mjs';
 import {compileTextFigure, parseTextFont, textOptionsWithDefaults} from '../../../../../../src/text-authoring.mjs';
@@ -14,7 +14,7 @@ import {emptyGpos, hex, kernTable, patchSfnt, readSfnt, sha256, symbolCmap, synt
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const root = join(here, '../../../../../..');
-const bytesOf = async path => new Uint8Array(await readFile(join(root, path)));
+const bytesOf = async path => new Uint8Array(await readFile(isAbsolute(path) ? path : join(root, path)));
 
 const NOTO = ['Regular', 'Bold', 'Italic', 'BoldItalic'].map(s => `vendor/text/NotoSans-${s}.ttf`);
 const FIRA = 'vendor/iced/graphics/fonts/FiraSans-Regular.ttf';
@@ -216,7 +216,8 @@ const corpusAt = process.argv.indexOf('--corpus');
 if (corpusAt >= 0) {
   // A local check against fonts that cannot be committed: every font file of a directory, a fixed set of strings.
   const [dir, outDir] = process.argv.slice(corpusAt + 1);
-  const files = (await readdir(dir)).filter(f => /\.(ttf|otf)$/i.test(f)).sort();
+  const {statSync} = await import('node:fs');
+  const files = (await readdir(dir)).filter(f => /\.(ttf|otf)$/i.test(f) && statSync(join(dir, f)).size < 6e6).sort();
   const strings = [{text: 'Hello, World AV To', fontSize: 48.7}, {text: 'ABC abc 123 ~!@\n\tÉé Ty', fontSize: 33, alignment: 'center', lineHeight: 1.1}, {text: ' ABC', fontSize: 20}];
   const corpus = files.map(file => ({id: file.replace(/[^A-Za-z0-9._-]/g, '_'), font: `file:${join(dir, file)}`, steps: strings}));
   const originalBytes = fontBytes;

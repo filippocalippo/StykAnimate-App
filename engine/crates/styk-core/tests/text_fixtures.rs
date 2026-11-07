@@ -188,9 +188,9 @@ fn assert_error(label: &str, error: &TextError, expected: &Value) {
     }
 }
 
-#[test]
-fn compile_cases_equal_the_javascript_compiler_bit_for_bit() {
-    let cases = read_json(&fixtures().join("cases.json"));
+/// Runs every step of `dir/cases.json` and returns how many there were.
+fn check_cases(dir: &Path) -> usize {
+    let cases = read_json(&dir.join("cases.json"));
     let mut checked = 0;
     for case in cases.get("cases").and_then(Value::elements).unwrap().iter() {
         let id = case.get("id").and_then(Value::as_str).unwrap();
@@ -202,7 +202,7 @@ fn compile_cases_equal_the_javascript_compiler_bit_for_bit() {
             let result = compiler.compile(&request, &CancelToken::new());
             if let Some(file) = entry.get("expected").and_then(Value::as_str) {
                 let figure = result.unwrap_or_else(|e| panic!("{label}: {e:?}"));
-                assert_figure(&label, &figure, &text_of(&fixtures().join(file)));
+                assert_figure(&label, &figure, &text_of(&dir.join(file)));
             } else if let Some(digest) = entry.get("digest").and_then(Value::as_str) {
                 let figure = result.unwrap_or_else(|e| panic!("{label}: {e:?}"));
                 assert_eq!(sha256(json::to_string(&figure).as_bytes()), digest, "{label}: digest of the figure text");
@@ -213,7 +213,28 @@ fn compile_cases_equal_the_javascript_compiler_bit_for_bit() {
             checked += 1;
         }
     }
+    checked
+}
+
+#[test]
+fn compile_cases_equal_the_javascript_compiler_bit_for_bit() {
+    let checked = check_cases(&fixtures());
     assert!(checked >= 70, "only {checked} steps ran");
+}
+
+/// `STYK_TEXT_CORPUS`: folders written by `generate.mjs --corpus <fonts> <out>`, separated by `;`. Fonts that cannot be
+/// committed (the machine's own, CFF-outline ones included) through the same comparison.
+#[test]
+#[ignore = "needs a corpus generated on this machine"]
+fn installed_fonts_equal_the_javascript_compiler_bit_for_bit() {
+    let folders = std::env::var("STYK_TEXT_CORPUS").expect("STYK_TEXT_CORPUS");
+    let mut total = 0;
+    for folder in folders.split(';') {
+        let checked = check_cases(Path::new(folder));
+        eprintln!("{folder}: {checked} steps equal");
+        total += checked;
+    }
+    assert!(total > 0);
 }
 
 #[test]
