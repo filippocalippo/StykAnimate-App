@@ -47,7 +47,7 @@ impl Prepared {
             tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), images::picture_of_image(&generation, atlas_pages, index)));
         }
         for cel in &cels {
-            tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), images::Picture::Cel(*cel)));
+            tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), images::Picture::CelChanged(*cel)));
         }
         if generation.anchors.is_some() {
             for row in 0..styk_eval::vfx::generated::atlas::ROWS {

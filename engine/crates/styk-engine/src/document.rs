@@ -587,8 +587,9 @@ impl Engine {
         let (prepared, assets, converted) = match views {
             Views::Same(prepared) => (prepared, store.assets.clone().expect("an activated document has its atlas"), Default::default()),
             Views::Made(prepared) => {
+                let quiet = self.pictures_settled();
                 let assets = Arc::new(match &store.assets {
-                    Some(previous) => previous.extended(&prepared.doc),
+                    Some(previous) => previous.extended_inheriting(&prepared.doc, quiet),
                     None => Assets::build(&prepared.doc),
                 });
                 (prepared, assets, Default::default())
@@ -597,8 +598,9 @@ impl Engine {
                 let name = tree.path(&["_styk", "name"]).and_then(Value::as_str).unwrap_or("").to_string();
                 let document = store.loader.document(&tree, &name).map_err(|error| OpenError { stage: OpenStage::Prepare, ..OpenError::decode(error.to_string()) })?;
                 let converted = store.loader.converted;
+                let quiet = self.pictures_settled();
                 let assets = Arc::new(match &store.assets {
-                    Some(previous) => previous.extended(&document),
+                    Some(previous) => previous.extended_inheriting(&document, quiet),
                     None => Assets::build(&document),
                 });
                 (Arc::new(Prepared::new(Arc::new(document))), assets, converted)

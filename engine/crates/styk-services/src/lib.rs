@@ -12,3 +12,5 @@ pub mod clock;
 pub mod input;
 
 pub use clock::{Clock, FixedClock, SystemClock};
+
+pub mod fonts;

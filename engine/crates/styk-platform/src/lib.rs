@@ -12,3 +12,4 @@
 pub mod windows;
 pub mod unattended;
 pub mod window;
+pub mod fonts;

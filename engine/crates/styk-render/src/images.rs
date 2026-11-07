@@ -435,7 +435,7 @@ mod tests {
 
     fn picture(index: u32, drawing: bool, width: u32, height: u32, seed: u8) -> DecodedImage {
         let rgba = (0..width * height * 4).map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed)).collect();
-        DecodedImage { index, drawing, soft: false, width, height, rgba }
+        DecodedImage { index, drawing, soft: false, width, height, rgba, placement: 0 }
     }
 
     /// A layout test: pictures land in their atlas places row for row, whatever their width, with the gutter or border outside the

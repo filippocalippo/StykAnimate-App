@@ -701,7 +701,7 @@ mod tests {
 
     #[test]
     fn history_entries_that_share_a_millisecond_are_all_kept_when_their_times_are_made_distinct() {
-        use styk_services::input::{EntryTime, history_times};
+        use styk_services::input::{EntryTime, HistoryClock};
         let mapping = Mapping::default();
         // Five entries of one message, stamped to the millisecond only (no counter): 100, 100, 101, 101, 101.
         let entries: Vec<EntryTime> = [100u32, 100, 101, 101, 101].iter().map(|&millis| EntryTime { counter_ns: 0, millis }).collect();
@@ -719,7 +719,12 @@ mod tests {
                 .collect();
             samples_of(&run(&mut input, &context(&mapping), &samples)).len()
         };
-        assert_eq!(feed(&history_times(&entries, 9_000_000_000)), 5, "every recovered entry becomes a sample");
+        let mut clock = HistoryClock::new();
+        let times: Vec<u64> = entries.iter().enumerate().filter_map(|(i, e)| clock.admit(1, *e, i as u64, 101, 9_000_000_000)).collect();
+        assert_eq!(feed(&times), 5, "every recovered entry becomes a sample");
+        // The next message repeats the last two entries, 30 ms late: they are not delivered again, so no sample is doubled.
+        let again: Vec<Option<u64>> = entries[3..].iter().enumerate().map(|(i, e)| clock.admit(1, *e, (i + 3) as u64, 101, 9_030_000_000)).collect();
+        assert_eq!(again, [None, None]);
         // What the source did before: every entry without a counter took the time of the message.
         assert_eq!(feed(&[9_000_000_000; 5]), 1, "the others were skipped as duplicates of the first");
     }

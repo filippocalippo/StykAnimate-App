@@ -34,12 +34,12 @@ fn assets() -> Assets {
 fn sharp(assets: &Assets, picture: u32, color: [u8; 4]) -> DecodedImage {
     let e = &assets.atlas[picture as usize];
     let (w, h) = (e.w + 2, e.h + 2);
-    DecodedImage { index: picture, drawing: false, soft: false, width: w, height: h, rgba: color.iter().copied().cycle().take((w * h * 4) as usize).collect() }
+    DecodedImage { index: picture, drawing: false, soft: false, width: w, height: h, rgba: color.iter().copied().cycle().take((w * h * 4) as usize).collect(), placement: 0 }
 }
 
 fn soft(assets: &Assets, picture: u32, color: [u8; 4]) -> DecodedImage {
     let (_, _, w, h) = soft_rect(&assets.atlas[picture as usize]);
-    DecodedImage { index: picture, drawing: false, soft: true, width: w, height: h, rgba: color.iter().copied().cycle().take((w * h * 4) as usize).collect() }
+    DecodedImage { index: picture, drawing: false, soft: true, width: w, height: h, rgba: color.iter().copied().cycle().take((w * h * 4) as usize).collect(), placement: 0 }
 }
 
 /// A picture of the layout drawn as a `PICTURE` pixel square with its corner at `at`.
@@ -229,9 +229,9 @@ fn the_picture_table_finds_every_picture_of_a_crowded_page() {
     for i in 0..64u32 {
         let e = &assets.atlas[i as usize];
         let (w, h) = (e.w + 2, e.h + 2);
-        let sharp = DecodedImage { index: i, drawing: false, soft: false, width: w, height: h, rgba: color(i, true).iter().copied().cycle().take((w * h * 4) as usize).collect() };
+        let sharp = DecodedImage { index: i, drawing: false, soft: false, width: w, height: h, rgba: color(i, true).iter().copied().cycle().take((w * h * 4) as usize).collect(), placement: 0 };
         let (_, _, sw, sh) = soft_rect(e);
-        let soft = DecodedImage { index: i, drawing: false, soft: true, width: sw, height: sh, rgba: color(i, false).iter().copied().cycle().take((sw * sh * 4) as usize).collect() };
+        let soft = DecodedImage { index: i, drawing: false, soft: true, width: sw, height: sh, rgba: color(i, false).iter().copied().cycle().take((sw * sh * 4) as usize).collect(), placement: 0 };
         kept.upload_images(&assets, [&soft, &sharp]);
         // Every third picture is in; the rest draw soft.
         if i % 3 == 0 {

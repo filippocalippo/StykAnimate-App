@@ -140,7 +140,13 @@ impl InputQueue {
                     }
                 }
                 Phase::Down => {
-                    if inner.events.len() < self.capacity && inner.open.len() < MAX_GESTURES && !inner.open.contains(&sample.pointer) {
+                    if inner.open.contains(&sample.pointer) {
+                        // A press for a pointer whose gesture is still open (its lift never came): today's controller ignores a
+                        // second pointerdown while a gesture is open (`down` returns), and so does this. The stroke goes on.
+                        inner.stats.ignored += 1;
+                        return false;
+                    }
+                    if inner.events.len() < self.capacity && inner.open.len() < MAX_GESTURES {
                         inner.open.push(sample.pointer);
                         inner.events.push_back(event);
                         true
@@ -342,6 +348,23 @@ mod tests {
         let second = drained(&queue);
         assert_eq!(second.len(), 11);
         assert!(!second.iter().any(|e| matches!(e, InputEvent::Overflowed { .. })));
+    }
+
+    #[test]
+    fn a_press_for_a_pointer_whose_gesture_is_open_is_ignored_and_the_stroke_goes_on() {
+        let queue = InputQueue::with_capacity(16);
+        queue.push(pointer_sample(1, 1, Phase::Down));
+        queue.push(pointer_sample(1, 2, Phase::Move));
+        // The lift was lost; a second press arrives for the same pointer, then the stroke continues and ends.
+        assert!(!queue.push(pointer_sample(1, 3, Phase::Down)));
+        queue.push(pointer_sample(1, 4, Phase::Move));
+        queue.push(pointer_sample(1, 5, Phase::Up));
+        let events = drained(&queue);
+        assert!(!events.iter().any(|e| matches!(e, InputEvent::Overflowed { .. })), "no overflow notice ends the stroke");
+        let times: Vec<u64> = events.iter().filter_map(|e| if let InputEvent::Sample(s) = e { Some(s.time_ns) } else { None }).collect();
+        assert_eq!(times, [1, 2, 4, 5]);
+        // The lift closed it: the next press is a new stroke.
+        assert!(queue.push(pointer_sample(1, 6, Phase::Down)));
     }
 
     #[test]

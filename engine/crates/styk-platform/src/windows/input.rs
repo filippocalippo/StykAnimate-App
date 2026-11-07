@@ -16,13 +16,12 @@
 //! Everything here runs on the thread that owns the window; the [`InputQueue`] is the only thing shared.
 
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
 use std::mem::zeroed;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use styk_services::input::{EntryTime, history_times, InputCaps, InputEvent, InputQueue, InputSource, InterruptReason, Modifiers, PenButtons, PenSample, Phase, SampleFlags, Tool, Valid};
+use styk_services::input::{EntryTime, HistoryClock, InputCaps, InputEvent, InputQueue, InputSource, InterruptReason, Modifiers, PenButtons, PenSample, Phase, SampleFlags, Tool, Valid};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT};
@@ -39,9 +38,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 /// The pointer id of the mouse.
 pub const MOUSE_POINTER: u32 = u32::MAX;
-
-/// Pen reports remembered to drop an entry a later message's history repeats.
-const RECENT_PEN: usize = 64;
 
 /// The device range of a Windows pen's pressure.
 const PRESSURE_RANGE: u32 = 1024;
@@ -127,6 +123,15 @@ pub fn scale_himetric(value: i32, device: (i32, i32), display: (i32, i32)) -> f6
     if span <= 0.0 { display.0 as f64 } else { display.0 as f64 + (value - device.0) as f64 * (display.1 - display.0) as f64 / span }
 }
 
+/// What an entry says, as a number: its position, pressure, buttons and phase, to tell two entries of one millisecond apart.
+fn content_of(sample: &PenSample) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for word in [sample.x.to_bits(), sample.y.to_bits(), u64::from(sample.raw_pressure), u64::from(sample.buttons.0), sample.phase as u64, sample.tool as u64] {
+        hash = (hash ^ word).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
 /// The sample one history entry of a pen message makes. `position` is in client pixels and `time_ns` the entry's time.
 pub fn pen_sample(entry: &POINTER_PEN_INFO, position: (f64, f64), time_ns: u64, modifiers: Modifiers) -> PenSample {
     let flags = entry.pointerInfo.pointerFlags;
@@ -185,7 +190,8 @@ struct Hook {
     mouse_barrel: Cell<bool>,
     scratch: RefCell<Vec<POINTER_PEN_INFO>>,
     /// The last pen reports pushed, so an entry the history repeats is not delivered twice.
-    recent_pen: RefCell<VecDeque<(u32, u64, u64, u64, u32, Phase)>>,
+    pen_clock: RefCell<HistoryClock>,
+    touch_clock: RefCell<HistoryClock>,
 }
 
 fn modifiers() -> Modifiers {
@@ -248,34 +254,27 @@ impl Hook {
         }
         let keys = modifiers();
         let total = (count as usize).min(entries.len());
-        // Newest first from the system; the application wants them oldest first, each with a time of its own.
-        let times = history_times(
-            &entries[..total].iter().rev().map(|entry| EntryTime { counter_ns: super::qpc::counter_ns(entry.pointerInfo.PerformanceCount), millis: entry.pointerInfo.dwTime }).collect::<Vec<_>>(),
-            super::qpc::now_ns(),
-        );
+        // Newest first from the system; the application wants them oldest first. Each entry has one time however many
+        // messages carry it (`HistoryClock`), and one that an earlier message delivered is not delivered again.
+        let now = super::qpc::now_ns();
+        let newest_millis = entries[0].pointerInfo.dwTime;
+        let mut clock = self.pen_clock.borrow_mut();
         for (index, entry) in entries[..total].iter().rev().enumerate() {
             let flags = entry.pointerInfo.pointerFlags;
-            let time_ns = times[index];
             if cancels(flags) {
                 self.contacts.borrow_mut().retain(|p| *p != pointer);
                 self.counters.interrupts.fetch_add(1, Ordering::Relaxed);
-                self.queue.push(InputEvent::Interrupted { pointer, time_ns, reason: InterruptReason::Canceled });
+                self.queue.push(InputEvent::Interrupted { pointer, time_ns: now, reason: InterruptReason::Canceled });
                 continue;
             }
-            let mut sample = pen_sample(entry, Self::position(hwnd, &entry.pointerInfo), time_ns, keys);
-            // The history of a message sometimes ends with the entry the message itself reports: once is enough.
-            let identity = (pointer, time_ns, sample.x.to_bits(), sample.y.to_bits(), sample.raw_pressure, sample.phase);
-            {
-                let mut recent = self.recent_pen.borrow_mut();
-                if recent.contains(&identity) {
-                    self.counters.repeated_entries.fetch_add(1, Ordering::Relaxed);
-                    continue;
-                }
-                if recent.len() == RECENT_PEN {
-                    recent.pop_front();
-                }
-                recent.push_back(identity);
-            }
+            let mut sample = pen_sample(entry, Self::position(hwnd, &entry.pointerInfo), 0, keys);
+            let entry_time = EntryTime { counter_ns: super::qpc::counter_ns(entry.pointerInfo.PerformanceCount), millis: entry.pointerInfo.dwTime };
+            let content = content_of(&sample);
+            let Some(time_ns) = clock.admit(pointer, entry_time, content, newest_millis, now) else {
+                self.counters.repeated_entries.fetch_add(1, Ordering::Relaxed);
+                continue;
+            };
+            sample.time_ns = time_ns;
             if index + 1 < total {
                 sample.flags = sample.flags | SampleFlags::HISTORY;
                 self.counters.history_samples.fetch_add(1, Ordering::Relaxed);
@@ -306,7 +305,8 @@ impl Hook {
             return;
         }
         let (x, y) = Self::position(hwnd, &info);
-        let time_ns = history_times(&[EntryTime { counter_ns: super::qpc::counter_ns(info.PerformanceCount), millis: info.dwTime }], super::qpc::now_ns())[0];
+        let now = super::qpc::now_ns();
+        let time_ns = self.touch_clock.borrow_mut().admit(pointer, EntryTime { counter_ns: super::qpc::counter_ns(info.PerformanceCount), millis: info.dwTime }, 0, info.dwTime, now).unwrap_or(now);
         if cancels(info.pointerFlags) {
             self.contacts.borrow_mut().retain(|p| *p != pointer);
             self.counters.interrupts.fetch_add(1, Ordering::Relaxed);
@@ -467,7 +467,8 @@ impl WindowsInput {
             mouse_down: Cell::new(false),
             mouse_barrel: Cell::new(false),
             scratch: RefCell::new(Vec::new()),
-            recent_pen: RefCell::new(VecDeque::new()),
+            pen_clock: RefCell::new(HistoryClock::new()),
+            touch_clock: RefCell::new(HistoryClock::new()),
         }));
         // SAFETY: `hook` stays allocated until `detach`, which removes the subclass first; the property value is plain bits.
         unsafe {

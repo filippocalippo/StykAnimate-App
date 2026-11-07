@@ -221,3 +221,127 @@ fn a_frame_kept_across_documents_is_resolved_against_the_figures_the_new_documen
     assert!(loader.restyle_frame(&mut frame, &first));
     assert_eq!(drawn(&frame), drawn(&Loader::new().edit_frame(&record, None, &Loader::new().document(&original, "p").unwrap()).unwrap()));
 }
+
+/// The cel of a drawing figure: its figure record changes with every edit (bounds, revision) and its tiles do not.
+#[test]
+fn a_cel_whose_bounds_changed_keeps_its_pixels_and_its_atlas_slots() {
+    use styk_eval::assets::Assets;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drawlist/drawing-cel.json");
+    let original = json::parse(&std::fs::read(path).unwrap()).unwrap();
+    let mut loader = Loader::new();
+    let first = loader.document(&original, "p").unwrap();
+    let assets = Assets::build(&first);
+    assert_eq!(assets.cels.len(), 1);
+    let cel = |document: &styk_eval::doc::Document| document.figures[0].images.iter().find_map(|image| image.tiles.clone()).expect("a cel");
+
+    // The figure's published bounds changed (an undo, a stroke): the record is a new one, the payload is the same node.
+    let mut edited = original.clone();
+    let figure = edited.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap();
+    let drawing = figure[0].make_obj().unwrap().get_mut("_styk").unwrap().make_obj().unwrap().get_mut("drawing").unwrap().make_obj().unwrap();
+    drawing.set("bounds", json::parse(br#"{"x":1,"y":2,"width":30,"height":40}"#).unwrap());
+    drawing.set("revision", Value::Num(41.0));
+    let second = loader.document(&edited, "p").unwrap();
+    assert_eq!(loader.converted.figures, 1, "the figure record was converted again");
+    let (before, after) = (cel(&first), cel(&second));
+    assert!(!Arc::ptr_eq(&before, &after), "a view of its own");
+    assert_eq!(before.key(), after.key(), "of the same pixels");
+    assert_eq!(after.bounds, Some([1.0, 2.0, 30.0, 40.0]), "with the bounds it was given");
+
+    // So the atlas places nothing again and the engine decodes nothing again.
+    let extended = assets.extended(&second);
+    assert_eq!((extended.drawing.len(), extended.cels.len(), extended.pages), (assets.drawing.len(), 1, assets.pages));
+    assert_eq!(extended.id(), assets.id(), "the same atlas");
+    assert!(extended.cel_slots(&after).is_some(), "and the new view finds its slots");
+
+    // A payload made anew (the same file read again) is other pixels.
+    let anew = json::parse(&std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drawlist/drawing-cel.json")).unwrap()).unwrap();
+    let third = loader.document(&anew, "p").unwrap();
+    assert_ne!(cel(&third).key(), before.key());
+}
+
+/// The cels of a drawing document, replaced by every edit: the one that is replaced gives its slots to the one that replaces it.
+#[test]
+fn a_cel_the_document_replaced_gives_its_slots_to_the_next_and_the_atlas_stops_growing() {
+    use styk_eval::assets::{Assets, decode_cel};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drawlist/drawing-cel.json");
+    let cel = |document: &styk_eval::doc::Document| document.figures[0].images.iter().find_map(|image| image.tiles.clone()).expect("a cel");
+    let mut loader = Loader::new();
+    let first = loader.document(&json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
+    let mut assets = Assets::build(&first);
+    let held = |assets: &Assets, tiles: &Arc<styk_eval::doc::DrawingTiles>| {
+        let mut slots: Vec<u32> = assets.cel_slots(tiles).unwrap().iter().flatten().copied().collect();
+        slots.sort_unstable();
+        slots
+    };
+    let (slots, pages, starts) = (assets.drawing.len(), assets.pages, held(&assets, &cel(&first)));
+    let mut before = (cel(&first), assets.id());
+    let mut serials = vec![assets.placement(before.0.key())];
+    assert_ne!(serials[0], 0);
+    let indices = |assets: &Assets, tiles: &Arc<styk_eval::doc::DrawingTiles>| decode_cel(assets, tiles).iter().map(|image| image.index).collect::<Vec<_>>();
+    let first_indices = indices(&assets, &before.0);
+    for round in 0..6 {
+        // The same file read again: other pixels, the same shape.
+        let next = loader.document(&json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
+        assets = assets.extended(&next);
+        let tiles = cel(&next);
+        assert_ne!(tiles.key(), before.0.key(), "round {round}: other pixels");
+        assert_eq!((assets.drawing.len(), assets.pages), (slots, pages), "round {round}: the atlas did not grow");
+        assert_eq!(assets.cels.len(), 1, "round {round}: the replaced cel is gone");
+        assert_eq!(held(&assets, &tiles), starts, "round {round}: it is in the slots of the one before");
+        assert_ne!(assets.id(), before.1, "round {round}: assets that place something are numbered anew");
+        let serial = assets.placement(tiles.key());
+        assert!(!serials.contains(&serial), "round {round}: a placement of its own");
+        assert!(serials.iter().all(|old| !assets.holds_placement(*old)), "round {round}: the placements before it are over");
+        let decoded = decode_cel(&assets, &tiles);
+        assert!(decoded.iter().all(|image| image.placement == serial));
+        assert_eq!(indices(&assets, &tiles), first_indices);
+        serials.push(serial);
+        before = (tiles, assets.id());
+    }
+}
+
+/// A cel that gained tiles needs more slots than the one it replaces held: it keeps those and takes new ones for the rest, and no two
+/// levels of it share a slot.
+#[test]
+fn a_cel_that_gained_tiles_is_given_the_slots_of_its_predecessor_and_new_ones_for_the_rest() {
+    use styk_eval::assets::Assets;
+    use styk_eval::doc::DrawingTiles;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drawlist/drawing-cel.json");
+    let mut loader = Loader::new();
+    let mut document = loader.document(&json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
+    let old = document.figures[0].images.iter().find_map(|image| image.tiles.clone()).expect("a cel");
+    let assets = Assets::build(&document);
+    let held: u32 = old.levels.iter().map(|level| level.len() as u32).sum();
+    // The same cel with three more tiles at its first level and one fewer at its last.
+    let mut levels = old.levels.clone();
+    levels[0].extend([(1000, 1000), (1001, 1000), (1002, 1000)]);
+    levels.last_mut().unwrap().pop();
+    let gained = Arc::new(DrawingTiles::new(old.anchor, old.pixels_per_unit, old.bounds, old.tiles.clone(), levels.clone()));
+    let figure = Arc::make_mut(&mut document.figures[0]);
+    for image in figure.images.iter_mut() {
+        if image.tiles.is_some() {
+            image.tiles = Some(gained.clone());
+        }
+    }
+    let extended = assets.extended(&document);
+    let mut taken: Vec<u32> = extended.cel_slots(&gained).expect("placed").iter().flatten().copied().collect();
+    assert_eq!(taken.len(), levels.iter().map(Vec::len).sum::<usize>(), "a slot for every tile");
+    let total = taken.len();
+    taken.sort_unstable();
+    taken.dedup();
+    assert_eq!(taken.len(), total, "no two tiles share a slot");
+    assert!(taken.iter().all(|slot| (*slot as usize) < extended.drawing.len() && extended.drawing[*slot as usize].valid), "every slot has a place");
+    // Only the slots the cel gained are new: a cel of the same shape after it needs none.
+    assert!(extended.drawing.len() as u32 <= assets.drawing.len() as u32 + 2, "{} slots for {} held, two tiles gained", extended.drawing.len(), held);
+    assert_eq!(extended.cels.len(), 1);
+    let again = Arc::new(DrawingTiles::new(old.anchor, old.pixels_per_unit, old.bounds, old.tiles.clone(), levels));
+    let figure = Arc::make_mut(&mut document.figures[0]);
+    for image in figure.images.iter_mut() {
+        if image.tiles.is_some() {
+            image.tiles = Some(again.clone());
+        }
+    }
+    let third = extended.extended(&document);
+    assert_eq!(third.drawing.len(), extended.drawing.len(), "the next cel of that shape takes the slots given back");
+    assert_eq!(third.cels.len(), 1);
+}
