@@ -20,3 +20,4 @@ iced = { workspace = true, features = ["x11", "wayland", "wayland-dlopen", "wayl
 
 [dev-dependencies]
 pollster = "0.4"
+styk-platform = { path = "../styk-platform" }

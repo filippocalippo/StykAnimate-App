@@ -7,11 +7,13 @@
 
 mod fake;
 mod history;
+mod host;
 mod queue;
 pub mod script;
 
 pub use fake::FakeSource;
 pub use history::{EntryTime, HistoryClock};
+pub use host::{AttachedInput, InputDiagnostics, InputHost, SourceCounters};
 pub use queue::{InputQueue, QueueStats, Waker};
 pub use script::{Script, ScriptSpec, ScriptStep, StrokeSpec};
 

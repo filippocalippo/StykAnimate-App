@@ -2857,6 +2857,9 @@ dependencies = [
 [[package]]
 name = "styk-services"
 version = "0.1.0"
+dependencies = [
+ "raw-window-handle",
+]
 
 [[package]]
 name = "styk-text-check"
@@ -2881,6 +2884,7 @@ dependencies = [
  "pollster",
  "styk-core",
  "styk-design",
+ "styk-platform",
  "styk-services",
 ]
 

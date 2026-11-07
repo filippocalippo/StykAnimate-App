@@ -16,14 +16,14 @@ pub use self_test::{SelfTest, TestKind};
 
 use iced::widget::{button, column, container, mouse_area, row, slider, text};
 use iced::{Element, Font, Length, Subscription, Task, Widget, window};
+use std::any::Any;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use styk_core::drawing::worker::{HistoryOp, Worker};
-use styk_platform::windows::input::{InputCounters, WindowsInput, refresh_hz};
-use styk_platform::windows::qpc::QpcClock;
+use styk_services::input::{InputDiagnostics, InputHost, InputQueue};
+use styk_services::Spawner;
 use styk_ui::ink_pad::{PadCore, ink_pad};
-use styk_services::input::InputQueue;
 
 /// The inspector's width in logical pixels.
 pub const PANEL_WIDTH: f32 = 360.0;
@@ -36,6 +36,10 @@ pub struct LabOptions {
     pub show_after_open: bool,
     pub self_test: Option<SelfTest>,
     pub out_dir: Option<PathBuf>,
+    /// The platform's input source, its clock and its counters: the application hands the implementation of its target.
+    pub input: Arc<dyn InputHost>,
+    /// Starts the drawing worker.
+    pub spawner: Arc<dyn Spawner>,
 }
 
 #[derive(Clone)]
@@ -56,11 +60,11 @@ pub enum Message {
 
 /// The result of hooking the window, handed from the window closure (which runs on the interface thread) to the lab.
 #[derive(Clone)]
-pub struct Attached(Arc<Mutex<Option<Result<(Arc<InputCounters>, f64), String>>>>);
+pub struct Attached(Arc<Mutex<Option<Result<(Arc<dyn InputDiagnostics>, f64), String>>>>);
 
 thread_local! {
     /// The source stays on the interface thread: it is dropped there, and nothing else touches it.
-    static SOURCE: RefCell<Option<WindowsInput>> = const { RefCell::new(None) };
+    static SOURCE: RefCell<Option<Box<dyn Any>>> = const { RefCell::new(None) };
 }
 
 impl std::fmt::Debug for Attached {
@@ -87,7 +91,8 @@ pub enum SwitchChange {
 
 struct Lab {
     core: Arc<PadCore>,
-    counters: Option<Arc<InputCounters>>,
+    counters: Option<Arc<dyn InputDiagnostics>>,
+    input: Arc<dyn InputHost>,
     window: Option<window::Id>,
     refresh_hz: f64,
     show_after_open: bool,
@@ -103,11 +108,13 @@ struct Lab {
 impl Lab {
     fn new(options: &LabOptions, exit_code: Arc<Mutex<i32>>) -> Lab {
         let queue = InputQueue::new();
-        let worker = Worker::spawn(Vec::new(), Arc::new(|| {}));
-        let core = PadCore::new(queue, worker, Arc::new(QpcClock));
+        let clock = options.input.clock();
+        let worker = Worker::spawn(Vec::new(), Arc::new(|| {}), clock.clone(), options.spawner.as_ref()).expect("the drawing worker starts");
+        let core = PadCore::new(queue, worker, clock);
         Lab {
             core,
             counters: None,
+            input: options.input.clone(),
             window: None,
             refresh_hz: 0.0,
             show_after_open: options.show_after_open,
@@ -130,17 +137,15 @@ impl Lab {
                 let attached = Attached(Arc::new(Mutex::new(None)));
                 let slot = attached.clone();
                 let show = styk_platform::window::show_without_activation;
+                let input = self.input.clone();
                 window::run(id, move |window| {
                     if show_after_open {
                         let _ = show(window);
                     }
-                    let result = WindowsInput::attach(window, queue)
-                        .map(|source| {
-                            let counters = source.counters();
-                            SOURCE.with(|cell| *cell.borrow_mut() = Some(source));
-                            (counters, refresh_hz(window))
-                        })
-                        .map_err(|e| e.to_string());
+                    let result = input.attach(window, queue).map(|attached| {
+                        SOURCE.with(|cell| *cell.borrow_mut() = Some(attached.hook));
+                        (attached.diagnostics, attached.refresh_hz)
+                    });
                     *slot.0.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
                     Message::Attached(slot)
                 })
@@ -285,13 +290,10 @@ impl Lab {
             .push(line(format!("frames {}  prepare {} us (max {}) of which graphics API {} us (max {})  update {} us (max {})", gpu.frames, gpu.prepare_last_us, gpu.prepare_max_us, gpu.wgpu_last_us, gpu.wgpu_max_us, inspector.update_last_us, inspector.update_max_us)))
             .push(line(format!("display {:.0} Hz  recording {}", self.refresh_hz, self.core.recording())));
         if let Some(counters) = &self.counters {
-            use std::sync::atomic::Ordering::Relaxed;
+            let counters = counters.counters();
             lines = lines.push(line(format!(
                 "pen messages {}  promoted mouse {}  real mouse {}  context menus {}",
-                counters.pen_messages.load(Relaxed),
-                counters.promoted_mouse_messages.load(Relaxed),
-                counters.real_mouse_messages.load(Relaxed),
-                counters.context_menus.load(Relaxed)
+                counters.pen_messages, counters.promoted_mouse_messages, counters.real_mouse_messages, counters.context_menus
             )));
         }
         for error in inspector.worker_errors.iter().rev().take(3) {

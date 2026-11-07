@@ -493,6 +493,9 @@ mod tests {
     use styk_services::input::{InputQueue, Modifiers};
     use styk_services::{Clock, FixedClock};
 
+    /// A test that needs a tool fails when the tool is missing: a machine with no adapter says so instead of passing.
+    const NO_GPU: &str = "these tests need a GPU adapter (a hardware or a software one) and none was found: the pad's drawing was not checked";
+
     const SIZE: u32 = 256;
 
     struct Gpu {
@@ -558,7 +561,8 @@ mod tests {
 
     fn core() -> Arc<PadCore> {
         let clock: Arc<dyn Clock> = Arc::new(FixedClock::new());
-        PadCore::new(InputQueue::new(), Worker::spawn(Vec::new(), Arc::new(|| {})), clock)
+        let worker = Worker::spawn(Vec::new(), Arc::new(|| {}), clock.clone(), &styk_platform::spawn::ThreadSpawner).expect("the worker starts");
+        PadCore::new(InputQueue::new(), worker, clock)
     }
 
     /// What the cel's tiles are over white paper, as SIZE x SIZE pixels (the pad shows cel pixels 1:1 from 0, 0).
@@ -585,10 +589,7 @@ mod tests {
 
     #[test]
     fn the_pad_draws_the_cel_the_worker_holds_pixel_for_pixel_and_keeps_no_preview_once_the_tiles_are_in() {
-        let Some(gpu) = gpu() else {
-            eprintln!("no GPU adapter on this machine: the pad's drawing is not checked here");
-            return;
-        };
+        let gpu = gpu().expect(NO_GPU);
         let core = core();
         let mut pipeline = InkPipeline::new(&gpu.device, &gpu.queue, wgpu::TextureFormat::Rgba8Unorm);
         let primitive = InkPrimitive { core: core.clone() };
@@ -651,10 +652,7 @@ mod tests {
     // B1: moving the view over tiles a stroke inked while they were out of sight must show that ink, mid-stroke and after it.
     #[test]
     fn a_view_that_moves_over_the_open_strokes_ink_shows_it_and_keeps_it() {
-        let Some(gpu) = gpu() else {
-            eprintln!("no GPU adapter on this machine: the pad's drawing is not checked here");
-            return;
-        };
+        let gpu = gpu().expect(NO_GPU);
         let core = core();
         let mut pipeline = InkPipeline::new(&gpu.device, &gpu.queue, wgpu::TextureFormat::Rgba8Unorm);
         let primitive = InkPrimitive { core: core.clone() };
@@ -719,10 +717,7 @@ mod tests {
     // Today's model: the view's tiles are held above the soft budget by growing the atlas a page at a time; nothing visible is evicted.
     #[test]
     fn a_view_that_shows_more_tiles_than_a_page_holds_grows_the_texture_and_draws_every_tile() {
-        let Some(gpu) = gpu() else {
-            eprintln!("no GPU adapter on this machine: the pad's drawing is not checked here");
-            return;
-        };
+        let gpu = gpu().expect(NO_GPU);
         let core = core();
         let mut pipeline = InkPipeline::new(&gpu.device, &gpu.queue, wgpu::TextureFormat::Rgba8Unorm);
         // A page of two tiles: the stroke below inks far more than that in the 4 x 4 tiles the view shows.

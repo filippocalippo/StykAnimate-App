@@ -10,6 +10,8 @@
 
 #[cfg(windows)]
 pub mod windows;
+pub mod input;
+pub mod spawn;
 pub mod unattended;
 pub mod window;
 pub mod fonts;

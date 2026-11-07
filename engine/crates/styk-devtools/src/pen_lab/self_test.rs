@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
-use styk_platform::windows::input::InputCounters;
+use styk_services::input::InputDiagnostics;
 use styk_services::input::{InputEvent, Modifiers, PenButtons, PenSample, Phase, Script, ScriptSpec, ScriptStep, Tool, Valid};
 use styk_ui::ink_pad::{FrameRow, PadCore, Switches, View};
 
@@ -63,7 +63,7 @@ impl SelfTest {
 
 pub struct Context<'a> {
     pub core: &'a Arc<PadCore>,
-    pub counters: Option<&'a Arc<InputCounters>>,
+    pub counters: Option<&'a Arc<dyn InputDiagnostics>>,
     pub refresh_hz: f64,
     pub out_dir: Option<&'a Path>,
 }

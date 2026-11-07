@@ -35,7 +35,8 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use styk_services::{Clock, SpawnError, Spawner};
 use styk_doc::{Value, json};
 use styk_drawing::brush::{Brush, BrushStroke, Dab, Sample};
 use styk_drawing::stroke::{SeedTile, StrokeEngine};
@@ -270,8 +271,8 @@ pub struct Worker {
 }
 
 impl Worker {
-    /// Starts the worker over a cel of `tiles` (empty for a blank cel).
-    pub fn spawn(tiles: Vec<(i64, i64, Vec<u8>)>, waker: Waker) -> Worker {
+    /// Starts the worker over a cel of `tiles` (empty for a blank cel) as a task of `spawner`; its timings are read from `clock`.
+    pub fn spawn(tiles: Vec<(i64, i64, Vec<u8>)>, waker: Waker, clock: Arc<dyn Clock>, spawner: &dyn Spawner) -> Result<Worker, SpawnError> {
         let (requests, receiver) = channel();
         let (reply_sender, replies) = channel();
         let shared = Arc::new(Shared {
@@ -286,9 +287,9 @@ impl Worker {
             generated: AtomicUsize::new(0),
         });
         let thread_shared = shared.clone();
-        // The thread is never joined: it ends when it sees the shutdown flag.
-        std::thread::Builder::new().name("styk-drawing".into()).spawn(move || run(tiles, receiver, reply_sender, thread_shared, waker)).expect("the drawing worker thread starts");
-        Worker { requests, replies: Mutex::new(replies), shared }
+        // The task is never joined: it ends when it sees the shutdown flag.
+        spawner.spawn("styk-drawing", Box::new(move || run(tiles, receiver, reply_sender, thread_shared, waker, clock)))?;
+        Ok(Worker { requests, replies: Mutex::new(replies), shared })
     }
 
     /// A weak handle on the state the thread holds: it is gone once the thread has ended.
@@ -513,14 +514,15 @@ struct State {
     replies: Sender<Reply>,
     shared: Arc<Shared>,
     waker: Waker,
+    clock: Arc<dyn Clock>,
 }
 
-fn run(tiles: Vec<(i64, i64, Vec<u8>)>, requests: Receiver<Request>, replies: Sender<Reply>, shared: Arc<Shared>, waker: Waker) {
+fn run(tiles: Vec<(i64, i64, Vec<u8>)>, requests: Receiver<Request>, replies: Sender<Reply>, shared: Arc<Shared>, waker: Waker, clock: Arc<dyn Clock>) {
     let mut cel = TileStore::new();
     for (tx, ty, pixels) in tiles {
         let _ = cel.set(tx, ty, Some(&pixels));
     }
-    let mut state = State { cel, engine: StrokeEngine::new(), current: None, seq: 0, stamp: 0, tile_stamp: HashMap::new(), undo: Vec::new(), redo: Vec::new(), replies, shared: shared.clone(), waker };
+    let mut state = State { cel, engine: StrokeEngine::new(), current: None, seq: 0, stamp: 0, tile_stamp: HashMap::new(), undo: Vec::new(), redo: Vec::new(), replies, shared: shared.clone(), waker, clock };
     while let Ok(first) = requests.recv() {
         // Everything that arrived while the last batch was drawn is one batch of samples.
         let mut batch = vec![first];
@@ -663,7 +665,7 @@ impl State {
             return;
         }
         current.sink.newest_ns = (time_ms * 1e6).round() as u64;
-        let started = Instant::now();
+        let started = self.clock.now();
         let mut rastered = Duration::ZERO;
         let Current { mapping, paths, sink } = &mut current;
         let mut brush_error = None;
@@ -678,9 +680,9 @@ impl State {
                 #[cfg(test)]
                 self.shared.generated.fetch_add(1, Ordering::Relaxed);
                 if let Some((dabs, tiles)) = sink.batcher.push(dab) {
-                    let began = Instant::now();
+                    let began = self.clock.now();
                     self.raster(sink, dabs, tiles, None);
-                    rastered += began.elapsed();
+                    rastered += self.clock.now().saturating_sub(began);
                 }
             });
             if let Err(error) = result {
@@ -688,7 +690,7 @@ impl State {
                 break;
             }
         }
-        current.sink.generate += started.elapsed().saturating_sub(rastered);
+        current.sink.generate += self.clock.now().saturating_sub(started).saturating_sub(rastered);
         let failure = brush_error.or_else(|| current.sink.failure.take());
         match failure {
             Some(message) => {
@@ -722,10 +724,10 @@ impl State {
         let generate_ms = std::mem::take(&mut sink.generate).as_secs_f64() * 1e3;
         let newest_ns = sink.newest_ns;
         self.reply(Reply::Dabs { stroke: sink.id, seq, dabs: wet, generate_ms, newest_ns });
-        let started = Instant::now();
+        let started = self.clock.now();
         match self.engine.dabs(sink.id, seq as f64, &dabs, seeds, tail.as_deref()) {
             Ok(Some(result)) => {
-                let raster_ms = started.elapsed().as_secs_f64() * 1e3;
+                let raster_ms = self.clock.now().saturating_sub(started).as_secs_f64() * 1e3;
                 let stamp = self.next_stamp();
                 for (tx, ty, _) in &result.tiles {
                     self.tile_stamp.insert((*tx, *ty), stamp);
@@ -790,7 +792,7 @@ impl State {
         self.flush_current(false);
         let Some(mut current) = self.current.take() else { return };
         if !self.shared.stopped(&current.sink.abort) {
-            let started = Instant::now();
+            let started = self.clock.now();
             let mut rastered = Duration::ZERO;
             let Current { paths, sink, .. } = &mut current;
             for path in paths.iter_mut() {
@@ -799,13 +801,13 @@ impl State {
                         return;
                     }
                     if let Some((dabs, tiles)) = sink.batcher.push(dab) {
-                        let began = Instant::now();
+                        let began = self.clock.now();
                         self.raster(sink, dabs, tiles, None);
-                        rastered += began.elapsed();
+                        rastered += self.clock.now().saturating_sub(began);
                     }
                 });
             }
-            current.sink.generate += started.elapsed().saturating_sub(rastered);
+            current.sink.generate += self.clock.now().saturating_sub(started).saturating_sub(rastered);
         }
         self.current = Some(current);
         // The rest of the stroke's dabs, then the stroke is complete.

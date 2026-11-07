@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use styk_core::drawing::mapping::Mapping;
 use styk_core::drawing::stroke_input::{Context, FingerDraw, StrokeCommand, StrokeInput, ToolMode};
-use styk_core::drawing::worker::{Reply, Request, Worker};
+use styk_core::drawing::worker::{Reply, Request};
 use styk_doc::{Value, json};
 use styk_services::input::{InputEvent, InterruptReason, Modifiers, PenButtons, PenSample, Phase, Tool, Valid};
 
@@ -111,7 +111,7 @@ fn the_native_pen_path_matches_todays_app_on_the_same_events() {
         let mirror = field(&scenario, "mirror").as_bool() == Some(true);
         let mapping = mapping_of(field(&scenario, "mapping"), mirror);
         let end = field(&scenario, "end").as_str().unwrap().to_string();
-        let worker = Worker::spawn(Vec::new(), Arc::new(|| {}));
+        let worker = common::new_worker();
         let mut input = StrokeInput::new();
         let mut commands = Vec::new();
         // A scenario that moves and turns the cel first has a first mark, painted with the cel's pose before the change.

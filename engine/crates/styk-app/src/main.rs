@@ -226,8 +226,8 @@ fn watchdog(outcome: Arc<Mutex<Outcome>>) {
     });
 }
 
-/// The pen lab (developer build, Windows): a drawing pad on the real input path, and its self-test.
-#[cfg(all(feature = "devtools", windows))]
+/// The pen lab (developer build): a drawing pad on the real input path, and its self-test.
+#[cfg(feature = "devtools")]
 fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
     use styk_devtools::pen_lab::{self, LabOptions, SelfTest};
     if strategy == Some(Strategy::Headless) {
@@ -247,7 +247,7 @@ fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
             return ExitCode::from(2);
         }
     }
-    let options = LabOptions { window: window::settings(launch, strategy), scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test, out_dir: launch.out.clone() };
+    let options = LabOptions { window: window::settings(launch, strategy), scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test, out_dir: launch.out.clone(), input: styk_platform::input::host(), spawner: std::sync::Arc::new(styk_platform::spawn::ThreadSpawner) };
     match pen_lab::run(options) {
         Ok(0) => ExitCode::SUCCESS,
         Ok(code) => ExitCode::from(code.clamp(1, 255) as u8),
@@ -258,9 +258,9 @@ fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
     }
 }
 
-#[cfg(not(all(feature = "devtools", windows)))]
+#[cfg(not(feature = "devtools"))]
 fn run_pen_lab(_: &Launch, _: Option<Strategy>) -> ExitCode {
-    eprintln!("the pen lab is in the Windows developer build (cargo build --features devtools)");
+    eprintln!("the pen lab is in the developer build (cargo build --features devtools)");
     ExitCode::from(2)
 }
 

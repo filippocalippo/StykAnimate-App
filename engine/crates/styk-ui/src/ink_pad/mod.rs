@@ -271,7 +271,8 @@ mod tests {
 
     fn core() -> Arc<PadCore> {
         let clock: Arc<dyn Clock> = Arc::new(FixedClock::new());
-        PadCore::new(InputQueue::new(), Worker::spawn(Vec::new(), Arc::new(|| {})), clock)
+        let worker = Worker::spawn(Vec::new(), Arc::new(|| {}), clock.clone(), &styk_platform::spawn::ThreadSpawner).expect("the worker starts");
+        PadCore::new(InputQueue::new(), worker, clock)
     }
 
     fn begin(id: u64) -> StrokeCommand {

@@ -2,6 +2,7 @@ use super::*;
 use std::collections::HashMap;
 use std::sync::{Condvar, Mutex};
 use styk_services::input::Modifiers;
+use styk_services::SystemClock;
 
 const WAIT: Duration = Duration::from_secs(20);
 
@@ -9,8 +10,21 @@ fn settings(extra: &str) -> Arc<str> {
     format!("{{\"size\":8,\"hardness\":1,\"color\":[10,20,30],\"opacity\":1,\"flow\":1,\"spacingRatio\":0.1{extra}}}").into()
 }
 
+/// Starts a task on a thread, for tests: the core's tests cannot use `styk-platform`'s spawner (the core never reaches the platform).
+struct TestThreads;
+
+impl Spawner for TestThreads {
+    fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), SpawnError> {
+        std::thread::Builder::new().name(name.to_string()).spawn(job).map(|_| ()).map_err(|error| SpawnError(error.to_string()))
+    }
+}
+
+fn clock() -> Arc<dyn Clock> {
+    Arc::new(SystemClock::new())
+}
+
 fn worker() -> Worker {
-    Worker::spawn(Vec::new(), Arc::new(|| {}))
+    Worker::spawn(Vec::new(), Arc::new(|| {}), clock(), &TestThreads).expect("the worker starts")
 }
 
 fn begin(worker: &Worker, id: u64, erase: bool, mapping: Mapping, settings: &Arc<str>) {
@@ -213,18 +227,20 @@ fn a_huge_gap_costs_the_worker_not_the_caller_and_a_cancel_still_lands() {
     let worker = worker();
     let settings = settings(",\"size\":2");
     begin(&worker, 1, false, Mapping::default(), &settings);
-    let sent = Instant::now();
+    let clock = clock();
+    let sent = clock.now();
     worker.command(StrokeCommand::Sample { id: 1, x: 0.0, y: 0.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
     worker.command(StrokeCommand::Sample { id: 1, x: 200_000.0, y: 0.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
-    let send_time = sent.elapsed();
+    let send_time = clock.now() - sent;
     assert!(send_time < Duration::from_millis(5), "the interface thread only queued: {send_time:?}");
     // The worker is inside the brush's call for the gap when the cancel comes.
     std::thread::sleep(Duration::from_millis(30));
-    let asked = Instant::now();
+    let asked = clock.now();
     worker.command(StrokeCommand::Cancel { id: 1 }, &settings);
     let replies = until(&worker, |r| matches!(r, Reply::Cancelled { .. } | Reply::Failed { .. }));
     assert!(matches!(replies.last(), Some(Reply::Cancelled { stroke: 1, .. })));
-    assert!(asked.elapsed() < Duration::from_millis(150), "the cancel landed after {:?}: the brush kept generating the gap", asked.elapsed());
+    let landed = clock.now() - asked;
+    assert!(landed < Duration::from_millis(150), "the cancel landed after {landed:?}: the brush kept generating the gap");
     // The worker is usable again.
     stroke(&worker, 2, &line(), &settings, Mapping::default());
     until(&worker, |r| matches!(r, Reply::Finished { stroke: 2, .. }));
@@ -258,7 +274,7 @@ fn the_cel_survives_a_save_and_reopen_through_a_snapshot() {
     stroke(&worker, 1, &line(), &settings(""), Mapping::default());
     until(&worker, |r| matches!(r, Reply::Finished { .. }));
     let saved = snapshot(&worker, 1);
-    let reopened = Worker::spawn(saved.clone(), Arc::new(|| {}));
+    let reopened = Worker::spawn(saved.clone(), Arc::new(|| {}), clock(), &TestThreads).expect("the worker starts");
     assert!(snapshot(&reopened, 1) == saved);
     // Painting over reopened pixels seeds from them: the old ink is still there beside the new.
     stroke(&reopened, 2, &[(20.0, 60.0), (100.0, 60.0)], &settings(""), Mapping::default());
@@ -294,13 +310,14 @@ fn dropping_the_worker_does_not_wait_for_the_work_it_has_queued() {
     worker.command(StrokeCommand::Sample { id: 1, x: 400_000.0, y: 0.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
     std::thread::sleep(Duration::from_millis(30));
     let alive = worker.alive();
-    let started = Instant::now();
+    let clock = clock();
+    let started = clock.now();
     drop(worker);
-    let took = started.elapsed();
+    let took = clock.now() - started;
     assert!(took < Duration::from_millis(250), "closing waited {took:?} for the stroke in progress");
     // And the thread itself stops within moments, not when the 400,000 pixel gap is finished.
-    let deadline = Instant::now() + Duration::from_millis(150);
-    while alive.upgrade().is_some() && Instant::now() < deadline {
+    let deadline = clock.now() + Duration::from_millis(150);
+    while alive.upgrade().is_some() && clock.now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(alive.upgrade().is_none(), "the worker thread was still running 150 ms after it was told to stop");
@@ -369,10 +386,12 @@ fn the_worker_stays_within_its_outstanding_batches_until_they_are_acknowledged()
         more += usize::from(matches!(reply, Reply::Tiles { last: true, .. }));
     }
     assert_eq!(more as u64, MAX_OUTSTANDING, "with the gap closed it goes on, four batches further");
-    let started = Instant::now();
+    let clock = clock();
+    let started = clock.now();
     worker.command(StrokeCommand::Cancel { id: 1 }, &settings);
     until(&worker, |r| matches!(r, Reply::Cancelled { .. }));
-    assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+    let landed = clock.now() - started;
+    assert!(landed < Duration::from_secs(2), "{landed:?}");
 }
 
 #[test]
@@ -386,11 +405,12 @@ fn the_time_to_generate_dabs_is_the_time_the_brush_took() {
     object.set("seed", Value::Num(1.0));
     let brush = Brush::normalize(&value).unwrap();
     let mut path = BrushStroke::new(brush.clone(), Some(brush.seed));
-    let started = Instant::now();
+    let clock = clock();
+    let started = clock.now();
     for (i, x) in [0.0, 20_000.0].into_iter().enumerate() {
         path.sample(&Sample { x, y: 30.0, pressure: Some(1.0), time: Some(i as f64), ax: Some(0.0), ay: Some(0.0) }, &mut |_| {}).unwrap();
     }
-    let direct_ms = started.elapsed().as_secs_f64() * 1e3;
+    let direct_ms = (clock.now() - started).as_secs_f64() * 1e3;
     begin(&worker, 1, false, Mapping::default(), &settings);
     worker.command(StrokeCommand::Sample { id: 1, x: 0.0, y: 30.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
     worker.command(StrokeCommand::Sample { id: 1, x: 20_000.0, y: 30.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
@@ -717,4 +737,41 @@ fn history_the_worker_refused_is_kept_and_sent_in_order_and_what_cannot_be_kept_
     assert!(!full.submit(&worker, HistoryOp::Undo));
     assert_eq!(full.lost, 1);
     release(&hold);
+}
+
+// Decision N8: the worker starts through the spawner it is given and reads every timing from the clock it is given.
+#[test]
+fn the_worker_starts_through_the_given_spawner_and_reads_its_times_from_the_given_clock() {
+    use styk_services::{FixedClock, ManualSpawner};
+    let spawner = Arc::new(ManualSpawner::new());
+    let fixed: Arc<dyn Clock> = Arc::new(FixedClock::new());
+    let worker = Worker::spawn(Vec::new(), Arc::new(|| {}), fixed, spawner.as_ref()).expect("the worker starts");
+    assert_eq!(spawner.names(), ["styk-drawing"], "one named task, and no thread of its own");
+    // Nothing runs until the test runs the task; it does so on a thread of the test's choosing.
+    let runner = { let spawner = spawner.clone(); std::thread::spawn(move || spawner.run_next()) };
+    let settings = settings("");
+    stroke(&worker, 1, &line(), &settings, Mapping::default());
+    let replies = until(&worker, |r| matches!(r, Reply::Finished { .. }));
+    for reply in &replies {
+        match reply {
+            Reply::Dabs { generate_ms, .. } => assert_eq!(*generate_ms, 0.0, "the generation time comes from the clock, which never moved"),
+            Reply::Tiles { raster_ms, .. } => assert_eq!(*raster_ms, 0.0, "the raster time comes from the clock, which never moved"),
+            _ => {}
+        }
+    }
+    assert!(replies.iter().any(|r| matches!(r, Reply::Tiles { .. })));
+    drop(worker);
+    assert!(runner.join().unwrap(), "the task ended when the worker was dropped");
+}
+
+#[test]
+fn a_spawner_that_cannot_start_the_task_is_reported_not_unwound() {
+    struct Refusing;
+    impl Spawner for Refusing {
+        fn spawn(&self, _: &str, _: styk_services::Job) -> Result<(), SpawnError> {
+            Err(SpawnError("no threads".into()))
+        }
+    }
+    let result = Worker::spawn(Vec::new(), Arc::new(|| {}), clock(), &Refusing);
+    assert_eq!(result.err(), Some(SpawnError("no threads".into())));
 }

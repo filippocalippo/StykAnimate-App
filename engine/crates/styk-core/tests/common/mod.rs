@@ -9,6 +9,20 @@ use styk_edit::session::Session;
 use styk_formats::container::{self, Kind};
 use styk_formats::files;
 
+/// Starts a task on a thread, for tests: the core never reaches `styk-platform`, whose spawner does the same.
+struct TestThreads;
+
+impl styk_services::Spawner for TestThreads {
+    fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+        std::thread::Builder::new().name(name.to_string()).spawn(job).map(|_| ()).map_err(|error| styk_services::SpawnError(error.to_string()))
+    }
+}
+
+/// A drawing worker over an empty cel, on a thread, with the real clock.
+pub fn new_worker() -> Worker {
+    Worker::spawn(Vec::new(), std::sync::Arc::new(|| {}), std::sync::Arc::new(styk_services::SystemClock::new()), &TestThreads).expect("the worker starts")
+}
+
 pub fn hashes(worker: &Worker, token: u64) -> Vec<(i64, i64, String)> {
     worker.send(Request::Snapshot { token });
     loop {

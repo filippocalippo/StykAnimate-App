@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use styk_services::Clock;
 use styk_services::input::{EntryTime, HistoryClock, InputCaps, InputEvent, InputQueue, InputSource, InterruptReason, Modifiers, PenButtons, PenSample, Phase, SampleFlags, Tool, Valid};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
@@ -503,6 +504,40 @@ impl InputSource for WindowsInput {
             drop(Box::from_raw(self.hook));
         }
         self.hook = std::ptr::null_mut();
+    }
+}
+
+/// The Windows input host: the `WM_POINTER` source, the performance counter and the display's refresh rate, behind
+/// the traits the developer tools read.
+pub struct WindowsInputHost;
+
+struct CountersView(Arc<InputCounters>);
+
+impl styk_services::input::InputDiagnostics for CountersView {
+    fn counters(&self) -> styk_services::input::SourceCounters {
+        let c = &self.0;
+        let get = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
+        styk_services::input::SourceCounters {
+            pen_messages: get(&c.pen_messages),
+            pen_samples: get(&c.pen_samples),
+            history_samples: get(&c.history_samples),
+            repeated_entries: get(&c.repeated_entries),
+            touch_samples: get(&c.touch_samples),
+            real_mouse_messages: get(&c.real_mouse_messages),
+            promoted_mouse_messages: get(&c.promoted_mouse_messages),
+            context_menus: get(&c.context_menus),
+        }
+    }
+}
+
+impl styk_services::input::InputHost for WindowsInputHost {
+    fn clock(&self) -> Arc<dyn Clock> {
+        Arc::new(super::qpc::QpcClock)
+    }
+
+    fn attach(&self, window: &dyn HasWindowHandle, queue: InputQueue) -> Result<styk_services::input::AttachedInput, String> {
+        let source = WindowsInput::attach(window, queue).map_err(|error| error.to_string())?;
+        Ok(styk_services::input::AttachedInput { diagnostics: Arc::new(CountersView(source.counters())), refresh_hz: refresh_hz(window), hook: Box::new(source) })
     }
 }
 

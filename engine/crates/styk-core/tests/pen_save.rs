@@ -32,7 +32,7 @@ fn draw(mapping: &Mapping) -> Worker {
     for step in script.steps.iter().take_while(|s| s.phase != Phase::Up).chain(script.steps.iter().filter(|s| s.phase == Phase::Up).take(1)) {
         input.feed(&InputEvent::Sample(step.sample(1, 1_000_000_000)), &context, &mut commands);
     }
-    let worker = Worker::spawn(Vec::new(), Arc::new(|| {}));
+    let worker = common::new_worker();
     for command in commands {
         worker.command(command, &brush);
     }

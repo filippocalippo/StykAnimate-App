@@ -10,7 +10,9 @@
 
 pub mod clock;
 pub mod input;
+pub mod spawn;
 
 pub use clock::{Clock, FixedClock, SystemClock};
+pub use spawn::{Job, ManualSpawner, SpawnError, Spawner};
 
 pub mod fonts;
