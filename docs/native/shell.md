@@ -96,7 +96,10 @@ Today: the lock is per user-data directory; a second process is an independent e
 - **Bounds.** A message is at most 8 KiB (16 files); the queue holds 64 requests; a connection has a 2 s read deadline
   (overlapped reads, cancelled on the deadline); at most one connection is served at a time; closing the server cancels
   every wait. A full queue answers `BUSY` and drops nothing silently.
-- **Security.** The pipe's DACL admits only the current user, remote clients are rejected.
+- **Security.** The pipe's DACL admits only the current user, remote clients are rejected. A client opens the pipe at
+  `SECURITY_IDENTIFICATION` (a squatting server learns who we are but cannot act as us) and sends nothing unless the server
+  process runs as the current user. The server waits at most one second after answering for the client to take the answer, so
+  a client that never reads cannot hold the pipe or its shutdown.
 - **Rules of today.** `parse_protocol` keeps `handleProtocol`: no userinfo, query, fragment or port; `open`, `privacy`,
   `library`, `library/<publicId>` only. File arguments keep the extension list of `main.cjs`.
 
@@ -121,10 +124,12 @@ Feed and installer stay the GitHub release assets, so installed Electron copies 
   app (`UPDATE_PUBLIC_KEY`). Without a key the updater is unavailable. The installer is verified against the feed's
   `sha512` and `size`. Downgrades and prereleases are refused.
 - **Staging across processes.** All processes of a user share `%LOCALAPPDATA%\StykAnimate\updates\<version>\`. A download
-  takes `download.lock` (created exclusively, holding pid and time, stale when the pid is dead), writes a uniquely named
-  `.part`, verifies it and renames it to the immutable `Setup-<sha512 prefix>.exe` only if absent. A process that loses the
-  lock waits for the artifact and re-verifies it. The artifact is held open with `FILE_SHARE_READ` until the installer has
-  started.
+  takes `download.lock`, a file opened with no sharing and deleted on close: the kernel owns the lock, so it lasts exactly as
+  long as its holder lives (no age or pid to judge, nothing to take over, nothing to delete from under a live holder). It
+  writes a uniquely named `.part`, verifies it and renames it to the immutable `Setup-<sha512 prefix>.exe` only if absent. A
+  process that loses the lock waits for the artifact and re-verifies it. The staged file is only a candidate: at the restart
+  the program opens it with `FILE_SHARE_READ`, checks its size and SHA-512 through that handle against the signed feed, and
+  keeps the handle until the installer has started, so a file replaced while the update waited is never run.
 - **Policy** as today: first check after 10 s, then hourly; `idle | checking | downloading | current | ready | restarting |
   error | unavailable` with the same fields and message keys; restart only from `ready`, after the close guard.
 - **Install handoff.** `InstallPlan` from the install scope (read from the install-location keys) and whether the process

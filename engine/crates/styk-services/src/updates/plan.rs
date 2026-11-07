@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn the_arguments_are_electron_updaters_with_the_directory_last() {
         let plan = install_plan(InstallScope::CurrentUser, false, "C:\\Users\\me\\AppData\\Local\\Programs\\StykAnimate\\");
-        assert_eq!(plan.args, ["--updated", "/S", "--force-run", "/D=C:\\Users\\me\\AppData\\Local\\Programs\\StykAnimate"]);
+        assert_eq!(plan.args, ["--updated", "/S", "--force-run", "/currentuser", "/D=C:\\Users\\me\\AppData\\Local\\Programs\\StykAnimate"]);
         assert!(!plan.elevate);
     }
 

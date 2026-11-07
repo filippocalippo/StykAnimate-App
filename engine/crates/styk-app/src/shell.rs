@@ -268,8 +268,6 @@ impl Shell {
         }
     }
 
-    }
-
     /// A sample of the window was taken.
     pub fn observe(&mut self, sample: Sample) {
         #[cfg(windows)]
@@ -285,7 +283,6 @@ impl Shell {
         #[cfg(not(windows))]
         let _ = frame;
     }
-
 }
 
 /// Reads the file, records the frame, and replaces the file atomically (a temporary file, then a rename).
@@ -404,7 +401,7 @@ mod tests {
             wakes.clone().send(Wake::Instance);
         }
         let mut held = 0;
-        while let Ok(Some(_)) = receiver.try_next() {
+        while receiver.try_recv().is_ok() {
             held += 1;
         }
         assert!(held <= 32, "{held} wake-ups were held for a reader that never came");

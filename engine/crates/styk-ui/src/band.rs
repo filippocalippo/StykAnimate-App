@@ -7,7 +7,7 @@
 //! hover and press are drawn from the state the window reports.
 
 use iced::widget::{button, container, mouse_area, row};
-use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Theme as IcedTheme, Widget};
+use iced::{Alignment, Border, Color, Element, Length, Shadow, Theme as IcedTheme, Widget};
 use styk_design::Theme;
 use styk_design::widgets::icon;
 use styk_services::shell::chrome::{CONTROL_GLYPH, MaxButtonState, control_width};
