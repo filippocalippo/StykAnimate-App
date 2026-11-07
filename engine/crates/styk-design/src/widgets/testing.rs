@@ -143,6 +143,18 @@ impl<'a, Message: 'a> Driver<'a, Message> {
         self.modifiers(Modifiers::default());
     }
 
+    /// Like [`Driver::chord`], returning the status of the key press: whether the field handled it.
+    pub fn chord_status(&mut self, letter: char, shift: bool) -> event::Status {
+        let mut modifiers = Modifiers::CTRL;
+        if shift {
+            modifiers |= Modifiers::SHIFT;
+        }
+        self.modifiers(modifiers);
+        let statuses = self.tap(Key::Character(letter.to_string().into()), None);
+        self.modifiers(Modifiers::default());
+        statuses.first().copied().unwrap_or(event::Status::Ignored)
+    }
+
     /// A left click at `position`.
     pub fn click(&mut self, position: impl Into<Point>) {
         self.point_at(position);
@@ -157,7 +169,13 @@ impl<'a, Message: 'a> Driver<'a, Message> {
 
     /// Answers the clipboard request `id` with `text`.
     pub fn reply_clipboard_to(&mut self, id: RequestId, text: &str) {
-        self.events(&[Event::Clipboard(clipboard::Event::Read(Ok(Arc::new(Content::Text(text.to_owned()))), id))]);
+        self.reply_clipboard_with(id, Arc::new(Content::Text(text.to_owned())));
+    }
+
+    /// Answers the clipboard request `id` with content that is already built (so a test can time only the interface's
+    /// own work on a very large paste).
+    pub fn reply_clipboard_with(&mut self, id: RequestId, content: Arc<Content>) {
+        self.events(&[Event::Clipboard(clipboard::Event::Read(Ok(content), id))]);
     }
 
     /// Runs the operation that focuses a target, as the runtime runs a focus task.

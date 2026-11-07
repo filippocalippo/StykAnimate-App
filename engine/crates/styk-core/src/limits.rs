@@ -142,6 +142,42 @@ mod tests {
     }
 
     #[test]
+    fn every_role_is_bounded_so_a_huge_paste_cannot_freeze_the_interface() {
+        let started = std::time::Instant::now();
+        let huge = "x".repeat(5_000_000);
+        for limits in [Limits::line(), Limits::area(1 << 30), Limits::number(), Limits::text_tool()] {
+            let taken = limits.admit(0, 0, &huge).unwrap();
+            assert!(taken.chars().count() <= 16384, "{limits:?} took {}", taken.chars().count());
+        }
+        assert!(started.elapsed() < std::time::Duration::from_millis(50), "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn marks_pile_up_no_further_than_a_cluster_can_be_shaped_cheaply() {
+        let marks = format!("a{}", "\u{301}".repeat(16_383));
+        let taken = Limits::area(16384).admit(0, 0, &marks).unwrap();
+        assert!(taken.chars().count() <= 17, "{} characters of one cluster", taken.chars().count());
+    }
+
+    #[test]
+    fn line_breaks_are_bounded_in_number_as_well_as_in_characters() {
+        let taken = Limits::area(16384).admit(0, 0, &"\n".repeat(5_000_000)).unwrap();
+        assert!(taken.chars().count() <= 1000, "{} line breaks", taken.chars().count());
+    }
+
+    #[test]
+    fn a_lone_carriage_return_is_a_line_break() {
+        assert_eq!(Limits::area(100).admit(0, 0, "a\rb\r\nc\n\rd").as_deref(), Some("a\nb\nc\n\nd"));
+    }
+
+    #[test]
+    fn the_text_tool_never_takes_more_than_255_distinct_units() {
+        let many: String = (0..400u32).map(|n| char::from_u32(0x100 + n).unwrap()).collect();
+        let taken = Limits::text_tool().admit(0, 0, &many).unwrap();
+        assert!(distinct_units(&taken) <= MAX_DISTINCT_UNITS, "{}", distinct_units(&taken));
+    }
+
+    #[test]
     fn distinct_units_count_utf16() {
         assert_eq!(distinct_units("aab"), 2);
         assert_eq!(distinct_units("😀"), 2, "a surrogate pair is two units");

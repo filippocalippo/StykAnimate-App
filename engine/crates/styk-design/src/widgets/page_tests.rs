@@ -14,6 +14,8 @@ use crate::{Theme as DesignTheme, tokens};
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::{Column, Stack, text};
 use iced::{Element, Event, Length, Point, Size, Widget as _, mouse};
+use iced_test::core::clipboard::Content;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use styk_core::field::{FieldValue, Role};
 use styk_core::focus::{FocusArea, FocusId, FocusState, ScopeId, TargetKind};
@@ -41,6 +43,14 @@ struct Page {
     dir: Dir,
     fields: Vec<FieldValue>,
     limit: Option<usize>,
+    /// Replaces every field's limits (the role's single-line rule still applies).
+    limits: Option<styk_core::limits::Limits>,
+    /// The first field is disabled.
+    first_disabled: bool,
+    /// The first field's focus ID: changing it replaces the field by another at the same place in the tree.
+    first_id: u64,
+    number_enabled: bool,
+    show_number: bool,
     show_second_field: bool,
     focus: FocusState,
     number: f64,
@@ -59,6 +69,11 @@ impl Page {
             dir,
             fields: vec![FieldValue::new(""), FieldValue::new(""), FieldValue::new("")],
             limit: None,
+            limits: None,
+            first_disabled: false,
+            first_id: 10,
+            number_enabled: true,
+            show_number: true,
             show_second_field: true,
             focus: FocusState::new(),
             number: 10.0,
@@ -120,6 +135,7 @@ impl Page {
     }
 
     fn field(&self, index: usize, id: u64, role: Role) -> Element<'static, Msg> {
+        let id = if index == 0 { self.first_id } else { id };
         let mut field = EditField::new(FocusId(id), FocusArea::Panels, role, self.fields[index].text().to_owned(), DesignTheme::Light.palette())
             .dir(self.dir)
             .composing(self.focus.composing())
@@ -127,7 +143,11 @@ impl Page {
             .on_enter(Msg::Enter(index))
             .on_escape(Msg::Escape(index))
             .on_focus_change(move |focused| Msg::Focus(index, focused))
-            .on_compose(move |composing| Msg::Compose(index, composing));
+            .on_compose(move |composing| Msg::Compose(index, composing))
+            .enabled(!(index == 0 && self.first_disabled));
+        if let Some(limits) = self.limits {
+            field = field.limits(limits);
+        }
         if let Some(limit) = self.limit {
             field = field.limits(styk_core::limits::Limits { max_chars: Some(limit), ..styk_core::limits::Limits::line() });
         }
@@ -156,14 +176,18 @@ impl Page {
             .on_escape(Msg::NumberEscape)
             .on_scrub(Msg::Scrub)
             .on_compose(|c| Msg::Compose(9, c))
+            .enabled(self.number_enabled)
             .into_element();
 
         let mut column = Column::new()
             .spacing(10.0)
             .padding(10.0)
             .push(self.button(1, "first", FocusArea::TopBand, true))
-            .push(self.field(0, 10, Role::SingleLine))
-            .push(number)
+            .push(self.field(0, 10, Role::SingleLine));
+        if self.show_number {
+            column = column.push(number);
+        }
+        column = column
             .push(roving)
             .push(self.button(2, "disabled", FocusArea::Panels, false));
         if self.show_second_field {
@@ -825,4 +849,315 @@ fn arrow_keys_visit_the_same_offsets_as_chromium_in_mixed_direction_text() {
         checked += 1;
     }
     assert_eq!(checked, 24);
+}
+
+// ---- Findings of the independent review and the checker (each fails without its fix) ----
+
+fn distinct_units(text: &str) -> usize {
+    styk_core::limits::distinct_units(text)
+}
+
+/// The longest run of combining marks in `text`.
+fn longest_mark_run(text: &str) -> usize {
+    let (mut longest, mut run) = (0, 0);
+    for c in text.chars() {
+        if ('\u{300}'..='\u{36f}').contains(&c) {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    longest
+}
+
+fn focus_field(h: &mut Harness, id: u64) {
+    h.d().focus(FocusId(id));
+    h.settle();
+    assert_eq!(h.focused(), Some(id));
+}
+
+#[test]
+fn a_huge_paste_into_a_single_line_field_is_bounded_and_does_not_freeze_the_interface() {
+    let mut h = harness();
+    focus_field(&mut h, 10);
+    h.chord('v', false);
+    let (_, id) = h.d().clipboard_reads[0];
+    let huge = Arc::new(Content::Text("x".repeat(5_000_000)));
+    let start = Instant::now();
+    h.d().reply_clipboard_with(id, huge);
+    let elapsed = start.elapsed();
+    h.settle();
+    assert!(h.text(0).chars().count() <= 4096, "{} characters were taken", h.text(0).chars().count());
+    assert!(elapsed < Duration::from_millis(33), "a 5 MB paste took {elapsed:?} on the interface thread");
+}
+
+#[test]
+fn a_100_megabyte_paste_costs_the_interface_thread_almost_nothing() {
+    let mut h = harness();
+    focus_field(&mut h, 10);
+    h.chord('v', false);
+    let (_, id) = h.d().clipboard_reads[0];
+    let huge = Arc::new(Content::Text("y".repeat(100_000_000)));
+    let start = Instant::now();
+    h.d().reply_clipboard_with(id, huge);
+    let elapsed = start.elapsed();
+    assert!(elapsed < Duration::from_millis(33), "a 100 MB paste took {elapsed:?} on the interface thread");
+}
+
+#[test]
+fn a_paste_of_one_letter_and_thousands_of_combining_marks_cannot_stall_the_next_frame() {
+    let mut h = harness();
+    for _ in 0..6 {
+        h.tab();
+    }
+    assert_eq!(h.focused(), Some(11));
+    let marks = format!("a{}", "\u{301}".repeat(16_383));
+    h.chord('v', false);
+    h.paste_reply(&marks);
+    assert!(longest_mark_run(h.text(1)) <= 16, "a run of {} combining marks was accepted", longest_mark_run(h.text(1)));
+    let start = Instant::now();
+    h.d().redraw();
+    assert!(start.elapsed() < Duration::from_millis(200), "the frame after the paste took {:?}", start.elapsed());
+}
+
+#[test]
+fn a_paste_of_millions_of_line_breaks_is_bounded_and_fast() {
+    let mut h = harness();
+    for _ in 0..6 {
+        h.tab();
+    }
+    h.chord('v', false);
+    let (_, id) = h.d().clipboard_reads[0];
+    let content = Arc::new(Content::Text("\n".repeat(5_000_000)));
+    let start = Instant::now();
+    h.d().reply_clipboard_with(id, content);
+    let elapsed = start.elapsed();
+    h.settle();
+    assert!(h.text(1).lines().count() <= 1001, "{} lines were accepted", h.text(1).lines().count());
+    assert!(elapsed < Duration::from_millis(33), "5 million line breaks took {elapsed:?}");
+}
+
+#[test]
+fn a_lone_carriage_return_in_a_paste_becomes_a_line_break_in_a_multiline_field() {
+    let mut h = harness();
+    for _ in 0..6 {
+        h.tab();
+    }
+    h.chord('v', false);
+    h.paste_reply("a\rb\r\nc");
+    assert_eq!(h.text(1), "a\nb\nc");
+}
+
+#[test]
+fn the_text_tools_255_distinct_units_are_enforced_before_the_edit() {
+    let mut page = Page::new(Dir::Ltr);
+    page.limits = Some(styk_core::limits::Limits::text_tool());
+    let mut h = Harness::new(page);
+    focus_field(&mut h, 10);
+    h.chord('v', false);
+    let many: String = (0..400u32).map(|n| char::from_u32(0x100 + n).unwrap()).collect();
+    h.paste_reply(&many);
+    assert!(distinct_units(h.text(0)) <= 255, "{} distinct units were accepted", distinct_units(h.text(0)));
+    // The field holds 255; a 256th distinct character is refused and a repeat is taken.
+    let held = h.text(0).to_owned();
+    h.type_text("\u{2200}");
+    assert_eq!(h.text(0), held, "a new distinct unit past the limit is refused");
+    let again = held.chars().next().unwrap().to_string();
+    h.type_text(&again);
+    assert_eq!(h.text(0).chars().count(), held.chars().count() + 1, "a repeated unit is taken");
+}
+
+#[test]
+fn enter_cannot_push_a_full_multiline_field_past_its_limit() {
+    let mut page = Page::new(Dir::Ltr);
+    page.limit = Some(5);
+    let mut h = Harness::new(page);
+    for _ in 0..6 {
+        h.tab();
+    }
+    assert_eq!(h.focused(), Some(11));
+    h.type_text("abcde");
+    h.press(Named::Enter, Modifiers::default());
+    assert_eq!(h.text(1), "abcde", "the line break would be a sixth character");
+}
+
+#[test]
+fn ctrl_c_and_ctrl_x_with_no_selection_are_handled_by_the_field() {
+    let mut h = harness();
+    focus_field(&mut h, 10);
+    for letter in ['c', 'x'] {
+        let status = h.d().chord_status(letter, false);
+        assert_eq!(status, iced::event::Status::Captured, "Ctrl+{letter} with nothing selected reached the document");
+    }
+    assert!(h.d().clipboard_writes.is_empty(), "nothing is written for an empty selection");
+}
+
+#[test]
+fn arrow_keys_inside_a_number_input_step_it_and_escape_keeps_focus() {
+    let mut h = harness();
+    focus_field(&mut h, 21);
+    h.press(Named::ArrowUp, Modifiers::default());
+    assert_eq!(h.page.number, 11.0, "ArrowUp in the input steps the value");
+    h.press(Named::ArrowDown, Modifiers::SHIFT);
+    assert!((h.page.number - 10.9).abs() < 1e-9, "{}", h.page.number);
+    h.d().chord('a', false);
+    h.type_text("50");
+    h.press(Named::Escape, Modifiers::default());
+    assert_eq!(h.focused(), Some(21), "Escape cancels the edit and keeps focus, as today");
+    assert_eq!(h.page.number_text.text(), "10.9");
+}
+
+#[test]
+fn tabbing_into_a_filled_field_selects_its_text() {
+    let mut page = Page::new(Dir::Ltr);
+    page.fields[0].set("abc");
+    let mut h = Harness::new(page);
+    h.tab();
+    h.tab();
+    assert_eq!(h.focused(), Some(10));
+    h.type_text("x");
+    assert_eq!(h.text(0), "x", "the text was selected by the Tab, so typing replaced it");
+    // The number input too: Tab from its label.
+    h.d().focus(FocusId(20));
+    h.settle();
+    h.tab();
+    assert_eq!(h.focused(), Some(21));
+    h.type_text("7");
+    assert_eq!(h.page.number_text.text(), "7");
+}
+
+#[test]
+fn typing_stops_being_one_undo_step_when_the_caret_moves() {
+    let mut h = harness();
+    focus_field(&mut h, 10);
+    h.type_text("a");
+    h.press(Named::ArrowLeft, Modifiers::default());
+    h.press(Named::ArrowRight, Modifiers::default());
+    h.type_text("b");
+    assert_eq!(h.text(0), "ab");
+    h.chord('z', false);
+    assert_eq!(h.text(0), "a", "the caret move ended the first typing group");
+}
+
+#[test]
+fn one_typing_run_is_not_unboundedly_one_undo_step() {
+    let mut h = harness();
+    focus_field(&mut h, 10);
+    h.type_text(&"x".repeat(3000));
+    assert_eq!(h.text(0).chars().count(), 3000);
+    h.chord('z', false);
+    let left = h.text(0).chars().count();
+    assert!(left > 0 && left < 3000, "one undo took the whole run of 3000 (left {left})");
+}
+
+#[test]
+fn undo_history_is_bounded_by_what_it_holds_not_only_by_how_many() {
+    let mut h = harness();
+    for _ in 0..6 {
+        h.tab();
+    }
+    assert_eq!(h.focused(), Some(11));
+    for n in 0..100u32 {
+        h.chord('a', false);
+        h.chord('v', false);
+        let body: String = std::iter::once(char::from_u32(0x41 + n % 26).unwrap()).chain(std::iter::repeat_n('z', 15_999)).collect();
+        h.paste_reply(&body);
+    }
+    let mut undos = 0;
+    for _ in 0..150 {
+        let before = h.text(1).to_owned();
+        h.chord('z', false);
+        if h.text(1) != before {
+            undos += 1;
+        }
+    }
+    assert!((8..100).contains(&undos), "{undos} undo steps were kept for 100 large replacements");
+}
+
+#[test]
+fn disabling_the_focused_field_drops_its_focus_and_enabling_it_again_does_not_bring_it_back() {
+    let mut h = harness();
+    h.tab();
+    h.tab();
+    assert_eq!(h.focused(), Some(10));
+    h.page.first_disabled = true;
+    h.settle();
+    assert_eq!(h.focused(), None);
+    h.page.first_disabled = false;
+    h.settle();
+    assert_eq!(h.focused(), None, "re-enabling the field must not resurrect its focus");
+    assert_eq!(h.page.focus.text_entry(), None);
+}
+
+#[test]
+fn replacing_a_field_by_another_does_not_hand_over_focus_or_a_pending_paste() {
+    let mut h = harness();
+    h.tab();
+    h.tab();
+    h.chord('v', false);
+    let (_, id) = h.d().clipboard_reads[0];
+    // Field 10 is replaced by field 60 at the same place in the tree.
+    h.page.first_id = 60;
+    h.settle();
+    assert_ne!(h.focused(), Some(60), "the new field starts unfocused");
+    h.d().reply_clipboard_to(id, "stray");
+    h.settle();
+    assert_eq!(h.text(0), "", "the old field's paste did not land in the new one");
+}
+
+#[test]
+fn a_dialog_contains_pointer_and_focus_so_a_field_behind_it_cannot_be_clicked() {
+    let mut h = harness();
+    h.page.modal = true;
+    h.settle();
+    let targets = h.d().snapshot().targets(MODAL).to_vec();
+    let first = h.page.focus.open_scope(MODAL, targets, None).unwrap();
+    h.d().focus(first);
+    h.settle();
+    assert_eq!(h.focused(), Some(50));
+    h.click_target(10);
+    assert_eq!(h.focused(), Some(50), "a click behind the dialog must not move focus out of it");
+    assert_eq!(h.page.focus.text_entry(), None);
+    // Typing goes nowhere behind the dialog either.
+    h.type_text("z");
+    assert_eq!(h.text(0), "");
+}
+
+#[test]
+fn ctrl_f6_goes_to_the_previous_area_and_shift_f6_is_not_navigation() {
+    let mut h = harness();
+    h.press(Named::F6, Modifiers::default());
+    assert_eq!(h.focused(), Some(1), "F6 goes to the first area, the top band");
+    h.press(Named::F6, Modifiers::CTRL);
+    assert_eq!(h.focused(), Some(3), "Ctrl+F6 goes to the previous area, wrapping to the timeline");
+    h.press(Named::F6, Modifiers::SHIFT);
+    assert_eq!(h.focused(), Some(3), "Shift+F6 is Remove keyframes, not a way to move focus");
+}
+
+#[test]
+fn navigation_waits_while_an_input_method_composes() {
+    use iced_test::core::input_method;
+    let mut h = harness();
+    h.tab();
+    h.tab();
+    h.events(&[Event::InputMethod(input_method::Event::Opened)]);
+    h.events(&[Event::InputMethod(input_method::Event::Preedit("に".to_owned(), Some(0..3)))]);
+    assert!(h.page.focus.composing());
+    h.press(Named::F6, Modifiers::default());
+    assert_eq!(h.focused(), Some(10), "F6 must not leave a composing field");
+}
+
+#[test]
+fn a_disabled_number_label_takes_no_pointer_input() {
+    let mut page = Page::new(Dir::Ltr);
+    page.number_enabled = false;
+    let mut h = Harness::new(page);
+    let label = h.d().snapshot().bounds_of(FocusId(20)).unwrap();
+    let start = Point::new(label.x + 2.0, label.y + label.height / 2.0);
+    h.d().point_at(start);
+    h.events(&[Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))]);
+    h.events(&[Event::Mouse(mouse::Event::CursorMoved { position: Point::new(start.x + 40.0, start.y) })]);
+    h.events(&[Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))]);
+    assert!(h.page.scrubs.is_empty(), "{:?}", h.page.scrubs);
 }

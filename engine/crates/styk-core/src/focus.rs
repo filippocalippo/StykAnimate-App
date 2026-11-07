@@ -438,6 +438,19 @@ mod tests {
     }
 
     #[test]
+    fn while_a_modal_is_open_only_its_targets_can_hold_focus() {
+        let mut f = page();
+        f.reconcile(Some(FocusId(4)));
+        f.open_scope(ScopeId(7), vec![t(10, Panels, Control), t(11, Panels, TextEntry)], None);
+        // The toolkit still reports a field behind the dialog as focused (a click got through, a task ran late).
+        f.reconcile(Some(FocusId(3)));
+        assert_eq!(f.focused(), None, "a target of the page below is not focusable while the dialog is open");
+        assert_eq!(f.text_entry(), None);
+        assert_eq!(f.focus(FocusId(3)), None, "and programmatic focus refuses it");
+        assert_eq!(f.focus(FocusId(11)), Some(FocusId(11)));
+    }
+
+    #[test]
     fn a_report_of_an_unknown_target_is_no_focus() {
         let mut f = page();
         f.reconcile(Some(FocusId(99)));

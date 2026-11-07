@@ -506,6 +506,25 @@ mod tests {
     }
 
     #[test]
+    fn a_hovered_slider_takes_no_keys_and_a_focused_one_has_a_single_keyboard_owner() {
+        use iced::keyboard::key::Named;
+        let sheet = Sheet::new(Theme::Light, Dir::Ltr);
+        let mut driver = driver(&sheet);
+        let bounds = driver.snapshot().bounds_of(ids::SLIDER).unwrap();
+        driver.point_at(iced::Point::new(bounds.x + 5.0, bounds.y + 5.0));
+        driver.press(Named::ArrowUp);
+        driver.press(Named::ArrowDown);
+        let messages = driver.messages();
+        assert!(messages.iter().all(|m| !matches!(m, Message::SliderTo(_) | Message::Slider(..))), "an unfocused slider under the pointer reacted: {messages:?}");
+
+        driver.focus(ids::SLIDER);
+        driver.press(Named::ArrowUp);
+        let messages = driver.messages();
+        assert!(messages.iter().any(|m| matches!(m, Message::Slider(SliderKey::Increase, _))), "{messages:?}");
+        assert!(messages.iter().all(|m| !matches!(m, Message::SliderTo(_))), "the slider answered its own way as well: {messages:?}");
+    }
+
+    #[test]
     fn slider_select_and_switch_answer_their_keys_only_while_focused() {
         use iced::keyboard::key::Named;
         let sheet = Sheet::new(Theme::Light, Dir::Ltr);

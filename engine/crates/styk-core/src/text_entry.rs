@@ -78,7 +78,7 @@ mod tests {
         let f = state(TargetKind::TextEntry);
         assert!(command_allowed(&f, &Chord::new("F6", false, false, false)));
         assert!(command_allowed(&f, &Chord::new("F6", true, false, false)));
-        assert!(command_allowed(&f, &Chord::new("F6", false, false, true)));
+        assert!(!command_allowed(&f, &Chord::new("F6", false, false, true)), "Shift+F6 is Remove keyframes, not a field chord");
         assert!(command_allowed(&f, &Chord::new("KeyM", true, true, false)));
         assert!(command_allowed(&f, &Chord::new("KeyL", true, true, false)));
         assert!(!command_allowed(&f, &Chord::new("KeyM", true, false, false)));
