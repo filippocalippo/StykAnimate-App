@@ -16,6 +16,11 @@ needs something this page does not cover, say so in your report instead of inven
 One owner per fact: nothing above is copied into another layer and kept in sync. The core never writes a document in
 place; Rust's borrows make that structural (a panel only ever holds `&Document`), and every change is a session call.
 
+Engine types (`Value`, `EditError`, `Selection`, the session's answer and view, the typed document) are named only in
+`styk-core`, through `styk_core::engine` (`docs/native/architecture.md`). `styk-ui`, its tests included, never names
+that module or an engine crate: views get plain view models and send messages, and a UI test drives the document
+through `styk_core::testing` (JSON arguments, `select_all`, `undo_depth`).
+
 ## The files of a panel
 
 - `styk-core/src/<panel>/model.rs`: the view model, plain data (`Clone + PartialEq`), no engine types, no borrowed
@@ -101,7 +106,12 @@ built into `styk-core` from `src/locales/en.mjs` at compile time (`build.rs`), s
    Driver`: a drag of a scrub label from its laid-out bounds, typing and Enter, an arrow step, undo), delivering the
    messages the widgets publish to `styk_ui::message::update`. UI tests open documents with
    `styk_core::testing::core_with_document` (feature `testing`), so the interface's tests name no engine crate.
-3. **Screenshots against today's**: the UI test writes each context's picture when `STYK_INSPECTOR_PNG_DIR` is set; the
+3. **The automated interaction drives the app through `styk_core::automation`**, the one automation language and parser
+   (`docs/native/architecture.md`, "The automation mode and the benchmark"; header `styk-auto/1`, steps such as `open`,
+   `key`, `click`, `expect`, `screenshot`). A panel that needs a step the language lacks adds it there, never a format
+   of its own. Until that module merges, the Inspector's interaction test drives the panel through core dispatch in one
+   place (`drag_type_step_and_undo_through_the_panel`), and moves to automation steps when it lands.
+4. **Screenshots against today's**: the UI test writes each context's picture when `STYK_INSPECTOR_PNG_DIR` is set; the
    reference is today's panel in the same context captured headless; the score and its limit go into the screen
    catalogue's limits (K-guards' `docs/native/screens/limits.toml`).
 

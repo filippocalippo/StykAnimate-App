@@ -233,7 +233,7 @@ fn finish(inspector: &mut Inspector, memory: &SectionMemory) {
     }
 }
 
-fn figure_record<'a>(records: &'a Value, id: u32) -> Option<Value> {
+fn figure_record(records: &Value, id: u32) -> Option<Value> {
     records.get("figure_types").and_then(Value::elements)?.iter().find(|figure| num(figure.get("figure_type_id")) == Some(f64::from(id)))
 }
 
