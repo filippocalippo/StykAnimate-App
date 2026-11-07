@@ -171,35 +171,32 @@ fn inflated_size(file: &[u8], cancel: &dyn Fn() -> bool) -> Option<usize> {
     }
 }
 
-/// The reservation the open of `source` makes before it starts. A Pivot file's size says little of what it opens to (a project of
-/// 120 MB of pictures stored as they were needs a tenth of what 16 times its size says, and a compressed one needs more of it), so a Pivot
-/// file the estimate by size refuses is asked what it inflates to, and refused only when that does not fit either.
+/// Reserve from the expanded payload even when the compressed file estimate fits. A small file can
+/// inflate to hundreds of megabytes. This projection is followed by counted checks between stages.
 fn reserve_for_open(source: &OpenSource<'_>, cancel: &dyn Fn() -> bool) -> Result<styk_alloc::Reservation, OpenError> {
     let estimate = open_estimate_of(source);
-    let refused = match styk_alloc::reserve(estimate) {
-        Ok(reservation) => return Ok(reservation),
-        Err(refused) => refused,
-    };
     let (bytes, name): (&[u8], &str) = match source {
         OpenSource::File { bytes, name } => (bytes, name),
         OpenSource::Owned { bytes, name } => (bytes.as_slice(), name),
-        OpenSource::Json { .. } | OpenSource::Tree { .. } => return Err(OpenError::out_of_memory(refused)),
+        OpenSource::Json { .. } | OpenSource::Tree { .. } => return styk_alloc::reserve(estimate).map_err(OpenError::out_of_memory),
     };
     if !matches!(extension(name).to_ascii_lowercase().as_str(), "piv" | "stk") {
-        return Err(OpenError::out_of_memory(refused));
+        return styk_alloc::reserve(estimate).map_err(OpenError::out_of_memory);
     }
     let counted = inflated_size(bytes, cancel);
     if cancel() {
         return Err(OpenError::cancelled());
     }
-    match counted.map(|size| size.saturating_mul(PIVOT_OPEN_BYTES_PER_INFLATED_BYTE).max(OPEN_MINIMUM_BYTES)) {
-        Some(real) if real < estimate => styk_alloc::reserve(real).map_err(OpenError::out_of_memory),
-        _ => Err(OpenError::out_of_memory(refused)),
-    }
+    let projected = counted.map_or(estimate, |size| size.saturating_mul(PIVOT_OPEN_BYTES_PER_INFLATED_BYTE).max(OPEN_MINIMUM_BYTES));
+    styk_alloc::reserve(projected).map_err(OpenError::out_of_memory)
+}
+
+fn check_memory(memory: &styk_alloc::Reservation) -> Result<(), OpenError> {
+    memory.overrun().map_or(Ok(()), |error| Err(OpenError::out_of_memory(error)))
 }
 
 /// What opening `source` may take, for the reservation that precedes the open: [`open_estimate`] of the file, or for a project
-/// container (which states how large its parts are) what its parts take, never more than the file's estimate.
+/// container (which states how large its parts are) what its expanded parts take.
 fn open_estimate_of(source: &OpenSource<'_>) -> usize {
     let (bytes, name): (&[u8], &str) = match source {
         OpenSource::File { bytes, name } => (bytes, name),
@@ -209,7 +206,7 @@ fn open_estimate_of(source: &OpenSource<'_>) -> usize {
     };
     let by_size = open_estimate(bytes.len());
     let Some(kind) = styk_formats::Kind::from_extension(&extension(name).to_ascii_lowercase()) else { return by_size };
-    styk_formats::container::open_cost(bytes, kind).map_or(by_size, |cost| cost.clamp(OPEN_MINIMUM_BYTES, by_size))
+    styk_formats::container::open_cost(bytes, kind).map_or(by_size, |cost| cost.max(OPEN_MINIMUM_BYTES))
 }
 
 impl OpenError {
@@ -449,9 +446,7 @@ impl Engine {
         let fan = OpenFanout { engine: self, cancel, helpers, lost_before: self.workers_lost(), marks: Default::default(), spawned: Default::default() };
         let began = self.now();
         fan.mark("started");
-        // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
-        // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
-        let _memory = reserve_for_open(&source, cancel)?;
+        let memory = reserve_for_open(&source, cancel)?;
 
         let mut check = None;
         let (document, kind, version, name, facts) = match source {
@@ -485,13 +480,14 @@ impl Engine {
             }
         };
         let decoded = self.now();
+        check_memory(&memory)?;
         // A Pivot project's fingerprint (what the codec records of the document read from the file) is computed on a helper while the
         // document is prepared: it holds the document as it was read, and the preparation copies what it changes.
         let fingerprint = facts.map(|facts| {
             let document = document.clone();
             (facts, styk_doc::fanout::start(&fan, move || styk_piv::source_digest(&document).map_err(|error| error.message)))
         });
-        let opened = self.prepare_opened(document, kind, version, name, options, cancel, &fan);
+        let opened = self.prepare_opened(document, kind, version, name, options, cancel, &fan, &memory);
         let prepared = self.now();
         let source = match (fingerprint, &opened) {
             (Some((facts, digest)), Ok(_)) => match digest.wait(&fan) {
@@ -502,6 +498,7 @@ impl Engine {
             _ => None,
         };
         let original_first = source.is_some();
+        check_memory(&memory)?;
         // A skeleton that does not match its checksum is the file's error, whatever became of the document read from it. A stopped
         // open does not wait for the check.
         match check {
@@ -531,12 +528,13 @@ impl Engine {
 
     /// The tail of an open: the document read, normalized and made into typed views.
     #[allow(clippy::too_many_arguments)]
-    fn prepare_opened(&self, document: Value, kind: &'static str, version: f64, name: String, options: OpenOptions, cancel: &dyn Fn() -> bool, fan: &OpenFanout<'_>) -> Result<OpenedDocument, OpenError> {
+    fn prepare_opened(&self, document: Value, kind: &'static str, version: f64, name: String, options: OpenOptions, cancel: &dyn Fn() -> bool, fan: &OpenFanout<'_>, memory: &styk_alloc::Reservation) -> Result<OpenedDocument, OpenError> {
         if cancel() {
             return Err(OpenError::cancelled());
         }
         let started = self.now();
         let mut indexes = styk_edit::load::prepare_for_editor_with(document, options.layer_timeline, fan).map_err(OpenError::from_edit)?;
+        check_memory(memory)?;
         let prepared = self.now();
         if cancel() {
             return Err(OpenError::cancelled());
@@ -554,11 +552,13 @@ impl Engine {
                 OpenError { stage: OpenStage::Prepare, ..OpenError::decode(error.to_string()) }
             }
         })?;
+        check_memory(memory)?;
         if cancel() {
             return Err(OpenError::cancelled());
         }
         let assets = Arc::new(Assets::build(&converted));
         let prepared_views = Arc::new(Prepared::new(Arc::new(converted)));
+        check_memory(memory)?;
         let lineage = self.inner.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let views = self.now() - prepared;
         let prepare = prepared - started;

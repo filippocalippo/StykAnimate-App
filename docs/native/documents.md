@@ -2,11 +2,14 @@
 
 `styk_core::documents::Documents` holds the tabs, each owning one `styk-edit::session::Session`.
 The session owns the document, selection/playhead, gesture and history. There is no report mirror,
-JSON patch, duplicate selection or duplicate dirty flag.
+JSON patch or duplicate selection. During an exclusive worker handoff only the last accepted
+revision and dirty scalars remain for tab chrome; the session is their sole editing authority.
 
 Engine type re-exports live only in **`styk_core::engine`**: `Value`, `CallAnswer` (`NativeCall`),
 `DocumentView` (`SessionView`), `EditError`, `Selection`, `OpenError`, `TypedDocument`, `Engine` and `Budgets`.
 Core panel logic may name that module; views must not. Views receive plain view models and messages.
+The native composition root installs `engine::Counting` and sets `engine::set_memory_limit` through
+this boundary too; it does not depend directly on an engine crate. The document re-export guard has no exemption.
 `documents` exposes the core's own document identities, owners, requests and effects.
 
 ## Preparing and installing a document
@@ -40,10 +43,10 @@ Panel **logic in the core** uses these names; a view displays its plain-data mod
 | `Documents::activate(id)` | Switch without rebuilding a session. Refuse an unfinished edit, as today's detach guard does. |
 | `Documents::call(id, method, args, view)` | Today's command name and native `Value` arguments. A null view retains the session's view; an object supplies the existing complete view inputs, including auto-key, focus and D18 draws. No encoded JSON argument wrapper. |
 | `Documents::undo(id)`, `redo(id)` | The original session commands and gesture grouping, with no second history stack. |
-| `Document::revision`, `view`, `selection` | Borrow selection/labels and read scalar playhead, history, dirty and editing state. |
+| `Document::revision`, `view`, `selection` | `view` and `selection` return `Result`, refusing with `Busy` during exclusive worker handoff. Revision remains the last accepted revision until the session returns. |
 | `Document::with_document(read)` | Borrow cached typed figures, keyframes, layers and project properties inside core logic. Project displayed fields into a plain-data model; do not retain engine objects in a UI model. |
 | `Document::frame_records()` | The session's shown records, including live gestures/property previews. A COW handle, with no record copy, serialization or geometry build. |
-| `Document::records()` | Borrow the canonical store for core operations such as save preparation. Never an editable mirror. |
+| `Document::records()` | `Result` borrowing the canonical store for core operations such as save preparation; `Busy` while the session is on its worker. Never an editable mirror. |
 
 `DocumentsError` means no session was called. Otherwise `CallAnswer::result` is the actual result or
 `EditError`, accompanied by events, drawing fork/retirement effects, clipboard data and unused random
@@ -96,9 +99,15 @@ still commit through that seam. Their parsing, open preparation, stored-frame pr
 activation run on workers. Drawing barriers and displayed live drafts belong to their existing owners.
 
 Closed tabs, replaced scope sessions, superseded clipboards and rejected results return to the document
-worker for reclamation. Dropping the owner cancels its active operation and hands over its remaining
+worker for reclamation. Native clipboard calls move outgoing typed storage into their retirement
+effect, including `@setClipboard`. A successful shared copy also detaches obsolete typed clipboards in
+every other tab and parent scope; a refused paste cannot retain one until a later interface-thread drop.
+A refused or empty copy restores its previous clipboard by move. Dropping the owner cancels its active operation and hands over its remaining
 tabs/clipboards without joining. `Cancel` wakes a waiting asynchronous file service and does not wait
 for a concurrent waker registration. Local file I/O checks cancellation between bounded chunks.
+
+Clipboard commands require an attached host (`ServicesRequired` otherwise), because a standalone
+milestone-1 owner has no reclamation worker. Ordinary commands and queries still work without services.
 
 ## Native memory
 
@@ -117,6 +126,14 @@ The Windows diagnostic exercised 848 figures with both allocators, with successf
 It ran in a shared `probe` slot, so it does not establish an overhead figure; exact accounting is retained
 pending the exclusive gate. `documents_memory` verifies counted open refusal, movieclip allocation
 refusal without a changed head, and successful retries. Tiny metadata edits do not use that allocation gate.
+
+Pivot admission counts the expanded stream before decoding even when the compressed-size estimate
+would fit. Container admission uses its expanded section sizes without capping them at compressed size.
+The engine checks `Reservation::overrun` after decode, normalization, typed conversion and prepared
+assets, and the native host checks counted session construction before installation. A refusal returns
+`out_of_memory`, releases the prepared work on its worker and leaves the current tab untouched.
+`styk-engine/tests/native_admission` generates a 64 MiB zero-padded repository Pivot: the 128 MiB refusal is followed
+by a successful retry after a competing reservation is released. No private file or frozen fixture is changed.
 
 ## Verification and integration
 
@@ -140,7 +157,25 @@ is read only. Comparing against native-app's changed JavaScript paired with an o
 Nothing writes frozen fixtures. Recovery/autosave, raw import decoding, the window's dialogs and stage
 presentation remain the respective owners' integrations. The panel seam needs none of those services to edit.
 
-The `movieclip-bake` command (inventory CMD-009/TL-095) still needs its command owner's integration with
-the engine's exclusive `WorkerSession` capability. Do not run the synchronous `bakeMovieclip` entry on
-the interface. This document host does not introduce a second editing session or a read-view mirror
-to run that job beside the fixed milestone-1 borrowed-read seam; asynchronous bake dispatch remains open.
+## Exclusive long commands
+
+`Documents::call` returns `DocumentsError::AsyncRequired { entry: "Documents::dispatch(Request::Call)" }`
+for `bakeMovieclip`, `restartMovieclip`, `removeMovieclipRestart`, `breakApartMovieclip`,
+`addMovieclipToNextKeyframes`, `placeMovieclip`, `splitMovieclip`, `setMovieclipPlayback` with `allFrames`,
+and `addFigure` when its definition is a movieclip. It also refuses the browser's incremental
+`bakeMovieclipBegin`, `bakeMovieclipSample`, `bakeMovieclipPublish` and `bakeMovieclipCancel`; native
+callers dispatch the complete `bakeMovieclip` instead. The session owns this classification.
+
+`Request::Call { document, method, args, view }` moves that tab's sole session to the bounded document
+lane and an engine job via `Spawner`. The worker enters `WorkerSession`, calls the existing cancellable
+timeline worker, and uses the existing publication heads for rollback. Cancellation before its commit
+boundary restores document, history, selection, counters and caches; after commit it cannot undo the
+operation. Every ordinary completion, refusal and cancellation reattaches the same session before its
+effect is returned. Dropping the host while work is pending retires it on the worker without joining.
+
+While handed off, `view`, `selection` and `records` refuse with `Busy`; `with_document` and
+`frame_records` preserve their `EditError` seam with the same busy message key. There is no second
+document or evaluation cache. Only revision and dirty scalars for tab chrome retain their last accepted
+values; editing, saving, switching and closing are refused until the owner returns. API names remain fixed.
+`Effect::Called` carries the session's actual answer and effects. Tests cover the blocked worker, busy
+queries, cancellation during bake and at commit, retry, one undo entry and save bytes against today's bake.

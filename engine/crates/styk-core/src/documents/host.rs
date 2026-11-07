@@ -39,6 +39,8 @@ pub enum Request {
     CloseSaved,
     SaveTarget { prompt: PromptId, target: Option<FileTarget> },
     Publish,
+    /// Exclusive worker-session command. `call` names this entry when a command is long work.
+    Call { document: DocumentId, method: String, args: Vec<Value>, view: Value },
     EnterMovieclip { document: DocumentId, type_id: f64 },
     LeaveMovieclip { document: DocumentId, save: bool },
     Close(DocumentId),
@@ -72,6 +74,7 @@ pub enum Effect {
     None, OpenDialog, Started(JobId), Cancelled(JobId),
     Opened(DocumentId), Closed(DocumentId), ClosedSaved(Vec<DocumentId>), Renamed(DocumentId), SavedAll, QuitReady,
     Published { document: DocumentId, revision: u64, generation: u64 },
+    Called { document: DocumentId, answer: CallAnswer },
     Saved { document: DocumentId, current: bool, repairs: usize, warning: Option<String> },
     SaveDialog { prompt: PromptId, document: DocumentId, name: String },
     ConfirmClose { prompt: PromptId, document: DocumentId, name: String },
@@ -86,7 +89,9 @@ pub(super) struct Scope { pub parent: PreparedDocument, type_id: f64 }
 struct Stamp { id: DocumentId, revision: u64, epoch: u64, depth: usize }
 impl Stamp { fn of(tab: &Document) -> Self { Self { id: tab.id, revision: tab.revision(), epoch: tab.epoch, depth: tab.scopes.len() } } }
 
+struct CallWork { session: Box<Session>, method: String, args: Vec<Value>, view: Value, depth: usize }
 enum Input {
+    Call(Box<CallWork>),
     Bytes(Arc<[u8]>, String), File(FileTarget), Tree(Value, String),
     Save { tree: Value, name: String, original_first: bool, target: FileTarget },
     Publish { lineage: u64, tree: Value, revision: u64, views: Option<Arc<styk_eval::eval::Prepared>> },
@@ -94,11 +99,13 @@ enum Input {
 }
 struct Work { id: JobId, cancel: Cancel, input: Input }
 enum Output {
+    Called { session: Box<Session>, answer: Result<CallAnswer, EditError>, changed: bool },
     Open(PreparedDocument), Saved { repairs: usize, warning: Option<String> },
     Published(u64), Leave { document: Value, duration: f64 },
 }
 struct Reply { id: JobId, result: Result<Output, HostError> }
 enum Action {
+    Call(Stamp),
     Open { target: Option<FileTarget>, blank: bool, replace: Option<Stamp>, base: Option<Stamp> },
     Save { stamp: Stamp, target: FileTarget }, Publish(Stamp), Enter { stamp: Stamp, type_id: f64 }, Leave(Stamp),
     LastClose(Stamp),
@@ -125,6 +132,7 @@ pub(super) struct Host {
 }
 
 impl Host {
+    pub(super) fn retire(&mut self, value: impl Send + 'static) { self.retired.push(Box::new(value)); }
     pub(super) fn retire_clipboard(&mut self, value: Option<Clipboard>) {
         if let Some(value) = value { self.retired.push(Box::new(value)); }
     }
@@ -161,10 +169,27 @@ impl Host {
 }
 
 fn execute(options: &HostOptions, work: Work) -> Reply {
+    // Even cancellation before execution must return the exclusive owner. No error path may
+    // discard the only session while its tab remains parked on the interface.
+    if let Input::Call(call) = work.input {
+        let CallWork { mut session, method, args, mut view, depth } = *call;
+        session.set_outer_depth(depth);
+        if let Some(fields) = view.make_obj() { fields.set("outerDepth", Value::Num(depth as f64)); }
+        let before = session.report().clone(); let revision = session.revision();
+        let mut owner = (*session).into_worker();
+        let cancelled = || EditError::Invalid("errors.editorSessions.backgroundOperationCancelled".into());
+        let answer = owner.call_native_long(&method, &args, &view,
+            &mut || if work.cancel.is_cancelled() { Err(cancelled()) } else { Ok(()) },
+            || if work.cancel.begin_commit() { Ok(()) } else { Err(cancelled()) });
+        let changed = owner.revision() != revision || !owner.report().same_node(&before);
+        let session = Box::new(owner.into_session());
+        return Reply { id: work.id, result: Ok(Output::Called { session, answer, changed }) };
+    }
     let cancel = &|| work.cancel.is_cancelled();
     let result = (|| {
         if cancel() { return Err(HostError::File(FileError::Cancelled)); }
         match work.input {
+            Input::Call(_) => Err(HostError::Stale),
             Input::Bytes(bytes, name) => PreparedDocument::open_application(&options.engine, bytes, &name, cancel).map(Output::Open).map_err(HostError::from),
             Input::File(target) => {
                 let name = target.name();
@@ -233,6 +258,10 @@ impl Documents {
                 worker.shutdown(Box::new(())); return Err(HostError::Spawn(error.to_string()));
             }
         }
+        for tab in &mut self.tabs {
+            tab.prepared.set_clock(clock);
+            for scope in &mut tab.scopes { scope.parent.set_clock(clock); }
+        }
         self.host = Some(Host { worker: Some(worker), pending: None, prompt: None, after_save: None, continue_save: None, retired: Vec::new(), startup, serial: 0, publication_needed: self.active.is_some(), published: None, clock });
         Ok(())
     }
@@ -261,10 +290,10 @@ impl Documents {
         let tab = self.tabs.remove(from); self.tabs.insert(to, tab); true
     }
     pub fn replaceable(&self) -> bool {
-        self.active().is_some_and(|tab| tab.blank && !tab.dirty() && tab.view().history.undo == 0 && tab.view().history.redo == 0 && tab.scopes.is_empty())
+        self.active().is_some_and(|tab| tab.blank && !tab.dirty() && tab.view().is_ok_and(|view| view.history.undo == 0 && view.history.redo == 0) && tab.scopes.is_empty())
     }
     fn matches(&self, stamp: Stamp) -> bool { self.get(stamp.id).is_some_and(|tab| Stamp::of(tab) == stamp) }
-    fn matches_quiet(&self, stamp: Stamp) -> bool { self.matches(stamp) && self.get(stamp.id).is_some_and(|tab| !tab.view().editing) }
+    fn matches_quiet(&self, stamp: Stamp) -> bool { self.matches(stamp) && self.get(stamp.id).is_some_and(|tab| tab.view().is_ok_and(|view| !view.editing)) }
     fn host(&mut self) -> Result<&mut Host, HostError> { self.host.as_mut().ok_or(HostError::NoHost) }
     fn ready(&mut self) -> Result<(), HostError> {
         let host = self.host()?;
@@ -315,6 +344,7 @@ impl Documents {
                 Ok(Effect::ClosedSaved(ids))
             }
             Request::Publish => self.begin_publication().map_err(|error| (error, Request::Publish)),
+            Request::Call { document, method, args, view } => self.begin_call(document, method, args, view),
             Request::Cancel(id) => {
                 let Some(pending) = self.host.as_ref().and_then(|host| host.pending.as_ref()).filter(|pending| pending.id == id) else { return Err((HostError::Stale, Request::Cancel(id))); };
                 if pending.cancel.cancel() { Ok(Effect::Cancelled(id)) } else { Ok(Effect::None) }
@@ -339,11 +369,34 @@ impl Documents {
     fn begin_publication(&mut self) -> Result<Effect, HostError> {
         let Some(tab) = self.active() else { return Ok(Effect::None); };
         let stamp = Stamp::of(tab);
-        let input = Input::Publish { lineage: tab.lineage(), tree: tab.records().clone(), revision: tab.revision(), views: tab.prepared.session.views() };
+        let input = Input::Publish { lineage: tab.lineage(), tree: tab.records()?.clone(), revision: tab.revision(), views: tab.prepared.session.get()?.views() };
         let host = self.host()?;
         match host.start(Action::Publish(stamp), input) {
             Ok(effect) => { host.publication_needed = false; Ok(effect) }
             Err((error, input)) => { host.retired.push(Box::new(input)); Err(error) }
+        }
+    }
+
+    fn begin_call(&mut self, id: DocumentId, method: String, args: Vec<Value>, view: Value) -> Dispatch {
+        let validation = (|| {
+            if self.active != Some(id) { return Err(DocumentsError::NotActive); }
+            let tab = self.get(id).ok_or(DocumentsError::NotOpen)?;
+            if tab.view()?.editing { return Err(DocumentsError::FinishEdit); }
+            Ok(Stamp::of(tab))
+        })();
+        let stamp = match validation { Ok(stamp) => stamp, Err(error) => return Err((error.into(), Request::Call { document: id, method, args, view })) };
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) else { return Err((DocumentsError::NotOpen.into(), Request::Call { document: id, method, args, view })); };
+        let session = match tab.prepared.session.take() { Ok(session) => session, Err(error) => return Err((error.into(), Request::Call { document: id, method, args, view })) };
+        let input = Input::Call(Box::new(CallWork { session, method, args, view, depth: stamp.depth }));
+        let started = match self.host.as_mut() { Some(host) => host.start(Action::Call(stamp), input), None => Err((HostError::NoHost, input)) };
+        match started {
+            Ok(effect) => Ok(effect),
+            Err((error, Input::Call(call))) => {
+                let CallWork { session, method, args, view, .. } = *call;
+                tab.prepared.session = SessionOwner::Ready(session);
+                Err((error, Request::Call { document: id, method, args, view }))
+            }
+            Err((error, input)) => { if let Some(host) = self.host.as_mut() { host.retire(input); } Err((error, Request::Publish)) }
         }
     }
 
@@ -358,7 +411,7 @@ impl Documents {
             return Ok(effect);
         }
         let tab = self.get(id).ok_or(DocumentsError::NotOpen)?;
-        if tab.view().editing { return Err(DocumentsError::FinishEdit.into()); }
+        if tab.view()?.editing { return Err(DocumentsError::FinishEdit.into()); }
         if save_as || tab.target.is_none() {
             let (stamp, name) = (Stamp::of(tab), format!("{}.styk", tab.project_name()));
             let host = self.host()?;
@@ -373,8 +426,8 @@ impl Documents {
     fn save_to(&mut self, id: DocumentId, target: FileTarget) -> Result<Effect, HostError> {
         let tab = self.get(id).ok_or(DocumentsError::NotOpen)?;
         let stamp = Stamp::of(tab);
-        if !tab.scopes.is_empty() || tab.view().editing { return Err(DocumentsError::FinishEdit.into()); }
-        let input = Input::Save { tree: tab.records().clone(), name: tab.project_name().to_owned(), original_first: tab.original_first(), target: target.clone() };
+        if !tab.scopes.is_empty() || tab.view()?.editing { return Err(DocumentsError::FinishEdit.into()); }
+        let input = Input::Save { tree: tab.records()?.clone(), name: tab.project_name().to_owned(), original_first: tab.original_first(), target: target.clone() };
         let host = self.host()?;
         host.start(Action::Save { stamp, target }, input).map_err(|(error, input)| { host.retired.push(Box::new(input)); error })
     }
@@ -420,6 +473,28 @@ impl Documents {
         let reply = reply?;
         let pending = host.pending.take()?;
         let id = reply.id;
+        if let Action::Call(stamp) = pending.action {
+            // Reattach before reporting cancellation or a command error. The worker rolled back
+            // cancelled work before returning, including history, selection and evaluation heads.
+            return Some(match reply.result {
+                Ok(Output::Called { session, answer, changed }) => {
+                    if pending.id != id || !self.matches(stamp) {
+                        if let Some(host) = self.host.as_mut() { host.retire((session, answer)); }
+                        Effect::Stale(id)
+                    } else if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == stamp.id) {
+                        tab.prepared.session = SessionOwner::Ready(session);
+                        if changed { tab.epoch = tab.epoch.wrapping_add(1); tab.blank = false;
+                            if let Some(host) = self.host.as_mut() { host.publication_needed = true; } }
+                        if pending.cancel.is_cancelled() {
+                            if let Some(host) = self.host.as_mut() { host.retire(answer); }
+                            Effect::Cancelled(id)
+                        } else { match answer { Ok(answer) => Effect::Called { document: stamp.id, answer }, Err(error) => Effect::Failed { job: id, error: error.into() } } }
+                    } else { if let Some(host) = self.host.as_mut() { host.retire((session, answer)); } Effect::Stale(id) }
+                }
+                Err(error) => Effect::Failed { job: id, error },
+                Ok(output) => { if let Some(host) = self.host.as_mut() { host.retire(output); } Effect::Stale(id) }
+            });
+        }
         if pending.id != id || pending.cancel.is_cancelled() {
             if matches!(pending.action, Action::Publish(_)) { host.published = None; host.publication_needed = self.active.is_some(); }
             host.retired.push(Box::new(reply)); host.after_save = None; host.continue_save = None;
@@ -443,7 +518,7 @@ impl Documents {
     fn accept(&mut self, action: Action, output: Output) -> Result<Effect, (HostError, Box<dyn Send>)> {
         match (action, output) {
             (Action::Open { target, blank, replace, base }, Output::Open(prepared)) => {
-                if base.is_some_and(|stamp| !self.matches(stamp) || self.active != Some(stamp.id)) || self.active().is_some_and(|tab| tab.view().editing) { return Err((HostError::Stale, Box::new(prepared))); }
+                if base.is_some_and(|stamp| !self.matches(stamp) || self.active != Some(stamp.id)) || self.active().is_some_and(|tab| tab.view().map_or(true, |view| view.editing)) { return Err((HostError::Stale, Box::new(prepared))); }
                 let id = if let Some(stamp) = replace {
                     if !self.matches(stamp) || !self.replaceable() { return Err((HostError::Stale, Box::new(prepared))); }
                     self.replace_tab(stamp.id, prepared)?;
@@ -454,11 +529,11 @@ impl Documents {
                 Ok(Effect::Opened(id))
             }
             (Action::Save { stamp, target }, Output::Saved { repairs, warning }) => {
-                let current = self.matches(stamp) && self.get(stamp.id).is_some_and(|tab| !tab.view().editing);
+                let current = self.matches(stamp) && self.get(stamp.id).is_some_and(|tab| tab.view().is_ok_and(|view| !view.editing));
                 let saved_at = self.host.as_ref().map(|host| (host.clock)());
                 if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == stamp.id) {
                     tab.target = Some(target);
-                    if current { tab.prepared.session.call_native("@markSaved", &[], &Value::Null).result.map_err(|error| (error.into(), Box::new(()) as Box<dyn Send>))?; tab.saved_at = saved_at; }
+                    if current { tab.prepared.session.get_mut().map_err(|error| (error.into(), Box::new(()) as Box<dyn Send>))?.call_native("@markSaved", &[], &Value::Null).result.map_err(|error| (error.into(), Box::new(()) as Box<dyn Send>))?; tab.saved_at = saved_at; }
                 }
                 if current {
                     match self.host.as_mut().and_then(|host| host.after_save.take()) {
@@ -476,15 +551,16 @@ impl Documents {
             }
             (Action::Import(stamp), Output::Open(prepared)) => {
                 if !self.matches_quiet(stamp) { return Err((HostError::Stale, Box::new(prepared))); }
-                let answer = self.call(stamp.id, "importFigure", &[prepared.session.report().clone()], &Value::Null)
-                    .map_err(HostError::Documents).and_then(|answer| answer.result.map_err(HostError::Edit));
+                let answer = prepared.session.get().map(|session| session.report().clone()).map_err(HostError::Documents)
+                    .and_then(|tree| self.call(stamp.id, "importFigure", &[tree], &Value::Null).map_err(HostError::Documents))
+                    .and_then(|answer| answer.result.map_err(HostError::Edit));
                 if let Some(host) = self.host.as_mut() { host.retired.push(Box::new(prepared)); }
                 answer.map(|_| Effect::Imported(stamp.id)).map_err(|error| (error, Box::new(()) as Box<dyn Send>))
             }
             (Action::Enter { stamp, type_id }, Output::Open(mut prepared)) => {
                 if !self.matches_quiet(stamp) { return Err((HostError::Stale, Box::new(prepared))); }
                 let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == stamp.id) else { return Err((HostError::Stale, Box::new(prepared))); };
-                prepared.session.set_outer_depth(tab.scopes.len() + 1);
+                if let Ok(session) = prepared.session.get_mut() { session.set_outer_depth(tab.scopes.len() + 1); }
                 let parent = std::mem::replace(&mut tab.prepared, prepared);
                 tab.scopes.push(Scope { parent, type_id }); tab.epoch = tab.epoch.wrapping_add(1);
                 if let Some(host) = self.host.as_mut() { host.publication_needed = true; }
@@ -511,7 +587,7 @@ impl Documents {
     fn begin_close(&mut self, id: DocumentId) -> Result<Effect, HostError> {
         self.activate(id)?;
         let tab = self.get(id).ok_or(DocumentsError::NotOpen)?;
-        if tab.view().editing { return Err(DocumentsError::FinishEdit.into()); }
+        if tab.view()?.editing { return Err(DocumentsError::FinishEdit.into()); }
         if !tab.dirty() { return self.finish_close(id); }
         let (stamp, name) = (Stamp::of(tab), tab.project_name().to_string());
         let host = self.host()?; let prompt = PromptId(host.next()?);
@@ -602,7 +678,7 @@ impl Documents {
         if self.active != Some(id) { return Err(DocumentsError::NotActive.into()); }
         let tab = self.get(id).ok_or(DocumentsError::NotOpen)?;
         let stamp = Stamp::of(tab);
-        let (document, name) = tab.prepared.session.movieclip_document(type_id)?;
+        let (document, name) = tab.prepared.session.get()?.movieclip_document(type_id)?;
         let host = self.host()?;
         host.start(Action::Enter { stamp, type_id }, Input::Tree(document, name)).map_err(|(error, input)| { host.retired.push(Box::new(input)); error })
     }
@@ -611,8 +687,8 @@ impl Documents {
         if self.active != Some(id) { return Err(DocumentsError::NotActive.into()); }
         let tab = self.get(id).ok_or(DocumentsError::NotOpen)?;
         if tab.scopes.is_empty() { return Ok(Effect::None); }
-        if !save || !tab.view().dirty { return self.finish_leave(id, None); }
-        let stamp = Stamp::of(tab); let tree = tab.records().clone();
+        if !save || !tab.view()?.dirty { return self.finish_leave(id, None); }
+        let stamp = Stamp::of(tab); let tree = tab.records()?.clone();
         let host = self.host()?;
         host.start(Action::Leave(stamp), Input::Leave { tree }).map_err(|(error, input)| { host.retired.push(Box::new(input)); error })
     }
@@ -620,7 +696,7 @@ impl Documents {
         let tab = self.tabs.iter_mut().find(|tab| tab.id == id).ok_or(DocumentsError::NotOpen)?;
         let scope = tab.scopes.last_mut().ok_or(HostError::Stale)?;
         if let Some((document, duration)) = edited {
-            scope.parent.session.call_native("publishMovieclipEdit", &[Value::Num(scope.type_id), document, Value::Num(duration)], &Value::Null).result?;
+            scope.parent.session.get_mut()?.call_native("publishMovieclipEdit", &[Value::Num(scope.type_id), document, Value::Num(duration)], &Value::Null).result?;
         }
         let scope = tab.scopes.pop().ok_or(HostError::Stale)?;
         let retired = std::mem::replace(&mut tab.prepared, scope.parent); tab.epoch = tab.epoch.wrapping_add(1);

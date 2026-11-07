@@ -17,6 +17,8 @@ pub struct NativeCall {
     pub clipboard: Option<(&'static str, Value)>,
     /// Unused D18 draws, in order, when the caller supplied a pool.
     pub draws_left: Option<Vec<(String, Value)>>,
+    /// Moved typed storage. Native hosts hand this to worker reclamation before returning the answer.
+    pub retired_clipboard: Option<crate::clipboards::RetiredClipboard>,
 }
 
 /// Borrowed view state and scalar history state. Nothing here owns a second selection or document.
@@ -34,6 +36,22 @@ pub struct SessionView<'a> {
 }
 
 impl Session {
+    /// Native long-work routing. The incremental browser bake entries are also excluded from
+    /// the synchronous native seam; native hosts dispatch the complete bake on its sole worker owner.
+    pub fn requires_worker(&self, method: &str, args: &[Value]) -> bool {
+        match method {
+            "bakeMovieclip" | "bakeMovieclipBegin" | "bakeMovieclipSample" | "bakeMovieclipPublish" | "bakeMovieclipCancel"
+            | "restartMovieclip" | "removeMovieclipRestart" | "breakApartMovieclip"
+            | "addMovieclipToNextKeyframes" | "placeMovieclip" | "splitMovieclip" => true,
+            "setMovieclipPlayback" => args.get(1).and_then(|value| value.get("allFrames")).is_some_and(Value::truthy),
+            "addFigure" => self.report().get("figure_types").and_then(Value::elements).is_some_and(|figures| {
+                let wanted = args.first().cloned().or_else(|| figures.iter().next().and_then(|figure| figure.get("figure_type_id").cloned()));
+                figures.iter().find(|figure| figure.get("figure_type_id") == wanted.as_ref())
+                    .is_some_and(|figure| figure.path(&["_styk", "movieclip"]).is_some_and(Value::truthy))
+            }),
+            _ => false,
+        }
+    }
     /// The same movieclip open operands used by the browser host, sharing the tree until the worker reserves its copy.
     pub fn movieclip_document(&self, type_id: f64) -> Result<(Value, String), EditError> {
         let refused = || EditError::Invalid("errors.editorMovieclips.chooseAMovieclip".into());
@@ -48,6 +66,8 @@ impl Session {
     /// Restore today's shared clipboards when a project becomes active, without serializing a read view.
     pub fn clipboard(&self, kind: &str) -> Option<Value> { self.editor.clipboard_wire(kind) }
 
+    pub fn take_clipboard(&mut self, kind: &str) -> Option<crate::clipboards::RetiredClipboard> { self.editor.take_clipboard(kind) }
+
     /// The nesting depth belongs to the document host; every command observes it, including null-view calls.
     pub fn set_outer_depth(&mut self, depth: usize) { self.editor.outer_depth = depth; }
 
@@ -57,21 +77,19 @@ impl Session {
     /// The command dispatcher, rollback, history and gesture grouping remain `Editor::call`'s.
     pub fn call_native(&mut self, method: &str, args: &[Value], view: &Value) -> NativeCall {
         let editor = &mut self.editor;
+        let displaced_kind = crate::clipboards::copied_kind(method)
+            .or_else(|| (method == "@setClipboard").then(|| args.first().and_then(Value::as_str)).flatten());
+        let mut retired_clipboard = displaced_kind.and_then(|kind| editor.take_clipboard(kind));
         let result = apply_view(editor, view).and_then(|()| {
             prepare_call(editor, view);
             editor.call(method, args)
         });
-        let ok = result.is_ok();
-        let copied = if ok { crate::clipboards::copied_kind(method).filter(|_| method == "sheetCopyFrames" || result.as_ref().is_ok_and(Value::truthy)) } else { None };
-        let clipboard = copied.and_then(|kind| editor.clipboard_answer(kind).map(|value| (kind, value)));
-        NativeCall {
-            result,
-            events: editor.take_events(),
-            drawing_forks: if ok { std::mem::take(&mut editor.drawing_forks) } else { Vec::new() },
-            drawing_retired: ok && std::mem::take(&mut editor.drawing_retired),
-            clipboard,
-            draws_left: editor.draw_pool.then(|| editor.draws.iter().cloned().collect()),
-        }
+        // A copy with no selection (or a refused copy) retains its old clipboard. A successful
+        // explicit null handoff clears it. Restore by move, never by cloning typed storage.
+        if displaced_kind.is_some_and(|kind| !editor.has_clipboard(kind))
+            && (method != "@setClipboard" || result.is_err())
+            && let Some(previous) = retired_clipboard.take() { previous.restore(editor); }
+        answer(editor, method, result, retired_clipboard)
     }
 
     pub fn view(&self) -> SessionView<'_> {
@@ -101,5 +119,48 @@ impl Session {
     /// Uses the editor's existing cache (tree identity, playhead and evaluation options).
     pub fn frame_records(&self) -> Result<Value, EditError> {
         self.editor.shown_frame()
+    }
+}
+
+fn answer(editor: &mut crate::Editor, method: &str, result: Result<Value, EditError>, retired_clipboard: Option<crate::clipboards::RetiredClipboard>) -> NativeCall {
+    let ok = result.is_ok();
+    let copied = if ok { crate::clipboards::copied_kind(method).filter(|_| method == "sheetCopyFrames" || result.as_ref().is_ok_and(Value::truthy)) } else { None };
+    let clipboard = copied.and_then(|kind| editor.clipboard_answer(kind).map(|value| (kind, value)));
+    NativeCall { result, events: editor.take_events(),
+        drawing_forks: if ok { std::mem::take(&mut editor.drawing_forks) } else { Vec::new() },
+        drawing_retired: ok && std::mem::take(&mut editor.drawing_retired), clipboard,
+        draws_left: editor.draw_pool.then(|| editor.draws.iter().cloned().collect()), retired_clipboard }
+}
+
+impl super::WorkerSession {
+    /// Run the complete native long command on the SAME exclusive owner. Checkpoints and rollback
+    /// use the existing timeline worker and publication heads; commit linearizes cancellation.
+    pub fn call_native_long(&mut self, method: &str, args: &[Value], view: &Value,
+        check: &mut dyn FnMut() -> Result<(), EditError>, commit: impl FnOnce() -> Result<(), EditError>,
+    ) -> Result<NativeCall, EditError> {
+        if !self.session.requires_worker(method, args) || matches!(method, "bakeMovieclipBegin" | "bakeMovieclipSample" | "bakeMovieclipPublish" | "bakeMovieclipCancel") {
+            return Err(EditError::Invalid("errors.editorSessions.chooseACompleteBackgroundCommand".into()));
+        }
+        self.session.editor.native_worker_transaction(|editor, check| {
+            let mut interrupted = None;
+            let mut checked = || match check() {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    let forwarded = match &error { EditError::Invalid(key) => EditError::Invalid(key.clone()), EditError::Unported(reason) => EditError::Unported(reason.clone()) };
+                    interrupted = Some(error);
+                    Err(forwarded)
+                }
+            };
+            let result = apply_view(editor, view).and_then(|()| {
+                prepare_call(editor, view);
+                if editor.sheet() || method == "bakeMovieclip" {
+                    let clock = editor.clock.unwrap_or(|| 0.0);
+                    let mut worker = crate::movieclip_planning::TimelineWorker { max_source_bytes: usize::MAX, check: &mut checked, progress: &mut |_| {}, clock };
+                    editor.call_movieclip_timeline_worker(method, args, &mut worker)
+                } else { editor.call_worker_checked(method, &Value::array(args.to_vec()), &mut checked) }
+            });
+            if let Some(error) = interrupted { return Err(error); }
+            Ok(answer(editor, method, result, None))
+        }, check, commit)
     }
 }

@@ -153,16 +153,6 @@ export function interfaceErrors(source, file) {
   return errors;
 }
 
-// Temporary integration exceptions, exact declarations only.
-// Reason: "K-doc moves these to `styk_core::engine`". No other re-export is approved here.
-const documentEngineExports = new Set([
-  'pub use styk_doc::Value;',
-  'pub use styk_edit::session::{NativeCall as CallAnswer, SessionView as DocumentView};',
-  'pub use styk_edit::{EditError, Selection};',
-  'pub use styk_engine::document::OpenError;',
-  'pub use styk_eval::doc::Document as TypedDocument;',
-].map(s => tokens(s).map(t => t.value).join(' ')));
-
 export function boundaryErrors(source, file) {
   if (vendorSource(file)) return [];
   const ts = productionTokens(source), errors = [];
@@ -188,7 +178,7 @@ export function boundaryErrors(source, file) {
     if(file.includes('/styk-core/') && !/\/src\/engine(?:\.rs|\/)/.test(file) && t.value==='pub' && ts[i+1]?.value==='use') {
       let end=i+2; while(end<ts.length && ts[end].value!==';')end++;
       const item=ts.slice(i,end+1);
-      if(item.some(t=>!t.string && engine.test(t.value)) && !(file==='engine/crates/styk-core/src/documents.rs' && documentEngineExports.has(item.map(t=>t.value).join(' ')))) errors.push(file+':'+t.line+': core-api: engine re-exports belong in styk_core::engine');
+      if(item.some(t=>!t.string && engine.test(t.value))) errors.push(file+':'+t.line+': core-api: engine re-exports belong in styk_core::engine');
     }
     if(platform && t.value==='pub') {
       let end=i+1; while(end<ts.length && ![';','{'].includes(ts[end].value))end++;

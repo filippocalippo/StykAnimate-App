@@ -16,7 +16,7 @@ pub fn run(counted: bool) {
     let mut documents = Documents::new();
     let id = documents.open(prepared).map_err(|(error, _)| error).unwrap();
     // Exercise the allocation-heavy frame, not the first-frame load default of the panel seam.
-    let tree = documents.get(id).unwrap().records();
+    let tree = documents.get(id).unwrap().records().unwrap();
     let index = tree.get("keyframes").unwrap().elements().unwrap().iter().enumerate()
         .max_by_key(|(_, frame)| frame.get("objects").and_then(Value::array_len).unwrap_or(0)).unwrap().0;
     let tick = styk_edit::timeline_rows(tree)[index].0;
@@ -25,7 +25,7 @@ pub fn run(counted: bool) {
     let selected: Vec<_> = frame.get("objects").unwrap().elements().unwrap().iter().map(|object| object.get("unique_id").unwrap().clone()).collect();
     let objects = selected.len(); assert!(objects > 1, "the measurement must exercise a dense frame");
     documents.call(id, "selectMany", &[Value::array(selected)], &Value::Null).unwrap().result.unwrap();
-    let original = documents.get(id).unwrap().records().clone();
+    let original = documents.get(id).unwrap().records().unwrap().clone();
     let options = styk_doc::json::parse(br#"{"fromStart":true}"#).unwrap();
     let mut timings = Vec::new();
     styk_alloc::reset_peak();
@@ -41,7 +41,7 @@ pub fn run(counted: bool) {
         }
         let elapsed = started.elapsed().as_secs_f64() * 1_000_000.0 / 120.0;
         documents.call(id, "cancelDrag", &[], &Value::Null).unwrap().result.unwrap();
-        assert!(documents.get(id).unwrap().records().same_node(&original), "each gesture cancellation restores the original head");
+        assert!(documents.get(id).unwrap().records().unwrap().same_node(&original), "each gesture cancellation restores the original head");
         if sample > 0 { timings.push(elapsed); }
     }
     assert_eq!(styk_alloc::live_bytes() > 0, counted);

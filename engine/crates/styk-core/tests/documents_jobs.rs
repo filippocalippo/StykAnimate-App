@@ -6,6 +6,7 @@ use styk_core::documents::*;
 use styk_engine::{Budgets, Engine};
 use styk_services::{Cancel, Job, SpawnError, Spawner};
 use styk_services::files::{FileError, FileFuture, FileTarget, Files};
+use styk_core::engine::Value;
 
 const STARTUP: &[u8] = include_bytes!("../../../tests/edit/startup.document.json");
 struct Threads;
@@ -112,4 +113,63 @@ fn dropping_an_owner_cancels_a_file_future_and_does_not_join_it() {
     entry.recv_timeout(Duration::from_secs(5)).unwrap();
     drop(docs);
     assert_ne!(drop_notice.recv_timeout(Duration::from_secs(5)).unwrap(), interface);
+}
+
+type ClockGate = (mpsc::SyncSender<std::thread::ThreadId>, mpsc::Receiver<()>);
+static BAKE_GATE: Mutex<Option<ClockGate>> = Mutex::new(None);
+fn bake_clock() -> f64 {
+    let gate = BAKE_GATE.lock().unwrap().take();
+    if let Some((entered, release)) = gate {
+        entered.send(std::thread::current().id()).unwrap();
+        release.recv_timeout(Duration::from_secs(10)).expect("test releases the worker clock");
+    }
+    0.0
+}
+
+#[test]
+fn bake_handoff_refuses_borrowed_reads_cancels_atomically_and_returns_the_same_history() {
+    let interface = std::thread::current().id();
+    let engine = Engine::new(|| 0.0, Budgets::for_device(None));
+    let prepared = PreparedDocument::open_bytes(&engine, Arc::from(STARTUP), "Bake.styk", &|| false).unwrap();
+    let mut docs = Documents::new();
+    let id = docs.open(prepared).map_err(|(error, _)| error).unwrap();
+    let options = styk_doc::json::parse(br#"{"start":0,"end":4,"replace":true,"name":"Bake clip"}"#).unwrap();
+    docs.call(id, "createMovieclip", &[options], &Value::Null).unwrap().result.unwrap();
+    let original = docs.get(id).unwrap().records().unwrap().clone();
+    let revision = docs.get(id).unwrap().revision();
+    let history = docs.get(id).unwrap().view().unwrap().history.undo;
+    let selection = docs.get(id).unwrap().selection().unwrap().clone();
+    // Use this clock on the prepared session as well as on subsequent worker opens.
+    // attach_host installs the clock for every already-open owner.
+    let (notice, notified) = mpsc::channel();
+    docs.attach_host(HostOptions { engine, spawner: Arc::new(Threads), files: Arc::new(styk_services::files::fake::MemoryFiles::default()),
+        startup: styk_doc::json::parse(STARTUP).unwrap(), clock: bake_clock, notify: Arc::new(move || { let _ = notice.send(()); }) }).unwrap();
+    let request = || Request::Call { document: id, method: "bakeMovieclip".into(), args: vec![], view: Value::Null };
+    let (entered, entry) = mpsc::sync_channel(1); let (release, gate) = mpsc::sync_channel(1);
+    *BAKE_GATE.lock().unwrap() = Some((entered, gate));
+    let Effect::Started(job) = docs.dispatch(request()).map_err(|(error, _)| error).unwrap() else { panic!("started") };
+    assert_ne!(entry.recv_timeout(Duration::from_secs(5)).unwrap(), interface);
+    let tab = docs.get(id).unwrap();
+    assert!(matches!(tab.view(), Err(DocumentsError::Busy)));
+    assert!(matches!(tab.records(), Err(DocumentsError::Busy)));
+    assert!(matches!(tab.selection(), Err(DocumentsError::Busy)));
+    assert!(tab.with_document(|_| ()).is_err()); assert!(tab.frame_records().is_err());
+    assert_eq!(tab.revision(), revision); assert!(tab.dirty());
+    assert!(matches!(docs.undo(id), Err(DocumentsError::Busy)));
+    assert!(matches!(docs.dispatch(Request::Close(id)), Err((HostError::Documents(DocumentsError::Busy), _))));
+    assert!(matches!(docs.dispatch(Request::Cancel(job)), Ok(Effect::Cancelled(_))));
+    release.send(()).unwrap();
+    assert!(matches!(next(&mut docs), Effect::Cancelled(_)));
+    assert!(docs.get(id).unwrap().records().unwrap().same_node(&original));
+    assert_eq!(docs.get(id).unwrap().view().unwrap().history.undo, history);
+    assert_eq!(docs.get(id).unwrap().selection().unwrap(), &selection);
+    while notified.try_recv().is_ok() {}
+    let Effect::Started(job) = docs.dispatch(request()).map_err(|(error, _)| error).unwrap() else { panic!("retry") };
+    let Effect::Called { answer, .. } = next(&mut docs) else { panic!("bake") }; answer.result.unwrap();
+    assert!(matches!(docs.dispatch(Request::Cancel(job)), Err((HostError::Stale, _))), "a completed command cannot be cancelled");
+    assert_eq!(docs.get(id).unwrap().view().unwrap().history.undo, history + 1);
+    let baked = docs.get(id).unwrap().records().unwrap().clone();
+    assert!(!baked.same_node(&original));
+    docs.undo(id).unwrap().result.unwrap(); assert_eq!(styk_doc::json::to_string(docs.get(id).unwrap().records().unwrap()), styk_doc::json::to_string(&original));
+    docs.redo(id).unwrap().result.unwrap(); assert_eq!(styk_doc::json::to_string(docs.get(id).unwrap().records().unwrap()), styk_doc::json::to_string(&baked));
 }

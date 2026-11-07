@@ -9,6 +9,21 @@ use styk_services::files::FileTarget;
 use styk_services::files::fake::{Failure, MemoryFiles};
 
 const STARTUP: &[u8] = include_bytes!("../../../tests/edit/startup.document.json");
+thread_local! {
+    static WATCH_DROPS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LARGEST_DROP: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+struct TrackDrops;
+// Only the test's interface thread opts in; worker reclamation is deliberately excluded.
+unsafe impl std::alloc::GlobalAlloc for TrackDrops {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 { unsafe { std::alloc::System.alloc(layout) } }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        let _ = WATCH_DROPS.try_with(|watch| { if watch.get() { let _ = LARGEST_DROP.try_with(|largest| largest.set(largest.get().max(layout.size()))); } });
+        unsafe { std::alloc::System.dealloc(ptr, layout) }
+    }
+}
+#[global_allocator]
+static ALLOCATOR: TrackDrops = TrackDrops;
 struct Threads;
 impl Spawner for Threads {
     fn spawn(&self, name: &str, job: Job) -> Result<(), SpawnError> {
@@ -169,13 +184,13 @@ fn every_native_and_pivot_format_opens_and_figure_files_import_with_undo() {
         ("../../tests/containers/movieclip-motion.stykmov", "movieclip.stykmov"),
     ] {
         let mut rig = Rig::new(); let id = rig.open("Base.styk");
-        let before = json::to_string(rig.docs.get(id).unwrap().records());
+        let before = json::to_string(rig.docs.get(id).unwrap().records().unwrap());
         rig.dispatch(Request::OpenBytes { bytes: fixture(path), name: name.into() });
         let effect = rig.next(); assert!(matches!(effect, Effect::Imported(found) if found == id), "{name}: {effect:?}");
         assert_eq!(rig.docs.tabs().len(), 1);
-        let after = json::to_string(rig.docs.get(id).unwrap().records()); assert_ne!(before, after);
-        rig.docs.undo(id).unwrap().result.unwrap(); assert_eq!(json::to_string(rig.docs.get(id).unwrap().records()), before);
-        rig.docs.redo(id).unwrap().result.unwrap(); assert_eq!(json::to_string(rig.docs.get(id).unwrap().records()), after);
+        let after = json::to_string(rig.docs.get(id).unwrap().records().unwrap()); assert_ne!(before, after);
+        rig.docs.undo(id).unwrap().result.unwrap(); assert_eq!(json::to_string(rig.docs.get(id).unwrap().records().unwrap()), before);
+        rig.docs.redo(id).unwrap().result.unwrap(); assert_eq!(json::to_string(rig.docs.get(id).unwrap().records().unwrap()), after);
     }
 }
 
@@ -183,12 +198,12 @@ fn movieclip(rig: &mut Rig) -> (DocumentId, f64) {
     let id = rig.open("Clips.styk");
     rig.dispatch(Request::OpenBytes { bytes: fixture("../../tests/containers/movieclip-motion.stykmov"), name: "Clip.stykmov".into() });
     assert!(matches!(rig.next(), Effect::Imported(_)));
-    let type_id = rig.docs.get(id).unwrap().records().get("figure_types").unwrap().elements().unwrap().iter()
+    let type_id = rig.docs.get(id).unwrap().records().unwrap().get("figure_types").unwrap().elements().unwrap().iter()
         .find(|figure| figure.path(&["_styk", "movieclip"]).is_some()).unwrap().get("figure_type_id").unwrap().as_f64().unwrap();
     (id, type_id)
 }
 fn clip_fps(rig: &Rig, id: DocumentId, type_id: f64) -> f64 {
-    rig.docs.get(id).unwrap().records().get("figure_types").unwrap().elements().unwrap().iter()
+    rig.docs.get(id).unwrap().records().unwrap().get("figure_types").unwrap().elements().unwrap().iter()
         .find(|figure| figure.get("figure_type_id").and_then(Value::as_f64) == Some(type_id)).unwrap()
         .path(&["_styk", "movieclip", "document", "fps"]).unwrap().as_f64().unwrap()
 }
@@ -196,14 +211,14 @@ fn clip_fps(rig: &Rig, id: DocumentId, type_id: f64) -> f64 {
 #[test]
 fn scopes_preserve_the_parent_and_publish_one_undo_entry_or_discard_the_child() {
     let mut rig = Rig::new(); let (id, type_id) = movieclip(&mut rig);
-    let before = json::to_string(rig.docs.get(id).unwrap().records());
+    let before = json::to_string(rig.docs.get(id).unwrap().records().unwrap());
     // A completion's old import owner may still be waiting for reclamation.
     rig.dispatch(Request::EnterMovieclip { document: id, type_id });
     assert!(matches!(rig.next(), Effect::ScopeChanged(_))); rig.fps(id, 17.0);
     rig.dispatch(Request::LeaveMovieclip { document: id, save: true });
     assert!(matches!(rig.next(), Effect::ScopeChanged(_)));
     assert_eq!(clip_fps(&rig, id, type_id), 17.0);
-    rig.docs.undo(id).unwrap().result.unwrap(); assert_eq!(json::to_string(rig.docs.get(id).unwrap().records()), before);
+    rig.docs.undo(id).unwrap().result.unwrap(); assert_eq!(json::to_string(rig.docs.get(id).unwrap().records().unwrap()), before);
     rig.docs.redo(id).unwrap().result.unwrap(); assert_eq!(clip_fps(&rig, id, type_id), 17.0);
 }
 
@@ -226,13 +241,55 @@ fn copied_figures_survive_switching_and_closing_the_source_tab() {
     let mut rig = Rig::new(); let source = rig.open("Source.styk");
     rig.call(source, "copySelection");
     let destination = rig.open("Destination.styk");
-    let before = json::to_string(rig.docs.get(destination).unwrap().records());
+    let before = json::to_string(rig.docs.get(destination).unwrap().records().unwrap());
     rig.call(destination, "pasteSelection");
-    assert_ne!(json::to_string(rig.docs.get(destination).unwrap().records()), before);
-    rig.docs.undo(destination).unwrap().result.unwrap(); assert_eq!(json::to_string(rig.docs.get(destination).unwrap().records()), before);
+    assert_ne!(json::to_string(rig.docs.get(destination).unwrap().records().unwrap()), before);
+    rig.docs.undo(destination).unwrap().result.unwrap(); assert_eq!(json::to_string(rig.docs.get(destination).unwrap().records().unwrap()), before);
     assert!(matches!(rig.dispatch(Request::Close(source)), Effect::Closed(_)));
     rig.call(destination, "pasteSelection");
-    assert_ne!(json::to_string(rig.docs.get(destination).unwrap().records()), before);
+    assert_ne!(json::to_string(rig.docs.get(destination).unwrap().records().unwrap()), before);
+}
+
+#[test]
+fn stale_typed_clipboards_are_reclaimed_off_the_interface_after_a_refused_paste() {
+    let mut rig = Rig::new();
+    let mut tree = json::parse(STARTUP).unwrap();
+    let mut figures: Vec<Value> = tree.get("figure_types").unwrap().elements().unwrap().iter().collect();
+    figures[0].make_obj().unwrap().set("clipboardPayload", Value::str(&"x".repeat(8 << 20)));
+    tree.make_obj().unwrap().set("figure_types", Value::array(figures));
+    rig.dispatch(Request::OpenDocument { document: tree, name: "A".into() });
+    let Effect::Opened(a) = rig.next() else { panic!("A") };
+    rig.call(a, "copySelection");
+    let b = rig.open("B.styk");
+    // Fractional playhead refuses a paste after @setClipboard installs the typed payload.
+    let view = json::parse(br#"{"tick":0.5,"frameIndex":0}"#).unwrap();
+    let answer = rig.docs.call(b, "pasteSelection", &[], &view).unwrap();
+    assert!(answer.result.is_err(), "the destination must retain no pasted document data");
+    let c = rig.open("C.styk");
+    WATCH_DROPS.with(|watch| watch.set(true));
+    rig.call(c, "copySelection");
+    assert!(matches!(rig.dispatch(Request::Close(a)), Effect::Closed(_)));
+    // A completed worker publication drains the prior reclamation batch before B pastes.
+    rig.dispatch(Request::Publish);
+    assert!(matches!(rig.next(), Effect::Published { .. }));
+    rig.docs.activate(b).unwrap();
+    let view = json::parse(br#"{"tick":0,"frameIndex":0}"#).unwrap();
+    let answer = rig.docs.call(b, "pasteSelection", &[], &view).unwrap();
+    WATCH_DROPS.with(|watch| watch.set(false));
+    answer.result.unwrap();
+    let largest = LARGEST_DROP.with(std::cell::Cell::get);
+    assert!(largest < 1 << 20, "large clipboard freed on interface: {largest} bytes");
+}
+
+#[test]
+fn long_movieclip_commands_cannot_enter_the_synchronous_seam() {
+    let mut rig = Rig::new(); let id = rig.open("Bake.styk");
+    for method in ["bakeMovieclip", "bakeMovieclipBegin", "bakeMovieclipSample", "bakeMovieclipPublish", "bakeMovieclipCancel", "restartMovieclip", "removeMovieclipRestart", "breakApartMovieclip", "addMovieclipToNextKeyframes", "placeMovieclip", "splitMovieclip"] {
+        assert!(matches!(rig.docs.call(id, method, &[], &Value::Null), Err(DocumentsError::AsyncRequired { entry: "Documents::dispatch(Request::Call)" })), "{method} entered the synchronous session");
+    }
+    let (clip, type_id) = movieclip(&mut rig);
+    assert!(matches!(rig.docs.call(clip, "addFigure", &[Value::Num(type_id)], &Value::Null), Err(DocumentsError::AsyncRequired { .. })));
+    assert!(matches!(rig.docs.call(clip, "setMovieclipPlayback", &[Value::Null, json::parse(br#"{"allFrames":true}"#).unwrap()], &Value::Null), Err(DocumentsError::AsyncRequired { .. })));
 }
 
 #[test]
@@ -288,6 +345,7 @@ fn an_edit_during_open_rejects_the_result_without_replacing_the_active_project()
 #[ignore = "requires the explicit old-versus-old oracle generated by native-documents-save-reference.test.mjs"]
 fn native_saved_bytes_equal_todays_after_edit_undo_and_redo() {
     let directory = std::env::var_os("STYK_NATIVE_SAVE_ORACLE").expect("set the oracle directory");
+    let mut compared = 0;
     for (case, source, name) in [
         ("startup", "../../tests/edit/startup.document.json", "Parity.styk"),
         ("channels", "../../tests/containers/project-channels.styk", "Parity.styk"),
@@ -297,9 +355,10 @@ fn native_saved_bytes_equal_todays_after_edit_undo_and_redo() {
         ("stick", "../styk-piv/tests/fixtures/figure-modern.stk", "figure.stk"),
         ("figure", "../../tests/containers/figure.stkz", "figure.stkz"),
         ("clip-import", "../../tests/containers/movieclip-motion.stykmov", "clip.stykmov"),
+        ("bake", "../../tests/containers/movieclip-motion.stykmov", "clip.stykmov"),
     ] {
         let mut rig = Rig::new();
-        let imported = matches!(case, "stick" | "figure" | "clip-import");
+        let imported = matches!(case, "stick" | "figure" | "clip-import" | "bake");
         if imported { rig.open("Parity.styk"); }
         rig.dispatch(Request::OpenBytes { bytes: fixture(source), name: name.into() });
         let id = match rig.next() { Effect::Opened(id) if !imported => id, Effect::Imported(id) if imported => id, effect => panic!("open {case}: {effect:?}") };
@@ -307,12 +366,15 @@ fn native_saved_bytes_equal_todays_after_edit_undo_and_redo() {
             match phase {
                 1 => {
                     if case == "movieclip" {
-                        let type_id = rig.docs.get(id).unwrap().records().get("figure_types").unwrap().elements().unwrap().iter()
+                        let type_id = rig.docs.get(id).unwrap().records().unwrap().get("figure_types").unwrap().elements().unwrap().iter()
                             .find(|figure| figure.path(&["_styk", "movieclip", "document"]).is_some()).unwrap().get("figure_type_id").unwrap().as_f64().unwrap();
                         rig.dispatch(Request::EnterMovieclip { document: id, type_id });
                         assert!(matches!(rig.next(), Effect::ScopeChanged(_)));
                     }
-                    rig.fps(id, 30.0);
+                    if case == "bake" {
+                        rig.dispatch(Request::Call { document: id, method: "bakeMovieclip".into(), args: vec![], view: Value::Null });
+                        let Effect::Called { answer, .. } = rig.next() else { panic!("bake completes") }; answer.result.unwrap();
+                    } else { rig.fps(id, 30.0); }
                 },
                 2 => { rig.docs.undo(id).unwrap().result.unwrap(); },
                 3 => { rig.docs.redo(id).unwrap().result.unwrap(); }, _ => {}
@@ -328,6 +390,9 @@ fn native_saved_bytes_equal_todays_after_edit_undo_and_redo() {
             let tab = reopened.get(reopened_id).unwrap();
             assert!(tab.frame_records().is_ok(), "{case}/{phase}: reopened frame");
             assert_eq!(tab.with_document(|doc| doc.fps).unwrap(), rig.docs.get(id).unwrap().with_document(|doc| doc.fps).unwrap());
+            compared += 1;
         }
     }
+    assert_eq!(compared, 36);
+    println!("NATIVE_SAVE_BYTES: {compared} exact comparisons and reopens passed");
 }

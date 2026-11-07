@@ -26,6 +26,7 @@ const cases = [
   ['stick', 'engine/crates/styk-piv/tests/fixtures/figure-modern.stk', 'figure.stk', true],
   ['figure', 'engine/tests/containers/figure.stkz', 'figure.stkz', true],
   ['clip-import', 'engine/tests/containers/movieclip-motion.stykmov', 'clip.stykmov', true],
+  ['bake', 'engine/tests/containers/movieclip-motion.stykmov', 'clip.stykmov', true],
 ];
 
 test('native document save oracle: old-versus-old is byte-identical after edits, undo and redo', {
@@ -63,7 +64,8 @@ test('native document save oracle: old-versus-old is byte-identical after edits,
               editor.setFPS(30);
               // performNativeSave leaves every scope before taking its project snapshot.
               editor.leaveMovieclip();
-            } else editor.setFPS(30);
+            } else if (id === 'bake') await editor.bakeMovieclip();
+            else editor.setFPS(30);
           }
           if (phase === 'undo') editor.undo();
           if (phase === 'redo') editor.redo();

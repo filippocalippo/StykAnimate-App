@@ -6,3 +6,6 @@ pub use styk_engine::document::OpenError;
 pub use styk_engine::{Budgets, Engine};
 pub use styk_eval::doc::Document as TypedDocument;
 pub use styk_engine::frame_builder::{Onion, Options as SceneOptions};
+#[cfg(not(target_arch = "wasm32"))]
+pub use styk_alloc::Counting;
+pub use styk_alloc::set_limit as set_memory_limit;

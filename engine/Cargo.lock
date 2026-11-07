@@ -2746,7 +2746,6 @@ dependencies = [
  "iced_runtime",
  "iced_winit",
  "pollster",
- "styk-alloc",
  "styk-core",
  "styk-design",
  "styk-devtools",
@@ -2895,6 +2894,7 @@ dependencies = [
  "styk-eval",
  "styk-formats",
  "styk-piv",
+ "styk-services",
  "zstd",
 ]
 
