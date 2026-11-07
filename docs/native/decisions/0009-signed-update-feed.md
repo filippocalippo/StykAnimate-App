@@ -1,4 +1,4 @@
-# N8. The native updater verifies a signed feed
+# N9. The native updater verifies a signed feed
 
 **Date:** 2026-11-07. **Status:** accepted.
 
