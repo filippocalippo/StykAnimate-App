@@ -1,45 +1,12 @@
-//! Names and ownership records for the update download, which every process of a user shares.
+//! Names for the update download, which every process of a user shares.
 //!
-//! All processes use `%LOCALAPPDATA%\StykAnimate\updates\<version>\`. One of them downloads at a time, under a lock file
-//! it creates exclusively; its partial file has a name no other process uses; the verified installer is renamed to a
+//! All processes use `%LOCALAPPDATA%\StykAnimate\updates\<version>\`. One of them downloads at a time, under a lock the
+//! kernel owns (the lock file, opened with no sharing: it is held exactly as long as its holder lives, so there is no
+//! staleness to judge and no lock to delete from under a live holder); its partial file has a name no other process uses; the verified installer is renamed to a
 //! name derived from its hash and is never written again. The file operations are in `styk_platform::windows::updates`.
 
 /// The name of the lock file in a version's staging folder.
 pub const LOCK_FILE: &str = "download.lock";
-
-/// A lock older than this is stale even if its process still exists (pids are reused).
-pub const LOCK_MAX_AGE_MS: u64 = 2 * 60 * 60 * 1000;
-
-/// Who holds the download lock, and since when.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LockRecord {
-    /// The process id.
-    pub pid: u32,
-    /// When it took the lock, in milliseconds since the Unix epoch.
-    pub since_ms: u64,
-}
-
-impl LockRecord {
-    /// The file's text.
-    pub fn to_text(&self) -> String {
-        format!("{} {}\n", self.pid, self.since_ms)
-    }
-
-    /// Reads a lock file; a damaged one is `None` (and counts as stale).
-    pub fn parse(text: &str) -> Option<LockRecord> {
-        let mut parts = text.split_whitespace();
-        let record = LockRecord { pid: parts.next()?.parse().ok()?, since_ms: parts.next()?.parse().ok()? };
-        parts.next().is_none().then_some(record)
-    }
-
-    /// Whether the lock may be taken over: its holder is gone, or it has been held for too long, or the file is damaged.
-    pub fn is_stale(record: Option<LockRecord>, now_ms: u64, alive: &dyn Fn(u32) -> bool) -> bool {
-        match record {
-            None => true,
-            Some(lock) => !alive(lock.pid) || now_ms.saturating_sub(lock.since_ms) > LOCK_MAX_AGE_MS,
-        }
-    }
-}
 
 /// The base64 alphabet's value of a character, for decoding a feed's hash.
 fn base64_value(byte: u8) -> Option<u8> {
@@ -149,18 +116,5 @@ mod tests {
         assert_ne!(part_name(10, 1), part_name(11, 1));
         assert_ne!(part_name(10, 1), part_name(10, 2));
         assert!(is_part_name(&part_name(10, 255)) && !is_part_name("Setup-1.2.0-0248642c44d611ba.exe") && !is_part_name(LOCK_FILE));
-    }
-
-    #[test]
-    fn a_lock_is_stale_when_its_holder_is_gone_old_or_unreadable() {
-        let lock = LockRecord { pid: 7, since_ms: 1_000 };
-        assert_eq!(LockRecord::parse(&lock.to_text()), Some(lock));
-        assert!(!LockRecord::is_stale(Some(lock), 2_000, &|_| true));
-        assert!(LockRecord::is_stale(Some(lock), 2_000, &|_| false), "the holder died");
-        assert!(LockRecord::is_stale(Some(lock), 1_000 + LOCK_MAX_AGE_MS + 1, &|_| true), "pid reuse cannot hold a lock forever");
-        assert!(LockRecord::is_stale(None, 0, &|_| true));
-        assert_eq!(LockRecord::parse("7"), None);
-        assert_eq!(LockRecord::parse("7 8 9"), None);
-        assert_eq!(LockRecord::parse("x y"), None);
     }
 }

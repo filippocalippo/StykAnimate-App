@@ -3,13 +3,13 @@
 use std::path::PathBuf;
 
 /// The command line's shape, shown with every parse error.
-pub const USAGE: &str = "usage: stykanimate [file] [--automation <script>] [--screenshot <png>] [--size WxH] [--scale <factor>] [--shell-check]";
+pub const USAGE: &str = "usage: stykanimate [file...] [--automation <script>] [--screenshot <png>] [--size WxH] [--scale <factor>] [--shell-check]";
 
 /// What the command line asked for.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Launch {
-    /// A document to open.
-    pub file: Option<PathBuf>,
+    /// The documents to open, in order (the Electron app opens every one it is given).
+    pub files: Vec<PathBuf>,
     /// A script of timestamped steps to run against the real interface.
     pub automation: Option<PathBuf>,
     /// Write the window's first complete frame to this PNG and exit.
@@ -58,10 +58,7 @@ impl Launch {
                 "--shell-check" => launch.shell_check = true,
                 other if other.starts_with("--") => return Err(LaunchError(format!("unknown option {other}"))),
                 _ => {
-                    if launch.file.is_some() {
-                        return Err(LaunchError("only one file can be opened".into()));
-                    }
-                    launch.file = Some(PathBuf::from(flag));
+                    launch.files.push(PathBuf::from(flag));
                 }
             }
         }
@@ -101,7 +98,7 @@ mod tests {
     #[test]
     fn every_option_is_read() {
         let launch = parse(&["project.styk", "--automation", "run.json", "--screenshot", "out.png", "--size", "1280x800", "--scale", "1.5"]).unwrap();
-        assert_eq!(launch.file, Some(PathBuf::from("project.styk")));
+        assert_eq!(launch.files, vec![PathBuf::from("project.styk")]);
         assert_eq!(launch.automation, Some(PathBuf::from("run.json")));
         assert_eq!(launch.screenshot, Some(PathBuf::from("out.png")));
         assert_eq!(launch.size, Some((1280, 800)));
@@ -113,12 +110,18 @@ mod tests {
         let launch = parse(&["--size=900X600", "--screenshot=a.png", "doc.piv"]).unwrap();
         assert_eq!(launch.size, Some((900, 600)));
         assert_eq!(launch.screenshot, Some(PathBuf::from("a.png")));
-        assert_eq!(launch.file, Some(PathBuf::from("doc.piv")));
+        assert_eq!(launch.files, vec![PathBuf::from("doc.piv")]);
     }
 
     #[test]
     fn a_path_with_an_equals_sign_is_still_a_file() {
-        assert_eq!(parse(&["C:/a=b/doc.piv"]).unwrap().file, Some(PathBuf::from("C:/a=b/doc.piv")));
+        assert_eq!(parse(&["C:/a=b/doc.piv"]).unwrap().files, vec![PathBuf::from("C:/a=b/doc.piv")]);
+    }
+
+    #[test]
+    fn several_files_are_all_kept_in_order_as_the_electron_app_does() {
+        let launch = parse(&["a.piv", "b.styk", "--size", "900x600", "c.stk"]).unwrap();
+        assert_eq!(launch.files, vec![PathBuf::from("a.piv"), PathBuf::from("b.styk"), PathBuf::from("c.stk")]);
     }
 
     #[test]
@@ -130,7 +133,6 @@ mod tests {
             (&["--scale", "0"][..], "positive number"),
             (&["--scale", "fast"][..], "positive number"),
             (&["--sizes", "1x1"][..], "unknown option --sizes"),
-            (&["a.piv", "b.piv"][..], "only one file"),
         ] {
             let error = parse(args).unwrap_err();
             assert!(error.0.contains(wanted), "{args:?}: {error}");

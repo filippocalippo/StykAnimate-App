@@ -42,11 +42,51 @@ where
     if let Some(link) = arguments.iter().find(|argument| looks_like_link(argument.as_ref())).and_then(|argument| parse_protocol(argument.as_ref())) {
         requests.push(LaunchRequest::Protocol(link));
     }
-    let files: Vec<PathBuf> = arguments.iter().map(AsRef::as_ref).filter(|argument| !looks_like_link(argument) && is_openable(argument)).take(MAX_FILES_PER_REQUEST).map(PathBuf::from).collect();
-    if !files.is_empty() {
-        requests.push(LaunchRequest::Files(files));
-    }
+    // Every file is kept, in order; a request carries at most MAX_FILES_PER_REQUEST, so a long list is several requests.
+    let files: Vec<PathBuf> = arguments.iter().map(AsRef::as_ref).filter(|argument| !looks_like_link(argument) && is_openable(argument)).map(PathBuf::from).collect();
+    requests.extend(files.chunks(MAX_FILES_PER_REQUEST).map(|chunk| LaunchRequest::Files(chunk.to_vec())));
     requests
+}
+
+/// The requests the program has received and the core has not yet taken, in arrival order.
+///
+/// It holds at most [`QUEUE_CAPACITY`]: it takes from the [`LaunchInbox`] only while it has room, so a flood of later
+/// starts stays in the inbox, whose full queue answers them `BUSY` instead of the program growing without bound.
+#[derive(Debug, Default)]
+pub struct PendingRequests {
+    queue: VecDeque<LaunchRequest>,
+}
+
+impl PendingRequests {
+    /// Starts with what the command line asked for (up to the bound).
+    pub fn new(initial: Vec<LaunchRequest>) -> PendingRequests {
+        PendingRequests { queue: initial.into_iter().take(QUEUE_CAPACITY).collect() }
+    }
+
+    /// Takes requests from the inbox while there is room; true if any arrived.
+    pub fn fill_from(&mut self, inbox: &LaunchInbox) -> bool {
+        let before = self.queue.len();
+        while self.queue.len() < QUEUE_CAPACITY {
+            let Some(request) = inbox.pop() else { break };
+            self.queue.push_back(request);
+        }
+        self.queue.len() > before
+    }
+
+    /// The oldest request, for the core.
+    pub fn pop(&mut self) -> Option<LaunchRequest> {
+        self.queue.pop_front()
+    }
+
+    /// How many are waiting.
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    /// Whether none are waiting.
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
 }
 
 /// The queue was full: the request was not taken and the sender must be told.
@@ -123,12 +163,37 @@ mod tests {
     }
 
     #[test]
-    fn a_hundred_files_are_limited_to_the_request_bound() {
-        let args: Vec<String> = (0..100).map(|n| format!("f{n}.piv")).collect();
-        match &launch_requests(&args)[0] {
-            LaunchRequest::Files(files) => assert_eq!(files.len(), MAX_FILES_PER_REQUEST),
-            other => panic!("{other:?}"),
+    fn more_files_than_a_request_holds_become_several_requests_and_none_is_dropped() {
+        let args: Vec<String> = (0..40).map(|n| format!("f{n}.piv")).collect();
+        let total: usize = launch_requests(&args).iter().map(|r| match r { LaunchRequest::Files(files) => files.len(), _ => 0 }).sum();
+        assert_eq!(total, 40);
+    }
+
+    #[test]
+    fn the_core_side_queue_is_bounded_and_the_rest_stays_in_the_inbox() {
+        let inbox = LaunchInbox::new();
+        for n in 0..QUEUE_CAPACITY {
+            inbox.push(LaunchRequest::Files(vec![format!("{n}.piv").into()])).unwrap();
         }
+        let mut pending = PendingRequests::new(vec![]);
+        assert!(pending.fill_from(&inbox));
+        assert_eq!((pending.len(), inbox.len()), (QUEUE_CAPACITY, 0));
+        // Nobody takes from `pending`; later starts pile up in the inbox, which then refuses them (BUSY).
+        for n in 0..QUEUE_CAPACITY + 10 {
+            let _ = inbox.push(LaunchRequest::Files(vec![format!("later{n}.piv").into()]));
+        }
+        assert!(!pending.fill_from(&inbox), "full: nothing more is taken");
+        assert_eq!((pending.len(), inbox.len()), (QUEUE_CAPACITY, QUEUE_CAPACITY));
+        assert_eq!(inbox.push(LaunchRequest::Protocol(ProtocolLink::Open)), Err(QueueFull), "the inbox refuses, visibly");
+        assert_eq!(pending.pop(), Some(LaunchRequest::Files(vec!["0.piv".into()])));
+        assert!(pending.fill_from(&inbox), "one slot freed: one request taken");
+        assert_eq!(pending.len(), QUEUE_CAPACITY);
+    }
+
+    #[test]
+    fn the_command_lines_own_requests_are_bounded_too() {
+        let many: Vec<LaunchRequest> = (0..QUEUE_CAPACITY + 5).map(|n| LaunchRequest::Files(vec![format!("{n}.piv").into()])).collect();
+        assert_eq!(PendingRequests::new(many).len(), QUEUE_CAPACITY);
     }
 
     #[test]

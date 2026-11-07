@@ -56,12 +56,15 @@ pub trait Stage {
 /// What a check ended with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CheckOutcome {
-    /// A verified update is ready at this path.
+    /// A verified update is staged at this path. The staged file is only a candidate until the restart: the program opens
+    /// it then, holds it, and verifies it again through that handle (`file` says what it must be).
     Ready {
-        /// The verified installer.
+        /// The staged installer.
         installer: PathBuf,
         /// Its version.
         version: String,
+        /// Its size and SHA-512, from the signed feed.
+        file: FileInfo,
     },
     /// Nothing newer.
     Current,
@@ -154,7 +157,7 @@ pub fn run_check(
         Ok(installer) => {
             state.downloaded(&info.version);
             notify(state);
-            CheckOutcome::Ready { installer, version: info.version }
+            CheckOutcome::Ready { installer, version: info.version.clone(), file: file.clone() }
         }
         Err(StageError::Cancelled) => fail(state, notify, "cancelled".into()),
         Err(StageError::Io(why)) | Err(StageError::Mismatch(why)) => fail(state, notify, why),
@@ -246,7 +249,10 @@ mod tests {
     fn a_newer_signed_release_is_downloaded_and_ready() {
         let st = stage(Ok(PathBuf::from("staged/Setup-1.2.0.exe")));
         let r = run("1.1.0", &feed("1.2.0", "v1.2.0"), true, &st, &|| 1_000_000);
-        assert_eq!(r.outcome, CheckOutcome::Ready { installer: PathBuf::from("staged/Setup-1.2.0.exe"), version: "1.2.0".into() });
+        assert_eq!(
+            r.outcome,
+            CheckOutcome::Ready { installer: PathBuf::from("staged/Setup-1.2.0.exe"), version: "1.2.0".into(), file: FileInfo { name: "Setup 1.2.0.exe".into(), sha512: SHA.into(), size: 1000 } }
+        );
         assert_eq!(r.state.status, UpdateStatus::Ready);
         assert_eq!(r.seen.first(), Some(&UpdateStatus::Checking));
         assert_eq!(st.calls.borrow()[0], ("v1.2.0".into(), "1.2.0".into(), "Setup 1.2.0.exe".into()), "the installer is asked for against the feed's own tag");

@@ -225,6 +225,99 @@ fn the_setup_accepts_the_updaters_arguments_and_nothing_in_it_is_signed_or_publi
     }
 }
 
+fn setup_command(setup: &Path, arguments: &[&str], install_dir: &Path) -> Command {
+    let mut command = Command::new(setup);
+    command.args(arguments).raw_arg(format!("/D={}", install_dir.display()));
+    command
+}
+
+fn native_setup(sandbox: &Sandbox, name: &str, version: &str) -> PathBuf {
+    let files = sandbox.dir.join(format!("native-files-{name}"));
+    lay_out(&files, &[("LICENSE", "license")]);
+    let setup = sandbox.dir.join(format!("Native-Setup-{name}.exe"));
+    let mut extra = Vec::new();
+    if let Some(plugins) = plugins() {
+        extra.push(format!("/DPLUGIN_DIR={}", plugins.display()));
+    }
+    build(sandbox, &repo_root().join("packaging/windows/installer.nsi"), version, &files, &setup, &extra);
+    setup
+}
+
+fn electron_install(sandbox: &Sandbox, at: &Path) {
+    let files = sandbox.dir.join("electron-files");
+    lay_out(&files, &[("resources\\app.asar", "old"), ("chrome_100_percent.pak", "old")]);
+    let setup = sandbox.dir.join("Electron-Setup.exe");
+    build(sandbox, &repo_root().join("packaging/windows/test/electron-fixture.nsi"), "1.1.0", &files, &setup, &[]);
+    run_setup(&setup, &["/S"], at);
+}
+
+#[test]
+#[ignore = "builds and runs Setups with makensis (sandboxed); run with --ignored"]
+fn an_upgrade_into_another_folder_removes_the_old_install_where_it_is_and_never_empties_the_new_folder() {
+    let sandbox = Sandbox::new("moved");
+    let (old, new) = (sandbox.dir.join("Programs").join("A"), sandbox.dir.join("Programs").join("B"));
+    let guid_key = format!("{UNINSTALL}\\{APP_GUID}");
+    electron_install(&sandbox, &old);
+    let setup = native_setup(&sandbox, "moved", "2.0.0");
+
+    // 1. The new folder holds someone's files: the Setup refuses, and neither folder is touched.
+    std::fs::create_dir_all(&new).unwrap();
+    std::fs::write(new.join("keep.txt"), "somebody's file").unwrap();
+    let refused = setup_command(&setup, &["--updated", "/S"], &new).status().unwrap();
+    assert!(!refused.success(), "a non-empty folder that is not ours is refused");
+    assert_eq!(std::fs::read_to_string(new.join("keep.txt")).unwrap(), "somebody's file", "the folder's own files were not deleted");
+    assert!(old.join("resources").join("app.asar").exists(), "the old install was not touched by the refused Setup");
+    assert_eq!(sandbox.registry.read_text(&guid_key, "DisplayVersion").as_deref(), Some("1.1.0"));
+
+    // 2. An empty new folder works: the old install goes from where it is, the new one lands in the new folder.
+    std::fs::remove_file(new.join("keep.txt")).unwrap();
+    run_setup(&setup, &["--updated", "/S"], &new);
+    assert!(!old.join("resources").exists() && !old.join("chrome_100_percent.pak").exists(), "the old install's files are gone from the old folder");
+    assert!(new.join("StykAnimate.exe").exists() && new.join("Uninstall StykAnimate.exe").exists());
+    assert_eq!(sandbox.registry.read_text(&guid_key, "InstallLocation").as_deref(), Some(new.to_str().unwrap()));
+    assert_eq!(sandbox.registry.read_text(&guid_key, "DisplayVersion").as_deref(), Some("2.0.0"));
+    // The link the Electron app registered at run time now opens the new program.
+    assert_eq!(
+        sandbox.registry.read_text("Software\\Classes\\stykanimate\\shell\\open\\command", "").as_deref(),
+        Some(format!("\"{}\" \"%1\"", new.join("StykAnimate.exe").display()).as_str()),
+        "the link's command was rewritten for the new install"
+    );
+}
+
+#[test]
+#[ignore = "builds and runs Setups with makensis (sandboxed); run with --ignored"]
+fn a_fresh_install_registers_the_link_and_uninstalling_removes_it() {
+    let sandbox = Sandbox::new("link");
+    let install = sandbox.dir.join("Programs").join("StykAnimate");
+    let setup = native_setup(&sandbox, "link", "2.0.0");
+    run_setup(&setup, &["/S", "/currentuser"], &install);
+    let key = "Software\\Classes\\stykanimate";
+    assert_eq!(sandbox.registry.read_text(key, "").as_deref(), Some("URL:stykanimate"));
+    assert_eq!(sandbox.registry.read_text(key, "URL Protocol").as_deref(), Some(""));
+    assert_eq!(sandbox.registry.read_text(&format!("{key}\\shell\\open\\command"), "").as_deref(), Some(format!("\"{}\" \"%1\"", install.join("StykAnimate.exe").display()).as_str()));
+    let mut uninstall = Command::new(install.join("Uninstall StykAnimate.exe"));
+    uninstall.arg("/currentuser").arg("/S").raw_arg(format!("_?={}", install.display()));
+    run(&mut uninstall, "the uninstaller");
+    assert!(!sandbox.registry.key_exists(key), "the link is released on uninstall");
+}
+
+#[test]
+#[ignore = "builds and runs Setups with makensis (sandboxed); run with --ignored"]
+fn two_setups_started_together_do_not_both_work_on_the_install() {
+    let sandbox = Sandbox::new("twice-at-once");
+    let install = sandbox.dir.join("Programs").join("StykAnimate");
+    electron_install(&sandbox, &install);
+    let setup = native_setup(&sandbox, "race", "2.0.0");
+    let mut first = setup_command(&setup, &["--updated", "/S"], &install).spawn().unwrap();
+    std::thread::sleep(Duration::from_millis(400));
+    let second = setup_command(&setup, &["--updated", "/S"], &install).status().unwrap();
+    let first = first.wait().unwrap();
+    assert_eq!(second.code(), Some(4), "the second Setup refuses: another Setup is working on the install");
+    assert!(first.success(), "the first Setup is not disturbed");
+    assert_eq!(sandbox.registry.read_text(&format!("{UNINSTALL}\\{APP_GUID}"), "DisplayVersion").as_deref(), Some("2.0.0"));
+    assert!(install.join("StykAnimate.exe").exists() && !install.join("resources").exists());
+}
+
 /// A release server for one version: the "latest" alias redirects to the tag; the feed, its signature and the Setup are
 /// files of the tag.
 fn serve_release(tag: &'static str, files: Vec<(String, Vec<u8>)>) -> (String, std::sync::Arc<std::sync::atomic::AtomicBool>) {
@@ -304,12 +397,12 @@ fn the_updater_finds_downloads_verifies_and_runs_the_setup_end_to_end() {
         &|| false,
         &mut |_| {},
     );
-    let CheckOutcome::Ready { installer, version } = outcome else { panic!("the check ended with {outcome:?}") };
+    let CheckOutcome::Ready { installer, version, file } = outcome else { panic!("the check ended with {outcome:?}") };
     assert_eq!((version.as_str(), state.status), ("2.0.0", UpdateStatus::Ready));
     println!("check, download and verify of a {size} byte Setup took {:?}", started.elapsed());
 
     // The restart: the verified file is held, the plan is a current-user install (no elevation), the Setup runs.
-    let held = HeldInstaller::open(&installer).unwrap();
+    let held = HeldInstaller::open_verified(&installer, &file, &|| false).expect("the staged file is the one the feed describes");
     let plan = install_plan(InstallScope::CurrentUser, false, install.to_str().unwrap());
     assert!(!plan.elevate);
     assert_eq!(launch_installer(&held, &plan), Handoff::Started);

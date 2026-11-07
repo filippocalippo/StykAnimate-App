@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use styk_services::updates::feed::{Endpoint, FileInfo, MAX_FEED};
 use styk_services::updates::flow::{FeedSource, FetchError, FetchedFeed, Integrity, Stage, StageError};
 use styk_services::updates::plan::{Handoff, InstallPlan, handoff_from_error};
-use styk_services::updates::staging::{self, LOCK_FILE, LockRecord};
+use styk_services::updates::staging::{self, LOCK_FILE};
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, WAIT_TIMEOUT};
 use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject};
 use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
@@ -41,7 +41,11 @@ impl Integrity for Ed25519Integrity {
 
 /// SHA-512 of a file, base64, as the feed writes it. Stops with `None` if `cancelled` says so.
 pub fn sha512_base64(path: &Path, cancelled: &dyn Fn() -> bool) -> std::io::Result<Option<String>> {
-    let mut file = File::open(path)?;
+    hash_reader(&mut File::open(path)?, cancelled)
+}
+
+/// SHA-512 of everything a reader yields, base64; `None` if cancelled.
+fn hash_reader(file: &mut impl Read, cancelled: &dyn Fn() -> bool) -> std::io::Result<Option<String>> {
     let mut hasher = Sha512::new();
     let mut buffer = vec![0u8; 1 << 20];
     loop {
@@ -155,39 +159,26 @@ pub struct HttpStage {
     pub endpoint: Endpoint,
 }
 
-struct LockGuard(PathBuf);
+/// The download lock: the lock file opened with no sharing at all, and deleted when the handle closes. The kernel owns
+/// it: it is held exactly as long as its holder lives (a crashed holder's lock is gone with the process), nobody can
+/// take it from a live holder, and there is no age or process id to judge, no lock to delete, no takeover to race.
+struct LockGuard(#[allow(dead_code)] File);
 
-impl Drop for LockGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-
-/// Takes the download lock. The record is written to a private file first and linked into place, so the lock is never
-/// visible half written (a reader that finds it empty would take it for abandoned); a volume without hard links falls
-/// back to creating it in place.
+/// Takes the download lock, or `None` while another holder has it.
 fn try_lock(path: &Path) -> std::io::Result<Option<LockGuard>> {
-    let record = LockRecord { pid: std::process::id(), since_ms: now_ms() }.to_text();
-    let private = path.with_file_name(format!("download.{}.{:x}.tmp", std::process::id(), now_ms()));
-    fs::write(&private, &record)?;
-    let linked = fs::hard_link(&private, path);
-    let _ = fs::remove_file(&private);
-    match linked {
-        Ok(()) => Ok(Some(LockGuard(path.to_path_buf()))),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
-        Err(_) => match OpenOptions::new().write(true).create_new(true).open(path) {
-            Ok(mut file) => {
-                file.write_all(record.as_bytes())?;
-                Ok(Some(LockGuard(path.to_path_buf())))
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
-            Err(e) => Err(e),
-        },
+    const GENERIC_WRITE_AND_DELETE: u32 = 0x4000_0000 | 0x0001_0000;
+    const FILE_FLAG_DELETE_ON_CLOSE: u32 = 0x0400_0000;
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    match OpenOptions::new().write(true).create(true).access_mode(GENERIC_WRITE_AND_DELETE).share_mode(0).custom_flags(FILE_FLAG_DELETE_ON_CLOSE).open(path) {
+        Ok(mut file) => {
+            // For a person looking at the folder; nothing reads it.
+            let _ = file.write_all(format!("{}\n", std::process::id()).as_bytes());
+            Ok(Some(LockGuard(file)))
+        }
+        Err(e) if e.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => Ok(None),
+        Err(e) => Err(e),
     }
 }
-
-/// How long an unreadable lock file is given before it counts as abandoned.
-const UNREADABLE_LOCK_GRACE: Duration = Duration::from_secs(30);
 
 fn stage_io(e: impl std::fmt::Display) -> StageError {
     StageError::Io(e.to_string())
@@ -321,12 +312,7 @@ impl Stage for HttpStage {
                     return self.download(&dir, tag, file, &final_path, progress, cancelled);
                 }
                 None => {
-                    let record = fs::read_to_string(&lock_path).ok().and_then(|text| LockRecord::parse(&text));
-                    let fresh_unreadable = record.is_none() && fs::metadata(&lock_path).and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|age| age < UNREADABLE_LOCK_GRACE));
-                    if !fresh_unreadable && LockRecord::is_stale(record, now_ms(), &process_alive) {
-                        let _ = fs::remove_file(&lock_path);
-                        continue;
-                    }
+                    // Another process holds the lock, and is alive (a dead one holds nothing): wait for its result.
                     if started.elapsed() > Duration::from_secs(3 * 60 * 60) {
                         return Err(StageError::Io("another process has been downloading the update for too long".into()));
                     }
@@ -337,18 +323,27 @@ impl Stage for HttpStage {
     }
 }
 
-/// The verified installer, held open without write or delete sharing until the installer has started, so it cannot be
-/// replaced between the check and the launch.
+/// The installer, held open without write or delete sharing, from the moment it is verified until the installer has
+/// started. The file is opened first and checked through that very handle, so what was checked is what is held, and
+/// nobody can replace it between the check and the launch (a staged file that waited in `ready` is only a candidate).
 pub struct HeldInstaller {
     path: PathBuf,
     _file: File,
 }
 
 impl HeldInstaller {
-    /// Opens the staged file for reading, sharing only reads.
-    pub fn open(path: &Path) -> std::io::Result<HeldInstaller> {
-        let file = OpenOptions::new().read(true).share_mode(1).open(path)?; // FILE_SHARE_READ
-        Ok(HeldInstaller { path: path.to_path_buf(), _file: file })
+    /// Opens the staged file, sharing only reads, and checks its size and SHA-512 against the signed feed's through the
+    /// handle it holds. Fails if the file is being written, is not what the feed says, or cannot be read.
+    pub fn open_verified(path: &Path, expected: &FileInfo, cancelled: &dyn Fn() -> bool) -> Result<HeldInstaller, StageError> {
+        let mut file = OpenOptions::new().read(true).share_mode(1).open(path).map_err(stage_io)?; // FILE_SHARE_READ
+        if file.metadata().map_err(stage_io)?.len() != expected.size {
+            return Err(StageError::Mismatch("the staged installer is not the size the feed says".into()));
+        }
+        match hash_reader(&mut file, cancelled).map_err(stage_io)? {
+            None => Err(StageError::Cancelled),
+            Some(hash) if hash != expected.sha512 => Err(StageError::Mismatch("the staged installer is not the one the feed describes".into())),
+            Some(_) => Ok(HeldInstaller { path: path.to_path_buf(), _file: file }),
+        }
     }
 
     /// The file's path.
@@ -628,14 +623,15 @@ mod tests {
     }
 
     #[test]
-    fn a_lock_left_by_a_dead_process_is_taken_over() {
+    fn a_lock_file_left_behind_by_a_dead_process_holds_nothing() {
         let data = body(500_000);
         let info = file_info("Setup.exe", &data);
         let server = serve(vec![("Setup.exe".into(), data.clone())]);
         let root = temp("stale");
         let dir = root.join("1.2.0");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join(LOCK_FILE), LockRecord { pid: 4_000_000_000, since_ms: now_ms() }.to_text()).unwrap();
+        fs::write(dir.join(LOCK_FILE), "4000000000 1
+").unwrap();
         let path = stage(&server, &root).obtain("v1.2.0", "1.2.0", &info, &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(fs::read(path).unwrap(), data);
         let _ = fs::remove_dir_all(root);
@@ -649,7 +645,7 @@ mod tests {
         let root = temp("held");
         let dir = root.join("1.2.0");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join(LOCK_FILE), LockRecord { pid: std::process::id(), since_ms: now_ms() }.to_text()).unwrap();
+        let _holder = try_lock(&dir.join(LOCK_FILE)).unwrap().expect("the lock was free");
         let started = Instant::now();
         let polls = Cell::new(0);
         let outcome = stage(&server, &root).obtain("v1.2.0", "1.2.0", &info, &mut |_, _| {}, &|| {
@@ -663,23 +659,27 @@ mod tests {
     }
 
     #[test]
-    fn a_lock_that_is_still_being_written_is_not_mistaken_for_an_abandoned_one() {
-        // The race the four-caller test found: a reader saw the lock file before its record was written, took the empty
-        // record for a dead holder, removed the lock and downloaded alongside the real holder.
+    fn a_lock_whose_holder_is_alive_is_never_taken_however_old_its_record_or_odd_its_pid() {
+        // The holder is alive: it has the lock file open. Its record says it started three hours ago, and names a pid that
+        // does not exist. Neither age nor pid is evidence of death; only the holder's handle is.
         let data = body(1000);
         let info = file_info("Setup.exe", &data);
         let server = serve(vec![("Setup.exe".into(), data)]);
-        let root = temp("empty-lock");
+        let root = temp("live-holder");
         let dir = root.join("1.2.0");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join(LOCK_FILE), "").unwrap();
+        fs::write(dir.join(LOCK_FILE), "4000000000 1
+").unwrap();
+        let holder = OpenOptions::new().read(true).open(dir.join(LOCK_FILE)).unwrap();
         let polls = Cell::new(0);
         let outcome = stage(&server, &root).obtain("v1.2.0", "1.2.0", &info, &mut |_, _| {}, &|| {
             polls.set(polls.get() + 1);
             polls.get() > 5
         });
-        assert_eq!(outcome, Err(StageError::Cancelled));
-        assert_eq!(server.file_hits.load(Ordering::SeqCst), 0);
+        assert_eq!(outcome, Err(StageError::Cancelled), "the caller waited");
+        assert_eq!(server.file_hits.load(Ordering::SeqCst), 0, "nothing was downloaded alongside the holder");
+        assert!(dir.join(LOCK_FILE).exists(), "the holder's lock was not deleted");
+        drop(holder);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -702,12 +702,35 @@ mod tests {
         let dir = temp("held-file");
         let path = dir.join("Setup.exe");
         fs::write(&path, b"MZ").unwrap();
-        let held = HeldInstaller::open(&path).unwrap();
+        let info = file_info("Setup.exe", b"MZ");
+        let held = HeldInstaller::open_verified(&path, &info, &|| false).unwrap();
         assert!(fs::remove_file(&path).is_err(), "deleting the held installer is refused");
         assert!(OpenOptions::new().write(true).open(&path).is_err(), "writing to it is refused");
         assert!(File::open(&path).is_ok(), "reading it (the installer's own access) is allowed");
         drop(held);
         assert!(fs::remove_file(&path).is_ok());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_staged_file_replaced_while_the_update_waited_is_not_held_or_run() {
+        let dir = temp("swapped");
+        let path = dir.join("Setup.exe");
+        let good = body(100_000);
+        let info = file_info("Setup.exe", &good);
+        fs::write(&path, &good).unwrap();
+        assert!(HeldInstaller::open_verified(&path, &info, &|| false).is_ok(), "the file the feed describes is accepted");
+        // Same size, other bytes: replaced after it was verified and staged.
+        let mut evil = good.clone();
+        evil[5_000] ^= 0xff;
+        fs::write(&path, &evil).unwrap();
+        assert!(matches!(HeldInstaller::open_verified(&path, &info, &|| false), Err(StageError::Mismatch(_))), "the swapped file is refused");
+        // Another size.
+        fs::write(&path, &good[..good.len() - 1]).unwrap();
+        assert!(matches!(HeldInstaller::open_verified(&path, &info, &|| false), Err(StageError::Mismatch(_))));
+        // Gone.
+        fs::remove_file(&path).unwrap();
+        assert!(HeldInstaller::open_verified(&path, &info, &|| false).is_err());
         let _ = fs::remove_dir_all(dir);
     }
 

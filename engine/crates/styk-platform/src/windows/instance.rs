@@ -18,17 +18,20 @@ use windows_sys::Win32::Foundation::{
     WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
-use windows_sys::Win32::Security::{GetTokenInformation, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser};
-use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, FlushFileBuffers, OPEN_EXISTING, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile};
+use windows_sys::Win32::Security::{EqualSid, GetTokenInformation, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser};
+use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, OPEN_EXISTING, PIPE_ACCESS_DUPLEX, ReadFile, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, WriteFile};
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeServerProcessId, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT, WaitNamedPipeW};
-use windows_sys::Win32::System::Threading::{CreateEventW, CreateMutexW, GetCurrentProcess, OpenProcessToken, SetEvent, WaitForMultipleObjects};
+use windows_sys::Win32::System::Threading::{CreateEventW, CreateMutexW, GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION, SetEvent, WaitForMultipleObjects};
 use windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
 
 use super::wide;
 
 /// The longest one read or write on the pipe may take, on either side.
 pub const IO_DEADLINE: Duration = Duration::from_secs(2);
+
+/// How long the server waits, after answering, for the client to take the answer and close.
+const ACK_GRACE: Duration = Duration::from_millis(1000);
 
 /// An owned kernel handle.
 struct Owned(HANDLE);
@@ -287,11 +290,13 @@ fn serve(first: Owned, name: Vec<u16>, sddl: Vec<u16>, inbox: Arc<LaunchInbox>, 
         let answer = receive(instance.0, &inbox, shutdown.0);
         if let Some(bytes) = answer.as_ref() {
             let _ = write_all(instance.0, bytes, Instant::now() + IO_DEADLINE, Some(shutdown.0));
-            // SAFETY: lets the client read the answer before the instance goes.
-            unsafe { FlushFileBuffers(instance.0) };
             if *bytes == ANSWER_OK {
                 wake();
             }
+            // Let the client read its answer (it closes when it has): disconnecting first would discard it. A client that
+            // never reads or closes is given ACK_GRACE, not forever, and shutdown ends the wait too.
+            let mut closed = [0u8; 1];
+            let _ = read_exact(instance.0, &mut closed, Instant::now() + ACK_GRACE, Some(shutdown.0));
         }
         // SAFETY: ends this client's connection; the instance is closed by its owner.
         unsafe { DisconnectNamedPipe(instance.0) };
@@ -313,6 +318,39 @@ fn receive(handle: HANDLE, inbox: &LaunchInbox, shutdown: HANDLE) -> Option<&'st
     }
 }
 
+/// Whether the process with this id runs as the current user. Anything that cannot be established says no: a pipe
+/// server that cannot be identified is not trusted with a request.
+pub(crate) fn process_is_current_user(pid: u32) -> bool {
+    // SAFETY: opens the process and its token for query only, compares two SIDs inside buffers this function owns, and
+    // closes every handle it opened.
+    unsafe {
+        let Some(own) = token_user_buffer(GetCurrentProcess()) else { return false };
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return false;
+        }
+        let process = Owned(process);
+        let Some(theirs) = token_user_buffer(process.0) else { return false };
+        EqualSid((*(own.as_ptr() as *const TOKEN_USER)).User.Sid, (*(theirs.as_ptr() as *const TOKEN_USER)).User.Sid) != 0
+    }
+}
+
+/// The `TOKEN_USER` of a process's token, in a buffer.
+unsafe fn token_user_buffer(process: HANDLE) -> Option<Vec<u8>> {
+    // SAFETY: standard token query; the buffer is sized by the first call.
+    unsafe {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
+            return None;
+        }
+        let token = Owned(token);
+        let mut needed = 0u32;
+        GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+        let mut buffer = vec![0u8; needed as usize];
+        (needed > 0 && GetTokenInformation(token.0, TokenUser, buffer.as_mut_ptr().cast(), needed, &mut needed) != 0).then_some(buffer)
+    }
+}
+
 /// The client side: hands a request to the primary.
 pub struct PipeCourier {
     name: Vec<u16>,
@@ -327,9 +365,15 @@ impl PipeCourier {
     fn connect(&self) -> Result<Owned, Delivery> {
         for _ in 0..3 {
             // SAFETY: opens the named pipe for reading and writing, overlapped.
-            let handle = unsafe { CreateFileW(self.name.as_ptr(), GENERIC_READ | GENERIC_WRITE, 0, std::ptr::null(), OPEN_EXISTING, FILE_FLAG_OVERLAPPED, std::ptr::null_mut()) };
+            let handle = unsafe { CreateFileW(self.name.as_ptr(), GENERIC_READ | GENERIC_WRITE, 0, std::ptr::null(), OPEN_EXISTING, FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, std::ptr::null_mut()) };
             if handle != INVALID_HANDLE_VALUE {
-                return Ok(Owned(handle));
+                let pipe = Owned(handle);
+                // The names are predictable, so whoever owns the pipe first answers. Only the current user's own program is
+                // given a request, and even that one only learns who we are (SECURITY_IDENTIFICATION), never acts as us.
+                let mut pid = 0u32;
+                // SAFETY: reads the process id of the pipe's server.
+                let known = unsafe { GetNamedPipeServerProcessId(pipe.0, &mut pid) } != 0;
+                return if known && process_is_current_user(pid) { Ok(pipe) } else { Err(Delivery::NoServer) };
             }
             // SAFETY: the last error of the call above, on this thread.
             match unsafe { GetLastError() } {
@@ -626,5 +670,81 @@ mod tests {
         let expected = pipe_sddl().unwrap().replace(";GA;", ";FA;"); // the system reports generic-all as file-all on a pipe
         assert_eq!(text, expected, "one allow entry, for the current user's SID, and the DACL is protected");
         assert!(text.matches("(A;").count() == 1 && !text.contains("(D;"));
+    }
+
+    #[test]
+    fn only_a_process_of_the_current_user_is_trusted_as_the_server() {
+        assert!(process_is_current_user(std::process::id()));
+        assert!(!process_is_current_user(4), "the System process cannot even be examined");
+        assert!(!process_is_current_user(0));
+        assert!(!process_is_current_user(4_000_000_000), "no such process");
+    }
+
+    #[test]
+    fn a_squatting_server_cannot_impersonate_the_client() {
+        // Whoever owns the pipe name first (the mutex and pipe names are predictable) sees the client connect. It may learn
+        // who the client is, but must not be able to act as the client.
+        use windows_sys::Win32::Security::{GetTokenInformation, RevertToSelf, TOKEN_QUERY, TokenImpersonationLevel};
+        use windows_sys::Win32::System::Pipes::ImpersonateNamedPipeClient;
+        use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+        let id = profile("squat");
+        let name = wide(&id.pipe_name());
+        let squatter = create_instance(&name, &wide(&pipe_sddl().unwrap()), true).expect("the test owns the name");
+        let level = std::thread::scope(|scope| {
+            let server = scope.spawn(|| {
+                let squatter = &squatter;
+                let deadline = Instant::now() + Duration::from_secs(5);
+                // SAFETY: the overlapped structure lives until the wait is over.
+                let connected = unsafe { overlapped_io(squatter.0, deadline, None, |ov| (ConnectNamedPipe(squatter.0, ov), GetLastError())) };
+                assert!(connected.is_ok(), "the client connected");
+                // Wait for the request, then look at the client's token the way an attacker would.
+                let mut header = [0u8; 4];
+                read_exact(squatter.0, &mut header, deadline, None).expect("the client sent a request");
+                // SAFETY: impersonates the connected client on this thread, reads the level of the thread token, reverts.
+                unsafe {
+                    assert_ne!(ImpersonateNamedPipeClient(squatter.0), 0, "the impersonation call itself is allowed");
+                    let mut token: HANDLE = std::ptr::null_mut();
+                    assert_ne!(OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut token), 0);
+                    let mut level = 99u32;
+                    let mut size = 0u32;
+                    GetTokenInformation(token, TokenImpersonationLevel, (&mut level as *mut u32).cast(), 4, &mut size);
+                    CloseHandle(token);
+                    RevertToSelf();
+                    level
+                }
+            });
+            // The client is not interested in the answer: the squatter never gives one.
+            let _ = PipeCourier::new(&id).deliver(&library("abcdefghij"));
+            server.join().unwrap()
+        });
+        // 0 anonymous, 1 identification, 2 impersonation, 3 delegation
+        assert!(level <= 1, "the client let the server impersonate it (level {level})");
+    }
+
+    #[test]
+    fn a_client_that_never_reads_its_answer_does_not_hold_the_server() {
+        let id = profile("unread");
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let w = wakes.clone();
+        let first = primary(acquire_with(&id, None, quick(), move || {
+            w.fetch_add(1, Ordering::SeqCst);
+        }));
+        // A sends a whole request and then reads nothing and closes nothing.
+        let courier = PipeCourier::new(&id);
+        let a = courier.connect().expect("connected");
+        let frame = wire::encode(&library("abcdefghij")).unwrap();
+        write_all(a.0, &frame, Instant::now() + IO_DEADLINE, None).unwrap();
+        // B must still be served within about one deadline, not when A goes away.
+        let started = Instant::now();
+        let patient = ElectionPolicy { rounds: 20, pause: Duration::from_millis(50), max_pause: Duration::from_millis(200) };
+        assert!(matches!(acquire_with(&id, Some(&library("zyxwvutsrq")), patient, || {}), Role::Forwarded), "B was served while A sat on its answer");
+        assert!(started.elapsed() < IO_DEADLINE + Duration::from_secs(2), "{:?}", started.elapsed());
+        assert_eq!(first.inbox.len(), 2, "both requests are queued");
+        // And closing the primary does not wait for A either.
+        let closing = Instant::now();
+        drop(first);
+        assert!(wait_for(|| courier.deliver(&library("abcdefghij")) == Delivery::NoServer), "the server was still there");
+        assert!(closing.elapsed() < Duration::from_secs(2), "{:?}", closing.elapsed());
+        drop(a);
     }
 }

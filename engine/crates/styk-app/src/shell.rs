@@ -5,10 +5,9 @@
 //! program ends here), what frame the window opens at, and keeps the window's frame saved. Unattended runs
 //! (`STYK_BACKGROUND_WINDOW`) touch none of it: they take no instance, read no window state and write none.
 
-use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use styk_services::shell::launch::{LaunchRequest, launch_requests};
+use styk_services::shell::launch::{LaunchRequest, PendingRequests, launch_requests};
 use styk_services::shell::protocol::looks_like_link;
 use styk_services::shell::window_state::{SaveDebounce, SetupKey, WindowFrame, WindowStateFile, default_frame, fit_to_monitors};
 
@@ -61,19 +60,22 @@ pub enum Wake {
 
 /// Sends wake-ups to the event loop without blocking: when the channel is full a wake is already pending, and what it
 /// is for (the chrome's state, the inbox) is read, not replayed.
+///
+/// There is one sender, shared: every extra sender of a futures channel brings a slot of its own, so cloning a sender per
+/// wake-up would make the channel unbounded.
 #[derive(Clone)]
-pub struct Wakes(iced::futures::channel::mpsc::Sender<Wake>);
+pub struct Wakes(std::sync::Arc<std::sync::Mutex<iced::futures::channel::mpsc::Sender<Wake>>>);
 
 impl Wakes {
     /// A sender and the receiver the event loop listens to.
     pub fn channel() -> (Wakes, iced::futures::channel::mpsc::Receiver<Wake>) {
         let (sender, receiver) = iced::futures::channel::mpsc::channel(16);
-        (Wakes(sender), receiver)
+        (Wakes(std::sync::Arc::new(std::sync::Mutex::new(sender))), receiver)
     }
 
     /// Wakes the loop.
     pub fn send(&self, wake: Wake) {
-        let _ = self.0.clone().try_send(wake);
+        let _ = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).try_send(wake);
     }
 }
 
@@ -108,7 +110,7 @@ pub struct Shell {
     /// The recovery directory of an independent editor.
     pub workspace: Option<PathBuf>,
     /// What this start itself asked for, then what later starts sent, until the core takes them.
-    pub pending: VecDeque<LaunchRequest>,
+    pub pending: PendingRequests,
     #[cfg(windows)]
     primary: Option<Primary>,
     #[cfg(windows)]
@@ -125,7 +127,7 @@ pub fn start(arguments: &[String], unattended: bool, wakes: &Wakes) -> Start {
         state_path: None,
         restore: None,
         workspace: None,
-        pending: requests.iter().cloned().collect(),
+        pending: PendingRequests::new(requests.clone()),
         #[cfg(windows)]
         primary: None,
         #[cfg(windows)]
@@ -199,11 +201,7 @@ impl Shell {
     pub fn collect_requests(&mut self) -> bool {
         #[cfg(windows)]
         if let Some(primary) = &self.primary {
-            let before = self.pending.len();
-            while let Some(request) = primary.inbox.pop() {
-                self.pending.push_back(request);
-            }
-            return self.pending.len() > before;
+            return self.pending.fill_from(&primary.inbox);
         }
         false
     }
@@ -237,11 +235,23 @@ impl Shell {
         }
     }
 
-    /// The window is closing: save what is pending, now.
-    pub fn save_now(&mut self) {
-        if self.debounce.pending() {
-            let _ = self.debounce.due(u64::MAX);
-            self.save();
+    /// The window is closing: a worker saves what is pending, and the receiver says when it is written (the program must
+    /// not end before; the interface thread must not do the writing). `None` when there is nothing to save.
+    pub fn save_for_close(&mut self) -> Option<iced::futures::channel::oneshot::Receiver<()>> {
+        if !self.debounce.pending() {
+            return None;
+        }
+        let _ = self.debounce.due(u64::MAX);
+        let (done, receiver) = iced::futures::channel::oneshot::channel();
+        match self.snapshot() {
+            Some((path, frame)) => {
+                std::thread::spawn(move || {
+                    write_state(&path, frame);
+                    let _ = done.send(());
+                });
+                Some(receiver)
+            }
+            None => None,
         }
     }
 
@@ -258,10 +268,6 @@ impl Shell {
         }
     }
 
-    fn save(&self) {
-        if let Some((path, frame)) = self.snapshot() {
-            write_state(&path, frame);
-        }
     }
 
     /// A sample of the window was taken.
@@ -387,6 +393,38 @@ mod tests {
         });
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(WindowStateFile::parse(&text).last.is_some(), "the file is whole: {text:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn wake_ups_are_bounded_however_many_are_sent_and_nobody_reads() {
+        let (wakes, mut receiver) = Wakes::channel();
+        for _ in 0..10_000 {
+            wakes.send(Wake::Chrome);
+            wakes.clone().send(Wake::Instance);
+        }
+        let mut held = 0;
+        while let Ok(Some(_)) = receiver.try_next() {
+            held += 1;
+        }
+        assert!(held <= 32, "{held} wake-ups were held for a reader that never came");
+    }
+
+    #[test]
+    fn closing_saves_on_a_worker_and_says_when_the_file_is_written() {
+        let dir = temp("close");
+        let path = dir.join("window-state.txt");
+        let (wakes, _receiver) = Wakes::channel();
+        let Start::Run(mut shell) = start(&[], true, &wakes) else { panic!("an unattended start runs") };
+        shell.state_path = Some(path.clone());
+        shell.assume(&frame(321));
+        assert!(shell.save_for_close().is_none(), "nothing changed: nothing to save");
+        shell.changed(&wakes);
+        let done = shell.save_for_close().expect("a change is pending");
+        iced::futures::executor::block_on(done).expect("the worker reported");
+        let file = WindowStateFile::parse(&std::fs::read_to_string(&path).unwrap());
+        assert_eq!(file.last, Some(frame(321)));
+        assert!(shell.save_for_close().is_none(), "saved once");
         let _ = std::fs::remove_dir_all(dir);
     }
 

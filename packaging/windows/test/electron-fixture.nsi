@@ -15,6 +15,7 @@ SilentUnInstall silent
 
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
+!include "x64.nsh"
 
 !define APP_GUID "da89159e-9653-5b0d-96ae-4aeef8dc5497"
 !define REG "Software\StykAnimateSandbox\${SANDBOX}\"
@@ -36,7 +37,16 @@ InstallDir "$LOCALAPPDATA\Programs\StykAnimate"
 !macroend
 
 Function .onInit
+  ${If} ${RunningX64}
+    SetRegView 64
+  ${EndIf}
   ${GetParameters} $R0
+FunctionEnd
+
+Function un.onInit
+  ${If} ${RunningX64}
+    SetRegView 64
+  ${EndIf}
 FunctionEnd
 
 Section "Install"
@@ -59,6 +69,10 @@ Section "Install"
   !insertmacro associate "stykmov" "StykAnimate movieclip"
   !insertmacro associate "stkz" "StykAnimate figure"
   !insertmacro associate "styk" "StykAnimate project"
+  ; The link, as the Electron app registers it at run time (setAsDefaultProtocolClient).
+  WriteRegStr HKCU "${REG}Software\Classes\stykanimate" "" "URL:stykanimate"
+  WriteRegStr HKCU "${REG}Software\Classes\stykanimate" "URL Protocol" ""
+  WriteRegStr HKCU "${REG}Software\Classes\stykanimate\shell\open\command" "" `"$INSTDIR\StykAnimate.exe" "%1"`
   CreateDirectory "${SANDBOX_DIR}\StartMenu"
   CreateDirectory "${SANDBOX_DIR}\Desktop"
   CreateShortCut "${SANDBOX_DIR}\StartMenu\StykAnimate.lnk" "$INSTDIR\StykAnimate.exe"

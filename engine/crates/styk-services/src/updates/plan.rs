@@ -28,7 +28,10 @@ pub struct InstallPlan {
 /// The installer's arguments and elevation for an install of `scope` in `install_dir`, from a process that is or is
 /// not already elevated.
 pub fn install_plan(scope: InstallScope, process_elevated: bool, install_dir: &str) -> InstallPlan {
-    let mut args = vec!["--updated".to_string(), "/S".to_string(), "--force-run".to_string()];
+    // The installer is told which installation it updates: with both a per-user and an all-users install present it would
+    // otherwise pick one of them, and might replace the wrong one.
+    let scope_flag = if scope == InstallScope::AllUsers { "/allusers" } else { "/currentuser" };
+    let mut args = vec!["--updated".to_string(), "/S".to_string(), "--force-run".to_string(), scope_flag.to_string()];
     args.push(format!("/D={}", install_dir.trim_end_matches(['\\', '/'])));
     InstallPlan { scope, elevate: scope == InstallScope::AllUsers && !process_elevated, args }
 }
@@ -87,6 +90,15 @@ mod tests {
         let plan = install_plan(InstallScope::CurrentUser, false, "C:\\Users\\me\\AppData\\Local\\Programs\\StykAnimate\\");
         assert_eq!(plan.args, ["--updated", "/S", "--force-run", "/D=C:\\Users\\me\\AppData\\Local\\Programs\\StykAnimate"]);
         assert!(!plan.elevate);
+    }
+
+    #[test]
+    fn the_installer_is_told_which_install_it_updates() {
+        let user = install_plan(InstallScope::CurrentUser, false, "C:\\Users\\me\\StykAnimate");
+        let all = install_plan(InstallScope::AllUsers, true, "C:\\Program Files\\StykAnimate");
+        assert!(user.args.contains(&"/currentuser".to_string()) && !user.args.contains(&"/allusers".to_string()), "{:?}", user.args);
+        assert!(all.args.contains(&"/allusers".to_string()) && !all.args.contains(&"/currentuser".to_string()), "{:?}", all.args);
+        assert!(user.args.last().is_some_and(|a| a.starts_with("/D=")) && all.args.last().is_some_and(|a| a.starts_with("/D=")), "/D= stays last");
     }
 
     #[test]

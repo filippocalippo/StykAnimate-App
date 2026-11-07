@@ -6,11 +6,20 @@
 //! it, which is what makes Windows 11 show its snap layouts), so the pointer never reaches it as a client event: its
 //! hover and press are drawn from the state the window reports.
 
-use iced::widget::{button, container, row};
+use iced::widget::{button, container, mouse_area, row};
 use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Theme as IcedTheme, Widget};
 use styk_design::Theme;
 use styk_design::widgets::icon;
 use styk_services::shell::chrome::{CONTROL_GLYPH, MaxButtonState, control_width};
+
+/// Which of the two clickable controls the pointer is over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hot {
+    /// Minimize.
+    Minimize,
+    /// Close.
+    Close,
+}
 
 /// What the controls need to be drawn.
 #[derive(Clone, Copy, Debug)]
@@ -23,6 +32,8 @@ pub struct Controls {
     pub height: f32,
     /// How the maximize button looks now.
     pub maximize: MaxButtonState,
+    /// The control the pointer is over, if one.
+    pub hover: Option<Hot>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -31,6 +42,8 @@ enum Kind {
     Close,
 }
 
+/// The background and the glyph colour of a control at rest or hot. The glyph is part of the hover look: Close's goes
+/// from `text-2` to `danger-text` with its background.
 fn colors(theme: Theme, kind: Kind, hot: bool) -> (Option<Color>, Color) {
     let palette = theme.palette();
     match (kind, hot) {
@@ -44,21 +57,23 @@ fn glyph<'a, M: 'a>(name: &str, color: Color) -> Element<'a, M> {
     icon(name, CONTROL_GLYPH as f32, color).boxed()
 }
 
-/// A control that is an iced button: minimize and close.
-fn control<'a, M: Clone + 'a>(controls: Controls, name: &'static str, kind: Kind, message: M) -> Element<'a, M> {
+/// A control that is an iced button: minimize and close. The hover look comes from the state the application keeps (the
+/// pointer entering and leaving), not from the button's own status, because an svg inside a button does not follow the
+/// button's text colour.
+fn control<'a, M: Clone + 'a>(controls: Controls, name: &'static str, kind: Kind, hot: Hot, message: M, on_hover: fn(Option<Hot>) -> M) -> Element<'a, M> {
     let (width, height, theme) = (control_width(controls.folded) as f32, controls.height, controls.theme);
-    let (_, resting) = colors(theme, kind, false);
-    button(container(glyph::<M>(name, resting)).center_x(Length::Fill).center_y(Length::Fill))
+    let (background, glyph_color) = colors(theme, kind, controls.hover == Some(hot));
+    let face = container(glyph::<M>(name, glyph_color))
+        .center_x(Length::Fixed(width))
+        .center_y(Length::Fixed(height))
+        .style(move |_| container::Style::default().background(background.unwrap_or(Color::TRANSPARENT)));
+    let clickable = button(face)
         .width(Length::Fixed(width))
         .height(Length::Fixed(height))
         .padding(0)
         .on_press(message)
-        .style(move |_: &IcedTheme, status| {
-            let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            let (background, text) = colors(theme, kind, hot);
-            button::Style { background: background.map(Background::Color), text_color: text, border: Border::default(), shadow: Shadow::default(), snap: true }
-        })
-        .boxed()
+        .style(|_: &IcedTheme, _| button::Style { background: None, text_color: Color::TRANSPARENT, border: Border::default(), shadow: Shadow::default(), snap: true });
+    mouse_area(clickable).on_enter(on_hover(Some(hot))).on_exit(on_hover(None)).boxed()
 }
 
 /// The maximize control: drawn from the reported state, since the pointer is in the non-client area over it.
@@ -74,9 +89,16 @@ fn maximize<'a, M: 'a>(controls: Controls) -> Element<'a, M> {
         .boxed()
 }
 
-/// The three window controls, minimize, maximize, close, in a row.
-pub fn window_controls<'a, M: Clone + 'a>(controls: Controls, on_minimize: M, on_close: M) -> Element<'a, M> {
-    row![control(controls, "window-minimize", Kind::Plain, on_minimize), maximize(controls), control(controls, "close", Kind::Close, on_close)].align_y(Alignment::Start).boxed()
+/// The three window controls, minimize, maximize, close, in a row. `on_hover` is told when the pointer enters or leaves
+/// minimize or close; the application keeps it and passes it back in `controls.hover`.
+pub fn window_controls<'a, M: Clone + 'a>(controls: Controls, on_minimize: M, on_close: M, on_hover: fn(Option<Hot>) -> M) -> Element<'a, M> {
+    row![
+        control(controls, "window-minimize", Kind::Plain, Hot::Minimize, on_minimize, on_hover),
+        maximize(controls),
+        control(controls, "close", Kind::Close, Hot::Close, on_close, on_hover)
+    ]
+    .align_y(Alignment::Start)
+    .boxed()
 }
 
 #[cfg(test)]
@@ -97,11 +119,24 @@ mod tests {
     }
 
     #[test]
+    fn closes_glyph_turns_with_its_background_when_the_pointer_is_over_it() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let (_, resting) = colors(theme, Kind::Close, false);
+            let (background, hot) = colors(theme, Kind::Close, true);
+            assert_ne!(resting, hot, "the glyph colour changes with hover");
+            assert_eq!(hot, Color::from(theme.palette().danger_text));
+            assert_eq!(background, Some(Color::from(theme.palette().danger_soft)));
+        }
+    }
+
+    #[test]
     fn the_controls_build_at_both_widths_in_every_state() {
         for folded in [false, true] {
             for state in [MaxButtonState::Idle, MaxButtonState::Hover, MaxButtonState::Pressed { armed: true }, MaxButtonState::Pressed { armed: false }] {
-                let controls = Controls { theme: Theme::Dark, folded, height: 52.0, maximize: state };
-                let _: Element<'_, ()> = window_controls(controls, (), ());
+                for hover in [None, Some(Hot::Minimize), Some(Hot::Close)] {
+                    let controls = Controls { theme: Theme::Dark, folded, height: 52.0, maximize: state, hover };
+                    let _: Element<'_, ()> = window_controls(controls, (), (), |_| ());
+                }
             }
         }
     }

@@ -53,6 +53,16 @@ ManifestDPIAware true
 
 !ifdef PLUGIN_DIR
   !addplugindir /x86-unicode "${PLUGIN_DIR}\x86-unicode"
+!else
+  !ifndef SANDBOX
+    !error "a Setup for release needs PLUGIN_DIR: StdUtils (start the program as the user, not elevated), UserInfo and WinShell"
+  !endif
+!endif
+
+!ifdef SANDBOX
+  !define MUTEX_TAG "-${SANDBOX}"
+!else
+  !define MUTEX_TAG ""
 !endif
 
 Name "${PRODUCT_NAME}"
@@ -133,6 +143,19 @@ Var modeMe
   !endif
 !macroend
 
+; Reads from the hive of the install mode (the current user, or the machine for all users).
+!macro readModeStr OUT KEY NAME
+  !ifdef SANDBOX
+    ReadRegStr ${OUT} HKCU "${REG}${KEY}" "${NAME}"
+  !else
+    ${If} $installMode == "all"
+      ReadRegStr ${OUT} HKLM "${KEY}" "${NAME}"
+    ${Else}
+      ReadRegStr ${OUT} HKCU "${KEY}" "${NAME}"
+    ${EndIf}
+  !endif
+!macroend
+
 ; One file type: the ProgID is the association's name, as electron-builder writes it.
 !macro associate EXT PROGID
   !insertmacro writeStr "Software\Classes\.${EXT}" "" "${PROGID}"
@@ -153,6 +176,12 @@ Var modeMe
   !insertmacro associate "stykmov" "StykAnimate movieclip"
   !insertmacro associate "stkz" "StykAnimate figure"
   !insertmacro associate "styk" "StykAnimate project"
+  ; The stykanimate:// link. The Electron app registers it at run time for the current user; the Setup does it so a fresh
+  ; install works at once and an upgrade replaces a command that names the old program.
+  !insertmacro writeStr "Software\Classes\stykanimate" "" "URL:stykanimate"
+  !insertmacro writeStr "Software\Classes\stykanimate" "URL Protocol" ""
+  !insertmacro writeStr "Software\Classes\stykanimate\DefaultIcon" "" '"$INSTDIR\${APP_EXE}",0'
+  !insertmacro writeStr "Software\Classes\stykanimate\shell\open\command" "" '"$INSTDIR\${APP_EXE}" "%1"'
 !macroend
 
 ; ---- The pages ----
@@ -195,6 +224,7 @@ Function modePageLeave
   ${If} $0 == ${BST_CHECKED}
     StrCpy $installMode "all"
     StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCT_NAME}"
+    Call EnsureAdministrator
   ${Else}
     StrCpy $installMode "CurrentUser"
     StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
@@ -209,7 +239,48 @@ FunctionEnd
 
 ; ---- Start ----
 
+; An install for all users writes the machine's registry and Program Files: if this Setup is not an administrator's, it
+; starts itself again elevated (the elevation prompt), with the same arguments and destination, and ends. A declined
+; prompt ends it with the error the prompt gave. The elevated copy installs; the program it starts afterwards is started
+; as the user (below), not elevated.
+Function EnsureAdministrator
+  !ifndef SANDBOX
+    UserInfo::GetAccountType
+    Pop $0
+    ${If} $0 != "admin"
+      ${GetParameters} $R0
+      System::Call 'shell32::ShellExecuteW(p 0, w "runas", w "$EXEPATH", w "$R0 /allusers /D=$INSTDIR", p 0, i 1) p .r1'
+      ${If} $1 > 32
+        SetErrorLevel 0
+        Quit
+      ${EndIf}
+      ${IfNot} ${Silent}
+        MessageBox MB_OK|MB_ICONSTOP "Installing for all users needs an administrator, and the request was not approved. Install it only for you, or try again."
+      ${EndIf}
+      SetErrorLevel 740
+      Quit
+    ${EndIf}
+  !endif
+FunctionEnd
+
 Function .onInit
+  ; The 64-bit view of the registry, where the Electron install, the uninstaller and the program look.
+  ${If} ${RunningX64}
+    SetRegView 64
+  ${EndIf}
+
+  ; One Setup at a time works on the install (electron-builder's installer has a mutex for the same reason). The handle
+  ; is kept for the life of this process.
+  System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\StykAnimateSetup-${APP_GUID}${MUTEX_TAG}") p .r8 ?e'
+  Pop $9
+  ${If} $9 = 183
+    ${IfNot} ${Silent}
+      MessageBox MB_OK|MB_ICONEXCLAMATION "Another ${PRODUCT_NAME} Setup is already running."
+    ${EndIf}
+    SetErrorLevel 4
+    Quit
+  ${EndIf}
+
   ${GetParameters} $R0
   StrCpy $isUpdated "0"
   StrCpy $forceRun "0"
@@ -261,25 +332,17 @@ Function .onInit
     StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCT_NAME}"
   ${EndIf}
 
-  !ifndef SANDBOX
-    ${If} $installMode == "all"
-      UserInfo::GetAccountType
-      Pop $0
-      ${If} $0 != "admin"
-        ${IfNot} ${Silent}
-          MessageBox MB_OK|MB_ICONSTOP "Installing for all users needs an administrator. Run the Setup as administrator, or install it only for you."
-        ${EndIf}
-        SetErrorLevel 740
-        Quit
-      ${EndIf}
-    ${EndIf}
-  !endif
+  ; The previous installation is the one of the install mode: its own folder is what its uninstaller runs in.
+  !insertmacro readModeStr $oldDir "${INSTALL_KEY}" "InstallLocation"
+
+  ${If} $installMode == "all"
+    Call EnsureAdministrator
+  ${EndIf}
 FunctionEnd
 
 ; ---- The install ----
 
 Section "Install"
-  SetOutPath $INSTDIR
   !insertmacro setLocations
 
   !ifndef SANDBOX
@@ -295,13 +358,13 @@ Section "Install"
       ${EndIf}
   !endif
 
-  ; Remove the install that is there, with its own uninstaller, silently, from a copy (it deletes its own folder).
-  !insertmacro readStr $oldUninstaller HKCU "${UNINSTALL_KEY}" "UninstallString"
-  !ifndef SANDBOX
-    ${If} $oldUninstaller == ""
-      ReadRegStr $oldUninstaller HKLM "${UNINSTALL_KEY}" "UninstallString"
-    ${EndIf}
-  !endif
+  ; ---- The previous installation, and the destination ----
+  ; The previous installation's uninstall command names its own program; the folder that program is in is where its
+  ; uninstaller runs (_?=), whatever the new destination is. The destination is checked first, so a refused Setup has
+  ; changed nothing.
+  !insertmacro readModeStr $oldUninstaller "${UNINSTALL_KEY}" "UninstallString"
+  StrCpy $R4 ""
+  StrCpy $oldDir ""
   ${If} $oldUninstaller != ""
     ; The command is '"<path>" /currentuser' or '"<path>" /allusers'; take the quoted path.
     StrCpy $R0 $oldUninstaller 1
@@ -320,27 +383,60 @@ Section "Install"
       StrCpy $R4 $oldUninstaller
     ${EndIf}
     ${If} ${FileExists} "$R4"
-      InitPluginsDir
-      CopyFiles /SILENT "$R4" "$PLUGINSDIR\old-uninstaller.exe"
-      ${If} $installMode == "all"
-        StrCpy $R5 "/allusers"
-      ${Else}
-        StrCpy $R5 "/currentuser"
-      ${EndIf}
-      !ifdef SANDBOX
-        StrCpy $R5 "/currentuser"
-      !endif
-      ExecWait '"$PLUGINSDIR\old-uninstaller.exe" /S /KEEP_APP_DATA $R5 --updated _?=$INSTDIR' $R6
-      ${If} $R6 != 0
-        ${IfNot} ${Silent}
-          MessageBox MB_OK|MB_ICONEXCLAMATION "The previous version could not be removed (error $R6)."
-        ${EndIf}
-        SetErrorLevel 2
-        Quit
-      ${EndIf}
-      ; The old uninstaller left itself behind (it was run in place with _?=); it is gone with the folder.
-      Delete "$INSTDIR\${UNINSTALL_EXE}"
+      ${GetParent} "$R4" $oldDir
+    ${Else}
+      StrCpy $R4 ""
     ${EndIf}
+  ${EndIf}
+
+  ; The destination must be empty, absent, the old installation's own folder, or already ours (it has our program):
+  ; our uninstaller removes the folder, so it must never be a folder with somebody else's files in it.
+  ${If} "$INSTDIR" != "$oldDir"
+    StrCpy $R7 0
+    ${If} ${FileExists} "$INSTDIR\*.*"
+    ${AndIfNot} ${FileExists} "$INSTDIR\${APP_EXE}"
+      FindFirst $R8 $R9 "$INSTDIR\*.*"
+      checkLoop:
+        StrCmp $R9 "" checkDone
+        StrCmp $R9 "." checkNext
+        StrCmp $R9 ".." checkNext
+        StrCpy $R7 1
+        Goto checkDone
+        checkNext:
+        FindNext $R8 $R9
+        Goto checkLoop
+      checkDone:
+      FindClose $R8
+    ${EndIf}
+    ${If} $R7 == 1
+      ${IfNot} ${Silent}
+        MessageBox MB_OK|MB_ICONSTOP "The folder $INSTDIR already holds other files. Choose an empty folder, or a new one."
+      ${EndIf}
+      SetErrorLevel 3
+      Quit
+    ${EndIf}
+  ${EndIf}
+
+  ; Remove the previous installation with its own uninstaller, silently, from a copy (it deletes its own folder).
+  ${If} $R4 != ""
+    InitPluginsDir
+    CopyFiles /SILENT "$R4" "$PLUGINSDIR\old-uninstaller.exe"
+    ${If} $installMode == "all"
+      StrCpy $R5 "/allusers"
+    ${Else}
+      StrCpy $R5 "/currentuser"
+    ${EndIf}
+    ExecWait '"$PLUGINSDIR\old-uninstaller.exe" /S /KEEP_APP_DATA $R5 --updated _?=$oldDir' $R6
+    ${If} $R6 != 0
+      ${IfNot} ${Silent}
+        MessageBox MB_OK|MB_ICONEXCLAMATION "The previous version could not be removed (error $R6)."
+      ${EndIf}
+      SetErrorLevel 2
+      Quit
+    ${EndIf}
+    ; The old uninstaller was run in place (_?=) and could not delete itself.
+    Delete "$oldDir\${UNINSTALL_EXE}"
+    RMDir "$oldDir"
   ${EndIf}
 
   SetOutPath $INSTDIR
@@ -380,12 +476,23 @@ Section "Install"
     System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)'
   !endif
 
+  ; --force-run: start the program again. An elevated Setup (an all-users install, or another administrator's account)
+  ; must not leave an elevated editor behind: the program is started as the logged-in user, in the user's session.
   ${If} $forceRun == "1"
   ${AndIf} ${Silent}
-    !ifndef SANDBOX
-      Exec '"$INSTDIR\${APP_EXE}"'
+    !ifdef SANDBOX
+      !define LAUNCH_ARGS "--installer-test"
     !else
-      Exec '"$INSTDIR\${APP_EXE}" --installer-test'
+      !define LAUNCH_ARGS ""
+    !endif
+    !ifdef PLUGIN_DIR
+      push `$INSTDIR\${APP_EXE}`
+      push `open`
+      push `${LAUNCH_ARGS}`
+      StdUtils::ExecShellAsUser /NOUNLOAD
+      pop $0
+    !else
+      Exec '"$INSTDIR\${APP_EXE}" ${LAUNCH_ARGS}'
     !endif
   ${EndIf}
 SectionEnd
@@ -396,6 +503,9 @@ SectionEnd
 !endif
 
 Function un.onInit
+  ${If} ${RunningX64}
+    SetRegView 64
+  ${EndIf}
   ${GetParameters} $R0
   StrCpy $installMode "CurrentUser"
   ${GetOptions} $R0 "/allusers" $R1
@@ -449,6 +559,7 @@ Section "Uninstall"
   !insertmacro unAssociate "stykmov" "StykAnimate movieclip"
   !insertmacro unAssociate "stkz" "StykAnimate figure"
   !insertmacro unAssociate "styk" "StykAnimate project"
+  !insertmacro unDeleteKey "Software\Classes\stykanimate"
   !insertmacro unDeleteKey "${UNINSTALL_KEY}"
   !insertmacro unDeleteKey "${INSTALL_KEY}"
 

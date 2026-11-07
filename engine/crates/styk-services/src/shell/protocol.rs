@@ -44,11 +44,10 @@ impl ProtocolLink {
 
 /// Whether an argument starts like one of our links (case-insensitive scheme, then `://`), valid or not.
 pub fn looks_like_link(argument: &str) -> bool {
+    // Bytes, not text: a path like "C:/Users/aé/a.piv" has a character that straddles the scheme's length.
     let head = SCHEME.len();
-    argument.len() >= head + 3
-        && argument.is_char_boundary(head + 3)
-        && argument[..head].eq_ignore_ascii_case(SCHEME)
-        && &argument[head..head + 3] == "://"
+    let bytes = argument.as_bytes();
+    bytes.len() >= head + 3 && bytes[..head].eq_ignore_ascii_case(SCHEME.as_bytes()) && &bytes[head..head + 3] == b"://"
 }
 
 /// Reads a link the way `new URL(value)` and the checks of `handleProtocol` do. Anything else is `None`.
@@ -199,6 +198,15 @@ mod tests {
     fn a_link_round_trips_through_its_canonical_text() {
         for link in [ProtocolLink::Open, ProtocolLink::Privacy, ProtocolLink::Library(None), ProtocolLink::Library(PublicId::parse("abcdefghij"))] {
             assert_eq!(parse_protocol(&link.to_url()), Some(link));
+        }
+    }
+
+    #[test]
+    fn a_path_with_a_multibyte_character_where_the_scheme_would_end_is_not_a_link_and_does_not_panic() {
+        // "C:/Users/aé/a.piv": the 11th byte falls inside the é.
+        for argument in ["C:/Users/aé/a.piv", "stykanimaté://x", "é", "stykanimate:é/", "C:/Users/aéé"] {
+            assert!(!looks_like_link(argument), "{argument}");
+            assert_eq!(parse_protocol(argument), None, "{argument}");
         }
     }
 

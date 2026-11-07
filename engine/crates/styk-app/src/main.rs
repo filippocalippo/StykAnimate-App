@@ -34,7 +34,7 @@ use styk_platform::unattended::{self, Strategy};
 use styk_platform::window::{self as platform, Image, WindowError};
 use styk_services::shell::chrome::{MaxButtonState, band_height, band_regions};
 use styk_trace::mark;
-use styk_ui::band::{Controls, window_controls};
+use styk_ui::band::{Controls, Hot, window_controls};
 
 /// How long `--screenshot` waits for a first frame before giving up. A window that never draws is a defect to report,
 /// not a reason to hang a script.
@@ -73,6 +73,10 @@ enum Message {
     Wake(shell::Wake),
     Minimize,
     CloseRequested,
+    /// The window state is written: the program may end.
+    Saved,
+    /// The pointer is over a window control, or left it.
+    Hover(Option<Hot>),
     Frame,
     /// The font system is built and holds the bundled fonts: text may be laid out.
     FontsReady,
@@ -106,6 +110,8 @@ struct App {
     wakes: shell::Wakes,
     chrome: Option<shell::Chrome>,
     max_button: MaxButtonState,
+    hover: Option<Hot>,
+    closing: bool,
     /// The window's logical size and scale factor, as the interface was last told.
     logical: Size,
     scale: f32,
@@ -141,6 +147,8 @@ impl App {
             wakes,
             chrome: None,
             max_button: MaxButtonState::Idle,
+            hover: None,
+            closing: false,
             logical: Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32),
             scale: 1.0,
             rescales: Vec::new(),
@@ -186,6 +194,11 @@ impl App {
             Message::Wake(wake) => self.wake(wake),
             Message::Minimize => self.window.map_or_else(Task::none, |id| iced_window::minimize(id, true)),
             Message::CloseRequested => self.close(),
+            Message::Saved => self.finish(Outcome::Done),
+            Message::Hover(hot) => {
+                self.hover = hot;
+                Task::none()
+            }
             Message::FontsReady => {
                 self.fonts_ready = true;
                 Task::none()
@@ -282,9 +295,15 @@ impl App {
     }
 
     fn close(&mut self) -> Task<Message> {
-        // The core's close guard (unsaved work) decides here once documents exist; until then the program ends.
-        self.shell.save_now();
-        self.finish(Outcome::Done)
+        // The core's close guard (unsaved work) decides here once documents exist; until then the program ends, once the
+        // window state is written (by a worker: the interface thread does not wait for the disk).
+        if std::mem::replace(&mut self.closing, true) {
+            return Task::none();
+        }
+        match self.shell.save_for_close() {
+            Some(done) => Task::perform(async move { let _ = done.await; }, |()| Message::Saved),
+            None => self.finish(Outcome::Done),
+        }
     }
 
     fn frame(&mut self) -> Task<Message> {
@@ -364,7 +383,7 @@ impl App {
                 let controls: iced::Element<'_, Message> = if cfg!(target_os = "macos") {
                     iced::widget::space().boxed()
                 } else {
-                    window_controls(Controls { theme: self.theme, folded: false, height, maximize: self.max_button }, Message::Minimize, Message::CloseRequested)
+                    window_controls(Controls { theme: self.theme, folded: false, height, maximize: self.max_button, hover: self.hover }, Message::Minimize, Message::CloseRequested, Message::Hover)
                 };
                 styk_ui::shell(self.theme, ready, height, controls)
             }
