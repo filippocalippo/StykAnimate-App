@@ -24,3 +24,6 @@ pub mod text_entry;
 pub mod text;
 
 pub use launch::{Launch, LaunchError, USAGE};
+
+#[cfg(feature = "inspect")]
+pub mod inspect;

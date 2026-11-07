@@ -14,7 +14,7 @@
 //! each thread records its recent events in its own fixed-size ring, written without locks and without allocating
 //! after the thread's first event; [`snapshot`] collects every thread's ring for a tool to show.
 //!
-//! This crate depends on nothing and must stay that way: the engine crates instrument themselves with it, so it can
+//! With tracing off this crate has no dependencies. Enabled tracing reads the injected services clock: the engine crates instrument themselves with it, so it can
 //! never depend on them, on the core or on a toolkit.
 
 #[cfg(feature = "enabled")]
@@ -24,8 +24,9 @@ mod ring;
 
 #[cfg(feature = "enabled")]
 pub use ring::{
-    ARCHIVE_CAPACITY, MAX_ARCHIVE_BYTES, MAX_RING_BYTES, MAX_SNAPSHOT_BYTES, Record, RecordKind,
-    Site, Span, capacity, dropped, live_threads, now_ns, ring_bytes, snapshot,
+    ARCHIVE_CAPACITY, MAX_ARCHIVE_BYTES, MAX_RING_BYTES, MAX_SNAPSHOT_BYTES, OpenSpan, Record,
+    RecordKind, Site, Span, Thread, capacity, counters, dropped, gauges, live_threads, now_ns,
+    open_spans, ring_bytes, ring_snapshot, snapshot, threads,
 };
 
 /// The guard `span!` returns when instrumentation is off: it holds nothing and does nothing.

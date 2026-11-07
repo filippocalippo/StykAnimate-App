@@ -22,7 +22,7 @@ const NAME_BYTES: usize = 128;
 pub const MAX_ARCHIVE_BYTES: usize =
     2 * ARCHIVE_CAPACITY * (std::mem::size_of::<Record>() + NAME_BYTES);
 const RING_BYTES: usize =
-    CAPACITY * std::mem::size_of::<Slot>() + std::mem::size_of::<Ring>() + NAME_BYTES + 32;
+    CAPACITY * std::mem::size_of::<Slot>() + std::mem::size_of::<Ring>() + NAME_BYTES + 128;
 static RING_BUDGET: Budget = Budget::new(MAX_RING_BYTES);
 static DROPPED: AtomicU64 = AtomicU64::new(0);
 pub fn dropped() -> u64 {
@@ -107,21 +107,54 @@ impl Site {
 pub struct Span {
     site: &'static Site,
     start_ns: u64,
+    clock: Option<Arc<dyn styk_services::clock::Clock>>,
+    open: Option<(Arc<Ring>, usize)>,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 impl Span {
     #[doc(hidden)]
     pub fn enter(site: &'static Site) -> Span {
+        let clock = crate::clock::current();
+        let start_ns = crate::clock::read(&clock);
+        let mut open = None;
+        with_ring(|ring| {
+            if let Some(index) = ring
+                .open
+                .iter()
+                .position(|slot| slot.site.load(Ordering::Relaxed).is_null())
+            {
+                let slot = &ring.open[index];
+                let seq = slot.sequence.load(Ordering::Relaxed);
+                slot.sequence.store(seq | 1, Ordering::Relaxed);
+                fence(Ordering::Release);
+                slot.start.store(start_ns, Ordering::Relaxed);
+                slot.site
+                    .store(std::ptr::from_ref(site).cast_mut(), Ordering::Relaxed);
+                slot.sequence.store((seq | 1) + 1, Ordering::Release);
+                open = Some((ring.clone(), index));
+            } else {
+                refuse(1);
+            }
+        });
         Span {
             site,
-            start_ns: now_ns(),
+            start_ns,
+            clock,
+            open,
+            _thread: std::marker::PhantomData,
         }
     }
 }
 
 impl Drop for Span {
     fn drop(&mut self) {
-        let end = now_ns();
+        let end = crate::clock::read(&self.clock);
+        if let Some((ring, index)) = &self.open {
+            ring.open[*index]
+                .site
+                .store(std::ptr::null_mut(), Ordering::Release);
+        }
         record(
             KIND_SPAN,
             self.site,
@@ -156,6 +189,7 @@ struct Ring {
     /// How many events this thread has recorded in all.
     written: AtomicUsize,
     slots: Box<[Slot]>,
+    open: [Slot; 64],
     _reservation: Reservation<'static>,
 }
 
@@ -204,7 +238,7 @@ thread_local! {
 
 static THREADS: AtomicU32 = AtomicU32::new(0);
 
-fn record(kind: u32, site: &'static Site, start: u64, payload: u64) {
+fn with_ring(use_ring: impl FnOnce(&Arc<Ring>)) {
     // Cold registration uses only try_lock. Refused threads can retry after capacity is released.
     let _ = RING.try_with(|cell| {
         let Ok(mut local) = cell.try_borrow_mut() else {
@@ -234,6 +268,7 @@ fn record(kind: u32, site: &'static Site, start: u64, payload: u64) {
                 thread_index,
                 written: AtomicUsize::new(0),
                 slots: slots.into_boxed_slice(),
+                open: std::array::from_fn(|_| Slot::default()),
                 _reservation: reservation,
             });
             let Ok(mut registry) = registry().try_lock() else {
@@ -248,6 +283,12 @@ fn record(kind: u32, site: &'static Site, start: u64, payload: u64) {
             return;
         };
         let ring = &local.0;
+        use_ring(ring);
+    });
+}
+
+fn record(kind: u32, site: &'static Site, start: u64, payload: u64) {
+    with_ring(|ring| {
         let index = ring.written.load(Ordering::Relaxed);
         let slot = &ring.slots[index % CAPACITY];
         if index >= CAPACITY {
@@ -266,7 +307,6 @@ fn record(kind: u32, site: &'static Site, start: u64, payload: u64) {
         ring.written.store(index + 1, Ordering::Release);
     });
 }
-
 /// What a record is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordKind {
@@ -295,6 +335,89 @@ pub struct Record {
     pub start_ns: u64,
     /// How long it lasted (spans only; zero otherwise).
     pub duration_ns: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct Thread {
+    pub id: u32,
+    pub name: Arc<str>,
+}
+pub fn threads() -> Vec<Thread> {
+    registry()
+        .try_lock()
+        .map(|rings| {
+            rings
+                .iter()
+                .filter_map(Weak::upgrade)
+                .map(|ring| Thread {
+                    id: ring.thread_index,
+                    name: ring.thread_name.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+#[derive(Clone, Copy, Debug)]
+pub struct OpenSpan {
+    pub name: &'static str,
+    pub start_ns: u64,
+}
+pub fn open_spans(thread: u32) -> Vec<OpenSpan> {
+    let ring = registry().try_lock().ok().and_then(|rings| {
+        rings
+            .iter()
+            .filter_map(Weak::upgrade)
+            .find(|r| r.thread_index == thread)
+    });
+    let Some(ring) = ring else { return Vec::new() };
+    let mut rows = Vec::with_capacity(64);
+    for slot in &ring.open {
+        let before = slot.sequence.load(Ordering::Acquire);
+        if before & 1 != 0 {
+            continue;
+        }
+        let site = slot.site.load(Ordering::Acquire);
+        let start_ns = slot.start.load(Ordering::Relaxed);
+        fence(Ordering::Acquire);
+        if site.is_null() || slot.sequence.load(Ordering::Relaxed) != before {
+            continue;
+        }
+        // SAFETY: every site pointer is a macro-owned static, including after its span ends.
+        rows.push(OpenSpan {
+            name: unsafe { (*site).name },
+            start_ns,
+        });
+    }
+    rows
+}
+pub fn ring_snapshot(seconds: f64) -> Vec<Record> {
+    let end = now_ns();
+    let duration = if seconds.is_finite() && seconds >= 0. {
+        (seconds * 1e9).min(u64::MAX as f64) as u64
+    } else {
+        0
+    };
+    snapshot()
+        .into_iter()
+        .filter(|r| r.start_ns >= end.saturating_sub(duration))
+        .collect()
+}
+/// Latest values in bounded ring history. Counters without a recent sample are absent.
+pub fn counters() -> Vec<(&'static str, i64)> {
+    let mut values = std::collections::BTreeMap::new();
+    for record in snapshot() {
+        if let RecordKind::Counter(value) = record.kind {
+            if values.len() < 256 || values.contains_key(record.name) {
+                values.insert(record.name, value);
+            } else {
+                refuse(1);
+            }
+        }
+    }
+    values.into_iter().collect()
+}
+pub fn gauges() -> Vec<(&'static str, i64)> {
+    counters()
 }
 
 /// The recent events of every thread that has recorded any, oldest first: those of running threads, and the last
@@ -371,6 +494,55 @@ fn read(ring: &Ring) -> Vec<Record> {
 #[cfg(test)]
 mod budget_tests {
     use super::*;
+    #[test]
+    fn a_refused_production_ring_allocates_nothing_and_can_retry() {
+        let _turn = crate::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let used = ring_bytes();
+        let hold = RING_BUDGET.reserve(MAX_RING_BYTES - used).unwrap();
+        let before = dropped();
+        std::thread::spawn(|| {
+            static SITE: Site = Site::new("test.total.refusal");
+            SITE.mark();
+        })
+        .join()
+        .unwrap();
+        assert_eq!(ring_bytes(), MAX_RING_BYTES);
+        assert!(dropped() > before);
+        drop(hold);
+        assert_eq!(ring_bytes(), used);
+    }
+    #[test]
+    fn open_spans_and_completed_durations_use_the_injected_clock() {
+        let _turn = crate::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        std::thread::Builder::new()
+            .name("open-inspection".into())
+            .spawn(|| {
+                let clock = styk_services::clock::FixedClock::new();
+                let _clock = crate::clock::scoped(Arc::new(clock.clone()));
+                static SITE: Site = Site::new("test.open.inspect");
+                let span = Span::enter(&SITE);
+                let thread = threads()
+                    .into_iter()
+                    .find(|t| t.name.as_ref() == "open-inspection")
+                    .unwrap()
+                    .id;
+                assert_eq!(open_spans(thread)[0].start_ns, 0);
+                clock.advance(std::time::Duration::from_nanos(17));
+                drop(span);
+                assert!(open_spans(thread).is_empty());
+                assert_eq!(
+                    snapshot()
+                        .iter()
+                        .find(|r| r.thread == thread && r.name == "test.open.inspect")
+                        .unwrap()
+                        .duration_ns,
+                    17
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
     #[test]
     fn admission_precedes_allocation_and_releases_exactly() {
         let b = Budget::new(RING_BYTES);

@@ -25,3 +25,6 @@ zstd = "0.13"
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
+
+[features]
+inspect = ["styk-edit/inspect", "styk-engine/inspect", "styk-eval/inspect"]

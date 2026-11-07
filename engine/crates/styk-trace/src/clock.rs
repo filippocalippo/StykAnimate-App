@@ -14,6 +14,18 @@ pub fn install(clock: Arc<dyn Clock>) -> Result<(), Arc<dyn Clock>> {
 pub fn missing_reads() -> u64 {
     MISSING.load(Ordering::Relaxed)
 }
+pub(crate) fn current() -> Option<Arc<dyn Clock>> {
+    LOCAL.with(|slot| slot.borrow().as_ref().or_else(|| CLOCK.get()).cloned())
+}
+pub(crate) fn read(clock: &Option<Arc<dyn Clock>>) -> u64 {
+    match clock {
+        Some(clock) => clock.now().as_nanos().min(u64::MAX as u128) as u64,
+        None => {
+            MISSING.fetch_add(1, Ordering::Relaxed);
+            0
+        }
+    }
+}
 pub struct Scope(
     Option<Arc<dyn Clock>>,
     std::marker::PhantomData<std::rc::Rc<()>>,

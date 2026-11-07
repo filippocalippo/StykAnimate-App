@@ -1327,3 +1327,6 @@ mod figure_row_tests {
         assert_eq!(row(r#"{"figure_type_id":6,"text_assets":[{}],"segments":[{"segment_type":"image"}]}"#), r#"{"id":6,"name":null,"cel":null,"kind":"Text","segments":1,"pictures":true}"#);
     }
 }
+
+#[cfg(feature = "inspect")]
+pub mod inspect;

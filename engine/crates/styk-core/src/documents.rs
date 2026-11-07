@@ -103,6 +103,10 @@ pub struct Document {
 }
 
 impl Document {
+    #[cfg(feature = "inspect")]
+    pub fn inspection(&self) -> crate::inspect::DocumentSnapshot { self.prepared.session.inspection() }
+    #[cfg(feature = "inspect")]
+    pub fn inspect_history(&self, offset:usize) -> crate::inspect::Page<crate::inspect::HistoryRow> { self.prepared.session.inspect_history(offset) }
     pub fn id(&self) -> DocumentId { self.id }
     pub fn name(&self) -> &str { &self.prepared.name }
     pub fn revision(&self) -> u64 { self.prepared.session.revision() }
@@ -160,6 +164,12 @@ pub struct Documents {
 }
 
 impl Documents {
+    #[cfg(feature = "inspect")]
+    pub fn inspection_state(&self) -> crate::inspect::State {
+        crate::inspect::State { active:self.active.map(|id|id.0),documents:self.tabs.iter().map(|tab| {
+            let view=tab.view(); crate::inspect::DocumentState {id:tab.id.0,revision:view.revision,tick:view.tick,dirty:view.dirty,undo:view.history.undo,redo:view.history.redo}
+        }).collect() }
+    }
     pub fn new() -> Self { Self::default() }
     pub fn tabs(&self) -> &[Document] { &self.tabs }
     pub fn get(&self, id: DocumentId) -> Option<&Document> { self.tabs.iter().find(|tab| tab.id == id) }
