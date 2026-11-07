@@ -4,8 +4,8 @@ How the native app reads a pen, a tablet, a touch screen and a mouse, turns them
 puts the ink on the screen. This is the design of spike S1 as corrected by its independent review (every finding
 accepted); the spike's code follows it and its numbers are recorded in [input-results.md](input-results.md).
 
-Owners: `styk-services::input` (plain types, the queue, a fake source, the script replayer), `styk-platform::windows::input`
-(the `WM_POINTER` source and the injection helper), `styk-core::drawing` (`stroke_input`: today's rules; `worker`: the
+Owners: `styk-services::input` (plain types, the queue, a fake source, the script replayer), `styk-platform::input`
+(one owner: `windows::pointer` the `WM_POINTER` source and its subclass, `windows::qpc` the pointer clock, `host` the developer tools' view of both, and `ime` the keyboard-layout and input-method automation of the text input check), `styk-core::drawing` (`stroke_input`: today's rules; `worker`: the
 drawing worker thread), `styk-ui::ink_pad` (the drawing surface widget with wet ink), `styk-devtools::pen_lab` (the test
 surface, later the developer tools' Input panel).
 
@@ -90,7 +90,7 @@ brush; `docs/DRAWING.md`, `docs/TOUCH.md` and `docs/engine/drawing.md` are the c
 
 ### 3.2 The Windows source
 
-`styk_platform::windows::input` installs a window subclass (comctl32 `SetWindowSubclass`) on the main window's HWND. The
+`styk_platform::input::windows::pointer` installs a window subclass (comctl32 `SetWindowSubclass`) on the main window's HWND. The
 subclass runs on the interface thread, before winit's procedure, and does the following.
 
 - `WM_POINTERDOWN/UPDATE/UP/ENTER/LEAVE` with `pointerType == PT_PEN`: reads the whole history with

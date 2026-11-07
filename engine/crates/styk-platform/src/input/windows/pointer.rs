@@ -444,7 +444,7 @@ unsafe extern "system" fn subclass_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
-const SUBCLASS_ID: usize = 0x5359_4B49;
+const SUBCLASS_ID: usize = super::subclass_id::POINTER;
 
 /// The Windows pen, touch and mouse source. Attach it on the thread that owns the window and drop it there.
 pub struct WindowsInput {
@@ -654,5 +654,80 @@ pub fn refresh_hz(window: &dyn HasWindowHandle) -> f64 {
         let mut mode: DEVMODEW = zeroed();
         mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
         if EnumDisplaySettingsW(info.szDevice.as_ptr(), ENUM_CURRENT_SETTINGS, &mut mode) == 0 { 0.0 } else { mode.dmDisplayFrequency as f64 }
+    }
+}
+
+/// The window's subclass chain holds every owner: the pointer source passes on what is not its own, and subclasses installed before
+/// and after it (the window chrome will be one) see their messages and keep their ids.
+#[cfg(test)]
+mod chain_tests {
+    use super::*;
+    use crate::input::{ImePhase, send_ime};
+    use raw_window_handle::{Win32WindowHandle, WindowHandle};
+    use std::num::NonZeroIsize;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, HWND_MESSAGE, SendMessageW, WM_CHAR, WM_IME_STARTCOMPOSITION, WM_KEYDOWN};
+
+    thread_local! {
+        /// `(subclass id, message)` in the order the subclasses saw them.
+        static SEEN: RefCell<Vec<(usize, u32)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    unsafe extern "system" fn recorder(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, id: usize, _: usize) -> LRESULT {
+        SEEN.with(|seen| seen.borrow_mut().push((id, msg)));
+        // SAFETY: forwards the message unchanged.
+        unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+    }
+
+    struct Handle(HWND);
+
+    impl HasWindowHandle for Handle {
+        fn window_handle(&self) -> Result<WindowHandle<'_>, raw_window_handle::HandleError> {
+            let raw = RawWindowHandle::Win32(Win32WindowHandle::new(NonZeroIsize::new(self.0 as isize).unwrap()));
+            // SAFETY: the window outlives the handle in this test.
+            Ok(unsafe { WindowHandle::borrow_raw(raw) })
+        }
+    }
+
+    const INNER: usize = 0x7001;
+    const OUTER: usize = 0x7002;
+
+    #[test]
+    fn subclasses_installed_before_and_after_the_pointer_source_all_see_the_messages_and_the_source_still_samples() {
+        // A message-only window: it is never on the screen, and it needs no input from the person at the computer.
+        let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+        // SAFETY: a plain window of a system class owned by this thread.
+        let hwnd = unsafe { CreateWindowExW(0, class.as_ptr(), std::ptr::null(), 0, 0, 0, 0, 0, HWND_MESSAGE, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null()) };
+        assert!(!hwnd.is_null(), "the message-only window was created");
+        let handle = Handle(hwnd);
+        // SAFETY: both are removed (the window is destroyed) on this thread before the test ends.
+        assert_ne!(unsafe { SetWindowSubclass(hwnd, Some(recorder), INNER, 0) }, 0);
+        let queue = InputQueue::new();
+        let source = WindowsInput::attach(&handle, queue.clone()).expect("the pointer source attaches");
+        assert_ne!(unsafe { SetWindowSubclass(hwnd, Some(recorder), OUTER, 0) }, 0);
+        assert!(![INNER, OUTER].contains(&super::super::subclass_id::POINTER), "each owner has an id of its own");
+
+        send_ime(&handle, ImePhase::Start).expect("the composition message is delivered");
+        // SAFETY: plain messages to our own window on its own thread.
+        unsafe {
+            SendMessageW(hwnd, WM_KEYDOWN, 0x42, 0);
+            SendMessageW(hwnd, WM_CHAR, 0x62, 0);
+            SendMessageW(hwnd, WM_LBUTTONDOWN, 1, (20 << 16) | 10);
+        }
+        let seen = SEEN.with(|seen| seen.borrow().clone());
+        for message in [WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_CHAR, WM_LBUTTONDOWN] {
+            let order: Vec<usize> = seen.iter().filter(|s| s.1 == message).map(|s| s.0).collect();
+            assert_eq!(order, [OUTER, INNER], "message {message:#x} went through the whole chain, outermost first: {seen:?}");
+        }
+        let mut events = Vec::new();
+        queue.drain(&mut events);
+        assert!(events.iter().any(|e| matches!(e, InputEvent::Sample(s) if s.tool == Tool::Mouse && s.phase == Phase::Down)), "and the source made the press a sample: {events:?}");
+
+        drop(source);
+        let before = SEEN.with(|seen| seen.borrow().len());
+        // SAFETY: as above.
+        unsafe { SendMessageW(hwnd, WM_KEYDOWN, 0x43, 0) };
+        assert_eq!(SEEN.with(|seen| seen.borrow().len()) - before, 2, "unhooking the source leaves the other subclasses in the chain");
+        // SAFETY: this thread made the window.
+        unsafe { DestroyWindow(hwnd) };
     }
 }

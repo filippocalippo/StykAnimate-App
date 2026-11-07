@@ -1068,6 +1068,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "iced_selector"
+version = "0.15.0-dev"
+dependencies = [
+ "iced_core",
+]
+
+[[package]]
+name = "iced_test"
+version = "0.15.0-dev"
+dependencies = [
+ "iced_futures",
+ "iced_program",
+ "iced_renderer",
+ "iced_runtime",
+ "iced_selector",
+ "nom",
+ "png",
+ "sha2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "iced_tiny_skia"
 version = "0.15.0-dev"
 dependencies = [
@@ -2615,6 +2637,7 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "iced_runtime",
+ "iced_winit",
  "png",
  "pollster",
  "styk-core",
@@ -2633,6 +2656,7 @@ dependencies = [
  "pollster",
  "rayon",
  "sha2",
+ "styk-core",
  "styk-doc",
  "styk-edit",
  "styk-engine",
@@ -2640,8 +2664,10 @@ dependencies = [
  "styk-export",
  "styk-formats",
  "styk-piv",
+ "styk-platform",
  "styk-raster",
  "styk-render",
+ "styk-services",
 ]
 
 [[package]]
@@ -2676,6 +2702,8 @@ name = "styk-design"
 version = "0.1.0"
 dependencies = [
  "iced",
+ "iced_test",
+ "styk-core",
 ]
 
 [[package]]
@@ -2825,6 +2853,7 @@ name = "styk-platform"
 version = "0.1.0"
 dependencies = [
  "icu_collator",
+ "image",
  "raw-window-handle",
  "sha2",
  "styk-services",
@@ -2881,6 +2910,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "iced",
+ "png",
  "pollster",
  "styk-core",
  "styk-design",

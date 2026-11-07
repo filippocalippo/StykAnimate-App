@@ -8,7 +8,7 @@ use styk_services::input::InputHost;
 pub fn host() -> Arc<dyn InputHost> {
     #[cfg(windows)]
     {
-        Arc::new(crate::windows::input::WindowsInputHost)
+        Arc::new(crate::input::windows::pointer::WindowsInputHost)
     }
     #[cfg(not(windows))]
     {

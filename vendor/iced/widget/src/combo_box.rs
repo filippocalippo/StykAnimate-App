@@ -432,6 +432,7 @@ where
                 alignment: text::Alignment::Default,
                 multiline: None,
                 is_secure: false,
+                base_direction: Default::default(),
             },
         );
     }
