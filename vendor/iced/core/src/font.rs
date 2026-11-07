@@ -12,6 +12,25 @@ pub struct Font {
     pub stretch: Stretch,
     /// The [`Style`] of the [`Font`].
     pub style: Style,
+    /// The [`OpticalSize`] of the [`Font`].
+    pub optical_size: OpticalSize,
+    /// The OpenType [`Feature`]s of the [`Font`], applied to every glyph.
+    pub features: &'static [Feature],
+    /// The space added after every glyph, in thousandths of an em (CSS `letter-spacing`).
+    pub tracking: i16,
+}
+
+/// An OpenType feature setting: its four-byte tag and its value (`1` turns it on, `0` off).
+pub type Feature = ([u8; 4], u32);
+
+/// How a font's optical size axis (`opsz`) is set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum OpticalSize {
+    /// The font's default coordinate.
+    #[default]
+    Default,
+    /// The text's size in logical pixels, clamped to the axis (CSS `font-optical-sizing: auto`).
+    Auto,
 }
 
 impl Font {
@@ -21,6 +40,9 @@ impl Font {
         weight: Weight::Normal,
         stretch: Stretch::Normal,
         style: Style::Normal,
+        optical_size: OpticalSize::Default,
+        features: &[],
+        tracking: 0,
     };
 
     /// A monospaced font with normal [`Weight`].
@@ -58,6 +80,21 @@ impl Font {
     /// Sets the [`Style`] of the [`Font`].
     pub const fn style(self, style: Style) -> Self {
         Self { style, ..self }
+    }
+
+    /// Sets the [`OpticalSize`] of the [`Font`].
+    pub const fn optical_size(self, optical_size: OpticalSize) -> Self {
+        Self { optical_size, ..self }
+    }
+
+    /// Sets the OpenType [`Feature`]s of the [`Font`].
+    pub const fn features(self, features: &'static [Feature]) -> Self {
+        Self { features, ..self }
+    }
+
+    /// Sets the tracking of the [`Font`], in thousandths of an em.
+    pub const fn tracking(self, tracking: i16) -> Self {
+        Self { tracking, ..self }
     }
 }
 
@@ -167,6 +204,8 @@ pub enum Weight {
     Bold,
     ExtraBold,
     Black,
+    /// Any value of a variable font's `wght` axis (CSS `font-weight: 450`), from 1 to 1000.
+    Value(u16),
 }
 
 /// The width of some text.

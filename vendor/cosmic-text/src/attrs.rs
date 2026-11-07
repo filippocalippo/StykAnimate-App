@@ -269,6 +269,27 @@ impl Default for SpanPadding {
     }
 }
 
+/// The optical size (`opsz` axis) a text is set at, in sixteenths of a pixel; zero leaves the axis at the font's
+/// default. Faces without an `opsz` axis ignore it. The value is part of every key a face's instance, a shaped run
+/// and a rasterized glyph is cached under, so one string can be drawn at several optical sizes at once.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Ord, PartialOrd)]
+pub struct OpticalSize(pub u16);
+
+impl OpticalSize {
+    /// The font's default `opsz` coordinate.
+    pub const DEFAULT: Self = Self(0);
+
+    /// The optical size for a font size in pixels (CSS `font-optical-sizing: auto`). The font clamps it to its axis.
+    pub fn from_pixels(pixels: f32) -> Self {
+        Self((pixels * 16.0).round().clamp(0.0, f32::from(u16::MAX)) as u16)
+    }
+
+    /// The `opsz` coordinate in pixels, or `None` for the font's default.
+    pub fn pixels(self) -> Option<f32> {
+        (self.0 != 0).then(|| f32::from(self.0) / 16.0)
+    }
+}
+
 /// A wrapper for letter spacing to get around that f32 doesn't implement Eq and Hash
 #[derive(Clone, Copy, Debug)]
 pub struct LetterSpacing(pub f32);
@@ -367,6 +388,7 @@ pub struct Attrs<'a> {
     pub stretch: Stretch,
     pub style: Style,
     pub weight: Weight,
+    pub optical_size: OpticalSize,
     pub metadata: usize,
     pub cache_key_flags: CacheKeyFlags,
     pub metrics_opt: Option<CacheMetrics>,
@@ -388,6 +410,7 @@ impl<'a> Attrs<'a> {
             stretch: Stretch::Normal,
             style: Style::Normal,
             weight: Weight::NORMAL,
+            optical_size: OpticalSize::DEFAULT,
             metadata: 0,
             cache_key_flags: CacheKeyFlags::empty(),
             metrics_opt: None,
@@ -425,6 +448,12 @@ impl<'a> Attrs<'a> {
     /// Set [Weight]
     pub const fn weight(mut self, weight: Weight) -> Self {
         self.weight = weight;
+        self
+    }
+
+    /// Set the [`OpticalSize`]
+    pub const fn optical_size(mut self, optical_size: OpticalSize) -> Self {
+        self.optical_size = optical_size;
         self
     }
 
@@ -500,6 +529,8 @@ impl<'a> Attrs<'a> {
             && self.stretch == other.stretch
             && self.style == other.style
             && self.weight == other.weight
+            && self.optical_size == other.optical_size
+            && self.font_features == other.font_features
     }
 }
 
@@ -532,6 +563,7 @@ pub struct AttrsOwned {
     pub stretch: Stretch,
     pub style: Style,
     pub weight: Weight,
+    pub optical_size: OpticalSize,
     pub metadata: usize,
     pub cache_key_flags: CacheKeyFlags,
     pub metrics_opt: Option<CacheMetrics>,
@@ -550,6 +582,7 @@ impl AttrsOwned {
             stretch: attrs.stretch,
             style: attrs.style,
             weight: attrs.weight,
+            optical_size: attrs.optical_size,
             metadata: attrs.metadata,
             cache_key_flags: attrs.cache_key_flags,
             metrics_opt: attrs.metrics_opt,
@@ -567,6 +600,7 @@ impl AttrsOwned {
             stretch: self.stretch,
             style: self.style,
             weight: self.weight,
+            optical_size: self.optical_size,
             metadata: self.metadata,
             cache_key_flags: self.cache_key_flags,
             metrics_opt: self.metrics_opt,

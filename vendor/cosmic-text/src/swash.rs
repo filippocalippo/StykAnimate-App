@@ -5,6 +5,8 @@ use alloc::boxed::Box;
 #[cfg(feature = "no_std")]
 use core_maths::CoreFloat;
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 use core::fmt;
 use swash::scale::{image::Content, ScaleContext};
 use swash::scale::{Render, Source, StrikeWith};
@@ -15,33 +17,55 @@ use crate::{CacheKey, CacheKeyFlags, Color, FontSystem, HashMap};
 pub use swash::scale::image::{Content as SwashContent, Image as SwashImage};
 pub use swash::zeno::{Angle, Command, Placement, Transform};
 
+/// A scaler for the glyph's face at the glyph's size, with the `wght` and `opsz` coordinates the glyph was shaped at.
+fn scaler_for<'a>(
+    context: &'a mut ScaleContext,
+    font: &'a crate::Font,
+    cache_key: &CacheKey,
+) -> swash::scale::Scaler<'a> {
+    let variations = font.as_swash().variations();
+    let mut builder = context
+        .builder(font.as_swash())
+        .size(f32::from_bits(cache_key.font_size_bits))
+        .hint(!cache_key.flags.contains(CacheKeyFlags::DISABLE_HINTING));
+    let wght = variations.find_by_tag(swash::Tag::from_be_bytes(*b"wght"));
+    let opsz = variations
+        .find_by_tag(swash::Tag::from_be_bytes(*b"opsz"))
+        .zip(cache_key.font_optical_size.pixels());
+    if wght.is_some() || opsz.is_some() {
+        let mut coordinates = Vec::with_capacity(2);
+        if let Some(axis) = wght {
+            coordinates.push((
+                swash::Tag::from_be_bytes(*b"wght"),
+                f32::from(cache_key.font_weight.0).clamp(axis.min_value(), axis.max_value()),
+            ));
+        }
+        if let Some((axis, pixels)) = opsz {
+            coordinates.push((
+                swash::Tag::from_be_bytes(*b"opsz"),
+                pixels.clamp(axis.min_value(), axis.max_value()),
+            ));
+        }
+        builder = builder.normalized_coords(variations.normalized_coords(coordinates));
+    }
+    builder.build()
+}
+
 fn swash_image(
     font_system: &mut FontSystem,
     context: &mut ScaleContext,
     cache_key: CacheKey,
 ) -> Option<SwashImage> {
-    let Some(font) = font_system.get_font(cache_key.font_id, cache_key.font_weight) else {
+    let Some(font) = font_system.get_font_instance(
+        cache_key.font_id,
+        cache_key.font_weight,
+        cache_key.font_optical_size,
+    ) else {
         log::warn!("did not find font {:?}", cache_key.font_id);
         return None;
     };
 
-    let variable_width = font
-        .as_swash()
-        .variations()
-        .find_by_tag(swash::Tag::from_be_bytes(*b"wght"));
-
-    // Build the scaler
-    let mut scaler = context
-        .builder(font.as_swash())
-        .size(f32::from_bits(cache_key.font_size_bits))
-        .hint(!cache_key.flags.contains(CacheKeyFlags::DISABLE_HINTING));
-    if let Some(variation) = variable_width {
-        scaler = scaler.normalized_coords(font.as_swash().variations().normalized_coords([(
-            swash::Tag::from_be_bytes(*b"wght"),
-            f32::from(cache_key.font_weight.0).clamp(variation.min_value(), variation.max_value()),
-        )]));
-    }
-    let mut scaler = scaler.build();
+    let mut scaler = scaler_for(context, &font, &cache_key);
 
     // Compute the fractional offset-- you'll likely want to quantize this
     // in a real renderer
@@ -86,28 +110,16 @@ fn swash_outline_commands(
 ) -> Option<Box<[swash::zeno::Command]>> {
     use swash::zeno::PathData as _;
 
-    let Some(font) = font_system.get_font(cache_key.font_id, cache_key.font_weight) else {
+    let Some(font) = font_system.get_font_instance(
+        cache_key.font_id,
+        cache_key.font_weight,
+        cache_key.font_optical_size,
+    ) else {
         log::warn!("did not find font {:?}", cache_key.font_id);
         return None;
     };
 
-    let variable_width = font
-        .as_swash()
-        .variations()
-        .find_by_tag(swash::Tag::from_be_bytes(*b"wght"));
-
-    // Build the scaler
-    let mut scaler = context
-        .builder(font.as_swash())
-        .size(f32::from_bits(cache_key.font_size_bits))
-        .hint(!cache_key.flags.contains(CacheKeyFlags::DISABLE_HINTING));
-    if let Some(variation) = variable_width {
-        scaler = scaler.normalized_coords(font.as_swash().variations().normalized_coords([(
-            swash::Tag::from_be_bytes(*b"wght"),
-            f32::from(cache_key.font_weight.0).clamp(variation.min_value(), variation.max_value()),
-        )]));
-    }
-    let mut scaler = scaler.build();
+    let mut scaler = scaler_for(context, &font, &cache_key);
 
     // Scale the outline
     let mut outline = scaler
