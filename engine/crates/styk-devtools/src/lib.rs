@@ -7,7 +7,12 @@
 //!
 //! It may depend on the core, the interface, the design system and `styk-trace`; nothing else may depend on it.
 
+#[cfg(feature = "ui")]
 pub mod pen_lab;
+pub mod capture;
+pub mod protocol;
+pub mod stats;
+pub mod scenario;
 
 use styk_trace::{RecordKind, snapshot};
 
@@ -57,3 +62,5 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("report.mark") && line.ends_with("mark")));
     }
 }
+
+pub fn capture_events() -> Vec<styk_trace::Record> { snapshot() }

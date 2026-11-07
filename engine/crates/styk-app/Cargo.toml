@@ -22,7 +22,7 @@ png = "0.18"
 pollster = "0.4"
 styk-core = { path = "../styk-core" }
 styk-design = { path = "../styk-design", features = ["widgets"] }
-styk-devtools = { path = "../styk-devtools", optional = true }
+styk-devtools = { path = "../styk-devtools", optional = true, features = ["ui"] }
 styk-platform = { path = "../styk-platform" }
 styk-trace = { path = "../styk-trace" }
 styk-ui = { path = "../styk-ui" }

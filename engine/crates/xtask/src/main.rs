@@ -11,6 +11,8 @@
 //!
 //! It depends on `std` alone, so it builds in seconds and can never become a way for a toolkit to reach the engine.
 
+mod dev_features;
+mod dev_release;
 mod css;
 mod deps;
 mod design;
@@ -40,6 +42,8 @@ fn run(args: &[String]) -> Result<(), String> {
         ["design", "check"] => design::check(&root),
         ["deps"] => deps::deps(&root),
         ["lock"] => deps::lock(&root),
+        ["check-features"] => dev_features::check(&root),
+        ["check-release", ..] => dev_release::run(&args[1..]),
         ["fonts"] => fonts::check(&root),
         ["fonts", "verify"] => fonts::verify(&root),
         ["check"] => design::check(&root).and_then(|()| deps::deps(&root)).and_then(|()| deps::lock(&root)),

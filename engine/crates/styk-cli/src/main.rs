@@ -28,6 +28,8 @@ use styk_eval::geometry::build;
 
 #[cfg(feature = "app-tools")]
 mod audio;
+#[cfg(feature = "app-tools")]
+mod profile;
 mod container;
 mod export;
 mod load;
@@ -49,6 +51,10 @@ fn main() {
             eprintln!("styk audio needs the app-tools feature: cargo run -p styk-cli --features app-tools -- audio ...");
             2
         }
+#[cfg(feature = "app-tools")]
+        Some("profile") => profile::run(&args[1..]),
+        #[cfg(feature = "app-tools")]
+        Some("compare-profile") => profile::compare(&args[1..]),
         Some("container") if args.len() >= 3 && args[1] == "roundtrip" => container::roundtrip(&args[2], &args[3..]),
         Some("container") if args.len() >= 4 && args[1] == "json" => container::json(&args[2], &args[3]),
         Some("open") if args.len() >= 2 => load::open(&args[1], &args[2..]),

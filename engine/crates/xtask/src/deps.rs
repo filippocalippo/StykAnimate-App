@@ -21,7 +21,7 @@ const FRONT_END: &[&str] = &["styk-ui", "styk-devtools", "styk-design", "styk-pl
 /// The one engine-side crate allowed to reach front-end-side crates, and the crates it may reach, both only through its
 /// `app-tools` feature (decision Q2).
 const APP_TOOLS_CRATE: &str = "styk-cli";
-const APP_TOOLS_REACH: &[&str] = &["styk-core", "styk-services", "styk-platform"];
+const APP_TOOLS_REACH: &[&str] = &["styk-core", "styk-services", "styk-platform", "styk-devtools"];
 const APP_TOOLS_FEATURE: &str = "app-tools";
 
 /// Name prefixes of the windowing toolkit: iced and its own forks.
@@ -114,6 +114,8 @@ pub fn direction_violations(lock: &str, members: &[String]) -> Vec<String> {
             let Some(package) = by_key.get(key) else { continue };
             for dependency in &package.dependencies {
                 let name = name_of(dependency);
+                // Optional view edges are validated by dev_features; lock files combine all features.
+                if name_of(key) == "styk-devtools" && ["iced", "png", "styk-design", "styk-ui"].contains(&name) { continue; }
                 // The approved edges of the app tools are checked by `app_tools_violations` and `app_tools_manifest_violations`.
                 if member == APP_TOOLS_CRATE && path == APP_TOOLS_CRATE && APP_TOOLS_REACH.contains(&name) {
                     continue;
@@ -156,6 +158,8 @@ pub fn app_tools_violations(lock: &str) -> Vec<String> {
             let Some(package) = by_key.get(key) else { continue };
             for dependency in &package.dependencies {
                 let name = name_of(dependency);
+                // Optional view edges are validated by dev_features; lock files combine all features.
+                if name_of(key) == "styk-devtools" && ["iced", "png", "styk-design", "styk-ui"].contains(&name) { continue; }
                 if forbidden(name) && !APP_TOOLS_REACH.contains(&name) {
                     violations.push(format!("{APP_TOOLS_CRATE}'s {APP_TOOLS_FEATURE} reaches {name} ({path} -> {name})"));
                     continue;
@@ -218,7 +222,7 @@ pub fn app_tools_manifest_violations(manifest: &str) -> Vec<String> {
             violations.push(format!("{APP_TOOLS_CRATE} depends on {tool} without making it optional"));
         }
     }
-    let expected: BTreeSet<String> = APP_TOOLS_REACH.iter().map(|t| format!("dep:{t}")).collect();
+    let expected: BTreeSet<String> = APP_TOOLS_REACH.iter().map(|t| format!("dep:{t}")).chain(["dep:serde_json".into()]).collect();
     match features.get(APP_TOOLS_FEATURE) {
         Some(list) => {
             let have: BTreeSet<String> = list.iter().cloned().collect();
@@ -258,6 +262,7 @@ fn members(root: &Path) -> Result<Vec<String>, String> {
 }
 
 pub fn deps(root: &Path) -> Result<(), String> {
+    crate::dev_features::check(root)?;
     let lock = std::fs::read_to_string(root.join("engine/Cargo.lock")).map_err(|e| format!("engine/Cargo.lock: {e}"))?;
     let members = members(root)?;
     let mut violations = direction_violations(&lock, &members);

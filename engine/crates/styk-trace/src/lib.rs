@@ -43,7 +43,7 @@ macro_rules! span {
 #[macro_export]
 macro_rules! span {
     ($name:expr) => {{
-        let _ = $name;
+        if false { let _ = $name; }
         $crate::Span
     }};
 }
@@ -63,7 +63,7 @@ macro_rules! counter {
 #[macro_export]
 macro_rules! counter {
     ($name:expr, $value:expr) => {{
-        let _ = $name;
+        if false { let _ = $name; }
         if false {
             let _ = ($value) as i64;
         }
@@ -85,12 +85,21 @@ macro_rules! mark {
 #[macro_export]
 macro_rules! mark {
     ($name:expr) => {{
-        let _ = $name;
+        if false { let _ = $name; }
     }};
 }
 
 #[cfg(all(test, not(feature = "enabled")))]
 mod tests_off {
+    #[test]
+    fn disabled_names_are_not_evaluated() {
+        let mut calls = 0;
+        let _guard = span!({ calls += 1; "disabled" });
+        counter!({ calls += 1; "disabled" }, 1);
+        mark!({ calls += 1; "disabled" });
+        assert_eq!(calls, 0);
+    }
+
     #[test]
     fn the_guard_is_zero_sized() {
         let guard = span!("never recorded");

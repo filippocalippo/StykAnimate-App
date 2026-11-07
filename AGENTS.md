@@ -84,3 +84,19 @@ Run `npm run check` after JavaScript changes and tests covering affected behavio
 - Run `npm run release:prepare` and `npm run changelog:check`. Commit the changelog, both package version files, and both generated note files together. Generate notes through the script; never append history to the current release payload.
 - Published sections are immutable during ordinary work. Software fixes need a higher version. Review semantic duplicates manually; validation catches normalized text duplicates and structural errors, not equivalent meanings.
 - Shipping includes exact-artifact verification and the history update. Implementing a feature alone does not authorize publishing. When shipping is authorized, complete the documented process without redundant approval. Tag pushes can publish immediately.
+## Native developer tools (headless)
+
+The `styk-devtools` default feature set contains no views. `ui` enables the existing pen lab;
+`styk-app --features devtools` selects it. The CLI's non-default `app-tools` feature enables
+headless tools.
+
+- `cargo xtask check-features`: check the optional view dependency boundary.
+- `cargo xtask check-release <stykanimate.exe> [stykanimate.pdb]`: scan already-built shipping
+  artifacts for developer markers, including matches crossing read chunks. Missing files fail.
+- `styk profile <file> open|frame --out <new-directory>`: three offline runs, a summary,
+  `profile.json`, `trace.styktrace`, and an independently readable Perfetto JSON export.
+- `styk compare-profile <A/profile.json> <B/profile.json>`: noise-aware comparison of matching
+  release runs; quick/debug builds are refused. A regression returns exit code 1.
+
+Run builds/tests through the machine queue. The artifact scanner never builds implicitly.
+The `quick` Cargo profile is for iteration only; it is not a performance measurement profile.
