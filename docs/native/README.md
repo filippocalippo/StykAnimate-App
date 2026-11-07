@@ -77,7 +77,11 @@ clock with `--clock fixed`, the script read bounded, no failed-save dot; referen
 tools' engine, `perf/briefs/native/K-dev-engine.md`; done at `e82a1b66`: injected trace clocks, byte-bounded captures, the
 current-user control pipe, inspection APIs, schemas, budgets, `profile`/`compare-profile`; review: the release guard scans for a
 string and passed a binary with tracing compiled in, a profiled export stalls under the picture budget, task-runner
-profiles are debug and cannot be compared; fixing); the reference slice done at `5c9a83dd` (in review, GPT-6.1 Sol xhigh); K-stage's core (Astra xhigh: the stage host, `perf/briefs/native/K-stage.md`) started;
+profiles are debug and cannot be compared; fixing); the reference slice done at `5c9a83dd`; review: a blocker (refresh builds selection geometry on the interface thread: derived
+facts move to the frame workers as revision-stamped facts, the pattern every panel copies) and majors (a leaked gesture, a
+stale model across a document switch, Edit together's playhead tick, align over the range, missing controls, the focus
+contract, a locale-aware presentation with a language-neutral catalogue for 27 languages, real screenshot references),
+plus command handlers in their feature modules and one clipboard owner; fixing, then one re-check; K-stage's core (Astra xhigh: the stage host, `perf/briefs/native/K-stage.md`) started;
 then K-rec, K-cmd, K-widgets, K-dock, the stage's shader widget; then the skeleton gate. No interface work starts until S1 and S2a pass in a native window.
 
 **Kept off the branches on purpose.** `t3/fix-save-differs` and `t3/resave-keeps-layout` change saved bytes: the owner's
