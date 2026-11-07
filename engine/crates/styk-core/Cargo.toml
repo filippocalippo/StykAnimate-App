@@ -5,3 +5,10 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+styk-doc = { path = "../styk-doc" }
+styk-drawing = { path = "../styk-drawing" }
+styk-math = { path = "../styk-math" }
+styk-services = { path = "../styk-services" }
+styk-trace = { path = "../styk-trace" }
