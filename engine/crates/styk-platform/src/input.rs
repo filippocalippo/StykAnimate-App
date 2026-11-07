@@ -33,7 +33,27 @@ pub fn key_text(klid: &str, vk: u16) -> Result<String, WindowError> {
     imp::key_text(klid, vk)
 }
 
-/// Posts a key press (`down`) or release of `vk` to the window, as the keyboard driver would.
+/// The phases of an input-method composition the window is told about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImePhase {
+    /// `WM_IME_STARTCOMPOSITION`.
+    Start,
+    /// `WM_IME_COMPOSITION` with the composition string and the cursor.
+    Update,
+    /// `WM_IME_ENDCOMPOSITION`.
+    End,
+}
+
+/// Delivers an input-method composition message to the window, as an installed input method would after it changed the
+/// composition string (see [`compose`]). Without an input method installed nothing sends these by itself, so a check on
+/// such a machine sends them; it proves the window's handling, not an input method.
+pub fn send_ime(window: &dyn HasWindowHandle, phase: ImePhase) -> Result<(), WindowError> {
+    imp::send_ime(window.window_handle().map_err(|_| WindowError::NoWindow)?.as_raw(), phase)
+}
+
+/// Posts a key press (`down`) or release of `vk` to the window, as the keyboard driver would. A press also posts the
+/// characters the thread's current layout gives the key (`WM_CHAR`, one per UTF-16 unit), as the system's message
+/// translation does for a real key.
 pub fn post_key(window: &dyn HasWindowHandle, vk: u16, down: bool) -> Result<(), WindowError> {
     imp::post_key(window.window_handle().map_err(|_| WindowError::NoWindow)?.as_raw(), vk, down)
 }
@@ -58,10 +78,10 @@ mod imp {
     use super::{Candidate, RawWindowHandle, WindowError};
     use windows_sys::Win32::Foundation::{GetLastError, HWND};
     use windows_sys::Win32::UI::Input::Ime::{
-        CANDIDATEFORM, CPS_COMPLETE, ImmGetCandidateWindow, ImmGetContext, ImmNotifyIME, ImmReleaseContext, ImmSetCompositionStringW, NI_COMPOSITIONSTR, SCS_SETSTR,
+        CANDIDATEFORM, CPS_COMPLETE, GCS_COMPSTR, GCS_CURSORPOS, ImmGetCandidateWindow, ImmGetContext, ImmNotifyIME, ImmReleaseContext, ImmSetCompositionStringW, NI_COMPOSITIONSTR, SCS_SETSTR,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{ActivateKeyboardLayout, LoadKeyboardLayoutW, MapVirtualKeyExW, ToUnicodeEx};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_KEYDOWN, WM_KEYUP};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, SendMessageW, WM_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP};
 
     const MAPVK_VK_TO_VSC: u32 = 0;
     const KLF_NOTELLSHELL: u32 = 0x80;
@@ -113,6 +133,20 @@ mod imp {
         }
     }
 
+    pub fn send_ime(handle: RawWindowHandle, phase: super::ImePhase) -> Result<(), WindowError> {
+        let hwnd = hwnd(handle)?;
+        let (message, flags) = match phase {
+            super::ImePhase::Start => (WM_IME_STARTCOMPOSITION, 0),
+            super::ImePhase::Update => (WM_IME_COMPOSITION, (GCS_COMPSTR | GCS_CURSORPOS) as isize),
+            super::ImePhase::End => (WM_IME_ENDCOMPOSITION, 0),
+        };
+        // SAFETY: SendMessageW runs the window's own procedure on this thread with plain values.
+        unsafe {
+            SendMessageW(hwnd, message, 0, flags);
+        }
+        Ok(())
+    }
+
     pub fn post_key(handle: RawWindowHandle, vk: u16, down: bool) -> Result<(), WindowError> {
         let hwnd = hwnd(handle)?;
         // SAFETY: MapVirtualKeyW and PostMessageW take plain values; the window handle is live.
@@ -123,6 +157,16 @@ mod imp {
             let (message, flags) = if down { (WM_KEYDOWN, repeat_and_scan) } else { (WM_KEYUP, repeat_and_scan | (1 << 30) | (1 << 31)) };
             if PostMessageW(hwnd, message, usize::from(vk), flags as isize) == 0 {
                 return Err(os("PostMessageW"));
+            }
+            if down {
+                let state = [0u8; 256];
+                let mut buffer = [0u16; 8];
+                let count = ToUnicodeEx(u32::from(vk), scan, state.as_ptr(), buffer.as_mut_ptr(), buffer.len() as i32, 0, layout);
+                for &unit in &buffer[..count.max(0) as usize] {
+                    if PostMessageW(hwnd, WM_CHAR, usize::from(unit), flags as isize) == 0 {
+                        return Err(os("PostMessageW"));
+                    }
+                }
             }
         }
         Ok(())
@@ -197,6 +241,10 @@ mod imp {
     }
 
     pub fn post_key(_: RawWindowHandle, _: u16, _: bool) -> Result<(), WindowError> {
+        Err(WindowError::Unsupported)
+    }
+
+    pub fn send_ime(_: RawWindowHandle, _: super::ImePhase) -> Result<(), WindowError> {
         Err(WindowError::Unsupported)
     }
 

@@ -64,8 +64,10 @@ struct App {
     strategy: Option<Strategy>,
     window: Option<iced_window::Id>,
     /// What the input check has seen so far.
+    #[cfg(feature = "devtools")]
     report: Vec<String>,
     /// When each redraw started, for the check's latency figures.
+    #[cfg(feature = "devtools")]
     frame_times: Vec<std::time::Instant>,
     /// Frames the event loop has started since the window was shown.
     frames: u32,
@@ -76,7 +78,7 @@ struct App {
 impl App {
     fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: Arc<Mutex<Outcome>>) -> App {
         let sheet = screen.map(|Screen::ComponentSheet| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr));
-        App { launch, theme: Theme::default(), sheet, strategy, window: None, report: Vec::new(), frame_times: Vec::new(), frames: 0, capturing: false, outcome }
+        App { launch, theme: Theme::default(), sheet, strategy, window: None, #[cfg(feature = "devtools")] report: Vec::new(), #[cfg(feature = "devtools")] frame_times: Vec::new(), frames: 0, capturing: false, outcome }
     }
 
     fn theme(&self) -> Theme {
@@ -100,8 +102,7 @@ impl App {
                 };
                 #[cfg(feature = "devtools")]
                 if self.launch.input_check.is_some() && self.sheet.is_some() {
-                    let focus = Task::done(Message::Sheet(component_sheet::Message::Focus(styk_core::focus::FocusId(input_check::FIELD))));
-                    return Task::batch([shown, focus.chain(input_check::script(id).map(Message::Check))]);
+                    return Task::batch([shown, input_check::script(id).map(Message::Check)]);
                 }
                 shown
             }
@@ -109,6 +110,7 @@ impl App {
             Message::Shown(Err(error)) => self.finish(Outcome::Failed(format!("could not show the window: {error}"))),
             Message::Frame => {
                 self.frames += 1;
+                #[cfg(feature = "devtools")]
                 if self.launch.input_check.is_some() {
                     self.frame_times.push(std::time::Instant::now());
                 }
@@ -138,7 +140,12 @@ impl App {
     fn check(&mut self, step: input_check::Step) -> Task<Message> {
         let sheet_state = |app: &App| {
             let sheet = app.sheet.as_ref();
-            format!("name field {:?}, composing {}", sheet.map(|s| s.name.text()).unwrap_or(""), sheet.is_some_and(|s| s.focus.composing()))
+            let bounds = sheet.and_then(|s| s.snapshot.bounds_of(styk_ui::component_sheet::ids::NAME));
+            let text = sheet.map_or(String::new(), |s| {
+                let name: String = s.name.text().chars().take(24).collect();
+                format!("{name:?} ({} characters), notes {} characters", s.name.text().chars().count(), s.notes.text().chars().count())
+            });
+            format!("name field {text}, focused {:?}, composing {}, field bounds {:?}", sheet.and_then(|s| s.focus.focused()), sheet.is_some_and(|s| s.focus.composing()), bounds)
         };
         match step {
             input_check::Step::Probe { label } => {
@@ -150,9 +157,18 @@ impl App {
                 self.report.push(format!("{label}: {detail}"));
                 Task::none()
             }
-            input_check::Step::Finish => {
+            input_check::Step::Sheet(message) => Task::done(Message::Sheet(message)),
+            input_check::Step::LatencyStart => {
+                input_check::latency_start();
+                self.frame_times.clear();
+                Task::none()
+            }
+            input_check::Step::LatencyEnd { label } => {
                 let latency = input_check::latency_summary(&self.frame_times);
-                self.report.push(format!("keystroke to the start of the redraw that draws it: {latency}"));
+                self.report.push(format!("{label}, key to the start of the redraw that draws it: {latency}"));
+                Task::none()
+            }
+            input_check::Step::Finish => {
                 let body: Vec<String> = self.report.iter().map(|line| format!("  {:?}", line)).collect();
                 let json = format!("[\n{}\n]\n", body.join(",\n"));
                 let path = self.launch.input_check.clone().expect("the check only runs with --input-check");

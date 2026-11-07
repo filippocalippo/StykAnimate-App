@@ -46,7 +46,7 @@ pub mod ids {
 }
 
 const SELECT_OPTIONS: [&str; 4] = ["Linear", "Ease in", "Ease out", "Hold"];
-const TOOLBAR_ICONS: [&str; 5] = ["move", "pen", "eraser", "hand", "zoom-in"];
+const TOOLBAR_ICONS: [&str; 5] = ["move", "brush", "eraser", "hand", "zoom-in"];
 
 /// Which text field a message is about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,6 +106,8 @@ pub struct Sheet {
     pub dialog_open: bool,
     /// The last thing that happened, shown at the bottom.
     pub status: String,
+    /// What the last walk of the tree found: where each target is.
+    pub snapshot: focus::Snapshot,
 }
 
 impl Sheet {
@@ -128,6 +130,7 @@ impl Sheet {
             switch_on: true,
             dialog_open: false,
             status: String::new(),
+            snapshot: focus::Snapshot::default(),
         }
     }
 
@@ -267,6 +270,7 @@ impl Sheet {
 
     /// The tree's focus state arrived: give it to the core; a dialog that was just opened takes focus now.
     fn synced(&mut self, snapshot: focus::Snapshot) -> Task<Message> {
+        self.snapshot = snapshot.clone();
         if self.dialog_open && self.focus.top_scope() != MODAL {
             let targets = snapshot.targets(MODAL).to_vec();
             if !targets.is_empty() {
