@@ -51,3 +51,24 @@ test('R6 approval is read from the Git merge base, not the branch copy',()=>{
 test('R7 qualified and same-file aliased clocks are rejected',()=>{
  for(const name of ['Instant','SystemTime']) for(const code of [`<std::time::${name}>::now()`, `time::${name}::now`, `type T = ${name}; T::now()`, `type T = std::time::${name}; <T>::now()`]) assert.ok(sources.webErrors(code,'fixture.rs').length,code);
 });
+test('wasm check shares the engine nightly and atomics settings without running the builder',async()=>{
+ assert.equal(typeof guards.wasmCheck,'function');
+ const config=await import('../../../../scripts/engine-wasm-config.mjs');
+ const names=['styk-core','styk-services','styk-wasm'];
+ const metadata={workspace_members:names,packages:names.map(name=>({id:name,name}))};
+ const root=resolve('.'); const calls=[];
+ guards.wasmCheck(root,metadata,(...call)=>calls.push(call));
+ assert.equal(calls.length,1);
+ const [command,args,options]=calls[0];
+ assert.equal(command,'cargo'); assert.equal(args[0],`+${config.TOOLCHAIN}`);
+ assert.equal(args[1],'check'); assert.equal(args[args.indexOf('--profile')+1],'wasm-dev');
+ assert.ok(args.includes('build-std=std,panic_abort'));
+ assert.equal(args[args.indexOf('--target')+1],'wasm32-unknown-unknown');
+ assert.deepEqual(args.filter((_,i)=>args[i-1]==='-p'),names);
+ const env=config.threadedWasmEnv(resolve(root,'engine/target'));
+ assert.equal(options.env.CARGO_TARGET_DIR,resolve(root,'engine/target/wasm-threads'));
+ assert.equal(options.env.CARGO_ENCODED_RUSTFLAGS,env.CARGO_ENCODED_RUSTFLAGS);
+ assert.match(env.CARGO_ENCODED_RUSTFLAGS,/\+atomics,\+bulk-memory,\+mutable-globals,\+simd128/);
+ assert.ok(env.CARGO_ENCODED_RUSTFLAGS.includes('\x1f'));
+ assert.throws(()=>guards.wasmCheck(root,metadata,()=>{throw new Error('compiler failed');}),/compiler failed/);
+});

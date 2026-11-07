@@ -6,6 +6,7 @@ import {resolve, relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {sourceErrors} from './native-source-guards.mjs';
 import {screenCheck} from './native-screen-guards.mjs';
+import {TOOLCHAIN, THREADED_WASM_ARGS, threadedWasmEnv} from './engine-wasm-config.mjs';
 
 const frontend = new Set(['styk-app', 'styk-ui', 'styk-design', 'styk-devtools', 'styk-platform', 'styk-text-check', 'xtask']);
 const toolkit = name => /^(iced|winit|cryoglyph)([_-]|$)/.test(name);
@@ -143,7 +144,18 @@ export function allowErrors(metadata, allow, lock = '', allowSource = '') {
 
 export function wasmPackages(metadata) {
   const members = new Set(metadata.workspace_members);
-  return metadata.packages.filter(p => members.has(p.id) && !frontend.has(p.name) && p.name !== 'styk-cli').map(p => p.name).sort();
+  const available = new Set(metadata.packages.filter(p => members.has(p.id)).map(p => p.name));
+  const roots = ['styk-core', 'styk-services', 'styk-wasm'];
+  for (const name of roots) if (!available.has(name)) throw new Error(`wasm: required workspace crate ${name} is missing`);
+  return roots;
+}
+
+export function wasmCheck(root, metadata, run = execFileSync) {
+  // The binding pulls in its engine dependencies; the other two roots enforce
+  // the portable host contracts without compiling native tools or views.
+  const args = [`+${TOOLCHAIN}`, 'check', '--manifest-path', 'engine/Cargo.toml', '--profile', 'wasm-dev', '--locked', '--lib', ...THREADED_WASM_ARGS];
+  for (const name of wasmPackages(metadata)) args.push('-p', name);
+  run('cargo', args, {cwd: root, stdio: 'inherit', env: threadedWasmEnv(resolve(root, 'engine/target'))});
 }
 
 export function allowSealErrors(current, approved) {
@@ -183,12 +195,8 @@ export function check(root, wasm = false) {
   console.log('interface: clippy guards pass');
   screenCheck(root, execFileSync, metadata.target_directory);
   // Still verify every independent rule when a branch awaits merge approval.
+  if (wasm) wasmCheck(root, metadata);
   if (approvalErrors.length) throw new Error(approvalErrors.join('\n'));
-  if (wasm) {
-    const args = ['check', '--manifest-path', 'engine/Cargo.toml', '--locked', '--lib', '--target', 'wasm32-unknown-unknown'];
-    for (const name of wasmPackages(metadata)) args.push('-p', name);
-    execFileSync('cargo', args, {cwd: root, stdio: 'inherit'});
-  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -176,6 +176,8 @@ assignments are reported; assigned but missing images, dimension differences and
 reference exists, the guard renders through `stykanimate --screen` in headless mode and uses `styk image-diff`.
 No window opens, no reference is generated or updated, and no threshold is inferred from the result.
 
-`cargo xtask check --wasm` additionally checks the engine libraries, core and services for
-`wasm32-unknown-unknown`. This is an optional gate, not part of an implementer's Windows verification.
-Native tool binaries are excluded from that library portability gate; the browser binding is included.
+`cargo xtask check --wasm` additionally checks `styk-wasm` (and its engine dependencies), core and services for
+`wasm32-unknown-unknown`, with `check --profile wasm-dev`. It shares the pinned nightly, `-Z build-std=std,panic_abort`
+and atomics flags with `engine-build.mjs` through `engine-wasm-config.mjs`; the cache is `engine/target/wasm-threads`.
+The guard neither imports the executable builder nor installs a toolchain or target. It propagates compiler failures.
+This is an optional gate, not part of an implementer's Windows verification; native tools and views are excluded.

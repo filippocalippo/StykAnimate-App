@@ -195,7 +195,8 @@ test('allow-list rejects both a new package and an additional user', () => {
   assert.throws(() => parseAllow('"serde" = []\n"serde" = []'), /deps-allow.toml:2/);
 });
 
-test('wasm gate selects libraries, core and services without native tools', () => {
+test('wasm gate selects the engine binding, core and services without native tools', () => {
   const m = fixture({'styk-cli': ['styk-doc'], 'styk-ui': ['styk-core'], 'styk-core': ['styk-services'], 'styk-wasm': ['styk-doc']});
-  assert.deepEqual(wasmPackages(m), ['styk-core', 'styk-doc', 'styk-services', 'styk-wasm']);
+  assert.deepEqual(wasmPackages(m), ['styk-core', 'styk-services', 'styk-wasm']);
+  assert.throws(() => wasmPackages(fixture({'styk-core': ['styk-services']})), /styk-wasm is missing/);
 });
