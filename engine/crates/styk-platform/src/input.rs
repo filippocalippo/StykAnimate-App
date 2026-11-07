@@ -33,6 +33,13 @@ pub fn key_text(klid: &str, vk: u16) -> Result<String, WindowError> {
     imp::key_text(klid, vk)
 }
 
+/// Whether the primary mouse button is down right now, as the system sees it (a read, never an injection). A scrub
+/// uses it to notice that mouse capture was lost to another window without any event saying so. Where the platform has no
+/// way to ask, it says `true`: nothing is cancelled that cannot be known to be over.
+pub fn primary_button_down() -> bool {
+    imp::primary_button_down()
+}
+
 /// The phases of an input-method composition the window is told about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImePhase {
@@ -80,8 +87,10 @@ mod imp {
     use windows_sys::Win32::UI::Input::Ime::{
         CANDIDATEFORM, CPS_COMPLETE, GCS_COMPSTR, GCS_CURSORPOS, ImmGetCandidateWindow, ImmGetContext, ImmNotifyIME, ImmReleaseContext, ImmSetCompositionStringW, NI_COMPOSITIONSTR, SCS_SETSTR,
     };
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{ActivateKeyboardLayout, LoadKeyboardLayoutW, MapVirtualKeyExW, ToUnicodeEx};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, SendMessageW, WM_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        ActivateKeyboardLayout, GetAsyncKeyState, LoadKeyboardLayoutW, MapVirtualKeyExW, ToUnicodeEx, VK_LBUTTON, VK_RBUTTON,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, PostMessageW, SM_SWAPBUTTON, SendMessageW, WM_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP};
 
     const MAPVK_VK_TO_VSC: u32 = 0;
     const KLF_NOTELLSHELL: u32 = 0x80;
@@ -130,6 +139,14 @@ mod imp {
             let mut buffer = [0u16; 8];
             let count = ToUnicodeEx(u32::from(vk), scan, state.as_ptr(), buffer.as_mut_ptr(), buffer.len() as i32, 0, layout);
             Ok(String::from_utf16_lossy(&buffer[..count.max(0) as usize]))
+        }
+    }
+
+    pub fn primary_button_down() -> bool {
+        // SAFETY: both calls read system state and take plain values.
+        unsafe {
+            let key = if GetSystemMetrics(SM_SWAPBUTTON) != 0 { VK_RBUTTON } else { VK_LBUTTON };
+            GetAsyncKeyState(i32::from(key)) < 0
         }
     }
 
@@ -246,6 +263,10 @@ mod imp {
 
     pub fn send_ime(_: RawWindowHandle, _: super::ImePhase) -> Result<(), WindowError> {
         Err(WindowError::Unsupported)
+    }
+
+    pub fn primary_button_down() -> bool {
+        true
     }
 
     pub fn compose(_: RawWindowHandle, _: &str) -> Result<(), WindowError> {

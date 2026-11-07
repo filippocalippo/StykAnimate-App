@@ -17,7 +17,7 @@ use iced::advanced::widget::operation::{self, Outcome};
 use iced::advanced::widget::{self, Operation, Tree, tree};
 use iced::advanced::{Shell, Widget};
 use iced::keyboard::{self, Key, key::Named};
-use iced::{Border, Color, Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, mouse};
+use iced::{Border, Color, Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, mouse, touch};
 use std::any::Any;
 use styk_core::focus::{FocusArea, FocusId, FocusState, FocusTarget, ScopeId, TargetKind};
 
@@ -66,11 +66,21 @@ impl Snapshot {
 
 /// Gives the core what a walk of the tree found: every open scope's targets, then what holds focus (an `Option`: nothing
 /// clears a stale text-entry state).
-pub fn sync(state: &mut FocusState, snapshot: &Snapshot) {
+pub fn sync(state: &mut FocusState, snapshot: &Snapshot) -> Synced {
     for (scope, targets) in &snapshot.scopes {
         state.register(*scope, targets.clone());
     }
-    state.reconcile(snapshot.focused);
+    let unfocus = state.reconcile(snapshot.focused);
+    Synced { unfocus, removed: state.take_removed() }
+}
+
+/// What the interface still has to do after [`sync`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Synced {
+    /// A target the toolkit holds focused that the core refuses (it is behind the open dialog): take focus from it.
+    pub unfocus: Option<FocusId>,
+    /// Targets that were in the tree and are not, or were enabled and are not: the owner of a gesture on one ends it.
+    pub removed: Vec<FocusId>,
 }
 
 /// What the core asks the interface to do after a navigation key.
@@ -78,9 +88,15 @@ pub fn navigate(state: &mut FocusState, event: &Event) -> Option<FocusId> {
     let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
         return None;
     };
+    // An input method that is composing owns the keys: nothing moves focus until it is done.
+    if state.composing() {
+        return None;
+    }
     match key.as_ref() {
         Key::Named(Named::Tab) if !modifiers.control() && !modifiers.alt() && !modifiers.logo() => state.tab(!modifiers.shift()),
-        Key::Named(Named::F6) if !modifiers.alt() && !modifiers.logo() => state.cycle_area(!modifiers.shift()),
+        // F6 is the next area and Ctrl+F6 the previous (`focus-next-region`, `focus-previous-region` in `src/hotkeys.mjs`);
+        // Shift+F6 is Remove keyframes and moves nothing.
+        Key::Named(Named::F6) if !modifiers.alt() && !modifiers.logo() && !modifiers.shift() => state.cycle_area(!modifiers.control()),
         _ => None,
     }
 }
@@ -316,25 +332,16 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Focusable<'a,
         viewport: &Rectangle,
     ) {
         let was_focused = tree.state.downcast_ref::<State>().focused;
+        let is_key = matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }));
+        let is_pointer = matches!(event, Event::Mouse(_) | Event::Touch(_));
 
-        self.content.update(&mut tree.children[0], event, layout, cursor, renderer, shell, viewport);
-
+        // The control's own keys come first, and only while it is enabled and holds focus: it is the one keyboard
+        // owner. A hovered control that is not focused never sees a key, and a focused one answers a key once (the
+        // wrapper's answer captures it, so the control inside does not answer as well).
         if self.enabled {
-            let bounds = layout.bounds();
             let state = tree.state.downcast_mut::<State>();
 
             match event {
-                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                    if cursor.is_over(bounds) {
-                        // A click focuses, without the ring.
-                        state.focused = true;
-                        state.visible = false;
-                    } else if state.focused {
-                        state.focused = false;
-                        state.visible = false;
-                        state.armed = false;
-                    }
-                }
                 Event::Window(iced::window::Event::Unfocused) => {
                     state.armed = false;
                 }
@@ -363,6 +370,38 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Focusable<'a,
                 }
                 _ => {}
             }
+        }
+
+        // What the control inside is given: nothing while it is disabled, no keys while it is not focused, and no key the
+        // wrapper already answered.
+        let focused = tree.state.downcast_ref::<State>().focused;
+        let blocked = (!self.enabled && (is_key || is_pointer)) || (is_key && (!focused || shell.is_event_captured()));
+
+        if !blocked {
+            self.content.update(&mut tree.children[0], event, layout, cursor, renderer, shell, viewport);
+        }
+
+        if self.enabled {
+            let bounds = layout.bounds();
+            let state = tree.state.downcast_mut::<State>();
+
+            if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event {
+                if cursor.is_over(bounds) {
+                    // A click focuses, without the ring.
+                    state.focused = true;
+                    state.visible = false;
+                } else if state.focused {
+                    state.focused = false;
+                    state.visible = false;
+                    state.armed = false;
+                }
+            }
+        } else {
+            // A disabled control cannot hold focus.
+            let state = tree.state.downcast_mut::<State>();
+            state.focused = false;
+            state.visible = false;
+            state.armed = false;
         }
 
         let state = tree.state.downcast_ref::<State>();
@@ -437,12 +476,20 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Focusable<'a,
 pub struct Anchor<'a, Message> {
     meta: Meta,
     content: Element<'a, Message>,
+    on_key_release: Option<Box<dyn Fn(&keyboard::Event) -> Option<Message> + 'a>>,
 }
 
 impl<'a, Message: 'a> Anchor<'a, Message> {
     /// Wraps `content`, whose own focusable state uses [`widget_id`]`(id)`.
     pub fn new(id: FocusId, area: FocusArea, kind: TargetKind, enabled: bool, content: Element<'a, Message>) -> Self {
-        Anchor { meta: Meta { id, area, kind, enabled, tab_stop: true }, content }
+        Anchor { meta: Meta { id, area, kind, enabled, tab_stop: true }, content, on_key_release: None }
+    }
+
+    /// A message for a key release the field's own widget does not see (the number field's arrow keys end a gesture
+    /// when they are released).
+    pub fn on_key_release(mut self, on_key_release: impl Fn(&keyboard::Event) -> Option<Message> + 'a) -> Self {
+        self.on_key_release = Some(Box::new(on_key_release));
+        self
     }
 }
 
@@ -480,6 +527,12 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Anchor<'a, Message> {
         viewport: &Rectangle,
     ) {
         self.content.update(&mut tree.children[0], event, layout, cursor, renderer, shell, viewport);
+
+        if let (Some(on_key_release), Event::Keyboard(key_event @ keyboard::Event::KeyReleased { .. })) = (&self.on_key_release, event)
+            && let Some(message) = on_key_release(key_event)
+        {
+            shell.publish(message);
+        }
     }
 
     fn mouse_interaction(
@@ -566,7 +619,20 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Scope<'a, Message> {
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        // A press outside the dialog is the dialog's and nobody else's: it neither reaches the page behind nor makes the
+        // dialog's own focused control lose focus (focus stays inside the modal).
+        if matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_)) | Event::Touch(touch::Event::FingerPressed { .. })) && !cursor.is_over(layout.bounds()) {
+            shell.capture_event();
+            return;
+        }
+
         self.content.update(&mut tree.children[0], event, layout, cursor, renderer, shell, viewport);
+
+        // A modal scope contains the pointer: whatever the dialog did not take, the page behind it must not receive (a click
+        // on a field behind it would give that field focus).
+        if matches!(event, Event::Mouse(_) | Event::Touch(_)) && !shell.is_event_captured() {
+            shell.capture_event();
+        }
     }
 
     fn mouse_interaction(

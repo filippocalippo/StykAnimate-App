@@ -436,6 +436,9 @@ where
                 editor::Update::Focus | editor::Update::Unfocus | editor::Update::InputMethod => {
                     shell.request_redraw();
                 }
+                editor::Update::Handled => {
+                    shell.capture_event();
+                }
             }
         }
 

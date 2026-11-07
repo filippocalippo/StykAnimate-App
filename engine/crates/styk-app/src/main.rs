@@ -70,6 +70,9 @@ struct App {
     /// When each redraw started, for the check's latency figures.
     #[cfg(feature = "devtools")]
     frame_times: Vec<std::time::Instant>,
+    /// The characters the field held when a latency run began.
+    #[cfg(feature = "devtools")]
+    latency_base: usize,
     /// Whether the font system is ready. Until it is, the view holds no text (`styk_design::warm_up`).
     fonts_ready: bool,
     /// Frames the event loop has started since the window was shown.
@@ -80,7 +83,11 @@ struct App {
 
 impl App {
     fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: Arc<Mutex<Outcome>>) -> App {
-        let sheet = screen.map(|Screen::ComponentSheet| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr));
+        let sheet = screen.map(|Screen::ComponentSheet| {
+            let mut sheet = Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr);
+            sheet.button_probe = Some(styk_platform::input::primary_button_down);
+            sheet
+        });
         App {
             launch,
             theme: Theme::default(),
@@ -91,6 +98,8 @@ impl App {
             report: Vec::new(),
             #[cfg(feature = "devtools")]
             frame_times: Vec::new(),
+            #[cfg(feature = "devtools")]
+            latency_base: 0,
             fonts_ready: false,
             frames: 0,
             capturing: false,
@@ -180,14 +189,16 @@ impl App {
                 Task::none()
             }
             input_check::Step::Sheet(message) => Task::done(Message::Sheet(message)),
-            input_check::Step::LatencyStart => {
+            input_check::Step::LatencyStart { field } => {
                 input_check::latency_start();
                 self.frame_times.clear();
+                self.latency_base = self.sheet.as_ref().map_or(0, |sheet| sheet.field_len(field));
                 Task::none()
             }
-            input_check::Step::LatencyEnd { label } => {
-                let latency = input_check::latency_summary(&self.frame_times);
-                self.report.push(format!("{label}, key to the start of the redraw that draws it: {latency}"));
+            input_check::Step::LatencyEnd { label, field } => {
+                let now = self.sheet.as_ref().map_or(0, |sheet| sheet.field_len(field));
+                let latency = input_check::latency_summary(&self.frame_times, &input_check::presents(), now.saturating_sub(self.latency_base));
+                self.report.push(format!("{label}: {latency}"));
                 Task::none()
             }
             input_check::Step::Finish => {

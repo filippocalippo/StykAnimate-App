@@ -24,9 +24,10 @@ impl Chord {
         Chord { key: key.to_owned(), ctrl, alt, shift, meta: false, alt_graph: false }
     }
 
-    /// F6, Ctrl+F6, Ctrl+Alt+M and Ctrl+Alt+L work from inside a text field (`docs/hotkeys.md`).
+    /// F6, Ctrl+F6, Ctrl+Alt+M and Ctrl+Alt+L work from inside a text field (`docs/hotkeys.md`), and nothing else:
+    /// Shift+F6 is Remove keyframes (`src/hotkeys.mjs`), so it must not run from a field.
     pub fn works_in_text_fields(&self) -> bool {
-        if self.meta || self.shift && self.key != "F6" {
+        if self.meta || self.shift {
             return false;
         }
         match self.key.as_str() {

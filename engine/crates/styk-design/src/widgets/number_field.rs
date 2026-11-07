@@ -31,14 +31,20 @@ pub enum Scrub {
     Click,
     /// The pointer moved past the drag slop: the gesture begins.
     Begin,
-    /// The pointer is `dx` pixels from where it was pressed (positive to the right), with the step modifiers held.
+    /// The pointer moved `dx` pixels (positive to the right) since the previous movement, with the step modifiers held
+    /// *at this movement*: the owner adds each one, as `property-controls.mjs` does, so a change of Shift mid-drag does
+    /// not rescale what was travelled.
     Delta { dx: f32, shift: bool, alt: bool },
     /// The gesture ended by release: commit it (one history entry).
     End,
-    /// The gesture was abandoned (Escape, the window lost focus, a touch cancel): roll it back.
+    /// The gesture was abandoned (Escape, the window lost focus, the button released elsewhere, a touch cancel, the
+    /// label removed or disabled): roll it back. Exactly one of `End` and `Cancel` ends a gesture.
     Cancel,
-    /// An arrow key or the wheel: one step up (`+1`) or down (`-1`), scaled by the modifiers.
-    Step { direction: i32, shift: bool, alt: bool },
+    /// An arrow key (`+1` up or right, `-1` down or left) pressed on the label or in the input: one step, scaled by the
+    /// modifiers. Holding the key repeats it inside one gesture.
+    KeyStep { direction: i32, shift: bool, alt: bool },
+    /// The arrow key was released: the held key's gesture ends.
+    KeyEnd,
 }
 
 #[derive(Default)]
@@ -49,7 +55,8 @@ struct State {
 }
 
 struct Press {
-    x: f32,
+    start_x: f32,
+    last_x: f32,
     started: bool,
 }
 
@@ -58,11 +65,19 @@ pub struct ScrubLabel<'a, Message> {
     content: Element<'a, Message>,
     on_scrub: Arc<dyn Fn(Scrub) -> Message + 'a>,
     slop: f32,
+    held: Option<fn() -> bool>,
 }
 
 impl<'a, Message: 'a> ScrubLabel<'a, Message> {
     pub fn new(content: Element<'a, Message>, on_scrub: Arc<dyn Fn(Scrub) -> Message + 'a>) -> Self {
-        ScrubLabel { content, on_scrub, slop: DRAG_SLOP }
+        ScrubLabel { content, on_scrub, slop: DRAG_SLOP, held: None }
+    }
+
+    /// Asks the system whether the primary button is still down. winit captures the mouse while a button is held, but
+    /// when another window takes the capture no event says so: a scrub that sees the button up is cancelled.
+    pub fn held(mut self, held: Option<fn() -> bool>) -> Self {
+        self.held = held;
+        self
     }
 
     /// Overrides the drag slop.
@@ -123,6 +138,17 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for ScrubLabel<'a, Messag
         }
         let (shift, alt) = (state.modifiers.shift(), state.modifiers.alt());
 
+        // The capture was lost (a system menu, another window took it): the button is up and no event says so.
+        if matches!(event, Event::Mouse(mouse::Event::CursorMoved { .. }) | Event::Window(iced::window::Event::RedrawRequested(_)))
+            && state.press.as_ref().is_some_and(|press| press.started)
+            && self.held.is_some_and(|held| !held())
+        {
+            state.press = None;
+            shell.publish((self.on_scrub)(Scrub::Cancel));
+            shell.capture_event();
+            return;
+        }
+
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(press) = state.press.take() {
@@ -134,20 +160,24 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for ScrubLabel<'a, Messag
                 } else if cursor.is_over(bounds)
                     && let Some(position) = cursor.position()
                 {
-                    state.press = Some(Press { x: position.x, started: false });
+                    state.press = Some(Press { start_x: position.x, last_x: position.x, started: false });
                     shell.capture_event();
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 if let Some(press) = &mut state.press {
-                    let dx = position.x - press.x;
-                    if !press.started && dx.abs() >= self.slop {
+                    // A press that has not travelled the drag slop is not a scrub yet.
+                    if !press.started && (position.x - press.start_x).abs() < self.slop {
+                        shell.capture_event();
+                        return;
+                    }
+                    if !press.started {
                         press.started = true;
                         shell.publish((self.on_scrub)(Scrub::Begin));
                     }
-                    if press.started {
-                        shell.publish((self.on_scrub)(Scrub::Delta { dx, shift, alt }));
-                    }
+                    let dx = position.x - press.last_x;
+                    press.last_x = position.x;
+                    shell.publish((self.on_scrub)(Scrub::Delta { dx, shift, alt }));
                     shell.capture_event();
                 }
             }
@@ -170,15 +200,6 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for ScrubLabel<'a, Messag
                     && press.started
                 {
                     shell.publish((self.on_scrub)(Scrub::Cancel));
-                }
-            }
-            Event::Mouse(mouse::Event::WheelScrolled { delta }) if hovered && state.press.is_none() => {
-                let y = match delta {
-                    mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. } => *y,
-                };
-                if y != 0.0 {
-                    shell.publish((self.on_scrub)(Scrub::Step { direction: if y > 0.0 { 1 } else { -1 }, shift, alt }));
-                    shell.capture_event();
                 }
             }
             _ => {}
@@ -245,6 +266,7 @@ pub struct NumberField<'a, Message> {
     on_scrub: Option<Arc<dyn Fn(Scrub) -> Message + 'a>>,
     on_focus_change: Option<Box<dyn Fn(bool) -> Message + 'a>>,
     on_compose: Option<Box<dyn Fn(bool) -> Message + 'a>>,
+    button_probe: Option<fn() -> bool>,
 }
 
 impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
@@ -274,7 +296,14 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
             on_scrub: None,
             on_focus_change: None,
             on_compose: None,
+            button_probe: None,
         }
+    }
+
+    /// How a scrub asks the system whether the primary button is still down (see [`ScrubLabel::held`]).
+    pub fn button_probe(mut self, probe: Option<fn() -> bool>) -> Self {
+        self.button_probe = probe;
+        self
     }
 
     pub fn unit(mut self, unit: &'a str) -> Self {
@@ -308,7 +337,7 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
         self
     }
 
-    /// Escape in the input: roll back to the gesture baseline and leave the field.
+    /// Escape in the input: cancel the edit; the field keeps focus (today's number fields do).
     pub fn on_escape(mut self, message: Message) -> Self {
         self.on_escape = Some(message);
         self
@@ -352,31 +381,8 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
             on_scrub,
             on_focus_change,
             on_compose,
+            button_probe,
         } = field;
-
-        let label_text = text(label).size(tokens::scale::TYPE_SMALL.size).font(super::INTER).color(iced::Color::from(palette.text_2));
-        let mut label_element: Element<'a, Message> = label_text.boxed();
-        let mut keys: Keys<'a, Message> = Keys::Button;
-
-        if let Some(on_scrub) = on_scrub {
-            label_element = ScrubLabel::new(label_element, on_scrub.clone()).boxed();
-            keys = Keys::Custom(Box::new(move |event| match event {
-                keyboard::Event::KeyPressed { key, modifiers, .. } => {
-                    let (shift, alt) = (modifiers.shift(), modifiers.alt());
-                    match key.as_ref() {
-                        Key::Named(Named::Enter) => Some(on_scrub(Scrub::Click)),
-                        Key::Named(Named::ArrowUp | Named::ArrowRight) => Some(on_scrub(Scrub::Step { direction: 1, shift, alt })),
-                        Key::Named(Named::ArrowDown | Named::ArrowLeft) => Some(on_scrub(Scrub::Step { direction: -1, shift, alt })),
-                        _ => None,
-                    }
-                }
-                _ => None,
-            }));
-        }
-
-        let label_target = Focusable::new(label_id, area, label_element, Ring::of(palette, tokens::scale::RADIUS_2XS))
-            .keys(keys)
-            .enabled(enabled);
 
         let mut input = EditField::new(field_id, area, Role::Number, value, palette)
             .dir(Dir::Ltr)
@@ -398,6 +404,41 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
         if let Some(on_compose) = on_compose {
             input = input.on_compose(on_compose);
         }
+
+        let label_text = text(label).size(tokens::scale::TYPE_SMALL.size).font(super::INTER).color(iced::Color::from(palette.text_2));
+        let mut label_element: Element<'a, Message> = label_text.boxed();
+        let mut keys: Keys<'a, Message> = Keys::Button;
+
+        if let Some(on_scrub) = on_scrub {
+            label_element = ScrubLabel::new(label_element, on_scrub.clone()).held(button_probe).boxed();
+            let on_scrub_keys = on_scrub.clone();
+            keys = Keys::Custom(Box::new(move |event| match event {
+                // Ctrl and Meta arrows pass through, as today.
+                keyboard::Event::KeyPressed { key, modifiers, .. } if !modifiers.control() && !modifiers.logo() => {
+                    let (shift, alt) = (modifiers.shift(), modifiers.alt());
+                    match key.as_ref() {
+                        Key::Named(Named::Enter) => Some(on_scrub_keys(Scrub::Click)),
+                        Key::Named(Named::ArrowUp | Named::ArrowRight) => Some(on_scrub_keys(Scrub::KeyStep { direction: 1, shift, alt })),
+                        Key::Named(Named::ArrowDown | Named::ArrowLeft) => Some(on_scrub_keys(Scrub::KeyStep { direction: -1, shift, alt })),
+                        _ => None,
+                    }
+                }
+                keyboard::Event::KeyReleased { key: Key::Named(Named::ArrowUp | Named::ArrowDown | Named::ArrowLeft | Named::ArrowRight), .. } => {
+                    Some(on_scrub_keys(Scrub::KeyEnd))
+                }
+                _ => None,
+            }));
+            input = input
+                .on_step({
+                    let on_scrub = on_scrub.clone();
+                    move |direction, shift, alt| on_scrub(Scrub::KeyStep { direction, shift, alt })
+                })
+                .on_step_end(on_scrub(Scrub::KeyEnd));
+        }
+
+        let label_target = Focusable::new(label_id, area, label_element, Ring::of(palette, tokens::scale::RADIUS_2XS))
+            .keys(keys)
+            .enabled(enabled);
 
         let mut children: Vec<Element<'a, Message>> = vec![label_target.boxed(), input.into_element()];
         if let Some(unit) = unit {

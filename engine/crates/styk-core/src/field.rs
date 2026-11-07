@@ -36,6 +36,8 @@ pub enum EnterAction {
 pub enum EscapeAction {
     /// Roll the text back to the baseline and leave the field.
     RevertAndBlur,
+    /// Roll the edit back and keep focus (a number field, as today's `property-controls.mjs` does).
+    Revert,
     /// Leave the field, keeping the text.
     Blur,
     /// Do nothing here: the enclosing dialog handles it.
@@ -66,7 +68,8 @@ impl Role {
     /// Escape.
     pub fn escape(self) -> EscapeAction {
         match self {
-            Role::SingleLine | Role::Number => EscapeAction::RevertAndBlur,
+            Role::SingleLine => EscapeAction::RevertAndBlur,
+            Role::Number => EscapeAction::Revert,
             Role::DialogLine => EscapeAction::PassToDialog,
             Role::Multiline => EscapeAction::Blur,
             Role::Search => EscapeAction::ClearOrBlur,
@@ -114,6 +117,17 @@ impl FieldValue {
         self.baseline = self.text.clone();
     }
 
+    /// The field took focus: what Escape returns to is the text it holds now (a commit and an edit elsewhere since the
+    /// last focus must not be rolled back past).
+    pub fn focus(&mut self) {
+        self.baseline = self.text.clone();
+    }
+
+    /// The field lost focus: its text stands, and is the baseline.
+    pub fn blur(&mut self) {
+        self.baseline = self.text.clone();
+    }
+
     /// The edit was committed without leaving the field: what Escape returns to is now the committed text.
     pub fn commit(&mut self) {
         self.baseline = self.text.clone();
@@ -145,7 +159,7 @@ mod tests {
         assert_eq!(Role::SingleLine.escape(), EscapeAction::RevertAndBlur);
         assert_eq!(Role::DialogLine.escape(), EscapeAction::PassToDialog);
         assert_eq!(Role::Multiline.escape(), EscapeAction::Blur);
-        assert_eq!(Role::Number.escape(), EscapeAction::RevertAndBlur);
+        assert_eq!(Role::Number.escape(), EscapeAction::Revert, "today Escape cancels a number edit and keeps focus");
         assert_eq!(Role::Search.escape(), EscapeAction::ClearOrBlur);
         assert!(Role::Search.single_line() && !Role::Multiline.single_line());
     }
@@ -161,6 +175,19 @@ mod tests {
         field.set("Other");
         field.revert();
         assert_eq!(field.text(), "Other", "a value set from outside is the new baseline");
+    }
+
+    #[test]
+    fn the_baseline_is_refreshed_when_the_field_is_focused_again() {
+        let mut field = FieldValue::new("one");
+        field.focus();
+        field.input("two".into());
+        field.blur();
+        field.input("three".into());
+        field.focus();
+        field.input("four".into());
+        field.revert();
+        assert_eq!(field.text(), "three", "Escape does not go back past the focus it belongs to");
     }
 
     #[test]

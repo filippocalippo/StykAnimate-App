@@ -16,23 +16,35 @@ A field has a **role**. The role fixes what Enter, Escape, Tab and undo do. One 
 
 | Role | Enter | Escape | Tab | Field undo | Used for |
 | --- | --- | --- | --- | --- | --- |
-| `SingleLine` | commits the edit (a `Commit` message), field keeps focus | reverts to the value at focus and blurs | moves focus; focusing by Tab selects all | the field's | names, inspector text, rename |
+| `SingleLine` | commits the edit (a `Commit` message), field keeps focus | reverts to the value at the **latest focus** (leaving and re-entering refreshes it) and blurs | moves focus; focusing by Tab selects all | the field's | names, inspector text, rename |
 | `DialogLine` | does **not** blur: sends `Submit`, which the dialog turns into its primary action (`ui-dialog.mjs`) | the dialog's Escape (cancel) | moves focus inside the dialog | the field's | one-line fields of a dialog |
 | `Multiline` | inserts a line break; Ctrl+Enter sends `Submit` | blurs the field and keeps the text (the dialog's own Escape decides cancel) | moves focus out (a literal tab is never typed) | the field's | text tool, notes, support center |
-| `Number` | commits the typed value and blurs | rolls back to the **gesture baseline** (below) and blurs | moves focus; selects all | the field's, plus the gesture grouping of section 4 | every inspector number |
+| `Number` | commits the typed value and blurs | cancels the open gesture (rolls back to its baseline, below) and **keeps focus**, as `property-controls.mjs` does | moves focus; selects all | the field's, plus the gesture grouping of section 4 | every inspector number |
 | `Search` | `Submit` (jumps to the first result) | clears a non-empty field; if empty, blurs | moves focus | the field's | font picker, library, command palette |
 
 - **Rollback is not "the value at focus".** A number field's baseline is the value before the *current gesture*: commit an
   arrow step (the field keeps focus), type another value, press Escape, and only the latest gesture reverts
-  (`property-controls.mjs` `_finish`/`_begin`). `NumberField` keeps `baseline`, set at focus and reset by every commit
-  that does not blur.
+  (`property-controls.mjs` `_finish`/`_begin`). The model is `styk_core::number::NumberEdit`, a port of that file:
+  focusing begins a gesture; typing previews valid text and marks invalid text; Enter commits; **leaving the field
+  commits valid text and reverts invalid text** (`_focusOut`); a held arrow key is one gesture that ends at its release;
+  a scrub accumulates every movement with *its own* modifiers (a Shift pressed mid-drag does not rescale what was already
+  travelled). ArrowUp and ArrowDown step inside the input as well as on the label; Ctrl and Meta arrows pass through to the
+  text. A one-line field selects its text when focus comes from the keyboard (Tab, F6, a dialog opening), not when it
+  comes from a click.
 - **Undo and redo in a focused field belong to the field**, unchanged fields and exhausted histories included
   (`app.mjs` 5806: a focused text field gets the native undo; the document is never undone from a field). Ctrl+Z,
   Ctrl+Shift+Z and Ctrl+Y route by focus alone: when `FocusState::text_entry` is set the document's undo is not
   reachable. When the field's history is exhausted Ctrl+Z does nothing.
-- Limits (the contract, `limits.rs`): a field has a `max_chars` and an `accept` filter (numeric, no control characters,
-  text tool: BMP only and at most 255 distinct UTF-16 units). Both are enforced **before the editor mutates** (section
-  2), never by rejecting the value after `on_input`: iced edits, shapes and records history before it publishes.
+- Limits (the contract, `limits.rs`) are enforced **before the editor mutates** (section 2), never by rejecting the value
+  after `on_input`: iced edits, shapes and records history before it publishes. **Every role is bounded**, because the
+  shaper's cost grows with each of these and a field that is unbounded in one can be frozen with a paste: characters
+  (16,384 at most; a one-line field 4,096), line breaks (1,000), the length of a paragraph (4,096: the editor shapes the whole paragraph being edited on every edit, so one line of 16,000 characters cost 32 ms an edit and four of 3,900 cost 14), the run of characters without a space (2,048: shaping works
+  word by word, and one 16,000-character word took 30 ms an edit), marks piled on one base character (16: 16,000 of them took
+  seven seconds a frame), and for the text tool the distinct UTF-16 units (255, counted over the text that stays plus what
+  comes in) and the alphabet (BMP). Enter is an insertion like any other and is admitted the same way. A lone CR in a paste is
+  a line break (a textarea normalises CR and CRLF to LF). The clipboard's own worker cuts text to 1 MiB before it reaches the
+  interface thread, the editor cuts again what it is given, and the admission scan stops after 256 Ki characters: a 100 MB
+  clipboard costs the interface thread well under a frame.
 
 ## 2. The editor patches the fields need
 
@@ -49,27 +61,38 @@ The vendored iced editor stack (`vendor/iced/core/src/text/{editor,input}.rs`, `
    before it reaches the shaper.
 3. **Bounded, coalesced history.** One typing run is one undo step: consecutive typed insertions that continue the same
    run within one second merge into the previous change; a paste, a deletion, a motion or a pause starts a new one.
-   History holds at most 200 changes (the oldest drops), and an external `overwrite` (the value changed under the
-   field) clears it.
+   Moving the caret, selecting, clicking and leaving the field end the group (type `a`, Left, Right, `b`: two steps). A group
+   stops growing at 1,024 items. The history holds at most 200 changes **and at most 1 MiB of text** (the oldest drops), so a few
+   large pastes cannot hold megabytes of undo. An external `overwrite` (the value changed under the field) clears it.
 4. **Ctrl+Shift+Z redoes** (Ctrl+Y as well).
 5. **Caret and selection geometry across mixed runs and ligatures** (section 7). Caret *motion* needed no patch: it already matches Chromium.
 6. **A forced bidi base direction** for fields that follow the UI direction rather than their first strong character
    (section 7).
 7. **Clipboard requests carry IDs** (section 5).
+8. **Field identity and lifetime.** A text input's state belongs to its widget ID: another field built at the same place in
+   the tree starts clean (no focus, composition, pending paste or history of the one it replaced), and a field that is
+   disabled loses focus then and there, so enabling it again does not bring focus or a paste back.
+9. **Keys the field owns are handled.** Ctrl+C and Ctrl+X with nothing selected, and a second Ctrl+V while a paste is
+   pending, are captured: they never reach the document's copy and paste.
 
 ## 3. Focus model (`styk-core::focus`)
 
 Plain Rust, no toolkit. The interface reports; the core decides.
 
-- **Areas**: `FocusArea { TopBand, Tools, Panels, Stage, Timeline }` plus modal scopes. F6 and Ctrl+F6 cycle the areas
-  that currently exist, in order and in reverse, from anywhere, **including from inside a text field** (the text is
-  unchanged). While a modal scope is open F6 cycles only inside the modal's regions (or does nothing when it has one).
+- **Areas**: `FocusArea { TopBand, Tools, Panels, Stage, Timeline }` plus modal scopes. F6 is the next area and Ctrl+F6 the
+  previous (`focus-next-region`, `focus-previous-region` in `src/hotkeys.mjs`); they cycle the areas that currently exist
+  from anywhere, **including from inside a text field** (the text is unchanged), but not while an input method composes.
+  **Shift+F6 is Remove keyframes** and is neither navigation nor a chord that works from a field: the only chords that work
+  from a text field are F6, Ctrl+F6, Ctrl+Alt+M and Ctrl+Alt+L. While a modal scope is open F6 cycles only inside the modal's regions (or does nothing when it has one).
 - **Scopes** form a stack. The root scope is the window; a dialog, menu or popover pushes a scope. Tab and Shift+Tab move
   among the focusable targets **of the top scope** and wrap at both edges (a modal never leaks focus to the page below).
   Opening a scope records the **invoker** (the focused target when it opened) and chooses an initial target (the
   requested one, else the first focusable). Closing a scope restores focus to its invoker; if the invoker is gone or
   disabled, to the nearest still-present target of the scope below, in registration order; else to the first target of the
-  area that held it; else nothing. Nested modals restore one level at a time.
+  area that held it; else nothing. Nested modals restore one level at a time. **A scope contains the modal interaction, not
+  only Tab**: while it is open only its targets can hold focus (`reconcile` and `focus` refuse the page's, and `reconcile`
+  returns the stale one so the interface takes focus from it), and the `Scope` widget consumes every pointer event the dialog
+  did not take, so a click on a field behind the dialog reaches nothing.
 - **Targets** are registered by the interface each view pass in tree order: `FocusTarget { id, area, kind, enabled,
   tab_stop }`. A roving group is one target for Tab (its active child).
 - **Reconciliation always reports `Option<Id>`.** After any event that can change focus (Tab, click, Escape, a removed or
@@ -86,7 +109,9 @@ Plain Rust, no toolkit. The interface reports; the core decides.
 ## 4. Control keyboard behaviour (`styk-design::focus`)
 
 A focusable wrapper alone is not keyboard-operable: each control kind has its own keys, and **a hovered control never
-consumes another control's keys** (iced's slider takes arrows by hover; the wrapper takes keys only when it holds focus).
+consumes another control's keys** (iced's slider takes arrows by hover). The wrapper is the one keyboard owner: it answers
+the control's keys itself, only while it is enabled and holds focus, and captures them; the control inside is given no key
+while the wrapper is not focused or has already answered, and no input at all while it is disabled.
 
 | Control | Keys |
 | --- | --- |
@@ -96,15 +121,19 @@ consumes another control's keys** (iced's slider takes arrows by hover; the wrap
 | Select | Space/Enter/Alt+Down opens; Up/Down moves; Enter chooses; Escape closes and returns focus |
 | Tab (a tab list) | roving group: arrows move and select by orientation, Home/End, wrap, skipping disabled |
 | Roving group (toolbar, rail) | one Tab stop; arrows per orientation via `roving::next_index` (a port of `nextRovingIndex`) |
-| Scrub label | Enter focuses and selects the number field; arrows step like the field (`property_step`) |
+| Scrub label | Enter focuses and selects the number field; Up/Right and Down/Left step like the field (`property_step`), Ctrl and Meta arrows pass through, a held key is one gesture ended by its release. No wheel stepping: today's fields do not step on the wheel |
 
 **Scrubbing and pointer capture.** A scrub starts on a pointer press on the label and is owned by the label until it
 ends. iced's `mouse_interaction` only chooses a cursor, so the label tracks capture itself: while captured it consumes
 `CursorMoved`/`ButtonReleased` wherever the pointer is (also outside the widget and the window). A scrub ends, once, on:
-release (commit), Escape (rollback), the window losing focus, a touch cancel, or a second press. (A label removed from
-the tree mid-gesture sends nothing: the owner of the gesture ends it when its next focus snapshot no longer lists the
-label. That rule is not built yet.) One gesture is one history entry (the core groups it; the widget only sends `Begin`, `Delta`, `End`,
-`Cancel`). A drag below `drag_slop` is a click.
+release (commit), Escape (rollback), the window losing focus, a touch cancel, a second press, or **capture lost** (a
+system menu or another window took the mouse: no event says so, so a scrub asks the system whether the primary button is
+still down, `styk_platform::input::primary_button_down`, a read and never an injection) , each reported once as `End` or
+`Cancel`. **The gesture's owner survives the widget**: a label removed from the tree or disabled mid-gesture cannot
+publish, so the core reports it (`FocusState::take_removed`, returned by `focus::sync`) and the owner calls
+`NumberEdit::scrub_cancel`, which is a no-op when a terminal result already happened. `Delta` carries the movement since the
+previous one with the modifiers held at that movement. One gesture is one history entry (the core groups it; the widget
+only sends `Begin`, `Delta`, `End`, `Cancel`). A drag below the drag slop is a click.
 
 ## 5. Clipboard
 
@@ -113,7 +142,10 @@ label. That rule is not built yet.) One gesture is one history entry (the core g
   (`clipboard::RequestId`) and every reply carries it. An editor accepts a reply only if: it issued that ID, it is still
   focused, and the window is focused. Anything else is dropped (paste in A, focus B before completion: B receives
   nothing, A is no longer focused and drops it). Each editor has at most one request in flight; a second paste while one
-  is pending is ignored. A reply applies at the cursor or selection **as it is when the reply arrives** (the user typed
+  is pending is ignored (and captured). **The clipboard work is bounded as a whole**: one worker thread serves every read and
+  write in order through a queue of 8; a request that finds it full is answered at once with `ClipboardOccupied` (the
+  requester sees a failure instead of a thread piling up behind a stuck clipboard); a field that loses focus cancels its
+  pending read, which the worker skips if it has not started it, and the memory of cancelled requests is bounded. A reply applies at the cursor or selection **as it is when the reply arrives** (the user typed
   in between: the paste lands at the caret, like a browser paste). Pending requests die with focus.
 - The app-level clipboard (figures, frames) goes through `styk-services::clipboard` and never through field widgets.
   `styk-core::clipboard::Requests` is the app's bounded table: IDs, a target, a kind, a deadline, `deliver(id, target)`
@@ -144,6 +176,29 @@ label. That rule is not built yet.) One gesture is one history entry (the core g
   Microsoft Japanese IME, Pinyin and the Arabic and Hebrew IMEs is **a manual pass for the owner**; the field-side
   contract (preedit, commit through the limits, `composing`, silenced hotkeys) is proven headless with iced's input-method
   events.
+
+### The owner's manual pass (decision N7: it gates the release, not the interface work)
+
+Run on a machine with the input methods installed, in `stykanimate --screen component-sheet` (the single-line field, the
+search field and the text area; each item in a 100 % and a 150 % display scale):
+
+1. **Microsoft Japanese IME** (hiragana input of `nihon`, then convert). *Composition:* the preedit is shown at the caret,
+   underlined, and the keys of the sheet (Delete, V, F6) do nothing while it is open. *Candidate selection:* Space opens
+   the candidate list, arrows and digits choose, Enter commits 日本 once. *Cancel:* Escape ends the composition and leaves the
+   field's text as it was (and does not blur the field). *Placement:* the candidate window opens at the caret, below it;
+   move the window to the bottom edge and to the right edge of the screen and to a second monitor at a different scale: it
+   stays on screen next to the caret each time.
+2. **Microsoft Pinyin** (`zhongwen`): the same four points; a committed 中文 passes the field's limits (type into a field
+   that is almost full: the commit is cut, not the field overrun).
+3. **The Arabic and Hebrew keyboards** (layouts, and the IMEs where installed): the lam-alef key (`B` on Arabic) types both
+   scalars; the caret and selection in "مرحبا بالعالم 123" and "שלום עולם 123" move one grapheme per arrow key, in the
+   paragraph's direction; a paste of mixed text keeps its order; in the Arabic interface (`Direction` button) an empty
+   field has its caret at the right edge.
+4. **Alt+Tab away during a composition**, and a click outside the field during one: the composition is closed or committed
+   as Windows does for a browser text box, and the field is left clean (not composing, no stuck preedit, hotkeys work).
+
+Anything that differs is fixed in the field widgets or the vendored winit/iced input code (the one place every panel's
+field comes from); it does not touch a panel.
 
 ## 7. Right to left
 
@@ -186,24 +241,28 @@ label. That rule is not built yet.) One gesture is one history entry (the core g
   a roving group, a modal with its Tab boundaries.
 - Real IME, RTL, latency: measured as described in section 6 and 7; the results are in the spike report.
 
-## 9. Results of the spike (2026-11-07)
+## 9. Results (2026-11-07, after the review and the checker)
 
 Measured on the Windows 11 development machine (Ryzen 5 5500, RTX 4070 SUPER, 144 Hz) while other agents were building:
-every number is directional.
+the latency numbers are directional.
 
 | Check | Result |
 | --- | --- |
-| Pure models (`styk-core`: focus, text entry, roving, number, limits, field roles, clipboard table, slider and select keys) | 51 tests pass |
-| Widgets on the headless driver with explicit clipboard and focus effects (`styk-design`, feature `testing`) | 41 tests pass: Tab order and wrap, the roving group as one stop (mirrored in RTL), modal edges and restoration, the ring after the keyboard only, one-key two-scalar text, grouped undo and Ctrl+Shift+Z, bounded history, filtering before mutation (5 MB paste in under 33 ms), refused keys leaving history alone, a paste reply after focus moved, number rollback to the gesture baseline, scrubs ended once by release, Escape, window deactivation and touch cancel, RTL mirror of the roving row, composition and hotkeys |
-| Caret motion against Chromium | The native editor's offset sequences equal those Chromium (Electron on Windows 11) visits, for six strings, both directions, both ends (`tests/fixtures/chromium-caret.txt`). Chromium moves logically in the paragraph's direction; the first design assumed visual motion, which would have been a deviation |
-| Arabic and Hebrew keys in the real window | The Arabic layout's `B` key reaches the field as both scalars of lam-alef, and the Hebrew `A` key as shin (posted to the window's own message queue on its UI thread; the layouts ship with Windows) |
-| Input method | Not run for real: no IME is installed here (section 6). `SCS_SETSTR`, `CPS_COMPLETE` and the window messages succeed; the candidate window was asked for the caret's rectangle (1 x 18 px at the field's padding), inside the field. A real pass is manual |
-| Keystroke to the start of the redraw that draws it, release build, 150 keys, 200-character field | p50 7.2 to 7.3 ms (one refresh is 6.9 ms), p95 7.8 to 9.7 ms in the quiet runs |
-| The same, 16,300 characters in 80-character lines | p50 7.1 to 7.2 ms, p95 9.5 to 10.7 ms: meets C2 |
-| The same, 16,300 characters on **one line** | p50 28 to 36 ms, p95 36 to 60 ms: **fails C2**. The editor reshapes the whole paragraph on every edit; a single 16 K-character line is the worst case. Not fixed here |
-| Chromium, same metric (key event to the second animation frame after `input`), `<input>` with 200 characters | p50 4.9 ms, p95 9.3 ms |
-| Chromium, `<textarea>` with 16,300 characters (one wrapped line) | p50 5.8 ms, p95 9.7 ms |
+| Pure models (`styk-core`: focus and scopes, text entry, roving, number gestures, limits, field roles, clipboard table, slider and select keys) | 68 tests pass |
+| Widgets on the headless driver with explicit clipboard and focus effects (`styk-design`, feature `testing`) | 82 tests pass. Each finding of the review and of the checker has a test that failed on the code it was found in (that run: 7 core, 19 widget and 1 sheet tests failed, among them a 100 MB paste that took 45.9 s on the interface thread) |
+| Caret motion against Chromium | The native editor's offset sequences equal those Chromium (Electron on Windows 11) visits, for six strings, both directions, both ends (`tests/fixtures/chromium-caret.txt`; rerun 2026-11-07: identical). Chromium moves logically in the paragraph's direction |
+| Caret geometry | Per-cluster extents (a base and its marks drawn by several glyphs are one cluster), run-boundary carets, right-to-left ligatures: 5 tests in `cosmic-text` |
+| Clipboard | One bounded worker: a full queue answers at once with `ClipboardOccupied` (a test in `iced_winit`); cancelled requests are noted once and the memory is bounded (a test in `iced_core`); a field that loses focus cancels its pending read (a widget test) |
+| Arabic and Hebrew keys in the real window | The Arabic layout's `B` key reaches the field as both scalars of lam-alef and the Hebrew `A` key as shin (posted to the window's own message queue on its UI thread). The one-line field had selected its text when it took focus, so the typed characters replaced it, as after a Tab into a field |
+| Input method | Not run for real: no IME is installed here (section 6); the manual pass is listed there. The candidate window was asked for the caret's rectangle (1 x 18 px, inside the field) |
+| Keystroke to presentation, release build, 150 keys, every key accepted (150 of 150), two runs | **200-character field:** to the start of the redraw p50 7.2 to 7.3 ms (a refresh is 6.9 ms), p95 7.9 to 9.0; to presentation p50 13.6, p95 14.4 to 14.7, p99 15.4 to 15.8, max 15.4 to 18.1. **16,100 characters in 80-character lines:** presentation p50 13.5 to 13.6, p95 14.5 to 14.6, max 16.4 to 21.2. **15,600 characters in four paragraphs of 3,900 (the longest a field takes):** presentation p50 13.7 to 14.1, p95 15.8 to 16.3, p99 16.6 to 18.9, max 17.3 to 23.3 |
+| Chromium, same machine, key event to the second animation frame after `input` (rerun) | `<input>` with 200 characters: p50 5.3 ms, p95 8.8, p99 10.1. `<textarea>` with 16,300 characters: p50 5.7, p95 9.8, p99 11.8 |
 
-The native figure stops at the start of the redraw: its own drawing and presenting come after, so it is a floor for
-keystroke to present. Chromium's counts through a second frame, so the two are not equal measures; the single-line
-text-area gap is large enough not to depend on that.
+Reading the latency rows: C1 (p95 at most one frame plus 4 ms, 20.7 ms at 60 Hz) and C2 (p95 at most 33 ms, no frame over
+50 ms) pass in every case above. The native figure to presentation includes the surface's wait for the display (`present`
+returns once the frame is queued behind the previous one); Chromium's stops at the second animation frame, before its
+own presentation, so the two are not equal measures: the native number is about one refresh above where Chromium's would
+be with the same wait. The failure of the first run, one paragraph of 16,000 characters at 32 ms an edit, is no longer a
+state a field can be in: the editor shapes a whole paragraph on every edit, so a paragraph is bounded (4,096 characters),
+like the other things the shaper is slow on (section 1). The harness posts keys only into text the field has room for and
+reports how many were accepted, so a run in which a key was refused says it is invalid instead of measuring rejections.

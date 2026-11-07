@@ -152,6 +152,12 @@ impl editor::Editor for Editor {
                 let layout = line.layout_opt()?;
 
                 let empty_offset = match internal.alignment {
+                    // An empty right-to-left field starts at its right edge.
+                    Alignment::Default
+                        if buffer.direction() == cosmic_text::Direction::RightToLeft =>
+                    {
+                        internal.bounds.width
+                    }
                     Alignment::Default | Alignment::Left | Alignment::Justified => 0.0,
                     Alignment::Center => internal.bounds.width / 2.0,
                     Alignment::Right => internal.bounds.width,
@@ -261,8 +267,14 @@ impl editor::Editor for Editor {
     fn perform(&mut self, action: Action) {
         let mut font_system = text::font_system().write().expect("Write font system");
         let is_typing = matches!(&action, Action::Edit(Edit::Insert(_) | Edit::Type(_)));
+        // Moving the caret, selecting or clicking ends the typing group in progress.
+        let ends_typing_group = !matches!(&action, Action::Edit(_) | Action::Scroll { .. });
 
         self.with_internal_mut(|internal| {
+            if ends_typing_group {
+                internal.history.seal();
+            }
+
             let editor = &mut internal.editor;
 
             match action {
@@ -584,6 +596,10 @@ impl editor::Editor for Editor {
 
     fn bounds(&self) -> Size {
         self.internal().bounds
+    }
+
+    fn seal_history(&mut self) {
+        self.with_internal_mut(|internal| internal.history.seal());
     }
 
     fn set_base_direction(&mut self, direction: editor::BaseDirection) {
@@ -1020,6 +1036,16 @@ fn shape_until_cursor(
 /// The most changes a field remembers; the oldest is dropped beyond it.
 const HISTORY_LIMIT: usize = 200;
 
+/// The most text (in bytes, with a small cost per item) the history keeps; the oldest steps are dropped beyond it, so a few
+/// large pastes cannot hold megabytes of undo.
+const HISTORY_BYTES: usize = 1 << 20;
+
+/// The most items of one coalesced typing group: a long run of typing is not one undo step without end.
+const GROUP_ITEMS: usize = 1024;
+
+/// What one item of a change costs besides its text.
+const ITEM_COST: usize = 64;
+
 /// Typed insertions that continue each other within this long are one step of the history.
 const TYPING_GROUP: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -1028,12 +1054,24 @@ struct Entry {
     /// Made of typed insertions, so the next typed insertion may join it.
     typing: bool,
     at: std::time::Instant,
+    /// What the entry holds, for the history's budget.
+    bytes: usize,
 }
 
 #[derive(Default)]
 struct History {
     changes: Vec<Entry>,
     current: usize,
+    /// The sum of the entries' `bytes`.
+    retained: usize,
+}
+
+fn cost(change: &cosmic_text::Change) -> usize {
+    change
+        .items
+        .iter()
+        .map(|item| item.text.len() + ITEM_COST)
+        .sum()
 }
 
 impl History {
@@ -1070,16 +1108,24 @@ impl History {
     fn push(&mut self, change: cosmic_text::Change, typing: bool) {
         let now = std::time::Instant::now();
 
-        self.changes.truncate(self.current);
+        for dropped in self.changes.drain(self.current..) {
+            self.retained -= dropped.bytes;
+        }
+
+        let bytes = cost(&change);
 
         if typing
             && let Some(last) = self.changes.last_mut()
             && last.typing
+            && last.change.items.len() < GROUP_ITEMS
             && now.duration_since(last.at) < TYPING_GROUP
             && continues(&last.change, &change)
         {
             last.change.items.extend(change.items);
             last.at = now;
+            last.bytes += bytes;
+            self.retained += bytes;
+            self.evict();
             return;
         }
 
@@ -1087,13 +1133,26 @@ impl History {
             change,
             typing,
             at: now,
+            bytes,
         });
+        self.retained += bytes;
 
-        if self.changes.len() > HISTORY_LIMIT {
-            let _ = self.changes.remove(0);
+        while self.changes.len() > HISTORY_LIMIT {
+            let dropped = self.changes.remove(0);
+            self.retained -= dropped.bytes;
         }
 
         self.current = self.changes.len();
+        self.evict();
+    }
+
+    /// Drops the oldest steps while the history holds more than its budget (the newest step always stays).
+    fn evict(&mut self) {
+        while self.retained > HISTORY_BYTES && self.changes.len() > 1 {
+            let dropped = self.changes.remove(0);
+            self.retained -= dropped.bytes;
+            self.current = self.current.saturating_sub(1);
+        }
     }
 }
 

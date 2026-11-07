@@ -7,16 +7,30 @@ use super::dir::Dir;
 use super::focus::{Anchor, widget_id};
 use crate::{Palette, tokens};
 use iced::advanced::text::editor::{self as editor_core, Binding, Intake, KeyPress, Room};
-use iced::keyboard::{Key, key::Named};
+use iced::keyboard::{self, Key, key::Named};
 use iced::widget::{container, text_input};
 use iced::{Background, Border, Element, Length, Padding, Pixels, Theme, Widget as _};
 use styk_core::field::{EnterAction, EscapeAction, Role};
 use styk_core::focus::{FocusArea, FocusId, TargetKind};
-use styk_core::limits::Limits;
+use styk_core::limits::{Context, Limits};
 
 /// The `Intake` that applies a field's [`Limits`] to incoming text.
 pub fn intake(limits: Limits) -> Intake {
-    Intake::new(move |room: Room, incoming: &str| limits.admit(room.chars, room.selected, incoming))
+    Intake::new(move |room: &Room, incoming: &str| {
+        let context = Context {
+            chars: room.chars,
+            selected: room.selected,
+            lines: room.lines,
+            selected_breaks: room.selected_breaks,
+            before_chars: room.before_chars,
+            after_chars: room.after_chars,
+            before: room.before.clone(),
+            after: room.after.clone(),
+            units: room.units.clone(),
+        };
+        limits.admit_in(&context, incoming)
+    })
+    .with_units(limits.tracks_units())
 }
 
 /// A text field. Build it, then `Element::from` it.
@@ -38,6 +52,8 @@ pub struct EditField<'a, Message> {
     on_enter: Option<Message>,
     on_escape: Option<Message>,
     on_clear: Option<Message>,
+    on_step: Option<std::sync::Arc<dyn Fn(i32, bool, bool) -> Message + 'a>>,
+    on_step_end: Option<Message>,
     on_focus_change: Option<Box<dyn Fn(bool) -> Message + 'a>>,
     on_compose: Option<Box<dyn Fn(bool) -> Message + 'a>>,
 }
@@ -69,6 +85,8 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             on_enter: None,
             on_escape: None,
             on_clear: None,
+            on_step: None,
+            on_step_end: None,
             on_focus_change: None,
             on_compose: None,
         }
@@ -144,6 +162,19 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
         self
     }
 
+    /// A number field's ArrowUp (+1) and ArrowDown (-1) inside the input, with Shift and Alt (Ctrl and Meta pass through to
+    /// the text, as today).
+    pub fn on_step(mut self, on_step: impl Fn(i32, bool, bool) -> Message + 'a) -> Self {
+        self.on_step = Some(std::sync::Arc::new(on_step));
+        self
+    }
+
+    /// The release of ArrowUp or ArrowDown after steps: the held key's gesture ends.
+    pub fn on_step_end(mut self, message: Message) -> Self {
+        self.on_step_end = Some(message);
+        self
+    }
+
     pub fn on_focus_change(mut self, on_focus_change: impl Fn(bool) -> Message + 'a) -> Self {
         self.on_focus_change = Some(Box::new(on_focus_change));
         self
@@ -196,6 +227,8 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             on_enter,
             on_escape,
             on_clear,
+            on_step,
+            on_step_end,
             on_focus_change,
             on_compose,
         } = field;
@@ -234,12 +267,26 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
         input = input.key_binding(move |key_press: &KeyPress| -> Option<Binding<Message>> {
             let is_enter = matches!(key_press.modified_key.as_ref(), Key::Named(Named::Enter));
             let is_escape = matches!(key_press.modified_key.as_ref(), Key::Named(Named::Escape));
-            if !(is_enter || is_escape) || !key_press.is_focused {
+            let step = match key_press.modified_key.as_ref() {
+                Key::Named(Named::ArrowUp) => Some(1),
+                Key::Named(Named::ArrowDown) => Some(-1),
+                _ => None,
+            };
+            if !key_press.is_focused || !(is_enter || is_escape || step.is_some()) {
                 return None;
             }
             if composing {
-                // The input method owns Enter (commit) and Escape (cancel the composition).
+                // The input method owns Enter (commit), Escape (cancel the composition) and the arrows.
                 return Some(Binding::Sequence(Vec::new()));
+            }
+            if let (Some(direction), Some(on_step)) = (step, &on_step) {
+                if role == Role::Number && !key_press.modifiers.control() && !key_press.modifiers.logo() {
+                    return Some(Binding::Custom(on_step(direction, key_press.modifiers.shift(), key_press.modifiers.alt())));
+                }
+                return None;
+            }
+            if step.is_some() {
+                return None;
             }
             if is_enter {
                 let action = if key_press.modifiers.command() { role.ctrl_enter() } else { role.enter() };
@@ -254,6 +301,7 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             match role.escape() {
                 EscapeAction::Blur => Some(Binding::Unfocus),
                 EscapeAction::PassToDialog => on_escape.clone().map(Binding::Custom),
+                EscapeAction::Revert => on_escape.clone().map(Binding::Custom),
                 EscapeAction::RevertAndBlur => match &on_escape {
                     Some(message) => Some(Binding::Sequence(vec![Binding::Custom(message.clone()), Binding::Unfocus])),
                     None => Some(Binding::Unfocus),
@@ -272,6 +320,13 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             element = container(element).width(width).boxed();
         }
 
-        Anchor::new(id, area, TargetKind::TextEntry, enabled, element).boxed()
+        let mut anchor = Anchor::new(id, area, TargetKind::TextEntry, enabled, element);
+        if let Some(message) = on_step_end {
+            anchor = anchor.on_key_release(move |event| match event {
+                keyboard::Event::KeyReleased { key: Key::Named(Named::ArrowUp | Named::ArrowDown), .. } => Some(message.clone()),
+                _ => None,
+            });
+        }
+        anchor.boxed()
     }
 }

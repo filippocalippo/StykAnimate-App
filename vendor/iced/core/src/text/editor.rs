@@ -118,6 +118,10 @@ pub trait Editor: Sized + Default {
     /// Returns the current [`LineHeight`] of the [`Editor`].
     fn line_height(&self) -> LineHeight;
 
+    /// Ends the current group of typed insertions in the undo history: the next edit is a step of its own. Called when
+    /// the caret moves, a selection is made or focus is lost.
+    fn seal_history(&mut self) {}
+
     /// Sets the base direction of the text of the [`Editor`]: detected from the first strong character
     /// ([`BaseDirection::Auto`]) or forced, for a field that follows the interface's direction (the caret side of an
     /// empty field, search and name fields).
@@ -412,8 +416,11 @@ impl State {
                     return None;
                 };
 
+                // Whatever the platform's worker handed over, no more than a field could ever take is looked at.
+                let end = text.floor_char_boundary(clipboard::MAX_TEXT_BYTES.min(text.len()));
+
                 Some(Update::Action(Action::Edit(Edit::Paste(Arc::new(
-                    text.clone(),
+                    text[..end].to_owned(),
                 )))))
             }
             Event::Mouse(event) => match event {
@@ -576,12 +583,18 @@ impl State {
                             None
                         }
                         Binding::Copy => {
-                            let selection = editor.copy()?;
+                            // With nothing selected the field still handles the key: it must not reach a copy of
+                            // something else (the document's).
+                            let Some(selection) = editor.copy() else {
+                                return Some(Update::Handled);
+                            };
 
                             Some(Update::Copy(selection))
                         }
                         Binding::Cut => {
-                            let selection = editor.copy()?;
+                            let Some(selection) = editor.copy() else {
+                                return Some(Update::Handled);
+                            };
 
                             Some(Update::Sequence(vec![
                                 Update::Copy(selection),
@@ -591,7 +604,7 @@ impl State {
                         Binding::Paste => {
                             // One request in flight: a second paste before the reply is ignored.
                             if state.pending_paste.is_some() {
-                                return None;
+                                return Some(Update::Handled);
                             }
 
                             let id = clipboard::RequestId::next();
@@ -769,7 +782,10 @@ impl State {
     fn unfocus_now(&mut self) {
         self.focus = None;
         self.is_dragging = false;
-        self.pending_paste = None;
+        if let Some(id) = self.pending_paste.take() {
+            // The platform's worker skips a read nobody is waiting for any more.
+            clipboard::cancel(id);
+        }
         self.preedit = None;
     }
 }
@@ -831,29 +847,65 @@ impl Focusable for State {
     }
 }
 
-/// How much text an editor holds, for an [`Intake`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What an editor tells an [`Intake`] about itself at the moment of an edit.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Room {
     /// The characters (Unicode scalar values, a line break counting one) in the editor.
     pub chars: usize,
     /// The characters of the selection, which the incoming text replaces.
     pub selected: usize,
+    /// The lines in the editor.
+    pub lines: usize,
+    /// The line breaks inside the selection.
+    pub selected_breaks: usize,
+    /// The characters of the edit's line before the edit, all of them.
+    pub before_chars: usize,
+    /// The characters of the edit's line after the edit, all of them.
+    pub after_chars: usize,
+    /// The text before the edit on its line: its last [`Room::CONTEXT`] characters, or all of it.
+    pub before: String,
+    /// The text after the edit on its line: its first [`Room::CONTEXT`] characters, or all of it.
+    pub after: String,
+    /// The distinct UTF-16 units of the text that stays, sorted; only when the [`Intake`] asks for them.
+    pub units: Vec<u16>,
+}
+
+impl Room {
+    /// How many characters of the line around the edit an [`Intake`] gets to see on each side.
+    pub const CONTEXT: usize = 2112;
 }
 
 /// What an editor takes of incoming text (typed, pasted or committed by an input method) *before* it edits: the
 /// returned text is what is inserted, `None` means no edit at all (no history entry, no shaping, no message).
 #[derive(Clone)]
-pub struct Intake(Arc<dyn Fn(Room, &str) -> Option<String> + Send + Sync>);
+pub struct Intake {
+    admit: Arc<dyn Fn(&Room, &str) -> Option<String> + Send + Sync>,
+    tracks_units: bool,
+}
 
 impl Intake {
     /// An [`Intake`] from a function.
-    pub fn new(admit: impl Fn(Room, &str) -> Option<String> + Send + Sync + 'static) -> Self {
-        Self(Arc::new(admit))
+    pub fn new(admit: impl Fn(&Room, &str) -> Option<String> + Send + Sync + 'static) -> Self {
+        Self {
+            admit: Arc::new(admit),
+            tracks_units: false,
+        }
+    }
+
+    /// Asks the editor to fill [`Room::units`] (it costs a pass over the text, so only a field that limits them pays it).
+    pub fn with_units(mut self, tracks_units: bool) -> Self {
+        self.tracks_units = tracks_units;
+        self
+    }
+
+    /// Whether [`Room::units`] is wanted.
+    pub fn tracks_units(&self) -> bool {
+        self.tracks_units
     }
 
     /// What of `incoming` the editor takes.
-    pub fn admit(&self, room: Room, incoming: &str) -> Option<String> {
-        (self.0)(room, incoming)
+    pub fn admit(&self, room: &Room, incoming: &str) -> Option<String> {
+        (self.admit)(room, incoming)
     }
 }
 
@@ -1041,6 +1093,8 @@ impl<Message> Binding<Message> {
 pub enum Update<Message> {
     /// An [`Action`] must be performed in the [`Editor`].
     Action(Action),
+    /// The key was the editor's but changes nothing (a copy with nothing selected): handled, so it reaches nobody else.
+    Handled,
     /// The [`Editor`] just gained focus.
     Focus,
     /// The [`Editor`] just lost focus.

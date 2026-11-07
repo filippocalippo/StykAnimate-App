@@ -86,6 +86,8 @@ pub struct FocusState {
     focused: Option<FocusId>,
     composing: bool,
     keyboard_modality: bool,
+    /// Targets that were registered and then were not (gone or disabled), until [`FocusState::take_removed`].
+    removed: Vec<FocusId>,
 }
 
 impl Default for FocusState {
@@ -102,6 +104,7 @@ impl FocusState {
             focused: None,
             composing: false,
             keyboard_modality: false,
+            removed: Vec::new(),
         }
     }
 
@@ -111,6 +114,17 @@ impl FocusState {
 
     fn find(&self, id: FocusId) -> Option<(usize, &FocusTarget)> {
         self.scopes.iter().enumerate().rev().find_map(|(s, scope)| scope.targets.iter().find(|t| t.id == id).map(|t| (s, t)))
+    }
+
+    /// A focusable target of the top scope: while a modal is open nothing behind it can hold focus.
+    fn eligible(&self, id: FocusId) -> bool {
+        self.top().targets.iter().any(|t| t.id == id && t.focusable())
+    }
+
+    /// The targets that were registered and are no longer (removed from the tree or disabled) since the last call. The
+    /// owner of a gesture on one of them ends it.
+    pub fn take_removed(&mut self) -> Vec<FocusId> {
+        std::mem::take(&mut self.removed)
     }
 
     /// The focused target, as last reported or chosen.
@@ -148,10 +162,15 @@ impl FocusState {
     /// is gone or disabled loses focus (and any composition): the result is the focus afterwards.
     pub fn register(&mut self, scope: ScopeId, targets: Vec<FocusTarget>) -> Option<FocusId> {
         if let Some(s) = self.scopes.iter_mut().find(|s| s.id == scope) {
+            for old in s.targets.iter().filter(|t| t.focusable()) {
+                if !targets.iter().any(|t| t.id == old.id && t.focusable()) {
+                    self.removed.push(old.id);
+                }
+            }
             s.targets = targets;
         }
         if let Some(id) = self.focused
-            && !self.find(id).is_some_and(|(_, t)| t.focusable())
+            && !self.eligible(id)
         {
             self.focused = None;
             self.composing = false;
@@ -160,13 +179,16 @@ impl FocusState {
     }
 
     /// The toolkit reports what it holds focused: `None` when nothing. Always an `Option`, so removal, disabling,
-    /// Escape and replaced panels clear the text-entry state instead of leaving it stale.
-    pub fn reconcile(&mut self, reported: Option<FocusId>) {
-        let known = reported.filter(|id| self.find(*id).is_some_and(|(_, t)| t.focusable()));
+    /// Escape and replaced panels clear the text-entry state instead of leaving it stale. While a modal is open only its
+    /// targets are accepted: a target behind it that the toolkit still reports as focused is not focus, and is returned
+    /// so the interface takes focus from it.
+    pub fn reconcile(&mut self, reported: Option<FocusId>) -> Option<FocusId> {
+        let known = reported.filter(|id| self.eligible(*id));
         if known != self.focused {
             self.composing = false;
         }
         self.focused = known;
+        reported.filter(|id| known.is_none() && self.find(*id).is_some())
     }
 
     /// A pointer press: the ring hides.
@@ -226,7 +248,7 @@ impl FocusState {
 
     /// Programmatic focus of a registered target.
     pub fn focus(&mut self, id: FocusId) -> Option<FocusId> {
-        if self.find(id).is_some_and(|(_, t)| t.focusable()) { self.move_to(Some(id)) } else { None }
+        if self.eligible(id) { self.move_to(Some(id)) } else { None }
     }
 
     fn move_to(&mut self, target: Option<FocusId>) -> Option<FocusId> {

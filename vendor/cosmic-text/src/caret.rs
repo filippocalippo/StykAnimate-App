@@ -44,21 +44,31 @@ impl GraphemeBox {
 
 /// The grapheme boxes of `glyphs` (a laid out line of `text`) in visual order.
 pub fn grapheme_boxes(text: &str, glyphs: &[LayoutGlyph]) -> Vec<GraphemeBox> {
-    let mut boxes = Vec::new();
+    // A cluster can be drawn by several glyphs (a base and its marks): they are one extent, divided among the cluster's
+    // graphemes, not one division per glyph.
+    let mut clusters: Vec<(usize, usize, bool, f32, f32)> = Vec::new();
     for glyph in glyphs {
-        let Some(cluster) = text.get(glyph.start..glyph.end) else {
+        let rtl = glyph.level.is_rtl();
+        let (left, right) = (glyph.x, glyph.x + glyph.w);
+        match clusters.iter_mut().find(|c| c.0 == glyph.start && c.1 == glyph.end && c.2 == rtl) {
+            Some(cluster) => {
+                cluster.3 = cluster.3.min(left);
+                cluster.4 = cluster.4.max(right);
+            }
+            None => clusters.push((glyph.start, glyph.end, rtl, left, right)),
+        }
+    }
+    let mut boxes = Vec::new();
+    for (start, end, rtl, left, right) in clusters {
+        let Some(cluster) = text.get(start..end) else {
             continue;
         };
         let count = cluster.graphemes(true).count().max(1);
-        let width = glyph.w / count as f32;
-        let rtl = glyph.level.is_rtl();
+        let extent = right - left;
+        let width = extent / count as f32;
         for (k, (i, grapheme)) in cluster.grapheme_indices(true).enumerate() {
-            let x = if rtl {
-                glyph.x + glyph.w - (k as f32 + 1.0) * width
-            } else {
-                glyph.x + k as f32 * width
-            };
-            boxes.push(GraphemeBox { start: glyph.start + i, end: glyph.start + i + grapheme.len(), x, w: width, rtl });
+            let x = if rtl { right - (k as f32 + 1.0) * width } else { left + k as f32 * width };
+            boxes.push(GraphemeBox { start: start + i, end: start + i + grapheme.len(), x, w: width, rtl });
         }
     }
     boxes.sort_by(|a, b| a.x.total_cmp(&b.x));
@@ -144,6 +154,27 @@ mod tests {
         // Index 2 is both the end of "ab" (its left edge, x 30) and the start of "123" (its left edge, x 0).
         assert_eq!(caret_x(&boxes, 2, Affinity::Before), Some(30.0));
         assert_eq!(caret_x(&boxes, 2, Affinity::After), Some(0.0));
+    }
+
+    #[test]
+    fn several_glyphs_of_one_cluster_are_one_extent_not_one_division_each() {
+        // One grapheme drawn by two left-to-right glyphs (a base at 0..5 and its mark at 5..10): the caret after it is at 10.
+        let glyphs = [glyph(0, 3, 0.0, 5.0, false), glyph(0, 3, 5.0, 5.0, false)];
+        let boxes = grapheme_boxes("á", &glyphs);
+        assert_eq!(boxes.len(), 1);
+        assert_eq!((boxes[0].x, boxes[0].w), (0.0, 10.0));
+        assert_eq!(caret_x(&boxes, 3, Affinity::Before), Some(10.0));
+        assert_eq!(caret_x(&boxes, 0, Affinity::After), Some(0.0));
+    }
+
+    #[test]
+    fn a_cluster_of_two_graphemes_drawn_by_two_glyphs_each_is_divided_once() {
+        // Right to left: "لا" drawn as a ligature by one glyph at 10..20 and a second glyph of the same cluster at 0..10.
+        let glyphs = [glyph(0, 4, 10.0, 10.0, true), glyph(0, 4, 0.0, 10.0, true)];
+        let boxes = grapheme_boxes("لا", &glyphs);
+        assert_eq!(boxes.len(), 2);
+        assert_eq!((boxes[0].start, boxes[0].x, boxes[0].w), (2, 0.0, 10.0));
+        assert_eq!((boxes[1].start, boxes[1].x, boxes[1].w), (0, 10.0, 10.0));
     }
 
     #[test]

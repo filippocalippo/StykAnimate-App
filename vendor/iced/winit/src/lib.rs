@@ -28,6 +28,7 @@ pub use winit;
 
 pub mod clipboard;
 pub mod conversion;
+pub mod presents;
 
 mod error;
 mod proxy;
@@ -945,6 +946,7 @@ async fn run_instance<P>(
                         ) {
                             Ok(()) => {
                                 present_span.finish();
+                                presents::record();
                             }
                             Err(error) => match error {
                                 compositor::SurfaceError::OutOfMemory => {
@@ -1915,7 +1917,7 @@ fn run_clipboard<Message: Send>(
     for (kind, id) in requests.reads {
         let proxy = proxy.clone();
 
-        clipboard.read(kind, move |result| {
+        clipboard.read_for(kind, id, move |result| {
             proxy.send_action(Action::Event {
                 window,
                 event: core::Event::Clipboard(core::clipboard::Event::Read(result.map(Arc::new), id)),

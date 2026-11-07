@@ -11,7 +11,7 @@ use iced::{Element, Event, Length, Subscription, Task, Widget as _, event, keybo
 use styk_core::controls::{Select, SelectKey, SelectOutcome, SliderKey, slider_value};
 use styk_core::field::{FieldValue, Role};
 use styk_core::focus::{FocusArea, FocusId, FocusState, ScopeId};
-use styk_core::number::{self, Baseline, StepKeys};
+use styk_core::number::{NumberEdit, Range, StepKeys};
 use styk_core::roving::Orientation;
 use styk_core::text_entry::{Chord, command_allowed};
 use styk_design::widgets::dir::Dir;
@@ -65,6 +65,8 @@ pub enum Message {
     Clear(Which),
     Compose(bool),
     NumberInput(String),
+    NumberFocus(bool),
+    FieldFocus(Which, bool),
     NumberEnter,
     NumberEscape,
     Scrub(Scrub),
@@ -95,10 +97,10 @@ pub struct Sheet {
     pub search: FieldValue,
     pub notes: FieldValue,
     pub dialog_name: FieldValue,
-    pub number: f64,
-    pub number_text: FieldValue,
-    baseline: Baseline,
-    scrub_start: f64,
+    /// The number field's model: value, typed text and the open gesture.
+    pub edit: NumberEdit,
+    /// How a scrub asks the system whether the primary button is still down (set by the application).
+    pub button_probe: Option<fn() -> bool>,
     pub toolbar_active: usize,
     pub slider: f64,
     pub select: Select,
@@ -120,10 +122,8 @@ impl Sheet {
             search: FieldValue::new(""),
             notes: FieldValue::new("Two lines\nof notes"),
             dialog_name: FieldValue::new("Untitled"),
-            number: 45.25,
-            number_text: FieldValue::new("45.25"),
-            baseline: Baseline::new(45.25),
-            scrub_start: 45.25,
+            edit: NumberEdit::new(45.25, Range::default(), 1.0, 2),
+            button_probe: None,
             toolbar_active: 0,
             slider: 50.0,
             select: Select::new(0),
@@ -132,6 +132,18 @@ impl Sheet {
             status: String::new(),
             snapshot: focus::Snapshot::default(),
         }
+    }
+
+    /// How many characters a field holds (the input check counts what a run of keys added).
+    pub fn field_len(&self, which: Which) -> usize {
+        match which {
+            Which::Name => self.name.text(),
+            Which::Search => self.search.text(),
+            Which::Notes => self.notes.text(),
+            Which::Dialog => self.dialog_name.text(),
+        }
+        .chars()
+        .count()
     }
 
     fn field_mut(&mut self, which: Which) -> &mut FieldValue {
@@ -171,21 +183,19 @@ impl Sheet {
             }
             Message::Clear(which) => self.field_mut(which).clear(),
             Message::Compose(composing) => self.focus.set_composing(composing),
-            Message::NumberInput(text) => self.number_text.input(text),
+            Message::NumberInput(text) => self.edit.input(text),
             Message::NumberEnter => {
-                match number::parse(self.number_text.text(), number::Range::default()) {
-                    Ok(value) => {
-                        self.number = value;
-                        self.baseline.committed(value);
-                    }
-                    Err(_) => {}
-                }
-                self.number_text.set(number::format(self.number, 2));
+                self.edit.enter();
             }
             Message::NumberEscape => {
-                self.number = self.baseline.rollback();
-                self.number_text.set(number::format(self.number, 2));
+                self.edit.escape();
             }
+            Message::NumberFocus(true) => self.edit.focus(),
+            Message::NumberFocus(false) => {
+                self.edit.blur();
+            }
+            Message::FieldFocus(which, true) => self.field_mut(which).focus(),
+            Message::FieldFocus(which, false) => self.field_mut(which).blur(),
             Message::Scrub(scrub) => return self.scrub(scrub),
             Message::ToolbarMove(index) => {
                 self.toolbar_active = index;
@@ -225,16 +235,21 @@ impl Sheet {
     fn scrub(&mut self, scrub: Scrub) -> Task<Message> {
         match scrub {
             Scrub::Click => return self.focus_then_select(),
-            Scrub::Begin => self.scrub_start = self.number,
-            Scrub::Delta { dx, shift, alt } => self.number = self.scrub_start + f64::from(dx) * number::step(0.1, StepKeys { shift, alt }),
-            Scrub::End => self.baseline.committed(self.number),
-            Scrub::Cancel => self.number = self.baseline.rollback(),
-            Scrub::Step { direction, shift, alt } => {
-                self.number += f64::from(direction) * number::step(1.0, StepKeys { shift, alt });
-                self.baseline.committed(self.number);
+            Scrub::Begin => {
+                self.edit.scrub_begin();
+            }
+            Scrub::Delta { dx, shift, alt } => self.edit.scrub_move(f64::from(dx), StepKeys { shift, alt }),
+            Scrub::End => {
+                self.edit.scrub_end();
+            }
+            Scrub::Cancel => {
+                self.edit.scrub_cancel();
+            }
+            Scrub::KeyStep { direction, shift, alt } => self.edit.key_step(direction, StepKeys { shift, alt }),
+            Scrub::KeyEnd => {
+                self.edit.key_release();
             }
         }
-        self.number_text.set(number::format(self.number, 2));
         self.after()
     }
 
@@ -282,8 +297,16 @@ impl Sheet {
                 };
             }
         }
-        focus::sync(&mut self.focus, &snapshot);
-        Task::none()
+        let synced = focus::sync(&mut self.focus, &snapshot);
+        // A scrub label that left the tree or was disabled mid-gesture: its owner ends the gesture (once).
+        if synced.removed.contains(&ids::NUMBER_LABEL) {
+            self.edit.scrub_cancel();
+        }
+        match synced.unfocus {
+            // The toolkit still holds a target behind the dialog as focused: take it away.
+            Some(_) => operate(focus::unfocus()).discard().chain(self.after()),
+            None => Task::none(),
+        }
     }
 
     /// Keys nothing in the tree captured, and pointer presses.
@@ -323,13 +346,14 @@ impl Sheet {
             .on_enter(Message::Enter(which))
             .on_escape(Message::Escape(which))
             .on_clear(Message::Clear(which))
+            .on_focus_change(move |focused| Message::FieldFocus(which, focused))
             .on_compose(Message::Compose)
     }
 
     pub fn view(&self) -> Element<'_, Message> {
         let palette = self.theme.palette();
         let dir = self.dir;
-        let number_text = self.number_text.text().to_owned();
+        let number_text = self.edit.text();
 
         let toolbar = RovingGroup::new(
             FocusArea::Tools,
@@ -413,6 +437,8 @@ impl Sheet {
             .on_enter(Message::NumberEnter)
             .on_escape(Message::NumberEscape)
             .on_scrub(Message::Scrub)
+            .on_focus_change(Message::NumberFocus)
+            .button_probe(self.button_probe)
             .on_compose(Message::Compose)
             .into_element();
 
@@ -465,7 +491,8 @@ impl Sheet {
             let panel = container(dialog.boxed()).style(move |_| {
                 container::Style::default().background(iced::Color::from(palette.surface)).border(iced::Border { color: palette.line_2.into(), width: 1.0, radius: tokens::scale::RADIUS_MD.into() })
             });
-            let backdrop = container(Scope::new(MODAL, container(panel).center(Length::Fill).boxed()))
+            // The scope is the dialog's panel itself: a press anywhere else is the dialog's and reaches nothing behind it.
+            let backdrop = container(container(Scope::new(MODAL, panel.boxed())).center(Length::Fill))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(move |_| container::Style::default().background(iced::Color::from(palette.surface_backdrop)));
