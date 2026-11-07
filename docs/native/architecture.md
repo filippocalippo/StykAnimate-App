@@ -88,6 +88,10 @@ build keeps the browser's WebGPU.
 coordinates, keys, waits, measurements, screenshots) against the real app, through the same core commands the
 interface sends. `--clock fixed` and fixed seeds make runs deterministic. The benchmark scenarios are such scripts; the
 same scripts run headless through `styk-cli` where no window is needed. There is no benchmark-only branch in normal paths.
+One language with one parser owns it: `styk_core::automation` (header `styk-auto/1`). Each feature adds its steps there
+(the shell's controls and keys, the stage's pointer and pen, the measurement steps); the developer tools' runners
+(`profile`, `compare`, headless runs, budgets) and every panel's automated test consume those steps and never define a
+script format of their own.
 
 `STYK_BACKGROUND_WINDOW=1` opens every window off-screen, without focus and without a taskbar entry. Screenshots of a
 window are taken with PrintWindow (Windows) by the app itself or by `xtask`, never from the screen.
