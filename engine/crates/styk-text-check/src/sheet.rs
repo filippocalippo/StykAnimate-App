@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use styk_design::{Theme, warm_up};
+use styk_platform::unattended::{self, Strategy};
 use styk_platform::window::{self as platform, Image};
 
 /// Frames a page is drawn for before it is captured: the first presents it, the rest let the compositor catch up.
@@ -33,7 +34,7 @@ struct Sheet {
     items: Vec<Item>,
     theme: Theme,
     scale: f32,
-    background: bool,
+    strategy: Option<Strategy>,
     out_dir: PathBuf,
     label: String,
     window: Option<window::Id>,
@@ -64,7 +65,7 @@ impl Sheet {
         match message {
             Message::Opened(id) => {
                 self.window = Some(id);
-                if self.background && cfg!(windows) {
+                if self.strategy == Some(Strategy::HiddenWindow) {
                     window::run(id, |window| platform::show_without_activation(window)).map(|_| Message::Shown)
                 } else {
                     Task::none()
@@ -210,13 +211,16 @@ pub fn run(matrix_path: &Path, out_dir: &Path, theme_name: &str, scale: f32) -> 
     std::fs::create_dir_all(out_dir).map_err(|error| error.to_string())?;
     // A cold start of a machine with thousands of fonts, reproduced: the worker waits this long before it starts.
     let delay = Duration::from_millis(std::env::var("STYK_FONT_WARMUP_DELAY_MS").ok().and_then(|value| value.parse().ok()).unwrap_or(0));
-    let background = std::env::var("STYK_BACKGROUND_WINDOW").is_ok_and(|value| value == "1");
+    let strategy = unattended::requested_by_environment()?;
+    if strategy == Some(Strategy::Headless) {
+        return Err("the typography sheet is captured from a window: use STYK_BACKGROUND_WINDOW=1".to_string());
+    }
     let result = Arc::new(Mutex::new(Ok(())));
     let sheet = Mutex::new(Some(Sheet {
         items,
         theme,
         scale,
-        background,
+        strategy,
         out_dir: out_dir.to_path_buf(),
         label: format!("{theme_name}-{scale}"),
         window: None,
@@ -235,10 +239,10 @@ pub fn run(matrix_path: &Path, out_dir: &Path, theme_name: &str, scale: f32) -> 
         size: Size::new(PAGE_WIDTH, PAGE_ROWS as f32 * ROW_HEIGHT),
         resizable: false,
         decorations: false,
-        visible: !(background && cfg!(windows)),
+        visible: strategy != Some(Strategy::HiddenWindow),
         ..window::Settings::default()
     };
-    if background {
+    if strategy.is_some() {
         settings.position = window::Position::Specific(iced::Point::new(-20000.0, -20000.0));
         #[cfg(windows)]
         {

@@ -116,6 +116,14 @@ mod tests {
     }
 
     #[test]
+    fn the_top_bar_height_follows_the_ui_scale_as_the_css_computes_it() {
+        // `--topbar-h: max(52px, calc(44px / var(--ui-scale)))`
+        assert_eq!(tokens::scale::topbar_h(1.0), 52.0);
+        assert_eq!(tokens::scale::topbar_h(2.0), 52.0);
+        assert_eq!(tokens::scale::topbar_h(0.5), 88.0);
+    }
+
+    #[test]
     fn the_themes_have_their_own_surfaces() {
         assert_eq!(Theme::Light.palette().surface_field.to_hex(), "#eceff4");
         assert_ne!(Theme::Light.palette().surface, Theme::Dark.palette().surface);

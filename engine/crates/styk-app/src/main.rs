@@ -7,9 +7,13 @@
 //! This crate is the wiring: it reads the command line (`styk-core`), picks the platform services (`styk-platform`),
 //! and runs the interface (`styk-ui`) in a window. Nothing here decides what the application does.
 //!
-//! `STYK_BACKGROUND_WINDOW=1` opens the window off-screen, without focus and without a taskbar entry. `--screenshot`
-//! waits for the window's first complete frame, writes it as a PNG and exits.
+//! `STYK_BACKGROUND_WINDOW=1` keeps a run off the desktop of the person at the computer, the way each platform allows
+//! (`styk_platform::unattended`): Windows opens the window off-screen without focus or a taskbar entry, X11 opens an
+//! override-redirect window off-screen, and Wayland and macOS open no window and draw offscreen ([`headless`]).
+//! `STYK_BACKGROUND_WINDOW=headless` does that everywhere. `--screenshot` waits for the first complete frame, writes it
+//! as a PNG and exits.
 
+mod headless;
 mod screenshot;
 mod window;
 
@@ -19,6 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use styk_core::Launch;
 use styk_design::{Theme, warm_up, widgets};
+use styk_platform::unattended::{self, Strategy};
 use styk_platform::window::{self as platform, Image, WindowError};
 use styk_trace::mark;
 
@@ -48,7 +53,7 @@ enum Message {
 struct App {
     launch: Launch,
     theme: Theme,
-    background: bool,
+    strategy: Option<Strategy>,
     window: Option<iced_window::Id>,
     /// Whether the font system is ready. Until it is, the view holds no text (`styk_design::warm_up`).
     fonts_ready: bool,
@@ -59,15 +64,15 @@ struct App {
 }
 
 impl App {
-    fn new(launch: Launch, background: bool, outcome: Arc<Mutex<Outcome>>) -> App {
-        App { launch, theme: Theme::default(), background, window: None, fonts_ready: false, frames: 0, capturing: false, outcome }
+    fn new(launch: Launch, strategy: Option<Strategy>, outcome: Arc<Mutex<Outcome>>) -> App {
+        App { launch, theme: Theme::default(), strategy, window: None, fonts_ready: false, frames: 0, capturing: false, outcome }
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Opened(id) => {
                 self.window = Some(id);
-                if window::shown_after_creation(self.background) {
+                if window::shown_after_creation(self.strategy) {
                     iced_window::run(id, |window| platform::show_without_activation(window)).map(Message::Shown)
                 } else {
                     Task::none()
@@ -147,7 +152,16 @@ fn main() -> ExitCode {
         eprintln!("--automation is not available yet: the automation mode arrives with the stage");
         return ExitCode::from(2);
     }
-    let background = window::background_requested();
+    let strategy = match unattended::requested_by_environment() {
+        Ok(strategy) => strategy,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(2);
+        }
+    };
+    if strategy == Some(Strategy::Headless) {
+        return run_headless(&launch);
+    }
     let outcome = Arc::new(Mutex::new(Outcome::Running));
     if launch.screenshot.is_some() {
         watchdog(outcome.clone());
@@ -155,10 +169,10 @@ fn main() -> ExitCode {
     #[cfg(feature = "devtools")]
     let trace_path = launch.screenshot.as_ref().map(|path| path.with_extension("trace.txt"));
     let scale = launch.scale.unwrap_or(1.0) as f32;
-    let settings = window::settings(&launch, background);
-    let app = Mutex::new(Some(App::new(launch, background, outcome.clone())));
-    // The font system is built on a worker from the first moment (`styk_design::warm_up`); the bundled fonts are
-    // loaded there, never through `iced::Settings::fonts`, which the runtime would load on the event loop.
+    let settings = window::settings(&launch, strategy);
+    let app = Mutex::new(Some(App::new(launch, strategy, outcome.clone())));
+    // The font system is built on a worker from the first moment (styk_design::warm_up); the bundled fonts are
+    // loaded there, never through iced::Settings::fonts, which the runtime would load on the event loop.
     let result = iced::application(
         move || (app.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the application starts once"), warm_up::warm_up().map(|()| Message::FontsReady)),
         App::update,
@@ -199,4 +213,26 @@ fn watchdog(outcome: Arc<Mutex<Outcome>>) {
             std::process::exit(1);
         }
     });
+}
+
+/// An unattended run with no window: draws the interface offscreen into the `--screenshot` picture and exits.
+fn run_headless(launch: &Launch) -> ExitCode {
+    let Some(path) = &launch.screenshot else {
+        eprintln!("an unattended run here opens no window, so it needs --screenshot <png> to produce anything");
+        return ExitCode::from(2);
+    };
+    let size = launch.size.unwrap_or(window::DEFAULT_SIZE);
+    let result = headless::screenshot(Theme::default(), size, launch.scale.unwrap_or(1.0) as f32).and_then(|image| {
+        mark!("first-frame");
+        screenshot::write(path, &image)
+    });
+    #[cfg(feature = "devtools")]
+    let _ = std::fs::write(path.with_extension("trace.txt"), styk_devtools::trace_report());
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
 }

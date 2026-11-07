@@ -67,7 +67,7 @@ fn build() {
 /// "Inter" with that file: no `wght` or `opsz` axis, other metrics. A web font beats an installed font of the same
 /// name in the browser; here the bundled one does, by dropping the installed faces of those two families first.
 /// Calling it again changes nothing.
-pub(crate) fn install_bundled() {
+pub fn install_bundled() {
     let mut system = font_system().write().unwrap_or_else(|poisoned| poisoned.into_inner());
     drop_installed(system.raw().db_mut());
     for font in fonts::ALL {

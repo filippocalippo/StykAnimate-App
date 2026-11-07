@@ -102,10 +102,16 @@ fn declarations(block: &str) -> Vec<(String, String)> {
 
 /// Replaces every `var(--name)` (or `var(--name, fallback)`) in `value` with the value `env` holds, recursively.
 pub fn resolve(value: &str, env: &HashMap<String, String>) -> Result<String, String> {
-    resolve_at(value, env, 0)
+    resolve_at(value, env, &[], 0)
 }
 
-fn resolve_at(value: &str, env: &HashMap<String, String>, depth: usize) -> Result<String, String> {
+/// Like [`resolve`], but leaves `var()` references to the properties in `keep` as they are: the page sets those at run
+/// time, so no value of theirs belongs in a constant.
+pub fn resolve_keeping(value: &str, env: &HashMap<String, String>, keep: &[&str]) -> Result<String, String> {
+    resolve_at(value, env, keep, 0)
+}
+
+fn resolve_at(value: &str, env: &HashMap<String, String>, keep: &[&str], depth: usize) -> Result<String, String> {
     if depth > 32 {
         return Err(format!("var() chain too deep or circular at {value:?}"));
     }
@@ -135,12 +141,17 @@ fn resolve_at(value: &str, env: &HashMap<String, String>, depth: usize) -> Resul
             Some((name, fallback)) => (name.trim(), Some(fallback.trim())),
             None => (inner.trim(), None),
         };
+        if keep.contains(&name) {
+            out.push_str(&rest[start..=close]);
+            rest = &rest[close + 1..];
+            continue;
+        }
         let replacement = match (env.get(name), fallback) {
             (Some(found), _) => found.as_str(),
             (None, Some(fallback)) => fallback,
             (None, None) => return Err(format!("{name} is not defined")),
         };
-        out.push_str(&resolve_at(replacement, env, depth + 1)?);
+        out.push_str(&resolve_at(replacement, env, keep, depth + 1)?);
         rest = &rest[close + 1..];
     }
     out.push_str(rest);
@@ -167,6 +178,12 @@ mod tests {
         assert_eq!(resolve("var(--c) x", &env).unwrap(), "0 0 #fff x");
         assert_eq!(resolve("var(--missing, 3px)", &env).unwrap(), "3px");
         assert!(resolve("var(--missing)", &env).unwrap_err().contains("not defined"));
+    }
+
+    #[test]
+    fn kept_properties_stay_as_references() {
+        let env: HashMap<String, String> = [("--a", "4px"), ("--scale", "1")].into_iter().map(|(k, v)| (k.into(), v.into())).collect();
+        assert_eq!(resolve_keeping("max(var(--a), calc(8px / var(--scale)))", &env, &["--scale"]).unwrap(), "max(4px, calc(8px / var(--scale)))");
     }
 
     #[test]

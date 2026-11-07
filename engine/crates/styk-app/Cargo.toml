@@ -16,10 +16,17 @@ devtools = ["dep:styk-devtools", "styk-trace/enabled"]
 
 [dependencies]
 iced = { workspace = true }
+iced_runtime = { path = "../../../vendor/iced/runtime" }
 png = "0.18"
+pollster = "0.4"
 styk-core = { path = "../styk-core" }
 styk-design = { path = "../styk-design", features = ["widgets"] }
 styk-devtools = { path = "../styk-devtools", optional = true }
 styk-platform = { path = "../styk-platform" }
 styk-trace = { path = "../styk-trace" }
 styk-ui = { path = "../styk-ui" }
+
+# winit has no display backend until one is enabled: without these, a Linux build stops at its compile_error. Both are
+# on, so one binary runs under X11 and Wayland (the libraries are loaded at run time, not linked).
+[target.'cfg(target_os = "linux")'.dependencies]
+iced = { workspace = true, features = ["x11", "wayland", "wayland-dlopen", "wayland-decorations"] }

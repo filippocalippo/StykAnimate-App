@@ -14,6 +14,7 @@
 mod css;
 mod deps;
 mod design;
+mod expr;
 mod fonts;
 mod tokens;
 

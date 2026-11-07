@@ -116,8 +116,12 @@ mod imp {
             let mut result = Err(os("CreateCompatibleBitmap"));
             if !memory.is_null() && !bitmap.is_null() {
                 let previous = SelectObject(memory, bitmap);
-                result = if PrintWindow(hwnd, memory, PRINT_FLAGS) == 0 {
-                    Err(os("PrintWindow"))
+                let printed = PrintWindow(hwnd, memory, PRINT_FLAGS) != 0;
+                let print_error = os("PrintWindow");
+                // GetDIBits requires the bitmap not to be selected into a device context.
+                SelectObject(memory, previous);
+                result = if !printed {
+                    Err(print_error)
                 } else {
                     let mut info: BITMAPINFO = std::mem::zeroed();
                     info.bmiHeader = BITMAPINFOHEADER {
@@ -131,7 +135,8 @@ mod imp {
                         ..std::mem::zeroed()
                     };
                     let mut pixels = vec![0u8; width as usize * height as usize * 4];
-                    if GetDIBits(memory, bitmap, 0, height, pixels.as_mut_ptr().cast(), &mut info, DIB_RGB_COLORS) == 0 {
+                    let copied = GetDIBits(memory, bitmap, 0, height, pixels.as_mut_ptr().cast(), &mut info, DIB_RGB_COLORS);
+                    if copied != height as i32 {
                         Err(os("GetDIBits"))
                     } else {
                         for pixel in pixels.chunks_exact_mut(4) {
@@ -141,7 +146,6 @@ mod imp {
                         Ok(Image { width, height, rgba: pixels })
                     }
                 };
-                SelectObject(memory, previous);
             }
             if !bitmap.is_null() {
                 DeleteObject(bitmap);
@@ -171,6 +175,65 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A real, bare window of a system class: the capture path runs against the operating system, not a fake.
+    #[cfg(windows)]
+    mod os_window {
+        use super::super::*;
+        use raw_window_handle::{HandleError, Win32WindowHandle, WindowHandle};
+        use std::num::NonZeroIsize;
+        use windows_sys::Win32::Foundation::HWND;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, WS_POPUP, WS_VISIBLE};
+
+        struct Bare(HWND);
+
+        impl HasWindowHandle for Bare {
+            fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+                let raw = RawWindowHandle::Win32(Win32WindowHandle::new(NonZeroIsize::new(self.0 as isize).expect("a window")));
+                // SAFETY: the handle is of a window this test created and destroys only after using it.
+                Ok(unsafe { WindowHandle::borrow_raw(raw) })
+            }
+        }
+
+        fn bare(width: i32, height: i32) -> Bare {
+            let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+            // SAFETY: a system window class, no parent, menu, instance or creation data; the window is far off-screen.
+            let hwnd = unsafe { CreateWindowExW(0, class.as_ptr(), std::ptr::null(), WS_POPUP | WS_VISIBLE, -20000, -20000, width, height, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null()) };
+            Bare(hwnd)
+        }
+
+        impl Drop for Bare {
+            fn drop(&mut self) {
+                // SAFETY: the window was created by `bare` on this thread.
+                unsafe { DestroyWindow(self.0) };
+            }
+        }
+
+        #[test]
+        fn a_window_off_screen_is_captured_at_its_size_with_opaque_pixels() {
+            let window = bare(64, 48);
+            let image = capture(&window).expect("the capture succeeds and reads every scanline");
+            assert_eq!((image.width, image.height), (64, 48));
+            assert_eq!(image.rgba.len(), 64 * 48 * 4);
+            assert!(image.rgba.chunks_exact(4).all(|pixel| pixel[3] == 255));
+        }
+
+        #[test]
+        fn a_destroyed_window_is_an_error_not_an_image() {
+            let window = bare(16, 16);
+            let hwnd = window.0;
+            drop(window);
+            struct Gone(HWND);
+            impl HasWindowHandle for Gone {
+                fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+                    let raw = RawWindowHandle::Win32(Win32WindowHandle::new(NonZeroIsize::new(self.0 as isize).unwrap()));
+                    // SAFETY: only the number is used; the test expects the operating system to refuse it.
+                    Ok(unsafe { WindowHandle::borrow_raw(raw) })
+                }
+            }
+            assert!(capture(&Gone(hwnd)).is_err());
+        }
+    }
 
     #[test]
     fn errors_say_what_failed() {
