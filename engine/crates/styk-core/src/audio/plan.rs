@@ -1,7 +1,13 @@
 //! The mix plan: what plays, resolved to its sources, immutable and shared by `Arc`.
 
+use std::sync::Arc;
+
+use styk_services::audio::AudioError;
+use styk_services::Cancel;
+
 use super::mix::{mix_clip, saturate, MixError};
-use super::model::{Clip, RATE};
+use super::model::{AudioState, Clip, RATE};
+use super::store::SourceStore;
 use super::wav::WavSource;
 
 /// An audible clip with its source.
@@ -49,4 +55,24 @@ impl MixPlan {
         saturate(out);
         Ok(())
     }
+}
+
+/// `prepare` of the engine: the audible clips that touch `[start, end)` seconds, their recordings decoded (or found in the
+/// store), as a plan. Runs on a worker; `cancel` ends it promptly, even inside the decoder.
+pub fn build_plan(store: &SourceStore, state: &AudioState, start: f64, end: f64, cancel: &Cancel) -> Result<Arc<MixPlan>, AudioError> {
+    let clips: Vec<Clip> = state.audible_clips().into_iter().filter(|clip| clip.start < end && clip.start + clip.duration > start).collect();
+    let mut needed: Vec<&super::model::Asset> = Vec::new();
+    for clip in &clips {
+        let asset = state.asset(&clip.asset_id).ok_or_else(|| AudioError::Decode(format!("the recording {} is missing", clip.asset_id)))?;
+        if !needed.iter().any(|a| a.id == asset.id) {
+            needed.push(asset);
+        }
+    }
+    let sources = store.ensure(&needed, cancel)?;
+    let mut planned = Vec::with_capacity(clips.len());
+    for clip in clips {
+        let index = needed.iter().position(|a| a.id == clip.asset_id).expect("every clip's recording was collected");
+        planned.push(PlanClip { source: sources[index].clone(), clip });
+    }
+    Ok(Arc::new(MixPlan::new(planned)))
 }

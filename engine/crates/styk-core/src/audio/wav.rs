@@ -78,6 +78,10 @@ pub struct WavSource {
 }
 
 impl WavSource {
+    pub fn new(header: WavHeader, bytes: Arc<SourceBytes>) -> WavSource {
+        WavSource { format: header.format, offset: header.offset, frames: header.frames, duration: header.duration, bytes }
+    }
+
     pub fn data(&self) -> &[u8] {
         self.bytes.as_slice()
     }
@@ -91,9 +95,23 @@ fn u32_at(bytes: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
 }
 
-/// What `inspectWave` reads of a WAV, and refuses. `bytes` is kept by the result.
+/// Where a WAV's samples are and how they are laid out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WavHeader {
+    pub format: WavFormat,
+    pub offset: usize,
+    pub frames: u64,
+    pub duration: f64,
+}
+
+/// `inspectWave` on a file: what it reads of a WAV, and what it refuses.
 pub fn inspect_wave(bytes: Arc<SourceBytes>) -> Result<WavSource, WavError> {
-    let data = bytes.as_slice();
+    let header = parse_wave(bytes.as_slice())?;
+    Ok(WavSource { format: header.format, offset: header.offset, frames: header.frames, duration: header.duration, bytes })
+}
+
+/// The header of `data` as `inspectWave` reads it.
+pub fn parse_wave(data: &[u8]) -> Result<WavHeader, WavError> {
     if data.len() < 44 || &data[0..4] != b"RIFF" || &data[8..12] != b"WAVE" {
         return Err(WavError::Unsupported);
     }
@@ -144,7 +162,7 @@ pub fn inspect_wave(bytes: Arc<SourceBytes>) -> Result<WavSource, WavError> {
     if duration <= 0.0 || duration > MAX_SECONDS {
         return Err(WavError::Duration);
     }
-    Ok(WavSource { format, offset, frames, duration, bytes })
+    Ok(WavHeader { format, offset, frames, duration })
 }
 
 /// `sample(view, at, format)`: one sample as a number in [-1, 1]; a value that is not finite is 0.
