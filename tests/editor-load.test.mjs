@@ -45,10 +45,12 @@ test('cooperative import publishes once with identical validated poses, UID/laye
   editor.select(1);editor.moveSelection(4,0);assert(editor.undo());assert.deepEqual(editor.report,sync.report);
 });
 
-test('late invalid joins, cameras, styles, backgrounds and retained poses never replace the active document',async()=>{
+// The contract: a project document is repaired when it opens (a join that names no figure is mended, see tests/engine-open-repairs.test.mjs),
+// so this test uses damage no repair can mend. A document that is refused leaves the active document, its history and its tokens untouched.
+test('late invalid poses, cameras, styles, backgrounds and retained poses never replace the active document',async()=>{
   const mutations=[
     r=>r.keyframes.at(-1).objects.at(-1).angles[0]=NaN,
-    r=>r.keyframes.at(-1).objects.at(-1).join={target_object_slot:999,target_handle_id:1},
+    r=>r.keyframes.at(-1).objects.at(-1).root_y=Infinity,
     r=>r.keyframes.at(-1).camera={is_default:false,x:0,y:0,scale:0},
     r=>r.keyframes.at(-1).objects.at(-1)._stykStyle={outlineOpacity:NaN},
     r=>r.keyframes.at(-1).background_id=999,

@@ -68,6 +68,15 @@ export default Object.freeze({
   "app.recoveryCopyCouldNotBeWritten": "Recovery copy could not be written: {message}",
   "app.closeAProjectToOpenAnother": "Close a project to open another. {count} can be open at once.",
   "app.waitForTheSaveOrTheOpeningFileToFinish": "Wait for the save or the opening file to finish.",
+  "app.savedAfterMendingTheProject": {
+    "one": "Saved. This project had damage in its movieclips, so {count} repair was made for the saved file to open.",
+    "other": "Saved. This project had damage in its movieclips, so {count} repairs were made for the saved file to open."
+  },
+  "app.savedButMayNotOpenAgain": "Saved, but this project may not open again ({reason}). Keep your previous copy until you have checked it.",
+  "app.openedAfterMendingTheProject": {
+    "one": "This project was saved with damaged movieclip data. It opened after {count} repair, and it is marked as having unsaved changes so that saving it fixes the file.",
+    "other": "This project was saved with damaged movieclip data. It opened after {count} repairs, and it is marked as having unsaved changes so that saving it fixes the file."
+  },
   "app.savedACopyNewerChangesAreStillUnsaved": "Saved a copy · newer changes are still unsaved",
   "app.projectSaved": "Project saved",
   "app.editText": "Edit text",

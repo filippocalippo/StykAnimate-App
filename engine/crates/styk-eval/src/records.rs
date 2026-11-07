@@ -871,7 +871,7 @@ impl<'a> Records<'a> {
                         entry.set("value", Value::object(value));
                         self.virtual_frame(&[Value::object(entry)], 0, false)
                     };
-                    Some(self.interval(seq, &entry_at, low, fraction, None)?)
+                    Some(self.interval(&seq, &entry_at, low, fraction, None)?)
                 }
             } else {
                 patch.get("frameId").and_then(Value::as_str).and_then(|frame_id| self.source(frame_id))
