@@ -34,6 +34,16 @@ or `cfg(windows)` outside `styk-platform`; no `unwrap`, `expect` or ignored `Res
 clippy `disallowed_methods` for file I/O, `sleep` and blocking waits in interface crates; views never import the engine; new
 dependencies only from an allow list the orchestrator keeps; a screenshot difference limit per screen.
 
+**A merge train, not catch-up rebuilds** (the owner, 2026-11-08). A finished chunk is not merged with `native-app` to be
+re-tested on newer work; only on a real conflict or a dependency on code merged after it started. Reviewed chunks (their
+own tests, review and the orchestrator's diff read done on their branches) merge onto `native-app` three or four in a
+row, then one combined pass runs on the result (build, the changed crates' tests, `cargo xtask check`). High-risk chunks
+and chunks that touch the same files or crates merge alone, with their own pass on the merged result. A failed pass stops
+all merges until it is fixed (the culprit by the failing area, reverted if the fix is not quick); nothing is pushed or
+branched from an untested train head. **Cheap checks while coding**: implementers iterate with `cargo check` and
+`cargo clippy` on the crates they touch and build and test when a piece is done, only the changed crates; every chunk still
+ends with its full done criteria.
+
 **Proof** proportionate to risk (no exhaustive sweeps unless a real failure calls for one; representative scenes; full
 suites at gates). **Reports** of about 30 lines (what changed, checks and results, screenshot scores, departures from the
 brief, risks). Short Handoff updates at merges; decision records only for real decisions.
