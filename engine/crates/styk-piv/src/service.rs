@@ -218,6 +218,20 @@ impl Codec {
         }
     }
 
+    /// The export `POST /api/export` makes of `request` (`{document, format, filename, figureTypeId}`), for a caller that holds the
+    /// document as a tree: the file's bytes and its name. Nothing is written as JSON and read back, so the request has no size, only
+    /// what the file itself may be (256 MiB); a document that holds a very large Pivot file twice (as the text
+    /// of its padding and as its original) is exported by what it is, not by twice its text. `original` is the Pivot file the document
+    /// carries, as in the framed request.
+    pub fn export_tree(&mut self, request: &Value, original: Option<Arc<[u8]>>, cancel: &dyn Fn() -> bool) -> Result<(Vec<u8>, String), CodecError> {
+        let ctx = Ctx::new(cancel);
+        if !request.is_object() {
+            return Err(api(400, "invalid_request", "The request must be a JSON object.").into());
+        }
+        let mut timings = Vec::new();
+        Ok(self.store.export(&ctx, request, original, &mut timings)?)
+    }
+
     fn limit(&self, filename: &str) -> usize {
         let lower = filename.to_lowercase();
         if [".styk", ".stkz", ".stykmov", ".json"].iter().any(|suffix| lower.ends_with(suffix)) { self.limits.max_document } else { self.limits.max_source }
