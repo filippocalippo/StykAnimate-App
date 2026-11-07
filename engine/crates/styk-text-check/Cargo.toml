@@ -1,0 +1,17 @@
+[package]
+name = "styk-text-check"
+description = "The typography check: draws the type matrix natively and compares it with Chromium (cargo xtask fonts)."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "styk-text-check"
+path = "src/main.rs"
+
+[dependencies]
+iced = { workspace = true }
+png = "0.18"
+styk-design = { path = "../styk-design", features = ["widgets"] }
+styk-platform = { path = "../styk-platform" }

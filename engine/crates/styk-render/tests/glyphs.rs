@@ -101,3 +101,59 @@ fn crisp_edges_draw_lone_glyphs_from_their_outlines() {
     let blank = draw(&mut Renderer::with_edges(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, Edges::Crisp), &device, &queue, &Arc::new(empty), &view(1.0));
     assert!(differing(&pixels, &blank) > 200, "the glyphs are drawn");
 }
+
+/// A frame of lone glyphs built here: `count` blobs of their own (each has a mask of its own), each of glyph-space size 100 drawn at
+/// `scale`, so their masks are `2^k` texels with `k` from the scale.
+fn glyphs(count: usize, scale: f64) -> Arc<DrawList> {
+    use styk_draw::{GlyphInstance, GlyphMask, Group, Pass, Prim, NO_LAYER, NO_PAINT};
+    let mut list = DrawList::default();
+    for index in 0..count {
+        let ring: Vec<[f32; 2]> = (0..7).map(|k| {
+            let angle = k as f64 / 7.0 * std::f64::consts::TAU;
+            let radius = 30.0 + 3.0 * ((index * 7 + k) % 5) as f64;
+            [(50.0 + radius * angle.cos()) as f32, (50.0 + radius * angle.sin()) as f32]
+        }).collect();
+        let triangles: Vec<[f32; 2]> = (0..7).flat_map(|k| [[50.0, 50.0], ring[k], ring[(k + 1) % 7]]).collect();
+        let mask = GlyphMask { bounds: [0.0, 0.0, 100.0, 100.0], origin: [10.0 + (index % 20) as f64 * 15.0, 10.0 + (index / 20) as f64 * 12.0], angle: 0.0, scale: [scale, scale], offset: [0.0, 0.0] };
+        list.glyphs.push(GlyphInstance { mask, triangles: triangles.into() });
+        list.prims.push(Prim { kind: K_GLYPH, group: 0, color: 0xff20_40c0, paint: NO_PAINT, a: [0.0; 4], b: [f32::from_bits(index as u32), 0.0, 0.0, 0.0], c: [0.0; 4] });
+    }
+    list.groups.push(Group { parent: 0, depth: 0, opacity: 1.0, bounds: [0.0, 0.0, 400.0, 200.0], layer: NO_LAYER });
+    list.passes.push(Pass { depth: 0, start: 0, end: count as u32 });
+    Arc::new(list)
+}
+
+/// The atlas keeps within its 64 MiB when the side of its pages changes. Its layers used to carry over from a texture of another
+/// side: many small pages, then one large mask, made that many pages of 4,096² texels (a mask of 2,000 texels a side, then 300 of 64,
+/// then the large one again measured 32, 5 and 80 MiB).
+#[test]
+fn the_glyph_atlas_stays_in_its_budget_when_the_side_of_its_pages_changes() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
+    const BUDGET: u64 = 64 << 20;
+    let view = ViewParams { matrix: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], artboard: [0.0, 0.0, 400.0, 200.0], clip_to_artboard: false, clear: [0.0; 4], zoom: 1.0, pan: [0.0; 2], stretch: 1.0, camera_view: false, camera_limit: styk_render::CAMERA_PREVIEW_LIMIT };
+    let (large, small) = (glyphs(1, 20.0), glyphs(300, 0.5));
+    // An export sizes its pages by each frame; the stage lets them only grow, so it meets the large mask after the small ones.
+    for (exact, order) in [(true, vec![&large, &small, &large]), (false, vec![&small, &large])] {
+        let mut renderer = Renderer::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+        renderer.set_exact_sizes(exact);
+        let mut bytes = Vec::new();
+        for list in order {
+            draw(&mut renderer, &device, &queue, list, &view);
+            bytes.push(renderer.stats.glyph_bytes);
+        }
+        assert!(bytes.iter().all(|&b| b <= BUDGET), "exact {exact}: the atlas is within {BUDGET} bytes in every frame: {bytes:?}");
+        let last = *bytes.last().unwrap();
+        assert!(last >= 4096 * 4096, "exact {exact}: the large mask is on a page of 4,096 texels a side: {bytes:?}");
+        if exact {
+            assert!(bytes[1] > 0 && bytes[1] < 4096 * 4096, "the small masks are on smaller pages: {bytes:?}");
+            assert_eq!(last, bytes[0], "the large mask needs what it needed before, not the layers the small pages grew to: {bytes:?}");
+        } else {
+            assert_eq!(last, 2 * 4096 * 4096, "the large mask needs two layers, not as many as the small pages had: {bytes:?}");
+        }
+    }
+}
