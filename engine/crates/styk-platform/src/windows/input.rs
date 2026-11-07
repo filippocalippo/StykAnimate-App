@@ -32,7 +32,7 @@ use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWi
 use windows_sys::Win32::UI::TabletPC::{TABLET_DISABLE_FLICKS, TABLET_DISABLE_PENBARRELFEEDBACK, TABLET_DISABLE_PENTAPFEEDBACK, TABLET_DISABLE_PRESSANDHOLD};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, GetMessageExtraInfo, PEN_FLAG_BARREL, PEN_FLAG_ERASER, PEN_FLAG_INVERTED, PEN_MASK_PRESSURE, PEN_MASK_ROTATION, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PT_PEN, PT_TOUCH, RemovePropW, SetPropW,
-    WM_ACTIVATE, WM_CANCELMODE, WM_CONTEXTMENU, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_POINTERCAPTURECHANGED, WM_POINTERDOWN, WM_POINTERUP, WM_POINTERUPDATE,
+    WM_ACTIVATE, WM_CANCELMODE, WM_CONTEXTMENU, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_POINTERCAPTURECHANGED, WM_POINTERDOWN, WM_POINTERENTER, WM_POINTERUP, WM_POINTERUPDATE,
     WM_RBUTTONDOWN, WM_RBUTTONUP,
 };
 
@@ -156,6 +156,8 @@ pub struct InputCounters {
     pub pen_samples: AtomicU64,
     /// Samples recovered from the history of a message.
     pub history_samples: AtomicU64,
+    /// History entries identical to the sample before them, dropped.
+    pub repeated_entries: AtomicU64,
     pub touch_samples: AtomicU64,
     pub real_mouse_messages: AtomicU64,
     /// Mouse messages Windows promoted from a pen or a finger; none became samples.
@@ -173,6 +175,8 @@ struct Hook {
     mouse_down: Cell<bool>,
     mouse_barrel: Cell<bool>,
     scratch: RefCell<Vec<POINTER_PEN_INFO>>,
+    /// The last pen report pushed, so an entry the history repeats is not delivered twice.
+    last_pen: Cell<Option<(u32, u64, u64, u64, u32, Phase)>>,
 }
 
 fn modifiers() -> Modifiers {
@@ -247,6 +251,12 @@ impl Hook {
                 continue;
             }
             let mut sample = pen_sample(entry, Self::position(hwnd, &entry.pointerInfo), time_ns, keys);
+            // The history of a message sometimes ends with the entry the message itself reports: once is enough.
+            let identity = (pointer, time_ns, sample.x.to_bits(), sample.y.to_bits(), sample.raw_pressure, sample.phase);
+            if self.last_pen.replace(Some(identity)) == Some(identity) {
+                self.counters.repeated_entries.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
             if index + 1 < total {
                 sample.flags = sample.flags | SampleFlags::HISTORY;
                 self.counters.history_samples.fetch_add(1, Ordering::Relaxed);
@@ -366,7 +376,7 @@ unsafe extern "system" fn subclass_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
     // and the procedure runs only on the window's thread, so the cells are never shared.
     let hook = unsafe { &*(data as *const Hook) };
     match msg {
-        WM_POINTERDOWN | WM_POINTERUPDATE | WM_POINTERUP => {
+        WM_POINTERDOWN | WM_POINTERUPDATE | WM_POINTERUP | WM_POINTERENTER => {
             let pointer = (wparam & 0xFFFF) as u32;
             let mut kind = 0;
             // SAFETY: `kind` outlives the call.
@@ -423,6 +433,7 @@ impl WindowsInput {
             mouse_down: Cell::new(false),
             mouse_barrel: Cell::new(false),
             scratch: RefCell::new(Vec::new()),
+            last_pen: Cell::new(None),
         }));
         // SAFETY: `hook` stays allocated until `detach`, which removes the subclass first; the property value is plain bits.
         unsafe {

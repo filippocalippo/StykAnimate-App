@@ -123,6 +123,8 @@ pub struct Inspector {
     pub history_samples: u64,
     pub touch_samples: u64,
     pub mouse_samples: u64,
+    /// Mouse samples in contact: a stroke from a mouse. A pen promoted to mouse must never make one.
+    pub mouse_contact_samples: u64,
     pub duplicates: u64,
     pub interrupts: u64,
     pub overflows: u64,

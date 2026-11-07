@@ -1,17 +1,20 @@
 //! A synthetic pen: `CreateSyntheticPointerDevice` / `InjectSyntheticPointerInput`, for the tests and `cargo xtask pen-inject`.
 //!
+//! A synthetic pen has no eraser end: the system drops the eraser and inverted flags of an injected report (and refuses a lift
+//! that carries them), so the eraser tool is tested through the field mapping and on a real tablet, not here.
+//!
 //! The system routes injected input like a real pen's: to the window under the pointer's screen position. A script is
 //! replayed at its own timing (a hybrid sleep and spin on the performance counter), and the counter time of every
 //! injection is returned so a latency measurement can start from it.
 
 use std::time::Duration;
-use styk_services::input::{Phase, Script, ScriptStep, Tool};
+use styk_services::input::{Phase, Script, ScriptStep};
 use windows_sys::Win32::UI::Controls::{CreateSyntheticPointerDevice, DestroySyntheticPointerDevice, HSYNTHETICPOINTERDEVICE, POINTER_FEEDBACK_NONE, POINTER_TYPE_INFO, POINTER_TYPE_INFO_0};
 use windows_sys::Win32::UI::Input::Pointer::{
     InjectSyntheticPointerInput, POINTER_FLAG_FIRSTBUTTON, POINTER_FLAG_DOWN, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_FLAG_NEW, POINTER_FLAG_SECONDBUTTON, POINTER_FLAG_UP, POINTER_FLAG_UPDATE,
     POINTER_PEN_INFO,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{PEN_FLAG_BARREL, PEN_FLAG_ERASER, PEN_FLAG_INVERTED, PEN_MASK_PRESSURE, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PT_PEN};
+use windows_sys::Win32::UI::WindowsAndMessaging::{PEN_FLAG_BARREL, PEN_MASK_PRESSURE, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PT_PEN};
 
 /// Why injection failed: what was called, and the system's error code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +45,35 @@ pub fn pointer_flags(phase: Phase, barrel: bool, entering: bool) -> u32 {
     flags
 }
 
+/// The primary display's size in pixels.
+pub fn primary_screen_size() -> (i32, i32) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+    // SAFETY: plain queries.
+    unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) }
+}
+
+/// Makes a window all but invisible (its opacity `alpha` of 255) while it still takes input.
+///
+/// Injected pointer input is delivered to the window under the pointer's screen position, so a window that is to receive
+/// it must be on the screen; a test window made this nearly transparent, small and at the screen's corner is there without
+/// being seen.
+pub fn make_nearly_invisible(window: &dyn raw_window_handle::HasWindowHandle, alpha: u8) -> Result<(), InjectError> {
+    use raw_window_handle::RawWindowHandle;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GetWindowLongPtrW, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowLongPtrW, WS_EX_LAYERED};
+    let Ok(handle) = window.window_handle() else { return Err(InjectError("window handle", 0)) };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else { return Err(InjectError("window handle", 0)) };
+    let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+    // SAFETY: the handle belongs to a live window of this process; these calls only change its own style and opacity.
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED as isize);
+        if SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA) == 0 {
+            return Err(InjectError("SetLayeredWindowAttributes", last_error()));
+        }
+    }
+    Ok(())
+}
+
 /// A synthetic pen device.
 pub struct PenInjector {
     device: HSYNTHETICPOINTERDEVICE,
@@ -64,15 +96,13 @@ impl PenInjector {
         pen.pointerInfo.pointerType = PT_PEN;
         pen.pointerInfo.pointerId = self.pointer;
         pen.pointerInfo.pointerFlags = flags;
+        // The system stamps an injection itself, with a millisecond clock; setting the time here is refused (error 87).
         pen.pointerInfo.ptPixelLocation.x = screen.0 + step.x.round() as i32;
         pen.pointerInfo.ptPixelLocation.y = screen.1 + step.y.round() as i32;
         pen.penMask = PEN_MASK_PRESSURE | PEN_MASK_TILT_X | PEN_MASK_TILT_Y;
         pen.pressure = step.raw_pressure;
         pen.tiltX = step.tilt_x;
         pen.tiltY = step.tilt_y;
-        if step.tool == Tool::Eraser {
-            pen.penFlags |= PEN_FLAG_INVERTED | PEN_FLAG_ERASER;
-        }
         if step.barrel {
             pen.penFlags |= PEN_FLAG_BARREL;
         }
@@ -91,15 +121,6 @@ impl PenInjector {
         Ok(())
     }
 
-    /// Takes the pen out of range.
-    pub fn leave(&mut self, step: &ScriptStep, screen_origin: (i32, i32)) -> Result<(), InjectError> {
-        let frame = self.frame(step, screen_origin, POINTER_FLAG_UPDATE);
-        // SAFETY: as in `inject`.
-        let sent = unsafe { InjectSyntheticPointerInput(self.device, &frame, 1) } != 0;
-        self.in_range = false;
-        if sent { Ok(()) } else { Err(InjectError("InjectSyntheticPointerInput", last_error())) }
-    }
-
     /// Replays a script at its own timing from the moment of the call. `before` runs just before each injection with the
     /// step index. Returns the counter time (ns) of each injection; stops at the first error.
     pub fn play(&mut self, script: &Script, screen_origin: (i32, i32), mut before: impl FnMut(usize)) -> Result<Vec<u64>, InjectError> {
@@ -110,9 +131,6 @@ impl PenInjector {
             before(index);
             times.push(super::qpc::now_ns());
             self.inject(step, screen_origin)?;
-        }
-        if let Some(last) = script.steps.last() {
-            self.leave(last, screen_origin)?;
         }
         Ok(times)
     }

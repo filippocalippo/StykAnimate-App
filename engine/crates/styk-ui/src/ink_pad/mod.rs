@@ -71,7 +71,12 @@ impl Pad {
                 }
                 match sample.tool {
                     Tool::Touch => inspector.touch_samples += 1,
-                    Tool::Mouse => inspector.mouse_samples += 1,
+                    Tool::Mouse => {
+                        inspector.mouse_samples += 1;
+                        if sample.phase != Phase::Hover {
+                            inspector.mouse_contact_samples += 1;
+                        }
+                    }
                     _ => {}
                 }
                 match state.last_time {

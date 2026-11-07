@@ -153,7 +153,17 @@ impl Runner {
                     TestKind::Behaviour => return self.behaviour_step(cx),
                     _ => {}
                 }
-                let script = Script::generate(&ScriptSpec::standard(self.test.rate_hz, self.test.seconds, pad.0 as f64, pad.1 as f64), 1);
+                let mut script = Script::generate(&ScriptSpec::standard(self.test.rate_hz, self.test.seconds, pad.0 as f64, pad.1 as f64), 1);
+                // A synthetic pen has no eraser end (see `inject`): the second stroke is injected with the tip.
+                for step in &mut script.steps {
+                    step.tool = Tool::Pen;
+                }
+                cx.core.with_inspector(|inspector| {
+                    inspector.update_max_us = 0;
+                    inspector.max_generate_ms = 0.0;
+                    inspector.max_raster_ms = 0.0;
+                });
+                cx.core.with_gpu(|gpu| gpu.prepare_max_us = 0);
                 cx.core.set_recording(true);
                 let thread = self.spawn_injection(script.clone(), cx.client_origin);
                 self.phase = Phase_::Injecting { thread, script, blocks_done: 0, frames: 0 };
@@ -254,7 +264,7 @@ impl Runner {
             self.check("A1 pressure within 1/1024", report.max_pressure_error <= 1.0, format!("max {:.1}/1024", report.max_pressure_error));
             self.check("A3 position within 0.5 px", report.max_position_error <= 0.5, format!("max {:.2} px", report.max_position_error));
         }
-        self.check("A7 no mouse stroke from a pen", inspector.mouse_samples == 0, format!("{} mouse samples, {} promoted mouse messages ignored", inspector.mouse_samples, counters.promoted_mouse_messages.load(Relaxed)));
+        self.check("A7 no mouse stroke from a pen", inspector.mouse_contact_samples == 0, format!("{} mouse strokes ({} hover samples from the system), {} promoted mouse messages ignored", inspector.mouse_contact_samples, inspector.mouse_samples, counters.promoted_mouse_messages.load(Relaxed)));
         self.check("A7 promotion reaches the toolkit", counters.promoted_mouse_messages.load(Relaxed) > 0, counters.promoted_mouse_messages.load(Relaxed));
         self.check("A5 update slice under 4 ms", inspector.update_max_us < 4000 || self.test.kind == TestKind::Blocked, format!("{} us", inspector.update_max_us));
         self.check("A5 prepare slice under 4 ms", cx.core.gpu_stats().prepare_max_us < 4000, format!("{} us", cx.core.gpu_stats().prepare_max_us));

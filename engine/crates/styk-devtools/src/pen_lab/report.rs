@@ -33,7 +33,10 @@ impl Percentiles {
 pub struct Report {
     pub injected: usize,
     pub delivered: usize,
+    /// Samples identical to an earlier one in pointer, time and position: a re-delivery.
     pub duplicates: usize,
+    /// Samples sharing a timestamp with an earlier, different one (injected input is stamped to the millisecond).
+    pub same_stamp: usize,
     pub history_samples: usize,
     pub monotonic: bool,
     pub median_gap_ms: f64,
@@ -57,20 +60,35 @@ pub struct Report {
 
 /// `offset` is where the script's origin sits in the client area (the pad's top-left), physical pixels.
 pub fn analyse(script: &Script, injected_ns: &[u64], samples: &[SampleRow], frames: &[FrameRow], offset: (f64, f64)) -> Report {
+    // Only the pen's samples: a real mouse used meanwhile has its own pointer and clock.
+    let pen: Vec<SampleRow> = samples.iter().filter(|row| matches!(row.sample.tool, Tool::Pen | Tool::Eraser)).copied().collect();
+    let samples = &pen[..];
     let mut report = Report { injected: script.steps.len(), delivered: samples.len(), frames: frames.len(), ..Report::default() };
     let times: Vec<u64> = samples.iter().map(|s| s.sample.time_ns).collect();
     report.monotonic = times.windows(2).all(|pair| pair[1] >= pair[0]);
     let mut seen = HashSet::new();
-    report.duplicates = samples.iter().filter(|s| !seen.insert((s.sample.pointer, s.sample.time_ns))).count();
+    report.duplicates = samples.iter().filter(|s| !seen.insert((s.sample.pointer, s.sample.time_ns, s.sample.x.to_bits(), s.sample.y.to_bits()))).count();
+    let mut stamps = HashSet::new();
+    report.same_stamp = samples.iter().filter(|s| !stamps.insert((s.sample.pointer, s.sample.time_ns))).count();
     report.history_samples = samples.iter().filter(|s| s.sample.flags.contains(SampleFlags::HISTORY)).count();
     let mut gaps: Vec<f64> = times.windows(2).filter(|p| p[1] > p[0]).map(|p| (p[1] - p[0]) as f64 / 1e6).collect();
     gaps.sort_by(|a, b| a.total_cmp(b));
     report.median_gap_ms = gaps.get(gaps.len() / 2).copied().unwrap_or(0.0);
 
-    report.aligned = samples.len() == script.steps.len() && report.duplicates == 0;
+    // The fields are compared on the contact runs (a press to its lift): hover reports are partly the system's own (it
+    // reports a pen entering or leaving range itself), so only the contact samples pair one to one with the script.
+    let contact = |phase: Phase| matches!(phase, Phase::Down | Phase::Move | Phase::Up);
+    let pairs: Vec<(usize, usize)> = {
+        let steps = script.steps.iter().enumerate().filter(|(_, s)| contact(s.phase)).map(|(i, _)| i);
+        let delivered = samples.iter().enumerate().filter(|(_, s)| contact(s.sample.phase)).map(|(j, _)| j);
+        steps.zip(delivered).collect()
+    };
+    let contact_steps = script.steps.iter().filter(|s| contact(s.phase)).count();
+    let contact_samples = samples.iter().filter(|s| contact(s.sample.phase)).count();
+    report.aligned = contact_steps == contact_samples && report.duplicates == 0;
     if report.aligned {
-        for (step, row) in script.steps.iter().zip(samples) {
-            let s = &row.sample;
+        for &(k, j) in &pairs {
+            let (step, s) = (&script.steps[k], &samples[j].sample);
             if s.tool != step.tool {
                 report.tool_mismatches += 1;
             }
@@ -82,8 +100,11 @@ pub fn analyse(script: &Script, injected_ns: &[u64], samples: &[SampleRow], fram
             }
             report.max_tilt_error = report.max_tilt_error.max((s.tilt_x as f64 - step.tilt_x as f64).abs()).max((s.tilt_y as f64 - step.tilt_y as f64).abs());
             report.max_pressure_error = report.max_pressure_error.max((s.raw_pressure as f64 - step.raw_pressure as f64).abs());
-            let (ex, ey) = (step.x.round() + offset.0, step.y.round() + offset.1);
-            report.max_position_error = report.max_position_error.max(((s.x - ex).powi(2) + (s.y - ey).powi(2)).sqrt());
+            // A lift reports where the contact last was, not the position the lift was injected at.
+            if step.phase != Phase::Up {
+                let (ex, ey) = (step.x.round() + offset.0, step.y.round() + offset.1);
+                report.max_position_error = report.max_position_error.max(((s.x - ex).powi(2) + (s.y - ey).powi(2)).sqrt());
+            }
         }
     }
 
@@ -97,9 +118,10 @@ pub fn analyse(script: &Script, injected_ns: &[u64], samples: &[SampleRow], fram
         let (mut preview, mut exact, mut delivery) = (Vec::new(), Vec::new(), Vec::new());
         // Later samples are never shown before earlier ones, so each scan only moves forward.
         let (mut wet_at, mut exact_at) = (0usize, 0usize);
-        for (k, (step, row)) in script.steps.iter().zip(samples).enumerate() {
+        for &(k, j) in &pairs {
+            let (step, row) = (&script.steps[k], &samples[j]);
             delivery.push(row.received_ns.saturating_sub(injected_ns[k]) as f64 / 1e6);
-            if !matches!(step.phase, Phase::Down | Phase::Move) {
+            if step.phase == Phase::Up {
                 continue;
             }
             // The device times are the system's and the injection times the injector's: a few microseconds apart.
@@ -148,7 +170,7 @@ impl Report {
     pub fn text(&self, refresh_hz: f64, present_mode: &str, slices_us: (u64, u64)) -> String {
         let mut out = String::new();
         let _ = writeln!(out, "display {refresh_hz:.0} Hz, present mode {present_mode}, measured frame period {:.2} ms, frames {}, frame gaps over 2x {}", self.frame_period_ms, self.frames, self.frame_gaps_over_2x);
-        let _ = writeln!(out, "injected {} delivered {} duplicates {} history-recovered {} monotonic {} median gap {:.3} ms", self.injected, self.delivered, self.duplicates, self.history_samples, self.monotonic, self.median_gap_ms);
+        let _ = writeln!(out, "injected {} delivered {} re-delivered {} same-timestamp {} history-recovered {} monotonic {} median gap {:.3} ms", self.injected, self.delivered, self.duplicates, self.same_stamp, self.history_samples, self.monotonic, self.median_gap_ms);
         if self.aligned {
             let _ = writeln!(
                 out,
@@ -156,7 +178,7 @@ impl Report {
                 self.tool_mismatches, self.barrel_mismatches, self.phase_mismatches, self.max_tilt_error, self.max_pressure_error, self.max_position_error
             );
         } else {
-            let _ = writeln!(out, "fields: not compared (delivered != injected, or duplicates)");
+            let _ = writeln!(out, "fields: not compared (contact runs differ in length, or re-delivered samples)");
         }
         let period = if self.frame_period_ms > 0.0 { self.frame_period_ms } else { 1000.0 / refresh_hz.max(1.0) };
         row(&mut out, "injection -> queue read", &self.delivery_ms, period);

@@ -32,6 +32,8 @@ pub struct LabOptions {
     pub scale: f32,
     /// The window is created hidden and shown without activation (an unattended run on Windows).
     pub show_after_open: bool,
+    /// The window is made nearly invisible so it can sit on the screen for injected input.
+    pub invisible: bool,
     pub self_test: Option<SelfTest>,
     pub out_dir: Option<PathBuf>,
 }
@@ -41,6 +43,7 @@ pub enum Message {
     Opened(window::Id),
     Attached(Attached),
     Frame,
+    Origin((i32, i32)),
     Brush(BrushChange),
     Switch(SwitchChange),
     Clear,
@@ -90,10 +93,12 @@ struct Lab {
     refresh_hz: f64,
     client_origin: (i32, i32),
     show_after_open: bool,
+    invisible: bool,
     out_dir: Option<PathBuf>,
     test: Option<self_test::Runner>,
     hover_target: bool,
     hover_enters: u64,
+    frames: u64,
     error: Option<String>,
     exit_code: Arc<Mutex<i32>>,
 }
@@ -110,10 +115,12 @@ impl Lab {
             refresh_hz: 0.0,
             client_origin: (0, 0),
             show_after_open: options.show_after_open,
+            invisible: options.invisible,
             out_dir: options.out_dir.clone(),
             test: options.self_test.clone().map(self_test::Runner::new),
             hover_target: false,
             hover_enters: 0,
+            frames: 0,
             error: None,
             exit_code,
         }
@@ -125,12 +132,16 @@ impl Lab {
                 self.window = Some(id);
                 let queue = self.core.queue.clone();
                 let show_after_open = self.show_after_open;
+                let invisible = self.invisible;
                 let attached = Attached(Arc::new(Mutex::new(None)));
                 let slot = attached.clone();
                 let show = styk_platform::window::show_without_activation;
                 window::run(id, move |window| {
                     if show_after_open {
                         let _ = show(window);
+                    }
+                    if invisible {
+                        let _ = styk_platform::windows::inject::make_nearly_invisible(window, 2);
                     }
                     let result = WindowsInput::attach(window, queue)
                         .map(|source| {
@@ -155,9 +166,19 @@ impl Lab {
                 }
                 Task::none()
             }
+            Message::Origin(origin) => {
+                self.client_origin = origin;
+                Task::none()
+            }
             Message::Frame => {
+                self.frames += 1;
+                // The window may still be moving into place when it attaches: keep the client origin current.
+                let refresh = match (self.window, self.frames % 15 == 0) {
+                    (Some(id), true) => window::run(id, |w| Message::Origin(styk_platform::windows::input::client_origin(w).unwrap_or((0, 0)))),
+                    _ => Task::none(),
+                };
                 // The window's client origin moves with the window; ask again each second or so.
-                let Some(runner) = self.test.as_mut() else { return Task::none() };
+                let Some(runner) = self.test.as_mut() else { return refresh };
                 let context = self_test::Context {
                     core: &self.core,
                     counters: self.counters.as_ref(),
@@ -167,7 +188,7 @@ impl Lab {
                     client_origin: self.client_origin,
                 };
                 match runner.step(&context) {
-                    self_test::Step::Continue => Task::none(),
+                    self_test::Step::Continue => refresh,
                     self_test::Step::Capture(path) => {
                         let id = self.window;
                         match id {
