@@ -70,8 +70,18 @@ with today's export of the same documents (FP's bytes are still not equal; sizes
 skeleton (`perf/briefs/native/skeleton-plan.md`, implementers by N8): K-guards (Astra: the guards of `cargo xtask check`)
 done at `3b1d3b09` (eight guards with 16 failing fixtures, the tree at zero, warm check 4.7 s); review: seven ways a mistake slips through (macros, blocking through traits, re-exports, test-like names, a self-approving allow list, qualified clocks) and the pen lab's blocking self-test; fixing, with the engine types the core passes on gathered in `styk_core::engine`, K-doc (Astra: documents and the engine host; milestone 1, the session seam of
 `docs/native/documents.md`, **merged `bd9e9d2a`**; the rest done at `b3ead141`: async open, save and publication jobs, atomic saves, close and quit effects, movieclip scopes, tab order and recency, shared clipboards, memory admission, engine types in `styk_core::engine`; 32 save states byte-equal to today's and reopened; review: an over-budget document still opens (admission by compressed size), a clipboard handoff drops payloads on the interface thread, bake synchronous through `call`; fixing; open: the counting allocator's measured cost (gate)) and R-slice (the one Opus implementer: the interface
-architecture and the Inspector, `patterns.md`; started on `bd9e9d2a`), K-shell (Sonnet: the window and the top band, `perf/briefs/native/K-shell.md`) started on `06b0c9fe`; K-frames (Astra xhigh: the frame scheduler over one shared frame builder) **merged `48c424ef`** and K-dev (Astra high, the developer
-tools' engine, `perf/briefs/native/K-dev-engine.md`); K-stage's core (Astra xhigh: the stage host, `perf/briefs/native/K-stage.md`) started;
+architecture and the Inspector, `patterns.md`; started on `bd9e9d2a`), K-shell (Sonnet: the window and the top band, `perf/briefs/native/K-shell.md`) done at `399a34d0`: the band's layout and folds
+equal today's stylesheets at 12 widths, tabs, the Ctrl+Tab switcher, the workspace rules, `styk_core::automation`; review:
+a refused open dropped on the interface thread, arrows during Ctrl+Tab, drops outside the strip, today's Home rule, one
+clock with `--clock fixed`, the script read bounded, no failed-save dot; references recaptured with ClearType; fixing; K-frames (Astra xhigh: the frame scheduler over one shared frame builder) **merged `48c424ef`** and K-dev (Astra high, the developer
+tools' engine, `perf/briefs/native/K-dev-engine.md`; done at `e82a1b66`: injected trace clocks, byte-bounded captures, the
+current-user control pipe, inspection APIs, schemas, budgets, `profile`/`compare-profile`; review: the release guard scans for a
+string and passed a binary with tracing compiled in, a profiled export stalls under the picture budget, task-runner
+profiles are debug and cannot be compared; fixing); the reference slice done at `5c9a83dd`; review: a blocker (refresh builds selection geometry on the interface thread: derived
+facts move to the frame workers as revision-stamped facts, the pattern every panel copies) and majors (a leaked gesture, a
+stale model across a document switch, Edit together's playhead tick, align over the range, missing controls, the focus
+contract, a locale-aware presentation with a language-neutral catalogue for 27 languages, real screenshot references),
+plus command handlers in their feature modules and one clipboard owner; fixing, then one re-check; K-stage's core (Astra xhigh: the stage host, `perf/briefs/native/K-stage.md`) started;
 then K-rec, K-cmd, K-widgets, K-dock, the stage's shader widget; then the skeleton gate. No interface work starts until S1 and S2a pass in a native window.
 
 **Kept off the branches on purpose.** `t3/fix-save-differs` and `t3/resave-keeps-layout` change saved bytes: the owner's
