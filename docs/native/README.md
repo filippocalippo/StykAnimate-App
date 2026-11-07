@@ -82,7 +82,8 @@ profiles are debug and cannot be compared; fixing); the reference slice done at 
 facts move to the frame workers as revision-stamped facts, the pattern every panel copies) and majors (a leaked gesture, a
 stale model across a document switch, Edit together's playhead tick, align over the range, missing controls, the focus
 contract, a locale-aware presentation with a language-neutral catalogue for 27 languages, real screenshot references),
-plus command handlers in their feature modules and one clipboard owner; fixing, then one re-check; K-stage's core (Astra xhigh: the stage host, `perf/briefs/native/K-stage.md`) started;
+plus command handlers in their feature modules and one clipboard owner; fixing, then one re-check; K-stage's core (Astra xhigh: the stage host, `perf/briefs/native/K-stage.md`) started; K-rec (Astra xhigh: recovery and
+autosave, `perf/briefs/native/K-rec-recovery.md`) started on `22c40c9f`;
 then K-rec, K-cmd, K-widgets, K-dock, the stage's shader widget; then the skeleton gate. No interface work starts until S1 and S2a pass in a native window.
 
 **Kept off the branches on purpose.** `t3/fix-save-differs` and `t3/resave-keeps-layout` change saved bytes: the owner's
