@@ -2468,6 +2468,7 @@ dependencies = [
  "sha2",
  "styk-core",
  "styk-doc",
+ "styk-draw",
  "styk-edit",
  "styk-engine",
  "styk-eval",
@@ -2641,6 +2642,7 @@ dependencies = [
 name = "styk-platform"
 version = "0.1.0"
 dependencies = [
+ "image",
  "raw-window-handle",
  "styk-services",
  "windows-sys",

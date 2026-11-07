@@ -7,7 +7,7 @@
 //!              [--vfw-arch x64|x86 --vfw-handler N [--vfw-quality] [--vfw-keyframes N] [--vfw-data-rate]]
 //!   Hooks for the tests of the export path (they disturb it from outside, as a stalled program would):
 //!              [--suspend-child-at-frame N --suspend-secs S] [--pause-producer-at-frame N --pause-secs S]
-//!              [--ticker] [--cancel-at-frame N] [--cancel-after-ms N] [--sample-frames N,N,..] [--no-encode --frame-hashes FILE
+//!              [--transparent] [--ticker] [--cancel-at-frame N] [--cancel-after-ms N] [--sample-frames N,N,..] [--no-encode --frame-hashes FILE
 //!              --order forward|reverse|shuffle]
 //!
 //! Ticks are 0-based and inclusive, as in `styk export`. One JSON line on standard output with `--json`.
@@ -83,6 +83,15 @@ struct Timings {
     samples: Vec<(u32, usize)>,
 }
 
+/// The draw list without the scene's background records: the figures on transparency (what a document with no
+/// background exports, and so what WebM's alpha plane is for).
+pub(crate) fn without_background(list: &Arc<styk_draw::DrawList>) -> Arc<styk_draw::DrawList> {
+    let mut list = (**list).clone();
+    let background = list.background_prims as usize;
+    list.prims[..background].iter_mut().for_each(|p| p.kind = 0);
+    Arc::new(list)
+}
+
 struct Producer {
     frames: styk_engine::export::ExportFrames,
     generation: Arc<styk_engine::Generation>,
@@ -93,6 +102,7 @@ struct Producer {
     sample: Vec<u32>,
     child: Arc<AtomicU32>,
     timings: Arc<Mutex<Timings>>,
+    transparent: bool,
 }
 
 impl FrameProducer for Producer {
@@ -113,7 +123,8 @@ impl FrameProducer for Producer {
         let frame = self.frames.take(tick).ok_or("no frame")?;
         let drawing = Instant::now();
         let doc = &self.generation.prepared.doc;
-        self.renderer.frame_into(doc, &frame.list, frame.camera.as_ref(), layout.matte, out)?;
+        let list = if self.transparent { without_background(&frame.list) } else { frame.list.clone() };
+        self.renderer.frame_into(doc, &list, frame.camera.as_ref(), layout.matte, out)?;
         if layout.legacy_canvas {
             styk_export::legacy_canvas::apply(out);
         }
@@ -345,6 +356,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
         sample,
         child: child.clone(),
         timings: timings.clone(),
+        transparent: flag(rest, "--transparent"),
     };
 
     if flag(rest, "--no-encode") {
@@ -364,15 +376,17 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
 
     // Disturbances and measurements, from outside the export path.
     let done = Arc::new(AtomicBool::new(false));
-    let peak = Arc::new(Mutex::new(0usize));
+    // (peak of this process + the encoder together, peak of this process, peak of the encoder), private bytes.
+    let peak = Arc::new(Mutex::new((0usize, 0usize, 0usize)));
+    let before_export = win::private_bytes(None);
     {
         let (child, done, peak) = (child.clone(), done.clone(), peak.clone());
         std::thread::spawn(move || {
             while !done.load(Ordering::Relaxed) {
                 let pid = child.load(Ordering::Relaxed);
-                let bytes = win::private_bytes(None) + if pid != 0 { win::private_bytes(Some(pid)) } else { 0 };
+                let (own, encoder) = (win::private_bytes(None), if pid != 0 { win::private_bytes(Some(pid)) } else { 0 });
                 let mut peak = peak.lock().unwrap();
-                *peak = (*peak).max(bytes);
+                *peak = (peak.0.max(own + encoder), peak.1.max(own), peak.2.max(encoder));
                 drop(peak);
                 std::thread::sleep(Duration::from_millis(50));
             }
@@ -439,10 +453,10 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     let export_ms = (finished - exporting).as_secs_f64() * 1000.0;
     let cancel_latency = cancel_when.lock().unwrap().map(|at| (finished - at).as_secs_f64() * 1000.0);
     let timings = timings.lock().unwrap();
-    let peak_private = *peak.lock().unwrap();
+    let (peak_private, peak_own, peak_encoder) = *peak.lock().unwrap();
     let samples = timings.samples.iter().map(|(frame, bytes)| format!("[{frame},{bytes}]")).collect::<Vec<_>>().join(",");
     let common = format!(
-        "\"adapter\":{},\"opened_ms\":{opened_ms:.0},\"export_ms\":{export_ms:.0},\"evaluate_ms\":{:.0},\"draw_ms\":{:.0},\"baseline_private\":{baseline},\"peak_private\":{peak_private},\"private_at_frames\":[{samples}],\"cancel_latency_ms\":{},\"stage_leftovers\":{},\"ticker_max_gap_ms\":{:.2}",
+        "\"adapter\":{},\"opened_ms\":{opened_ms:.0},\"export_ms\":{export_ms:.0},\"evaluate_ms\":{:.0},\"draw_ms\":{:.0},\"baseline_private\":{baseline},\"before_export_private\":{before_export},\"peak_private\":{peak_private},\"peak_own_private\":{peak_own},\"peak_encoder_private\":{peak_encoder},\"private_at_frames\":[{samples}],\"cancel_latency_ms\":{},\"stage_leftovers\":{},\"ticker_max_gap_ms\":{:.2}",
         json_string(&adapter_name),
         timings.evaluate_ms,
         timings.draw_ms,

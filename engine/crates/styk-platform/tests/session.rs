@@ -5,6 +5,7 @@
 #![cfg(windows)]
 
 use std::fs;
+use image::ImageEncoder;
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -424,5 +425,93 @@ fn an_encoder_suspended_for_a_while_ends_in_the_same_bytes() {
     session.finish().unwrap();
     resumer.join().unwrap();
     assert_eq!(fs::read(&calm).unwrap(), fs::read(&stalled).unwrap());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// The 8 random bytes of a WebM's TrackUID and of its Tags/Targets TagTrackUID (EBML ids 73 C5 and 63 C5, size 8):
+/// the fields that differ between two runs of today's exporter on identical input.
+fn blank_random_uids(mut file: Vec<u8>) -> Vec<u8> {
+    for id in [[0x73, 0xc5, 0x88], [0x63, 0xc5, 0x88]] {
+        let mut at = 0;
+        while at + 11 <= file.len() {
+            if file[at..at + 3] == id {
+                file[at + 3..at + 11].fill(0);
+                at += 11;
+            } else {
+                at += 1;
+            }
+        }
+    }
+    file
+}
+
+/// Today's input (PNG frames, `-f image2pipe -c:v png`) and the native input (PAM frames) give the same bytes, also at
+/// widths whose rows are not aligned. Raw video input (`-f rawvideo`), the first choice, did not: this test is why it is
+/// not used (WebM at 65 by 33 and 161 by 91 differed by thousands of bytes).
+#[test]
+fn pam_frames_give_the_bytes_png_frames_give_at_unaligned_sizes() {
+    use std::io::Write;
+    use styk_platform::video::args::{encoder_args, Input};
+    let Some(ffmpeg) = ffmpeg() else { return };
+    let dir = scratch("pam");
+    let service = FfmpegVideoService::new(&ffmpeg);
+    for (width, height) in [(65u32, 33u32), (161, 91), (160, 90)] {
+        let req = request(Container::Webm, Codec::Vp9, width, height, 6);
+        let make = |i| frame(width, height, i, 127, true);
+        // Native: the session.
+        let native = dir.join(format!("native-{width}.webm"));
+        export(&service, &native, &req, &make).unwrap();
+        // Today's: PNG frames into the same arguments.
+        let today = dir.join(format!("today-{width}.webm"));
+        let mut child = Command::new(&ffmpeg).args(encoder_args(&req, &today.to_string_lossy(), Input::Png)).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        for index in 0..6 {
+            let mut png = Vec::new();
+            image::codecs::png::PngEncoder::new(&mut png).write_image(&make(index), width, height, image::ExtendedColorType::Rgba8).unwrap();
+            stdin.write_all(&png).unwrap();
+        }
+        drop(stdin);
+        assert!(child.wait().unwrap().success());
+        let (a, b) = (blank_random_uids(fs::read(&native).unwrap()), blank_random_uids(fs::read(&today).unwrap()));
+        assert_eq!(a.len(), b.len(), "{width}x{height}");
+        assert!(a == b, "{width}x{height}: {} bytes differ", a.iter().zip(&b).filter(|(x, y)| x != y).count());
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// The observation behind the PAM input: with `-f rawvideo` the same frames give different bytes at 65 by 33. If this
+/// ever starts passing the other way, FFmpeg changed and the choice of input deserves another look.
+#[test]
+fn raw_video_input_differs_from_png_input_at_an_unaligned_size() {
+    use std::io::Write;
+    use styk_platform::video::args::{encoder_args, Input};
+    let Some(ffmpeg) = ffmpeg() else { return };
+    let dir = scratch("raw");
+    let (width, height) = (65u32, 33u32);
+    let req = request(Container::Webm, Codec::Vp9, width, height, 6);
+    let make = |i| frame(width, height, i, 127, true);
+    let run = |name: &str, raw: bool| {
+        let out = dir.join(name);
+        let mut args = encoder_args(&req, &out.to_string_lossy(), Input::Png);
+        if raw {
+            let at = args.iter().position(|a| a == "image2pipe").unwrap();
+            args.splice(at..at + 3, ["rawvideo", "-pix_fmt", "rgba", "-video_size"].map(String::from).into_iter().chain([format!("{width}x{height}")]));
+        }
+        let mut child = Command::new(&ffmpeg).args(args).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        for index in 0..6 {
+            if raw {
+                stdin.write_all(&make(index)).unwrap();
+            } else {
+                let mut png = Vec::new();
+                image::codecs::png::PngEncoder::new(&mut png).write_image(&make(index), width, height, image::ExtendedColorType::Rgba8).unwrap();
+                stdin.write_all(&png).unwrap();
+            }
+        }
+        drop(stdin);
+        assert!(child.wait().unwrap().success());
+        blank_random_uids(fs::read(out).unwrap())
+    };
+    assert_ne!(run("png.webm", false), run("raw.webm", true), "raw input is not equivalent to PNG input at this size");
     fs::remove_dir_all(dir).unwrap();
 }
