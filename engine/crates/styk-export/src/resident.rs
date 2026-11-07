@@ -123,12 +123,11 @@ pub struct Resident {
     lost: HashSet<u32>,
     /// Drawing cels with every tile in the texture.
     cels_in: HashSet<usize>,
-    /// Drawing cels asked for and not in yet.
-    cels_asked: HashSet<usize>,
-    /// Tiles of the cels asked for that are in the texture, by cel (a set: a tile asked for twice counts once).
-    cel_got: HashMap<usize, HashSet<u32>>,
-    /// Tiles the engine will have sent of the cels it has decoded, by cel.
-    cel_expected: HashMap<usize, usize>,
+    /// Drawing cels asked for and not in yet, with the number of the attempt whose result is awaited: a cel that left its layers and was
+    /// asked for again has a newer number, and what an older attempt brings (tiles, or a refusal) is let go.
+    cels_asked: HashMap<usize, u64>,
+    /// The number of the last attempt asked for.
+    attempts: u64,
 }
 
 impl Resident {
@@ -152,9 +151,8 @@ impl Resident {
             asked: HashSet::new(),
             lost: HashSet::new(),
             cels_in: HashSet::new(),
-            cels_asked: HashSet::new(),
-            cel_got: HashMap::new(),
-            cel_expected: HashMap::new(),
+            cels_asked: HashMap::new(),
+            attempts: 0,
         }
     }
 
@@ -176,8 +174,6 @@ impl Resident {
                 for cel in self.cels.on_page.get(&old).into_iter().flatten() {
                     self.cels_in.remove(cel);
                     self.cels_asked.remove(cel);
-                    self.cel_got.remove(cel);
-                    self.cel_expected.remove(cel);
                 }
             }
             gpu.map_page(page, Some(layer));
@@ -196,17 +192,6 @@ impl Resident {
             if image.soft {
                 continue;
             }
-            if image.drawing {
-                // A tile of a cel asked for; one of a cel nobody asked for (or that lost its page since) is let go.
-                let cel = self.cels.owner.get(image.index as usize).copied().unwrap_or(usize::MAX);
-                if !self.cels_asked.contains(&cel) {
-                    continue;
-                }
-                self.cel_got.entry(cel).or_default().insert(image.index);
-                gpu.upload_images(assets, [&*image]);
-                any = true;
-                continue;
-            }
             let Some(entry) = assets.atlas.get(image.index as usize).filter(|entry| entry.valid) else { continue };
             let Some(layer) = self.residency.layer_of(entry.layer) else {
                 self.asked.remove(&image.index);
@@ -218,26 +203,22 @@ impl Resident {
             self.asked.remove(&image.index);
             any = true;
         }
-        for (cel, count) in frames.take_landed_cels() {
-            if !self.cels_asked.contains(&cel) {
+        for landed in frames.take_landed_cels(max_bytes) {
+            // An attempt that is not the one awaited (the cel's pages left their layers since, perhaps to come back and ask again) is
+            // let go whole: its tiles are not in the places of the newer attempt, and its refusal is not the newer one's.
+            if self.cels_asked.get(&landed.cel) != Some(&landed.attempt) {
                 continue;
             }
-            self.cel_expected.insert(cel, count);
-            if count == 0 {
+            self.cels_asked.remove(&landed.cel);
+            if landed.images.is_empty() {
                 // A cel with tiles that came with none: the engine refused to decode it (the memory could not hold its work). It is not
                 // shown, as a picture that cannot be decoded is not, so its places must not show what their layer held before.
-                any |= self.clear_cel(gpu, assets, cel);
+                any |= self.clear_cel(gpu, assets, landed.cel);
+            } else {
+                gpu.upload_images(assets, landed.images.iter().map(|image| &**image));
+                any = true;
             }
-        }
-        // A cel is in when every tile of it that was to come has been put in the texture and every page of it still has its layer.
-        let done: Vec<usize> = self.cel_expected.iter().filter(|(cel, expected)| self.cel_got.get(*cel).map_or(0, HashSet::len) >= **expected).map(|(&cel, _)| cel).collect();
-        for cel in done {
-            self.cel_expected.remove(&cel);
-            self.cel_got.remove(&cel);
-            self.cels_asked.remove(&cel);
-            if self.cels.pages.get(&cel).map_or(true, |pages| pages.iter().all(|&page| self.residency.layer_of(page).is_some())) {
-                self.cels_in.insert(cel);
-            }
+            self.cels_in.insert(landed.cel);
         }
         if any {
             gpu.flush_sprites();
@@ -263,7 +244,7 @@ impl Resident {
     /// take ends the call (false).
     fn load(&mut self, gpu: &mut GpuExport, frames: &ExportFrames, generation: &Generation, wanted: &[u32], cels: &[usize], keep: &mut Vec<u32>, grow: bool) -> bool {
         let assets = &generation.assets;
-        let (mut given, mut request, mut request_cels, mut complete) = (Vec::new(), Vec::new(), Vec::new(), true);
+        let (mut given, mut request, mut request_cels, mut complete) = (Vec::new(), Vec::new(), Vec::<(usize, u64)>::new(), true);
         'pictures: for &picture in wanted {
             let Some(entry) = assets.atlas.get(picture as usize).filter(|entry| entry.valid) else { continue };
             if entry.layer >= styk_render::MAX_PAGES {
@@ -297,7 +278,7 @@ impl Resident {
                     keep.push(page);
                 }
             }
-            if self.cels_in.contains(&cel) || self.cels_asked.contains(&cel) {
+            if self.cels_in.contains(&cel) || self.cels_asked.contains_key(&cel) {
                 continue;
             }
             for &page in &pages {
@@ -313,8 +294,9 @@ impl Resident {
                     }
                 }
             }
-            self.cels_asked.insert(cel);
-            request_cels.push(cel);
+            self.attempts += 1;
+            self.cels_asked.insert(cel, self.attempts);
+            request_cels.push((cel, self.attempts));
         }
         self.give(gpu, assets, given);
         if !request.is_empty() {

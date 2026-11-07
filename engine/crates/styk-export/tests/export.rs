@@ -385,59 +385,113 @@ fn picture_list(assets: &styk_eval::assets::Assets, picture: usize) -> std::sync
     std::sync::Arc::new(list)
 }
 
-/// The frame of the cel in a document of several pages, exported in two layers: two pictures take both, then the cel's page takes the layer
-/// of the one shown longest ago (which holds that picture's pixels), then the cel is decoded `refused` (the memory cannot hold its work) or
-/// not. With `again`, the pictures come back (the cel's page leaves) and the cel is asked for a second time, with the memory as it was.
-fn cel_frame_in_two_layers(gpu: &Gpu, refused: bool, again: bool) -> Vec<u8> {
-    let engine = Engine::new(clock, Budgets::for_device(None));
-    engine.open(&cel_document(3), "json", "test").unwrap();
-    let frames = engine.export_frames(0).unwrap();
-    let generation = frames.generation().clone();
-    let settings = Settings::new(960, 540, Smoothing::Edges, MAX_PIXELS).unwrap();
-    let mut exporter = GpuExport::new(&gpu.device, &gpu.queue, settings, styk_export::TILE_SIDE);
-    let mut resident = styk_export::resident::Resident::begin_with_layers(&mut exporter, &frames, 2);
-    let cel_pages: Vec<u32> = generation.assets.drawing.iter().filter(|entry| entry.valid).map(|entry| entry.layer).collect();
-    let mut seen = Vec::new();
-    let pictures: Vec<usize> = (0..generation.assets.atlas.len())
-        .filter(|&index| {
-            let entry = &generation.assets.atlas[index];
-            let fresh = entry.valid && entry.w > 4000 && !cel_pages.contains(&entry.layer) && !seen.contains(&entry.layer);
-            if fresh {
-                seen.push(entry.layer);
+/// An export of the cel document in two layers, with the pictures and the cel it is driven by.
+struct CelScene {
+    engine: Engine,
+    frames: styk_engine::export::ExportFrames,
+    generation: std::sync::Arc<styk_engine::Generation>,
+    exporter: GpuExport,
+    resident: styk_export::resident::Resident,
+    /// Two pictures on pages of their own, apart from the cel's.
+    pictures: [std::sync::Arc<styk_draw::DrawList>; 2],
+    cel: std::sync::Arc<styk_engine::FrameData>,
+}
+
+impl CelScene {
+    fn new(gpu: &Gpu) -> CelScene {
+        let engine = Engine::new(clock, Budgets::for_device(None));
+        engine.open(&cel_document(3), "json", "test").unwrap();
+        let frames = engine.export_frames(0).unwrap();
+        let generation = frames.generation().clone();
+        let settings = Settings::new(960, 540, Smoothing::Edges, MAX_PIXELS).unwrap();
+        let mut exporter = GpuExport::new(&gpu.device, &gpu.queue, settings, styk_export::TILE_SIDE);
+        let mut resident = styk_export::resident::Resident::begin_with_layers(&mut exporter, &frames, 2);
+        let cel_pages: Vec<u32> = generation.assets.drawing.iter().filter(|entry| entry.valid).map(|entry| entry.layer).collect();
+        let mut seen = Vec::new();
+        let pictures: Vec<usize> = (0..generation.assets.atlas.len())
+            .filter(|&index| {
+                let entry = &generation.assets.atlas[index];
+                let fresh = entry.valid && entry.w > 4000 && !cel_pages.contains(&entry.layer) && !seen.contains(&entry.layer);
+                if fresh {
+                    seen.push(entry.layer);
+                }
+                fresh
+            })
+            .collect();
+        assert!(pictures.len() >= 2, "two pictures on pages of their own, apart from the cel's: {pictures:?} {cel_pages:?}");
+        let cel = loop {
+            resident.upload(&mut exporter, &frames, styk_export::resident::UPLOAD_BYTES);
+            if let Some(frame) = frames.take(0) {
+                break frame;
             }
-            fresh
-        })
-        .collect();
-    assert!(pictures.len() >= 2, "two pictures on pages of their own, apart from the cel's: {pictures:?} {cel_pages:?}");
-    let cel = loop {
-        resident.upload(&mut exporter, &frames, styk_export::resident::UPLOAD_BYTES);
-        if let Some(frame) = frames.take(0) {
-            break frame;
-        }
-        assert!(engine.step(), "tick 0 never came");
-    };
-    let shown = |index: usize| picture_list(&generation.assets, pictures[index]);
-    let mut settle = |exporter: &mut GpuExport, list: &std::sync::Arc<styk_draw::DrawList>, limit: Option<usize>| {
+            assert!(engine.step(), "tick 0 never came");
+        };
+        let index = styk_engine::PlaceIndex::new(&generation.assets);
+        assert!(styk_engine::pictures_of(&cel.list, &index).is_empty(), "the cel's frame asks for no picture, so only the cel is decoded for it");
+        let pictures = [picture_list(&generation.assets, pictures[0]), picture_list(&generation.assets, pictures[1])];
+        CelScene { engine, frames, generation, exporter, resident, pictures, cel }
+    }
+
+    /// Asks once for what `list` draws (nothing is decoded).
+    fn ask(&mut self, list: &std::sync::Arc<styk_draw::DrawList>) -> bool {
+        self.resident.ready(&mut self.exporter, &self.frames, list, None, 0)
+    }
+
+    /// Runs one unit of the engine's work, with the memory unable to hold a cel's decode when `refuse`.
+    fn step(&self, refuse: bool) {
+        // Above what a picture's own work reserves in these documents is not needed: only the cel's three-fold reserve is over this.
+        let work = if refuse { styk_alloc::with_limit(1 << 20, || self.engine.step()) } else { self.engine.step() };
+        assert!(work, "there was work to run");
+    }
+
+    /// Asks for what `list` draws until it is all in; `refuse` as in [`CelScene::step`].
+    fn settle(&mut self, list: &std::sync::Arc<styk_draw::DrawList>, refuse: bool) {
         for _ in 0..4000 {
-            if resident.ready(exporter, &frames, list, None, 0) {
+            if self.ask(list) {
                 return;
             }
-            match limit {
-                Some(bytes) => styk_alloc::with_limit(bytes, || engine.step()),
-                None => engine.step(),
-            };
+            if refuse { styk_alloc::with_limit(1 << 20, || self.engine.step()) } else { self.engine.step() };
         }
         panic!("the frame never became ready");
-    };
-    settle(&mut exporter, &shown(0), None);
-    settle(&mut exporter, &shown(1), None);
-    settle(&mut exporter, &cel.list, refused.then_some(1024));
-    if again {
-        settle(&mut exporter, &shown(0), None);
-        settle(&mut exporter, &shown(1), None);
-        settle(&mut exporter, &cel.list, None);
     }
-    exporter.frame_blocking(&generation.prepared.doc, &cel.list, cel.camera.as_ref(), false).unwrap()
+
+    /// The pictures take both layers, then the cel's page takes the layer of the one shown longest ago, which holds that picture's pixels.
+    fn fill(&mut self) {
+        let (a, b) = (self.pictures[0].clone(), self.pictures[1].clone());
+        self.settle(&a, false);
+        self.settle(&b, false);
+    }
+
+    fn draw(&mut self) -> Vec<u8> {
+        self.exporter.frame_blocking(&self.generation.prepared.doc, &self.cel.list, self.cel.camera.as_ref(), false).unwrap()
+    }
+}
+
+/// The frame of the cel after the layers were filled with the pictures' pixels and the cel was decoded `refused` (the memory cannot hold
+/// its work) or not. With `again`, the pictures come back (the cel's page leaves) and the cel is asked for a second time, with the memory as it was.
+fn cel_frame_in_two_layers(gpu: &Gpu, refused: bool, again: bool) -> Vec<u8> {
+    let mut scene = CelScene::new(gpu);
+    scene.fill();
+    let (cel, a, b) = (scene.cel.list.clone(), scene.pictures[0].clone(), scene.pictures[1].clone());
+    scene.settle(&cel, refused);
+    if again {
+        scene.settle(&a, false);
+        scene.settle(&b, false);
+        scene.settle(&cel, false);
+    }
+    scene.draw()
+}
+
+/// The frame of a document with nothing in the texture: what an export that could not decode the cel draws.
+fn cel_frame_never_decoded(gpu: &Gpu) -> Vec<u8> {
+    let mut scene = CelScene::new(gpu);
+    scene.exporter = {
+        let settings = Settings::new(960, 540, Smoothing::Edges, MAX_PIXELS).unwrap();
+        let mut exporter = GpuExport::new(&gpu.device, &gpu.queue, settings, styk_export::TILE_SIDE);
+        exporter.prepare_sprites(scene.generation.lineage, &scene.generation.assets);
+        exporter
+    };
+    scene.draw()
 }
 
 /// A drawing cel the engine refused to decode (its memory could not hold the work) is not shown, as a picture that cannot be decoded is not:
@@ -450,24 +504,7 @@ fn a_cel_the_engine_refused_to_decode_is_blank_not_the_pixels_its_layer_held_bef
         return;
     };
     let shown = cel_frame_in_two_layers(&gpu, false, false);
-    // The same frame with nothing in the texture: what an export that could not decode the cel draws.
-    let blank = {
-        let engine = Engine::new(clock, Budgets::for_device(None));
-        engine.open(&cel_document(3), "json", "test").unwrap();
-        let frames = engine.export_frames(0).unwrap();
-        let generation = frames.generation().clone();
-        let settings = Settings::new(960, 540, Smoothing::Edges, MAX_PIXELS).unwrap();
-        let mut exporter = GpuExport::new(&gpu.device, &gpu.queue, settings, styk_export::TILE_SIDE);
-        exporter.prepare_sprites(generation.lineage, &generation.assets);
-        frames.decode_cels();
-        let frame = loop {
-            if let Some(frame) = frames.take(0) {
-                break frame;
-            }
-            assert!(engine.step(), "tick 0 never came");
-        };
-        exporter.frame_blocking(&generation.prepared.doc, &frame.list, frame.camera.as_ref(), false).unwrap()
-    };
+    let blank = cel_frame_never_decoded(&gpu);
     assert!(differing(&shown, &blank).0 > 100, "the cel is drawn when it is decoded");
     let refused = cel_frame_in_two_layers(&gpu, true, false);
     let (count, largest) = differing(&refused, &blank);
@@ -475,6 +512,55 @@ fn a_cel_the_engine_refused_to_decode_is_blank_not_the_pixels_its_layer_held_bef
     let again = cel_frame_in_two_layers(&gpu, true, true);
     let (count, largest) = differing(&again, &shown);
     assert_eq!(count, 0, "asked for again with the memory there, the cel is drawn whole: {count} pixels differ, by up to {largest}");
+}
+
+/// The cel is asked for, its page leaves its layer, and it is asked for again before the first attempt has ended: the first attempt
+/// ends (refused or not) with the second's tiles and slots in the texture or on their way, and uploads both completions together. What the
+/// older attempt brings, tiles or a refusal, is not the second attempt's: the cel is what the second attempt made of it.
+fn cel_frame_after_two_overlapping_attempts(gpu: &Gpu, first_refused: bool, second_refused: bool) -> Vec<u8> {
+    let mut scene = CelScene::new(gpu);
+    scene.fill();
+    let (cel, a, b) = (scene.cel.list.clone(), scene.pictures[0].clone(), scene.pictures[1].clone());
+    // The cel's page takes the layer of picture `a`'s page; attempt 1 waits in the engine's queue.
+    assert!(!scene.ask(&cel));
+    // Picture `b` is shown, then `a` is wanted again: the page that was shown longest ago, the cel's, leaves.
+    assert!(scene.ask(&b));
+    assert!(!scene.ask(&a));
+    // The cel is wanted again, still before a decode has run: its page takes the layer of `b`'s page; attempt 2 waits behind `a`.
+    assert!(!scene.ask(&cel));
+    // Attempt 1, then the picture, then attempt 2 end; the work is uploaded all at once.
+    scene.step(first_refused);
+    scene.step(false);
+    scene.step(second_refused);
+    scene.resident.upload(&mut scene.exporter, &scene.frames, styk_export::resident::UPLOAD_BYTES);
+    scene.settle(&cel, false);
+    scene.draw()
+}
+
+#[test]
+fn an_older_attempt_to_decode_a_cel_never_touches_a_newer_ones_tiles_or_makes_it_refused() {
+    let Some(gpu) = gpu() else {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    };
+    let shown = cel_frame_in_two_layers(&gpu, false, false);
+    let blank = cel_frame_never_decoded(&gpu);
+    let mut wrong = Vec::new();
+    for (first_refused, second_refused) in [(true, false), (false, false), (true, true), (false, true)] {
+        let drawn = cel_frame_after_two_overlapping_attempts(&gpu, first_refused, second_refused);
+        let expected = if second_refused { &blank } else { &shown };
+        let (count, largest) = differing(&drawn, expected);
+        if count != 0 {
+            wrong.push(format!(
+                "attempt 1 {}, attempt 2 {}: the cel is {} but {count} pixels differ, by up to {largest}",
+                if first_refused { "refused" } else { "decoded" },
+                if second_refused { "refused" } else { "decoded" },
+                if second_refused { "blank" } else { "whole" }
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("
+"));
 }
 
 /// Evaluation, not drawing: the draw list of a tick after the ticks before it against its draw list in a fresh engine.
