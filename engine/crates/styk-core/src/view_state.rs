@@ -33,7 +33,8 @@ pub struct ViewState {
     context: InspectorContext,
     /// Edit together (`state.applyRange`).
     apply_range: bool,
-    /// The frames chosen on the timeline (frame indices, in order), which Edit together reaches.
+    /// The frames chosen on the timeline, which Edit together reaches: ticks on a layer sheet (`timelineUI.selectedTicks`),
+    /// keyframe indices on a classic document (`state.rangeIndices`).
     range: Vec<usize>,
     /// A Draw tool is active: the Inspector shows its options.
     drawing: Option<&'static str>,
@@ -90,10 +91,14 @@ impl ViewState {
         }
     }
 
-    /// The frames chosen on the timeline. Duplicates collapse and the list is kept in order.
-    pub fn set_range(&mut self, mut frames: Vec<usize>) {
-        frames.sort_unstable();
-        frames.dedup();
+    /// The frames chosen on the timeline, in the order the timeline reports them; duplicates collapse.
+    pub fn set_range(&mut self, chosen: Vec<usize>) {
+        let mut frames: Vec<usize> = Vec::with_capacity(chosen.len());
+        for frame in chosen {
+            if !frames.contains(&frame) {
+                frames.push(frame);
+            }
+        }
         if self.range != frames {
             self.range = frames;
             self.bump();

@@ -4,29 +4,26 @@ use std::sync::Arc;
 
 use styk_core::app::Core;
 use styk_core::commands::{Command, CommandId, Effect};
-use styk_core::documents::{Documents, PreparedDocument, Value};
+use styk_core::documents::Value;
 use styk_core::i18n::{Label, english};
 use styk_core::inspector::model::{Inspector, Kind, Place, Row, Toggle};
 use styk_core::inspector::property::PropertyKey;
 use styk_core::inspector::{Event, FieldEvent, Scrub};
 use styk_core::number::StepKeys;
 use styk_core::view_state::{InspectorContext, InspectorTab};
+use styk_core::testing;
 use styk_doc::json;
-use styk_engine::{Budgets, Engine};
 
 const STARTUP: &[u8] = include_bytes!("../../../tests/edit/startup.document.json");
 const SHEET: &[u8] = include_bytes!("../../../tests/edit/property-sheet.document.json");
 const NATIVE: &[u8] = include_bytes!("../../../tests/edit/selection-metadata-plain-native.document.json");
 const SPRITE: &[u8] = include_bytes!("../../../tests/edit/sprite-segment-sparse-native.document.json");
 
+include!("support/today_bounds.rs");
+const TODAY_PROPERTY_SHEET_BOUNDS: [f64; 4] = TODAY_BOUNDS;
+
 fn core_with(bytes: &[u8]) -> Core {
-    let engine = Engine::new(|| 0.0, Budgets::for_device(None));
-    let prepared = PreparedDocument::open_bytes(&engine, Arc::from(bytes), "Test.styk", &|| false).unwrap();
-    let mut documents = Documents::new();
-    documents.open(prepared).map_err(|(error, _)| error).unwrap();
-    let mut core = Core::new(documents);
-    core.refresh();
-    core
+    testing::core_with_document(bytes, "Test.styk").unwrap()
 }
 
 /// The startup document with every segment of its figure turned into `primitive` (2 image, 5 text).
@@ -173,10 +170,17 @@ fn several_figures_show_their_bounds_align_and_mixed_values() {
     assert_eq!(figures.target.name.english(), "3 figures");
     assert_eq!(section_ids(&figures)[..4], ["selection", "align", "appearance", "arrange"]);
     assert_eq!(figures.section("connection").is_some(), true, "a joined figure among them offers Combine");
-    let bounds = core.documents.active().unwrap().selection_bounds().unwrap().unwrap();
-    assert_eq!(value(&core, PropertyKey::GroupX), bounds[0]);
-    assert_eq!(value(&core, PropertyKey::GroupWidth), bounds[2] - bounds[0]);
-    assert!(bounds[2] > bounds[0] && bounds[3] > bounds[1]);
+    // The bounds are made on the worker: pending until it has run, never computed by the refresh itself.
+    assert!(figures.number(PropertyKey::GroupX).unwrap().pending, "no geometry on the interface thread");
+    testing::settle_facts(&mut core).unwrap();
+    // Today's app on the same document and selection: the union of `boundsOf` over the three figures
+    // (`window.styk.boundsOf`, headless Chromium, captured with the screen references).
+    let [min_x, min_y, max_x, max_y] = TODAY_PROPERTY_SHEET_BOUNDS;
+    assert!(!model(&core).number(PropertyKey::GroupX).unwrap().pending);
+    assert!((value(&core, PropertyKey::GroupX) - min_x).abs() < 1e-9, "{} against today's {min_x}", value(&core, PropertyKey::GroupX));
+    assert!((value(&core, PropertyKey::GroupY) - min_y).abs() < 1e-9);
+    assert!((value(&core, PropertyKey::GroupWidth) - (max_x - min_x)).abs() < 1e-9);
+    assert!((value(&core, PropertyKey::GroupHeight) - (max_y - min_y)).abs() < 1e-9);
     let Row::Actions(align) = &figures.section("align").unwrap().rows[0] else { panic!("the align row") };
     assert_eq!(align.items.len(), 6);
 }
@@ -332,6 +336,9 @@ fn every_kind_of_edit_is_one_entry_that_undoes_and_redoes() {
         (STARTUP, "[1,-1]", Some(InspectorContext::Frame), PropertyKey::Duration, 4.0),
         (SHEET, "[[1,2]]", None, PropertyKey::GroupX, 40.0),
         (SHEET, "[[1,2]]", None, PropertyKey::GroupWidth, 200.0),
+        (STARTUP, "[1,1]", None, PropertyKey::SegmentZOrder, 1.0),
+        (NATIVE, "[1,-1]", None, PropertyKey::PolygonOpacity(0), 40.0),
+        (NATIVE, "[1,-1]", None, PropertyKey::PolygonZOrder(1), 1.0),
     ];
     for (bytes, selection, context, key, target) in cases {
         let mut core = core_with(bytes);
@@ -341,6 +348,7 @@ fn every_kind_of_edit_is_one_entry_that_undoes_and_redoes() {
             core.view_state_mut().set_context(*context);
             core.refresh();
         }
+        testing::settle_facts(&mut core).unwrap();
         let before = records(&core);
         let initial = value(&core, *key);
         field(&mut core, *key, FieldEvent::Focus);
@@ -350,14 +358,18 @@ fn every_kind_of_edit_is_one_entry_that_undoes_and_redoes() {
         let effects = field(&mut core, *key, FieldEvent::Blur);
         assert!(notices(&effects).is_empty(), "{key:?}: {:?}", notices(&effects));
         assert_eq!(undo_depth(&core), 1, "{key:?}: one entry");
+        // Facts made on the worker (a selection's bounds) follow once it has run.
+        testing::settle_facts(&mut core).unwrap();
         // Opacity is stored as a transparency byte: 50 % is kept as 128 and reads back as (1 - 128/255) * 100.
         let stored = if *key == PropertyKey::FigureOpacity { (1.0 - ((1.0 - target / 100.0) * 255.0).round() / 255.0) * 100.0 } else { *target };
         let shown = value(&core, *key);
         assert!((shown - stored).abs() < 1e-9, "{key:?}: shows {shown}, wanted {stored}");
         run(&mut core, CommandId::Undo);
+        testing::settle_facts(&mut core).unwrap();
         assert_eq!(records(&core), before, "{key:?}: undo restores the document");
         assert!((value(&core, *key) - initial).abs() < 1e-9, "{key:?}: the model follows undo");
         run(&mut core, CommandId::Redo);
+        testing::settle_facts(&mut core).unwrap();
         assert!((value(&core, *key) - stored).abs() < 1e-9, "{key:?}: and redo");
     }
 }
@@ -379,7 +391,8 @@ fn a_refused_edit_reaches_the_person_as_a_message() {
 fn edit_together_reaches_every_chosen_frame_in_one_entry() {
     let mut core = core_with(NATIVE);
     session(&mut core, "select", "[1,-1]");
-    core.view_state_mut().set_range(vec![0, 1]);
+    // On a layer sheet the chosen frames are ticks: the two keyframes start at 0 and 6.
+    core.view_state_mut().set_range(vec![0, 6]);
     core.dispatch(Command::Inspector(Event::Toggle(Toggle::ApplyRange, true)));
     core.refresh();
     let inspector = model(&core);
@@ -420,11 +433,14 @@ fn panel_commands_run_through_the_session() {
     // Two figures that are not joined (a joined assembly aligns as one).
     let mut figures = core_with(SPRITE);
     session(&mut figures, "selectMany", "[[1,3]]");
+    testing::settle_facts(&mut figures).unwrap();
     let x = value(&figures, PropertyKey::GroupX);
     run(&mut figures, CommandId::AlignRight);
+    testing::settle_facts(&mut figures).unwrap();
     assert_eq!(undo_depth(&figures), 1);
     assert_ne!(value(&figures, PropertyKey::GroupX), x, "aligned to the right edge");
     run(&mut figures, CommandId::Undo);
+    testing::settle_facts(&mut figures).unwrap();
     assert_eq!(value(&figures, PropertyKey::GroupX), x);
 }
 

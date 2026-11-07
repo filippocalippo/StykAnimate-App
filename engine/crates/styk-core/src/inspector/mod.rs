@@ -1,36 +1,46 @@
 //! The Properties panel's logic (the reference slice of `docs/native/patterns.md`).
 //!
 //! - [`model`]: the view model, one descriptor per context, plain data the interface draws with a generic kit.
-//! - [`contexts`]: builds it from the session's reads and the view state (a port of `src/inspector-view.mjs`).
-//! - [`property`]: the number properties and the gesture that edits one through the session.
+//! - [`contexts`]: builds it from the session's cheap typed reads, the view state and ready facts (a port of
+//!   `src/inspector-view.mjs`).
+//! - [`property`]: the number properties and the gesture that edits one through the session; [`order`] the draw order.
 //! - [`memory`]: which titled sections are open.
-//! - [`Panel`]: the panel's own state (the field being edited, its gesture, pages, tabs) and [`Panel::update`], which
+//! - [`Panel`]: the panel's own state (the field being edited and its gesture, pages, tabs) and [`Panel::update`], which
 //!   turns an [`Event`] from the view into session calls and [`Effect`]s.
 //!
 //! The view model is rebuilt only when its key changes (the document, its revision, the frame on show, the selection,
-//! the playhead, the view state, the section memory, the panel state) and never while a property gesture is open: today
-//! the Inspector defers its refresh during a gesture and never reflows a field being typed in.
+//! the playhead, the view state, the section memory, the panel state, the facts shown) and never while a property
+//! gesture of the active document is open: today the Inspector defers its refresh during a gesture and never reflows a
+//! field being typed in. Facts that need geometry (the selection's bounds) come from [`crate::facts`]; the panel shows
+//! the last ready ones until newer ones land.
 
 pub mod contexts;
 pub mod facts;
 pub mod memory;
 pub mod model;
+pub mod order;
 pub mod property;
 
 use std::sync::Arc;
 
 use styk_doc::{Obj, Value};
 
+use crate::answers::{self, Session};
+use crate::app::Lifecycle;
 use crate::commands::{Effect, Notice, Severity};
-use crate::documents::{CallAnswer, DocumentId, Documents, DocumentsError};
+use crate::documents::{DocumentId, Documents};
+use crate::facts::{Facts, FactsKey};
+use crate::frames::FrameDocument;
 use crate::i18n::Msg;
-use crate::number::{NumberEdit, Range, Settled, StepKeys};
+use crate::number::{NumberEdit, Range as FieldRange, Settled, StepKeys};
+use crate::range::Range;
 use crate::view_state::ViewState;
 use memory::SectionMemory;
-use model::{Choice, ColorTarget, Inspector, Pager, RenameTarget, Segments, Toggle};
-use property::{Gesture, PropertyKey, Reach};
+use model::{Choice, ColorTarget, Inspector, OrderDirection, PanelAction, Pager, RenameTarget, Segments, Toggle};
+use order::DrawKind;
+use property::{Gesture, PropertyKey};
 
-/// What a number field reports (the scrub label's [`ScrubLabel`] events and the input's).
+/// What a number field reports (the scrub label's events and the input's).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Scrub {
     Begin,
@@ -67,10 +77,19 @@ pub enum Event {
     Toggle(Toggle, bool),
     Choose(Choice, Arc<str>),
     Section { id: &'static str, open: bool },
-    Page(Pager, i32),
+    Act(PanelAction),
     Segment(Segments, &'static str),
     Color(ColorTarget),
     Rename(RenameEvent),
+}
+
+/// Where the panel asks focus to go (the interface maps each to its focus target).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusRequest {
+    /// The header's rename field, which takes focus as renaming begins.
+    Rename,
+    /// The header's name, where focus returns when renaming ends.
+    TargetName,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -94,11 +113,17 @@ pub struct PanelState {
     pub connector_part: ConnectorPart,
     pub palette_page: usize,
     pub fills_page: usize,
-    /// The camera pose `camera-copy` copied, which `camera-paste` pastes.
-    pub camera_clipboard: Option<Value>,
-    /// The selection's bounds, read with the model (several figures' X, Y, W, H).
-    pub bounds: Option<[f64; 4]>,
     version: u64,
+}
+
+/// The facts the model shows, as of the last refresh.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Shown {
+    /// The selection's bounds; `None` while none are ready for this selection.
+    pub bounds: Option<[f64; 4]>,
+    /// The facts were made for an older revision or tick than the one on show.
+    pub stale: bool,
+    key: Option<FactsKey>,
 }
 
 /// The number field being edited: its model (typed text, the open gesture's value) and its session gesture.
@@ -137,6 +162,8 @@ struct Key {
     view: u64,
     memory: u64,
     panel: u64,
+    facts: Option<FactsKey>,
+    paste: bool,
 }
 
 /// The Properties panel.
@@ -149,22 +176,9 @@ pub struct Panel {
     hinted: bool,
     model: Option<Arc<Inspector>>,
     key: Option<Key>,
+    shown: Shown,
     /// How many times the model was built (tests and the timing read it).
     pub builds: u64,
-}
-
-fn call(documents: &mut Documents, id: DocumentId, method: &str, args: &[Value]) -> Result<CallAnswer, Msg> {
-    match documents.call(id, method, args, &Value::Null) {
-        Ok(answer) => match &answer.result {
-            Ok(_) => Ok(answer),
-            Err(error) => Err(crate::commands::refusal(error)),
-        },
-        Err(error) => Err(documents_refusal(error)),
-    }
-}
-
-fn documents_refusal(error: DocumentsError) -> Msg {
-    Msg::owned(error.message_key().to_owned())
 }
 
 fn warn(message: Msg) -> Effect {
@@ -179,6 +193,12 @@ fn object(pairs: &[(&str, Value)]) -> Value {
     Value::object(obj)
 }
 
+impl Lifecycle for Panel {
+    fn finish(&mut self, documents: &mut Documents, session: &mut Session, effects: &mut Vec<Effect>) {
+        Panel::finish(self, documents, session, effects);
+    }
+}
+
 impl Panel {
     pub fn new(memory: SectionMemory) -> Panel {
         Panel { memory, ..Panel::default() }
@@ -191,6 +211,11 @@ impl Panel {
     /// The current view model (as of the last [`Panel::refresh`]).
     pub fn model(&self) -> Option<&Arc<Inspector>> {
         self.model.as_ref()
+    }
+
+    /// The facts the model shows.
+    pub fn shown(&self) -> &Shown {
+        &self.shown
     }
 
     /// The field being edited, as the view shows it.
@@ -208,7 +233,7 @@ impl Panel {
         self.rename.as_ref().map(|text| RenameView { text: text.clone() })
     }
 
-    /// Whether a property gesture is open (the model is not refreshed meanwhile).
+    /// Whether a property gesture is open.
     pub fn gesture_open(&self) -> bool {
         self.field.as_ref().is_some_and(|field| field.gesture.is_some())
     }
@@ -217,11 +242,46 @@ impl Panel {
         self.state.version = self.state.version.wrapping_add(1);
     }
 
-    /// Rebuilds the view model if anything it is built from changed. Cheap when nothing did: a key comparison.
-    pub fn refresh(&mut self, documents: &Documents, view: &ViewState) {
+    /// Asks for the facts of the active document's selection and takes what is ready; never waits.
+    fn facts(&mut self, documents: &Documents, facts: Option<&mut Facts>, source: Option<Arc<dyn FrameDocument>>) {
+        let Some(document) = documents.active() else { return };
+        let selection = document.selection();
+        let (Some(facts), true) = (facts, selection.uids.len() > 1) else {
+            self.shown = Shown::default();
+            return;
+        };
+        let key = FactsKey::new(document.id().serial(), document.revision(), document.view().tick, &selection.uids);
+        if let Some(source) = source {
+            facts.request(key.clone(), source);
+        }
+        facts.flush();
+        // The last ready facts of this document and selection are shown until the ones for this state land.
+        self.shown = match facts.latest() {
+            Some(ready) if ready.key.document == key.document && ready.key.uids == key.uids => Shown { bounds: ready.bounds, stale: ready.key != key, key: Some(ready.key.clone()) },
+            _ => Shown::default(),
+        };
+    }
+
+    /// Rebuilds the view model if anything it is built from changed. Cheap when nothing did: a key comparison and
+    /// typed reads; geometry comes ready from the facts worker.
+    pub fn refresh(&mut self, documents: &mut Documents, view: &ViewState, facts: Option<&mut Facts>, source: Option<Arc<dyn FrameDocument>>, session: &mut Session) {
+        let active = documents.active().map(|document| document.id());
+        // A field whose gesture belongs to a document that is no longer active (a switch that bypassed the lifecycle, a
+        // closed tab) is abandoned on its own document before anything is deferred.
+        let orphaned = self.field.as_ref().and_then(|field| field.gesture.as_ref()).is_some_and(|gesture| Some(gesture.document) != active);
+        if orphaned && let Some(gesture) = self.field.take().and_then(|field| field.gesture) {
+            gesture.cancel(documents, session);
+        }
+        if self.key.as_ref().map(|key| key.document) != active {
+            self.rename = None;
+            if self.field.as_ref().is_some_and(|field| field.gesture.is_none()) {
+                self.field = None;
+            }
+        }
         if self.gesture_open() && self.model.is_some() {
             return;
         }
+        self.facts(documents, facts, source);
         let Some(document) = documents.active() else {
             self.model = None;
             self.key = None;
@@ -229,23 +289,23 @@ impl Panel {
         };
         let frame = document.frame_records().unwrap_or(Value::Null);
         let selection = document.selection();
-        let session = document.view();
         let key = Key {
             document: document.id(),
             revision: document.revision(),
             frame: frame.clone(),
             selection: (selection.uid, selection.uids.clone(), selection.joint),
-            tick: session.tick.to_bits(),
+            tick: document.view().tick.to_bits(),
             view: view.version(),
             memory: self.memory.version(),
             panel: self.state.version,
+            facts: self.shown.key.clone(),
+            paste: crate::camera_actions::can_paste(document),
         };
         let same = self.key.as_ref().is_some_and(|old| old.frame.same_node(&key.frame) && Key { frame: Value::Null, ..old.clone() } == Key { frame: Value::Null, ..key.clone() });
         if same && self.model.is_some() {
             return;
         }
-        self.state.bounds = if selection.uids.len() > 1 { document.selection_bounds().ok().flatten() } else { None };
-        let built = contexts::build(document, &contexts::Inputs { view, memory: &self.memory, panel: &self.state });
+        let built = contexts::build(document, &contexts::Inputs { view, memory: &self.memory, panel: &self.state, shown: &self.shown, can_paste: key.paste });
         for section in &built.sections {
             if section.place == model::Place::Titled && !section.auto {
                 self.memory.rule_released(built.kind.id(), section.id);
@@ -262,30 +322,15 @@ impl Panel {
         self.model.as_ref()?.number(key)
     }
 
-    /// The frames an edit reaches (Edit together): their indices, and the ticks they start at.
-    pub(crate) fn reach(documents: &Documents, id: DocumentId, view: &ViewState) -> Reach {
-        let Some(frames) = view.range_frames() else { return Reach::default() };
-        let Some(document) = documents.get(id) else { return Reach::default() };
-        let mut indices = frames.to_vec();
-        let current = document.view().frame_index;
-        if !indices.contains(&current) {
-            indices.push(current);
-            indices.sort_unstable();
-        }
-        let rows = styk_edit::timeline_rows(document.records());
-        let ticks = indices.iter().filter_map(|index| rows.get(*index).map(|row| row.0)).collect();
-        Reach { ticks: Some(ticks), indices: Some(indices) }
-    }
-
-    /// Ends the field's session gesture with the field model's outcome: a commit is one history entry, anything else
-    /// cancels. A refused commit puts the field back to where the gesture began and tells the person why.
-    fn settle(&mut self, documents: &mut Documents, settled: Settled, effects: &mut Vec<Effect>) {
+    /// Ends the field's session gesture with the field model's outcome: a commit is one history entry; anything else,
+    /// and any refusal, cancels the session's gesture explicitly before the panel lets go of it.
+    fn settle(&mut self, documents: &mut Documents, session: &mut Session, settled: Settled, effects: &mut Vec<Effect>) {
         let Some(field) = self.field.as_mut() else { return };
-        let Some(mut gesture) = field.gesture.take() else { return };
+        let Some(gesture) = field.gesture.take() else { return };
         match settled {
             Settled::Committed(value) => {
                 let initial = gesture.initial;
-                match gesture.preview(documents, value).and_then(|_| gesture.commit(documents)) {
+                match gesture.commit(documents, value, session) {
                     Ok(true) => effects.push(Effect::RequestFrame),
                     Ok(false) => {}
                     Err(message) => {
@@ -296,19 +341,20 @@ impl Panel {
                 }
             }
             Settled::Cancelled(_) | Settled::Unchanged => {
-                gesture.cancel(documents);
+                gesture.cancel(documents, session);
                 effects.push(Effect::RequestFrame);
             }
         }
     }
 
     /// Opens the session gesture of the field when it has none yet (`_begin` runs on every input until one begins).
-    fn ensure_gesture(&mut self, documents: &mut Documents, id: DocumentId, view: &ViewState, effects: &mut Vec<Effect>) -> bool {
+    fn ensure_gesture(&mut self, documents: &mut Documents, session: &mut Session, id: DocumentId, view: &ViewState, effects: &mut Vec<Effect>) -> bool {
         let Some(field) = self.field.as_mut() else { return false };
         if field.gesture.is_some() {
             return true;
         }
-        match Gesture::begin(documents, id, field.key, field.edit.value(), Self::reach(documents, id, view)) {
+        let range = documents.get(id).and_then(|document| Range::of(view, document));
+        match Gesture::begin(documents, id, field.key, field.edit.value(), range, session) {
             Ok(gesture) => {
                 field.gesture = Some(gesture);
                 true
@@ -320,91 +366,86 @@ impl Panel {
         }
     }
 
-    fn preview(&mut self, documents: &mut Documents, effects: &mut Vec<Effect>) {
+    fn preview(&mut self, documents: &mut Documents, session: &mut Session, effects: &mut Vec<Effect>) {
         let Some(field) = self.field.as_mut() else { return };
         let value = field.edit.value();
-        if let Some(gesture) = field.gesture.as_mut() {
-            match gesture.preview(documents, value) {
-                Ok(true) => effects.push(Effect::RequestFrame),
-                Ok(false) => {}
-                Err(message) => {
-                    // A refused preview ends the gesture where it began (`assertCurrent` cancels; a bad value is refused).
-                    if let Some(gesture) = field.gesture.take() {
-                        field.edit.set_value(gesture.initial);
-                        gesture.cancel(documents);
-                    }
-                    effects.push(warn(message));
-                    effects.push(Effect::RequestFrame);
+        let Some(gesture) = field.gesture.as_mut() else { return };
+        match gesture.preview(documents, value, session) {
+            Ok(true) => effects.push(Effect::RequestFrame),
+            Ok(false) => {}
+            Err(message) => {
+                // A refused preview ends the gesture where it began (`assertCurrent` cancels; a bad value is refused).
+                if let Some(gesture) = field.gesture.take() {
+                    field.edit.set_value(gesture.initial);
+                    gesture.cancel(documents, session);
                 }
+                effects.push(warn(message));
+                effects.push(Effect::RequestFrame);
             }
         }
     }
 
     /// Makes `key` the field being edited, ending another field's gesture first (a second gesture commits the first).
-    fn take_field(&mut self, documents: &mut Documents, key: PropertyKey, effects: &mut Vec<Effect>) -> bool {
+    fn take_field(&mut self, documents: &mut Documents, session: &mut Session, key: PropertyKey, effects: &mut Vec<Effect>) -> bool {
         if self.field.as_ref().is_some_and(|field| field.key == key) {
             return true;
         }
-        self.finish(documents, effects);
+        self.finish(documents, session, effects);
         let Some(row) = self.row(key) else { return false };
-        if row.disabled {
+        if row.disabled || row.pending {
             return false;
         }
-        let edit = NumberEdit::new(row.value, Range { min: row.min, max: row.max }, 1.0, row.precision);
+        let edit = NumberEdit::new(row.value, FieldRange { min: row.min, max: row.max }, 1.0, row.precision);
         self.field = Some(Field { key, edit, gesture: None, focused: false, mixed: row.mixed });
         true
     }
 
-    /// Commits whatever the panel has open (`propertyControls.commit()` before another edit, undo, a tab switch).
-    pub fn finish(&mut self, documents: &mut Documents, effects: &mut Vec<Effect>) {
+    /// Commits whatever the panel has open (`propertyControls.commit()` before another edit, a command, a tab switch).
+    pub fn finish(&mut self, documents: &mut Documents, session: &mut Session, effects: &mut Vec<Effect>) {
         let Some(field) = self.field.as_mut() else { return };
         // Whichever of the field's gestures is open ends committed: typing (or a held key), else a scrub.
         let settled = match field.edit.blur() {
             Settled::Unchanged => field.edit.scrub_end(),
             other => other,
         };
-        self.settle(documents, settled, effects);
-        self.field = None;
-    }
-
-    /// Abandons whatever the panel has open (the document changed under it, Escape in a scrub).
-    pub fn cancel(&mut self, documents: &mut Documents) {
+        self.settle(documents, session, settled, effects);
+        // A gesture the field model had already settled still has its session side to close.
         if let Some(gesture) = self.field.take().and_then(|field| field.gesture) {
-            gesture.cancel(documents);
+            gesture.cancel(documents, session);
         }
     }
 
     /// Runs one event of the panel's view against the active document.
-    pub fn update(&mut self, documents: &mut Documents, view: &mut ViewState, event: Event) -> Vec<Effect> {
+    pub fn update(&mut self, documents: &mut Documents, view: &mut ViewState, session: &mut Session, event: Event) -> Vec<Effect> {
         let mut effects = Vec::new();
         let Some(id) = documents.active().map(|document| document.id()) else { return effects };
         match event {
-            Event::Field(key, event) => self.field_event(documents, view, id, key, event, &mut effects),
+            Event::Field(key, event) => self.field_event(documents, session, view, id, key, event, &mut effects),
             Event::Toggle(toggle, on) => {
-                self.finish(documents, &mut effects);
+                self.finish(documents, session, &mut effects);
                 let result = match toggle {
                     Toggle::ApplyRange => {
                         view.set_apply_range(on);
                         Ok(())
                     }
-                    Toggle::StaticJoint => call(documents, id, "updateBuilderSegmentStyle", &[object(&[("static", Value::Bool(on))]), object(&[("branch", Value::Bool(false))])]).map(|_| ()),
+                    Toggle::StaticJoint => answers::call(documents, id, "updateBuilderSegmentStyle", &[object(&[("static", Value::Bool(on))]), object(&[("branch", Value::Bool(false))])], session).map(|_| ()),
                     Toggle::SecondaryColor => {
                         let gradient = if on { object(&[("color", Value::str("#ffffff"))]) } else { Value::Null };
-                        call(documents, id, "updateBuilderSegmentStyle", &[object(&[("gradient", gradient)]), object(&[("branch", Value::Bool(false))])]).map(|_| ())
+                        answers::call(documents, id, "updateBuilderSegmentStyle", &[object(&[("gradient", gradient)]), object(&[("branch", Value::Bool(false))])], session).map(|_| ())
                     }
                     Toggle::BuilderBranch => Err(Msg::new("errors.engineOwner.notSupported")),
                 };
                 Self::report(result, &mut effects);
             }
             Event::Choose(choice, value) => {
-                self.finish(documents, &mut effects);
+                self.finish(documents, session, &mut effects);
                 let result = match choice {
-                    Choice::SegmentShape => call(documents, id, "convertSegment", &[Value::str(&value)]).map(|_| ()),
+                    Choice::SegmentShape => answers::call(documents, id, "convertSegment", &[Value::str(&value)], session).map(|_| ()),
                     Choice::FigureLayer => {
                         let uids = documents.get(id).map(|document| document.selection().uids.iter().map(|uid| Value::Num(f64::from(*uid))).collect()).unwrap_or_default();
-                        call(documents, id, "assignFiguresToLayer", &[Value::array(uids), Value::str(&value)]).and_then(|answer| {
-                            if answer.result.as_ref().is_ok_and(Value::truthy) {
-                                call(documents, id, "setActiveLayer", &[Value::str(&value)])?;
+                        answers::call(documents, id, "assignFiguresToLayer", &[Value::array(uids), Value::str(&value)], session).and_then(|changed| {
+                            if changed.truthy() {
+                                answers::call(documents, id, "setActiveLayer", &[Value::str(&value)], session)?;
                             }
                             Ok(())
                         })
@@ -418,16 +459,9 @@ impl Panel {
                     self.memory.toggle(model.kind.id(), section, open, auto);
                 }
             }
-            Event::Page(pager, step) => {
-                let page = match pager {
-                    Pager::Palette => &mut self.state.palette_page,
-                    Pager::Fills => &mut self.state.fills_page,
-                };
-                *page = page.saturating_add_signed(step as isize);
-                self.bump();
-            }
+            Event::Act(action) => self.act(documents, session, id, action, &mut effects),
             Event::Segment(Segments::CameraTab, value) => {
-                self.finish(documents, &mut effects);
+                self.finish(documents, session, &mut effects);
                 self.state.camera_tab = if value == "motion" { CameraTab::Motion } else { CameraTab::Transform };
                 self.bump();
             }
@@ -436,12 +470,46 @@ impl Panel {
                 self.bump();
             }
             Event::Color(target) => {
-                self.finish(documents, &mut effects);
+                self.finish(documents, session, &mut effects);
                 effects.push(Effect::PickColor(target));
             }
-            Event::Rename(event) => self.rename_event(documents, id, event, &mut effects),
+            Event::Rename(event) => self.rename_event(documents, session, id, event, &mut effects),
         }
         effects
+    }
+
+    fn act(&mut self, documents: &mut Documents, session: &mut Session, id: DocumentId, action: PanelAction, effects: &mut Vec<Effect>) {
+        match action {
+            PanelAction::Page(pager, step) => {
+                let page = match pager {
+                    Pager::Palette => &mut self.state.palette_page,
+                    Pager::Fills => &mut self.state.fills_page,
+                };
+                *page = page.saturating_add_signed(step as isize);
+                self.bump();
+            }
+            PanelAction::DeletePolygon(index) => {
+                self.finish(documents, session, effects);
+                Self::report(answers::call(documents, id, "removePolygon", &[Value::Num(f64::from(index))], session).map(|_| ()), effects);
+            }
+            PanelAction::Order { kind, index, direction } => {
+                // `builder-order`: `moveBuilderOrder({kind, index}, direction, {branch})`, after the open edit finishes.
+                self.finish(documents, session, effects);
+                let kind = match kind {
+                    DrawKind::Polygon => "polygon",
+                    DrawKind::Segment => "segment",
+                };
+                let direction = match direction {
+                    OrderDirection::Back => "back",
+                    OrderDirection::Down => "down",
+                    OrderDirection::Up => "up",
+                    OrderDirection::Front => "front",
+                };
+                let target = object(&[("kind", Value::str(kind)), ("index", Value::Num(f64::from(index)))]);
+                let result = answers::call(documents, id, "moveBuilderOrder", &[target, Value::str(direction), object(&[("branch", Value::Bool(false))])], session);
+                Self::report(result.map(|_| ()), effects);
+            }
+        }
     }
 
     fn report(result: Result<(), Msg>, effects: &mut Vec<Effect>) {
@@ -451,15 +519,19 @@ impl Panel {
         }
     }
 
-    fn rename_event(&mut self, documents: &mut Documents, id: DocumentId, event: RenameEvent, effects: &mut Vec<Effect>) {
+    fn rename_event(&mut self, documents: &mut Documents, session: &mut Session, id: DocumentId, event: RenameEvent, effects: &mut Vec<Effect>) {
         let Some(rename) = self.model.as_ref().and_then(|model| model.target.rename.clone()) else {
             self.rename = None;
             return;
         };
         match event {
             RenameEvent::Begin => {
-                self.finish(documents, effects);
+                if self.rename.is_some() {
+                    return;
+                }
+                self.finish(documents, session, effects);
                 self.rename = Some(self.model.as_ref().map(|model| model.target.name.english()).unwrap_or_default());
+                effects.push(Effect::Focus(FocusRequest::Rename));
             }
             RenameEvent::Input(text) => {
                 if self.rename.is_some() {
@@ -470,18 +542,23 @@ impl Panel {
                     self.rename = Some(text);
                 }
             }
-            RenameEvent::Cancel => self.rename = None,
+            RenameEvent::Cancel => {
+                if self.rename.take().is_some() {
+                    effects.push(Effect::Focus(FocusRequest::TargetName));
+                }
+            }
             RenameEvent::Commit => {
                 // Enter or leaving the field commits; a blank name keeps the old one.
                 let Some(text) = self.rename.take() else { return };
+                effects.push(Effect::Focus(FocusRequest::TargetName));
                 if text.trim().is_empty() {
                     return;
                 }
                 let result = match rename.target {
-                    RenameTarget::Figure => call(documents, id, "updateFigureStyle", &[object(&[("name", Value::str(&text))])]),
+                    RenameTarget::Figure => answers::call(documents, id, "updateFigureStyle", &[object(&[("name", Value::str(&text))])], session),
                     RenameTarget::Layer => {
                         let layer = documents.get(id).map(|document| facts::active_layer(document.records())).unwrap_or_else(|| Arc::from("layer-1"));
-                        call(documents, id, "renameLayer", &[Value::str(&layer), Value::str(&text)])
+                        answers::call(documents, id, "renameLayer", &[Value::str(&layer), Value::str(&text)], session)
                     }
                 };
                 Self::report(result.map(|_| ()), effects);
@@ -489,10 +566,12 @@ impl Panel {
         }
     }
 
-    fn field_event(&mut self, documents: &mut Documents, view: &ViewState, id: DocumentId, key: PropertyKey, event: FieldEvent, effects: &mut Vec<Effect>) {
+    #[allow(clippy::too_many_arguments)] // One field event, with the owners it reaches.
+    fn field_event(&mut self, documents: &mut Documents, session: &mut Session, view: &ViewState, id: DocumentId, key: PropertyKey, event: FieldEvent, effects: &mut Vec<Effect>) {
+        let editing = self.field.as_ref().is_some_and(|field| field.key == key);
         match event {
             FieldEvent::Focus => {
-                if !self.take_field(documents, key, effects) {
+                if !self.take_field(documents, session, key, effects) {
                     return;
                 }
                 if !self.hinted {
@@ -503,26 +582,25 @@ impl Panel {
                     field.focused = true;
                     field.edit.focus();
                 }
-                self.ensure_gesture(documents, id, view, effects);
+                self.ensure_gesture(documents, session, id, view, effects);
             }
-            FieldEvent::Blur => {
-                if let Some(field) = self.field.as_mut().filter(|field| field.key == key) {
-                    let settled = field.edit.blur();
-                    field.focused = false;
-                    // A scrub of the label owns the field until it ends.
-                    if field.edit.gesture_open() {
-                        return;
-                    }
-                    self.settle(documents, settled, effects);
-                    self.field = None;
+            FieldEvent::Blur if editing => {
+                let Some(field) = self.field.as_mut() else { return };
+                let settled = field.edit.blur();
+                field.focused = false;
+                // A scrub of the label owns the field until it ends.
+                if field.edit.gesture_open() {
+                    return;
                 }
+                self.settle(documents, session, settled, effects);
+                self.field = None;
             }
             FieldEvent::Input(text) => {
-                if !self.take_field(documents, key, effects) {
+                if !self.take_field(documents, session, key, effects) {
                     return;
                 }
                 // The session gesture begins from the value before this edit (`_typed` begins, then previews).
-                let began = self.ensure_gesture(documents, id, view, effects);
+                let began = self.ensure_gesture(documents, session, id, view, effects);
                 if let Some(field) = self.field.as_mut() {
                     field.mixed = false;
                     field.edit.input(text);
@@ -531,93 +609,71 @@ impl Panel {
                     }
                 }
                 if began {
-                    self.preview(documents, effects);
+                    self.preview(documents, session, effects);
                 }
             }
-            FieldEvent::Enter => {
-                if let Some(field) = self.field.as_mut().filter(|field| field.key == key) {
+            FieldEvent::Enter if editing => {
+                if let Some(field) = self.field.as_mut() {
                     let settled = field.edit.enter();
-                    self.settle(documents, settled, effects);
-                    effects.push(Effect::Blur);
+                    self.settle(documents, session, settled, effects);
                 }
+                effects.push(Effect::Blur);
             }
-            FieldEvent::Escape => {
-                if let Some(field) = self.field.as_mut().filter(|field| field.key == key) {
+            FieldEvent::Escape if editing => {
+                if let Some(field) = self.field.as_mut() {
                     let settled = if field.focused { field.edit.escape() } else { field.edit.scrub_cancel() };
-                    self.settle(documents, settled, effects);
-                    if !self.field.as_ref().is_some_and(|field| field.focused) {
-                        self.field = None;
-                    }
+                    self.settle(documents, session, settled, effects);
+                }
+                if !self.field.as_ref().is_some_and(|field| field.focused) {
+                    self.field = None;
                 }
             }
             FieldEvent::Scrub(Scrub::Begin) => {
-                if !self.take_field(documents, key, effects) {
+                if !self.take_field(documents, session, key, effects) {
                     return;
                 }
                 if let Some(field) = self.field.as_mut() {
                     // A press on the label commits the open input gesture and begins the scrub's.
                     let settled = field.edit.scrub_begin();
                     field.mixed = false;
-                    self.settle(documents, settled, effects);
+                    self.settle(documents, session, settled, effects);
                 }
-                self.ensure_gesture(documents, id, view, effects);
+                self.ensure_gesture(documents, session, id, view, effects);
             }
-            FieldEvent::Scrub(Scrub::Delta { dx, keys }) => {
-                if let Some(field) = self.field.as_mut().filter(|field| field.key == key) {
+            FieldEvent::Scrub(Scrub::Delta { dx, keys }) if editing => {
+                if let Some(field) = self.field.as_mut() {
                     field.edit.scrub_move(dx, keys);
-                    self.preview(documents, effects);
                 }
+                self.preview(documents, session, effects);
             }
-            FieldEvent::Scrub(Scrub::End) => {
-                if let Some(field) = self.field.as_mut().filter(|field| field.key == key) {
-                    let settled = field.edit.scrub_end();
-                    self.settle(documents, settled, effects);
-                    if !self.field.as_ref().is_some_and(|field| field.focused) {
-                        self.field = None;
-                    }
+            FieldEvent::Scrub(Scrub::End | Scrub::Cancel) | FieldEvent::KeyEnd if editing => {
+                if let Some(field) = self.field.as_mut() {
+                    let settled = match event {
+                        FieldEvent::Scrub(Scrub::End) => field.edit.scrub_end(),
+                        FieldEvent::Scrub(_) => field.edit.scrub_cancel(),
+                        _ => field.edit.key_release(),
+                    };
+                    self.settle(documents, session, settled, effects);
                 }
-            }
-            FieldEvent::Scrub(Scrub::Cancel) => {
-                if let Some(field) = self.field.as_mut().filter(|field| field.key == key) {
-                    let settled = field.edit.scrub_cancel();
-                    self.settle(documents, settled, effects);
-                    if !self.field.as_ref().is_some_and(|field| field.focused) {
-                        self.field = None;
-                    }
+                if !self.field.as_ref().is_some_and(|field| field.focused) {
+                    self.field = None;
                 }
             }
             FieldEvent::KeyStep { direction, keys } => {
-                if !self.take_field(documents, key, effects) {
+                if !self.take_field(documents, session, key, effects) {
                     return;
                 }
-                let began = self.ensure_gesture(documents, id, view, effects);
+                let began = self.ensure_gesture(documents, session, id, view, effects);
                 if let Some(field) = self.field.as_mut() {
                     field.mixed = false;
                     field.edit.key_step(direction, keys);
                 }
                 if began {
-                    self.preview(documents, effects);
+                    self.preview(documents, session, effects);
                 }
             }
-            FieldEvent::KeyEnd => {
-                if let Some(field) = self.field.as_mut().filter(|field| field.key == key) {
-                    let settled = field.edit.key_release();
-                    self.settle(documents, settled, effects);
-                    if !self.field.as_ref().is_some_and(|field| field.focused) {
-                        self.field = None;
-                    }
-                }
-            }
+            // An end, Enter or Escape of a field that is not the one being edited changes nothing.
+            FieldEvent::Blur | FieldEvent::Enter | FieldEvent::Escape | FieldEvent::Scrub(_) | FieldEvent::KeyEnd => {}
         }
-    }
-
-    /// The camera pose `camera-copy` put on the panel's clipboard.
-    pub(crate) fn set_camera_clipboard(&mut self, pose: Option<Value>) {
-        self.state.camera_clipboard = pose;
-        self.bump();
-    }
-
-    pub(crate) fn camera_clipboard(&self) -> Option<&Value> {
-        self.state.camera_clipboard.as_ref()
     }
 }

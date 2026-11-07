@@ -23,6 +23,10 @@ pub(crate) struct Inputs<'a> {
     pub view: &'a ViewState,
     pub memory: &'a SectionMemory,
     pub panel: &'a PanelState,
+    /// Facts made on the worker (the selection's bounds), as last ready.
+    pub shown: &'a super::Shown,
+    /// Whether the session holds a copied camera pose.
+    pub can_paste: bool,
 }
 
 const STEP_DOWN: &str = "step-down";
@@ -56,7 +60,7 @@ fn number(key: PropertyKey, label: impl Into<Label>, value: f64, unit: &'static 
         max: f64::INFINITY,
         mixed: false,
         disabled: false,
-        slider: false,
+        pending: false,
         span: false,
     }
 }
@@ -71,8 +75,8 @@ impl NumberRow {
         self.description = Some(description);
         self
     }
-    fn slider(mut self) -> NumberRow {
-        self.slider = true;
+    fn pending(mut self, pending: bool) -> NumberRow {
+        self.pending = pending;
         self
     }
 }
@@ -360,7 +364,7 @@ fn camera(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<'
             ])])
             .actions(vec![
                 button(CommandId::CameraCopy, Some("duplicate"), "inspectorView.copyCameraPose"),
-                button(CommandId::CameraPaste, Some("clipboard"), "inspectorView.pasteCameraPose").disabled(inputs.panel.camera_clipboard.is_none()),
+                button(CommandId::CameraPaste, Some("clipboard"), "inspectorView.pasteCameraPose").disabled(!inputs.can_paste),
             ]),
         );
         sections.push(
@@ -572,7 +576,7 @@ fn figure_context(document: &Document, records: &Value, frame: &Value, figure: &
                 mixed: false,
                 span: false,
             }),
-            Row::Number(number(PropertyKey::FigureOpacity, msg("inspectorView.opacity"), opacity, "%").range(0.0, 100.0).slider()),
+            Row::Number(number(PropertyKey::FigureOpacity, msg("inspectorView.opacity"), opacity, "%").range(0.0, 100.0)),
         ])])
         .actions(vec![button(CommandId::ResetColor, Some("reset"), "inspectorView.resetColors")]),
     );
@@ -608,7 +612,7 @@ fn figure_context(document: &Document, records: &Value, frame: &Value, figure: &
         );
     }
     if document.selection().joint < 0 {
-        sections.push(colours(&palette, figure, object, version, inputs.panel));
+        sections.push(colours(document, &palette, figure, object, version, inputs.panel));
     }
     Inspector {
         kind: kind_id,
@@ -622,8 +626,22 @@ fn figure_context(document: &Document, records: &Value, frame: &Value, figure: &
 const PALETTE_PAGE: usize = 32;
 const FILLS_PAGE: usize = 12;
 
+/// A drawable's four order steps (`orderActions`): send to back, backward, forward, to front.
+fn order_actions(kind: super::order::DrawKind, index: u32, label: &'static str) -> Row {
+    let step = |direction, icon, label| Button { action: Action::Panel(PanelAction::Order { kind, index, direction }), ..button(CommandId::Undo, Some(icon), label) };
+    Row::Actions(ActionsRow {
+        label: Some(msg(label)),
+        items: vec![
+            step(OrderDirection::Back, "send-to-back", "inspectorView.sendToBack"),
+            step(OrderDirection::Down, STEP_DOWN, "inspectorView.sendBackward"),
+            step(OrderDirection::Up, STEP_UP, "inspectorView.bringForward"),
+            step(OrderDirection::Front, "bring-to-front", "inspectorView.bringToFront"),
+        ],
+    })
+}
+
 fn page(pager: Pager, step: i32, icon: &'static str, label: &'static str) -> Button {
-    Button { action: Action::Page(pager, step), icon: Some(icon), label: msg(label), text: false, outline: false, tip: None, disabled: false, pressed: None }
+    Button { action: Action::Panel(PanelAction::Page(pager, step)), icon: Some(icon), label: msg(label), text: false, outline: false, tip: None, disabled: false, pressed: None }
 }
 
 fn page_text(start: usize, size: usize, total: usize) -> Arc<str> {
@@ -631,7 +649,9 @@ fn page_text(start: usize, size: usize, total: usize) -> Arc<str> {
 }
 
 /// The figure's colours and fills (titled): the palette 32 per page, the fills 12 per page.
-fn colours(palette: &[([u8; 3], usize, usize)], figure: &Figure, object: &Value, version: f64, panel: &PanelState) -> Section {
+fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Figure, object: &Value, version: f64, panel: &PanelState) -> Section {
+    let uid = num(object.get("unique_id")).map(|uid| uid as u32);
+    let drawables = super::order::drawables(figure, object);
     let mut rows = Vec::new();
     let palette_start = (panel.palette_page * PALETTE_PAGE).min(palette.len().div_ceil(PALETTE_PAGE).saturating_sub(1) * PALETTE_PAGE);
     if !palette.is_empty() {
@@ -660,12 +680,19 @@ fn colours(palette: &[([u8; 3], usize, usize)], figure: &Figure, object: &Value,
     });
     let start = (panel.fills_page * FILLS_PAGE).min(polygons.len().saturating_sub(1) / FILLS_PAGE * FILLS_PAGE);
     for (index, polygon) in polygons.iter().enumerate().skip(start).take(FILLS_PAGE) {
+        // `fillGroup`: its row (colour, delete), its opacity and order, and the four order steps.
         let name = Msg::new("inspectorView.polygon").with("value", index + 1);
+        let at = index as u32;
+        let target = uid.map(|uid| [("kind", Value::str("polygon")), ("uid", Value::Num(f64::from(uid))), ("polygonId", Value::Num(f64::from(polygon.id))), ("figureTypeId", Value::Num(f64::from(figure.id)))]);
+        let opacity = target.as_ref().and_then(|target| channel(document, target, "opacity", 100.0)).unwrap_or(polygon.alpha * 100.0);
+        let position = super::order::position(&drawables, super::order::DrawKind::Polygon, index).unwrap_or(1) as f64;
+        let mut delete = Button { action: Action::Panel(PanelAction::DeletePolygon(at)), ..button(CommandId::Undo, Some("trash"), "inspectorView.deletePolygon") };
+        delete.label = Msg::new("inspectorView.deletePolygon").with("value", index + 1);
         rows.push(Row::Group {
             label: name.clone(),
             rows: vec![
                 Row::Color(ColorRow {
-                    target: ColorTarget::Polygon(index as u32),
+                    target: ColorTarget::Polygon(at),
                     label: Msg::new("inspectorView.color").with("name", name),
                     description: None,
                     paint: Paint::Solid(displayed_color(version, figure, object, polygon.rgb)),
@@ -673,7 +700,12 @@ fn colours(palette: &[([u8; 3], usize, usize)], figure: &Figure, object: &Value,
                     mixed: false,
                     span: true,
                 }),
-                grid(vec![Row::Value { label: msg("inspectorView.opacity"), text: Label::plain(format!("{}%", crate::number::format(polygon.alpha * 100.0, 1))) }]),
+                Row::Actions(ActionsRow { label: None, items: vec![delete] }),
+                grid(vec![
+                    Row::Number(number(PropertyKey::PolygonOpacity(at), msg("inspectorView.opacity"), opacity, "%").range(0.0, 100.0)),
+                    Row::Number(number(PropertyKey::PolygonZOrder(at), msg("inspectorView.order"), position, "").range(1.0, drawables.len() as f64)),
+                ]),
+                order_actions(super::order::DrawKind::Polygon, at, "inspectorView.fillOrder"),
             ],
         });
     }
@@ -704,7 +736,9 @@ fn figures(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<
     colours.sort_unstable();
     colours.dedup();
     let joined = objects.iter().any(|item| item.get("join").is_some_and(Value::is_object));
-    let [min_x, min_y, max_x, max_y] = inputs.panel.bounds.unwrap_or([0.0; 4]);
+    // The bounds are a fact made on the worker: until they are ready the rows wait, empty.
+    let pending = inputs.shown.bounds.is_none();
+    let [min_x, min_y, max_x, max_y] = inputs.shown.bounds.unwrap_or([0.0; 4]);
     let align = [
         (CommandId::AlignLeft, "align-left", "inspectorView.alignLeft"),
         (CommandId::AlignCenterX, "align-horizontal-center", "inspectorView.alignCenter"),
@@ -713,16 +747,16 @@ fn figures(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<
         (CommandId::AlignCenterY, "align-vertical-center", "inspectorView.alignMiddle"),
         (CommandId::AlignBottom, "align-bottom", "inspectorView.alignBottom"),
     ];
-    let mut opacity = number(PropertyKey::FigureOpacity, msg("inspectorView.opacity"), pct_of_transparency(num(object.get("field28")).unwrap_or(0.0)), "%").range(0.0, 100.0).slider();
+    let mut opacity = number(PropertyKey::FigureOpacity, msg("inspectorView.opacity"), pct_of_transparency(num(object.get("field28")).unwrap_or(0.0)), "%").range(0.0, 100.0);
     opacity.mixed = opacities.len() > 1;
     let mut sections = Vec::new();
     sections.extend(range_section(inputs.view));
     sections.push(
         section("selection", Some(msg("inspectorView.selection")), vec![grid(vec![
-            Row::Number(number(PropertyKey::GroupX, plain("X"), min_x, "px")),
-            Row::Number(number(PropertyKey::GroupY, plain("Y"), min_y, "px")),
-            Row::Number(number(PropertyKey::GroupWidth, plain("W"), max_x - min_x, "px").range(0.01, f64::INFINITY).described(msg("inspectorView.widthPx"))),
-            Row::Number(number(PropertyKey::GroupHeight, plain("H"), max_y - min_y, "px").range(0.01, f64::INFINITY).described(msg("inspectorView.heightPx"))),
+            Row::Number(number(PropertyKey::GroupX, plain("X"), min_x, "px").pending(pending)),
+            Row::Number(number(PropertyKey::GroupY, plain("Y"), min_y, "px").pending(pending)),
+            Row::Number(number(PropertyKey::GroupWidth, plain("W"), max_x - min_x, "px").range(0.01, f64::INFINITY).described(msg("inspectorView.widthPx")).pending(pending)),
+            Row::Number(number(PropertyKey::GroupHeight, plain("H"), max_y - min_y, "px").range(0.01, f64::INFINITY).described(msg("inspectorView.heightPx")).pending(pending)),
         ])])
         .actions(vec![button(CommandId::Rotate, None, "inspectorView.rotate15").text().tip("inspectorView.rotateTheSelection15"), button(CommandId::Center, None, "inspectorView.center").text().tip("inspectorView.centerSelection")]),
     );
@@ -824,7 +858,6 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
     let opacity_value = override_of("opacity").map_or(segment.alpha * 100.0, |opacity| opacity * 100.0);
     let alpha = number(PropertyKey::SegmentOpacity, msg(if secondary { "inspectorView.primaryOpacity" } else { "inspectorView.opacity" }), opacity_value, "%")
         .range(0.0, 100.0)
-        .slider()
         .described(msg("inspectorView.primaryColorOpacity"));
     let shapes = [
         ("line", "inspectorView.roundLine"),
@@ -849,8 +882,8 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
         span: true,
         bare: false,
     });
-    let order: f64 = override_of("zIndex").unwrap_or(segment.z);
-    let drawables = figure.segments.len() + figure.polyfills.len();
+    let drawables = super::order::drawables(figure, object);
+    let order = super::order::position(&drawables, super::order::DrawKind::Segment, joint).unwrap_or(1) as f64;
     let mut joint_rows = Vec::new();
     if !connector {
         let mut angle_row = number(PropertyKey::JointAngle, msg("inspectorView.angle"), degrees(angle), "°");
@@ -883,8 +916,7 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
     } else {
         sections.push(section("joint", Some(msg("inspectorView.joint")), vec![grid(joint_rows)]));
         sections.push(section("ik", None, vec![Row::Slot(Slot::Ik)]));
-        let mut order_row = number(PropertyKey::SegmentZOrder, msg("inspectorView.order"), order, "").range(1.0, drawables as f64).described(msg("inspectorView.drawOrder"));
-        order_row.disabled = true;
+        let order_row = number(PropertyKey::SegmentZOrder, msg("inspectorView.order"), order, "").range(1.0, drawables.len() as f64).described(msg("inspectorView.drawOrder"));
         sections.push(section("style", Some(msg("inspectorView.style")), vec![grid(vec![Row::Number(width), Row::Color(colour), Row::Number(alpha), Row::Number(order_row), shape_select])]));
     }
     if two_tone && !slider {

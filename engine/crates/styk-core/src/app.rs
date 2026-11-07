@@ -1,31 +1,44 @@
 //! The application core's state and its one entry point, [`Core::dispatch`].
 //!
-//! `Core` owns the open documents (each one's session owns the document, its selection, playhead and history), the
-//! window's view state and the panels' state. The interface calls `dispatch` with a [`Command`] and gets [`Effect`]s
-//! back; after every dispatch it calls [`Core::refresh`], which rebuilds the view models whose inputs changed, and its
-//! `view` reads them. Nothing here blocks: every call is a session command on the interface thread, as today's are.
+//! `Core` owns the open documents (each one's session owns the document, its selection, playhead, history and
+//! clipboards), the window's view state, the panels and the derived-facts worker. It routes: a command goes to the
+//! module that owns its handler ([`CommandId::info`]), a panel's event to that panel. Every session answer passes the
+//! one adapter ([`crate::answers`]), whose record of the dispatch is kept for the consumers of session events.
+//!
+//! The panels' lifecycle is one, shared ([`Lifecycle`]): before a command runs or another document becomes active,
+//! every panel finishes what it has open, as today's `finishCurrentEdit` does; a panel that finds its document no longer
+//! active on refresh abandons its open edit on that document. Nothing here blocks or builds geometry (D7): facts that
+//! need evaluation come from [`crate::facts`].
 
-use styk_doc::{Obj, Value};
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use crate::commands::{Command, CommandId, Effect, Notice, Severity, refusal};
-use crate::documents::{CallAnswer, DocumentId, Documents};
+use crate::answers::Session;
+use crate::commands::{Command, CommandId, Context, Effect, Notice, Owner, Severity};
+use crate::documents::{DocumentId, Documents};
+use crate::facts::Facts;
+use crate::focus::FocusState;
+use crate::frames::FrameDocument;
 use crate::i18n::Msg;
 use crate::inspector::Panel;
 use crate::view_state::ViewState;
+
+/// What every panel does when a command runs or the active document changes.
+pub trait Lifecycle {
+    /// Commits what the panel has open (an edit in a field), as today's `finishCurrentEdit`.
+    fn finish(&mut self, documents: &mut Documents, session: &mut Session, effects: &mut Vec<Effect>);
+}
 
 #[derive(Default)]
 pub struct Core {
     pub documents: Documents,
     view: ViewState,
     inspector: Panel,
-}
-
-fn object(pairs: &[(&str, Value)]) -> Value {
-    let mut obj = Obj::new();
-    for (key, value) in pairs {
-        obj.set(key, value.clone());
-    }
-    Value::object(obj)
+    facts: Option<Facts>,
+    /// Each document's published generations, which the workers read (K-doc supplies them).
+    sources: HashMap<DocumentId, Arc<dyn FrameDocument>>,
+    session: Session,
+    focus: FocusState,
 }
 
 fn warn(message: Msg) -> Effect {
@@ -35,6 +48,20 @@ fn warn(message: Msg) -> Effect {
 impl Core {
     pub fn new(documents: Documents) -> Core {
         Core { documents, ..Core::default() }
+    }
+
+    /// The derived-facts worker. Without one, a fact that needs geometry stays pending.
+    pub fn set_facts(&mut self, facts: Facts) {
+        self.facts = Some(facts);
+    }
+
+    pub fn facts(&self) -> Option<&Facts> {
+        self.facts.as_ref()
+    }
+
+    /// The published generations of a document, which the workers read.
+    pub fn set_source(&mut self, document: DocumentId, source: Arc<dyn FrameDocument>) {
+        self.sources.insert(document, source);
     }
 
     pub fn view_state(&self) -> &ViewState {
@@ -50,110 +77,79 @@ impl Core {
         &self.inspector
     }
 
-    /// Rebuilds the view models whose inputs changed since the last call.
+    /// Which target holds focus, the scopes and the text-entry gate (`docs/native/text-input.md`).
+    pub fn focus(&self) -> &FocusState {
+        &self.focus
+    }
+
+    pub fn focus_mut(&mut self) -> &mut FocusState {
+        &mut self.focus
+    }
+
+    /// What the session reported during the last dispatch (events, drawing forks, the clipboard filled).
+    pub fn session_report(&self) -> &Session {
+        &self.session
+    }
+
+    /// Rebuilds the view models whose inputs changed since the last call, and places pending fact requests.
     pub fn refresh(&mut self) {
-        self.inspector.refresh(&self.documents, &self.view);
+        let source = self.documents.active().and_then(|document| self.sources.get(&document.id())).cloned();
+        self.inspector.refresh(&mut self.documents, &self.view, self.facts.as_mut(), source, &mut self.session);
     }
 
     /// Runs one command.
     pub fn dispatch(&mut self, command: Command) -> Vec<Effect> {
+        self.session = Session::default();
         match command {
-            Command::Inspector(event) => self.inspector.update(&mut self.documents, &mut self.view, event),
+            Command::Inspector(event) => self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, event),
             Command::Run(id) => self.run(id),
+            Command::Activate(id) => self.activate(id),
         }
     }
 
-    fn active(&self) -> Option<DocumentId> {
-        self.documents.active().map(|document| document.id())
-    }
-
-    fn call(&mut self, method: &str, args: &[Value]) -> Result<CallAnswer, Msg> {
-        let id = self.active().ok_or_else(|| Msg::new("errors.editorSessions.thisProjectIsNoLongerOpen"))?;
-        let answer = self.documents.call(id, method, args, &Value::Null).map_err(|error| Msg::owned(error.message_key().to_owned()))?;
-        match &answer.result {
-            Ok(_) => Ok(answer),
-            Err(error) => Err(refusal(error)),
+    /// Every panel finishes what it has open.
+    fn finish_panels(&mut self, effects: &mut Vec<Effect>) {
+        let panels: [&mut dyn Lifecycle; 1] = [&mut self.inspector];
+        for panel in panels {
+            panel.finish(&mut self.documents, &mut self.session, effects);
         }
     }
 
-    /// `rangeFrames()` as the session takes it: the chosen frame indices, and the options naming the ticks they start
-    /// at (a layer sheet's `sheetTicks`).
-    fn range(&self) -> Option<(Value, Value)> {
-        let id = self.active()?;
-        let reach = Panel::reach(&self.documents, id, &self.view);
-        let indices = reach.indices?;
-        let ticks = Value::array(reach.ticks.unwrap_or_default().into_iter().map(Value::Num).collect());
-        Some((Value::array(indices.into_iter().map(|index| Value::Num(index as f64)).collect()), object(&[("ticks", ticks)])))
-    }
-
-    fn run(&mut self, id: CommandId) -> Vec<Effect> {
+    /// Makes another tab active: every panel finishes first, then the documents switch, as today's tab switch does.
+    fn activate(&mut self, id: DocumentId) -> Vec<Effect> {
         let mut effects = Vec::new();
-        // An open property edit is committed before any command, as today's `finishCurrentEdit`.
-        self.inspector.finish(&mut self.documents, &mut effects);
-        let range = self.range();
-        let result = match id {
-            CommandId::Undo => self.history(true),
-            CommandId::Redo => self.history(false),
-            CommandId::Rotate => match &range {
-                Some((frames, options)) => self.call("rotateFiguresInFrames", &[Value::Num(std::f64::consts::PI / 12.0), frames.clone(), options.clone()]),
-                None => self.call("rotateFigure", &[Value::Num(std::f64::consts::PI / 12.0)]),
-            },
-            CommandId::ResetColor => self.call("resetFigureColors", &[object(&[("indices", range.as_ref().map_or(Value::Null, |(frames, _)| frames.clone()))])]),
-            CommandId::LayerUp | CommandId::LayerDown => {
-                let step = Value::Num(if id == CommandId::LayerUp { 1.0 } else { -1.0 });
-                match &range {
-                    Some((frames, options)) => self.call("orderFiguresInFrames", &[step, frames.clone(), options.clone()]),
-                    None => self.call("moveSelectionLayer", &[step]),
-                }
-            }
-            CommandId::AlignLeft | CommandId::AlignCenterX | CommandId::AlignRight | CommandId::AlignTop | CommandId::AlignCenterY | CommandId::AlignBottom => {
-                let (axis, edge) = match id {
-                    CommandId::AlignLeft => ("x", "start"),
-                    CommandId::AlignCenterX => ("x", "center"),
-                    CommandId::AlignRight => ("x", "end"),
-                    CommandId::AlignTop => ("y", "start"),
-                    CommandId::AlignCenterY => ("y", "center"),
-                    _ => ("y", "end"),
-                };
-                // The app's own bounds callback (`boundsOf`), measured by the session from its geometry.
-                let options = object(&[("boundsOf", object(&[("@boundsCallback", Value::str("app"))]))]);
-                self.call("alignSelection", &[Value::str(axis), Value::str(edge), options])
-            }
-            CommandId::CameraCopy => self.call("copyCamera", &[]).inspect(|answer| {
-                let pose = answer.clipboard.as_ref().map(|(_, pose)| pose.clone()).or_else(|| answer.result.as_ref().ok().filter(|value| value.is_object()).cloned());
-                if pose.is_some() {
-                    self.inspector.set_camera_clipboard(pose);
-                }
-            }),
-            CommandId::CameraPaste => match self.inspector.camera_clipboard().cloned() {
-                Some(pose) => self.call("pasteCamera", &[pose]),
-                None => return effects,
-            },
-            CommandId::ToggleRangeEdit => {
-                let on = !self.view.apply_range();
-                self.view.set_apply_range(on);
-                return effects;
-            }
-            other => {
-                effects.push(Effect::NotAvailable(other));
-                return effects;
-            }
-        };
-        match result {
+        self.finish_panels(&mut effects);
+        match self.documents.activate(id) {
             Ok(_) => effects.push(Effect::RequestFrame),
-            Err(message) => effects.push(warn(message)),
+            Err(error) => effects.push(warn(Msg::owned(error.message_key().to_owned()))),
         }
         effects
     }
 
-    fn history(&mut self, undo: bool) -> Result<CallAnswer, Msg> {
-        let id = self.active().ok_or_else(|| Msg::new("errors.editorSessions.thisProjectIsNoLongerOpen"))?;
-        let answer = if undo { self.documents.undo(id) } else { self.documents.redo(id) };
-        let answer = answer.map_err(|error| Msg::owned(error.message_key().to_owned()))?;
-        match &answer.result {
-            Ok(_) => Ok(answer),
-            Err(error) => Err(refusal(error)),
+    /// Routes a registry command to its owner, after the panels finish what they have open.
+    fn run(&mut self, id: CommandId) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        self.finish_panels(&mut effects);
+        let mut context = Context { documents: &mut self.documents, view: &mut self.view, session: &mut self.session };
+        let result = match id.info().owner {
+            Owner::History => crate::history::run(&mut context, id),
+            Owner::Selection => crate::selection_actions::run(&mut context, id),
+            Owner::Camera => crate::camera_actions::run(&mut context, id),
+            Owner::ViewState => {
+                // `toggle-range-edit`: Edit together on or off.
+                let on = !context.view.apply_range();
+                context.view.set_apply_range(on);
+                return effects;
+            }
+            Owner::NotYet => {
+                effects.push(Effect::NotAvailable(id));
+                return effects;
+            }
+        };
+        match result {
+            Ok(()) => effects.push(Effect::RequestFrame),
+            Err(message) => effects.push(warn(message)),
         }
+        effects
     }
 }
-

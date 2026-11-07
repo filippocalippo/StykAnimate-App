@@ -1,12 +1,16 @@
 //! Every user action is a [`Command`]; [`crate::app::Core::dispatch`] runs it and answers with [`Effect`]s.
 //!
-//! This is the one command type. The registry of every command, its label, shortcut, enabled state and history group is
-//! chunk K-cmd's (`docs/native/INVENTORY.md` appendix A): it adds variants to [`CommandId`] and their handlers. Until a
-//! command has a handler it answers [`Effect::NotAvailable`], typed, so nothing pretends to have run.
+//! This is the one command type and the one registry. [`CommandId::info`] holds each command's metadata (its label and
+//! the module that owns its handler); chunk K-cmd adds every command of `docs/native/INVENTORY.md` appendix A here with
+//! its shortcut and enabled state. `Core` only routes: a handler lives with its feature ([`crate::history`],
+//! [`crate::selection_actions`], [`crate::camera_actions`], the view state), never in `Core`. A command whose
+//! feature has no handler yet answers [`Effect::NotAvailable`], typed, so nothing pretends to have run.
 
-use crate::documents::EditError;
+use crate::answers::Session;
+use crate::documents::{Documents, EditError};
 use crate::i18n::{Arg, Msg};
 use crate::inspector;
+use crate::view_state::ViewState;
 
 /// A registry command by its identity (appendix A's `id`). The Inspector's buttons and quick actions name these.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -42,7 +46,71 @@ pub enum CommandId {
     ToggleRangeEdit,
 }
 
+/// The module whose handler runs a command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Owner {
+    History,
+    Selection,
+    Camera,
+    ViewState,
+    /// Its feature belongs to a later chunk.
+    NotYet,
+}
+
+/// A command's registry entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Info {
+    pub id: CommandId,
+    /// The label's message key (today's registry label).
+    pub label: &'static str,
+    pub owner: Owner,
+}
+
+/// What a handler is given: the documents, the view state and the dispatch's record of what the session reported.
+pub struct Context<'a> {
+    pub documents: &'a mut Documents,
+    pub view: &'a mut ViewState,
+    pub session: &'a mut Session,
+}
+
 impl CommandId {
+    /// The command's registry entry.
+    pub fn info(self) -> Info {
+        use CommandId as C;
+        let (label, owner) = match self {
+            C::Undo => ("common.undo", Owner::History),
+            C::Redo => ("common.redo", Owner::History),
+            C::Rotate => ("inspectorView.rotate15", Owner::Selection),
+            C::ResetColor => ("inspectorView.resetColors", Owner::Selection),
+            C::LayerUp => ("inspectorView.bringForward", Owner::Selection),
+            C::LayerDown => ("inspectorView.sendBackward", Owner::Selection),
+            C::AlignLeft => ("inspectorView.alignLeft", Owner::Selection),
+            C::AlignCenterX => ("inspectorView.alignCenter", Owner::Selection),
+            C::AlignRight => ("inspectorView.alignRight", Owner::Selection),
+            C::AlignTop => ("inspectorView.alignTop", Owner::Selection),
+            C::AlignCenterY => ("inspectorView.alignMiddle", Owner::Selection),
+            C::AlignBottom => ("inspectorView.alignBottom", Owner::Selection),
+            C::CameraCopy => ("inspectorView.copyCameraPose", Owner::Camera),
+            C::CameraPaste => ("inspectorView.pasteCameraPose", Owner::Camera),
+            C::ToggleRangeEdit => ("inspectorView.stop", Owner::ViewState),
+            C::Center => ("inspectorView.center", Owner::NotYet),
+            C::JoinFigure => ("inspectorView.joinToFigure", Owner::NotYet),
+            C::CombineFigures => ("inspectorView.combineConnected", Owner::NotYet),
+            C::EditText => ("inspectorView.editText", Owner::NotYet),
+            C::ImportBackground => ("inspectorView.importBackground", Owner::NotYet),
+            C::BackgroundStyle => ("inspectorView.backgroundSettings", Owner::NotYet),
+            C::CameraGuides => ("inspectorView.guides", Owner::NotYet),
+            C::CameraAlignView => ("inspectorView.fitView", Owner::NotYet),
+            C::CameraCenterX => ("inspectorView.centerCameraHorizontally", Owner::NotYet),
+            C::CameraCenterY => ("inspectorView.centerCameraVertically", Owner::NotYet),
+            C::CameraLocatePrevious => ("inspectorView.matchPreviousCameraPose", Owner::NotYet),
+            C::CameraLocateNext => ("inspectorView.matchNextCameraPose", Owner::NotYet),
+            C::CameraApplyFigures => ("inspectorView.applyCameraTransformToFigures", Owner::NotYet),
+            C::AddFrame => ("inspectorView.insertKeyframeF6", Owner::NotYet),
+        };
+        Info { id: self, label, owner }
+    }
+
     /// The identity today's registry gives it.
     pub fn id(self) -> &'static str {
         match self {
@@ -86,6 +154,8 @@ pub enum Command {
     Run(CommandId),
     /// A Properties panel control: a field's gesture, a switch, a choice, a section's toggle.
     Inspector(inspector::Event),
+    /// Make another open document the active one (a project tab).
+    Activate(crate::documents::DocumentId),
 }
 
 /// How a refusal or a failure reaches the person (the error policy: a message key and scalar parameters).
@@ -119,6 +189,8 @@ pub enum Effect {
     ScrubHint(Msg),
     /// Take focus from the field that finished (Enter commits and blurs).
     Blur,
+    /// Move focus where a panel asks (the rename field as it opens, the name as it closes).
+    Focus(inspector::FocusRequest),
 }
 
 /// A refusal of the session as a message (`messageError`): the key, and the values its message names.

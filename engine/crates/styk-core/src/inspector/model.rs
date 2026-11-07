@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use super::order::DrawKind;
 use super::property::PropertyKey;
 use crate::commands::CommandId;
 use crate::i18n::{Label, Msg};
@@ -147,12 +148,29 @@ pub struct Button {
     pub pressed: Option<bool>,
 }
 
-/// What a button does when pressed.
+/// What a button does when pressed: a registry command, or an action of the panel itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Command(CommandId),
+    Panel(PanelAction),
+}
+
+/// The panel's own actions (`data-*` hooks today): pages, a fill's delete and its draw-order steps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanelAction {
     /// One page of a pager.
     Page(Pager, i32),
+    DeletePolygon(u32),
+    /// `builder-order`: a drawable sent back, down, up or to the front.
+    Order { kind: DrawKind, index: u32, direction: OrderDirection },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrderDirection {
+    Back,
+    Down,
+    Up,
+    Front,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -186,8 +204,8 @@ pub struct NumberRow {
     /// Several figures with different values: shown empty with a "Mixed" placeholder.
     pub mixed: bool,
     pub disabled: bool,
-    /// A percentage that also shows a slider (`field: false` today: the opacity rows).
-    pub slider: bool,
+    /// The value is a fact still being made on a worker (a selection's bounds): shown empty, not editable yet.
+    pub pending: bool,
     pub span: bool,
 }
 

@@ -79,27 +79,6 @@ impl Session {
         Ok(read(&prepared.doc))
     }
 
-    /// The app's `selectionBounds()`: the union of the selected figures' `boundsOf` (`[minX, minY, maxX, maxY]`, the
-    /// reach of their effects included) in the frame on show, `None` when no selected figure is drawn there. Measures
-    /// only the selected figures, with the session's own geometry; it changes nothing.
-    pub fn selection_bounds(&self) -> Result<Option<[f64; 4]>, EditError> {
-        let editor = &self.editor;
-        let frame = editor.shown_frame()?;
-        let slots: Vec<usize> = crate::frame::objects_of(&frame)
-            .iter()
-            .enumerate()
-            .filter(|(_, object)| crate::record::uid(object).is_some_and(|uid| editor.selection.uids.contains(&uid)))
-            .map(|(slot, _)| slot)
-            .collect();
-        if slots.is_empty() {
-            return Ok(None);
-        }
-        let measured = editor.app_bounds(&frame, &slots)?;
-        Ok(slots.iter().filter_map(|slot| measured.get(slot)).fold(None, |union: Option<[f64; 4]>, b| {
-            Some(union.map_or(*b, |u| [u[0].min(b[0]), u[1].min(b[1]), u[2].max(b[2]), u[3].max(b[3])]))
-        }))
-    }
-
     /// A read the interface makes by name (`animationValue`, `segmentAnimationTarget`, `getIKSettings`, ...), with
     /// native arguments, against the session's current view: `None` for a name the session does not answer.
     pub fn read(&self, name: &str, args: &Value) -> Option<Result<Option<Value>, EditError>> {
