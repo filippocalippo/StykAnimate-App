@@ -211,15 +211,7 @@ pub(super) fn validate(report: &Value) -> Result<(), EditError> {
             if !truthy(frame_id) {
                 continue;
             }
-            let frame_id = frame_id.unwrap();
-            let name = property_name(frame_id);
-            let retained = path(Some(report), &["_styk", "frameSources"]).and_then(|sources| name.as_deref().and_then(|n| sources.get(n)));
-            let by_frame: Option<Value> = if is_given(retained) {
-                retained.cloned()
-            } else {
-                items(report.get("keyframes")).into_iter().rev().find(|f| path(Some(f), &["_styk", "frameId"]) == Some(frame_id))
-            };
-            let Some(frame) = by_frame.filter(|f| !f.is_null()) else { continue };
+            let Some(frame) = keyed_frame(report, frame_id.unwrap()) else { continue };
             let listed = prop(Some(&frame), "objects")?;
             if !is_array(listed) {
                 return Err(refuse(TYPE_ERROR));
@@ -243,6 +235,18 @@ pub(super) fn validate(report: &Value) -> Result<(), EditError> {
     Ok(())
 }
 
+/// The frame a key of a layer shows: the pose a sheet retains under that name, else the last keyframe that carries the identity.
+fn keyed_frame(report: &Value, frame_id: &Value) -> Option<Value> {
+    let name = property_name(frame_id);
+    let retained = path(Some(report), &["_styk", "frameSources"]).and_then(|sources| name.as_deref().and_then(|n| sources.get(n)));
+    let by_frame: Option<Value> = if is_given(retained) {
+        retained.cloned()
+    } else {
+        items(report.get("keyframes")).into_iter().rev().find(|f| path(Some(f), &["_styk", "frameId"]) == Some(frame_id))
+    };
+    by_frame.filter(|f| !f.is_null())
+}
+
 /// The property name a value reads as.
 fn property_name(value: &Value) -> Option<String> {
     match value {
@@ -252,8 +256,35 @@ fn property_name(value: &Value) -> Option<String> {
     }
 }
 
+/// Figures that a drawing layer's own frames show beside its cel, or instead of one: what opening refuses (`drawingLayersMustContainOneDrawingCelPer`).
+/// A figure assigned to a drawing layer that no frame the layer keys shows (a movieclip placed while one was active is a replacement, which
+/// is not a key's frame) is not one: opening has always kept it where it was saved, and so does the repair below.
+fn refused_on_drawing_layers(report: &Value, drawing_layers: &HashSet<String>, drawn: &HashSet<u64>) -> HashSet<String> {
+    let mut refused = HashSet::new();
+    let assignments = path(Some(report), &["_styk", "layers", "assignments"]);
+    let sheet = path(Some(report), &["_styk", "layerSheet"]);
+    for id in drawing_layers {
+        for key in items(path(sheet, &["tracks", id.as_str(), "keys"])) {
+            let Some(frame_id) = path(Some(&key), &["value", "frameId"]).filter(|frame_id| truthy(Some(*frame_id))) else { continue };
+            let Some(frame) = keyed_frame(report, frame_id) else { continue };
+            let here: Vec<(String, bool)> = items(frame.get("objects"))
+                .iter()
+                .filter_map(|object| {
+                    let uid = object.get("unique_id").and_then(property_name)?;
+                    let assigned = get(assignments, &uid).is_some_and(|layer| layer.as_str() == Some(id.as_str()));
+                    assigned.then(|| (uid, num(object.get("figure_type_id")).is_some_and(|kind| drawn.contains(&kind.to_bits()))))
+                })
+                .collect();
+            if here.len() > 1 || here.iter().any(|(_, cel)| !cel) {
+                refused.extend(here.into_iter().filter(|(_, cel)| !cel).map(|(uid, _)| uid));
+            }
+        }
+    }
+    refused
+}
+
 /// Figures assigned to a drawing layer, which holds only drawing cels (older builds assigned a movieclip placed while one was active), given
-/// the layer new figures go to. Says how many assignments it changed.
+/// the layer new figures go to when opening would refuse the file for them. Says how many assignments it changed.
 pub(super) fn repair_assignments(report: &mut Value) -> usize {
     let drawing_layers: HashSet<String> = entries(path(Some(report), &["_styk", "layers", "byId"]))
         .into_iter()
@@ -276,9 +307,10 @@ pub(super) fn repair_assignments(report: &mut Value) -> usize {
             }
         }
     }
+    let refused = refused_on_drawing_layers(report, &drawing_layers, &drawn);
     let wrong: Vec<String> = entries(path(Some(report), &["_styk", "layers", "assignments"]))
         .into_iter()
-        .filter(|(uid, layer)| layer.as_str().is_some_and(|layer| drawing_layers.contains(layer)) && figures.get(&**uid) == Some(&false))
+        .filter(|(uid, layer)| layer.as_str().is_some_and(|layer| drawing_layers.contains(layer)) && figures.get(&**uid) == Some(&false) && refused.contains(&**uid))
         .map(|(uid, _)| uid.to_string())
         .collect();
     let assignments = report.make_obj().and_then(|r| r.get_mut("_styk")).and_then(Value::make_obj).and_then(|s| s.get_mut("layers")).and_then(Value::make_obj).and_then(|l| l.get_mut("assignments")).and_then(Value::make_obj);

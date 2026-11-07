@@ -310,6 +310,45 @@ impl Value {
         self.unshared_arrays().unwrap_or_else(|| self.clone())
     }
 
+    /// The bytes [`Value::unshared`] allocates for this value, counted conservatively before any of it is made: every packed array is copied,
+    /// and so is every container that holds one (with the temporary list of its elements' copies that the copy makes on the way). Each
+    /// allocation is charged its header and alignment; a tree of two million arrays of one number costs what two million allocations do, which
+    /// its text (a few characters for each) does not say. Walks the tree without allocating.
+    pub fn unshared_cost(&self) -> usize {
+        self.unshared_cost_of().0
+    }
+
+    /// The cost, and whether this value is copied at all.
+    fn unshared_cost_of(&self) -> (usize, bool) {
+        // An allocation's header and alignment, rounded up.
+        const ALLOCATION: usize = 64;
+        match self {
+            Value::Nums(numbers) => (ALLOCATION + std::mem::size_of::<Nums>() + numbers.heap_bytes() + ALLOCATION, true),
+            Value::Arr(items) => {
+                let (mut cost, mut copied) = (0usize, false);
+                for item in items.iter() {
+                    let (item_cost, item_copied) = item.unshared_cost_of();
+                    cost = cost.saturating_add(item_cost);
+                    copied |= item_copied;
+                }
+                if !copied { return (0, false); }
+                // The list of copies made on the way, the new list and its owner.
+                (cost.saturating_add(items.len().saturating_mul(std::mem::size_of::<Option<Value>>() + std::mem::size_of::<Value>())).saturating_add(2 * ALLOCATION), true)
+            }
+            Value::Obj(object) => {
+                let (mut cost, mut copied) = (0usize, false);
+                for item in object.values() {
+                    let (item_cost, item_copied) = item.unshared_cost_of();
+                    cost = cost.saturating_add(item_cost);
+                    copied |= item_copied;
+                }
+                if !copied { return (0, false); }
+                (cost.saturating_add(object.values().len().saturating_mul(std::mem::size_of::<Option<Value>>() + std::mem::size_of::<Value>())).saturating_add(3 * ALLOCATION + std::mem::size_of::<Obj>()), true)
+            }
+            _ => (0, false),
+        }
+    }
+
     fn unshared_arrays(&self) -> Option<Value> {
         match self {
             Value::Nums(numbers) => Some(Value::Nums(Arc::new((**numbers).clone()))),
@@ -685,6 +724,20 @@ mod tests {
         }
         // What `Object.keys` returns for the same assignments ("07" is not an index).
         assert_eq!(object.keys().map(|k| &**k).collect::<Vec<_>>(), ["0", "2", "10", "b", "a", "07"]);
+    }
+
+    #[test]
+    fn the_cost_of_an_unshared_tree_counts_each_array_it_copies_and_nothing_else() {
+        let number = Value::Num(1.0);
+        let strings = Value::array(vec![Value::str("a"), Value::str("b")]);
+        assert_eq!(strings.unshared_cost(), 0, "a tree with no packed array is not copied");
+        assert_eq!(number.unshared_cost(), 0);
+        let one = Value::nums(&[0.0]);
+        // Two million arrays of one number: far more than the few characters each takes in text.
+        let many = Value::array(vec![one.clone(); 2_000_000]);
+        assert!(many.unshared_cost() > 2_000_000 * 100, "{}", many.unshared_cost());
+        // The cost is of the copy that is made: what a tree holds once is not counted for what points at it twice.
+        assert!(Value::array(vec![one.clone(), one.clone()]).unshared_cost() >= 2 * (64 + 64));
     }
 
     #[test]

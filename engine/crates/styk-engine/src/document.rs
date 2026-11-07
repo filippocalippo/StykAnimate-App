@@ -126,7 +126,8 @@ pub const OPEN_BYTES_PER_TREE_BYTE: usize = 3;
 /// What opening `tree` may take, for the reservation that precedes the open.
 pub fn open_tree_estimate(tree: &Value) -> usize {
     let text = styk_doc::json::utf16_units_checked::<std::convert::Infallible>(tree, || Ok(())).unwrap_or(0);
-    text.saturating_mul(OPEN_BYTES_PER_TREE_BYTE).max(OPEN_MINIMUM_BYTES)
+    // The copy that gives the text's arrays (`Value::unshared`) is made once the memory is reserved, and what it allocates is not what the text says.
+    text.saturating_mul(OPEN_BYTES_PER_TREE_BYTE).saturating_add(tree.unshared_cost()).max(OPEN_MINIMUM_BYTES)
 }
 
 /// What opening a document of `file_bytes` bytes may take, for the reservation that precedes the open.

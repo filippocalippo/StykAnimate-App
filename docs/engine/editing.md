@@ -719,8 +719,11 @@ it on the editor, for every document.
   caches that the page's thread and the workers both fill: each is taken with one attempt (`styk_doc::lock::once`) and built with no lock held (D7).
   An entry's cost (what redoing it needs) follows the entry, also when a full history displaces its oldest to take it (`HistoryMarks`: the newest
   revision tells a new entry from a displaced one). A retained scene's replacements keep naming only figures their cut pose still holds (`prune_patches`).
-  A figure that is not a drawing cel is not pasted or imported onto a drawing layer (the clip a `.stykmov` file holds included): a file saved so would
-  be mended when it opens.
+  The copy a call is given of another session's document (leaving a clip) and the copy the open of a tree makes are sized from what they allocate
+  (`Value::unshared_cost`: every packed array, and the containers that hold one), not from the text, which says little of a tree of many small arrays.
+  A figure that is not a drawing cel pasted or imported while a drawing layer is active is placed on it, as it has always been; the repair opening makes
+  of a figure assigned to a drawing layer moves only one that a frame the layer keys shows beside its cel (what opening refuses), so a save opens as written.
+  Freeing a session starts the engine's drain of closed documents where it has no worker threads (`engine.pump`).
   A movieclip made inside a clip retains the scene the outer clip retains cut down to its own figures (`prune_retained`: poses,
   effect clips and imported animation, down the chain of `movieclipSource` documents). An older retained scene numbers its figures on its own, and shares
   the definitions of the clip that holds it, so only objects of a definition the new clip holds stay in it (a figure of the older scene with the

@@ -15,9 +15,6 @@ use crate::js_error;
 /// measured). A call starts only when the memory can hold this much, so that a document the engine holds cannot be
 /// edited into running it out of memory.
 const CALL_WORKING_BYTES: usize = 64 << 20;
-/// What the copy of a document that a call is given (a movieclip left, `call_with_document`) takes for each unit of its text: the copy is about
-/// as large as the text, and it is asked for before it is made.
-const COPY_BYTES_PER_TEXT_UNIT: usize = 2;
 
 /// The same for an undo or a redo, which builds the records of the entry anew (380 MiB beyond the 230 MiB of the
 /// document at the peak of undoing a movieclip edit of a 40 MiB Pivot file). A session asks for the most any of its
@@ -270,7 +267,8 @@ impl EditSession {
         let Some(mut list) = args.elements().map(|items| items.iter().collect::<Vec<Value>>()).filter(|items| items.len() >= 2) else { return "{\"status\":\"error\",\"error\":\"a call with a document takes it as its second argument\"}".to_string() };
         // The copy is asked for with the call's working memory, from the size of what is copied, before any of it is made: a clip as large as the
         // project it was made from is hundreds of megabytes.
-        let copy = styk_doc::json::utf16_units_checked::<std::convert::Infallible>(document.session().report(), || Ok(())).unwrap_or(0).saturating_mul(COPY_BYTES_PER_TEXT_UNIT);
+        let copy = document.session().report().unshared_cost();
+        let copy = copy.saturating_add(copy / 4);
         let Ok(_working) = styk_alloc::reserve(CALL_WORKING_BYTES.max(self.working.get(method).copied().unwrap_or(0)).max(copy)) else { return out_of_memory_answer() };
         // The tree as text would give it: a pose array the clip's records share is one array in each place it sits, as a file saves it.
         list[1] = document.session().report().unshared();

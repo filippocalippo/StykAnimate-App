@@ -783,18 +783,6 @@ impl Editor {
                 objects[i].set("join", Value::Null);
             }
         }
-        // A drawing layer holds only drawing cels: a figure that is not one is not placed on it, as a movieclip is not (`addFigure`). A file saved
-        // with one there is mended when it opens, and a save must open as it was written.
-        let active = self.active_layer();
-        let destination = if self.report.path(&["_styk", "layers", "byId", &active]).is_some() { active } else { self.report.path(&["_styk", "layers", "defaultLayerId"]).and_then(Value::as_str).unwrap_or("").to_string() };
-        for object in &objects {
-            let owner = object.get("unique_id").and_then(Value::as_f64).and_then(|new| hints.get(&(new as u32))).unwrap_or(&destination);
-            let drawing_layer = self.report.path(&["_styk", "layers", "byId", owner.as_str(), "drawing", "version"]).and_then(Value::as_f64) == Some(1.0);
-            let cel = types.iter().find(|(_, figure, _)| figure.get("figure_type_id") == object.get("figure_type_id")).is_some_and(|(_, figure, _)| is_drawing(figure));
-            if drawing_layer && !cel {
-                return Err(invalid("errors.editorLayerSheet.drawingLayersAcceptOneDrawingCelAtA"));
-            }
-        }
         let order: Vec<u32> = clipboard.order.iter().filter_map(|u| renamed(*u)).collect();
         let pasted: Vec<Value> = objects.iter().cloned().map(Value::object).collect();
         let inserted: Vec<u32> = pasted.iter().filter_map(uid).collect();

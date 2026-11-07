@@ -1,7 +1,7 @@
-// A drawing layer holds only drawing cels. A movieclip imported while one is active used to be assigned to it, and the file saved so was
-// mended when it opened: the instance moved to the first layer, silently, so a save did not open as it was written (found by the movieclip
-// fuzz: a drawing layer created, a clip exported as a `.stykmov` file and imported again). The figure is not placed on a drawing layer now, as
-// a movieclip is not by `addFigure`, whichever way it comes.
+// A movieclip imported while a drawing layer is active is placed on it (a replacement, which opening has never checked as it checks a key's
+// frame), and the base reopens the file with the instance on that layer. The repair opening makes of a figure on a drawing layer moves only
+// what opening would refuse, so a save opens as it was written (found by the movieclip fuzz: a drawing layer created, a clip exported as a
+// `.stykmov` file and imported again; the instance went to the first layer, silently).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -16,7 +16,6 @@ import './support/engine-node.mjs';
 
 const options = {demo: false, layerTimeline: true, propertyChannels: true};
 const fixture = JSON.parse(readFileSync(new URL('../engine/tests/edit/sheet-movieclip.document.json', import.meta.url), 'utf8'));
-const REFUSAL = 'errors.editorLayerSheet.drawingLayersAcceptOneDrawingCelAtA';
 
 /** The assignments of the project as a file saved from `editor` opens, and the repairs the open made. */
 async function reopened(editor) {
@@ -28,24 +27,25 @@ async function reopened(editor) {
   } finally { opening.dispose(); }
 }
 
-test('a movieclip exported to a file and imported while a drawing layer is active is refused, and the project saves as it is', {timeout: 30000}, async t => {
+test('a movieclip exported to a file and imported while a drawing layer is active stays on that layer when the project is saved and opened', {timeout: 30000}, async t => {
   useExportWorker(t);
   const codecHost = new FakeCodecHost(), exporter = new DocumentExporter({codecHost, idleMs: 0});
   t.after(() => { exporter.dispose(); codecHost.close(); });
   const {editor} = ownedEditorSync(options, fixture, {verify: false, recorded: false});
   const clip = editor.report.figure_types.find(figure => figure._styk?.movieclip);
-  // The recorded calls: a drawing layer is made, the clip is exported as a `.stykmov` file, and the file imported.
+  // The recorded calls: a clip is entered and left, a drawing layer is made, the clip is exported as a `.stykmov` file, and the file imported.
+  editor.enterMovieclip(clip.figure_type_id);
+  editor.leaveMovieclip();
   editor.createDrawingLayer();
+  const drawingLayer = editor.activeLayerId;
   const blob = await exporter.export(editor.report, {format: 'stykmov', figureTypeId: clip.figure_type_id, revision: editor.revision});
   const opening = await openBytes(new Uint8Array(await blob.arrayBuffer()), 'clip.stykmov', {layerTimeline: false}), read = await opening.read();
   attachRead(read.report, read);
-  const before = JSON.stringify(editor.report);
-  assert.throws(() => editor.importFigure(structuredClone(read.report)), error => error.messageKey === REFUSAL);
-  assert.equal(JSON.stringify(editor.report), before, 'and changes nothing');
-  // Where it may go, it is saved where it was placed.
-  editor.setActiveLayer('layer-1');
-  editor.importFigure(structuredClone(read.report));
+  const placed = editor.importFigure(structuredClone(read.report));
+  const assigned = editor.report._styk.layers.assignments[placed.unique_id];
+  assert.equal(assigned, drawingLayer, 'the gesture places the instance where the active layer is, as it always has');
   const file = await reopened(editor);
   assert.equal(file.repairs, 0, 'nothing to mend when the file opens');
+  assert.equal(file.assignments[placed.unique_id], drawingLayer, 'and the instance is on the layer it was saved on');
   assert.deepEqual(file.assignments, JSON.parse(JSON.stringify(editor.report._styk.layers.assignments)), 'the file opens as it was written');
 });
