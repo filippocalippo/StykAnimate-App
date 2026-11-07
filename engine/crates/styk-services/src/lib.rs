@@ -9,5 +9,6 @@
 //! needs it, not before.
 
 pub mod clock;
+pub mod input;
 
 pub use clock::{Clock, FixedClock, SystemClock};

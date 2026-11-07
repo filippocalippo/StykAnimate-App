@@ -61,7 +61,7 @@ brush; `docs/DRAWING.md`, `docs/TOUCH.md` and `docs/engine/drawing.md` are the c
 
 `styk_services::input` holds plain data:
 
-- `PenSample { time_ns, pointer, tool (Pen, Eraser, Mouse, Touch), origin, x, y (window client physical px, sub-pixel),
+- `PenSample { time_ns, pointer, tool (Pen, Eraser, Mouse, Touch), x, y (window client physical px, sub-pixel),
   pressure (0..1), raw_pressure, pressure_max, tilt_x, tilt_y, twist, valid (which of pressure, tilt, twist the device
   reported), buttons (tip, barrel, eraser), phase (Hover, Down, Move, Up), flags (history entry, predicted), modifiers }`.
 - `InputEvent`: `Sample(PenSample)`, `Interrupted { pointer, time_ns, reason: CaptureLost | Canceled | FocusLost }`,
@@ -69,9 +69,9 @@ brush; `docs/DRAWING.md`, `docs/TOUCH.md` and `docs/engine/drawing.md` are the c
   present in the history.
 - **Modifiers travel with the event.** The source reads Shift, Ctrl, Alt and Meta when it builds the sample, on the thread
   and in the order of the messages, so a modifier released before the batch is drained is still what the press saw.
-- **Provenance, not timing.** Every sample names its `origin`: `Pen`, `Touch` or `Mouse` as the operating system reported
-  it, and `PromotedFromPen` is never a stroke source: the source classifies each mouse message by its extra-info
-  signature and emits samples only for real mice. The stage draws only from `InputEvent`s; it never uses iced's mouse
+- **Provenance, not timing.** Every sample names its `tool` as the operating system reported it (`Pen`, `Eraser`, `Touch`,
+  `Mouse`), and a mouse message that Windows promoted from a pen is never a stroke source: the source classifies each mouse
+  message by its extra-info signature and emits samples only for real mice. The stage draws only from `InputEvent`s; it never uses iced's mouse
   events for a stroke. Windows still sends the promoted mouse messages on to iced, so hover and buttons work for a pen,
   and a short pen tap cannot also start a mouse stroke however the event-loop turn batches them.
 - **The queue.** `InputQueue` is bounded (4096 events, plus 64 reserved for terminals). When it is full: a `Hover` sample
@@ -177,7 +177,7 @@ sample).
 ### 3.6 The pen lab
 
 `styk-devtools::pen_lab` (feature `devtools`, `stykanimate --pen-lab`) is a window with the pad on the real path (source →
-queue → `StrokeInput` → worker → tiles and wet ink) and a live inspector: pressure, tilt, twist, buttons, tool, origin,
+queue → `StrokeInput` → worker → tiles and wet ink) and a live inspector: pressure, tilt, twist, buttons, tool,
 timestamps and gaps, history counts, queue depth, drops, the worker's queue and last batch time, wet and tile counts,
 frame times. Controls: brush size and hardness, pressure curve preset, stabilisation, prediction on and off, wet ink on and
 off, clear, undo, redo, and the recorder (`samples.csv`, `frames.csv`). It becomes the developer tools' Input panel.
