@@ -729,6 +729,10 @@ it on the editor, for every document.
   A figure that is not a drawing cel pasted or imported while a drawing layer is active is placed on it, as it has always been; the repair opening makes
   of a figure assigned to a drawing layer moves only one that a frame the layer keys shows beside its cel (what opening refuses), so a save opens as written.
   Freeing a session starts the engine's drain of closed documents where it has no worker threads (`engine.pump`).
+  A drawing cel is one image segment that carries its pixels: no gesture that edits the segments of a figure (add, split, delete, duplicate, mirror) works
+  on one (`errors.editorDrawing.aDrawingHasNoSegmentsToEdit`), and copying a drawing's key forks only the cels the frame shows, not the figure a cel is joined to.
+  The fuzz that keeps this honest: `node scripts/fuzz-movieclips-docs.mjs --regression` runs a fixed set of seeds (each refused save found so far, and
+  a few more starts) in about a minute; `scripts/fuzz-movieclips.mjs <seed> --doc=<fixture>` is the same idea for one editor and any number of seeds.
   A movieclip made inside a clip retains the scene the outer clip retains cut down to its own figures (`prune_retained`: poses,
   effect clips and imported animation, down the chain of `movieclipSource` documents). An older retained scene numbers its figures on its own, and shares
   the definitions of the clip that holds it, so only objects of a definition the new clip holds stay in it (a figure of the older scene with the

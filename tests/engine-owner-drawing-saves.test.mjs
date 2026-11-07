@@ -71,3 +71,41 @@ test('another segment cannot be added to a drawing cel, and the cel stays a file
     await opens(editor);
   } finally { s.resources.dispose(); }
 });
+
+// Seed 403 (on the sheet-movieclip and the rig fixtures): the same refused save with other gestures first. The rig one splits a segment of the cel, then
+// adds one (after a copy of the drawing, so it is the second cel that is selected); the sheet-movieclip one draws on a new drawing layer, then adds one.
+const SEGMENT_GESTURES = [
+  ['addSegment', []], ['addSegments', [[{}]]], ['splitSegment', [0.5]], ['splitSegmentBranch', [0.5]], ['splitBuilderSegments', []], ['deleteSegment', []],
+  ['deleteSingleSegment', []], ['unsplitSegment', []], ['duplicateSegment', []], ['duplicateSegmentBranch', []], ['mirrorSegment', []],
+  ['mirrorSegmentBranch', []],
+];
+// These two check what they are given (two joints, anchors) before they reach the figure: any refusal will do, and the document is the same.
+const BY_ARGUMENTS = [['addConnector', []], ['addWeightedJoint', []]];
+const REFUSED = 'errors.editorDrawing.aDrawingHasNoSegmentsToEdit';
+
+for (const [fixtureName, prelude] of [['sheet-movieclip', async () => {}], ['rig', async ({editor}) => { editor.sheetDuplicateFrameAfter(); }]]) {
+  test(`no gesture that edits the segments of a figure changes a drawing cel (${fixtureName}), and the project saves as a file that opens`, async () => {
+    const document = JSON.parse(readFileSync(new URL(`../engine/tests/edit/${fixtureName}.document.json`, import.meta.url), 'utf8'));
+    const {editor} = ownedEditorSync(options, document, {verify: false, recorded: false});
+    const resources = new DrawingResources(editor.report, {worker, onPublished: figure => editor._drawingPublished(figure)});
+    const s = {editor, resources};
+    try {
+      await draw(s, {x: 30, y: 1}, [{x: 22, y: 49}, {x: 6, y: 28}], 1);
+      await prelude(s);
+      const cel = editor.object;
+      assert.ok(cel && editor.report.figure_types.find(figure => figure.figure_type_id === cel.figure_type_id)?._styk?.drawing, 'the cel is selected');
+      for (const [gesture, args] of SEGMENT_GESTURES) {
+        const before = JSON.stringify(editor.report);
+        // Refused with the cel's own message, or (a gesture that finds nothing of the figure to work on) answering that it did nothing: the document is the same.
+        try { editor[gesture](...args); } catch (error) { assert.equal(error.messageKey, REFUSED, `${gesture}: ${error.message}`); }
+        assert.equal(JSON.stringify(editor.report), before, `${gesture} changes nothing`);
+      }
+      for (const [gesture, args] of BY_ARGUMENTS) {
+        const before = JSON.stringify(editor.report);
+        try { editor[gesture](...args); } catch { /* refused */ }
+        assert.equal(JSON.stringify(editor.report), before, `${gesture} changes nothing`);
+      }
+      await opens(editor);
+    } finally { resources.dispose(); }
+  });
+}
