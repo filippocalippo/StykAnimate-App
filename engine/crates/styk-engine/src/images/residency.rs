@@ -436,7 +436,7 @@ mod tests {
         use styk_eval::assets::AtlasEntry;
         let mut assets = Assets::default();
         assets.atlas.push(AtlasEntry { layer: 1, x: 1, y: 1, w: 8, h: 8, source_w: 8, source_h: 8, valid: true });
-        let image = |soft: bool, drawing: bool| DecodedImage { index: 0, drawing, soft, width: 10, height: 10, rgba: Vec::new() };
+        let image = |soft: bool, drawing: bool| DecodedImage { index: 0, drawing, soft, width: 10, height: 10, rgba: Vec::new(), placement: 0 };
         let mut residency = Residency::new(4, 1);
         assert!(!has_place(&residency, &assets, &image(false, false)), "its page has no layer yet");
         assert!(has_place(&residency, &assets, &image(true, false)), "a soft copy always has a place");

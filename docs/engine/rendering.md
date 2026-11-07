@@ -73,8 +73,9 @@ Effect rectangles follow the drawing's tight ink bounds, as `objectBounds` does,
 rather than its whole tile coverage. The loader reads the published rectangle;
 the existing PNG worker derives authoritative alpha bounds while it already holds
 the level-0 pixels. Each immutable `DrawingTiles` retains only that rectangle in
-`decoded_bounds`; empty decoded ink keeps the published fallback. Shared cels keep
-the correction across document revisions. A changed rectangle invalidates cached
+`decoded_bounds`; empty decoded ink keeps the published fallback. `decoded_bounds` and `tile_ink` are shared by every view made from one tile payload
+(`Loader` hands them out with the payload's tiles), so the correction survives any edit that leaves the pixels alone, and a decode that finishes for an
+earlier revision resolves them for the revision in front. A changed rectangle invalidates cached
 effect lists and requeues requested ticks; a cache epoch rejects earlier workers
 and inline preparations. Export preparation holds at most `AHEAD` requests until
 its image preload finishes, without waiting on a thread. Cancellation drops those
