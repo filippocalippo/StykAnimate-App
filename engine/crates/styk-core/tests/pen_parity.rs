@@ -15,7 +15,7 @@ use common::{hashes, save_and_reopen, settle};
 use std::sync::Arc;
 use std::time::Duration;
 use styk_core::drawing::mapping::Mapping;
-use styk_core::drawing::stroke_input::{Context, FingerDraw, StrokeInput, ToolMode};
+use styk_core::drawing::stroke_input::{Context, FingerDraw, StrokeCommand, StrokeInput, ToolMode};
 use styk_core::drawing::worker::{Reply, Request, Worker};
 use styk_doc::{Value, json};
 use styk_services::input::{InputEvent, InterruptReason, Modifiers, PenButtons, PenSample, Phase, Tool, Valid};
@@ -40,6 +40,56 @@ fn tiles_of(value: &Value) -> Vec<(i64, i64, String)> {
         .collect()
 }
 
+/// The mapping a capture records: the stage's rectangle, the camera, the cel's pose and the symmetry axis.
+fn mapping_of(value: &Value, mirror: bool) -> Mapping {
+    let canvas = numbers(field(value, "canvas"));
+    let camera = numbers(field(value, "camera"));
+    let rect = numbers(field(value, "rect"));
+    let p = numbers(field(value, "pixel_matrix"));
+    Mapping {
+        window_origin: (rect[0], rect[1]),
+        window_scale: (rect[2], rect[3]),
+        camera: [camera[0], camera[1], camera[2], camera[3], camera[4], camera[5]],
+        pixel_matrix: [p[0], p[1], p[2], p[3], p[4], p[5]],
+        mirror_x: mirror.then_some(canvas[0] / 2.0),
+        mirror_y: None,
+    }
+}
+
+/// Feeds a capture's received events through the stroke rules. `stroke` only gives each stroke its own span of time.
+fn feed_events(input: &mut StrokeInput, events: &Value, mapping: &Mapping, end: &str, stroke: u64, commands: &mut Vec<StrokeCommand>) {
+    let context = Context { tool: ToolMode::Brush, space_held: false, playing: false, finger: FingerDraw::Never, mapping, continue_from: None, region: None };
+    let base = 1_000_000_000u64 + stroke * 100_000_000_000;
+    let mut last_ns = base;
+    for event in events.elements().expect("events") {
+        let kind = field(&event, "type").as_str().unwrap(); // down, move or up
+        let num = |key: &str| field(&event, key).as_f64().unwrap();
+        let time_ns = base + (num("t") * 1e6) as u64;
+        last_ns = time_ns;
+        let mut sample = PenSample::at(time_ns, 1, Tool::Pen, num("x"), num("y"));
+        sample.phase = match kind {
+            "down" => Phase::Down,
+            "up" => Phase::Up,
+            _ if num("buttons") as u32 & 1 != 0 => Phase::Move,
+            _ => Phase::Hover,
+        };
+        sample.pressure = num("pressure") as f32;
+        sample.tilt_x = num("tiltX") as f32;
+        sample.tilt_y = num("tiltY") as f32;
+        sample.valid = Valid::PRESSURE | Valid::TILT;
+        if sample.phase != Phase::Hover && sample.phase != Phase::Up {
+            sample.buttons = PenButtons::TIP;
+        }
+        sample.modifiers = Modifiers::NONE;
+        input.feed(&InputEvent::Sample(sample), &context, commands);
+    }
+    match end {
+        "lostcapture" => input.feed(&InputEvent::Interrupted { pointer: 1, time_ns: last_ns + 1, reason: InterruptReason::CaptureLost }, &context, commands),
+        "escape" => input.discard(commands),
+        _ => {}
+    }
+}
+
 #[test]
 fn the_native_pen_path_matches_todays_app_on_the_same_events() {
     let Some(path) = std::env::var_os("STYK_PEN_PARITY") else {
@@ -51,54 +101,18 @@ fn the_native_pen_path_matches_todays_app_on_the_same_events() {
     for scenario in field(&capture, "scenarios").elements().expect("scenarios") {
         let name = field(&scenario, "name").as_str().unwrap().to_string();
         let brush: Arc<str> = field(&scenario, "brush_json").as_str().unwrap().into();
-        let mapping_value = field(&scenario, "mapping");
-        let canvas = numbers(field(mapping_value, "canvas"));
         let mirror = field(&scenario, "mirror").as_bool() == Some(true);
-        let camera = numbers(field(mapping_value, "camera"));
-        let rect = numbers(field(mapping_value, "rect"));
-        let p = numbers(field(mapping_value, "pixel_matrix"));
-        let mapping = Mapping {
-            window_origin: (rect[0], rect[1]),
-            window_scale: (rect[2], rect[3]),
-            camera: [camera[0], camera[1], camera[2], camera[3], camera[4], camera[5]],
-            pixel_matrix: [p[0], p[1], p[2], p[3], p[4], p[5]],
-            mirror_x: mirror.then_some(canvas[0] / 2.0),
-            mirror_y: None,
-        };
+        let mapping = mapping_of(field(&scenario, "mapping"), mirror);
         let end = field(&scenario, "end").as_str().unwrap().to_string();
         let worker = Worker::spawn(Vec::new(), Arc::new(|| {}));
         let mut input = StrokeInput::new();
-        let context = Context { tool: ToolMode::Brush, space_held: false, playing: false, finger: FingerDraw::Never, mapping: &mapping, continue_from: None, region: None };
         let mut commands = Vec::new();
-        let base = 1_000_000_000u64;
-        let mut last_ns = base;
-        for event in field(&scenario, "events").elements().expect("events") {
-            let kind = field(&event, "type").as_str().unwrap(); // down, move or up
-            let num = |key: &str| field(&event, key).as_f64().unwrap();
-            let time_ns = base + (num("t") * 1e6) as u64;
-            last_ns = time_ns;
-            let mut sample = PenSample::at(time_ns, 1, Tool::Pen, num("x"), num("y"));
-            sample.phase = match kind {
-                "down" => Phase::Down,
-                "up" => Phase::Up,
-                _ if num("buttons") as u32 & 1 != 0 => Phase::Move,
-                _ => Phase::Hover,
-            };
-            sample.pressure = num("pressure") as f32;
-            sample.tilt_x = num("tiltX") as f32;
-            sample.tilt_y = num("tiltY") as f32;
-            sample.valid = Valid::PRESSURE | Valid::TILT;
-            if sample.phase != Phase::Hover && sample.phase != Phase::Up {
-                sample.buttons = PenButtons::TIP;
-            }
-            sample.modifiers = Modifiers::NONE;
-            input.feed(&InputEvent::Sample(sample), &context, &mut commands);
+        // A scenario that moves and turns the cel first has a first mark, painted with the cel's pose before the change.
+        if let Some(pre) = scenario.get("pre").filter(|v| v.is_object()) {
+            let before = mapping_of(field(pre, "mapping"), mirror);
+            feed_events(&mut input, field(pre, "events"), &before, "up", 1, &mut commands);
         }
-        match end.as_str() {
-            "lostcapture" => input.feed(&InputEvent::Interrupted { pointer: 1, time_ns: last_ns + 1, reason: InterruptReason::CaptureLost }, &context, &mut commands),
-            "escape" => input.discard(&mut commands),
-            _ => {}
-        }
+        feed_events(&mut input, field(&scenario, "events"), &mapping, &end, 2, &mut commands);
         for command in commands {
             worker.command(command, &brush);
         }

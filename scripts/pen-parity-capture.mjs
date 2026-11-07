@@ -40,6 +40,8 @@ const scenarios = [
   {name: 'interrupted', view: null, mirror: false, end: 'lostcapture'},
   // A flat tip that turns with the pen's tilt: the lean reaches the pixels.
   {name: 'tilt-angle', view: {scale: 1.7, dx: -11, dy: 9}, mirror: false, end: 'up', settings: {angleMode: 'tilt', roundness: 0.35}},
+  // The cel is turned and moved after its first mark, then painted on: the pose is in the pixel matrix.
+  {name: 'moved-and-rotated-cel', view: null, mirror: false, end: 'up', pose: {rotate: 0.55, move: [37, -23]}},
   {name: 'discarded', view: null, mirror: false, end: 'escape'},
 ];
 
@@ -89,6 +91,22 @@ async function capture(browser, scenario) {
     // The stage's offset in the window and the ratio of its client size to its rectangle, then the camera.
     return {rect: [r.left, r.top, r.clientWidth / r.width, r.clientHeight / r.height], camera: [...camera], pixel_matrix: d.gesture?.session?.matrix ?? d.pixelMatrix(target), canvas: [report.canvas_width, report.canvas_height]};
   });
+  let pre = null;
+  if (scenario.pose) {
+    // A first mark makes the cel; then the cel is rotated and moved as an object, and the stroke under test follows.
+    for (const e of sineStroke(cx - 40, cx + 40, cy, {samples: 6, amplitude: 5, hover: 1})) await send(e.type === 'down' ? 'mousePressed' : e.type === 'up' ? 'mouseReleased' : 'mouseMoved', e);
+    await page.evaluate(() => window.__settle());
+    pre = {events: await page.evaluate(() => window.__seen.slice()), mapping: await readMapping()};
+    await page.evaluate(pose => {
+      const e = styk.editor, target = e.drawingTarget();
+      e.select(target.object.unique_id);
+      e.rotateFigure(pose.rotate);
+      e.beginTranslationDrag('Move drawing');
+      e.moveSelection(pose.move[0], pose.move[1], {fromStart: true});
+      e.commitDrag();
+    }, scenario.pose);
+    await page.evaluate(() => { window.__seen.length = 0; });
+  }
   if (scenario.end === 'lostcapture') {
     // A synthetic pointer: capture is stubbed, and losing it is a lostpointercapture event.
     await page.evaluate(async ({events}) => {
@@ -145,7 +163,7 @@ async function capture(browser, scenario) {
     });
   }
   await page.close();
-  return {name: scenario.name, view: scenario.view, mirror: scenario.mirror, end: scenario.end, brush_json: JSON.stringify(brush), mapping, events: received, expect, errors};
+  return {name: scenario.name, view: scenario.view, mirror: scenario.mirror, end: scenario.end, brush_json: JSON.stringify(brush), mapping, events: received, pre, expect, errors};
 }
 
 const diff = (a, b, path = '') => {
