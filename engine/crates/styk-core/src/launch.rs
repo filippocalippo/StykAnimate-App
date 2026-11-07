@@ -3,8 +3,18 @@
 use std::path::PathBuf;
 
 /// The command line's shape, shown with every parse error.
-pub const USAGE: &str = "usage: stykanimate [file...] [--automation <script>] [--screenshot <png>] [--screen <id>] [--input-check <json>] [--size WxH] [--scale <factor>] [--shell-check]
+pub const USAGE: &str = "usage: stykanimate [file...] [--automation <script>] [--screenshot <png>] [--screen <id>] [--input-check <json>] [--size WxH] [--scale <factor>] [--clock fixed|system] [--shell-check]
        (developer build) stykanimate --pen-lab [--self-test standard|blocked|behaviour|stress[:seconds]] [--out <folder>]";
+
+/// Which clock the program runs on (`styk_services::clock`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClockMode {
+    /// The real, monotonic clock.
+    #[default]
+    System,
+    /// A clock that moves only when a script advances it (`advance` in the automation language): the same frames every run.
+    Fixed,
+}
 
 /// What the command line asked for.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -23,6 +33,8 @@ pub struct Launch {
     /// Developer build: drive the component sheet through the operating system's input path and write what happened
     /// to this JSON file, then exit.
     pub input_check: Option<PathBuf>,
+    /// The clock: `--clock fixed` makes a run deterministic.
+    pub clock: ClockMode,
     /// The window's logical size, instead of the default.
     pub size: Option<(u32, u32)>,
     /// The interface scale factor, instead of the display's.
@@ -73,6 +85,13 @@ impl Launch {
                 "--input-check" => launch.input_check = Some(PathBuf::from(value("--input-check")?)),
                 "--size" => launch.size = Some(parse_size(&value("--size")?)?),
                 "--scale" => launch.scale = Some(parse_scale(&value("--scale")?)?),
+                "--clock" => {
+                    launch.clock = match value("--clock")?.as_str() {
+                        "fixed" => ClockMode::Fixed,
+                        "system" => ClockMode::System,
+                        other => return Err(LaunchError(format!("--clock wants fixed or system, not {other:?}"))),
+                    }
+                }
                 "--shell-check" => launch.shell_check = true,
                 "--pen-lab" => launch.pen_lab = true,
                 "--self-test" => {
@@ -127,6 +146,14 @@ mod tests {
         assert_eq!(launch.screenshot, Some(PathBuf::from("out.png")));
         assert_eq!(launch.size, Some((1280, 800)));
         assert_eq!(launch.scale, Some(1.5));
+    }
+
+    #[test]
+    fn the_clock_is_the_system_one_unless_a_fixed_one_is_asked_for() {
+        assert_eq!(parse(&[]).unwrap().clock, ClockMode::System);
+        assert_eq!(parse(&["--clock", "fixed"]).unwrap().clock, ClockMode::Fixed);
+        assert_eq!(parse(&["--clock=system"]).unwrap().clock, ClockMode::System);
+        assert!(parse(&["--clock", "wall"]).unwrap_err().0.contains("fixed or system"));
     }
 
     #[test]
