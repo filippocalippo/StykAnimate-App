@@ -52,11 +52,11 @@ fn glyphs_wanted_by_a_superseded_screen_are_not_waited_for() {
     assert!(ink(&shown[0]) > 100);
     // Nothing the abandoned screen asked for stays asked for: the worker's answers are retired as they come.
     let started = Instant::now();
-    let mut state = cryoglyph::client_state();
+    let mut state = window.renderer.glyph_state();
     while state != (0, 0) && started.elapsed() < Duration::from_secs(5) {
         window.frame(&mut kept);
         std::thread::sleep(Duration::from_millis(5));
-        state = cryoglyph::client_state();
+        state = window.renderer.glyph_state();
     }
     assert_eq!(state, (0, 0), "no job and no mask of the superseded screen is kept (jobs, entries)");
 }
@@ -74,7 +74,7 @@ fn requests_beyond_the_bound_wait_for_the_next_candidate_and_all_arrive() {
     let started = Instant::now();
     loop {
         window.frame(&mut interface);
-        most = most.max(cryoglyph::client_state().0);
+        most = most.max(window.renderer.glyph_state().0);
         if !window.renderer.text_incomplete() {
             break;
         }

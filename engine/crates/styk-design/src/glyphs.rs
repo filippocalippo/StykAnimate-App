@@ -9,6 +9,12 @@ use iced::Subscription;
 use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, StreamExt};
 
+/// How long windows have kept their last frame for glyphs the worker was still drawing, for the developer tools. There is
+/// no deadline to a wait: a frame with holes in its text is never shown.
+pub fn held() -> iced::advanced::graphics::text::HeldFrames {
+    iced::advanced::graphics::text::held_frames()
+}
+
 /// Whether the frame drawn last lacked glyphs the worker is still drawing.
 pub fn incomplete() -> bool {
     iced::advanced::graphics::text::candidate_incomplete()

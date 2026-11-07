@@ -260,6 +260,21 @@ impl Storage {
 pub struct Viewport(cryoglyph::Viewport);
 
 impl Viewport {
+    /// Starts preparing a candidate frame with this window's text viewport.
+    pub fn begin_candidate(&self) {
+        self.0.begin_candidate();
+    }
+
+    /// Ends the candidate frame: whether glyphs it needs are still being drawn.
+    pub fn end_candidate(&self) -> bool {
+        self.0.end_candidate()
+    }
+
+    /// How many glyph jobs this window has outstanding and how many entries it keeps.
+    pub fn glyph_state(&self) -> (usize, usize) {
+        self.0.glyph_state()
+    }
+
     /// Tells the text renderer how glyphs are rasterized and blended (`graphics::text::set_rendering`).
     pub fn set_rendering(&mut self, queue: &wgpu::Queue) {
         let rendering = crate::graphics::text::rendering();

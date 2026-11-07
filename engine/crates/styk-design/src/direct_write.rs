@@ -85,7 +85,7 @@ fn drawn_by_the_text_stack(character: char) -> Option<(i32, i32, u32, u32, Vec<u
     let font = system.raw().get_font_instance(id, Weight::NORMAL, OpticalSize::DEFAULT)?;
     let glyph = font.as_swash().charmap().map(character);
     let mut direct_write = DirectWrite::new()?;
-    match direct_write.rasterize(&font, glyph, SIZE, 400, OpticalSize::DEFAULT, 0.0, Smoothing::ClearType) {
+    match direct_write.rasterize(&font, glyph, SIZE, 400, OpticalSize::DEFAULT, 0.0, Smoothing::ClearType, &mut |_, _| true) {
         Rasterized::Mask(mask) if mask.lcd => Some((mask.left, mask.top, mask.width, mask.height, mask.data)),
         _ => None,
     }
@@ -133,7 +133,7 @@ fn the_instances_of_a_variable_font_share_one_file_and_the_unused_are_evicted() 
     for weight in (100..=900).step_by(10) {
         let font = system.raw().get_font_instance(id, Weight(weight), OpticalSize::DEFAULT).expect("an instance of Inter");
         let glyph = font.as_swash().charmap().map('A');
-        if matches!(direct_write.rasterize(&font, glyph, 13.0, weight, OpticalSize::DEFAULT, 0.0, Smoothing::ClearType), Rasterized::Mask(_)) {
+        if matches!(direct_write.rasterize(&font, glyph, 13.0, weight, OpticalSize::DEFAULT, 0.0, Smoothing::ClearType, &mut |_, _| true), Rasterized::Mask(_)) {
             drawn += 1;
         }
         most_faces = most_faces.max(direct_write.held().0);
@@ -141,4 +141,57 @@ fn the_instances_of_a_variable_font_share_one_file_and_the_unused_are_evicted() 
     assert_eq!(drawn, 81, "every weight drew");
     assert!(most_faces <= MAX_FACES, "{most_faces} face instances were held at once");
     assert_eq!(direct_write.held().1, 1, "one copy of the font file served all of them");
+}
+
+/// The id of a bundled family's face in the text stack's font system.
+fn bundled(system: &mut iced::advanced::graphics::text::FontSystem, family: &str) -> iced::advanced::graphics::text::cosmic_text::fontdb::ID {
+    system.raw().db().faces().find(|face| face.families.iter().any(|(name, _)| name == family) && matches!(face.source, iced::advanced::graphics::text::cosmic_text::fontdb::Source::Binary(_))).unwrap_or_else(|| panic!("the bundled {family}")).id
+}
+
+#[test]
+fn a_mask_is_reserved_at_its_exact_size_before_any_memory_for_it_is_allocated() {
+    crate::warm_up::install_bundled();
+    let mut system = font_system().write().unwrap();
+    let id = bundled(&mut system, "Inter");
+    let font = system.raw().get_font_instance(id, Weight(400), OpticalSize::DEFAULT).expect("Inter");
+    let glyph = font.as_swash().charmap().map('W');
+    let mut direct_write = DirectWrite::new().expect("DirectWrite 5");
+
+    let mut asked = Vec::new();
+    let drawn = direct_write.rasterize(&font, glyph, 13.0, 400, OpticalSize::DEFAULT, 0.0, Smoothing::ClearType, &mut |pixels, lcd| {
+        asked.push((pixels, lcd));
+        true
+    });
+    let Rasterized::Mask(mask) = drawn else { panic!("the glyph has ink") };
+    assert_eq!(asked, vec![(mask.width as usize * mask.height as usize, true)], "asked once, with the glyph's pixels, before the mask existed");
+    assert_eq!(mask.data.len(), asked[0].0 * 3, "and the mask is the three bytes a pixel that were reserved");
+
+    // A refusal is recoverable: nothing is drawn, and the same glyph can be asked for again.
+    let refused = direct_write.rasterize(&font, glyph, 13.0, 400, OpticalSize::DEFAULT, 0.0, Smoothing::ClearType, &mut |_, _| false);
+    assert!(matches!(refused, Rasterized::Overflow), "{refused:?}");
+    let again = direct_write.rasterize(&font, glyph, 13.0, 400, OpticalSize::DEFAULT, 0.0, Smoothing::ClearType, &mut |_, _| true);
+    assert!(matches!(again, Rasterized::Mask(_)));
+}
+
+#[test]
+fn font_files_are_bounded_by_bytes_even_when_they_have_face_instances() {
+    crate::warm_up::install_bundled();
+    let mut system = font_system().write().unwrap();
+    let (inter, tight) = (bundled(&mut system, "Inter"), bundled(&mut system, "Inter Tight"));
+    // Room for the larger file and not for both.
+    let limit = crate::fonts::INTER.len().max(crate::fonts::INTER_TIGHT.len()) + 1;
+    assert!(limit < crate::fonts::INTER.len() + crate::fonts::INTER_TIGHT.len());
+    let mut direct_write = DirectWrite::with_limits(48, limit).expect("DirectWrite 5");
+    let mut most_files = 0;
+    for round in 0..6 {
+        for (id, weight) in [(inter, 400), (tight, 650)] {
+            let font = system.raw().get_font_instance(id, Weight(weight), OpticalSize::DEFAULT).expect("an instance");
+            let glyph = font.as_swash().charmap().map('A');
+            let drawn = direct_write.rasterize(&font, glyph, 13.0, weight, OpticalSize::DEFAULT, 0.0, Smoothing::ClearType, &mut |_, _| true);
+            assert!(matches!(drawn, Rasterized::Mask(_)), "round {round}: {drawn:?}");
+            most_files = most_files.max(direct_write.held().1);
+        }
+    }
+    assert_eq!(most_files, 1, "the file of the font in use is the only one held: a file with a cached face instance is evicted too");
+    assert_eq!(direct_write.held(), (1, 1), "and so are its face instances");
 }

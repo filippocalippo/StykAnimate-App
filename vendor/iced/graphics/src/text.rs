@@ -170,6 +170,45 @@ pub fn set_candidate_incomplete(incomplete: bool) {
     CANDIDATE_INCOMPLETE.store(incomplete, std::sync::atomic::Ordering::Release);
 }
 
+/// How long windows kept their last frame because the next one lacked glyphs a worker was still drawing: for the developer
+/// tools. There is no deadline to the wait (a frame with holes in its text is never shown), so these numbers are how a
+/// slow worker shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HeldFrames {
+    /// Candidate frames kept back, in all.
+    pub frames: u64,
+    /// Waits that ended with a whole frame shown.
+    pub waits: u64,
+    /// The longest of those waits, in milliseconds.
+    pub longest_millis: u64,
+    /// All those waits together, in milliseconds.
+    pub total_millis: u64,
+}
+
+static HELD_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static HELD_WAITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static HELD_LONGEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static HELD_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The renderer counts a candidate frame it kept back.
+pub fn record_held_frame() {
+    let _ = HELD_FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The renderer counts a wait that ended with a whole frame shown.
+pub fn record_wait(waited: std::time::Duration) {
+    let millis = waited.as_millis() as u64;
+    let _ = HELD_WAITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let _ = HELD_TOTAL.fetch_add(millis, std::sync::atomic::Ordering::Relaxed);
+    let _ = HELD_LONGEST.fetch_max(millis, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// What the renderers have kept back so far.
+pub fn held_frames() -> HeldFrames {
+    use std::sync::atomic::Ordering::Relaxed;
+    HeldFrames { frames: HELD_FRAMES.load(Relaxed), waits: HELD_WAITS.load(Relaxed), longest_millis: HELD_LONGEST.load(Relaxed), total_millis: HELD_TOTAL.load(Relaxed) }
+}
+
 /// Whether the frame the renderer prepared last lacked glyphs a worker is still drawing (never, where masks are drawn
 /// on the calling thread). A program that captures a frame draws again until this is false.
 pub fn candidate_incomplete() -> bool {

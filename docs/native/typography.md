@@ -233,30 +233,48 @@ for none of them) and with `STYK_TEXT_RASTERIZER=swash`. Shaping, layout and wid
   tree.
 - **Off the interface thread, and never half drawn.** Nothing is rasterized in `prepare`: a glyph the atlas lacks is
   asked of the worker (`cryoglyph::raster`, thread "glyphs") and left out of that candidate frame, which is then
-  *incomplete*. The window keeps showing its last complete frame (`iced_wgpu::presentation::Gate`: the compositor
-  prepares the frame before it acquires the swap chain's texture, and for an incomplete one never acquires it and returns
-  `SurfaceError::Withheld`; a texture acquired and not presented stalls every later acquire), the worker wakes the program (`styk_design::glyphs::ready`, a subscription) when
-  it has glyphs, iced prepares the incomplete uploads again, and the whole frame is shown. The wait is bounded: after
-  150 ms (`presentation::LIMIT`) the incomplete frame is shown, so a worker that never delivers cannot freeze a
-  window, and the window asks for a redraw at that time. A program that captures a frame (a screenshot, the typography
-  check, the headless path) draws until `glyphs::incomplete()` is false, and fails if it never is.
-- **The protocol** is the interface thread's own bookkeeping plus two bounded queues. A frame is a *candidate*
-  (`begin_candidate`, `end_candidate`): what it asks for is its to wait for, and whatever it did not ask for again is
-  obsolete when it ends (the worker skips the job if it has not started; a result that arrives is thrown away), so a
-  superseded screen or a changed scale never leaves a request pending. Requests go through a queue with nonblocking
-  admission (256 jobs and 2 MB of estimated masks outstanding per interface thread; a request not admitted is asked
-  again by the next candidate); results come back on a channel the interface thread drains, with at most 8 MB
-  waiting. No lock is shared with the worker. The worker draws the glyphs DirectWrite cannot (colour fonts, a failure)
-  and those with synthetic italic, unhinted or pixel-snapped flags with swash, on the same thread. It keeps one copy of
-  each font file for all of its weights and optical sizes, at most 48 face instances and 64 MB of font files that no
-  face instance uses (least recently used first).
-- **The fixed repertoire is drawn ahead.** `styk_design::repertoire::prewarm` runs once the font system is ready
-  (`warm_up`): every type role of the stylesheet at its size and weight, printable ASCII and the symbols of numbers and
-  labels in the four subpixel positions, and for the roles most text is set in the characters of the person's language
-  (Latin-1 and Latin Extended-A for Latin-script languages, Cyrillic, Greek, Vietnamese; none for the shaped or very large
-  scripts, whose text goes through the worker as it appears), at the system's scale. The results wait (16 MB at most) for
-  the first frame that uses them. A project name in Japanese, or a window on a monitor of another scale, still waits
-  for the worker once, within the bound above.
+  *incomplete*. An incomplete frame is **never shown, however long the worker takes**: there is no deadline (Chromium's
+  compositor has none either: it does not activate a frame before its raster is done). The window keeps its last
+  complete frame and asks again every 8 ms (`presentation::RETRY`; the worker also wakes the program through
+  `styk_design::glyphs::ready` when it has glyphs); iced prepares the incomplete uploads again, and the whole frame is
+  shown. A screen switched away before it is whole is simply superseded. How long frames were held is counted for the
+  developer tools (`styk_design::glyphs::held()`: candidates held, waits, the longest and the total in milliseconds).
+  The compositor prepares the frame before it acquires the swap chain's texture and never acquires one for a frame it
+  does not show (a texture acquired and not presented stalls every later acquire, on DX12 and on Vulkan); a suboptimal
+  texture is drawn and presented, and only then is the surface reconfigured, so no path acquires a texture it does not
+  present (`plan` in the wgpu compositor has a test for every answer of the swap chain). A program that captures a
+  frame (a screenshot, the typography check, the headless path) draws until `glyphs::incomplete()` is false, and fails
+  if it never is.
+- **A failure never leaves a hole.** A DirectWrite failure (a panic) is drawn again by swash on the worker. A worker that
+  dies is replaced by the next request, and the requests it was holding answer "lost" as they are dropped, so the
+  windows ask again. (A glyph that neither rasterizer can draw is an empty glyph: there is nothing to show.) If the
+  operating system cannot start a thread at all the window keeps its last frame and the held-frames counter grows.
+- **The protocol.** Every renderer (every window) is a *consumer* of the worker with its own bookkeeping (its
+  viewport): its candidate counter, what it asked for, what came back and its cancellation floor, so one window ending a
+  frame never retires another's requests. A frame is a *candidate* (`begin_candidate`, `end_candidate`): whatever it
+  did not ask for again is obsolete when it ends (the worker skips the job if it has not started; a result that arrives
+  is thrown away), so a superseded screen or a changed scale never leaves a request pending. Requests go through a queue
+  with nonblocking admission (256 jobs per consumer); results come back on the consumer's own channel. No lock is
+  shared with the worker. The worker draws the glyphs DirectWrite cannot (colour fonts, a failure) and those with
+  synthetic italic, unhinted or pixel-snapped flags with swash, on the same thread.
+- **Bytes are bounded for real.** All the masks frames hold share a budget of 16 MB (`FRAME_BYTES`): a request reserves its
+  glyph's largest plausible size before it is queued, DirectWrite is asked for the exact size of the mask before it
+  allocates it, the reservation travels with the mask through the reply queue and the consumer's store, and is given back
+  when the mask has been uploaded or thrown away. A request that does not fit is asked for again by the next candidate; a
+  mask larger than its reservation that cannot be granted more is answered with an overflow, which removes the request so
+  the next candidate asks again with the size learned. One mask larger than the whole budget still passes, alone. The warm
+  masks (below) have a budget of their own (`WARM_BYTES`), reserved before they are queued. DirectWrite keeps one copy of
+  each font file for all of its weights and optical sizes, at most 48 face instances and 64 MB of font files, least recently
+  used first, together with their face instances (a file with a cached face is not exempt).
+- **The fixed repertoire is drawn ahead.** `styk_design::repertoire` lays out every type role of the stylesheet at its size
+  and weight (printable ASCII and the symbols of numbers and labels in the four subpixel positions, and for the roles most
+  text is set in the characters of the person's language: Latin-1 and Latin Extended-A for Latin-script languages,
+  Cyrillic, Greek, Vietnamese; none for the shaped or very large scripts, whose text goes through the worker as it
+  appears) at the system's scale. The layout and the collection of the fonts are the part that takes the font system,
+  and `warm_up` does them **before it publishes readiness**; feeding the worker afterwards (`Prepared::feed`) never
+  touches the font system, so the interface thread is never made to wait for it. The results wait for the first frame that
+  uses them and are shared by the windows. A project name in Japanese, or a window on a monitor of another scale, still
+  waits for the worker once.
 - The atlas grows by copying its texture, not by drawing every glyph again.
 
 **Result** (`cargo xtask fonts`, Windows 11, ClearType on, the Inter rows, 90 per combination):
@@ -289,11 +307,16 @@ of about 100 distinct characters in one size) all glyphs were on screen after 16
 150 %, against 16 to 17 ms and 28 to 40 ms for swash on the interface thread, which stalls the frame it is drawn in
 instead. The interface's own text is drawn ahead (`repertoire`), so its first screens wait for nothing.
 
-**Tests** (`styk-text-check/tests`, each was seen to fail with the thing it checks removed): a screen switch in which no frame shown lacks a glyph (`glyph_gate`), superseded requests and results retired,
-requests beyond the bound waiting for the next candidate, synthetic italic drawn by the worker, unsmoothed text aliased
-(`aliased_text`), the fixed repertoire ready before the first frame (`glyph_prewarm`), the real window not stalling when
-frames are held back (`font_gate`); in `styk-design`, a mask against DirectWrite's own drawing and the bound on face
-instances; in `styk-platform`, the settings precedence with faked values; in `compare`, the ink mark failing the run.
+**Tests** (`styk-text-check/tests`, each was seen to fail with the thing it checks removed): quick screen switches against a
+slowed worker in which no frame shown lacks a glyph, however long the wait (`glyph_hold`), the same through a failing
+DirectWrite and a worker that dies (`glyph_failures`), two renderers alternating on one thread (`glyph_consumers`), the byte
+budget and the overflow that is asked for again (`glyph_budget`), feeding the worker with the font system held
+(`glyph_feed`), superseded requests retired, synthetic italic drawn by the worker (`glyph_gate`), unsmoothed text aliased
+(`aliased_text`), the fixed repertoire ready before the first frame (`glyph_prewarm`), the real window not stalling when frames
+are held back (`font_gate`); in `iced_wgpu`, the gate that has no deadline and the answer of the swap chain for each case; in
+`styk-design`, a mask against DirectWrite's own drawing, the exact reservation before a mask is allocated, the bounds on face
+instances and on font files, and the order of preparing the repertoire and publishing readiness; in `styk-platform`, the
+settings precedence with faked values; in `compare`, the ink mark failing the run.
 
 ## 7. The font system is ready before the first font-dependent widget
 

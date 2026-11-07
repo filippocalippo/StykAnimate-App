@@ -21,7 +21,7 @@ use iced::advanced::graphics::text::{font_system, font_system_if_built};
 use iced::Task;
 use std::borrow::Cow;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 static READY: AtomicBool = AtomicBool::new(false);
@@ -91,9 +91,25 @@ fn build_on_worker() {
 /// Builds the system (the first call to it does) and installs the bundled fonts, then marks it ready.
 fn build() {
     let _ = install_bundled();
+    // The interface's own glyphs: everything that needs the font system (the layout of the repertoire, the font
+    // instances) is done here, before readiness lets the interface thread reach it. Feeding the worker comes after and
+    // does not touch it.
+    let prepared = crate::repertoire::prepare(styk_platform::environment::system_scale(), &styk_platform::environment::user_locale());
+    PREPARED_AT.store(tick(), Ordering::Release);
     READY.store(true, Ordering::Release);
-    // The interface's own glyphs, drawn while the first screens are built.
-    let _ = crate::repertoire::prewarm(styk_platform::environment::system_scale(), styk_platform::environment::user_locale());
+    READY_AT.store(tick(), Ordering::Release);
+    if let Some(prepared) = prepared {
+        let _ = prepared.feed();
+    }
+}
+
+/// A clock of events, to say which came first: the repertoire is prepared before readiness is published.
+static ORDER: AtomicU64 = AtomicU64::new(0);
+static PREPARED_AT: AtomicU64 = AtomicU64::new(0);
+static READY_AT: AtomicU64 = AtomicU64::new(0);
+
+fn tick() -> u64 {
+    ORDER.fetch_add(1, Ordering::AcqRel) + 1
 }
 
 /// Makes the bundled Inter and Inter Tight the only faces of those families.
@@ -191,6 +207,8 @@ mod tests {
         }
         assert!(polls > 5, "the caller kept running while the font system was built ({polls} polls)");
         assert!(ready());
+        let (prepared, published) = (PREPARED_AT.load(Ordering::Acquire), READY_AT.load(Ordering::Acquire));
+        assert!(prepared > 0 && prepared < published, "the repertoire (which takes the font system) is prepared at {prepared}, before readiness is published at {published}");
         let system = iced::advanced::graphics::text::font_system_if_built().expect("built");
         let families: Vec<String> = system.read().unwrap().families().map(str::to_owned).collect();
         assert!(families.iter().any(|name| name == fonts::INTER_FAMILY), "{families:?}");

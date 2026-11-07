@@ -37,6 +37,8 @@ pub enum Rasterized {
     /// DirectWrite cannot draw this glyph the way the caller needs: a colour glyph, or a failure. Another rasterizer
     /// must.
     Unsupported,
+    /// The caller's reservation for the mask was refused (see [`DirectWrite::rasterize`]): nothing was allocated.
+    Overflow,
 }
 
 /// A glyph's coverage and where it sits.
@@ -130,12 +132,14 @@ struct Face {
 
 /// How many face instances a [`DirectWrite`] keeps; the least recently used go first.
 pub const MAX_FACES: usize = 48;
-/// How many bytes of font files a [`DirectWrite`] keeps; the least recently used file without a face instance goes
-/// first, and a file with one is never evicted.
+/// How many bytes of font files a [`DirectWrite`] keeps; the least recently used file goes first, with its face instances
+/// (only the file of the glyph being drawn is kept).
 pub const MAX_FILE_BYTES: usize = 64 << 20;
 
 /// DirectWrite, ready to draw glyph masks.
 pub struct DirectWrite {
+    max_faces: usize,
+    max_file_bytes: usize,
     factory: IDWriteFactory5,
     resources: IDWriteFactory6,
     analysis: IDWriteFactory2,
@@ -149,6 +153,12 @@ pub struct DirectWrite {
 impl DirectWrite {
     /// Starts DirectWrite, or `None` where it cannot (a Windows without `IDWriteFactory5`).
     pub fn new() -> Option<Self> {
+        Self::with_limits(MAX_FACES, MAX_FILE_BYTES)
+    }
+
+    /// [`DirectWrite::new`] holding at most `max_faces` face instances and `max_file_bytes` of font files (a file the
+    /// glyph being drawn needs is kept even when it alone is larger).
+    pub fn with_limits(max_faces: usize, max_file_bytes: usize) -> Option<Self> {
         // SAFETY: plain factory creation and registration of the in-memory loader, which this value unregisters.
         unsafe {
             let factory: IDWriteFactory5 = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).ok()?;
@@ -156,7 +166,7 @@ impl DirectWrite {
             let resources = factory.cast::<IDWriteFactory6>().ok()?;
             let loader = factory.CreateInMemoryFontFileLoader().ok()?;
             factory.RegisterFontFileLoader(&loader).ok()?;
-            Some(Self { factory, resources, analysis, loader, files: HashMap::new(), faces: HashMap::new(), clock: 0 })
+            Some(Self { max_faces, max_file_bytes, factory, resources, analysis, loader, files: HashMap::new(), faces: HashMap::new(), clock: 0 })
         }
     }
 
@@ -220,10 +230,11 @@ impl DirectWrite {
         Some((entry.face.clone(), file.hints.clone(), file.color))
     }
 
-    /// Drops the least recently used face instances beyond [`MAX_FACES`], then the least recently used files without a
-    /// face instance beyond [`MAX_FILE_BYTES`]. `keep` is the face just made.
+    /// Drops the least recently used face instances beyond the limit, then the least recently used font files beyond
+    /// the byte limit together with their face instances (a file with cached faces is not exempt). `keep` is the face
+    /// just made: its file stays.
     fn evict(&mut self, keep: FaceKey) {
-        while self.faces.len() > MAX_FACES {
+        while self.faces.len() > self.max_faces {
             let Some(oldest) = self.faces.iter().filter(|(key, _)| **key != keep).min_by_key(|(_, face)| face.used).map(|(key, _)| *key) else {
                 break;
             };
@@ -231,17 +242,18 @@ impl DirectWrite {
         }
         loop {
             let held: usize = self.files.values().flatten().map(|file| file.bytes).sum();
-            if held <= MAX_FILE_BYTES {
+            if held <= self.max_file_bytes {
                 break;
             }
-            let idle = self
+            let oldest = self
                 .files
                 .iter()
-                .filter(|(id, file)| file.is_some() && !self.faces.keys().any(|key| key.font == **id))
+                .filter(|(id, file)| file.is_some() && **id != keep.font)
                 .min_by_key(|(_, file)| file.as_ref().map_or(0, |file| file.used))
                 .map(|(id, _)| *id);
-            match idle {
+            match oldest {
                 Some(id) => {
+                    self.faces.retain(|key, _| key.font != id);
                     self.files.remove(&id);
                 }
                 None => break,
@@ -250,7 +262,12 @@ impl DirectWrite {
     }
 
     /// Draws `glyph` of `font` at `size` device pixels, `x_offset` pixels (0 to 1) to the right of its origin.
-    pub fn rasterize(&mut self, font: &Font, glyph: u16, size: f32, weight: u16, optical_size: OpticalSize, x_offset: f32, smoothing: Smoothing) -> Rasterized {
+    ///
+    /// `reserve` is asked, once the glyph's size is known and before any memory for the mask is allocated, whether the
+    /// caller can hold a mask of that many pixels (its width times its height) with the given colour kind (ClearType
+    /// masks have three bytes a pixel, the others one). When it says no, nothing is allocated and the result is
+    /// [`Rasterized::Overflow`].
+    pub fn rasterize(&mut self, font: &Font, glyph: u16, size: f32, weight: u16, optical_size: OpticalSize, x_offset: f32, smoothing: Smoothing, reserve: &mut dyn FnMut(usize, bool) -> bool) -> Rasterized {
         let analysis = self.analysis.clone();
         let factory: IDWriteFactory = self.factory.cast().expect("a factory 5 is a factory");
         let Some((face, hints, color)) = self.face(font, weight, optical_size) else {
@@ -296,6 +313,9 @@ impl DirectWrite {
                     return Some(Rasterized::Empty);
                 }
                 let (width, height) = ((bounds.right - bounds.left) as u32, (bounds.bottom - bounds.top) as u32);
+                if !reserve(width as usize * height as usize, lcd) {
+                    return Some(Rasterized::Overflow);
+                }
                 let mut data = alloc::vec![0u8; width as usize * height as usize * if lcd { 3 } else { 1 }];
                 analysis.CreateAlphaTexture(texture, &bounds, &mut data).ok()?;
                 if smoothing == Smoothing::Aliased {

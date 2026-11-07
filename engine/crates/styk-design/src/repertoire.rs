@@ -138,15 +138,46 @@ pub fn keys(scale: f32, locale: &str) -> Vec<(CacheKey, Arc<Font>)> {
         .collect()
 }
 
-/// Asks the glyph worker for the repertoire at `scale` for `locale`, from a thread of its own that feeds the worker's
-/// bounded queue as it drains. Does nothing where glyphs are drawn on the calling thread. Returns at once, with the thread
-/// that feeds the worker (it ends when everything is queued).
-pub fn prewarm(scale: f32, locale: String) -> Option<std::thread::JoinHandle<()>> {
+/// The repertoire laid out and its fonts collected: everything that needs the font system is done. [`Prepared::feed`]
+/// then queues the glyphs for the worker without touching it again.
+pub struct Prepared {
+    glyphs: Vec<(CacheKey, Arc<Font>)>,
+    direct_write: bool,
+}
+
+impl Prepared {
+    /// How many glyphs there are to draw.
+    pub fn len(&self) -> usize {
+        self.glyphs.len()
+    }
+
+    /// Whether there are none.
+    pub fn is_empty(&self) -> bool {
+        self.glyphs.is_empty()
+    }
+
+    /// Queues the glyphs for the worker from a thread of its own, as the worker's bounded queue drains. Never touches the
+    /// font system (the interface thread takes it synchronously). Returns at once, with the thread that feeds the worker
+    /// (it ends when everything is queued).
+    pub fn feed(self) -> Option<std::thread::JoinHandle<()>> {
+        std::thread::Builder::new().name("glyph-warm".into()).spawn(move || feed(self.glyphs, self.direct_write)).ok()
+    }
+}
+
+/// Lays the repertoire out at `scale` for `locale` and collects its fonts, or `None` where glyphs are drawn on the
+/// calling thread. This is the part that takes the font system, so a program does it before it lets the interface thread
+/// reach the fonts (`warm_up` does it before it publishes readiness).
+pub fn prepare(scale: f32, locale: &str) -> Option<Prepared> {
     let drawing = rendering().glyphs;
     if drawing == GlyphDrawing::Inline {
         return None;
     }
-    std::thread::Builder::new().name("glyph-warm".into()).spawn(move || feed(keys(scale, &locale), drawing == GlyphDrawing::DirectWrite)).ok()
+    Some(Prepared { glyphs: keys(scale, locale), direct_write: drawing == GlyphDrawing::DirectWrite })
+}
+
+/// [`prepare`] and [`Prepared::feed`] in one: for programs and tests that have no interface thread to protect.
+pub fn prewarm(scale: f32, locale: String) -> Option<std::thread::JoinHandle<()>> {
+    prepare(scale, &locale)?.feed()
 }
 
 /// Feeds `glyphs` to the worker as its queue has room, for at most ten seconds.

@@ -220,9 +220,16 @@ impl Renderer {
 
     /// Whether the window keeps the last frame it showed instead of showing the one just drawn, until `until` at the
     /// latest: the frame lacks glyphs a worker is still drawing, and a frame is never shown with holes in its text
-    /// (the wait is bounded: [`presentation::LIMIT`]). Call it after drawing a frame and before showing it.
+    /// (there is no deadline: see [`presentation`]); it says when to ask again. Call it after preparing a frame and
+    /// before showing it.
     pub fn hold_frame(&mut self) -> Option<std::time::Instant> {
-        self.gate.hold(self.text_incomplete, std::time::Instant::now(), presentation::LIMIT)
+        self.gate.hold(self.text_incomplete, std::time::Instant::now())
+    }
+
+    /// How many glyph jobs this window's text has outstanding and how many entries (asked for or drawn and waiting) it
+    /// keeps.
+    pub fn glyph_state(&self) -> (usize, usize) {
+        self.text_viewport.glyph_state()
     }
 
     /// Whether the frame drawn last lacks glyphs a worker is still drawing.
@@ -343,7 +350,7 @@ impl Renderer {
         self.text_viewport
             .update(&self.engine.queue, viewport.physical_size());
         self.text_viewport.set_rendering(&self.engine.queue);
-        cryoglyph::begin_candidate();
+        self.text_viewport.begin_candidate();
 
         let physical_bounds =
             Rectangle::<f32>::from(Rectangle::with_size(viewport.physical_size()));
@@ -450,7 +457,7 @@ impl Renderer {
             }
         }
 
-        self.text_incomplete = cryoglyph::end_candidate();
+        self.text_incomplete = self.text_viewport.end_candidate();
         crate::graphics::text::set_candidate_incomplete(self.text_incomplete);
     }
 

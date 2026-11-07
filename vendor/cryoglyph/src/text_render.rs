@@ -125,11 +125,16 @@ impl TextRenderer {
                         details.last_used = color_generation;
                         details
                     } else {
+                        // The bytes of a mask drawn by the worker stay reserved until it has been uploaded (the end of this block).
+                        let mut _held = None;
                         let image = if drawing == crate::GlyphDrawing::Inline {
                             cache.get_image_uncached(font_system, cache_key)
                         } else {
-                            match crate::raster::lookup(&cache_key, || font_system.get_font_instance(cache_key.font_id, cache_key.font_weight, cache_key.font_optical_size), drawing == crate::GlyphDrawing::DirectWrite) {
-                                crate::raster::Lookup::Ready(image) => Some(image),
+                            match viewport.lookup(&cache_key, || font_system.get_font_instance(cache_key.font_id, cache_key.font_weight, cache_key.font_optical_size), drawing == crate::GlyphDrawing::DirectWrite) {
+                                crate::raster::Lookup::Ready(image, reservation) => {
+                                    _held = reservation;
+                                    Some(image)
+                                }
                                 crate::raster::Lookup::Missing => {
                                     self.incomplete = true;
                                     None

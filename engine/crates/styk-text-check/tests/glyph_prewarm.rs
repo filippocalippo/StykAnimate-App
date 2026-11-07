@@ -28,7 +28,7 @@ fn the_interfaces_fixed_glyphs_are_ready_before_its_first_frame() {
     }
     let (queued, warm_bytes) = cryoglyph::worker_state();
     assert_eq!(queued, 0, "the worker drew everything asked of it");
-    assert!(warm_bytes > 100_000 && warm_bytes <= cryoglyph::MAX_WARM_BYTES, "{warm_bytes} bytes of warm glyphs");
+    assert!(warm_bytes > 100_000 && warm_bytes <= cryoglyph::WARM_BYTES, "{warm_bytes} bytes of warm glyphs");
     // Body-sized text in the app's Latin letters, digits and accents: the first candidate is whole.
     let style = styk_design::typography::TextStyle::from_role(&styk_design::tokens::scale::TYPE_BODY);
     let element: iced::Element<'static, (), iced::Theme, iced_wgpu::Renderer> = text("Posizione Rotazione 45,25° Zoom 100% — è più già").font(style.font).size(style.pixels()).line_height(style.line()).color(Color::BLACK).boxed();

@@ -141,6 +141,9 @@ pub enum SurfaceError {
     /// frame; draw again when the glyphs are ready, at the latest at the given time.
     #[error("The frame was kept back until its glyphs are ready")]
     Withheld(std::time::Instant),
+    /// The frame was shown, but the surface no longer matches the window exactly: reconfigure it for the next one.
+    #[error("The frame was shown, but the surface should be reconfigured")]
+    Suboptimal,
 }
 
 /// Contains information about the graphics (e.g. graphics adapter, graphics backend).

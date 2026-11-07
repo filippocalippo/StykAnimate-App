@@ -237,9 +237,9 @@ pub fn present(
     on_pre_present: impl FnOnce(),
 ) -> Result<(), compositor::SurfaceError> {
     // The frame is prepared before the surface's texture is acquired. A frame whose text lacks glyphs a worker is still
-    // drawing is not shown: the window keeps its last complete frame and is drawn again when the glyphs are ready, or
-    // when the wait ends. The texture is never acquired for it: one that is acquired and dropped without being
-    // presented stalls the swap chain (every later acquire times out).
+    // drawing is not shown, ever: the window keeps its last complete frame and asks again. The texture is never acquired
+    // for it: one that is acquired and dropped without being presented stalls the swap chain (every later acquire
+    // times out), so no path acquires a texture it does not present (see `plan`).
     let candidate = renderer.prepare_candidate(viewport);
 
     if let Some(until) = renderer.hold_frame() {
@@ -247,8 +247,11 @@ pub fn present(
         return Err(compositor::SurfaceError::Withheld(until));
     }
 
-    match surface.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(frame) => {
+    let acquired = surface.get_current_texture();
+    let plan = plan(Acquired::of(&acquired));
+    match acquired {
+        wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
+            debug_assert!(plan.present, "a texture was acquired: it is presented");
             let view = &frame
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
@@ -259,18 +262,93 @@ pub fn present(
             on_pre_present();
             renderer.engine.queue.present(frame);
 
-            Ok(())
+            plan.then.map_or(Ok(()), Err)
         }
-        other => {
+        _ => {
+            // No texture was acquired: nothing to present, and the prepared frame's uploads still go out.
             let _ = renderer.drop_candidate(candidate);
-            Err(match other {
-                wgpu::CurrentSurfaceTexture::Suboptimal(_) | wgpu::CurrentSurfaceTexture::Outdated => compositor::SurfaceError::Outdated,
-                wgpu::CurrentSurfaceTexture::Timeout => compositor::SurfaceError::Timeout,
-                wgpu::CurrentSurfaceTexture::Occluded => compositor::SurfaceError::Occluded,
-                wgpu::CurrentSurfaceTexture::Lost => compositor::SurfaceError::Lost,
-                _ => compositor::SurfaceError::Other,
-            })
+            Err(plan.then.unwrap_or(compositor::SurfaceError::Other))
         }
+    }
+}
+
+/// What `get_current_texture` answered, without the texture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Acquired {
+    Success,
+    Suboptimal,
+    Timeout,
+    Outdated,
+    Occluded,
+    Lost,
+    Validation,
+}
+
+impl Acquired {
+    fn of(acquired: &wgpu::CurrentSurfaceTexture) -> Self {
+        match acquired {
+            wgpu::CurrentSurfaceTexture::Success(_) => Acquired::Success,
+            wgpu::CurrentSurfaceTexture::Suboptimal(_) => Acquired::Suboptimal,
+            wgpu::CurrentSurfaceTexture::Timeout => Acquired::Timeout,
+            wgpu::CurrentSurfaceTexture::Outdated => Acquired::Outdated,
+            wgpu::CurrentSurfaceTexture::Occluded => Acquired::Occluded,
+            wgpu::CurrentSurfaceTexture::Lost => Acquired::Lost,
+            wgpu::CurrentSurfaceTexture::Validation => Acquired::Validation,
+        }
+    }
+
+    /// Whether the answer carries a texture: one that is acquired must be presented.
+    #[cfg(test)]
+    fn carries_a_texture(self) -> bool {
+        matches!(self, Acquired::Success | Acquired::Suboptimal)
+    }
+}
+
+/// What to do with an answer: whether to draw and present, and the error to report afterwards.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Plan {
+    present: bool,
+    then: Option<compositor::SurfaceError>,
+}
+
+/// A suboptimal texture is valid: it is drawn and presented, and only then is the surface reconfigured.
+fn plan(acquired: Acquired) -> Plan {
+    use compositor::SurfaceError as E;
+    match acquired {
+        Acquired::Success => Plan { present: true, then: None },
+        Acquired::Suboptimal => Plan { present: true, then: Some(E::Suboptimal) },
+        Acquired::Timeout => Plan { present: false, then: Some(E::Timeout) },
+        Acquired::Outdated => Plan { present: false, then: Some(E::Outdated) },
+        Acquired::Occluded => Plan { present: false, then: Some(E::Occluded) },
+        Acquired::Lost => Plan { present: false, then: Some(E::Lost) },
+        Acquired::Validation => Plan { present: false, then: Some(E::Other) },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_answer_that_carries_a_texture_presents_it() {
+        for acquired in [Acquired::Success, Acquired::Suboptimal, Acquired::Timeout, Acquired::Outdated, Acquired::Occluded, Acquired::Lost, Acquired::Validation] {
+            assert_eq!(plan(acquired).present, acquired.carries_a_texture(), "{acquired:?}: a texture acquired and not presented stalls the swap chain; presenting where none was acquired is impossible");
+        }
+    }
+
+    #[test]
+    fn a_suboptimal_texture_is_presented_and_then_the_surface_is_reconfigured() {
+        assert_eq!(plan(Acquired::Suboptimal), Plan { present: true, then: Some(compositor::SurfaceError::Suboptimal) });
+        assert_eq!(plan(Acquired::Success).then, None);
+    }
+
+    #[test]
+    fn the_answers_without_a_texture_report_their_own_error() {
+        assert_eq!(plan(Acquired::Outdated).then, Some(compositor::SurfaceError::Outdated));
+        assert_eq!(plan(Acquired::Lost).then, Some(compositor::SurfaceError::Lost));
+        assert_eq!(plan(Acquired::Occluded).then, Some(compositor::SurfaceError::Occluded));
+        assert_eq!(plan(Acquired::Timeout).then, Some(compositor::SurfaceError::Timeout));
+        assert_eq!(plan(Acquired::Validation).then, Some(compositor::SurfaceError::Other));
     }
 }
 

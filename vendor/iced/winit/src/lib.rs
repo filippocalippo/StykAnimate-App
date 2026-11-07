@@ -958,6 +958,13 @@ async fn run_instance<P>(
 
                                     // Do nothing and wait for window to become visible again
                                 }
+                                compositor::SurfaceError::Suboptimal => {
+                                    present_span.finish();
+
+                                    // The frame was drawn and shown; the surface only needs to match the window again.
+                                    window.configure_surface(current_compositor);
+                                    window.raw.request_redraw();
+                                }
                                 compositor::SurfaceError::Withheld(until) => {
                                     present_span.finish();
 

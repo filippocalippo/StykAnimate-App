@@ -12,7 +12,7 @@ mod text_render;
 mod viewport;
 
 pub use cache::Cache;
-pub use raster::{GlyphDrawing, MAX_INFLIGHT_BYTES, MAX_JOBS, MAX_READY_BYTES, MAX_WARM_BYTES, begin_candidate, client_state, end_candidate, prewarm, set_glyph_notifier, worker_state};
+pub use raster::{FRAME_BYTES, GlyphDrawing, MAX_JOBS, WARM_BYTES, fail_draws, frame_bytes, kill_worker, overflow_draws, prewarm, set_frame_budget, set_glyph_notifier, skipped_jobs, slow_worker, worker_state};
 pub use error::{PrepareError, RenderError};
 pub use text_atlas::{ColorMode, TextAtlas};
 pub use text_render::TextRenderer;

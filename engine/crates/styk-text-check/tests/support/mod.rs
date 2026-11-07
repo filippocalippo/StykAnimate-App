@@ -66,7 +66,7 @@ impl Window {
     pub fn until_complete(&mut self, interface: &mut Interface) -> Vec<Vec<u8>> {
         let mut shown = Vec::new();
         let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(10) {
+        while started.elapsed() < Duration::from_secs(40) {
             if self.frame(interface) {
                 shown.push(self.shown.clone());
                 if !self.renderer.text_incomplete() {
@@ -76,7 +76,7 @@ impl Window {
             }
             std::thread::sleep(Duration::from_millis(1));
         }
-        panic!("no complete frame in ten seconds");
+        panic!("no complete frame in forty seconds");
     }
 }
 
