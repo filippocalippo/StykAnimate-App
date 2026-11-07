@@ -398,6 +398,7 @@ dependencies = [
  "unicode-linebreak",
  "unicode-script",
  "unicode-segmentation",
+ "windows",
 ]
 
 [[package]]
@@ -2828,9 +2829,12 @@ dependencies = [
 name = "styk-design"
 version = "0.1.0"
 dependencies = [
+ "cryoglyph",
  "iced",
  "iced_test",
  "styk-core",
+ "styk-platform",
+ "windows",
 ]
 
 [[package]]
@@ -3026,10 +3030,15 @@ dependencies = [
 name = "styk-text-check"
 version = "0.1.0"
 dependencies = [
+ "cryoglyph",
  "iced",
+ "iced_runtime",
+ "iced_wgpu",
  "png",
+ "pollster",
  "styk-design",
  "styk-platform",
+ "wgpu",
 ]
 
 [[package]]

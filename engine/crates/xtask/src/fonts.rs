@@ -31,6 +31,11 @@ pub fn verify(root: &Path) -> Result<(), String> {
     run(Command::new("node").current_dir(root).arg("engine/crates/xtask/fonts-verify.mjs"), "the bundled-font verification")
 }
 
+/// `cargo xtask fonts surfaces`: which CSS surfaces Chromium draws ClearType text on.
+pub fn surfaces(root: &Path) -> Result<(), String> {
+    run(Command::new("node").current_dir(root).arg("engine/crates/xtask/fonts-surfaces.mjs"), "the surface probe")
+}
+
 pub fn check(root: &Path) -> Result<(), String> {
     verify(root)?;
     let out: PathBuf = root.join("artifacts/fonts");

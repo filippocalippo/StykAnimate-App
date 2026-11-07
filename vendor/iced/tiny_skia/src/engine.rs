@@ -297,6 +297,7 @@ impl Engine {
                 color,
                 clip_bounds: local_clip_bounds,
                 transformation: local_transformation,
+                ..
             } => {
                 let transformation = transformation * *local_transformation;
                 let Some(clip_bounds) =
@@ -335,6 +336,7 @@ impl Engine {
                 color,
                 clip_bounds: local_clip_bounds,
                 transformation: local_transformation,
+                ..
             } => {
                 let transformation = transformation * *local_transformation;
 
@@ -368,6 +370,7 @@ impl Engine {
                 wrapping,
                 ellipsis,
                 clip_bounds: local_clip_bounds,
+                ..
             } => {
                 let physical_bounds = *local_clip_bounds * transformation;
 

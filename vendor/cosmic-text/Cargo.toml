@@ -78,3 +78,8 @@ opt-level = 1
 
 [package.metadata.docs.rs]
 features = ["vi"]
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.62"
+default-features = false
+features = ["Win32_Graphics_DirectWrite", "Win32_Foundation", "Win32_Graphics_Gdi"]
