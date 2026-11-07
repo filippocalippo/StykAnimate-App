@@ -18,3 +18,7 @@ testing = ["widgets", "dep:iced_test", "iced/tiny-skia"]
 iced = { workspace = true, optional = true }
 iced_test = { path = "../../../vendor/iced/test", optional = true }
 styk-core = { path = "../styk-core", optional = true }
+
+# The same Linux display backends as styk-app and styk-ui, so `-p styk-design --features widgets` builds there too.
+[target.'cfg(target_os = "linux")'.dependencies]
+iced = { workspace = true, optional = true, features = ["x11", "wayland", "wayland-dlopen", "wayland-decorations"] }

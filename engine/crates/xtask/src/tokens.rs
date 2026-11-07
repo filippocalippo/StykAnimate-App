@@ -9,15 +9,24 @@
 //!   become the fields of `Palette`, with `LIGHT` and `DARK` values.
 //!
 //! Every value is resolved through `var()` at generation time; colours become `Rgba` with the alpha CSS computes,
-//! shadows become `BoxShadow` lists. Declarations that cannot be a constant (`calc()`, `max()`, `env()`, shorthands
-//! that are not a type role) are listed at the top of the generated file so a porter can see what was left out.
+//! shadows become `BoxShadow` lists, and a length expression (`max()`, `min()`, `clamp()`, `calc()`) becomes a function
+//! of the run-time properties it reads ([`crate::expr`]).
+//!
+//! A declaration in a rule this reader follows that it cannot turn into one of those is an **error**, so `design
+//! check` fails the moment the CSS gains a token the native interface would silently lack. Whole rules it does not
+//! follow (touch input, compact chrome) are listed at the top of the generated file instead.
 
 use crate::css::{self, Rule};
+use crate::expr;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
 const LIGHT_SELECTOR: &str = ":root[data-theme=\"light\"]";
 const DARK_SELECTOR: &str = ":root[data-theme=\"dark\"]";
+
+/// Custom properties the page sets at run time (the UI scale preference). Expressions that read them become functions
+/// of them; their declared value in the CSS is only the default.
+const RUNTIME_INPUTS: &[&str] = &["--ui-scale"];
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -30,6 +39,8 @@ pub enum Value {
     Bezier([f64; 4]),
     Text(String),
     Type { weight: f64, size: f64, line_height: f64, family: String },
+    /// A length expression over run-time properties: the Rust expression and its parameters (CSS property names).
+    Function { params: Vec<String>, body: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -51,8 +62,8 @@ pub struct Tokens {
     pub scale: Vec<(String, Value)>,
     /// The themed names, in source order, with their light and dark values.
     pub themed: Vec<(String, Value, Value)>,
-    /// Declarations that cannot be constants, with the reason.
-    pub skipped: Vec<(String, String)>,
+    /// Rules this reader does not follow, by selector, with how many custom properties each declares.
+    pub unfollowed: Vec<(String, usize)>,
 }
 
 pub fn parse(source: &str) -> Result<Tokens, String> {
@@ -61,8 +72,16 @@ pub fn parse(source: &str) -> Result<Tokens, String> {
     let mut dark: HashMap<String, String> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
     let mut themed_names: Vec<String> = Vec::new();
+    let mut unfollowed: Vec<(String, usize)> = Vec::new();
     for rule in &rules {
-        let Some(target) = target_of(rule) else { continue };
+        let Some(target) = target_of(rule) else {
+            let selector = rule.selectors.join(", ");
+            match unfollowed.iter_mut().find(|(seen, _)| *seen == selector) {
+                Some((_, count)) => *count += rule.properties.len(),
+                None => unfollowed.push((selector, rule.properties.len())),
+            }
+            continue;
+        };
         for (name, value) in &rule.properties {
             if !order.contains(name) {
                 order.push(name.clone());
@@ -78,12 +97,12 @@ pub fn parse(source: &str) -> Result<Tokens, String> {
     }
     let mut dark_env = base.clone();
     dark_env.extend(dark);
-    let mut tokens = Tokens::default();
+    let mut tokens = Tokens { unfollowed, ..Tokens::default() };
     for name in &order {
         let is_themed = themed_names.contains(name);
-        let light = classify(name, &base, &mut tokens.skipped)?;
+        let light = classify(name, &base)?;
         if is_themed {
-            let dark = classify(name, &dark_env, &mut tokens.skipped)?;
+            let dark = classify(name, &dark_env)?;
             match (light, dark) {
                 (Some(light), Some(dark)) => {
                     if !matches!((&light, &dark), (Value::Color(..), Value::Color(..)) | (Value::Shadows(_), Value::Shadows(_))) {
@@ -128,26 +147,21 @@ fn target_of(rule: &Rule) -> Option<Target> {
     }
 }
 
-/// The value of `name` in `env`, or None (and a note in `skipped`) when it cannot be a constant.
-fn classify(name: &str, env: &HashMap<String, String>, skipped: &mut Vec<(String, String)>) -> Result<Option<Value>, String> {
+/// The value of `name` in `env`, or None when `env` does not declare it. A declaration the generator cannot turn into
+/// a value is an error: see the module documentation.
+fn classify(name: &str, env: &HashMap<String, String>) -> Result<Option<Value>, String> {
     let Some(raw) = env.get(name) else { return Ok(None) };
-    // A property the page sets at run time (`--ui-scale`) cannot be resolved here: that token is not a constant.
-    let resolved = match css::resolve(raw, env) {
-        Ok(resolved) => resolved,
-        Err(reason) => {
-            skipped.push((name.to_string(), format!("{reason}: {raw}")));
-            return Ok(None);
+    let unsupported = |reason: String| format!("{name}: {reason} (declared as {raw:?}); teach crates/xtask/src/tokens.rs to generate it, or declare it in a rule the generator does not follow");
+    if expr::is_expression(raw) {
+        let kept = css::resolve_keeping(raw, env, RUNTIME_INPUTS).map_err(unsupported)?;
+        let parsed = expr::parse(&kept).map_err(unsupported)?;
+        if let Some(unknown) = parsed.params.iter().find(|param| !RUNTIME_INPUTS.contains(&param.as_str())) {
+            return Err(unsupported(format!("reads {unknown}, which is neither declared nor a run-time input")));
         }
-    };
-    match value_of(name, &resolved) {
-        Ok(value) => Ok(Some(value)),
-        Err(reason) => {
-            if !skipped.iter().any(|(skipped_name, _)| skipped_name == name) {
-                skipped.push((name.to_string(), format!("{reason}: {resolved}")));
-            }
-            Ok(None)
-        }
+        return Ok(Some(Value::Function { params: parsed.params.clone(), body: parsed.rust() }));
     }
+    let resolved = css::resolve(raw, env).map_err(unsupported)?;
+    value_of(name, &resolved).map(Some).map_err(|reason| unsupported(format!("{reason}: {resolved}")))
 }
 
 fn value_of(name: &str, text: &str) -> Result<Value, String> {
@@ -322,7 +336,7 @@ fn scale_constant(name: &str, value: &Value) -> Option<(String, String, String)>
         Value::Bezier(b) => (base, "[f32; 4]".into(), format!("[{}, {}, {}, {}]", float(b[0]), float(b[1]), float(b[2]), float(b[3]))),
         Value::Text(t) => (base, "&str".into(), format!("r#\"{t}\"#")),
         Value::Type { weight, size, line_height, family } => (base, "TypeRole".into(), format!("TypeRole {{ weight: {}, size: {}, line_height: {}, family: r#\"{family}\"# }}", float(*weight), float(*size), float(*line_height))),
-        Value::Color(..) | Value::Shadows(_) => return None,
+        Value::Function { .. } | Value::Color(..) | Value::Shadows(_) => return None,
     })
 }
 
@@ -331,9 +345,9 @@ pub fn generate(source: &str) -> Result<String, String> {
     let mut out = String::new();
     out.push_str("// @generated by `cargo xtask design generate` from src/styles/tokens.css. Do not edit: change the CSS and regenerate.\n");
     out.push_str("// `cargo xtask design check` fails when this file is stale.\n//\n");
-    out.push_str("// Left out because a constant cannot hold them (calc(), max(), env(), shorthands, touch and compact overrides):\n");
-    for (name, reason) in &tokens.skipped {
-        let _ = writeln!(out, "//   {name}: {reason}");
+    out.push_str("// Rules this file does not follow, with how many custom properties each declares (the native interface lays out\n// touch and compact chrome with its own rules):\n");
+    for (selector, count) in &tokens.unfollowed {
+        let _ = writeln!(out, "//   {selector}: {count}");
     }
     out.push_str("\nuse crate::{BoxShadow, Rgba, TypeRole};\n");
 
@@ -347,7 +361,17 @@ pub fn generate(source: &str) -> Result<String, String> {
 
     out.push_str("\n/// The scales: type, space, radius, controls, motion. The same in both themes.\n#[allow(missing_docs)]\npub mod scale {\n    #[allow(unused_imports)]\n    use super::TypeRole;\n");
     for (name, value) in &tokens.scale {
-        if let Some((constant, ty, expression)) = scale_constant(name, value) {
+        if let Value::Function { params, body } = value {
+            let arguments: Vec<String> = params.iter().map(|param| format!("{}: f32", expr::parameter(param))).collect();
+            let reads: Vec<String> = params.iter().map(|param| format!("`{param}` as `{}`", expr::parameter(param))).collect();
+            let _ = writeln!(
+                out,
+                "    /// `{name}`, a length that depends on {} (set at run time; the CSS declares only a default).\n    #[allow(unused_parens)]\n    pub fn {}({}) -> f32 {{\n        {body}\n    }}",
+                reads.join(" and "),
+                field_name(name),
+                arguments.join(", ")
+            );
+        } else if let Some((constant, ty, expression)) = scale_constant(name, value) {
             let _ = writeln!(out, "    /// `{name}`\n    pub const {constant}: {ty} = {expression};");
         }
     }
@@ -428,7 +452,30 @@ mod tests {
         assert_eq!(space.1, Value::Px(8.0));
         let role = tokens.scale.iter().find(|(name, _)| name == "--type-ui").unwrap();
         assert_eq!(role.1, Value::Type { weight: 500.0, size: 13.0, line_height: 20.0, family: "\"Inter\", sans-serif".into() });
-        assert!(tokens.skipped.iter().any(|(name, _)| name == "--topbar-h"));
+        assert_eq!(tokens.unfollowed, [(":root[data-input=\"touch\"]".to_string(), 1)]);
+    }
+
+    #[test]
+    fn a_length_expression_becomes_a_function_of_the_runtime_input() {
+        let tokens = parse(CSS).unwrap();
+        let topbar = tokens.scale.iter().find(|(name, _)| name == "--topbar-h").unwrap();
+        assert_eq!(topbar.1, Value::Function { params: vec!["--ui-scale".into()], body: "(52.0_f32).max((44.0_f32 / ui_scale))".into() });
+        let rust = generate(CSS).unwrap();
+        assert!(rust.contains("#[allow(unused_parens)]\n    pub fn topbar_h(ui_scale: f32) -> f32 {\n        (52.0_f32).max((44.0_f32 / ui_scale))\n    }"), "{rust}");
+    }
+
+    #[test]
+    fn a_declaration_the_generator_cannot_read_is_an_error_not_a_skip() {
+        for (declaration, wanted) in [
+            ("--inset: env(safe-area-inset-top, 0px)", "--inset"),
+            ("--wide: calc(100% - 4px)", "--wide"),
+            ("--reads: max(1px, var(--nowhere))", "is not defined"),
+            ("--odd: some-new-function(1)", "--odd"),
+        ] {
+            let css = format!("@layer tokens {{ :root {{ {declaration}; }} }}");
+            let error = parse(&css).unwrap_err();
+            assert!(error.contains(wanted), "{declaration}: {error}");
+        }
     }
 
     #[test]

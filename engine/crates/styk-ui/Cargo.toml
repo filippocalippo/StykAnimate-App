@@ -14,3 +14,8 @@ styk-design = { path = "../styk-design", features = ["widgets"] }
 [dev-dependencies]
 png = "0.18"
 styk-design = { path = "../styk-design", features = ["widgets", "testing"] }
+
+# winit has no display backend until one is enabled: without these, a Linux build stops at its compile_error. Both are
+# on, so one binary runs under X11 and Wayland (the libraries are loaded at run time, not linked).
+[target.'cfg(target_os = "linux")'.dependencies]
+iced = { workspace = true, features = ["x11", "wayland", "wayland-dlopen", "wayland-decorations"] }

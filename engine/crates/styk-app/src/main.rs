@@ -7,11 +7,15 @@
 //! This crate is the wiring: it reads the command line (`styk-core`), picks the platform services (`styk-platform`),
 //! and runs the interface (`styk-ui`) in a window. Nothing here decides what the application does.
 //!
-//! `STYK_BACKGROUND_WINDOW=1` opens the window off-screen, without focus and without a taskbar entry. `--screenshot`
-//! waits for the window's first complete frame, writes it as a PNG and exits.
+//! `STYK_BACKGROUND_WINDOW=1` keeps a run off the desktop of the person at the computer, the way each platform allows
+//! (`styk_platform::unattended`): Windows opens the window off-screen without focus or a taskbar entry, X11 opens an
+//! override-redirect window off-screen, and Wayland and macOS open no window and draw offscreen ([`headless`]).
+//! `STYK_BACKGROUND_WINDOW=headless` does that everywhere. `--screenshot` waits for the first complete frame, writes it
+//! as a PNG and exits.
 
 #[cfg(feature = "devtools")]
 mod input_check;
+mod headless;
 mod screenshot;
 mod window;
 
@@ -22,6 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use styk_core::Launch;
 use styk_design::{Theme, fonts, widgets};
+use styk_platform::unattended::{self, Strategy};
 use styk_ui::component_sheet::{self, Sheet};
 use styk_ui::screens::Screen;
 use styk_platform::window::{self as platform, Image, WindowError};
@@ -56,7 +61,7 @@ struct App {
     theme: Theme,
     /// The screen of the catalogue being shown instead of the application, if any.
     sheet: Option<Sheet>,
-    background: bool,
+    strategy: Option<Strategy>,
     window: Option<iced_window::Id>,
     /// What the input check has seen so far.
     report: Vec<String>,
@@ -69,9 +74,9 @@ struct App {
 }
 
 impl App {
-    fn new(launch: Launch, screen: Option<Screen>, background: bool, outcome: Arc<Mutex<Outcome>>) -> App {
+    fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: Arc<Mutex<Outcome>>) -> App {
         let sheet = screen.map(|Screen::ComponentSheet| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr));
-        App { launch, theme: Theme::default(), sheet, background, window: None, report: Vec::new(), frame_times: Vec::new(), frames: 0, capturing: false, outcome }
+        App { launch, theme: Theme::default(), sheet, strategy, window: None, report: Vec::new(), frame_times: Vec::new(), frames: 0, capturing: false, outcome }
     }
 
     fn theme(&self) -> Theme {
@@ -88,7 +93,7 @@ impl App {
             Message::Check(step) => self.check(step),
             Message::Opened(id) => {
                 self.window = Some(id);
-                let shown = if window::shown_after_creation(self.background) {
+                let shown = if window::shown_after_creation(self.strategy) {
                     iced_window::run(id, |window| platform::show_without_activation(window)).map(Message::Shown)
                 } else {
                     Task::none()
@@ -224,7 +229,16 @@ fn main() -> ExitCode {
         eprintln!("--automation is not available yet: the automation mode arrives with the stage");
         return ExitCode::from(2);
     }
-    let background = window::background_requested();
+    let strategy = match unattended::requested_by_environment() {
+        Ok(strategy) => strategy,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(2);
+        }
+    };
+    if strategy == Some(Strategy::Headless) {
+        return run_headless(&launch, screen);
+    }
     let outcome = Arc::new(Mutex::new(Outcome::Running));
     if launch.screenshot.is_some() {
         watchdog(outcome.clone());
@@ -232,8 +246,8 @@ fn main() -> ExitCode {
     #[cfg(feature = "devtools")]
     let trace_path = launch.screenshot.as_ref().map(|path| path.with_extension("trace.txt"));
     let scale = launch.scale.unwrap_or(1.0) as f32;
-    let settings = window::settings(&launch, background);
-    let app = Mutex::new(Some(App::new(launch, screen, background, outcome.clone())));
+    let settings = window::settings(&launch, strategy);
+    let app = Mutex::new(Some(App::new(launch, screen, strategy, outcome.clone())));
     let result = iced::application(move || app.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the application starts once"), App::update, App::view)
         .subscription(App::subscription)
         .title("StykAnimate")
@@ -271,4 +285,27 @@ fn watchdog(outcome: Arc<Mutex<Outcome>>) {
             std::process::exit(1);
         }
     });
+}
+
+/// An unattended run with no window: draws the interface offscreen into the `--screenshot` picture and exits.
+fn run_headless(launch: &Launch, screen: Option<Screen>) -> ExitCode {
+    let Some(path) = &launch.screenshot else {
+        eprintln!("an unattended run here opens no window, so it needs --screenshot <png> to produce anything");
+        return ExitCode::from(2);
+    };
+    let size = launch.size.unwrap_or(window::DEFAULT_SIZE);
+    let sheet = screen.map(|Screen::ComponentSheet| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr));
+    let result = headless::screenshot(Theme::default(), size, launch.scale.unwrap_or(1.0) as f32, sheet.as_ref()).and_then(|image| {
+        mark!("first-frame");
+        screenshot::write(path, &image)
+    });
+    #[cfg(feature = "devtools")]
+    let _ = std::fs::write(path.with_extension("trace.txt"), styk_devtools::trace_report());
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
 }
