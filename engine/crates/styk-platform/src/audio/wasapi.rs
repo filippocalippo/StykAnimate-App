@@ -117,7 +117,7 @@ impl Stream {
     /// Opens the default render endpoint: direct when its mix format allows, else converted.
     ///
     /// SAFETY: COM must be initialised on this thread, and the stream must stay on it.
-    unsafe fn open() -> Result<Stream, AudioError> {
+    unsafe fn open(allow_direct: bool) -> Result<Stream, AudioError> {
         let enumerator: IMMDeviceEnumerator = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }.map_err(device_error)?;
         let device = unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole) }.map_err(|e| match device_error(e) {
             AudioError::Device(m) => AudioError::Unavailable(format!("There is no audio output device: {m}")),
@@ -135,7 +135,7 @@ impl Stream {
         } else {
             (0, tag == WAVE_FORMAT_IEEE_FLOAT)
         };
-        let direct = float && bits == 32 && rate == RATE && channels >= 1;
+        let direct = allow_direct && float && bits == 32 && rate == RATE && channels >= 1;
         let mut opened = None;
         if direct {
             let (mut default, mut fundamental, mut least, mut most) = (0u32, 0u32, 0u32, 0u32);
@@ -228,21 +228,30 @@ pub struct WasapiOutput {
     clock: Arc<StreamClock>,
     wake: Arc<Event>,
     thread: Option<JoinHandle<()>>,
+    allow_direct: bool,
 }
 
 impl WasapiOutput {
     pub fn new() -> Result<WasapiOutput, AudioError> {
-        Ok(WasapiOutput { control: StreamControl::new(), clock: StreamClock::new(), wake: Arc::new(Event::new()?), thread: None })
+        Ok(WasapiOutput { control: StreamControl::new(), clock: StreamClock::new(), wake: Arc::new(Event::new()?), thread: None, allow_direct: true })
+    }
+
+    /// An output that never takes the low-period direct path: the ordinary shared mode with the system converting. It is what a
+    /// 44.1 kHz or 96 kHz endpoint gets, and what the direct path falls back to; this makes it testable on any endpoint.
+    pub fn converted_only() -> Result<WasapiOutput, AudioError> {
+        let mut output = WasapiOutput::new()?;
+        output.allow_direct = false;
+        Ok(output)
     }
 }
 
-fn run(source: Box<dyn RenderSource>, clock: Arc<StreamClock>, control: Arc<StreamControl>, wake: Arc<Event>, opened: std::sync::mpsc::Sender<Result<OutputInfo, AudioError>>) {
+fn run(allow_direct: bool, source: Box<dyn RenderSource>, clock: Arc<StreamClock>, control: Arc<StreamControl>, wake: Arc<Event>, opened: std::sync::mpsc::Sender<Result<OutputInfo, AudioError>>) {
     // SAFETY: COM is initialised and released on this thread, and every COM object is created and dropped on it.
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let mut task_index = 0u32;
         let mmcss = AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_index).ok();
-        match Stream::open() {
+        match Stream::open(allow_direct) {
             Err(error) => {
                 let _ = opened.send(Err(error));
             }
@@ -283,8 +292,8 @@ impl AudioOutput for WasapiOutput {
         let wake = self.wake.clone();
         self.control.set_waker(move || wake.set());
         let (opened, result) = channel();
-        let (clock, control, wake) = (self.clock.clone(), self.control.clone(), self.wake.clone());
-        let thread = std::thread::Builder::new().name("styk audio output".into()).spawn(move || run(source, clock, control, wake, opened)).map_err(|e| AudioError::Device(e.to_string()))?;
+        let (clock, control, wake, allow_direct) = (self.clock.clone(), self.control.clone(), self.wake.clone(), self.allow_direct);
+        let thread = std::thread::Builder::new().name("styk audio output".into()).spawn(move || run(allow_direct, source, clock, control, wake, opened)).map_err(|e| AudioError::Device(e.to_string()))?;
         match result.recv() {
             Ok(Ok(info)) => {
                 self.thread = Some(thread);

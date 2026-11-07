@@ -81,10 +81,14 @@ fn state(wav: &[u8], seconds: f64, clips: usize) -> AudioState {
 }
 
 fn transport() -> (AudioTransport, QpcClock) {
+    transport_on(WasapiOutput::new().expect("an event"))
+}
+
+fn transport_on(output: WasapiOutput) -> (AudioTransport, QpcClock) {
     let work = std::env::temp_dir().join("styk-audio-device-test");
     let decoder = Arc::new(FfmpegAudioDecoder::new(ffmpeg(), work));
     let host = QpcClock::new();
-    let transport = AudioTransport::new(Box::new(WasapiOutput::new().expect("an event")), Arc::new(host), decoder, 768 << 20).expect("the default audio endpoint opens");
+    let transport = AudioTransport::new(Box::new(output), Arc::new(host), decoder, 768 << 20).expect("the default audio endpoint opens");
     (transport, host)
 }
 
@@ -382,6 +386,9 @@ fn playing_under_preparation_decoding_and_an_export_keeps_the_clock_and_the_soun
     let clicks = capture.clicks();
     let intervals: Vec<f64> = clicks.windows(2).map(|w| (w[1] - w[0]) as f64 / 1e6).collect();
     let worst_interval = intervals.iter().map(|i| (i - 100.0).abs()).fold(0.0, f64::max);
+    let heard_clicks: Vec<i64> = clicks.iter().filter_map(|&at| media_at(&readings, at)).map(|m| (m / 4800.0).round() as i64).collect();
+    let missing: Vec<i64> = (0..50).filter(|k| !heard_clicks.contains(k)).collect();
+    println!("AUDIO: clicks not heard (index of 50): {missing:?}");
     let (mean, _, p99, max) = stats(&mut errors);
     println!(
         "AUDIO: stress over {seconds:.1} s with {} busy threads, {} decodes and {:.0} MB exported: {heard} clicks heard of 50, worst click interval error {worst_interval:.2} ms, clock minus loopback mean {mean:.2} ms p99 {p99:.2} max {max:.2}, underruns {}",
@@ -417,7 +424,7 @@ fn scrub_latency_and_position_with_a_time_coded_signal() {
     std::thread::sleep(Duration::from_millis(100));
     let capture = Loopback::start();
     let mut calls = Vec::new();
-    for slot in [100u64, 237, 311, 415, 503, 777] {
+    for slot in [100u64, 237, 311, 415, 503, 577] {
         let time = slot as f64 * 0.02;
         let called = host.now_ns();
         let job = transport.scrub(&audio, time).expect("not throttled");
@@ -432,8 +439,9 @@ fn scrub_latency_and_position_with_a_time_coded_signal() {
     let mut latencies = Vec::new();
     let mut position_errors = 0;
     for (called, slot) in &calls {
-        let threshold = capture.peak() * 0.25;
-        let onset = capture.packets.iter().filter(|(q, p)| *q + (p.len() as f64 * 1e9 / capture.rate) as u64 > *called).find_map(|(q, p)| p.iter().position(|v| v.abs() > threshold).map(|i| q + (i as f64 * 1e9 / capture.rate) as u64)).expect("a scrub made sound");
+        // Relative to the level the signal was written at, not to the capture peak (other programs may sound on the endpoint).
+        let threshold = LEVEL * 0.25;
+        let onset = capture.packets.iter().filter(|(q, p)| *q + (p.len() as f64 * 1e9 / capture.rate) as u64 > *called).find_map(|(q, p)| p.iter().position(|v| v.abs() > threshold).map(|i| q + (i as f64 * 1e9 / capture.rate) as u64)).unwrap_or_else(|| panic!("scrub to slot {slot} made no sound at the loopback (capture peak {}, {} packets)", capture.peak(), capture.packets.len()));
         latencies.push((onset - called) as f64 / 1e6);
         let heard = frequency(&capture.window(onset, 800), capture.rate);
         let expected = 600.0 + 200.0 * (*slot % 20) as f64;
@@ -447,4 +455,21 @@ fn scrub_latency_and_position_with_a_time_coded_signal() {
     assert_eq!(position_errors, 0, "a scrub slice started at the wrong place");
     assert!(max < 120.0, "scrub latency {max} ms");
     let _ = Then::Hold;
+}
+
+#[test]
+#[ignore = "plays through the default output device"]
+fn the_converted_path_the_system_resampling_keeps_the_clock_as_well() {
+    let (mut transport, host) = transport_on(WasapiOutput::converted_only().expect("an event"));
+    let info = transport.output_info().unwrap().clone();
+    println!("AUDIO: converted path {info:?}");
+    assert_eq!(info.path, styk_services::audio::Path::Converted);
+    let (readings, capture) = play_clicks(&mut transport, &host, 3.0, &mut || {});
+    let mut errors = click_errors(&readings, &capture);
+    assert!(errors.len() >= 25, "only {} clicks", errors.len());
+    let (mean, median, p99, max) = stats(&mut errors);
+    let jitter = errors.iter().map(|e| (e - mean).abs()).fold(0.0, f64::max);
+    println!("AUDIO: converted path, clock minus loopback over {} clicks: mean {mean:.2} ms, median {median:.2}, p99 {p99:.2}, max {max:.2}, jitter {jitter:.2}; underruns {}", errors.len(), transport.underruns());
+    assert!(mean.abs() < 40.0 && jitter < 6.0, "mean {mean} jitter {jitter}");
+    assert_eq!(transport.underruns(), 0);
 }
