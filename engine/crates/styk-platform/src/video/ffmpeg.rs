@@ -74,7 +74,7 @@ impl FfmpegVideoService {
 
     /// The arguments the encoding pass runs with for `request` writing `output`.
     pub fn arguments(request: &FfmpegRequest, output: &str) -> Vec<String> {
-        encoder_args(request, output, Input::Raw)
+        encoder_args(request, output, Input::Pam)
     }
 }
 

@@ -2,17 +2,35 @@
 //!
 //! The arguments after `-i` are today's, character for character (`tests/ffmpeg_arguments.rs` holds them to a fixture
 //! generated from the JavaScript). Only the input segment can differ: today sends PNG frames (`-f image2pipe -c:v png`),
-//! the native app sends raw RGBA (`-f rawvideo -pix_fmt rgba -video_size WxH`).
+//! the native app sends the same RGBA as uncompressed PAM images (`-f image2pipe -c:v pam`). Raw video (`-f rawvideo`)
+//! would be the same pixels but arrives in a buffer of exactly `width * 4` bytes a row; FFmpeg's scaler takes a different
+//! path for unaligned rows and rounds differently at some sizes (measured: WebM at 65 by 33 and 161 by 91), while an image
+//! decoder, PNG's or PAM's, hands it an aligned buffer, so the bytes follow today's.
 
 use styk_services::video::{codec_dimensions, js_round, Codec, Container, FfmpegRequest};
+
+/// The header of one frame as FFmpeg's PAM decoder reads it; the `width * height * 4` bytes of RGBA follow.
+pub fn pam_header(width: u32, height: u32) -> Vec<u8> {
+    format!("P7\nWIDTH {width}\nHEIGHT {height}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n").into_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pam_header_is_the_decoders_text() {
+        assert_eq!(pam_header(65, 33), b"P7\nWIDTH 65\nHEIGHT 33\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n");
+    }
+}
 
 /// How frames reach FFmpeg's standard input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Input {
     /// PNG images, one after the other (today's app; the golden test and the parity baseline use it).
     Png,
-    /// Raw RGBA frames of the request's size.
-    Raw,
+    /// Uncompressed PAM images (RGB_ALPHA): the same pixels, decoded into aligned buffers like PNG's.
+    Pam,
 }
 
 /// JavaScript's `String(number)` for the finite numbers an export holds (no exponent in range).
@@ -26,7 +44,7 @@ pub fn encoder_args(request: &FfmpegRequest, output: &str, input: Input) -> Vec<
     let mut args: Vec<String> = ["-hide_banner", "-loglevel", "error", "-nostdin", "-filter_threads", "1", "-y", "-threads", "1"].iter().map(|a| s(a)).collect();
     match input {
         Input::Png => args.extend(["-f", "image2pipe", "-c:v", "png"].iter().map(|a| s(a))),
-        Input::Raw => args.extend(["-f", "rawvideo", "-pix_fmt", "rgba", "-video_size"].iter().map(|a| s(a)).chain([format!("{}x{}", request.width, request.height)])),
+        Input::Pam => args.extend(["-f", "image2pipe", "-c:v", "pam"].iter().map(|a| s(a))),
     }
     args.extend(["-framerate".to_string(), js_string(request.fps), "-i".into(), "pipe:0".into()]);
     args.extend(["-an", "-sn", "-dn", "-map", "0:v:0"].iter().map(|a| s(a)));

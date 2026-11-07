@@ -18,7 +18,7 @@ use styk_services::video::{
 };
 use styk_services::Cancel;
 
-use super::args;
+use super::args::{self, pam_header};
 use super::json::{json_number, json_text};
 use super::pixels::rgba_to_bgr24;
 use super::process::{self, ChildGuard};
@@ -152,7 +152,8 @@ impl Session {
         };
         let writer = {
             let (shared, progress) = (shared.clone(), progress.clone());
-            std::thread::Builder::new().name("styk video pipe".into()).spawn(move || write_frames(rx, stdin, convert, &shared, &progress)).expect("a thread to feed the encoder")
+            let header = matches!(kind, Kind::Ffmpeg(_)).then(|| pam_header(layout.width, layout.height));
+            std::thread::Builder::new().name("styk video pipe".into()).spawn(move || write_frames(rx, stdin, convert, header, &shared, &progress)).expect("a thread to feed the encoder")
         };
         Ok(Session {
             kind,
@@ -229,7 +230,7 @@ fn layout_stride(width: u32) -> u32 {
     (width * 3).div_ceil(4) * 4
 }
 
-fn write_frames(rx: Receiver<FrameBuf>, mut stdin: std::process::ChildStdin, vfw: Option<(u32, u32)>, shared: &Shared, progress: &Progress) {
+fn write_frames(rx: Receiver<FrameBuf>, mut stdin: std::process::ChildStdin, vfw: Option<(u32, u32)>, header: Option<Vec<u8>>, shared: &Shared, progress: &Progress) {
     let mut converted = Vec::new();
     for frame in rx.iter() {
         let bytes: &[u8] = match vfw {
@@ -239,7 +240,8 @@ fn write_frames(rx: Receiver<FrameBuf>, mut stdin: std::process::ChildStdin, vfw
             }
             None => frame.bytes(),
         };
-        if let Err(error) = stdin.write_all(bytes) {
+        let written = header.as_deref().map_or(Ok(()), |h| stdin.write_all(h)).and_then(|_| stdin.write_all(bytes));
+        if let Err(error) = written {
             shared.fail(if matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset) { Failure::Pipe } else { Failure::Message(format!("Native video encoder stopped accepting frames: {error}")) });
             return;
         }

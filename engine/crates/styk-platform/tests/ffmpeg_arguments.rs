@@ -40,13 +40,11 @@ fn num(r: &HashMap<String, String>, key: &str) -> Option<f64> {
     r.get(key).map(|v| v.parse().unwrap_or_else(|_| panic!("{key} = {v:?}")))
 }
 
-/// `-f image2pipe -c:v png` (today) against `-f rawvideo -pix_fmt rgba -video_size WxH` (native).
-fn raw_input_of(png: &[String], width: u32, height: u32) -> Vec<String> {
-    let at = png.iter().position(|a| a == "image2pipe").expect("the PNG input");
-    let mut out = png[..at - 1].to_vec();
-    out.extend(["-f", "rawvideo", "-pix_fmt", "rgba", "-video_size"].map(String::from));
-    out.push(format!("{width}x{height}"));
-    out.extend_from_slice(&png[at + 3..]);
+/// `-f image2pipe -c:v png` (today) against `-f image2pipe -c:v pam` (native): the one segment that differs.
+fn pam_input_of(png: &[String]) -> Vec<String> {
+    let at = png.iter().position(|a| a == "png").expect("the PNG input");
+    let mut out = png.to_vec();
+    out[at] = "pam".into();
     out
 }
 
@@ -88,7 +86,7 @@ fn every_record_of_the_fixture_comes_out_the_same() {
         let output = format!("OUT.{}", request.container.extension());
         let expected = list(&r["args"]);
         assert_eq!(encoder_args(&request, &output, Input::Png), expected, "{here}");
-        assert_eq!(encoder_args(&request, &output, Input::Raw), raw_input_of(&expected, request.width, request.height), "{here}");
+        assert_eq!(encoder_args(&request, &output, Input::Pam), pam_input_of(&expected), "{here}");
         arguments += 1;
         if let Some(mux) = r.get("mux") {
             let extension = request.container.extension();

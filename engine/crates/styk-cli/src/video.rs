@@ -2,12 +2,12 @@
 //! services the app uses (`docs/native/video-export.md`).
 //!
 //!   styk video <file> <first-last> <out> [--format mp4|webm|avi|wmv|vfw] [--codec h264|mpeg4|ffv1|rawvideo|..]
-//!              [--quality draft|great|max|0..1] [--bitrate MBPS] [--size WxH] [--smoothing edges|none|sprites]
+//!              [--quality draft|great|max] [--bitrate MBPS] [--size WxH] [--smoothing edges|none|sprites]
 //!              [--fps F] [--audio mix.f32] [--max-bytes N] [--cpu] [--ffmpeg PATH] [--json]
 //!              [--vfw-arch x64|x86 --vfw-handler N [--vfw-quality] [--vfw-keyframes N] [--vfw-data-rate]]
 //!   Hooks for the tests of the export path (they disturb it from outside, as a stalled program would):
 //!              [--suspend-child-at-frame N --suspend-secs S] [--pause-producer-at-frame N --pause-secs S]
-//!              [--cancel-at-frame N] [--cancel-after-ms N] [--sample-frames N,N,..] [--no-encode --frame-hashes FILE
+//!              [--ticker] [--cancel-at-frame N] [--cancel-after-ms N] [--sample-frames N,N,..] [--no-encode --frame-hashes FILE
 //!              --order forward|reverse|shuffle]
 //!
 //! Ticks are 0-based and inclusive, as in `styk export`. One JSON line on standard output with `--json`.
@@ -255,13 +255,12 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
         let service = VfwVideoService::new(find_helper("x64"), find_helper("x86"));
         (Box::new(service), VideoRequest::Vfw(request), count)
     } else {
-        let (preset, quality_value) = match option(rest, "--quality").unwrap_or("great") {
-            "draft" => ("small", None),
-            "great" => ("recommended", None),
-            "max" => ("high", None),
-            other => ("recommended", Some(other.parse::<f64>().map_err(|_| fail("--quality is draft, great, max or a number"))?)),
+        let preset = match option(rest, "--quality").unwrap_or("great") {
+            "draft" => "small",
+            "great" => "recommended",
+            "max" => "high",
+            other => return Err(fail(format!("--quality is draft, great or max, not {other}"))),
         };
-        let _ = quality_value;
         let bitrate_mbps: Option<f64> = number(rest, "--bitrate").map_err(fail)?;
         let codec = option(rest, "--codec").unwrap_or("").to_string();
         let fields = VideoFields {
@@ -379,6 +378,20 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
             }
         });
     }
+    // A 1 ms ticker: the longest gap between its wake-ups says what a thread that must not stall would have seen.
+    let ticker_gap = Arc::new(AtomicU32::new(0));
+    if flag(rest, "--ticker") {
+        let (done, gap) = (done.clone(), ticker_gap.clone());
+        std::thread::spawn(move || {
+            let mut last = Instant::now();
+            while !done.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(1));
+                let now = Instant::now();
+                gap.fetch_max((now - last).as_micros() as u32, Ordering::Relaxed);
+                last = now;
+            }
+        });
+    }
     let suspend: Option<(u32, f64)> = number(rest, "--suspend-child-at-frame").map_err(fail)?.zip(number(rest, "--suspend-secs").map_err(fail)?);
     let cancel_after: Option<u64> = number(rest, "--cancel-after-ms").map_err(fail)?;
     let on_start = {
@@ -429,12 +442,13 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     let peak_private = *peak.lock().unwrap();
     let samples = timings.samples.iter().map(|(frame, bytes)| format!("[{frame},{bytes}]")).collect::<Vec<_>>().join(",");
     let common = format!(
-        "\"adapter\":{},\"opened_ms\":{opened_ms:.0},\"export_ms\":{export_ms:.0},\"evaluate_ms\":{:.0},\"draw_ms\":{:.0},\"baseline_private\":{baseline},\"peak_private\":{peak_private},\"private_at_frames\":[{samples}],\"cancel_latency_ms\":{},\"stage_leftovers\":{}",
+        "\"adapter\":{},\"opened_ms\":{opened_ms:.0},\"export_ms\":{export_ms:.0},\"evaluate_ms\":{:.0},\"draw_ms\":{:.0},\"baseline_private\":{baseline},\"peak_private\":{peak_private},\"private_at_frames\":[{samples}],\"cancel_latency_ms\":{},\"stage_leftovers\":{},\"ticker_max_gap_ms\":{:.2}",
         json_string(&adapter_name),
         timings.evaluate_ms,
         timings.draw_ms,
         cancel_latency.map_or("null".to_string(), |ms| format!("{ms:.1}")),
         leftovers(Path::new(out)).len(),
+        ticker_gap.load(Ordering::Relaxed) as f64 / 1000.0,
     );
     match result {
         Ok(done) => {
