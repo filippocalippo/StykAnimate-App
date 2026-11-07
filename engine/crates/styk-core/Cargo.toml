@@ -21,6 +21,12 @@ styk-math = { path = "../styk-math" }
 styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace" }
 unicode-normalization = "=0.1.23"
+# Plural rules and number formatting for the interface's 27 languages: ICU4X 1.4, CLDR 44, the data of Electron 39's ICU 74.
+fixed_decimal = { version = "0.5", features = ["ryu"] }
+icu_decimal = "=1.4.0"
+icu_locid = "1.4"
+icu_plurals = "=1.4.0"
+icu_provider = "1.4"
 
 [dev-dependencies]
 # The integration tests open documents through the same harness the interface's tests use.

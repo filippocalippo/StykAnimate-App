@@ -5,7 +5,7 @@
 //! Output: `catalogue.bin` in `OUT_DIR`, read in place at run time (no parsing, no allocation). Little-endian `u32`s:
 //!
 //! ```text
-//! magic "STYKCAT1" | keys | locales
+//! magic "STYKCAT1" | keys | locales | the string pool's byte offset in the file
 //! key table:    keys × (offset, length) into the string pool, sorted by the key's bytes
 //! locale table: locales × (id offset, id length, direction 0 ltr / 1 rtl, entry table offset)
 //! entry tables: locales × keys × entry offset (u32::MAX: the locale has no such message)
@@ -65,12 +65,12 @@ fn main() {
     }).collect();
 
     // Offsets are in u32 units from the start of the u32 area (after the magic), except string pool offsets, in bytes.
-    let header = 2u32;
+    let header = 3u32;
     let key_table = header;
     let locale_table = key_table + 2 * keys.len() as u32;
     let entry_tables = locale_table + 4 * locales.len() as u32;
     let entry_area = entry_tables + (keys.len() * locales.len()) as u32;
-    let mut words: Vec<u32> = vec![keys.len() as u32, locales.len() as u32];
+    let mut words: Vec<u32> = vec![keys.len() as u32, locales.len() as u32, 0];
     for (offset, length) in &key_refs {
         words.extend([*offset, *length]);
     }
@@ -81,6 +81,7 @@ fn main() {
         words.extend(table.iter().map(|entry| if *entry == u32::MAX { u32::MAX } else { entry_area + entry }));
     }
     words.extend(&entries);
+    words[2] = (8 + 4 * words.len()) as u32;
     let mut out = b"STYKCAT1".to_vec();
     for word in &words {
         out.extend(word.to_le_bytes());

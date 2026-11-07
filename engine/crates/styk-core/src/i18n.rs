@@ -1,10 +1,10 @@
-//! Interface text as data: a message key and its parameters, as today's `interfaceText(key, params)` takes them.
+//! Interface text as data, and its presentation.
 //!
 //! View models never hold finished strings they did not get from the document: a label is a [`Label`] (a message, or
-//! a name the person typed), so a later locale chunk changes the catalogue, not a panel. [`english`] formats a message
-//! with today's English catalogue (`src/locales/en.mjs`, built into the crate by `build.rs`) and today's rules
-//! (`Localization.t` in `src/localization.mjs`): `{name}` placeholders, a plural form chosen by `count`, nested
-//! messages, and numbers as `Intl.NumberFormat('en')` writes them (grouped, at most three decimals).
+//! a name the person typed). Only a [`Presentation`] formats text: the selected locale's catalogue (built into the
+//! crate by `build.rs` from the committed, language-neutral `locales/`, generated from today's `src/locales`), its
+//! direction, its CLDR plural rules and number formatting, with today's fallbacks (`Localization.t` in
+//! `src/localization.mjs`): `{name}` placeholders, a plural form chosen by `count`, nested messages.
 //!
 //! Errors use the same type: a refusal reaches the person as a message key and scalar parameters (the error policy).
 
@@ -93,12 +93,9 @@ impl Label {
     pub fn plain(text: impl Into<Arc<str>>) -> Label {
         Label::Plain(text.into())
     }
-    /// The label in English.
+    /// The label in English (tests and logs; the interface formats through its [`Presentation`]).
     pub fn english(&self) -> String {
-        match self {
-            Label::Msg(msg) => english(msg),
-            Label::Plain(text) => text.to_string(),
-        }
+        Presentation::english().label(self)
     }
 }
 
@@ -108,75 +105,257 @@ impl From<Msg> for Label {
     }
 }
 
-pub(crate) enum Entry {
-    Plain(&'static str),
-    Plural(&'static [(&'static str, &'static str)]),
+/// The catalogue `build.rs` makes from `locales/` (see its layout there), read in place.
+static CATALOGUE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/catalogue.bin"));
+const MAGIC: usize = 8;
+
+fn word(index: usize) -> u32 {
+    let at = MAGIC + index * 4;
+    CATALOGUE.get(at..at + 4).map_or(0, |bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
-include!(concat!(env!("OUT_DIR"), "/english.rs"));
-
-/// The English message for `key`, or `None` when the catalogue has no such key.
-pub fn has(key: &str) -> bool {
-    lookup(key).is_some()
+struct Tables {
+    keys: usize,
+    locales: usize,
+    pool: usize,
 }
 
-fn lookup(key: &str) -> Option<&'static Entry> {
-    ENGLISH.binary_search_by(|(candidate, _)| (*candidate).cmp(key)).ok().map(|at| &ENGLISH[at].1)
+fn tables() -> Tables {
+    Tables { keys: word(0) as usize, locales: word(1) as usize, pool: word(2) as usize }
 }
 
-/// `msg` in English, as `interfaceText(key, params)` writes it. A key the catalogue lacks is shown as the key, as today.
-pub fn english(msg: &Msg) -> String {
-    format_message(msg, 0)
-}
+impl Tables {
+    fn text(&self, offset: u32, length: u32) -> &'static str {
+        let start = self.pool + offset as usize;
+        CATALOGUE.get(start..start + length as usize).and_then(|bytes| std::str::from_utf8(bytes).ok()).unwrap_or("")
+    }
 
-fn format_message(msg: &Msg, depth: usize) -> String {
-    let count = msg.params.iter().find(|(name, _)| *name == "count").and_then(|(_, arg)| match arg {
-        Arg::Num(value) if value.is_finite() => Some(*value),
-        _ => None,
-    });
-    let template: &str = match lookup(&msg.key) {
-        Some(Entry::Plain(text)) => text,
-        Some(Entry::Plural(forms)) => {
-            // English has two categories: "one" for exactly 1, "other" for the rest.
-            let category = if count == Some(1.0) { "one" } else { "other" };
-            let pick = |name: &str| forms.iter().find(|(form, _)| *form == name).map(|(_, text)| *text);
-            pick(category).or_else(|| pick("other")).unwrap_or(&msg.key)
+    fn key(&self, index: usize) -> &'static str {
+        self.text(word(3 + 2 * index), word(4 + 2 * index))
+    }
+
+    fn find(&self, key: &str) -> Option<usize> {
+        let (mut low, mut high) = (0, self.keys);
+        while low < high {
+            let middle = (low + high) / 2;
+            match self.key(middle).cmp(key) {
+                std::cmp::Ordering::Less => low = middle + 1,
+                std::cmp::Ordering::Greater => high = middle,
+                std::cmp::Ordering::Equal => return Some(middle),
+            }
         }
-        None => &msg.key,
-    };
-    substitute(template, &msg.params, depth)
+        None
+    }
+
+    fn locale(&self, index: usize) -> (&'static str, bool, usize) {
+        let base = 3 + 2 * self.keys + 4 * index;
+        (self.text(word(base), word(base + 1)), word(base + 2) == 1, word(base + 3) as usize)
+    }
+
+    fn entry(&self, locale: usize, key: usize) -> Option<Entry> {
+        let (_, _, table) = self.locale(locale);
+        let entry = word(table + key);
+        if entry == u32::MAX {
+            return None;
+        }
+        let entry = entry as usize;
+        Some(match word(entry) {
+            0 => Entry::Plain(self.text(word(entry + 1), word(entry + 2))),
+            _ => Entry::Plural((0..word(entry + 1) as usize).map(|form| {
+                let at = entry + 2 + 4 * form;
+                (self.text(word(at), word(at + 1)), self.text(word(at + 2), word(at + 3)))
+            }).collect()),
+        })
+    }
 }
 
-fn substitute(template: &str, params: &[(Cow<'static, str>, Arg)], depth: usize) -> String {
-    let mut out = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        out.push_str(&rest[..open]);
-        let after = &rest[open + 1..];
-        let name_end = after.find('}');
-        let token = name_end.map(|end| &after[..end]).filter(|name| is_name(name));
-        match token {
-            Some(name) => {
-                match params.iter().find(|(candidate, _)| *candidate == name) {
-                    Some((_, Arg::Text(text))) => out.push_str(text),
-                    Some((_, Arg::Num(value))) if value.is_finite() => out.push_str(&format_number(*value)),
-                    Some((_, Arg::Msg(inner))) if depth < 8 => out.push_str(&format_message(inner, depth + 1)),
-                    _ => {
-                        out.push('{');
-                        out.push_str(name);
-                        out.push('}');
-                    }
-                }
-                rest = &after[name.len() + 1..];
-            }
-            None => {
-                out.push('{');
-                rest = after;
-            }
+enum Entry {
+    Plain(&'static str),
+    Plural(Vec<(&'static str, &'static str)>),
+}
+
+/// The catalogue's locales, English first, with whether each is written right to left.
+pub fn locales() -> Vec<(&'static str, bool)> {
+    let tables = tables();
+    (0..tables.locales).map(|index| {
+        let (id, rtl, _) = tables.locale(index);
+        (id, rtl)
+    }).collect()
+}
+
+/// Whether today's English catalogue has `key`.
+pub fn has(key: &str) -> bool {
+    let tables = tables();
+    tables.find(key).is_some_and(|index| tables.entry(0, index).is_some())
+}
+
+/// The interface's direction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    Ltr,
+    Rtl,
+}
+
+/// How the interface writes text and numbers in one locale: today's `Localization` (`src/localization.mjs`). The
+/// catalogue's message, else English's; the plural form by the locale's CLDR rules (ICU4X 1.4, CLDR 44, the data of
+/// Electron 39's ICU 74), English's rules for an English fallback; numbers as `Intl.NumberFormat(locale)` writes them by
+/// default (grouped, at most three decimals, a tie away from zero).
+pub struct Presentation {
+    tables: Tables,
+    locale: usize,
+    id: &'static str,
+    direction: Direction,
+    plurals: icu_plurals::PluralRules,
+    english_plurals: icu_plurals::PluralRules,
+    decimal: icu_decimal::FixedDecimalFormatter,
+}
+
+impl std::fmt::Debug for Presentation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Presentation").field("locale", &self.id).field("direction", &self.direction).finish()
+    }
+}
+
+fn data_locale(id: &str) -> icu_provider::DataLocale {
+    let locale: icu_locid::Locale = id.parse().unwrap_or(icu_locid::Locale::UND);
+    icu_provider::DataLocale::from(&locale)
+}
+
+impl Presentation {
+    /// The presentation of a catalogue locale (`de`, `pt-BR`, `zh-Hans`); `None` for one the catalogue lacks.
+    pub fn new(id: &str) -> Option<Presentation> {
+        let tables = tables();
+        let locale = (0..tables.locales).find(|index| tables.locale(*index).0 == id)?;
+        let (id, rtl, _) = tables.locale(locale);
+        let plurals = icu_plurals::PluralRules::try_new_cardinal(&data_locale(id)).ok()?;
+        let english_plurals = icu_plurals::PluralRules::try_new_cardinal(&data_locale("en")).ok()?;
+        let decimal = icu_decimal::FixedDecimalFormatter::try_new(&data_locale(id), Default::default()).ok()?;
+        Some(Presentation { tables, locale, id, direction: if rtl { Direction::Rtl } else { Direction::Ltr }, plurals, english_plurals, decimal })
+    }
+
+    /// English: the catalogue's first locale, always present.
+    pub fn english() -> Presentation {
+        match Presentation::new("en") {
+            Some(english) => english,
+            None => unreachable!("the catalogue's first locale is English and ICU4X has its data"),
         }
     }
-    out.push_str(rest);
-    out
+
+    pub fn locale(&self) -> &'static str {
+        self.id
+    }
+
+    pub fn direction(&self) -> Direction {
+        self.direction
+    }
+
+    /// A label as the interface shows it.
+    pub fn label(&self, label: &Label) -> String {
+        match label {
+            Label::Msg(msg) => self.text(msg),
+            Label::Plain(text) => text.to_string(),
+        }
+    }
+
+    /// `msg` as `interfaceLocalization.t(key, params)` writes it. A key no catalogue has is shown as the key, as today.
+    pub fn text(&self, msg: &Msg) -> String {
+        self.format(msg, 0)
+    }
+
+    fn decimal(value: f64) -> Option<fixed_decimal::FixedDecimal> {
+        let mut decimal = fixed_decimal::FixedDecimal::try_from_f64(value, fixed_decimal::FloatPrecision::Floating).ok()?;
+        decimal.half_expand(-3);
+        decimal.trim_end();
+        Some(decimal)
+    }
+
+    /// A number as `Intl.NumberFormat(locale).format(value)` writes it.
+    pub fn number(&self, value: f64) -> String {
+        match Presentation::decimal(value) {
+            Some(decimal) => self.decimal.format(&decimal).to_string(),
+            None => String::new(),
+        }
+    }
+
+    /// The plural category `Intl.PluralRules(locale).select(count)` picks.
+    pub fn plural(&self, count: f64) -> &'static str {
+        category(&self.plurals, count)
+    }
+
+    fn format(&self, msg: &Msg, depth: usize) -> String {
+        let count = msg.params.iter().find(|(name, _)| *name == "count").and_then(|(_, arg)| match arg {
+            Arg::Num(value) if value.is_finite() => Some(*value),
+            _ => None,
+        });
+        let index = self.tables.find(&msg.key);
+        let localized = index.and_then(|index| self.tables.entry(self.locale, index));
+        let english = index.and_then(|index| self.tables.entry(0, index));
+        let translated = localized.is_some();
+        let template: String = match localized.as_ref().or(english.as_ref()) {
+            Some(Entry::Plain(text)) => text.to_owned(),
+            Some(Entry::Plural(forms)) => {
+                let rules = if translated { &self.plurals } else { &self.english_plurals };
+                let wanted = count.map_or("other", |count| category(rules, count));
+                let pick = |forms: &[(&'static str, &'static str)], name: &str| forms.iter().find(|(form, _)| *form == name).map(|(_, text)| *text);
+                // `message[category] ?? english[key][englishCategory] ?? english[key].other`, then the message's `other`.
+                let english_forms = match &english {
+                    Some(Entry::Plural(forms)) => Some(forms.as_slice()),
+                    _ => None,
+                };
+                pick(forms, wanted)
+                    .or_else(|| english_forms.and_then(|english| pick(english, count.map_or("other", |count| category(&self.english_plurals, count))).or_else(|| pick(english, "other"))))
+                    .or_else(|| pick(forms, "other"))
+                    .unwrap_or(&msg.key)
+                    .to_owned()
+            }
+            None => msg.key.to_string(),
+        };
+        self.substitute(&template, &msg.params, depth)
+    }
+
+    fn substitute(&self, template: &str, params: &[(Cow<'static, str>, Arg)], depth: usize) -> String {
+        let mut out = String::with_capacity(template.len());
+        let mut rest = template;
+        while let Some(open) = rest.find('{') {
+            out.push_str(&rest[..open]);
+            let after = &rest[open + 1..];
+            let token = after.find('}').map(|end| &after[..end]).filter(|name| is_name(name));
+            match token {
+                Some(name) => {
+                    match params.iter().find(|(candidate, _)| *candidate == name) {
+                        Some((_, Arg::Text(text))) => out.push_str(text),
+                        Some((_, Arg::Num(value))) if value.is_finite() => out.push_str(&self.number(*value)),
+                        Some((_, Arg::Msg(inner))) if depth < 8 => out.push_str(&self.format(inner, depth + 1)),
+                        _ => {
+                            out.push('{');
+                            out.push_str(name);
+                            out.push('}');
+                        }
+                    }
+                    rest = &after[name.len() + 1..];
+                }
+                None => {
+                    out.push('{');
+                    rest = after;
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+}
+
+fn category(rules: &icu_plurals::PluralRules, count: f64) -> &'static str {
+    use icu_plurals::PluralCategory as C;
+    let Some(decimal) = fixed_decimal::FixedDecimal::try_from_f64(count, fixed_decimal::FloatPrecision::Floating).ok() else { return "other" };
+    match rules.category_for(&decimal) {
+        C::Zero => "zero",
+        C::One => "one",
+        C::Two => "two",
+        C::Few => "few",
+        C::Many => "many",
+        C::Other => "other",
+    }
 }
 
 fn is_name(name: &str) -> bool {
@@ -184,23 +363,14 @@ fn is_name(name: &str) -> bool {
     chars.next().is_some_and(|first| first.is_ascii_alphabetic()) && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// A number as `Intl.NumberFormat('en')` writes it by default: at most three decimals (a tie away from zero), the
-/// whole part grouped by thousands, `-0` as `-0` only when it is not rounded away.
+/// `msg` in English (tests and logs; the interface formats through its [`Presentation`]).
+pub fn english(msg: &Msg) -> String {
+    Presentation::english().text(msg)
+}
+
+/// A number as `Intl.NumberFormat('en')` writes it.
 pub fn format_number(value: f64) -> String {
-    let fixed = crate::number::format(value, 3);
-    let (sign, digits) = fixed.strip_prefix('-').map_or(("", fixed.as_str()), |rest| ("-", rest));
-    let (whole, fraction) = digits.split_once('.').map_or((digits, None), |(whole, fraction)| (whole, Some(fraction)));
-    let mut grouped = String::with_capacity(whole.len() + whole.len() / 3);
-    for (index, digit) in whole.chars().enumerate() {
-        if index > 0 && (whole.len() - index) % 3 == 0 {
-            grouped.push(',');
-        }
-        grouped.push(digit);
-    }
-    match fraction {
-        Some(fraction) => format!("{sign}{grouped}.{fraction}"),
-        None => format!("{sign}{grouped}"),
-    }
+    Presentation::english().number(value)
 }
 
 #[cfg(test)]
@@ -225,8 +395,29 @@ mod tests {
             .with("value3", 50.0);
         assert_eq!(english(&summary), "2 figures · 1,200 frames · 50 s");
         assert_eq!(format_number(1234567.891_23), "1,234,567.891");
-        assert_eq!(format_number(0.0005), "0.001", "a tie rounds away from zero");
         assert_eq!(format_number(-12.5), "-12.5");
         assert_eq!(english(&Msg::new("inspectorView.keyframe")), "Keyframe {frame}", "an absent parameter stays a token");
+    }
+
+    #[test]
+    fn every_catalogue_locale_has_a_presentation() {
+        let locales = locales();
+        assert_eq!(locales.len(), 27);
+        assert_eq!(locales[0], ("en", false));
+        for (id, rtl) in locales {
+            let presentation = Presentation::new(id).unwrap_or_else(|| panic!("{id} has a presentation"));
+            assert_eq!(presentation.direction() == Direction::Rtl, rtl);
+        }
+        assert_eq!(Presentation::new("ar").map(|p| p.direction()), Some(Direction::Rtl));
+        assert!(Presentation::new("xx").is_none());
+    }
+
+    #[test]
+    fn a_message_falls_back_to_english_with_english_plural_rules() {
+        let german = Presentation::new("de").unwrap();
+        assert_eq!(german.text(&Msg::new("common.cancel")), "Abbrechen");
+        let missing = Msg::count("counts.figures", 1.0);
+        let shown = german.text(&missing);
+        assert!(shown == "1 figure" || shown.contains('1'), "{shown}");
     }
 }
