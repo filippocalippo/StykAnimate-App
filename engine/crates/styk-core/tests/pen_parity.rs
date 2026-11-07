@@ -79,10 +79,13 @@ fn the_native_pen_path_matches_todays_app_on_the_same_events() {
         let mapping_value = field(&scenario, "mapping");
         let canvas = numbers(field(mapping_value, "canvas"));
         let mirror = field(&scenario, "mirror").as_bool() == Some(true);
-        let w = numbers(field(mapping_value, "world_from_window"));
+        let camera = numbers(field(mapping_value, "camera"));
+        let rect = numbers(field(mapping_value, "rect"));
         let p = numbers(field(mapping_value, "pixel_matrix"));
         let mapping = Mapping {
-            world_from_window: [w[0], w[1], w[2], w[3], w[4], w[5]],
+            window_origin: (rect[0], rect[1]),
+            window_scale: (rect[2], rect[3]),
+            camera: [camera[0], camera[1], camera[2], camera[3], camera[4], camera[5]],
             pixel_matrix: [p[0], p[1], p[2], p[3], p[4], p[5]],
             mirror_x: mirror.then_some(canvas[0] / 2.0),
             mirror_y: None,
@@ -95,7 +98,7 @@ fn the_native_pen_path_matches_todays_app_on_the_same_events() {
         let base = 1_000_000_000u64;
         let mut last_ns = base;
         for event in field(&scenario, "events").elements().expect("events") {
-            let kind = field(&event, "type").as_str().unwrap();
+            let kind = field(&event, "type").as_str().unwrap(); // down, move or up
             let num = |key: &str| field(&event, key).as_f64().unwrap();
             let time_ns = base + (num("t") * 1e6) as u64;
             last_ns = time_ns;
@@ -134,8 +137,8 @@ fn the_native_pen_path_matches_todays_app_on_the_same_events() {
                 return;
             }
             if native != expected {
-                let differing = native.iter().filter(|row| !expected.contains(row)).count();
-                failures.push(format!("{name} {stage}: {} native tiles, {} in today's app, {differing} native tiles differ", native.len(), expected.len()));
+                let differing: Vec<(i64, i64)> = native.iter().filter(|row| !expected.contains(row)).map(|row| (row.0, row.1)).collect();
+                failures.push(format!("{name} {stage}: {} native tiles, {} in today's app, {} native tiles differ: {differing:?}", native.len(), expected.len(), differing.len()));
             }
         };
         check("commit", hashes(&worker, 1));

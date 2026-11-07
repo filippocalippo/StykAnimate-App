@@ -25,10 +25,17 @@ pub fn inverse_point(m: &Matrix, x: f64, y: f64) -> Option<(f64, f64)> {
 }
 
 /// How a stroke's pointer positions reach its cel.
+///
+/// The window position becomes a position in the stage's own pixels (the window's offset and the ratio of the stage's
+/// client size to its rectangle), then a world position through the inverse of the camera matrix (`screenToWorld`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Mapping {
-    /// Window pixels to world units (the stage's view).
-    pub world_from_window: Matrix,
+    /// Where the stage starts in the window.
+    pub window_origin: (f64, f64),
+    /// The stage's client size over its rectangle, per axis (1 unless the page is scaled).
+    pub window_scale: (f64, f64),
+    /// The camera: world units to the stage's pixels.
+    pub camera: Matrix,
     /// The cel's pixels to world units.
     pub pixel_matrix: Matrix,
     /// The world-space axes symmetry mirrors across, if the mirror is on.
@@ -38,7 +45,7 @@ pub struct Mapping {
 
 impl Default for Mapping {
     fn default() -> Mapping {
-        Mapping { world_from_window: IDENTITY, pixel_matrix: IDENTITY, mirror_x: None, mirror_y: None }
+        Mapping { window_origin: (0.0, 0.0), window_scale: (1.0, 1.0), camera: IDENTITY, pixel_matrix: IDENTITY, mirror_x: None, mirror_y: None }
     }
 }
 
@@ -58,20 +65,21 @@ impl Mapping {
         paths
     }
 
-    fn world(&self, flips: (bool, bool), window: (f64, f64)) -> (f64, f64) {
-        let (mut x, mut y) = apply(&self.world_from_window, window.0, window.1);
+    fn world(&self, flips: (bool, bool), window: (f64, f64)) -> Option<(f64, f64)> {
+        let local = ((window.0 - self.window_origin.0) * self.window_scale.0, (window.1 - self.window_origin.1) * self.window_scale.1);
+        let (mut x, mut y) = inverse_point(&self.camera, local.0, local.1)?;
         if let (true, Some(axis)) = (flips.0, self.mirror_x) {
             x = 2.0 * axis - x;
         }
         if let (true, Some(axis)) = (flips.1, self.mirror_y) {
             y = 2.0 * axis - y;
         }
-        (x, y)
+        Some((x, y))
     }
 
     /// One path's cel position for a window position (`inversePoint(matrix, map(world))`).
     pub fn cel_point(&self, flips: (bool, bool), window: (f64, f64)) -> Option<(f64, f64)> {
-        let (x, y) = self.world(flips, window);
+        let (x, y) = self.world(flips, window)?;
         inverse_point(&self.pixel_matrix, x, y)
     }
 
@@ -102,13 +110,21 @@ mod tests {
     }
 
     #[test]
-    fn a_view_then_the_inverse_pose_in_the_javascript_order() {
+    fn the_camera_then_the_inverse_pose_in_the_javascript_order() {
         // Zoom 2 and pan (10, 20) from window to world; the cel is placed at (100, 50) at scale 4.
-        let mapping = Mapping { world_from_window: [0.5, 0.0, 0.0, 0.5, -5.0, -10.0], pixel_matrix: [4.0, 0.0, 0.0, 4.0, 100.0, 50.0], mirror_x: None, mirror_y: None };
-        let (wx, wy) = apply(&mapping.world_from_window, 230.0, 180.0);
+        let mapping = Mapping { camera: [2.0, 0.0, 0.0, 2.0, 10.0, 20.0], pixel_matrix: [4.0, 0.0, 0.0, 4.0, 100.0, 50.0], ..Mapping::default() };
+        // Window (230, 180) is stage pixel (230, 180), world ((230 - 10) / 2, (180 - 20) / 2) = (110, 80).
+        let (wx, wy) = inverse_point(&mapping.camera, 230.0, 180.0).unwrap();
+        assert_eq!((wx, wy), (110.0, 80.0));
         let expected = inverse_point(&mapping.pixel_matrix, wx, wy).unwrap();
         assert_eq!(mapping.cel_point((false, false), (230.0, 180.0)), Some(expected));
         assert_eq!(expected, (2.5, 7.5));
+    }
+
+    #[test]
+    fn the_stage_offset_and_scale_come_before_the_camera() {
+        let mapping = Mapping { window_origin: (100.0, 50.0), window_scale: (2.0, 2.0), ..Mapping::default() };
+        assert_eq!(mapping.cel_point((false, false), (110.0, 60.0)), Some((20.0, 20.0)));
     }
 
     #[test]

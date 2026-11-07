@@ -38,6 +38,8 @@ const scenarios = [
   {name: 'zoomed-and-panned', view: {scale: 2.5, dx: 37, dy: -21}, mirror: false, end: 'up'},
   {name: 'mirrored', view: null, mirror: true, end: 'up'},
   {name: 'interrupted', view: null, mirror: false, end: 'lostcapture'},
+  // A flat tip that turns with the pen's tilt: the lean reaches the pixels.
+  {name: 'tilt-angle', view: {scale: 1.7, dx: -11, dy: 9}, mirror: false, end: 'up', settings: {angleMode: 'tilt', roundness: 0.35}},
   {name: 'discarded', view: null, mirror: false, end: 'escape'},
 ];
 
@@ -51,8 +53,8 @@ async function capture(browser, scenario) {
   await page.locator('[data-workspace-mode="draw"]').click();
   await page.locator('[data-draw-action="new"]').first().click();
   await page.locator('[data-tool="drawing-brush"]').click();
-  await page.evaluate(({view, mirror}) => {
-    Object.assign(styk.drawing.settings, {preset: 'ink', size: 24, color: '#202020', opacity: 1, flow: 1, hardness: 1, pressureSize: true, pressureOpacity: false, stabilization: 0, texture: 0, scatter: 0, roundness: 1, blend: 'normal', alphaLock: false, mirrorX: mirror, mirrorY: false});
+  await page.evaluate(({view, mirror, settings}) => {
+    Object.assign(styk.drawing.settings, {preset: 'ink', size: 24, color: '#202020', opacity: 1, flow: 1, hardness: 1, pressureSize: true, pressureOpacity: false, stabilization: 0, texture: 0, scatter: 0, roundness: 1, blend: 'normal', alphaLock: false, mirrorX: mirror, mirrorY: false, ...settings});
     if (view) { styk.state.view.scale = view.scale; styk.state.view.x += view.dx; styk.state.view.y += view.dy; }
     // What the controller hands its stroke worker: the brush, exactly.
     const worker = styk.drawing.owner.strokeWorker, post = worker.post.bind(worker);
@@ -68,12 +70,25 @@ async function capture(browser, scenario) {
     };
     window.__settle = () => new Promise(resolve => { const wait = () => styk.drawing.gesture || styk.drawing.operation || styk.drawing.loading ? setTimeout(wait, 10) : resolve(); wait(); });
   }, scenario);
+  // The events as the app received them: the browser rounds positions to single precision and stamps its own times.
+  await page.evaluate(() => {
+    window.__seen = [];
+    for (const type of ['pointerdown', 'pointermove', 'pointerup']) window.addEventListener(type, e => { if (e.target.id === 'overlay') window.__seen.push({type: e.type.slice(7), x: e.clientX, y: e.clientY, pressure: e.pressure, tiltX: e.tiltX, tiltY: e.tiltY, buttons: e.buttons, t: e.timeStamp}); }, {capture: true});
+  });
   const cdp = await page.context().newCDPSession(page);
   const box = await page.locator('#viewport').boundingBox();
   const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
   const events = sineStroke(cx - 300, cx + 300, cy);
   const send = (type, e) => cdp.send('Input.dispatchMouseEvent', {type, x: e.x, y: e.y, button: type === 'mouseMoved' && !e.buttons ? 'none' : 'left', buttons: e.buttons, clickCount: type === 'mouseMoved' ? 0 : 1, pointerType: 'pen', force: e.pressure, tiltX: e.tiltX, tiltY: e.tiltY});
   const dispatched = [];
+  let mapping = null;
+  const readMapping = () => page.evaluate(async () => {
+    const {cameraMatrix} = await import('/src/renderer-geometry.mjs'), d = styk.drawing, r = d.viewRect();
+    const target = d.gesture?.session ? null : styk.editor.drawingTarget(), report = styk.editor.report;
+    const camera = cameraMatrix({report, frame: styk.editor.evaluatedFrame, view: styk.state.view, cameraEnabled: false});
+    // The stage's offset in the window and the ratio of its client size to its rectangle, then the camera.
+    return {rect: [r.left, r.top, r.clientWidth / r.width, r.clientHeight / r.height], camera: [...camera], pixel_matrix: d.gesture?.session?.matrix ?? d.pixelMatrix(target), canvas: [report.canvas_width, report.canvas_height]};
+  });
   if (scenario.end === 'lostcapture') {
     // A synthetic pointer: capture is stubbed, and losing it is a lostpointercapture event.
     await page.evaluate(async ({events}) => {
@@ -101,18 +116,16 @@ async function capture(browser, scenario) {
       await send(e.type === 'down' ? 'mousePressed' : e.type === 'up' ? 'mouseReleased' : 'mouseMoved', e);
       dispatched.push(e);
     }
-    if (scenario.end === 'escape') await page.keyboard.press('Escape');
+    if (scenario.end === 'escape') {
+      // The cel's pose is read while the stroke still holds its target.
+      mapping = await readMapping();
+      await page.keyboard.press('Escape');
+    }
   }
   await page.evaluate(() => window.__settle());
+  mapping ??= await readMapping();
   const brush = await page.evaluate(() => window.__begin);
-  // The window-to-world map and the cel's pixel matrix (affine: probe three points).
-  const mapping = await page.evaluate(() => {
-    const d = styk.drawing, p = (x, y) => d.point({clientX: x, clientY: y}), o = p(0, 0), px = p(1, 0), py = p(0, 1);
-    const target = styk.editor.drawingTarget();
-    const matrix = d.pixelMatrix ? d.pixelMatrix(target) : null;
-    const report = styk.editor.report;
-    return {world_from_window: [px.x - o.x, px.y - o.y, py.x - o.x, py.y - o.y, o.x, o.y], pixel_matrix: matrix, canvas: [report.canvas_width, report.canvas_height]};
-  });
+  const received = await page.evaluate(() => window.__seen);
   const expect = {};
   expect.commit = await page.evaluate(() => window.__tiles());
   expect.undoLabel = await page.evaluate(() => styk.editor.undoLabel);
@@ -132,7 +145,7 @@ async function capture(browser, scenario) {
     });
   }
   await page.close();
-  return {name: scenario.name, view: scenario.view, mirror: scenario.mirror, end: scenario.end, brush_json: JSON.stringify(brush), mapping, events: dispatched, expect, errors};
+  return {name: scenario.name, view: scenario.view, mirror: scenario.mirror, end: scenario.end, brush_json: JSON.stringify(brush), mapping, events: received, expect, errors};
 }
 
 const diff = (a, b, path = '') => {

@@ -54,8 +54,9 @@ impl Pad {
         let scale = self.core.scale() as f64;
         let (ox, oy) = (bounds.x as f64 * scale, bounds.y as f64 * scale);
         let k = 1.0 / view.zoom;
+        let z = view.zoom;
         let mirror_x = self.core.switches().mirror_x.then(|| view.pan.0 + bounds.width as f64 * scale * k / 2.0);
-        Mapping { world_from_window: [k, 0.0, 0.0, k, view.pan.0 - ox * k, view.pan.1 - oy * k], mirror_x, ..Mapping::default() }
+        Mapping { window_origin: (ox, oy), camera: [z, 0.0, 0.0, z, -view.pan.0 * z, -view.pan.1 * z], mirror_x, ..Mapping::default() }
     }
 
     fn note(&self, inspector: &mut Inspector, state: &mut PadState, event: &InputEvent, received_ns: u64) {
