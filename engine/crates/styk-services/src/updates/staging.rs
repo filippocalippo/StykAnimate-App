@@ -76,6 +76,23 @@ pub fn decode_base64(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Standard base64 with padding.
+pub fn encode_base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let value = chunk.iter().enumerate().fold(0u32, |acc, (i, b)| acc | (u32::from(*b) << (16 - 8 * i)));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ALPHABET[((value >> (18 - 6 * i)) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 /// The immutable name of a verified installer: `Setup-<version>-<first 8 bytes of its sha512, hex>.exe`. The same bytes
 /// always get the same name, so a second process that finds it knows what it is.
 pub fn artifact_name(version: &str, sha512_b64: &str) -> Option<String> {
@@ -108,6 +125,10 @@ mod tests {
         let bytes = decode_base64(SHA).unwrap();
         assert_eq!(bytes.len(), 64);
         assert_eq!(&bytes[..8], &[0x02, 0x48, 0x64, 0x2c, 0x44, 0xd6, 0x11, 0xba]);
+        assert_eq!(encode_base64(&bytes), SHA, "encoding is the decoding's inverse");
+        for sample in [&b""[..], b"M", b"Ma", b"Man", b"Many"] {
+            assert_eq!(decode_base64(&encode_base64(sample)).unwrap(), sample);
+        }
         assert_eq!(decode_base64("TWFu").unwrap(), b"Man");
         assert_eq!(decode_base64("TWE=").unwrap(), b"Ma");
         assert_eq!(decode_base64("TQ==").unwrap(), b"M");

@@ -103,7 +103,7 @@ pub fn file_type_ops(exe: &str) -> Vec<RegOp> {
         ops.push(set(ext_key.clone(), "", text(item.prog_id)));
         ops.push(set(format!("{ext_key}\\OpenWithProgids"), item.prog_id, Value::Empty));
         ops.push(set(class.clone(), "", text(item.prog_id)));
-        ops.push(set(format!("{class}\\DefaultIcon"), "", text(format!("\"{exe}\",0"))));
+        ops.push(set(format!("{class}\\DefaultIcon"), "", text(format!("\"{exe},0\""))));
         ops.push(set(format!("{class}\\shell"), "", text("open")));
         ops.push(set(format!("{class}\\shell\\open"), "", text(format!("Open with {PRODUCT_NAME}"))));
         ops.push(set(format!("{class}\\shell\\open\\command"), "", text(format!("\"{exe}\" \"%1\""))));
@@ -206,7 +206,7 @@ mod tests {
             let class = format!("Software\\Classes\\{}", item.prog_id);
             assert_eq!(registry.get(&format!("{class}\\shell\\open\\command"), ""), Some(&Value::Text(format!("\"{EXE}\" \"%1\""))));
             assert_eq!(registry.get(&format!("{class}\\shell\\open"), ""), Some(&Value::Text("Open with StykAnimate".into())));
-            assert_eq!(registry.get(&format!("{class}\\DefaultIcon"), ""), Some(&Value::Text(format!("\"{EXE}\",0"))));
+            assert_eq!(registry.get(&format!("{class}\\DefaultIcon"), ""), Some(&Value::Text(format!("\"{EXE},0\""))));
         }
     }
 

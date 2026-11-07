@@ -7,6 +7,7 @@
 //! | `deps` | Fails if the engine or the core depends, even through other crates, on iced, `styk-ui` or `styk-devtools`. |
 //! | `lock` | Fails if `engine/Cargo.lock` holds a git source. |
 //! | `check` | `design check`, `deps` and `lock`. |
+//! | `package` | The Windows Setup: builds the program, runs `makensis`, writes `latest.yml`, its signature and `SHA256SUMS.txt` (`docs/native/shell.md`). Signs nothing, publishes nothing. |
 //! | `fonts` | The typography check: the type matrix in Chromium and natively, widths, fallback fonts and pixels compared (needs Playwright's Chromium and a GPU; not part of `check`). |
 //!
 //! It depends on `std` alone, so it builds in seconds and can never become a way for a toolkit to reach the engine.
@@ -16,12 +17,13 @@ mod deps;
 mod design;
 mod expr;
 mod fonts;
+mod package;
 mod tokens;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: cargo xtask <design generate | design check | deps | lock | check | fonts | fonts verify>";
+const USAGE: &str = "usage: cargo xtask <design generate | design check | deps | lock | check | fonts | fonts verify | package>";
 
 fn root() -> PathBuf {
     // engine/crates/xtask -> the repository root.
@@ -42,6 +44,7 @@ fn run(args: &[String]) -> Result<(), String> {
         ["lock"] => deps::lock(&root),
         ["fonts"] => fonts::check(&root),
         ["fonts", "verify"] => fonts::verify(&root),
+        ["package", options @ ..] => package::package(&root, options),
         ["check"] => design::check(&root).and_then(|()| deps::deps(&root)).and_then(|()| deps::lock(&root)),
         _ => Err(USAGE.to_string()),
     }

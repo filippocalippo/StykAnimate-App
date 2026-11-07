@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 iced = { workspace = true }
 styk-design = { path = "../styk-design", features = ["widgets"] }
+styk-services = { path = "../styk-services" }
 
 # winit has no display backend until one is enabled: without these, a Linux build stops at its compile_error. Both are
 # on, so one binary runs under X11 and Wayland (the libraries are loaded at run time, not linked).

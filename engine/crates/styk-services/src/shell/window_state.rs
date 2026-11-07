@@ -1,7 +1,8 @@
 //! Where the window goes: monitors, the saved frame per monitor setup, and fitting a frame to what is attached now.
 //!
-//! Everything is in physical pixels in screen coordinates. `WINDOWPLACEMENT` is not: it counts from the work area, so a
-//! top or left taskbar displaces a window restored with screen coordinates; [`to_workspace`] and [`to_screen`] convert.
+//! Everything is in physical pixels in screen coordinates, and only screen-coordinate calls place the window
+//! (`SetWindowPos`, then `ShowWindow`): `WINDOWPLACEMENT` counts from the work area, so a top or left taskbar would
+//! displace a window restored through it.
 
 use super::geometry::Rect;
 use super::instance::fnv1a;
@@ -64,16 +65,6 @@ impl SetupKey {
         }
         SetupKey(fnv1a(&bytes))
     }
-}
-
-/// A rectangle from screen coordinates into the monitor's workspace coordinates (the work area's origin is zero).
-pub fn to_workspace(rect: Rect, monitor: &MonitorInfo) -> Rect {
-    rect.offset(-(monitor.work.x - monitor.rect.x), -(monitor.work.y - monitor.rect.y))
-}
-
-/// A rectangle from the monitor's workspace coordinates into screen coordinates.
-pub fn to_screen(rect: Rect, monitor: &MonitorInfo) -> Rect {
-    rect.offset(monitor.work.x - monitor.rect.x, monitor.work.y - monitor.rect.y)
 }
 
 fn scaled(logical: i32, scale_milli: u32) -> i32 {
@@ -146,6 +137,21 @@ pub fn fit_to_monitors(frame: &WindowFrame, monitors: &[MonitorInfo]) -> Option<
         Some(WindowFrame { rect, maximized: frame.maximized, scale_milli: monitor.scale_milli })
     } else {
         Some(centred(w, h, monitor, frame.maximized))
+    }
+}
+
+/// The attached displays.
+pub trait MonitorSource {
+    /// The monitors now attached, in physical pixels, with their work areas and scales.
+    fn monitors(&self) -> Vec<MonitorInfo>;
+}
+
+/// A fixed set of monitors, for tests: two monitors, mixed scales, a taskbar on any edge.
+pub struct FakeMonitors(pub Vec<MonitorInfo>);
+
+impl MonitorSource for FakeMonitors {
+    fn monitors(&self) -> Vec<MonitorInfo> {
+        self.0.clone()
     }
 }
 
@@ -274,24 +280,6 @@ mod tests {
     }
 
     const ONE: fn() -> Vec<MonitorInfo> = || vec![mon(0, 0, 2560, 1440, 1000, true)];
-
-    #[test]
-    fn workspace_conversion_follows_every_taskbar_edge() {
-        let screen = Rect::new(100, 200, 1234, 777);
-        for (rect, work) in [
-            (Rect::new(0, 0, 2560, 1440), Rect::new(0, 0, 2560, 1392)), // bottom
-            (Rect::new(0, 0, 2560, 1440), Rect::new(0, 48, 2560, 1392)), // top
-            (Rect::new(0, 0, 2560, 1440), Rect::new(64, 0, 2496, 1440)), // left
-            (Rect::new(0, 0, 2560, 1440), Rect::new(0, 0, 2496, 1440)), // right
-            (Rect::new(-2560, -200, 2560, 1440), Rect::new(-2560, -152, 2560, 1392)), // negative origin, top
-        ] {
-            let m = MonitorInfo { rect, work, scale_milli: 1000, primary: true };
-            let there = to_workspace(screen, &m);
-            assert_eq!((there.x, there.y), (screen.x - (work.x - rect.x), screen.y - (work.y - rect.y)));
-            assert_eq!(to_screen(there, &m), screen, "repeated restores do not drift: {work:?}");
-            assert_eq!(to_screen(to_workspace(to_screen(there, &m), &m), &m), screen);
-        }
-    }
 
     #[test]
     fn a_frame_on_screen_is_kept_exactly() {

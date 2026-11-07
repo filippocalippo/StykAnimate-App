@@ -10,3 +10,5 @@
 
 pub mod unattended;
 pub mod window;
+#[cfg(windows)]
+pub mod windows;

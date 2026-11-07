@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 /// The command line's shape, shown with every parse error.
-pub const USAGE: &str = "usage: stykanimate [file] [--automation <script>] [--screenshot <png>] [--size WxH] [--scale <factor>]";
+pub const USAGE: &str = "usage: stykanimate [file] [--automation <script>] [--screenshot <png>] [--size WxH] [--scale <factor>] [--shell-check]";
 
 /// What the command line asked for.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -18,6 +18,9 @@ pub struct Launch {
     pub size: Option<(u32, u32)>,
     /// The interface scale factor, instead of the display's.
     pub scale: Option<f64>,
+    /// Run the shell's in-process checks against the real window (hit testing, minimum size, snap-zone placement,
+    /// DPI change), print the results and exit with their status. Needs `STYK_BACKGROUND_WINDOW=1`.
+    pub shell_check: bool,
 }
 
 /// A command line that cannot be run.
@@ -52,6 +55,7 @@ impl Launch {
                 "--screenshot" => launch.screenshot = Some(PathBuf::from(value("--screenshot")?)),
                 "--size" => launch.size = Some(parse_size(&value("--size")?)?),
                 "--scale" => launch.scale = Some(parse_scale(&value("--scale")?)?),
+                "--shell-check" => launch.shell_check = true,
                 other if other.starts_with("--") => return Err(LaunchError(format!("unknown option {other}"))),
                 _ => {
                     if launch.file.is_some() {

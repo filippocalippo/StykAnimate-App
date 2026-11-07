@@ -106,6 +106,22 @@ pub fn band_height(ui_scale: f32, compact: bool) -> f32 {
     base.max(44.0 / ui_scale)
 }
 
+/// The regions of a band that spans the window's width at the top: the whole band drags, the three window controls sit
+/// flush with the right edge (`topbar.css`), minimize and close are plain buttons, maximize is the snap-layouts button,
+/// and `no_drag` is what else in the band takes the pointer (tabs, buttons, fields). `scale` is physical pixels per
+/// logical pixel.
+pub fn band_regions(client_width: i32, scale: f32, band_height: f32, folded: bool, no_drag: &[Rect]) -> ChromeRegions {
+    let control = (control_width(folded) as f32 * scale).round() as i32;
+    let height = (band_height * scale).round() as i32;
+    let right = client_width;
+    ChromeRegions {
+        caption: vec![Rect::new(0, 0, client_width, height)],
+        no_drag: no_drag.to_vec(),
+        maximize: Some(Rect::new(right - 2 * control, 0, control, height)),
+        buttons: vec![Rect::new(right - 3 * control, 0, control, height), Rect::new(right - control, 0, control, height)],
+    }
+}
+
 /// Why a press was given up on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cancel {
@@ -333,6 +349,20 @@ mod tests {
         assert_eq!(at(-1, 5), ht::CLIENT);
         assert_eq!(at(W, 5), ht::CLIENT);
         assert_eq!(at(5, H), ht::CLIENT);
+    }
+
+    #[test]
+    fn the_band_publishes_its_controls_flush_right_at_both_widths_and_every_scale() {
+        for (scale, folded, control) in [(1.0, false, 44), (1.0, true, 36), (1.5, false, 66), (2.0, true, 72)] {
+            let width = 1560;
+            let regions = band_regions(width, scale, band_height(1.0, false), folded, &[]);
+            let height = (52.0 * scale).round() as i32;
+            assert_eq!(regions.maximize, Some(Rect::new(width - 2 * control, 0, control, height)), "{scale} {folded}");
+            assert_eq!(regions.buttons, vec![Rect::new(width - 3 * control, 0, control, height), Rect::new(width - control, 0, control, height)]);
+            assert_eq!(regions.caption, vec![Rect::new(0, 0, width, height)]);
+            let rightmost = regions.buttons[1];
+            assert_eq!(rightmost.right(), width, "close is flush with the window edge");
+        }
     }
 
     #[test]

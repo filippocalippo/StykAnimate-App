@@ -63,15 +63,16 @@ keeps the logical size; the subclass only reads the DPI for its border.
 
 ## Window state (new; today saves none)
 
-Stored through `styk-services::storage`-style atomic replace: `window-state.json`, a small, capped file. Geometry is in
+Replaced atomically (write a temporary file, then rename): `window-state.txt`, a small, capped file. Geometry is in
 physical pixels in screen coordinates, per monitor setup: the `SetupKey` is a hash of the sorted `(x, y, w, h, scale)` of
 every monitor; a setup never seen uses `last`.
 
-- **Coordinates.** `WINDOWPLACEMENT` is in workspace coordinates (relative to the work area); a top or left taskbar
-  displaces it. Save converts the normal rectangle to screen coordinates by adding the monitor's work-area offset; restore
-  subtracts the destination monitor's offset (`shell::window_state::to_workspace` / `to_screen`, tested with top, left,
-  right and bottom taskbars and negative monitor origins). Iced's `Position::Specific` is logical and converted at the new
-  window's scale, so it is never used to restore.
+- **Coordinates.** `WINDOWPLACEMENT` is in workspace coordinates (relative to a work area), which a top or left taskbar
+  displaces, and which is documented differently for tool windows; it is not used. The normal rectangle is read with
+  `GetWindowRect` while the window is neither maximized nor minimized and kept by the shell (so a maximized window still
+  knows its restore rectangle); restore is `SetWindowPos` (screen coordinates, twice, so a `WM_DPICHANGED` caused by the
+  move cannot leave a rescaled rectangle), then `ShowWindow` for the maximized state. Iced's `Position::Specific` is
+  logical and converted at the new window's scale, so it is never used to restore.
 - **Fit.** `fit_to_monitors`: the size is at least the minimum at the destination scale and at most its work area; the
   band's grip must be reachable: the window's top strip, as high as the band (52 or compact 44 logical, `topbar_h`) and at
   least 64 logical px wide, intersects some work area. Otherwise the default size is centred on the primary work area
