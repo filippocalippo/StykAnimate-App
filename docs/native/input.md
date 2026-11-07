@@ -77,7 +77,9 @@ brush; `docs/DRAWING.md`, `docs/TOUCH.md` and `docs/engine/drawing.md` are the c
 - **The queue.** `InputQueue` holds at most 4096 events plus a reserve of 64, and never more. It keeps the gestures it has
   admitted: a press is admitted only if there is room and fewer than 63 gestures are open, and from then on the reserve
   holds exactly one end (a lift or an interrupt) for it, so an end always fits and nothing is ever evicted to make room. An
-  end for a gesture that was never admitted is redundant and only counted. When the queue is full a `Hover` sample is dropped
+  end for a gesture that was never admitted is redundant and only counted. A press on a pointer whose gesture is still open is
+  ignored (`ignored` in the stats), as today's controller ignores a second `pointerdown` while a gesture is open: it queues no
+  notice and refuses nothing. When the queue is full a `Hover` sample is dropped
   (the oldest hover makes room for a new one), a `Move` is dropped and counted, a press is refused with the rest of its
   stroke (cheaper and more honest than a stroke with a hole in it), and the first loss since the last drain queues one
   `Overflowed` event. The consumer treats `Overflowed` as an interruption: the stroke in progress ends and keeps its ink, the
@@ -105,7 +107,12 @@ subclass runs on the interface thread, before winit's procedure, and does the fo
   `Interrupted` events with the pointer id and a reason.
 - Press-and-hold, flicks and the pen tap feedback are switched off for the window with the tablet-service window property,
   so Windows does not turn a held tip into a right click at all.
-- A history entry whose QPC is 0 is stamped with the time of the message. Pressure is `raw / 1024` for `penMask` pressure,
+- Times of history entries are made by `styk_services::input::HistoryClock`, one per pointer. An entry with a QPC keeps it. An
+  entry with only the millisecond stamp (`dwTime`, wrapping at 2^32) is placed by a mapping fixed once for the pointer (the first
+  message's newest entry is the moment it arrived, every other entry is that moment plus its distance in milliseconds), so the
+  same entry carried by two messages gets the same time however late the second came, is recognised by `(time, content)` and
+  delivered once, and entries of one millisecond get distinct increasing times. The mapping is fixed again only if it drifts a
+  quarter of a second from the arrival times. Pressure is `raw / 1024` for `penMask` pressure,
   tilt is the reported degrees, and the pointer id is the OS pointer id.
 - Time is QPC. `QpcClock` implements `styk_services::Clock` and stamps the sample queue; the input thread and the stroke
   worker use the same clock.
@@ -146,52 +153,74 @@ milliseconds.
 
 ### 3.4 Dab generation and rasterisation on the drawing worker
 
-`BrushStroke::sample` generates every dab between two samples with no yield; one long gap with a fine brush can run for a
-long time. It therefore never runs on the interface thread. The **drawing worker** is a thread owning, per stroke: one
-`BrushStroke` per mirror (seeds `seed + index * 7919` as today), the engine's `StrokeEngine` and the cel's `TileStore`.
-The interface thread sends `StrokeCommand`s and never waits; a sample is refused (and its stroke ended) when 131,072 are
-already queued behind the worker. The worker generates dabs, cuts them into batches of at most 64 touched tiles, seeds the
-tiles the batch can reach from the cel, calls `StrokeEngine::dabs`, and posts `Dabs` (before rasterising: the preview's
-material), `Tiles` (at most 64 tiles, tagged by sequence), then `Finished` or `Cancelled`.
+`BrushStroke::sample` generates every dab between two samples; one long gap with a fine brush is a long stretch of work. It
+therefore never runs on the interface thread. The **drawing worker** is a thread owning, per stroke: one `BrushStroke` per
+mirror (seeds `seed + index * 7919` as today), the engine's `StrokeEngine` and the cel's `TileStore`. The interface thread sends
+`StrokeCommand`s and never waits.
 
-- **Cancellation is by stroke.** Each stroke has its own abort flag, raised by its `Cancel` the moment the command is sent
-  (not when the worker reaches it) and by shutdown; the brush's own loops read it (`StrokePath::abort`, checked every curve
-  step and every 4096 dabs), as do the batch loop and the gate below. A cancel never touches another stroke's queued work (a
-  shared watermark would have truncated an earlier completed stroke).
-- **Bounded transfers.** The worker rasterises at most 4 batches ahead of what the consumer has acknowledged
-  (`Worker::ack`); the consumer acknowledges a batch when it is installed on the GPU or no longer needed (a cancelled stroke,
-  tiles outside the view). Undo, redo, clear and a cancelled stroke answer with tile *coordinates*; the consumer asks for the
-  pixels of the ones it shows, 64 at a time (`Request::Fetch`). So the consumer never holds more than 4 batches of 64 tiles
-  of a stroke plus 64 fetched tiles.
+- **Generation streams through bounded buffers.** The brush hands each dab to the worker as it makes it (it keeps no list of
+  its points or dabs; the curve is cut into pieces as it goes). The worker gathers the dabs into a batch (the controller's dab
+  limit, and at most 64 touched tiles unless one dab alone covers more) and rasterises the batch before the brush makes more.
+  A 200,000 px gap holds one batch of dabs, not 800,000. Gathering is also the gate: past 4 unacknowledged batches the worker
+  waits, inside the brush's own call, until the consumer catches up or the stroke is cancelled.
+- **Bounded transfers.** A batch's tiles are sent in parts of at most 64 tiles (`Tiles { seq, part, last }`), the provisional
+  tail of the stroke and a single huge dab included. The worker rasterises at most 4 batches ahead of what the consumer has
+  acknowledged, and the acknowledgement is a **contiguous frontier**: acknowledging batch 4 first (a cancelled stroke does) frees
+  nothing until 1 to 3 are acknowledged too. Undo, redo, clear and a cancelled stroke answer with tile *coordinates* and a stamp;
+  the consumer asks for the pixels of the ones it shows, 64 at a time (`Request::Fetch`).
+- **Every queue is bounded.** Samples past 131,072 waiting are refused (the stroke ends); at most 16 strokes are open at once
+  (a press past that is refused and counted); a stroke ends once (a second end, and an end or a cancel for a stroke never
+  admitted, are dropped where they are made); other requests past 1,024 waiting are refused. A stroke's working memory in the
+  engine is capped (512 MiB, which a brush's own `workingBytes` may only lower); past it the stroke fails visibly.
+- **Cancellation is by stroke, and by name.** Each stroke has its own abort flag, raised by its `Cancel` the moment the command
+  is sent and by shutdown; the brush's loops read it (every curve step and every 4096 dabs), as do the batch loop and the gate. A
+  cancel for an id that is not the open stroke changes nothing, and never touches another stroke's queued work.
+- **Versions.** Every tile the worker reports carries a stamp that only grows: a stroke batch's, or the one an undo, redo, clear,
+  cancel or commit gave it. A fetch answers with the tile as the cel will hold it once the open stroke is kept (the stroke's own
+  pixels where it touched the tile) and its stamp, so a view that moves over ink drawn out of sight shows it.
 - **Shutdown never joins.** Dropping the handle raises every abort flag, wakes the gate and the channel and returns; the
   thread ends by itself, within a curve step of the call it was in.
-- **Generation time** is the time of the brush's own `sample` and `finish` calls, reported with each batch.
+- **Generation time** is the time spent inside the brush's calls, less the time spent rasterising within them, reported with each
+  batch.
 
 ### 3.5 Tiles and wet ink on the GPU (`styk-ui::ink_pad`)
 
-The pad is an iced `shader` widget on iced's device. Its primitive's `prepare` is budgeted as a whole (3 ms): it takes the
-worker's replies one at a time while the batches waiting hold under 4 MiB, installs tiles, asks for what the view needs,
-and builds the preview from a ledger capped at 32,768 dabs. `render` draws the cel's tiles and then the **wet ink** in the
-same render pass: instances for the dabs the worker has not yet returned joined by the raw pointer and the predicted point
-of the stroke being drawn (and only of a stroke that may be previewed: its eligibility was decided when it began, from its own
-tool), with today's eligibility rules. There is no desynchronised canvas and no second surface.
+The pad is an iced `shader` widget on iced's device. Its primitive's `prepare` is budgeted as a whole (3 ms of the pad's own
+work; the time inside the graphics API's queue calls is measured apart): it takes the worker's replies one at a time, writes
+tiles a few at a time, asks for what the view needs, and builds the preview from a ledger capped at 32,768 dabs. `render`
+draws the cel's tiles and then the **wet ink** in the same render pass: instances for the dabs the worker has not yet returned
+joined by the raw pointer and the predicted point of the stroke being drawn (and only of a stroke that may be previewed: its
+eligibility was decided when it began, from its own tool), with today's eligibility rules. There is no desynchronised canvas and
+no second surface. A uniform block that did not change is not written again.
 
 **Residency (`styk_core::drawing::tile_sync`).** The GPU holds the tiles the view shows, in an atlas of 2048 slots (32 MiB).
-A stroke batch is installed **whole or not at all** (at least one batch a frame; more while they fit 96 tiles and the time
-left), so the atlas never shows part of a batch while the preview still shows all of it. A batch needs a slot for each of its
-visible tiles that is not resident; none free means tiles outside the view are evicted, least recently used first. A batch
-the view pins too many slots for is deferred (counted, never acknowledged as shown, exact-pixel progress does not advance); one
-larger than the whole atlas is dropped, acknowledged and counted. Tiles that enter the view and tiles changed by undo, redo,
-clear or a cancel are fetched from the worker, 64 at a time, a tile known to be empty is not asked for again, and a fetched
-tile never overwrites what a stroke batch installed after the fetch was asked for.
+
+- *No gate on replies.* Every reply is taken as it comes: what waits is bounded by the worker's 4-batch window, and a cancel or an
+  undo is never held behind tile data (a full queue used to hide the very reply that would have emptied it).
+- *Hidden tiles are dropped on arrival.* A batch keeps only the tiles the view shows or that are already resident; a tile that
+  scrolls into view later is fetched from the worker, which answers from the open stroke.
+- *Atomic within a budget.* A stroke batch appears all at once, so the atlas never shows part of a batch while the preview still
+  shows all of it. Its tiles are written into **new** slots, a few a call within the frame's 96 tiles and time (every call places
+  at least one), and the batch is flipped into the view in the call that writes its last tile; a tile it replaces keeps showing
+  its old pixels until then.
+- *Versions by order.* The worker answers in order and numbers what it changes, so everything queued here is older than the reply
+  being accepted: an undo, redo, clear, cancel or fetched tile removes its tiles from every queued and half-written batch.
+  A late batch can never cover newer pixels and a changed tile is always fetched again.
+- *Eviction without stalls.* A tile needs a slot when it is shown and not resident. None free: tiles outside the view go, least
+  recently used first. A stroke batch (the person is drawing there) may then take the slot of the least recently used visible tile
+  that is not in the batch; a fetched tile may not, and is declined and counted (`unshown`) until the view changes. A view that
+  pins more inked tiles than the atlas holds therefore degrades to showing the nearest ones; it never leaves a batch
+  unacknowledged and the worker waiting.
+- Tiles that enter the view and tiles changed by undo, redo, clear or a cancel are fetched from the worker, 64 at a time; a tile
+  known to be empty is not asked for again.
 
 **Retirement is tied to the real asynchronous tile path, by sequence.** Every dab carries the batch sequence it was sent in.
 A wet segment retires in the frame whose `prepare` installed the tile batch with a sequence at least its own, and only
 then, so the exact pixels are in the same frame as the last preview of them; a segment older than 30 frames retires too
-(today's rule). Cancelled strokes retire all their ink and acknowledge what they had queued. Delayed replies, whole-batch
-installs, deferral, eviction and stale replies are tested without a GPU (`tile_sync`, `wet`), and the pad is drawn on a real
-GPU device in a test (`ink_pad::gpu::tests`) and compared pixel for pixel with the cel the worker holds, through clear, undo and
-a moved view. A rendered check of double painting at a translucent soft edge is not made: wet ink is limited to full-opacity
+(today's rule). Cancelled strokes retire all their ink and acknowledge what they had queued. Delayed replies, staged
+installs, versions, eviction and stale replies are tested without a GPU (`tile_sync`, `wet`), and the pad is drawn on a real
+GPU device in a test (`ink_pad::gpu::tests`) and compared pixel for pixel with the cel the worker holds, through clear, undo,
+a moved view and a view that moves over a stroke's ink mid-stroke. A rendered check of double painting at a translucent soft edge is not made: wet ink is limited to full-opacity
 strokes and installs are whole, so the case cannot occur today.
 
 Prediction is our own: the newest two samples extrapolated by `min(1.5 * mean period, 8 ms)`, clamped to 24 px, flagged
@@ -212,7 +241,7 @@ Decision N6 forbids system-level input injection, so nothing here is tested with
 scripted samples pushed into the pad's queue from an in-process thread (the lab's self-test, which exercises the queue, the
 stroke rules, the worker, the tile path and the GPU), by the fake source in plain Rust tests where the criterion is about
 logic, by pure-function tests of the platform source (`pen_sample`, `phase_of`, `cancels`, `promotion`, `scale_himetric`,
-`history_times`), and by hand with a tablet where only the operating system's own path can answer (hover reaching a toolkit
+`HistoryClock`), and by hand with a tablet where only the operating system's own path can answer (hover reaching a toolkit
 widget, press-and-hold, the eraser flags a driver reports). Every latency number is printed with the display's refresh rate
 and the present mode.
 
@@ -279,5 +308,5 @@ The pressure-curve editor, the Draw workspace, macOS and Linux sources (designed
   once a frame without a wake-up; the queue's waker is for the real application, whose stage draws only on demand.
 - **What an earlier, injected spike run showed, kept because it still shapes the design** (that run is dropped by N6): about
   40 % of a 240 Hz stroke's samples arrived as history entries; injected reports are stamped to the millisecond, so a
-  recovered history must not be rejected as duplicate timestamps (`history_times`); a lift reports the position of the last
+  recovered history must not be rejected as duplicate timestamps (`HistoryClock`); a lift reports the position of the last
   contact; the system reports a pen entering range as a report of its own; and the barrel button arrives in `penFlags`.

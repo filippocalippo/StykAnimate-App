@@ -205,12 +205,12 @@ impl<Message> shader::Program<Message> for Pad {
         let json = state.brush_json.clone().unwrap_or(json);
         let mut refused_stroke = None;
         for command in commands.drain(..) {
-            let id = if let StrokeCommand::Sample { id, .. } = &command { Some(*id) } else { None };
+            let id = if let StrokeCommand::Sample { id, .. } | StrokeCommand::Begin { id, .. } = &command { Some(*id) } else { None };
             if !self.core.worker.command(command, &json) {
                 refused_stroke = id;
             }
         }
-        // The worker is too far behind to take more of this stroke: it ends here and keeps what it has.
+        // The worker is too far behind to take this stroke (or more of it): it ends here and keeps what it has.
         if refused_stroke.is_some() {
             let mut ending = Vec::new();
             state.input.finish(&mut ending);
