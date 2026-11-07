@@ -8,6 +8,8 @@
 //! the snapshot and writes the answer the interface sends on: the document as JSON, or the body of the codec's export
 //! request with the document in it.
 
+use std::cell::Cell;
+
 use styk_doc::{Obj, Value};
 use styk_edit::export::{Exported, Format, Hold, Request};
 use styk_formats::Kind;
@@ -82,21 +84,40 @@ impl Engine {
             }
             (store.tree.clone(), store.loader.clone(), prepared)
         };
-        // A Pivot file is written from the tree in one piece, by allocations that cannot be refused one by one: the most the export takes is
-        // asked for first, and kept until it is done, so that a memory that has not got it refuses the export before anything is written.
-        let _memory = match output {
-            Output::Pivot { .. } => Some(reserve_pivot_export(&tree, cancel)?),
+        // A Pivot file is written from the tree by allocations nothing can refuse one by one: what the file itself takes is asked for first (the
+        // original it carries and the file written), and the work then asks between its steps whether it has outgrown what the memory had
+        // ([`styk_alloc::Reservation::overrun`]), so that it stops, with what it built dropped, before anything is written.
+        let memory = match output {
+            Output::Pivot { .. } => Some(reserve_pivot_export(&tree)?),
             _ => None,
         };
-        let Exported { mut document, figure_type_id, drawings } = styk_edit::export::export_document(&tree, &loader, &prepared, request, &Hold { cancel })
-            .map_err(|error| match error {
-                styk_edit::EditError::Invalid(message) if message == styk_edit::export::CANCELLED => DocumentExportError::Cancelled,
-                styk_edit::EditError::Invalid(message) => DocumentExportError::Refused(message),
-                styk_edit::EditError::Unported(feature) => DocumentExportError::Unported(feature),
+        let outgrown = Cell::new(None);
+        let stop = || {
+            cancel()
+                || memory.as_ref().is_some_and(|memory| match memory.overrun() {
+                    Some(overrun) => {
+                        outgrown.set(Some(overrun));
+                        true
+                    }
+                    None => false,
+                })
+        };
+        // A stop that is the memory's is a refusal for lack of it, whatever stopped the step that saw it.
+        let stopped = |error: DocumentExportError| match outgrown.take() {
+            Some(overrun) => DocumentExportError::Save(SaveError::OutOfMemory(overrun)),
+            None => error,
+        };
+        let Exported { mut document, figure_type_id, drawings } = styk_edit::export::export_document(&tree, &loader, &prepared, request, &Hold { cancel: &stop })
+            .map_err(|error| {
+                stopped(match error {
+                    styk_edit::EditError::Invalid(message) if message == styk_edit::export::CANCELLED => DocumentExportError::Cancelled,
+                    styk_edit::EditError::Invalid(message) => DocumentExportError::Refused(message),
+                    styk_edit::EditError::Unported(feature) => DocumentExportError::Unported(feature),
+                })
             })?;
         drop((tree, loader, prepared));
-        if cancel() {
-            return Err(DocumentExportError::Cancelled);
+        if stop() {
+            return Err(stopped(DocumentExportError::Cancelled));
         }
         let bytes = match output {
             Output::Document => styk_doc::json::to_string(&document).into_bytes(),
@@ -114,10 +135,14 @@ impl Engine {
             }
             Output::Pivot { format } => {
                 let original = take_original(&mut document);
-                let body = codec_request(document, format, request, figure_type_id);
-                let (file, _) = styk_piv::Codec::new(styk_piv::Limits::desktop()).export_tree(&body, original, &cancel).map_err(|error| match error.status {
-                    499 => DocumentExportError::Cancelled,
-                    _ => DocumentExportError::Refused(error.message),
+                // What the codec's route reads of the request it is sent: the document as text read back (no negative zero, no NaN, no infinity).
+                let body = styk_doc::json::read_back(&codec_request(document, format, request, figure_type_id), || if stop() { Err(()) } else { Ok(()) })
+                    .map_err(|()| stopped(DocumentExportError::Cancelled))?;
+                let (file, _) = styk_piv::Codec::new(styk_piv::Limits::desktop()).export_tree(&body, original, &stop).map_err(|error| {
+                    stopped(match error.status {
+                        499 => DocumentExportError::Cancelled,
+                        _ => DocumentExportError::Refused(error.message),
+                    })
                 })?;
                 file
             }
@@ -138,20 +163,18 @@ impl Engine {
     }
 }
 
-/// What a Pivot export takes beyond the document it reads, per byte the document retains, at most. Measured at the peak of the native export
-/// (2026-11-07, one edit, private bytes over the document held): a file padded with noise 3.34 (its padding is held as hex text and as bytes
-/// and written again), three projects of 55 to 212 MiB retained 2.1 to 2.7.
-const PIVOT_EXPORT_BYTES_PER_RETAINED_BYTE: usize = 4;
-
 /// The least a Pivot export reserves: a small document still needs the codec's working storage.
 const PIVOT_EXPORT_MINIMUM_BYTES: usize = 64 << 20;
 
-/// The reservation a Pivot export makes before it starts, from what the document retains (shared nodes counted once: the padding of a
-/// padded file, the original it carries and the frames are all in it). Refused with the message of a save that ran out of memory.
-fn reserve_pivot_export(tree: &Value, cancel: &dyn Fn() -> bool) -> Result<styk_alloc::Reservation, DocumentExportError> {
-    let retained = styk_doc::retained_bytes_checked(&[tree], |_| if cancel() { Err(()) } else { Ok(()) }).map_err(|()| DocumentExportError::Cancelled)?;
-    let bytes = retained.saturating_mul(PIVOT_EXPORT_BYTES_PER_RETAINED_BYTE).max(PIVOT_EXPORT_MINIMUM_BYTES);
-    styk_alloc::reserve(bytes).map_err(|error| DocumentExportError::Save(SaveError::OutOfMemory(error)))
+/// The reservation a Pivot export makes before it starts: the codec's working storage, and the original the document carries twice (the
+/// file is written from it, and what is written is as large). What else the export takes depends on the document and is asked for as it is
+/// taken. Refused with the message of a save that ran out of memory.
+fn reserve_pivot_export(tree: &Value) -> Result<styk_alloc::Reservation, DocumentExportError> {
+    let original = match tree.get("_stykSource").and_then(|record| record.get("source_base64")) {
+        Some(Value::Blob(blob)) => blob.bytes.len(),
+        _ => 0,
+    };
+    styk_alloc::reserve(PIVOT_EXPORT_MINIMUM_BYTES.saturating_add(original.saturating_mul(2))).map_err(|error| DocumentExportError::Save(SaveError::OutOfMemory(error)))
 }
 
 /// The request the codec's export route takes: the document, the format, the name and the figure type.

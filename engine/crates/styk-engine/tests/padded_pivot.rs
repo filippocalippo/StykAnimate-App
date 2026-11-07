@@ -1,70 +1,11 @@
-//! Large and padded Pivot files on the engine's own path: a very compressible file opens and gives its memory back when the document
-//! is closed, and a padded file edited once is exported as a Pivot file without the codec's request in between (whose size is twice
-//! the padding, as the document holds it as hex text).
-use std::sync::Arc;
+//! A padded Pivot file edited once is exported as a Pivot file without the codec's request in between (whose size is twice the padding, as the
+//! document holds it as hex text), with the bytes the codec's route writes.
+mod support;
 
-use styk_doc::{Value, json};
-use styk_edit::export::{FigureRequest, Format, Request};
-use styk_engine::document::{OpenOptions, OpenSource};
+use styk_doc::Value;
 use styk_engine::document_export::Output;
-use styk_engine::{Budgets, Engine};
-use styk_piv::{Codec, Limits};
-
-fn clock() -> f64 {
-    0.0
-}
-
-const APP: OpenOptions = OpenOptions { layer_timeline: true };
-const STATE: &str = r#"{"propertyChannels":true,"layerTimeline":true,"tick":0,"frameIndex":0,"layerRevision":1,"nextFrameIdentity":2,"nextUid":2}"#;
-
-/// The payload of a Pivot file of the fixtures, inflated.
-fn project() -> Vec<u8> {
-    let original = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-piv/tests/fixtures/modern-identities.piv")).unwrap();
-    miniz_oxide::inflate::decompress_to_vec_zlib(&original).unwrap()
-}
-
-/// A Pivot file with `padding` bytes of noise after its project, stored as they are.
-fn padded_with_noise(padding: usize) -> Vec<u8> {
-    let mut payload = project();
-    let mut state = 0x2545_f491_4f6c_dd1du64;
-    payload.extend((0..padding).map(|_| {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        (state >> 24) as u8
-    }));
-    miniz_oxide::deflate::compress_to_vec_zlib(&payload, 0)
-}
-
-/// The engine of a padded file that was opened as the app opens one (the file kept as the document's original), and edited once.
-fn edited(file: &[u8]) -> (Engine, u64) {
-    let engine = Engine::new(clock, Budgets::for_device(None));
-    let mut opened = engine.open_document(OpenSource::File { bytes: file, name: "Padded.piv" }, APP, &|| false).unwrap();
-    opened.attach_source(Arc::from(file)).unwrap();
-    engine.activate(&opened.typed, &opened.tree, 1).unwrap();
-    let mut session = opened.start_session(STATE).unwrap();
-    let answer = json::parse(session.call("setFPS", "[30]", "null").as_bytes()).unwrap();
-    assert_eq!(answer.get("status").and_then(Value::as_str), Some("ok"), "{answer}");
-    engine.publish_tree(opened.lineage(), session.report().clone(), session.revision()).unwrap().expect("nothing reads the document");
-    let revision = session.revision();
-    (engine, revision)
-}
-
-fn request() -> Request {
-    Request { format: Format::Piv, name: Some("Padded".into()), figure: FigureRequest::default() }
-}
-
-/// What the codec service makes of the request an export sends it: the status and the bytes.
-fn through_the_service(engine: &Engine, revision: u64, limits: Limits) -> (u16, Vec<u8>) {
-    let body = engine.export_document(revision, &request(), &Output::CodecRequest { format: "piv".into() }, &|| false).unwrap().bytes;
-    let headers = [("Content-Type".to_string(), "application/vnd.stykanimate.export".to_string())];
-    let answer = Codec::new(limits).request("POST", "/api/export", &headers, &body, &|| false);
-    (answer.status, answer.body)
-}
-
-fn pivot(engine: &Engine, revision: u64) -> Vec<u8> {
-    engine.export_document(revision, &request(), &Output::Pivot { format: "piv".into() }, &|| false).unwrap().bytes
-}
+use support::*;
+use styk_piv::Limits;
 
 #[test]
 fn an_edited_padded_file_exports_the_bytes_the_codec_service_writes() {
@@ -118,4 +59,38 @@ fn a_pivot_export_the_memory_cannot_hold_is_refused_before_it_writes_anything() 
     // The export in the codec's request form is not asked for the memory (the browser's path reserves nothing here).
     let request_body = styk_alloc::with_limit(100 << 20, || engine.export_document(revision, &request(), &Output::CodecRequest { format: "piv".into() }, &|| false));
     assert!(request_body.is_ok());
+}
+
+#[test]
+fn a_document_with_edge_numbers_exports_the_bytes_the_codec_route_writes() {
+    // JSON has no negative zero, no NaN and no infinity: the route that writes the document as text and reads it back turns a negative zero into a
+    // zero and the others into null. The tree export must write what that route writes, for the fields a Pivot file stores.
+    let file = padded_with_noise(1 << 10);
+    let probe = |tree: &Value| {
+        let mut root = tree.as_obj().unwrap().clone();
+        root.set("probe", Value::nums(&[f64::NAN, f64::INFINITY, -0.0, 1.5]));
+        root.set("probe_zero", Value::Num(-0.0));
+        Value::object(root)
+    };
+    let cases: [(&str, Box<dyn Fn(&Value) -> Value>); 5] = [
+        ("root_x negative zero", Box::new(|tree| with_numbers(tree, &|n| n, Some(("root_x", -0.0))))),
+        ("first angle negative zero", Box::new(|tree| with_numbers(tree, &|n| n, Some(("angles", -0.0))))),
+        ("root_x NaN", Box::new(|tree| with_numbers(tree, &|n| n, Some(("root_x", f64::NAN))))),
+        ("NaN, infinity and negative zero in a field the format has no place for", Box::new(probe)),
+        ("nothing changed", Box::new(|tree| tree.clone())),
+    ];
+    let mut written = 0;
+    for (name, change) in cases {
+        let (engine, revision) = edited_then(&file, &*change);
+        let (service, tree) = both_routes(&engine, revision);
+        match (&service, &tree) {
+            (Ok(expected), Ok(bytes)) => {
+                assert!(bytes == expected, "{name}: {} bytes by the tree, {} by the codec's route; first difference at {:?}", bytes.len(), expected.len(), bytes.iter().zip(expected.iter()).position(|(a, b)| a != b));
+                written += 1;
+            }
+            (Err(by_route), Err(by_tree)) => assert!(by_route.contains(by_tree.as_str()), "{name}: refused as {by_tree:?} by the tree and {by_route:?} by the route"),
+            _ => panic!("{name}: one route writes and the other refuses: route {:?}, tree {:?}", service.as_ref().map(Vec::len), tree.as_ref().map(Vec::len)),
+        }
+    }
+    assert!(written >= 3, "the cases that write are compared byte for byte ({written})");
 }

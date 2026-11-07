@@ -271,7 +271,7 @@ pub(crate) fn validate_document(ctx: &Ctx<'_>, document: &Value) -> PyResult<()>
 
 /// `codec_bridge.source_bytes`: the original Pivot file a native document
 /// embeds, checked against its recorded SHA-256.
-pub(crate) fn source_bytes(document: &Value) -> PyResult<Option<Arc<[u8]>>> {
+pub(crate) fn source_bytes(ctx: &Ctx<'_>, document: &Value) -> PyResult<Option<Arc<[u8]>>> {
     let Some(metadata) = py::get(document, "_stykSource")?.filter(|m| py::truthy(m)) else {
         return Ok(None);
     };
@@ -295,16 +295,18 @@ pub(crate) fn source_bytes(document: &Value) -> PyResult<Option<Arc<[u8]>>> {
         }
         _ => return Err(piv("Invalid embedded original source")),
     };
-    checked_source(Some(metadata), source).map(Some)
+    checked_source(ctx, Some(metadata), source).map(Some)
 }
 
 /// The original Pivot file a request gives apart from its document, checked against the SHA-256 the document's `_stykSource` records.
-pub(crate) fn checked_source(metadata: Option<&Value>, source: Arc<[u8]>) -> PyResult<Arc<[u8]>> {
+pub(crate) fn checked_source(ctx: &Ctx<'_>, metadata: Option<&Value>, source: Arc<[u8]>) -> PyResult<Arc<[u8]>> {
     let recorded = match metadata {
         Some(metadata) => py::get(metadata, "sha256")?,
         None => None,
     };
-    if recorded.and_then(Value::as_str) != Some(sha256_hex(&source).as_str()) {
+    // The fingerprint of a file of a hundred megabytes is hashed in strides, asking whether to stop between them.
+    let Some(digest) = styk_doc::digest::sha256_until(&source, &|| ctx.stopped()) else { return Err(crate::error::cancelled()) };
+    if recorded.and_then(Value::as_str) != Some(crate::piv::v5::hex(&digest).as_str()) {
         return Err(piv("Embedded original source fingerprint does not match"));
     }
     Ok(source)
