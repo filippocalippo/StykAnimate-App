@@ -50,7 +50,7 @@ fn recency_follows_the_project_in_front_and_the_successor_is_the_one_used_before
     assert_eq!(documents.successor(c), Some(a));
     documents.activate(b).unwrap();
     assert_eq!(documents.recency(), [b, a, c]);
-    assert_eq!(documents.activate(b).unwrap(), false);
+    assert!(!documents.activate(b).unwrap());
     assert_eq!(documents.recency(), [b, a, c], "activating the project in front changes nothing");
 }
 

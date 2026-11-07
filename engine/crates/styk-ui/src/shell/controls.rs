@@ -63,7 +63,16 @@ pub(crate) struct Surface {
 }
 
 /// A surface the pointer and the keyboard operate: a button in a focus target, hovering through the shell.
-pub(crate) fn pressable(content: Element<'static, Message>, width: f32, height: f32, surface: Surface, hovered: bool, target: Hover, press: Option<Message>, focus: FocusId, theme: Theme) -> Element<'static, Message> {
+/// What a pressable surface does: the shell's hover target, the message a press sends (none: disabled) and its focus target.
+pub(crate) struct Action {
+    pub target: Hover,
+    pub press: Option<Message>,
+    pub focus: FocusId,
+}
+
+pub(crate) fn pressable(content: Element<'static, Message>, size: (f32, f32), surface: Surface, hovered: bool, action: Action, theme: Theme) -> Element<'static, Message> {
+    let (width, height) = size;
+    let Action { target, press, focus } = action;
     let enabled = press.is_some();
     let ring = Ring::of(theme.palette(), surface.radius);
     let face = button(content)
@@ -120,7 +129,7 @@ pub(crate) fn icon_button(button: IconButton) -> Element<'static, Message> {
     let surface = Surface { rest: rest.map(|c| faded(c, enabled)), hot: hot.map(|c| faded(c, enabled)), active: active.map(|c| faded(c, enabled)), border: None, shadow: Shadow::default(), radius: button.radius };
     let glyph = icon(button.name, button.glyph, faded(if hovered { fg_hot } else { fg }, enabled));
     let face = container(glyph).center_x(Length::Fixed(button.size)).center_y(Length::Fixed(button.size));
-    pressable(face.boxed(), button.size, button.size, surface, hovered, button.target, enabled.then_some(button.press), button.focus, button.theme)
+    pressable(face.boxed(), (button.size, button.size), surface, hovered, Action { target: button.target, press: enabled.then_some(button.press), focus: button.focus }, button.theme)
 }
 
 /// Which button of the design system.
@@ -169,7 +178,7 @@ pub(crate) fn word_button(button: WordButton) -> Element<'static, Message> {
         (None, _) => label.boxed(),
     };
     let face = container(content).center_x(Length::Fixed(button.width)).center_y(Length::Fixed(button.height));
-    pressable(face.boxed(), button.width, button.height, surface, button.hovered, button.target, Some(button.press), button.focus, button.theme)
+    pressable(face.boxed(), (button.width, button.height), surface, button.hovered, Action { target: button.target, press: Some(button.press), focus: button.focus }, button.theme)
 }
 
 /// One segment of the workspace switch (`.ui-segmented-item` in `.workspace-switch`).
@@ -243,5 +252,6 @@ pub(crate) fn segment(segment: Segment) -> Element<'static, Message> {
             container(icon(glyph_of(segment.workspace), 17.0, glyph_color)).center_x(Length::Fixed(segment.width)).center_y(Length::Fixed(segment.height)).boxed()
         }
     };
-    pressable(content, segment.width, segment.height, surface, segment.hovered, Hover::Workspace(segment.workspace), Some(Message::Shell(Event::Workspace(segment.workspace))), segment.focus, segment.theme)
+    let action = Action { target: Hover::Workspace(segment.workspace), press: Some(Message::Shell(Event::Workspace(segment.workspace))), focus: segment.focus };
+    pressable(content, (segment.width, segment.height), surface, segment.hovered, action, segment.theme)
 }

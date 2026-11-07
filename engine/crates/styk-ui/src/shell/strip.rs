@@ -101,12 +101,12 @@ pub(crate) fn tab(view: &TabView, look: TabLook, frame: Frame, hover: Option<Hov
     let end: Element<'static, Message> = match look.end {
         TabEnd::Gone => space().width(0.0).boxed(),
         TabEnd::Narrow => {
-            let dot = dot.map_or_else(|| space().width(DOT).height(DOT).boxed(), |c| dot_widget(c));
+            let dot = dot.map_or_else(|| space().width(DOT).height(DOT).boxed(), dot_widget);
             container(dot).center(Length::Fixed(END_NARROW)).height(Length::Fixed(END)).boxed()
         }
         TabEnd::Full if show_close => close_button(id, over_close, fg, theme),
         TabEnd::Full => {
-            let slot: Element<'static, Message> = dot.map_or_else(|| space().boxed(), |c| dot_widget(c));
+            let slot: Element<'static, Message> = dot.map_or_else(|| space().boxed(), dot_widget);
             container(slot).center(Length::Fixed(END)).boxed()
         }
     };

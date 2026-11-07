@@ -647,7 +647,10 @@ pub fn solve(input: &Input<'_>) -> Layout {
 }
 
 /// The tabs inside a strip `strip_width` wide: each tab's offset and width, and New's offset.
-fn layout_tabs(input: &Input<'_>, parts: &Parts<'_>, strip_width: f32, add: f32) -> (Vec<(DocumentId, TabLook, f32, f32)>, Option<f32>) {
+/// A tab's place in the strip: which, how it looks, its offset and its width.
+type PlacedTab = (DocumentId, TabLook, f32, f32);
+
+fn layout_tabs(input: &Input<'_>, parts: &Parts<'_>, strip_width: f32, add: f32) -> (Vec<PlacedTab>, Option<f32>) {
     let gap = input.metrics.space_0_5;
     let dot = parts.on(Fold::Dot);
     // At the `dot` step only the tab in front shows, and New is gone.
@@ -886,8 +889,8 @@ mod tests {
         near(animate.x, 941.71875);
         near(animate.width, 97.140625);
         assert_eq!((animate.y, animate.height), (11.0, 30.0));
-        near(layout.find(|item| *item == Item::Workspace(Workspace::Draw)).unwrap().x, 1040.859375);
-        near(layout.find(|item| *item == Item::Workspace(Workspace::Build)).unwrap().x, 1120.671875);
+        near(layout.find(|item| *item == Item::Workspace(Workspace::Draw)).unwrap().x, 1040.859);
+        near(layout.find(|item| *item == Item::Workspace(Workspace::Build)).unwrap().x, 1120.672);
         near(at(Item::Undo).x, 1212.125);
         near(at(Item::Redo).x, 1244.125);
         near(at(Item::Save).x, 1284.125);
@@ -1027,8 +1030,8 @@ mod tests {
         assert_eq!(tab_look(136.0, false), TabLook { name: true, close: false, end: TabEnd::Gone });
         assert_eq!(tab_look(137.0, false), TabLook { name: true, close: true, end: TabEnd::Full });
         // content = 72 drops the name.
-        assert_eq!(tab_look(84.0, true).name, false);
-        assert_eq!(tab_look(85.0, true).name, true);
+        assert!(!tab_look(84.0, true).name);
+        assert!(tab_look(85.0, true).name);
     }
 
     #[test]

@@ -14,7 +14,7 @@ use styk_core::shell::strip::Side;
 use styk_core::shell::workspace::Workspace;
 use styk_core::shell::{Event, Hover, Menu, ids};
 use styk_design::widgets::icon;
-use styk_design::{Theme, tokens};
+use styk_design::tokens;
 
 /// The StykAnimate symbol the mark shows (`symbol.svg`).
 const SYMBOL: &[u8] = include_bytes!("../../../../../symbol.svg");
@@ -106,7 +106,7 @@ pub(crate) fn view(params: &Params<'_>) -> Element<'static, Message> {
                 let picture = svg(svg::Handle::from_memory(SYMBOL)).width(22.0).height(22.0);
                 let chevron = icon("chevronDown", 12.0, color(palette.text_3));
                 let content = container(row![picture, chevron].spacing(tokens::scale::SPACE_0_5).align_y(Alignment::Center)).padding(Padding { left, right: end, ..Padding::ZERO }).center_y(Length::Fixed(frame.height));
-                (frame.x, controls::pressable(content.boxed(), frame.width, frame.height, surface, hot, Hover::Mark, Some(Message::Shell(Event::Mark)), ids::MARK, theme), frame.right())
+                (frame.x, controls::pressable(content.boxed(), (frame.width, frame.height), surface, hot, controls::Action { target: Hover::Mark, press: Some(Message::Shell(Event::Mark)), focus: ids::MARK }, theme), frame.right())
             }
             Item::Home => (
                 frame.x,
