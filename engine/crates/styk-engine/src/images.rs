@@ -361,7 +361,7 @@ impl Engine {
         let mut taken = std::collections::LinkedList::new();
         let mut stale = std::collections::LinkedList::new();
         let mut bytes = 0;
-        let mut blanks = Vec::new();
+        let blanks;
         let released = {
             let mut state = self.inner.state.lock();
             while let Some(image) = state.images.ready.back() {
