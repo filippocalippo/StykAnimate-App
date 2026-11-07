@@ -184,7 +184,7 @@ The output thread never locks, allocates, frees a large block or waits.
 - **Events.** The renderer publishes state, not messages: `applied_generation`, `ended_generation`, `underruns`,
   `device_lost`. State cannot overflow and a terminal event cannot be dropped.
 - **Prepare jobs.** One worker thread, one request waiting (a newer one replaces it), one result waiting (an unpolled older one
-  is replaced and freed on the worker): however many prepares are asked for, the process has one thread and each handoff holds
+  is replaced and freed on the worker), handed over by **atomic one-slot handoffs**: the interface side takes no lock the worker holds, only puts a request, takes a result and cancels through the job's own token (a short critical section with no waiting inside); the worker parks when idle. However many prepares are asked for, the process has one thread and each handoff holds
   one item. `prepare` returns a job identity; starting another prepare cancels **that one job** (its `Cancel` wakes a blocked
   FFmpeg wait and kills the process); a finished job is accepted only if its identity is the transport's current one, otherwise
   the plan is reclaimed and never reaches the output ("prepare A, then stop or edit, then A completes" starts nothing). `poll`

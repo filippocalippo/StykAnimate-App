@@ -12,10 +12,10 @@
 use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
 use std::ptr;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
+use std::sync::Arc;
+use std::thread::{JoinHandle, Thread};
 
 use styk_services::audio::clock::Reading;
 use styk_services::audio::{AudioDecoder, AudioError, AudioOutput, HostClock, Next, OutputInfo, RenderResult, RenderSource, StreamClock, StreamControl};
@@ -214,6 +214,7 @@ struct Reclaimer {
 enum Reclaim {
     Envelope(#[allow(dead_code)] Box<Envelope>),
     Plan(#[allow(dead_code)] Arc<MixPlan>),
+    Job(#[allow(dead_code)] Box<Job>),
 }
 
 /// Items the freeing thread's queue holds, the backlog beyond it, and how many go over per call.
@@ -286,66 +287,63 @@ struct Job {
     cancel: Cancel,
 }
 
-#[derive(Default)]
-struct Slot {
-    /// The newest request waiting for the worker (a newer one replaces it).
-    next: Option<Job>,
-    /// The request the worker is on.
-    running: Option<(JobId, Cancel)>,
-    /// The newest result (an unpolled older one is replaced).
-    done: Option<Prepared>,
-    shutdown: bool,
+/// A one-slot handoff between two threads with no lock: a newer value replaces an older one that was not taken, and the replaced
+/// value comes back to whoever put the newer one, to be freed where that is allowed.
+struct Handoff<T> {
+    slot: AtomicPtr<T>,
 }
 
-/// Preparation: one worker thread, one request waiting, one result waiting. However many prepares are asked for, the process
-/// has this one thread, and each handoff holds one item.
+// SAFETY: the slot owns at most one `Box<T>`, handed over whole by atomic swaps, so `T` is only ever used by one thread at a time.
+unsafe impl<T: Send> Send for Handoff<T> {}
+unsafe impl<T: Send> Sync for Handoff<T> {}
+
+impl<T> Handoff<T> {
+    fn new() -> Handoff<T> {
+        Handoff { slot: AtomicPtr::new(ptr::null_mut()) }
+    }
+
+    /// Puts `value`; the value it replaces, if it was not taken, comes back.
+    fn put(&self, value: Box<T>) -> Option<Box<T>> {
+        let old = self.slot.swap(Box::into_raw(value), Ordering::AcqRel);
+        // SAFETY: a pointer swapped out of the slot came from `Box::into_raw` in `put` and nobody else has it now.
+        (!old.is_null()).then(|| unsafe { Box::from_raw(old) })
+    }
+
+    fn take(&self) -> Option<Box<T>> {
+        let old = self.slot.swap(ptr::null_mut(), Ordering::AcqRel);
+        // SAFETY: as in `put`.
+        (!old.is_null()).then(|| unsafe { Box::from_raw(old) })
+    }
+}
+
+impl<T> Drop for Handoff<T> {
+    fn drop(&mut self) {
+        drop(self.take());
+    }
+}
+
+/// Preparation: one worker thread, one request waiting, one result waiting, handed over by atomic slots. The interface side takes
+/// no lock the worker holds: it puts a request, takes a result, and cancels through the job's own token (a short critical section
+/// of its own, with no waiting inside). The worker parks when it has nothing to do.
 struct Jobs {
-    slot: Mutex<Slot>,
-    wake: Condvar,
+    request: Handoff<Job>,
+    result: Handoff<Prepared>,
+    shutdown: AtomicBool,
 }
 
 impl Jobs {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Slot> {
-        self.slot.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// Cancels the job named `id`, wherever it is. No other job is touched.
-    fn cancel(slot: &mut Slot, id: JobId) {
-        if slot.next.as_ref().is_some_and(|job| job.id == id) {
-            if let Some(job) = slot.next.take() {
-                job.cancel.cancel();
-            }
-        }
-        if let Some((running, cancel)) = &slot.running {
-            if *running == id {
-                cancel.cancel();
-            }
-        }
-    }
-
     fn worker(self: Arc<Jobs>, store: Arc<SourceStore>) {
         loop {
-            let job = {
-                let mut slot = self.lock();
-                loop {
-                    if slot.shutdown {
-                        return;
-                    }
-                    if let Some(job) = slot.next.take() {
-                        slot.running = Some((job.id, job.cancel.clone()));
-                        break job;
-                    }
-                    slot = self.wake.wait(slot).unwrap_or_else(|e| e.into_inner());
-                }
+            if self.shutdown.load(Ordering::Acquire) {
+                return;
+            }
+            let Some(job) = self.request.take() else {
+                std::thread::park();
+                continue;
             };
             let result = build_plan(&store, &job.state, job.start, job.end, &job.cancel);
-            let replaced = {
-                let mut slot = self.lock();
-                slot.running = None;
-                slot.done.replace((job.id, result))
-            };
-            // An older result nobody polled is freed here, on the worker.
-            drop(replaced);
+            // An older result nobody took is freed here, on the worker.
+            drop(self.result.put(Box::new((job.id, result))));
         }
     }
 }
@@ -353,6 +351,8 @@ impl Jobs {
 struct Pending {
     id: JobId,
     then: Then,
+    /// The token the worker's job runs under: cancelling the job is cancelling this, by the job's own identity.
+    cancel: Cancel,
 }
 
 struct Active {
@@ -371,6 +371,7 @@ pub struct AudioTransport {
     store: ManuallyDrop<Arc<SourceStore>>,
     jobs: ManuallyDrop<Arc<Jobs>>,
     worker: Option<JoinHandle<()>>,
+    worker_thread: Thread,
     /// The generation of the last command issued.
     generation: u64,
     next_job: JobId,
@@ -387,7 +388,7 @@ impl AudioTransport {
         let renderer = Renderer { shared: shared.clone(), plan: None, playing: false, next_sample: 0, end_sample: 0, generation: 0 };
         let info = output.open(Box::new(renderer))?;
         let store = SourceStore::new(Budget::new(budget_bytes), decoder);
-        let jobs = Arc::new(Jobs { slot: Mutex::new(Slot::default()), wake: Condvar::new() });
+        let jobs = Arc::new(Jobs { request: Handoff::new(), result: Handoff::new(), shutdown: AtomicBool::new(false) });
         let worker = {
             let (jobs, store) = (jobs.clone(), store.clone());
             std::thread::Builder::new().name("styk audio prepare".into()).spawn(move || jobs.worker(store)).map_err(|e| AudioError::Io(e.to_string()))?
@@ -402,6 +403,7 @@ impl AudioTransport {
             info: Some(info),
             store: ManuallyDrop::new(store),
             jobs: ManuallyDrop::new(jobs),
+            worker_thread: worker.thread().clone(),
             worker: Some(worker),
             generation: 0,
             next_job: 0,
@@ -451,15 +453,16 @@ impl AudioTransport {
         self.next_job += 1;
         let id = self.next_job;
         let cancel = Cancel::new();
-        {
-            let mut slot = self.jobs.lock();
-            if let Some(previous) = self.pending.take() {
-                Jobs::cancel(&mut slot, previous.id);
-            }
-            slot.next = Some(Job { id, state: state.clone(), start, end, cancel });
+        // The prepare before it, if unfinished, is cancelled by its own token; a request the worker has not taken is replaced.
+        if let Some(previous) = self.pending.take() {
+            previous.cancel.cancel();
         }
-        self.jobs.wake.notify_one();
-        self.pending = Some(Pending { id, then });
+        let job = Box::new(Job { id, state: state.clone(), start, end, cancel: cancel.clone() });
+        if let Some(replaced) = self.jobs.request.put(job) {
+            self.reclaimer.give(Reclaim::Job(replaced));
+        }
+        self.worker_thread.unpark();
+        self.pending = Some(Pending { id, then, cancel });
         id
     }
 
@@ -481,7 +484,7 @@ impl AudioTransport {
     /// Stops: the preparing job is cancelled, the queued sound is discarded now, the stream goes idle.
     pub fn stop(&mut self) {
         if let Some(pending) = self.pending.take() {
-            Jobs::cancel(&mut self.jobs.lock(), pending.id);
+            pending.cancel.cancel();
         }
         self.generation += 1;
         let generation = self.generation;
@@ -511,8 +514,8 @@ impl AudioTransport {
     /// at most, and a bounded number of items handed to the freeing thread.
     pub fn poll(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
-        let done = self.jobs.lock().done.take();
-        if let Some((id, result)) = done {
+        if let Some(done) = self.jobs.result.take() {
+            let (id, result) = *done;
             if self.pending.as_ref().is_some_and(|pending| pending.id == id) {
                 let pending = self.pending.take().expect("the job is current");
                 match (result, pending.then) {
@@ -569,25 +572,17 @@ impl Drop for AudioTransport {
         // in the command envelopes, the preparing worker and the result it may hold, the cache, the freeing thread's backlog and
         // what the output thread left in the control block's graveyard. None of it is freed on the interface thread.
         if let Some(pending) = self.pending.take() {
-            Jobs::cancel(&mut self.jobs.lock(), pending.id);
+            pending.cancel.cancel();
         }
+        // The worker is told to end now (an atomic and an unpark); it is joined on the closing thread.
+        self.jobs.shutdown.store(true, Ordering::Release);
+        self.worker_thread.unpark();
         let mut output = self.output.take();
         let worker = self.worker.take();
         let control = self.control.clone();
         // SAFETY: `drop` runs once and nothing reads these fields afterwards.
         let (shared, store, jobs, reclaimer) = unsafe { (ManuallyDrop::take(&mut self.shared), ManuallyDrop::take(&mut self.store), ManuallyDrop::take(&mut self.jobs), ManuallyDrop::take(&mut self.reclaimer)) };
         let _ = std::thread::Builder::new().name("styk audio close".into()).spawn(move || {
-            {
-                let mut slot = jobs.lock();
-                slot.shutdown = true;
-                if let Some(job) = slot.next.take() {
-                    job.cancel.cancel();
-                }
-                if let Some((_, cancel)) = &slot.running {
-                    cancel.cancel();
-                }
-            }
-            jobs.wake.notify_all();
             if let Some(worker) = worker {
                 let _ = worker.join();
             }
@@ -642,5 +637,20 @@ impl WallClock {
 impl MediaClock for WallClock {
     fn media_time(&self) -> Option<f64> {
         Some(self.from + (self.host.now_ns().saturating_sub(self.started_ns)) as f64 / 1e9)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_newer_value_replaces_an_older_one_that_was_not_taken_and_the_older_comes_back() {
+        let handoff = Handoff::new();
+        assert!(handoff.put(Box::new(1)).is_none());
+        assert_eq!(handoff.put(Box::new(2)).map(|v| *v), Some(1), "the replaced value comes back to the sender");
+        assert_eq!(handoff.take().map(|v| *v), Some(2));
+        assert!(handoff.take().is_none());
+        handoff.put(Box::new(3));
     }
 }
