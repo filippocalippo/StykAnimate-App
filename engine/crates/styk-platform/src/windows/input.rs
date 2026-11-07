@@ -16,6 +16,7 @@
 //! Everything here runs on the thread that owns the window; the [`InputQueue`] is the only thing shared.
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::mem::zeroed;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -38,6 +39,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 /// The pointer id of the mouse.
 pub const MOUSE_POINTER: u32 = u32::MAX;
+
+/// Pen reports remembered to drop an entry a later message's history repeats.
+const RECENT_PEN: usize = 64;
 
 /// The device range of a Windows pen's pressure.
 const PRESSURE_RANGE: u32 = 1024;
@@ -175,8 +179,8 @@ struct Hook {
     mouse_down: Cell<bool>,
     mouse_barrel: Cell<bool>,
     scratch: RefCell<Vec<POINTER_PEN_INFO>>,
-    /// The last pen report pushed, so an entry the history repeats is not delivered twice.
-    last_pen: Cell<Option<(u32, u64, u64, u64, u32, Phase)>>,
+    /// The last pen reports pushed, so an entry the history repeats is not delivered twice.
+    recent_pen: RefCell<VecDeque<(u32, u64, u64, u64, u32, Phase)>>,
 }
 
 fn modifiers() -> Modifiers {
@@ -253,9 +257,16 @@ impl Hook {
             let mut sample = pen_sample(entry, Self::position(hwnd, &entry.pointerInfo), time_ns, keys);
             // The history of a message sometimes ends with the entry the message itself reports: once is enough.
             let identity = (pointer, time_ns, sample.x.to_bits(), sample.y.to_bits(), sample.raw_pressure, sample.phase);
-            if self.last_pen.replace(Some(identity)) == Some(identity) {
-                self.counters.repeated_entries.fetch_add(1, Ordering::Relaxed);
-                continue;
+            {
+                let mut recent = self.recent_pen.borrow_mut();
+                if recent.contains(&identity) {
+                    self.counters.repeated_entries.fetch_add(1, Ordering::Relaxed);
+                    continue;
+                }
+                if recent.len() == RECENT_PEN {
+                    recent.pop_front();
+                }
+                recent.push_back(identity);
             }
             if index + 1 < total {
                 sample.flags = sample.flags | SampleFlags::HISTORY;
@@ -433,7 +444,7 @@ impl WindowsInput {
             mouse_down: Cell::new(false),
             mouse_barrel: Cell::new(false),
             scratch: RefCell::new(Vec::new()),
-            last_pen: Cell::new(None),
+            recent_pen: RefCell::new(VecDeque::new()),
         }));
         // SAFETY: `hook` stays allocated until `detach`, which removes the subclass first; the property value is plain bits.
         unsafe {

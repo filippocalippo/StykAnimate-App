@@ -18,11 +18,20 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{PEN_FLAG_BARREL, PEN_MASK_PRES
 
 /// Why injection failed: what was called, and the system's error code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InjectError(pub &'static str, pub u32);
+pub struct InjectError {
+    pub call: &'static str,
+    pub code: u32,
+    /// The script step that was being injected.
+    pub step: Option<usize>,
+}
 
 impl std::fmt::Display for InjectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} failed (error {})", self.0, self.1)
+        write!(f, "{} failed (error {})", self.call, self.code)?;
+        if let Some(step) = self.step {
+            write!(f, " at step {step}")?;
+        }
+        Ok(())
     }
 }
 
@@ -60,15 +69,15 @@ pub fn primary_screen_size() -> (i32, i32) {
 pub fn make_nearly_invisible(window: &dyn raw_window_handle::HasWindowHandle, alpha: u8) -> Result<(), InjectError> {
     use raw_window_handle::RawWindowHandle;
     use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GetWindowLongPtrW, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowLongPtrW, WS_EX_LAYERED};
-    let Ok(handle) = window.window_handle() else { return Err(InjectError("window handle", 0)) };
-    let RawWindowHandle::Win32(handle) = handle.as_raw() else { return Err(InjectError("window handle", 0)) };
+    let Ok(handle) = window.window_handle() else { return Err(InjectError { call: "window handle", code: 0, step: None }) };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else { return Err(InjectError { call: "window handle", code: 0, step: None }) };
     let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
     // SAFETY: the handle belongs to a live window of this process; these calls only change its own style and opacity.
     unsafe {
         let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED as isize);
         if SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA) == 0 {
-            return Err(InjectError("SetLayeredWindowAttributes", last_error()));
+            return Err(InjectError { call: "SetLayeredWindowAttributes", code: last_error(), step: None });
         }
     }
     Ok(())
@@ -86,7 +95,7 @@ impl PenInjector {
         // SAFETY: plain call; the device is destroyed in `Drop`.
         let device = unsafe { CreateSyntheticPointerDevice(PT_PEN, 1, POINTER_FEEDBACK_NONE) };
         if device.is_null() {
-            return Err(InjectError("CreateSyntheticPointerDevice", last_error()));
+            return Err(InjectError { call: "CreateSyntheticPointerDevice", code: last_error(), step: None });
         }
         Ok(PenInjector { device, pointer, in_range: false })
     }
@@ -115,7 +124,7 @@ impl PenInjector {
         let frame = self.frame(step, screen_origin, flags);
         // SAFETY: `frame` is a fully initialised frame that outlives the call; one pointer, count one.
         if unsafe { InjectSyntheticPointerInput(self.device, &frame, 1) } == 0 {
-            return Err(InjectError("InjectSyntheticPointerInput", last_error()));
+            return Err(InjectError { call: "InjectSyntheticPointerInput", code: last_error(), step: None });
         }
         self.in_range = true;
         Ok(())
@@ -130,7 +139,7 @@ impl PenInjector {
             wait_until(start + step.t_ns);
             before(index);
             times.push(super::qpc::now_ns());
-            self.inject(step, screen_origin)?;
+            self.inject(step, screen_origin).map_err(|error| InjectError { step: Some(index), ..error })?;
         }
         Ok(times)
     }

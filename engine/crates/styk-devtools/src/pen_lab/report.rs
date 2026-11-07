@@ -33,7 +33,7 @@ impl Percentiles {
 pub struct Report {
     pub injected: usize,
     pub delivered: usize,
-    /// Samples identical to an earlier one in pointer, time and position: a re-delivery.
+    /// Samples identical to an earlier one in pointer, time, position, pressure and phase: a re-delivery.
     pub duplicates: usize,
     /// Samples sharing a timestamp with an earlier, different one (injected input is stamped to the millisecond).
     pub same_stamp: usize,
@@ -67,7 +67,7 @@ pub fn analyse(script: &Script, injected_ns: &[u64], samples: &[SampleRow], fram
     let times: Vec<u64> = samples.iter().map(|s| s.sample.time_ns).collect();
     report.monotonic = times.windows(2).all(|pair| pair[1] >= pair[0]);
     let mut seen = HashSet::new();
-    report.duplicates = samples.iter().filter(|s| !seen.insert((s.sample.pointer, s.sample.time_ns, s.sample.x.to_bits(), s.sample.y.to_bits()))).count();
+    report.duplicates = samples.iter().filter(|s| !seen.insert((s.sample.pointer, s.sample.time_ns, s.sample.x.to_bits(), s.sample.y.to_bits(), s.sample.raw_pressure, s.sample.phase as u8))).count();
     let mut stamps = HashSet::new();
     report.same_stamp = samples.iter().filter(|s| !stamps.insert((s.sample.pointer, s.sample.time_ns))).count();
     report.history_samples = samples.iter().filter(|s| s.sample.flags.contains(SampleFlags::HISTORY)).count();

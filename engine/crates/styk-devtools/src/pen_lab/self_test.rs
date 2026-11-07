@@ -18,6 +18,8 @@ const SETTLE_FRAMES: u32 = 90;
 /// The forced interface-thread block of the history test, and how many there are.
 const BLOCK_MS: u64 = 50;
 const BLOCKS: u32 = 20;
+/// How many times a refused injection starts the script again.
+const MAX_RETRIES: u32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TestKind {
@@ -91,6 +93,8 @@ pub struct Runner {
     summary: String,
     failures: u32,
     behaviour: Option<Behaviour>,
+    /// Times the system refused an injection and the script was started over.
+    attempts: u32,
 }
 
 /// The behaviour test's three scripts run one after another; their results are read between them.
@@ -104,7 +108,7 @@ struct Behaviour {
 
 impl Runner {
     pub fn new(test: SelfTest) -> Runner {
-        Runner { test, phase: Phase_::Warmup(0), result: Arc::new(Mutex::new(None)), summary: String::new(), failures: 0, behaviour: None }
+        Runner { test, phase: Phase_::Warmup(0), result: Arc::new(Mutex::new(None)), summary: String::new(), failures: 0, behaviour: None, attempts: 0 }
     }
 
     pub fn captured(&mut self) {
@@ -195,6 +199,25 @@ impl Runner {
                     return Step::Continue;
                 }
                 let Phase_::Settling { script, injected, .. } = std::mem::replace(&mut self.phase, Phase_::Capturing) else { unreachable!("the phase was Settling") };
+                if self.test.kind == TestKind::Behaviour {
+                    // The next script of the behaviour test, or its verdicts.
+                    match injected {
+                        Err(error) if self.attempts >= MAX_RETRIES => {
+                            self.check("injection", false, error);
+                            self.phase = Phase_::Done(3);
+                        }
+                        Err(error) => {
+                            self.attempts += 1;
+                            let _ = writeln!(self.summary, "injection refused ({error}); starting the step again ({} of {MAX_RETRIES})", self.attempts);
+                            if let Some(state) = self.behaviour.as_mut() {
+                                state.step = state.step.saturating_sub(1);
+                            }
+                            self.phase = Phase_::Warmup(WARMUP_FRAMES);
+                        }
+                        Ok(_) => self.phase = Phase_::Warmup(WARMUP_FRAMES),
+                    }
+                    return Step::Continue;
+                }
                 self.finish_scripted(cx, &script, injected)
             }
             Phase_::Stress { frames } => {
@@ -221,6 +244,13 @@ impl Runner {
         let present = std::env::var("ICED_PRESENT_MODE").unwrap_or_else(|_| "Fifo (iced AutoVsync)".into());
         let injected_ns = match injected {
             Ok(times) => times,
+            Err(error) if self.attempts < MAX_RETRIES => {
+                // The system sometimes refuses a report of a script (error 87) for a reason it does not give; the script starts over.
+                self.attempts += 1;
+                let _ = writeln!(self.summary, "injection refused ({error}); starting the script again ({} of {MAX_RETRIES})", self.attempts);
+                self.phase = Phase_::Warmup(WARMUP_FRAMES);
+                return Step::Continue;
+            }
             Err(error) => {
                 self.check("injection", false, error);
                 self.phase = Phase_::Done(3);
