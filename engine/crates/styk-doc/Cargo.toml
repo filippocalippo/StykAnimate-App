@@ -11,3 +11,7 @@ ryu-js = "1"
 base64 = "0.22"
 sha2 = "0.10"
 thiserror = "2"
+
+[features]
+# Test harnesses only; production hosts inject Fanout.
+test-fakes = []

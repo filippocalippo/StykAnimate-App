@@ -17,10 +17,14 @@ use styk_ui::component_sheet::Sheet;
 ///
 /// Fails when the machine has no graphics adapter the renderer can use.
 pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>) -> Result<Image, String> {
+    pollster::block_on(screenshot_async(theme, size, scale, sheet))
+}
+
+async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>) -> Result<Image, String> {
     let settings = iced::Settings { font: widgets::INTER, text_size: Pixels(16.0), ..iced::Settings::default() };
-    let mut renderer = pollster::block_on(<iced::Renderer as Headless>::new(renderer::Settings::from(&settings), None)).ok_or("no graphics adapter is available to draw offscreen")?;
+    let mut renderer = <iced::Renderer as Headless>::new(renderer::Settings::from(&settings), None).await.ok_or("no graphics adapter is available to draw offscreen")?;
     // Nothing here is an event loop to keep responsive: the font system is built and the bundled fonts installed in place.
-    let ready = warm_up::install_bundled();
+    let ready = warm_up::install_bundled(styk_platform::font_smoothing::current());
     let bounds = Size::new(size.0 as f32, size.1 as f32);
     let style = styk_ui::window_style(theme);
     let iced_theme = styk_ui::base_theme(theme);
@@ -47,7 +51,11 @@ pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&She
         if !styk_design::glyphs::incomplete() {
             return Ok(Image { width: physical.width, height: physical.height, rgba });
         }
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        let (send, receive) = iced::futures::channel::oneshot::channel();
+        styk_platform::diagnostics::after(std::time::Duration::from_millis(5), move || {
+            if send.send(()).is_err() { eprintln!("headless capture timer receiver closed"); }
+        })?;
+        receive.await.map_err(|error| error.to_string())?;
     }
     Err("the text was still missing glyphs after 400 frames: the glyph worker did not deliver".to_string())
 }

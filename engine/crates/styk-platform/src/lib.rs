@@ -21,5 +21,38 @@ pub mod video;
 pub mod unattended;
 pub mod window;
 pub mod fonts;
+pub mod diagnostics;
+
+pub mod screenshot;
+
+// Platform-owned compile-time capability: tools may compose the native video
+// service without embedding target predicates or importing unavailable services.
+// Both forms accept items or an expression; unsupported targets keep their
+// existing explicit "unavailable" path, not an unimplemented OS backend.
+#[cfg(windows)]
+#[macro_export]
+macro_rules! video_tools {
+    ({ $($available:tt)* } { $($unavailable:tt)* }) => { $($available)* };
+}
+
+#[cfg(not(windows))]
+#[macro_export]
+macro_rules! video_tools {
+    ({ $($available:tt)* } { $($unavailable:tt)* }) => { $($unavailable)* };
+}
+
+pub mod clock;
 #[cfg(windows)]
 pub mod windows;
+
+pub mod shell;
+pub mod shell_check;
+
+#[cfg(windows)]
+#[macro_export]
+macro_rules! shell_window_settings {
+    ($settings:expr) => { $settings.platform_specific.undecorated_shadow = true; };
+}
+#[cfg(not(windows))]
+#[macro_export]
+macro_rules! shell_window_settings { ($settings:expr) => {}; }

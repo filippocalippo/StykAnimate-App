@@ -490,8 +490,8 @@ mod tests {
     use styk_core::drawing::mapping::Mapping;
     use styk_core::drawing::stroke_input::StrokeCommand;
     use styk_core::drawing::worker::Worker;
-    use styk_services::input::{InputQueue, Modifiers};
-    use styk_services::{Clock, FixedClock};
+    use styk_core::services::input::{InputQueue, Modifiers};
+    use styk_core::services::{Clock, FixedClock};
 
     /// A test that needs a tool fails when the tool is missing: a machine with no adapter says so instead of passing.
     const NO_GPU: &str = "these tests need a GPU adapter (a hardware or a software one) and none was found: the pad's drawing was not checked";

@@ -79,7 +79,7 @@ fn drawn_directly(character: char) -> Option<Vec<[u8; 3]>> {
 
 /// The glyph of "Segoe UI" in the text stack's font system, and our mask of it at `SIZE`.
 fn drawn_by_the_text_stack(character: char) -> Option<(i32, i32, u32, u32, Vec<u8>)> {
-    crate::warm_up::install_bundled();
+    crate::warm_up::install_bundled(styk_platform::font_smoothing::current());
     let mut system = font_system().write().ok()?;
     let id = system.raw().db().faces().find(|face| face.families.iter().any(|(name, _)| name == "Segoe UI") && face.weight == FontWeight::NORMAL && face.style == Style::Normal)?.id;
     let font = system.raw().get_font_instance(id, Weight::NORMAL, OpticalSize::DEFAULT)?;
@@ -124,7 +124,7 @@ fn a_mask_is_what_directwrite_draws_directly() {
 #[test]
 fn the_instances_of_a_variable_font_share_one_file_and_the_unused_are_evicted() {
     use iced::advanced::graphics::text::cosmic_text::dwrite::MAX_FACES;
-    crate::warm_up::install_bundled();
+    crate::warm_up::install_bundled(styk_platform::font_smoothing::current());
     let mut system = font_system().write().unwrap();
     let id = system.raw().db().faces().find(|face| face.families.iter().any(|(name, _)| name == "Inter") && matches!(face.source, iced::advanced::graphics::text::cosmic_text::fontdb::Source::Binary(_))).expect("the bundled Inter").id;
     let mut direct_write = DirectWrite::new().expect("DirectWrite 5");
@@ -150,7 +150,7 @@ fn bundled(system: &mut iced::advanced::graphics::text::FontSystem, family: &str
 
 #[test]
 fn a_mask_is_reserved_at_its_exact_size_before_any_memory_for_it_is_allocated() {
-    crate::warm_up::install_bundled();
+    crate::warm_up::install_bundled(styk_platform::font_smoothing::current());
     let mut system = font_system().write().unwrap();
     let id = bundled(&mut system, "Inter");
     let font = system.raw().get_font_instance(id, Weight(400), OpticalSize::DEFAULT).expect("Inter");
@@ -175,7 +175,7 @@ fn a_mask_is_reserved_at_its_exact_size_before_any_memory_for_it_is_allocated() 
 
 #[test]
 fn font_files_are_bounded_by_bytes_even_when_they_have_face_instances() {
-    crate::warm_up::install_bundled();
+    crate::warm_up::install_bundled(styk_platform::font_smoothing::current());
     let mut system = font_system().write().unwrap();
     let (inter, tight) = (bundled(&mut system, "Inter"), bundled(&mut system, "Inter Tight"));
     // Room for the larger file and not for both.

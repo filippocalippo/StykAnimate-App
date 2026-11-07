@@ -32,9 +32,9 @@ pub const GAMMA: f32 = 1.8;
 ///
 /// The glyph masks are drawn by a worker thread, with DirectWrite where the platform has it (Chromium's rasterizer
 /// on Windows) and swash elsewhere.
-pub fn rendering_for(smoothing: styk_platform::font_smoothing::FontSmoothing) -> iced::advanced::graphics::text::Rendering {
+pub fn rendering_for(smoothing: styk_core::services::text_environment::FontSmoothing) -> iced::advanced::graphics::text::Rendering {
     use iced::advanced::graphics::text::{GlyphDrawing, Rendering, SubpixelOrder};
-    use styk_platform::font_smoothing::{Smoothing, SubpixelOrder as Order};
+    use styk_core::services::text_environment::{Smoothing, SubpixelOrder as Order};
     match smoothing.smoothing {
         Smoothing::Off => Rendering { subpixel: None, adjustment: None, glyphs: GlyphDrawing::DirectWrite, aliased: true },
         Smoothing::Grayscale | Smoothing::ClearType => Rendering {
@@ -54,8 +54,8 @@ pub fn rendering_for(smoothing: styk_platform::font_smoothing::FontSmoothing) ->
 /// Diagnostics for the typography check can override it through the environment: `STYK_TEXT_SUBPIXEL=0` draws
 /// grayscale, `STYK_TEXT_RASTERIZER=swash` draws the masks with swash instead of DirectWrite, `STYK_TEXT_ADJUST=0` draws no coverage adjustment, `STYK_TEXT_CONTRAST` and `STYK_TEXT_GAMMA` set the
 /// adjustment's parameters.
-pub fn apply_system_text_rendering() -> iced::advanced::graphics::text::Rendering {
-    let mut rendering = rendering_for(styk_platform::font_smoothing::current());
+pub fn apply_system_text_rendering(smoothing: styk_core::services::text_environment::FontSmoothing) -> iced::advanced::graphics::text::Rendering {
+    let mut rendering = rendering_for(smoothing);
     let number = |name: &str| std::env::var(name).ok().and_then(|value| value.parse::<f32>().ok());
     if std::env::var("STYK_TEXT_SUBPIXEL").is_ok_and(|value| value == "0") {
         rendering.subpixel = None;
@@ -127,7 +127,7 @@ impl TextStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use styk_platform::font_smoothing::{FontSmoothing, Smoothing, SubpixelOrder as Order};
+    use styk_core::services::text_environment::{FontSmoothing, Smoothing, SubpixelOrder as Order};
 
     #[test]
     fn clear_type_gives_subpixel_text_in_the_displays_order_and_the_coverage_adjustment() {
@@ -160,7 +160,7 @@ mod tests {
 
     /// Puts the bundled fonts in iced's global font system, as the application does at start.
     fn load_fonts() {
-        crate::warm_up::install_bundled();
+        crate::warm_up::install_bundled(styk_platform::font_smoothing::current());
     }
 
     fn paragraph(content: &str, font: Font, size: f32) -> Paragraph {

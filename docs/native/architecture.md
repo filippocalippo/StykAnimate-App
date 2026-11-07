@@ -15,7 +15,7 @@ Everything is one Cargo workspace (`engine/`, members `engine/crates/*`). The en
 | `styk-services` | The platform service traits and their plain data types: files, dialogs, clipboard, fonts, storage, recovery, updates, audio output, video encoding, image codecs, telemetry, support, shell (single instance, protocol, associations, window state), input devices, network. Test fakes for each. No OS code. | std |
 | `styk-platform` | The implementations of `styk-services` per target: `windows/`, `macos/`, `linux/`, `web/`. | `styk-services`, OS crates |
 | `styk-core` | The application core, plain Rust, no toolkit: app and view state (documents, tabs, selection, tools, playhead, panels), every command and shortcut and undo grouping, the docking layout model and its solver, settings, the view models panels display, the stage's view (zoom, pan, hit-testing, drag sessions), frame scheduling, the automation mode. | engine crates, `styk-services`, `styk-trace` |
-| `styk-design` | The design system: tokens (both themes), icons, bundled fonts (Inter, Inter Tight), and the shared iced widgets in their every state. Generates the CSS custom properties, the SVG sprite and the component sheet for the design studio. | iced (widgets only behind its `widgets` feature) |
+| `styk-design` | The design system: tokens (both themes), icons, bundled fonts (Inter, Inter Tight), and the shared iced widgets in their every state. Generates the CSS custom properties, the SVG sprite and the component sheet for the design studio. | iced and `styk-core` for shared focus and field state (behind `widgets`) |
 | `styk-ui` | The iced front end: lays out and draws what the core holds and turns input into core commands. Shell, docking widgets, stage, timeline, inspector, panels, dialogs, Home, Settings, drawing, build, text input. | `styk-core`, `styk-design`, iced |
 | `styk-devtools` | The developer tools ([devtools.md](devtools.md)). Compiled only with the app's `devtools` feature. | `styk-core`, `styk-ui`, `styk-design`, `styk-trace` |
 | `styk-app` | The binary `stykanimate`: command line, startup, wiring of platform services into the core, the window. Feature `devtools`. | everything above |
@@ -136,3 +136,68 @@ build and mobile come later as ports, not rewrites: every OS call is behind a `s
 wgpu, and nothing in the core or the engine that a wasm32 or Unix target could not build (a `cargo check` for wasm32 at
 gates). Input, layout tiers and platform services stay behind traits a touch build can implement
 ([../TOUCH.md](../TOUCH.md)). Constraints found for the web build are in `web.md`.
+
+## The automatic guards
+
+`cargo xtask check` checks generated design files, the Cargo metadata dependency graph (all features and targets),
+registry package users against `engine/deps-allow.toml`, and production Rust tokens for Windows code outside
+`styk-platform`. Frozen evidence, `tests/` and `benches/` are excluded by path; `cfg(test)` items are skipped.
+A separate test module is exempt only when its module declaration requires `test`, never because of its filename.
+`vendor/` is excluded by path: the forked third-party text/toolkit crates own their target predicates and workers;
+this exemption does not extend to the application crates that use them.
+Feature-gated test helpers live under `tests/support/` and cannot be enabled by production dependencies.
+The dependency allow list requires its ownership header and must equal its version at the merge base with
+`native-app`: the orchestrator approves changes at the merge, including the initial baseline. Core state in shared
+design widgets is allowed; UI and developer-tool views cannot use direct engine paths or `styk_core::engine`.
+Platform public re-exports and type aliases cannot expose external Windows-crate items; crate-local platform wrappers
+are allowed. Core engine re-exports belong in `styk_core::engine`, including K-frames' `Onion` and `SceneOptions`. Five exact declarations in `documents.rs` have the
+temporary named exception "K-doc moves these to `styk_core::engine`"; adding a name to one is still a violation.
+These are textual checks, not a type resolver.
+The existing non-default CLI `app-tools` boundary remains. The app may depend on services to compose S6's shell;
+its UI reads the portable chrome types through core's existing `services` facade.
+`cargo test --manifest-path engine/Cargo.toml -p xtask --test native_guards` runs the violating fixtures, including
+a real scratch-crate Clippy check and the screenshot failure path, through the existing Node prerequisite.
+
+Clippy checks the app, UI, developer tools, design widgets and the diagnostic library for unwrap/expect, ignored
+results, file I/O and blocking calls using `engine/guard-clippy/clippy.toml`. A source scan also catches unwrap/expect
+inside local macro bodies. Tests may unwrap. File handles and synchronous receivers are forbidden types; trait
+Read/Write methods and receiver iterators are forbidden calls. Device polling is conservatively disallowed
+in these interfaces, even for non-wait polls. Design font warm-up is outside the widget-module guard, but starts
+through the injected `Spawner` and returns failures. Text smoothing, scale and locale come through the portable
+`styk_services::text_environment::TextEnvironment` contract, implemented by platform and injected by the host.
+The repertoire feeder also uses injected `Spawner`/`Clock`; it returns spawn failures and never gives the interface
+a join handle. Its existing time and queue-stall budgets are unchanged. The pen pad state belongs to core; its scripted diagnostic
+workload belongs to `styk-text-check`, injected into the developer tool through the core probe protocol.
+The probe submits to a bounded worker mailbox through `Spawner` and returns completion messages. Only named task
+functions in its private worker module allow blocking I/O and waits; its start/submit entry points retain the interface
+lints. Analysis, feeder waits, Behaviour's 800 ms pause and report/CSV writes run there; write and spawn failures reach
+the interface. The named platform `disturb_blocked_probe` is the sole
+intentional interface sleep, requested only by the explicit Blocked self-test. Capture encoding/writes remain in
+the asynchronous platform diagnostic service. The worker never joins on the interface thread.
+The shell's instance, profile I/O, save workers, native window helpers and in-process diagnostics live in
+`styk-platform::{shell,shell_check}`. The app passes raw-window-handle interfaces and receives plain samples;
+its three wake reasons coalesce in atomic bits with an async waker, without a mutex or an unbounded queue.
+Closing awaits a worker callback and reports write failures. The platform capability macro sets iced's native
+shadow field at the composition site without importing iced into platform.
+
+The web constraint guard rejects direct thread spawning and wall/monotonic clock construction in portable libraries,
+including qualified clock paths and same-file clock aliases.
+Text jobs use `Spawner`; closing cancels and wakes the worker without joining the interface thread. The production
+clock lives in platform; services exposes a real-time clock only behind its explicit `test-fakes` feature for tests.
+The document crate's `StdThreads` is likewise a test fake: only dev-dependencies may enable `test-fakes`.
+Named native exceptions in the guard must also be inside `cfg(not(target_arch = "wasm32"))`: the export GPU disposal
+and wait helpers (web drops in place and uses mapping callbacks), and the optional edit profiler (web has no-op
+scope/take). Host binaries, tracing and standalone test modules are outside this portable-library rule.
+The renderer receives the platform choice from its caller; it does not inspect Windows configuration itself.
+
+`docs/native/screens/limits.toml` names reference captures from today's app, dimensions and the maximum fraction of
+pixels with any RGBA channel difference. The screen IDs come from the catalogue's `id()` function. Missing reference
+assignments are reported; assigned but missing images, dimension differences and exceeded limits fail. When a
+reference exists, the guard renders through `stykanimate --screen` in headless mode and uses `styk image-diff`.
+No window opens, no reference is generated or updated, and no threshold is inferred from the result.
+
+`cargo xtask check --wasm` additionally checks `styk-wasm` (and its engine dependencies), core and services for
+`wasm32-unknown-unknown`, with `check --profile wasm-dev`. It shares the pinned nightly, `-Z build-std=std,panic_abort`
+and atomics flags with `engine-build.mjs` through `engine-wasm-config.mjs`; the cache is `engine/target/wasm-threads`.
+The guard neither imports the executable builder nor installs a toolchain or target. It propagates compiler failures.
+This is an optional gate, not part of an implementer's Windows verification; native tools and views are excluded.

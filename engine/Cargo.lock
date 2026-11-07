@@ -2745,13 +2745,13 @@ dependencies = [
  "iced",
  "iced_runtime",
  "iced_winit",
- "png",
  "pollster",
  "styk-core",
  "styk-design",
  "styk-devtools",
  "styk-platform",
  "styk-services",
+ "styk-text-check",
  "styk-trace",
  "styk-ui",
 ]
@@ -2827,11 +2827,8 @@ name = "styk-devtools"
 version = "0.1.0"
 dependencies = [
  "iced",
- "png",
  "styk-core",
  "styk-design",
- "styk-platform",
- "styk-services",
  "styk-trace",
  "styk-ui",
 ]
@@ -2970,6 +2967,7 @@ version = "0.1.0"
 dependencies = [
  "icu_collator",
  "image",
+ "png",
  "raw-window-handle",
  "ring",
  "sha2",
@@ -3020,6 +3018,7 @@ dependencies = [
  "iced_wgpu",
  "png",
  "pollster",
+ "styk-core",
  "styk-design",
  "styk-platform",
  "wgpu",
@@ -3040,7 +3039,6 @@ dependencies = [
  "styk-core",
  "styk-design",
  "styk-platform",
- "styk-services",
 ]
 
 [[package]]

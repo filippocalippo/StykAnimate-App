@@ -5,7 +5,7 @@
 //! brings the worker's tiles to the GPU and draws the wet ink in the toolkit's own render pass. Mouse events from the
 //! toolkit never start a stroke: every stroke comes from the queue, whose samples say what produced them.
 
-mod core;
+use styk_core::drawing::pad as core;
 mod gpu;
 
 pub use self::core::{BrushConfig, FrameRow, GpuStats, Inspector, Live, PadCore, SampleRow, Switches, View};
@@ -17,7 +17,7 @@ use iced::{Element, Event, Length, Rectangle, Widget};
 use std::sync::Arc;
 use styk_core::drawing::mapping::Mapping;
 use styk_core::drawing::stroke_input::{Action as PenAction, Context, FingerDraw, InputError, StrokeCommand, StrokeInput, ToolMode};
-use styk_services::input::{InputEvent, Phase, SampleFlags, Tool};
+use styk_core::services::input::{InputEvent, Phase, SampleFlags, Tool};
 
 /// Samples the prediction looks at.
 const PREDICTION_WINDOW: usize = 8;
@@ -266,8 +266,8 @@ mod tests {
     use super::*;
     use styk_core::drawing::mapping::Mapping;
     use styk_core::drawing::worker::{MAX_OPEN, Worker};
-    use styk_services::input::{InputQueue, Modifiers};
-    use styk_services::{Clock, FixedClock};
+    use styk_core::services::input::{InputQueue, Modifiers};
+    use styk_core::services::{Clock, FixedClock};
 
     fn core() -> Arc<PadCore> {
         let clock: Arc<dyn Clock> = Arc::new(FixedClock::new());

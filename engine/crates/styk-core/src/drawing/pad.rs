@@ -3,8 +3,8 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use styk_core::drawing::wet::{LedgerStats, WetLedger};
-use styk_core::drawing::worker::{HistoryOp, HistoryOutbox, Worker};
+use crate::drawing::wet::{LedgerStats, WetLedger};
+use crate::drawing::worker::{HistoryOp, HistoryOutbox, Worker};
 use styk_services::Clock;
 use styk_services::input::{InputQueue, PenSample, QueueStats};
 
@@ -192,7 +192,7 @@ pub struct GpuStats {
     pub tiles_uploaded: u64,
     pub tiles_resident: usize,
     /// The atlas's counters: see `SyncStats`.
-    pub sync: styk_core::drawing::tile_sync::SyncStats,
+    pub sync: crate::drawing::tile_sync::SyncStats,
     /// Replies the `prepare` left in the channel for the next frame (its budget ran out first).
     pub replies_left: bool,
     /// Batches installed but not yet shown whole (waiting for a slot or the frame's budget).

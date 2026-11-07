@@ -4,9 +4,10 @@
 //! injected and no window is placed on the screen (decision N6). It runs only in an unattended run, whose window is
 //! outside every monitor. What a person has to try with a real pointer is listed in `docs/native/shell.md`.
 
-use iced::window::Window;
-use styk_platform::windows::chrome::Chrome;
-use styk_platform::windows::probe;
+use raw_window_handle::HasWindowHandle as Window;
+use crate::shell::Chrome;
+#[cfg(windows)]
+use crate::windows::probe;
 use styk_services::shell::Rect;
 use styk_services::shell::chrome::{band_regions, ht};
 
@@ -35,6 +36,7 @@ pub struct DpiProbe {
 }
 
 /// The synchronous checks, run on the window's thread. `scale` is physical pixels per logical pixel.
+#[cfg(windows)]
 pub fn run(window: &dyn Window, chrome: &Chrome, scale: f32, logical: (f32, f32), foreground_before: isize) -> (Vec<Line>, Option<DpiProbe>) {
     let mut lines = Vec::new();
     let Some((w, h)) = probe::client_size(window) else {
@@ -113,13 +115,15 @@ pub fn run(window: &dyn Window, chrome: &Chrome, scale: f32, logical: (f32, f32)
 }
 
 /// Puts the DPI back after the step.
+#[cfg(windows)]
 pub fn restore_dpi(window: &dyn Window, current_dpi: u32, original: Rect) {
     let suggested = scaled(original, 1.0);
     probe::send_dpi_changed(window, current_dpi, suggested);
 }
 
+#[cfg(windows)]
 fn probe_rect(window: &dyn Window) -> Option<Rect> {
-    styk_platform::windows::monitors::hwnd_of(window).and_then(styk_platform::windows::monitors::window_rect)
+    crate::windows::monitors::hwnd_of(window).and_then(crate::windows::monitors::window_rect)
 }
 
 fn scaled(rect: Rect, factor: f32) -> Rect {
@@ -137,3 +141,12 @@ pub fn judge_dpi(probe: DpiProbe, logical_now: (f32, f32), scales_seen: &[f32]) 
         pass_if("the interface was told the scale factor 1.5", scales_seen.iter().any(|s| (*s - 1.5).abs() < 1e-3), || format!("saw {scales_seen:?}")),
     ]
 }
+
+// Other shells have not landed in this Windows-only phase; refuse their diagnostic
+// explicitly rather than claiming the native checks ran.
+#[cfg(not(windows))]
+pub fn run(_: &dyn Window, _: &Chrome, _: f32, _: (f32, f32), _: isize) -> (Vec<Line>, Option<DpiProbe>) {
+    (vec![Line { name: "shell check".into(), failure: Some("unavailable on this platform".into()) }], None)
+}
+#[cfg(not(windows))]
+pub fn restore_dpi(_: &dyn Window, _: u32, _: Rect) {}
