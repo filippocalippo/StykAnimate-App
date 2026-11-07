@@ -164,7 +164,9 @@ cannot be refused are covered by the loss of the worker it ends with (`finish` i
 the app, exports it unchanged and edited, saves it as a project and opens that. The opened padded Ayame exports unchanged (the file again, byte for byte), saves as a project and opens that again at 100 and 122 MB (release build), and
 exports edited at 100. The document the codec is sent for a Pivot export is JSON of at most 256 MiB, and it holds the padding twice over, as a project's pictures are
 (`data_base64` and `data_url`): at 122 MB it is 265 MB of 268, and at 133 MB the export, edited or not, is refused with "The request exceeds the configured size
-limit" while the project opens (as it did with the codec holding the original: the document is the same).
+limit" while the project opens (as it did with the codec holding the original: the document is the same). That limit is the request's, not the file's: the engine's native export (`Output::Pivot`) writes the file from the tree without a request, and a padded file of 133 MB edited once exports (140,043,076 bytes, identical to what the codec writes given room for the request, 7.4 s, a peak of 2,008 MiB private bytes natively, 1,338 over the edited document that was open: the export reserves nothing yet). The browser still sends the request.
+
+**A very compressible file, natively.** A Pivot file of 1.1 MB that inflates to the 256 MiB a project may be opens and peaks at 1,368 MiB (5.5 times what it inflates to), holds 599 with the document open, and the process holds what it held before once the document is closed (`tests/memory_release.rs`). The memory that stays after such an open in the browser is the allocator's high-water mark (above), not the engine's.
 
 **The allocator lock** (`std`'s wasm allocator: one spinning lock for every thread). Timed with a gate in front of it, tdd2
 and svr_uriel through open, play and scrub, eight workers: a worker finds the lock taken on 5 to 40 % of its calls and
