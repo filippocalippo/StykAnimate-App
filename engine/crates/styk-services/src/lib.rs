@@ -9,5 +9,7 @@
 //! needs it, not before.
 
 pub mod clock;
+pub mod shell;
+pub mod updates;
 
 pub use clock::{Clock, FixedClock, SystemClock};
