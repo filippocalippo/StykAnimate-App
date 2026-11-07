@@ -1,0 +1,61 @@
+styk-auto/1
+# The band's interaction check (docs/native/shell-band.md): two projects, Ctrl+Tab, a tab reorder, the workspace switch,
+# Undo and Redo. Run from the repository root:
+#   STYK_BACKGROUND_WINDOW=1 stykanimate --size 600x900 --automation engine/crates/styk-app/automation/shell-interaction.script
+open ../../../tests/edit/startup.document.json
+open ../../../tests/containers/project-channels.styk
+open ../../../tests/edit/startup.document.json
+wait 5
+resize 1560 900
+expect order 1,2,3
+expect front 3
+expect tabs 3
+expect workspace animate
+expect export primary
+screenshot ../../../../tmp/interaction/opened.png
+
+# Ctrl+Tab held shows the board on the project used before; releasing switches to it.
+key ctrl+tab:hold
+expect board open
+screenshot ../../../../tmp/interaction/board.png
+key release-ctrl
+expect board closed
+expect front 2
+# Pressed and released again goes back.
+key ctrl+tab
+expect front 3
+
+# Dragging the first tab onto the far half of the last one puts it last.
+drag-tab 1 3 after
+expect order 2,3,1
+expect front 3
+click tab:1
+expect front 1
+screenshot ../../../../tmp/interaction/reordered.png
+
+# An edit shows the dot; Undo takes it away and Redo brings it back.
+expect dirty 1 no
+edit 30
+expect dirty 1 yes
+click undo
+expect dirty 1 no
+click redo
+expect dirty 1 yes
+
+# The workspace switch.
+click workspace:draw
+expect workspace draw
+click workspace:build
+expect workspace build
+expect export ghost
+screenshot ../../../../tmp/interaction/build.png
+click workspace:animate
+expect workspace animate
+expect export primary
+click home
+expect workspace home
+
+# A narrow window folds the band.
+resize 700 900
+wait 3
+expect folds tight,name,save,winctl,switchtight,icons

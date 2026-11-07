@@ -23,6 +23,7 @@ mod screenshot;
 mod shell;
 #[cfg(windows)]
 mod shell_check;
+mod top_band;
 mod window;
 
 use iced::futures::StreamExt;
@@ -34,15 +35,17 @@ use styk_core::Launch;
 use styk_design::{Theme, warm_up, widgets};
 use styk_platform::unattended::{self, Strategy};
 use styk_platform::window::{self as platform, Image, WindowError};
-use styk_services::shell::chrome::{MaxButtonState, band_height, band_regions};
+use styk_services::shell::chrome::{MaxButtonState, band_regions};
 use styk_trace::mark;
-use styk_ui::band::{Controls, Hot, window_controls};
 use styk_ui::component_sheet::{self, Sheet};
 use styk_ui::screens::Screen;
 
 /// How long `--screenshot` waits for a first frame before giving up. A window that never draws is a defect to report,
 /// not a reason to hang a script.
 const SCREENSHOT_DEADLINE: Duration = Duration::from_secs(30);
+
+/// How long `--automation` waits for its script before giving up.
+const AUTOMATION_DEADLINE: Duration = Duration::from_secs(180);
 
 /// How long `--shell-check` waits for its steps before giving up.
 const CHECK_DEADLINE: Duration = Duration::from_secs(60);
@@ -52,9 +55,6 @@ const CHECK_DEADLINE: Duration = Duration::from_secs(60);
 #[cfg_attr(not(windows), allow(dead_code))]
 const CHECK_AT_FRAME: u32 = 12;
 const CHECK_SETTLE_FRAMES: u32 = 12;
-
-/// The window's height under which the chrome is compact (`layout-solver.mjs`: windows under 801 px tall).
-const COMPACT_BELOW: f32 = 801.0;
 
 /// How an unattended run ended, read after the event loop returns.
 #[derive(Debug, Default)]
@@ -78,12 +78,10 @@ enum Message {
     Attached(Result<shell::Attached, String>),
     Sampled(shell::Sample),
     Wake(shell::Wake),
-    Minimize,
-    CloseRequested,
+    /// The top band: the projects, the shell and the automation (`top_band`).
+    Band(top_band::Message),
     /// The window state is written: the program may end.
     Saved,
-    /// The pointer is over a window control, or left it.
-    Hover(Option<Hot>),
     Frame,
     /// The font system is built and holds the bundled fonts: text may be laid out.
     FontsReady,
@@ -128,7 +126,9 @@ struct App {
     wakes: shell::Wakes,
     chrome: Option<shell::Chrome>,
     max_button: MaxButtonState,
-    hover: Option<Hot>,
+    band: top_band::TopBand,
+    /// Where the window is captured to for the automation, while it is.
+    capture_path: Option<std::path::PathBuf>,
     closing: bool,
     /// The window's logical size and scale factor, as the interface was last told.
     logical: Size,
@@ -177,7 +177,8 @@ impl App {
             wakes,
             chrome: None,
             max_button: MaxButtonState::Idle,
-            hover: None,
+            band: top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32)),
+            capture_path: None,
             closing: false,
             logical: Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32),
             scale: 1.0,
@@ -191,15 +192,11 @@ impl App {
         self.sheet.as_ref().map_or(self.theme, |sheet| sheet.theme)
     }
 
-    fn band_height(&self) -> f32 {
-        band_height(1.0, self.logical.height < COMPACT_BELOW)
-    }
-
     /// Tells the window where the band's controls are, in physical client pixels.
     fn publish_regions(&self) {
         if let Some(chrome) = &self.chrome {
             let width = (self.logical.width * self.scale).round() as i32;
-            chrome.publish(band_regions(width, self.scale, self.band_height(), false, &[]));
+            chrome.publish(band_regions(width, self.scale, self.band.height(), self.band.controls_folded(), &self.band.no_drag(self.scale)));
         }
     }
 
@@ -232,32 +229,65 @@ impl App {
                 Task::none()
             }
             Message::Wake(wake) => self.wake(wake),
-            Message::Minimize => self.window.map_or_else(Task::none, |id| iced_window::minimize(id, true)),
-            Message::CloseRequested => self.close(),
+            Message::Band(message) => self.band_update(message),
             Message::Saved => self.finish(Outcome::Done),
-            Message::Hover(hot) => {
-                self.hover = hot;
-                Task::none()
-            }
             Message::FontsReady => {
                 self.fonts_ready = true;
+                self.band.fonts_ready();
+                self.publish_regions();
                 Task::none()
             }
             Message::Frame => self.frame(),
             Message::Captured(Ok(image)) => {
+                if let Some(path) = self.capture_path.take() {
+                    // A step of the automation: the script goes on, and records a failure rather than ending the run.
+                    self.band.captured(screenshot::write(&path, &image));
+                    return Task::none();
+                }
                 let path = self.launch.screenshot.clone().expect("a capture is only requested with --screenshot");
                 match screenshot::write(&path, &image) {
                     Ok(()) => self.finish(Outcome::Done),
                     Err(error) => self.finish(Outcome::Failed(error)),
                 }
             }
-            Message::Captured(Err(error)) => self.finish(Outcome::Failed(format!("could not capture the window: {error}"))),
+            Message::Captured(Err(error)) => {
+                if self.capture_path.take().is_some() {
+                    self.band.captured(Err(format!("could not capture the window: {error}")));
+                    return Task::none();
+                }
+                self.finish(Outcome::Failed(format!("could not capture the window: {error}")))
+            }
             Message::Checked(lines, dpi) => {
                 self.check = CheckStep::Settling { until_frame: self.frames + CHECK_SETTLE_FRAMES, dpi, logical_before: (self.logical.width, self.logical.height), lines };
                 Task::none()
             }
             Message::CheckDone(lines) => self.report_check(lines),
         }
+    }
+
+    /// A message of the top band, and what it asks of the window.
+    fn band_update(&mut self, message: top_band::Message) -> Task<Message> {
+        let (requests, task) = self.band.update(message);
+        let mut tasks = vec![task.map(Message::Band)];
+        for request in requests {
+            match request {
+                top_band::Request::Minimize => tasks.extend(self.window.map(|id| iced_window::minimize(id, true))),
+                top_band::Request::Close => tasks.push(self.close()),
+                top_band::Request::Resize(size) => tasks.extend(self.window.map(|id| iced_window::resize(id, size))),
+                top_band::Request::Capture(path) => {
+                    self.capture_path = Some(path);
+                    tasks.extend(self.window.map(capture));
+                }
+                top_band::Request::Theme(theme) => self.theme = theme,
+                top_band::Request::Finished(None) => tasks.push(self.finish(Outcome::Done)),
+                top_band::Request::Finished(Some(failures)) => {
+                    eprintln!("{failures}");
+                    tasks.push(self.finish(Outcome::Failed("the automation script failed".into())));
+                }
+            }
+        }
+        self.publish_regions();
+        Task::batch(tasks)
     }
 
     fn window_event(&mut self, id: iced_window::Id, event: iced_window::Event) -> Task<Message> {
@@ -267,6 +297,7 @@ impl App {
                 self.window = Some(id);
                 self.logical = size;
                 self.scale = scale_factor;
+                self.band.resized(size);
                 let owns_show = window::shell_shows(self.strategy);
                 let frame = self.shell.restore;
                 let attach = iced_window::run(id, move |w| shell::attach(w, frame, owns_show)).map(Message::Attached);
@@ -283,6 +314,7 @@ impl App {
             }
             Event::Resized(size) => {
                 self.logical = size;
+                self.band.resized(size);
                 self.publish_regions();
                 self.sample(id)
             }
@@ -360,7 +392,7 @@ impl App {
         let Some(id) = self.window else { return Task::none() };
         // The first frame's event arrives as it is about to be drawn; the second, once that draw is done and the text it
         // shows can be laid out.
-        if self.frames >= 2 && self.fonts_ready && self.launch.screenshot.is_some() && !self.capturing {
+        if self.frames >= 2 && self.fonts_ready && self.band.idle() && self.launch.screenshot.is_some() && !self.capturing {
             self.capturing = true;
             mark!("first-frame");
             return capture(id);
@@ -475,16 +507,8 @@ impl App {
         // Text is laid out only once the font system is ready: until then the view holds none.
         match warm_up::proof() {
             Some(_) if self.sheet.is_some() => self.sheet.as_ref().expect("checked").view().map(Message::Sheet).boxed(),
-            Some(ready) => {
-                let height = self.band_height();
-                let controls: iced::Element<'_, Message> = if cfg!(target_os = "macos") {
-                    iced::widget::space().boxed()
-                } else {
-                    window_controls(Controls { theme: self.theme, folded: false, height, maximize: self.max_button, hover: self.hover }, Message::Minimize, Message::CloseRequested, Message::Hover)
-                };
-                styk_ui::shell(self.theme, ready, height, controls)
-            }
-            None => styk_ui::loading(self.theme),
+            Some(ready) => self.band.view(self.theme, ready, self.max_button, styk_ui::loading(self.theme)).map(Message::Band).boxed(),
+            None => styk_ui::prepaint(),
         }
     }
 
@@ -492,6 +516,8 @@ impl App {
         let mut subscriptions = vec![iced_window::events().map(|(id, event)| Message::Window(id, event)), Subscription::run(wake_stream)];
         if let Some(sheet) = &self.sheet {
             subscriptions.push(sheet.subscription().map(Message::Sheet));
+        } else {
+            subscriptions.push(self.band.subscription().map(Message::Band));
         }
         if (!self.capturing && (self.launch.screenshot.is_some() || self.launch.shell_check)) || self.launch.input_check.is_some() {
             subscriptions.push(iced_window::frames().map(|_| Message::Frame));
@@ -528,10 +554,6 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    if launch.automation.is_some() {
-        eprintln!("--automation is not available yet: the automation mode arrives with the stage");
-        return ExitCode::from(2);
-    }
     let strategy = match unattended::requested_by_environment() {
         Ok(strategy) => strategy,
         Err(error) => {
@@ -586,18 +608,31 @@ fn main() -> ExitCode {
     let trace_path = launch.screenshot.as_ref().map(|path| path.with_extension("trace.txt"));
     let scale = launch.scale.unwrap_or(1.0) as f32;
     let settings = window::settings(&launch, strategy);
-    let app = Mutex::new(Some(App::new(launch, screen, strategy, outcome.clone(), shell, wakes, foreground_before)));
+    let files = launch.files.clone();
+    let mut built = App::new(launch, screen, strategy, outcome.clone(), shell, wakes, foreground_before);
+    if let Some(script) = built.launch.automation.clone() {
+        if let Err(error) = built.band.run_script(&script) {
+            eprintln!("{error}");
+            return ExitCode::from(2);
+        }
+        watchdog(outcome.clone(), "--automation: the script did not finish", AUTOMATION_DEADLINE);
+    }
+    let app = Mutex::new(Some(built));
     // The font system is built on a worker from the first moment (styk_design::warm_up); the bundled fonts are
     // loaded there, never through iced::Settings::fonts, which the runtime would load on the event loop.
     let result = iced::application(
-        move || (app.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the application starts once"), warm_up::warm_up().map(|()| Message::FontsReady)),
+        move || {
+            let mut app = app.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the application starts once");
+            let open = app.band.open_all(&files).map(Message::Band);
+            (app, Task::batch([warm_up::warm_up().map(|()| Message::FontsReady), open]))
+        },
         App::update,
         App::view,
     )
     .subscription(App::subscription)
     .title("StykAnimate")
     .theme(|app: &App| styk_ui::base_theme(app.theme()))
-    .style(|app: &App, _| styk_ui::window_style(app.theme()))
+    .style(|app: &App, _| if app.fonts_ready { styk_ui::window_style(app.theme()) } else { styk_ui::prepaint_style() })
     .scale_factor(move |_| scale)
     .font(widgets::INTER)
     .window(settings)

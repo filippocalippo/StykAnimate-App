@@ -23,6 +23,7 @@ pollster = "0.4"
 styk-core = { path = "../styk-core" }
 styk-design = { path = "../styk-design", features = ["widgets"] }
 styk-devtools = { path = "../styk-devtools", optional = true }
+styk-engine = { path = "../styk-engine" }
 styk-platform = { path = "../styk-platform" }
 styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace" }

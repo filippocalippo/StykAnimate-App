@@ -17,6 +17,10 @@ use styk_edit::session::Session;
 use styk_engine::Engine;
 use styk_engine::document::{OpenOptions, OpenSource, OpenedDocument};
 
+mod tabs;
+
+pub use tabs::drop_index;
+
 /// Today's project-tab limit (`src/project-tabs.mjs`).
 pub const MAX_OPEN_PROJECTS: usize = 12;
 
@@ -24,6 +28,18 @@ pub const MAX_OPEN_PROJECTS: usize = 12;
 /// two projects can have the same history revision, and undo deliberately restores an older revision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct DocumentId(u64);
+
+impl DocumentId {
+    /// The identity as a number, for the interface's own keys (focus targets); it means nothing else.
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// An identity for a band shown without open projects (`Shell::preview`) and for tests of logic that only holds ids.
+    pub const fn preview(serial: u64) -> DocumentId {
+        DocumentId(serial)
+    }
+}
 
 /// A fully prepared session. Construct on the open worker; installing it only moves ownership.
 pub struct PreparedDocument {
@@ -157,6 +173,8 @@ pub struct Documents {
     tabs: Vec<Document>,
     active: Option<DocumentId>,
     serial: u64,
+    /// The order the tabs were last in front, the one in front first (`documents/tabs.rs`).
+    recent: Vec<DocumentId>,
 }
 
 impl Documents {
@@ -182,6 +200,7 @@ impl Documents {
         self.tabs.insert(at, Document { id, prepared });
         self.serial = serial;
         self.active = Some(id);
+        self.recent.insert(0, id);
         Ok(id)
     }
 
@@ -191,6 +210,8 @@ impl Documents {
         if self.active == Some(id) { return Ok(false); }
         self.can_switch()?;
         self.active = Some(id);
+        self.recent.retain(|other| *other != id);
+        self.recent.insert(0, id);
         Ok(true)
     }
 

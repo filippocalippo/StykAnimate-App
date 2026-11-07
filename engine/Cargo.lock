@@ -2749,6 +2749,7 @@ dependencies = [
  "styk-core",
  "styk-design",
  "styk-devtools",
+ "styk-engine",
  "styk-platform",
  "styk-services",
  "styk-trace",
