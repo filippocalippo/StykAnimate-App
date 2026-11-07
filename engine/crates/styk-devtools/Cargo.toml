@@ -1,0 +1,10 @@
+[package]
+name = "styk-devtools"
+description = "The StykAnimate developer tools. Compiled only with the app's devtools feature."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+styk-trace = { path = "../styk-trace", features = ["enabled"] }

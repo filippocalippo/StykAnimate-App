@@ -1,0 +1,253 @@
+use crate::container;
+use crate::core::layout;
+use crate::core::mouse;
+use crate::core::overlay;
+use crate::core::renderer;
+use crate::core::theme;
+use crate::core::widget::tree::{self, Tree};
+use crate::core::widget::{Meta, Operation};
+use crate::core::{
+    Background, Color, Element, Event, Layout, Length, Rectangle, Shell, Size, Vector, Widget,
+};
+
+/// A widget that applies any `Theme` to its contents.
+///
+/// This widget can be useful to leverage multiple `Theme`
+/// types in an application.
+pub struct Themer<'a, Message, Theme, Renderer = crate::Renderer>
+where
+    Renderer: crate::core::Renderer,
+{
+    content: Element<'a, Message, Theme, Renderer>,
+    theme: Option<Theme>,
+    text_color: Option<fn(&Theme) -> Color>,
+    background: Option<fn(&Theme) -> Background>,
+}
+
+impl<'a, Message, Theme, Renderer> Themer<'a, Message, Theme, Renderer>
+where
+    Renderer: crate::core::Renderer,
+{
+    /// Creates an empty [`Themer`] that applies the given `Theme`
+    /// to the provided `content`.
+    pub fn new(theme: Option<Theme>, content: impl Widget<Message, Theme, Renderer> + 'a) -> Self {
+        Self {
+            content: content._boxed(),
+            theme,
+            text_color: None,
+            background: None,
+        }
+    }
+
+    /// Sets the default text [`Color`] of the [`Themer`].
+    pub fn text_color(mut self, f: fn(&Theme) -> Color) -> Self {
+        self.text_color = Some(f);
+        self
+    }
+
+    /// Sets the [`Background`] of the [`Themer`].
+    pub fn background(mut self, f: fn(&Theme) -> Background) -> Self {
+        self.background = Some(f);
+        self
+    }
+}
+
+impl<Message, Theme, Renderer> Meta for Themer<'_, Message, Theme, Renderer> where
+    Renderer: crate::core::Renderer
+{
+}
+
+impl<Message, Theme, Renderer, AnyTheme> Widget<Message, AnyTheme, Renderer>
+    for Themer<'_, Message, Theme, Renderer>
+where
+    Theme: theme::Base,
+    AnyTheme: theme::Base,
+    Renderer: crate::core::Renderer,
+{
+    fn tag(&self) -> tree::Tag {
+        self.content.tag()
+    }
+
+    fn state(&self) -> tree::State {
+        self.content.state()
+    }
+
+    fn diff(&mut self, tree: &mut Tree) {
+        self.content.diff(tree);
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.size()
+    }
+
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) {
+        self.content.layout(tree, renderer, limits);
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .operate(tree, layout, viewport, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        self.content
+            .update(tree, event, layout, cursor, renderer, shell, viewport);
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content
+            .mouse_interaction(tree, layout, cursor, viewport, renderer)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &AnyTheme,
+        style: &renderer::Style,
+        layout: Layout,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let default_theme = theme::Base::default(theme.mode());
+        let theme = self.theme.as_ref().unwrap_or(&default_theme);
+
+        if let Some(background) = self.background {
+            container::draw_background(
+                renderer,
+                &container::Style {
+                    background: Some(background(theme)),
+                    ..container::Style::default()
+                },
+                layout.bounds(),
+            );
+        }
+
+        let style = if let Some(text_color) = self.text_color {
+            renderer::Style {
+                text_color: text_color(theme),
+            }
+        } else {
+            *style
+        };
+
+        self.content
+            .draw(tree, renderer, theme, &style, layout, cursor, viewport);
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+        window: Size,
+    ) -> Vec<overlay::Element<'b, Message, AnyTheme, Renderer>> {
+        struct Overlay<'a, Message, Theme, Renderer> {
+            theme: &'a Option<Theme>,
+            content: overlay::Element<'a, Message, Theme, Renderer>,
+        }
+
+        impl<Message, Theme, Renderer, AnyTheme> overlay::Overlay<Message, AnyTheme, Renderer>
+            for Overlay<'_, Message, Theme, Renderer>
+        where
+            Theme: theme::Base,
+            AnyTheme: theme::Base,
+            Renderer: crate::core::Renderer,
+        {
+            fn draw(
+                &self,
+                renderer: &mut Renderer,
+                theme: &AnyTheme,
+                style: &renderer::Style,
+                cursor: mouse::Cursor,
+            ) {
+                let default_theme = theme::Base::default(theme.mode());
+                let theme = self.theme.as_ref().unwrap_or(&default_theme);
+
+                self.content
+                    .as_overlay()
+                    .draw(renderer, theme, style, cursor);
+            }
+
+            fn update(
+                &mut self,
+                event: &Event,
+                cursor: mouse::Cursor,
+                renderer: &Renderer,
+                shell: &mut Shell<'_, Message>,
+            ) {
+                self.content
+                    .as_overlay_mut()
+                    .update(event, cursor, renderer, shell);
+            }
+
+            fn operate(&mut self, renderer: &Renderer, operation: &mut dyn Operation) {
+                self.content.as_overlay_mut().operate(renderer, operation);
+            }
+
+            fn mouse_interaction(
+                &self,
+                cursor: mouse::Cursor,
+                renderer: &Renderer,
+            ) -> mouse::Interaction {
+                self.content
+                    .as_overlay()
+                    .mouse_interaction(cursor, renderer)
+            }
+
+            fn index(&self) -> f32 {
+                self.content.as_overlay().index()
+            }
+
+            fn overlay<'c>(
+                &'c mut self,
+                renderer: &Renderer,
+            ) -> Vec<overlay::Element<'c, Message, AnyTheme, Renderer>> {
+                let theme = self.theme;
+
+                self.content
+                    .as_overlay_mut()
+                    .overlay(renderer)
+                    .into_iter()
+                    .map(|content| overlay::Element::new(Box::new(Overlay { theme, content })))
+                    .collect()
+            }
+        }
+
+        self.content
+            .overlay(tree, layout, renderer, viewport, translation, window)
+            .into_iter()
+            .map(|content| {
+                overlay::Element::new(Box::new(Overlay {
+                    theme: &self.theme,
+                    content,
+                }))
+            })
+            .collect()
+    }
+}
