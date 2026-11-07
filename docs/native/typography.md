@@ -280,15 +280,20 @@ contrast; the pair (0.5, 1.8), Skia's default contrast, is within 0.002 of the l
 of 0.4 is worse in the light themes (0.028 against 0.021 at 100 %). The values stay.
 
 **Cost.** Text-dense frames (`styk-text-check bench`: 5,376 glyphs of the interface's body text, light theme, drawn and
-read back in a headless renderer, 150 frames, the machine shared with other jobs), four interleaved rounds. Medians in
-ms, DirectWrite subpixel / swash subpixel / grayscale: at 100 %, 2.49 / 4.23 / 3.19, 3.13 / 3.07 / 2.87, 3.70 / 2.15 /
-2.44 and 3.49 / 4.70 / 2.62; at 150 %, 8.35 / 7.85 / 8.08, 7.75 / 7.47 / 7.34, 7.23 / 7.78 / 7.59 and 7.23 / 8.43 / 8.39.
-A frame with every glyph cached costs the same with the three (the spread between rounds is larger than the spread
-between kinds; a frame is 7 ms at 144 Hz). What DirectWrite adds is the first view: every glyph of a new text waits for
-the worker, so a screen of new text is drawn without it for a moment. On this screen (the 5,376 glyphs of about 100
-distinct characters in one size) all glyphs were on screen after 15 to 23 ms at 100 % and 23 to 26 ms at 150 %, against
-7 to 9 ms and 11 to 13 ms for swash on the interface thread, which stalls the frame it is drawn in instead. The interface
-thread draws no glyph on Windows.
+read back in a headless renderer, 150 frames, the machine shared with other jobs). A frame with every glyph cached costs
+the same with DirectWrite masks, swash masks and grayscale text: medians in ms of 3.29, 2.99 and 2.96 at 100 % (second
+round 3.35, 3.85 and 4.23) and 8.96, 8.69 and 9.13 at 150 % (second round 14.44, 10.74 and 10.45); the spread between
+rounds is larger than the spread between kinds. What DirectWrite adds is the first view: every glyph of a new text
+waits for the worker, and the window keeps its last complete frame meanwhile (above). On this screen (the 5,376 glyphs
+of about 100 distinct characters in one size) all glyphs were on screen after 16 to 17 ms at 100 % and 27 to 57 ms at
+150 %, against 16 to 17 ms and 28 to 40 ms for swash on the interface thread, which stalls the frame it is drawn in
+instead. The interface's own text is drawn ahead (`repertoire`), so its first screens wait for nothing.
+
+**Tests** (`styk-text-check/tests`, each was seen to fail with the thing it checks removed): a screen switch in which no frame shown lacks a glyph (`glyph_gate`), superseded requests and results retired,
+requests beyond the bound waiting for the next candidate, synthetic italic drawn by the worker, unsmoothed text aliased
+(`aliased_text`), the fixed repertoire ready before the first frame (`glyph_prewarm`), the real window not stalling when
+frames are held back (`font_gate`); in `styk-design`, a mask against DirectWrite's own drawing and the bound on face
+instances; in `styk-platform`, the settings precedence with faked values; in `compare`, the ink mark failing the run.
 
 ## 7. The font system is ready before the first font-dependent widget
 
