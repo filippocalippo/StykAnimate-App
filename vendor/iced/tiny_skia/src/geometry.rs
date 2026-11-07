@@ -197,6 +197,7 @@ impl geometry::frame::Backend for Frame {
 
             // TODO: Honor layering!
             self.text.push(Text::Cached {
+                grayscale: true,
                 content: text.content,
                 bounds,
                 color: text.color,

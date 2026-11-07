@@ -96,6 +96,11 @@ impl Font {
         self.has_optical_size_axis
     }
 
+    /// The font's bytes and the index of the face in them, for another rasterizer to read.
+    pub(crate) fn font_data(&self) -> &FontData {
+        &self.data
+    }
+
     pub fn data(&self) -> &[u8] {
         self.data.data.data()
     }

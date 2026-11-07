@@ -8,7 +8,7 @@
 //! | `lock` | Fails if `engine/Cargo.lock` holds a git source. |
 //! | `check` | `design check`, `deps` and `lock`. |
 //! | `package` | The Windows Setup: builds the program, runs `makensis`, writes `latest.yml`, its signature and `SHA256SUMS.txt` (`docs/native/shell.md`). Signs nothing, publishes nothing. |
-//! | `fonts` | The typography check: the type matrix in Chromium and natively, widths, fallback fonts and pixels compared (needs Playwright's Chromium and a GPU; not part of `check`). |
+//! | `fonts` | The typography check: the type matrix in Chromium and natively, widths, fallback fonts and pixels compared (needs Playwright's Chromium and a GPU; not part of `check`). `fonts verify` checks the bundled TrueType files against the shipped WOFF2 subsets; `fonts surfaces` measures which CSS surfaces Chromium draws ClearType text on. |
 //!
 //! It depends on `std` alone, so it builds in seconds and can never become a way for a toolkit to reach the engine.
 
@@ -23,7 +23,7 @@ mod tokens;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: cargo xtask <design generate | design check | deps | lock | check | fonts | fonts verify | package>";
+const USAGE: &str = "usage: cargo xtask <design generate | design check | deps | lock | check | fonts | fonts verify | fonts surfaces | package>";
 
 fn root() -> PathBuf {
     // engine/crates/xtask -> the repository root.
@@ -44,6 +44,7 @@ fn run(args: &[String]) -> Result<(), String> {
         ["lock"] => deps::lock(&root),
         ["fonts"] => fonts::check(&root),
         ["fonts", "verify"] => fonts::verify(&root),
+        ["fonts", "surfaces"] => fonts::surfaces(&root),
         ["package", options @ ..] => package::package(&root, options),
         ["check"] => design::check(&root).and_then(|()| deps::deps(&root)).and_then(|()| deps::lock(&root)),
         _ => Err(USAGE.to_string()),

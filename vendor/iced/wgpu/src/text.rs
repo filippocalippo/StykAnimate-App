@@ -164,7 +164,8 @@ impl Storage {
                     group.should_trim = group.should_trim || upload.version != cache.version;
 
                     upload.text = Arc::downgrade(&cache.text);
-                    upload.version = cache.version;
+                    // Glyphs a worker is still drawing are missing from the upload: prepare it again next frame.
+                    upload.version = if upload.renderer.incomplete() { usize::MAX } else { cache.version };
                     upload.group_version = group.version;
                     upload.transformation = new_transformation;
 
@@ -196,11 +197,13 @@ impl Storage {
                     );
                 }
 
+                let version = if renderer.incomplete() { usize::MAX } else { 0 };
+
                 let _ = entry.insert(Upload {
                     renderer,
                     buffer_cache,
                     transformation: new_transformation,
-                    version: 0,
+                    version,
                     group_version: group.version,
                     text: Arc::downgrade(&cache.text),
                     _atlas: Arc::downgrade(&group.handle),
@@ -257,6 +260,39 @@ impl Storage {
 pub struct Viewport(cryoglyph::Viewport);
 
 impl Viewport {
+    /// Starts preparing a candidate frame with this window's text viewport.
+    pub fn begin_candidate(&self) {
+        self.0.begin_candidate();
+    }
+
+    /// Ends the candidate frame: whether glyphs it needs are still being drawn.
+    pub fn end_candidate(&self) -> bool {
+        self.0.end_candidate()
+    }
+
+    /// How many glyph jobs this window has outstanding and how many entries it keeps.
+    pub fn glyph_state(&self) -> (usize, usize) {
+        self.0.glyph_state()
+    }
+
+    /// Tells the text renderer how glyphs are rasterized and blended (`graphics::text::set_rendering`).
+    pub fn set_rendering(&mut self, queue: &wgpu::Queue) {
+        let rendering = crate::graphics::text::rendering();
+        self.0.set_rendering(
+            queue,
+            cryoglyph::TextRendering {
+                bgr: rendering.subpixel == Some(crate::graphics::text::SubpixelOrder::Bgr),
+                adjustment: rendering.adjustment.map(|(contrast, gamma)| cryoglyph::CoverageAdjustment { contrast, gamma }),
+                glyphs: match rendering.glyphs {
+                    crate::graphics::text::GlyphDrawing::Inline => cryoglyph::GlyphDrawing::Inline,
+                    crate::graphics::text::GlyphDrawing::Worker => cryoglyph::GlyphDrawing::Worker,
+                    crate::graphics::text::GlyphDrawing::DirectWrite => cryoglyph::GlyphDrawing::DirectWrite,
+                },
+                aliased: rendering.aliased,
+            },
+        );
+    }
+
     pub fn update(&mut self, queue: &wgpu::Queue, resolution: Size<u32>) {
         self.0.update(
             queue,
@@ -277,6 +313,7 @@ pub struct Pipeline {
 
 impl Pipeline {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+        crate::graphics::text::install_glyph_source(|notifier| cryoglyph::set_glyph_notifier(move || notifier()));
         let cache = cryoglyph::Cache::new(device);
         let atlas =
             cryoglyph::TextAtlas::with_color_mode(device, queue, &cache, format, COLOR_MODE);
@@ -430,6 +467,14 @@ impl State {
     }
 }
 
+/// Whether the text was drawn inside a grayscale scope.
+fn grayscale(section: &Text) -> bool {
+    match section {
+        Text::Paragraph { grayscale, .. } | Text::Editor { grayscale, .. } | Text::Cached { grayscale, .. } => *grayscale,
+        Text::Raw { .. } => false,
+    }
+}
+
 fn prepare(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -492,6 +537,8 @@ fn prepare(
             Text::Raw { raw, .. } => raw.buffer.upgrade().map(Allocation::Raw),
         })
         .collect();
+
+    let subpixel = crate::graphics::text::rendering().subpixel.is_some();
 
     let text_areas = sections
         .iter()
@@ -637,6 +684,7 @@ fn prepare(
                     bottom: (clip_bounds.y + clip_bounds.height) as i32,
                 },
                 default_color: to_color(color),
+                subpixel: subpixel && !grayscale(section),
             })
         });
 

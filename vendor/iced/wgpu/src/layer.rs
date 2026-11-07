@@ -73,6 +73,7 @@ impl Layer {
             color,
             clip_bounds,
             transformation,
+            grayscale: graphics::text::grayscale_active(),
         };
 
         self.pending_text.push(paragraph);
@@ -92,6 +93,7 @@ impl Layer {
             color,
             clip_bounds,
             transformation,
+            grayscale: graphics::text::grayscale_active(),
         };
 
         self.pending_text.push(editor);
@@ -118,6 +120,7 @@ impl Layer {
             wrapping: text.wrapping,
             ellipsis: text.ellipsis,
             clip_bounds: clip_bounds * transformation,
+            grayscale: graphics::text::grayscale_active(),
         };
 
         self.pending_text.push(text);

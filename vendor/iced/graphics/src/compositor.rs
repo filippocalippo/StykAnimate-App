@@ -137,6 +137,13 @@ pub enum SurfaceError {
     /// Acquiring a texture failed with a generic error.
     #[error("Acquiring a texture failed with a generic error")]
     Other,
+    /// The frame was drawn but not shown: its text lacks glyphs a worker is still drawing. The window keeps its last
+    /// frame; draw again when the glyphs are ready, at the latest at the given time.
+    #[error("The frame was kept back until its glyphs are ready")]
+    Withheld(std::time::Instant),
+    /// The frame was shown, but the surface no longer matches the window exactly: reconfigure it for the next one.
+    #[error("The frame was shown, but the surface should be reconfigured")]
+    Suboptimal,
 }
 
 /// Contains information about the graphics (e.g. graphics adapter, graphics backend).

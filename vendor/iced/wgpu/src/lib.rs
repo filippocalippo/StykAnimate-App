@@ -33,6 +33,7 @@ mod buffer;
 mod color;
 mod engine;
 mod nudge;
+pub mod presentation;
 mod quad;
 mod text;
 mod triangle;
@@ -66,6 +67,11 @@ use crate::graphics::mesh;
 use crate::graphics::text::{Editor, Paragraph};
 use crate::graphics::{Shell, Viewport};
 
+/// A frame prepared and not yet drawn: see [`Renderer::prepare_candidate`].
+pub struct Candidate {
+    encoder: wgpu::CommandEncoder,
+}
+
 /// A [`wgpu`] graphics renderer for [`iced`].
 ///
 /// [`wgpu`]: https://github.com/gfx-rs/wgpu-rs
@@ -81,6 +87,9 @@ pub struct Renderer {
     triangle: triangle::State,
     text: text::State,
     text_viewport: text::Viewport,
+    /// Whether the frame prepared last lacks glyphs a worker is still drawing, and the window's wait for them.
+    text_incomplete: bool,
+    gate: presentation::Gate,
 
     #[cfg(any(feature = "svg", feature = "image"))]
     image: image::State,
@@ -103,6 +112,8 @@ impl Renderer {
             triangle: triangle::State::new(&engine.device, &engine.triangle_pipeline),
             text: text::State::new(),
             text_viewport: engine.text_pipeline.create_viewport(&engine.device),
+            text_incomplete: false,
+            gate: presentation::Gate::new(),
 
             #[cfg(any(feature = "svg", feature = "image"))]
             image: image::State::new(),
@@ -141,7 +152,12 @@ impl Renderer {
 
         self.prepare(&mut encoder, viewport);
         self.render(&mut encoder, target, clear_color, viewport);
+        self.trim();
 
+        encoder
+    }
+
+    fn trim(&mut self) {
         self.quad.trim();
         self.triangle.trim();
         self.text.trim();
@@ -154,8 +170,37 @@ impl Renderer {
             self.image.trim();
             self.image_cache.borrow_mut().trim();
         }
+    }
 
-        encoder
+    /// Prepares the current primitives as a candidate frame, without a target to draw them into: the window decides
+    /// from [`hold_frame`](Self::hold_frame) whether to show it, and only then acquires the surface's texture (a texture
+    /// that is acquired and not presented stalls the swap chain). Finish it with [`show_candidate`](Self::show_candidate)
+    /// or [`drop_candidate`](Self::drop_candidate).
+    pub fn prepare_candidate(&mut self, viewport: &Viewport) -> Candidate {
+        let mut encoder = self.engine.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("iced_wgpu encoder") });
+        self.prepare(&mut encoder, viewport);
+        Candidate { encoder }
+    }
+
+    /// Draws the candidate into `frame` and submits it.
+    pub fn show_candidate(&mut self, candidate: Candidate, clear_color: Option<Color>, frame: &wgpu::TextureView, viewport: &Viewport) -> wgpu::SubmissionIndex {
+        let Candidate { mut encoder } = candidate;
+        self.render(&mut encoder, frame, clear_color, viewport);
+        self.trim();
+        self.submit(encoder)
+    }
+
+    /// Submits what preparing the candidate recorded (uploads the caches count on) without drawing it.
+    pub fn drop_candidate(&mut self, candidate: Candidate) -> wgpu::SubmissionIndex {
+        self.trim();
+        self.submit(candidate.encoder)
+    }
+
+    fn submit(&mut self, encoder: wgpu::CommandEncoder) -> wgpu::SubmissionIndex {
+        self.staging_belt.finish();
+        let submission = self.engine.queue.submit([encoder.finish()]);
+        self.staging_belt.recall();
+        submission
     }
 
     pub fn present(
@@ -171,6 +216,25 @@ impl Renderer {
         let submission = self.engine.queue.submit([encoder.finish()]);
         self.staging_belt.recall();
         submission
+    }
+
+    /// Whether the window keeps the last frame it showed instead of showing the one just drawn, until `until` at the
+    /// latest: the frame lacks glyphs a worker is still drawing, and a frame is never shown with holes in its text
+    /// (there is no deadline: see [`presentation`]); it says when to ask again. Call it after preparing a frame and
+    /// before showing it.
+    pub fn hold_frame(&mut self) -> Option<std::time::Instant> {
+        self.gate.hold(self.text_incomplete, std::time::Instant::now())
+    }
+
+    /// How many glyph jobs this window's text has outstanding and how many entries (asked for or drawn and waiting) it
+    /// keeps.
+    pub fn glyph_state(&self) -> (usize, usize) {
+        self.text_viewport.glyph_state()
+    }
+
+    /// Whether the frame drawn last lacks glyphs a worker is still drawing.
+    pub fn text_incomplete(&self) -> bool {
+        self.text_incomplete
     }
 
     /// Renders the current surface to an offscreen buffer.
@@ -285,6 +349,8 @@ impl Renderer {
 
         self.text_viewport
             .update(&self.engine.queue, viewport.physical_size());
+        self.text_viewport.set_rendering(&self.engine.queue);
+        self.text_viewport.begin_candidate();
 
         let physical_bounds =
             Rectangle::<f32>::from(Rectangle::with_size(viewport.physical_size()));
@@ -390,6 +456,9 @@ impl Renderer {
                 prepare_span.finish();
             }
         }
+
+        self.text_incomplete = self.text_viewport.end_candidate();
+        crate::graphics::text::set_candidate_incomplete(self.text_incomplete);
     }
 
     fn render(
@@ -914,7 +983,7 @@ impl renderer::Headless for Renderer {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("iced_wgpu [headless]"),
-                required_features: wgpu::Features::empty(),
+                required_features: adapter.features() & wgpu::Features::DUAL_SOURCE_BLENDING,
                 required_limits: wgpu::Limits {
                     max_bind_groups: 2,
                     ..wgpu::Limits::default()
