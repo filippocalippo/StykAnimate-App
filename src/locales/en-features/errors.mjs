@@ -941,6 +941,7 @@ export default Object.freeze({
   "errors.movieclips.invalidMovieclipRestartKeys": "Invalid movieclip restart keys.",
   "errors.movieclips.invalidMovieclipDocument": "Invalid movieclip document.",
   "errors.movieclips.movieclipsContainACycleOrExceedEightNested": "Movieclips contain a cycle or exceed eight nested levels.",
+  "errors.movieclips.movieclipsNestAtMostEightLevelsDeep": "Movieclips can be nested at most eight levels deep.",
   "errors.movieclips.movieclipAssetLimitExceeded": "Movieclip asset limit exceeded.",
   "errors.movieclips.invalidMovieclipAsset": "Invalid movieclip asset.",
   "errors.movieclips.movieclipContainersRequireOneTransformHandle": "Movieclip containers require one transform handle.",

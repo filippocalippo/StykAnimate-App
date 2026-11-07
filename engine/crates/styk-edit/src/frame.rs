@@ -103,6 +103,14 @@ pub(crate) fn objects_of(frame: &Value) -> Vec<Value> {
 }
 
 impl Editor {
+    /// Refuses, with nothing changed, a command about to take about `bytes` more than the host can give (`memory_gate`).
+    pub(crate) fn admit(&self, bytes: usize) -> Result<(), EditError> {
+        match self.memory_gate {
+            Some(gate) if !gate(bytes) => Err(EditError::Invalid("errors.engine.outOfMemory".into())),
+            _ => Ok(()),
+        }
+    }
+
     /// Whether the document is edited through its layer sheet (always, in the app).
     pub(crate) fn sheet(&self) -> bool {
         self.report.path(&["_styk", "layerSheet"]).is_some()

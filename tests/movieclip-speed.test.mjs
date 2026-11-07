@@ -111,6 +111,28 @@ test('the figure a clip creation answers is its definition, read from the docume
   assert.ok(Object.keys(clip).includes('_styk') && 'segments' in clip);
 });
 
+test('asking the figure a clip creation answers whether it is a promise reads no record of its definition', () => {
+  const {editor} = session(3);
+  editor.select(null);
+  const clip = editor.createMovieclip({start: 0, end: 4, uids: [], name: 'Crowd'});
+  const table = tableOf(editor.report.figure_types), index = table ? table.positionOf(clip.figure_type_id, true) : -1;
+  // What an async function or a promise does to a value it is given.
+  assert.equal(typeof clip.then, 'undefined');
+  if (table) assert.ok(!table.fetched().includes(index), 'the definition of the clip was read by a check for a promise');
+});
+
+test('entering a clip opens it from the project tree and reads no record of its definition', () => {
+  const {editor} = session(3);
+  editor.select(null);
+  const clip = editor.createMovieclip({start: 0, end: 4, uids: [], name: 'Crowd'});
+  const table = tableOf(editor.report.figure_types), index = table ? table.positionOf(clip.figure_type_id, true) : -1;
+  editor.enterMovieclip(clip.figure_type_id);
+  assert.equal(editor._movieclipScopes.length, 1);
+  assert.ok(editor.evaluatedFrame.objects.length > 0, 'the clip shows its figures');
+  editor.leaveMovieclip();
+  if (table) assert.ok(!tableOf(editor.report.figure_types).fetched().includes(index), 'the definition of the clip was not read to enter it');
+});
+
 /** The saved bytes after each step of a session over crowds whose records share pose arrays of 70 numbers: a clip made of several figures, entered,
  * edited and left, nested, placed twice, and undone and redone through all of it. */
 async function savedAtEachStep() {

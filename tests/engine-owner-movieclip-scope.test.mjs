@@ -274,8 +274,19 @@ test('closing a project ends the sessions it holds, those of the movieclips it w
 
 // A movieclip made inside an entered movieclip retains the poses it was made from, which the clip it was made in
 // retains too: those are cut down to the figures the new clip holds, as the editor alone does.
+/** The recorded editor left a figure whose parent the retained scene no longer held joined to nothing: a join with neither a slot nor an identity,
+ * which opening the saved file refuses (`errors.model.joinPointsToAMissingFigureOrHandle`). The engine unjoins the figure, as the clipboard does,
+ * so the recording is read with such joins as no join. */
+const withoutHalfJoins = reference => {
+  const mend = value => {
+    if (Array.isArray(value)) return value.map(mend);
+    if (value === null || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, key === 'join' && item && typeof item === 'object' && !('target_object_slot' in item) && !('target_unique_id' in item) ? null : mend(item)]));
+  };
+  return {...reference, states: reference.states.map(state => ({...state, document: JSON.stringify(mend(JSON.parse(state.document)))}))};
+};
 refs.test('a movieclip made inside another keeps only its own figures in the poses it retains', {skip: !engineBuilt}, async take => {
-  await bothWays(take, recordedDocument('origin-future-rig-joined-sheet'), (editor, mark) => {
+  await bothWays(label => withoutHalfJoins(take(label)), recordedDocument('origin-future-rig-joined-sheet'), (editor, mark) => {
     editor.select(firstFigure(editor), -1);
     const clip = editor.createMovieclip({start: 0, end: 4});
     mark('outer made');

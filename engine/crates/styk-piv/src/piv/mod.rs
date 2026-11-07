@@ -145,6 +145,27 @@ fn decode_v5<'a>(ctx: &Ctx<'_>, payload: Cow<'a, [u8]>, source_len: usize, diges
 mod unpack_tests {
     use super::*;
 
+    /// The limits are the Python codec's (`codecs/piv_codec.py`, `_unpack_source`: `MAX_PAYLOAD_BYTES = 256 * 1024 * 1024`; a file longer than that is
+    /// "Project exceeds size limit", a payload longer than that "Decompressed project exceeds size limit", one of exactly that length is read).
+    #[test]
+    fn the_size_limits_are_those_of_the_python_codec() {
+        let mut payload = vec![0u8; MAX_PAYLOAD_BYTES + 1];
+        payload[0] = 5;
+        let message = |source: &[u8]| unpack_source(source).err().map(|error| error.msg.clone());
+        let exact = crate::zlib::compress(&payload[..MAX_PAYLOAD_BYTES]);
+        assert!(exact.len() < 1 << 20, "a payload of zeros is small once compressed");
+        let (read, was_compressed) = unpack_source(&exact).expect("a payload of exactly the limit is read");
+        assert!(was_compressed && read.len() == MAX_PAYLOAD_BYTES);
+        drop(read);
+        let over = crate::zlib::compress(&payload);
+        assert_eq!(message(&over).as_deref(), Some("Decompressed project exceeds size limit"));
+        // A file longer than the limit is refused before it is looked at, however it would inflate.
+        let mut long = vec![5u8; MAX_PAYLOAD_BYTES];
+        assert!(unpack_source(&long).is_ok(), "a file of exactly the limit, stored, is read");
+        long.push(0);
+        assert_eq!(message(&long).as_deref(), Some("Project exceeds size limit"));
+    }
+
     /// The inflated payload is held while the document is built from it: it keeps no capacity it does not use.
     #[test]
     fn the_inflated_payload_keeps_no_spare_capacity() {

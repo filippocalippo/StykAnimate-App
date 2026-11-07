@@ -38,6 +38,10 @@ pub enum OpenSource<'a> {
     Owned { bytes: Vec<u8>, name: &'a str },
     /// A document as JSON text, and the name it is shown under.
     Json { bytes: &'a [u8], name: &'a str },
+    /// A document already in memory as a tree, and the name it is shown under: a movieclip's own, taken from the project that holds it (as the
+    /// project holds it: its arrays shared with the project's other records, which the open unshares once its memory is reserved, so that the
+    /// document is the one its text would give). Nothing is read from text, so what the open makes is the normalized document and its views.
+    Tree { document: Value, name: &'a str },
 }
 
 /// How far an open got.
@@ -115,6 +119,17 @@ fn block(bytes: usize) -> Result<(), OpenError> {
     copy.try_reserve_exact(bytes).map_err(|_| OpenError::out_of_memory(styk_alloc::OutOfMemory { requested: bytes, available: styk_alloc::headroom() }))
 }
 
+/// How many times the text of a document that is already a tree the open of it may take: the normalized copy and the typed views (a clip of
+/// every figure of a large project took one time its text; the open of its text takes sixteen, for the buffers it parses through).
+pub const OPEN_BYTES_PER_TREE_BYTE: usize = 3;
+
+/// What opening `tree` may take, for the reservation that precedes the open.
+pub fn open_tree_estimate(tree: &Value) -> usize {
+    let text = styk_doc::json::utf16_units_checked::<std::convert::Infallible>(tree, || Ok(())).unwrap_or(0);
+    // The copy that gives the text's arrays (`Value::unshared`) is made once the memory is reserved, and what it allocates is not what the text says.
+    text.saturating_mul(OPEN_BYTES_PER_TREE_BYTE).saturating_add(tree.unshared_cost()).max(OPEN_MINIMUM_BYTES)
+}
+
 /// What opening a document of `file_bytes` bytes may take, for the reservation that precedes the open.
 pub fn open_estimate(file_bytes: usize) -> usize {
     file_bytes.saturating_mul(OPEN_BYTES_PER_BYTE).max(OPEN_MINIMUM_BYTES)
@@ -168,7 +183,7 @@ fn reserve_for_open(source: &OpenSource<'_>, cancel: &dyn Fn() -> bool) -> Resul
     let (bytes, name): (&[u8], &str) = match source {
         OpenSource::File { bytes, name } => (bytes, name),
         OpenSource::Owned { bytes, name } => (bytes.as_slice(), name),
-        OpenSource::Json { .. } => return Err(OpenError::out_of_memory(refused)),
+        OpenSource::Json { .. } | OpenSource::Tree { .. } => return Err(OpenError::out_of_memory(refused)),
     };
     if !matches!(extension(name).to_ascii_lowercase().as_str(), "piv" | "stk") {
         return Err(OpenError::out_of_memory(refused));
@@ -190,6 +205,7 @@ fn open_estimate_of(source: &OpenSource<'_>) -> usize {
         OpenSource::File { bytes, name } => (bytes, name),
         OpenSource::Owned { bytes, name } => (bytes.as_slice(), name),
         OpenSource::Json { bytes, .. } => return open_estimate(bytes.len()),
+        OpenSource::Tree { document, .. } => return open_tree_estimate(document),
     };
     let by_size = open_estimate(bytes.len());
     let Some(kind) = styk_formats::Kind::from_extension(&extension(name).to_ascii_lowercase()) else { return by_size };
@@ -199,6 +215,11 @@ fn open_estimate_of(source: &OpenSource<'_>) -> usize {
 impl OpenError {
     fn decode(message: impl Into<String>) -> OpenError {
         OpenError { message: message.into(), key: None, params: Vec::new(), code: None, status: None, stage: OpenStage::Decode }
+    }
+
+    /// A refusal that is a message of the interface's, for a document that cannot be opened as asked.
+    pub fn refused(key: &str) -> OpenError {
+        OpenError { key: Some(key.into()), stage: OpenStage::Prepare, ..OpenError::decode(key) }
     }
 
     fn unreadable() -> OpenError {
@@ -451,6 +472,12 @@ impl Engine {
                     None => read_file(&bytes, name, cancel, &fan, &mut check)?,
                 },
             },
+            OpenSource::Tree { document, name } => {
+                // Copied only now that the open holds the memory it asked for: the copy is as large as the text of the document.
+                let document = document.unshared();
+                let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
+                (document, "json", version, name.to_string(), None)
+            }
             OpenSource::Json { bytes, name } => {
                 let document = styk_doc::json::parse(bytes).map_err(|_| OpenError::unreadable())?;
                 let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
@@ -542,7 +569,7 @@ impl Engine {
     /// is now: the stage draws it, playback and exports read it. What changed in `tree` since `typed` was made
     /// is converted again; nothing else is.
     pub fn activate(&self, typed: &Typed, tree: &Value, revision: u64) -> Result<Committed, OpenError> {
-        let mut store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut store = styk_doc::lock::spinning(&self.inner.store);
         store.loader = typed.loader.clone();
         store.lineage = typed.lineage;
         store.assets = Some(typed.assets.clone());
@@ -563,7 +590,7 @@ impl Engine {
     /// [`Engine::publish_tree`] with the typed views the caller already made of `tree` (the editing session converts the
     /// document for its own reads): they are published as they are, and the document is converted once.
     pub fn publish_tree_with(&self, lineage: u64, tree: Value, revision: u64, made: Option<Arc<Prepared>>) -> Result<Option<Committed>, OpenError> {
-        let store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let store = styk_doc::lock::spinning(&self.inner.store);
         if store.lineage != lineage || store.prepared.is_none() {
             return Ok(None);
         }
@@ -578,7 +605,7 @@ impl Engine {
 
     /// The typed views of the document the engine holds, when `tree` is the tree it was published from.
     pub fn views_of(&self, tree: &Value) -> Option<Arc<Prepared>> {
-        let store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let store = styk_doc::lock::spinning(&self.inner.store);
         store.tree.same_node(tree).then(|| store.prepared.clone()).flatten()
     }
 
@@ -655,7 +682,7 @@ impl Engine {
     /// a planner reads never include a draft. `None` while no document is open.
     pub fn publish_draft(&self, token: u64, draft: &Draft) -> Result<Option<Committed>, OpenError> {
         let started = self.now();
-        let mut store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut store = styk_doc::lock::spinning(&self.inner.store);
         if store.prepared.is_none() {
             return Ok(None);
         }
@@ -679,7 +706,7 @@ impl Engine {
     /// Takes a draft out: the document itself is the generation in front again. `None` when none is held.
     pub fn clear_draft(&self) -> Option<Committed> {
         let started = self.now();
-        let mut store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut store = styk_doc::lock::spinning(&self.inner.store);
         store.draft.take()?;
         let (prepared, assets) = (store.prepared.clone()?, store.assets.clone()?);
         let revision = store.revision;

@@ -31,6 +31,12 @@ impl Py {
 /// `json.dumps(text)` with `ensure_ascii=True`.
 pub(crate) fn write_string_ascii(text: &str, out: &mut Vec<u8>) {
     out.push(b'"');
+    write_string_ascii_body(text, out);
+    out.push(b'"');
+}
+
+/// The characters of [`write_string_ascii`] between the quotes: a long text can be written in pieces cut at characters.
+pub(crate) fn write_string_ascii_body(text: &str, out: &mut Vec<u8>) {
     for ch in text.chars() {
         match ch {
             '"' => out.extend_from_slice(b"\\\""),
@@ -49,7 +55,6 @@ pub(crate) fn write_string_ascii(text: &str, out: &mut Vec<u8>) {
             }
         }
     }
-    out.push(b'"');
 }
 
 /// `json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(",", ":"))`.

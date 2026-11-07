@@ -29,10 +29,6 @@ fn number(value: Option<&Value>) -> f64 {
     value.and_then(Value::as_f64).unwrap_or(f64::NAN)
 }
 
-fn id_key(value: f64) -> u64 {
-    if value == 0.0 { 0.0f64.to_bits() } else { value.to_bits() }
-}
-
 /// One place where an object lives: a native keyframe or a retained pose source, and its slot.
 #[derive(Clone)]
 enum Place {
