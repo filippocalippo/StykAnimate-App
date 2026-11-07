@@ -22,6 +22,8 @@ pub struct Cache(Arc<Inner>);
 struct Inner {
     sampler: Sampler,
     shader: ShaderModule,
+    /// Whether the device blends with two sources, which subpixel text needs.
+    dual_source: bool,
     vertex_buffers: [Option<wgpu::VertexBufferLayout<'static>>; 1],
     atlas_layout: BindGroupLayout,
     uniforms_layout: BindGroupLayout,
@@ -36,7 +38,32 @@ struct Inner {
     >,
 }
 
+/// The shader with the blocks of the other variant removed (`//@dual:begin` .. `//@dual:end` exist only with two-source
+/// blending, `//@single:begin` .. `//@single:end` only without).
+fn shader_source(dual_source: bool) -> String {
+    let (drop_begin, drop_end) = if dual_source { ("//@single:begin", "//@single:end") } else { ("//@dual:begin", "//@dual:end") };
+    let mut dropping = false;
+    let mut source = String::new();
+    for line in include_str!("shader.wgsl").lines() {
+        let trimmed = line.trim();
+        if trimmed == drop_begin {
+            dropping = true;
+        } else if trimmed == drop_end {
+            dropping = false;
+        } else if !dropping && !trimmed.starts_with("//@") {
+            source.push_str(line);
+            source.push('\n');
+        }
+    }
+    source
+}
+
 impl Cache {
+    /// Whether the device can draw subpixel text.
+    pub fn subpixel_supported(&self) -> bool {
+        self.0.dual_source
+    }
+
     pub fn new(device: &Device) -> Self {
         let sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("glyphon sampler"),
@@ -48,9 +75,12 @@ impl Cache {
             ..Default::default()
         });
 
+        // Subpixel text blends each channel by its own coverage: a second fragment output. Where the device cannot,
+        // the shader has no such entry and text is drawn in grayscale, which is correct everywhere.
+        let dual_source = device.features().contains(wgpu::Features::DUAL_SOURCE_BLENDING);
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("glyphon shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
+            source: ShaderSource::Wgsl(Cow::Owned(shader_source(dual_source))),
         });
 
         let vertex_buffer_layout = wgpu::VertexBufferLayout {
@@ -125,7 +155,7 @@ impl Cache {
         let uniforms_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[BindGroupLayoutEntry {
                 binding: 0,
-                visibility: ShaderStages::VERTEX,
+                visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
                 ty: BindingType::Buffer {
                     ty: BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -145,6 +175,7 @@ impl Cache {
         Self(Arc::new(Inner {
             sampler,
             shader,
+            dual_source,
             vertex_buffers: [Some(vertex_buffer_layout)],
             uniforms_layout,
             atlas_layout,
@@ -202,6 +233,7 @@ impl Cache {
             pipeline_layout,
             shader,
             vertex_buffers,
+            dual_source,
             ..
         } = self.0.deref();
 
@@ -226,7 +258,20 @@ impl Cache {
                         entry_point: Some("fs_main"),
                         targets: &[Some(ColorTargetState {
                             format,
-                            blend: Some(BlendState::ALPHA_BLENDING),
+                            blend: Some(if *dual_source {
+                                // Each channel blends by its own coverage: out = text * coverage + destination * (1 - coverage).
+                                // A grayscale glyph gives the same coverage on every channel, which is ordinary alpha blending.
+                                BlendState {
+                                    color: wgpu::BlendComponent {
+                                        src_factor: wgpu::BlendFactor::Src1,
+                                        dst_factor: wgpu::BlendFactor::OneMinusSrc1,
+                                        operation: wgpu::BlendOperation::Add,
+                                    },
+                                    alpha: BlendState::ALPHA_BLENDING.alpha,
+                                }
+                            } else {
+                                BlendState::ALPHA_BLENDING
+                            }),
                             write_mask: ColorWrites::default(),
                         })],
                         compilation_options: PipelineCompilationOptions::default(),
@@ -246,5 +291,20 @@ impl Cache {
                 pipeline
             })
             .clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shader_source;
+
+    #[test]
+    fn each_variant_of_the_shader_has_only_its_own_blocks() {
+        let (dual, single) = (shader_source(true), shader_source(false));
+        assert!(dual.starts_with("enable dual_source_blending;") && dual.contains("@blend_src(1)") && dual.contains("case 2u"));
+        assert!(!single.contains("dual_source_blending") && !single.contains("blend_src") && !single.contains("case 2u"));
+        for source in [&dual, &single] {
+            assert!(source.contains("fn fs_main") && !source.contains("//@"), "markers must not survive");
+        }
     }
 }

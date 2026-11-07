@@ -17,6 +17,14 @@ pub mod fonts;
 pub mod icons;
 mod icon_table;
 pub mod tokens;
+#[cfg(all(feature = "widgets", windows, test))]
+mod direct_write;
+#[cfg(feature = "widgets")]
+pub mod glyphs;
+#[cfg(feature = "widgets")]
+pub mod grayscale;
+#[cfg(feature = "widgets")]
+pub mod repertoire;
 #[cfg(feature = "widgets")]
 pub mod typography;
 #[cfg(feature = "widgets")]

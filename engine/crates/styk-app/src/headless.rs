@@ -38,10 +38,18 @@ pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&She
         &mut renderer,
         &mut shell::Bus::new(),
     );
-    interface.draw(&mut renderer, &iced_theme, &renderer::Style { text_color: style.text_color }, mouse::Cursor::Unavailable);
     let physical = Size::new((bounds.width * scale).round() as u32, (bounds.height * scale).round() as u32);
-    let rgba = Headless::screenshot(&mut renderer, physical, scale, style.background_color);
-    Ok(Image { width: physical.width, height: physical.height, rgba })
+    // Glyphs a worker is drawing are left out of a frame, and such a frame is not the picture: draw again until one is
+    // complete, or fail.
+    for _ in 0..400 {
+        interface.draw(&mut renderer, &iced_theme, &renderer::Style { text_color: style.text_color }, mouse::Cursor::Unavailable);
+        let rgba = Headless::screenshot(&mut renderer, physical, scale, style.background_color);
+        if !styk_design::glyphs::incomplete() {
+            return Ok(Image { width: physical.width, height: physical.height, rgba });
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    Err("the text was still missing glyphs after 400 frames: the glyph worker did not deliver".to_string())
 }
 
 #[cfg(test)]

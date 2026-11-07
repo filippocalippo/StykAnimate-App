@@ -76,6 +76,7 @@ impl Sheet {
             Message::Shown => Task::none(),
             Message::FontsReady => {
                 self.fonts_ready = true;
+                eprintln!("text rendering: {:?}", iced::advanced::graphics::text::rendering());
                 if warm_up::built_early() {
                     return self.fail("the interface thread built the font system before the warm-up worker did".to_string());
                 }
@@ -91,6 +92,10 @@ impl Sheet {
                 }
             }
             Message::Frame => {
+                if self.fonts_ready && styk_design::glyphs::incomplete() {
+                    // A frame that lacks glyphs the worker is still drawing is not the one to capture.
+                    self.frames = 0;
+                }
                 if !self.fonts_ready {
                     let now = Instant::now();
                     if let Some(last) = self.last_frame {

@@ -2752,6 +2752,7 @@ const messages = {
   "errors.editorCombine.theCombinedFigureExceedsTheSupported30000": "The combined figure exceeds the supported 30,000-segment or 20,000-polygon capacity.",
   "errors.editorCombine.anAttachedMediaSegmentIsMissingItsDecoded": "An attached media segment is missing its decoded asset.",
   "errors.editorDrawing.chooseADrawingLayer": "Choose a drawing layer.",
+  "errors.editorDrawing.aDrawingKeepsItsOneImage": "A drawing keeps its one image: segments can't be added to it, split from it or removed.",
   "errors.editorDrawing.chooseADrawingLayerOrCreateANew": "Choose a drawing layer or create a new drawing layer.",
   "errors.editorDrawing.showAndUnlockBeforeDrawing": "Show and unlock {name} before drawing.",
   "errors.editorDrawing.theDrawingHistoryReferencesAMissingCel": "The drawing history references a missing cel.",

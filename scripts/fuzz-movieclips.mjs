@@ -2,12 +2,14 @@
 // A seeded gesture fuzz of movieclips and saving, in Node: the real editor under the engine owner, saves through the real export worker, and
 // every file opened again through the app's own open. The same seed gives the same gestures.
 //
-//   node scripts/fuzz-movieclips.mjs <seed> [steps=60] [--big] [--blank] [--drawn] [--piv[=file]] [--every=1] [--verify] [--quiet] [--log]
+//   node scripts/fuzz-movieclips.mjs <seed> [steps=60] [--big] [--blank] [--drawn] [--piv[=file]] [--doc=<fixture>] [--every=1] [--verify] [--quiet] [--log]
 //
 // `--big` gives the project a figure of 60 segments (pose arrays of 32 numbers or more), `--blank` starts from the blank document, `--drawn`
 // from a document with a drawing layer whose cels hold pixels, `--piv` from a Pivot file opened as the app opens one (a small repository fixture,
-// or the file given). Besides movieclips the gestures add audio, sprites (images), layers, effects, authored keys, camera motion and drawing
-// layers, export a clip as a `.stykmov` file and import it again.
+// or the file given), `--doc` from an engine fixture (`engine/tests/edit/<name>.document.json`, for instance `sheet-movieclip`). Besides
+// movieclips the gestures add audio, sprites (images), layers, effects, authored keys, camera motion, drawing layers and strokes on them (the
+// drawings are published after every gesture, as the app publishes them, in every movieclip being edited), edit the segments of the selected
+// figure (cels refuse that), export a clip as a `.stykmov` file and import it again.
 //
 // After every gesture the project is written one of the ways the app writes it (Save, which leaves the movieclips being edited, or the recovery
 // copy, which folds them in) and opened again. Failures: a file that does not open, one that differs from the project saved, a second round of
@@ -26,10 +28,14 @@ import {createDemo, createObject} from '../src/demo.mjs';
 import {createImageFigure} from '../src/media-authoring.mjs';
 import {isMovieclip} from '../src/movieclips.mjs';
 import {movieclipScopes} from '../src/editor-sessions.mjs';
+import {DrawingResources, drawingResourcesFor} from '../src/drawing-resources.mjs';
+import {drawingEngineOperation} from '../src/engine/engine-drawing-worker.mjs';
+import {DrawingStroke} from '../tests/support/sketch-stroke.mjs';
 
 const args = process.argv.slice(2), flag = name => args.includes(name), value = name => args.find(a => a === name || a.startsWith(name + '='))?.split('=')[1];
 const numbers = args.filter(a => /^\d+$/.test(a)).map(Number);
 const seed = numbers[0] ?? 1, steps = numbers[1] ?? 60, every = Number(value('--every') ?? 1);
+const fixture = value('--doc');
 const big = flag('--big'), blank = flag('--blank'), drawn = flag('--drawn'), piv = args.some(a => a === '--piv' || a.startsWith('--piv=')), verify = flag('--verify'), quiet = flag('--quiet');
 let s = seed >>> 0;
 const rnd = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
@@ -58,7 +64,8 @@ function startDocument() {
 }
 async function startEditor() {
   const editor = new Editor(options);
-  if (blank) editor.newDocument();
+  if (fixture) editor.load(JSON.parse(readFileSync(new URL(`../engine/tests/edit/${fixture}.document.json`, import.meta.url), 'utf8')));
+  else if (blank) editor.newDocument();
   else if (drawn) editor.load((await (await import('../tests/support/painted-document.mjs')).paintedDocument()).document);
   else if (piv) {
     const file = value('--piv') ?? fileURLToPath(new URL('../engine/crates/styk-piv/tests/fixtures/legacy-v3.piv', import.meta.url));
@@ -70,6 +77,16 @@ async function startEditor() {
 const editor = await startEditor();
 const owner = installEngineOwner(editor, {verify});
 if (!owner.ready()) throw new Error('no session');
+
+// The drawings of the document being edited (the project's, or a movieclip's after entering one) are published as the app publishes them.
+const drawingWorker = {async request(kind, data) {
+  let reply;
+  await drawingEngineOperation({id: 0, kind, ...structuredClone(data)}, message => { reply = message; });
+  if (reply.error) throw Object.assign(new Error(reply.error), {messageKey: reply.messageKey});
+  return reply;
+}, dispose() {}};
+const drawings = () => drawingResourcesFor(editor.report) ?? new DrawingResources(editor.report, {worker: drawingWorker, onPublished: figure => editor._drawingPublished(figure)});
+let strokes = 0;
 
 const log = [], failures = [];
 const note = (name, detail = '') => { log.push(`${name}${detail ? ' ' + detail : ''}`); };
@@ -110,6 +127,21 @@ const gestures = {
   key() { const o = objects(); if (!o.length) return 'none'; editor.addAnimationKey({kind: 'figure', uid: pick(o).unique_id}, 'pose', editor.tick); },
   camera() { editor.addCameraMotion('shake', {start: int(0, 10), duration: int(6, 24)}); },
   drawingLayer() { editor.createDrawingLayer(); },
+  drawFrame() { editor.addDrawingFrame?.(); },
+  async draw() {
+    const where = {pixelsPerUnit: 1, world: {x: int(0, 60), y: int(0, 60)}};
+    let target;
+    try { target = editor.prepareDrawingCel(where); } catch { editor.createDrawingLayer(); target = editor.prepareDrawingCel(where); }
+    const surface = await drawings().surface(target.figure);
+    const brush = new DrawingStroke(surface.store, {size: 8, pressureSize: false, seed: ++strokes});
+    brush.sample({x: int(5, 55), y: int(5, 55)}); brush.sample({x: int(5, 55), y: int(5, 55)});
+    editor.commitDrawingPixels(target, brush.finish());
+  },
+  addSegment() { gestures.selectOne(); editor.addSegment(); },
+  deleteSegment() { gestures.selectOne(); editor.deleteSegment(int(1, 3)); },
+  splitSegment() { gestures.selectOne(); editor.splitSegment(int(1, 3)); },
+  segmentValues() { gestures.selectOne(); editor.setSegmentValues(int(1, 3), {length: int(10, 60)}); },
+  mirror() { gestures.selectOne(); editor.mirrorFigure(); },
   audio() { editor.importAudio(sound(), {start: int(0, 6)}); },
   sprite() { gestures.selectOne(); const figure = createImageFigure({dataUrl: png, width: 1, height: 1, name: 'Sprite'}); Object.assign(figure.image_assets[0], {anchor_start: {x: -7, y: 5}, anchor_end: {x: 23, y: -35}}); editor.addSpriteSegment(figure); },
   async exportClip() {
@@ -128,7 +160,7 @@ const gestures = {
   deleteClipDefinitionInstances() { const c = clips(); if (!c.length) return 'none'; const id = pick(c).figure_type_id; for (const o of objects()) if (o.figure_type_id === id) { editor.select(o.unique_id, -1); editor.deleteSelection(); } },
 };
 const weights = {seek: 2, selectOne: 2, selectSome: 1, createRange: 4, createStatic: 2, createEmpty: 1, enter: 4, enterSelected: 1, leave: 3, addClipInstance: 3, addFigure: 2, move: 2, duplicate: 2, del: 2,
-  join: 3, unjoin: 1, createLayer: 1, moveLayer: 1, vfx: 1, vfxClip: 1, key: 1, camera: 1, drawingLayer: 1, audio: 1, sprite: 1, exportClip: 1, importClip: 1, rename: 1, unique: 1, breakApart: 1, split: 1,
+  join: 3, unjoin: 1, createLayer: 1, moveLayer: 1, vfx: 1, vfxClip: 1, key: 1, camera: 1, drawingLayer: 1, audio: 1, sprite: 1, drawFrame: 1, draw: 3, addSegment: 1, deleteSegment: 1, splitSegment: 1, segmentValues: 1, mirror: 1, exportClip: 1, importClip: 1, rename: 1, unique: 1, breakApart: 1, split: 1,
   playback: 1, pose: 1, addFrame: 1, duplicateFrame: 1, insertKey: 1, undo: 3, redo: 2, deleteClipDefinitionInstances: 1};
 const table = Object.entries(weights).flatMap(([k, w]) => Array(w).fill(k));
 
@@ -203,13 +235,15 @@ async function check(kind) {
 }
 for (step = 1; step <= steps; step++) {
   const name = pick(table);
+  drawings();
   try { const d = await gestures[name](); note(name, d === undefined ? '' : String(d)); }
   catch (error) { refused++; note(`${name}!refused`, String(error?.message ?? error).slice(0, 50)); }
+  await drawings().flush();
   if (step % every === 0) await check(depth() ? pick(['recovery', 'recovery', 'save']) : pick(['save', 'recovery']));
   if (failures.length) break;
 }
 if (!failures.length) await check('save');
-console.log(JSON.stringify({seed, steps: step - 1, big, blank, drawn, piv, saves, refused, clips: clips().length, failures: failures.slice(0, 3), tail: failures.length ? log.slice(-12) : undefined}, null, quiet ? 0 : 1));
+console.log(JSON.stringify({seed, steps: step - 1, doc: fixture, big, blank, drawn, piv, saves, refused, clips: clips().length, failures: failures.slice(0, 3), tail: failures.length ? log.slice(-12) : undefined}, null, quiet ? 0 : 1));
 if (flag('--log')) console.log(log.join('\n'));
 owner.release(); exporter.dispose(); codecHost.close();
 process.exit(failures.length ? 1 : 0);
