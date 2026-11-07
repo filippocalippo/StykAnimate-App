@@ -1,14 +1,14 @@
-//! `styk-video`: a video export of a document, headless, through the same planning, frame source, flow and encoder
+//! `styk video`: a video export of a document, headless, through the same planning, frame source, flow and encoder
 //! services the app uses (`docs/native/video-export.md`).
 //!
-//!   styk-video <file> <first-last> <out> [--format mp4|webm|avi|wmv|vfw] [--codec h264|mpeg4|ffv1|rawvideo|..]
+//!   styk video <file> <first-last> <out> [--format mp4|webm|avi|wmv|vfw] [--codec h264|mpeg4|ffv1|rawvideo|..]
 //!              [--quality draft|great|max] [--bitrate MBPS] [--size WxH] [--smoothing edges|none|sprites]
 //!              [--fps F] [--audio mix.f32] [--max-bytes N] [--cpu] [--ffmpeg PATH] [--json]
 //!              [--vfw-arch x64|x86 --vfw-handler N [--vfw-quality] [--vfw-keyframes N] [--vfw-data-rate]]
 //!   Hooks for the tests of the export path (they disturb it from outside, as a stalled program would):
 //!              [--suspend-child-at-frame N --suspend-secs S] [--pause-producer-at-frame N --pause-secs S]
 //!              [--transparent] [--ticker] [--cancel-at-frame N] [--cancel-after-ms N] [--sample-frames N,N,..] [--no-encode --frame-hashes FILE
-//!              --order forward|reverse|shuffle]
+//!              --order forward|reverse|shuffle|interleave [--with ANOTHER_DOCUMENT]]
 //!
 //! Ticks are 0-based and inclusive, as in `styk export`. One JSON line on standard output with `--json`.
 
@@ -28,7 +28,7 @@ use styk_render::wgpu;
 use styk_services::video::{Arch, FrameLayout, VfwRequest, VideoError, VideoRequest, VideoService};
 use styk_services::Cancel;
 
-mod win;
+use crate::win;
 
 fn option<'a>(rest: &'a [String], name: &str) -> Option<&'a str> {
     rest.iter().position(|a| a == name).and_then(|i| rest.get(i + 1)).map(String::as_str)
@@ -47,6 +47,14 @@ fn clock() -> f64 {
     START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
 }
 
+/// `WxH` with whole pixel counts: anything else is refused with a message (never replaced by the canvas size).
+fn parse_size(text: &str) -> Result<(u32, u32), String> {
+    let bad = || format!("--size is WxH in whole pixels (for example 1920x1080), not {text:?}");
+    let (width, height) = text.split_once('x').ok_or_else(bad)?;
+    let whole = |part: &str| part.parse::<u32>().ok().filter(|n| *n > 0 && part.bytes().all(|b| b.is_ascii_digit()));
+    Ok((whole(width).ok_or_else(bad)?, whole(height).ok_or_else(bad)?))
+}
+
 fn json_string(text: &str) -> String {
     let mut out = String::from("\"");
     for c in text.chars() {
@@ -62,16 +70,8 @@ fn json_string(text: &str) -> String {
     out
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.len() < 3 {
-        eprintln!("usage: styk-video <file> <first-last> <out> [--format mp4|webm|avi|wmv|vfw] [--codec ..] [--quality draft|great|max] [--bitrate MBPS] [--size WxH] [--fps F] [--audio mix.f32] [--json] (see src/main.rs)");
-        std::process::exit(2);
-    }
-    std::process::exit(video(&args[0], &args[1], &args[2], &args[3..]));
-}
-
-fn video(path: &str, ticks: &str, out: &str, rest: &[String]) -> i32 {
+/// Entry of `styk video` (built with the `app-tools` feature).
+pub fn video(path: &str, ticks: &str, out: &str, rest: &[String]) -> i32 {
     match run(path, ticks, out, rest) {
         Ok(summary) => {
             println!("{summary}");
@@ -89,7 +89,8 @@ fn video(path: &str, ticks: &str, out: &str, rest: &[String]) -> i32 {
 struct Timings {
     evaluate_ms: f64,
     draw_ms: f64,
-    samples: Vec<(u32, usize)>,
+    /// (frame, this process, the encoder), private bytes.
+    samples: Vec<(u32, usize, usize)>,
 }
 
 struct Producer {
@@ -133,8 +134,7 @@ impl FrameProducer for Producer {
         timings.draw_ms += drawing.elapsed().as_secs_f64() * 1000.0;
         if self.sample.contains(&index) {
             let child = self.child.load(Ordering::Relaxed);
-            let bytes = win::private_bytes(None) + if child != 0 { win::private_bytes(Some(child)) } else { 0 };
-            timings.samples.push((index, bytes));
+            timings.samples.push((index, win::private_bytes(None), if child != 0 { win::private_bytes(Some(child)) } else { 0 }));
         }
         Ok(())
     }
@@ -216,6 +216,49 @@ fn leftovers(destination: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// A renderer for `generation`'s pictures: decoded by the engine's tasks (here on this thread), uploaded, and the decoded
+/// copies dropped (the exporter holds what it needs).
+fn make_renderer(engine: &Engine, frames: &styk_engine::export::ExportFrames, generation: &Arc<styk_engine::Generation>, settings: Settings, cpu: bool, tile: u32) -> Result<(FrameRenderer, String), String> {
+    frames.decode_images();
+    while engine.step() {}
+    let images = frames.take_images(usize::MAX);
+    if cpu {
+        let mut exporter = CpuExport::new(settings, tile);
+        exporter.use_assets(generation.assets.clone());
+        exporter.upload_images(&generation.assets, images.iter().cloned());
+        Ok((FrameRenderer::Cpu(exporter), "CPU (styk-raster)".to_string()))
+    } else {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).map_err(|e| fail(format!("No GPU adapter: {e}")))?;
+        let adapter_name = adapter.get_info().name;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("styk video export"), required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()), ..Default::default() })).map_err(|e| fail(e.to_string()))?;
+        let mut exporter = GpuExport::new(&device, &queue, settings, tile);
+        exporter.prepare_sprites(generation.lineage, &generation.assets);
+        exporter.upload_images(&generation.assets, images.iter().map(|image| &**image));
+        Ok((FrameRenderer::Gpu(exporter), adapter_name))
+    }
+}
+
+/// Another document open beside the first, drawn between its frames: the check that a frame does not depend on what was
+/// drawn before it, by this or another document.
+struct Other {
+    _engine: Engine,
+    frames: styk_engine::export::ExportFrames,
+    generation: Arc<styk_engine::Generation>,
+    renderer: FrameRenderer,
+}
+
+fn open_other(path: &str, settings: Settings, cpu: bool) -> Result<Other, String> {
+    let bytes = std::fs::read(path).map_err(|e| fail(format!("{path}: {e}")))?;
+    let extension = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("styk").to_ascii_lowercase();
+    let engine = Engine::new(clock, Budgets::for_device(None));
+    engine.open(&bytes, &extension, "other").map_err(|e| fail(format!("{path}: {e}")))?;
+    let frames = engine.export_frames(0).map_err(fail)?;
+    let generation = frames.generation().clone();
+    let (renderer, _) = make_renderer(&engine, &frames, &generation, settings, cpu, styk_export::TILE_SIDE)?;
+    Ok(Other { _engine: engine, frames, generation, renderer })
+}
+
 fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, String> {
     let baseline = win::private_bytes(None);
     let started = Instant::now();
@@ -226,6 +269,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     engine.open(&bytes, &extension, &name).map_err(|e| fail(format!("{path}: {e}")))?;
     let frames = engine.export_frames(0).map_err(fail)?;
     let generation = frames.generation().clone();
+    let after_open = win::private_bytes(None);
     let doc = &generation.prepared.doc;
     let (first, last) = match ticks.split_once('-') {
         Some((a, b)) => (a.parse::<u32>().map_err(fail)?, b.parse::<u32>().map_err(fail)?),
@@ -236,17 +280,17 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     };
     let last = last.min(frames.ticks().saturating_sub(1));
     let count = last + 1 - first;
-    let (width, height) = option(rest, "--size")
-        .and_then(|s| s.split_once('x'))
-        .and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))
-        .unwrap_or((doc.canvas[0], doc.canvas[1]));
+    let (width, height) = match option(rest, "--size") {
+        Some(size) => parse_size(size).map_err(fail)?,
+        None => (doc.canvas[0], doc.canvas[1]),
+    };
     let smoothing_name = option(rest, "--smoothing").unwrap_or("edges");
     let fps: f64 = number(rest, "--fps").map_err(fail)?.unwrap_or(24.0);
     let format = option(rest, "--format").unwrap_or("mp4");
     let cancel = Cancel::new();
 
     // The request: the core plans it exactly as the dialog's choices would be planned.
-    let (service, request, total_frames): (Box<dyn VideoService>, VideoRequest, u32) = if format == "vfw" {
+    let (service, request): (Box<dyn VideoService>, VideoRequest) = if format == "vfw" {
         let arch = if option(rest, "--vfw-arch").unwrap_or("x64") == "x86" { Arch::X86 } else { Arch::X64 };
         let request = VfwRequest {
             arch,
@@ -264,7 +308,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
             state_file: option(rest, "--vfw-state").map(PathBuf::from),
         };
         let service = VfwVideoService::new(find_helper("x64"), find_helper("x86"));
-        (Box::new(service), VideoRequest::Vfw(request), count)
+        (Box::new(service), VideoRequest::Vfw(request))
     } else {
         let preset = match option(rest, "--quality").unwrap_or("great") {
             "draft" => "small",
@@ -299,38 +343,25 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
             encode.max_bytes = max;
         }
         let service = FfmpegVideoService::new(find_ffmpeg(rest));
-        (Box::new(service), VideoRequest::Ffmpeg(encode), job.encode.total_frames)
+        (Box::new(service), VideoRequest::Ffmpeg(encode))
     };
 
     let smoothing = Smoothing::parse(smoothing_name).ok_or_else(|| fail("--smoothing is edges, none or sprites"))?;
     let settings = Settings::new(width, height, smoothing, styk_export::settings::MAX_PIXELS).map_err(fail)?;
 
-    // Pictures: decoded by the engine's tasks (here on this thread).
-    frames.decode_images();
-    while engine.step() {}
-    let images = frames.take_images(usize::MAX);
-    let tile = styk_export::TILE_SIDE;
-    let (renderer, adapter_name) = if flag(rest, "--cpu") {
-        let mut exporter = CpuExport::new(settings, tile);
-        exporter.use_assets(generation.assets.clone());
-        exporter.upload_images(&generation.assets, images.iter().cloned());
-        (FrameRenderer::Cpu(exporter), "CPU (styk-raster)".to_string())
-    } else {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).map_err(|e| fail(format!("No GPU adapter: {e}")))?;
-        let adapter_name = adapter.get_info().name;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("styk video export"), required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()), ..Default::default() })).map_err(|e| fail(e.to_string()))?;
-        let mut exporter = GpuExport::new(&device, &queue, settings, tile);
-        exporter.prepare_sprites(generation.lineage, &generation.assets);
-        exporter.upload_images(&generation.assets, images.iter().map(|image| &**image));
-        (FrameRenderer::Gpu(exporter), adapter_name)
-    };
+    let (renderer, adapter_name) = make_renderer(&engine, &frames, &generation, settings, flag(rest, "--cpu"), number(rest, "--tile").map_err(fail)?.unwrap_or(styk_export::TILE_SIDE))?;
+    let after_renderer = win::private_bytes(None);
+    // A cancel also ends a wait for the GPU.
+    {
+        let interrupt = renderer.interrupt();
+        cancel.on_cancel(move || interrupt.interrupt());
+    }
     let opened_ms = started.elapsed().as_secs_f64() * 1000.0;
 
     // The order the frames are drawn in (the video is only valid in order; other orders are for the hash check).
     let mut order: Vec<u32> = (first..=last).collect();
     match option(rest, "--order").unwrap_or("forward") {
-        "forward" => {}
+        "forward" | "interleave" => {}
         "reverse" => order.reverse(),
         "shuffle" => {
             let mut seed = 0x9E3779B97F4A7C15u64;
@@ -339,7 +370,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
                 order.swap(i, (seed >> 33) as usize % (i + 1));
             }
         }
-        other => return Err(fail(format!("--order is forward, reverse or shuffle, not {other}"))),
+        other => return Err(fail(format!("--order is forward, reverse, shuffle or interleave, not {other}"))),
     }
 
     let child = Arc::new(AtomicU32::new(0));
@@ -364,8 +395,20 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
         let mut lines = vec![String::new(); count as usize];
         let mut buffer = Vec::new();
         let layout = FrameLayout { width, height, bytes: 0, matte: !flag(rest, "--straight"), legacy_canvas: false, encoded: (width, height), edge: None };
+        let mut other = match (option(rest, "--order"), option(rest, "--with")) {
+            (Some("interleave"), Some(with)) => Some(open_other(with, settings, flag(rest, "--cpu"))?),
+            (Some("interleave"), None) => return Err(fail("--order interleave needs --with <another document>")),
+            _ => None,
+        };
+        let mut scratch = Vec::new();
         for index in 0..count {
             producer.frame_into(index, &layout, &mut buffer).map_err(fail)?;
+            if let Some(other) = other.as_mut() {
+                // A frame of the other document between this document's frames.
+                let tick = (index * 7 + 3) % other.frames.ticks();
+                let frame = other.frames.take(tick).ok_or_else(|| fail("no frame of the other document"))?;
+                other.renderer.frame_into(&other.generation.prepared.doc, &frame.list, frame.camera.as_ref(), layout.matte, &mut scratch).map_err(fail)?;
+            }
             let tick = producer.order[index as usize];
             let digest: String = Sha256::digest(&buffer).iter().map(|b| format!("{b:02x}")).collect();
             lines[(tick - first) as usize] = format!("{tick} {digest}");
@@ -447,16 +490,16 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
         None => None,
     };
     let exporting = Instant::now();
-    let result = run_video_export(&*service, Path::new(out), &request, total_frames, &mut producer, mix.as_mut().map(|m| m as &mut dyn AudioSource), &cancel, &on_start);
+    let result = run_video_export(&*service, Path::new(out), &request, &mut producer, mix.as_mut().map(|m| m as &mut dyn AudioSource), &cancel, &on_start);
     let finished = Instant::now();
     done.store(true, Ordering::Relaxed);
     let export_ms = (finished - exporting).as_secs_f64() * 1000.0;
     let cancel_latency = cancel_when.lock().unwrap().map(|at| (finished - at).as_secs_f64() * 1000.0);
     let timings = timings.lock().unwrap();
     let (peak_private, peak_own, peak_encoder) = *peak.lock().unwrap();
-    let samples = timings.samples.iter().map(|(frame, bytes)| format!("[{frame},{bytes}]")).collect::<Vec<_>>().join(",");
+    let samples = timings.samples.iter().map(|(frame, own, encoder)| format!("[{frame},{own},{encoder}]")).collect::<Vec<_>>().join(",");
     let common = format!(
-        "\"adapter\":{},\"opened_ms\":{opened_ms:.0},\"export_ms\":{export_ms:.0},\"evaluate_ms\":{:.0},\"draw_ms\":{:.0},\"baseline_private\":{baseline},\"before_export_private\":{before_export},\"peak_private\":{peak_private},\"peak_own_private\":{peak_own},\"peak_encoder_private\":{peak_encoder},\"private_at_frames\":[{samples}],\"cancel_latency_ms\":{},\"stage_leftovers\":{},\"ticker_max_gap_ms\":{:.2}",
+        "\"adapter\":{},\"opened_ms\":{opened_ms:.0},\"export_ms\":{export_ms:.0},\"evaluate_ms\":{:.0},\"draw_ms\":{:.0},\"baseline_private\":{baseline},\"after_open_private\":{after_open},\"after_renderer_private\":{after_renderer},\"before_export_private\":{before_export},\"peak_private\":{peak_private},\"peak_own_private\":{peak_own},\"peak_encoder_private\":{peak_encoder},\"private_at_frames\":[{samples}],\"cancel_latency_ms\":{},\"stage_leftovers\":{},\"ticker_max_gap_ms\":{:.2}",
         json_string(&adapter_name),
         timings.evaluate_ms,
         timings.draw_ms,
@@ -477,6 +520,21 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
                 _ => "failed",
             };
             Err(format!("{{\"ok\":false,\"kind\":\"{kind}\",\"error\":{},{common}}}", json_string(&error.to_string())))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_size;
+
+    #[test]
+    fn a_size_is_whole_pixels_or_it_is_refused() {
+        assert_eq!(parse_size("1920x1080"), Ok((1920, 1080)));
+        assert_eq!(parse_size("1x1"), Ok((1, 1)));
+        for bad in ["1.5x2", "1920", "x1080", "1920x", "0x10", "-3x4", "axb", "1920X1080", "+5x5", "1920x1080x3", ""] {
+            let message = parse_size(bad).expect_err(bad);
+            assert!(message.contains("--size") && message.contains("WxH"), "{bad}: {message}");
         }
     }
 }

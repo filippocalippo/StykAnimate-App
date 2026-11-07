@@ -31,6 +31,10 @@ mod export;
 mod load;
 mod prims;
 mod stepbench;
+#[cfg(feature = "app-tools")]
+mod video;
+#[cfg(feature = "app-tools")]
+mod win;
 mod raster_parity;
 
 fn main() {
@@ -62,6 +66,13 @@ fn main() {
         Some("edit-bench") if args.len() >= 4 => edit_bench(&args[1], &args[2], &args[3], &args[4..]),
         Some("diff") if args.len() >= 4 => diff(&args[1], &args[2], &args[3], &args[4..]),
         Some("export") if args.len() >= 4 => export::export(&args[1], &args[2], &args[3], &args[4..]),
+        #[cfg(feature = "app-tools")]
+        Some("video") if args.len() >= 4 => video::video(&args[1], &args[2], &args[3], &args[4..]),
+        #[cfg(not(feature = "app-tools"))]
+        Some("video") => {
+            eprintln!("styk video needs the app-tools feature: cargo run -p styk-cli --features app-tools -- video ...");
+            2
+        }
         Some("raster-parity") if args.len() >= 2 => raster_parity::run(&args[1..]),
         Some("prims") if args.len() >= 2 => prims::run(&args[1..]),
         Some("stepbench") if args.len() >= 3 => stepbench::run(&args[1..]),

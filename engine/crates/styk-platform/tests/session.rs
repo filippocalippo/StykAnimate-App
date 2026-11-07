@@ -1,7 +1,8 @@
 //! The FFmpeg session against the real bundled FFmpeg: destination checks before any frame, atomic replacement,
 //! cancellation of every wait (a suspended encoder, a full pool, the finish, the audio pass), a commit that loses a
-//! race, odd sizes, transparency and a stalled encoder that resumes. Skipped, loudly, where `build/video-encoder/ffmpeg.exe`
-//! is not found (the encoder is git-ignored; copy it into the checkout's `build/video-encoder`).
+//! race, odd sizes, transparency and a stalled encoder that resumes. These tests need `build/video-encoder/ffmpeg.exe`
+//! (the encoder is git-ignored: copy it into the checkout's `build/video-encoder`); without it they **fail** with that
+//! message, so a run without the encoder never counts as a pass.
 #![cfg(windows)]
 
 use std::fs;
@@ -13,7 +14,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use styk_platform::video::FfmpegVideoService;
+use styk_platform::video::{FfmpegVideoService, ReaderGate};
 use styk_services::video::{Codec, Container, FfmpegRequest, Phase, Rate, VideoError, VideoRequest, VideoService, VideoSession};
 use styk_services::Cancel;
 
@@ -45,6 +46,7 @@ fn resume(pid: u32) {
     }
 }
 
+/// The bundled encoder. Panics, saying what to do, where it is not found: a missing encoder is a failed run, not a pass.
 fn ffmpeg() -> Option<PathBuf> {
     let mut here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {
@@ -53,8 +55,7 @@ fn ffmpeg() -> Option<PathBuf> {
             return Some(candidate);
         }
         if !here.pop() {
-            eprintln!("skipped: build/video-encoder/ffmpeg.exe not found");
-            return None;
+            panic!("build/video-encoder/ffmpeg.exe was not found above {}: the video session tests need the bundled encoder (it is git-ignored). Copy it into this checkout's build/video-encoder and run again.", env!("CARGO_MANIFEST_DIR"));
         }
     }
 }
@@ -445,15 +446,14 @@ fn blank_random_uids(mut file: Vec<u8>) -> Vec<u8> {
     file
 }
 
-/// Today's input (PNG frames, `-f image2pipe -c:v png`) and the native input (PAM frames) give the same bytes, also at
-/// widths whose rows are not aligned. Raw video input (`-f rawvideo`), the first choice, did not: this test is why it is
-/// not used (WebM at 65 by 33 and 161 by 91 differed by thousands of bytes).
+/// The session's frames (PNG images, as today's app sends them) and PNG frames fed to FFmpeg with today's arguments give the
+/// same bytes, also at widths whose rows are not aligned.
 #[test]
-fn pam_frames_give_the_bytes_png_frames_give_at_unaligned_sizes() {
+fn the_session_gives_the_bytes_of_png_frames_fed_to_ffmpeg_directly_also_at_unaligned_sizes() {
     use std::io::Write;
-    use styk_platform::video::args::{encoder_args, Input};
+    use styk_platform::video::args::encoder_args;
     let Some(ffmpeg) = ffmpeg() else { return };
-    let dir = scratch("pam");
+    let dir = scratch("png");
     let service = FfmpegVideoService::new(&ffmpeg);
     for (width, height) in [(65u32, 33u32), (161, 91), (160, 90)] {
         let req = request(Container::Webm, Codec::Vp9, width, height, 6);
@@ -463,7 +463,7 @@ fn pam_frames_give_the_bytes_png_frames_give_at_unaligned_sizes() {
         export(&service, &native, &req, &make).unwrap();
         // Today's: PNG frames into the same arguments.
         let today = dir.join(format!("today-{width}.webm"));
-        let mut child = Command::new(&ffmpeg).args(encoder_args(&req, &today.to_string_lossy(), Input::Png)).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+        let mut child = Command::new(&ffmpeg).args(encoder_args(&req, &today.to_string_lossy())).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
         let mut stdin = child.stdin.take().unwrap();
         for index in 0..6 {
             let mut png = Vec::new();
@@ -479,12 +479,12 @@ fn pam_frames_give_the_bytes_png_frames_give_at_unaligned_sizes() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-/// The observation behind the PAM input: with `-f rawvideo` the same frames give different bytes at 65 by 33. If this
+/// The observation behind the PNG input: with `-f rawvideo` the same frames give different bytes at 65 by 33. If this
 /// ever starts passing the other way, FFmpeg changed and the choice of input deserves another look.
 #[test]
 fn raw_video_input_differs_from_png_input_at_an_unaligned_size() {
     use std::io::Write;
-    use styk_platform::video::args::{encoder_args, Input};
+    use styk_platform::video::args::encoder_args;
     let Some(ffmpeg) = ffmpeg() else { return };
     let dir = scratch("raw");
     let (width, height) = (65u32, 33u32);
@@ -492,7 +492,7 @@ fn raw_video_input_differs_from_png_input_at_an_unaligned_size() {
     let make = |i| frame(width, height, i, 127, true);
     let run = |name: &str, raw: bool| {
         let out = dir.join(name);
-        let mut args = encoder_args(&req, &out.to_string_lossy(), Input::Png);
+        let mut args = encoder_args(&req, &out.to_string_lossy());
         if raw {
             let at = args.iter().position(|a| a == "image2pipe").unwrap();
             args.splice(at..at + 3, ["rawvideo", "-pix_fmt", "rgba", "-video_size"].map(String::from).into_iter().chain([format!("{width}x{height}")]));
@@ -513,5 +513,217 @@ fn raw_video_input_differs_from_png_input_at_an_unaligned_size() {
         blank_random_uids(fs::read(out).unwrap())
     };
     assert_ne!(run("png.webm", false), run("raw.webm", true), "raw input is not equivalent to PNG input at this size");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The review's and the checker's findings, each with the test that fails without its fix.
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn WaitForSingleObject(handle: isize, milliseconds: u32) -> u32;
+}
+
+/// Whether process `pid` ends within `milliseconds` (a bounded wait for a process that is expected to be killed).
+fn ends_within(pid: u32, milliseconds: u32) -> bool {
+    unsafe {
+        let handle = OpenProcess(0x0010_0000 /* SYNCHRONIZE */, 0, pid);
+        if handle == 0 {
+            return true;
+        }
+        let ended = WaitForSingleObject(handle, milliseconds) == 0;
+        CloseHandle(handle);
+        ended
+    }
+}
+
+/// Sets the modification time of a file or a folder (a folder needs backup semantics to be opened on Windows).
+fn set_modified(path: &Path, time: std::time::SystemTime) {
+    let mut options = fs::OpenOptions::new();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_WRITE_ATTRIBUTES, full sharing, FILE_FLAG_BACKUP_SEMANTICS.
+        options.access_mode(0x100).share_mode(7).custom_flags(0x0200_0000);
+    }
+    #[cfg(not(windows))]
+    options.write(true);
+    options.open(path).unwrap().set_modified(time).unwrap();
+}
+
+fn kill(pid: u32) {
+    let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).output();
+}
+
+/// Finding 4 of the review: the finish waited for the encoder's exit but not for the reader that collects its frame
+/// count, so a slow reader turned a good export into a failure. Here the reader is held back until the encoder has gone.
+#[test]
+fn a_slow_progress_reader_does_not_fail_a_good_export() {
+    let Some(ffmpeg) = ffmpeg() else { return };
+    let dir = scratch("slow-reader");
+    let gate = ReaderGate::new();
+    let service = FfmpegVideoService::new(&ffmpeg).with_progress_reader_gate(gate.clone());
+    let dest = dir.join("out.mp4");
+    let req = request(Container::Mp4, Codec::H264, 64, 36, 4);
+    let mut session = service.begin(&dest, &VideoRequest::Ffmpeg(req), &Cancel::new()).unwrap();
+    let pid = session.encoder_pid().unwrap();
+    fill(&mut *session, 4, &|i| frame(64, 36, i, 255, false)).unwrap();
+    let (sender, result) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(session.finish());
+    });
+    assert!(ends_within(pid, 20_000), "the encoder finishes");
+    // The encoder is gone and its last progress lines are unread: the finish must wait for them, not judge without them.
+    assert!(result.recv_timeout(Duration::from_millis(700)).is_err(), "the finish judged the export before its progress was read");
+    gate.open();
+    let done = result.recv_timeout(Duration::from_secs(20)).expect("finished once the reader had read").expect("a good export");
+    assert_eq!(done.frames, 4);
+    assert_eq!(decoded_frames(&ffmpeg, &dest, &[]).0, 4);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// Finding 5 of the review: a finish that rejects the count joined the pipe writer before ending the encoder, and a
+/// writer blocked on a suspended encoder never returns.
+#[test]
+fn a_finish_that_rejects_the_frame_count_does_not_hang_behind_a_blocked_writer() {
+    let Some(ffmpeg) = ffmpeg() else { return };
+    let dir = scratch("early-finish");
+    let service = FfmpegVideoService::new(&ffmpeg);
+    let dest = dir.join("out.mp4");
+    let req = request(Container::Mp4, Codec::H264, 640, 360, 40);
+    let mut session = service.begin(&dest, &VideoRequest::Ffmpeg(req), &Cancel::new()).unwrap();
+    let pid = session.encoder_pid().unwrap();
+    suspend(pid);
+    fill(&mut *session, 3, &|i| frame(640, 360, i, 255, false)).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let (sender, result) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(session.finish());
+    });
+    let outcome = result.recv_timeout(Duration::from_secs(10));
+    // Whatever happened, do not leave the encoder suspended behind a failing test.
+    resume(pid);
+    kill(pid);
+    let error = outcome.expect("the finish returned").err().expect("fewer frames than asked is refused");
+    assert!(error.to_string().contains("Send every video frame"), "{error}");
+    assert!(stages(&dir).is_empty());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// Finding 6 of the review: the probe tried to make a file in the stage, so a folder that allows subfolders but not files
+/// passed it and the rename failed after the encode. The probe now moves a file from the stage into the folder.
+#[test]
+fn a_folder_that_takes_subfolders_but_not_files_is_refused_before_a_frame() {
+    let Some(ffmpeg) = ffmpeg() else { return };
+    let dir = scratch("no-files");
+    let service = FfmpegVideoService::new(&ffmpeg);
+    let req = VideoRequest::Ffmpeg(request(Container::Mp4, Codec::H264, 64, 36, 2));
+    let user = std::env::var("USERNAME").unwrap();
+    let folder = dir.join("folders-only");
+    fs::create_dir(&folder).unwrap();
+    // WD: add a file. AD (add a subfolder) stays allowed.
+    assert!(Command::new("icacls").arg(&folder).arg("/deny").arg(format!("{user}:(WD)")).output().unwrap().status.success());
+    let error = service.begin(&folder.join("out.mp4"), &req, &Cancel::new()).err();
+    assert!(Command::new("icacls").arg(&folder).arg("/remove:d").arg(&user).output().unwrap().status.success());
+    match error {
+        Some(VideoError::Destination { path, .. }) => assert_eq!(path, folder),
+        other => panic!("expected the folder to be refused, got {other:?}"),
+    }
+    assert!(stages(&folder).is_empty());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// Checker finding 2: the stage name followed the destination's, so names of about 226 characters failed.
+#[test]
+fn a_destination_name_of_226_characters_exports_and_a_name_too_long_is_refused_naming_the_file() {
+    let Some(ffmpeg) = ffmpeg() else { return };
+    let dir = scratch("long-name");
+    let service = FfmpegVideoService::new(&ffmpeg);
+    let req = request(Container::Mp4, Codec::H264, 64, 36, 3);
+    let long = dir.join(format!("{}.mp4", "n".repeat(226)));
+    export(&service, &long, &req, &|i| frame(64, 36, i, 255, false)).unwrap();
+    assert_eq!(decoded_frames(&ffmpeg, &long, &[]).0, 3);
+    let too_long = dir.join(format!("{}.mp4", "n".repeat(300)));
+    match service.begin(&too_long, &VideoRequest::Ffmpeg(req), &Cancel::new()).err() {
+        Some(VideoError::Destination { path, message }) => {
+            assert_eq!(path, too_long, "the error names the file");
+            assert!(message.contains("too long"), "{message}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(stages(&dir).is_empty());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// The driver of the hard-kill test below: it begins an export, prints its encoder's process id and waits to be killed.
+/// Without `STYK_TEST_DRIVER_FOLDER` it does nothing.
+#[test]
+fn hard_kill_driver_role() {
+    let Ok(folder) = std::env::var("STYK_TEST_DRIVER_FOLDER") else { return };
+    let Some(ffmpeg) = ffmpeg() else { return };
+    let service = FfmpegVideoService::new(&ffmpeg);
+    let req = request(Container::Mp4, Codec::H264, 640, 360, 40);
+    let mut session = service.begin(&Path::new(&folder).join("out.mp4"), &VideoRequest::Ffmpeg(req), &Cancel::new()).unwrap();
+    fill(&mut *session, 2, &|i| frame(640, 360, i, 255, false)).unwrap();
+    // On a line of its own: the test harness prints "test … ... " in front of the first line it sees.
+    println!("\nENCODER_PID={}", session.encoder_pid().unwrap());
+    use std::io::Write;
+    std::io::stdout().flush().unwrap();
+    loop {
+        std::thread::park();
+    }
+}
+
+/// Checker finding 3: a hard kill of the app (no destructor runs) left the encoder alive, a suspended one for good, and a
+/// hidden stage folder with a partial file. Every encoder is in a job object that kills its members when the app's last
+/// handle to it closes, and the next export to that folder sweeps a stage whose process is gone and which sat untouched
+/// for today's two minutes.
+#[test]
+fn a_hard_killed_app_leaves_no_encoder_and_the_next_export_sweeps_its_stage() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    let Some(ffmpeg) = ffmpeg() else { return };
+    let dir = scratch("hard-kill");
+    let mut driver = Command::new(std::env::current_exe().unwrap())
+        .args(["hard_kill_driver_role", "--exact", "--nocapture", "--test-threads=1"])
+        .env("STYK_TEST_DRIVER_FOLDER", &dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(driver.stdout.take().unwrap()).lines();
+    let pid: u32 = loop {
+        let line = lines.next().expect("the driver ended before it began an export").unwrap();
+        if let Some(pid) = line.strip_prefix("ENCODER_PID=") {
+            break pid.parse().unwrap();
+        }
+    };
+    suspend(pid);
+    let driver_pid = driver.id();
+    kill(driver_pid);
+    let _ = driver.wait();
+    let gone = ends_within(pid, 10_000);
+    if !gone {
+        resume(pid);
+        kill(pid);
+    }
+    assert!(gone, "the encoder outlived the app that was killed");
+    // The killed app could not clean up: its stage is still there, partial.
+    let left = stages(&dir);
+    assert_eq!(left.len(), 1, "{left:?}");
+    // A fresh stage is not swept (it could belong to an export that has just begun elsewhere)...
+    let service = FfmpegVideoService::new(&ffmpeg);
+    let req = request(Container::Mp4, Codec::H264, 64, 36, 2);
+    export(&service, &dir.join("first.mp4"), &req, &|i| frame(64, 36, i, 255, false)).unwrap();
+    assert_eq!(stages(&dir), left, "a stage younger than the two minutes stays");
+    // ...an abandoned one is.
+    let old = std::time::SystemTime::now() - Duration::from_secs(3600);
+    let stage = dir.join(&left[0]);
+    for entry in fs::read_dir(&stage).unwrap().filter_map(Result::ok) {
+        set_modified(&entry.path(), old);
+    }
+    set_modified(&stage, old);
+    export(&service, &dir.join("second.mp4"), &req, &|i| frame(64, 36, i, 255, false)).unwrap();
+    assert!(stages(&dir).is_empty(), "{:?}", stages(&dir));
     fs::remove_dir_all(dir).unwrap();
 }

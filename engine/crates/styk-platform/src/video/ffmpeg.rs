@@ -11,14 +11,15 @@ use styk_services::video::{
 use styk_services::video_limits::{check_service, RawVideoConfig};
 use styk_services::Cancel;
 
-use super::args::{encoder_args, Input};
+use super::args::encoder_args;
 use super::probe;
-use super::session::{Kind, Session};
+use super::session::{Kind, ReaderGate, Session};
 use super::staging::{self, Stage};
 
 pub struct FfmpegVideoService {
     program: PathBuf,
     probed: Mutex<Option<(Capabilities, String)>>,
+    gate: Option<ReaderGate>,
 }
 
 /// `\bname\b` as a regular expression would find it in `text`.
@@ -33,7 +34,14 @@ fn has_word(text: &str, name: &str) -> bool {
 
 impl FfmpegVideoService {
     pub fn new(program: impl Into<PathBuf>) -> FfmpegVideoService {
-        FfmpegVideoService { program: program.into(), probed: Mutex::new(None) }
+        FfmpegVideoService { program: program.into(), probed: Mutex::new(None), gate: None }
+    }
+
+    /// For tests: holds the reader of the encoder's progress back until the gate opens.
+    #[doc(hidden)]
+    pub fn with_progress_reader_gate(mut self, gate: ReaderGate) -> FfmpegVideoService {
+        self.gate = Some(gate);
+        self
     }
 
     pub fn program(&self) -> &Path {
@@ -74,7 +82,7 @@ impl FfmpegVideoService {
 
     /// The arguments the encoding pass runs with for `request` writing `output`.
     pub fn arguments(request: &FfmpegRequest, output: &str) -> Vec<String> {
-        encoder_args(request, output, Input::Pam)
+        encoder_args(request, output)
     }
 }
 
@@ -124,7 +132,7 @@ impl VideoService for FfmpegVideoService {
         let (encoded_width, encoded_height, edge) = codec_dimensions(request.codec, request.width, request.height);
         let layout = FrameLayout { width: request.width, height: request.height, bytes: request.width as usize * request.height as usize * 4, matte: !request.codec.alpha(), legacy_canvas: request.codec.alpha(), encoded: (encoded_width, encoded_height), edge };
         let arguments = FfmpegVideoService::arguments(request, &output.to_string_lossy());
-        let session = Session::start(&self.program, arguments, Kind::Ffmpeg(request.clone()), layout, stage, output, destination, cancel)?;
+        let session = Session::start(&self.program, arguments, Kind::Ffmpeg(request.clone()), layout, stage, output, destination, cancel, self.gate.clone())?;
         Ok(Box::new(session))
     }
 

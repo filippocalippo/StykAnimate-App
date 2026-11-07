@@ -18,11 +18,11 @@ use styk_services::video::{
 };
 use styk_services::Cancel;
 
-use super::args::{self, pam_header};
+use super::args;
 use super::json::{json_number, json_text};
 use super::pixels::rgba_to_bgr24;
 use super::process::{self, ChildGuard};
-use super::staging::{self, Stage};
+use super::staging::{self, CommitError, Stage};
 
 /// Frame buffers in flight between the producer and the pipe.
 pub(crate) const POOL: usize = 3;
@@ -75,7 +75,10 @@ pub(crate) struct Session {
     pool: FramePool,
     tx: Option<Sender<FrameBuf>>,
     writer: Option<JoinHandle<()>>,
-    readers: Vec<JoinHandle<()>>,
+    /// The reader of the encoder's standard error and the one of its standard output, which the finish joins before it
+    /// trusts the counters and terminal events the second one collected.
+    stderr_reader: Option<JoinHandle<()>>,
+    stdout_reader: Option<JoinHandle<()>>,
     child: ChildGuard,
     shared: Arc<Shared>,
     stage: Stage,
@@ -96,9 +99,32 @@ fn tail(text: &str, max: usize) -> String {
     text[start..].to_string()
 }
 
+/// Holds the reader of the encoder's standard output back until opened. Tests use it to make that reader slower than the
+/// encoder; it is an event, not a delay.
+#[derive(Clone, Default)]
+pub struct ReaderGate(Arc<(Mutex<bool>, Condvar)>);
+
+impl ReaderGate {
+    pub fn new() -> ReaderGate {
+        ReaderGate::default()
+    }
+
+    pub fn open(&self) {
+        *self.0 .0.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.0 .1.notify_all();
+    }
+
+    fn wait(&self) {
+        let mut open = self.0 .0.lock().unwrap_or_else(|e| e.into_inner());
+        while !*open {
+            open = self.0 .1.wait(open).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
 impl Session {
     /// Starts `program` with `args` for the export of `kind`, writing `output` inside `stage`.
-    pub(crate) fn start(program: &Path, arguments: Vec<String>, kind: Kind, layout: FrameLayout, stage: Stage, output: PathBuf, destination: &Path, cancel: &Cancel) -> Result<Session, VideoError> {
+    pub(crate) fn start(program: &Path, arguments: Vec<String>, kind: Kind, layout: FrameLayout, stage: Stage, output: PathBuf, destination: &Path, cancel: &Cancel, gate: Option<ReaderGate>) -> Result<Session, VideoError> {
         let mut command = Command::new(program);
         command.args(&arguments);
         let (child, mut pipes) = process::spawn(&mut command, true).map_err(|e| VideoError::Unavailable(format!("Native video encoder could not start: {e}")))?;
@@ -115,11 +141,10 @@ impl Session {
             Kind::Vfw(r) => r.total_frames,
         };
 
-        let mut readers = Vec::new();
         let stderr = pipes.stderr.take().expect("piped stderr");
-        {
+        let stderr_reader = {
             let shared = shared.clone();
-            readers.push(std::thread::spawn(move || {
+            std::thread::spawn(move || {
                 let mut stderr = stderr;
                 let mut buffer = [0u8; 4096];
                 while let Ok(n) = stderr.read(&mut buffer) {
@@ -132,28 +157,32 @@ impl Session {
                 }
                 shared.stderr.lock().unwrap_or_else(|e| e.into_inner()).1 = true;
                 shared.stderr_done.notify_all();
-            }));
-        }
+            })
+        };
         let stdout = pipes.stdout.take().expect("piped stdout");
-        {
+        let stdout_reader = {
             let (shared, progress) = (shared.clone(), progress.clone());
             let vfw = match &kind {
                 Kind::Vfw(r) => Some((layout_stride(r.width), layout_stride(r.width) as u64 * r.height as u64)),
                 Kind::Ffmpeg(_) => None,
             };
-            readers.push(std::thread::spawn(move || read_progress(stdout, vfw, &shared, &progress)));
-        }
+            std::thread::spawn(move || {
+                if let Some(gate) = gate {
+                    gate.wait();
+                }
+                read_progress(stdout, vfw, &shared, &progress)
+            })
+        };
 
         let (tx, rx) = mpsc::channel::<FrameBuf>();
         let stdin = pipes.stdin.take().expect("piped stdin");
-        let convert = match &kind {
-            Kind::Vfw(r) => Some((r.width, r.height)),
-            Kind::Ffmpeg(_) => None,
+        let wire = match &kind {
+            Kind::Vfw(r) => Wire::Bgr24(r.width, r.height),
+            Kind::Ffmpeg(_) => Wire::Png(layout.width, layout.height),
         };
         let writer = {
             let (shared, progress) = (shared.clone(), progress.clone());
-            let header = matches!(kind, Kind::Ffmpeg(_)).then(|| pam_header(layout.width, layout.height));
-            std::thread::Builder::new().name("styk video pipe".into()).spawn(move || write_frames(rx, stdin, convert, header, &shared, &progress)).expect("a thread to feed the encoder")
+            std::thread::Builder::new().name("styk video pipe".into()).spawn(move || write_frames(rx, stdin, wire, &shared, &progress)).expect("a thread to feed the encoder")
         };
         Ok(Session {
             kind,
@@ -162,7 +191,8 @@ impl Session {
             pool,
             tx: Some(tx),
             writer: Some(writer),
-            readers,
+            stderr_reader: Some(stderr_reader),
+            stdout_reader: Some(stdout_reader),
             child,
             shared,
             stage,
@@ -220,7 +250,7 @@ impl Session {
     }
 
     fn join_readers(&mut self) {
-        for reader in self.readers.drain(..) {
+        for reader in [self.stderr_reader.take(), self.stdout_reader.take()].into_iter().flatten() {
             let _ = reader.join();
         }
     }
@@ -230,18 +260,32 @@ fn layout_stride(width: u32) -> u32 {
     (width * 3).div_ceil(4) * 4
 }
 
-fn write_frames(rx: Receiver<FrameBuf>, mut stdin: std::process::ChildStdin, vfw: Option<(u32, u32)>, header: Option<Vec<u8>>, shared: &Shared, progress: &Progress) {
+/// What the encoder reads on its standard input.
+#[derive(Clone, Copy)]
+enum Wire {
+    /// FFmpeg: one PNG image a frame, as from today's app.
+    Png(u32, u32),
+    /// The Windows codec helper: bottom-up BGR24 rows padded to four bytes.
+    Bgr24(u32, u32),
+}
+
+fn write_frames(rx: Receiver<FrameBuf>, mut stdin: std::process::ChildStdin, wire: Wire, shared: &Shared, progress: &Progress) {
+    use image::ImageEncoder;
     let mut converted = Vec::new();
     for frame in rx.iter() {
-        let bytes: &[u8] = match vfw {
-            Some((width, height)) => {
-                rgba_to_bgr24(frame.bytes(), width, height, &mut converted);
-                &converted
+        converted.clear();
+        match wire {
+            Wire::Bgr24(width, height) => rgba_to_bgr24(frame.bytes(), width, height, &mut converted),
+            Wire::Png(width, height) => {
+                // Fast compression: the pixels are what matter, and a small frame is what the encoder queues.
+                let encoder = image::codecs::png::PngEncoder::new_with_quality(&mut converted, image::codecs::png::CompressionType::Fast, image::codecs::png::FilterType::Sub);
+                if let Err(error) = encoder.write_image(frame.bytes(), width, height, image::ExtendedColorType::Rgba8) {
+                    shared.fail(Failure::Message(format!("A video frame could not be encoded as PNG: {error}")));
+                    return;
+                }
             }
-            None => frame.bytes(),
-        };
-        let written = header.as_deref().map_or(Ok(()), |h| stdin.write_all(h)).and_then(|_| stdin.write_all(bytes));
-        if let Err(error) = written {
+        }
+        if let Err(error) = stdin.write_all(&converted) {
             shared.fail(if matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset) { Failure::Pipe } else { Failure::Message(format!("Native video encoder stopped accepting frames: {error}")) });
             return;
         }
@@ -353,6 +397,11 @@ impl VideoSession for Session {
 
     fn finish(mut self: Box<Self>) -> Result<Committed, VideoError> {
         let result = self.finish_inner();
+        // On an error the encoder may still be alive (a count that does not add up, a stalled pipe): end it before
+        // joining the writer that may be blocked writing to it.
+        if result.is_err() {
+            self.child.terminate();
+        }
         self.end_threads();
         self.child.terminate();
         self.join_readers();
@@ -379,6 +428,11 @@ impl Session {
             let _ = writer.join();
         }
         let status = self.child.wait();
+        // The exit does not mean the last progress lines were read: join the reader that holds the counters and the
+        // terminal events before they are trusted (a reader that is slow must not turn a good export into a failure).
+        if let Some(reader) = self.stdout_reader.take() {
+            let _ = reader.join();
+        }
         self.check()?;
         let stderr = self.stderr_text();
         if !status.success() {
@@ -426,15 +480,15 @@ impl Session {
             return Err(VideoError::Encoder(message.into()));
         }
         self.progress.set_phase(Phase::Committing);
-        if self.cancel.is_cancelled() {
-            return Err(VideoError::Cancelled);
-        }
-        match staging::commit(&self.output, &self.destination) {
+        // The flush happens before the commit boundary, the rename after it: a cancel (an edit, a close) during the flush
+        // still cancels, and none can be followed by a replaced destination.
+        match staging::commit_gated(&self.output, &self.destination, &self.cancel, &|| {}) {
+            Err(CommitError::Cancelled) => Err(VideoError::Cancelled),
             Ok(bytes) => {
                 self.progress.set_phase(Phase::Done);
                 Ok(Committed { path: self.destination.clone(), bytes, frames: self.total_frames })
             }
-            Err(error) => {
+            Err(CommitError::Io(error)) => {
                 // The finished file stays for another try; only the intermediates go.
                 for name in ["mix.f32", "video.mp4", "video.webm", "video.avi", "video.wmv"] {
                     if self.stage.path(name) != self.output {

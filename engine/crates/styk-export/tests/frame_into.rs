@@ -51,3 +51,48 @@ fn a_frame_into_a_reused_buffer_equals_the_allocating_frame() {
         }
     }
 }
+
+/// Review finding 2: a frame waiting for the GPU could not be cancelled. An interrupt ends the frame in progress and
+/// every later one; the wait is on the interrupt's condition variable, not on the GPU.
+#[test]
+fn an_interrupt_ends_the_frame_in_progress_and_every_later_one() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    };
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/policy");
+    let engine = Engine::new(|| 0.0, Budgets::for_device(None));
+    engine.open(&std::fs::read(root.join("alternating-drawing.json")).unwrap(), "json", "policy").unwrap();
+    let frames = engine.export_frames(0).unwrap();
+    frames.decode_images();
+    while engine.step() {}
+    let images = frames.take_images(usize::MAX);
+    let generation = frames.generation();
+    let settings = Settings::new(2048, 2048, Smoothing::Edges, styk_export::settings::MAX_PIXELS).unwrap();
+    let mut exporter = GpuExport::new(&device, &queue, settings, 512);
+    exporter.prepare_sprites(generation.lineage, &generation.assets);
+    exporter.upload_images(&generation.assets, images.iter().map(|image| &**image));
+    let frame = frames.take(0).unwrap();
+    let mut buffer = Vec::new();
+    exporter.frame_into(&generation.prepared.doc, &frame.list, frame.camera.as_ref(), false, &mut buffer).expect("a frame before the interrupt");
+    let interrupt = exporter.interrupt();
+    // From another thread, while frames are being drawn: some frame must end with the interrupt, and none after it works.
+    let stopper = std::thread::spawn({
+        let interrupt = interrupt.clone();
+        move || {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            interrupt.interrupt();
+        }
+    });
+    let mut ended = None;
+    for n in 0..10_000 {
+        if let Err(error) = exporter.frame_into(&generation.prepared.doc, &frame.list, frame.camera.as_ref(), false, &mut buffer) {
+            ended = Some((n, error));
+            break;
+        }
+    }
+    stopper.join().unwrap();
+    let (_, error) = ended.expect("the frames went on after the interrupt");
+    assert_eq!(error, styk_export::interrupt::INTERRUPTED);
+    assert!(exporter.frame_into(&generation.prepared.doc, &frame.list, frame.camera.as_ref(), false, &mut buffer).is_err(), "later frames stay interrupted");
+}

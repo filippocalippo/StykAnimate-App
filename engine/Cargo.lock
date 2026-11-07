@@ -2466,6 +2466,7 @@ dependencies = [
  "pollster",
  "rayon",
  "sha2",
+ "styk-core",
  "styk-doc",
  "styk-edit",
  "styk-engine",
@@ -2473,8 +2474,10 @@ dependencies = [
  "styk-export",
  "styk-formats",
  "styk-piv",
+ "styk-platform",
  "styk-raster",
  "styk-render",
+ "styk-services",
 ]
 
 [[package]]
@@ -2691,20 +2694,6 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "styk-design",
-]
-
-[[package]]
-name = "styk-video"
-version = "0.1.0"
-dependencies = [
- "pollster",
- "sha2",
- "styk-core",
- "styk-engine",
- "styk-export",
- "styk-platform",
- "styk-render",
- "styk-services",
 ]
 
 [[package]]

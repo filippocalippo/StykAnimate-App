@@ -17,6 +17,7 @@ use styk_eval::assets::{Assets, DecodedImage};
 use styk_eval::doc::{Camera, Document};
 use styk_render::{wgpu, Renderer};
 
+use crate::interrupt::Interrupt;
 use crate::pixels::resolve;
 use crate::settings::Settings;
 use crate::tiles::{tiles, Tile};
@@ -40,6 +41,11 @@ pub struct GpuExport {
     atlas: Option<(u64, u32, usize)>,
     /// The last resolved tile, straight RGBA.
     resolved: Vec<u8>,
+    /// Ends a frame's wait for the GPU from any thread ([`GpuExport::interrupt`]).
+    interrupt: Interrupt,
+    /// Asks the poller thread to wait for the GPU (the frame's wait is on the interrupt, not on the GPU).
+    #[cfg(not(target_arch = "wasm32"))]
+    poller: Option<std::sync::mpsc::Sender<()>>,
 }
 
 impl GpuExport {
@@ -64,7 +70,40 @@ impl GpuExport {
         let mut renderer = renderer.filter(|r| r.edges() == settings.smoothing.edges()).unwrap_or_else(|| Renderer::with_edges(device, queue, wgpu::TextureFormat::Rgba8Unorm, settings.smoothing.edges()));
         // A frame is the same whatever was drawn before it (the sizes of the layer pages and effect slots follow the frame alone).
         renderer.set_exact_sizes(true);
-        GpuExport { device: device.clone(), queue: queue.clone(), renderer, settings, tiles, readbacks, stride, atlas: None, resolved: Vec::new() }
+        #[cfg(not(target_arch = "wasm32"))]
+        let poller = {
+            let (sender, requests) = std::sync::mpsc::channel::<()>();
+            let device = device.clone();
+            std::thread::Builder::new()
+                .name("styk export gpu wait".into())
+                .spawn(move || {
+                    for () in requests {
+                        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+                    }
+                })
+                .ok()
+                .map(|_| sender)
+        };
+        GpuExport {
+            device: device.clone(),
+            queue: queue.clone(),
+            renderer,
+            settings,
+            tiles,
+            readbacks,
+            stride,
+            atlas: None,
+            resolved: Vec::new(),
+            interrupt: Interrupt::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            poller,
+        }
+    }
+
+    /// A handle that ends this exporter's waits for the GPU from any thread: the frame in progress returns an error, so
+    /// does every later one, and the exporter is to be dropped.
+    pub fn interrupt(&self) -> Interrupt {
+        self.interrupt.clone()
     }
 
     pub fn settings(&self) -> &Settings {
@@ -215,21 +254,21 @@ impl GpuExport {
         let slots = self.readbacks.len();
         let mut first = 0;
         while first < self.tiles.len() {
+            if self.interrupt.is_interrupted() {
+                return Err(crate::interrupt::INTERRUPTED.to_string());
+            }
             let batch = slots.min(self.tiles.len() - first);
             for k in 0..batch {
                 self.draw(doc, list, camera, first + k, k);
             }
-            let (sender, receiver) = std::sync::mpsc::channel();
+            self.interrupt.expect(batch);
             for k in 0..batch {
-                let sender = sender.clone();
-                self.readbacks[k].slice(..).map_async(wgpu::MapMode::Read, move |result| {
-                    let _ = sender.send(result);
-                });
+                let latch = self.interrupt.clone();
+                self.readbacks[k].slice(..).map_async(wgpu::MapMode::Read, move |result| latch.completed(result.map_err(|e| e.to_string())));
             }
-            let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-            for _ in 0..batch {
-                receiver.recv().map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
-            }
+            // The GPU is waited for on the poller thread; this thread waits for the mappings or an interrupt.
+            self.poller.as_ref().ok_or("the export has no thread to wait for the GPU")?.send(()).map_err(|e| e.to_string())?;
+            self.interrupt.wait()?;
             for k in 0..batch {
                 let tile = self.tiles[first + k];
                 let pixels = self.resolve(first + k, k, matte)?;
