@@ -165,5 +165,34 @@ pub fn script(id: window::Id) -> Task<Step> {
             Sheet::Input(Which::Notes, "x".repeat(16300)),
             Sheet::Focus(ids::NOTES),
         ))
+        .chain(typing(
+            id,
+            "keystroke into a 16,300-character text area of 80-character lines",
+            Sheet::Input(Which::Notes, lines(16300, 80)),
+            Sheet::Focus(ids::NOTES),
+        ))
         .chain(Task::done(Step::Finish))
+}
+
+/// About `total` characters of words in lines of `width` characters, as written text is.
+fn lines(total: usize, width: usize) -> String {
+    let words = ["stick", "figure", "walks", "across", "the", "stage", "and", "waves", "to", "a", "friend"];
+    let mut text = String::new();
+    let mut line = 0;
+    let mut n = 0;
+    while text.chars().count() < total {
+        let word = words[n % words.len()];
+        n += 1;
+        if line + word.len() + 1 > width {
+            text.push('
+');
+            line = 0;
+        } else if line > 0 {
+            text.push(' ');
+            line += 1;
+        }
+        text.push_str(word);
+        line += word.len();
+    }
+    text.chars().take(total).collect()
 }
