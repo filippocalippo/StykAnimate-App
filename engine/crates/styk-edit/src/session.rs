@@ -507,6 +507,16 @@ impl Session {
         })
     }
 
+    /// The memory a command that copies much of the document asks for before it begins (`Editor::admit`).
+    pub fn set_memory_gate(&mut self, gate: fn(usize) -> bool) {
+        self.editor.memory_gate = Some(gate);
+    }
+
+    /// Where the history stands: how many entries it can undo and redo, and the revision the newest leads to.
+    pub fn history_marks(&self) -> crate::HistoryMarks {
+        crate::HistoryMarks { undo: self.editor.undo.len(), redo: self.editor.redo.len(), newest: self.editor.undo.last().map(|entry| entry.after_revision) }
+    }
+
     /// The clock reads that are given a time to take are held to (milliseconds).
     pub fn set_clock(&mut self, clock: fn() -> f64) {
         self.editor.clock = Some(clock);
@@ -614,6 +624,7 @@ fn apply_view(editor: &mut Editor, view: &Value) -> Result<(), EditError> {
     editor.sync_selection_metadata(view)?;
     editor.set_auto_key(flag(view, "autoKey"));
     editor.audio_ripple = flag(view, "audioRipple");
+    editor.outer_depth = number(view, "outerDepth").unwrap_or(0.0).max(0.0) as usize;
     // Focus and lock: the layers outside the focus are locked for this call (the focus is the interface's, never the document's).
     editor.set_layer_focus_lock_of(view);
     // Selecting changes the active layer without a new revision of the document.

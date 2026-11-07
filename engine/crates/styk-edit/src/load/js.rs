@@ -102,6 +102,12 @@ pub(super) fn is_given(value: V) -> bool {
     !matches!(value, None | Some(Value::Null))
 }
 
+/// The identity a number has as an id: zero and minus zero are one id, as they are to the loader everywhere (a figure's definition and the
+/// instance that names it).
+pub(super) fn id_key(value: f64) -> u64 {
+    if value == 0.0 { 0.0f64.to_bits() } else { value.to_bits() }
+}
+
 pub(super) fn num(value: V) -> Option<f64> {
     value.and_then(Value::as_f64)
 }

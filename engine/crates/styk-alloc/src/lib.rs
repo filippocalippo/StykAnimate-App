@@ -135,7 +135,7 @@ pub fn with_limit<T>(bytes: usize, run: impl FnOnce() -> T) -> T {
     run()
 }
 
-fn limit() -> usize {
+pub fn limit() -> usize {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(bytes) = TEST_LIMIT.with(std::cell::Cell::get) {
         return bytes;

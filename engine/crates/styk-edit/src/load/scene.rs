@@ -57,10 +57,6 @@ struct Types {
     by_id: HashMap<u64, usize>,
 }
 
-fn id_key(value: f64) -> u64 {
-    if value == 0.0 { 0.0f64.to_bits() } else { value.to_bits() }
-}
-
 impl Types {
     fn get(&self, id: V) -> Option<&Value> {
         num(id).and_then(|n| self.by_id.get(&id_key(n))).map(|i| &self.figures[*i])

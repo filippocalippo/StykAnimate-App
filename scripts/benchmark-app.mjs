@@ -753,7 +753,7 @@ async function frameEdits(ctx) {
 
 /**
  * Movieclips on the open document, with no `main` baseline: create one from a selection, enter it, leave it with and without an edit,
- * place an instance, and the undo and redo of each. Three clips: `selection` (the figures of the layer with the most figures, for a second of animation),
+ * place an instance, and the undo and redo of each. Four clips: `selection` (the figures of the layer with the most figures, for a second of animation),
  * `large` (every figure for up to 600 frames) and `nested` (a clip holding a clip holding a clip, the outermost placed). Per row,
  * `blocked` is how long the call holds the interface thread and `shown` the time until the stage shows the result (a paint at the
  * editor's revision, as `frameEdit` reads it); `longest` is the longest task of the page while the row ran. Each clip's `stats` gives its
@@ -853,7 +853,10 @@ async function movieclipEdits(ctx) {
     await scenario('selection', async rows => {
       await life(rows, {start, end: Math.min(total, start + fps)}, groups());
     });
-    await scenario('large', rows => life(rows, {start: 0, end: Math.min(total, 600)}, [[]]));
+    // The same figures for up to 600 frames, and every figure for one second: the clip of everything for the whole length is a record for each
+    // figure at each key, which the engine refuses on a large project.
+    await scenario('large', rows => life(rows, {start: 0, end: Math.min(total, 600)}, groups()));
+    await scenario('everything', rows => life(rows, {start, end: Math.min(total, start + fps)}, [[]]));
     await scenario('nested', async rows => {
       editor.seek(start); await B.paints();
       let outer;
