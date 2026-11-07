@@ -21,19 +21,24 @@
 //! Encoders (PNG, GIF, APNG, ZIP, WebCodecs, FFmpeg) stay platform services of the
 //! interface; see `docs/engine/rendering.md` (Exports) and `docs/export-sampling.md`.
 
+pub mod background;
 pub mod cpu;
 pub mod gpu;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod legacy_canvas;
 pub mod pick;
 pub mod pixels;
 pub mod settings;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod source;
 pub mod svg;
 pub mod tiles;
 pub mod view;
 
+pub use background::without_background;
 pub use cpu::CpuExport;
 pub use gpu::GpuExport;
 pub use settings::{Settings, Smoothing};
+#[cfg(not(target_arch = "wasm32"))]
 pub use source::FrameRenderer;
 pub use tiles::{Tile, TILE_SIDE};

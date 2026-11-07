@@ -22,9 +22,5 @@ styk-raster = { path = "../styk-raster" }
 styk-engine = { path = "../styk-engine" }
 styk-export = { path = "../styk-export" }
 pollster = "0.4"
-styk-draw = { path = "../styk-draw" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 sha2 = "0.10"
-styk-core = { path = "../styk-core" }
-styk-services = { path = "../styk-services" }
-styk-platform = { path = "../styk-platform" }

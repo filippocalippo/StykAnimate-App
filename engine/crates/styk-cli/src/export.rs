@@ -111,7 +111,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
             let t0 = Instant::now();
             let frame = frames.take(tick).ok_or("no frame")?;
             let t1 = Instant::now();
-            let list = if transparent { crate::video::without_background(&frame.list) } else { frame.list.clone() };
+            let list = if transparent { styk_export::without_background(&frame.list) } else { frame.list.clone() };
             let pixels = match (gpu.as_mut(), cpu_export.as_mut()) {
                 (Some(exporter), _) => exporter.frame_blocking(doc, &list, frame.camera.as_ref(), matte)?,
                 (None, Some(exporter)) => exporter.frame(doc, &list, frame.camera.as_ref(), matte)?,

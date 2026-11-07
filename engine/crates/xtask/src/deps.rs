@@ -2,7 +2,7 @@
 //!
 //! - **Direction** (decision N1): nothing on the engine side (every engine crate, `styk-core`, `styk-services`,
 //!   `styk-trace`) may depend, directly or through other crates, on iced or on the front-end side (`styk-ui`,
-//!   `styk-devtools`, `styk-design`, `styk-platform`, `styk-app`, `xtask`). The lock file lists every package's
+//!   `styk-devtools`, `styk-design`, `styk-platform`, `styk-video`, `styk-app`, `xtask`). The lock file lists every package's
 //!   dependencies, optional and target-specific ones included, so the check is stricter than any one build.
 //! - **No git sources** (decision N2): `Cargo.lock` holds no `source = "git+..."` line; iced and its pre-release
 //!   dependencies are vendored.
@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// Crates the engine side must never reach.
-const FRONT_END: &[&str] = &["styk-ui", "styk-devtools", "styk-design", "styk-platform", "styk-app", "xtask"];
+const FRONT_END: &[&str] = &["styk-ui", "styk-devtools", "styk-design", "styk-platform", "styk-video", "styk-app", "xtask"];
 
 /// Name prefixes of the windowing toolkit: iced and its own forks.
 const TOOLKIT: &[&str] = &["iced", "winit", "cryoglyph"];

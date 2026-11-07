@@ -14,7 +14,7 @@ the dialogs); this page is the headless export path: request, frames, encoder, d
 | `styk-platform::video` | `FfmpegVideoService` (capability probe, the argument builder, the sidecar session), `VfwVideoService` (the existing `native/bin/*/styk-vfw.exe` helper), `staging` (the destination probe, the staging directory, the commit). |
 | `styk-core::export` | The video part of the export request: validation, limits and the job a request becomes (`export-request.mjs` and `video-export-service.cjs validateConfig`, ported), and the flow state machine. |
 | `styk-export` | The frame source: `FrameRenderer` (GPU or CPU) writing straight or matte RGBA into a buffer the caller owns. |
-| `styk-cli video` | Drives all of it headless: `styk video <file> <first-last> <out> ...`. |
+| `styk-video` | Drives all of it headless: `styk-video <file> <first-last> <out> ...`. |
 
 ## Rules that hold by construction
 
@@ -39,9 +39,10 @@ the dialogs); this page is the headless export path: request, frames, encoder, d
    helper (which opens with `CREATE_NEW`), `mix.f32` for the sound. The directory is on the destination's volume, so
    committing is a rename and there is no copy path.
 5. **Replacement rights are probed before rendering; races are handled at commit.** `plan` creates the staging directory,
-   writes and flushes a probe file in it, and, when the destination exists, opens it for write with delete sharing
-   *and* renames it onto a second probe name in the same folder and back (a replace the filesystem allows is what the
-   commit will do). A failure names the folder or file and stops before frame 1. At commit the rename can still lose a race
+   writes and flushes a probe file in it, and, when the destination exists, checks it is a file that is not read-only and
+   opens it with the DELETE right and full sharing (what the replacing rename needs; it changes nothing, so the destination
+   is never moved aside, not even for a moment). It runs before the encoder is probed. A failure names the folder or file
+   and stops before frame 1. At commit the rename can still lose a race
    (a viewer opens the file with no delete sharing between the probe and the commit): the finished artifact is **kept**,
    `finish` returns `Err(CommitFailed { artifact })` with its path, and the caller may retry the commit
    (`Committed::retry(dest)`) onto the same or another destination. Cleanup removes the stage only after a successful commit
@@ -66,17 +67,25 @@ the dialogs); this page is the headless export path: request, frames, encoder, d
 The producer thread draws on **its own wgpu device** (`GpuExport`, as the worker does today), so `PollType::wait_indefinitely`
 never waits for the interface's frames. `FrameRenderer::frame_into(buf)` draws the tiles of a frame (all tiles are queued
 before the first is mapped, as many as there are read-back slots) and writes straight RGBA (WebM with alpha, VFW) or RGBA
-over black (every other format, the engine's matte) into `buf`; nothing is allocated per frame. Raw RGBA goes to FFmpeg
-(`-f rawvideo -pix_fmt rgba -video_size WxH -framerate F -i pipe:0`) where today it sends PNG; everything after `-i` is
-today's argument list. Whether raw input gives the same bytes as the PNG round trip is the first check of the spike (A2);
-the fallback, if it did not, is `image2pipe` with PNGs from the `png` crate at `Fast`.
+over black (every other format, the engine's matte) into `buf`; nothing is allocated per frame. The RGBA goes to FFmpeg as **uncompressed PAM images**
+(`-f image2pipe -c:v pam -framerate F -i pipe:0`) where today it sends PNG; everything else in the argument list is
+today's. The first choice, `-f rawvideo`, gave the same bytes at most sizes and different bytes for WebM at 65 by 33 and
+161 by 91: rawvideo hands the scaler a buffer of exactly `width * 4` bytes a row, and for unaligned rows the scaler rounds
+differently. An image decoder (PNG's or PAM's) allocates aligned buffers, so PAM keeps today's bytes at every size tried and
+costs no compression on the pipe. A header of about 70 bytes per frame is written before the pixels.
+
+**WebM with transparency keeps today's canvas mapping.** Today's frames go through a canvas, which stores premultiplied
+colour: the colour of a translucent pixel comes out of the PNG changed (alpha is exact, opaque pixels are exact, the colour
+under alpha 0 becomes black). `styk-export::legacy_canvas` applies the mapping, measured in Chromium over every colour and
+alpha level (`scripts/generate-legacy-canvas-fixture.cjs`), to the straight frames of WebM, and only there. Installed Windows
+codecs get straight frames without it (their legacy path is not the same canvas step; see the report).
 
 Memory is bounded by the pool of three frame buffers, the 64 MiB of read-back slots, the engine's `AHEAD` draw lists and the
 encoder child. The producer waits on an empty pool and never allocates.
 
 ## Flow
 
-`Preflight` (limits, capabilities, destination probes, free-space note) → `Rendering` (frames, pipe, audio concurrently) →
+`Preflight` (limits, destination probes, capabilities) → `Rendering` (frames, pipe, audio concurrently) →
 `Finalizing` (close the pipe, wait for exit, mux sound, check the frame count and the size cap) → `Committing` (flush,
 rename) → `Done | Failed | Cancelled`. The sound keeps today's two passes (silent video, then `-c:v copy` with the audio
 codec) so container bytes match.
@@ -100,3 +109,32 @@ output, 64 MiB per frame, 1 MiB codec state, 16 retained states. Messages are th
 
 The export dialog; the progress presentation (the core publishes `Progress`, the interface decides how to show it); GIF,
 APNG and the picture sequences (same flow, a later chunk); the Save dialog (the destination arrives as a path).
+
+## What the spike measured (2026-11-07, Ryzen 5 5500, RTX 4070 SUPER, shared machine)
+
+- **Arguments.** `styk-platform/tests/ffmpeg_arguments.rs` holds `args::encoder_args` and `mux_args` to 2,382 command lines
+  generated from today's `validateConfig`, `encoderArguments` and `muxAudio` (every codec by every preset by a manual
+  bitrate, sizes, frame rates, limits and refusals). `styk-core/tests/video_jobs.rs` holds the request-to-job derivation to
+  3,380 records from `videoExportArguments`, `encodeNativeVideo` and `validateConfig`, refusals included.
+- **Bytes.** Today's service (driven from Node with the same frames) is run twice, then the native export. Every codec in
+  MP4, AVI and WMV gives equal bytes in all runs. WebM differs between two runs of today's service in exactly two 8-byte
+  fields, found by structure: the `TrackUID` (EBML id `73 C5`) and the `TagTrackUID` (`63 C5`), random per file (a larger file holds a second copy of each later on, found by the same structure). They are the only bytes native
+  WebM may differ in, and it differs in nothing else, with translucent frames from Chromium's canvas included.
+- **Windows codecs.** Uncompressed (both architectures), Microsoft Video 1 (x64) and Cinepak (x86) AVI files equal today's
+  helper output. Cinepak at its default quality differs between two runs of today's service (the codec is not
+  deterministic); native equalled the first run.
+- **Memory** (4K, H.264 Great, 120 frames, private bytes): the export adds 0.8 GB (a heavy document) to 1.6 GB (a light one)
+  to the process before it starts, of which the encoder is 1.1 GB (x264 at 4K with today's arguments); today's figure is
+  1.8 to 2.1 GiB. At 1080p a 1,872-frame export grows 10 MiB between frame 200 and frame 1,871.
+- **Cancel** at 4K ends in 23 to 44 ms with nothing left behind; with the encoder suspended, 0.2 ms; during the finish,
+  8 to 40 ms; during the audio pass, 41 to 51 ms.
+- **No timer.** An encoder suspended for 300 s and a producer paused for 200 s end in the same file, byte for byte.
+- **One reference run against today's app** (`tests/export-4k.desktop.mjs`, its 12-frame document at 3840 by 2160, shared
+  machine, directional): today's app 5.3 s (MP4, Smooth sprites), 7.7 s (WebM), 4.1 s (MP4, no smoothing); `styk-video` on
+  the same document 4.5 s, 5.6 s and 2.1 s, document open excluded. The files are not byte-equal across the two apps
+  (82,699 against 81,639 bytes for the first): the frames come from two GPU stacks (Chromium's WebGPU and wgpu), and the
+  decoded videos agree at 66 to 68 dB PSNR. Byte parity holds for the encoder path, from identical frames.
+- **Not decided here:** export order independence (the engine renders 52 of 64 frames of one document differently when drawn
+  in reverse; engine chunk X fixes it, and the check `--no-encode --frame-hashes --order` is ready for it), the full-disk
+  case (needs an administrator to make a small volume), and an input-latency test of the interface during an export (needs
+  the shell).

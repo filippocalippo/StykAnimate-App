@@ -1,7 +1,7 @@
-//! `styk video`: a video export of a document, headless, through the same planning, frame source, flow and encoder
+//! `styk-video`: a video export of a document, headless, through the same planning, frame source, flow and encoder
 //! services the app uses (`docs/native/video-export.md`).
 //!
-//!   styk video <file> <first-last> <out> [--format mp4|webm|avi|wmv|vfw] [--codec h264|mpeg4|ffv1|rawvideo|..]
+//!   styk-video <file> <first-last> <out> [--format mp4|webm|avi|wmv|vfw] [--codec h264|mpeg4|ffv1|rawvideo|..]
 //!              [--quality draft|great|max] [--bitrate MBPS] [--size WxH] [--smoothing edges|none|sprites]
 //!              [--fps F] [--audio mix.f32] [--max-bytes N] [--cpu] [--ffmpeg PATH] [--json]
 //!              [--vfw-arch x64|x86 --vfw-handler N [--vfw-quality] [--vfw-keyframes N] [--vfw-data-rate]]
@@ -28,7 +28,7 @@ use styk_render::wgpu;
 use styk_services::video::{Arch, FrameLayout, VfwRequest, VideoError, VideoRequest, VideoService};
 use styk_services::Cancel;
 
-use crate::win;
+mod win;
 
 fn option<'a>(rest: &'a [String], name: &str) -> Option<&'a str> {
     rest.iter().position(|a| a == name).and_then(|i| rest.get(i + 1)).map(String::as_str)
@@ -62,7 +62,16 @@ fn json_string(text: &str) -> String {
     out
 }
 
-pub fn video(path: &str, ticks: &str, out: &str, rest: &[String]) -> i32 {
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.len() < 3 {
+        eprintln!("usage: styk-video <file> <first-last> <out> [--format mp4|webm|avi|wmv|vfw] [--codec ..] [--quality draft|great|max] [--bitrate MBPS] [--size WxH] [--fps F] [--audio mix.f32] [--json] (see src/main.rs)");
+        std::process::exit(2);
+    }
+    std::process::exit(video(&args[0], &args[1], &args[2], &args[3..]));
+}
+
+fn video(path: &str, ticks: &str, out: &str, rest: &[String]) -> i32 {
     match run(path, ticks, out, rest) {
         Ok(summary) => {
             println!("{summary}");
@@ -81,15 +90,6 @@ struct Timings {
     evaluate_ms: f64,
     draw_ms: f64,
     samples: Vec<(u32, usize)>,
-}
-
-/// The draw list without the scene's background records: the figures on transparency (what a document with no
-/// background exports, and so what WebM's alpha plane is for).
-pub(crate) fn without_background(list: &Arc<styk_draw::DrawList>) -> Arc<styk_draw::DrawList> {
-    let mut list = (**list).clone();
-    let background = list.background_prims as usize;
-    list.prims[..background].iter_mut().for_each(|p| p.kind = 0);
-    Arc::new(list)
 }
 
 struct Producer {
@@ -123,7 +123,7 @@ impl FrameProducer for Producer {
         let frame = self.frames.take(tick).ok_or("no frame")?;
         let drawing = Instant::now();
         let doc = &self.generation.prepared.doc;
-        let list = if self.transparent { without_background(&frame.list) } else { frame.list.clone() };
+        let list = if self.transparent { styk_export::without_background(&frame.list) } else { frame.list.clone() };
         self.renderer.frame_into(doc, &list, frame.camera.as_ref(), layout.matte, out)?;
         if layout.legacy_canvas {
             styk_export::legacy_canvas::apply(out);
