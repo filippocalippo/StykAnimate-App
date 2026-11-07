@@ -136,7 +136,16 @@ does not enumerate or clean other agents' targets/processes. These are explicit 
 not successful placeholder runs. Default diagnostics are bounded; all xtask commands accept --json for a bounded result envelope.
 CLI profile/compare produce structured JSON directly.
 
-`check-release` scans already-built shipping artifacts in bounded chunks for developer markers,
-including chunk-boundary matches. It is an artifact isolation check, not a disassembler or proof of
-identical machine code. Disabled-macro tests cover argument non-evaluation; optional-feature checks
-cover the headless dependency boundary. Frozen fixtures and parity thresholds remain unchanged.
+Shipping isolation has two required checks. `check-shipping-features` reads Cargo's resolved
+normal/build feature graph for each separate shipping package, default features, and the actual
+rustc host target. It rejects `styk-devtools` or `styk-trace/enabled`, including transitive activation.
+These selectors match the separate `cargo rustc --locked -p styk-app --bin stykanimate --release`
+and `-p styk-cli --bin styk --release` builds; debug info remains off through the machine environment.
+
+Pass `-- -C link-arg=/MAP:<absolute.map>` to each shipping link, then run
+`cargo xtask check-release <shipping.exe> <matching.map>`. The guard parses linked public/static
+symbols, including mangled Rust identifiers, and rejects trace/devtools code. It validates the map's
+module, timestamp and image base against the PE, requires a nonempty symbol table and bounds lines
+to 16 KiB. Missing/mismatched maps fail. This supersedes the literal-string marker scan, which could
+miss optimized code. The release negative control links a real enabled-trace executable and must
+be rejected. Disabled-macro tests separately cover argument non-evaluation.

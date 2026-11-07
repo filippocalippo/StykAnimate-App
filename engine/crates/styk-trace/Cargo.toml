@@ -12,3 +12,7 @@ enabled = ["dep:styk-services"]
 
 [dependencies]
 styk-services = { path = "../styk-services", optional = true }
+
+[[example]]
+name = "release_leak"
+required-features = ["enabled"]

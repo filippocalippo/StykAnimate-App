@@ -17,6 +17,7 @@ mod dev_tasks;
 mod dev_trace;
 mod dev_features;
 mod dev_release;
+mod dev_resolution;
 mod css;
 mod deps;
 mod design;
@@ -51,6 +52,7 @@ fn run(args: &[String]) -> Result<(), String> {
         ["check-read-apis"] => dev_reads::run(&root,true),
         ["check-features"] => dev_features::check(&root),
         ["check-release", ..] => dev_release::run(&args[1..]),
+        ["check-shipping-features"] => dev_resolution::check(&root),
         ["fonts"] => fonts::check(&root),
         ["fonts", "verify"] => fonts::verify(&root),
         ["fonts", "surfaces"] => fonts::surfaces(&root),

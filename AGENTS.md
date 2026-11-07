@@ -99,7 +99,8 @@ unification from contaminating the shipping app. The quick profile is for iterat
 - cargo xtask compare <A/profile.json> <B/profile.json>: matching release measurements.
 - cargo xtask screenshot <screen-id> [--against <PNG>] [--size <WxH>] [--scale <number>].
 - cargo xtask doctor: tools, disk and GPU capabilities; never cleans other tasks' resources.
-- cargo xtask check-release <shipping.exe> [shipping.pdb]: bounded marker scan; never builds.
+- cargo xtask check-release <shipping.exe> <matching.map>: linked-symbol check with PE/map identity; never builds.
+- cargo xtask check-shipping-features: resolve default shipping app/CLI features for the current host.
 - cargo xtask check-features, check-trace, check-schema, check-read-apis: developer guards.
 - cargo xtask read-apis and styk devtools-schema: regenerate inspection inventory and schemas.
 - cargo xtask flags, design-export [--check], renderdoc: registry and design/capture conveniences.
