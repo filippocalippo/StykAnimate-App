@@ -151,7 +151,7 @@ platform, grayscale; both with Skia's coverage adjustment.
   (`graphics::text::set_rendering`); `warm_up::install_bundled` calls it, so the application, the headless path and the
   typography check all draw the same way.
 - cosmic-text rasterizes a glyph with `CacheKeyFlags::LCD` as one coverage sample per subpixel (swash, a third of a pixel
-  apart); cryoglyph stores it in the existing mask atlas, three texels per pixel, and the fragment shader blends each
+  apart; on Windows DirectWrite does it, below); cryoglyph stores it in the existing mask atlas, three texels per pixel, and the fragment shader blends each
   channel by its own coverage with a second fragment output: **one device, the same pass**. A device without
   `DUAL_SOURCE_BLENDING` builds the other shader variant, which has no subpixel entry, and text stays grayscale
   (`text_pipeline.rs` builds both variants on a real device). iced's wgpu device requests the feature where the adapter
@@ -188,33 +188,77 @@ platform, grayscale; both with Skia's coverage adjustment.
   as strong as Chromium's and a larger error: swash's one-pixel box per subpixel is the filter. The offset of the samples
   (0.25 to 0.36 of a pixel) changes the error by 0.001.
 
-**Result** (`cargo xtask fonts`, Windows 11, ClearType on): the mean ink error of the Inter rows between native text and
-Chromium's ClearType, against the mark to beat (Chromium's grayscale against its ClearType):
+**Result of the swash masks** (`cargo xtask fonts`, Windows 11, ClearType on; the state before DirectWrite, kept as the
+record of why it was built): the mean ink error of the Inter rows between native text and Chromium's ClearType, against
+the mark to beat (Chromium's grayscale against its ClearType):
 
-| Theme, scale | Native vs ClearType, before | Native vs ClearType, now | The mark: Chromium grayscale vs ClearType | |
+| Theme, scale | Native vs ClearType, grayscale | Native vs ClearType, swash subpixel | The mark | |
 | --- | --- | --- | --- | --- |
-| dark, 100 % | 0.155 | **0.071** | 0.116 | below |
-| dark, 150 % | 0.113 | **0.048** | 0.083 | below |
-| light, 100 % | 0.131 | **0.088** | 0.077 | above |
-| light, 150 % | 0.085 | **0.058** | 0.052 | above |
+| dark, 100 % | 0.155 | 0.071 | 0.116 | below |
+| dark, 150 % | 0.113 | 0.048 | 0.083 | below |
+| light, 100 % | 0.131 | 0.088 | 0.077 | above |
+| light, 150 % | 0.085 | 0.058 | 0.052 | above |
 
-The mean colour spread of the ink pixels, which was 6.5 (grayscale), is now 74.8 against Chromium's 79.8 (light, 100 %),
-and the total ink of every row is within 1 % of Chromium's, weight by weight. The widths are unchanged (0.03 px).
+Total ink and its centroid matched; what differed was its distribution (the error fell with weight and size), which is
+the rasterizer: DirectWrite draws Chromium's glyphs and swash drew ours. Tuning the contrast, the gamma, the offset and
+the filter did not close it, so the masks themselves changed.
 
-**What is left.** The two light combinations miss the mark by 0.011 and 0.006. Total ink and its centroid match; what
-differs is its distribution (the error falls with weight and size: 0.04 for display text, 0.12 for 400-weight body text),
-which is the rasterizer: DirectWrite draws Chromium's glyphs and swash ours. Tuning the contrast, the gamma, the offset
-and the filter did not close it (the least error found in the light themes was 0.083). The way to close it is to
-rasterize glyph masks with DirectWrite on Windows (`IDWriteGlyphRunAnalysis` in `ClearType` 3x1, natural symmetric, fed
-the bundled variable fonts through an in-memory font loader), which is a different rasterizer behind the same atlas:
-named as the next step, not started.
+### DirectWrite masks (Windows)
 
-**Cost.** A text-dense frame (`styk-text-check bench`: 5,376 glyphs of the interface's body text, drawn and read back in a
-headless renderer, the machine shared with other jobs) takes the same time with subpixel and grayscale text within the
-run-to-run noise: medians of 2.5, 3.7, 3.9 and 2.7 ms at 100 % against 2.3, 3.5, 3.6 and 3.1 ms, and of 8.0, 11.0, 10.6
-and 9.1 ms at 150 % against 9.8, 11.4, 9.4 and 9.5 ms over four interleaved rounds (a frame is 7 ms at 144 Hz; the
-difference, at most a few tenths of a millisecond on a screen of 5,000 glyphs, is not one a person can see). The glyph
-cache holds a subpixel glyph three texels wide per pixel, in the same atlas.
+**What is built.** On Windows the glyph masks come from DirectWrite, the rasterizer Chromium uses there, behind the same
+atlas; swash stays the rasterizer on macOS and Linux, for colour fonts (COLR, SVG, bitmap strikes: DirectWrite is asked
+for none of them) and with `STYK_TEXT_RASTERIZER=swash`. Shaping, layout and widths are still cosmic-text's.
+
+- `cosmic_text::dwrite::DirectWrite` loads the bundled font's bytes through an in-memory font file loader and
+  `IDWriteFontResource::CreateFontFace` at the `wght` and `opsz` coordinates of the glyph (cached by font, weight and
+  optical size), and rasterizes with `IDWriteGlyphRunAnalysis`: ClearType 3x1 for subpixel text, a grayscale
+  `ALIASED_1x1` texture for grayscale text. The subpixel offset (0, ¼, ½, ¾ pixel) is the transform's translation, as
+  in Skia.
+- **Skia's choices** (`SkScalerContext_DW`, Chromium's hinting on Windows is "normal"; `scaler_choice`): measuring mode
+  natural; the rendering mode and size by the font's `gasp` table (version 1: natural symmetric where its symmetric
+  smoothing flag is set, natural otherwise, at the device size), otherwise natural symmetric at the device size above
+  20 px or for a font without instructions, otherwise (a hinted font up to 20 px: Segoe UI, Microsoft YaHei UI) natural
+  at the size rounded to 1/64 pixel; grid fitting enabled. Inter has no instructions, so it is natural symmetric at its
+  size. Assuming Chromium draws without grid fitting (as with `HINTING_NONE`) was tried first and was wrong for the
+  fallback fonts: the error of the Chinese rows was 0.53 and of the Arabic 0.15, against 0.01 and 0.03 with Skia's
+  tree.
+- **Off the interface thread.** Rasterizing is not done in `prepare`. The first frame that needs a glyph asks the
+  worker (`cryoglyph::raster`, thread "glyphs"), leaves the glyph out and reports the text incomplete; iced prepares a
+  cached upload again while it is incomplete; the worker wakes the program (`styk_design::glyphs::ready`, a
+  subscription) when it has glyphs, and the next frame draws them. A program that captures a frame (a screenshot, the
+  typography check, the headless path) draws until `glyphs::pending()` is zero. The atlas grows by copying its texture,
+  not by drawing every glyph again.
+
+**Result** (`cargo xtask fonts`, Windows 11, ClearType on, the Inter rows, 90 per combination):
+
+| Theme, scale | Swash masks | DirectWrite masks | The mark | |
+| --- | --- | --- | --- | --- |
+| light, 100 % | 0.088 | **0.021** | 0.077 | below |
+| dark, 100 % | 0.071 | **0.013** | 0.116 | below |
+| light, 150 % | 0.058 | **0.015** | 0.052 | below |
+| dark, 150 % | 0.048 | **0.010** | 0.083 | below |
+
+The Arabic, Hebrew and CJK rows are at 0.014 to 0.034, 0.013 to 0.030 and 0.007 to 0.016. The mean colour spread of the
+ink pixels is 78.5, 68.0, 62.9 and 55.0 against Chromium's 79.8, 68.7, 63.7 and 55.4, the total ink is within 0.1 %, and
+the widths are unchanged (largest difference 0.03 px, in all four combinations).
+
+**The coverage adjustment, rechecked.** With DirectWrite's masks the adjustment is still needed and the same: switched
+off (`STYK_TEXT_ADJUST=0`) the error is 0.087, 0.144, 0.059 and 0.104 (light 100 %, dark 100 %, light 150 %, dark 150 %).
+A sweep of the contrast from 0.4 to 0.6 and the gamma from 1.7 to 1.9 (`cargo xtask fonts`'s captures, nine pairs) has its
+least in the light themes at contrast 0.5 or 0.6 with gamma 1.8 or 1.9, and in the dark ones at gamma 1.8 whatever the
+contrast; the pair (0.5, 1.8), Skia's default contrast, is within 0.002 of the least in every combination, and a contrast
+of 0.4 is worse in the light themes (0.028 against 0.021 at 100 %). The values stay.
+
+**Cost.** Text-dense frames (`styk-text-check bench`: 5,376 glyphs of the interface's body text, light theme, drawn and
+read back in a headless renderer, 150 frames, the machine shared with other jobs), four interleaved rounds. Medians in
+ms, DirectWrite subpixel / swash subpixel / grayscale: at 100 %, 2.49 / 4.23 / 3.19, 3.13 / 3.07 / 2.87, 3.70 / 2.15 /
+2.44 and 3.49 / 4.70 / 2.62; at 150 %, 8.35 / 7.85 / 8.08, 7.75 / 7.47 / 7.34, 7.23 / 7.78 / 7.59 and 7.23 / 8.43 / 8.39.
+A frame with every glyph cached costs the same with the three (the spread between rounds is larger than the spread
+between kinds; a frame is 7 ms at 144 Hz). What DirectWrite adds is the first view: every glyph of a new text waits for
+the worker, so a screen of new text is drawn without it for a moment. On this screen (the 5,376 glyphs of about 100
+distinct characters in one size) all glyphs were on screen after 15 to 23 ms at 100 % and 23 to 26 ms at 150 %, against
+7 to 9 ms and 11 to 13 ms for swash on the interface thread, which stalls the frame it is drawn in instead. The interface
+thread draws no glyph on Windows.
 
 ## 7. The font system is ready before the first font-dependent widget
 
