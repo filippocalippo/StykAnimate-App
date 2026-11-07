@@ -220,8 +220,13 @@ fn to_target(world: vec2<f32>, g: u32, gr: Group) -> vec2<f32> {
     return affine(gr.m, gr.t, world);
 }
 
+// Screen pixels to clip space. The division comes first and is kept apart from the doubling: a compiler that folds
+// `t / size * 2` into `t * (2 / size)` rounds differently, and the rasteriser snaps this position to 1/256 pixel before it
+// decides which samples a triangle covers, so DX12's compiler moved the edges of thin triangles by a sample
+// (tests/clip_position.rs).
 fn clip_pos(t: vec2<f32>) -> vec4<f32> {
-    return vec4<f32>(t.x / view.dest.x * 2.0 - 1.0, 1.0 - t.y / view.dest.y * 2.0, 0.0, 1.0);
+    let q = t / view.dest.xy;
+    return vec4<f32>(fma(q.x, 2.0, -1.0), fma(q.y, -2.0, 1.0), 0.0, 1.0);
 }
 
 fn corner(v: u32) -> vec2<f32> {

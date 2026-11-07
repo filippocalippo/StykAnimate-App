@@ -86,7 +86,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
         cpu_export = Some(exporter);
         adapter_name = "CPU (styk-raster)".to_string();
     } else {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let instance = wgpu::Instance::new(styk_render::native_instance_descriptor());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).map_err(|e| format!("No GPU adapter: {e}"))?;
         adapter_name = adapter.get_info().name;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("styk export"), required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()), ..Default::default() })).map_err(|e| e.to_string())?;

@@ -219,6 +219,11 @@ into resources that already hold data (a buffer written 280 frames in a row, rea
 tdd2 export still differs by one level in a few pixels of about one render in 25 of the particle frames, ticks 183–188 (the
 same output as before the warming; native wgpu gave the same bytes in 3,200 renders; `styk export <file> <ticks> <out> --verify N`).
 
+**Clip position and backends.** The vertex stage's clip position is written as a division followed by a doubling
+(`clip_pos`, `tests/clip_position.rs`): the DX12 compiler folded `t / size * 2` into a reciprocal product, which moved the edges of
+thin triangles by a sample against Vulkan and Chromium's WebGPU. Native hosts take Direct3D 12 with FXC on Windows
+(`native_instance_descriptor`). What is left against Chromium's frames, and how it was measured: `docs/native/frame-parity.md`.
+
 ## Text
 
 The JavaScript editor's WebGPU renderer (since deleted) never drew text as vectors
