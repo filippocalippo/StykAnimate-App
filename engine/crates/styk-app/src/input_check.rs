@@ -184,8 +184,7 @@ fn lines(total: usize, width: usize) -> String {
         let word = words[n % words.len()];
         n += 1;
         if line + word.len() + 1 > width {
-            text.push('
-');
+            text.push_str("\n");
             line = 0;
         } else if line > 0 {
             text.push(' ');
