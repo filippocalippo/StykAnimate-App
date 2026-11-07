@@ -128,13 +128,25 @@ impl Renderer {
     /// its pixels are uploaded; a picture that is not in draws its soft copy ([`Renderer::upload_rows`]), which draws
     /// nothing until it is uploaded. Nothing is in yet.
     pub fn prepare_sprites_resident(&mut self, assets: &Assets, live: u32, layers: u32) {
+        self.lay_out_resident(assets, live, layers, assets.pages);
+    }
+
+    /// The sprite texture of an export that keeps only the pages its frames draw from ([`Renderer::prepare_sprites_resident`]
+    /// without live pages and without soft copies): an export draws a frame only when every picture it shows is sharp, so
+    /// the pictures that are not in draw nothing, and the soft atlas is not made. `layers` layers to begin with; the texture
+    /// grows by [`Renderer::resize_sprite_layers`] when the export needs more pages at once.
+    pub fn prepare_sprites_export(&mut self, assets: &Assets, layers: u32) {
+        self.lay_out_resident(assets, 0, layers, 0);
+    }
+
+    fn lay_out_resident(&mut self, assets: &Assets, live: u32, layers: u32, soft_pages: u32) {
         let pages = assets.pages + live;
         let (texture, view) = array_texture(&self.device, "styk sprites", [PAGE, PAGE], layers.max(2), false);
         crate::resources::warm_texture(&self.queue, &texture);
         self.sprite_view = view;
         self.sprite_map.layers = vec![UNMAPPED; pages.min(MAX_PAGES) as usize];
         self.sprite_map.flush(&self.queue);
-        let held = PictureState::new(&self.device, &self.queue, assets, assets.pages, false, |_| None);
+        let held = PictureState::new(&self.device, &self.queue, assets, soft_pages, false, |_| None);
         std::mem::replace(&mut self.pictures, held).destroy();
         let old = std::mem::replace(&mut self.sprites, texture);
         self.rebind_sprites();

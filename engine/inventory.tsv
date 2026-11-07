@@ -46,6 +46,7 @@ codecs/work_control.py	engine	styk-formats::piv	verified	the app runs styk-piv (
 desktop/appimage-updater.cjs	platform	-	stays	Electron shell and services
 desktop/audio-service.cjs	platform	-	stays	Electron shell and services
 desktop/backend.cjs	platform	styk-formats::service	removed	started the Python codec sidecar; the desktop runs styk-codec-wasm in the page (6079 bytes)
+desktop/export-destinations.cjs	platform	-	stays	Electron shell and services
 desktop/file-streams.cjs	platform	-	stays	Electron shell and services
 desktop/rename-retry.cjs	platform	-	stays	Electron shell and services
 desktop/font-service.cjs	platform	-	stays	Electron shell and services
@@ -260,6 +261,7 @@ src/export-flow.mjs	ui	-	stays	export dialog and request
 src/export-frame-core.mjs	engine	styk-export	removed	Deleted: nothing in the app draws with the JavaScript painter any more; a click on artwork asks the engine (styk_export::pick), the stage and exports draw with the engine.
 src/export-frame-renderer.mjs	engine	styk-export	removed	removed; src/engine/engine-export.mjs owns the request, progress, revision, timeout and retry logic of an export and the output canvas
 src/export-frame-worker.mjs	engine	styk-export	removed	removed; the engine's export worker (src/engine/engine-export-worker.mjs) draws every export, and writes SVG with styk-export svg
+src/export-guard.mjs	platform	styk-export	js	progress guard over the export workers (stall watch, keep-alive); frames come from the engine
 src/export-memory.mjs	engine	styk-export	partial	Rust: engine exports bounded by 2,048-px tiles and read-back slots (styk-export); the interface keeps the allowance and tile plan it validates a request with
 src/export-presets.mjs	ui	-	stays	export dialog and request
 src/export-progress.mjs	ui	-	stays	export dialog and request
