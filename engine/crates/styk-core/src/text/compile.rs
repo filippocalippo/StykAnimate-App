@@ -354,8 +354,11 @@ pub fn compile_text_figure(options: &TextOptions, font: &Font) -> Result<Value, 
     compile_text_figure_checked(options, font, &|| false)
 }
 
-/// [`compile_text_figure`] that stops with [`TextError::Cancelled`] when `cancelled` answers true; it is asked before each
-/// distinct character and each line.
+/// [`compile_text_figure`] that ends with [`TextError::Cancelled`] when `cancelled` answers true. It is asked once the draft's
+/// glyphs have been read and then before each line, never in the middle of reading glyphs: the JavaScript worker cannot be
+/// interrupted, so a draft it started always read all of its glyphs, and for a CFF font that reading is state (a glyph's
+/// advance becomes the one its charstring declares) which the next draft's layout sees. Reading glyphs is bounded (255
+/// distinct units, and composite resolution has a work limit), so cancellation still takes effect promptly.
 pub fn compile_text_figure_checked(options: &TextOptions, font: &Font, cancelled: &dyn Fn() -> bool) -> Result<Value, TextError> {
     let o = TextSettings::validate(options, true)?;
     if font.units_per_em == 0 {
@@ -373,9 +376,6 @@ pub fn compile_text_figure_checked(options: &TextOptions, font: &Font, cancelled
     for &unit in &text {
         if by_unit.contains_key(&unit) {
             continue;
-        }
-        if cancelled() {
-            return Err(TextError::Cancelled);
         }
         let invisible = unit == b'\n' as u16 || unit == b'\t' as u16;
         let source = if invisible { None } else { Some(font.glyph_index(unit)?) };
@@ -404,6 +404,9 @@ pub fn compile_text_figure_checked(options: &TextOptions, font: &Font, cancelled
             commands,
             node_count,
         });
+    }
+    if cancelled() {
+        return Err(TextError::Cancelled);
     }
     let source_of = |unit: u16| -> Option<Option<usize>> { font_glyphs.iter().find(|(u, _)| *u == unit).map(|(_, g)| *g) };
 

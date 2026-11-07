@@ -29,7 +29,7 @@ pub use embedded::{
 pub use font::{Font, MAX_FONT_BYTES};
 pub use job::{
     Busy, BundledFonts, CancelToken, CompileOutcome, CompileRequest, FontInfo, FontSource, JobEvent, TextCompiler, TextJob,
-    MAX_FACES, MAX_RETAINED_FONT_BYTES,
+    MAX_FACES, MAX_QUEUED_BYTES, MAX_RETAINED_FONT_BYTES,
 };
 pub use options::{TextOptions, TextSettings, MAX_TEXT_LENGTH};
 pub use path::PathCmd;

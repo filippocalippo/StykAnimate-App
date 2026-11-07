@@ -6,6 +6,7 @@
 //! before any parser sees it. Reads re-check the path and the file's fingerprint, repack collection faces, and keep
 //! at most eight recent fonts (64 MiB) in memory.
 
+use std::cmp::Ordering as Collation;
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Component, Path, PathBuf};
@@ -15,7 +16,7 @@ use std::time::{Duration, SystemTime};
 
 use sha2::{Digest, Sha256};
 use styk_services::fonts::{
-    compare_faces, inspect_file, standalone_face, FontError, FontFace, FontId, FontService, InspectedFace, ReadAt, CACHE_BYTES, CACHE_COUNT,
+    inspect_file, standalone_face, FontError, FontFace, FontId, FontService, InspectedFace, ReadAt, CACHE_BYTES, CACHE_COUNT,
     MAX_ACTIVE_READS, MAX_CONTAINER_BYTES, MAX_DEPTH, MAX_DIRECTORIES, MAX_FILES, MAX_FONTS,
 };
 
@@ -57,6 +58,28 @@ pub fn default_font_directories() -> Vec<PathBuf> {
     };
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default();
     system_font_directories(platform, &|name| std::env::var(name).ok(), &home)
+}
+
+/// The canonical form of a path, without the `\\?\` prefix Windows adds.
+pub fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+    real_path(path)
+}
+
+thread_local! {
+    // The root collation of CLDR 44, which is what ICU 74 (today's Electron) gives `localeCompare(_, "en")`: English has no tailoring.
+    // A collator is not `Sync`, so each thread that sorts builds its own (a scan sorts on one thread).
+    static COLLATOR: icu_collator::Collator = icu_collator::Collator::try_new(&Default::default(), icu_collator::CollatorOptions::new())
+        .expect("the compiled collation data");
+}
+
+/// The order of names and families: ICU's English collation, as `localeCompare(_, "en")` gives it.
+pub fn compare_text(a: &str, b: &str) -> Collation {
+    COLLATOR.with(|collator| collator.compare(a, b))
+}
+
+/// The list order of a scan: family, style, then id.
+fn compare_faces(a: &FontFace, b: &FontFace) -> Collation {
+    compare_text(&a.family, &b.family).then_with(|| compare_text(&a.style, &b.style)).then_with(|| a.id.cmp(&b.id))
 }
 
 /// Canonical form without the `\\?\` prefix Windows adds.
@@ -139,23 +162,54 @@ fn read_at(file: &File, offset: u64, buffer: &mut [u8]) -> Result<usize, FontErr
     }
 }
 
+/// What identifies the file that was validated: its size and time, and which file it is (volume and file index on Windows,
+/// device and inode elsewhere), all read from the open handle so that no other file can stand in for it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Fingerprint {
     size: u64,
     modified: Option<SystemTime>,
-    #[cfg(unix)]
     identity: (u64, u64),
 }
 
-fn fingerprint(metadata: &std::fs::Metadata) -> Fingerprint {
+fn fingerprint(file: &File) -> Result<Fingerprint, FontError> {
+    let io = |e: std::io::Error| FontError::Io(e.to_string());
+    let metadata = file.metadata().map_err(io)?;
     #[cfg(unix)]
-    {
+    let identity = {
         use std::os::unix::fs::MetadataExt;
-        Fingerprint { size: metadata.len(), modified: metadata.modified().ok(), identity: (metadata.dev(), metadata.ino()) }
-    }
-    #[cfg(not(unix))]
-    {
-        Fingerprint { size: metadata.len(), modified: metadata.modified().ok() }
+        (metadata.dev(), metadata.ino())
+    };
+    #[cfg(windows)]
+    let identity = {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION};
+        // SAFETY: `info` is a plain struct the call fills in, and the handle stays open for the call.
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) } == 0 {
+            return Err(io(std::io::Error::last_os_error()));
+        }
+        (info.dwVolumeSerialNumber as u64, (info.nFileIndexHigh as u64) << 32 | info.nFileIndexLow as u64)
+    };
+    Ok(Fingerprint { size: metadata.len(), modified: metadata.modified().ok(), identity })
+}
+
+/// The path the open handle really names, so a link swapped in between resolving a path and opening it is seen.
+#[cfg(windows)]
+fn path_of_handle(file: &File) -> Result<PathBuf, FontError> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{GetFinalPathNameByHandleW, FILE_NAME_NORMALIZED};
+    let mut buffer = vec![0u16; 1024];
+    loop {
+        // SAFETY: the buffer and its length are passed together; the handle stays open for the call.
+        let n = unsafe { GetFinalPathNameByHandleW(file.as_raw_handle() as _, buffer.as_mut_ptr(), buffer.len() as u32, FILE_NAME_NORMALIZED) } as usize;
+        if n == 0 {
+            return Err(FontError::Io(std::io::Error::last_os_error().to_string()));
+        }
+        if n < buffer.len() {
+            let text = String::from_utf16_lossy(&buffer[..n]);
+            return Ok(PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text)));
+        }
+        buffer.resize(n + 1, 0);
     }
 }
 
@@ -296,7 +350,7 @@ impl SystemFonts {
             let Ok(read) = std::fs::read_dir(&real) else { continue };
             let mut contents: Vec<(String, std::fs::DirEntry)> =
                 read.filter_map(|e| e.ok()).map(|e| (e.file_name().to_string_lossy().to_string(), e)).collect();
-            contents.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()).then_with(|| a.0.cmp(&b.0)));
+            contents.sort_by(|a, b| compare_text(&a.0, &b.0));
             for (name, item) in contents {
                 if entries.len() >= self.max_fonts || files.len() >= MAX_FILES {
                     break;
@@ -365,14 +419,13 @@ impl SystemFonts {
         }
         files.insert(actual.clone());
         stats.candidates += 1;
-        self.inspect(&actual, name, &metadata, entries, stats, cancel)
+        self.inspect(&actual, name, entries, stats, cancel)
     }
 
     fn inspect(
         &self,
         path: &Path,
         display_name: &str,
-        metadata: &std::fs::Metadata,
         entries: &mut HashMap<FontId, Entry>,
         stats: &mut ScanStats,
         cancel: &dyn Fn() -> bool,
@@ -385,7 +438,7 @@ impl SystemFonts {
         let mut source = FileSource { file, length: opened.len(), cancel };
         let remaining = self.max_fonts - entries.len();
         let (collection, faces) = inspect_file(&mut source, display_name, remaining, cancel, &mut stats.skipped)?;
-        let print = fingerprint(metadata);
+        let print = fingerprint(&source.file)?;
         for face in faces {
             let id = font_id(path, face.index);
             entries.insert(id, Entry { path: path.to_path_buf(), collection, face, fingerprint: print.clone() });
@@ -424,8 +477,17 @@ impl SystemFonts {
         }
         let file = File::open(&real).map_err(io)?;
         let metadata = file.metadata().map_err(io)?;
-        if !metadata.is_file() || fingerprint(&metadata) != entry.fingerprint {
+        // What was opened must be the file that was validated: the same file (not merely one of the same size and time),
+        // and, on Windows, still at the path the walk found it by and inside a root.
+        if !metadata.is_file() || fingerprint(&file)? != entry.fingerprint {
             return Err(FontError::Changed);
+        }
+        #[cfg(windows)]
+        {
+            let opened = path_of_handle(&file)?;
+            if opened.to_string_lossy().to_lowercase() != entry.path.to_string_lossy().to_lowercase() || !scan.roots.iter().any(|root| inside(&opened, root)) {
+                return Err(FontError::Changed);
+            }
         }
         let mut source = FileSource { file, length: metadata.len(), cancel };
         let data = if entry.collection {

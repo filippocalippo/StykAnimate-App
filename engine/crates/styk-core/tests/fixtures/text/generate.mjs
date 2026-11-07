@@ -1,16 +1,20 @@
-// Generates the fixtures of the Rust text compiler from the JavaScript module it must equal bit for bit.
-//   node engine/crates/styk-core/tests/fixtures/text/generate.mjs [--corpus <dir> <out-dir>]
-// Writes cases.json (the inputs and, per step, either the JSON text of `compileTextFigure`'s result or the error it threw),
-// expected/<id>.json (that text), recipes.json (the derived fonts) and synthetic-cff.otf. Nothing here is tuned to pass:
-// a Rust mismatch changes the Rust.
+// Generates the fixtures of the Rust text compiler from the JavaScript module it must equal bit for bit, under the runtime
+// of today's app (Electron 39: V8 14.2, ICU 74.2, Unicode 15.1), whose normalisation and number formatting are the reference:
+//   ELECTRON_RUN_AS_NODE=1 <repo>/node_modules/electron/dist/electron.exe engine/crates/styk-core/tests/fixtures/text/generate.mjs [--corpus <dir> <out-dir>]
+// Writes cases.json (the inputs and, per step, the name of the JSON text of `compileTextFigure`'s result or the error it threw),
+// texts.json.zst (those texts, zstd-compressed JSON {name: text}), recipes.json (the derived fonts), synthetic-cff.otf and the
+// synthetic composite fonts. Nothing here is tuned to pass: a Rust mismatch changes the Rust.
 
 import {mkdir, readFile, readdir, writeFile} from 'node:fs/promises';
+import {constants, zstdCompressSync} from 'node:zlib';
 import {basename, isAbsolute, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parse} from '../../../../../../vendor/text/opentype.mjs';
 import {compileTextFigure, parseTextFont, textOptionsWithDefaults} from '../../../../../../src/text-authoring.mjs';
 import {compileEmbeddedTextFigure, readTextFigureOptions, replaceTextAssetFigure} from '../../../../../../src/native-text-authoring.mjs';
-import {emptyGpos, hex, kernTable, patchSfnt, readSfnt, sha256, symbolCmap, syntheticCff} from './synthetic.mjs';
+import {cmapFormat12, cmapFormat4, emptyGpos, hex, kernTable, patchSfnt, readSfnt, sha256, symbolCmap, syntheticCff, syntheticComposite} from './synthetic.mjs';
+
+if (!process.versions.electron) throw new Error("run this under the runtime of today's app: ELECTRON_RUN_AS_NODE=1 <electron.exe> generate.mjs");
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const root = join(here, '../../../../../..');
@@ -24,6 +28,7 @@ const INTER = 'engine/crates/styk-design/fonts/Inter.ttf';
 
 const notoRegular = await bytesOf(NOTO[0]);
 const glyphOf = (bytes, char) => parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)).charToGlyph(char).index;
+const glyphB = glyphOf(notoRegular, 'B');
 const glyphA = glyphOf(notoRegular, 'A'), glyphV = glyphOf(notoRegular, 'V'), glyphT = glyphOf(notoRegular, 'T'), glyphO = glyphOf(notoRegular, 'o');
 
 const recipes = {
@@ -36,6 +41,12 @@ const recipes = {
   // Windows symbol characters at U+F000 + code: A-Z, a-z, space and digits.
   symbol: {base: NOTO[0], remove: [], replace: {cmap: symbolCmap(Object.fromEntries(
     [...' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'].map(c => [0xf000 + c.charCodeAt(0), glyphOf(notoRegular, c)])))}},
+  // A mapping that is overwritten later is never validated: 'A' goes to a glyph the font lacks, then to the right one.
+  'cmap4-overwritten': {base: NOTO[0], remove: [], replace: {cmap: cmapFormat4([[0x41, 0x41, 65535 - 0x41], [0x41, 0x41, glyphA - 0x41], [0x42, 0x42, glyphB - 0x42]])}},
+  'cmap12-overwritten': {base: NOTO[0], remove: [], replace: {cmap: cmapFormat12([[0x41, 0x41, 65535], [0x41, 0x41, glyphA], [0x42, 0x42, glyphB]])}},
+  // The mapping that wins names a glyph the font lacks: the font is refused.
+  'cmap4-bad': {base: NOTO[0], remove: [], replace: {cmap: cmapFormat4([[0x41, 0x41, glyphA - 0x41], [0x41, 0x41, 65535 - 0x41]])}},
+  'cmap12-bad': {base: NOTO[0], remove: [], replace: {cmap: cmapFormat12([[0x41, 0x41, glyphA], [0x41, 0x41, 65535]])}},
 };
 const recipeBytes = async name => {
   const r = recipes[name];
@@ -47,6 +58,8 @@ for (const [name, r] of Object.entries(recipes)) {
     sha256: sha256(await recipeBytes(name))};
 }
 const cffBytes = syntheticCff();
+const compositeBytes = syntheticComposite(24), bombBytes = syntheticComposite(24, {bomb: true});
+const fixtureFiles = {'synthetic-composite.ttf': compositeBytes, 'synthetic-composite-bomb.ttf': bombBytes};
 
 /** Fresh font bytes for a font spec: `noto:<style>`, `file:<path>`, `recipe:<name>`, `synthetic-cff`. */
 async function fontBytes(spec) {
@@ -54,6 +67,7 @@ async function fontBytes(spec) {
   if (spec.startsWith('file:')) return bytesOf(spec.slice(5));
   if (spec.startsWith('recipe:')) return recipeBytes(spec.slice(7));
   if (spec === 'synthetic-cff') return cffBytes;
+  if (spec.startsWith('fixture:')) return fixtureFiles[spec.slice(8)];
   throw new Error(`font ${spec}`);
 }
 const arrayBuffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -133,6 +147,12 @@ add('symbol', 'recipe:symbol', [{text: 'ABC 123', fontSize: 50}, {text: 'abc'}, 
 add('cff', 'synthetic-cff', [{text: 'AB\nCV', fontSize: 100}, {text: 'A\tB V', fontSize: 100}, {text: 'A\tB', fontSize: 100}, {text: 'AV\nVA', fontSize: 50, alignment: 'right'},
   {text: 'A\tB', fontSize: 100}, {text: 'x'}]);
 add('cff-fresh-tab', 'synthetic-cff', [{text: 'A\tB', fontSize: 100}]);
+// A draft the job abandons after it started still read its glyphs (the space among them): the next draft sees that.
+add('cff-superseded', 'synthetic-cff', [{text: 'A ', fontSize: 100, __superseded: true}, {text: 'A\tB', fontSize: 100}]);
+add('cmap4-overwritten', 'recipe:cmap4-overwritten', [{text: 'AB', fontSize: 50}]);
+add('cmap12-overwritten', 'recipe:cmap12-overwritten', [{text: 'AB', fontSize: 50}]);
+// 28 levels of composites, each referring to the one below twice: opentype.js resolves every glyph once.
+add('composite-dag', 'fixture:synthetic-composite.ttf', [{text: 'A', fontSize: 100}]);
 
 // Editing imported text: the figure comes from a compile, with and without the private metadata.
 const base = (bytesSpec, options) => ({bytesSpec, options});
@@ -151,24 +171,46 @@ addNative('native-missing', 'hello', {}, [{text: 'Hello Wörld 日本'}]);
 addNative('native-mixed', 'plain', {mix: true}, [{}, {text: 'To AV', fontSize: 40}]);
 const replacements = [{font: 'file:' + FIRA, options: {text: 'Replaced', fontSize: 50, assetIndex: 0}}, {font: 'noto:2', options: {text: 'AV To', fontSize: 33, alignment: 'right', italic: true, assetIndex: 0}}];
 
+// Normalisation of every character of the Basic Multilingual Plane in five contexts that expose composition and canonical
+// reordering, as the reference runtime computes it (Unicode 15.1). Only results that differ from the input are stored.
+function nfcSweep() {
+  const contexts = [c => c, c => 'A' + c, c => 'B' + c + '\u0316', c => 'B\u0316' + c, c => 'B' + c + '\u0301', c => 'B\u0301' + c];
+  const changed = {};
+  for (let code = 0; code < 0x10000; code++) {
+    if (code >= 0xd800 && code <= 0xdfff) continue;
+    const c = String.fromCharCode(code);
+    const outputs = contexts.map(context => {
+      const text = context(c);
+      try { return textOptionsWithDefaults({text}).text; } catch (error) { return {error: error.messageKey}; }
+    });
+    if (outputs.some((o, i) => typeof o !== 'string' || o !== contexts[i](c))) changed[code.toString(16)] = outputs;
+  }
+  const named = ['A\u1aef\u0316', '\u1aef\u0316A', 'e\u0301\u0323'].map(text => ({text, nfc: textOptionsWithDefaults({text}).text}));
+  return {unicode: process.versions.unicode, icu: process.versions.icu, changed, named};
+}
+
 // ---- run ------------------------------------------------------------------------------------------------------------
 
-async function run(outDir, caseList, nativeList) {
-  await mkdir(join(outDir, 'expected'), {recursive: true});
+async function run(outDir, caseList, nativeList, extra = {}) {
+  await mkdir(outDir, {recursive: true});
+  const texts = {};
   const out = [];
   for (const c of caseList) {
     const face = await openFace(c.font);
     const steps = c.steps.map(options => {
-      const r = attempt(() => compileWith(face, options));
-      if (r.error) return {options, error: r.error};
+      // A step marked superseded is one the Rust job abandons after it started: JavaScript always finishes it.
+      const {__superseded, ...draft} = options;
+      const r = attempt(() => compileWith(face, draft));
+      const recorded = __superseded ? {superseded: true} : {};
+      if (r.error) return {options: draft, ...recorded, error: r.error};
       const text = JSON.stringify(r.value);
-      return c.digestOnly ? {options, digest: sha256(Buffer.from(text))} : {options, expected: text};
+      return c.digestOnly ? {options: draft, ...recorded, digest: sha256(Buffer.from(text))} : {options: draft, ...recorded, expected: text};
     });
     const entry = {id: c.id, font: c.font, face: face.bundled ? null : {family: face.family, style: face.style, bold: face.bold, italic: face.italic}, steps: steps.map((s, i) => {
-      if (s.expected !== undefined) return {options: s.options, expected: `expected/${c.id}-${i}.json`};
+      if (s.expected !== undefined) return {options: s.options, ...(s.superseded ? {superseded: true} : {}), expected: `${c.id}-${i}.json`};
       return s;
     })};
-    for (const [i, s] of steps.entries()) if (s.expected !== undefined) await writeFile(join(outDir, 'expected', `${c.id}-${i}.json`), s.expected);
+    for (const [i, s] of steps.entries()) if (s.expected !== undefined) texts[`${c.id}-${i}.json`] = s.expected;
     out.push(entry);
   }
   const native = [];
@@ -183,14 +225,14 @@ async function run(outDir, caseList, nativeList) {
       source.segment_count = 2;
       source.side_tables = [{kind: 'text', asset_index: 0, table_index: 0, text: 'stale'}, {kind: 'image', asset_index: 0}];
     }
-    const sourceFile = `expected/${n.id}-source.json`;
-    await writeFile(join(outDir, sourceFile), JSON.stringify(source));
+    const sourceFile = `${n.id}-source.json`;
+    texts[sourceFile] = JSON.stringify(source);
     const steps = [];
     for (const [i, options] of n.steps.entries()) {
       const r = attempt(() => compileEmbeddedTextFigure(JSON.parse(JSON.stringify(options)), JSON.parse(JSON.stringify(source))));
       if (r.error) { steps.push({options, error: r.error}); continue; }
-      const file = `expected/${n.id}-${i}.json`;
-      await writeFile(join(outDir, file), JSON.stringify(r.value));
+      const file = `${n.id}-${i}.json`;
+      texts[file] = JSON.stringify(r.value);
       steps.push({options, expected: file});
     }
     const replaceSteps = [];
@@ -203,13 +245,15 @@ async function run(outDir, caseList, nativeList) {
         figure._styk.textAuthoring.fontOrigin = target.bundled ? 'bundled' : 'custom';
         return figure;
       });
-      const file = `expected/${n.id}-replace-${i}.json`;
-      await writeFile(join(outDir, file), JSON.stringify(r.value));
+      const file = `${n.id}-replace-${i}.json`;
+      texts[file] = JSON.stringify(r.value);
       replaceSteps.push({font: replacement.font, options: replacement.options, expected: file});
     }
     native.push({id: n.id, source: sourceFile, readOptions: readTextFigureOptions(JSON.parse(JSON.stringify(source))), steps, replaceSteps});
   }
-  await writeFile(join(outDir, 'cases.json'), JSON.stringify({cases: out, native}, null, 1));
+  Object.assign(texts, extra.texts ?? {});
+  await writeFile(join(outDir, 'cases.json'), JSON.stringify({cases: out, native, ...(extra.cases ?? {})}, null, 1));
+  await writeFile(join(outDir, 'texts.json.zst'), zstdCompressSync(Buffer.from(JSON.stringify(texts)), {params: {[constants.ZSTD_c_compressionLevel]: 19}}));
 }
 
 const corpusAt = process.argv.indexOf('--corpus');
@@ -225,7 +269,13 @@ if (corpusAt >= 0) {
   await run(outDir, corpus.map(c => ({...c, font: c.font})), []);
   console.log(`corpus: ${corpus.length} fonts in ${outDir} (${originalBytes.name})`);
 } else {
-  await run(here, cases, nativeCases);
+  await run(here, cases, nativeCases, {cases: {sweep: 'nfc-sweep.json', rejected: ['recipe:cmap4-bad', 'recipe:cmap12-bad']}, texts: {'nfc-sweep.json': JSON.stringify(nfcSweep())}});
+  for (const spec of ['recipe:cmap4-bad', 'recipe:cmap12-bad']) {
+    let refused = false;
+    try { parseTextFont(arrayBuffer(await fontBytes(spec)), {name: spec}); } catch { refused = true; }
+    if (!refused) throw new Error(`${spec} was meant to be refused by opentype.js`);
+  }
+  for (const [name, bytes] of Object.entries(fixtureFiles)) await writeFile(join(here, name), bytes);
   await writeFile(join(here, 'recipes.json'), JSON.stringify(recipeFile, null, 1));
   await writeFile(join(here, 'synthetic-cff.otf'), cffBytes);
   console.log(`wrote ${cases.length} compile cases and ${nativeCases.length} editing cases`);

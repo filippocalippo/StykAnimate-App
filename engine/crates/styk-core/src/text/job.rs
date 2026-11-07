@@ -22,8 +22,10 @@ use super::TextError;
 pub const MAX_FACES: usize = 8;
 /// Font bytes a session keeps in total.
 pub const MAX_RETAINED_FONT_BYTES: usize = 64 * 1024 * 1024;
-/// Commands waiting for the job's thread beyond which a caller is told the job is busy.
+/// Commands waiting, running and answered-but-not-taken beyond which a caller is told the job is busy.
 const MAX_COMMANDS: usize = 16;
+/// Bytes of font data and figures those commands and their answers may hold together.
+pub const MAX_QUEUED_BYTES: usize = 96 * 1024 * 1024;
 
 /// A flag a running compile polls between glyphs and lines.
 #[derive(Clone, Debug, Default)]
@@ -216,12 +218,39 @@ enum Command {
     ClearFonts,
 }
 
+impl Command {
+    /// What the command holds while it waits: font bytes, the figure's tree.
+    fn cost(&self) -> usize {
+        match self {
+            Command::Source(Some(figure)) => figure.heap_bytes(),
+            Command::Source(None) | Command::ClearFonts => 0,
+            Command::Font(bytes, name) => bytes.len() + name.len(),
+        }
+    }
+}
+
+/// What an answer holds while it waits to be taken.
+fn reply_cost(event: &JobEvent) -> usize {
+    match event {
+        JobEvent::Source(Ok(Some(options))) => options.heap_bytes(),
+        _ => 256,
+    }
+}
+
 #[derive(Default)]
 struct Shared {
     commands: VecDeque<Command>,
+    /// The command the thread is working on, counted until its answer is queued.
+    in_flight: bool,
     /// The newest draft not yet started.
     pending: Option<CompileRequest>,
-    outbox: VecDeque<JobEvent>,
+    /// Answers waiting to be taken, each with its cost; only the newest compile result is kept and it is not counted
+    /// against the commands (it replaces itself).
+    outbox: VecDeque<(JobEvent, usize)>,
+    /// Answers to commands in `outbox`.
+    replies: usize,
+    /// Bytes of the commands waiting or in flight and of the answers waiting.
+    queued_bytes: usize,
     running: Option<CancelToken>,
     closed: bool,
 }
@@ -237,8 +266,8 @@ pub struct TextJob {
     thread: Option<JoinHandle<()>>,
 }
 
-/// The caller could not queue a command: the job already holds [`MAX_COMMANDS`] of them. Nothing was dropped silently;
-/// try again after taking events.
+/// The caller could not queue a command: the commands and answers the job holds are at [`MAX_COMMANDS`] or [`MAX_QUEUED_BYTES`].
+/// Nothing was dropped silently; try again after taking events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Busy;
 
@@ -257,10 +286,15 @@ impl TextJob {
     }
 
     fn command(&self, command: Command) -> Result<(), Busy> {
+        let cost = command.cost();
         let mut shared = self.inner.shared.lock().expect("text job state");
-        if shared.commands.len() >= MAX_COMMANDS {
+        // Requests and answers are bounded together: every accepted command yields at most one answer, so the answers
+        // nobody has taken can never outgrow the allowance either.
+        let held = shared.commands.len() + shared.in_flight as usize + shared.replies;
+        if held >= MAX_COMMANDS || shared.queued_bytes.saturating_add(cost) > MAX_QUEUED_BYTES {
             return Err(Busy);
         }
+        shared.queued_bytes += cost;
         shared.commands.push_back(command);
         self.inner.wake.notify_one();
         Ok(())
@@ -297,34 +331,48 @@ impl TextJob {
         }
     }
 
-    /// Takes every event that is ready.
+    /// Takes every event that is ready. The lock is held only to swap the queue out; the events are handed over outside it.
     pub fn take_events(&self) -> Vec<JobEvent> {
-        self.inner.shared.lock().expect("text job state").outbox.drain(..).collect()
+        let taken = {
+            let mut shared = self.inner.shared.lock().expect("text job state");
+            let freed: usize = shared.outbox.iter().filter(|(e, _)| !matches!(e, JobEvent::Compiled(_))).map(|(_, cost)| *cost).sum();
+            shared.queued_bytes = shared.queued_bytes.saturating_sub(freed);
+            shared.replies = 0;
+            std::mem::take(&mut shared.outbox)
+        };
+        taken.into_iter().map(|(event, _)| event).collect()
+    }
+
+    /// Stops the job and hands back its thread, so a caller that wants the join does it away from the interface thread.
+    pub fn close(mut self) -> Option<JoinHandle<()>> {
+        self.signal_close();
+        self.thread.take()
+    }
+
+    fn signal_close(&self) {
+        let mut shared = self.inner.shared.lock().expect("text job state");
+        shared.closed = true;
+        shared.pending = None;
+        shared.commands.clear();
+        if let Some(running) = &shared.running {
+            running.cancel();
+        }
+        self.inner.wake.notify_all();
     }
 }
 
 impl Drop for TextJob {
+    /// Signals the thread and lets go of it. The interface thread never waits for the worker: the worker may be inside a
+    /// parse, a compile, or the caller's own notification. It ends as soon as the one step it is in returns.
     fn drop(&mut self) {
-        {
-            let mut shared = self.inner.shared.lock().expect("text job state");
-            shared.closed = true;
-            shared.pending = None;
-            shared.commands.clear();
-            if let Some(running) = &shared.running {
-                running.cancel();
-            }
-            self.inner.wake.notify_all();
-        }
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
+        self.signal_close();
     }
 }
 
 fn run(inner: Arc<Inner>, mut compiler: TextCompiler, notify: impl Fn()) {
     loop {
         enum Work {
-            Command(Command),
+            Command(Command, usize),
             Compile(CompileRequest, CancelToken),
         }
         let work = {
@@ -334,7 +382,9 @@ fn run(inner: Arc<Inner>, mut compiler: TextCompiler, notify: impl Fn()) {
                     return;
                 }
                 if let Some(command) = shared.commands.pop_front() {
-                    break Work::Command(command);
+                    shared.in_flight = true;
+                    let cost = command.cost();
+                    break Work::Command(command, cost);
                 }
                 if let Some(request) = shared.pending.take() {
                     let token = CancelToken::new();
@@ -344,32 +394,42 @@ fn run(inner: Arc<Inner>, mut compiler: TextCompiler, notify: impl Fn()) {
                 shared = inner.wake.wait(shared).expect("text job state");
             }
         };
-        let event = match work {
-            Work::Command(Command::Source(figure)) => JobEvent::Source(compiler.set_source(figure)),
-            Work::Command(Command::Font(bytes, name)) => JobEvent::Font(compiler.load_font(bytes, &name)),
-            Work::Command(Command::ClearFonts) => {
-                compiler.clear_fonts();
-                continue;
+        match work {
+            Work::Command(command, cost) => {
+                let reply = match command {
+                    Command::Source(figure) => Some(JobEvent::Source(compiler.set_source(figure))),
+                    Command::Font(bytes, name) => Some(JobEvent::Font(compiler.load_font(bytes, &name))),
+                    Command::ClearFonts => {
+                        compiler.clear_fonts();
+                        None
+                    }
+                };
+                let mut shared = inner.shared.lock().expect("text job state");
+                shared.in_flight = false;
+                shared.queued_bytes = shared.queued_bytes.saturating_sub(cost);
+                if let Some(event) = reply {
+                    let cost = reply_cost(&event);
+                    shared.replies += 1;
+                    shared.queued_bytes += cost;
+                    shared.outbox.push_back((event, cost));
+                    drop(shared);
+                    notify();
+                }
             }
             Work::Compile(request, token) => {
                 let revision = request.revision;
                 let result = compiler.compile(&request, &token);
-                inner.shared.lock().expect("text job state").running = None;
+                let mut shared = inner.shared.lock().expect("text job state");
+                shared.running = None;
                 if token.is_cancelled() {
                     // A newer draft (or a close) took over: this result is for a revision nobody waits for.
                     continue;
                 }
-                JobEvent::Compiled(CompileOutcome { revision, result })
+                shared.outbox.retain(|(e, _)| !matches!(e, JobEvent::Compiled(_)));
+                shared.outbox.push_back((JobEvent::Compiled(CompileOutcome { revision, result }), 0));
+                drop(shared);
+                notify();
             }
-        };
-        {
-            let mut shared = inner.shared.lock().expect("text job state");
-            if matches!(event, JobEvent::Compiled(_)) {
-                shared.outbox.retain(|e| !matches!(e, JobEvent::Compiled(_)));
-            }
-            shared.outbox.push_back(event);
         }
-        notify();
     }
 }
-

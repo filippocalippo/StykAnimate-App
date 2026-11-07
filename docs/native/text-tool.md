@@ -44,8 +44,9 @@ colour, outline width 0..128 and outline colour are checked in that order. Every
 **opentype.js details that show in the numbers** (all reproduced):
 
 - The cmap is the **last** supported subtable (platform 3 encodings 0, 1, 10 or platform 0), format 4 or 12 only;
-  format 4 skips the final segment; later segments override earlier ones; every mapped glyph must exist in the font or
-  the font is rejected at load (`addGlyphNames`), and a TrueType font without a `post` table is rejected too.
+  format 4 skips the final segment; later segments override earlier ones; every glyph array is read, and every mapping
+  that **survives** (the last one made for a character; an overwritten mapping is never looked at) must name a glyph of
+  the font or the font is rejected at load (`addGlyphNames`). A TrueType font without a `post` table is rejected too.
 - Windows **symbol** fonts (OS/2 code page bit 31, or any (3, 0) cmap subtable): codes 0x20..0xff without a glyph take
   the glyph of U+F000 + code.
 - **Kerning.** If the font has a `GPOS` table, kerning comes from the default script's (`DFLT`, else `latn`) default
@@ -55,9 +56,13 @@ colour, outline width 0..128 and outline colour are checked in that order. Every
 - **CFF width.** A CFF glyph's `advanceWidth` is overwritten with the width its charstring declares when its outline is
   first read, and stays that way for the life of the font object: the space advance of a text without a space depends
   on whether an earlier draft read the space. The worker keeps one font object per face, so the Rust `Font` keeps the
-  same per-glyph state.
+  same per-glyph state. The JavaScript worker cannot be interrupted, so a draft it started has always read all of its
+  glyphs, even when a newer draft superseded it: the Rust compile therefore checks for cancellation only **after** its
+  glyphs are read (reading is bounded: 255 distinct units and the composite limit below), never in the middle.
 - Composite glyph points are transformed in doubles (`xScale*x + scale01*y + dx`), matched points by their offset
-  difference; CFF charstring stacks give `NaN` for a missing operand (`undefined` in JavaScript) and `endchar` does not
+  difference; opentype.js resolves each glyph once and keeps the points, so composites that share a component cost once,
+  and so does the Rust resolver (a memo per outline). A stack that doubles its points at every level would still exhaust
+  memory: the resolver stops with an error after copying 4,000,000 points; CFF charstring stacks give `NaN` for a missing operand (`undefined` in JavaScript) and `endchar` does not
   stop interpretation.
 - Names: the family is `preferredFamily.en`, else `fontFamily.en`, else the first language stored, else "Custom font".
   Language ids map through the Windows and Macintosh tables of opentype.js (generated into `names_data.rs` from the
@@ -100,8 +105,10 @@ bounds-checked reader (`reader.rs`) whose failure mode is opentype.js's `RangeEr
   malformed. The text tool never reads them; the Rust port ignores them.
 - WOFF input and font collections (the picker offers `.ttf`/`.otf`; collection faces arrive repacked).
 - Lone UTF-16 surrogates inside a font's name strings become U+FFFD.
-- NFC uses the `unicode-normalization` crate's Unicode version, not V8's ICU: they differ only for characters assigned
-  after either was built.
+- NFC uses `unicode-normalization` pinned at 0.1.23, whose tables are Unicode 15.1, the version of the ICU in Electron 39
+  (ICU 74.2, CLDR 44.1). A newer crate reorders characters Unicode 15.1 had not assigned yet (U+1AEF with a following
+  U+0316 is the case that exposed it), so the pin is part of the contract; `normalisation_is_the_unicode_version_of_the_reference_runtime`
+  compares all 63,488 non-surrogate BMP characters in six contexts against that runtime.
 - A class-pair `GPOS` table of more than 2^24 pairs, or a cmap whose segments overlap for more than 4 million
   characters, is refused (opentype.js would hang or run out of memory building it).
 - `toLocaleString()` in the "at most N characters" message: the parameter is the plain number.
@@ -115,10 +122,12 @@ bounds-checked reader (`reader.rs`) whose failure mode is opentype.js's `RangeEr
 - `read_text_figure_options`, `compile_embedded_text_figure`, `replace_text_asset_figure`, `can_edit_text_figure`,
   `text_asset_for`: the native-text rules over document values, so key order and numbers are the file's.
 - `TextCompiler`: the worker's state (source, up to 8 faces / 64 MiB, the four bundled styles on demand).
-  `TextJob`: that state on its own thread. `CompileRequest { revision, font, options }`; `compile` replaces a draft that
+  `TextJob`: that state on its own thread; dropping it never waits for the worker (it signals and lets go; `close()` hands the
+  thread to a caller that wants the join, away from the interface thread). `CompileRequest { revision, font, options }`; `compile` replaces a draft that
   has not started and cancels one that has (a flag polled before every distinct character and every line); only the newest
   `JobEvent::Compiled` is kept, tagged with its revision, so the interface drops anything stale; commands (source, font
-  load) queue at most 16 deep and answer `Busy` instead of dropping; the single lock is never held across a parse or a
+  load) and their unread answers are bounded together (16 in all, 96 MiB of font bytes and figures) and answer `Busy`
+  instead of dropping; the single lock is never held across a parse or a
   compile, so the interface thread never waits (D7); dropping the job cancels, wakes and joins the thread. The 100 ms
   debounce is the interface's (`styk-ui`).
 
@@ -130,17 +139,26 @@ bounds-checked reader (`reader.rs`) whose failure mode is opentype.js's `RangeEr
 `styk-platform::fonts::SystemFonts` is the walk: breadth first over the roots, `read_dir` entries sorted, links resolved
 with `canonicalize` and dropped unless inside a root, junctions treated as links, the same caps, a scan shared by
 concurrent callers (waiters poll their own cancel callback), a cancelled scan keeping nothing, reads chunked with a cancel
-check per 256 KiB. `with_directories` takes trusted absolute folders; `new()` takes the machine's. The per-user Roaming
+check per 256 KiB. A file's identity is read from the open handle (volume and file index on Windows, device and inode
+elsewhere) at the scan and again at every read, with its size and time; on Windows the handle's own final path must also
+still be the path found and inside a root, so a file or link swapped in later is refused. Names and families sort with ICU's
+English collation (`icu_collator` 1.4, CLDR 44, the collation of `localeCompare(_, "en")` in the reference runtime), which also
+decides which faces survive a limit. `with_directories` takes trusted absolute folders; `new()` takes the machine's. The per-user Roaming
 folder that fontdb would also scan is **not** listed: the face list is today's service's list.
 
 ## 3. Proof
 
-`engine/crates/styk-core/tests/fixtures/text/generate.mjs` runs `compileTextFigure`, `compileEmbeddedTextFigure` and
+`engine/crates/styk-core/tests/fixtures/text/generate.mjs` runs, under the runtime of today's app (Electron 39,
+`ELECTRON_RUN_AS_NODE=1 electron.exe generate.mjs`; it refuses any other runtime, because normalisation and collation belong
+to the runtime), `compileTextFigure`, `compileEmbeddedTextFigure` and
 `replaceTextAssetFigure` from the repository's JavaScript on: the four bundled Noto Sans styles, a user TTF
 (FiraSans), the variable Inter, derived fonts (GPOS and `kern` with different values; `kern` only; an empty `GPOS` plus
 `kern`; a Windows symbol font), and a synthetic CFF font written for the fixtures. `tests/text_fixtures.rs` requires the
 JSON text of each result to equal the JavaScript's byte for byte (and the parsed structure, key order included), and
-each refusal to carry the same message key and parameters. `tests/pivot_bytes.rs` saves documents holding a natively
-compiled figure and the JavaScript's figure and compares the files. The platform tests cover escaped links, oversized
-collections, cancel in the middle of a walk and the same face list as the JavaScript service on the machine that runs
-them. Results of the runs are in the chunk's report.
+each refusal to carry the same message key and parameters. `styk-engine/tests/text_figure_saves.rs` saves documents holding a natively
+compiled figure and the JavaScript's figure and compares the files. The expected texts are stored in one zstd archive (`texts.json.zst`, 0.3 MB instead of 3.3 MB). The saved-bytes test pins, for every draft, whether each export is a file that
+reopens with the text in it or a refusal with a given message (today's exporter refuses gradient paints in Pivot files).
+Other fixtures: composite stacks, overwritten cmap mappings, a draft superseded after it started, and the normalisation sweep.
+The platform tests cover escaped links, oversized
+collections, cancel in the middle of a walk, a file replaced after the scan, the collation at a limit, and the same faces, in the same order, as the
+JavaScript service on the machine that runs them. Results of the runs are in the chunk's report.

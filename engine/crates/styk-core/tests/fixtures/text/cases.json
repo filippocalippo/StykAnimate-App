@@ -12,7 +12,7 @@
       "text": "Hello, World",
       "fontSize": 47.3
      },
-     "expected": "expected/hello-regular-0.json"
+     "expected": "hello-regular-0.json"
     }
    ]
   },
@@ -28,7 +28,7 @@
       "text": "AV To AVATAR\nTo.",
       "fontSize": 100
      },
-     "expected": "expected/kerning-regular-0.json"
+     "expected": "kerning-regular-0.json"
     }
    ]
   },
@@ -46,7 +46,7 @@
       "lineHeight": 1.5,
       "fontSize": 40
      },
-     "expected": "expected/lines-regular-0.json"
+     "expected": "lines-regular-0.json"
     },
     {
      "options": {
@@ -57,7 +57,7 @@
       "lineHeight": 1.5,
       "fontSize": 40
      },
-     "expected": "expected/lines-regular-1.json"
+     "expected": "lines-regular-1.json"
     }
    ]
   },
@@ -73,7 +73,7 @@
       "text": "A\tB\tAV\n\tx",
       "fontSize": 33.3
      },
-     "expected": "expected/tab-regular-0.json"
+     "expected": "tab-regular-0.json"
     }
    ]
   },
@@ -89,7 +89,7 @@
       "text": "Hello, World",
       "fontSize": 47.3
      },
-     "expected": "expected/hello-bold-0.json"
+     "expected": "hello-bold-0.json"
     }
    ]
   },
@@ -105,7 +105,7 @@
       "text": "AV To AVATAR\nTo.",
       "fontSize": 100
      },
-     "expected": "expected/kerning-bold-0.json"
+     "expected": "kerning-bold-0.json"
     }
    ]
   },
@@ -123,7 +123,7 @@
       "lineHeight": 1.5,
       "fontSize": 40
      },
-     "expected": "expected/lines-bold-0.json"
+     "expected": "lines-bold-0.json"
     },
     {
      "options": {
@@ -134,7 +134,7 @@
       "lineHeight": 1.5,
       "fontSize": 40
      },
-     "expected": "expected/lines-bold-1.json"
+     "expected": "lines-bold-1.json"
     }
    ]
   },
@@ -150,7 +150,7 @@
       "text": "A\tB\tAV\n\tx",
       "fontSize": 33.3
      },
-     "expected": "expected/tab-bold-0.json"
+     "expected": "tab-bold-0.json"
     }
    ]
   },
@@ -166,7 +166,7 @@
       "text": "Hello, World",
       "fontSize": 47.3
      },
-     "expected": "expected/hello-italic-0.json"
+     "expected": "hello-italic-0.json"
     }
    ]
   },
@@ -182,7 +182,7 @@
       "text": "AV To AVATAR\nTo.",
       "fontSize": 100
      },
-     "expected": "expected/kerning-italic-0.json"
+     "expected": "kerning-italic-0.json"
     }
    ]
   },
@@ -200,7 +200,7 @@
       "lineHeight": 1.5,
       "fontSize": 40
      },
-     "expected": "expected/lines-italic-0.json"
+     "expected": "lines-italic-0.json"
     },
     {
      "options": {
@@ -211,7 +211,7 @@
       "lineHeight": 1.5,
       "fontSize": 40
      },
-     "expected": "expected/lines-italic-1.json"
+     "expected": "lines-italic-1.json"
     }
    ]
   },
@@ -227,7 +227,7 @@
       "text": "A\tB\tAV\n\tx",
       "fontSize": 33.3
      },
-     "expected": "expected/tab-italic-0.json"
+     "expected": "tab-italic-0.json"
     }
    ]
   },
@@ -243,7 +243,7 @@
       "text": "Hello, World",
       "fontSize": 47.3
      },
-     "expected": "expected/hello-bolditalic-0.json"
+     "expected": "hello-bolditalic-0.json"
     }
    ]
   },
@@ -259,7 +259,7 @@
       "text": "AV To AVATAR\nTo.",
       "fontSize": 100
      },
-     "expected": "expected/kerning-bolditalic-0.json"
+     "expected": "kerning-bolditalic-0.json"
     }
    ]
   },
@@ -277,7 +277,7 @@
       "lineHeight": 1.5,
       "fontSize": 40
      },
-     "expected": "expected/lines-bolditalic-0.json"
+     "expected": "lines-bolditalic-0.json"
     },
     {
      "options": {
@@ -288,7 +288,7 @@
       "lineHeight": 1.5,
       "fontSize": 40
      },
-     "expected": "expected/lines-bolditalic-1.json"
+     "expected": "lines-bolditalic-1.json"
     }
    ]
   },
@@ -304,7 +304,7 @@
       "text": "A\tB\tAV\n\tx",
       "fontSize": 33.3
      },
-     "expected": "expected/tab-bolditalic-0.json"
+     "expected": "tab-bolditalic-0.json"
     }
    ]
   },
@@ -318,7 +318,7 @@
       "text": "café é Å\r\nfin\rend",
       "name": "Title 動画 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
      },
-     "expected": "expected/nfc-0.json"
+     "expected": "nfc-0.json"
     }
    ]
   },
@@ -347,7 +347,7 @@
       "lineHeight": 0.5,
       "fontSize": 1
      },
-     "expected": "expected/paint-and-style-0.json"
+     "expected": "paint-and-style-0.json"
     },
     {
      "options": {
@@ -361,7 +361,7 @@
        128
       ]
      },
-     "expected": "expected/paint-and-style-1.json"
+     "expected": "paint-and-style-1.json"
     },
     {
      "options": {
@@ -397,7 +397,7 @@
        ]
       }
      },
-     "expected": "expected/paint-and-style-2.json"
+     "expected": "paint-and-style-2.json"
     },
     {
      "options": {
@@ -418,7 +418,7 @@
        ]
       }
      },
-     "expected": "expected/paint-and-style-3.json"
+     "expected": "paint-and-style-3.json"
     }
    ]
   },
@@ -879,7 +879,7 @@
      "options": {
       "text": " ."
      },
-     "expected": "expected/limit-errors-23.json"
+     "expected": "limit-errors-23.json"
     },
     {
      "options": {
@@ -901,7 +901,7 @@
      "options": {
       "text": " x"
      },
-     "expected": "expected/limit-errors-25.json"
+     "expected": "limit-errors-25.json"
     }
    ]
   },
@@ -914,7 +914,7 @@
      "options": {
       "text": ".\n   \n."
      },
-     "expected": "expected/spaces-only-visible-0.json"
+     "expected": "spaces-only-visible-0.json"
     },
     {
      "options": {
@@ -945,7 +945,7 @@
       "text": "Kerning AVATAR Ty To",
       "fontSize": 72
      },
-     "expected": "expected/fira-0.json"
+     "expected": "fira-0.json"
     },
     {
      "options": {
@@ -953,7 +953,7 @@
       "fontSize": 30,
       "alignment": "center"
      },
-     "expected": "expected/fira-1.json"
+     "expected": "fira-1.json"
     }
    ]
   },
@@ -972,7 +972,7 @@
       "text": "Variable AVATAR Ty",
       "fontSize": 64
      },
-     "expected": "expected/inter-0.json"
+     "expected": "inter-0.json"
     }
    ]
   },
@@ -991,7 +991,7 @@
       "text": "AV To AVATAR",
       "fontSize": 80
      },
-     "expected": "expected/both-tables-0.json"
+     "expected": "both-tables-0.json"
     }
    ]
   },
@@ -1010,7 +1010,7 @@
       "text": "AV To AVATAR",
       "fontSize": 80
      },
-     "expected": "expected/kern-only-0.json"
+     "expected": "kern-only-0.json"
     }
    ]
   },
@@ -1029,7 +1029,7 @@
       "text": "AV To AVATAR",
       "fontSize": 80
      },
-     "expected": "expected/empty-gpos-0.json"
+     "expected": "empty-gpos-0.json"
     }
    ]
   },
@@ -1048,7 +1048,7 @@
       "text": "ABC 123",
       "fontSize": 50
      },
-     "expected": "expected/symbol-0.json"
+     "expected": "symbol-0.json"
     },
     {
      "options": {
@@ -1093,21 +1093,21 @@
       "text": "AB\nCV",
       "fontSize": 100
      },
-     "expected": "expected/cff-0.json"
+     "expected": "cff-0.json"
     },
     {
      "options": {
       "text": "A\tB V",
       "fontSize": 100
      },
-     "expected": "expected/cff-1.json"
+     "expected": "cff-1.json"
     },
     {
      "options": {
       "text": "A\tB",
       "fontSize": 100
      },
-     "expected": "expected/cff-2.json"
+     "expected": "cff-2.json"
     },
     {
      "options": {
@@ -1115,14 +1115,14 @@
       "fontSize": 50,
       "alignment": "right"
      },
-     "expected": "expected/cff-3.json"
+     "expected": "cff-3.json"
     },
     {
      "options": {
       "text": "A\tB",
       "fontSize": 100
      },
-     "expected": "expected/cff-4.json"
+     "expected": "cff-4.json"
     },
     {
      "options": {
@@ -1156,7 +1156,91 @@
       "text": "A\tB",
       "fontSize": 100
      },
-     "expected": "expected/cff-fresh-tab-0.json"
+     "expected": "cff-fresh-tab-0.json"
+    }
+   ]
+  },
+  {
+   "id": "cff-superseded",
+   "font": "synthetic-cff",
+   "face": {
+    "family": "Prefam",
+    "style": "Regular",
+    "bold": true,
+    "italic": true
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "A ",
+      "fontSize": 100
+     },
+     "superseded": true,
+     "expected": "cff-superseded-0.json"
+    },
+    {
+     "options": {
+      "text": "A\tB",
+      "fontSize": 100
+     },
+     "expected": "cff-superseded-1.json"
+    }
+   ]
+  },
+  {
+   "id": "cmap4-overwritten",
+   "font": "recipe:cmap4-overwritten",
+   "face": {
+    "family": "Noto Sans",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "AB",
+      "fontSize": 50
+     },
+     "expected": "cmap4-overwritten-0.json"
+    }
+   ]
+  },
+  {
+   "id": "cmap12-overwritten",
+   "font": "recipe:cmap12-overwritten",
+   "face": {
+    "family": "Noto Sans",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "AB",
+      "fontSize": 50
+     },
+     "expected": "cmap12-overwritten-0.json"
+    }
+   ]
+  },
+  {
+   "id": "composite-dag",
+   "font": "fixture:synthetic-composite.ttf",
+   "face": {
+    "family": "Styk Composite",
+    "style": "Regular",
+    "bold": false,
+    "italic": false
+   },
+   "steps": [
+    {
+     "options": {
+      "text": "A",
+      "fontSize": 100
+     },
+     "expected": "composite-dag-0.json"
     }
    ]
   }
@@ -1164,7 +1248,7 @@
  "native": [
   {
    "id": "native-noop",
-   "source": "expected/native-noop-source.json",
+   "source": "native-noop-source.json",
    "readOptions": {
     "text": "Hello\nWorld",
     "name": "Text",
@@ -1200,14 +1284,14 @@
    "steps": [
     {
      "options": {},
-     "expected": "expected/native-noop-0.json"
+     "expected": "native-noop-0.json"
     }
    ],
    "replaceSteps": []
   },
   {
    "id": "native-size",
-   "source": "expected/native-size-source.json",
+   "source": "native-size-source.json",
    "readOptions": {
     "text": "Hello\nWorld",
     "name": "Text",
@@ -1245,7 +1329,7 @@
      "options": {
       "fontSize": 120
      },
-     "expected": "expected/native-size-0.json"
+     "expected": "native-size-0.json"
     },
     {
      "options": {
@@ -1257,14 +1341,14 @@
       ],
       "opacity": 0.5
      },
-     "expected": "expected/native-size-1.json"
+     "expected": "native-size-1.json"
     }
    ],
    "replaceSteps": []
   },
   {
    "id": "native-text",
-   "source": "expected/native-text-source.json",
+   "source": "native-text-source.json",
    "readOptions": {
     "text": "Hello\nWorld",
     "name": "Text",
@@ -1315,21 +1399,21 @@
       "text": "Hello\nWorld",
       "alignment": "right"
      },
-     "expected": "expected/native-text-1.json"
+     "expected": "native-text-1.json"
     },
     {
      "options": {
       "text": "World Hello",
       "lineHeight": 2
      },
-     "expected": "expected/native-text-2.json"
+     "expected": "native-text-2.json"
     }
    ],
    "replaceSteps": []
   },
   {
    "id": "native-stripped",
-   "source": "expected/native-stripped-source.json",
+   "source": "native-stripped-source.json",
    "readOptions": {
     "text": "Hello\nWorld",
     "name": "Text",
@@ -1365,13 +1449,13 @@
    "steps": [
     {
      "options": {},
-     "expected": "expected/native-stripped-0.json"
+     "expected": "native-stripped-0.json"
     },
     {
      "options": {
       "embeddedScale": 150
      },
-     "expected": "expected/native-stripped-1.json"
+     "expected": "native-stripped-1.json"
     },
     {
      "options": {
@@ -1391,26 +1475,26 @@
       "text": "o\to",
       "alignment": "center"
      },
-     "expected": "expected/native-stripped-3.json"
+     "expected": "native-stripped-3.json"
     },
     {
      "options": {
       "embeddedScale": 0
      },
-     "expected": "expected/native-stripped-4.json"
+     "expected": "native-stripped-4.json"
     },
     {
      "options": {
       "embeddedScale": 4001
      },
-     "expected": "expected/native-stripped-5.json"
+     "expected": "native-stripped-5.json"
     }
    ],
    "replaceSteps": []
   },
   {
    "id": "native-plain-stripped",
-   "source": "expected/native-plain-stripped-source.json",
+   "source": "native-plain-stripped-source.json",
    "readOptions": {
     "text": "AV To",
     "name": "Text",
@@ -1445,7 +1529,7 @@
       "text": "AV VA T",
       "embeddedScale": 100
      },
-     "expected": "expected/native-plain-stripped-0.json"
+     "expected": "native-plain-stripped-0.json"
     },
     {
      "options": {
@@ -1476,7 +1560,7 @@
   },
   {
    "id": "native-missing",
-   "source": "expected/native-missing-source.json",
+   "source": "native-missing-source.json",
    "readOptions": {
     "text": "Hello\nWorld",
     "name": "Text",
@@ -1529,7 +1613,7 @@
   },
   {
    "id": "native-mixed",
-   "source": "expected/native-mixed-source.json",
+   "source": "native-mixed-source.json",
    "readOptions": {
     "text": "AV To",
     "name": "Text",
@@ -1561,14 +1645,14 @@
    "steps": [
     {
      "options": {},
-     "expected": "expected/native-mixed-0.json"
+     "expected": "native-mixed-0.json"
     },
     {
      "options": {
       "text": "To AV",
       "fontSize": 40
      },
-     "expected": "expected/native-mixed-1.json"
+     "expected": "native-mixed-1.json"
     }
    ],
    "replaceSteps": [
@@ -1579,7 +1663,7 @@
       "fontSize": 50,
       "assetIndex": 0
      },
-     "expected": "expected/native-mixed-replace-0.json"
+     "expected": "native-mixed-replace-0.json"
     },
     {
      "font": "noto:2",
@@ -1590,9 +1674,14 @@
       "italic": true,
       "assetIndex": 0
      },
-     "expected": "expected/native-mixed-replace-1.json"
+     "expected": "native-mixed-replace-1.json"
     }
    ]
   }
+ ],
+ "sweep": "nfc-sweep.json",
+ "rejected": [
+  "recipe:cmap4-bad",
+  "recipe:cmap12-bad"
  ]
 }

@@ -271,11 +271,58 @@ fn lists_the_same_faces_as_the_javascript_service_on_this_machine() {
     let started = std::time::Instant::now();
     let list = SystemFonts::new().list(&never).unwrap();
     eprintln!("{} faces in {:?}", list.len(), started.elapsed());
-    let mut got: Vec<(String, String, String)> = list.iter().map(|f| (f.id.to_string(), f.family.clone(), f.style.clone())).collect();
-    let mut want = expected.clone();
-    got.sort();
-    want.sort();
+    // The order too: the list is sorted by the collation of the runtime of today's app.
+    let got: Vec<(String, String, String)> = list.iter().map(|f| (f.id.to_string(), f.family.clone(), f.style.clone())).collect();
+    let want = expected.clone();
     let missing: Vec<_> = want.iter().filter(|w| !got.contains(w)).take(10).collect();
     let extra: Vec<_> = got.iter().filter(|g| !want.contains(g)).take(10).collect();
     assert!(missing.is_empty() && extra.is_empty(), "javascript {} faces, rust {}; only in javascript: {missing:?}; only in rust: {extra:?}", want.len(), got.len());
+    let first_difference = got.iter().zip(&want).position(|(a, b)| a != b);
+    assert_eq!(first_difference, None, "the same faces in a different order: rust {:?}, javascript {:?}", first_difference.map(|i| &got[i]), first_difference.map(|i| &want[i]));
+}
+
+#[test]
+fn a_listed_font_replaced_by_a_file_of_the_same_size_and_time_is_refused() {
+    let scratch = Scratch::new("replaced");
+    let folder = scratch.0.join("Fonts");
+    fs::create_dir_all(&folder).unwrap();
+    let path = folder.join("N.ttf");
+    fs::write(&path, noto("Regular")).unwrap();
+    let modified = fs::metadata(&path).unwrap().modified().unwrap();
+    let fonts = SystemFonts::with_directories(vec![folder]);
+    let id = fonts.list(&never).unwrap()[0].id.clone();
+    // Another file in its place: the same length and the same modification time, but not the file that was validated.
+    let mut other = noto("Regular");
+    let first_table_offset = 12 + 8;
+    other[first_table_offset..first_table_offset + 4].copy_from_slice(&[0xff, 0xff, 0xff, 0xff]);
+    fs::remove_file(&path).unwrap();
+    fs::write(&path, &other).unwrap();
+    fs::OpenOptions::new().write(true).open(&path).unwrap().set_modified(modified).unwrap();
+    assert_eq!(fs::metadata(&path).unwrap().len(), noto("Regular").len() as u64);
+    assert_eq!(fonts.read(&id, &never), Err(FontError::Changed));
+}
+
+#[test]
+fn the_files_that_survive_the_face_limit_are_the_first_in_the_collation_of_today() {
+    let scratch = Scratch::new("collation");
+    let folder = scratch.0.join("Fonts");
+    fs::create_dir_all(&folder).unwrap();
+    // JavaScript's `localeCompare(_, "en")` puts an accented a before z; a byte or lower-case order puts it after.
+    for name in ["z.ttf", "\u{e1}.ttf"] {
+        fs::write(folder.join(name), noto("Regular")).unwrap();
+    }
+    let fonts = SystemFonts::with_directories(vec![folder.clone()]).with_max_fonts(1);
+    let list = fonts.list(&never).unwrap();
+    assert_eq!(list.len(), 1);
+    let kept = styk_platform::fonts::font_id(&styk_platform::fonts::canonical(&folder.join("\u{e1}.ttf")).unwrap(), 0);
+    assert_eq!(list[0].id, kept, "the accented file comes first");
+}
+
+#[test]
+fn the_text_order_is_the_english_collation_of_icu() {
+    // The order `["_x","1","a","á.ttf","B","e","é","Z","z.ttf"]` takes under `localeCompare(_, "en")` in the runtime of today's app.
+    let wanted = ["_x", "1", "a", "\u{e1}.ttf", "B", "e", "\u{e9}", "Z", "z.ttf"];
+    let mut shuffled = ["z.ttf", "B", "\u{e9}", "a", "_x", "Z", "\u{e1}.ttf", "e", "1"];
+    shuffled.sort_by(|a, b| styk_platform::fonts::compare_text(a, b));
+    assert_eq!(shuffled, wanted);
 }

@@ -7,7 +7,6 @@
 //! collection are repacked into standalone fonts. Nothing in this module calls the operating system: [`ReadAt`]
 //! is the file, and `styk-platform` supplies the directory walk.
 
-use std::cmp::Ordering;
 use std::sync::Arc;
 
 /// A font file larger than this is refused, and so is any single face.
@@ -160,16 +159,6 @@ impl FontService for FakeFontService {
         }
         self.faces.iter().find(|(face, _)| &face.id == id).map(|(_, bytes)| bytes.clone()).ok_or(FontError::Unavailable)
     }
-}
-
-/// `localeCompare` for the picker's order, approximated without a collation library: case-insensitive first, then exact.
-pub fn compare_text(a: &str, b: &str) -> Ordering {
-    a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b))
-}
-
-/// The list order: family, style, id.
-pub fn compare_faces(a: &FontFace, b: &FontFace) -> Ordering {
-    compare_text(&a.family, &b.family).then_with(|| compare_text(&a.style, &b.style)).then_with(|| a.id.cmp(&b.id))
 }
 
 // ---- reading a file ------------------------------------------------------------------------------------------------

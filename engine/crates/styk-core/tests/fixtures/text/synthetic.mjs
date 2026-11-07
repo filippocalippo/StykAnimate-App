@@ -176,3 +176,60 @@ export function syntheticCff() {
     hhea: Uint8Array.from(hhea), hmtx: Uint8Array.from(hmtx), maxp: Uint8Array.from(maxp), name: Uint8Array.from(name), post: Uint8Array.from(post),
     kern: kernTable([[2, 5, -80], [5, 2, -60]])});
 }
+
+// ---- character maps ---------------------------------------------------------------------------------------------------
+
+/** A (3, 1) `cmap` with one format 4 subtable: `segments` are `[start, end, idDelta]`; the terminating segment is added. */
+export function cmapFormat4(segments) {
+  const all = [...segments, [0xffff, 0xffff, 1]];
+  const segCount = all.length;
+  const entrySelector = Math.floor(Math.log2(segCount)), searchRange = 2 * 2 ** entrySelector;
+  const sub = [...u16(4), ...u16(16 + segCount * 8), ...u16(0), ...u16(segCount * 2), ...u16(searchRange), ...u16(entrySelector),
+    ...u16(segCount * 2 - searchRange), ...all.flatMap(s => u16(s[1])), ...u16(0), ...all.flatMap(s => u16(s[0])),
+    ...all.flatMap(s => u16(s[2] & 0xffff)), ...all.flatMap(() => u16(0))];
+  return Uint8Array.from([...u16(0), ...u16(1), ...u16(3), ...u16(1), ...u32(12), ...sub]);
+}
+
+/** A (3, 10) `cmap` with one format 12 subtable: `groups` are `[start, end, firstGlyph]`. */
+export function cmapFormat12(groups) {
+  const sub = [...u16(12), ...u16(0), ...u32(16 + groups.length * 12), ...u32(0), ...u32(groups.length), ...groups.flatMap(([s, e, g]) => [...u32(s), ...u32(e), ...u32(g)])];
+  return Uint8Array.from([...u16(0), ...u16(1), ...u16(3), ...u16(10), ...u32(12), ...sub]);
+}
+
+// ---- a TrueType font of composite glyphs ----------------------------------------------------------------------------
+
+/**
+ * A TrueType font whose glyph `top` is a stack of composites: each level refers to the one below it twice. With
+ * `bomb` false the bottom is an empty composite and the top adds one triangle (so the font draws, and resolving it
+ * naively takes 2^levels steps); with `bomb` true the bottom is the triangle itself (so the resolved points double at
+ * every level). 'A' maps to the top glyph.
+ */
+export function syntheticComposite(levels, {bomb = false} = {}) {
+  const word = (flags, glyph, dx = 0, dy = 0) => [...u16(flags), ...u16(glyph), ...i16(dx), ...i16(dy)];
+  const composite = components => [...i16(-1), ...i16(0), ...i16(0), ...i16(0), ...i16(0), ...components.flatMap((c, i) => word(c[0] | (i < components.length - 1 ? 0x20 : 0), c[1], c[2] ?? 0, c[3] ?? 0))];
+  const triangle = [...i16(1), ...i16(0), ...i16(0), ...i16(500), ...i16(700), ...u16(2), ...u16(0), 1, 1, 1, ...i16(0), ...i16(500), ...i16(-250), ...i16(0), ...i16(0), ...i16(700)];
+  const glyphs = [[], triangle];
+  if (bomb) {
+    for (let k = 0; k < levels; k++) glyphs.push(composite([[3, glyphs.length - 1], [3, glyphs.length - 1, 10]]));
+  } else {
+    glyphs.push(composite([[3, 0]]));
+    for (let k = 0; k < levels; k++) glyphs.push(composite([[3, glyphs.length - 1], [3, glyphs.length - 1]]));
+    glyphs.push(composite([[3, glyphs.length - 1], [3, glyphs.length - 1], [3, 1, 100]]));
+  }
+  const top = glyphs.length - 1;
+  const loca = [0], glyf = [];
+  for (const g of glyphs) {
+    glyf.push(...g, ...new Array((4 - (g.length % 4)) % 4).fill(0));
+    loca.push(glyf.length);
+  }
+  const head = [...u32(0x00010000), ...u32(0), ...u32(0), ...u32(0x5f0f3cf5), ...u16(0), ...u16(1000), ...new Array(16).fill(0), ...i16(0), ...i16(-200),
+    ...i16(1000), ...i16(900), ...u16(0), ...u16(8), ...i16(2), ...i16(1), ...i16(0)];
+  const hhea = [...u32(0x00010000), ...i16(900), ...i16(-200), ...i16(0), ...u16(720), ...new Array(22).fill(0), ...u16(glyphs.length)];
+  const name = [...u16(0), ...u16(2), ...u16(6 + 2 * 12), ...u16(3), ...u16(1), ...u16(0x409), ...u16(1), ...u16(2 * 'Styk Composite'.length), ...u16(0),
+    ...u16(3), ...u16(1), ...u16(0x409), ...u16(2), ...u16(2 * 'Regular'.length), ...u16(2 * 'Styk Composite'.length), ...utf16('Styk Composite'), ...utf16('Regular')];
+  return writeSfnt(u32(0x00010000), {
+    head: Uint8Array.from(head), hhea: Uint8Array.from(hhea), maxp: Uint8Array.from([...u32(0x00005000), ...u16(glyphs.length)]),
+    hmtx: Uint8Array.from(glyphs.flatMap(() => [...u16(600), ...i16(0)])), cmap: cmapFormat4([[0x41, 0x41, top - 0x41]]),
+    name: Uint8Array.from(name), post: Uint8Array.from([...u32(0x00030000), ...new Array(28).fill(0)]),
+    loca: Uint8Array.from(loca.flatMap(u32)), glyf: Uint8Array.from(glyf)});
+}

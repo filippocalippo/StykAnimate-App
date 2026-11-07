@@ -18,6 +18,7 @@ miniz_oxide = { version = "0.9", default-features = false }
 
 [dev-dependencies]
 styk-core = { path = "../styk-core" }
+zstd = "0.13"
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
 sha2 = "0.10"

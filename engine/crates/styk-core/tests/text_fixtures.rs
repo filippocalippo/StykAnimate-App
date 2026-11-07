@@ -24,8 +24,20 @@ fn read_json(path: &Path) -> Value {
     json::parse(&std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))).expect("fixture JSON")
 }
 
-fn text_of(path: &Path) -> String {
-    std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+/// The texts of a fixture folder (`texts.json.zst`: zstd-compressed JSON `{name: text}`).
+struct Texts(std::collections::HashMap<String, String>);
+
+fn texts(dir: &Path) -> Texts {
+    let packed = std::fs::read(dir.join("texts.json.zst")).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
+    let raw = zstd::decode_all(&packed[..]).expect("texts.json.zst is zstd");
+    let value = json::parse(&raw).expect("texts.json.zst holds JSON");
+    Texts(value.as_obj().expect("an object of texts").iter().map(|(k, v)| (k.to_string(), v.as_str().expect("a text").to_string())).collect())
+}
+
+impl Texts {
+    fn get(&self, name: &str) -> &str {
+        self.0.get(name).unwrap_or_else(|| panic!("no text named {name}"))
+    }
 }
 
 fn sha256(bytes: &[u8]) -> String {
@@ -120,6 +132,9 @@ fn font_bytes(spec: &str) -> Vec<u8> {
     if let Some(name) = spec.strip_prefix("recipe:") {
         return recipe_bytes(name);
     }
+    if let Some(name) = spec.strip_prefix("fixture:") {
+        return std::fs::read(fixtures().join(name)).unwrap();
+    }
     assert_eq!(spec, "synthetic-cff");
     std::fs::read(fixtures().join("synthetic-cff.otf")).unwrap()
 }
@@ -191,6 +206,7 @@ fn assert_error(label: &str, error: &TextError, expected: &Value) {
 /// Runs every step of `dir/cases.json` and returns how many there were.
 fn check_cases(dir: &Path) -> usize {
     let cases = read_json(&dir.join("cases.json"));
+    let texts = texts(dir);
     let mut checked = 0;
     for case in cases.get("cases").and_then(Value::elements).unwrap().iter() {
         let id = case.get("id").and_then(Value::as_str).unwrap();
@@ -199,10 +215,18 @@ fn check_cases(dir: &Path) -> usize {
         for (step, entry) in case.get("steps").and_then(Value::elements).unwrap().iter().enumerate() {
             let label = format!("{id} step {step}");
             let request = CompileRequest { revision: step as u64, font: source.clone(), options: entry.get("options").unwrap().clone() };
+            if entry.get("superseded").is_some_and(Value::truthy) {
+                // A draft the job abandons once it started: the worker of today finishes it, so the font's state moves on anyway.
+                let cancelled = CancelToken::new();
+                cancelled.cancel();
+                assert_eq!(compiler.compile(&request, &cancelled), Err(TextError::Cancelled), "{label}");
+                checked += 1;
+                continue;
+            }
             let result = compiler.compile(&request, &CancelToken::new());
             if let Some(file) = entry.get("expected").and_then(Value::as_str) {
                 let figure = result.unwrap_or_else(|e| panic!("{label}: {e:?}"));
-                assert_figure(&label, &figure, &text_of(&dir.join(file)));
+                assert_figure(&label, &figure, texts.get(file));
             } else if let Some(digest) = entry.get("digest").and_then(Value::as_str) {
                 let figure = result.unwrap_or_else(|e| panic!("{label}: {e:?}"));
                 assert_eq!(sha256(json::to_string(&figure).as_bytes()), digest, "{label}: digest of the figure text");
@@ -240,16 +264,17 @@ fn installed_fonts_equal_the_javascript_compiler_bit_for_bit() {
 #[test]
 fn imported_text_editing_equals_the_javascript_editor() {
     let cases = read_json(&fixtures().join("cases.json"));
+    let texts = texts(&fixtures());
     for case in cases.get("native").and_then(Value::elements).unwrap().iter() {
         let id = case.get("id").and_then(Value::as_str).unwrap();
-        let source = read_json(&fixtures().join(case.get("source").and_then(Value::as_str).unwrap()));
+        let source = json::parse(texts.get(case.get("source").and_then(Value::as_str).unwrap()).as_bytes()).unwrap();
         let options = read_text_figure_options(&source, None).unwrap();
         assert_eq!(options, case.get("readOptions").unwrap().clone(), "{id}: the options read from the figure");
         for (step, entry) in case.get("steps").and_then(Value::elements).unwrap().iter().enumerate() {
             let label = format!("{id} step {step}");
             let result = compile_embedded_text_figure(entry.get("options").unwrap(), &source);
             match entry.get("expected").and_then(Value::as_str) {
-                Some(file) => assert_figure(&label, &result.unwrap_or_else(|e| panic!("{label}: {e:?}")), &text_of(&fixtures().join(file))),
+                Some(file) => assert_figure(&label, &result.unwrap_or_else(|e| panic!("{label}: {e:?}")), texts.get(file)),
                 None => assert_error(&label, &result.expect_err(&label), entry.get("error").unwrap()),
             }
         }
@@ -261,7 +286,7 @@ fn imported_text_editing_equals_the_javascript_editor() {
             let font = font_source(&mut compiler, entry.get("font").and_then(Value::as_str).unwrap());
             let request = CompileRequest { revision: 0, font, options: entry.get("options").unwrap().clone() };
             let figure = compiler.compile(&request, &CancelToken::new()).unwrap_or_else(|e| panic!("{label}: {e:?}"));
-            assert_figure(&label, &figure, &text_of(&fixtures().join(entry.get("expected").and_then(Value::as_str).unwrap())));
+            assert_figure(&label, &figure, texts.get(entry.get("expected").and_then(Value::as_str).unwrap()));
         }
     }
 }
@@ -291,4 +316,81 @@ fn faces_report_the_names_and_style_flags_opentype_js_reads() {
         assert_eq!(Some(font.bold()), face.get("bold").and_then(Value::as_bool), "{spec}: bold");
         assert_eq!(Some(font.italic()), face.get("italic").and_then(Value::as_bool), "{spec}: italic");
     }
+}
+
+#[test]
+fn a_font_whose_winning_cmap_mapping_names_a_missing_glyph_is_refused_but_an_overwritten_one_is_not() {
+    let cases = read_json(&fixtures().join("cases.json"));
+    let rejected: Vec<String> = cases.get("rejected").and_then(Value::elements).unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert!(rejected.len() >= 2);
+    for spec in rejected {
+        assert!(Font::parse(font_bytes(&spec)).is_err(), "{spec} must be refused as opentype.js refuses it");
+    }
+    // The accepted ones (cmap4-overwritten, cmap12-overwritten) are compile cases of `cases.json`.
+}
+
+/// Reference results of the normalisation of every character of the Basic Multilingual Plane in six contexts, from the
+/// runtime of today's app (Unicode 15.1), and the cases that exposed a newer table.
+#[test]
+fn normalisation_is_the_unicode_version_of_the_reference_runtime() {
+    use styk_core::text::{TextOptions, TextSettings};
+    let texts = texts(&fixtures());
+    let sweep = json::parse(texts.get("nfc-sweep.json").as_bytes()).unwrap();
+    assert_eq!(sweep.get("unicode").and_then(Value::as_str), Some("15.1"));
+    let changed = sweep.get("changed").and_then(Value::as_obj).unwrap();
+    let contexts: [fn(char) -> String; 6] = [
+        |c| c.to_string(),
+        |c| format!("A{c}"),
+        |c| format!("B{c}\u{316}"),
+        |c| format!("B\u{316}{c}"),
+        |c| format!("B{c}\u{301}"),
+        |c| format!("B\u{301}{c}"),
+    ];
+    let mut wrong = Vec::new();
+    for code in 0..0x10000u32 {
+        let Some(c) = char::from_u32(code) else { continue };
+        for (i, context) in contexts.iter().enumerate() {
+            let input = context(c);
+            let expected: Value = match changed.get(&format!("{code:x}")) {
+                Some(outputs) => outputs.item(i).unwrap(),
+                None => Value::str(&input),
+            };
+            let got = match TextSettings::validate(&TextOptions::new(input.clone()), true) {
+                Ok(settings) => Value::str(&settings.text),
+                Err(TextError::Message { key, .. }) => {
+                    let mut o = Obj::new();
+                    o.set("error", Value::str(key));
+                    Value::object(o)
+                }
+                Err(other) => panic!("{other:?}"),
+            };
+            if got != expected && wrong.len() < 8 {
+                wrong.push(format!("U+{code:04X} context {i}: rust {got}, reference {expected}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+    for named in sweep.get("named").and_then(Value::elements).unwrap().iter() {
+        let text = named.get("text").and_then(Value::as_str).unwrap();
+        let settings = TextSettings::validate(&TextOptions::new(text), true).unwrap();
+        assert_eq!(Some(settings.text.as_str()), named.get("nfc").and_then(Value::as_str), "{text:?}");
+    }
+}
+
+/// A stack of composites that each refer to the one below twice resolves in linear time and memory, and a stack that doubles
+/// its points at every level is refused instead of exhausting the machine.
+#[test]
+fn composite_resolution_is_bounded() {
+    let started = std::time::Instant::now();
+    let font = Font::parse(font_bytes("fixture:synthetic-composite-bomb.ttf")).unwrap();
+    let top = font.glyph_index(0x41).unwrap();
+    let error = font.scaled_path(top, 50.0).expect_err("2^24 triangles are not a glyph");
+    assert!(matches!(error, styk_core::text::FontError::Invalid(_)), "{error:?}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(20), "refusing took {:?}", started.elapsed());
+    // The stack that does not double its points is a compile case of `cases.json` (composite-dag) and finishes at once.
+    let started = std::time::Instant::now();
+    let font = Font::parse(font_bytes("fixture:synthetic-composite.ttf")).unwrap();
+    let top = font.glyph_index(0x41).unwrap();
+    assert_eq!(font.scaled_path(top, 50.0).unwrap().len(), 5);
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "resolving took {:?}", started.elapsed());
 }

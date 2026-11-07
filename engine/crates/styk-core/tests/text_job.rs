@@ -1,7 +1,8 @@
 //! The text job: revisions, latest draft wins, cancellation, the bounded command queue and the face limits.
 
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use styk_core::text::{
@@ -85,7 +86,7 @@ fn a_running_compile_stops_when_a_newer_draft_arrives() {
 }
 
 #[test]
-fn a_cancelled_token_stops_a_compile_before_it_does_any_work() {
+fn a_cancelled_token_ends_a_compile_with_cancelled_after_its_glyphs_are_read() {
     let mut compiler = compiler();
     let token = CancelToken::new();
     token.cancel();
@@ -169,4 +170,90 @@ fn faces_are_limited_in_number_and_size_and_must_parse() {
     let embedded = CompileRequest { revision: 0, font: FontSource::Embedded, options: options("x", 20.0) };
     assert!(matches!(compiler.compile(&embedded, &CancelToken::new()), Err(TextError::Message { key: "errors.textAuthoringWorker.thereIsNoEmbeddedTextToEdit", .. })));
     let _ = json::to_string(&Value::Null);
+}
+
+#[test]
+fn dropping_the_job_does_not_wait_for_a_worker_stuck_in_its_notification() {
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let entered = Arc::new(AtomicBool::new(false));
+    let job = {
+        let (gate, entered) = (gate.clone(), entered.clone());
+        TextJob::spawn(compiler(), move || {
+            entered.store(true, Ordering::Release);
+            let (open, changed) = &*gate;
+            let mut open = open.lock().unwrap();
+            while !*open {
+                open = changed.wait(open).unwrap();
+            }
+        })
+    };
+    job.set_source(None).unwrap();
+    let started = Instant::now();
+    while !entered.load(Ordering::Acquire) {
+        assert!(started.elapsed() < Duration::from_secs(10), "the worker never answered");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let (done, returned) = mpsc::channel();
+    std::thread::spawn(move || {
+        drop(job);
+        let _ = done.send(());
+    });
+    let dropped = returned.recv_timeout(Duration::from_secs(2)).is_ok();
+    // Whatever happened, let the worker go so the test leaves no thread behind.
+    let (open, changed) = &*gate;
+    *open.lock().unwrap() = true;
+    changed.notify_all();
+    assert!(dropped, "dropping the job waited for its worker");
+}
+
+#[test]
+fn closing_the_job_hands_the_thread_to_the_caller_to_join_off_the_interface_thread() {
+    let job = TextJob::spawn(compiler(), || {});
+    job.compile(request(1, "done soon"));
+    let thread = job.close().expect("the thread is still there");
+    thread.join().expect("the worker ends cleanly");
+}
+
+#[test]
+fn replies_nobody_takes_are_counted_with_the_commands_and_stay_bounded() {
+    let job = TextJob::spawn(compiler(), || {});
+    let (mut accepted, mut busy) = (0, 0);
+    for _ in 0..300 {
+        match job.set_source(None) {
+            Ok(()) => accepted += 1,
+            Err(Busy) => busy += 1,
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(busy > 0, "{accepted} commands were accepted without a single reply being taken");
+    assert!(accepted <= 17, "{accepted} commands were accepted");
+    std::thread::sleep(Duration::from_millis(100));
+    let events = job.take_events();
+    assert_eq!(events.len(), accepted);
+    // Taking the replies frees the room.
+    assert_eq!(job.set_source(None), Ok(()));
+}
+
+#[test]
+fn queued_payload_bytes_are_bounded_too() {
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let job = {
+        let gate = gate.clone();
+        TextJob::spawn(compiler(), move || {
+            let (open, changed) = &*gate;
+            let mut open = open.lock().unwrap();
+            while !*open {
+                open = changed.wait(open).unwrap();
+            }
+        })
+    };
+    job.set_source(None).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    // Fonts of 32 MiB each: a handful fill the byte allowance long before the count does.
+    let big = vec![0u8; 32 * 1024 * 1024];
+    let accepted = (0..10).filter(|_| job.load_font(big.clone(), "big").is_ok()).count();
+    let (open, changed) = &*gate;
+    *open.lock().unwrap() = true;
+    changed.notify_all();
+    assert!((1..=4).contains(&accepted), "{accepted} fonts of 32 MiB were queued");
 }

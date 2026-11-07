@@ -3,6 +3,9 @@
 //! The arithmetic is in doubles in opentype.js's order (`transformPoints`, the midpoint of two off-curve points as
 //! `(a + b) * 0.5`); skrifa scales in single precision and resolves composites differently, so it cannot give the same bits.
 
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use super::path::PathCmd;
 use super::reader::{Data, Parser, R};
 use super::FontError;
@@ -32,29 +35,64 @@ impl Glyf {
 
     /// The outline of one glyph in font units, as `Glyph.path.commands`.
     pub fn path(&self, data: Data, gid: usize) -> R<Vec<PathCmd>> {
-        match self.points(data, gid, 0)? {
+        let mut resolver = Resolver { glyf: self, data, memo: HashMap::new(), moved: 0 };
+        match resolver.points(gid, 0)? {
             Some(points) => contour_path(&points),
             None => Ok(Vec::new()),
         }
     }
+}
+
+/// Points one outline may copy while its composites are resolved. Real glyphs have hundreds; a stack of composites that
+/// doubles its points at every level would otherwise exhaust memory.
+const MAX_POINTS_MOVED: usize = 4_000_000;
+
+/// Resolves composites the way opentype.js does: each glyph once (it keeps the resolved points on the glyph), so a glyph
+/// that many composites share costs once, not once per reference. The memo lives for one outline.
+struct Resolver<'a> {
+    glyf: &'a Glyf,
+    data: Data<'a>,
+    memo: HashMap<usize, Option<Rc<Vec<Point>>>>,
+    moved: usize,
+}
+
+impl Resolver<'_> {
+    fn spend(&mut self, points: usize) -> R<()> {
+        self.moved = self.moved.saturating_add(points);
+        if self.moved > MAX_POINTS_MOVED {
+            return Err(FontError::Invalid("composite glyphs are too complex"));
+        }
+        Ok(())
+    }
 
     /// `glyph.points` after `getPath()`; `None` for a glyph with no data (opentype.js leaves `points` undefined).
-    fn points(&self, data: Data, gid: usize, depth: usize) -> R<Option<Vec<Point>>> {
+    fn points(&mut self, gid: usize, depth: usize) -> R<Option<Rc<Vec<Point>>>> {
+        if let Some(done) = self.memo.get(&gid) {
+            return Ok(done.clone());
+        }
         if depth > MAX_COMPOSITE_DEPTH {
             return Err(FontError::Invalid("composite glyphs nest too deeply"));
         }
-        let (offset, next) = match (self.loca.get(gid), self.loca.get(gid + 1)) {
+        let resolved = self.resolve(gid, depth)?.map(Rc::new);
+        self.memo.insert(gid, resolved.clone());
+        Ok(resolved)
+    }
+
+    fn resolve(&mut self, gid: usize, depth: usize) -> R<Option<Vec<Point>>> {
+        let (offset, next) = match (self.glyf.loca.get(gid), self.glyf.loca.get(gid + 1)) {
             (Some(&a), Some(&b)) => (a, b),
             _ => return Err(FontError::GlyphOutOfRange(gid)),
         };
         if offset == next {
             return Ok(None);
         }
-        let mut p = Parser::new(data, self.start + offset as i64);
+        let mut p = Parser::new(self.data, self.glyf.start + offset as i64);
         let contours = p.i16()?;
         p.skip(8); // xMin, yMin, xMax, yMax
         if contours > 0 {
-            return Ok(Some(simple_points(&mut p, contours as usize)?));
+            let points = simple_points(&mut p, contours as usize)?;
+            self.spend(points.len())?;
+            return Ok(Some(points));
         }
         if contours == 0 {
             return Ok(Some(Vec::new()));
@@ -92,8 +130,10 @@ impl Glyf {
                 scale10 = p.f2dot14()?;
                 y_scale = p.f2dot14()?;
             }
-            if let Some(component) = self.points(data, glyph_index, depth + 1)? {
+            self.spend(1)?;
+            if let Some(component) = self.points(glyph_index, depth + 1)? {
                 let transform = Transform { x_scale, scale01, scale10, y_scale, dx, dy };
+                self.spend(component.len())?;
                 let transformed = match matched {
                     None => transform_points(&component, &transform),
                     Some((first, second)) => {
@@ -117,7 +157,7 @@ impl Glyf {
         }
         if flags & 0x100 != 0 {
             let length = p.u16()? as usize;
-            data.slice(p.at(), length)?;
+            self.data.slice(p.at(), length)?;
         }
         Ok(Some(points))
     }

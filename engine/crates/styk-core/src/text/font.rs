@@ -302,13 +302,15 @@ impl Cmap {
         }
     }
 
-    /// Reads every mapping once, as opentype.js's eager `glyphIndexMap` does, so a bad glyph array is an error up front,
-    /// and checks that each mapped glyph exists.
+    /// What opentype.js does when it fills `glyphIndexMap` and then names the glyphs (`addGlyphNames`): every glyph array is
+    /// read, a read outside the file is an error, and then each mapping that **survived** (the last one made for a
+    /// character) must name a glyph of the font. A mapping that a later one overwrote is never looked at.
     fn check_glyphs(&self, data: Data, glyph_count: usize) -> R<()> {
         // Segments may overlap in a malformed font; opentype.js would walk each character of each one.
         let mut budget = 4_000_000usize;
         match self {
             Cmap::Format4(segments) => {
+                let mut winners: Vec<Option<u32>> = vec![None; 0x10000];
                 for s in segments {
                     if s.start > s.end {
                         continue;
@@ -316,20 +318,51 @@ impl Cmap {
                     let characters = (s.end - s.start) as usize + 1;
                     budget = budget.checked_sub(characters).ok_or(FontError::Invalid("cmap segments overlap too much"))?;
                     for c in s.start as u32..=s.end as u32 {
-                        let glyph = Self::segment_glyph(data, s, c)?;
-                        if glyph as usize >= glyph_count {
-                            return Err(FontError::GlyphOutOfRange(glyph as usize));
-                        }
+                        winners[c as usize] = Some(Self::segment_glyph(data, s, c)?);
                     }
+                }
+                if let Some(glyph) = winners.iter().flatten().find(|g| **g as usize >= glyph_count) {
+                    return Err(FontError::GlyphOutOfRange(*glyph as usize));
                 }
             }
             Cmap::Format12(groups) => {
-                for &(start, end, glyph) in groups {
-                    if start <= end && glyph + (end - start) as u64 >= glyph_count as u64 {
-                        return Err(FontError::GlyphOutOfRange((glyph + (end - start) as u64) as usize));
+                // The last group to cover a character wins: walk the groups from the end and look only at the characters
+                // no later group covered.
+                let mut covered: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
+                for &(start, end, glyph) in groups.iter().rev() {
+                    if start > end {
+                        continue;
                     }
+                    let overlapping: Vec<(u32, u32)> =
+                        covered.range(..=end).rev().take_while(|(_, last)| **last >= start).map(|(a, b)| (*a, *b)).collect::<Vec<_>>().into_iter().rev().collect();
+                    let mut next = start as u64;
+                    for &(from, to) in &overlapping {
+                        if (from as u64) > next {
+                            Self::check_run(glyph, start, next as u32, from - 1, glyph_count)?;
+                        }
+                        next = next.max(to as u64 + 1);
+                    }
+                    if next <= end as u64 {
+                        Self::check_run(glyph, start, next as u32, end, glyph_count)?;
+                    }
+                    let (mut union_start, mut union_end) = (start, end);
+                    for (from, to) in overlapping {
+                        covered.remove(&from);
+                        union_start = union_start.min(from);
+                        union_end = union_end.max(to);
+                    }
+                    covered.insert(union_start, union_end);
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// The characters `from..=to` of a group that starts at `start` with glyph `glyph` all name existing glyphs.
+    fn check_run(glyph: u64, start: u32, _from: u32, to: u32, glyph_count: usize) -> R<()> {
+        let last = glyph + (to - start) as u64;
+        if last >= glyph_count as u64 {
+            return Err(FontError::GlyphOutOfRange(last as usize));
         }
         Ok(())
     }

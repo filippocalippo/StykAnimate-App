@@ -3,8 +3,11 @@
 //!
 //! The figures come from `styk-core`'s fixtures: the JavaScript figure is the fixture's JSON text, the native one is
 //! compiled here from the same draft. Each is imported into its own edit session by `importFigure`, as the dialog's
-//! Apply does, and the open document is saved three ways.
+//! Apply does, and the open document is saved three ways. Every case pins its outcome: a file that is written must
+//! reopen with the text in it (and then equal the other side's bytes); a file that today's exporter refuses must be
+//! refused with the same message on both sides. Refusing everything cannot pass.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -15,6 +18,7 @@ use styk_edit::session::Session;
 use styk_engine::save::{save_project, ProjectRequest};
 use styk_eval::eval::Prepared;
 use styk_eval::load::Loader;
+use styk_formats::{files, Kind};
 
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
@@ -26,6 +30,12 @@ fn fixtures() -> PathBuf {
 
 fn parse(text: &str) -> Value {
     json::parse(text.as_bytes()).unwrap()
+}
+
+fn texts() -> HashMap<String, String> {
+    let packed = std::fs::read(fixtures().join("texts.json.zst")).unwrap();
+    let value = json::parse(&zstd::decode_all(&packed[..]).unwrap()).unwrap();
+    value.as_obj().unwrap().iter().map(|(k, v)| (k.to_string(), v.as_str().unwrap().to_string())).collect()
 }
 
 /// A session over the document the `startup-sheet` tape starts from.
@@ -70,11 +80,11 @@ fn exported(tree: &Value, format: Format) -> Result<Vec<u8>, String> {
     .map_err(|e| e.to_string())
 }
 
-fn native_figure(case: &str, step: usize) -> (Value, Value) {
+fn native_figure(texts: &HashMap<String, String>, case: &str, step: usize) -> (Value, Value) {
     let cases = parse(&std::fs::read_to_string(fixtures().join("cases.json")).unwrap());
     let case = cases.get("cases").unwrap().elements().unwrap().iter().find(|c| c.get("id").and_then(Value::as_str) == Some(case)).unwrap();
     let entry = case.get("steps").unwrap().item(step).unwrap();
-    let javascript = parse(&std::fs::read_to_string(fixtures().join(entry.get("expected").and_then(Value::as_str).unwrap())).unwrap());
+    let javascript = parse(&texts[entry.get("expected").and_then(Value::as_str).unwrap()]);
     let spec = case.get("font").and_then(Value::as_str).unwrap();
     let mut compiler = TextCompiler::new(Arc::new(|style| {
         let name = ["Regular", "Bold", "Italic", "BoldItalic"][style];
@@ -92,22 +102,93 @@ fn native_figure(case: &str, step: usize) -> (Value, Value) {
     (javascript, native)
 }
 
+/// What today's exporter does with a case in one format.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Outcome {
+    /// A file that reopens with the text in it.
+    File,
+    /// The exporter's refusal, which contains this text.
+    Refused(&'static str),
+}
+
+use Outcome::{File, Refused};
+
+const GRADIENT: &str = "pivotFilesCannotRepresentTheseGradientFills";
+
+/// `(case, step, .piv, .stk)`.
+const CASES: [(&str, usize, Outcome, Outcome); 8] = [
+    ("hello-regular", 0, File, File),
+    ("kerning-bolditalic", 0, File, File),
+    ("lines-italic", 1, File, File),
+    ("tab-bold", 0, File, File),
+    ("nfc", 0, File, File),
+    ("fira", 0, File, File),
+    ("paint-and-style", 0, File, File),
+    ("paint-and-style", 2, Refused(GRADIENT), Refused(GRADIENT)),
+];
+
+/// The texts of every text asset found anywhere in a reopened document.
+fn asset_texts(value: &Value, found: &mut Vec<(String, usize)>) {
+    match value {
+        Value::Obj(object) => {
+            for (key, child) in object.iter() {
+                if &**key == "text_assets" {
+                    for asset in child.elements().into_iter().flat_map(|e| e.iter()) {
+                        if let Some(text) = asset.get("text").and_then(Value::as_str) {
+                            found.push((text.replace("\r\n", "\n"), asset.get("glyphs").and_then(Value::array_len).unwrap_or(0)));
+                        }
+                    }
+                } else {
+                    asset_texts(child, found);
+                }
+            }
+        }
+        Value::Arr(items) => items.iter().for_each(|child| asset_texts(child, found)),
+        _ => {}
+    }
+}
+
+fn assert_reopens_with_text(label: &str, document: &Value, text: &str) {
+    let mut found = Vec::new();
+    asset_texts(document, &mut found);
+    assert!(found.iter().any(|(t, glyphs)| t == text && *glyphs > 0), "{label}: no text asset {text:?} with glyphs in {found:?}");
+}
+
 #[test]
 fn a_natively_compiled_text_figure_saves_to_the_bytes_of_the_javascript_one() {
-    let mut compared = 0;
-    for (case, step) in [("hello-regular", 0), ("kerning-bolditalic", 0), ("lines-italic", 1), ("tab-bold", 0), ("nfc", 0), ("fira", 0), ("paint-and-style", 0), ("paint-and-style", 2)] {
-        let (javascript, native) = native_figure(case, step);
+    let texts = texts();
+    let mut files_compared = 0;
+    let mut refusals_compared = 0;
+    for (case, step, piv, stk) in CASES {
+        let (javascript, native) = native_figure(&texts, case, step);
         assert_eq!(json::to_string(&javascript), json::to_string(&native), "{case} {step}: the figure itself");
+        let text = javascript.path(&["text_assets"]).and_then(|a| a.item(0)).and_then(|a| a.get("text").and_then(Value::as_str).map(str::to_string)).unwrap();
         let (from_javascript, from_native) = (imported(&javascript), imported(&native));
-        assert!(styk(&from_javascript) == styk(&from_native), "{case} {step}: .styk");
-        for (format, name) in [(Format::Piv, ".piv"), (Format::Stk, ".stk")] {
+
+        let (a, b) = (styk(&from_javascript), styk(&from_native));
+        assert!(a == b, "{case} {step}: .styk bytes differ");
+        assert_reopens_with_text(&format!("{case} {step} .styk"), &files::open_document(&a, Kind::Styk).unwrap(), &text);
+        files_compared += 1;
+
+        for (format, name, kind, expected) in [(Format::Piv, ".piv", "piv", piv), (Format::Stk, ".stk", "stk", stk)] {
+            let label = format!("{case} {step} {name}");
             let (a, b) = (exported(&from_javascript, format), exported(&from_native, format));
-            assert!(a == b, "{case} {step}: {name}");
-            if let Ok(bytes) = &a {
-                assert!(bytes.len() > 100, "{case} {step}: {name} is a real file");
+            match expected {
+                File => {
+                    let (a, b) = (a.unwrap_or_else(|e| panic!("{label}: refused: {e}")), b.unwrap_or_else(|e| panic!("{label}: refused natively: {e}")));
+                    assert!(a == b, "{label}: bytes differ");
+                    let decoded = styk_piv::decode_document(&a, &format!("text.{kind}"), &|| false).unwrap_or_else(|e| panic!("{label}: does not reopen: {e}"));
+                    assert_reopens_with_text(&label, &decoded.document, &text);
+                    files_compared += 1;
+                }
+                Refused(why) => {
+                    let (a, b) = (a.expect_err(&format!("{label}: expected a refusal")), b.expect_err(&format!("{label}: expected a refusal natively")));
+                    assert!(a.contains(why), "{label}: refusal {a}");
+                    assert_eq!(a, b, "{label}: the two sides refuse differently");
+                    refusals_compared += 1;
+                }
             }
-            compared += 1;
         }
     }
-    assert_eq!(compared, 16);
+    assert_eq!((files_compared, refusals_compared), (22, 2));
 }
