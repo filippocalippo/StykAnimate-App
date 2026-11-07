@@ -17,3 +17,6 @@ styk-services = { path = "../styk-services" }
 # on, so one binary runs under X11 and Wayland (the libraries are loaded at run time, not linked).
 [target.'cfg(target_os = "linux")'.dependencies]
 iced = { workspace = true, features = ["x11", "wayland", "wayland-dlopen", "wayland-decorations"] }
+
+[dev-dependencies]
+pollster = "0.4"

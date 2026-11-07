@@ -2692,6 +2692,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "iced",
+ "pollster",
  "styk-core",
  "styk-design",
  "styk-services",

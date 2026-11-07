@@ -386,3 +386,175 @@ impl shader::Primitive for InkPrimitive {
         true
     }
 }
+
+/// The pad on a real GPU device, drawn offscreen: skipped (and said so) on a machine with no adapter.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ink_pad::core::BrushConfig;
+    use iced::advanced::renderer::Scale;
+    use iced::{Point, Size};
+    use shader::Pipeline as _;
+    use shader::Primitive as _;
+    use std::time::Duration;
+    use styk_core::drawing::mapping::Mapping;
+    use styk_core::drawing::stroke_input::StrokeCommand;
+    use styk_core::drawing::worker::Worker;
+    use styk_services::input::{InputQueue, Modifiers};
+    use styk_services::{Clock, FixedClock};
+
+    const SIZE: u32 = 256;
+
+    struct Gpu {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        target: wgpu::Texture,
+    }
+
+    fn gpu() -> Option<Gpu> {
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("test target"),
+            size: wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        Some(Gpu { device, queue, target })
+    }
+
+    /// One frame: prepare, draw into the target, read the pixels back (straight RGBA, SIZE x SIZE).
+    fn frame(gpu: &Gpu, pipeline: &mut InkPipeline, primitive: &InkPrimitive) -> Vec<u8> {
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(SIZE as f32, SIZE as f32));
+        let viewport = Viewport::with_physical_size(Size::new(SIZE, SIZE), Scale::default());
+        primitive.prepare(pipeline, &gpu.device, &gpu.queue, &bounds, &viewport);
+        let view = gpu.target.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("test pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            assert!(primitive.draw(pipeline, &mut pass));
+        }
+        let row = SIZE * 4;
+        let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some("readback"), size: (row * SIZE) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        encoder.copy_texture_to_buffer(
+            gpu.target.as_image_copy(),
+            wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None } },
+            wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 },
+        );
+        gpu.queue.submit([encoder.finish()]);
+        let slice = buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        let _ = gpu.device.poll(wgpu::PollType::wait_indefinitely());
+        let pixels = slice.get_mapped_range().expect("the readback maps").to_vec();
+        pixels
+    }
+
+    fn core() -> Arc<PadCore> {
+        let clock: Arc<dyn Clock> = Arc::new(FixedClock::new());
+        PadCore::new(InputQueue::new(), Worker::spawn(Vec::new(), Arc::new(|| {})), clock)
+    }
+
+    /// What the cel's tiles are over white paper, as SIZE x SIZE pixels (the pad shows cel pixels 1:1 from 0, 0).
+    fn expected(tiles: &[(i64, i64, Vec<u8>)]) -> Vec<u8> {
+        let mut out = vec![255u8; (SIZE * SIZE * 4) as usize];
+        for (tx, ty, pixels) in tiles {
+            for y in 0..64 {
+                for x in 0..64 {
+                    let (px, py) = (tx * 64 + x, ty * 64 + y);
+                    if !(0..SIZE as i64).contains(&px) || !(0..SIZE as i64).contains(&py) {
+                        continue;
+                    }
+                    let src = &pixels[((y * 64 + x) * 4) as usize..][..4];
+                    let at = ((py as u32 * SIZE + px as u32) * 4) as usize;
+                    let a = src[3] as f32 / 255.0;
+                    for c in 0..3 {
+                        out[at + c] = (src[c] as f32 * a + 255.0 * (1.0 - a)).round() as u8;
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_pad_draws_the_cel_the_worker_holds_pixel_for_pixel_and_keeps_no_preview_once_the_tiles_are_in() {
+        let Some(gpu) = gpu() else {
+            eprintln!("no GPU adapter on this machine: the pad's drawing is not checked here");
+            return;
+        };
+        let core = core();
+        let mut pipeline = InkPipeline::new(&gpu.device, &gpu.queue, wgpu::TextureFormat::Rgba8Unorm);
+        let primitive = InkPrimitive { core: core.clone() };
+        // A firm round stroke across the pad, through the real worker.
+        core.with_ledger(|ledger| ledger.stroke_started(1, true));
+        let brush = BrushConfig { size: 14.0, hardness: 1.0, ..BrushConfig::default() }.to_json();
+        let send = |command: StrokeCommand| {
+            core.worker.command(command, &brush);
+        };
+        send(StrokeCommand::Begin { id: 1, erase: false, mapping: Mapping::default(), modifiers: Modifiers::NONE });
+        for i in 0..30 {
+            send(StrokeCommand::Sample { id: 1, x: 20.0 + i as f64 * 7.0, y: 100.0 + (i as f64 * 0.4).sin() * 30.0, pressure: 1.0, time_ms: i as f64, lean: None });
+        }
+        send(StrokeCommand::End { id: 1 });
+        let mut last = Vec::new();
+        for _ in 0..400 {
+            last = frame(&gpu, &mut pipeline, &primitive);
+            if core.inspector().finished_strokes >= 1 && core.gpu_stats().batches_waiting == 0 && core.with_ledger(|l| l.visible_dabs()) == 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(core.gpu_stats().wet_instances, 0, "no preview is drawn once the tiles are in");
+        // Once the tiles are in, the frame is the cel: pixel for pixel what the worker holds, over white.
+        core.worker.send(styk_core::drawing::worker::Request::Snapshot { token: 1 });
+        let snapshot = loop {
+            // The pad's own prepare reads the replies for it; the test only needs the snapshot.
+            if let styk_core::drawing::worker::Reply::Snapshot { tiles, .. } = core.worker.wait(Duration::from_secs(10)).expect("the worker answers") {
+                break tiles;
+            }
+        };
+        let want = expected(&snapshot);
+        let ink = want.chunks_exact(4).filter(|p| p[0] < 128).count();
+        assert!(ink > 500, "the stroke has ink: {ink} dark pixels");
+        let wrong = last.chunks_exact(4).zip(want.chunks_exact(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| (*x as i32 - *y as i32).abs() > 2)).count();
+        assert_eq!(wrong, 0, "{wrong} pixels of the frame differ from the cel");
+
+        // Clear and undo change tiles the pad holds: it is told which, asks for the ones it shows and draws what comes back.
+        let until = |core: &Arc<PadCore>, pipeline: &mut InkPipeline, target: &[u8]| {
+            for _ in 0..400 {
+                let image = frame(&gpu, pipeline, &InkPrimitive { core: core.clone() });
+                if image.chunks_exact(4).zip(target.chunks_exact(4)).all(|(a, b)| a.iter().zip(b.iter()).all(|(x, y)| (*x as i32 - *y as i32).abs() <= 2)) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            false
+        };
+        core.worker.send(styk_core::drawing::worker::Request::Clear);
+        assert!(until(&core, &mut pipeline, &vec![255u8; (SIZE * SIZE * 4) as usize]), "after a clear the pad shows blank paper");
+        core.worker.send(styk_core::drawing::worker::Request::Undo);
+        assert!(until(&core, &mut pipeline, &want), "after undoing the clear the pad shows the stroke again");
+        // Moving the view away evicts nothing it needs and back again shows the same pixels.
+        core.set_view(crate::ink_pad::View { zoom: 1.0, pan: (4096.0, 0.0) });
+        assert!(until(&core, &mut pipeline, &vec![255u8; (SIZE * SIZE * 4) as usize]), "a view over empty cel is blank paper");
+        core.set_view(crate::ink_pad::View { zoom: 1.0, pan: (0.0, 0.0) });
+        assert!(until(&core, &mut pipeline, &want), "the view back over the stroke shows it again");
+    }
+}
