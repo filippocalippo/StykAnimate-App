@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-input="pointer">
+<head><meta charset="utf-8"><link rel="stylesheet" href="/src/styles/app.css"><style>html,body{margin:0;overflow:hidden}#app{display:block}</style></head>
+<body><div id="app" class="shell"></div>
+<script type="module">
+import {hydrateIcons, icon} from '/src/icons.mjs';
+import {measureBand, syncBandSession} from '/src/shell/topbar.mjs';
+import {resolveTiers} from '/src/shell/layout-solver.mjs';
+import {installProjectTabs} from '/src/shell/project-tabs-view.mjs';
+import {ProjectTabs} from '/src/project-tabs.mjs';
+const html = await (await fetch('/index.html')).text();
+const doc = new DOMParser().parseFromString(html, 'text/html');
+const header = doc.querySelector('header.titlebar');
+document.getElementById('app').append(document.importNode(header, true));
+const band = document.querySelector('.titlebar');
+band.querySelectorAll("img").forEach(i => { i.src = "/symbol.svg"; });
+hydrateIcons(band);
+const tabs = new ProjectTabs();
+const view = installProjectTabs(band.querySelector('.project-tabs'), {tabs, activate: () => {}, close: () => {}, rename: () => {}, menu: () => {}, icon});
+window.band = band;
+window.setup = async ({theme = 'light', width = 1560, height = 1000, names = ['Untitled'], dirty = [], saving = [], front = 0, session = '', workspace = 'animate', controls = true, home = false}) => {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.chrome = height < 801 ? 'compact' : 'roomy';
+  for (const item of [...tabs.items]) { if (tabs.items.length > 1 && item.id === tabs.activeId) tabs.activate(tabs.items.find(o => o.id !== item.id).id); tabs.remove(item.id); }
+  const first = tabs.items[0];
+  let ids = [];
+  names.forEach((name, i) => { const item = tabs.add({name, dirty: !!dirty[i], saved: saving[i] ? 'saving' : null}); ids.push(item.id); });
+  if (first) { tabs.activate(ids[0] ?? first.id); tabs.remove(first.id); }
+  tabs.activate(ids[front]);
+  view.sync();
+  band.querySelector('#window-controls').hidden = !controls;
+  syncBandSession(band, session);
+  band.querySelectorAll('[data-workspace-mode]').forEach(b => { if (b.closest('.workspace-switch')) b.setAttribute('aria-pressed', String(!home && b.dataset.workspaceMode === workspace)); });
+  band.querySelector('.band-home').setAttribute('aria-pressed', String(home));
+  band.style.inlineSize = ''; band.removeAttribute('data-band');
+  // The dock shows the Properties sheet button where it folds Properties into a sheet (width tier compact, up to 800 px).
+  band.querySelector('.shell-sheet-button').hidden = !(width <= 800);
+  document.getElementById('app').style.width = width + 'px';
+  await document.fonts.ready;
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const widths = measureBand(band, {folded: true});
+  const solved = resolveTiers(width, height, {bandMin: widths});
+  const steps = solved.band;
+  if (steps.length) band.setAttribute('data-band', steps.join(' '));
+  await new Promise(r => setTimeout(r, 450));
+  const box = band.getBoundingClientRect();
+  const rects = {};
+  const add = (key, el) => { if (!el) return; const r = el.getBoundingClientRect(); if (r.width > 0) rects[key] = [r.x, r.y, r.width, r.height]; };
+  add('band', band);
+  add('mark', band.querySelector('.shell-mark')); add('home', band.querySelector('.band-home'));
+  add('tabs', band.querySelector('.project-tabs')); add('tabslist', band.querySelector('.project-tabs-list')); add('add', band.querySelector('.project-tabs-add'));
+  [...band.querySelectorAll('.project-tab')].forEach((el, i) => add('tab' + i, el));
+  add('switch', band.querySelector('.workspace-switch')); [...band.querySelectorAll('.band-label')].forEach((el, i) => { const r = document.createRange(); r.selectNodeContents(el); const b = r.getBoundingClientRect(); if (el.offsetParent !== null && b.width) rects['label' + i + ':' + el.textContent] = [b.x, b.y, b.width, b.height]; });
+  [...band.querySelectorAll('.workspace-switch .ui-segmented-item')].forEach((el, i) => add('ws' + i, el));
+  add('undo', band.querySelector('[data-action=undo]')); add('redo', band.querySelector('[data-action=redo]')); add('save', band.querySelector('.band-save'));
+  add('export', band.querySelector('.band-export'));
+  [...band.querySelectorAll('[data-band-session]')].forEach((el, i) => add('s' + i + ':' + el.dataset.action, el));
+  [...band.querySelectorAll('#window-controls > button')].forEach((el, i) => add('win' + i, el));
+  return {widths, steps, rects, tier: solved.tier, height: box.height};
+};
+window.ready = true;
+</script></body></html>
