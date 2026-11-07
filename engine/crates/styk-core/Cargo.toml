@@ -14,12 +14,14 @@ styk-edit = { path = "../styk-edit" }
 styk-engine = { path = "../styk-engine" }
 styk-eval = { path = "../styk-eval" }
 styk-math = { path = "../styk-math" }
+styk-render = { path = "../styk-render" }
 styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace" }
 unicode-normalization = "=0.1.23"
 
 [dev-dependencies]
 styk-services = { path = "../styk-services", features = ["test-fakes"] }
+styk-export = { path = "../styk-export" }
 sha2 = "0.10"
 styk-formats = { path = "../styk-formats" }
 zstd = "0.13"

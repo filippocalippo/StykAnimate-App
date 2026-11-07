@@ -18,6 +18,7 @@ devtools = ["dep:styk-text-check", "dep:styk-devtools", "dep:iced_winit", "styk-
 styk-text-check = { path = "../styk-text-check", optional = true }
 iced = { workspace = true }
 iced_runtime = { path = "../../../vendor/iced/runtime" }
+iced_wgpu = { path = "../../../vendor/iced/wgpu" }
 iced_winit = { path = "../../../vendor/iced/winit", optional = true }
 pollster = "0.4"
 styk-core = { path = "../styk-core" }

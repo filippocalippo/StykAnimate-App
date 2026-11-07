@@ -126,7 +126,7 @@ src/canvas-interactions.mjs	engine	styk-eval::picking	partial	Rust: handle/body/
 src/canvas-pinch.mjs	ui	-	stays	
 src/canvas-pose-input.mjs	ui	-	stays	
 src/canvas-raster-refinement.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
-src/canvas-wheel-zoom.mjs	ui	-	stays	
+src/canvas-wheel-zoom.mjs	engine	styk-core::stage	partial	Rust: native wheel easing and gesture idle policy; browser reference retained, native widget integration pending
 src/clipboard-asset-plan.mjs	engine	styk-edit	removed	deleted with the native frame clipboard: nothing in the interface copied or pasted keyframes on a native timeline (4009 bytes)
 src/clipboard-assets.mjs	engine	styk-edit	removed	Deleted: nothing called it; the engine makes the portable figure (styk-edit/src/export/figure.rs) (3252 bytes)
 src/clipboard-legacy-upgrade.mjs	engine	styk-edit	removed	deleted with the native frame clipboard (its legacy destination upgrade) (9681 bytes)
@@ -425,7 +425,7 @@ src/release-notes.mjs	app	-	stays	telemetry, support, updates
 src/render-artwork.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/renderer-camera-scene.mjs	engine	styk-render	removed	deleted: only the removed camera effects executor used it (2907 bytes)
 src/renderer-canvas-plan.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
-src/renderer-geometry.mjs	engine	styk-eval::view	partial	the interface's view math only: cameraMatrix, worldToScreen, screenToWorld and objectBounds. Rust: styk_eval::view (camera_matrix, orientation) and drawlist::artwork_bounds; the editing cut replaces picking and bounds with engine queries
+src/renderer-geometry.mjs	engine	styk-eval::view	partial	the interface's view math only: cameraMatrix, worldToScreen, screenToWorld and objectBounds. Rust: styk_eval::view (camera_matrix, orientation), styk-core::stage (viewport transforms, zoom and fit) and drawlist::artwork_bounds; the editing cut replaces picking and bounds with engine queries
 src/renderer-glyphs.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/renderer-handles.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/renderer-mesh-raster.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame

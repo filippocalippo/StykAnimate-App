@@ -528,6 +528,18 @@ by the engine (an edit frame whose trails are still being sampled asks the app f
 another frame, `Stage::refining`); so are 3D meshes, surfaces, poses and drawings a
 spatial bone turns.
 
+### Native stage host
+
+The native interface draws through `styk_core::stage::Painter` on iced's device
+and queue ([contract](../native/stage.md)). Its worker owns the existing renderer,
+prepares complete scheduler frames and detaches the output with `take_frame`.
+`RenderedFrame::present` uses the same blit in the host pass; `recycle_frame`
+returns ownership on the worker after the preceding presentation was submitted.
+The displayed texture is never mutated by pending work. `working_set_bound`
+admits scratch resources before rendering, and `prepare_sprites_export_bounded`
+admits the picture table before capacity growth; refusal leaves installed atlas
+contents intact. These APIs share the existing render/placement/upload paths.
+
 ### Picking artwork
 
 A click on artwork (`pick` in `src/app.mjs`) asks the stage which figure the frame it drew last paints at the point

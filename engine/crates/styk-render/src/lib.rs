@@ -36,6 +36,8 @@ pub mod effects;
 pub mod paint;
 #[cfg(feature = "gpu")]
 mod frame;
+#[cfg(feature = "gpu")]
+mod budget;
 #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
 pub mod native_gpu;
 #[cfg(feature = "gpu")]
@@ -59,7 +61,7 @@ mod view;
 #[cfg(feature = "gpu")]
 pub use images::{decode_images, DecodedImage, MAX_PAGES};
 #[cfg(feature = "gpu")]
-pub use present::read_frame;
+pub use present::{read_frame, RenderedFrame};
 pub use view::{ViewParams, CAMERA_PREVIEW_LIMIT};
 pub use effects::plan::DrawingGrid;
 

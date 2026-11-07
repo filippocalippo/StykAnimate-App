@@ -83,6 +83,8 @@ pub struct View {
     pub size: [u32; 2],
     pub zoom: f64,
     pub pan: [f64; 2],
+    pub rotation: f64,
+    pub flip: bool,
     /// Backing density, e.g. 1, .75, .5 or .25.
     pub quality: f64,
     /// Preview edge sampling can change without changing backing density.
@@ -96,6 +98,8 @@ impl Default for View {
             size: [640, 480],
             zoom: 1.0,
             pan: [0.0; 2],
+            rotation: 0.0,
+            flip: false,
             quality: 1.0,
             samples: 4,
             scene: Options::default(),
@@ -109,6 +113,7 @@ impl View {
             && self.zoom.is_finite()
             && self.zoom > 0.0
             && self.pan.iter().all(|v| v.is_finite())
+            && self.rotation.is_finite()
             && self.quality.is_finite()
             && self.quality > 0.0
             && self.quality <= 1.0
@@ -182,6 +187,8 @@ impl Key {
             size,
             zoom,
             pan,
+            rotation,
+            flip,
             quality,
             samples,
             scene,
@@ -200,7 +207,8 @@ impl Key {
         number(&mut hash, *tick);
         size.hash(&mut hash);
         samples.hash(&mut hash);
-        for value in [*zoom, pan[0], pan[1], *quality] {
+        flip.hash(&mut hash);
+        for value in [*zoom, pan[0], pan[1], *rotation, *quality] {
             number(&mut hash, value);
         }
         (hidden_uids, effects, camera, clip_to_canvas, background).hash(&mut hash);
@@ -505,6 +513,13 @@ pub struct Frames {
 }
 
 impl Frames {
+    /// A small ticket for the stage's paint worker, never a CPU frame lease on
+    /// the interface. Full-key checks and dense ownership stay on workers.
+    pub(crate) fn stage_ticket(&self) -> Option<WorkerTicket> {
+        self.wanted[0].as_ref().map(|request| WorkerTicket {
+            shared: self.shared.clone(), request: request.clone(),
+        })
+    }
     #[allow(clippy::too_many_arguments)] // The host supplies document identity and services once.
     pub fn new(
         document: u64,
@@ -770,6 +785,49 @@ impl Frames {
             self.cancel_slot(slot);
         }
         self.shared.changed.notify_all();
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct WorkerTicket {
+    shared: Arc<Shared>,
+    request: Request,
+}
+
+pub(crate) struct WorkerFrame {
+    pub key: Key,
+    pub frame: FrameData,
+    pub generation: Arc<Generation>,
+}
+
+impl WorkerTicket {
+    pub fn current(&self) -> bool { self.shared.current(&self.request) }
+    pub fn key(&self) -> &Key { &self.request.key }
+    pub fn identity(&self) -> (u64, u64, u64) { (self.request.key.document, self.request.epoch, self.request.stamp) }
+
+    /// Paint worker only. Clone the immutable list handle under a short lock,
+    /// then ask the document source outside it. The sole paint worker can hold
+    /// at most one extra frame (at most cache_bytes); it drops it itself.
+    pub fn read(&self) -> Result<Option<WorkerFrame>, Error> {
+        if !self.current() { return Ok(None); }
+        let (frame, source) = {
+            let Ok(state) = self.shared.state.try_lock() else { return Ok(None); };
+            let outcome = state.outcome[self.request.slot];
+            if outcome.stamp != self.request.stamp { return Ok(None); }
+            if let Status::Failed(error) = outcome.status { return Err(error); }
+            if outcome.status != Status::Ready { return Ok(None); }
+            let Some(ticket) = outcome.ready else { return Ok(None); };
+            let Some(entry) = state.cache.get(ticket.index).filter(|entry| entry.id == ticket.id) else { return Ok(None); };
+            let frame = FrameData { generation: entry.frame.generation, tick: entry.frame.tick,
+                list: entry.frame.list.clone(), camera: entry.frame.camera,
+                background: entry.frame.background, ms: entry.frame.ms };
+            (frame, state.source.clone())
+        };
+        let generation = source.and_then(|source| source.snapshot(self.request.key.revision, self.request.key.resource_epoch))
+            .filter(|generation| generation.revision == self.request.key.revision)
+            .ok_or(Error::RevisionUnavailable)?;
+        if !self.current() { return Ok(None); }
+        Ok(Some(WorkerFrame { key: self.request.key.clone(), frame, generation }))
     }
 }
 

@@ -9,6 +9,7 @@
 //! iced, `styk-ui` or `styk-devtools` (`cargo xtask deps` fails the build if it does).
 
 pub mod audio;
+pub mod automation;
 pub mod clipboard;
 pub mod controls;
 pub mod documents;
@@ -22,6 +23,7 @@ pub mod launch;
 pub mod limits;
 pub mod number;
 pub mod roving;
+pub mod stage;
 pub mod text_entry;
 pub mod text;
 

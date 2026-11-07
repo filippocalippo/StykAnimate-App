@@ -1,0 +1,25 @@
+{
+  "format": "styk-auto/1",
+  "steps": [
+    {"at_ms":0,"op":"open","input":"scene_a"},
+    {"at_ms":0,"op":"frame","tick":100},
+    {"at_ms":0,"op":"measure","label":"first_frame"},
+    {"at_ms":100,"op":"pointer","id":1,"phase":"down","button":"middle","at":[300,200]},
+    {"at_ms":116,"op":"pointer","id":1,"phase":"move","button":"middle","at":[323,187]},
+    {"at_ms":132,"op":"pointer","id":1,"phase":"up","button":"middle","at":[323,187]},
+    {"at_ms":132,"op":"frame","tick":100},
+    {"at_ms":200,"op":"zoom","factor":1.2,"at":[323,187]},
+    {"at_ms":200,"op":"frame","tick":100},
+    {"at_ms":300,"op":"play","from":100,"frames":16},
+    {"at_ms":1000,"op":"measure","label":"frame_time"},
+    {"at_ms":1100,"op":"open","input":"scene_b"},
+    {"at_ms":1100,"op":"frame","tick":180},
+    {"at_ms":1100,"op":"measure","label":"first_frame"},
+    {"at_ms":1200,"op":"pan","delta":[-17,23]},
+    {"at_ms":1200,"op":"frame","tick":180},
+    {"at_ms":1300,"op":"zoom","factor":0.8333333333333334,"at":[310,210]},
+    {"at_ms":1300,"op":"frame","tick":180},
+    {"at_ms":1400,"op":"play","from":180,"frames":16},
+    {"at_ms":2100,"op":"measure","label":"frame_time"}
+  ]
+}

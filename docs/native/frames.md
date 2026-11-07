@@ -21,7 +21,7 @@ not stop the document engine or its other jobs.
   slot; then come 48 playback, 48 onion, eight preview and eight thumbnail slots.
   There is no queue node per pointer move. Invalid slots and inputs are refused.
 - A key contains document identity, revision, resource epoch, exact fractional tick,
-  size, zoom, pan, backing quality, MSAA samples, hidden figures, effects, camera, clipping,
+  size, zoom, pan, rotation, flip, backing quality, MSAA samples, hidden figures, effects, camera, clipping,
   background, figure translations and ordered onion settings (including per-ghost
   hidden figures). Zero has numeric identity; NaN and infinity
   are refused. Raster size and transform travel to presentation even though geometry
@@ -40,6 +40,12 @@ not stop the document engine or its other jobs.
   It borrows the matching draw list only for the callback. The callback submits the draw; it must not prepare,
   wait for GPU readback, clone dense list fields or retain CPU frame ownership.
   A presenter can keep its previous GPU picture while the next request is pending.
+- The native stage instead uses a crate-private worker ticket. Only its paint worker
+  can take an immutable ready-list handle and resolve the matching generation; the
+  interface receives a detached GPU picture from `stage::Painter`. This avoids
+  renderer preparation under the ready-cache lock. Ticket currency is checked at
+  lookup, publication and handoff. See [stage.md](stage.md) for its extra retained
+  list and GPU byte bounds.
 - `cancel`, `revise`, `close` and Drop never wait for a worker. Close is irrevocable;
   a reopened document gets a new scheduler/document identity. Workers release ready
   frames, their reuse state, and the source on all shutdown paths.
