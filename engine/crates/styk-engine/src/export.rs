@@ -52,6 +52,8 @@ struct State {
     /// Requested frames wait here while this renderer preloads its pictures.
     pending: Vec<u32>,
     images: Vec<Arc<DecodedImage>>,
+    /// Places a refused decode left to write over with nothing, made into tiles as the renderer takes them ([`crate::images::take_cleared`]).
+    cleared: Vec<(u32, u64)>,
     /// Pictures not yet landed (to decode, decoding, or just decoded), and the ones still to start.
     images_left: usize,
     todo: VecDeque<Todo>,
@@ -120,7 +122,8 @@ fn start_decoders(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Sha
     }
 }
 
-fn pictures_ready(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Shared<State>>, ended: &Arc<AtomicBool>, epoch: u64, estimate: usize, images: Vec<DecodedImage>) {
+fn pictures_ready(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Shared<State>>, ended: &Arc<AtomicBool>, epoch: u64, estimate: usize, decoded: crate::images::Decoded) {
+    let crate::images::Decoded { images, cleared } = decoded;
     {
         let mut state = state.lock();
         if ended.load(Ordering::Relaxed) || epoch != state.epoch {
@@ -131,6 +134,7 @@ fn pictures_ready(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Sha
         state.decoding_bytes = state.decoding_bytes.saturating_sub(estimate);
         state.image_bytes += images.iter().map(|image| image.rgba.len()).sum::<usize>();
         state.images.extend(images.into_iter().map(Arc::new));
+        state.cleared.extend(cleared);
     }
     start_decoders(engine, generation, state, ended);
     prepare_pending(engine, generation, state, ended);
@@ -221,7 +225,7 @@ impl ExportFrames {
     /// Decoded pictures not yet taken, up to `max_bytes` of pixels (at least one).
     pub fn take_images(&self, max_bytes: usize) -> Vec<Arc<DecodedImage>> {
         let mut taken = Vec::new();
-        {
+        let blanks = {
             let mut state = self.state.lock();
             let mut bytes = 0;
             while let Some(image) = state.images.last() {
@@ -232,7 +236,9 @@ impl ExportFrames {
                 taken.push(state.images.pop().expect("checked above"));
             }
             state.image_bytes = state.image_bytes.saturating_sub(bytes);
-        }
+            crate::images::take_cleared(&mut state.cleared, taken.is_empty(), bytes, max_bytes)
+        };
+        taken.extend(blanks.into_iter().map(|(slot, placement)| Arc::new(styk_eval::assets::blank_tile(slot, placement))));
         // Room for more pictures: the ones that waited are decoded now.
         start_decoders(&self.engine, &self.generation, &self.state, &self.ended);
         taken
@@ -241,7 +247,7 @@ impl ExportFrames {
     /// Pictures still being decoded or waiting to be taken.
     pub fn images_pending(&self) -> usize {
         let state = self.state.lock();
-        state.images_left + state.images.len()
+        state.images_left + state.images.len() + state.cleared.len()
     }
 
     /// Asks the engine's workers for `ticks` (the ones after the frame being drawn), at most
@@ -313,6 +319,7 @@ impl Drop for ExportFrames {
         let mut state = self.state.lock();
         state.ready.clear();
         state.images.clear();
+        state.cleared.clear();
         state.todo.clear();
         state.pending.clear();
         state.inflight.clear();

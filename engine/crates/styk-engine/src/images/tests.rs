@@ -459,3 +459,40 @@ fn a_cel_that_keeps_the_slots_of_the_tiles_it_shares_marks_only_the_slots_it_wri
     }
     assert!(!uploaded.refilling_in(&list((50, 50))) && !uploaded.lacks(&list((50, 50))));
 }
+
+/// The places a refused decode leaves to write over with nothing are not tiles until the renderer takes them: a large replacement refused
+/// because the memory is short must not allocate a tile for each place at once.
+#[test]
+fn the_places_of_a_refused_cel_become_tiles_only_as_the_renderer_takes_them() {
+    use crate::document::{OpenOptions, OpenSource};
+    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/drawlist/drawing-cel.json");
+    let text = std::fs::read(file).unwrap();
+    let engine = Engine::new(clock, Budgets::for_device(None));
+    let opened = engine.open_document(OpenSource::Json { bytes: &text, name: "refused cel" }, OpenOptions::default(), &|| false).unwrap();
+    engine.activate(&opened.typed, &opened.tree, 1).unwrap();
+    // The first publication is decoded and not taken, so the atlas holds nothing the next may share: it is written whole.
+    while engine.step() {}
+    // The same cel made anew: its slots are the ones of the cel before, and its decode is refused.
+    let mut next = opened.tree.clone();
+    let asset = &mut next.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap()[0].make_obj().unwrap().get_mut("image_assets").unwrap().make_arr().unwrap()[0];
+    let payload = asset.get("styk_tiles").and_then(styk_doc::Value::as_str).expect("the cel's tiles").to_string();
+    asset.make_obj().unwrap().set("styk_tiles", styk_doc::Value::str(&payload));
+    engine.publish_tree(opened.lineage(), next, 2).unwrap().expect("the document is the engine's");
+    assert!(engine.take_images(usize::MAX).is_empty(), "what the first publication decoded is for the cel the second replaced: dropped");
+    let tiles: usize = engine.generation().unwrap().assets.cels.values().map(|(_, slots)| slots.iter().map(Vec::len).sum::<usize>()).sum();
+    styk_alloc::with_limit(1 << 20, || while engine.step() {});
+    assert!(engine.pictures_refused() > 0, "the decode was refused");
+    {
+        let state = engine.inner.state.lock();
+        assert!(state.images.ready.is_empty() && state.images.ready_bytes == 0, "no tile is held for the places");
+        assert_eq!(state.images.cleared.len(), tiles, "the places are named");
+    }
+    assert_eq!(engine.images_backlog(), (0, tiles), "and the renderer is to take them");
+    let one = engine.take_images(1);
+    assert_eq!(one.len(), 1, "one at least, no more than the budget leaves room for");
+    let some = engine.take_images(3 * styk_eval::assets::BLANK_TILE_BYTES);
+    assert_eq!(some.len(), 3);
+    let rest = engine.take_images(usize::MAX);
+    assert_eq!(1 + 3 + rest.len(), tiles);
+    assert_eq!(engine.images_backlog(), (0, 0));
+}

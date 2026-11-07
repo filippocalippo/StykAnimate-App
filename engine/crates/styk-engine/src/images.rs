@@ -11,6 +11,20 @@ use crate::{Engine, Generation, TaskQueue};
 pub use styk_eval::assets::DecodedImage;
 
 pub(crate) mod residency;
+
+/// What decoding a picture came to: its pixels, or (the memory refused it) the places to write over with nothing.
+pub(crate) struct Decoded {
+    pub(crate) images: Vec<DecodedImage>,
+    pub(crate) cleared: Vec<(u32, u64)>,
+}
+
+/// Takes from `cleared` the places that `max_bytes` of pixels leave room for after `bytes` were taken (one at least when `first`: nothing
+/// else was), for the caller to make tiles of with [`styk_eval::assets::blank_tile`] once it has let go of its lock.
+pub(crate) fn take_cleared(cleared: &mut Vec<(u32, u64)>, first: bool, bytes: usize, max_bytes: usize) -> Vec<(u32, u64)> {
+    let room = max_bytes.saturating_sub(bytes) / styk_eval::assets::BLANK_TILE_BYTES;
+    let count = if first { room.max(1) } else { room }.min(cleared.len());
+    cleared.split_off(cleared.len() - count)
+}
 pub use residency::{drawing_pages, has_place, images_on, on_demand, pictures_of, Acquired, PlaceIndex, Residency, ATLAS_PAGES};
 
 /// Which places of a sprite atlas hold their pixels: what a renderer that takes decoded
@@ -184,6 +198,9 @@ pub(crate) struct Store {
     ready: std::collections::LinkedList<Arc<DecodedImage>>,
     /// Bytes of pixels in `ready`, and the estimated bytes of the pictures being decoded now.
     ready_bytes: usize,
+    /// Places a refused decode left to write over with nothing ([`styk_eval::assets::cleared_slots`]), as slot and placement: made into tiles
+    /// only as the renderer takes them, so a large refusal never holds a tile for each at once.
+    cleared: Vec<(u32, u64)>,
     inflight_bytes: usize,
     /// Pictures to decode that wait for the renderer to take some of the ready ones ([`Budgets::picture_bytes`]).
     parked: TaskQueue,
@@ -215,7 +232,7 @@ impl Drop for Preparation<'_> {
 }
 
 impl Store {
-    pub(crate) fn has_storage(&self) -> bool { !self.ready.is_empty() || !self.parked.is_empty() }
+    pub(crate) fn has_storage(&self) -> bool { !self.ready.is_empty() || !self.cleared.is_empty() || !self.parked.is_empty() }
 
     pub(crate) fn for_publication(lineage: u64, count: usize) -> Self {
         Self { lineage, remaining: count, ..Self::default() }
@@ -265,7 +282,7 @@ impl Engine {
     /// The pixels of `picture` of `generation`: the image or every display level of the drawing cel. The decoders
     /// allocate in pieces nothing can refuse, so a picture is decoded only when the memory can hold its work; one it
     /// cannot hold is not shown (like one that cannot be decoded) and the engine goes on ([`Engine::pictures_refused`]).
-    pub(crate) fn decode_pixels(&self, generation: &Generation, picture: Picture) -> Vec<DecodedImage> {
+    pub(crate) fn decode_pixels(&self, generation: &Generation, picture: Picture) -> Decoded {
         let before = match picture {
             Picture::Cel(cel) | Picture::CelChanged(cel) => generation.assets.cels.get(&cel).map(|(tiles, _)| (tiles.clone(), tiles.artwork_bounds())),
             Picture::Image(_) | Picture::Soft(_) => None,
@@ -277,16 +294,13 @@ impl Engine {
                 {
                     self.drawing_bounds_changed(generation, &tiles);
                 }
-                decoded
+                Decoded { images: decoded, cleared: Vec::new() }
             }
             Err(_) => {
                 self.inner.pictures_refused.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                // A cel that replaced another is drawn from the slots of the one before, which hold its pixels until its own are written: a
-                // refused cel is written over with nothing, like a picture that cannot be decoded is not shown, so a frame never draws the old.
-                match picture {
-                    Picture::CelChanged(cel) => generation.assets.cels.get(&cel).map_or_else(Vec::new, |(tiles, _)| styk_eval::assets::blank_cel_changed(&generation.assets, tiles)),
-                    _ => Vec::new(),
-                }
+                // A cel placed among slots the document had is drawn from slots that hold the pixels of the cel before, until its own are written:
+                // a refused cel is written over with nothing, like a picture that cannot be decoded is not shown, so a frame never draws the old.
+                Decoded { images: Vec::new(), cleared: styk_eval::assets::cleared_slots(&generation.assets, picture) }
             }
         }
     }
@@ -305,7 +319,8 @@ impl Engine {
             }
             state.images.epoch
         };
-        let mut ready: std::collections::LinkedList<_> = self.decode_pixels(generation, picture).into_iter().map(Arc::new).collect();
+        let Decoded { images, mut cleared } = self.decode_pixels(generation, picture);
+        let mut ready: std::collections::LinkedList<_> = images.into_iter().map(Arc::new).collect();
         let bytes = ready.iter().map(|image| image.rgba.len()).sum::<usize>();
         let mut state = self.inner.state.lock();
         state.images.finish_decode(estimate);
@@ -314,6 +329,7 @@ impl Engine {
         if superseded(&state, generation, picture) { return }
         state.images.ready_bytes += bytes;
         state.images.ready.append(&mut ready);
+        state.images.cleared.append(&mut cleared);
     }
 
     /// Resource workers can finish an earlier revision's decode after a commit.
@@ -336,7 +352,7 @@ impl Engine {
     /// names, so a cel that replaces another can keep the slots of the tiles they share ([`Assets::extended_inheriting`]). `false` when
     /// the state is busy: nothing is kept then.
     pub(crate) fn pictures_settled(&self) -> bool {
-        self.inner.state.try_lock().is_some_and(|state| state.images.remaining == 0 && state.images.ready.is_empty() && state.images.inflight_bytes == 0 && state.images.parked.is_empty())
+        self.inner.state.try_lock().is_some_and(|state| state.images.remaining == 0 && state.images.ready.is_empty() && state.images.cleared.is_empty() && state.images.inflight_bytes == 0 && state.images.parked.is_empty())
     }
 
     /// Decoded images the renderer has not uploaded yet, up to `max_bytes` of pixels
@@ -345,6 +361,7 @@ impl Engine {
         let mut taken = std::collections::LinkedList::new();
         let mut stale = std::collections::LinkedList::new();
         let mut bytes = 0;
+        let mut blanks = Vec::new();
         let released = {
             let mut state = self.inner.state.lock();
             while let Some(image) = state.images.ready.back() {
@@ -361,6 +378,11 @@ impl Engine {
                 taken.append(&mut state.images.ready.split_off(tail));
             }
             state.images.ready_bytes = state.images.ready_bytes.saturating_sub(bytes);
+            // The places a refused decode left to write over with nothing, as many as the budget leaves room for; those of a cel whose slots
+            // another cel was given since are dropped, like its tiles.
+            let current = state.current.clone();
+            state.images.cleared.retain(|&(_, placement)| current.as_ref().is_some_and(|current| current.assets.holds_placement(placement)));
+            blanks = take_cleared(&mut state.images.cleared, taken.is_empty(), bytes, max_bytes);
             let state = &mut *state;
             state.images.release_parked(&mut state.tasks, self.inner.picture_bytes)
         };
@@ -368,7 +390,7 @@ impl Engine {
         if released { self.inner.state.notify_all(); }
         // Node disposal and output allocation happen after the shared lock.
         drop(stale);
-        taken.into_iter().collect()
+        taken.into_iter().chain(blanks.into_iter().map(|(slot, placement)| Arc::new(styk_eval::assets::blank_tile(slot, placement)))).collect()
     }
 
     /// Decodes pictures of `generation`'s document that a document kept a few pages at a time ([`Residency`]) needs:
@@ -491,7 +513,7 @@ impl Engine {
     /// [`Engine::take_images`].
     pub fn images_backlog(&self) -> (usize, usize) {
         let state = self.inner.state.lock();
-        (state.images.remaining, state.images.ready.len())
+        (state.images.remaining, state.images.ready.len() + state.images.cleared.len())
     }
 }
 

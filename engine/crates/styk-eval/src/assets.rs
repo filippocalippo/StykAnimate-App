@@ -84,9 +84,8 @@ struct Placement {
     serial: u64,
     id: Option<Arc<str>>,
     dirty: Option<Vec<Vec<bool>>>,
-    /// The slots below this number existed before the placement was made: they may hold the pixels of a cel the document had. Those from it
-    /// on are new and hold nothing.
-    reused_below: u32,
+    /// The atlas had slots when the placement was made: those the cel was given may hold the pixels of a cel the document had.
+    after_slots: bool,
 }
 
 /// Numbers the placements of cels.
@@ -265,7 +264,7 @@ impl Assets {
                 .collect();
             let serial = NEXT_PLACEMENT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             assets.serials.insert(serial);
-            assets.placements.insert(cel.key(), Placement { serial, id, dirty, reused_below: held.1 as u32 });
+            assets.placements.insert(cel.key(), Placement { serial, id, dirty, after_slots: held.1 > 0 });
             assets.cels.insert(cel.key(), (cel, slots));
         }
         assets.pages = if assets.cursor.used { assets.cursor.layer + 1 } else { 0 };
@@ -637,25 +636,37 @@ pub fn decode_cel_changed(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<Decod
         .collect()
 }
 
-/// [`decode_cel_changed`]'s tiles with nothing in them, for the slots that were there before the cel was placed: the pictures to write over
-/// the places of a cel whose decode was refused (the memory could not hold its work). Those slots hold the pixels of a cel the document had,
-/// which is not the cel in front: it is not shown, as a picture that cannot be decoded is not, and a frame must not draw the old pixels in
-/// its place. A slot made for the cel holds nothing and is left alone.
-pub fn blank_cel_changed(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<DecodedImage> {
-    let Some(slots) = assets.cel_slots(cel) else { return Vec::new() };
-    let dirty = assets.cel_dirty(cel.key());
-    let placement = assets.placement(cel.key());
-    let reused_below = assets.placements.get(&cel.key()).map_or(0, |placement| placement.reused_below);
-    let side = crate::drawing::TILE + 2 * crate::drawing::BORDER;
-    let mut blanks = Vec::new();
+/// The bytes of the pixels of a tile with nothing in it ([`blank_tile`]).
+pub const BLANK_TILE_BYTES: usize = {
+    let side = (crate::drawing::TILE + 2 * crate::drawing::BORDER) as usize;
+    side * side * 4
+};
+
+/// The places to write over with nothing when the decode of `picture` was refused (the memory could not hold its work), as slot and
+/// placement. A cel placed when the atlas already had slots may hold in them the pixels of a cel the document had, which is not the cel in
+/// front: it is not shown, as a picture that cannot be decoded is not, and a frame must not draw the old pixels in its place. The
+/// slots are the ones the picture would have written, and are written one at a time ([`blank_tile`]) so that nothing is allocated for
+/// all of them at once. A cel placed in an atlas that had none holds nothing: no place is named.
+pub fn cleared_slots(assets: &Assets, picture: Picture) -> Vec<(u32, u64)> {
+    let (Picture::Cel(key) | Picture::CelChanged(key)) = picture else { return Vec::new() };
+    let Some((_, slots)) = assets.cels.get(&key) else { return Vec::new() };
+    let Some(placement) = assets.placements.get(&key).filter(|placement| placement.after_slots) else { return Vec::new() };
+    let dirty = if matches!(picture, Picture::CelChanged(_)) { assets.cel_dirty(key) } else { None };
+    let mut cleared = Vec::new();
     for (level, tiles) in slots.iter().enumerate() {
         for (index, &slot) in tiles.iter().enumerate() {
-            if slot < reused_below && dirty.is_none_or(|dirty| dirty[level][index]) {
-                blanks.push(DecodedImage { index: slot, drawing: true, soft: false, width: side, height: side, rgba: vec![0; side as usize * side as usize * 4], placement });
+            if dirty.is_none_or(|dirty| dirty[level][index]) {
+                cleared.push((slot, placement.serial));
             }
         }
     }
-    blanks
+    cleared
+}
+
+/// A tile of the drawing atlas with nothing in it, to write over `slot` for the placement numbered `placement`.
+pub fn blank_tile(slot: u32, placement: u64) -> DecodedImage {
+    let side = crate::drawing::TILE + 2 * crate::drawing::BORDER;
+    DecodedImage { index: slot, drawing: true, soft: false, width: side, height: side, rgba: vec![0; BLANK_TILE_BYTES], placement }
 }
 
 /// One picture to decode: an image of the document, or a drawing cel (every display level of it).
