@@ -8,11 +8,18 @@ publish.workspace = true
 
 [dependencies]
 raw-window-handle = "0.6"
+styk-services = { path = "../styk-services" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Storage_Xps",
+    "Win32_System_Performance",
+    "Win32_UI_Controls",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Input_Pointer",
+    "Win32_UI_Shell",
+    "Win32_UI_TabletPC",
     "Win32_UI_WindowsAndMessaging",
 ] }

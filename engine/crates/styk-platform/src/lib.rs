@@ -7,4 +7,6 @@
 //!
 //! It must never depend on the engine, the core or a toolkit: windows reach it as `raw-window-handle` handles.
 
+#[cfg(windows)]
+pub mod windows;
 pub mod window;

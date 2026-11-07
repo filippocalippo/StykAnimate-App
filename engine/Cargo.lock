@@ -2426,6 +2426,7 @@ name = "styk-platform"
 version = "0.1.0"
 dependencies = [
  "raw-window-handle",
+ "styk-services",
  "windows-sys",
 ]
 
