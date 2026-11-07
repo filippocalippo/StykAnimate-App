@@ -20,7 +20,7 @@ use styk_core::shell::{Event, Shell};
 use styk_design::typography::TextStyle;
 use styk_design::warm_up::Ready;
 use styk_design::{Theme, tokens};
-use styk_services::shell::chrome::MaxButtonState;
+use styk_core::services::shell::chrome::MaxButtonState;
 
 /// What the shell's views send.
 #[derive(Clone, Debug)]
@@ -151,7 +151,7 @@ mod tests {
     fn every_control_is_where_the_layout_put_it() {
         for (width, session, tabs) in [(1560.0, Session::None, 3), (879.0, Session::None, 3), (700.0, Session::None, 3), (1000.0, Session::Build, 3), (1560.0, Session::Movieclip, 12), (400.0, Session::None, 1)] {
             let shell = shell(width, session, tabs);
-            let ready = styk_design::warm_up::install_bundled();
+            let ready = styk_design::warm_up::install_bundled(styk_platform::font_smoothing::current());
             let element = window(Params { shell: &shell, theme: Theme::Light, ready, maximize: MaxButtonState::Idle }, container(space()).width(Fill).height(Fill).boxed());
             let mut driver = Driver::new(element, Size::new(width, 900.0), &styk_design::fonts::ALL);
             let snapshot = driver.snapshot();

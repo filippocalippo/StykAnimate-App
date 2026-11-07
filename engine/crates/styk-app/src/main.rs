@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::let_underscore_must_use, unused_must_use, clippy::disallowed_methods, clippy::disallowed_types))]
 //! `stykanimate`: the StykAnimate program.
 //!
 //! ```text
@@ -19,17 +20,16 @@
 mod headless;
 #[cfg(feature = "devtools")]
 mod input_check;
-mod screenshot;
-mod shell;
-#[cfg(windows)]
-mod shell_check;
+use styk_platform::{screenshot, shell, shell_check};
 mod top_band;
+mod wakes;
 mod window;
 
 use iced::futures::StreamExt;
 use iced::{Size, Subscription, Task, Widget, window as iced_window};
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::mpsc::{self, SyncSender};
 use std::time::Duration;
 use styk_core::Launch;
 use styk_design::{Theme, glyphs, warm_up, widgets};
@@ -44,17 +44,16 @@ use styk_ui::screens::Screen;
 /// not a reason to hang a script.
 const SCREENSHOT_DEADLINE: Duration = Duration::from_secs(30);
 
-/// How long `--automation` waits for its script before giving up.
-const AUTOMATION_DEADLINE: Duration = Duration::from_secs(180);
-
 /// How long `--shell-check` waits for its steps before giving up.
 const CHECK_DEADLINE: Duration = Duration::from_secs(60);
 
 /// The frame at which `--shell-check` asks its synchronous questions, and how many frames it waits for the events the
 /// DPI step causes.
-#[cfg_attr(not(windows), allow(dead_code))]
 const CHECK_AT_FRAME: u32 = 12;
 const CHECK_SETTLE_FRAMES: u32 = 12;
+
+/// How long `--automation` waits for its script before giving up.
+const AUTOMATION_DEADLINE: Duration = Duration::from_secs(180);
 
 /// How an unattended run ended, read after the event loop returns.
 #[derive(Debug, Default)]
@@ -80,14 +79,15 @@ enum Message {
     Wake(shell::Wake),
     /// The top band: the projects, the shell and the automation (`top_band`).
     Band(top_band::Message),
-    /// The window state is written: the program may end.
-    Saved,
+    /// A screenshot of an automation step is written.
+    StepSaved(Result<(), String>),
     Frame,
     /// The font system is built and holds the bundled fonts: text may be laid out.
-    FontsReady,
-    /// The glyph worker has drawn glyphs: the frame this message asks for has them.
+    FontsReady(Result<(), String>),
+    /// The glyph worker has completed a candidate frame.
     GlyphsReady,
     Captured(Result<Image, String>),
+    OutputSaved(Result<(), String>),
     /// `--shell-check`'s synchronous answers, and what the DPI step needs afterwards.
     Checked(Vec<CheckLine>, Option<CheckedDpi>),
     /// `--shell-check` is over: the final report.
@@ -112,7 +112,7 @@ struct App {
     /// Frames the event loop has started since the window was shown.
     frames: u32,
     capturing: bool,
-    outcome: Arc<Mutex<Outcome>>,
+    outcome: SyncSender<Outcome>,
     /// The screen of the catalogue being shown instead of the application, if any.
     sheet: Option<Sheet>,
     /// What the input check has seen so far.
@@ -125,7 +125,7 @@ struct App {
     #[cfg(feature = "devtools")]
     latency_base: usize,
     shell: Box<shell::Shell>,
-    wakes: shell::Wakes,
+    wakes: wakes::Wakes,
     chrome: Option<shell::Chrome>,
     max_button: MaxButtonState,
     band: top_band::TopBand,
@@ -137,7 +137,6 @@ struct App {
     scale: f32,
     /// Every scale factor the window announced, for `--shell-check`.
     rescales: Vec<f32>,
-    #[cfg_attr(not(windows), allow(dead_code))]
     foreground_before: isize,
     check: CheckStep,
 }
@@ -146,19 +145,18 @@ struct App {
 #[derive(Debug)]
 enum CheckStep {
     NotRunning,
-    #[cfg_attr(not(windows), allow(dead_code))]
     Asked,
-    #[cfg_attr(not(windows), allow(dead_code))]
     Settling { until_frame: u32, dpi: Option<CheckedDpi>, logical_before: (f32, f32), lines: Vec<CheckLine> },
 }
 
 impl App {
-    fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: Arc<Mutex<Outcome>>, shell: Box<shell::Shell>, wakes: shell::Wakes, foreground_before: isize) -> App {
-        let sheet = screen.map(|Screen::ComponentSheet| {
+    fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: SyncSender<Outcome>, shell: Box<shell::Shell>, wakes: wakes::Wakes, foreground_before: isize) -> App {
+        let sheet = (screen == Some(Screen::ComponentSheet)).then(|| {
             let mut sheet = Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr);
             sheet.button_probe = Some(styk_platform::input::primary_button_down);
             sheet
         });
+        let band_screen = screen.filter(|screen| screen.is_band());
         let clock_mode = launch.clock;
         App {
             sheet,
@@ -169,7 +167,7 @@ impl App {
             #[cfg(feature = "devtools")]
             latency_base: 0,
             launch,
-            theme: Theme::default(),
+            theme: band_screen.map_or(Theme::default(), Screen::theme),
             strategy,
             window: None,
             fonts_ready: false,
@@ -187,9 +185,11 @@ impl App {
                         let fixed = styk_services::clock::FixedClock::new();
                         (Arc::new(fixed.clone()), Some(fixed))
                     }
-                    styk_core::ClockMode::System => (Arc::new(styk_services::clock::SystemClock::new()), None),
+                    styk_core::ClockMode::System => (Arc::new(styk_platform::clock::SystemClock::new()), None),
                 };
-                top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, Arc::new(styk_platform::spawn::ThreadSpawner))
+                let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, Arc::new(styk_platform::spawn::ThreadSpawner));
+                band.show_screen(band_screen);
+                band
             },
             capture_path: None,
             closing: false,
@@ -238,16 +238,22 @@ impl App {
             Message::Attached(Err(error)) => self.finish(Outcome::Failed(format!("could not attach the window's chrome: {error}"))),
             Message::Sampled(sample) => {
                 self.shell.observe(sample);
-                self.shell.changed(&self.wakes);
+                self.shell.changed(&self.wakes.callback());
                 Task::none()
             }
             Message::Wake(wake) => self.wake(wake),
             Message::Band(message) => self.band_update(message),
-            Message::Saved => self.finish(Outcome::Done),
-            Message::FontsReady => {
+            Message::StepSaved(result) => {
+                self.band.captured(result);
+                Task::none()
+            }
+            Message::FontsReady(Err(error)) => self.finish(Outcome::Failed(error)),
+            Message::FontsReady(Ok(())) => {
                 self.fonts_ready = true;
                 self.band.fonts_ready();
                 self.publish_regions();
+                // Loading frames cannot satisfy the two-frame wait for rendered content.
+                self.frames = 0;
                 Task::none()
             }
             Message::GlyphsReady => Task::none(),
@@ -255,15 +261,15 @@ impl App {
             Message::Captured(Ok(image)) => {
                 if let Some(path) = self.capture_path.take() {
                     // A step of the automation: the script goes on, and records a failure rather than ending the run.
-                    self.band.captured(screenshot::write(&path, &image));
-                    return Task::none();
+                    return step_output_task(move || screenshot::write(&path, &image));
                 }
-                let path = self.launch.screenshot.clone().expect("a capture is only requested with --screenshot");
-                match screenshot::write(&path, &image) {
-                    Ok(()) => self.finish(Outcome::Done),
-                    Err(error) => self.finish(Outcome::Failed(error)),
-                }
+                let Some(path) = self.launch.screenshot.clone() else {
+                    return self.finish(Outcome::Failed("capture has no output path".into()));
+                };
+                output_task(move || screenshot::write(&path, &image))
             }
+            Message::OutputSaved(Ok(())) => self.finish(Outcome::Done),
+            Message::OutputSaved(Err(error)) => self.finish(Outcome::Failed(error)),
             Message::Captured(Err(error)) => {
                 if self.capture_path.take().is_some() {
                     self.band.captured(Err(format!("could not capture the window: {error}")));
@@ -345,18 +351,13 @@ impl App {
     }
 
     /// Looks at the window on its thread, for the frame to save.
-    #[cfg(windows)]
     fn sample(&self, id: iced_window::Id) -> Task<Message> {
         if self.strategy.is_some() {
             return Task::none();
         }
-        iced_window::run(id, |w| styk_platform::windows::monitors::hwnd_of(w).map(styk_platform::windows::monitors::sample)).and_then(|sample| Task::done(Message::Sampled(sample)))
+        iced_window::run(id, |w| shell::sample(w)).and_then(|sample| Task::done(Message::Sampled(sample)))
     }
 
-    #[cfg(not(windows))]
-    fn sample(&self, _: iced_window::Id) -> Task<Message> {
-        Task::none()
-    }
 
     fn wake(&mut self, wake: shell::Wake) -> Task<Message> {
         match wake {
@@ -379,7 +380,7 @@ impl App {
                 self.window.map_or_else(Task::none, |id| Task::batch([iced_window::minimize(id, false), iced_window::gain_focus(id)]))
             }
             shell::Wake::SaveCheck => {
-                self.shell.save_check(&self.wakes);
+                self.shell.save_check(&self.wakes.callback());
                 Task::none()
             }
         }
@@ -392,7 +393,11 @@ impl App {
             return Task::none();
         }
         match self.shell.save_for_close() {
-            Some(done) => Task::perform(async move { let _ = done.await; }, |()| Message::Saved),
+            Some(job) => Task::perform(async move {
+                let (send, receive) = iced::futures::channel::oneshot::channel();
+                job(Box::new(move |result| { if send.send(result).is_err() { eprintln!("window save receiver closed"); } }));
+                receive.await.map_err(|error| error.to_string())?
+            }, Message::OutputSaved),
             None => self.finish(Outcome::Done),
         }
     }
@@ -419,7 +424,6 @@ impl App {
         self.check_step(id)
     }
 
-    #[cfg(windows)]
     fn check_step(&mut self, id: iced_window::Id) -> Task<Message> {
         if !self.launch.shell_check {
             return Task::none();
@@ -427,10 +431,10 @@ impl App {
         match &self.check {
             CheckStep::NotRunning if self.frames >= CHECK_AT_FRAME && self.chrome.is_some() && self.fonts_ready => {
                 self.check = CheckStep::Asked;
-                let chrome = self.chrome.clone().expect("checked above");
+                let Some(chrome) = self.chrome.clone() else { return Task::none() };
                 let (scale, logical, foreground) = (self.scale, (self.logical.width, self.logical.height), self.foreground_before);
                 iced_window::run(id, move |window| {
-                    let original = styk_platform::windows::monitors::hwnd_of(window).and_then(styk_platform::windows::monitors::window_rect).unwrap_or(styk_services::shell::Rect::new(-20000, -20000, 1560, 1000));
+                    let original = shell::window_rect(window).unwrap_or(styk_services::shell::Rect::new(-20000, -20000, 1560, 1000));
                     let (lines, dpi) = shell_check::run(window, &chrome, scale, logical, foreground);
                     (lines.into_iter().map(|line| (line.name, line.failure)).collect::<Vec<_>>(), dpi.map(|d| CheckedDpi { before: d.before, after: d.after, original }))
                 })
@@ -452,10 +456,6 @@ impl App {
         }
     }
 
-    #[cfg(not(windows))]
-    fn check_step(&mut self, _: iced_window::Id) -> Task<Message> {
-        Task::none()
-    }
 
     /// Prints the check's results and ends with their status.
     fn report_check(&mut self, lines: Vec<CheckLine>) -> Task<Message> {
@@ -508,31 +508,32 @@ impl App {
             input_check::Step::Finish => {
                 let body: Vec<String> = self.report.iter().map(|line| format!("  {:?}", line)).collect();
                 let json = format!("[\n{}\n]\n", body.join(",\n"));
-                let path = self.launch.input_check.clone().expect("the check only runs with --input-check");
-                match std::fs::write(&path, json) {
-                    Ok(()) => self.finish(Outcome::Done),
-                    Err(error) => self.finish(Outcome::Failed(format!("{}: {error}", path.display()))),
-                }
+                let Some(path) = self.launch.input_check.clone() else {
+                    return self.finish(Outcome::Failed("input check has no output path".into()));
+                };
+                output_task(move || styk_platform::diagnostics::write_report(&path, &json))
             }
         }
     }
 
     fn finish(&mut self, outcome: Outcome) -> Task<Message> {
-        *self.outcome.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = outcome;
+        if self.outcome.try_send(outcome).is_err() {
+            eprintln!("application outcome receiver was closed");
+        }
         iced::exit()
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
         // Text is laid out only once the font system is ready: until then the view holds none.
-        match warm_up::proof() {
-            Some(_) if self.sheet.is_some() => self.sheet.as_ref().expect("checked").view().map(Message::Sheet).boxed(),
-            Some(ready) => self.band.view(self.theme, ready, self.max_button, styk_ui::loading(self.theme)).map(Message::Band).boxed(),
-            None => styk_ui::prepaint(),
+        match (warm_up::proof(), self.sheet.as_ref()) {
+            (Some(_), Some(sheet)) => sheet.view().map(Message::Sheet).boxed(),
+            (Some(ready), None) => self.band.view(self.theme, ready, self.max_button, styk_ui::loading(self.theme)).map(Message::Band).boxed(),
+            (None, _) => styk_ui::prepaint(),
         }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let mut subscriptions = vec![iced_window::events().map(|(id, event)| Message::Window(id, event)), Subscription::run(wake_stream), glyphs::ready().map(|()| Message::GlyphsReady)];
+        let mut subscriptions = vec![iced_window::events().map(|(id, event)| Message::Window(id, event)), Subscription::run_with(self.wakes.clone(), wake_stream), glyphs::ready().map(|()| Message::GlyphsReady)];
         if let Some(sheet) = &self.sheet {
             subscriptions.push(sheet.subscription().map(Message::Sheet));
         } else {
@@ -545,12 +546,9 @@ impl App {
     }
 }
 
-/// The receiver of the wake-ups the window procedure, the pipe server and the save timer send.
-static WAKES: Mutex<Option<iced::futures::channel::mpsc::Receiver<shell::Wake>>> = Mutex::new(None);
-
-fn wake_stream() -> impl iced::futures::Stream<Item = Message> {
-    let receiver = WAKES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
-    iced::futures::stream::iter(receiver).flatten().map(Message::Wake)
+/// Each shell owns its wake stream; no process-global receiver or blocking lock.
+fn wake_stream(wakes: &wakes::Wakes) -> impl iced::futures::Stream<Item = Message> + use<> {
+    wakes.clone().stream().map(Message::Wake)
 }
 
 /// Captures the window through the operating system's compositor; where the platform has none, from iced's own
@@ -606,44 +604,49 @@ fn main() -> ExitCode {
     if strategy == Some(Strategy::Headless) {
         return run_headless(&launch, screen);
     }
-    let (wakes, receiver) = shell::Wakes::channel();
-    *WAKES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(receiver);
-    let shell = match shell::start(&arguments, strategy.is_some(), &wakes) {
+    let wakes = wakes::Wakes::new();
+    let shell = match shell::start(&arguments, strategy.is_some(), &wakes.callback()) {
         shell::Start::Run(shell) => shell,
         shell::Start::End(code) => return code,
     };
-    #[cfg(windows)]
-    let foreground_before = styk_platform::windows::probe::foreground();
-    #[cfg(not(windows))]
-    let foreground_before = 0;
-    let outcome = Arc::new(Mutex::new(Outcome::Running));
-    if launch.screenshot.is_some() {
-        watchdog(outcome.clone(), "--screenshot: the window drew no frame", SCREENSHOT_DEADLINE);
-    }
-    if launch.shell_check {
-        watchdog(outcome.clone(), "--shell-check: the checks did not finish", CHECK_DEADLINE);
-    }
+    let foreground_before = shell::foreground();
+    let (outcome, receiver) = mpsc::sync_channel(1);
+    let _deadline = if launch.screenshot.is_some() || launch.shell_check {
+        match styk_platform::diagnostics::deadline(if launch.shell_check { CHECK_DEADLINE } else { SCREENSHOT_DEADLINE }) {
+            Ok(deadline) => Some(deadline),
+            Err(error) => { eprintln!("{error}"); return ExitCode::FAILURE; }
+        }
+    } else { None };
     #[cfg(feature = "devtools")]
     let trace_path = launch.screenshot.as_ref().map(|path| path.with_extension("trace.txt"));
     let scale = launch.scale.unwrap_or(1.0) as f32;
     let settings = window::settings(&launch, strategy);
     let files = launch.files.clone();
     let mut built = App::new(launch, screen, strategy, outcome.clone(), shell, wakes, foreground_before);
-    if let Some(script) = built.launch.automation.clone() {
-        if let Err(error) = built.band.run_script(&script) {
-            eprintln!("{error}");
-            return ExitCode::from(2);
+    let _automation_deadline = match built.launch.automation.clone() {
+        Some(script) => {
+            if let Err(error) = built.band.run_script(&script) {
+                eprintln!("{error}");
+                return ExitCode::from(2);
+            }
+            match styk_platform::diagnostics::deadline(AUTOMATION_DEADLINE) {
+                Ok(deadline) => Some(deadline),
+                Err(error) => {
+                    eprintln!("{error}");
+                    return ExitCode::FAILURE;
+                }
+            }
         }
-        watchdog(outcome.clone(), "--automation: the script did not finish", AUTOMATION_DEADLINE);
-    }
-    let app = Mutex::new(Some(built));
+        None => None,
+    };
+    let app = std::cell::RefCell::new(Some(built));
     // The font system is built on a worker from the first moment (styk_design::warm_up); the bundled fonts are
     // loaded there, never through iced::Settings::fonts, which the runtime would load on the event loop.
     let result = iced::application(
         move || {
-            let mut app = app.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().expect("the application starts once");
+            let mut app = match app.borrow_mut().take() { Some(app) => app, None => unreachable!("iced initializes once") };
             let open = app.band.open_all(&files).map(Message::Band);
-            (app, Task::batch([warm_up::warm_up().map(|()| Message::FontsReady), open]))
+            (app, Task::batch([warm_up::warm_up(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(styk_platform::clock::SystemClock::new()), std::sync::Arc::new(styk_platform::font_smoothing::NativeTextEnvironment)).map(Message::FontsReady), open]))
         },
         App::update,
         App::view,
@@ -662,9 +665,11 @@ fn main() -> ExitCode {
     }
     #[cfg(feature = "devtools")]
     if let Some(path) = trace_path {
-        let _ = std::fs::write(path, styk_devtools::trace_report());
+        if let Err(error) = styk_platform::diagnostics::write_report(&path, &styk_devtools::trace_report()) {
+            eprintln!("{error}"); return ExitCode::FAILURE;
+        }
     }
-    let outcome = std::mem::take(&mut *outcome.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+    let outcome = receiver.try_recv().unwrap_or(Outcome::Running);
     match (result, outcome) {
         (Err(error), _) => {
             eprintln!("the window failed: {error}");
@@ -678,21 +683,11 @@ fn main() -> ExitCode {
     }
 }
 
-/// Ends the process if an unattended run is still going after `deadline`.
-fn watchdog(outcome: Arc<Mutex<Outcome>>, what: &'static str, deadline: Duration) {
-    std::thread::spawn(move || {
-        std::thread::sleep(deadline);
-        if matches!(*outcome.lock().unwrap_or_else(|poisoned| poisoned.into_inner()), Outcome::Running) {
-            eprintln!("{what} within {} s", deadline.as_secs());
-            std::process::exit(1);
-        }
-    });
-}
-
 /// The pen lab (developer build): a drawing pad on the real input path, and its self-test.
 #[cfg(feature = "devtools")]
 fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
-    use styk_devtools::pen_lab::{self, LabOptions, SelfTest};
+    use styk_devtools::pen_lab::{self, LabOptions};
+    use styk_text_check::pen_lab::self_test::{SelfTest, Runner};
     if strategy == Some(Strategy::Headless) {
         eprintln!("the pen lab needs a window; it cannot run headless");
         return ExitCode::from(2);
@@ -705,12 +700,16 @@ fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
         }
     };
     if let Some(dir) = &launch.out {
-        if let Err(error) = std::fs::create_dir_all(dir) {
+        if let Err(error) = styk_platform::diagnostics::create_output_directory(dir) {
             eprintln!("{}: {error}", dir.display());
             return ExitCode::from(2);
         }
     }
-    let options = LabOptions { window: window::settings(launch, strategy), scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test, out_dir: launch.out.clone(), input: styk_platform::input::host(), spawner: std::sync::Arc::new(styk_platform::spawn::ThreadSpawner) };
+    let self_test = match self_test.map(|test| Runner::new(test, std::sync::Arc::new(styk_platform::spawn::ThreadSpawner))).transpose() {
+        Ok(probe) => probe.map(|probe| Box::new(probe) as Box<dyn styk_core::drawing::probe::PenProbe>),
+        Err(error) => { eprintln!("{error}"); return ExitCode::FAILURE; }
+    };
+    let options = LabOptions { window: window::settings(launch, strategy), scale: launch.scale.unwrap_or(1.0) as f32, show_after_open: window::shown_after_creation(strategy), self_test, out_dir: launch.out.clone(), input: styk_platform::input::host(), spawner: std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), diagnostics: std::sync::Arc::new(styk_platform::diagnostics::NativeDiagnostics) };
     match pen_lab::run(options) {
         Ok(0) => ExitCode::SUCCESS,
         Ok(code) => ExitCode::from(code.clamp(1, 255) as u8),
@@ -734,18 +733,68 @@ fn run_headless(launch: &Launch, screen: Option<Screen>) -> ExitCode {
         return ExitCode::from(2);
     };
     let size = launch.size.unwrap_or(window::DEFAULT_SIZE);
-    let sheet = screen.map(|Screen::ComponentSheet| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr));
-    let result = headless::screenshot(Theme::default(), size, launch.scale.unwrap_or(1.0) as f32, sheet.as_ref()).and_then(|image| {
+    let sheet = (screen == Some(Screen::ComponentSheet)).then(|| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr));
+    let theme = screen.map_or(Theme::default(), Screen::theme);
+    let result = headless::screenshot(theme, size, launch.scale.unwrap_or(1.0) as f32, sheet.as_ref(), screen.filter(|screen| screen.is_band())).and_then(|image| {
         mark!("first-frame");
         screenshot::write(path, &image)
     });
     #[cfg(feature = "devtools")]
-    let _ = std::fs::write(path.with_extension("trace.txt"), styk_devtools::trace_report());
+    if let Err(error) = styk_platform::diagnostics::write_report(&path.with_extension("trace.txt"), &styk_devtools::trace_report()) {
+        eprintln!("{error}"); return ExitCode::FAILURE;
+    }
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// The same as `output_task` for a screenshot an automation step takes: its result goes to the script, not the exit.
+fn step_output_task(job: impl FnOnce() -> Result<(), String> + Send + 'static) -> Task<Message> {
+    Task::perform(
+        async move {
+            let (sender, receiver) = iced::futures::channel::oneshot::channel();
+            styk_platform::diagnostics::spawn(move || {
+                if sender.send(job()).is_err() {
+                    eprintln!("diagnostic output receiver was closed");
+                }
+            })?;
+            receiver.await.map_err(|error| error.to_string())?
+        },
+        Message::StepSaved,
+    )
+}
+
+fn output_task(job: impl FnOnce() -> Result<(), String> + Send + 'static) -> Task<Message> {
+    Task::perform(async move {
+        let (sender, receiver) = iced::futures::channel::oneshot::channel();
+        styk_platform::diagnostics::spawn(move || {
+            if sender.send(job()).is_err() { eprintln!("diagnostic output receiver was closed"); }
+        })?;
+        receiver.await.map_err(|error| error.to_string())?
+    }, Message::OutputSaved)
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+
+    #[test]
+    fn capture_waits_for_a_frame_drawn_after_font_readiness() {
+        let wakes = wakes::Wakes::new();
+        let shell::Start::Run(shell) = shell::start(&[], true, &wakes.callback()) else { panic!("unattended run") };
+        let (outcome, _receiver) = mpsc::sync_channel(1);
+        let launch = Launch { screenshot: Some("unused-test-output.png".into()), ..Launch::default() };
+        let mut app = App::new(launch, None, Some(Strategy::HiddenWindow), outcome, shell, wakes, 0);
+        app.window = Some(iced_window::Id::unique());
+        app.frames = 20; // Loading frames must not count as a completed content frame.
+        drop(app.update(Message::FontsReady(Ok(()))));
+        drop(app.frame());
+        assert!(!app.capturing, "the first frame after fonts-ready has not been drawn yet");
+        drop(app.frame());
+        assert!(app.capturing, "the existing two-frame wait should now be complete");
     }
 }

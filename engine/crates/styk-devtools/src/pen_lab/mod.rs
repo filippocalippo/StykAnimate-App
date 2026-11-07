@@ -9,20 +9,19 @@
 //! N6) and writes what it measured; the operating system's own path (`WM_POINTER`) is covered by the platform crate's tests of
 //! its pure parts and by hand with a tablet.
 
-pub mod report;
-mod self_test;
-
-pub use self_test::{SelfTest, TestKind};
+use styk_core::drawing::probe as self_test;
+use styk_core::drawing::probe::PenProbe;
 
 use iced::widget::{button, column, container, mouse_area, row, slider, text};
 use iced::{Element, Font, Length, Subscription, Task, Widget, window};
 use std::any::Any;
 use std::cell::RefCell;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, Ordering};
 use styk_core::drawing::worker::{HistoryOp, Worker};
-use styk_services::input::{InputDiagnostics, InputHost, InputQueue};
-use styk_services::Spawner;
+use styk_core::services::input::{InputDiagnostics, InputHost, InputQueue};
+use styk_core::services::Spawner;
 use styk_ui::ink_pad::{PadCore, ink_pad};
 
 /// The inspector's width in logical pixels.
@@ -34,12 +33,13 @@ pub struct LabOptions {
     pub scale: f32,
     /// The window is created hidden and shown without activation (an unattended run on Windows).
     pub show_after_open: bool,
-    pub self_test: Option<SelfTest>,
+    pub self_test: Option<Box<dyn PenProbe>>,
     pub out_dir: Option<PathBuf>,
     /// The platform's input source, its clock and its counters: the application hands the implementation of its target.
     pub input: Arc<dyn InputHost>,
     /// Starts the drawing worker.
     pub spawner: Arc<dyn Spawner>,
+    pub diagnostics: Arc<dyn styk_core::services::diagnostics::DiagnosticWindows>,
 }
 
 #[derive(Clone)]
@@ -47,6 +47,7 @@ pub enum Message {
     Opened(window::Id),
     Attached(Attached),
     Frame,
+    Probe(Result<self_test::Step, String>),
     Brush(BrushChange),
     Switch(SwitchChange),
     Clear,
@@ -55,12 +56,12 @@ pub enum Message {
     ToggleRecording,
     HoverEnter,
     HoverExit,
-    Finished,
+    Finished(Result<(), String>),
 }
 
 /// The result of hooking the window, handed from the window closure (which runs on the interface thread) to the lab.
 #[derive(Clone)]
-pub struct Attached(Arc<Mutex<Option<Result<(Arc<dyn InputDiagnostics>, f64), String>>>>);
+pub struct Attached(Result<(Arc<dyn InputDiagnostics>, f64), String>);
 
 thread_local! {
     /// The source stays on the interface thread: it is dropped there, and nothing else touches it.
@@ -93,39 +94,45 @@ struct Lab {
     core: Arc<PadCore>,
     counters: Option<Arc<dyn InputDiagnostics>>,
     input: Arc<dyn InputHost>,
+    diagnostics: Arc<dyn styk_core::services::diagnostics::DiagnosticWindows>,
     window: Option<window::Id>,
     refresh_hz: f64,
     show_after_open: bool,
     out_dir: Option<PathBuf>,
-    test: Option<self_test::Runner>,
+    test: Option<Box<dyn PenProbe>>,
+    probe_pending: bool,
+    captured: bool,
     hover_target: bool,
     hover_enters: u64,
     frames: u64,
     error: Option<String>,
-    exit_code: Arc<Mutex<i32>>,
+    exit_code: Arc<AtomicI32>,
 }
 
 impl Lab {
-    fn new(options: &LabOptions, exit_code: Arc<Mutex<i32>>) -> Lab {
+    fn new(options: &mut LabOptions, exit_code: Arc<AtomicI32>) -> Result<Lab, String> {
         let queue = InputQueue::new();
         let clock = options.input.clock();
-        let worker = Worker::spawn(Vec::new(), Arc::new(|| {}), clock.clone(), options.spawner.as_ref()).expect("the drawing worker starts");
+        let worker = Worker::spawn(Vec::new(), Arc::new(|| {}), clock.clone(), options.spawner.as_ref()).map_err(|error| error.to_string())?;
         let core = PadCore::new(queue, worker, clock);
-        Lab {
+        Ok(Lab {
             core,
             counters: None,
             input: options.input.clone(),
+            diagnostics: options.diagnostics.clone(),
             window: None,
             refresh_hz: 0.0,
             show_after_open: options.show_after_open,
             out_dir: options.out_dir.clone(),
-            test: options.self_test.clone().map(self_test::Runner::new),
+            test: options.self_test.take(),
+            probe_pending: false,
+            captured: false,
             hover_target: false,
             hover_enters: 0,
             frames: 0,
             error: None,
             exit_code,
-        }
+        })
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -134,66 +141,95 @@ impl Lab {
                 self.window = Some(id);
                 let queue = self.core.queue.clone();
                 let show_after_open = self.show_after_open;
-                let attached = Attached(Arc::new(Mutex::new(None)));
-                let slot = attached.clone();
-                let show = styk_platform::window::show_without_activation;
+                let diagnostics = self.diagnostics.clone();
                 let input = self.input.clone();
                 window::run(id, move |window| {
                     if show_after_open {
-                        let _ = show(window);
+                        if let Err(error) = diagnostics.show(window) { return Message::Attached(Attached(Err(error))); }
                     }
                     let result = input.attach(window, queue).map(|attached| {
                         SOURCE.with(|cell| *cell.borrow_mut() = Some(attached.hook));
                         (attached.diagnostics, attached.refresh_hz)
                     });
-                    *slot.0.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
-                    Message::Attached(slot)
+                    Message::Attached(Attached(result))
                 })
             }
             Message::Attached(slot) => {
-                match slot.0.lock().unwrap_or_else(|p| p.into_inner()).take() {
-                    Some(Ok((counters, hz))) => {
+                match slot.0 {
+                    Ok((counters, hz)) => {
                         self.counters = Some(counters);
                         self.refresh_hz = hz;
                     }
-                    Some(Err(error)) => self.error = Some(error),
-                    None => {}
+                    Err(error) => self.error = Some(error),
                 }
                 Task::none()
             }
             Message::Frame => {
                 self.frames += 1;
+                if self.probe_pending { return Task::none(); }
                 let Some(runner) = self.test.as_mut() else { return Task::none() };
                 let context = self_test::Context {
-                    core: &self.core,
-                    counters: self.counters.as_ref(),
+                    core: self.core.clone(),
+                    counters: self.counters.clone(),
                     refresh_hz: self.refresh_hz,
-                    out_dir: self.out_dir.as_deref(),
+                    out_dir: self.out_dir.clone(),
                 };
-                match runner.step(&context) {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                let captured = std::mem::take(&mut self.captured);
+                match runner.step(context, captured, Box::new(move |result| {
+                    if sender.send(result).is_err() { eprintln!("pen probe receiver closed"); }
+                })) {
+                    Ok(()) => { self.probe_pending = true; Task::perform(async move { receiver.await.map_err(|e| e.to_string())? }, Message::Probe) }
+                    Err(error) => Task::done(Message::Finished(Err(error))),
+                }
+            }
+            Message::Probe(Err(error)) => { self.probe_pending = false; Task::done(Message::Finished(Err(error))) }
+            Message::Probe(Ok(step)) => {
+                self.probe_pending = false;
+                match step {
                     self_test::Step::Continue => Task::none(),
+                    self_test::Step::DisturbBlockedProbe => {
+                        self.diagnostics.disturb_blocked_probe();
+                        Task::none()
+                    }
                     self_test::Step::Capture(path) => {
+                        self.probe_pending = true;
                         let id = self.window;
                         match id {
-                            Some(id) => window::run(id, move |w| styk_platform::window::capture(w).map_err(|e| e.to_string())).map(move |result| {
-                                if let Ok(image) = result {
-                                    let _ = write_png(&path, &image);
-                                }
-                                Message::Finished
-                            }),
-                            None => Task::done(Message::Finished),
+                            Some(id) => {
+                                let diagnostics = self.diagnostics.clone();
+                                let output = diagnostics.clone();
+                                window::run(id, move |w| diagnostics.capture(w)).then(move |result| {
+                                    let output = output.clone();
+                                    let path = path.clone();
+                                    Task::perform(async move {
+                                        let image = result?;
+                                        let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                                        output.save_image(path, image, Box::new(move |result| {
+                                            if sender.send(result).is_err() { eprintln!("diagnostic receiver closed"); }
+                                        }))?;
+                                        receiver.await.map_err(|error| error.to_string())?
+                                    }, Message::Finished)
+                                })
+                            },
+                            None => Task::done(Message::Finished(Err("diagnostic window is absent".into()))),
                         }
                     }
                     self_test::Step::Done(code) => {
-                        *self.exit_code.lock().unwrap_or_else(|p| p.into_inner()) = code;
+                        self.exit_code.store(code, Ordering::Release);
                         iced::exit()
                     }
                 }
             }
-            Message::Finished => {
-                if let Some(runner) = self.test.as_mut() {
-                    runner.captured();
-                }
+            Message::Finished(Err(error)) => {
+                eprintln!("pen probe failed: {error}");
+                self.error = Some(error);
+                self.exit_code.store(1, Ordering::Release);
+                iced::exit()
+            }
+            Message::Finished(Ok(())) => {
+                self.probe_pending = false;
+                self.captured = true;
                 Task::none()
             }
             Message::Brush(change) => {
@@ -336,23 +372,21 @@ impl Lab {
     }
 }
 
-fn write_png(path: &std::path::Path, image: &styk_platform::window::Image) -> Result<(), String> {
-    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), image.width, image.height);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-    writer.write_image_data(&image.rgba).map_err(|e| e.to_string())?;
-    writer.finish().map_err(|e| e.to_string())
-}
-
 /// Runs the lab until its window closes (or its self-test ends). Returns the process exit code.
-pub fn run(options: LabOptions) -> Result<i32, String> {
-    let exit_code = Arc::new(Mutex::new(0));
-    let lab = Mutex::new(Some(Lab::new(&options, exit_code.clone())));
+pub fn run(mut options: LabOptions) -> Result<i32, String> {
+    fn view(state: &Option<Lab>) -> Element<'_, Message> {
+        match state { Some(lab) => lab.view(), None => text("Closing diagnostic window").boxed() }
+    }
+    let exit_code = Arc::new(AtomicI32::new(0));
+    let lab = RefCell::new(Some(Lab::new(&mut options, exit_code.clone())?));
     let scale = options.scale;
-    iced::application(move || lab.lock().unwrap_or_else(|p| p.into_inner()).take().expect("the lab starts once"), Lab::update, Lab::view)
-        .subscription(Lab::subscription)
+    iced::application(move || {
+        let state = lab.borrow_mut().take();
+        let task = if state.is_some() { Task::none() } else { iced::exit() };
+        (state, task)
+    }, |state: &mut Option<Lab>, message| state.as_mut().map_or_else(iced::exit, |lab| lab.update(message)),
+       view)
+        .subscription(|state: &Option<Lab>| state.as_ref().map_or_else(Subscription::none, Lab::subscription))
         .title("StykAnimate pen lab")
         .scale_factor(move |_| scale)
         .font(styk_design::widgets::INTER)
@@ -360,6 +394,5 @@ pub fn run(options: LabOptions) -> Result<i32, String> {
         .window(options.window)
         .run()
         .map_err(|error| format!("the window failed: {error}"))?;
-    let code = *exit_code.lock().unwrap_or_else(|p| p.into_inner());
-    Ok(code)
+    Ok(exit_code.load(Ordering::Acquire))
 }

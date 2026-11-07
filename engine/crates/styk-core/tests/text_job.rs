@@ -57,7 +57,7 @@ fn compiled_revisions(events: &[JobEvent]) -> Vec<u64> {
 
 #[test]
 fn the_latest_draft_wins_and_every_result_carries_its_revision() {
-    let job = TextJob::spawn(compiler(), || {});
+    let job = spawn_job(compiler(), || {});
     job.compile(request(1, &long_text()));
     for revision in 2..=6 {
         job.compile(request(revision, &format!("Draft {revision}")));
@@ -73,7 +73,7 @@ fn the_latest_draft_wins_and_every_result_carries_its_revision() {
 
 #[test]
 fn a_running_compile_stops_when_a_newer_draft_arrives() {
-    let job = TextJob::spawn(compiler(), || {});
+    let job = spawn_job(compiler(), || {});
     job.compile(request(1, &long_text()));
     // Give the thread time to start the long compile, then supersede it.
     std::thread::sleep(Duration::from_millis(30));
@@ -96,7 +96,7 @@ fn a_cancelled_token_ends_a_compile_with_cancelled_after_its_glyphs_are_read() {
 
 #[test]
 fn cancel_forgets_the_waiting_draft_and_the_running_one_delivers_nothing() {
-    let job = TextJob::spawn(compiler(), || {});
+    let job = spawn_job(compiler(), || {});
     job.compile(request(1, &long_text()));
     job.cancel();
     std::thread::sleep(Duration::from_millis(500));
@@ -110,7 +110,7 @@ fn a_full_command_queue_says_busy_and_every_accepted_command_is_answered() {
     let gate = Arc::new((Mutex::new(false), Condvar::new()));
     let job = {
         let gate = gate.clone();
-        TextJob::spawn(compiler(), move || {
+        spawn_job(compiler(), move || {
             let (open, changed) = &*gate;
             let mut open = open.lock().unwrap();
             while !*open {
@@ -139,7 +139,7 @@ fn a_full_command_queue_says_busy_and_every_accepted_command_is_answered() {
 
 #[test]
 fn dropping_the_job_stops_the_thread_even_in_the_middle_of_a_compile() {
-    let job = TextJob::spawn(compiler(), || {});
+    let job = spawn_job(compiler(), || {});
     job.compile(request(1, &long_text()));
     std::thread::sleep(Duration::from_millis(20));
     let started = Instant::now();
@@ -178,7 +178,7 @@ fn dropping_the_job_does_not_wait_for_a_worker_stuck_in_its_notification() {
     let entered = Arc::new(AtomicBool::new(false));
     let job = {
         let (gate, entered) = (gate.clone(), entered.clone());
-        TextJob::spawn(compiler(), move || {
+        spawn_job(compiler(), move || {
             entered.store(true, Ordering::Release);
             let (open, changed) = &*gate;
             let mut open = open.lock().unwrap();
@@ -207,16 +207,24 @@ fn dropping_the_job_does_not_wait_for_a_worker_stuck_in_its_notification() {
 }
 
 #[test]
-fn closing_the_job_hands_the_thread_to_the_caller_to_join_off_the_interface_thread() {
-    let job = TextJob::spawn(compiler(), || {});
+fn closing_the_job_lets_the_host_join_away_from_the_interface_thread() {
+    struct Host(Mutex<Option<std::thread::JoinHandle<()>>>);
+    impl styk_services::Spawner for Host {
+        fn spawn(&self, _: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+            *self.0.lock().unwrap() = Some(std::thread::spawn(job));
+            Ok(())
+        }
+    }
+    let host = Host(Mutex::new(None));
+    let job = TextJob::spawn(compiler(), || {}, &host).unwrap();
     job.compile(request(1, "done soon"));
-    let thread = job.close().expect("the thread is still there");
-    thread.join().expect("the worker ends cleanly");
+    job.close();
+    host.0.lock().unwrap().take().unwrap().join().unwrap();
 }
 
 #[test]
 fn replies_nobody_takes_are_counted_with_the_commands_and_stay_bounded() {
-    let job = TextJob::spawn(compiler(), || {});
+    let job = spawn_job(compiler(), || {});
     let (mut accepted, mut busy) = (0, 0);
     for _ in 0..300 {
         match job.set_source(None) {
@@ -239,7 +247,7 @@ fn queued_payload_bytes_are_bounded_too() {
     let gate = Arc::new((Mutex::new(false), Condvar::new()));
     let job = {
         let gate = gate.clone();
-        TextJob::spawn(compiler(), move || {
+        spawn_job(compiler(), move || {
             let (open, changed) = &*gate;
             let mut open = open.lock().unwrap();
             while !*open {
@@ -256,4 +264,24 @@ fn queued_payload_bytes_are_bounded_too() {
     *open.lock().unwrap() = true;
     changed.notify_all();
     assert!((1..=4).contains(&accepted), "{accepted} fonts of 32 MiB were queued");
+}
+
+struct TestThreads;
+impl styk_services::Spawner for TestThreads {
+    fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+        std::thread::Builder::new().name(name.into()).spawn(job).map(|_| ()).map_err(|e| styk_services::SpawnError(e.to_string()))
+    }
+}
+fn spawn_job(compiler: TextCompiler, notify: impl Fn() + Send + 'static) -> TextJob {
+    TextJob::spawn(compiler, notify, &TestThreads).unwrap()
+}
+#[test]
+fn a_refused_spawner_returns_an_error_without_starting_a_job() {
+    struct Refused;
+    impl styk_services::Spawner for Refused {
+        fn spawn(&self, _: &str, _: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+            Err(styk_services::SpawnError("refused by host".into()))
+        }
+    }
+    assert!(matches!(TextJob::spawn(compiler(), || panic!("no job started"), &Refused), Err(e) if e.0 == "refused by host"));
 }

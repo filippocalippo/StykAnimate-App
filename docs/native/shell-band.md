@@ -102,8 +102,8 @@ widths are the wide window, each fold step of three tabs (903, 879, 851, 813, 78
 (400), light and dark, plus Build, movieclip and camera sessions, one tab and twelve tabs. The references are captured the way `engine/crates/xtask/fonts-chromium.mjs` captures its own: bundled Chromium through
 Playwright with LCD text on and opaque surfaces, so its text is ClearType like the native window's. The harness is in
 `engine/crates/styk-app/automation/band-reference/` (`shots.mjs`, `make-script.mjs`, `compare.mjs`); the references and
-limits are recorded in `engine/crates/styk-app/automation/band-limits.toml` (they move to `docs/native/screens/limits.toml`
-when K-guards lands it). Scores (PSNR over the band's rows, 22 scenarios, debug build): 20.9 to 30.6 dB, never more than
+limits of the four band screens of the catalogue (`band`, `band-dark`, `band-folded`, `band-build`) are in
+`docs/native/screens/limits.toml`, with the references in `docs/native/screens/band/`. Scores (PSNR over the band's rows, 22 scenarios, debug build): 20.9 to 30.6 dB, never more than
 3.8 % of pixels differing by more than 24 levels; what remains is a pixel at glyph edges, dots and shadows. Each scenario
 also asserts the window width and the fold steps Chromium applied (`expect width`, `expect folds`), all of which hold.
 

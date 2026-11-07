@@ -24,7 +24,7 @@ pub const fn shown_after_creation(strategy: Option<Strategy>) -> bool {
 
 /// Whether the shell shows the window itself, at the frame it chose (every ordinary Windows run).
 pub const fn shell_shows(strategy: Option<Strategy>) -> bool {
-    cfg!(windows) && strategy.is_none()
+    styk_platform::shell::owns_show() && strategy.is_none()
 }
 
 /// The main window's settings. `strategy` is how an unattended run keeps off the desktop (`styk_platform::unattended`),
@@ -43,16 +43,10 @@ pub fn settings(launch: &Launch, strategy: Option<Strategy>) -> window::Settings
         exit_on_close_request: false,
         ..window::Settings::default()
     };
-    #[cfg(windows)]
-    {
-        settings.platform_specific.undecorated_shadow = true;
-    }
+    styk_platform::shell_window_settings!(settings);
     if strategy.is_some() {
         settings.position = window::Position::Specific(Point::new(OFF_SCREEN, OFF_SCREEN));
-        #[cfg(windows)]
-        {
-            settings.platform_specific.skip_taskbar = true;
-        }
+        // styk-platform applies the tool-window style before showing this hidden window.
         #[cfg(target_os = "linux")]
         if strategy == Some(Strategy::OverrideRedirectWindow) {
             // The window manager never sees an override-redirect window: it takes no focus and gets no taskbar entry.
@@ -105,13 +99,6 @@ mod tests {
         let settings = settings(&Launch::default(), None);
         assert!(!settings.decorations);
         assert!(settings.platform_specific.undecorated_shadow);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_hidden_window_has_no_taskbar_entry() {
-        assert!(settings(&Launch::default(), Some(Strategy::HiddenWindow)).platform_specific.skip_taskbar);
-        assert!(!settings(&Launch::default(), None).platform_specific.skip_taskbar);
     }
 
     #[cfg(target_os = "linux")]

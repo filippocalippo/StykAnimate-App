@@ -12,7 +12,6 @@
 use iced::advanced::widget::operate;
 use iced::keyboard::{self, Key, key::Named};
 use iced::{Event, Size, Subscription, Task, Widget as _, event, mouse, window};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -27,18 +26,20 @@ use styk_core::shell::workspace::{self, Workspace};
 use styk_core::shell::{self, Effect, ids};
 use styk_design::widgets::focus;
 use styk_design::{Theme, warm_up};
-use styk_engine::{Budgets, Engine};
+use styk_core::engine::{Budgets, Engine};
 use styk_services::Spawner;
 use styk_services::clock::{Clock, FixedClock};
 use styk_services::shell::Rect;
 use styk_services::shell::chrome::MaxButtonState;
+use styk_ui::screens::Screen;
 use styk_ui::shell as view;
 
 /// Frames to let pass after a step so the window shows its result before the next step (and before a capture).
 const SETTLE_FRAMES: u32 = 3;
 
-/// A project opened on a worker, handed to the interface thread once. The mutex holds it until the message that
-/// carries it is handled; the interface thread only moves it into the tab.
+/// A project opened on a worker, handed to the interface thread once. The cell holds it until the message that carries
+/// it is handled: the worker is done with it before the message exists, so the interface thread only ever `try_lock`s it
+/// (never waits) and moves it into the tab.
 #[derive(Clone)]
 pub struct Handoff(Arc<Mutex<Option<Result<PreparedDocument, String>>>>);
 
@@ -112,6 +113,8 @@ pub struct TopBand {
     run: Option<Run>,
     /// The band's words are measured: the layout is the real one.
     measured: bool,
+    /// A band screen of the catalogue shown in place of the open projects (`--screen band`).
+    screen: Option<Screen>,
 }
 
 /// What the stand-in for the workspace sessions answers.
@@ -131,7 +134,7 @@ fn engine_clock() -> f64 {
 /// Opens a project file on a worker: the one stand-in for K-doc's files service and engine host. When that host merges,
 /// this function is what is replaced (its call sites hold only the `Handoff` it returns).
 async fn open_project(path: PathBuf) -> Handoff {
-    let result = std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display())).and_then(|bytes| {
+    let result = styk_platform::diagnostics::read_file(&path, None).and_then(|bytes| {
         let name = path.file_name().map_or_else(|| "Untitled".to_string(), |name| name.to_string_lossy().into_owned());
         prepare(bytes, &name).map_err(|message| format!("{}: {message}", path.display()))
     });
@@ -144,15 +147,10 @@ fn prepare(bytes: Vec<u8>, name: &str) -> Result<PreparedDocument, String> {
     PreparedDocument::open_bytes(&engine, Arc::from(bytes), name, &|| false).map_err(|error| error.message)
 }
 
-/// Reads at most `MAX_SCRIPT_BYTES + 1` bytes of a script and refuses one that is longer, so a huge file is never read
-/// whole.
-fn read_script(reader: impl Read) -> Result<String, String> {
-    let mut bytes = Vec::new();
-    reader.take(MAX_SCRIPT_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
-    if bytes.len() > MAX_SCRIPT_BYTES {
-        return Err(format!("the script is longer than {MAX_SCRIPT_BYTES} bytes"));
-    }
-    String::from_utf8(bytes).map_err(|_| "the script is not UTF-8 text".to_string())
+/// Reads a script through its size limit (`diagnostics::read_file` reads one byte past it at most) and decodes it.
+fn read_script(path: &Path) -> Result<String, String> {
+    let bytes = styk_platform::diagnostics::read_file(path, Some(MAX_SCRIPT_BYTES))?;
+    String::from_utf8(bytes).map_err(|_| format!("{}: the script is not UTF-8 text", path.display()))
 }
 
 /// Gives a project to a tab. A refused project is handed to a worker to be disposed of: dropping a large session on
@@ -170,9 +168,9 @@ fn install(documents: &mut Documents, prepared: PreparedDocument, spawner: &dyn 
 fn dispose(prepared: PreparedDocument, spawner: &dyn Spawner, parked: &mut Vec<PreparedDocument>) {
     let cell = Arc::new(Mutex::new(Some(prepared)));
     let job_cell = cell.clone();
-    let job: styk_services::Job = Box::new(move || drop(job_cell.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take()));
+    let job: styk_services::Job = Box::new(move || drop(job_cell.try_lock().ok().and_then(|mut cell| cell.take())));
     if spawner.spawn("dispose project", job).is_err()
-        && let Some(prepared) = cell.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take()
+        && let Some(prepared) = cell.try_lock().ok().and_then(|mut cell| cell.take())
     {
         parked.push(prepared);
     }
@@ -207,13 +205,12 @@ impl TopBand {
     pub fn new(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>) -> TopBand {
         let window = shell::Window { width: window_size.width, height: window_size.height, ui_scale: 1.0, controls: !cfg!(target_os = "macos") };
         let unmeasured = shell::band::Labels { animate: 0.0, draw: 0.0, build: 0.0, export: 0.0, cancel: 0.0, test_rig: 0.0, done: 0.0 };
-        TopBand { documents: Documents::new(), shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), opening: 0, clock, fixed, spawner, parked: Vec::new(), run: None, measured: false }
+        TopBand { documents: Documents::new(), shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), opening: 0, clock, fixed, spawner, parked: Vec::new(), run: None, measured: false, screen: None }
     }
 
     /// Starts the script the command line named.
     pub fn run_script(&mut self, path: &Path) -> Result<(), String> {
-        let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
-        let text = read_script(file).map_err(|error| format!("{}: {error}", path.display()))?;
+        let text = read_script(path)?;
         let script = Script::parse(&text).map_err(|error| format!("{}: {error}", path.display()))?;
         let base = path.parent().map(Path::to_path_buf).unwrap_or_default();
         self.run = Some(Run { steps: script.steps, next: 0, settle: SETTLE_FRAMES, base, failures: Vec::new(), capturing: false });
@@ -235,10 +232,22 @@ impl TopBand {
         self.opening == 0
     }
 
+    /// Shows a band screen of the catalogue (`--screen band`) instead of the open projects.
+    pub fn show_screen(&mut self, screen: Option<Screen>) {
+        self.screen = screen;
+    }
+
     /// The fonts are ready: measure the band's words.
     pub fn fonts_ready(&mut self) {
         if let Some(ready) = warm_up::proof() {
-            drop(self.dispatch(shell::Event::Labels(view::measure_labels(ready))));
+            let labels = view::measure_labels(ready);
+            match self.screen {
+                Some(screen) => {
+                    let window = *self.shell.window();
+                    self.shell = styk_ui::screens::band_shell(screen, (window.width as u32, window.height as u32), labels);
+                }
+                None => drop(self.dispatch(shell::Event::Labels(labels))),
+            }
             self.measured = true;
         }
     }
@@ -344,7 +353,7 @@ impl TopBand {
             Message::Ui(view::Message::CloseWindow) => (vec![Request::Close], Task::none()),
             Message::Opened(handoff) => {
                 self.opening = self.opening.saturating_sub(1);
-                let result = handoff.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+                let result = handoff.0.try_lock().ok().and_then(|mut cell| cell.take());
                 let mut task = Task::none();
                 match result {
                     Some(Ok(prepared)) => match install(&mut self.documents, prepared, self.spawner.as_ref(), &mut self.parked) {
@@ -535,7 +544,7 @@ impl TopBand {
                     (Vec::new(), self.dispatch(E::SaveLanded(id, now)))
                 }
                 Step::Expect(expectation) => {
-                    self.expect(&expectation)?;
+                    self.check_expectation(&expectation)?;
                     (Vec::new(), Task::none())
                 }
                 Step::Screenshot(path) => {
@@ -588,7 +597,7 @@ impl TopBand {
         self.dispatch(event)
     }
 
-    fn expect(&self, expectation: &Expect) -> Result<(), String> {
+    fn check_expectation(&self, expectation: &Expect) -> Result<(), String> {
         let number_of = |id: DocumentId| self.opened.iter().position(|opened| *opened == id).map_or(0, |at| at + 1);
         let same = |what: &str, wanted: String, found: String| if wanted == found { Ok(()) } else { Err(format!("expected {what} {wanted}, found {found}")) };
         match expectation {
@@ -716,24 +725,18 @@ mod tests {
     }
 
     #[test]
-    fn a_script_over_the_limit_is_refused_after_reading_one_byte_past_it() {
-        struct Counting(usize, std::cell::Cell<usize>);
-        impl Read for &Counting {
-            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-                let left = self.0 - self.1.get();
-                let n = left.min(buffer.len());
-                buffer[..n].fill(b'#');
-                self.1.set(self.1.get() + n);
-                Ok(n)
-            }
-        }
-        let huge = Counting(10 * MAX_SCRIPT_BYTES, std::cell::Cell::new(0));
-        let error = read_script(&huge).unwrap_err();
-        assert!(error.contains("longer than"), "{error}");
-        assert_eq!(huge.1.get(), MAX_SCRIPT_BYTES + 1, "no more than one byte past the limit was read");
-        let exact = Counting(MAX_SCRIPT_BYTES, std::cell::Cell::new(0));
+    fn a_script_over_the_limit_is_refused_before_it_is_decoded_or_parsed() {
+        let dir = std::env::temp_dir().join(format!("styk-script-limit-{}", std::process::id()));
+        styk_platform::diagnostics::create_output_directory(&dir).unwrap();
+        let big = dir.join("big.script");
+        styk_platform::diagnostics::write_report(&big, &"wait 1
+".repeat(MAX_SCRIPT_BYTES / 7 + 1)).unwrap();
+        assert!(read_script(&big).unwrap_err().contains("longer than"), "refused by size");
+        let exact = dir.join("exact.script");
+        styk_platform::diagnostics::write_report(&exact, &"#".repeat(MAX_SCRIPT_BYTES)).unwrap();
         assert_eq!(read_script(&exact).unwrap().len(), MAX_SCRIPT_BYTES);
-        assert!(read_script(&b"\xff\xfe"[..]).unwrap_err().contains("UTF-8"));
+        assert!(read_script(&dir.join("missing.script")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

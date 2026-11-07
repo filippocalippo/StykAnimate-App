@@ -8,7 +8,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
+use styk_services::{Spawner, SpawnError};
 
 use styk_doc::Value;
 
@@ -263,7 +263,6 @@ struct Inner {
 /// A text compiler on its own thread.
 pub struct TextJob {
     inner: Arc<Inner>,
-    thread: Option<JoinHandle<()>>,
 }
 
 /// The caller could not queue a command: the commands and answers the job holds are at [`MAX_COMMANDS`] or [`MAX_QUEUED_BYTES`].
@@ -273,16 +272,11 @@ pub struct Busy;
 
 impl TextJob {
     /// `notify` is called from the job's thread whenever an event is ready to take; keep it short (request a redraw).
-    pub fn spawn(compiler: TextCompiler, notify: impl Fn() + Send + 'static) -> TextJob {
+    pub fn spawn(compiler: TextCompiler, notify: impl Fn() + Send + 'static, spawner: &dyn Spawner) -> Result<TextJob, SpawnError> {
         let inner = Arc::new(Inner { shared: Mutex::new(Shared::default()), wake: Condvar::new() });
-        let thread = {
-            let inner = inner.clone();
-            std::thread::Builder::new()
-                .name("text-compile".to_string())
-                .spawn(move || run(inner, compiler, notify))
-                .expect("spawn the text compile thread")
-        };
-        TextJob { inner, thread: Some(thread) }
+        let worker = inner.clone();
+        spawner.spawn("text-compile", Box::new(move || run(worker, compiler, notify)))?;
+        Ok(TextJob { inner })
     }
 
     fn command(&self, command: Command) -> Result<(), Busy> {
@@ -343,10 +337,9 @@ impl TextJob {
         taken.into_iter().map(|(event, _)| event).collect()
     }
 
-    /// Stops the job and hands back its thread, so a caller that wants the join does it away from the interface thread.
-    pub fn close(mut self) -> Option<JoinHandle<()>> {
+    /// Signals shutdown. The host spawner owns worker reclamation; closing never joins.
+    pub fn close(self) {
         self.signal_close();
-        self.thread.take()
     }
 
     fn signal_close(&self) {

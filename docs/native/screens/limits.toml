@@ -1,0 +1,41 @@
+# Only the orchestrator adds reference captures and chooses thresholds (never tuned to pass).
+# Paths are repository-relative captures of today's app. An empty reference is pending,
+# not an exemption after a reference is supplied. max_difference is the fraction of
+# pixels with any RGBA channel difference, in [0, 1]; dimensions must match exactly.
+["component-sheet"]
+reference = ""
+max_difference = 0.0
+width = 1560
+height = 1000
+
+# The top band (K-shell). The references are today's real window rows at the screen's size, captured as
+# engine/crates/xtask/fonts-chromium.mjs captures (bundled Chromium through Playwright, LCD text on, opaque surfaces,
+# device scale 1) by engine/crates/styk-app/automation/band-reference/screens.mjs: today's index.html header with today's
+# measureBand, resolveTiers, installProjectTabs and hydrateIcons, three projects ("Rooftop fight", "Chase" unsaved and in
+# front, "Untitled animation"), the dock's Properties button at widths up to 800 px. The limits are the differing-pixel
+# fractions the guard measured on 2026-11-08 (debug build, headless, `styk image-diff`) rounded up to three places; they
+# are to be tightened, never loosened. The windowed comparison (22 scenarios, PSNR 20.9 to 30.6 dB, folds and widths
+# asserted by `expect`) is in docs/native/shell-band.md.
+["band"]
+reference = "docs/native/screens/band/band.png"
+max_difference = 0.007
+width = 1560
+height = 900
+
+["band-dark"]
+reference = "docs/native/screens/band/band-dark.png"
+max_difference = 0.006
+width = 1560
+height = 900
+
+["band-folded"]
+reference = "docs/native/screens/band/band-folded.png"
+max_difference = 0.010
+width = 720
+height = 900
+
+["band-build"]
+reference = "docs/native/screens/band/band-build.png"
+max_difference = 0.008
+width = 1000
+height = 900

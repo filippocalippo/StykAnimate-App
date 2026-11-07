@@ -157,10 +157,9 @@ impl Prepared {
     }
 
     /// Queues the glyphs for the worker from a thread of its own, as the worker's bounded queue drains. Never touches the
-    /// font system (the interface thread takes it synchronously). Returns at once, with the thread that feeds the worker
-    /// (it ends when everything is queued).
-    pub fn feed(self) -> Option<std::thread::JoinHandle<()>> {
-        std::thread::Builder::new().name("glyph-warm".into()).spawn(move || feed(self.glyphs, self.direct_write)).ok()
+    /// font system (the interface thread takes it synchronously). Returns at once, reporting a refused task; completion never joins on the caller.
+    pub fn feed(self, spawner: &dyn styk_core::services::Spawner, clock: Arc<dyn styk_core::services::Clock>) -> Result<(), styk_core::services::SpawnError> {
+        spawner.spawn("glyph-warm", Box::new(move || feed(self.glyphs, self.direct_write, clock.as_ref())))
     }
 }
 
@@ -175,17 +174,12 @@ pub fn prepare(scale: f32, locale: &str) -> Option<Prepared> {
     Some(Prepared { glyphs: keys(scale, locale), direct_write: drawing == GlyphDrawing::DirectWrite })
 }
 
-/// [`prepare`] and [`Prepared::feed`] in one: for programs and tests that have no interface thread to protect.
-pub fn prewarm(scale: f32, locale: String) -> Option<std::thread::JoinHandle<()>> {
-    prepare(scale, &locale)?.feed()
-}
-
 /// Feeds `glyphs` to the worker as its queue has room, for at most ten seconds.
-fn feed(glyphs: Vec<(CacheKey, Arc<Font>)>, direct_write: bool) {
+fn feed(glyphs: Vec<(CacheKey, Arc<Font>)>, direct_write: bool, clock: &dyn styk_core::services::Clock) {
     let mut glyphs: std::collections::VecDeque<_> = glyphs.into();
-    let started = std::time::Instant::now();
+    let started = clock.now();
     let mut stalled = 0;
-    while !glyphs.is_empty() && started.elapsed() < std::time::Duration::from_secs(10) && stalled < 400 {
+    while !glyphs.is_empty() && clock.now().saturating_sub(started) < std::time::Duration::from_secs(10) && stalled < 400 {
         if cryoglyph::prewarm(&mut glyphs, direct_write) == 0 {
             // The queue is full (or the warm results are not being used): let the worker catch up.
             stalled += 1;
@@ -199,6 +193,42 @@ fn feed(glyphs: Vec<(CacheKey, Arc<Font>)>, direct_write: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feeder_submission_uses_the_injected_spawner_and_clock() {
+        use styk_core::services::{Clock, Job, SpawnError, Spawner};
+        use std::sync::{Mutex, atomic::{AtomicUsize, Ordering}};
+        struct Host(Mutex<Option<Job>>);
+        impl Spawner for Host {
+            fn spawn(&self, name: &str, job: Job) -> Result<(), SpawnError> {
+                assert_eq!(name, "glyph-warm");
+                *self.0.lock().unwrap() = Some(job); Ok(())
+            }
+        }
+        struct Count(AtomicUsize);
+        impl Clock for Count {
+            fn now(&self) -> std::time::Duration {
+                self.0.fetch_add(1, Ordering::Relaxed); std::time::Duration::ZERO
+            }
+        }
+        let clock = Arc::new(Count(AtomicUsize::new(0)));
+        let host = Host(Mutex::new(None));
+        Prepared { glyphs: Vec::new(), direct_write: false }.feed(&host, clock.clone()).unwrap();
+        assert_eq!(clock.0.load(Ordering::Relaxed), 0, "submission does not run worker work inline");
+        host.0.into_inner().unwrap().expect("injected host owns the job")();
+        assert_eq!(clock.0.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn a_refused_feeder_is_reported() {
+        use styk_core::services::{Job, SpawnError, Spawner, FixedClock};
+        struct Refuse;
+        impl Spawner for Refuse {
+            fn spawn(&self, _: &str, _: Job) -> Result<(), SpawnError> { Err(SpawnError("refused".into())) }
+        }
+        let result = Prepared { glyphs: Vec::new(), direct_write: false }.feed(&Refuse, Arc::new(FixedClock::new()));
+        assert!(result.unwrap_err().to_string().contains("refused"));
+    }
 
     #[test]
     fn the_roles_are_all_of_them() {

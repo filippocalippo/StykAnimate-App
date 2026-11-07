@@ -12,18 +12,17 @@ path = "src/main.rs"
 
 [features]
 # The developer build: the instrumentation layer records, and the tools are linked in. Same optimisation as release.
-devtools = ["dep:styk-devtools", "dep:iced_winit", "styk-trace/enabled"]
+devtools = ["dep:styk-text-check", "dep:styk-devtools", "dep:iced_winit", "styk-trace/enabled"]
 
 [dependencies]
+styk-text-check = { path = "../styk-text-check", optional = true }
 iced = { workspace = true }
 iced_runtime = { path = "../../../vendor/iced/runtime" }
 iced_winit = { path = "../../../vendor/iced/winit", optional = true }
-png = "0.18"
 pollster = "0.4"
 styk-core = { path = "../styk-core" }
 styk-design = { path = "../styk-design", features = ["widgets"] }
 styk-devtools = { path = "../styk-devtools", optional = true }
-styk-engine = { path = "../styk-engine" }
 styk-platform = { path = "../styk-platform" }
 styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace" }

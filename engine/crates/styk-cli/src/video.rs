@@ -28,7 +28,7 @@ use styk_render::wgpu;
 use styk_services::video::{Arch, FrameLayout, VfwRequest, VideoError, VideoRequest, VideoService};
 use styk_services::Cancel;
 
-use crate::win;
+use styk_platform::diagnostics as win;
 
 fn option<'a>(rest: &'a [String], name: &str) -> Option<&'a str> {
     rest.iter().position(|a| a == name).and_then(|i| rest.get(i + 1)).map(String::as_str)

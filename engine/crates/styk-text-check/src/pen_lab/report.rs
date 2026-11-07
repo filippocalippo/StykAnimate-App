@@ -3,9 +3,9 @@
 //! Everything here is arithmetic over recorded rows, so it is tested with made-up rows; the lab only feeds it.
 
 use std::collections::HashSet;
-use std::fmt::Write;
-use styk_services::input::{PenButtons, Phase, SampleFlags, Script, Tool};
-use styk_ui::ink_pad::{FrameRow, SampleRow};
+macro_rules! line { ($out:expr, $($arg:tt)*) => {{ $out.push_str(&format!($($arg)*)); $out.push('\n'); }}; }
+use styk_core::services::input::{PenButtons, Phase, SampleFlags, Script, Tool};
+use styk_core::drawing::pad::{FrameRow, SampleRow};
 
 /// Percentiles of a set of durations.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -153,7 +153,7 @@ pub fn analyse(script: &Script, injected_ns: &[u64], samples: &[SampleRow], fram
 
 fn row(out: &mut String, name: &str, p: &Percentiles, period_ms: f64) {
     let frames = |ms: f64| if period_ms > 0.0 { format!("{:.2}", ms / period_ms) } else { "-".into() };
-    let _ = writeln!(
+    line!(
         out,
         "{name:<28} n={:<5} p50 {:>7.2} ms ({} fr)  p95 {:>7.2} ms ({} fr)  p99 {:>7.2} ms ({} fr)  max {:>7.2} ms ({} fr)",
         p.count,
@@ -172,22 +172,22 @@ impl Report {
     /// The report as text, with the conditions it was measured under.
     pub fn text(&self, refresh_hz: f64, present_mode: &str, slices_us: (u64, u64)) -> String {
         let mut out = String::new();
-        let _ = writeln!(out, "display {refresh_hz:.0} Hz, present mode {present_mode}, measured frame period {:.2} ms, frames {}, frame gaps over 2x {}", self.frame_period_ms, self.frames, self.frame_gaps_over_2x);
-        let _ = writeln!(out, "injected {} delivered {} (in contact: {} of {}) re-delivered {} same-timestamp {} history-recovered {} monotonic {} median gap {:.3} ms", self.injected, self.delivered, self.delivered_contact, self.injected_contact, self.duplicates, self.same_stamp, self.history_samples, self.monotonic, self.median_gap_ms);
+        line!(out, "display {refresh_hz:.0} Hz, present mode {present_mode}, measured frame period {:.2} ms, frames {}, frame gaps over 2x {}", self.frame_period_ms, self.frames, self.frame_gaps_over_2x);
+        line!(out, "injected {} delivered {} (in contact: {} of {}) re-delivered {} same-timestamp {} history-recovered {} monotonic {} median gap {:.3} ms", self.injected, self.delivered, self.delivered_contact, self.injected_contact, self.duplicates, self.same_stamp, self.history_samples, self.monotonic, self.median_gap_ms);
         if self.aligned {
-            let _ = writeln!(
+            line!(
                 out,
                 "fields: tool mismatches {} barrel mismatches {} phase mismatches {} max tilt error {:.1} deg max pressure error {:.1}/1024 max position error {:.2} px",
                 self.tool_mismatches, self.barrel_mismatches, self.phase_mismatches, self.max_tilt_error, self.max_pressure_error, self.max_position_error
             );
         } else {
-            let _ = writeln!(out, "fields: not compared (contact runs differ in length, or re-delivered samples)");
+            line!(out, "fields: not compared (contact runs differ in length, or re-delivered samples)");
         }
         let period = if self.frame_period_ms > 0.0 { self.frame_period_ms } else { 1000.0 / refresh_hz.max(1.0) };
         row(&mut out, "push -> queue read", &self.delivery_ms, period);
         row(&mut out, "push -> preview frame", &self.preview_ms, period);
         row(&mut out, "push -> exact tiles frame", &self.exact_ms, period);
-        let _ = writeln!(out, "interface-thread slices: update max {} us, prepare max {} us", slices_us.0, slices_us.1);
+        line!(out, "interface-thread slices: update max {} us, prepare max {} us", slices_us.0, slices_us.1);
         out
     }
 }
@@ -195,7 +195,7 @@ impl Report {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use styk_services::input::ScriptSpec;
+    use styk_core::services::input::ScriptSpec;
 
     fn script() -> Script {
         Script::generate(&ScriptSpec::standard(240.0, 1.0, 400.0, 300.0), 1)
