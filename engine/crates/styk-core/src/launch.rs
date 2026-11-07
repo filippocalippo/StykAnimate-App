@@ -3,14 +3,14 @@
 use std::path::PathBuf;
 
 /// The command line's shape, shown with every parse error.
-pub const USAGE: &str = "usage: stykanimate [file] [--automation <script>] [--screenshot <png>] [--screen <id>] [--input-check <json>] [--size WxH] [--scale <factor>]
+pub const USAGE: &str = "usage: stykanimate [file...] [--automation <script>] [--screenshot <png>] [--screen <id>] [--input-check <json>] [--size WxH] [--scale <factor>] [--shell-check]
        (developer build) stykanimate --pen-lab [--self-test standard|blocked|behaviour|stress[:seconds]] [--out <folder>]";
 
 /// What the command line asked for.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Launch {
-    /// A document to open.
-    pub file: Option<PathBuf>,
+    /// The documents to open, in order (the Electron app opens every one it is given).
+    pub files: Vec<PathBuf>,
     /// A script of timestamped steps to run against the real interface.
     pub automation: Option<PathBuf>,
     /// Write the window's first complete frame to this PNG and exit.
@@ -25,6 +25,9 @@ pub struct Launch {
     pub size: Option<(u32, u32)>,
     /// The interface scale factor, instead of the display's.
     pub scale: Option<f64>,
+    /// Run the shell's in-process checks against the real window (hit testing, minimum size, snap-zone placement,
+    /// DPI change), print the results and exit with their status. Needs `STYK_BACKGROUND_WINDOW=1`.
+    pub shell_check: bool,
     /// Open the pen lab (developer build) instead of the application.
     pub pen_lab: bool,
     /// Run a pen-lab self-test: its kind and, optionally, its length in seconds.
@@ -67,6 +70,7 @@ impl Launch {
                 "--input-check" => launch.input_check = Some(PathBuf::from(value("--input-check")?)),
                 "--size" => launch.size = Some(parse_size(&value("--size")?)?),
                 "--scale" => launch.scale = Some(parse_scale(&value("--scale")?)?),
+                "--shell-check" => launch.shell_check = true,
                 "--pen-lab" => launch.pen_lab = true,
                 "--self-test" => {
                     launch.pen_lab = true;
@@ -75,10 +79,7 @@ impl Launch {
                 "--out" => launch.out = Some(PathBuf::from(value("--out")?)),
                 other if other.starts_with("--") => return Err(LaunchError(format!("unknown option {other}"))),
                 _ => {
-                    if launch.file.is_some() {
-                        return Err(LaunchError("only one file can be opened".into()));
-                    }
-                    launch.file = Some(PathBuf::from(flag));
+                    launch.files.push(PathBuf::from(flag));
                 }
             }
         }
@@ -118,7 +119,7 @@ mod tests {
     #[test]
     fn every_option_is_read() {
         let launch = parse(&["project.styk", "--automation", "run.json", "--screenshot", "out.png", "--size", "1280x800", "--scale", "1.5"]).unwrap();
-        assert_eq!(launch.file, Some(PathBuf::from("project.styk")));
+        assert_eq!(launch.files, vec![PathBuf::from("project.styk")]);
         assert_eq!(launch.automation, Some(PathBuf::from("run.json")));
         assert_eq!(launch.screenshot, Some(PathBuf::from("out.png")));
         assert_eq!(launch.size, Some((1280, 800)));
@@ -142,12 +143,18 @@ mod tests {
         assert_eq!(parse(&["--input-check", "report.json"]).unwrap().input_check, Some(PathBuf::from("report.json")));
         assert_eq!(launch.size, Some((900, 600)));
         assert_eq!(launch.screenshot, Some(PathBuf::from("a.png")));
-        assert_eq!(launch.file, Some(PathBuf::from("doc.piv")));
+        assert_eq!(launch.files, vec![PathBuf::from("doc.piv")]);
     }
 
     #[test]
     fn a_path_with_an_equals_sign_is_still_a_file() {
-        assert_eq!(parse(&["C:/a=b/doc.piv"]).unwrap().file, Some(PathBuf::from("C:/a=b/doc.piv")));
+        assert_eq!(parse(&["C:/a=b/doc.piv"]).unwrap().files, vec![PathBuf::from("C:/a=b/doc.piv")]);
+    }
+
+    #[test]
+    fn several_files_are_all_kept_in_order_as_the_electron_app_does() {
+        let launch = parse(&["a.piv", "b.styk", "--size", "900x600", "c.stk"]).unwrap();
+        assert_eq!(launch.files, vec![PathBuf::from("a.piv"), PathBuf::from("b.styk"), PathBuf::from("c.stk")]);
     }
 
     #[test]
@@ -159,7 +166,6 @@ mod tests {
             (&["--scale", "0"][..], "positive number"),
             (&["--scale", "fast"][..], "positive number"),
             (&["--sizes", "1x1"][..], "unknown option --sizes"),
-            (&["a.piv", "b.piv"][..], "only one file"),
         ] {
             let error = parse(args).unwrap_err();
             assert!(error.0.contains(wanted), "{args:?}: {error}");

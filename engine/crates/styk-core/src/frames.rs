@@ -4,6 +4,7 @@
 //! frames; presentation borrows a ready list for the duration of one callback.
 //! Closing never joins a thread or destroys the document/cache on the caller.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -164,6 +165,81 @@ pub struct Key {
     pub view: Arc<View>,
 }
 
+impl Key {
+    /// Hash metadata once at request admission, outside the queue lock. Equality
+    /// still resolves collisions on workers; readiness uses only the issued id.
+    fn fingerprint(&self) -> u64 {
+        fn number(hash: &mut DefaultHasher, value: f64) {
+            (if value == 0.0 { 0 } else { value.to_bits() }).hash(hash);
+        }
+        let Self {
+            document,
+            revision,
+            resource_epoch,
+            tick,
+            view,
+        } = self;
+        let View {
+            size,
+            zoom,
+            pan,
+            quality,
+            samples,
+            scene,
+        } = view.as_ref();
+        let Options {
+            hidden_uids,
+            effects,
+            camera,
+            clip_to_canvas,
+            background,
+            translations,
+            onions,
+        } = scene;
+        let mut hash = DefaultHasher::new();
+        (document, revision, resource_epoch).hash(&mut hash);
+        number(&mut hash, *tick);
+        size.hash(&mut hash);
+        samples.hash(&mut hash);
+        for value in [*zoom, pan[0], pan[1], *quality] {
+            number(&mut hash, value);
+        }
+        (hidden_uids, effects, camera, clip_to_canvas, background).hash(&mut hash);
+        translations.len().hash(&mut hash);
+        for (uid, offset) in translations {
+            uid.hash(&mut hash);
+            for value in offset {
+                number(&mut hash, *value);
+            }
+        }
+        onions.len().hash(&mut hash);
+        for Onion {
+            tick,
+            opacity,
+            tint,
+            on_top,
+            hidden_uids,
+        } in onions
+        {
+            number(&mut hash, *tick);
+            number(&mut hash, *opacity);
+            (tint, on_top, hidden_uids).hash(&mut hash);
+        }
+        hash.finish()
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static FULL_KEY_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn keys_equal(a: &Key, b: &Key) -> bool {
+    #[cfg(test)]
+    FULL_KEY_COMPARISONS.with(|count| count.set(count.get() + 1));
+    a == b
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Config {
     pub workers: usize,
@@ -227,6 +303,7 @@ pub struct Ready<'a> {
 #[derive(Clone)]
 struct Request {
     key: Key,
+    fingerprint: u64,
     slot: usize,
     priority: Priority,
     stamp: u64,
@@ -236,6 +313,9 @@ struct Request {
 
 struct Entry {
     key: Key,
+    fingerprint: u64,
+    /// The creating request's checked, document-lifetime-unique serial.
+    id: u64,
     epoch: u64,
     frame: FrameData,
     bytes: usize,
@@ -244,14 +324,160 @@ struct Entry {
     latency: Duration,
 }
 
+#[derive(Clone)]
+struct Demand {
+    request: Request,
+    queued: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ReadyTicket {
+    index: usize,
+    id: u64,
+}
+
+#[derive(Clone, Copy)]
+struct Outcome {
+    stamp: u64,
+    status: Status,
+    ready: Option<ReadyTicket>,
+}
+
+impl Default for Outcome {
+    fn default() -> Self {
+        Self {
+            stamp: 0,
+            status: Status::Pending,
+            ready: None,
+        }
+    }
+}
+
 struct State {
     source: Option<Arc<dyn FrameDocument>>,
-    pending: Vec<Option<Request>>,
-    outcome: Vec<(u64, Status)>,
+    // Retain current demand after preparation: its playback slot is the nearest-
+    // first order, including a wrapped range. No second playhead is inferred.
+    demands: Vec<Option<Demand>>,
+    outcome: Vec<Outcome>,
     cache: Vec<Entry>,
     stats: Stats,
     serial: u64,
-    stage: Option<(u64, Key)>,
+}
+
+impl State {
+    /// Worker-only collision check. The interface never compares full keys.
+    fn find(&self, request: &Request) -> Option<usize> {
+        self.cache.iter().position(|entry| {
+            entry.fingerprint == request.fingerprint && keys_equal(&entry.key, &request.key)
+        })
+    }
+
+    fn publish_ready(&mut self, request: &Request, index: usize) {
+        self.outcome[request.slot] = Outcome {
+            stamp: request.stamp,
+            status: Status::Ready,
+            ready: Some(ReadyTicket {
+                index,
+                id: self.cache[index].id,
+            }),
+        };
+    }
+
+    /// Move metadata and repair scalar locators on a worker. The returned dense
+    /// payload is retired only after releasing the queue lock.
+    fn remove(&mut self, index: usize) -> Entry {
+        let removed = self.cache.swap_remove(index);
+        self.stats.cached_bytes -= removed.bytes;
+        if let Some(moved) = self.cache.get(index) {
+            for outcome in &mut self.outcome {
+                if let Some(ticket) = &mut outcome.ready
+                    && ticket.id == moved.id
+                {
+                    ticket.index = index;
+                }
+            }
+        }
+        removed
+    }
+
+    fn matches(entry: &Entry, request: &Request, shared: &Shared) -> bool {
+        shared.current(request)
+            && entry.fingerprint == request.fingerprint
+            && keys_equal(&entry.key, &request.key)
+    }
+
+    fn protected(&self, entry: &Entry, shared: &Shared) -> bool {
+        self.demands[0]
+            .as_ref()
+            .is_some_and(|demand| Self::matches(entry, &demand.request, shared))
+    }
+
+    fn playback_rank(&self, entry: &Entry, shared: &Shared) -> usize {
+        self.demands[1..=LOOKAHEAD]
+            .iter()
+            .enumerate()
+            .find(|(_, demand)| {
+                demand
+                    .as_ref()
+                    .is_some_and(|d| Self::matches(entry, &d.request, shared))
+            })
+            .map_or(usize::MAX, |(rank, _)| rank)
+    }
+
+    fn playback_bytes(&self) -> usize {
+        self.cache
+            .iter()
+            .filter(|entry| entry.priority == Priority::Playback)
+            .map(|entry| entry.bytes)
+            .sum()
+    }
+
+    fn maintain(&mut self, shared: &Shared) -> Vec<Entry> {
+        let mut retired = Vec::new();
+        let epoch = shared.epoch.load(Ordering::Acquire);
+        let mut index = 0;
+        while index < self.cache.len() {
+            if self.cache[index].epoch != epoch {
+                retired.push(self.remove(index));
+            } else {
+                index += 1;
+            }
+        }
+        for entry in &mut self.cache {
+            let priority = self
+                .demands
+                .iter()
+                .flatten()
+                .filter(|d| Self::matches(entry, &d.request, shared))
+                .map(|d| d.request.priority)
+                .min();
+            if let Some(priority) = priority {
+                entry.priority = priority;
+            } else if entry.priority == Priority::Stage {
+                entry.priority = Priority::Thumbnail;
+            }
+        }
+        let limit = shared.lookahead_bytes.load(Ordering::Acquire);
+        while self.playback_bytes() > limit {
+            let victim = self
+                .cache
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| entry.priority == Priority::Playback)
+                .max_by_key(|(_, entry)| {
+                    (
+                        self.playback_rank(entry, shared),
+                        std::cmp::Reverse(entry.used),
+                    )
+                })
+                .map(|(index, _)| index);
+            let Some(victim) = victim else {
+                break;
+            };
+            retired.push(self.remove(victim));
+        }
+        retired
+    }
 }
 
 struct Shared {
@@ -297,12 +523,11 @@ impl Frames {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 source: Some(source.clone()),
-                pending: vec![None; SLOTS],
-                outcome: vec![(0, Status::Pending); SLOTS],
+                demands: vec![None; SLOTS],
+                outcome: vec![Outcome::default(); SLOTS],
                 cache: Vec::with_capacity(SLOTS),
                 stats: Stats::default(),
                 serial: 0,
-                stage: None,
             }),
             changed: Condvar::new(),
             closed: AtomicBool::new(false),
@@ -382,6 +607,7 @@ impl Frames {
             view,
         };
         let request = Request {
+            fingerprint: key.fingerprint(),
             key: key.clone(),
             slot,
             priority: consumer.priority(),
@@ -420,10 +646,10 @@ impl Frames {
         };
         for slot in 0..SLOTS {
             if self.dirty[slot] {
-                state.pending[slot] = self.wanted[slot].clone();
-                if slot == 0 {
-                    state.stage = self.wanted[0].as_ref().map(|r| (r.stamp, r.key.clone()));
-                }
+                state.demands[slot] = self.wanted[slot].clone().map(|request| Demand {
+                    request,
+                    queued: true,
+                });
                 self.dirty[slot] = false;
             }
         }
@@ -490,7 +716,11 @@ impl Frames {
         let Ok(mut state) = self.shared.state.try_lock() else {
             return Status::Busy;
         };
-        let (stamp, status) = state.outcome[slot];
+        let Outcome {
+            stamp,
+            status,
+            ready,
+        } = state.outcome[slot];
         if stamp != wanted.stamp || !self.shared.current(wanted) {
             return Status::Pending;
         }
@@ -499,7 +729,14 @@ impl Frames {
         }
         state.serial = state.serial.wrapping_add(1);
         let serial = state.serial;
-        let Some(entry) = state.cache.iter_mut().find(|entry| entry.key == wanted.key) else {
+        let Some(ticket) = ready else {
+            return Status::Evicted;
+        };
+        let Some(entry) = state
+            .cache
+            .get_mut(ticket.index)
+            .filter(|entry| entry.id == ticket.id)
+        else {
             return Status::Evicted;
         };
         entry.used = serial;
@@ -518,7 +755,7 @@ impl Frames {
         let state = self.shared.state.try_lock().ok()?;
         Some(Stats {
             cached_frames: state.cache.len(),
-            queued: state.pending.iter().filter(|r| r.is_some()).count()
+            queued: state.demands.iter().flatten().filter(|d| d.queued).count()
                 + self.dirty.iter().filter(|d| **d).count(),
             ..state.stats
         })
@@ -568,7 +805,7 @@ impl Shared {
                 return;
             }
             let state = styk_doc::lock::spinning(&self.state);
-            if state.pending.iter().any(Option::is_some) {
+            if state.demands.iter().flatten().any(|d| d.queued) {
                 continue;
             }
             // Only workers wait. The timeout also closes the notify-before-wait
@@ -581,8 +818,7 @@ impl Shared {
     fn clear(&self) {
         let retired = {
             let mut state = styk_doc::lock::spinning(&self.state);
-            state.pending.fill(None);
-            state.stage = None;
+            state.demands.fill(None);
             state.stats.cached_bytes = 0;
             (std::mem::take(&mut state.cache), state.source.take())
         };
@@ -597,57 +833,23 @@ impl Shared {
         }
         let (request, source, stale) = {
             let mut state = styk_doc::lock::spinning(&self.state);
-            let mut stale = Vec::new();
-            // Old revisions are removed lazily on a worker, never on revise().
-            let epoch = self.epoch.load(Ordering::Acquire);
-            let mut i = 0;
-            while i < state.cache.len() {
-                if state.cache[i].epoch != epoch {
-                    let entry = state.cache.swap_remove(i);
-                    state.stats.cached_bytes -= entry.bytes;
-                    stale.push(entry);
-                } else {
-                    i += 1;
-                }
-            }
-            if let Some((_, key)) = state
-                .stage
-                .clone()
-                .filter(|(stamp, _)| *stamp == self.tokens[0].load(Ordering::Acquire))
-                && let Some(entry) = state.cache.iter_mut().find(|entry| entry.key == key)
-            {
-                entry.priority = Priority::Stage;
-            }
-            let limit = self.lookahead_bytes.load(Ordering::Acquire);
-            while state
-                .cache
-                .iter()
-                .filter(|e| e.priority == Priority::Playback)
-                .map(|e| e.bytes)
-                .sum::<usize>()
-                > limit
-            {
-                let victim = state
-                    .cache
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, e)| e.priority == Priority::Playback)
-                    .min_by_key(|(_, e)| e.used)
-                    .map(|(i, _)| i);
-                let Some(victim) = victim else {
-                    break;
-                };
-                let entry = state.cache.swap_remove(victim);
-                state.stats.cached_bytes -= entry.bytes;
-                stale.push(entry);
-            }
+            let stale = state.maintain(self);
             let next = state
-                .pending
+                .demands
                 .iter()
                 .enumerate()
-                .filter_map(|(slot, r)| r.as_ref().map(|r| (r.priority, slot)))
+                .filter_map(|(slot, d)| {
+                    d.as_ref()
+                        .filter(|d| d.queued)
+                        .map(|d| (d.request.priority, slot))
+                })
                 .min();
-            let request = next.and_then(|(_, slot)| state.pending[slot].take());
+            let request = next
+                .and_then(|(_, slot)| state.demands[slot].as_mut())
+                .map(|demand| {
+                    demand.queued = false;
+                    demand.request.clone()
+                });
             (request, state.source.clone(), stale)
         };
         drop(stale);
@@ -659,13 +861,8 @@ impl Shared {
         }
         {
             let mut state = styk_doc::lock::spinning(&self.state);
-            if let Some(entry) = state
-                .cache
-                .iter_mut()
-                .find(|entry| entry.key == request.key)
-            {
-                entry.priority = entry.priority.min(request.priority);
-                state.outcome[request.slot] = (request.stamp, Status::Ready);
+            if let Some(index) = state.find(&request) {
+                state.publish_ready(&request, index);
                 state.stats.cache_hits += 1;
                 drop(state);
                 self.notify();
@@ -715,15 +912,12 @@ impl Shared {
         }
         // Another worker may have prepared the same key for another consumer.
         // Keep one payload/charge and retire the duplicate off the queue lock.
-        if let Some(entry) = state
-            .cache
-            .iter_mut()
-            .find(|entry| entry.key == request.key)
-        {
-            entry.priority = entry.priority.min(request.priority);
-            state.outcome[request.slot] = (request.stamp, Status::Ready);
+        retired.extend(state.maintain(self));
+        if let Some(index) = state.find(&request) {
+            state.publish_ready(&request, index);
             state.stats.cache_hits += 1;
             drop(state);
+            drop(retired);
             drop(answer);
             self.notify();
             return;
@@ -740,29 +934,20 @@ impl Shared {
                 } else {
                     self.cache_bytes
                 };
-                let playback_bytes = |state: &State| {
-                    state
-                        .cache
-                        .iter()
-                        .filter(|e| e.priority == Priority::Playback)
-                        .map(|e| e.bytes)
-                        .sum::<usize>()
-                };
                 while bytes <= limit
                     && (state.stats.cached_bytes > self.cache_bytes - bytes
                         || state.cache.len() >= SLOTS
                         || (request.priority == Priority::Playback
-                            && playback_bytes(&state) > limit - bytes))
+                            && state.playback_bytes() > limit - bytes))
                 {
-                    // Stage is protected until superseded. Lower-priority work
-                    // cannot evict higher-priority work to make itself fit.
-                    let protected = |entry: &Entry| {
-                        state.stage.as_ref().is_some_and(|(stamp, key)| {
-                            *stamp == self.tokens[0].load(Ordering::Acquire) && *key == entry.key
-                        })
-                    };
+                    // Speculation competes in requested (nearest-first) order,
+                    // including the incoming result, never by oldest use. When
+                    // only its budget is full, removing another class cannot
+                    // help: refuse the far result without disturbing that class.
+                    let speculation_full = request.priority == Priority::Playback
+                        && state.playback_bytes() > limit - bytes;
                     let effective_priority = |entry: &Entry| {
-                        if entry.priority == Priority::Stage && !protected(entry) {
+                        if entry.priority == Priority::Stage && !state.protected(entry, self) {
                             Priority::Thumbnail
                         } else {
                             entry.priority
@@ -772,24 +957,42 @@ impl Shared {
                         .cache
                         .iter()
                         .enumerate()
-                        .filter(|(_, e)| !protected(e) && effective_priority(e) >= request.priority)
-                        .max_by_key(|(_, e)| (effective_priority(e), std::cmp::Reverse(e.used)))
+                        .filter(|(_, e)| {
+                            let priority = effective_priority(e);
+                            !state.protected(e, self)
+                                && priority >= request.priority
+                                && (!speculation_full || priority == Priority::Playback)
+                                && (request.priority != Priority::Playback
+                                    || priority != Priority::Playback
+                                    || state.playback_rank(e, self) > request.slot - 1)
+                        })
+                        .max_by_key(|(_, e)| {
+                            (
+                                effective_priority(e),
+                                if e.priority == Priority::Playback {
+                                    state.playback_rank(e, self)
+                                } else {
+                                    0
+                                },
+                                std::cmp::Reverse(e.used),
+                            )
+                        })
                         .map(|(i, _)| i);
                     let Some(victim) = victim else {
                         break;
                     };
-                    let entry = state.cache.swap_remove(victim);
-                    state.stats.cached_bytes -= entry.bytes;
-                    retired.push(entry);
+                    retired.push(state.remove(victim));
                 }
                 if bytes > limit
                     || state.stats.cached_bytes > self.cache_bytes.saturating_sub(bytes)
                     || state.cache.len() >= SLOTS
                     || (request.priority == Priority::Playback
-                        && playback_bytes(&state) > limit.saturating_sub(bytes))
+                        && state.playback_bytes() > limit.saturating_sub(bytes))
                 {
                     retired.push(Entry {
                         key: request.key.clone(),
+                        fingerprint: request.fingerprint,
+                        id: request.stamp,
                         epoch: request.epoch,
                         frame,
                         bytes,
@@ -807,6 +1010,8 @@ impl Shared {
                     state.stats.cached_bytes += bytes;
                     state.cache.push(Entry {
                         key: request.key.clone(),
+                        fingerprint: request.fingerprint,
+                        id: request.stamp,
                         epoch: request.epoch,
                         frame,
                         bytes,
@@ -814,11 +1019,19 @@ impl Shared {
                         priority: request.priority,
                         latency: self.clock.now().saturating_sub(request.submitted),
                     });
+                    let index = state.cache.len() - 1;
+                    state.publish_ready(&request, index);
                     Status::Ready
                 }
             }
         };
-        state.outcome[request.slot] = (request.stamp, status);
+        if status != Status::Ready {
+            state.outcome[request.slot] = Outcome {
+                stamp: request.stamp,
+                status,
+                ready: None,
+            };
+        }
         drop(state);
         drop(retired);
         self.notify();

@@ -2,6 +2,9 @@ use super::*;
 use styk_engine::{Budgets, Engine};
 use styk_services::{FixedClock, Job, ManualSpawner};
 
+#[path = "../../../styk-engine/tests/support/drawlist.rs"]
+mod drawlist_payload;
+
 struct Document {
     generation: Arc<Generation>,
     hook: Mutex<Option<Job>>,
@@ -94,11 +97,7 @@ fn scheduler_lists_equal_engine_for_repository_fixtures() {
             drain(&frames);
             assert_eq!(
                 frames.with_ready(Consumer::Stage, |ready| {
-                    assert_eq!(
-                        format!("{:?}", ready.list),
-                        format!("{:?}", expected.list),
-                        "{name} {tick}"
-                    );
+                    drawlist_payload::assert_lists(ready.list, &expected.list);
                     assert_eq!(ready.camera, expected.camera);
                     assert_eq!(ready.background, expected.background);
                     assert_eq!(ready.key.tick, tick);
@@ -308,6 +307,216 @@ fn an_oversized_frame_is_refused_even_when_cache_is_empty() {
     assert_eq!(frames.stats().unwrap().cached_bytes, 0);
     drop(frames);
     while spawner.run_next() {}
+}
+
+#[test]
+fn review_lookahead_keeps_the_two_nearest_requested_ticks() {
+    let source = document();
+    let view = Arc::new(View::default());
+    let (mut sizing, jobs) = frames(source.clone(), Config::default());
+    sizing.request(Consumer::Stage, 0.0, view.clone()).unwrap();
+    drain(&sizing);
+    let charge = sizing.stats().unwrap().cached_bytes;
+    drop(sizing);
+    while jobs.run_next() {}
+    let (mut frames, jobs) = frames(
+        source,
+        Config {
+            cache_bytes: 2 * charge,
+            lookahead_bytes: 2 * charge,
+            ..Config::default()
+        },
+    );
+    frames
+        .lookahead(0, 0..3, false, 3, 2 * charge, view)
+        .unwrap();
+    drain(&frames);
+    assert_eq!(
+        status(&frames, Consumer::Playback(0)),
+        Status::Ready,
+        "the next tick must not be evicted for farther speculation"
+    );
+    assert_eq!(status(&frames, Consumer::Playback(1)), Status::Ready);
+    assert!(matches!(
+        status(&frames, Consumer::Playback(2)),
+        Status::Failed(Error::Budget { .. })
+    ));
+    drop(frames);
+    while jobs.run_next() {}
+}
+
+#[test]
+fn review_readiness_does_no_full_view_comparison_for_dense_same_tick_views() {
+    let (mut frames, jobs) = frames(document(), Config::default());
+    for index in 0..20 {
+        let mut view = View::default();
+        view.scene.translations = vec![(u32::MAX, [0.0, 0.0]); 65_536];
+        view.scene.translations.last_mut().unwrap().1[0] = f64::from(index);
+        frames
+            .request(Consumer::Stage, 0.0, Arc::new(view))
+            .unwrap();
+        drain(&frames);
+    }
+    assert_eq!(frames.stats().unwrap().cached_frames, 20);
+    FULL_KEY_COMPARISONS.with(|count| count.set(0));
+    assert_eq!(
+        frames.with_ready(Consumer::Stage, |ready| {
+            assert_eq!(ready.key.view.scene.translations.last().unwrap().1[0], 19.0);
+        }),
+        Status::Ready
+    );
+    assert_eq!(
+        FULL_KEY_COMPARISONS.with(|count| count.get()),
+        0,
+        "readiness must resolve a scalar ticket, not compare translation arrays"
+    );
+    drop(frames);
+    while jobs.run_next() {}
+}
+
+#[test]
+fn wrapped_lookahead_moves_forward_and_a_smaller_budget_keeps_the_nearest() {
+    let source = document();
+    let view = Arc::new(View::default());
+    let (mut sizing, jobs) = frames(source.clone(), Config::default());
+    sizing.request(Consumer::Stage, 0.0, view.clone()).unwrap();
+    drain(&sizing);
+    let charge = sizing.stats().unwrap().cached_bytes;
+    drop(sizing);
+    while jobs.run_next() {}
+    let (mut frames, jobs) = frames(
+        source,
+        Config {
+            cache_bytes: 2 * charge,
+            lookahead_bytes: 2 * charge,
+            ..Config::default()
+        },
+    );
+    for start in [2, 0, 1] {
+        frames
+            .lookahead(start, 0..3, true, 3, 2 * charge, view.clone())
+            .unwrap();
+        drain(&frames);
+        for rank in 0..2 {
+            assert_eq!(
+                frames.with_ready(Consumer::Playback(rank), |ready| {
+                    assert_eq!(ready.key.tick, f64::from((start + u32::from(rank)) % 3));
+                }),
+                Status::Ready
+            );
+        }
+        assert!(matches!(
+            status(&frames, Consumer::Playback(2)),
+            Status::Failed(Error::Budget { .. })
+        ));
+    }
+    frames.lookahead(1, 0..3, true, 3, charge, view).unwrap();
+    drain(&frames);
+    assert_eq!(
+        frames.with_ready(Consumer::Playback(0), |ready| assert_eq!(
+            ready.key.tick,
+            1.0
+        )),
+        Status::Ready
+    );
+    assert_eq!(frames.stats().unwrap().cached_frames, 1);
+    drop(frames);
+    while jobs.run_next() {}
+}
+
+#[test]
+fn ready_tickets_survive_compaction_and_reject_a_reused_cache_slot() {
+    let source = document();
+    let (mut sizing, jobs) = frames(source.clone(), Config::default());
+    sizing
+        .request(Consumer::Stage, 0.0, Arc::new(View::default()))
+        .unwrap();
+    drain(&sizing);
+    let charge = sizing.stats().unwrap().cached_bytes;
+    drop(sizing);
+    while jobs.run_next() {}
+    let (mut frames, jobs) = frames(
+        source,
+        Config {
+            cache_bytes: 2 * charge,
+            ..Config::default()
+        },
+    );
+    for index in 0..3 {
+        let mut view = View::default();
+        view.pan[0] = f64::from(index);
+        frames
+            .request(Consumer::Preview(index), 0.0, Arc::new(view))
+            .unwrap();
+        drain(&frames);
+    }
+    FULL_KEY_COMPARISONS.with(|count| count.set(0));
+    assert_eq!(
+        frames.with_ready(Consumer::Preview(0), |_| panic!(
+            "retired ticket aliased another entry"
+        )),
+        Status::Evicted
+    );
+    for index in 1..3 {
+        assert_eq!(
+            frames.with_ready(Consumer::Preview(index), |ready| assert_eq!(
+                ready.key.view.pan[0],
+                f64::from(index)
+            )),
+            Status::Ready
+        );
+    }
+    assert_eq!(FULL_KEY_COMPARISONS.with(|count| count.get()), 0);
+    drop(frames);
+    while jobs.run_next() {}
+}
+
+#[test]
+fn a_key_hash_collision_is_resolved_on_the_worker() {
+    let (mut frames, jobs) = frames(document(), Config::default());
+    frames
+        .request(Consumer::Stage, 0.0, Arc::new(View::default()))
+        .unwrap();
+    drain(&frames);
+    let mut view = View::default();
+    view.pan[0] = 1.0;
+    let wanted = frames
+        .request(Consumer::Stage, 0.0, Arc::new(view))
+        .unwrap();
+    // Force an adversarial equal hash without replacing the first entry's key.
+    frames.shared.state.lock().unwrap().cache[0].fingerprint = wanted.fingerprint();
+    FULL_KEY_COMPARISONS.with(|count| count.set(0));
+    drain(&frames);
+    assert!(FULL_KEY_COMPARISONS.with(|count| count.get()) > 0);
+    assert_eq!(frames.stats().unwrap().prepared, 2);
+    FULL_KEY_COMPARISONS.with(|count| count.set(0));
+    assert_eq!(
+        frames.with_ready(Consumer::Stage, |ready| assert_eq!(
+            ready.key.view.pan[0],
+            1.0
+        )),
+        Status::Ready
+    );
+    assert_eq!(FULL_KEY_COMPARISONS.with(|count| count.get()), 0);
+    drop(frames);
+    while jobs.run_next() {}
+}
+
+#[test]
+fn signed_zero_keys_share_a_fingerprint() {
+    let (mut frames, jobs) = frames(document(), Config::default());
+    let first = frames
+        .request(Consumer::Stage, -0.0, Arc::new(View::default()))
+        .unwrap();
+    let mut view = View::default();
+    view.pan = [-0.0; 2];
+    let second = frames
+        .request(Consumer::Stage, 0.0, Arc::new(view))
+        .unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first.fingerprint(), second.fingerprint());
+    drop(frames);
+    while jobs.run_next() {}
 }
 
 #[test]
@@ -560,26 +769,26 @@ fn decoded_resource_bounds_replace_every_retained_frame_of_the_old_epoch() {
     let view = Arc::new(View::default());
     frames.request(Consumer::Stage, 0.0, view.clone()).unwrap();
     assert!(frames.shared.step(&mut builder));
-    let mut before = String::new();
+    let mut before = Vec::new();
     assert_eq!(
         frames.with_ready(Consumer::Stage, |ready| before =
-            format!("{:?}", ready.list)),
+            drawlist_payload::payload(ready.list)),
         Status::Ready
     );
     while engine.step() {}
     let expected = engine.frame_now(0).unwrap();
     assert_ne!(
         before,
-        format!("{:?}", expected.list),
+        drawlist_payload::payload(&expected.list),
         "the decoder must change the actual effect grid"
     );
     frames.revise(0, 1).unwrap();
     frames.request(Consumer::Stage, 0.0, view).unwrap();
     assert!(frames.shared.step(&mut builder));
     assert_eq!(
-        frames.with_ready(Consumer::Stage, |ready| assert_eq!(
-            format!("{:?}", ready.list),
-            format!("{:?}", expected.list)
+        frames.with_ready(Consumer::Stage, |ready| drawlist_payload::assert_lists(
+            ready.list,
+            &expected.list
         )),
         Status::Ready
     );

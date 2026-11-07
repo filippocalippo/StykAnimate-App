@@ -22,7 +22,9 @@ Everything is one Cargo workspace (`engine/`, members `engine/crates/*`). The en
 | `styk-cli` | The headless tools (`styk` binary); its `video` command (feature `app-tools`, off by default) drives a video export of a document through the core's planning and flow, the engine's frame source and the platform's encoder services. `cargo xtask deps` lets it reach `styk-core`, `styk-services` and `styk-platform` only through that feature. | engine crates; `styk-core`, `styk-services`, `styk-platform` with `app-tools` |
 | `xtask` | The task runner (`cargo xtask ...`, alias in the repository's `.cargo/config.toml`). | std |
 
-Dependencies point one way: `styk-app` → `styk-ui` → `styk-core` → engine crates and `styk-services`. Nothing in the
+Dependencies point one way: `styk-app` → `styk-ui` → `styk-core` → engine crates and `styk-services`. The engine types
+the core passes on to its own logic are re-exported in one place, `styk_core::engine`; `styk-ui` and the developer tools'
+views never name it or an engine crate, and see only plain view models (`cargo xtask check` enforces it). Nothing in the
 engine or the core depends on iced, `styk-ui` or `styk-devtools`. A different front end (a touch layout, Slint, a newer
 toolkit) sits on `styk-core` without rewriting a feature; the core's features are tested without a window.
 

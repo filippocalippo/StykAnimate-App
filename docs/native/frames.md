@@ -25,7 +25,8 @@ not stop the document engine or its other jobs.
   background, figure translations and ordered onion settings (including per-ghost
   hidden figures). Zero has numeric identity; NaN and infinity
   are refused. Raster size and transform travel to presentation even though geometry
-  itself is in world coordinates.
+  itself is in world coordinates. Admission hashes the key once, outside the queue
+  lock. Workers resolve hash collisions with complete key equality.
 - `revise` cancels all old requests immediately through atomic identities. The
   resource epoch must advance when image/cel bounds change without an edit. Revision
   and resource changes are not inferred by reading the engine on the interface.
@@ -33,8 +34,10 @@ not stop the document engine or its other jobs.
   bounded interface outbox and schedules a retry wake. Call it on progress and
   subsequent event-loop turns.
 - `with_ready` tries once and returns Busy, Pending, Evicted, Ready or a visible
-  failure. It verifies the latest consumer identity and borrows the matching draw
-  list only for the callback. The callback submits the draw; it must not prepare,
+  failure. It verifies the latest consumer identity and resolves a scalar cache
+  index plus unique entry ID: no key scan or dense comparison runs on this path.
+  Workers repair indices when compacting the cache; IDs reject a reused slot.
+  It borrows the matching draw list only for the callback. The callback submits the draw; it must not prepare,
   wait for GPU readback, clone dense list fields or retain CPU frame ownership.
   A presenter can keep its previous GPU picture while the next request is pending.
 - `cancel`, `revise`, `close` and Drop never wait for a worker. Close is irrevocable;
@@ -70,7 +73,7 @@ as well as lengths, so a short vector with a huge spare allocation is refused.
 Shared allocations across different entries
 are conservatively charged again. Oversized single frames are explicitly refused;
 there is no first-entry exemption. The current stage entry is protected. Eviction
-prefers old entries at the requesting priority or below; background work cannot
+prefers entries at the requesting priority or below; background work cannot
 remove the visible stage to make itself fit. Results always carry their full key.
 
 The byte limit describes retained ready frames, not total process memory. Engine
@@ -83,6 +86,10 @@ No claim is made that a ready-cache limit bounds an individual evaluator allocat
 A separate limit caps the actual retained speculative frame bytes. Range replacement
 cancels unused slots; zero budget disables and retires speculation. The timeline
 still owns transport, audio gates, startup/buffering policy and presentation deadlines.
+Current demands remain recorded after preparation, so their slot order identifies
+the nearest samples even across a loop. Eviction and admission compare that order:
+farthest speculation is removed or refused first, and nearer requested frames stay
+ready. A frame also requested by the stage is protected and charged as stage work.
 
 ## Coverage and remaining integration
 
@@ -91,7 +98,12 @@ against the engine, a revision change during a snapshot, 1,000 superseding views
 queue contention, priorities, stage protection, byte refusal, bounded lookahead,
 spawn failure, injected time and close during preparation. Engine tests compare
 reused output with the original evaluate/build/encode composition on repository
-fixtures, including fractional ticks, cameras, effects and onion skins.
+fixtures, including fractional ticks, cameras, effects and onion skins. Test-only
+lossless encoding compares every typed payload field, including effect parameters,
+gradient paints and float bits. Coverage assertions prove generated birth-anchor
+sampling and offsets, nonzero parallax, hidden primitives and actual culling.
+Dense same-tick views (65,536 translations) verify that readiness performs zero
+full-key comparisons; collision, cache compaction and reused-slot cases cover tickets.
 
 This is scheduling infrastructure. K-doc connects the source and revision/resource
 notifications; K-stage connects draw submission, picture readiness and live session
