@@ -64,8 +64,8 @@ Each is a name for `--only=`; `open` always runs in a document run.
   revision). The first add of a document is the dearest (the layer sheet captures the poses of the animation); after its undo the next one captures
   them again, so every round measures that. Run it alone with `--only=frameEdit`.
 - **`movieclips`**: movieclips on the open document, with no `main` baseline (the goals in the summary are one frame blocked and a tenth of a second
-  shown). Three clips, each made, entered, left, placed and undone in the app's own editor calls: `selection` (the figures of the layer with the most figures, for one
-  second from the frame at 40 %), `large` (every figure, up to 600 frames) and `nested` (a clip inside a clip inside a clip, the outermost placed).
+  shown). Four clips, each made, entered, left, placed and undone in the app's own editor calls: `selection` (the figures of the layer with the most figures, for one
+  second from the frame at 40 %), `large` (the same figures for up to 600 frames), `everything` (every figure, for one second: a clip of every figure for the whole length is a record for each figure at each key, which the engine refuses on a large project) and `nested` (a clip inside a clip inside a clip, the outermost placed).
   Per row, `blocked` is how long the call holds the interface thread, `shown` the time until the stage shows the result (a paint at the editor's
   revision, as `frameEdit` reads it) and `longest` the longest task of the page meanwhile. The rows: `create`, `enter`, `leaveClean` (nothing edited,
   so the project is untouched), `leaveEdited` (the clip's edit becomes one history entry of the project), `place` (another instance in the scene) and

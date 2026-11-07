@@ -3236,6 +3236,12 @@ async function acceptImport(
     images.clear();
     fit();
   }
+  // A repair is made in memory: the project is marked as having unsaved changes (no history entry), so that the next save writes the file mended
+  // and a close or a crash does not leave the damaged one as the only copy. Autosave follows the mark like any other change.
+  if (result.repairs) {
+    editor.dirty = true;
+    notify(interfaceText("app.openedAfterMendingTheProject", {count: result.repairs}), "app.openedAfterMendingTheProject", {count: result.repairs});
+  }
   state.lastImportWarnings = [...(result.warnings || report._styk?.sticknodes?.warnings || []), ...(report.import_warnings || [])];
   if(state.lastImportWarnings.length)dialogs.showImportNotes(state.lastImportWarnings, {pivot: Boolean(report.import_warnings?.length),report});
   state.lastImport = result.timings || null;
@@ -3778,6 +3784,10 @@ async function performNativeSave({saveAs}) {
         }
       }
       updateTitle();
+      // What the engine's check of the file found: mended in what was written, or refused by opening and written all the same.
+      const checked = state.lastExport?.engine;
+      if (checked?.warning) { const reason = (() => { try { return interfaceText(checked.warning); } catch { return checked.warning; } })(); notify(interfaceText("app.savedButMayNotOpenAgain", {reason}), "app.savedButMayNotOpenAgain", {reason}); }
+      else if (checked?.repairs) notify(interfaceText("app.savedAfterMendingTheProject", {count: checked.repairs}), "app.savedAfterMendingTheProject", {count: checked.repairs});
       if (editor.dirty) notify(interfaceText("app.savedACopyNewerChangesAreStillUnsaved"), "app.savedACopyNewerChangesAreStillUnsaved", {});
       else { status({messageKey: "app.projectSaved", messageParams: {}}); scheduleProjectPicture(0, 1); }
     } else status(downloaded ? {messageKey: "app.downloadStartedTheProjectStaysEditedUntilA", messageParams: {}} : {messageKey: "app.saveCancelled", messageParams: {}});
