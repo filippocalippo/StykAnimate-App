@@ -5,16 +5,18 @@
 //! [etagere]: https://github.com/nical/etagere
 
 mod cache;
+mod raster;
 mod error;
 mod text_atlas;
 mod text_render;
 mod viewport;
 
 pub use cache::Cache;
+pub use raster::{FRAME_BYTES, GlyphDrawing, MAX_JOBS, WARM_BYTES, fail_draws, frame_bytes, kill_worker, overflow_draws, prewarm, set_frame_budget, set_glyph_notifier, skipped_jobs, slow_worker, worker_state};
 pub use error::{PrepareError, RenderError};
 pub use text_atlas::{ColorMode, TextAtlas};
 pub use text_render::TextRenderer;
-pub use viewport::Viewport;
+pub use viewport::{CoverageAdjustment, TextRendering, Viewport};
 
 use text_render::ContentType;
 
@@ -74,10 +76,13 @@ pub struct Resolution {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Params {
     screen_resolution: Resolution,
-    _pad: [u32; 2],
+    contrast: f32,
+    gamma: f32,
+    flags: u32,
+    _pad: [u32; 3],
 }
 
 /// Controls the visible area of the text. Any text outside of the visible area will be clipped.
@@ -120,4 +125,8 @@ pub struct TextArea<'a> {
     pub bounds: TextBounds,
     // The default color of the text area.
     pub default_color: Color,
+    /// Whether the text may be drawn with subpixel (ClearType-style) coverage, when the atlas supports it
+    /// ([`TextAtlas::subpixel_supported`]) and the viewport asks for it ([`TextRendering`]). Text on a translucent
+    /// layer is drawn in grayscale, as the browser draws it.
+    pub subpixel: bool,
 }

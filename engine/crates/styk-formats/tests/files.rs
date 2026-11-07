@@ -387,7 +387,7 @@ fn blocks_hashed_and_compressed_side_by_side_make_the_same_container() {
 #[test]
 fn a_save_reports_what_each_block_cost_by_the_hosts_clock() {
     use std::cell::Cell;
-    struct Ticking(Cell<u32>);
+    struct Ticking;
     impl Host for Ticking {
         fn cancelled(&self) -> bool {
             false
@@ -399,7 +399,7 @@ fn a_save_reports_what_each_block_cost_by_the_hosts_clock() {
             }
         }
     }
-    let saved = files::save(Kind::Styk, arc(b"{}"), arc(&sample_bytes(1 << 20)), arc(&sample_bytes(1 << 19)), &Ticking(Cell::new(0))).unwrap();
+    let saved = files::save(Kind::Styk, arc(b"{}"), arc(&sample_bytes(1 << 20)), arc(&sample_bytes(1 << 19)), &Ticking).unwrap();
     assert_eq!(saved.frames.map(|frame| frame.raw_bytes), [2, 1 << 20, 1 << 19]);
     assert!(saved.frames.iter().all(|frame| frame.hash_ms > 0.0 && frame.compress_ms > 0.0 && frame.stored_bytes > 0), "{:?}", saved.frames);
     assert!(saved.frames_ms > 0.0);

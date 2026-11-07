@@ -1,3 +1,7 @@
+//@dual:begin
+enable dual_source_blending;
+//@dual:end
+
 struct VertexInput {
     @builtin(vertex_index) vertex_idx: u32,
     @location(0) pos: vec2<i32>,
@@ -15,9 +19,15 @@ struct VertexOutput {
     @location(2) @interpolate(flat) content_type: u32,
 };
 
+// flags: bit 0, the subpixels run blue, green, red; bit 1, coverage is adjusted for the text colour (contrast, gamma).
 struct Params {
     screen_resolution: vec2<u32>,
-    _pad: vec2<u32>,
+    contrast: f32,
+    gamma: f32,
+    flags: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 };
 
 @group(0) @binding(0)
@@ -56,7 +66,15 @@ fn vs_main(in_vert: VertexInput) -> VertexOutput {
 
     let corner_offset = vec2<u32>(width, height) * corner_position;
 
-    uv = uv + corner_offset;
+    let content_type = in_vert.content_type_with_srgb & 0xffffu;
+    let srgb = (in_vert.content_type_with_srgb & 0xffff0000u) >> 16u;
+
+    // Subpixel coverage is stored three texels per pixel, so its texture coordinates move three times as fast.
+    if content_type == 2u {
+        uv = uv + vec2<u32>(corner_offset.x * 3u, corner_offset.y);
+    } else {
+        uv = uv + corner_offset;
+    }
     pos = pos + vec2<i32>(corner_offset);
 
     var vert_output: VertexOutput;
@@ -68,9 +86,6 @@ fn vs_main(in_vert: VertexInput) -> VertexOutput {
     );
 
     vert_output.position.y *= -1.0;
-
-    let content_type = in_vert.content_type_with_srgb & 0xffffu;
-    let srgb = (in_vert.content_type_with_srgb & 0xffff0000u) >> 16u;
 
     switch srgb {
         case 0u: {
@@ -107,22 +122,128 @@ fn vs_main(in_vert: VertexInput) -> VertexOutput {
 
     vert_output.content_type = content_type;
 
-    vert_output.uv = vec2<f32>(uv) / vec2<f32>(dim);
+    if content_type == 2u {
+        // Whole texels: the fragment shader fetches the three subpixels of its pixel itself.
+        vert_output.uv = vec2<f32>(uv);
+    } else {
+        vert_output.uv = vec2<f32>(uv) / vec2<f32>(dim);
+    }
 
     return vert_output;
 }
 
+// Skia's coverage adjustment (SkMaskGamma): the glyph's coverage is bent according to the text colour's luminance so that
+// the blend of the text on its opposite looks as heavy as the font's own weight, with the contrast the platform asks
+// for. `src` is a channel (or the luminance) of the text colour, quantized to three bits as Skia does.
+// Skia's luminance curves: gamma 0 is sRGB's, anything else a power.
+fn to_luma(x: f32) -> f32 {
+    if params.gamma == 0.0 {
+        if x <= 0.04045 {
+            return x / 12.92;
+        }
+        return pow((x + 0.055) / 1.055, 2.4);
+    }
+    return pow(x, params.gamma);
+}
+
+fn from_luma(x: f32) -> f32 {
+    if params.gamma == 0.0 {
+        if x <= 0.0031308 {
+            return x * 12.92;
+        }
+        return 1.055 * pow(x, 1.0 / 2.4) - 0.055;
+    }
+    return pow(x, 1.0 / params.gamma);
+}
+
+fn quantize(c: f32) -> f32 {
+    let v = u32(round(clamp(c, 0.0, 1.0) * 255.0)) >> 5u;
+    let q = (v << 5u) | (v << 2u) | (v >> 1u);
+    return f32(q) / 255.0;
+}
+
+fn adjust(coverage: f32, channel: f32) -> f32 {
+    if (params.flags & 2u) == 0u {
+        return coverage;
+    }
+    let src = quantize(channel);
+    let dst = 1.0 - src;
+    if abs(src - dst) < (1.0 / 256.0) {
+        return coverage;
+    }
+    let lin_src = to_luma(src);
+    let lin_dst = to_luma(dst);
+    let contrast = params.contrast * lin_dst;
+    let srca = coverage + (1.0 - coverage) * contrast * coverage;
+    let dsta = 1.0 - srca;
+    let lin_out = lin_src * srca + dsta * lin_dst;
+    let out = from_luma(lin_out);
+    return clamp((out - dst) / (src - dst), 0.0, 1.0);
+}
+
+fn luminance(color: vec3<f32>) -> f32 {
+    let linear = vec3<f32>(to_luma(color.r), to_luma(color.g), to_luma(color.b));
+    return from_luma(dot(linear, vec3<f32>(0.2126, 0.7152, 0.0722)));
+}
+
+//@dual:begin
+struct FragmentOutput {
+    @location(0) @blend_src(0) color: vec4<f32>,
+    @location(0) @blend_src(1) coverage: vec4<f32>,
+}
+
+fn output(color: vec3<f32>, coverage: vec3<f32>, alpha: f32) -> FragmentOutput {
+    var result: FragmentOutput;
+    result.color = vec4<f32>(color, alpha);
+    result.coverage = vec4<f32>(coverage, alpha);
+    return result;
+}
+//@dual:end
+//@single:begin
+struct FragmentOutput {
+    @location(0) color: vec4<f32>,
+}
+
+fn output(color: vec3<f32>, coverage: vec3<f32>, alpha: f32) -> FragmentOutput {
+    var result: FragmentOutput;
+    result.color = vec4<f32>(color, alpha);
+    return result;
+}
+//@single:end
+
 @fragment
-fn fs_main(in_frag: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_main(in_frag: VertexOutput) -> FragmentOutput {
     switch in_frag.content_type {
         case 0u: {
-            return textureSampleLevel(color_atlas_texture, atlas_sampler, in_frag.uv, 0.0);
+            let texel = textureSampleLevel(color_atlas_texture, atlas_sampler, in_frag.uv, 0.0);
+            return output(texel.rgb, vec3<f32>(texel.a), texel.a);
         }
         case 1u: {
-            return vec4<f32>(in_frag.color.rgb, in_frag.color.a * textureSampleLevel(mask_atlas_texture, atlas_sampler, in_frag.uv, 0.0).x);
+            let coverage = textureSampleLevel(mask_atlas_texture, atlas_sampler, in_frag.uv, 0.0).x;
+            let alpha = in_frag.color.a * adjust(coverage, luminance(in_frag.color.rgb));
+            return output(in_frag.color.rgb, vec3<f32>(alpha), alpha);
         }
+        //@dual:begin
+        case 2u: {
+            let texel = vec2<i32>(i32(floor(in_frag.uv.x)) - 1, i32(floor(in_frag.uv.y)));
+            var coverage = vec3<f32>(
+                textureLoad(mask_atlas_texture, texel, 0).x,
+                textureLoad(mask_atlas_texture, texel + vec2<i32>(1, 0), 0).x,
+                textureLoad(mask_atlas_texture, texel + vec2<i32>(2, 0), 0).x,
+            );
+            if (params.flags & 1u) != 0u {
+                coverage = coverage.bgr;
+            }
+            let adjusted = vec3<f32>(
+                adjust(coverage.r, in_frag.color.r),
+                adjust(coverage.g, in_frag.color.g),
+                adjust(coverage.b, in_frag.color.b),
+            ) * in_frag.color.a;
+            return output(in_frag.color.rgb, adjusted, (adjusted.r + adjusted.g + adjusted.b) / 3.0);
+        }
+        //@dual:end
         default: {
-            return vec4<f32>(0.0);
+            return output(vec3<f32>(0.0), vec3<f32>(0.0), 0.0);
         }
     }
 }
