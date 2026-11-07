@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::let_underscore_must_use, unused_must_use, clippy::disallowed_methods, clippy::disallowed_types))]
 //! The iced side of the design system: conversions, font handles and the icon widget.
 //!
 //! iced is built with its `web-colors` feature in this workspace, so a token passed through here blends in sRGB space
@@ -60,6 +61,7 @@ pub mod focus;
 pub mod number_field;
 pub mod roving;
 #[cfg(feature = "testing")]
+#[path = "../tests/support/testing.rs"]
 pub mod testing;
 #[cfg(all(test, feature = "testing"))]
 mod page_tests;

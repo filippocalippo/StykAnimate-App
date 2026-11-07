@@ -1,6 +1,64 @@
 //! Owner-produced read models; developer tools never access private owner fields.
 use crate::{documents::Documents, focus::FocusState};
-pub use styk_edit::inspect::{HistoryRow, Node, Page, Snapshot as DocumentSnapshot};
+// Core owns these read models; engine types never escape the private adapter.
+#[derive(Clone, Debug)]
+pub struct HistoryRow {
+    pub revision: u64,
+    pub before_revision: u64,
+    pub label: String,
+    pub redo: bool,
+}
+#[derive(Clone, Debug)]
+pub struct Page<T> {
+    pub rows: Vec<T>,
+    pub n_total: usize,
+    pub more: Option<usize>,
+}
+#[derive(Clone, Debug)]
+pub struct Node {
+    pub key: String,
+    pub kind: &'static str,
+    pub children: usize,
+    pub value: Option<String>,
+    pub truncated: bool,
+}
+#[derive(Clone)]
+pub struct DocumentSnapshot {
+    inner: styk_edit::inspect::Snapshot,
+    pub revision: u64,
+}
+impl From<styk_edit::inspect::Snapshot> for DocumentSnapshot {
+    fn from(inner: styk_edit::inspect::Snapshot) -> Self {
+        Self { revision: inner.revision, inner }
+    }
+}
+impl From<styk_edit::inspect::Node> for Node {
+    fn from(n: styk_edit::inspect::Node) -> Self {
+        Self { key: n.key, kind: n.kind, children: n.children, value: n.value, truncated: n.truncated }
+    }
+}
+impl From<styk_edit::inspect::HistoryRow> for HistoryRow {
+    fn from(r: styk_edit::inspect::HistoryRow) -> Self {
+        Self { revision: r.revision, before_revision: r.before_revision, label: r.label, redo: r.redo }
+    }
+}
+impl<T, U: From<T>> From<styk_edit::inspect::Page<T>> for Page<U> {
+    fn from(p: styk_edit::inspect::Page<T>) -> Self {
+        Self { rows: p.rows.into_iter().map(U::from).collect(), n_total: p.n_total, more: p.more }
+    }
+}
+impl DocumentSnapshot {
+    /// Worker-only bounded traversal of the revision-pinned owner ticket.
+    pub fn memory_report(&self, max_bytes: usize) -> Result<usize, &'static str> {
+        self.inner.memory_report(max_bytes)
+    }
+    pub fn node_raw(&self, path: &[&str]) -> Result<Node, &'static str> {
+        self.inner.node_raw(path).map(Into::into)
+    }
+    pub fn tree(&self, path: &[&str], offset: usize) -> Result<Page<Node>, &'static str> {
+        self.inner.tree(path, offset).map(Into::into)
+    }
+}
 pub use styk_services::clock::Clock;
 #[derive(Clone, Debug)]
 pub struct DocumentState {

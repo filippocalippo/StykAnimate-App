@@ -104,9 +104,9 @@ pub struct Document {
 
 impl Document {
     #[cfg(feature = "inspect")]
-    pub fn inspection(&self) -> crate::inspect::DocumentSnapshot { self.prepared.session.inspection() }
+    pub fn inspection(&self) -> crate::inspect::DocumentSnapshot { self.prepared.session.inspection().into() }
     #[cfg(feature = "inspect")]
-    pub fn inspect_history(&self, offset:usize) -> crate::inspect::Page<crate::inspect::HistoryRow> { self.prepared.session.inspect_history(offset) }
+    pub fn inspect_history(&self, offset:usize) -> crate::inspect::Page<crate::inspect::HistoryRow> { self.prepared.session.inspect_history(offset).into() }
     pub fn id(&self) -> DocumentId { self.id }
     pub fn name(&self) -> &str { &self.prepared.name }
     pub fn revision(&self) -> u64 { self.prepared.session.revision() }

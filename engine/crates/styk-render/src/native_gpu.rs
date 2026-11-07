@@ -48,8 +48,8 @@ pub fn attempts_for(windows: bool, backend_env: Option<wgpu::Backends>, compiler
 }
 
 /// The attempts for this process.
-pub fn attempts() -> Vec<Attempt> {
-    attempts_for(cfg!(windows), wgpu::Backends::from_env(), wgpu::Dx12Compiler::from_env().is_some())
+pub fn attempts(windows: bool) -> Vec<Attempt> {
+    attempts_for(windows, wgpu::Backends::from_env(), wgpu::Dx12Compiler::from_env().is_some())
 }
 
 /// The first attempt `open` succeeds with, or every attempt's reason.
@@ -83,7 +83,7 @@ pub fn open_attempt(attempt: &Attempt, label: &str, limits: &impl Fn(&wgpu::Adap
 }
 
 /// The GPU a native host draws with: Direct3D 12 first on Windows, then the other backends (see the module).
-pub fn native_gpu(label: &str, limits: impl Fn(&wgpu::Adapter) -> wgpu::Limits) -> Result<NativeGpu, String> {
-    let ((instance, adapter, device, queue), attempt) = open_first(&attempts(), |attempt| open_attempt(attempt, label, &limits))?;
+pub fn native_gpu(windows: bool, label: &str, limits: impl Fn(&wgpu::Adapter) -> wgpu::Limits) -> Result<NativeGpu, String> {
+    let ((instance, adapter, device, queue), attempt) = open_first(&attempts(windows), |attempt| open_attempt(attempt, label, &limits))?;
     Ok(NativeGpu { instance, adapter, device, queue, attempt })
 }

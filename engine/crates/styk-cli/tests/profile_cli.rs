@@ -35,7 +35,7 @@ fn fixture_profile_writes_readable_captures_without_document_contents() {
             .iter()
             .any(|e| e["name"] == "scenario.frame")
     );
-    let native = styk_devtools::capture::Capture::read(
+    let native = styk_devtools_engine::capture::Capture::read(
         std::fs::File::open(out.join("trace.styktrace")).unwrap(),
         8 * 1024 * 1024,
     )

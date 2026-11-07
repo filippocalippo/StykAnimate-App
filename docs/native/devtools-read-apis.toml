@@ -34,4 +34,4 @@ items = ["last_frame_passes", "memory_report"]
 [[owner]]
 crate = "styk-core"
 source = "engine/crates/styk-core/src/inspect.rs"
-items = ["focus", "state"]
+items = ["focus", "memory_report", "node_raw", "state", "tree"]

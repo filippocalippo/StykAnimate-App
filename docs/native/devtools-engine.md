@@ -1,7 +1,9 @@
 # Developer tools engine
 
-The optional `styk-devtools` crate has no views by default. `styk-app/devtools` adds the existing
-pen lab; `styk-cli/app-tools` enables the headless tools. Build shipping and developer binaries
+The headless `styk-devtools-engine` crate owns worker dispatch, capture and profiling.
+`styk-devtools` remains the guarded interface crate; `styk-app/devtools` adds its existing
+pen lab and re-exported worker entry points. `styk-cli/app-tools` depends directly on the headless
+engine and never pulls in the interface crate or its toolkit. Build shipping and developer binaries
 in separate Cargo invocations: feature unification must not enable tracing in a shipping app.
 The `quick` profile is for iteration; only release profiles are comparable measurements.
 
@@ -43,7 +45,8 @@ that tools import owners through those modules (the pre-existing pen lab is expl
 - Edit sessions publish an O(1) immutable canonical-record ticket and revision. Tree/node traversal
   and retained-byte counting run on a tool worker. Pages hold at most 50 rows and 128-byte previews;
   blobs never expand into base64. History pages copy labels and revision IDs, not undo payloads.
-- Core exposes document state, focus state and document/history tickets. Inspection does not
+- Core exposes its own document state, focus state and document/history ticket types; engine
+  records stay behind a private adapter. Inspection does not
   alter session history or saved records. A fixed 4096-byte service slot publishes small owner
   snapshots using `try_lock`; failed publication preserves the last complete snapshot.
 - Engine snapshots queue depths, retirement, current revision and frame/picture counters using

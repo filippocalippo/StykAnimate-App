@@ -14,45 +14,7 @@
 //!
 //! Other targets have no such setting here and draw grayscale.
 
-/// What the system does to the edges of text.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Smoothing {
-    /// No smoothing: text is aliased.
-    Off,
-    /// Grayscale antialiasing.
-    Grayscale,
-    /// ClearType: antialiasing with the display's subpixels.
-    ClearType,
-}
-
-/// The order of the display's subpixels, left to right.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SubpixelOrder {
-    /// Red, green, blue.
-    Rgb,
-    /// Blue, green, red.
-    Bgr,
-}
-
-/// The system's text smoothing.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FontSmoothing {
-    /// What is done to the edges of text.
-    pub smoothing: Smoothing,
-    /// The order of the display's subpixels.
-    pub order: SubpixelOrder,
-    /// The contrast the person configured for the primary display, when they did.
-    pub contrast: Option<f32>,
-    /// The gamma the person configured for the primary display, when they did.
-    pub gamma: Option<f32>,
-}
-
-impl Default for FontSmoothing {
-    /// Grayscale with no preferences: what a platform without the setting gets.
-    fn default() -> Self {
-        FontSmoothing { smoothing: Smoothing::Grayscale, order: SubpixelOrder::Rgb, contrast: None, gamma: None }
-    }
-}
+pub use styk_services::text_environment::{FontSmoothing, Smoothing, SubpixelOrder};
 
 /// The raw values Windows reports.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -246,4 +208,12 @@ mod tests {
         assert_eq!(smoothing, FontSmoothing::default());
         let _ = smoothing;
     }
+}
+
+/// Native settings provider for the font worker.
+pub struct NativeTextEnvironment;
+impl styk_services::text_environment::TextEnvironment for NativeTextEnvironment {
+    fn smoothing(&self) -> FontSmoothing { current() }
+    fn scale(&self) -> f32 { crate::environment::system_scale() }
+    fn locale(&self) -> String { crate::environment::user_locale() }
 }

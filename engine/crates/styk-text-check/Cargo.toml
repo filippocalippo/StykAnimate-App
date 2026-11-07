@@ -11,6 +11,7 @@ name = "styk-text-check"
 path = "src/main.rs"
 
 [dependencies]
+styk-core = { path = "../styk-core" }
 iced = { workspace = true }
 iced_runtime = { path = "../../../vendor/iced/runtime" }
 png = "0.18"

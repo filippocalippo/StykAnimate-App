@@ -7,18 +7,14 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+styk-devtools-engine = { path = "../styk-devtools-engine" }
 iced = { workspace = true, optional = true }
-png = { version = "0.18", optional = true }
 styk-core = { path = "../styk-core", features = ["inspect"] }
 styk-design = { path = "../styk-design", features = ["widgets"], optional = true }
-styk-platform = { path = "../styk-platform", features = ["dev-control"] }
-styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace", features = ["enabled"] }
 styk-ui = { path = "../styk-ui", optional = true }
 
-serde_json = "1"
-serde = "1"
 
 [features]
 default = []
-ui = ["dep:iced", "dep:png", "dep:styk-design", "dep:styk-ui"]
+ui = ["dep:iced", "dep:styk-design", "dep:styk-ui"]

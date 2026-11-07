@@ -28,13 +28,13 @@ styk-core = { path = "../styk-core", optional = true }
 styk-services = { path = "../styk-services", optional = true }
 styk-platform = { path = "../styk-platform", optional = true }
 
-styk-devtools = { path = "../styk-devtools", optional = true }
+styk-devtools-engine = { path = "../styk-devtools-engine", optional = true }
 serde_json = { version = "1", optional = true }
 
 [features]
 # The headless tools that drive the app's own services (`styk video`). Off by default: the engine-side tools reach no
 # platform crate, and `cargo xtask deps` holds this to being the only way in (decision Q2).
-app-tools = ["dep:styk-core", "dep:styk-services", "dep:styk-platform", "dep:styk-devtools", "dep:serde_json"]
+app-tools = ["dep:styk-core", "dep:styk-services", "dep:styk-platform", "dep:styk-devtools-engine", "dep:serde_json"]
 
 [target.'cfg(windows)'.dev-dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }

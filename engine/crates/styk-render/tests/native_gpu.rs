@@ -57,7 +57,7 @@ fn every_attempt_failing_reports_every_reason() {
 
 #[test]
 fn the_host_gets_a_device() {
-    match native_gpu("native gpu test", |adapter| wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits())) {
+    match native_gpu(cfg!(windows), "native gpu test", |adapter| wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits())) {
         Ok(gpu) => {
             if cfg!(windows) && std::env::var("WGPU_BACKEND").is_err() {
                 eprintln!("{} on {:?}", gpu.attempt.name, gpu.adapter.get_info().backend);

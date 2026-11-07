@@ -8,16 +8,15 @@
 //! writes a line of the report; a step the machine cannot do (no input method installed) says why instead of passing.
 
 use iced::{Task, window};
-use std::sync::{Mutex, OnceLock};
+use std::cell::RefCell;
 use std::time::{Duration, Instant};
 use styk_platform::input;
 use styk_ui::component_sheet::{Message as Sheet, Which, ids};
 
-/// When each latency key was posted to the window.
-static POSTED: OnceLock<Mutex<Vec<Instant>>> = OnceLock::new();
-
-fn posted() -> &'static Mutex<Vec<Instant>> {
-    POSTED.get_or_init(|| Mutex::new(Vec::new()))
+// When each latency key was posted to the window.
+thread_local! {
+    // Both the window callbacks and the app's update run on the UI thread.
+    static POSTED: RefCell<Vec<Instant>> = const { RefCell::new(Vec::new()) };
 }
 
 /// How many keys a latency run types, and the gap between them.
@@ -37,7 +36,7 @@ fn percentiles(mut deltas: Vec<f64>) -> String {
 /// presentation of the surface after that redraw started. `accepted` is how many of the posted keys the field took: a
 /// run in which a key was refused measures nothing about edits and says so.
 pub fn latency_summary(frames: &[Instant], presents: &[Instant], accepted: usize) -> String {
-    let posted = posted().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let posted = POSTED.with(|posted| posted.borrow().clone());
     let mut to_frame = Vec::new();
     let mut to_present = Vec::new();
     for &post in posted.iter() {
@@ -72,7 +71,7 @@ pub enum Step {
 
 /// Forgets the keys posted so far and starts recording presentations.
 pub fn latency_start() {
-    posted().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
+    POSTED.with(|posted| posted.borrow_mut().clear());
     iced_winit::presents::start();
 }
 
@@ -83,9 +82,16 @@ pub fn presents() -> Vec<Instant> {
 
 fn pause(millis: u64) -> Task<Step> {
     Task::future(async move {
-        std::thread::sleep(Duration::from_millis(millis));
+        let (sender, receiver) = iced::futures::channel::oneshot::channel();
+        styk_platform::diagnostics::after(Duration::from_millis(millis), move || {
+            if sender.send(()).is_err() { eprintln!("input-check timer receiver closed"); }
+        })?;
+        receiver.await.map_err(|error| error.to_string())
     })
-    .discard()
+    .then(|result| match result {
+        Ok(()) => Task::none(),
+        Err(detail) => Task::done(Step::Result { label: "pause failed", detail }),
+    })
 }
 
 fn on_ui_thread(id: window::Id, label: &'static str, work: impl FnOnce(&dyn window::Window) -> String + Send + 'static) -> Task<Step> {
@@ -93,8 +99,11 @@ fn on_ui_thread(id: window::Id, label: &'static str, work: impl FnOnce(&dyn wind
 }
 
 /// Like [`on_ui_thread`], for work whose answer the report does not need.
-fn quietly(id: window::Id, work: impl FnOnce(&dyn window::Window) + Send + 'static) -> Task<Step> {
-    window::run(id, move |window| work(window)).discard()
+fn quietly(id: window::Id, work: impl FnOnce(&dyn window::Window) -> Result<(), styk_platform::window::WindowError> + Send + 'static) -> Task<Step> {
+    window::run(id, move |window| work(window)).then(|result| match result {
+        Ok(()) => Task::none(),
+        Err(error) => Task::done(Step::Result { label: "input failed", detail: error.to_string() }),
+    })
 }
 
 fn text_of(result: Result<(), styk_platform::window::WindowError>) -> String {
@@ -110,15 +119,16 @@ fn typing(id: window::Id, label: &'static str, field: Which, fill: Sheet, focus:
     // when it takes focus), so every key is an insertion into the text that is there.
     let vk_end = 0x23;
     let mut task = quietly(id, |_| {
-        let _ = input::activate_layout("00000409");
+        input::activate_layout("00000409").map(|_| ())
     })
     .chain(Task::done(Step::Sheet(fill)))
     .chain(pause(300))
     .chain(Task::done(Step::Sheet(focus)))
     .chain(pause(300))
     .chain(quietly(id, move |w| {
-        let _ = input::post_key(w, vk_end, true);
-        let _ = input::post_key(w, vk_end, false);
+        let down = input::post_key(w, vk_end, true);
+        let up = input::post_key(w, vk_end, false);
+        down.and(up)
     }))
     .chain(pause(300))
     .chain(Task::done(Step::LatencyStart { field }))
@@ -127,9 +137,10 @@ fn typing(id: window::Id, label: &'static str, field: Which, fill: Sheet, focus:
         let vk = 0x41 + (n % 26) as u16;
         task = task
             .chain(quietly(id, move |w| {
-                posted().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(Instant::now());
-                let _ = input::post_key(w, vk, true);
-                let _ = input::post_key(w, vk, false);
+                POSTED.with(|posted| posted.borrow_mut().push(Instant::now()));
+                let down = input::post_key(w, vk, true);
+                let up = input::post_key(w, vk, false);
+                down.and(up)
             }))
             .chain(pause(LATENCY_GAP_MS));
     }
@@ -260,4 +271,19 @@ fn lines(total: usize, width: usize) -> String {
         line += word.len();
     }
     text.chars().take(total).collect()
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+
+    #[test]
+    fn latency_timestamps_are_summarised_and_reset_on_the_ui_thread() {
+        let post = Instant::now();
+        POSTED.with(|posted| posted.borrow_mut().push(post));
+        let summary = latency_summary(&[post + Duration::from_millis(2)], &[post + Duration::from_millis(3)], 1);
+        assert!(summary.contains("1 keys, 1 accepted") && summary.contains("p50 2.0 ms") && summary.contains("p50 3.0 ms"), "{summary}");
+        latency_start();
+        assert!(latency_summary(&[], &[], 0).starts_with("0 keys, 0 accepted"));
+    }
 }

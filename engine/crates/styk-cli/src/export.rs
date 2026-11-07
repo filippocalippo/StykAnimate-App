@@ -87,7 +87,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
         cpu_export = Some(exporter);
         adapter_name = "CPU (styk-raster)".to_string();
     } else {
-        let native = styk_render::native_gpu::native_gpu("styk export", |adapter| wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()))?;
+        let native = styk_render::native_gpu::native_gpu(wgpu::Instance::enabled_backend_features().contains(wgpu::Backends::DX12), "styk export", |adapter| wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()))?;
         adapter_name = format!("{} ({:?}, {})", native.adapter.get_info().name, native.adapter.get_info().backend, native.attempt.name);
         let (device, queue) = (native.device, native.queue);
         let mut exporter = GpuExport::new(&device, &queue, settings, tile);

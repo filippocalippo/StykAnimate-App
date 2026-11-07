@@ -19,11 +19,12 @@ import {spawnSync} from 'node:child_process';
 import {existsSync, mkdirSync, statSync, writeFileSync, readFileSync, copyFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
+import {TOOLCHAIN, MAX_MEMORY, THREADED_WASM_ARGS, threadedWasmEnv} from './engine-wasm-config.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const engine = path.join(root, 'engine');
 const out = path.join(root, 'src/engine/pkg');
-export const TOOLCHAIN = 'nightly-2026-09-15';
+export {TOOLCHAIN} from './engine-wasm-config.mjs';
 export const WASM_BINDGEN = '0.2.129';
 // The codec needs no atomics, so the stable toolchain builds it.
 export const CODEC_TOOLCHAIN = 'stable';
@@ -31,8 +32,6 @@ export const CODEC_TOOLCHAIN = 'stable';
 // Firefox 89, Safari 16.4, the version OffscreenCanvas sets), and the compiler only uses it where IEEE results stay
 // exact (docs/engine/threading.md, Build). The codec and drawing modules take it through RUSTFLAGS: they need nothing else.
 const SIMD_RUSTFLAGS = ['-C', 'target-feature=+simd128'].join('');
-// 2 GiB of address space: every thread shares it, and a shared memory's maximum is fixed when it links.
-const MAX_MEMORY = 2147483648;
 const dev = process.argv.includes('--dev');
 const profile = dev ? 'wasm-dev' : 'wasm';
 // Worktrees share one target directory through CARGO_TARGET_DIR: build caches are what fills the disk.
@@ -52,11 +51,8 @@ const bindgen = has('wasm-bindgen');
 if (!bindgen?.endsWith(WASM_BINDGEN))
   throw new Error(`wasm-bindgen ${WASM_BINDGEN} is required (found ${bindgen ?? 'none'}): cargo install wasm-bindgen-cli --version ${WASM_BINDGEN} --locked`);
 
-const rustflags = ['-C', 'target-feature=+atomics,+bulk-memory,+mutable-globals,+simd128', '-C', 'link-arg=--shared-memory', '-C', 'link-arg=--import-memory',
-  '-C', `link-arg=--max-memory=${MAX_MEMORY}`, '-C', 'link-arg=--export=__wasm_init_tls', '-C', 'link-arg=--export=__tls_size',
-  '-C', 'link-arg=--export=__tls_align', '-C', 'link-arg=--export=__tls_base'];
-run('cargo', [`+${TOOLCHAIN}`, 'build', '--profile', profile, '-p', 'styk-wasm', '--target', 'wasm32-unknown-unknown', '-Z', 'build-std=std,panic_abort'],
-  {env: {...process.env, CARGO_ENCODED_RUSTFLAGS: rustflags.join('\x1f'), CARGO_TARGET_DIR: path.join(target, 'wasm-threads')}});
+run('cargo', [`+${TOOLCHAIN}`, 'build', '--profile', profile, '-p', 'styk-wasm', ...THREADED_WASM_ARGS],
+  {env: threadedWasmEnv(target)});
 
 mkdirSync(out, {recursive: true});
 const built = path.join(target, 'wasm-threads/wasm32-unknown-unknown', profile, 'styk_wasm.wasm');

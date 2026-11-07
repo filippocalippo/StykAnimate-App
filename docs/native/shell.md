@@ -18,8 +18,11 @@ is the reference ([N5](decisions/0005-electron-is-the-reference.md)).
 | Associations table, registry layout | `shell::associations` | `windows::registry`, `windows::associations` |
 | Feed, versions, state machine, install plan, staging | `styk_services::updates` | `windows::updates` (HTTP, staging, installer) |
 
-`styk-services` holds no OS code and no dependencies. The band's three window buttons are drawn by `styk-ui` and publish
+`styk-services` holds no OS code. The band's three window buttons are drawn by `styk-ui` and publish
 their rectangles; `styk-app` wires the window, the instance and the updater to the core.
+`styk-platform::shell` owns profile access, instance startup, save workers and window samples; `shell_check` owns
+the in-process native diagnostics. Both accept raw-window-handle interfaces, with no iced dependency or exposed OS
+handle in the app. The UI reads chrome's portable presentation types through `styk_core::services`.
 
 ## The window
 
@@ -50,8 +53,8 @@ a small state machine (`shell::chrome::MaxButton`, tested on its own): `Idle`, `
 is over the button), cancelled by mouse leave, release outside the button, capture loss (`WM_CAPTURECHANGED`),
 deactivation, fullscreen, the band hiding and `WM_NCDESTROY`. A press takes the mouse capture (so the release arrives even
 outside the window) and activates only on release over the button. The state is an atomic the wndproc writes and the
-interface reads, and a click is a counter the interface takes (it then toggles through iced, so no click is lost or doubled); the wndproc only does a non-blocking `try_send` of a wake-up, so a full channel loses nothing (the
-state is read, not replayed) and the wndproc never waits.
+interface reads, and a click is a counter the interface takes (it then toggles through iced, so no click is lost or doubled); the wndproc only sets a wake-reason bit and wakes the async stream. Repeated notifications coalesce into at most
+three pending reasons (chrome, instance, save timer); state is read, not replayed, and the notification never waits.
 
 `ChromeRegions` is published after each layout by the interface and read by the wndproc under a lock held for one
 pointer swap. Window controls are drawn by the band at today's sizes: 44 px wide at the band's height, 36 px once the

@@ -10,7 +10,7 @@ use iced::widget::{button, container, mouse_area, row};
 use iced::{Alignment, Border, Color, Element, Length, Shadow, Theme as IcedTheme, Widget};
 use styk_design::Theme;
 use styk_design::widgets::icon;
-use styk_services::shell::chrome::{CONTROL_GLYPH, MaxButtonState, control_width};
+use styk_core::services::shell::chrome::{CONTROL_GLYPH, MaxButtonState, control_width};
 
 /// Which of the two clickable controls the pointer is over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

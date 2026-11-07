@@ -2,12 +2,13 @@
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path, sync::Arc, time::Duration};
-use styk_devtools::{
+use styk_devtools_engine::{
     drain::Drain,
     scenario::{self, Host, Step},
     stats,
 };
-use styk_services::clock::{Clock, SystemClock};
+use styk_services::clock::Clock;
+use styk_platform::clock::SystemClock;
 
 thread_local! {
     static MEASUREMENT_CLOCK: std::cell::RefCell<Option<Arc<dyn Clock>>> = const { std::cell::RefCell::new(None) };
@@ -168,7 +169,7 @@ impl Host for EngineHost {
 }
 
 fn error(what: &str) -> i32 {
-    let error = styk_devtools::answer::error(
+    let error = styk_devtools_engine::answer::error(
         "developer command failed",
         "profile",
         Value::Null,
@@ -278,7 +279,7 @@ fn profile(args: &[String]) -> Result<bool, String> {
         hash.update(&scratch[..n]);
     }
     let clock: Arc<dyn Clock> = Arc::new(SystemClock::new());
-    styk_devtools::initialize_with(clock.clone());
+    styk_devtools_engine::initialize_with(clock.clone());
     let drain = Drain::start(
         &styk_platform::spawn::ThreadSpawner,
         clock.clone(),
@@ -380,10 +381,10 @@ fn profile(args: &[String]) -> Result<bool, String> {
         .remove("export_hashes");
     short["truncated"] = json!(true);
     short["more"] = json!("profile.json");
-    let bytes=styk_devtools::answer::encode(&short,styk_devtools::answer::SHORT_BYTES).unwrap_or_else(|_|json!({"format":"stykprofile/1","summary":report["summary"],"budget_missed":missed,"truncated":true,"more":"profile.json"}).to_string().into_bytes());
+    let bytes=styk_devtools_engine::answer::encode(&short,styk_devtools_engine::answer::SHORT_BYTES).unwrap_or_else(|_|json!({"format":"stykprofile/1","summary":report["summary"],"budget_missed":missed,"truncated":true,"more":"profile.json"}).to_string().into_bytes());
     std::fs::write(out.join("summary.txt"), &bytes).map_err(|e| e.to_string())?;
     if args.iter().any(|s| s == "--full") {
-        let full = styk_devtools::answer::encode(&report, styk_devtools::answer::FULL_BYTES)?;
+        let full = styk_devtools_engine::answer::encode(&report, styk_devtools_engine::answer::FULL_BYTES)?;
         println!("{}", String::from_utf8_lossy(&full));
     } else {
         println!("{}", String::from_utf8_lossy(&bytes));
@@ -391,7 +392,7 @@ fn profile(args: &[String]) -> Result<bool, String> {
     for budget in budgets.iter().filter(|b| b["met"] == false) {
         eprintln!(
             "{}",
-            styk_devtools::answer::error(
+            styk_devtools_engine::answer::error(
                 "BUDGET missed",
                 "scenario",
                 json!({"line":budget["line"],"metric":budget["metric"]}),
@@ -410,11 +411,11 @@ pub fn schema(args: &[String]) -> i32 {
     let check = args.iter().any(|a| a == "--check");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     for (name, value) in [
-        ("devtools-protocol.json", styk_devtools::schema::protocol()),
-        ("devtools-profile.json", styk_devtools::schema::profile()),
+        ("devtools-protocol.json", styk_devtools_engine::schema::protocol()),
+        ("devtools-profile.json", styk_devtools_engine::schema::profile()),
     ] {
         let path = root.join("docs/native").join(name);
-        let bytes = styk_devtools::schema::bytes(&value);
+        let bytes = styk_devtools_engine::schema::bytes(&value);
         if check {
             if std::fs::read(&path).ok().as_ref() != Some(&bytes) {
                 return error("developer schema is stale");

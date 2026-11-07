@@ -28,7 +28,7 @@ pub fn run(theme_name: &str, scale_factor: f32, frames: usize) -> Result<(), Str
     };
     let settings = iced::Settings { font: widgets::INTER, ..iced::Settings::default() };
     let mut renderer = pollster::block_on(<iced::Renderer as Headless>::new(renderer::Settings::from(&settings), None)).ok_or("no graphics adapter is available to draw offscreen")?;
-    let _ready = warm_up::install_bundled();
+    let _ready = warm_up::install_bundled(styk_platform::font_smoothing::current());
     let style = TextStyle::from_role(&scale::TYPE_BODY);
     let ink: iced::Color = theme.palette().text_1.into();
     let rows: Vec<Element<'_, ()>> = (0..ROWS)

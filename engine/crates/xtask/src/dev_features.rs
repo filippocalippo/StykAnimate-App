@@ -6,7 +6,7 @@ fn validate(manifest: &str) -> Result<(), String> {
         .map(str::trim)
         .filter(|s| !s.starts_with('#'))
         .collect();
-    for name in ["iced", "png", "styk-ui", "styk-design"] {
+    for name in ["iced", "styk-ui", "styk-design"] {
         let prefix = format!("{name} =");
         let line = lines
             .iter()
@@ -27,7 +27,7 @@ fn validate(manifest: &str) -> Result<(), String> {
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
     {
         if line != "default = []"
-            && line != "ui = [\"dep:iced\", \"dep:png\", \"dep:styk-design\", \"dep:styk-ui\"]"
+            && line != "ui = [\"dep:iced\", \"dep:styk-design\", \"dep:styk-ui\"]"
         {
             return Err(format!("unreviewed devtools feature: {line}"));
         }

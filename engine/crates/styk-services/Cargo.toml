@@ -8,3 +8,6 @@ publish.workspace = true
 
 [dependencies]
 raw-window-handle = "0.6"
+
+[features]
+test-fakes = []

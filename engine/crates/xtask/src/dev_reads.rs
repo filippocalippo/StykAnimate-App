@@ -57,7 +57,7 @@ fn imports(path: &Path) -> Result<(), String> {
                         .unwrap_or("");
                     let existing_pen = path.components().any(|p| p.as_os_str() == "pen_lab")
                         && owner == "styk_core"
-                        && module == "drawing";
+                        && ["drawing", "services"].contains(&module);
                     if module != "inspect" && !existing_pen {
                         return Err(format!(
                             "{}: tools may import {owner} only through its inspect API",
@@ -81,6 +81,7 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
         fs::write(path, text).map_err(|e| e.to_string())?;
     }
     imports(&root.join("engine/crates/styk-devtools/src"))?;
+    imports(&root.join("engine/crates/styk-devtools-engine/src"))?;
     println!(
         "inspection APIs: inventory current; tools import owner inspection APIs only (existing pen lab exception)"
     );

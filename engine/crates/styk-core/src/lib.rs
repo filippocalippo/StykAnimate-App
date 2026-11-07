@@ -17,6 +17,7 @@ pub mod export;
 pub mod field;
 pub mod focus;
 pub mod frames;
+pub mod engine;
 pub mod launch;
 pub mod limits;
 pub mod number;
@@ -28,3 +29,5 @@ pub use launch::{Launch, LaunchError, USAGE};
 
 #[cfg(feature = "inspect")]
 pub mod inspect;
+/// Service contracts exposed to views through the application core.
+pub use styk_services as services;

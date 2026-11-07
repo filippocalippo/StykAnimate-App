@@ -265,7 +265,7 @@ mod tests {
         let state = Arc::new(styk_services::inspection::Slot::default());
         state.publish(7, br#"{"revision":7}"#).unwrap();
         let spawner = Arc::new(styk_platform::spawn::ThreadSpawner);
-        let clock = Arc::new(styk_services::clock::SystemClock::new());
+        let clock = Arc::new(styk_platform::clock::SystemClock::new());
         let endpoint = format!("stykanimate-dev-{}-read-host", std::process::id());
         let reader = start_reader(&endpoint, state, spawner.clone(), clock.clone()).unwrap();
         let operation = styk_platform::LocalControl

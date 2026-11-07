@@ -10,7 +10,7 @@ use styk_design::{repertoire, warm_up};
 
 #[test]
 fn feeding_the_worker_does_not_touch_the_font_system() {
-    let _ready = warm_up::install_bundled();
+    let _ready = warm_up::install_bundled(styk_platform::font_smoothing::current());
     let started = Instant::now();
     let prepared = repertoire::prepare(1.0, "it-IT").expect("glyphs are drawn by a worker");
     println!("the repertoire of {} glyphs was laid out in {} ms", prepared.len(), started.elapsed().as_millis());
@@ -18,7 +18,7 @@ fn feeding_the_worker_does_not_touch_the_font_system() {
 
     // The interface thread holds the font system (as it does while it lays out text): the feeder must not need it.
     let guard = font_system().write().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let feeder = prepared.feed().expect("a feeder thread");
+    let feeder = feed::start(prepared);
     let started = Instant::now();
     while !feeder.is_finished() && started.elapsed() < Duration::from_secs(20) {
         std::thread::sleep(Duration::from_millis(5));
@@ -28,3 +28,6 @@ fn feeding_the_worker_does_not_touch_the_font_system() {
     assert!(finished, "the feeder waited for the font system the interface thread held");
     feeder.join().expect("the feeder ends");
 }
+
+#[path = "support/feed.rs"]
+mod feed;
