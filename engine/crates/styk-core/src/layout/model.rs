@@ -1,4 +1,4 @@
-use super::{Operation, Zone};
+use super::{Operation, UnknownRecords, Zone};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub type GroupId = u32;
@@ -267,6 +267,8 @@ pub struct Layout {
     pub layers_width: f64,
     /// Opaque fields retained by the codec (including future panel records).
     pub unknown: BTreeMap<String, styk_doc::Value>,
+    /// Opaque nested members, owned by their stable record identities.
+    pub unknown_records: UnknownRecords,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LayoutError {
@@ -322,6 +324,7 @@ impl Layout {
         self.main
             .iter()
             .map(max)
+            .chain(std::iter::once(self.unknown_records.max_id()))
             .chain(self.floats.iter().flat_map(|f| [f.id, max(&f.root)]))
             .chain(
                 self.returns
@@ -476,6 +479,7 @@ pub fn essentials(workspace: Workspace) -> Layout {
         joined_layers: true,
         layers_width: 200.,
         unknown: BTreeMap::new(),
+        unknown_records: UnknownRecords::default(),
     };
     if workspace == Workspace::Rig {
         l.dormant.clear();

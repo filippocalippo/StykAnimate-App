@@ -45,6 +45,7 @@ impl Layout {
         self.validate(workspace)?;
         let mut next = self.clone();
         next.perform(op, workspace)?;
+        UnknownRecords::prune(&mut next);
         next.validate(workspace)?;
         *self = next;
         Ok(vec![LayoutEvent {

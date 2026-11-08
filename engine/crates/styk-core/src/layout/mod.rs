@@ -2,6 +2,8 @@
 mod model;
 mod ops;
 mod solve;
+mod unknown;
+pub use unknown::UnknownRecords;
 pub mod store;
 pub use model::*;
 pub use ops::*;

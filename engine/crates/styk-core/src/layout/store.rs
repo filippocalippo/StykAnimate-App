@@ -233,6 +233,7 @@ pub fn to_value(l: &Layout) -> Value {
             }
         }
     }
+    l.unknown_records.restore(&mut v);
     v
 }
 pub fn from_value(v: &Value, w: Workspace) -> Result<Layout, LayoutError> {
@@ -276,9 +277,10 @@ pub fn from_value(v: &Value, w: Workspace) -> Result<Layout, LayoutError> {
         "layersWidth",
         "returns",
     ];
-    let l = Layout {
+    let mut l = Layout {
         main,
         floats,
+        unknown_records: UnknownRecords::default(),
         closed: list(get(v, "closed")?)?
             .iter()
             .map(read_panel)
@@ -308,6 +310,7 @@ pub fn from_value(v: &Value, w: Workspace) -> Result<Layout, LayoutError> {
             .collect(),
     };
     l.validate(w)?;
+    l.unknown_records = UnknownRecords::read(v);
     Ok(l)
 }
 pub fn encode(l: &Layout) -> Result<Vec<u8>, LayoutError> {

@@ -777,3 +777,389 @@ fn import_numeric_groups_stacks_and_preserves_active_order() {
     assert_eq!(s.groups[&inspector.id].x, s.groups[&library.id].x);
     assert!(s.groups[&library.id].y > s.groups[&inspector.id].y);
 }
+
+fn future_payload() -> styk_doc::Value {
+    styk_doc::json::parse(br#"{"z":[null,true,false,1.2345678901234567,{"nested":{"keep":"\\u0000 and unicode \u03bb","empty":[]}}],"a":{"future-node":{"id":4294967295,"tabs":"opaque"}}}"#).unwrap()
+}
+fn wire_mut<'a>(value: &'a mut styk_doc::Value, path: &[&str]) -> &'a mut styk_doc::Value {
+    if path.is_empty() {
+        return value;
+    }
+    let child = match value {
+        styk_doc::Value::Obj(o) => std::sync::Arc::make_mut(o).get_mut(path[0]).unwrap(),
+        styk_doc::Value::Arr(a) => {
+            &mut std::sync::Arc::make_mut(a)[path[0].parse::<usize>().unwrap()]
+        }
+        _ => panic!("invalid test path"),
+    };
+    wire_mut(child, &path[1..])
+}
+fn add_future(value: &mut styk_doc::Value, path: &[&str]) {
+    let styk_doc::Value::Obj(o) = wire_mut(value, path) else {
+        panic!("expected record")
+    };
+    std::sync::Arc::make_mut(o).set("future", future_payload());
+}
+fn assert_future_bytes(value: &mut styk_doc::Value, path: &[&str]) {
+    let actual = wire_mut(value, path)
+        .get("future")
+        .expect("unknown field was discarded");
+    let mut expected_bytes = vec![];
+    let mut actual_bytes = vec![];
+    styk_doc::json::write(&future_payload(), &mut expected_bytes);
+    styk_doc::json::write(actual, &mut actual_bytes);
+    assert_eq!(
+        actual_bytes, expected_bytes,
+        "opaque values must remain byte-equal through the JSON codec"
+    );
+}
+fn file_cycle(value: styk_doc::Value) -> styk_doc::Value {
+    let mut file = store::LayoutFile::default();
+    file.workspaces.insert(
+        "animate".into(),
+        store::Entry {
+            stamp: store::Stamp {
+                millis: 1,
+                writer: "test".into(),
+            },
+            value,
+        },
+    );
+    store::LayoutFile::decode(&file.encode().unwrap())
+        .unwrap()
+        .workspaces
+        .remove("animate")
+        .unwrap()
+        .value
+}
+fn unknown_record_cycle(path: &[&str], op: Operation) {
+    let mut original = essentials(Workspace::Animate);
+    apply(
+        &mut original,
+        Operation::Move(
+            p("library"),
+            Zone::Float {
+                rect: Rect {
+                    x: 20.,
+                    y: 30.,
+                    w: 320.,
+                    h: 400.,
+                },
+            },
+        ),
+    );
+    let mut wire = store::to_value(&original);
+    add_future(&mut wire, path);
+    let mut loaded = store::from_value(&file_cycle(wire), Workspace::Animate).unwrap();
+    let mut saved = file_cycle(store::to_value(&loaded));
+    assert_future_bytes(&mut saved, path);
+    let before = loaded.clone();
+    apply(&mut loaded, op);
+    assert_ne!(loaded, before, "the edit must change the annotated record");
+    let mut saved = file_cycle(store::to_value(&loaded));
+    assert_future_bytes(&mut saved, path);
+    let reloaded = store::from_value(&saved, Workspace::Animate).unwrap();
+    assert_eq!(loaded, reloaded);
+}
+#[test]
+fn unknown_fields_split_survive_file_and_resize() {
+    unknown_record_cycle(
+        &["main"],
+        Operation::Resize {
+            split: 5,
+            index: 0,
+            first: Sz::Flex(2.),
+            second: Sz::Px(280.),
+        },
+    );
+}
+#[test]
+fn unknown_fields_tabs_survive_file_and_activation() {
+    unknown_record_cycle(
+        &["main", "kids", "0", "node", "kids", "1", "node"],
+        Operation::Activate(2, 1),
+    );
+}
+#[test]
+fn unknown_fields_float_survive_file_and_frame_edit() {
+    let mut l = essentials(Workspace::Animate);
+    apply(
+        &mut l,
+        Operation::Move(
+            p("library"),
+            Zone::Float {
+                rect: Rect {
+                    x: 20.,
+                    y: 30.,
+                    w: 320.,
+                    h: 400.,
+                },
+            },
+        ),
+    );
+    let mut wire = store::to_value(&l);
+    add_future(&mut wire, &["floats", "0"]);
+    let mut l = store::from_value(&file_cycle(wire), Workspace::Animate).unwrap();
+    let mut saved = file_cycle(store::to_value(&l));
+    assert_future_bytes(&mut saved, &["floats", "0"]);
+    let mut e = Env::new(1440., 900.);
+    e.setup = 42;
+    e.screens.push(Screen {
+        key: 1,
+        work: Rect {
+            x: 0.,
+            y: 0.,
+            w: 1920.,
+            h: 1080.,
+        },
+        scale: 1.,
+        primary: true,
+    });
+    l.place_float(
+        l.floats[0].id,
+        Rect {
+            x: 100.,
+            y: 120.,
+            w: 400.,
+            h: 500.,
+        },
+        &e,
+        Workspace::Animate,
+    )
+    .unwrap();
+    let mut saved = file_cycle(store::to_value(&l));
+    assert_future_bytes(&mut saved, &["floats", "0"]);
+}
+#[test]
+fn unknown_fields_nested_node_survive_file_and_reorder() {
+    let mut l = essentials(Workspace::Animate);
+    apply(
+        &mut l,
+        Operation::Move(
+            p("library"),
+            Zone::Split {
+                group: 2,
+                side: Side::Bottom,
+            },
+        ),
+    );
+    let path = &[
+        "main", "kids", "0", "node", "kids", "1", "node", "kids", "0", "node",
+    ];
+    let mut wire = store::to_value(&l);
+    add_future(&mut wire, path);
+    let mut loaded = store::from_value(&file_cycle(wire), Workspace::Animate).unwrap();
+    let mut saved = file_cycle(store::to_value(&loaded));
+    assert_future_bytes(&mut saved, path);
+    apply(&mut loaded, Operation::Reorder(2, 0, 1));
+    let mut saved = file_cycle(store::to_value(&loaded));
+    assert_future_bytes(&mut saved, path);
+}
+
+#[test]
+fn unknown_fields_all_nested_records_survive_typed_file_and_geometry_edits() {
+    let mut l = essentials(Workspace::Animate);
+    apply(
+        &mut l,
+        Operation::Move(
+            p("library"),
+            Zone::Float {
+                rect: Rect {
+                    x: 20.,
+                    y: 30.,
+                    w: 320.,
+                    h: 400.,
+                },
+            },
+        ),
+    );
+    apply(&mut l, Operation::Close(p("vfx")));
+    let paths: &[&[&str]] = &[
+        &["main"],
+        &["main", "kids", "0"],
+        &["main", "kids", "0", "size"],
+        &["main", "kids", "0", "node"],
+        &[
+            "main", "kids", "0", "node", "kids", "1", "node", "tabs", "0",
+        ],
+        &["floats", "0"],
+        &["floats", "0", "root"],
+        &["floats", "0", "root", "tabs", "0"],
+        &["floats", "0", "relative"],
+        &["floats", "0", "setups", "0"],
+        &["floats", "0", "setups", "0", "rect"],
+        &["returns", "0"],
+        &["returns", "0", "panel"],
+        &["returns", "0", "hint"],
+        &["returns", "0", "hint", "size"],
+        &["closed", "0"],
+        &["dormant", "0"],
+    ];
+    let mut value = store::to_value(&l);
+    for path in paths {
+        add_future(&mut value, path);
+    }
+    let mut l = store::from_value(&file_cycle(value), Workspace::Animate).unwrap();
+    apply(
+        &mut l,
+        Operation::Resize {
+            split: 4,
+            index: 0,
+            first: Sz::Flex(2.),
+            second: Sz::Px(340.),
+        },
+    );
+    let mut e = Env::new(1440., 900.);
+    e.screens.push(Screen {
+        key: 1,
+        work: Rect {
+            x: 0.,
+            y: 0.,
+            w: 1920.,
+            h: 1080.,
+        },
+        scale: 1.,
+        primary: true,
+    });
+    let id = l.floats[0].id;
+    l.place_float(
+        id,
+        Rect {
+            x: 100.,
+            y: 120.,
+            w: 400.,
+            h: 500.,
+        },
+        &e,
+        Workspace::Animate,
+    )
+    .unwrap();
+    let mut saved = file_cycle(store::to_value(&l));
+    for path in paths {
+        assert_future_bytes(&mut saved, path);
+    }
+    let mut reloaded = store::from_value(&saved, Workspace::Animate).unwrap();
+    assert_eq!(l, reloaded);
+    apply(&mut reloaded, Operation::Reopen(p("vfx")));
+    let mut saved = file_cycle(store::to_value(&reloaded));
+    assert_future_bytes(
+        &mut saved,
+        &[
+            "main", "kids", "0", "node", "kids", "1", "node", "tabs", "1",
+        ],
+    );
+}
+#[test]
+fn unknown_fields_follow_node_ids_when_a_sibling_is_inserted_and_normalized() {
+    let mut l = essentials(Workspace::Animate);
+    let mut wire = store::to_value(&l);
+    add_future(
+        &mut wire,
+        &["main", "kids", "0", "node", "kids", "1", "node"],
+    );
+    l = store::from_value(&file_cycle(wire), Workspace::Animate).unwrap();
+    apply(
+        &mut l,
+        Operation::Move(p("library"), Zone::Between { split: 4, index: 0 }),
+    );
+    let mut saved = file_cycle(store::to_value(&l));
+    assert_future_bytes(
+        &mut saved,
+        &["main", "kids", "0", "node", "kids", "2", "node"],
+    );
+    assert!(
+        wire_mut(
+            &mut saved,
+            &["main", "kids", "0", "node", "kids", "0", "node"]
+        )
+        .get("future")
+        .is_none()
+    );
+    // Moving another panel invokes normalization without changing the annotated group's identity.
+    apply(
+        &mut l,
+        Operation::Move(p("library"), Zone::Tab { group: 2, index: 0 }),
+    );
+    let mut saved = file_cycle(store::to_value(&l));
+    assert_future_bytes(
+        &mut saved,
+        &["main", "kids", "0", "node", "kids", "1", "node"],
+    );
+}
+#[test]
+fn unknown_fields_deleted_owners_do_not_contaminate_reused_slots() {
+    let mut l = essentials(Workspace::Animate);
+    apply(
+        &mut l,
+        Operation::Move(
+            p("library"),
+            Zone::Float {
+                rect: Rect {
+                    x: 20.,
+                    y: 30.,
+                    w: 320.,
+                    h: 400.,
+                },
+            },
+        ),
+    );
+    let mut wire = store::to_value(&l);
+    add_future(&mut wire, &["floats", "0"]);
+    add_future(&mut wire, &["floats", "0", "root"]);
+    let mut l = store::from_value(&file_cycle(wire), Workspace::Animate).unwrap();
+    // One operation removes the old host before allocating its replacement.
+    let mut replaced = l.clone();
+    apply(
+        &mut replaced,
+        Operation::Move(
+            p("library"),
+            Zone::Float {
+                rect: Rect {
+                    x: 50.,
+                    y: 60.,
+                    w: 320.,
+                    h: 400.,
+                },
+            },
+        ),
+    );
+    let mut saved = file_cycle(store::to_value(&replaced));
+    assert!(
+        wire_mut(&mut saved, &["floats", "0"])
+            .get("future")
+            .is_none()
+    );
+    assert!(
+        wire_mut(&mut saved, &["floats", "0", "root"])
+            .get("future")
+            .is_none()
+    );
+    let id = l.floats[0].id;
+    apply(&mut l, Operation::DockBack(id));
+    apply(
+        &mut l,
+        Operation::Move(
+            p("vfx"),
+            Zone::Float {
+                rect: Rect {
+                    x: 20.,
+                    y: 30.,
+                    w: 320.,
+                    h: 400.,
+                },
+            },
+        ),
+    );
+    let mut saved = file_cycle(store::to_value(&l));
+    assert!(
+        wire_mut(&mut saved, &["floats", "0"])
+            .get("future")
+            .is_none()
+    );
+    assert!(
+        wire_mut(&mut saved, &["floats", "0", "root"])
+            .get("future")
+            .is_none()
+    );
+    assert_eq!(l, store::from_value(&saved, Workspace::Animate).unwrap());
+}

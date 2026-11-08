@@ -859,6 +859,7 @@ impl Layout {
             w: frame.w / screen.work.w,
             h: frame.h / screen.work.h,
         };
+        UnknownRecords::prune(&mut next);
         next.validate(w)?;
         *self = next;
         Ok(())

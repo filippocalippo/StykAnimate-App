@@ -33,7 +33,12 @@ and workspace state retains arrangements by monitor setup.
 `layout::store` uses the existing `styk_doc` JSON codec without changing the dependency allow-list.
 `to_value`/`from_value` handle an arrangement; `state_to_value`/`state_from_value` also retain its base
 and monitor arrangements. Undo and Focus snapshots are transient. `LayoutFile` carries stamped workspace
-and named-layout entries, tombstones and unknown root fields. Unknown arrangement root fields survive.
+and named-layout entries, tombstones and unknown root fields. Unknown arrangement fields survive at
+every record depth, including splits, tab groups, floats, allocations, panel descriptors, frame histories
+and return placements. `UnknownRecords` retains only opaque members as existing `styk_doc::Value` values,
+shared across snapshots; known fields remain owned by the typed model. Extensions follow stable record
+identities through edits and reordering, with their nested values and member order intact. Deleting an
+owning record deletes its extensions; ID allocation prevents a replacement inheriting those extensions.
 A newer version is rejected before a write. Files are bounded to 256 KiB; named layouts to 32 and
 names to 48 Unicode scalar values. Tombstones retain 30 days, with at most 16 after merging.
 
@@ -63,10 +68,12 @@ preview equivalence and the source solver's exact default 1440 by 900 geometry. 
 
 This core does not certify the later UI scenarios: native float windows, live playback while dragging,
 keyboard routing, screenshot parity, flyout animation and application restart. The platform adapter
-and a real cross-process storage race test are still required. The complete legacy numeric solver
-matrix and every imported preset's geometry also need comparison; only the default 1440 by 900
-rectangles currently have an exact source golden. Nested unknown fields inside known node records
-are not yet retained by the typed codec. Inventory rows spanning these obligations remain open.
+and a real cross-process storage race test belong to a later platform chunk; the storage trait's
+transaction contract is unchanged. The orchestrator accepted the legacy numeric solver matrix as
+outside this chunk because docking is a new system; several window and screen setups are covered,
+and the default 1440 by 900 rectangles have an exact source golden. Nested unknown fields in the
+typed layout codec are retained and tested through `LayoutFile` and edits of their owning records.
+Inventory rows spanning the later UI and platform obligations remain open.
 
 ## Implementer verification (2026-11-08)
 
@@ -89,3 +96,17 @@ because this checkout had document file services but no preference transaction s
 contract is required before platform integration; the core never substitutes an unlocked read followed by a write.
 - Final source confirmation: `cargo check` exited 0; Clippy exited 0 with no diagnostics in `layout/`.
   The focused suite reported `20 passed; 0 failed; 1 ignored; 270 filtered out` (12.55 s).
+
+### Nested-field preservation follow-up (2026-11-08)
+
+The four new split/group/float/nested-node regressions first reported `0 passed; 4 failed`, each with
+`unknown field was discarded`. After the fix, all seven new tests pass, including every nested helper
+record, array reordering and replacement-owner isolation. Assertions compare the opaque values' JSON
+bytes after `LayoutFile` encoding/decoding and typed edits, without changing known-field expectations.
+
+- Queued `cargo check --all-targets` and Clippy: exit 0, no diagnostics in `layout/`.
+- Queued core build: exit 0. Full core tests: `405 passed; 0 failed; 7 ignored` across 22 targets;
+  the library result is `297 passed; 0 failed; 1 ignored`. Existing measurement and external-oracle tests stay ignored.
+- Queued `cargo xtask check`: exit 0; all guards pass. The four screenshot fractions and limits are
+  unchanged from the run above. The component sheet still has no reference.
+- Logs: `artifacts/docking-unknown-fields/`. No new dependency, frozen fixture or threshold change.
