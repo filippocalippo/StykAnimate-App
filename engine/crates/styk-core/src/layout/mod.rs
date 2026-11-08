@@ -1,0 +1,10 @@
+//! Toolkit-independent docking. Operations publish only validated arrangements; fitting never mutates them.
+mod model;
+mod ops;
+mod solve;
+pub mod store;
+pub use model::*;
+pub use ops::*;
+pub use solve::*;
+#[cfg(test)]
+mod tests;
