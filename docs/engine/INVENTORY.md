@@ -28,7 +28,7 @@ Engine logic: ported to Rust.
 
 | Module | Rust owner | Status | Notes |
 | --- | --- | --- | --- |
-| `src/playback-window.mjs` | `styk-core::frames` | partial | Rust: native bounded lookahead over a half-open range, with looping; timeline range UI and startup policy await native integration |
+| `src/playback-window.mjs` | `styk-core::frames; styk-core::timeline` | partial | Rust: bounded lookahead and core transport use the reference half-open range, looping and startup policy; timeline views follow in a later native chunk |
 | `src/canvas-wheel-zoom.mjs` | `styk-core::stage` | partial | Rust: native wheel easing and gesture idle policy; browser reference retained, native widget integration pending |
 | `src/pivot/model.mjs` | `styk-doc` | js | validation and structure |
 | `src/pivot/structure.mjs` | `styk-doc` | partial | Rust: join selection and rotation edits (styk-edit); the JavaScript keeps resolveJoinSelection and segmentBranchIndices for the interface |

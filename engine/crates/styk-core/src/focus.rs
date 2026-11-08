@@ -154,6 +154,9 @@ impl FocusState {
     pub fn focused(&self) -> Option<FocusId> {
         self.focused
     }
+    pub fn area(&self) -> Option<FocusArea> {
+        self.focused.and_then(|id| self.find(id)).map(|(_, target)| target.area)
+    }
 
     /// The focused target when it is a text field.
     pub fn text_entry(&self) -> Option<FocusId> {

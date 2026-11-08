@@ -197,3 +197,9 @@ command line and a script name with `Request::OpenFile`, one at a time, polling 
 open runs. A project the tabs refuse comes back as a failure and is disposed of on the host's worker. The band's other
 commands (Save, Close, New, Rename) are still dropped until the command registry and the dialogs exist; `Event::Closed`
 tells the band when a project closed.
+
+K-timeline adds `Core::dispatch_document` as the shared panel lifecycle barrier and
+`Core::poll_document` as the completion adapter. The band now also polls from its coalesced
+worker Progress subscription. Native `@timeline` batches reuse the exclusive session worker;
+ready completion drives the stage and never creates a second session or history. The host exposes
+a revision/lineage-checked `FrameDocument` adapter over its existing publication. See [timeline.md](timeline.md).

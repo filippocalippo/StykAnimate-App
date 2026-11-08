@@ -75,11 +75,20 @@ impl Harness {
         (Harness::of(core, size, scale), gate)
     }
 
-    fn of(core: Core, size: (u32, u32), scale: f32) -> Harness {
+    fn of(mut core: Core, size: (u32, u32), scale: f32) -> Harness {
         let settings = iced::Settings { font: widgets::INTER, text_size: Pixels(16.0), ..iced::Settings::default() };
         let renderer = pollster::block_on(<iced::Renderer as Headless>::new(renderer::Settings::from(&settings), None)).expect("a graphics adapter is required; a missing one must not pass");
         let _ready = warm_up::install_bundled(styk_platform::font_smoothing::current());
         let surface = core.stage().expect("the active document has a stage");
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            while core.poll_document().is_some() {}
+            core.dispatch(Command::Wake { now: 0 });
+            if !core.timeline().model().pending { break; }
+            assert!(std::time::Instant::now() < until, "initial timeline projection");
+            std::thread::yield_now();
+        }
+        while surface.progress().poll(&Waker::noop()) {}
         Harness { renderer, core, surface, cache: Cache::default(), size: Size::new(size.0 as f32, size.1 as f32), scale, theme: Theme::Light, picture: Vec::new(), redraw: window::RedrawRequest::Wait, woken: Arc::new(Count(AtomicUsize::new(0))) }
     }
 
@@ -111,6 +120,8 @@ impl Harness {
 
     /// The runtime's answer to a wake of the stage: its progress message, handled, and the one redraw that follows.
     fn deliver_progress(&mut self) {
+        while self.core.poll_document().is_some() {}
+        self.core.dispatch(Command::Wake { now: 0 });
         let _ = styk_ui::message::update(&mut self.core, Message::Command(Command::Stage(StageEvent::Progress)));
         self.redraw_frame();
     }
@@ -242,7 +253,8 @@ fn a_slow_frame_with_no_input_asks_for_no_redraw_until_its_wake_and_then_gets_on
     let count = Arc::new(Count(AtomicUsize::new(0)));
     let waker = Waker::from(count.clone());
     let mut context = Context::from_waker(&waker);
-    assert!(messages.poll_next_unpin(&mut context).is_pending());
+    // Core projection and retirement now share this stream. Their initial completion may arrive
+    // after construction; the no-idle-wakes assertion belongs after those completions settle.
     // The first frame places the painter and the demand. The frame is slow: for as long as it is, redraws that nothing asked
     // for ask for nothing, and the stage's progress stays silent.
     stage.redraw_frame();
@@ -257,6 +269,7 @@ fn a_slow_frame_with_no_input_asks_for_no_redraw_until_its_wake_and_then_gets_on
         std::thread::sleep(Duration::from_millis(2));
     }
     assert_ne!(stage.surface.status(), PaintStatus::Ready);
+    assert!(messages.poll_next_unpin(&mut context).is_pending(), "a settled core and gated frame need no polling");
     // The frame completes: the wake comes from the worker, and the answer is one message for the redraw to follow.
     // The document is published, and the person goes to the next frame: a new demand, which the scheduler can now serve.
     gate.open();

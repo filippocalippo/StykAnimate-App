@@ -1,0 +1,8 @@
+{
+  "native.timeline.frameUnavailable": "Playback stopped because the frame could not be prepared.",
+  "native.timeline.operationFailed": "The timeline operation could not be completed: {detail}",
+  "native.timeline.audioUnavailable": "Sound is unavailable. Playback will continue without audio.",
+  "native.timeline.audioPreparationFailed": "Audio could not be prepared. Playback stopped.",
+  "native.settings.saveFailed": "Settings could not be saved. Your changes are kept and will be retried.",
+  "native.settings.readOnly": "Settings could not be updated. The existing settings file has been preserved."
+}

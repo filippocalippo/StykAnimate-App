@@ -47,6 +47,14 @@ impl Drop for Scratch {
 }
 
 impl FfmpegAudioDecoder {
+    /// Shipping encoder beside the app, or the development build's existing encoder. No install or copy.
+    pub fn native() -> Self {
+        let program = std::env::var_os("STYK_FFMPEG").map(PathBuf::from).or_else(|| {
+            let exe = std::env::current_exe().ok()?;
+            exe.ancestors().skip(1).flat_map(|dir| [dir.join("ffmpeg.exe"), dir.join("build/video-encoder/ffmpeg.exe")]).find(|path| path.is_file())
+        }).unwrap_or_else(|| PathBuf::from("ffmpeg.exe"));
+        Self::new(program, std::env::temp_dir())
+    }
     /// Decodes with `program` (the bundled `ffmpeg`), working in folders under `temp_root`. Folders left by an earlier run that
     /// ended badly are removed now.
     pub fn new(program: impl Into<PathBuf>, temp_root: impl Into<PathBuf>) -> FfmpegAudioDecoder {

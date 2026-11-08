@@ -19,6 +19,8 @@ pub const UNPORTED: &str = "unported: ";
 
 pub struct Session {
     pub(crate) editor: Editor,
+    // Legacy view calls reach the session at the next document command, not at snapshot time.
+    native_snapshot_active: Option<Value>,
 }
 
 mod worker;
@@ -381,7 +383,7 @@ impl Session {
         // Which figures the frames hold is counted now, not by the first commit: it scans every pose of the document (tens of milliseconds
         // on a dense one), which the first gesture of a session paid for as a freeze.
         editor.ensure_counts();
-        Ok(Session { editor })
+        Ok(Session { editor, native_snapshot_active: None })
     }
 
     /// Whether the session's own history can undo (it only knows the commands it ran).

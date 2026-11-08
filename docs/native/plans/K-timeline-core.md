@@ -80,7 +80,8 @@ export gate, one-time optional fit, and audio stop/re-anchor on buffering or loo
 position when running; Starting holds, device failure reports and falls back to injected application
 time. Open the device on a service job. Recheck clock/generation at submission; a prepared picture
 does not count as presented. K-stage keeps the last complete picture until the transport releases
-the next current candidate and reports its submission. Readout updates have a 200 ms deadline;
+the next current candidate and reports its submission. Readout updates have a 250 ms deadline
+(executable app.mjs wins over the original plan's 200 ms);
 idle has none. Wakes/deadlines use the application's injected clock/subscription.
 
 Register timeline in the **shared** lifecycle before edits, history, save, mode/tab/scope changes,
@@ -146,3 +147,7 @@ session ownership and executable sheet behavior over stale read-view/F6/draft de
 Sequence navigation/transport before editing gestures. The approved amendments require the Settings
 design's actual typed owner and minimum core navigation geometry now. Step 1 seeded via the prescribed
 script without a build. This amendment is committed before part 1 implementation.
+
+Implementation contract: [timeline](../timeline.md), [Settings](../settings.md). Native timeline
+evaluation uses the existing exclusive Documents worker; only ready completions advance the stage.
+Other settings groups remain preserved for later typed extensions of the same Settings owner.

@@ -252,6 +252,11 @@ pub struct Documents {
 struct Clipboard { source: (DocumentId, u64), holder: (DocumentId, u64), value: Value }
 
 impl Documents {
+    pub fn set_auto_key(&mut self, enabled: bool) -> Result<(), DocumentsError> {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| Some(tab.id) == self.active) else { return Ok(()); };
+        tab.prepared.session.get_mut()?.set_auto_key(enabled);
+        Ok(())
+    }
     #[cfg(feature = "inspect")]
     pub fn inspection_state(&self) -> Result<crate::inspect::State, DocumentsError> {
         let documents = self.tabs.iter().map(|tab| {

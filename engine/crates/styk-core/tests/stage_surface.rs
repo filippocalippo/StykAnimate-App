@@ -233,6 +233,7 @@ fn the_automated_interaction_ends_on_the_frame_export_makes() {
     let gpu = gpu();
     let clock = Arc::new(FixedClock::new());
     let mut core = core_with(Arc::new(platform_spawn::ThreadSpawner), clock.clone());
+    core.start_timeline(&platform_spawn::ThreadSpawner, Arc::new(|| {})).unwrap();
     let surface = core.stage().expect("a stage");
     let size = [960, 540];
     let target = target(&gpu, size);
@@ -244,8 +245,16 @@ fn the_automated_interaction_ends_on_the_frame_export_makes() {
             step => {
                 let event = Event::from_step(step).unwrap_or_else(|| panic!("line {line}: the stage takes this step"));
                 core.dispatch(Command::Stage(event));
-                if matches!(step, Step::Frame(_)) {
+                if let Step::Frame(tick) = step {
+                    let until = std::time::Instant::now() + Duration::from_secs(30);
+                    loop {
+                        while core.poll_document().is_some() {}
+                        core.dispatch(Command::Wake { now: 0 });
+                        if core.documents.active().unwrap().view().is_ok_and(|v| v.tick == *tick) { break; }
+                        assert!(std::time::Instant::now() < until, "the session seek must land"); std::thread::yield_now();
+                    }
                     settle(&gpu, &surface, 1, &target, size);
+                    assert_eq!(surface.shown_key().unwrap().prepared.tick, *tick);
                     shown += 1;
                 }
             }
@@ -442,7 +451,7 @@ fn a_closed_document_takes_its_stage_with_it() {
     let surface = core.stage().expect("a stage");
     let first = core.documents.active().expect("a document").id();
     let clock = SystemClock::new();
-    let mut send = |core: &mut Core, mut request: Request| {
+    let send = |core: &mut Core, mut request: Request| {
         let start = clock.now();
         loop {
             match core.documents.dispatch(request) {
@@ -476,4 +485,86 @@ fn a_closed_document_takes_its_stage_with_it() {
     assert_eq!(surface.status(), PaintStatus::Closed, "the stage went with its document: painter and host are closed");
     assert!(surface.event(Event::Pan([1.0, 1.0])).is_err());
     assert!(core.documents.get(second).is_some());
+}
+
+#[test]
+fn transport_acknowledges_the_matching_rendered_submission_once_and_rejects_replaced_demands() {
+    use styk_core::timeline::transport::Demand;
+    let gpu=gpu(); let core=core_with(Arc::new(platform_spawn::ThreadSpawner),Arc::new(FixedClock::new()));
+    let surface=core.stage().unwrap(); let size=[960,540]; let output=target(&gpu,size);
+    let first=Demand {token:1,tick:0.}; surface.transport_frame(first);
+    assert_eq!(surface.take_submission(),None);
+    settle(&gpu,&surface,1,&output,size);
+    assert_eq!(surface.take_submission(),None,"a newly encoded picture is not an observed submission");
+    // Replace before the post-submit observation: the old acknowledgement must never satisfy the new request.
+    let second=Demand {token:2,tick:0.}; surface.transport_frame(second);
+    frame(&gpu,&surface,1,&output,size); assert_eq!(surface.take_submission(),None);
+    settle(&gpu,&surface,1,&output,size);
+    frame(&gpu,&surface,1,&output,size); assert_eq!(surface.take_submission(),Some(second));
+    assert_eq!(surface.take_submission(),None);
+    surface.end_transport(); frame(&gpu,&surface,1,&output,size); assert_eq!(surface.take_submission(),None);
+}
+
+#[path = "support/audio.rs"]
+mod audio_support;
+#[test]
+fn audible_playback_starts_only_after_real_picture_submission_and_pause_stops_it() {
+    use styk_core::{commands::CommandId, timeline::{Event as Timeline,Payload,transport::State}};
+    use styk_services::audio::fake::{FakeOutput,FakeConfig};
+    let wav=audio_support::decoded_wav(0.25);
+    let audio=styk_doc::json::parse(format!(r#"{{"version":1,"assets":{{"a":{{"id":"a","name":"tone.wav","size":{},"duration":0.25,"chunks":[{{"data_base64":"{}"}}],"peaks":[0.5]}}}},"tracks":[{{"id":"t","name":"Track","gain":1,"mute":false,"solo":false,"clips":[{{"id":"c","assetId":"a","start":0,"offset":0,"duration":0.25,"gain":1,"fadeIn":0,"fadeOut":0}}]}}]}}"#,wav.len(),audio_support::base64(&wav)).as_bytes()).unwrap();
+    let mut document=styk_doc::json::parse(FIXTURE).unwrap();let mut styk=document.get("_styk").cloned().unwrap_or_else(|| styk_doc::Value::object(styk_doc::Obj::new()));
+    styk.make_obj().unwrap().set("audio",audio);document.make_obj().unwrap().set("_styk",styk);
+    let bytes=styk_doc::json::to_string(&document);
+    let spawner=Arc::new(platform_spawn::ThreadSpawner);let clock=Arc::new(FixedClock::new());let progress=styk_core::stage::Progress::new();
+    let (mut core,publication)=screens::core_with_document(bytes.as_bytes(),"Audio.styk",spawner.clone(),progress.wake()).unwrap();
+    let doc=core.documents.active().unwrap();let id=doc.id();
+    let source:Arc<dyn styk_core::frames::FrameDocument>=publication;
+    let frames=styk_core::frames::Frames::new(doc.lineage(),doc.revision(),0,&source,Default::default(),spawner.as_ref(),clock.clone(),progress.wake()).unwrap();
+    let host=styk_core::stage::Host::new(frames,[960,540],region()).unwrap();
+    let surface=Arc::new(Surface::new(host,spawner.clone(),clock,progress.clone(),Default::default()));core.set_stage(id,surface.clone());
+    core.start_timeline(spawner.as_ref(),progress.wake()).unwrap();
+    let until=std::time::Instant::now()+Duration::from_secs(30);
+    while core.timeline().model().pending {core.refresh();assert!(std::time::Instant::now()<until);std::thread::yield_now();}
+    let (output,fake)=FakeOutput::new(FakeConfig::default(),false);
+    let audio=styk_core::audio::AudioTransport::new_notifying(spawner,Box::new(output),fake.host_clock(),audio_support::TestDecoder::new(audio_support::Behavior::Silence),styk_core::audio::CACHE_BYTES,progress.wake()).unwrap();
+    core.set_audio(Ok(audio));
+    core.dispatch(Command::Settings(styk_core::settings::Event::Set { id: styk_core::settings::SettingId::FitViewOnPlayback, value: styk_doc::Value::Bool(false), now: 0 }));
+    surface.event(Event::Pan([73.,29.])).unwrap();
+    let manual_view = surface.view();
+    core.dispatch(Command::Timeline(Timeline::Action {id:CommandId::Play,payload:Payload::None,now:0}));
+    assert_eq!(surface.view(),manual_view,"disabled fit preserves the user's view at playback start");
+    assert_eq!(fake.starts(),0,"preparing a plan cannot start sound before a picture is submitted");
+    let gpu=gpu();let size=[960,540];let output=target(&gpu,size);
+    let until=std::time::Instant::now()+Duration::from_secs(30);
+    while core.timeline().model().transport.state!=State::Playing {
+        while core.poll_document().is_some() {}
+        core.dispatch(Command::Wake {now:0});
+        frame(&gpu,&surface,1,&output,size);
+        assert!(std::time::Instant::now()<until,"prepared audio and a real submitted picture must start playback");std::thread::yield_now();
+    }
+    fake.advance_ms(1);assert_eq!(fake.starts(),1,"the first actual picture starts the S4 output once");
+    core.dispatch(Command::Timeline(Timeline::Action {id:CommandId::Play,payload:Payload::None,now:1}));
+    fake.advance_ms(1);assert_eq!(core.timeline().model().transport.state,State::Paused);
+    assert_eq!(core.timeline().deadline(),None);
+    core.dispatch(Command::Settings(styk_core::settings::Event::Set { id: styk_core::settings::SettingId::FitViewOnPlayback, value: styk_doc::Value::Bool(true), now: 2 }));
+    core.dispatch(Command::Timeline(Timeline::Action {id:CommandId::Play,payload:Payload::None,now:2}));
+    assert_ne!(surface.view(),manual_view,"enabled fit uses the existing stage navigation owner");
+    core.dispatch(Command::Timeline(Timeline::Action {id:CommandId::Play,payload:Payload::None,now:3}));
+    let until=std::time::Instant::now()+Duration::from_secs(30);
+    while core.timeline().model().pending { while core.poll_document().is_some() {} core.dispatch(Command::Wake {now:3}); assert!(std::time::Instant::now()<until); std::thread::yield_now(); }
+    // A real preparation refusal is an error, not a silent completed audio plan.
+    let (output,refused)=FakeOutput::new(FakeConfig::default(),false);
+    let limited=styk_core::audio::AudioTransport::new_notifying(Arc::new(platform_spawn::ThreadSpawner),Box::new(output),refused.host_clock(),audio_support::TestDecoder::new(audio_support::Behavior::Silence),0,progress.wake()).unwrap();
+    core.set_audio(Ok(limited));
+    core.dispatch(Command::Timeline(Timeline::Action {id:CommandId::Play,payload:Payload::None,now:4}));
+    let until=std::time::Instant::now()+Duration::from_secs(30);
+    loop {
+        while core.poll_document().is_some() {}
+        let effects=core.dispatch(Command::Wake {now:4});
+        if effects.iter().any(|effect|matches!(effect,styk_core::commands::Effect::Notice(notice) if notice.message.key.starts_with("native.timeline.audio"))) { break; }
+        assert!(std::time::Instant::now()<until,"preparation refusal reaches the Core caller"); std::thread::yield_now();
+    }
+    assert_eq!(core.timeline().model().transport.state,State::Paused,"failed preparation pauses as today's app does");
+    assert_eq!(refused.starts(),0); assert_eq!(core.timeline().deadline(),None);
 }

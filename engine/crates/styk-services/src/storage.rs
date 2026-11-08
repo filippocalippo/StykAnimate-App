@@ -9,6 +9,11 @@ pub type Update = Box<dyn FnOnce(Option<&[u8]>) -> Result<Vec<u8>, String> + Sen
 pub trait Storage: Send + Sync {
     /// Read without creating or rewriting a missing file.
     fn load<'a>(&'a self, name: &'a str, maximum: usize) -> FileFuture<'a, Option<Arc<[u8]>>>;
+    /// Read-only migration source selected by the platform, separate from the native profile.
+    /// An explicit/in-memory profile may use the same directory for migration fixtures.
+    fn load_legacy<'a>(&'a self, name: &'a str, maximum: usize) -> FileFuture<'a, Option<Arc<[u8]>>> {
+        self.load(name, maximum)
+    }
     /// Acquire the per-profile lock on the worker, read under the lock, call update, stage, flush and replace.
     /// Observe cancellation while acquiring the lock and doing bounded I/O. Stage and flush first,
     /// then call Cancel::begin_commit immediately before atomic replacement. If it refuses, nothing

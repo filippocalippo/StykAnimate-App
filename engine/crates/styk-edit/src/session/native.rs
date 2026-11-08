@@ -3,7 +3,7 @@
 use styk_doc::Value;
 
 use super::{Session, apply_view, prepare_call};
-use crate::{EditError, HistoryMarks, Selection};
+use crate::{EditError, Editor, HistoryMarks, Selection};
 
 /// A command's actual return value or refusal, and effects the host must handle.
 /// Errors retain events too: the native host must not invent a rollback the command does not make.
@@ -24,6 +24,7 @@ pub struct NativeCall {
 /// Borrowed view state and scalar history state. Nothing here owns a second selection or document.
 pub struct SessionView<'a> {
     pub selection: &'a Selection,
+    pub sheet_selection: Option<(&'a str, bool)>,
     pub tick: f64,
     pub frame_index: usize,
     pub revision: u64,
@@ -36,10 +37,25 @@ pub struct SessionView<'a> {
 }
 
 impl Session {
+    /// COW save operands. Materialize on the save worker, never on the interface thread.
+    pub fn native_save_snapshot(&self) -> impl FnOnce() -> Value + Send + 'static {
+        let mut report = self.report().clone();
+        let active = self.native_snapshot_active.clone();
+        move || {
+            if let Some(active) = active {
+                if let Some(layers) = report.make_obj().and_then(|r| r.get_mut("_styk")).and_then(Value::make_obj)
+                    .and_then(|r| r.get_mut("layers")).and_then(Value::make_obj) { layers.set("activeId", active); }
+            }
+            report
+        }
+    }
+    /// Native Settings supplies only the preference it owns; a partial JSON view would reset selection/playhead.
+    pub fn set_auto_key(&mut self, enabled: bool) { self.editor.set_auto_key(enabled); }
     /// Native long-work routing. The incremental browser bake entries are also excluded from
     /// the synchronous native seam; native hosts dispatch the complete bake on its sole worker owner.
     pub fn requires_worker(&self, method: &str, args: &[Value]) -> bool {
         match method {
+            "@timeline" => true,
             "bakeMovieclip" | "bakeMovieclipBegin" | "bakeMovieclipSample" | "bakeMovieclipPublish" | "bakeMovieclipCancel"
             | "restartMovieclip" | "removeMovieclipRestart" | "breakApartMovieclip"
             | "addMovieclipToNextKeyframes" | "placeMovieclip" | "splitMovieclip" => true,
@@ -76,6 +92,7 @@ impl Session {
     /// Values are native (including non-finite numbers); no JSON argument encoding or document patch is needed.
     /// The command dispatcher, rollback, history and gesture grouping remain `Editor::call`'s.
     pub fn call_native(&mut self, method: &str, args: &[Value], view: &Value) -> NativeCall {
+        snapshot_view_boundary(&self.editor, &mut self.native_snapshot_active, method);
         let editor = &mut self.editor;
         let displaced_kind = crate::clipboards::copied_kind(method)
             .or_else(|| (method == "@setClipboard").then(|| args.first().and_then(Value::as_str)).flatten());
@@ -96,6 +113,7 @@ impl Session {
         let editor = &self.editor;
         SessionView {
             selection: &editor.selection,
+            sheet_selection: editor.sheet_selection.as_ref().map(|s| (s.id.as_str(), s.contents)),
             tick: editor.tick,
             frame_index: editor.frame_index,
             revision: editor.revision,
@@ -170,7 +188,8 @@ impl super::WorkerSession {
         if !self.session.requires_worker(method, args) || matches!(method, "bakeMovieclipBegin" | "bakeMovieclipSample" | "bakeMovieclipPublish" | "bakeMovieclipCancel") {
             return Err(EditError::Invalid("errors.editorSessions.chooseACompleteBackgroundCommand".into()));
         }
-        self.session.editor.native_worker_transaction(|editor, check| {
+        let mut snapshot_active = self.session.native_snapshot_active.clone();
+        let result = self.session.editor.native_worker_transaction(|editor, check| {
             let mut interrupted = None;
             let mut checked = || match check() {
                 Ok(()) => Ok(()),
@@ -182,6 +201,24 @@ impl super::WorkerSession {
             };
             let result = apply_view(editor, view).and_then(|()| {
                 prepare_call(editor, view);
+                if method == "@timeline" {
+                    // A bounded interaction batch on the same exclusive session, never a second Editor.
+                    // Selection and seek can evaluate arbitrarily dense frames. FPS normalization also stays here.
+                    if args.len() > 4 { return Err(EditError::Invalid("errors.editorSessions.finishTheCurrentOperationFirst".into())); }
+                    let mut result = Value::Null;
+                    for call in args {
+                        checked()?;
+                        let name = call.get("method").and_then(Value::as_str).unwrap_or("");
+                        if !matches!(name, "seek" | "selectSheetLayer" | "keepSelectionOnSeek" | "setFPS" | "endFrameDraftPreview" | "disableFrameDrafts") {
+                            return Err(EditError::Invalid("errors.editorSessions.chooseACompleteBackgroundCommand".into()));
+                        }
+                        let values: Vec<_> = call.get("args").and_then(Value::elements).map(|v| v.iter().collect()).unwrap_or_default();
+                        snapshot_view_boundary(editor, &mut snapshot_active, name);
+                        result = editor.call(name, &values)?;
+                    }
+                    return Ok(result);
+                }
+                snapshot_view_boundary(editor, &mut snapshot_active, method);
                 if editor.sheet() || method == "bakeMovieclip" {
                     let clock = editor.clock.unwrap_or(|| 0.0);
                     let mut worker = crate::movieclip_planning::TimelineWorker { max_source_bytes: usize::MAX, check: &mut checked, progress: &mut |_| {}, clock };
@@ -190,6 +227,17 @@ impl super::WorkerSession {
             });
             if let Some(error) = interrupted { return Err(error); }
             Ok(answer(editor, method, result, None))
-        }, check, commit)
+        }, check, commit);
+        if result.is_ok() { self.session.native_snapshot_active = snapshot_active; }
+        result
     }
+}
+
+// The browser owner leaves selection/seek in its read view. Snapshot/export takes the session's
+// last activeId until the next actual session command imports that view. Keep that one scalar
+// wire distinction here; the native Editor remains the only live selection/history owner.
+fn snapshot_view_boundary(editor: &Editor, active: &mut Option<Value>, method: &str) {
+    if matches!(method, "seek" | "selectSheetLayer" | "keepSelectionOnSeek" | "setActiveLayer") {
+        if active.is_none() { *active = editor.report.path(&["_styk", "layers", "activeId"]).cloned(); }
+    } else { *active = None; }
 }

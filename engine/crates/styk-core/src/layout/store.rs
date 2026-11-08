@@ -748,13 +748,26 @@ pub struct SaveQueue {
     retry_ms: u64,
 }
 impl SaveQueue {
+    /// One host wake, also used by Settings so retry timing has a single owner.
+    pub fn deadline(&self) -> Option<u64> {
+        if self.in_flight.is_some() { None } else { self.pending.as_ref().map(|(at, _)| *at) }
+    }
+    pub fn flush(&mut self, now: u64) {
+        if let Some((at, _)) = &mut self.pending { *at = now; }
+    }
+    pub fn idle(&self) -> bool { self.pending.is_none() && self.in_flight.is_none() }
     pub fn changed(&mut self, now: u64, bytes: Vec<u8>) -> Result<(), LayoutError> {
         if bytes.len() > MAX_BYTES {
             return Err(LayoutError::Limit);
         }
+        self.replace(now, bytes);
+        Ok(())
+    }
+    /// Reuse the same scheduling/backoff when an owner holds its typed payload elsewhere.
+    pub(crate) fn mark_changed(&mut self, now: u64) { self.replace(now, Vec::new()); }
+    fn replace(&mut self, now: u64, bytes: Vec<u8>) {
         self.pending = Some((now.saturating_add(SAVE_DELAY_MS), bytes));
         self.retry_ms = 0;
-        Ok(())
     }
     pub fn take_due(&mut self, now: u64) -> Option<Vec<u8>> {
         if self.in_flight.is_some() || self.pending.as_ref().is_none_or(|(due, _)| *due > now) {

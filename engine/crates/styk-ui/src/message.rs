@@ -20,6 +20,9 @@ use styk_design::widgets::focus;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {
+    /// The core accepted the shared lifecycle barrier; the application can hand this to its shell owner.
+    ShellReady(styk_core::shell::Event),
+    ExitReady,
     /// A command for the core.
     Command(Command),
     /// Focus a number field's input (a click on its scrub label).
@@ -85,7 +88,7 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
         }
         Message::FocusField(key) => operate(focus::focus(crate::inspector::input_id(key))).discard(),
         Message::Focusing(inner, id) => Task::batch([update(core, *inner), operate(focus::focus(id)).discard()]),
-        Message::Idle => Task::none(),
+        Message::Idle | Message::ShellReady(_) | Message::ExitReady => Task::none(),
         Message::Compose(composing) => {
             core.focus_mut().set_composing(composing);
             Task::none()
@@ -140,8 +143,10 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
 /// One effect as a task. Notices, frame requests and the colour picker belong to the shell, the stage and the picker
 /// chunks: until they land they have no task here.
 #[cfg(feature = "engine")]
-fn effect(effect: Effect) -> Task<Message> {
+pub fn effect(effect: Effect) -> Task<Message> {
     match effect {
+        Effect::ShellReady(event) => Task::done(Message::ShellReady(event)),
+        Effect::ExitReady => Task::done(Message::ExitReady),
         Effect::Overlay(styk_core::overlay::Effect::Focus(id)) => match id { Some(id) => operate(focus::focus(id)).discard(), None => operate(focus::unfocus()).discard() },
         Effect::Overlay(effect) => Task::done(Message::OverlayEffect(effect)),
         Effect::OverlayChoice { invoker, index } => Task::done(Message::OverlayChoice { invoker, index }),
@@ -154,7 +159,7 @@ fn effect(effect: Effect) -> Task<Message> {
         }))
         .discard(),
         Effect::NotAvailable(id) => Task::done(Message::NotAvailable(id)),
-        Effect::Notice(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
+        Effect::SettingsChanged(_) | Effect::Notice(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
     }
 }
 
@@ -184,4 +189,26 @@ pub fn raw_at(core: &mut Core, event: &iced::Event, ignored: bool, now: u64) -> 
 pub fn update_at(core: &mut Core, message: Message, now: u64) -> Task<Message> {
     let effects = core.dispatch(Command::Overlay { event: styk_core::overlay::host::Event::Time, now });
     Task::batch([Task::batch(effects.into_iter().map(effect)), update(core, message)])
+}
+
+/// Translate toolkit input only. Shortcut precedence, scopes and field/IME gates belong to Core's shared resolver.
+#[cfg(feature = "engine")]
+pub fn editor_key(event: &iced::Event, ignored: bool) -> Option<Message> {
+    use iced::keyboard::{Event, Key, key::Physical};
+    let key_name = |physical: &Physical, logical: &Key| match physical {
+        Physical::Code(code) => format!("{code:?}"),
+        Physical::Unidentified(_) => match logical { Key::Named(name) => format!("{name:?}"), Key::Character(c) if c.len() == 1 => format!("Key{}", c.to_uppercase()), _ => String::new() },
+    };
+    match event {
+        iced::Event::Keyboard(Event::KeyPressed { key, physical_key, modifiers, repeat, .. }) => {
+            let mut chord = styk_core::text_entry::Chord::new(&key_name(physical_key, key), modifiers.control(), modifiers.alt(), modifiers.shift());
+            chord.meta = modifiers.logo();
+            // Windows AltGr is reported as Ctrl+Alt on the physical right Alt key; the text widget retains its input.
+            chord.alt_graph = matches!(key, Key::Named(iced::keyboard::key::Named::AltGraph));
+            Some(Command::KeyPressed { chord, repeat: *repeat, prevented: !ignored }.into())
+        }
+        iced::Event::Keyboard(Event::KeyReleased { key, physical_key, .. }) => Some(Command::KeyReleased { key: key_name(physical_key, key), cancelled: false }.into()),
+        iced::Event::Window(iced::window::Event::Unfocused) => Some(Command::Blur.into()),
+        _ => None,
+    }
 }

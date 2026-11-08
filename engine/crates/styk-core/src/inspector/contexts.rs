@@ -262,8 +262,8 @@ fn figure_rename() -> Rename {
 /// The frames an edit reaches while Edit together is on: the scope line ("Editing frames 22–28 · Stop").
 fn scope_line(view: &ViewState) -> Option<Scope> {
     let frames = view.range_frames()?;
-    let (first, last) = (*frames.first()?, *frames.last()?);
-    let label = if last - first + 1 == frames.len() {
+    let (first, last) = (frames.first()?, frames.last()?);
+    let label = if last >= first && last - first + 1 == frames.len() {
         Msg::new("inspectorView.editingFrameRange").with("first", first + 1).with("last", last + 1)
     } else {
         Msg::count("inspectorView.editingFrames", frames.len() as f64)
@@ -273,7 +273,7 @@ fn scope_line(view: &ViewState) -> Option<Scope> {
 
 /// Edit together, shown while two or more frames are chosen.
 fn range_section(view: &ViewState) -> Option<Section> {
-    let length = view.range().len();
+    let length = view.edit_range().len();
     (length > 1).then(|| {
         section("range", None, vec![grid(vec![Row::Switch(SwitchRow {
             toggle: Toggle::ApplyRange,

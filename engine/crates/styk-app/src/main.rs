@@ -297,6 +297,7 @@ impl App {
             match request {
                 top_band::Request::Minimize => tasks.extend(self.window.map(|id| iced_window::minimize(id, true))),
                 top_band::Request::Close => tasks.push(self.close()),
+                top_band::Request::ExitReady => tasks.push(self.close_settled()),
                 top_band::Request::Resize(size) => tasks.extend(self.window.map(|id| iced_window::resize(id, size))),
                 top_band::Request::Capture(path) => {
                     self.capture_path = Some(path);
@@ -391,6 +392,10 @@ impl App {
     }
 
     fn close(&mut self) -> Task<Message> {
+        self.band.prepare_exit().map(Message::Band)
+    }
+
+    fn close_settled(&mut self) -> Task<Message> {
         // The core's close guard (unsaved work) decides here once documents exist; until then the program ends, once the
         // window state is written (by a worker: the interface thread does not wait for the disk).
         if std::mem::replace(&mut self.closing, true) {

@@ -34,7 +34,7 @@ fn registry_is_exactly_appendix_a_no_missing_extra_or_duplicate_identifiers() {
     let actual: BTreeSet<_> = CommandId::ALL.iter().map(|id| id.id()).collect();
     assert_eq!(actual, expected);
     assert_eq!(actual.len(), CommandId::ALL.len());
-    assert_eq!(actual.len(), 276);
+    assert_eq!(actual.len(), 286);
     for entry in CommandId::ALL.iter().map(|id| id.info()) {
         assert_eq!(CommandId::from_id(entry.id.id()), Some(entry.id));
         assert!(!entry.label.is_empty(), "{}", entry.id.id());
@@ -83,7 +83,8 @@ fn executable_reference_matches_metadata_every_shortcut_and_both_polygon_gates()
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let reference = json::parse(&output.stdout).unwrap();
     let commands = reference.get("commands").unwrap().as_arr().unwrap();
-    assert_eq!(commands.len(), CommandId::ALL.len());
+    assert_eq!(commands.len(), 276, "the executable reference still covers every legacy command");
+    assert_eq!(CommandId::ALL.len(), commands.len() + 10, "ten explicit native timeline actions extend the registry");
     let safe = strings(&reference, "polygonActions");
     let keys = strings(&reference, "polygonKeys");
     let home = strings(&reference, "homeActions");

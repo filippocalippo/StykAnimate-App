@@ -27,7 +27,11 @@ fn main() {
     let index = read("index.json");
     let locales: Vec<(String, String)> = Parser::new(&index).locales();
     assert!(locales.first().is_some_and(|(id, _)| id == "en"), "locales/index.json lists English first");
-    let catalogues: Vec<Vec<(String, Value)>> = locales.iter().map(|(id, _)| Parser::new(&read(&format!("{id}.json"))).catalogue()).collect();
+    let mut catalogues: Vec<Vec<(String, Value)>> = locales.iter().map(|(id, _)| Parser::new(&read(&format!("{id}.json"))).catalogue()).collect();
+    let native = manifest.join("native-messages.json");
+    println!("cargo:rerun-if-changed={}", native.display());
+    let native = std::fs::read_to_string(native).expect("the native message catalogue");
+    catalogues[0].extend(Parser::new(&native).catalogue());
 
     let mut keys: Vec<String> = catalogues.iter().flat_map(|catalogue| catalogue.iter().map(|(key, _)| key.clone())).collect();
     keys.sort();
