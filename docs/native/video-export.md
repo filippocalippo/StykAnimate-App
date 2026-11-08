@@ -210,3 +210,20 @@ Linux) and nothing above it changes.
 - **Translucent WebM is held to today's file in a test** (`styk-cli`, `translucent_webm_equals_the_file_made_from_the_canvas_pngs_of_todays_app`):
   the canvas-mapped frames of today's app as PNG through today's arguments against the native session, and the same without the
   mapping, which differs.
+
+## Cancellation checks under machine load
+
+The platform suite synchronizes on the actual child or flush helper, with bounded hang guards.
+Video cancellation ends a suspended audio-pass child and reaps it before returning; a commit
+returns cancellation while its flush is held. Both flush/receiver completion orders remove the
+stage and preserve the destination. Decoder timeout kills and reaps a child with no natural exit.
+
+The original latency workloads and bounds remain quiet-machine gate checks (1 s for audio-pass
+cancellation, 250 ms for flush cancellation, 3 s for decoder timeout). The orchestrator runs these
+with the machine quiet, through the queue, from `engine/`:
+
+```sh
+timeout 300 cargo test -p styk-platform quiet_gate_ -- --ignored --test-threads=1
+```
+
+These ignored measurements are required at the gate; a loaded functional suite does not certify latency.

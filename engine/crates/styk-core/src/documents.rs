@@ -195,6 +195,31 @@ impl Document {
 
     /// Current frame records, shared with the session (live drafts and previews included).
     pub fn frame_records(&self) -> Result<Value, EditError> { self.prepared.session.get().map_err(|error| EditError::Invalid(error.to_string()))?.frame_records() }
+
+    /// The reads the interface thread may make for a panel: they answer from what the session holds and never evaluate
+    /// or convert (D7). `None` means "not ready": the facts lane makes the frame and views from the published generation
+    /// ([`crate::facts`]) and [`Document::adopt_evaluation`] takes them.
+    ///
+    /// The frame on show (a gesture's draft or preview, the retained frame, or a cached evaluation at the playhead).
+    pub fn frame_records_ready(&self) -> Option<Value> { self.prepared.session.get().ok()?.frame_records_ready() }
+    /// The typed document, when the session holds views of it as it is now.
+    pub fn with_document_ready<T>(&self, read: impl FnOnce(&TypedDocument) -> T) -> Option<T> { self.prepared.session.get().ok()?.with_document_ready(read) }
+    /// `animationValue(target, property)` at the playhead, when the frame on show and the views are ready.
+    pub fn animation_value_ready(&self, target: &Value, property: &str) -> Option<Result<Option<Value>, EditError>> { self.prepared.session.get().ok()?.animation_value_ready(target, property) }
+    /// Takes the views and frame a worker made of revision `revision` at `tick`; a document that changed since keeps
+    /// what it has.
+    pub fn adopt_evaluation(&self, revision: u64, views: std::sync::Arc<crate::engine::Prepared>, tick: f64, frame: Value) {
+        if revision != self.revision() { return; }
+        if let Ok(session) = self.prepared.session.get() { session.adopt_evaluation(&session.report().clone(), views, tick, frame); }
+    }
+
+    /// A named read of the session (`animationValue`, ...); `None` when the session does not answer that name.
+    pub fn read(&self, name: &str, args: &Value) -> Option<Result<Option<Value>, EditError>> {
+        match self.prepared.session.get() {
+            Ok(session) => session.read(name, args),
+            Err(error) => Some(Err(EditError::Invalid(error.to_string()))),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,6 +283,8 @@ impl Documents {
     pub fn tabs(&self) -> &[Document] { &self.tabs }
     pub fn get(&self, id: DocumentId) -> Option<&Document> { self.tabs.iter().find(|tab| tab.id == id) }
     pub fn active(&self) -> Option<&Document> { self.active.and_then(|id| self.get(id)) }
+    /// Whether the shared clipboard of `kind` (`camera`, `figures`, ...) holds something to paste.
+    pub fn has_clipboard(&self, kind: &str) -> bool { self.clipboards.contains_key(kind) }
 
     fn can_switch(&self) -> Result<(), DocumentsError> {
         if self.host.as_ref().is_some_and(host::Host::blocks_switch) { return Err(DocumentsError::Busy); }

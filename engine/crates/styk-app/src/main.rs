@@ -762,7 +762,12 @@ fn run_headless(launch: &Launch, screen: Option<Screen>) -> ExitCode {
     let size = launch.size.unwrap_or(window::DEFAULT_SIZE);
     let sheet = (screen == Some(Screen::ComponentSheet)).then(|| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr));
     let theme = screen.map_or(Theme::default(), Screen::theme);
-    let result = headless::screenshot(theme, size, launch.scale.unwrap_or(1.0) as f32, sheet.as_ref(), screen.filter(|screen| screen.is_band())).and_then(|image| {
+    let scale = launch.scale.unwrap_or(1.0) as f32;
+    let result = match screen {
+        Some(screen @ Screen::Inspector(..)) => headless::inspector_screenshot(screen, size, scale),
+        _ => headless::screenshot(theme, size, scale, sheet.as_ref(), screen.filter(|screen| screen.is_band())),
+    }
+    .and_then(|image| {
         mark!("first-frame");
         screenshot::write(path, &image)
     });

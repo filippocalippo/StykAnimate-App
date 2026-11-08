@@ -234,3 +234,20 @@ by key; undo and redo return the same key and hit the same entry. The cache is b
   the app builds its `AudioTransport` on a job thread, never in `update`/`view` (D7).
 - Children of the decoder die with the app through the job object that `styk_platform::video::process::spawn` joins them to
   (S3's chunk); the audio decoder uses that function and adds none of its own.
+
+## Cancellation checks under machine load
+
+The platform suite synchronizes on the actual child or flush helper, with bounded hang guards.
+Video cancellation ends a suspended audio-pass child and reaps it before returning; a commit
+returns cancellation while its flush is held. Both flush/receiver completion orders remove the
+stage and preserve the destination. Decoder timeout kills and reaps a child with no natural exit.
+
+The original latency workloads and bounds remain quiet-machine gate checks (1 s for audio-pass
+cancellation, 250 ms for flush cancellation, 3 s for decoder timeout). The orchestrator runs these
+with the machine quiet, through the queue, from `engine/`:
+
+```sh
+timeout 300 cargo test -p styk-platform quiet_gate_ -- --ignored --test-threads=1
+```
+
+These ignored measurements are required at the gate; a loaded functional suite does not certify latency.

@@ -34,7 +34,7 @@ pub struct EditField<'a, Message> {
     role: Role,
     history_owner: HistoryOwner,
     value: std::borrow::Cow<'a, str>,
-    placeholder: &'a str,
+    placeholder: std::borrow::Cow<'a, str>,
     limits: Limits,
     dir: Dir,
     palette: &'static Palette,
@@ -43,6 +43,8 @@ pub struct EditField<'a, Message> {
     composing: bool,
     width: Length,
     height: Option<f32>,
+    embedded: bool,
+    proportional: bool,
     on_input: Option<Box<dyn Fn(String) -> Message + 'a>>,
     on_enter: Option<Message>,
     on_escape: Option<Message>,
@@ -68,7 +70,7 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             role,
             history_owner: HistoryOwner::Field,
             value,
-            placeholder: "",
+            placeholder: std::borrow::Cow::Borrowed(""),
             limits,
             dir: Dir::Ltr,
             palette,
@@ -77,6 +79,8 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             composing: false,
             width: Length::Fill,
             height: None,
+            embedded: false,
+            proportional: false,
             on_input: None,
             on_enter: None,
             on_escape: None,
@@ -88,8 +92,8 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
         }
     }
 
-    pub fn placeholder(mut self, placeholder: &'a str) -> Self {
-        self.placeholder = placeholder;
+    pub fn placeholder(mut self, placeholder: impl Into<std::borrow::Cow<'a, str>>) -> Self {
+        self.placeholder = placeholder.into();
         self
     }
 
@@ -130,6 +134,19 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
 
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
+        self
+    }
+
+    /// The input sits inside a field box that draws itself (`.ui-field` with `.ui-field-input`: the Inspector's rows):
+    /// no background, border or padding of its own, the value type role (`--type-value`).
+    pub fn embedded(mut self) -> Self {
+        self.embedded = true;
+        self
+    }
+
+    /// An embedded field of names and paths: proportional figures (`.ui-field-input[type="text"]`), not tabular.
+    pub fn proportional(mut self) -> Self {
+        self.proportional = true;
         self
     }
 
@@ -187,6 +204,20 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
     }
 }
 
+/// The embedded input: transparent, its box drawn by the row around it.
+fn embedded_style(palette: &'static Palette, invalid: bool) -> impl Fn(&Theme, text_input::Status) -> text_input::Style {
+    move |_theme, status| {
+        let disabled = matches!(status, text_input::Status::Disabled);
+        text_input::Style {
+            background: Background::Color(iced::Color::TRANSPARENT),
+            border: Border { color: iced::Color::TRANSPARENT, width: 0.0, radius: 0.0.into() },
+            placeholder: palette.text_placeholder.into(),
+            value: if invalid { palette.danger_text } else if disabled { palette.text_disabled } else { palette.text_1 }.into(),
+            selection: palette.text_selection.into(),
+        }
+    }
+}
+
 fn style(palette: &'static Palette, invalid: bool) -> impl Fn(&Theme, text_input::Status) -> text_input::Style {
     move |_theme, status| {
         let line = if invalid { palette.danger_text } else { palette.line_control };
@@ -225,6 +256,8 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             composing,
             width,
             height,
+            embedded,
+            proportional,
             on_input,
             on_enter,
             on_escape,
@@ -239,20 +272,31 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
         let is_empty = value.is_empty();
         let limits = Limits { single_line: role.single_line(), ..limits };
 
+        // An embedded value sets its line as `--type-value` does (18 px), so it sits where today's does in its field.
+        let (font, size, padding, line) = if embedded {
+            let value = crate::typography::TextStyle::from_role(&tokens::scale::TYPE_VALUE);
+            let value = if proportional { value } else { value.tabular() };
+            (value.font, value.size, Padding::ZERO, Some(value.line()))
+        } else {
+            (super::INTER, tokens::scale::TYPE_UI.size, Padding { top: 6.0, right: 8.0, bottom: 6.0, left: 8.0 }, None)
+        };
         let mut input = text_input(placeholder, value)
             .id(widget_id(id))
-            .font(super::INTER)
-            .size(Pixels(tokens::scale::TYPE_UI.size))
-            .padding(Padding { top: 6.0, right: 8.0, bottom: 6.0, left: 8.0 })
+            .font(font)
+            .size(Pixels(size))
+            .padding(padding)
             .width(Length::Fill)
             .intake(intake(limits))
-            .style(style(palette, invalid))
+            .style(if embedded { Box::new(embedded_style(palette, invalid)) as Box<dyn Fn(&Theme, text_input::Status) -> text_input::Style> } else { Box::new(style(palette, invalid)) })
             .base_direction(match (dir, role) {
                 (Dir::Rtl, _) => editor_core::BaseDirection::RightToLeft,
                 (Dir::Ltr, Role::Number) => editor_core::BaseDirection::LeftToRight,
                 _ => editor_core::BaseDirection::Auto,
             });
 
+        if let Some(line) = line {
+            input = input.line_height(line);
+        }
         if role == Role::Multiline {
             input = input.multiline(Some(iced::advanced::text::Wrapping::WordOrGlyph));
         }

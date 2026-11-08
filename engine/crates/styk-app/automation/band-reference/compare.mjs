@@ -1,6 +1,6 @@
 // Compares the native band with today's, scenario by scenario: tmp/band-ref/out/{chromium,native}/<id>.png, the band's rows.
 // Writes a stack (today's, native, difference x4) to out/compare/<id>.png and prints the scores.
-import {readPng, writePng} from './png.mjs';
+import {readPng, writePng} from '../../../../../scripts/png.mjs';
 import {mkdirSync, existsSync} from 'node:fs';
 import {SCENARIOS} from './scenarios.mjs';
 
