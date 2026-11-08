@@ -69,6 +69,7 @@ pub enum Action {
     Swallow,
     Move(usize),
     OpenSubmenu(usize),
+    OpenSubmenuHover(usize),
     CloseChild,
     CloseSubmenu,
     CloseEscape,
@@ -109,6 +110,9 @@ impl Menu {
     }
     pub fn entries(&self) -> &[Entry] {
         &self.entries
+    }
+    pub(super) fn sync_focus(&mut self, index: Option<usize>) {
+        self.current = index.filter(|&i| i < self.items().count());
     }
     pub fn current(&self) -> Option<usize> {
         self.current
@@ -284,7 +288,7 @@ impl Menu {
             && now >= d
         {
             self.hover = None;
-            return i.map_or(Action::CloseChild, Action::OpenSubmenu);
+            return i.map_or(Action::CloseChild, Action::OpenSubmenuHover);
         }
         Action::Swallow
     }
@@ -310,4 +314,77 @@ pub fn find_typeahead<'a>(
     (0..labels.len())
         .map(|step| (start + step) % labels.len())
         .find(|&i| labels[i].trim().to_lowercase().starts_with(&needle))
+}
+
+use super::placement::{self, Align, Placement, Positioned, Rect, Side, Size};
+#[derive(Clone, Copy, Debug)]
+pub enum Anchor {
+    Root(Rect),
+    Point { x: f64, y: f64 },
+    Submenu(Rect),
+}
+impl Menu {
+    pub fn deadline(&self) -> Option<u64> {
+        self.hover.map(|(_, deadline)| deadline)
+    }
+    /// Menu-specific placement from ui-menu.mjs #place. Root placement is physical
+    /// bottom-start in both directions; submenus select left-start for RTL.
+    pub fn place(
+        anchor: Anchor,
+        size: Size,
+        viewport: Size,
+        top_inset: f64,
+        rtl: bool,
+    ) -> Positioned {
+        let mut options = Placement {
+            top_inset,
+            overlap: true,
+            ..Placement::default()
+        };
+        let rect = match anchor {
+            Anchor::Root(r) => r,
+            Anchor::Point { x, y } => {
+                options.offset = 2.;
+                Rect {
+                    x,
+                    y,
+                    width: 0.,
+                    height: 0.,
+                }
+            }
+            Anchor::Submenu(r) => {
+                let right = r.x + r.width;
+                let cramped =
+                    size.width > viewport.width - 8. - right - 2. && size.width > r.x - 8. - 2.;
+                let right = if cramped {
+                    right.min(viewport.width - 8. - size.width - 2.).max(8.)
+                } else {
+                    right
+                };
+                let left = if cramped { right } else { r.x };
+                options.side = if rtl { Side::Left } else { Side::Right };
+                options.align = Align::Start;
+                options.offset = 2.;
+                options.flip = !cramped;
+                Rect {
+                    x: left,
+                    y: r.y - 4.,
+                    width: right - left,
+                    height: r.height + 8.,
+                }
+            }
+        };
+        placement::compute(rect, size, viewport, options)
+    }
+}
+
+impl Action {
+    /// Opening intent travels with the action; views do not choose focus policy.
+    pub fn submenu_focus(&self) -> Option<super::OpenFocus> {
+        match self {
+            Self::OpenSubmenu(_) => Some(super::OpenFocus::First),
+            Self::OpenSubmenuHover(_) => Some(super::OpenFocus::Keep),
+            _ => None,
+        }
+    }
 }

@@ -202,7 +202,7 @@ fn menu_submenu_hover_rtl_and_keep_open() {
     assert_eq!(m.key(key("ArrowLeft"), 0), menu::Action::OpenSubmenu(0));
     m.hover(0, 10);
     assert_eq!(m.tick(159), menu::Action::Swallow);
-    assert_eq!(m.tick(160), menu::Action::OpenSubmenu(0));
+    assert_eq!(m.tick(160), menu::Action::OpenSubmenuHover(0));
     m.focus(1);
     assert_eq!(
         m.activate(),
@@ -519,5 +519,357 @@ fn message_position_prefers_modal_then_slot_and_avoids_stage_controls() {
     assert_eq!(
         position(size, 720., stage, modal, slot, &[], 50.),
         Some(Position { x: 250., top: 363. })
+    );
+}
+
+#[test]
+fn review_hover_submenu_keeps_parent_focus_and_allows_ancestor_navigation() {
+    let mut s = Stack::default();
+    let mut f = page();
+    s.open(
+        Overlay::new(10, Kind::Menu),
+        &mut f,
+        vec![target(10), target(12)],
+        None,
+    )
+    .unwrap();
+    let mut child = Overlay::new(20, Kind::Menu);
+    child.parent = Some(10);
+    child.anchor = Some(FocusId(10));
+    s.open_with_focus(child, &mut f, vec![target(20)], OpenFocus::Keep)
+        .unwrap();
+    assert_eq!(
+        f.focused(),
+        Some(FocusId(10)),
+        "ui-menu hover uses focus:none"
+    );
+    assert_eq!(
+        f.focus(FocusId(12)),
+        Some(FocusId(12)),
+        "another ancestor row stays focusable"
+    );
+    assert_eq!(f.depth(), 2, "the whole menu tree is one scope");
+}
+#[test]
+fn review_keyboard_submenu_can_return_to_ancestor_rows() {
+    let mut s = Stack::default();
+    let mut f = page();
+    s.open(
+        Overlay::new(10, Kind::Menu),
+        &mut f,
+        vec![target(10), target(12)],
+        None,
+    )
+    .unwrap();
+    let mut child = Overlay::new(20, Kind::Menu);
+    child.parent = Some(10);
+    child.anchor = Some(FocusId(10));
+    s.open_with_focus(child, &mut f, vec![target(20)], OpenFocus::First)
+        .unwrap();
+    assert_eq!(f.focused(), Some(FocusId(20)));
+    assert_eq!(
+        f.focus(FocusId(12)),
+        Some(FocusId(12)),
+        "pointer can focus a parent while the child is open"
+    );
+}
+#[test]
+fn review_submenu_placement_keeps_natural_width_and_aligns_first_row() {
+    use placement::{Rect, Size};
+    let p = menu::Menu::place(
+        menu::Anchor::Submenu(Rect {
+            x: 180.,
+            y: 100.,
+            width: 80.,
+            height: 28.,
+        }),
+        Size {
+            width: 240.,
+            height: 200.,
+        },
+        Size {
+            width: 400.,
+            height: 400.,
+        },
+        0.,
+        false,
+    );
+    assert_eq!((p.rect.x, p.rect.y, p.rect.width), (152., 96., 240.));
+}
+#[test]
+fn review_submenu_deadlines_drive_open_close_and_cancellation_without_polling() {
+    use menu::{Action, Entry, Item, Menu};
+    let mut m = Menu::new(vec![
+        Entry::Item(Item {
+            submenu: Some(vec![item("Child")]),
+            ..Default::default()
+        }),
+        item("Other"),
+    ]);
+    assert_eq!(m.deadline(), None);
+    m.hover(0, 100);
+    assert_eq!(m.deadline(), Some(250));
+    let wake = m.deadline().unwrap();
+    assert_eq!(m.tick(wake), Action::OpenSubmenuHover(0));
+    assert_eq!(m.deadline(), None);
+    m.submenu_opened(0);
+    m.hover(1, 300);
+    assert_eq!(m.deadline(), Some(550));
+    m.cancel_hover();
+    assert_eq!(m.deadline(), None);
+    assert_eq!(m.tick(550), Action::Swallow);
+    m.hover(1, 600);
+    let wake = m.deadline().unwrap();
+    assert_eq!(wake, 850);
+    assert_eq!(m.tick(wake), Action::CloseChild);
+    assert_eq!(m.deadline(), None);
+    m.submenu_closed();
+    assert_eq!(m.deadline(), None);
+}
+
+#[test]
+fn review_menu_placement_edges_match_the_executed_javascript_place_method() {
+    use menu::Anchor;
+    use placement::{Rect, Size};
+    // Evaluated from ui-menu.mjs #place with its placeFloating -> computePosition adapter.
+    let cases = [
+        (
+            Anchor::Submenu(Rect {
+                x: 180.,
+                y: 100.,
+                width: 80.,
+                height: 28.,
+            }),
+            400.,
+            400.,
+            true,
+            (8., 96., 140., 200.),
+        ),
+        (
+            Anchor::Submenu(Rect {
+                x: 1000.,
+                y: 100.,
+                width: 232.,
+                height: 28.,
+            }),
+            1280.,
+            720.,
+            false,
+            (758., 96., 240., 200.),
+        ),
+        (
+            Anchor::Submenu(Rect {
+                x: 8.,
+                y: 100.,
+                width: 80.,
+                height: 28.,
+            }),
+            1280.,
+            720.,
+            true,
+            (90., 96., 240., 200.),
+        ),
+        (
+            Anchor::Submenu(Rect {
+                x: 400.,
+                y: 680.,
+                width: 80.,
+                height: 28.,
+            }),
+            1280.,
+            720.,
+            false,
+            (482., 512., 240., 200.),
+        ),
+        (
+            Anchor::Root(Rect {
+                x: 1150.,
+                y: 650.,
+                width: 100.,
+                height: 28.,
+            }),
+            1280.,
+            720.,
+            false,
+            (1010., 444., 240., 200.),
+        ),
+        (
+            Anchor::Point { x: 1270., y: 710. },
+            1280.,
+            720.,
+            false,
+            (1030., 508., 240., 200.),
+        ),
+        (
+            Anchor::Root(Rect {
+                x: 100.,
+                y: 100.,
+                width: 80.,
+                height: 28.,
+            }),
+            1280.,
+            720.,
+            true,
+            (100., 134., 240., 200.),
+        ),
+    ];
+    for (anchor, w, h, rtl, expected) in cases {
+        let p = menu::Menu::place(
+            anchor,
+            Size {
+                width: 240.,
+                height: 200.,
+            },
+            Size {
+                width: w,
+                height: h,
+            },
+            50.,
+            rtl,
+        );
+        assert_eq!(
+            (p.rect.x, p.rect.y, p.rect.width, p.rect.height),
+            expected,
+            "{anchor:?}, rtl={rtl}"
+        );
+    }
+}
+
+#[test]
+fn review_tree_keys_follow_the_focused_ancestor_and_keep_the_page_out() {
+    let mut s = Stack::default();
+    let mut f = page();
+    s.open(
+        Overlay::new(10, Kind::Menu),
+        &mut f,
+        vec![target(10), target(12)],
+        None,
+    )
+    .unwrap();
+    let mut child = Overlay::new(20, Kind::Menu);
+    child.parent = Some(10);
+    child.anchor = Some(FocusId(10));
+    s.open_with_focus(child, &mut f, vec![target(20)], OpenFocus::Keep)
+        .unwrap();
+    let mut parent_model = menu::Menu::new(vec![item("First"), item("Other")]);
+    s.menu_hover(10, 1, &mut parent_model, &mut f, 0);
+    assert_eq!(s.active_menu(&f), Some(10));
+    assert_eq!(
+        s.menu_key(10, &mut parent_model, &mut f, key("ArrowUp"), 0),
+        menu::Action::Move(0)
+    );
+    assert_eq!(f.focused(), Some(FocusId(10)));
+    assert_eq!(
+        f.focus(FocusId(1)),
+        None,
+        "the page still cannot take focus through the tree scope"
+    );
+    s.escape(false, &mut f);
+    assert!(
+        s.entries().is_empty(),
+        "Escape on a parent row closes that menu, including its child"
+    );
+    assert_eq!(f.focused(), Some(FocusId(1)));
+}
+#[test]
+fn review_refresh_and_hover_close_preserve_the_other_menus_focus() {
+    let mut s = Stack::default();
+    let mut f = page();
+    s.open(
+        Overlay::new(10, Kind::Menu),
+        &mut f,
+        vec![target(10), target(12)],
+        None,
+    )
+    .unwrap();
+    let mut child = Overlay::new(20, Kind::Menu);
+    child.parent = Some(10);
+    child.anchor = Some(FocusId(10));
+    s.open_with_focus(child, &mut f, vec![target(20)], OpenFocus::First)
+        .unwrap();
+    s.register_targets(10, vec![target(10), target(12), target(13)], &mut f);
+    assert_eq!(f.focused(), Some(FocusId(20)));
+    f.focus(FocusId(13));
+    s.finish(20, Reason::Hover, &mut f);
+    assert_eq!(
+        f.focused(),
+        Some(FocusId(13)),
+        "hover-close must not restore the old parent row"
+    );
+    assert_eq!(
+        f.focus(FocusId(20)),
+        None,
+        "closed rows leave the shared scope"
+    );
+    assert_eq!(f.depth(), 2);
+}
+#[test]
+fn review_keyboard_enters_an_existing_hover_child_and_escape_restores_its_row() {
+    let mut s = Stack::default();
+    let mut f = page();
+    s.open(Overlay::new(10, Kind::Menu), &mut f, vec![target(10)], None)
+        .unwrap();
+    let mut child = Overlay::new(20, Kind::Menu);
+    child.parent = Some(10);
+    child.anchor = Some(FocusId(10));
+    s.open_with_focus(child, &mut f, vec![target(20)], OpenFocus::Keep)
+        .unwrap();
+    assert_eq!(
+        s.focus_menu(20, &mut f),
+        Some(Effect::Focus(Some(FocusId(20))))
+    );
+    assert_eq!(s.entries().len(), 2);
+    let mut child_model = menu::Menu::new(vec![item("Child")]);
+    assert_eq!(
+        s.menu_key(20, &mut child_model, &mut f, key("ArrowLeft"), 0),
+        menu::Action::CloseSubmenu
+    );
+    s.escape(false, &mut f);
+    assert_eq!(s.entries().len(), 1);
+    assert_eq!(f.focused(), Some(FocusId(10)));
+}
+
+#[test]
+fn review_open_actions_carry_the_reference_focus_policy() {
+    assert_eq!(
+        menu::Action::OpenSubmenu(0).submenu_focus(),
+        Some(OpenFocus::First)
+    );
+    assert_eq!(
+        menu::Action::OpenSubmenuHover(0).submenu_focus(),
+        Some(OpenFocus::Keep)
+    );
+}
+
+#[test]
+fn review_removed_menu_tree_preserves_a_dialogs_invoker_chain() {
+    let mut s = Stack::default();
+    let mut f = page();
+    s.open(
+        Overlay::new(10, Kind::Menu),
+        &mut f,
+        vec![target(10), target(12)],
+        None,
+    )
+    .unwrap();
+    let mut child = Overlay::new(20, Kind::Menu);
+    child.parent = Some(10);
+    child.anchor = Some(FocusId(10));
+    s.open_with_focus(child, &mut f, vec![target(20)], OpenFocus::First)
+        .unwrap();
+    s.open(
+        Overlay::new(30, Kind::Dialog),
+        &mut f,
+        vec![target(30)],
+        None,
+    )
+    .unwrap();
+    s.finish(10, Reason::Removed, &mut f);
+    assert_eq!(f.focused(), Some(FocusId(30)));
+    s.finish(30, Reason::Selected, &mut f);
+    assert_eq!(
+        f.focused(),
+        Some(FocusId(1)),
+        "the removed child hands back through its parent and the root invoker"
     );
 }

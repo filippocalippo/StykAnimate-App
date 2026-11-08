@@ -32,6 +32,8 @@ pub enum Reason {
     Removed,
     CloseAll,
     Toggle,
+    Hover,
+    Replace,
 }
 #[derive(Clone, Debug)]
 pub struct Overlay {
@@ -47,6 +49,8 @@ pub struct Overlay {
     pub guarded: bool,
     pending: Option<Reason>,
     scope: bool,
+    focus_scope: Option<ScopeId>,
+    target_ids: Vec<FocusId>,
 }
 impl Overlay {
     pub fn new(id: u64, kind: Kind) -> Self {
@@ -63,6 +67,8 @@ impl Overlay {
             guarded: false,
             pending: None,
             scope: false,
+            focus_scope: None,
+            target_ids: Vec::new(),
         }
     }
     fn blocks(&self) -> bool {
@@ -113,26 +119,76 @@ impl Stack {
         self.gate(&mut out);
         out
     }
-    /// IDs strictly increase for this window, so delayed guard replies cannot target a replacement.
+    /// IDs strictly increase for this window. Root menus and non-menu overlays own scopes;
+    /// submenus join their root menu's scope, so ancestor rows remain eligible for focus.
     pub fn open(
         &mut self,
-        mut entry: Overlay,
+        entry: Overlay,
         focus: &mut FocusState,
         targets: Vec<FocusTarget>,
         initial: Option<FocusId>,
     ) -> Result<Vec<Effect>, &'static str> {
+        self.open_with_focus(
+            entry,
+            focus,
+            targets,
+            initial.map_or(OpenFocus::First, OpenFocus::Target),
+        )
+    }
+    pub fn open_with_focus(
+        &mut self,
+        mut entry: Overlay,
+        focus: &mut FocusState,
+        targets: Vec<FocusTarget>,
+        intent: OpenFocus,
+    ) -> Result<Vec<Effect>, &'static str> {
         if entry.id <= self.last_id {
             return Err("overlay ID must increase for this window");
         }
-        if entry
+        let parent = entry
             .parent
-            .is_some_and(|id| !self.entries.iter().any(|e| e.id == id))
-        {
+            .and_then(|id| self.entries.iter().find(|e| e.id == id));
+        if entry.parent.is_some() && parent.is_none() {
             return Err("overlay parent is not open");
         }
+        let shared = parent
+            .filter(|p| p.kind == Kind::Menu && entry.kind == Kind::Menu)
+            .and_then(|p| p.focus_scope);
+        if intent == OpenFocus::Keep && shared.is_none() {
+            return Err("keep-focus opening requires a parent menu");
+        }
+        entry.target_ids = targets.iter().map(|t| t.id).collect();
+        if shared.is_some() {
+            entry.anchor = entry.anchor.or(focus.focused());
+        }
+        entry.scope = !entry.kind.passive() && shared.is_none();
+        entry.focus_scope = if entry.scope {
+            Some(ScopeId(entry.id))
+        } else {
+            shared
+        };
+        let initial = match intent {
+            OpenFocus::Target(id) => Some(id),
+            _ => None,
+        };
         let mut out = Vec::new();
-        entry.scope = !entry.kind.passive();
-        if entry.scope {
+        if let Some(scope) = shared {
+            let first = initial
+                .filter(|id| targets.iter().any(|t| t.id == *id && t.enabled))
+                .or_else(|| {
+                    targets
+                        .iter()
+                        .find(|t| t.enabled && t.tab_stop)
+                        .or_else(|| targets.iter().find(|t| t.enabled))
+                        .map(|t| t.id)
+                });
+            focus.replace_scope_targets(scope, &[], targets);
+            if intent != OpenFocus::Keep
+                && let Some(id) = first
+            {
+                out.push(Effect::Focus(focus.focus(id)));
+            }
+        } else if entry.scope {
             if let Some(anchor) = entry.anchor {
                 focus.focus(anchor);
             }
@@ -146,6 +202,106 @@ impl Stack {
         self.entries.push(entry);
         self.gate(&mut out);
         Ok(out)
+    }
+    /// Replace one menu's rows without removing its ancestors' or descendants' targets.
+    pub fn register_targets(
+        &mut self,
+        id: u64,
+        targets: Vec<FocusTarget>,
+        focus: &mut FocusState,
+    ) -> Option<FocusId> {
+        let entry = self.entries.iter_mut().find(|e| e.id == id)?;
+        let scope = entry.focus_scope?;
+        let ids = targets.iter().map(|t| t.id).collect();
+        let result = focus.replace_scope_targets(scope, &entry.target_ids, targets);
+        entry.target_ids = ids;
+        result
+    }
+    /// ui-menu #activeMenu: the menu holding focus, otherwise the deepest open menu.
+    pub fn active_menu(&self, focus: &FocusState) -> Option<u64> {
+        let deepest = self.top().filter(|e| e.kind == Kind::Menu)?;
+        Some(
+            self.entries
+                .iter()
+                .rev()
+                .find(|e| {
+                    e.kind == Kind::Menu
+                        && e.focus_scope == deepest.focus_scope
+                        && focus.focused().is_some_and(|id| e.target_ids.contains(&id))
+                })
+                .unwrap_or(deepest)
+                .id,
+        )
+    }
+    /// Keyboard opening of an already visible hover submenu enters its first eligible row.
+    pub fn focus_menu(&self, id: u64, focus: &mut FocusState) -> Option<Effect> {
+        let entry = self
+            .entries
+            .iter()
+            .find(|e| e.id == id && e.kind == Kind::Menu)?;
+        entry
+            .target_ids
+            .iter()
+            .find_map(|id| focus.focus(*id))
+            .map(|id| Effect::Focus(Some(id)))
+    }
+    /// Pointer movement focuses a row anywhere in the active menu tree, including ancestors.
+    pub fn menu_hover(
+        &self,
+        id: u64,
+        index: usize,
+        model: &mut menu::Menu,
+        focus: &mut FocusState,
+        now: u64,
+    ) -> menu::Action {
+        let Some(entry) = self
+            .entries
+            .iter()
+            .find(|e| e.id == id && e.kind == Kind::Menu)
+        else {
+            return menu::Action::Swallow;
+        };
+        let Some(target) = entry.target_ids.get(index) else {
+            return menu::Action::Swallow;
+        };
+        if focus.focus(*target).is_none() {
+            return menu::Action::Swallow;
+        }
+        model.hover(index, now)
+    }
+    /// Synchronize the active row from the tree's single focus owner before interpreting a key.
+    /// The returned action is core policy; Move is applied to the shared focus scope here.
+    pub fn menu_key(
+        &self,
+        id: u64,
+        model: &mut menu::Menu,
+        focus: &mut FocusState,
+        event: menu::Key<'_>,
+        now: u64,
+    ) -> menu::Action {
+        if self.active_menu(focus) != Some(id) {
+            return menu::Action::Swallow;
+        }
+        let Some(entry) = self.entries.iter().find(|e| e.id == id) else {
+            return menu::Action::Swallow;
+        };
+        model.nested = entry.parent.is_some_and(|id| {
+            self.entries
+                .iter()
+                .any(|e| e.id == id && e.kind == Kind::Menu)
+        });
+        model.sync_focus(
+            focus
+                .focused()
+                .and_then(|id| entry.target_ids.iter().position(|t| *t == id)),
+        );
+        let action = model.key(event, now);
+        if let menu::Action::Move(index) = action
+            && let Some(id) = entry.target_ids.get(index)
+        {
+            focus.focus(*id);
+        }
+        action
     }
     pub fn request_close(
         &mut self,
@@ -207,6 +363,28 @@ impl Stack {
         if entry.scope {
             let restored = focus.remove_scope(ScopeId(id), entry.return_focus);
             out.push(Effect::Focus(restored));
+        } else if let Some(scope) = entry.focus_scope {
+            let had_focus = focus
+                .focused()
+                .is_some_and(|id| entry.target_ids.contains(&id));
+            focus.remove_scope_targets(scope, &entry.target_ids, entry.anchor);
+            let restore = entry.return_focus
+                && !matches!(
+                    reason,
+                    Reason::Hover
+                        | Reason::Replace
+                        | Reason::OutsidePress
+                        | Reason::Blur
+                        | Reason::Resize
+                        | Reason::AnchorScroll
+                        | Reason::Removed
+                        | Reason::Abort
+                );
+            if (restore || had_focus)
+                && let Some(id) = entry.anchor.and_then(|id| focus.focus(id))
+            {
+                out.push(Effect::Focus(Some(id)));
+            }
         }
         for child in &mut self.entries {
             if child.parent == Some(id) {
@@ -250,7 +428,11 @@ impl Stack {
         self.request_close(root.id, reason, focus)
     }
     pub fn escape(&mut self, composing: bool, focus: &mut FocusState) -> Vec<Effect> {
-        let Some(top) = self.top() else {
+        let Some(top) = self
+            .active_menu(focus)
+            .and_then(|id| self.entries.iter().find(|e| e.id == id))
+            .or_else(|| self.top())
+        else {
             return Vec::new();
         };
         if composing || !top.close_on_escape {
@@ -290,3 +472,11 @@ impl Stack {
 mod placement_reference_tests;
 #[cfg(test)]
 mod tests;
+
+/// Submenus may open from keyboard input or pointer intent without stealing the parent's focus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenFocus {
+    First,
+    Target(FocusId),
+    Keep,
+}
