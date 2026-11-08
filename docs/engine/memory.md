@@ -32,13 +32,11 @@ frame stays in the existing bounded `ExportFrames` cache until taken. Reverse an
 shuffled orders use the caller's actual successor. No extra decode thread or queue
 is created; cancellation uses the same interrupt and disposer.
 
-Native devices requested by `native_gpu` and the video tool start at 8 MiB device
-allocator blocks (4 MiB host), doubling as each memory type's live usage grows,
-up to the previous 256 MiB device / 128 MiB host ceilings. The existing wgpu
-allocator owns this policy independently for each device and memory type; retained
-resources keep their blocks until teardown. Larger resources can use dedicated
-allocations; these sizes do not limit artwork. The backend, compiler and render calculations are
-unchanged. Live GPU allocations and reserved allocator blocks are separate measures.
+Native devices use wgpu's default allocation policy. The small-block and geometric
+pool experiments were removed after exclusive paired measurements; pool design is
+deferred until native commitment can be measured. Resource lifetime retention and
+byte bounds remain. Live GPU allocations and reserved allocator blocks are
+separate, overlapping measures; neither attributes all process-private commitment.
 Native exports keep at most one frame's tiles in flight, within the existing
 64 MiB readback budget. Serializing tiles reduced overlap but regressed frame time
 in paired measurements; the tiles remain pipelined. Browser hosts still pipeline

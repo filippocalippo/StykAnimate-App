@@ -1,5 +1,9 @@
 # RM geometric pools and upload-ahead candidate
 
+Historical candidate record. Geometric pools were rejected and removed after the
+second exclusive matrix; prefetch remains. See [render-memory.md](render-memory.md)
+for the kept set, final verification and open items.
+
 Follow-up to `da35fb8f`. The orchestrator's exclusive matrix at
 `artifacts/rm/timing-2026-11-08T09-07-48-325Z/` completed 56/56 exports in
 695.311 seconds, with identical H.264 bytes for every document and binary.

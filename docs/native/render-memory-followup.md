@@ -1,5 +1,8 @@
 # RM lifetime retention and isolated timing candidates
 
+Historical candidate record. Both exclusive matrices have since completed; the
+selected configuration and current open items are in [render-memory.md](render-memory.md).
+
 This follows the rejected timing candidate `0e7c4ab4`. The historical measurements
 in [render-memory.md](render-memory.md) remain historical; they do not certify the
 new code. No performance matrix was run for this follow-up. The orchestrator runs

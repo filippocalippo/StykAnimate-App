@@ -1,253 +1,260 @@
-# Native renderer memory: RM
+# Native renderer memory: RM kept set
 
-Measured on Windows, RTX 4070 SUPER, from `fdb0d4dd` with diagnostic instrumentation
-and implementation head `3f5a1a4b`. A–D are the four documents in the brief's order. Private
-documents were read in place. Each export covers 120 frames at 1920×1080 or
-3840×2160, with the original backend, sampling, codec and quality arguments.
-All builds, tests and measurements used the machine's **heavy** queue; timing is
-directional because other jobs share the machine. No frozen reference was changed.
+The orchestrator selected the second exclusive matrix's **no-pools** configuration:
+default wgpu allocation policy, headless stage-picture suppression, bounded cel
+draining, one frame of pipelined readbacks, lifetime retention, adjacent-frame
+residency and upload-ahead. Small-block and geometric pool hints, their shared
+helper and all four pool-policy tests are removed. The default policy is the
+measured variant's `MemoryHints::Performance`; no benchmark switch remains.
 
-This is a **review candidate, not an acceptance pass**. The process-memory target,
-complete private-memory attribution, zero PNG differences and the no-slowdown
-criterion are evaluated below; a passing unit test does not substitute for them.
+**Accepted trade-off:** B costs **2.004 ms/frame (+4.26%)**, from 47.054 to 49.058,
+for **1,585.61 MiB (1.55 GiB)** less peak own private memory, from 2,688.88 to
+1,103.26 MiB. Both runs support the slowdown. A and D are neutral within the
+observed noise; C is faster and approximately equal in memory. This is explicit
+acceptance of the B trade-off, not satisfaction of the original no-slowdown rule.
+The 780 MiB target and native commitment attribution remain **open**, not floors.
 
-## Ownership and the large jump
+Measurements use Windows / RTX 4070 SUPER. A-D identify the brief's documents,
+read in place. Exports use 120 frames, 3840x2160, H.264 Great, edges smoothing and
+Vulkan. The orchestrator ran both timing matrices on the drained exclusive slot;
+implementation builds, tests and confirmation exports use the heavy queue.
+No input, frozen fixture, parity threshold or encoder argument changed.
 
-The original A 4K run crosses a GPU allocator block boundary between ticks 137 and
-138: process private increases **257.1 MiB**, GPU reservation **256 MiB**, live GPU
-allocations **23.8 MiB**, and live Rust allocation is unchanged. This reproduces the
-brief's approximately 265 MiB jump at a slightly different tick. The reservation
-belongs to wgpu's growing allocation pools: isolation arrays grow **15.625 MiB**
-and their MSAA target **8.125 MiB**. Those allocations cross the next 256 MiB block
-boundary; live suballocations and retained isolation capacity keep the pool in use.
-The exporter owns the device through the job;
-it is not a new 265 MiB document or frame cache.
+## Exclusive timing matrices
 
-GPU allocator labels, reserved blocks, Rust live/peak bytes and process private are
-recorded at startup, document open, renderer setup, every completed frame and exit.
-`styk-trace` receives the same scalar counters. The opt-in `video --memory-report`
-and `stage-memory` commands are documented in `../engine/memory.md`. The latter
-drives the real K-stage host and painter through parsed automation frame steps.
+Every cell is **mean draw ms/frame / maximum own private MiB**, retaining both
+runs. Subtractions are from that matrix's all/final candidate, not cumulative.
+The matrix names are historical: second-matrix `final` contains rejected pools;
+second-matrix `no-pools` is the kept set. Do not compare absolute times across
+different matrices as a controlled prefetch experiment.
 
-These are overlapping accounts: do not add GPU allocations to process private or
-Rust live to GPU reservation. Allocator slack is reserved minus allocated. The
-remaining process-private bytes include native/driver heaps, mapped backing and
-allocator commitment that wgpu and the Rust allocator do not identify individually.
-They are **unattributed**, not evidence of an unavoidable floor. A completed-frame
-checkpoint can miss a transient peak; video's separate 50 ms sampler is used for
-the target judgement. Stage has checkpoint measurements only.
-The stage's end checkpoint follows host/painter shutdown, while the diagnostic
-still holds its document generation. The video's end checkpoint precedes renderer
-destruction. Neither is a claim that every command-local allocation has been freed.
+First matrix: `artifacts/rm/timing-2026-11-08T09-07-48-325Z/`, **56/56 complete**,
+695.311 seconds, identical H.264 bytes for all binaries on each document.
 
-| Document | Size | Sampled own peak, before → after (MiB) | Draw ms/frame, before → after |
-| --- | --- | ---: | ---: |
-| A | 1920x1080 | 1148.6 → 873.4 | 13.34 → 12.35 |
-| A | 3840x2160 | 1486.0 → 1040.6 | 65.74 → 70.42 |
-| B | 1920x1080 | 2662.5 → 821.2 | 14.51 → 18.27 |
-| B | 3840x2160 | 2736.8 → 994.9 | 58.36 → 69.18 |
-| C | 1920x1080 | 685.8 → 547.0 | 13.01 → 11.49 |
-| C | 3840x2160 | 763.3 → 792.5 | 53.90 → 57.98 |
-| D | 1920x1080 | 828.4 → 614.3 | 10.70 → 12.43 |
-| D | 3840x2160 | 908.0 → 894.9 | 56.77 → 58.26 |
+| Doc | Before | All | No pools | No readbacks | No residency | No adjacency | No retention |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| A | 53.738 / 1429.50 | 54.808 / 1150.11 | 54.896 / 1360.93 | 53.933 / 1183.44 | 53.617 / 1158.66 | 57.217 / 1153.25 | 56.867 / 1049.99 |
+| B | 50.204 / 2690.13 | 55.638 / 955.55 | 53.942 / 1104.68 | 57.304 / 994.01 | 52.008 / 2009.45 | 57.988 / 930.32 | 55.346 / 948.76 |
+| C | 45.583 / 725.44 | 49.129 / 752.77 | 47.000 / 720.23 | 48.621 / 784.32 | 49.021 / 748.19 | 49.813 / 752.14 | 53.383 / 751.50 |
+| D | 43.875 / 873.99 | 42.892 / 616.57 | 43.246 / 839.90 | 46.392 / 649.16 | 44.225 / 617.68 | 46.679 / 616.08 | 45.417 / 868.51 |
 
-4K: maximum peak and median mean draw time of three runs; 1080p: one run.
-All four final 4K process peaks exceed 780 MiB. C also exceeds its baseline peak;
-the large reductions on A and B do not establish the target for every document.
+Second matrix: `artifacts/rm/timing-2026-11-08T10-01-20-195Z/`, **32/32 complete**,
+387.165 seconds, identical H.264 bytes for all binaries on each document.
 
-A, 4K H.264: completed-frame ownership (MiB), before → after. Peaks in this
-table are checkpoint peaks, not the higher sampled transient peaks above.
-
-| Owner | First frame | Peak checkpoint | End |
-| --- | ---: | ---: | ---: |
-| Process private | 900.9 → 661.2 | 1425.8 → 958.0 | 1182.7 → 650.7 |
-| Rust live (includes document and CPU buffers) | 236.4 → 182.5 | 261.5 → 184.9 | 236.6 → 182.7 |
-| Sprite atlas | 128.0 → 128.0 | 128.0 → 128.0 | 128.0 → 128.0 |
-| Isolation arrays | 50.6 → 50.6 | 87.5 → 67.5 | 87.5 → 16.9 |
-| MSAA targets | 63.8 → 63.8 | 63.8 → 63.8 | 63.8 → 63.8 |
-| Resolved GPU frame | 8.4 → 8.4 | 8.4 → 8.4 | 8.4 → 8.4 |
-| Readback buffers | 63.3 → 31.6 | 63.3 → 31.6 | 63.3 → 31.6 |
-| Glyph masks | 0.0 → 0.0 | 32.0 → 32.0 | 32.0 → 32.0 |
-| Primitive buffer | 1.0 → 1.0 | 32.0 → 0.5 | 32.0 → 0.5 |
-| Other GPU allocations | 1.1 → 1.1 | 1.1 → 1.1 | 1.1 → 1.1 |
-| GPU allocated total | 316.2 → 284.6 | 416.1 → 332.9 | 416.1 → 282.3 |
-| GPU reserved total | 512.0 → 302.0 | 768.0 → 370.9 | 768.0 → 304.3 |
-| GPU allocator slack | 195.8 → 17.5 | 351.9 → 38.0 | 351.9 → 22.0 |
-| Other private (overlaps GPU / native commitment) | 664.6 → 478.7 | 1164.3 → 773.0 | 946.1 → 468.0 |
-
-The retained evidence at `artifacts/rm/memory-account.md`, `.csv` and `.json` gives
-all four documents, both resolutions, export and stage, at start, document open,
-first frame, peak checkpoint and end, with every GPU allocation label in JSON.
-
-
-## Changes and fail-first evidence
-
-| Owner / change | Regression and original failure |
-| --- | --- |
-| Headless engine publication | `export_memory`: 403 stage picture tiles remained with no stage consumer; `Engine::for_export` leaves that queue empty while export cels still decode. |
-| Export upload batches | `source_memory`: a real 4096×2048 cel exceeded one 32 MiB batch and returned “pending without runnable decoding work”; every ready batch now drains. The small-queue CPU test compares original whole-decode pixels. |
-| Sprite atlas | `headless_frame_source_allocates_only_resident_sprite_pages`: the default source allocated four pages for unused pictures instead of two; existing residency grows for all visible pages and the cel equals the original whole-atlas output exactly. |
-| GPU allocation pools | `a_native_device_reserves_small_memory_blocks_for_small_work`: 192 MiB reserved for a 1 MiB buffer; `small_native_owners_do_not_grow_large_allocator_blocks`: small owners grew 32/64 MiB blocks. Shared native hints now use 8–16 MiB device blocks and 4–8 MiB host blocks, with no resource-size limit. |
-| Isolation arrays and MSAA | `memory_lifetime`: an empty frame retained 2,097,160 logical layer bytes instead of 16; a one-layer frame retained 2,097,160 instead of 524,296. Exact arrays now match both parities' current needs and unused intermediate MSAA leaves with them; allocator reports also include backend padding. |
-| Readback capacity | `memory_lifetime`: native 1080p allocated eight readbacks instead of one. The native source now allocates at most the current frame's tiles (four at 4K), within the existing byte limit. A single-slot experiment was rejected because paired runs regressed frame time. |
-| Primitive and effect capacity | `memory_lifetime`: empty artwork retained 16,842,752 primitive bytes and an unused effect retained 262,144 bytes. Exact frames release excess capacity; the primitive assertion compares a fresh owner, including backend padding. |
-
-The existing cancellation, dropped-owner, GPU readback, export refusal and residency
-tests remain in the touched-crate run. Upload flushing uses the existing poller and
-interrupt latch, so cancellation/device loss wakes the producer rather than waiting
-on a blocking device poll. Neither stage limits nor frame/byte tolerances were raised.
-
-## Attempts and remaining limits
-
-The evidence retains five separate configurations: smaller default pools and
-lifetime fixes with the whole atlas; resident sprites; one in-flight tile with
-primitive/effect retirement; bounded manual allocation pools; and restored tile
-pipelining after the timing regression. Their binaries
-and measurements are kept in the ignored `artifacts/rm/` folder. These are distinct
-owner-level attempts, not repeated runs with a shifted acceptance threshold.
-
-| Configuration | A peak MiB | B peak MiB | A draw ms/frame | B draw ms/frame |
+| Doc | Before | Geometric final | No pools: kept | No residency |
 | --- | ---: | ---: | ---: | ---: |
-| Whole atlas; smaller pools and lifetime fixes | 1173.8 | 2097.3 | 64.05 | 55.60 |
-| Resident sprite pages | 1240.7 | 1098.9 | 110.85 | 84.90 |
-| One native tile; primitive/effect retirement | 1124.2 | 882.4 | 63.58 | 66.22 |
-| Bounded 8–16 MiB allocator pools | 958.8 | 920.6 | 85.75 | 64.84 |
-| Restored tile pipeline; final | 987.4 | 981.6 | 45.78 | 67.17 |
+| A | 52.092 / 1414.97 | 50.767 / 1216.95 | 52.142 / 1376.35 | 50.104 / 1218.12 |
+| B | 47.054 / 2688.88 | 50.817 / 1272.23 | 49.058 / 1103.26 | 50.050 / 2362.59 |
+| C | 45.296 / 725.75 | 45.663 / 941.98 | 43.692 / 719.88 | 45.354 / 941.67 |
+| D | 41.288 / 876.36 | 42.808 / 739.36 | 41.221 / 837.54 | 41.308 / 742.03 |
 
-Alternating before/after and after/before pairs in one heavy-queue job (two runs
-per version and document, mean draw ms/frame; every file has identical bytes):
+The B residency subtraction falls from 3.629 ms in the first matrix to 0.767 ms
+in the second; the latter still saves 1,090.36 MiB against whole-atlas loading.
+That supports upload-ahead, but does not isolate its cost independently of pool
+interactions. Geometric pools cost B 1.758 ms and 168.96 MiB, and C 1.971 ms and
+222.11 MiB, relative to the kept set. They are rejected rather than tuned.
 
-| Document | Before | After | Change |
-| --- | ---: | ---: | ---: |
-| A | 58.50 | 71.72 | 22.6% |
-| B | 58.96 | 73.35 | 24.4% |
-| C | 56.72 | 63.21 | 11.4% |
-| D | 53.60 | 66.86 | 24.7% |
+## Owner account for the kept set
 
-The paired measurements fail the directional no-slowdown requirement. Restoring
-tile overlap removed the single-slot mechanism, but did not establish unchanged
-frame time. Exact owners can recreate resources when successive working sets
-change, and residency can upload newly visible pages; their remaining timing cost
-has not been isolated from shared-machine load. This is an open acceptance blocker,
-not a speed claim or a reason to discard the measurements.
+The requested A/B confirmation exports use the freshly rebuilt kept source and
+collect owner checkpoints with `--memory-report`. The baseline owner account is
+the first original instrumented `fdb0d4dd` 4K run, selected in advance, not the
+best of its three runs. The exclusive matrices did not collect per-owner logs.
+Current A/B results and the complete start/document/first/peak/end accounts are
+retained in `artifacts/rm/kept-confirmation/`.
 
-The single-slot attempt's render-only A at 4K reaches 815.4 MiB at a completed-frame checkpoint with
-120.2 MiB Rust live and 326.3 MiB GPU reserved. The video-writing path therefore
-does not explain all the remaining private memory. Its two extra full RGBA buffers
-account for 63.3 MiB of the video/render-only Rust-live difference; native/driver
-commitment needs further attribution before claiming a process-memory floor.
+Fresh confirmation, one run each, against the two exclusive no-pools runs:
 
-The WebM encoder floor is a separate process, with the original libvpx arguments.
-Two baseline runs measured 1,895.6 and 1,895.9 MiB for the encoder alone. Changing
-encoder arguments or the platform video service is outside RM; these figures are
-an observed floor candidate for those fixed arguments, not a universal codec limit.
+| Doc | Fresh sampled peak MiB | Exclusive no-pools peaks MiB | Frames / file bytes | Exact comparisons |
+| --- | ---: | ---: | ---: | --- |
+| A | 1310.03 | 1332.57 / 1376.35 | 120 / 14166800 | Both files identical |
+| B | 1091.23 | 1092.41 / 1103.26 | 120 / 7883136 | Both files identical |
 
-## Validation and decisions
+These confirmation peaks do not replace the exclusive maximum or establish a
+new timing result. A is 66.32 MiB below the exclusive maximum, B 12.03 MiB below;
+both still miss 780 MiB. No run was repeated to select a lower peak.
 
-The final strict comparison exits **1**: 960 Vulkan RGBA frame hashes compared,
-**0 different**; 16 H.264 files compared, **0 different**; two WebM files compared,
-**0 different after only the two baseline-proven UID fields below**. The 960 native
-DX12 PNG files include **six differences**: A at 1080p ticks 131, 138 and 181;
-D at 1080p tick 571 and at 4K ticks 541 and 544. No PNG tolerance or whitelist was
-introduced. Full results are in `artifacts/rm/equality.json` and
-`artifacts/rm/png-differences.json`.
+Owners at each run's highest completed-frame private checkpoint (not matched
+ticks): A before tick 207 / kept 195; B before 122 / kept 206.
 
-The separate PNG diagnosis repeats the original binary: A tick 131 differs in
-36 pixels, and D tick 541 in four, all by at most one channel unit. Thus the old
-DX12 path is itself nondeterministic on these frames. That does not explain every
-final mismatch: the single-slot diagnostic also found two changed pixels at A
-tick 181 while its two baseline samples agreed. The final strict zero-difference
-requirement remains failed, and no baseline fixture was replaced.
+| Owner, MiB | A before | A kept | B before | B kept |
+| --- | ---: | ---: | ---: | ---: |
+| Process private | 1425.79 | 1301.30 | 2425.10 | 1084.17 |
+| Rust live (all CPU owners) | 261.46 | 184.90 | 252.50 | 202.05 |
+| Sprite atlas | 128.00 | 128.00 | 1280.00 | 192.00 |
+| Isolation arrays | 87.50 | 87.50 | 16.88 | 33.75 |
+| MSAA targets | 63.75 | 63.75 | 63.75 | 63.75 |
+| Resolved frame | 8.44 | 8.44 | 8.44 | 8.44 |
+| Readbacks | 63.28 | 31.64 | 63.28 | 31.64 |
+| Glyph masks | 32.00 | 32.00 | 0.00 | 2.00 |
+| Primitive buffer | 32.00 | 8.00 | 0.13 | 2.00 |
+| Other GPU allocations | 1.10 | 1.10 | 1.10 | 1.10 |
+| GPU allocated total | 416.07 | 360.43 | 1433.57 | 334.68 |
+| GPU reserved total | 768.00 | 768.00 | 1728.00 | 768.00 |
+| GPU allocator slack | 351.93 | 407.57 | 294.43 | 433.32 |
+| Private minus Rust (overlapping, unattributed) | 1164.33 | 1116.40 | 2172.60 | 882.12 |
 
-Final touched-crate tests (`styk-render`, `styk-export`, `styk-engine`, `styk-cli`,
-with `styk-cli/app-tools`, dev profile, one test thread) exit **0**: **326 passed,
-0 failed, 7 ignored**, across 56 test-result lines including doc tests.
-`cargo check` and touched-crate `cargo clippy -- --no-deps` exit **0**, with existing
-warnings; the measured release build reports `Finished release profile ... in 15.68s`.
-Dependency-wide clippy previously failed in unchanged `styk-math` NaN comparisons
-(`clippy::eq_op`); it is not reported as a clean dependency-wide check.
+Lifetime checkpoints (MiB). `owners.json` retains every GPU label at every point:
 
-The single requested `npm run engine:parity` invocation ran the Rust fixture
-suites: **1,354 passed, 0 failed, 5 ignored**, across 228 test-result lines. Its
-JavaScript container fixture step fails with `ERR_MODULE_NOT_FOUND` for
-`src/engine/pkg/styk_engine.js`; the nine container comparisons likewise lack
-`styk_codec.js`. No stale WebAssembly package was substituted. The command exits
-**1**, with these final results:
+| Document / version | Point | Private | Rust live | GPU allocated | GPU reserved |
+| --- | --- | ---: | ---: | ---: | ---: |
+| A before | start | 1.60 | 0.01 | 0.00 | 0.00 |
+| A before | document | 137.70 | 98.39 | 0.00 | 0.00 |
+| A before | first | 900.94 | 236.38 | 316.20 | 512.00 |
+| A before | peak | 1425.79 | 261.46 | 416.07 | 768.00 |
+| A before | end | 1182.69 | 236.59 | 416.07 | 768.00 |
+| A kept | start | 1.61 | 0.01 | 0.00 | 0.00 |
+| A kept | document | 134.79 | 98.39 | 0.00 | 0.00 |
+| A kept | first | 790.41 | 182.50 | 284.55 | 512.00 |
+| A kept | peak | 1301.30 | 184.90 | 360.43 | 768.00 |
+| A kept | end | 1078.00 | 182.70 | 384.43 | 768.00 |
+| B before | start | 1.57 | 0.01 | 0.00 | 0.00 |
+| B before | document | 149.93 | 126.93 | 0.00 | 0.00 |
+| B before | first | 2413.12 | 244.76 | 1384.82 | 1728.00 |
+| B before | peak | 2425.10 | 252.50 | 1433.57 | 1728.00 |
+| B before | end | 2372.66 | 245.59 | 1454.32 | 1984.00 |
+| B kept | start | 1.56 | 0.01 | 0.00 | 0.00 |
+| B kept | document | 146.36 | 126.93 | 0.00 | 0.00 |
+| B kept | first | 787.51 | 192.10 | 201.18 | 512.00 |
+| B kept | peak | 1084.17 | 202.05 | 334.68 | 768.00 |
+| B kept | end | 1074.77 | 192.83 | 334.68 | 768.00 |
+
+These accounts overlap. Rust live includes the document, evaluation and CPU
+buffers; GPU allocations and reserved backing cannot be added to process private.
+Allocator slack is reserved minus allocated. Private minus Rust is an overlapping
+unattributed account, not a disjoint driver total. GPU labels do not expose native
+host commitment versus device backing. Completed-frame checkpoints can miss a
+transient peak; the separate 50 ms sampler judges the process target. The video
+end checkpoint precedes renderer destruction; teardown is verified by lifetime
+tests, not inferred from that checkpoint. C/D kept-set process peaks come from
+the exclusive matrix; no new C/D owner or stage run was requested or substituted.
+
+The original A 4K jump remains explained: between ticks 137 and 138, private bytes
+rose 257.1 MiB, GPU reservation 256 MiB and live GPU allocations only 23.8 MiB,
+with Rust live unchanged. Isolation grew 15.625 MiB and MSAA 8.125 MiB, crossing
+a default allocation-block boundary. This is retained backing owned by the GPU
+device, not a new 265 MiB document cache. Default pools are restored deliberately;
+removing them did not produce a favorable overall cost in the measured designs.
+
+## Kept changes and fail-first coverage
+
+| Change / owning layer | Regression and evidence |
+| --- | --- |
+| Suppress stage-picture work in headless exports (`styk-engine`) | `a_headless_export_has_one_picture_consumer` failed with 403 stage picture tiles queued without a stage consumer. `Engine::for_export` leaves that queue empty while export cels still decode. |
+| Drain every bounded cel/upload batch (`styk-export`, CLI) | `one_cel_can_span_several_upload_batches` failed with pending pictures after the final decoder stopped. The real 4096x2048 cel crosses the 32 MiB boundary; `a_small_decode_queue_preserves_all_cpu_pixels` compares against whole-decode pixels. Decoded/staging copies leave after upload; CPU pixels remain owned where needed. Input bytes leave after open. |
+| Resident native sprites (`styk-export`) | `headless_frame_source_allocates_only_resident_sprite_pages` failed at four pages instead of two for unused pictures. Visible pages can exceed the soft two-page budget; refused/partial loads never become ready. Cel pixels equal the original whole-atlas output. |
+| One frame of pipelined readbacks (`styk-export`) | `native_readbacks_are_sized_for_the_tiles_of_one_frame` failed with eight slots instead of one at 1080p. Four 4K tiles stay pipelined within 64 MiB; the slower serial-tile experiment was removed. `readbacks_reuse_buffers_and_release_at_export_end` verifies reuse and disposer release; no new change was needed for that lifetime. |
+| Retain isolation/MSAA and primitive capacity (`styk-render`) | `isolation_and_msaa_reuse_across_quiet_frames_and_release_at_close` and `primitives_reuse_capacity_and_release_at_close`: `0 passed; 2 failed` before retention. Equal/smaller/empty frames keep handles, close releases owners, and pixels match a fresh renderer. |
+| Retain effects (`styk-render`) | `exact_effect_slots_reuse_after_quiet_frames_and_release_at_close`: `0 passed; 1 failed` before retention; active/quiet/active frames reuse the handle, close releases it. |
+| Protect adjacent complete working sets (`styk-export`) | `native_adjacent_frames_keep_their_sprite_pages_until_export_end`: corrected fail-first `0 passed; 1 failed` on an eviction instead of zero. Three loads for overlapping two-page frames, no repeat loads, release at end. The earlier invalid-index test failure is not counted as evidence. |
+| Prefetch export successor (`styk-export`, CLI) | `prefetched_frame_draws_without_uploading_again`: `0 passed; 1 failed` without prefetch. Next draw uploads zero pixels; current pixels stay equal while its in-flight atlas grows from two to three layers; cancellation reaches the prefetch/readback boundary. |
+| Prefetch stage playback (`styk-core` worker) | `prefetched_stage_frame_records_no_upload_when_drawn` and `painter_prefetch_follows_playback_order_and_rejects_retired_requests`: `0 passed; 2 failed` without the seams. Tests cover zero draw-time uploads, budget refusal, forward/reverse/wrap order and retired revisions. |
+
+Fail-first logs remain in `artifacts/rm/`: `decode-fail-first.log`,
+`large-cel-fail-first.log`, `resident-fail-first.log`, `fail-first.log`,
+`retention-fail-first.log`, `effects-reuse-fail-first.log`,
+`adjacent-corrected-fail-first.log`, `prefetch-fail-first.log` and
+`stage-prefetch-fail-first.log`. Pool-policy fail-first logs are historical evidence
+for rejected experiments, not coverage claimed for this kept set. Cancellation,
+device-loss, dropped-owner and refusal tests remain. No test threshold was raised.
+
+## Open items
+
+1. **Recover B's 2.004 ms/frame.** This accepted cost is not a floor. Ranked suspects:
+   - Residency preparation and upload synchronization first: its isolated B cost
+     was 3.629 ms before upload-ahead and remains 0.767 ms with geometric pools.
+     Inspect page-set preparation, remaining batch flush waits and decode overlap.
+     The second matrix has no combined no-pools/no-residency variant, so 0.767 ms
+     is not a measured decomposition of the kept set's entire 2.004 ms.
+   - Exact texture-dimension replacement and its allocation/queue interaction
+     next. Retention prevents capacity shrink, but dimensions still change for
+     pixel arithmetic. Pools clearly affected B, while removing retention changed
+     first-matrix B only -0.292 ms (noise); this is a hypothesis, not a proven cause.
+   - Readback scheduling and adjacency are lower-priority profiling sites, not
+     candidates for removal: their first-matrix subtractions cost B +1.667 and
+     +2.350 ms respectively. Keep both, as instructed. No per-frame cost is hidden
+     by moving prefetch out of the reported draw interval.
+2. **Process memory above 780 MiB:** exclusive kept-set A 1,376.35, B 1,103.26 and
+   D 837.54 MiB; C 719.88 MiB. The remaining commitment includes unattributed native
+   and driver allocations. A platform/devtools probe in a later chunk must split
+   native heaps, mapped backing and driver commitment; the engine's overlapping
+   counters cannot do so. The historical render-only A checkpoint of 815.4 MiB,
+   with 120.2 MiB Rust live and 326.3 MiB GPU reserved, demonstrates that video
+   output buffers alone do not explain it. It does not establish a floor.
+3. **Pools deferred:** design and measure first in a later chunk, with the new
+   native probe. Neither the 8-16 MiB policy nor 8-256 MiB geometric policy remains.
+4. **X2 native frame nondeterminism remains separate.** Four extra old-binary
+   samples agreed at A tick 181 and D571; their historical candidate differences
+   have no demonstrated baseline-self-variation exemption. Baseline variation is
+   demonstrated at A131, D541 and D544, and historical A138 samples disagree.
+   No tolerance or blanket exemption was introduced; see the retained
+   [PNG investigation](render-memory-followup.md#a-tick-181-and-process-attribution).
+
+## Equality, verification and provenance
+
+Both exclusive matrices have exact H.264 equality for every run and binary.
+The new A/B confirmation compares complete files against **both** second-matrix
+no-pools files for that document, and checks the CLI's SHA-256 against the file.
 
 ```text
-ok   Rust fixture suites (1224.3 s)
-ok   math fixtures regenerate unchanged (0.2 s)
-FAIL container fixtures regenerate unchanged (0.1 s)
-ok   styk CLI build (190.3 s)
-ok   live worker command replays (0.2 s)
-FAIL containers (9 repository files) (0.9 s)
+cargo check (render/export/engine/core/CLI, app-tools, tests): exit 0
+cargo clippy (same crates, --no-deps): exit 0, existing warnings
+touched-crate tests: 845 passed; 0 failed; 16 ignored (83 result lines)
+cargo build --release -p styk-cli --features app-tools --locked: exit 0
+cargo xtask check: exit 0; 22 screenshot references within unchanged limits
+A/B 4K confirmation: 2 exports; both equal to both no-pools matrix runs
 ```
 
-The first `cargo xtask check` caught this change's incorrect placement of
-`dep:styk-trace` in `app-tools`. The CLI now declares the instrumentation crate as
-a normal dependency; `styk-devtools-engine` still enables its tracing feature only
-for app tools. The guard's allowed dependency list was not changed.
+Logs: `artifacts/rm/kept-checks.log`, `kept-test-summary.json` and
+`kept-confirmation.log`. Component-sheet still has no screenshot reference.
+The built executable and a retained copy at `artifacts/rm/kept-confirmation/styk.exe`
+have SHA-256 `0c3b0f8099ec991f0d16f1b9a1b33bf40bdad0e84e87d869fb3eab6534577313`.
+`kept-confirmation/verification.json` records each production-source hash and
+compares it to the measured no-pools snapshot, allowing only removal of the
+constant default-policy helper and its two fields. It records the pre-commit
+parent `c08c163f`; the hashed working sources are the kept change. No runtime
+source changed after these checks or measurements.
 
-After that manifest repair, both default and app-tools CLI `cargo check`, app-tools
-clippy and the release build pass; CLI tests report **14 passed, 0 failed,
-5 ignored**. `cargo xtask check` passes with a directly captured child exit **0**.
-Its first successful-looking run had an ambiguous PowerShell status after stderr
-redirection, so the guard alone was repeated to capture that exit explicitly.
+Fresh file SHA-256:
 
-```text
-design: 183 generated files are current
-locales: 28 catalogue files equal src/locales
-features: developer views are optional and off by default
-metadata: dependency direction and registry allow-list pass (453 packages)
-source: Windows isolation, view boundaries, macro unwrap/expect and web Clock/Spawner constraints pass
-interface: clippy guards pass
-screenshots: active, 22 references (23 catalogue screens)
-```
+- A: `ac8abfeb9861c89f5ff6d31c647dabfe78ed79290ee6c478ec340d586e5a4855`
+- B: `d5c3654a1196f04ad7dc9bd5bc2aae0737de970f7841a6a7212a5af254056e1e`
 
-All 22 screenshot comparisons stay within their unchanged limits. The largest
-differing-pixel fraction is **0.019534363**, against that reference's **0.022** limit;
-`component-sheet` has no reference. The standard guard builds the native app and
-captures its catalogue with background-window mode enabled.
+Earlier candidate evidence remains explicitly historical: 960 Vulkan RGBA hashes,
+zero differences; 16 H.264 files, zero differences; two WebM files, zero differences
+after normalizing only the baseline-proven eight-byte `TrackUID` and `TagTrackUID`
+fields. It is not relabeled as a new kept-set RGBA/WebM run. Original before/after
+1080p/4K export and stage owner accounts remain at `artifacts/rm/memory-account.*`;
+the original report is retained at `artifacts/rm/render-memory-initial-report.md`.
+The old A4K stage run stopped at its unchanged 1 GiB admission limit; it was never
+claimed as a completed 120-frame stage comparison.
 
-The measured app-tools executable has SHA-256
-`45660da2aa65875122040b12857a64c991b7b25bb9ec676c2d1d56f9a8cbcd37`.
-The rebuilt executable after the manifest repair has SHA-256
-`d102ed764e39789d8a53f4b23c5e7ab3d767089adba18bab64ad98bec350fd73`.
-Their `.text`, `.data`, `.pdata` and `.reloc` sections are byte-identical. All 24
-changed file bytes are in the COFF/debug timestamps and CodeView PDB GUID; the
-comparison identifies **0 unexplained bytes**. The files are not claimed to have
-identical hashes. `artifacts/rm/manifest-binary-comparison.json` retains the section
-hashes and parsed metadata ranges; no renderer or engine Rust source changed after
-the recorded memory/frame/export matrix.
+The earlier requested parity command ran Rust fixtures: **1,354 passed, 0 failed,
+5 ignored**. Its JavaScript container steps failed because generated
+`styk_engine.js`/`styk_codec.js` bindings were absent (`ERR_MODULE_NOT_FOUND`),
+exit 1. No prohibited web build or stale bindings were substituted. Rustfmt is
+unavailable in the installed toolchain. No global component was installed.
+The prior WebM encoder observations, 1,895.6/1,895.9 MiB for fixed libvpx arguments,
+describe that separate process only; they do not establish an RM process floor.
 
-`node scripts/engine-inventory.mjs --render` leaves generated files unchanged but
-reports six pre-existing JavaScript inventory issues (three absent modules and
-three unlisted modules). They are outside this native memory change. No web build,
-Electron smoke, root JavaScript suite or cross-platform build was run, per N8.
-The current build target, final executable and raw evidence remain for review.
+## Decisions
 
-- Preserve the original video backend (Vulkan here) and native PNG/stage preference
-  (DX12/FXC here), because switching them would invalidate byte/pixel comparisons.
-- Retain the stage's existing 1 GiB guard: A's 4K stage run completes 15 frames
-  before and 36 after, then refuses. The other requested runs are reported separately;
-  this is not a completed 120-frame stage comparison for A at 4K.
-- WebM is not literally deterministic: old-versus-old differs only in `TrackUID`
-  and `TagTrackUID`, eight bytes each. Structural EBML parsing established their
-  locations; only those fields are normalized for the final comparison.
-- DX12 adds allocation padding. Compare an empty primitive owner with its freshly
-  created allocation rather than assuming its logical 64 KiB size equals its report.
-- Preserve D11's two-layer minimum and the existing portable atlas layout; RM does
-  not introduce a separate native packing or sampling convention.
-- Keep the mandatory heavy queue. Do not substitute an exclusive benchmark or
-  select only favorable timing runs to turn the no-slowdown requirement into a pass.
-- Run Rust tests with one test thread per binary to avoid concurrent GPU-device
-  tests multiplying memory on the shared machine; test assertions are unchanged.
-- Keep OS-specific investigation behind platform traits. The allowed crates cannot
-  add a Windows heap/driver walk to split the remaining native commitment, and the
-  available portable reports do not expose that split.
-- Run the mandatory parity command once despite its JavaScript container dependency;
-  report the missing package instead of building the web target forbidden by N8 or
-  repeating the command with a mismatched prebuilt package.
-- Keep the build folder and dependency junction for review, as native-common rule 2
-  requires. The orchestrator owns review and shipping; this implementation was not
-  pushed and started no additional agents.
+- Follow the orchestrator's kept-set selection and explicit B trade-off. Remove
+  allocator policy and tests cleanly rather than leave an unused constant helper.
+  Pinned wgpu derives `Performance` as its default, preserving the measured policy.
+- Keep owner teardown as the release point and exact dimensions for sampling
+  parity; no new idle timer, size cache, allocation limit or pool tuning is added.
+- Keep one actual ordered successor in existing bounded caches, with all work
+  included in draw timing. Stage prefetch stays on its worker and stops once the
+  current GPU submission completes; the explicit stage request permits these
+  core seams without interface work.
+- Run exactly one new A and one new B export in that fixed order, with full owner
+  logs. Compare bytes to both exclusive no-pools runs; report every peak without
+  rerunning for a favorable sample. Use the first existing baseline owner run.
+- Retain both complete matrices and their measurements, including rejected pool
+  results. Do not add or subtract group timings as if their interactions were
+  measured, or turn the native commitment remainder into a floor.
+- Leave platform attribution, pool redesign and X2 to their later chunks. Keep
+  frozen fixtures, existing limits, the toolchain and prior parity limitation.
+- Leave the build target, dependency junction and raw evidence for Sol review;
+  no merge, push, review delegation or new timing matrix is performed here.

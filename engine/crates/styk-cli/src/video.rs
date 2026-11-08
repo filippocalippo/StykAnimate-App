@@ -248,7 +248,7 @@ fn make_renderer(engine: &Engine, frames: &styk_engine::export::ExportFrames, se
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).map_err(|e| fail(format!("No GPU adapter: {e}")))?;
         let adapter_name = adapter.get_info().name;
         crate::memory::sample(memory, "adapter", None, None, serde_json::json!({"backend":format!("{:?}",adapter.get_info().backend)})).map_err(fail)?;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("styk video export"), required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()), memory_hints: styk_render::native_gpu::memory_hints(), ..Default::default() })).map_err(|e| fail(e.to_string()))?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("styk video export"), required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()), ..Default::default() })).map_err(|e| fail(e.to_string()))?;
         crate::memory::sample(memory, "device", None, Some(&device), serde_json::json!({})).map_err(fail)?;
         let exporter = GpuExport::new(&device, &queue, settings, tile);
         crate::memory::sample(memory, "exporter", None, Some(&device), serde_json::json!({})).map_err(fail)?;
