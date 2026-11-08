@@ -10,12 +10,17 @@
 
 use std::borrow::Cow;
 
+#[cfg(feature = "engine")]
 use styk_doc::{Obj, Value};
 
+#[cfg(feature = "engine")]
 use super::order::{self, DrawKind, Drawable};
+#[cfg(feature = "engine")]
 use crate::answers::{self, Session};
+#[cfg(feature = "engine")]
 use crate::documents::{Document, DocumentId, Documents};
 use crate::i18n::Msg;
+#[cfg(feature = "engine")]
 use crate::range::Range;
 
 /// A number the Inspector edits (`data-property` today; [`PropertyKey::id`] is that name).
@@ -138,6 +143,7 @@ impl PropertyKey {
     }
 
     /// The history label of a gesture (`names` in `native-property-edit.mjs`; other keys read as their name).
+    #[cfg(feature = "engine")]
     fn label(self) -> Cow<'static, str> {
         Cow::Borrowed(match self {
             PropertyKey::Fps => "Frame rate",
@@ -200,6 +206,7 @@ pub fn validate(key: PropertyKey, value: f64) -> Result<f64, Msg> {
 }
 
 /// How a property is edited.
+#[cfg(feature = "engine")]
 #[derive(Clone, Debug)]
 enum Route {
     /// An animation channel: the value is `display / factor`.
@@ -215,6 +222,7 @@ enum Route {
 }
 
 /// One open property gesture: what began it, what it shows, how it ends. Exactly one of `commit` and `cancel` ends it.
+#[cfg(feature = "engine")]
 #[derive(Clone, Debug)]
 pub struct Gesture {
     pub document: DocumentId,
@@ -228,6 +236,7 @@ pub struct Gesture {
     tick: f64,
 }
 
+#[cfg(feature = "engine")]
 fn object(pairs: &[(&str, Value)]) -> Value {
     let mut obj = Obj::new();
     for (key, value) in pairs {
@@ -236,11 +245,13 @@ fn object(pairs: &[(&str, Value)]) -> Value {
     Value::object(obj)
 }
 
+#[cfg(feature = "engine")]
 fn label_options(label: &str) -> Value {
     object(&[("label", Value::str(label))])
 }
 
 /// What the routes read of the selection.
+#[cfg(feature = "engine")]
 pub(crate) struct Selected {
     pub uid: Option<u32>,
     pub count: usize,
@@ -254,6 +265,7 @@ pub(crate) struct Selected {
     pub drawables: Vec<Drawable>,
 }
 
+#[cfg(feature = "engine")]
 pub(crate) fn selected(document: &Document) -> Selected {
     let selection = super::facts::selection(document);
     let found = super::facts::figure_of_selection(document);
@@ -286,6 +298,7 @@ pub(crate) fn selected(document: &Document) -> Selected {
 }
 
 /// The animation target of a drawable of the figure on show (`builderOrderTargets`).
+#[cfg(feature = "engine")]
 fn drawable_target(uid: u32, figure_type: u32, drawable: &Drawable) -> Value {
     let (kind, id_key) = match drawable.kind {
         DrawKind::Segment => ("segment", "handleId"),
@@ -296,6 +309,7 @@ fn drawable_target(uid: u32, figure_type: u32, drawable: &Drawable) -> Value {
 
 /// The route of a key for this selection: `propertyChannel(key)` of `src/app.mjs`, `builderStyleProperty` for draw
 /// orders and fill opacity, and `beginNativePropertyEdit`'s for the rest.
+#[cfg(feature = "engine")]
 fn route(key: PropertyKey, selected: &Selected, document: &Document) -> Result<Route, Msg> {
     use PropertyKey as K;
     let camera = |property, factor| Ok(Route::Channel { target: object(&[("kind", Value::str("camera"))]), property, factor });
@@ -360,6 +374,7 @@ fn route(key: PropertyKey, selected: &Selected, document: &Document) -> Result<R
     })
 }
 
+#[cfg(feature = "engine")]
 impl Gesture {
     /// Begins editing `key` from the value the panel shows (`value`): `PropertyControls._begin` and the app's `begin`.
     pub fn begin(documents: &mut Documents, id: DocumentId, key: PropertyKey, value: f64, range: Option<Range>, session: &mut Session) -> Result<Gesture, Msg> {
@@ -561,6 +576,7 @@ impl Gesture {
 
 /// A pose edit's frames: `editor._frameIndices([...indices, frameIndex])` with `sheetTicks = sheetEditTimes(...)`,
 /// that is sorted and once each.
+#[cfg(feature = "engine")]
 fn pose_frames(range: &Range) -> Value {
     let mut sorted = range.clone();
     sorted.indices.sort_unstable();
@@ -573,10 +589,12 @@ fn pose_frames(range: &Range) -> Value {
 }
 
 /// Degrees to radians in today's order of operations, `value * Math.PI / 180`.
+#[cfg(feature = "engine")]
 fn radians(degrees: f64) -> f64 {
     degrees * std::f64::consts::PI / 180.0
 }
 
+#[cfg(feature = "engine")]
 #[cfg(test)]
 mod tests {
     use super::*;

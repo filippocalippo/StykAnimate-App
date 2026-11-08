@@ -7,21 +7,23 @@ license.workspace = true
 publish.workspace = true
 
 [features]
+default = ["engine"]
+engine = ["dep:styk-alloc", "dep:styk-drawing", "dep:styk-edit", "dep:styk-engine", "dep:styk-eval", "dep:styk-math", "dep:styk-trace", "dep:styk-render"]
 # `styk_core::testing`: what the interface's tests need to open a document without naming an engine crate.
 testing = []
-inspect = ["styk-edit/inspect", "styk-engine/inspect", "styk-eval/inspect"]
+inspect = ["engine", "styk-edit/inspect", "styk-engine/inspect", "styk-eval/inspect"]
 
 [dependencies]
-styk-alloc = { path = "../styk-alloc" }
+styk-alloc = { path = "../styk-alloc", optional = true }
 styk-doc = { path = "../styk-doc" }
-styk-drawing = { path = "../styk-drawing" }
-styk-edit = { path = "../styk-edit" }
-styk-engine = { path = "../styk-engine" }
-styk-eval = { path = "../styk-eval" }
-styk-math = { path = "../styk-math" }
-styk-render = { path = "../styk-render" }
+styk-drawing = { path = "../styk-drawing", optional = true }
+styk-edit = { path = "../styk-edit", optional = true }
+styk-engine = { path = "../styk-engine", optional = true }
+styk-eval = { path = "../styk-eval", optional = true }
+styk-math = { path = "../styk-math", optional = true }
+styk-render = { path = "../styk-render", optional = true }
 styk-services = { path = "../styk-services" }
-styk-trace = { path = "../styk-trace" }
+styk-trace = { path = "../styk-trace", optional = true }
 unicode-normalization = "=0.1.23"
 # Plural rules and number formatting for the interface's 27 languages: ICU4X 1.4, CLDR 44, the data of Electron 39's ICU 74.
 fixed_decimal = { version = "0.5", features = ["ryu"] }
@@ -41,4 +43,3 @@ zstd = "0.13"
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
-

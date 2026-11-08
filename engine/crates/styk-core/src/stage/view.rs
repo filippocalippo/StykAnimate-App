@@ -1,5 +1,7 @@
 //! Today's workspace view (`app.mjs`, `renderer-geometry.mjs`, `canvas-wheel-zoom.mjs`).
+#[cfg(feature = "engine")]
 use styk_eval::doc::Camera;
+#[cfg(feature = "engine")]
 use styk_eval::view::{apply, camera_transform, compose, orientation};
 
 pub const MIN_ZOOM: f64 = 0.001;
@@ -82,12 +84,14 @@ impl View {
             && self.rotation.is_finite()
     }
 
+    #[cfg(feature = "engine")]
     pub fn matrix(&self, canvas: [u32; 2], camera: Option<&Camera>) -> [f64; 6] {
         let upright = camera_transform(camera, canvas, self.zoom, self.pan);
         self.orientation(canvas)
             .map_or(upright, |o| compose(o, upright))
     }
 
+    #[cfg(feature = "engine")]
     pub fn orientation(&self, canvas: [u32; 2]) -> Option<[f64; 6]> {
         orientation(
             self.rotation,
@@ -99,6 +103,7 @@ impl View {
         )
     }
 
+    #[cfg(feature = "engine")]
     pub fn document_to_stage(
         &self,
         point: [f64; 2],
@@ -108,6 +113,7 @@ impl View {
         apply(self.matrix(canvas, camera), point)
     }
 
+    #[cfg(feature = "engine")]
     pub fn stage_to_document(
         &self,
         point: [f64; 2],
@@ -161,6 +167,7 @@ impl View {
     }
 
     /// Bounds are the engine's conservative artwork bounds, in document coordinates.
+    #[cfg(feature = "engine")]
     pub fn fit_selection(
         &mut self,
         bounds: [f64; 4],

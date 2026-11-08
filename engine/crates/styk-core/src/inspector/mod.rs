@@ -16,8 +16,11 @@
 //! [`crate::facts`]; until they land the panel is pending (its last model, values cleared and controls disabled), and
 //! a fact is shown only under its complete current key.
 
+#[cfg(feature = "engine")]
 pub mod contexts;
+#[cfg(feature = "engine")]
 pub mod facts;
+#[cfg(feature = "engine")]
 pub mod memory;
 pub mod model;
 pub mod order;
@@ -25,22 +28,41 @@ pub mod property;
 
 use std::sync::Arc;
 
+#[cfg(feature = "engine")]
 use styk_doc::{Obj, Value};
 
+#[cfg(feature = "engine")]
 use crate::answers::{self, Session};
+#[cfg(feature = "engine")]
 use crate::app::Lifecycle;
+#[cfg(feature = "engine")]
 use crate::commands::{Effect, Notice, Severity};
+#[cfg(feature = "engine")]
 use crate::documents::{DocumentId, Documents};
+#[cfg(feature = "engine")]
 use crate::facts::{Facts, FactsKey};
+#[cfg(feature = "engine")]
 use crate::frames::FrameDocument;
+#[cfg(feature = "engine")]
 use crate::i18n::{Msg, Presentation};
+#[cfg(feature = "engine")]
 use crate::number::{NumberEdit, Range as FieldRange, Settled, StepKeys};
+#[cfg(feature = "engine")]
 use crate::range::Range;
+#[cfg(feature = "engine")]
 use crate::view_state::ViewState;
+#[cfg(feature = "engine")]
 use memory::SectionMemory;
-use model::{Choice, ColorTarget, Inspector, OrderDirection, PanelAction, Pager, RenameTarget, Segments, TextKey, Toggle};
+use model::{Choice, ColorTarget, PanelAction, Segments, TextKey, Toggle};
+#[cfg(feature = "engine")]
+use model::{Inspector, OrderDirection, Pager, RenameTarget};
+#[cfg(feature = "engine")]
 use order::DrawKind;
-use property::{Gesture, PropertyKey};
+#[cfg(feature = "engine")]
+use property::Gesture;
+use property::PropertyKey;
+#[cfg(not(feature = "engine"))]
+use crate::{i18n::Msg, number::StepKeys};
 
 /// What a number field reports (the scrub label's events and the input's).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -125,6 +147,7 @@ pub enum ConnectorPart {
 }
 
 /// The panel's own state that its view model depends on.
+#[cfg(feature = "engine")]
 #[derive(Clone, Debug, Default)]
 pub struct PanelState {
     pub camera_tab: CameraTab,
@@ -136,6 +159,7 @@ pub struct PanelState {
 
 /// The facts the model shows, as of the last refresh: only facts made for the state on show (document, revision,
 /// playhead, selection); anything else is not shown, and the rows built from it are pending.
+#[cfg(feature = "engine")]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Shown {
     /// The selection's bounds; `None` while none are ready for exactly this state.
@@ -144,6 +168,7 @@ pub struct Shown {
 }
 
 /// The number field being edited: its model (typed text, the open gesture's value) and its session gesture.
+#[cfg(feature = "engine")]
 #[derive(Debug)]
 struct Field {
     key: PropertyKey,
@@ -170,6 +195,7 @@ pub struct RenameView {
 }
 
 /// Where a name is being typed.
+#[cfg(feature = "engine")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NamePlace {
     Header,
@@ -177,6 +203,7 @@ enum NamePlace {
 }
 
 /// What a name renames, fixed when typing began.
+#[cfg(feature = "engine")]
 #[derive(Clone, Debug, PartialEq)]
 enum NameTarget {
     /// The selected figure's definition (`updateFigureStyle({name})`).
@@ -188,6 +215,7 @@ enum NameTarget {
 /// A name being typed, in the header or in a text row. It keeps the document and the target it began on, so whatever
 /// ends it (Enter, leaving the field, a command, another document becoming active) settles it there, as the input's
 /// `change` event does today when it loses focus.
+#[cfg(feature = "engine")]
 #[derive(Clone, Debug)]
 struct NameDraft {
     document: DocumentId,
@@ -198,6 +226,7 @@ struct NameDraft {
     max_chars: Option<usize>,
 }
 
+#[cfg(feature = "engine")]
 #[derive(Clone, Debug, PartialEq)]
 struct Key {
     document: DocumentId,
@@ -213,6 +242,7 @@ struct Key {
 }
 
 /// The Properties panel.
+#[cfg(feature = "engine")]
 #[derive(Debug, Default)]
 pub struct Panel {
     state: PanelState,
@@ -229,10 +259,12 @@ pub struct Panel {
     pub builds: u64,
 }
 
+#[cfg(feature = "engine")]
 fn warn(message: Msg) -> Effect {
     Effect::Notice(Notice { message, severity: Severity::Warning })
 }
 
+#[cfg(feature = "engine")]
 fn object(pairs: &[(&str, Value)]) -> Value {
     let mut obj = Obj::new();
     for (key, value) in pairs {
@@ -241,12 +273,14 @@ fn object(pairs: &[(&str, Value)]) -> Value {
     Value::object(obj)
 }
 
+#[cfg(feature = "engine")]
 impl Lifecycle for Panel {
     fn finish(&mut self, documents: &mut Documents, session: &mut Session, effects: &mut Vec<Effect>) {
         Panel::finish(self, documents, session, effects);
     }
 }
 
+#[cfg(feature = "engine")]
 impl Panel {
     pub fn new(memory: SectionMemory) -> Panel {
         Panel { memory, ..Panel::default() }

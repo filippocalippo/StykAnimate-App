@@ -6,20 +6,32 @@
 //! has no window to keep responsive yet, as the band's preview has none), its generation published for the facts lane,
 //! and the lane started through the host's spawner. The caller refreshes until [`Core::refresh`] has the facts.
 
+#[cfg(feature = "engine")]
 use std::collections::HashMap;
+#[cfg(feature = "engine")]
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "engine")]
 use styk_services::Spawner;
 
+#[cfg(feature = "engine")]
 use crate::app::Core;
+#[cfg(feature = "engine")]
 use crate::documents::{Documents, HostOptions, PreparedDocument};
+#[cfg(feature = "engine")]
 use crate::engine::{Budgets, Engine, Value};
+#[cfg(feature = "engine")]
 use crate::facts::Facts;
+#[cfg(feature = "engine")]
 use crate::frames::FrameDocument;
+#[cfg(feature = "engine")]
 use crate::view_state::{InspectorContext, InspectorTab};
 
+#[cfg(feature = "engine")]
 const STARTUP: &[u8] = include_bytes!("../../../tests/edit/startup.document.json");
+#[cfg(feature = "engine")]
 const SHEET: &[u8] = include_bytes!("../../../tests/edit/property-sheet.document.json");
+#[cfg(feature = "engine")]
 const SPRITE: &[u8] = include_bytes!("../../../tests/edit/sprite-segment-sparse-native.document.json");
 
 /// A context of the Properties panel the catalogue shows.
@@ -67,18 +79,21 @@ impl InspectorScreen {
 
 /// A document's published generations by revision, from an engine that opened the same file: what K-doc's
 /// publication supplies to the workers, for fixtures (the screens, the tests).
+#[cfg(feature = "engine")]
 pub struct FixturePublication {
     engine: Engine,
     lineage: u64,
     generations: Mutex<HashMap<u64, Arc<styk_engine::Generation>>>,
 }
 
+#[cfg(feature = "engine")]
 impl FrameDocument for FixturePublication {
     fn snapshot(&self, revision: u64, _: u64) -> Option<Arc<styk_engine::Generation>> {
         self.generations.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&revision).cloned()
     }
 }
 
+#[cfg(feature = "engine")]
 impl FixturePublication {
     /// Opens `bytes` (named `name`) the way documents are prepared.
     pub fn open(bytes: &[u8], name: &str) -> Result<FixturePublication, String> {
@@ -102,6 +117,7 @@ impl FixturePublication {
 /// A core with `bytes` open in one tab, the documents services attached, a facts lane started through `spawner`
 /// (`wake` is called when facts land), and the document's first revision published. Returns the publication, which
 /// publishes later revisions.
+#[cfg(feature = "engine")]
 pub fn core_with_document(bytes: &[u8], name: &str, spawner: Arc<dyn Spawner>, wake: crate::frames::Wake) -> Result<(Core, Arc<FixturePublication>), String> {
     let opener = Engine::new(|| 0.0, Budgets::for_device(None));
     let prepared = PreparedDocument::open_bytes(&opener, Arc::from(bytes), name, &|| false).map_err(|error| error.message)?;
@@ -122,6 +138,7 @@ pub fn core_with_document(bytes: &[u8], name: &str, spawner: Arc<dyn Spawner>, w
 }
 
 /// The core a Properties panel screen shows.
+#[cfg(feature = "engine")]
 pub fn inspector(screen: InspectorScreen, spawner: Arc<dyn Spawner>, wake: crate::frames::Wake) -> Result<Core, String> {
     let text;
     let (bytes, select): (&[u8], &str) = match screen {
