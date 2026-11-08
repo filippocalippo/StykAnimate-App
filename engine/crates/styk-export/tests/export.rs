@@ -462,8 +462,14 @@ fn prefetched_frame_draws_without_uploading_again() {
     let settings = Settings::new(64,64,Smoothing::Edges,MAX_PIXELS).unwrap();
     let mut source = styk_export::FrameRenderer::Gpu(GpuExport::new(&gpu.device,&gpu.queue,settings,64),None);
     source.load_images(&engine,&frames).unwrap();
-    let current = picture_list(&frames.generation().assets,0);
-    let next = picture_list(&frames.generation().assets,1);
+    let pair = |a,b| {
+        let mut list = (*picture_list(&frames.generation().assets,a)).clone();
+        list.prims.extend_from_slice(&picture_list(&frames.generation().assets,b).prims);
+        list.passes[0].end = list.prims.len() as u32;
+        std::sync::Arc::new(list)
+    };
+    let current = pair(0,1);
+    let next = pair(1,2);
     source.prepare_frame(&engine,&frames,&current).unwrap();
     let uploaded = |source: &styk_export::FrameRenderer| {
         let styk_export::FrameRenderer::Gpu(gpu,_) = source else { unreachable!() }; gpu.uploaded_bytes()
@@ -481,7 +487,7 @@ fn prefetched_frame_draws_without_uploading_again() {
     source.frame_into(&frames.generation().prepared.doc,&next,None,true,&mut pixels).unwrap();
     assert_eq!(uploaded(&source),warm,"a prefetched frame records no upload in its draw");
     let styk_export::FrameRenderer::Gpu(gpu,Some(resident)) = &source else { unreachable!() };
-    assert_eq!(gpu.sprite_layers(),2);
+    assert_eq!(gpu.sprite_layers(),3,"only the adjacent-frame union grows the atlas");
     assert_eq!(resident.stats().3,0);
     let interrupt = source.interrupt();
     let error = source.frame_with_prefetch(&engine,&frames,&current,None,true,&mut pixels,|| {
