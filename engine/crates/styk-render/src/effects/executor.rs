@@ -51,6 +51,9 @@ pub struct Stats {
 }
 
 impl Executor {
+    pub(crate) fn retained_bytes(&self) -> u64 {
+        self.stats.slot_bytes.saturating_add(self.uniforms.size()).saturating_add(4)
+    }
     pub fn new(device: &wgpu::Device) -> Executor {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("styk effects"), source: wgpu::ShaderSource::Wgsl(include_str!("passes.wgsl").into()) });
         let texture = |binding: u32| wgpu::BindGroupLayoutEntry {
@@ -138,6 +141,11 @@ impl Executor {
     pub fn begin(&mut self) {
         self.records.clear();
         self.stats = Stats { slot_bytes: self.stats.slot_bytes, ..Default::default() };
+    }
+
+    pub(crate) fn begin_recorded(&mut self, records: Vec<Uniform>, layers: u32) {
+        self.records = records;
+        self.stats = Stats { layers, slot_bytes: self.stats.slot_bytes, ..Default::default() };
     }
 
     /// Records `stack` on a `size` layer (in slot 0). Mirrors `VfxWebGPU.run`.

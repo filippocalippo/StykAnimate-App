@@ -27,6 +27,11 @@ const MAX_HIDDEN: usize = 65_536;
 /// or cel bounds change without a document edit.
 pub trait FrameDocument: Send + Sync {
     fn snapshot(&self, revision: u64, resource_epoch: u64) -> Option<Arc<Generation>>;
+    /// The document's existing picture service, with its workers already running.
+    /// Only the paint worker calls this; no decoder is constructed by the view.
+    fn picture_engine(&self) -> Option<styk_engine::Engine> {
+        None
+    }
 }
 
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -76,44 +81,15 @@ impl Consumer {
     }
 }
 
-/// Immutable, validated complete presentation inputs. Floats must be finite;
-/// numeric equality gives signed zero a single cache identity.
-#[derive(Clone, Debug, PartialEq)]
-pub struct View {
-    pub size: [u32; 2],
-    pub zoom: f64,
-    pub pan: [f64; 2],
-    /// Backing density, e.g. 1, .75, .5 or .25.
-    pub quality: f64,
-    /// Preview edge sampling can change without changing backing density.
-    pub samples: u8,
+/// Inputs to world-space preparation. Navigation belongs exclusively to the painter.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Inputs {
     pub scene: Options,
 }
 
-impl Default for View {
-    fn default() -> Self {
-        Self {
-            size: [640, 480],
-            zoom: 1.0,
-            pan: [0.0; 2],
-            quality: 1.0,
-            samples: 4,
-            scene: Options::default(),
-        }
-    }
-}
-
-impl View {
+impl Inputs {
     fn valid(&self) -> bool {
-        self.size.iter().all(|&s| s > 0)
-            && self.zoom.is_finite()
-            && self.zoom > 0.0
-            && self.pan.iter().all(|v| v.is_finite())
-            && self.quality.is_finite()
-            && self.quality > 0.0
-            && self.quality <= 1.0
-            && matches!(self.samples, 1 | 4)
-            && self.scene.hidden_uids.capacity() <= MAX_HIDDEN
+        self.scene.hidden_uids.capacity() <= MAX_HIDDEN
             && self.scene.onions.len() <= ONIONS
             && self.scene.onions.capacity() <= ONIONS.next_power_of_two()
             && self.scene.translations.capacity() <= MAX_HIDDEN
@@ -161,7 +137,7 @@ pub struct Key {
     pub revision: u64,
     pub resource_epoch: u64,
     pub tick: f64,
-    pub view: Arc<View>,
+    pub inputs: Arc<Inputs>,
 }
 
 impl Key {
@@ -176,16 +152,8 @@ impl Key {
             revision,
             resource_epoch,
             tick,
-            view,
+            inputs,
         } = self;
-        let View {
-            size,
-            zoom,
-            pan,
-            quality,
-            samples,
-            scene,
-        } = view.as_ref();
         let Options {
             hidden_uids,
             effects,
@@ -194,15 +162,10 @@ impl Key {
             background,
             translations,
             onions,
-        } = scene;
+        } = &inputs.scene;
         let mut hash = DefaultHasher::new();
         (document, revision, resource_epoch).hash(&mut hash);
         number(&mut hash, *tick);
-        size.hash(&mut hash);
-        samples.hash(&mut hash);
-        for value in [*zoom, pan[0], pan[1], *quality] {
-            number(&mut hash, value);
-        }
         (hidden_uids, effects, camera, clip_to_canvas, background).hash(&mut hash);
         translations.len().hash(&mut hash);
         for (uid, offset) in translations {
@@ -487,6 +450,7 @@ struct Shared {
     tokens: [AtomicU64; SLOTS],
     lookahead_bytes: AtomicUsize,
     cache_bytes: usize,
+    reuse_bytes: usize,
     clock: Arc<dyn Clock>,
     progress: AtomicU64,
     wake: Wake,
@@ -505,6 +469,14 @@ pub struct Frames {
 }
 
 impl Frames {
+    /// A small ticket for the stage's paint worker, never a CPU frame lease on
+    /// the interface. Full-key checks and dense ownership stay on workers.
+    pub(crate) fn stage_ticket(&self) -> Option<WorkerTicket> {
+        self.wanted[0].as_ref().map(|request| WorkerTicket {
+            shared: self.shared.clone(),
+            request: request.clone(),
+        })
+    }
     #[allow(clippy::too_many_arguments)] // The host supplies document identity and services once.
     pub fn new(
         document: u64,
@@ -534,6 +506,7 @@ impl Frames {
             tokens: std::array::from_fn(|_| AtomicU64::new(0)),
             lookahead_bytes: AtomicUsize::new(config.lookahead_bytes.min(config.cache_bytes)),
             cache_bytes: config.cache_bytes,
+            reuse_bytes: config.cache_bytes / config.workers.max(1),
             clock,
             progress: AtomicU64::new(0),
             wake,
@@ -588,25 +561,38 @@ impl Frames {
         &mut self,
         consumer: Consumer,
         tick: f64,
-        view: Arc<View>,
+        inputs: Arc<Inputs>,
     ) -> Result<Key, Error> {
         if self.shared.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
         let slot = consumer.slot().ok_or(Error::InvalidRequest)?;
-        if !tick.is_finite() || tick < 0.0 || !view.valid() {
+        if !tick.is_finite() || tick < 0.0 || !inputs.valid() {
             return Err(Error::InvalidRequest);
         }
-        self.serial = self.serial.checked_add(1).ok_or(Error::IdentityExhausted)?;
         let key = Key {
             document: self.document,
             revision: self.revision,
             resource_epoch: self.resource_epoch,
             tick: if tick == 0.0 { 0.0 } else { tick },
-            view,
+            inputs,
         };
+        let fingerprint = key.fingerprint();
+        if let Some(wanted) = &self.wanted[slot]
+            && wanted.fingerprint == fingerprint
+            && keys_equal(&wanted.key, &key)
+        {
+            let retry = self.shared.state.try_lock().ok().is_some_and(|state| {
+                let outcome = state.outcome[slot];
+                outcome.stamp == wanted.stamp && (matches!(outcome.status, Status::Evicted | Status::Failed(_))
+                    || (outcome.status == Status::Ready && outcome.ready.is_none_or(|ticket|
+                        state.cache.get(ticket.index).is_none_or(|entry|entry.id != ticket.id))))
+            });
+            if !retry { return Ok(wanted.key.clone()); }
+        }
+        self.serial = self.serial.checked_add(1).ok_or(Error::IdentityExhausted)?;
         let request = Request {
-            fingerprint: key.fingerprint(),
+            fingerprint,
             key: key.clone(),
             slot,
             priority: consumer.priority(),
@@ -667,12 +653,12 @@ impl Frames {
         looping: bool,
         count: usize,
         bytes: usize,
-        view: Arc<View>,
+        inputs: Arc<Inputs>,
     ) -> Result<usize, Error> {
         if self.shared.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
-        if !view.valid() {
+        if !inputs.valid() {
             return Err(Error::InvalidRequest);
         }
         self.shared
@@ -689,7 +675,7 @@ impl Frames {
                 }
                 let tick =
                     u64::from(range.start) + (tick - u64::from(range.start)) % u64::from(span);
-                self.request(Consumer::Playback(index as u8), tick as f64, view.clone())?;
+                self.request(Consumer::Playback(index as u8), tick as f64, inputs.clone())?;
                 queued += 1;
             }
         }
@@ -773,6 +759,94 @@ impl Frames {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct WorkerTicket {
+    shared: Arc<Shared>,
+    request: Request,
+}
+
+pub(crate) struct WorkerFrame {
+    pub key: Key,
+    pub frame: FrameData,
+    pub generation: Arc<Generation>,
+    pub pictures: Option<styk_engine::Engine>,
+}
+
+impl WorkerTicket {
+    pub fn current(&self) -> bool {
+        self.shared.current(&self.request)
+    }
+    pub fn key(&self) -> &Key {
+        &self.request.key
+    }
+    pub fn identity(&self) -> (u64, u64, u64) {
+        (
+            self.request.key.document,
+            self.request.epoch,
+            self.request.stamp,
+        )
+    }
+
+    /// Paint worker only. Clone the immutable list handle under a short lock,
+    /// then ask the document source outside it. The sole paint worker can hold
+    /// at most one extra frame (at most cache_bytes); it drops it itself.
+    pub fn read(&self) -> Result<Option<WorkerFrame>, Error> {
+        if !self.current() {
+            return Ok(None);
+        }
+        let (frame, source) = {
+            let Ok(state) = self.shared.state.try_lock() else {
+                return Ok(None);
+            };
+            let outcome = state.outcome[self.request.slot];
+            if outcome.stamp != self.request.stamp {
+                return Ok(None);
+            }
+            if let Status::Failed(error) = outcome.status {
+                return Err(error);
+            }
+            if outcome.status != Status::Ready {
+                return Ok(None);
+            }
+            let Some(ticket) = outcome.ready else {
+                return Ok(None);
+            };
+            let Some(entry) = state
+                .cache
+                .get(ticket.index)
+                .filter(|entry| entry.id == ticket.id)
+            else {
+                return Ok(None);
+            };
+            let frame = FrameData {
+                generation: entry.frame.generation,
+                tick: entry.frame.tick,
+                list: entry.frame.list.clone(),
+                camera: entry.frame.camera,
+                background: entry.frame.background,
+                ms: entry.frame.ms,
+            };
+            (frame, state.source.clone())
+        };
+        let pictures = source.as_ref().and_then(|source| source.picture_engine());
+        let generation = source
+            .and_then(|source| {
+                source.snapshot(self.request.key.revision, self.request.key.resource_epoch)
+            })
+            .filter(|generation| generation.revision == self.request.key.revision)
+            .ok_or(Error::RevisionUnavailable)?;
+        if !self.current() {
+            return Ok(None);
+        }
+        Ok(Some(WorkerFrame {
+            key: self.request.key.clone(),
+            frame,
+            generation,
+            pictures,
+        }))
+    }
+}
+
 impl Drop for Frames {
     fn drop(&mut self) {
         self.close();
@@ -793,12 +867,16 @@ impl Shared {
 
     fn run(&self) {
         let mut builder = FrameBuilder::default();
+        let mut active = self.clock.now();
         loop {
             if self.step(&mut builder) {
+                active = self.clock.now();
+                builder.release_over(self.reuse_bytes);
                 continue;
             }
-            // Dense reuse state is retired on its worker before it sleeps.
-            builder = FrameBuilder::default();
+            // Short sleeps between frames keep bounded object/encoder reuse.
+            // A quiet document releases it after one second, on its worker.
+            self.retire_idle(&mut builder, active);
             if self.closed.load(Ordering::Acquire) {
                 self.clear();
                 return;
@@ -811,6 +889,14 @@ impl Shared {
             // race for a lock-free close/revise; interface methods never wait.
             let waited = self.changed.wait_timeout(state, Duration::from_millis(25));
             drop(waited);
+        }
+    }
+
+    fn retire_idle(&self, builder: &mut FrameBuilder, active: Duration) {
+        if self.closed.load(Ordering::Acquire)
+            || self.clock.now().saturating_sub(active) >= Duration::from_secs(1)
+        {
+            *builder = FrameBuilder::default();
         }
     }
 
@@ -880,7 +966,7 @@ impl Shared {
                 let frame = builder.prepare(
                     &generation,
                     request.key.tick,
-                    &request.key.view.scene,
+                    &request.key.inputs.scene,
                     || self.clock.now().as_secs_f64() * 1000.0,
                     || !self.current(&request),
                 );
@@ -890,7 +976,7 @@ impl Shared {
                 let bytes = styk_eval::drawlist::retained_bytes_checked(&frame.list)
                     .map_err(|_| Error::Accounting)?
                     .checked_add(std::mem::size_of::<Entry>())
-                    .and_then(|bytes| bytes.checked_add(request.key.view.retained_bytes()))
+                    .and_then(|bytes| bytes.checked_add(request.key.inputs.retained_bytes()))
                     .ok_or(Error::Accounting)?;
                 Ok(Some((frame, bytes)))
             });

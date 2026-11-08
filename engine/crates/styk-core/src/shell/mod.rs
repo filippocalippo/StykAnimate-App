@@ -19,6 +19,9 @@ pub mod workspace;
 use crate::identity::DocumentId;
 #[cfg(feature = "engine")]
 use crate::documents::{Documents, DocumentsError};
+use crate::commands::Command;
+#[cfg(feature = "engine")]
+use crate::commands::CommandId;
 use crate::focus::{FocusArea, FocusId, FocusState};
 use band::{Frame, Input, Item, Labels, Layout, Metrics, TabFacts};
 use session::{Done, Session};
@@ -275,63 +278,35 @@ pub enum Effect {
     Edited,
     /// A command the shell does not own. The document commands answer it.
     Command(Command),
+    /// A command targeted at a tab, such as closing or renaming it.
+    DocumentCommand { command: Command, document: DocumentId },
+    /// Finish Build's workspace operation (not an appendix-A command).
+    FinishBuild,
     /// A project cannot be switched to, as `Documents` says.
     #[cfg(feature = "engine")]
     Refused(DocumentsError),
 }
 
-/// The band's buttons whose work is somebody else's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Command {
-    /// Close a project (asks about unsaved changes).
-    Close(DocumentId),
-    /// Rename a project.
-    Rename(DocumentId),
-    /// A new, empty animation.
-    New,
-    /// Save the project in front.
-    Save,
-    /// Export.
-    Export,
-    /// Open Properties as a sheet.
-    Properties,
-    /// Test the rig being built.
-    TestRig,
-    /// Discard the movieclip's changes.
-    CancelMovieclip,
-    /// Finish a session.
-    Done(Done),
-}
-
-/// The commands that run with Home staying where it is: they open something of their own or act on the window
-/// (`HOME_COMMANDS` in `src/home/home.mjs`; the ones the band can send are here). Every other command works on the
-/// animation, so Home steps aside before it runs.
-pub const HOME_COMMANDS: &[&str] = &[
-    "home", "tutorials", "menu", "command-palette", "settings", "privacy", "feedback", "check-updates", "release-notes", "donate", "website", "help", "about",
-    "performance", "minimize", "maximize", "close", "new-window", "open", "open-recent", "save", "save-as", "save-all", "save-and-close", "save-and-update",
-    "restart-update",
-];
-
-/// The name today's command wrapper gives what an event does, for the events that are commands (`data-action` of the
+/// The registry identity of what an event does, for the events that are commands (`data-action` of the
 /// band's buttons). The workspace switch and Build's Done are not commands there (`changeMode`), and neither are the
 /// tabs' own clicks: they do not run it.
 #[cfg(feature = "engine")]
-fn command_name(event: &Event) -> Option<&'static str> {
+fn command_id(event: &Event) -> Option<CommandId> {
     Some(match event {
-        Event::Home => "home",
-        Event::Mark => "menu",
-        Event::New => "new",
-        Event::Undo => "undo",
-        Event::Redo => "redo",
-        Event::Save => "save",
-        Event::Export => "export",
-        Event::Properties => "panel-toggle-properties",
-        Event::Cancel => "movieclip-cancel",
-        Event::TestRig => "rig-test",
-        Event::Done(Done::Movieclip) => "movieclip-done",
-        Event::Done(Done::Camera) => "camera-done",
-        Event::TabClose(_) => "close-project",
-        Event::TabRename(_) => "rename-project",
+        Event::Home => CommandId::Home,
+        Event::Mark => CommandId::Menu,
+        Event::New => CommandId::New,
+        Event::Undo => CommandId::Undo,
+        Event::Redo => CommandId::Redo,
+        Event::Save => CommandId::Save,
+        Event::Export => CommandId::Export,
+        Event::Properties => CommandId::PanelToggleProperties,
+        Event::Cancel => CommandId::MovieclipCancel,
+        Event::TestRig => CommandId::RigTest,
+        Event::Done(Done::Movieclip) => CommandId::MovieclipDone,
+        Event::Done(Done::Camera) => CommandId::CameraDone,
+        Event::TabClose(_) => CommandId::CloseProject,
+        Event::TabRename(_) => CommandId::Rename,
         _ => return None,
     })
 }
@@ -513,7 +488,7 @@ impl Shell {
     pub fn handle(&mut self, documents: &mut Documents, event: Event) -> Vec<Effect> {
         let mut effects = Vec::new();
         // The one place Home is sent away by a command (`home.before` in `src/app.mjs`'s command wrapper).
-        if let Some(command) = command_name(&event) {
+        if let Some(command) = command_id(&event) {
             self.before_command(command);
         }
         let keeps_menu = matches!(event, Event::Hover(_) | Event::Mark | Event::TabMenu(_) | Event::Tick(_) | Event::Resized(_) | Event::Labels(_) | Event::PointerMoved(..) | Event::SaveStarted(_) | Event::SaveLanded(..) | Event::SaveEnded(_) | Event::Report(_) | Event::Session(_));
@@ -525,7 +500,7 @@ impl Shell {
             Event::Mark => self.menu = if self.menu == Some(Menu::Mark) { None } else { Some(Menu::Mark) },
             Event::Home => self.home = !self.home,
             Event::New => {
-                effects.push(Effect::Command(Command::New));
+                effects.push(Effect::Command(Command::Run(CommandId::New)));
             }
             Event::TabPressed(id) => self.strip.press(id),
             Event::PointerMoved(x, y) => self.strip.moved(x, y, &self.layout),
@@ -547,14 +522,14 @@ impl Shell {
                 match strip::key(&order, id, key) {
                     KeyOutcome::Focus(next) => effects.push(Effect::FocusTab(next)),
                     KeyOutcome::Activate(next) => self.activate(documents, next, &mut effects),
-                    KeyOutcome::Close(next) => effects.push(Effect::Command(Command::Close(next))),
-                    KeyOutcome::Rename(next) => effects.push(Effect::Command(Command::Rename(next))),
+                    KeyOutcome::Close(next) => effects.push(Effect::DocumentCommand { command: Command::Run(CommandId::CloseProject), document: next }),
+                    KeyOutcome::Rename(next) => effects.push(Effect::DocumentCommand { command: Command::Run(CommandId::Rename), document: next }),
                     KeyOutcome::Menu(next) => self.menu = Some(Menu::Tab(next)),
                     KeyOutcome::None => {}
                 }
             }
-            Event::TabClose(id) => effects.push(Effect::Command(Command::Close(id))),
-            Event::TabRename(id) => effects.push(Effect::Command(Command::Rename(id))),
+            Event::TabClose(id) => effects.push(Effect::DocumentCommand { command: Command::Run(CommandId::CloseProject), document: id }),
+            Event::TabRename(id) => effects.push(Effect::DocumentCommand { command: Command::Run(CommandId::Rename), document: id }),
             Event::TabMenu(id) => self.menu = Some(Menu::Tab(id)),
             Event::Workspace(workspace) => {
                 effects.extend(self.workspaces.choose(workspace).into_iter().map(Effect::Workspace));
@@ -572,17 +547,18 @@ impl Shell {
                     }
                 }
             }
-            Event::Save => effects.push(Effect::Command(Command::Save)),
-            Event::Export => effects.push(Effect::Command(Command::Export)),
-            Event::Properties => effects.push(Effect::Command(Command::Properties)),
-            Event::Cancel => effects.push(Effect::Command(Command::CancelMovieclip)),
-            Event::TestRig => effects.push(Effect::Command(Command::TestRig)),
+            Event::Save => effects.push(Effect::Command(Command::Run(CommandId::Save))),
+            Event::Export => effects.push(Effect::Command(Command::Run(CommandId::Export))),
+            Event::Properties => effects.push(Effect::Command(Command::Run(CommandId::PanelToggleProperties))),
+            Event::Cancel => effects.push(Effect::Command(Command::Run(CommandId::MovieclipCancel))),
+            Event::TestRig => effects.push(Effect::Command(Command::Run(CommandId::RigTest))),
             Event::Done(Done::Build) => {
                 // Build's Done is a workspace button too: it returns to Animate.
                 effects.extend(self.workspaces.choose(Workspace::Animate).into_iter().map(Effect::Workspace));
-                effects.push(Effect::Command(Command::Done(Done::Build)));
+                effects.push(Effect::FinishBuild);
             }
-            Event::Done(done) => effects.push(Effect::Command(Command::Done(done))),
+            Event::Done(Done::Movieclip) => effects.push(Effect::Command(Command::Run(CommandId::MovieclipDone))),
+            Event::Done(Done::Camera) => effects.push(Effect::Command(Command::Run(CommandId::CameraDone))),
             Event::Session(session) => self.session = session,
             Event::Resized(window) => self.window = window,
             Event::Labels(labels) => self.labels = labels,
@@ -623,10 +599,10 @@ impl Shell {
         effects
     }
 
-    /// `home.before(command)`: a command that works on the animation sends Home away; the ones in [`HOME_COMMANDS`] leave it.
+    /// `home.before(command)`: a command that works on the animation sends Home away; the registry marks the commands that leave it visible.
     #[cfg(feature = "engine")]
-    fn before_command(&mut self, command: &str) {
-        if !HOME_COMMANDS.contains(&command) {
+    fn before_command(&mut self, command: CommandId) {
+        if !command.info().stays_on_home {
             self.home = false;
         }
     }
@@ -715,6 +691,24 @@ mod tests {
         assert_eq!(shell.pressed(), Some(Workspace::Animate), "Draw was asked for, not yet entered");
     }
 
+    #[test]
+    fn feature_requests_keep_the_shared_command_and_target_document() {
+        let mut documents = Documents::new();
+        let mut shell = shell(1560.0);
+        for (event, command) in [
+            (Event::New, CommandId::New), (Event::Save, CommandId::Save),
+            (Event::Export, CommandId::Export), (Event::Properties, CommandId::PanelToggleProperties),
+            (Event::TestRig, CommandId::RigTest), (Event::Cancel, CommandId::MovieclipCancel),
+            (Event::Done(Done::Movieclip), CommandId::MovieclipDone), (Event::Done(Done::Camera), CommandId::CameraDone),
+        ] {
+            assert_eq!(shell.handle(&mut documents, event), [Effect::Command(Command::Run(command))]);
+        }
+        let id = DocumentId::preview(7);
+        for (event, command) in [(Event::TabClose(id), CommandId::CloseProject), (Event::TabRename(id), CommandId::Rename)] {
+            assert_eq!(shell.handle(&mut documents, event), [Effect::DocumentCommand { command: Command::Run(command), document: id }]);
+        }
+    }
+
     /// `HOME_COMMANDS` and `home.before` in `src/home/home.mjs`: a command that works on the animation sends Home away,
     /// and the ones that open something of their own or act on the window leave it.
     #[test]
@@ -753,7 +747,7 @@ mod tests {
         assert_eq!(shell.pressed(), Some(Workspace::Draw));
         // Build's Done returns to Animate through the same rules: Draw commits first.
         let effects = shell.handle(&mut documents, Event::Done(Done::Build));
-        assert_eq!(effects, vec![Effect::Workspace(workspace::Effect::ExitDrawing), Effect::Command(Command::Done(Done::Build))]);
+        assert_eq!(effects, vec![Effect::Workspace(workspace::Effect::ExitDrawing), Effect::FinishBuild]);
     }
 
     #[test]

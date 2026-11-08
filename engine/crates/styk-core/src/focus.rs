@@ -36,12 +36,34 @@ pub enum TargetKind {
     TextEntry,
 }
 
+/// The input role is independent of focusability: a select is a control but owns editor keys.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InputRole {
+    #[default]
+    None,
+    Text,
+    Select,
+    Checkbox,
+    Radio,
+    Other,
+}
+
+/// Who must finish the focused edit before an undo/redo command runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HistoryOwner {
+    #[default]
+    Field,
+    Vfx,
+}
+
 /// One focusable target, as registered in a view pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusTarget {
     pub id: FocusId,
     pub area: FocusArea,
     pub kind: TargetKind,
+    pub input_role: InputRole,
+    pub history_owner: HistoryOwner,
     pub enabled: bool,
     /// Whether Tab stops here. A roving group's inactive children are focusable by arrows and by `focus` but not stops.
     pub tab_stop: bool,
@@ -50,7 +72,8 @@ pub struct FocusTarget {
 impl FocusTarget {
     /// An enabled Tab stop.
     pub fn new(id: u64, area: FocusArea, kind: TargetKind) -> FocusTarget {
-        FocusTarget { id: FocusId(id), area, kind, enabled: true, tab_stop: true }
+        FocusTarget { id: FocusId(id), area, kind, input_role: if kind == TargetKind::TextEntry { InputRole::Text } else { InputRole::None },
+            history_owner: HistoryOwner::Field, enabled: true, tab_stop: true }
     }
 
     fn focusable(&self) -> bool {
@@ -138,6 +161,14 @@ impl FocusState {
         self.find(id).filter(|(_, t)| t.kind == TargetKind::TextEntry).map(|_| id)
     }
 
+    pub fn input_role(&self) -> InputRole {
+        self.focused.and_then(|id| self.find(id)).map_or(InputRole::None, |(_, target)| target.input_role)
+    }
+
+    pub fn history_owner(&self) -> HistoryOwner {
+        self.focused.and_then(|id| self.find(id)).map_or(HistoryOwner::Field, |(_, target)| target.history_owner)
+    }
+
     /// Whether an input method has a composition open in the focused text field.
     pub fn composing(&self) -> bool {
         self.composing && self.text_entry().is_some()
@@ -156,6 +187,32 @@ impl FocusState {
     /// Number of open scopes, the root included.
     pub fn depth(&self) -> usize {
         self.scopes.len()
+    }
+
+    /// Replaces one member menu's targets within a shared tree scope. FocusState remains
+    /// the sole owner of target metadata; the overlay stack only retains the member IDs.
+    pub fn replace_scope_targets(&mut self, scope: ScopeId, members: &[FocusId], targets: Vec<FocusTarget>) -> Option<FocusId> {
+        let Some(existing) = self.scopes.iter().find(|s| s.id == scope) else { return self.focused; };
+        let position = existing.targets.iter().position(|t| members.contains(&t.id)).unwrap_or(existing.targets.len());
+        let mut combined = existing.targets.clone();
+        combined.retain(|t| !members.contains(&t.id));
+        combined.splice(position.min(combined.len())..position.min(combined.len()), targets);
+        self.register(scope, combined)
+    }
+
+    /// A submenu removed below a dialog transfers that dialog's return chain to its parent row.
+    pub fn remove_scope_targets(&mut self, scope: ScopeId, members: &[FocusId], return_to: Option<FocusId>) -> Option<FocusId> {
+        let replacement = self.scopes.iter().find(|s| s.id == scope).and_then(|s| {
+            let id = return_to?;
+            let index = s.targets.iter().position(|t| t.id == id)?;
+            Some(Invoker { id, index: Some(index), area: Some(s.targets[index].area) })
+        });
+        for child in &mut self.scopes {
+            if child.invoker.is_some_and(|inv| members.contains(&inv.id)) {
+                child.invoker = replacement;
+            }
+        }
+        self.replace_scope_targets(scope, members, Vec::new())
     }
 
     /// Registers the targets of a scope for this view pass, replacing the previous registration. A focused target that
@@ -277,6 +334,26 @@ impl FocusState {
         self.composing = false;
         self.focused = first;
         first
+    }
+
+    /// Removes an overlay scope by identity, including a parent removed underneath a child.
+    /// The child inherits the parent's return target when its invoker belonged to that parent.
+    pub fn remove_scope(&mut self, id: ScopeId, restore: bool) -> Option<FocusId> {
+        let Some(index) = self.scopes.iter().position(|scope| scope.id == id) else { return self.focused; };
+        if index == 0 { return self.focused; }
+        if index + 1 == self.scopes.len() {
+            let previous = self.focused;
+            let restored = self.close_scope();
+            if !restore { self.reconcile(previous); }
+            return if restore { restored } else { self.focused };
+        }
+        let removed = self.scopes.remove(index);
+        for child in &mut self.scopes[index..] {
+            if child.invoker.is_some_and(|inv| removed.targets.iter().any(|t| t.id == inv.id)) {
+                child.invoker = removed.invoker;
+            }
+        }
+        self.focused
     }
 
     /// Closes the top modal scope (the root never closes) and restores focus: to the invoker when it is still there,

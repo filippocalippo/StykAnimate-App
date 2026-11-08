@@ -9,14 +9,16 @@ export function previewGraphCheck(root) {
   // Separate invocation: the app must not unify engine into the view-model-only UI check.
   execFileSync('cargo', ['check', '--locked', '--manifest-path', 'engine/Cargo.toml', '-p', 'styk-ui', '--lib', '--no-default-features'], {cwd: root, stdio: 'inherit'});
   const tree = execFileSync('cargo', ['tree', '--manifest-path', 'engine/Cargo.toml', '--locked', '--offline', '-p', 'styk-screens', '--edges', 'normal,build', '--prefix', 'none', '--format', '{p}'], {cwd: root, encoding: 'utf8'});
-  const allowed = new Set(['styk-screens', 'styk-ui', 'styk-design', 'styk-core', 'styk-services', 'styk-platform']);
+  // Dock layout uses the existing leaf value tree for unknown fields and persistence;
+  // keeping that plain logic available must not admit evaluation, editing or rendering.
+  const allowed = new Set(['styk-screens', 'styk-ui', 'styk-design', 'styk-core', 'styk-services', 'styk-platform', 'styk-doc']);
   const lines = tree.split(/\r?\n/);
   if (!lines.some(line => line.startsWith('styk-screens '))) throw new Error('preview graph supplied no root');
   for (const line of lines) {
     const name = line.split(' ')[0];
     if (name.startsWith('styk-') && !allowed.has(name)) throw new Error(`preview reaches forbidden crate ${name}`);
   }
-  console.log('preview: model-only graph; no engine crates or core export/audio modules');
+  console.log('preview: model-only graph; layout value store only; no evaluation/render/edit engine or core export/audio modules');
 }
 
 export function previewParityCheck(root, target) {

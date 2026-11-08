@@ -8,19 +8,20 @@ publish.workspace = true
 
 [features]
 default = ["engine"]
-engine = ["dep:styk-alloc", "dep:styk-doc", "dep:styk-drawing", "dep:styk-edit", "dep:styk-engine", "dep:styk-eval", "dep:styk-math", "dep:styk-trace"]
+engine = ["dep:styk-alloc", "dep:styk-drawing", "dep:styk-edit", "dep:styk-engine", "dep:styk-eval", "dep:styk-math", "dep:styk-trace", "dep:styk-render"]
 # `styk_core::testing`: what the interface's tests need to open a document without naming an engine crate.
 testing = []
 inspect = ["engine", "styk-edit/inspect", "styk-engine/inspect", "styk-eval/inspect"]
 
 [dependencies]
 styk-alloc = { path = "../styk-alloc", optional = true }
-styk-doc = { path = "../styk-doc", optional = true }
+styk-doc = { path = "../styk-doc" }
 styk-drawing = { path = "../styk-drawing", optional = true }
 styk-edit = { path = "../styk-edit", optional = true }
 styk-engine = { path = "../styk-engine", optional = true }
 styk-eval = { path = "../styk-eval", optional = true }
 styk-math = { path = "../styk-math", optional = true }
+styk-render = { path = "../styk-render", optional = true }
 styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace", optional = true }
 unicode-normalization = "=0.1.23"
@@ -35,6 +36,7 @@ icu_provider = "1.4"
 # The integration tests open documents through the same harness the interface's tests use.
 styk-core = { path = ".", features = ["testing"] }
 styk-services = { path = "../styk-services", features = ["test-fakes"] }
+styk-export = { path = "../styk-export" }
 sha2 = "0.10"
 styk-formats = { path = "../styk-formats" }
 zstd = "0.13"

@@ -113,7 +113,7 @@ impl Renderer {
             bind_group_layouts: &[Some(&blit_layout)],
             immediate_size: 0,
         });
-        let blit = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let presentation_pipeline = |blend| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("styk blit"),
             layout: Some(&blit_pipeline_layout),
             vertex: wgpu::VertexState { module: &blit_shader, entry_point: Some("vs_blit"), compilation_options: Default::default(), buffers: &[] },
@@ -124,11 +124,13 @@ impl Renderer {
                 module: &blit_shader,
                 entry_point: Some(if present_format.is_srgb() { "fs_blit_srgb" } else { "fs_blit" }),
                 compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format: present_format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                targets: &[Some(wgpu::ColorTargetState { format: present_format, blend, write_mask: wgpu::ColorWrites::ALL })],
             }),
             multiview_mask: None,
             cache: None,
         });
+        let blit = presentation_pipeline(None);
+        let composite = presentation_pipeline(Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING));
         let nearest = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("styk nearest"),
             mag_filter: wgpu::FilterMode::Nearest,
@@ -178,6 +180,7 @@ impl Renderer {
             queue,
             pipeline,
             blit,
+            composite,
             blit_layout,
             layout0,
             layout1,

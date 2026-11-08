@@ -9,6 +9,7 @@
 //! Stand-ins that go when their owners land, each marked where it is: the file open (K-doc's files service and engine
 //! host), the workspace sessions (the Draw and Build chunks), and the commands the band's buttons ask for (K-cmd).
 
+use styk_core::commands::CommandId;
 use iced::advanced::widget::operate;
 use iced::keyboard::{self, Key, key::Named};
 use iced::{Event, Size, Subscription, Task, Widget as _, event, mouse, window};
@@ -290,7 +291,8 @@ impl TopBand {
                         Answer::Session(session) => shell::Event::Session(session),
                     })),
                     Effect::FocusTab(id) => tasks.push(TopBand::focus(ids::tab(id))),
-                    Effect::Activated(_) | Effect::Moved(..) | Effect::Edited | Effect::Command(_) | Effect::Refused(_) => {}
+                    Effect::Activated(_) | Effect::Moved(..) | Effect::Edited | Effect::Command(_)
+                    | Effect::DocumentCommand { .. } | Effect::FinishBuild | Effect::Refused(_) => {}
                 }
             }
         }
@@ -544,13 +546,13 @@ impl TopBand {
                 let frame = self.tab_frame(id)?;
                 vec![E::TabPressed(id), E::PointerMoved(frame.x + frame.width / 2.0, frame.y + frame.height / 2.0), E::PointerReleased]
             }
-            Target::New => vec![E::New],
-            Target::Home => vec![E::Home],
-            Target::Mark => vec![E::Mark],
-            Target::Undo => vec![E::Undo],
-            Target::Redo => vec![E::Redo],
-            Target::Save => vec![E::Save],
-            Target::Export => vec![E::Export],
+            Target::Command(CommandId::New) => vec![E::New],
+            Target::Command(CommandId::Home) => vec![E::Home],
+            Target::Command(CommandId::Menu) => vec![E::Mark],
+            Target::Command(CommandId::Undo) => vec![E::Undo],
+            Target::Command(CommandId::Redo) => vec![E::Redo],
+            Target::Command(CommandId::Save) => vec![E::Save],
+            Target::Command(CommandId::Export) => vec![E::Export],
             Target::Workspace(name) => vec![E::Workspace(workspace_named(&name))],
             other => return Err(format!("this build cannot click {other:?}")),
         };

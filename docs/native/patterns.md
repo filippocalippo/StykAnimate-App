@@ -243,3 +243,8 @@ guards reject `styk-screens`; no production package may depend on it.
 
 The gate separately compiles `styk-ui --no-default-features --lib`, with the core engine off.
 The engine-backed pen lab is excluded; live adapters are gated in their existing files.
+
+The model-only graph also contains `styk-doc`, the leaf value store used by the ungated docking
+layout's unknown fields and persistence. It still excludes evaluation, editing, scheduling and
+rendering engine crates. Layout and overlay logic, registry metadata and plain stage navigation
+remain available without the core engine feature; document/painter adapters require it.

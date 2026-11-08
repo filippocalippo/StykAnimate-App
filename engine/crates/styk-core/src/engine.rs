@@ -11,3 +11,5 @@ pub use styk_engine::frame_builder::{Onion, Options as SceneOptions};
 #[cfg(not(target_arch = "wasm32"))]
 pub use styk_alloc::Counting;
 pub use styk_alloc::set_limit as set_memory_limit;
+pub use styk_eval::{doc, eval, geometry, picking};
+pub use styk_render::wgpu;

@@ -4,7 +4,8 @@ use styk_draw::K_COMPOSITE;
 use styk_eval::drawlist::layer_effects;
 
 use crate::effects::executor::{Executor, Frame, Run};
-use crate::effects::{self, plan, Slot};
+use crate::effects::{self, plan, recipe, Slot};
+use std::sync::Arc;
 use crate::isolation::{page_size, plan_rounds};
 use crate::resources::{buffer, GpuGroup, GpuView};
 use crate::{Renderer, Stats, ViewParams, FORMAT, UNIFORM_STRIDE};
@@ -18,6 +19,22 @@ struct Work {
     at: [u32; 2],
     size: [u32; 2],
     run: Run,
+}
+
+/// A single, owned rendering plan. Admission observes this plan; rendering consumes
+/// it without repeating placement, isolation or effect planning. Keep renderer
+/// configuration unchanged until consumption (sprite uploads may run meanwhile).
+pub struct FramePlan {
+    pub(crate) list: Arc<styk_draw::DrawList>,
+    pub(crate) view: ViewParams,
+    pub(crate) size: [u32; 2],
+    pub(crate) planned: Vec<plan::Placement>,
+    pub(crate) page: [u32; 2],
+    page_small: u32,
+    pub(crate) rounds: Vec<crate::isolation::Round>,
+    work: Vec<Work>,
+    pub(crate) records: Vec<recipe::Uniform>,
+    pub(crate) biggest: [u32; 2],
 }
 
 /// Receipt of the composite operations just encoded for one owning target.
@@ -211,27 +228,11 @@ impl Renderer {
         output + msaa
     }
 
-    /// Renders the current draw list into the offscreen frame.
-    pub fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &ViewParams, size: [u32; 2]) {
-        self.root_gpu_source = false;
-        let foreground = matches!(self.paint_context, crate::paint::PaintContext::CanvasForeground { .. });
-        let size = [size[0].max(1), size[1].max(1)];
-        self.ensure_output(size);
-        let Some(list) = self.list.clone() else {
-            self.clear_only(encoder, view);
-            return;
-        };
-        if self.bind0.is_none() {
-            self.rebind();
-        }
-        // Lone glyphs: the masks this view calls for (filled now when no frame has yet).
-        self.prepare_glyphs(encoder, &list, plan::raster_resolution(view.matrix[0].hypot(view.matrix[1])));
-        let n = list.groups.len();
-        // Local execution receipt, never a second retained scene or cache.
-        let mut gpu_sources = foreground.then(|| vec![false; n]);
-        let max_depth = list.groups.iter().map(|g| g.depth).max().unwrap_or(0);
+    /// Plans world-space input for one presentation without allocating GPU resources.
+    pub fn plan_frame(&self, list: &Arc<styk_draw::DrawList>, view: &ViewParams, size: [u32; 2]) -> FramePlan {
+        let size = size.map(|n| n.max(1));
         // Where every group is drawn for this view (effects::plan), then where it lands in the atlas.
-        let planned = plan::plan_with_grid(&list, &plan::View {
+        let planned = plan::plan_with_grid(list, &plan::View {
             matrix: view.matrix,
             size,
             zoom: view.zoom,
@@ -247,16 +248,69 @@ impl Renderer {
         // Pages hold the frame and grow for larger layers (effect layers at the editor's density, the
         // camera image); after 240 frames that all fit the frame they shrink back to it.
         let wanted = page_size(size, largest);
-        self.page_small = if wanted == size { self.page_small + 1 } else { 0 };
-        if self.page_frame != size || self.page_small > 240 {
-            self.page_frame = size;
-            self.page = size;
-            self.page_small = 0;
+        let mut page_small = if wanted == size { self.page_small + 1 } else { 0 };
+        let mut page = self.page;
+        if self.page_frame != size || page_small > 240 {
+            page = size;
+            page_small = 0;
         }
         // An export sizes its pages by the frame alone (a frame must not depend on the frames drawn before it); the stage grows them.
-        self.page = if self.exact_sizes { wanted } else { [self.page[0].max(wanted[0]), self.page[1].max(wanted[1])] };
-        let page = self.page;
-        let rounds = plan_rounds(&list, &sizes, page);
+        page = if self.exact_sizes { wanted } else { [page[0].max(wanted[0]), page[1].max(wanted[1])] };
+        let rounds = plan_rounds(list, &sizes, page);
+        let mut records = Vec::new();
+        let mut work = Vec::new();
+        let mut biggest = [0u32; 2];
+            for (r, round) in rounds.iter().enumerate() {
+                for &(g, slot) in &round.placed {
+                    let Some(filter) = planned[g].filter else { continue };
+                    let stack = list.layers.get(list.groups[g].layer as usize).map_or(&[][..], layer_effects);
+                    if stack.is_empty() {
+                        continue;
+                    }
+                    let s = sizes[g];
+                    let at = [(s[0] as f64 * slot.scale).ceil().max(1.0) as u32, (s[1] as f64 * slot.scale).ceil().max(1.0) as u32];
+                    let f = effects::scaled(filter, slot.scale);
+                    let run = recipe::record(&mut records, stack, Frame { scale: f.scale, origin: f.origin, output_size: f.output_size }, at);
+                    biggest = [biggest[0].max(at[0]), biggest[1].max(at[1])];
+                    work.push(Work { group: g, round: r, depth: list.groups[g].depth, page: slot.page, at: [slot.offset[0] as u32, slot.offset[1] as u32], size: at, run });
+                }
+            }
+        FramePlan { list: list.clone(), view: *view, size, planned, page, page_small, rounds, work, records, biggest }
+    }
+
+    /// Renders the current draw list into the offscreen frame.
+    pub fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &ViewParams, size: [u32; 2]) {
+        let Some(list) = self.list.clone() else {
+            self.root_gpu_source = false;
+            self.ensure_output(size.map(|n| n.max(1)));
+            self.clear_only(encoder, view);
+            return;
+        };
+        let plan = self.plan_frame(&list, view, size);
+        self.render_planned(encoder, plan);
+    }
+
+    /// Consumes precisely the plan admitted by the caller. The same Arc reaches
+    /// set_list, preserving pointer-based geometry upload reuse during navigation.
+    pub fn render_planned(&mut self, encoder: &mut wgpu::CommandEncoder, plan: FramePlan) {
+        let FramePlan { list, view, size, planned, page, page_small, rounds, work, records, biggest } = plan;
+        let view = &view;
+        self.set_list(&list);
+        self.page = page;
+        self.page_frame = size;
+        self.page_small = page_small;
+        self.root_gpu_source = false;
+        let foreground = matches!(self.paint_context, crate::paint::PaintContext::CanvasForeground { .. });
+        self.ensure_output(size);
+        if self.bind0.is_none() {
+            self.rebind();
+        }
+        // Lone glyphs: the masks this view calls for (filled now when no frame has yet).
+        self.prepare_glyphs(encoder, &list, plan::raster_resolution(view.matrix[0].hypot(view.matrix[1])));
+        let n = list.groups.len();
+        // Local execution receipt, never a second retained scene or cache.
+        let mut gpu_sources = foreground.then(|| vec![false; n]);
+        let max_depth = list.groups.iter().map(|g| g.depth).max().unwrap_or(0);
         let mut slots: Vec<Option<Slot>> = vec![None; n];
         for round in &rounds {
             for &(g, slot) in &round.placed {
@@ -274,28 +328,10 @@ impl Renderer {
         if self.groups.write(&self.device, &self.queue, bytemuck::cast_slice(&placed)) {
             self.rebind();
         }
-        // Effect runs: recorded now (their uniforms are written once), encoded after their depth's layer pass.
-        let mut work: Vec<Work> = Vec::new();
         if list.layers.iter().any(|layer| layer.effects.is_some()) {
             let exact = self.exact_sizes;
-            let executor = self.executor.get_or_insert_with(|| { let mut executor = Executor::new(&self.device); executor.set_exact(exact); executor });
-            executor.begin();
-            let mut biggest = [0u32, 0u32];
-            for (r, round) in rounds.iter().enumerate() {
-                for &(g, slot) in &round.placed {
-                    let Some(filter) = planned[g].filter else { continue };
-                    let stack = list.layers.get(list.groups[g].layer as usize).map_or(&[][..], layer_effects);
-                    if stack.is_empty() {
-                        continue;
-                    }
-                    let s = sizes[g];
-                    let at = [(s[0] as f64 * slot.scale).ceil().max(1.0) as u32, (s[1] as f64 * slot.scale).ceil().max(1.0) as u32];
-                    let f = effects::scaled(filter, slot.scale);
-                    let run = executor.record(stack, Frame { scale: f.scale, origin: f.origin, output_size: f.output_size }, at);
-                    biggest = [biggest[0].max(at[0]), biggest[1].max(at[1])];
-                    work.push(Work { group: g, round: r, depth: list.groups[g].depth, page: slot.page, at: [slot.offset[0] as u32, slot.offset[1] as u32], size: at, run });
-                }
-            }
+            let executor = self.executor.get_or_insert_with(|| { let mut e = Executor::new(&self.device); e.set_exact(exact); e });
+            executor.begin_recorded(records, work.len() as u32);
             executor.prepare(&self.device, &self.queue, biggest);
         } else if let Some(executor) = &mut self.executor {
             executor.begin();

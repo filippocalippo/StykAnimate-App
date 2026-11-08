@@ -104,3 +104,19 @@ were a different batch and are not a controlled baseline for these Inspector res
 Evidence: `artifacts/fastui/inspector-timings.json` and the `inspector-*-build.log`/capture logs.
 The app independently prepares its document while the preview consumes generated plain models;
 the gate compares all 23 captures byte-for-byte and keeps the existing reference checks.
+
+### Exclusive-slot follow-up (orchestrator supplied)
+
+The orchestrator repeated `inspector-figure` with FOOTER_HEIGHT edits on the queue's exclusive
+bench slot, with the machine drained: four rounds per host, alternating hosts. These are the
+orchestrator's reported measurements, not an additional run in this checkout.
+
+| Host | Build samples (s) | Edit-to-PNG samples (s) | Median edit-to-PNG (s) |
+| --- | --- | --- | ---: |
+| stykanimate | 7.98, 39.85, 9.66, 6.90 | 9.99, 41.56, 10.82, 8.30 | 10.405 |
+| styk-screens | 5.92, 20.60, 3.49, 3.79 | 6.79, 21.44, 4.30, 4.58 | 5.685 |
+
+The preview median is **45.4% lower** in this controlled batch. Captures were reported as about
+1.6 s through the app and 0.8 s through the preview; round 2 was slow for both hosts and remains
+included. This exclusive-slot evidence complements the shared-machine batch above; neither
+batch is rewritten or pooled with the other. MSVC remains the default.

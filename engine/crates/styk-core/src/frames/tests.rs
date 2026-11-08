@@ -70,6 +70,112 @@ fn drain(frames: &Frames) {
     panic!("worker failed to drain bounded requests");
 }
 
+#[test]
+fn navigation_reuses_the_prepared_list_without_preparation_or_an_upload_identity_change() {
+    let (frames, jobs) = frames(document(), Config::default());
+    let mut host = crate::stage::Host::new(frames, [960, 540], Default::default()).unwrap();
+    host.request(0., 1., 4, Options::default()).unwrap();
+    drain(host.frames());
+    let first = host
+        .frames()
+        .stage_ticket()
+        .unwrap()
+        .read()
+        .unwrap()
+        .unwrap()
+        .frame
+        .list;
+    for i in 1..=10 {
+        host.pan_by([i as f64, 0.]).unwrap();
+        host.zoom_by(1.1, None).unwrap();
+        host.request(0., 1., 4, Options::default()).unwrap();
+        drain(host.frames());
+        let next = host
+            .frames()
+            .stage_ticket()
+            .unwrap()
+            .read()
+            .unwrap()
+            .unwrap()
+            .frame
+            .list;
+        assert!(
+            Arc::ptr_eq(&first, &next),
+            "navigation must preserve the upload identity"
+        );
+    }
+    assert_eq!(host.frames().stats().unwrap().prepared, 1);
+    drop(host);
+    while jobs.run_next() {}
+}
+
+#[test]
+fn in_flight_navigation_keeps_preparation_and_worker_reuse_survives_short_sleeps() {
+    let clock = Arc::new(FixedClock::new());
+    let source: Arc<dyn FrameDocument> = document();
+    let jobs = ManualSpawner::new();
+    let frames = Frames::new(
+        9,
+        0,
+        0,
+        &source,
+        Config::default(),
+        &jobs,
+        clock.clone(),
+        Arc::new(|| {}),
+    )
+    .unwrap();
+    let mut host = crate::stage::Host::new(frames, [960, 540], Default::default()).unwrap();
+    host.request(0., 1., 4, Options::default()).unwrap();
+    let ticket = host.frames().stage_ticket().unwrap();
+    host.pan_by([20., 0.]).unwrap();
+    host.zoom_by(1.2, None).unwrap();
+    host.request(0., 1., 4, Options::default()).unwrap();
+    assert!(
+        ticket.current(),
+        "view changes cannot cancel world-space preparation"
+    );
+    assert_eq!(
+        ticket.identity(),
+        host.frames().stage_ticket().unwrap().identity()
+    );
+    let mut builder = FrameBuilder::default();
+    assert!(host.frames().shared.step(&mut builder));
+    let retained = builder.retained_bytes();
+    assert!(retained > FrameBuilder::default().retained_bytes());
+    clock.advance(Duration::from_millis(25));
+    host.frames()
+        .shared
+        .retire_idle(&mut builder, Duration::ZERO);
+    assert_eq!(builder.retained_bytes(), retained);
+    builder.release_over(retained);
+    assert_eq!(builder.retained_bytes(), retained);
+    builder.release_over(retained - 1);
+    assert_eq!(
+        builder.retained_bytes(),
+        FrameBuilder::default().retained_bytes()
+    );
+    host.request(0.5, 1., 4, Options::default()).unwrap();
+    host.frames().shared.step(&mut builder);
+    clock.advance(Duration::from_secs(1));
+    host.frames()
+        .shared
+        .retire_idle(&mut builder, Duration::ZERO);
+    assert_eq!(
+        builder.retained_bytes(),
+        FrameBuilder::default().retained_bytes()
+    );
+    host.request(1., 1., 4, Options::default()).unwrap();
+    host.frames().shared.step(&mut builder);
+    host.close();
+    host.frames().shared.retire_idle(&mut builder, clock.now());
+    assert_eq!(
+        builder.retained_bytes(),
+        FrameBuilder::default().retained_bytes()
+    );
+    while jobs.run_next() {}
+}
+
 fn status(frames: &Frames, consumer: Consumer) -> Status {
     frames.with_ready(consumer, |_| {})
 }
@@ -92,7 +198,7 @@ fn scheduler_lists_equal_engine_for_repository_fixtures() {
         for tick in [0.0, 0.5, 1.0] {
             let expected = engine.frame_now_at(tick).unwrap();
             frames
-                .request(Consumer::Stage, tick, Arc::new(View::default()))
+                .request(Consumer::Stage, tick, Arc::new(Inputs::default()))
                 .unwrap();
             drain(&frames);
             assert_eq!(
@@ -115,7 +221,7 @@ fn one_thousand_views_while_a_worker_is_stalled_deliver_only_the_last() {
     let source = document();
     let (frames, spawner) = frames(source.clone(), Config::default());
     let owner = Arc::new(Mutex::new(frames));
-    let view = Arc::new(View::default());
+    let view = Arc::new(Inputs::default());
     owner
         .lock()
         .unwrap()
@@ -127,8 +233,8 @@ fn one_thousand_views_while_a_worker_is_stalled_deliver_only_the_last() {
         // the first request already in flight and no queue lock held.
         let mut frames = caller.lock().unwrap();
         for x in 1..=1000 {
-            let mut view = View::default();
-            view.pan[0] = x as f64;
+            let mut view = Inputs::default();
+            view.scene.translations = vec![(u32::MAX, [x as f64, 0.])];
             frames
                 .request(Consumer::Stage, 0.0, Arc::new(view))
                 .unwrap();
@@ -148,7 +254,7 @@ fn one_thousand_views_while_a_worker_is_stalled_deliver_only_the_last() {
     drain(&frames);
     assert_eq!(
         frames.with_ready(Consumer::Stage, |ready| assert_eq!(
-            ready.key.view.pan[0],
+            ready.key.inputs.scene.translations[0].1[0],
             1000.0
         )),
         Status::Ready
@@ -164,7 +270,7 @@ fn revision_change_in_flight_rejects_old_result_and_retires_idle_cache() {
     let source = document();
     let (mut frames, spawner) = frames(source.clone(), Config::default());
     frames
-        .request(Consumer::Stage, 0.0, Arc::new(View::default()))
+        .request(Consumer::Stage, 0.0, Arc::new(Inputs::default()))
         .unwrap();
     drain(&frames);
     assert!(frames.stats().unwrap().cached_bytes > 0);
@@ -177,7 +283,7 @@ fn revision_change_in_flight_rejects_old_result_and_retires_idle_cache() {
     );
     frames.revise(0, 0).unwrap();
     frames
-        .request(Consumer::Stage, 0.5, Arc::new(View::default()))
+        .request(Consumer::Stage, 0.5, Arc::new(Inputs::default()))
         .unwrap();
     let owner = Arc::new(Mutex::new(frames));
     let caller = owner.clone();
@@ -202,7 +308,7 @@ fn contended_queue_admission_and_readiness_never_wait_and_keep_latest_stage() {
     let held = shared.state.lock().unwrap();
     for tick in [0.0, 0.5, 1.0] {
         frames
-            .request(Consumer::Stage, tick, Arc::new(View::default()))
+            .request(Consumer::Stage, tick, Arc::new(Inputs::default()))
             .unwrap();
     }
     assert_eq!(status(&frames, Consumer::Stage), Status::Busy);
@@ -210,7 +316,7 @@ fn contended_queue_admission_and_readiness_never_wait_and_keep_latest_stage() {
     assert!(frames.stats().is_none());
     frames.revise(0, 1).unwrap();
     frames
-        .request(Consumer::Stage, 1.0, Arc::new(View::default()))
+        .request(Consumer::Stage, 1.0, Arc::new(Inputs::default()))
         .unwrap();
     drop(held);
     assert!(frames.flush());
@@ -234,11 +340,11 @@ fn close_while_preparing_cancels_and_releases_document_and_cache() {
     let weak_generation = Arc::downgrade(&source.generation);
     let (mut frames, spawner) = frames(source.clone(), Config::default());
     frames
-        .request(Consumer::Stage, 0.0, Arc::new(View::default()))
+        .request(Consumer::Stage, 0.0, Arc::new(Inputs::default()))
         .unwrap();
     drain(&frames);
     frames
-        .request(Consumer::Stage, 0.5, Arc::new(View::default()))
+        .request(Consumer::Stage, 0.5, Arc::new(Inputs::default()))
         .unwrap();
     let owner = Arc::new(Mutex::new(frames));
     let caller = owner.clone();
@@ -267,7 +373,7 @@ fn priority_is_stage_then_playback_onion_preview_thumbnail() {
         Consumer::Stage,
     ] {
         frames
-            .request(consumer, 0.0, Arc::new(View::default()))
+            .request(consumer, 0.0, Arc::new(Inputs::default()))
             .unwrap();
     }
     let mut builder = FrameBuilder::default();
@@ -297,7 +403,7 @@ fn an_oversized_frame_is_refused_even_when_cache_is_empty() {
         },
     );
     frames
-        .request(Consumer::Stage, 0.0, Arc::new(View::default()))
+        .request(Consumer::Stage, 0.0, Arc::new(Inputs::default()))
         .unwrap();
     drain(&frames);
     assert!(matches!(
@@ -312,7 +418,7 @@ fn an_oversized_frame_is_refused_even_when_cache_is_empty() {
 #[test]
 fn review_lookahead_keeps_the_two_nearest_requested_ticks() {
     let source = document();
-    let view = Arc::new(View::default());
+    let view = Arc::new(Inputs::default());
     let (mut sizing, jobs) = frames(source.clone(), Config::default());
     sizing.request(Consumer::Stage, 0.0, view.clone()).unwrap();
     drain(&sizing);
@@ -349,7 +455,7 @@ fn review_lookahead_keeps_the_two_nearest_requested_ticks() {
 fn review_readiness_does_no_full_view_comparison_for_dense_same_tick_views() {
     let (mut frames, jobs) = frames(document(), Config::default());
     for index in 0..20 {
-        let mut view = View::default();
+        let mut view = Inputs::default();
         view.scene.translations = vec![(u32::MAX, [0.0, 0.0]); 65_536];
         view.scene.translations.last_mut().unwrap().1[0] = f64::from(index);
         frames
@@ -361,7 +467,10 @@ fn review_readiness_does_no_full_view_comparison_for_dense_same_tick_views() {
     FULL_KEY_COMPARISONS.with(|count| count.set(0));
     assert_eq!(
         frames.with_ready(Consumer::Stage, |ready| {
-            assert_eq!(ready.key.view.scene.translations.last().unwrap().1[0], 19.0);
+            assert_eq!(
+                ready.key.inputs.scene.translations.last().unwrap().1[0],
+                19.0
+            );
         }),
         Status::Ready
     );
@@ -377,7 +486,7 @@ fn review_readiness_does_no_full_view_comparison_for_dense_same_tick_views() {
 #[test]
 fn wrapped_lookahead_moves_forward_and_a_smaller_budget_keeps_the_nearest() {
     let source = document();
-    let view = Arc::new(View::default());
+    let view = Arc::new(Inputs::default());
     let (mut sizing, jobs) = frames(source.clone(), Config::default());
     sizing.request(Consumer::Stage, 0.0, view.clone()).unwrap();
     drain(&sizing);
@@ -428,8 +537,12 @@ fn wrapped_lookahead_moves_forward_and_a_smaller_budget_keeps_the_nearest() {
 fn ready_tickets_survive_compaction_and_reject_a_reused_cache_slot() {
     let source = document();
     let (mut sizing, jobs) = frames(source.clone(), Config::default());
+    // Size the same preparation metadata as the entries below. Navigation was
+    // inline in the old View; translations own an additional vector allocation.
+    let mut inputs = Inputs::default();
+    inputs.scene.translations = vec![(u32::MAX, [0.0, 0.0])];
     sizing
-        .request(Consumer::Stage, 0.0, Arc::new(View::default()))
+        .request(Consumer::Stage, 0.0, Arc::new(inputs))
         .unwrap();
     drain(&sizing);
     let charge = sizing.stats().unwrap().cached_bytes;
@@ -443,8 +556,8 @@ fn ready_tickets_survive_compaction_and_reject_a_reused_cache_slot() {
         },
     );
     for index in 0..3 {
-        let mut view = View::default();
-        view.pan[0] = f64::from(index);
+        let mut view = Inputs::default();
+        view.scene.translations = vec![(u32::MAX, [f64::from(index), 0.])];
         frames
             .request(Consumer::Preview(index), 0.0, Arc::new(view))
             .unwrap();
@@ -460,13 +573,19 @@ fn ready_tickets_survive_compaction_and_reject_a_reused_cache_slot() {
     for index in 1..3 {
         assert_eq!(
             frames.with_ready(Consumer::Preview(index), |ready| assert_eq!(
-                ready.key.view.pan[0],
+                ready.key.inputs.scene.translations[0].1[0],
                 f64::from(index)
             )),
             Status::Ready
         );
     }
     assert_eq!(FULL_KEY_COMPARISONS.with(|count| count.get()), 0);
+    let mut retry = Inputs::default();
+    retry.scene.translations = vec![(u32::MAX,[0.,0.])];
+    frames.request(Consumer::Preview(0),0.,Arc::new(retry)).unwrap();
+    drain(&frames);
+    assert_eq!(status(&frames,Consumer::Preview(0)),Status::Ready,"an evicted identity can be requested again");
+
     drop(frames);
     while jobs.run_next() {}
 }
@@ -475,11 +594,11 @@ fn ready_tickets_survive_compaction_and_reject_a_reused_cache_slot() {
 fn a_key_hash_collision_is_resolved_on_the_worker() {
     let (mut frames, jobs) = frames(document(), Config::default());
     frames
-        .request(Consumer::Stage, 0.0, Arc::new(View::default()))
+        .request(Consumer::Stage, 0.0, Arc::new(Inputs::default()))
         .unwrap();
     drain(&frames);
-    let mut view = View::default();
-    view.pan[0] = 1.0;
+    let mut view = Inputs::default();
+    view.scene.translations = vec![(u32::MAX, [1., 0.])];
     let wanted = frames
         .request(Consumer::Stage, 0.0, Arc::new(view))
         .unwrap();
@@ -492,7 +611,7 @@ fn a_key_hash_collision_is_resolved_on_the_worker() {
     FULL_KEY_COMPARISONS.with(|count| count.set(0));
     assert_eq!(
         frames.with_ready(Consumer::Stage, |ready| assert_eq!(
-            ready.key.view.pan[0],
+            ready.key.inputs.scene.translations[0].1[0],
             1.0
         )),
         Status::Ready
@@ -506,12 +625,9 @@ fn a_key_hash_collision_is_resolved_on_the_worker() {
 fn signed_zero_keys_share_a_fingerprint() {
     let (mut frames, jobs) = frames(document(), Config::default());
     let first = frames
-        .request(Consumer::Stage, -0.0, Arc::new(View::default()))
+        .request(Consumer::Stage, -0.0, Arc::new(Inputs::default()))
         .unwrap();
-    let view = View {
-        pan: [-0.0; 2],
-        ..View::default()
-    };
+    let view = Inputs::default();
     let second = frames
         .request(Consumer::Stage, 0.0, Arc::new(view))
         .unwrap();
@@ -525,7 +641,7 @@ fn signed_zero_keys_share_a_fingerprint() {
 fn a_playback_cache_hit_promoted_to_stage_cannot_be_evicted_by_lookahead() {
     let source = document();
     let (mut frames, spawner) = frames(source.clone(), Config::default());
-    let view = Arc::new(View::default());
+    let view = Arc::new(Inputs::default());
     frames
         .request(Consumer::Playback(0), 0.0, view.clone())
         .unwrap();
@@ -558,7 +674,7 @@ fn a_playback_cache_hit_promoted_to_stage_cannot_be_evicted_by_lookahead() {
 #[test]
 fn lookahead_wraps_half_open_range_and_actual_bytes_are_bounded() {
     let (mut frames, spawner) = frames(document(), Config::default());
-    let view = Arc::new(View::default());
+    let view = Arc::new(Inputs::default());
     assert_eq!(
         frames
             .lookahead(9, 2..10, true, 48, 4096, view.clone())
@@ -593,48 +709,49 @@ fn lookahead_wraps_half_open_range_and_actual_bytes_are_bounded() {
 }
 
 #[test]
-fn every_presentation_input_changes_the_key_and_invalid_requests_are_visible() {
-    let (mut frames, spawner) = frames(document(), Config::default());
+fn every_preparation_input_changes_the_key_and_invalid_requests_are_visible() {
+    let (mut frames, jobs) = frames(document(), Config::default());
     let base = frames
-        .request(Consumer::Stage, 0.0, Arc::new(View::default()))
+        .request(Consumer::Stage, 0., Arc::new(Inputs::default()))
         .unwrap();
-    let mut variants = vec![View::default(); 12];
-    variants[0].size[0] += 1;
-    variants[1].zoom = 2.0;
-    variants[2].pan[0] = 1.0;
-    variants[3].quality = 0.5;
-    variants[4].scene.camera = false;
-    variants[5].scene.effects = false;
-    variants[6].scene.clip_to_canvas = false;
-    variants[7].scene.background = Some(0xff123456);
-    variants[8].scene.hidden_uids.push(1);
-    variants[9].scene.onions.push(Onion {
-        tick: 1.0,
+    let mut variants = vec![Inputs::default(); 7];
+    variants[0].scene.camera = false;
+    variants[1].scene.effects = false;
+    variants[2].scene.clip_to_canvas = false;
+    variants[3].scene.background = Some(0xff123456);
+    variants[4].scene.hidden_uids.push(1);
+    variants[5].scene.translations.push((1, [10., 20.]));
+    variants[6].scene.onions.push(Onion {
+        tick: 1.,
         opacity: 0.3,
         tint: Some([0, 128, 255]),
         on_top: true,
         hidden_uids: vec![1],
     });
-    variants[10].scene.translations.push((1, [10.0, 20.0]));
-    variants[11].samples = 1;
-    for view in variants {
+    for inputs in variants {
         assert_ne!(
             base,
             frames
-                .request(Consumer::Stage, 0.0, Arc::new(view))
+                .request(Consumer::Stage, 0., Arc::new(inputs))
                 .unwrap()
         );
     }
+    assert_ne!(
+        base,
+        frames
+            .request(Consumer::Stage, 0.25, base.inputs.clone())
+            .unwrap()
+    );
     assert_eq!(
-        frames.request(Consumer::Stage, f64::NAN, base.view.clone()),
+        frames.request(Consumer::Stage, f64::NAN, base.inputs.clone()),
         Err(Error::InvalidRequest)
     );
     assert_eq!(
-        frames.request(Consumer::Thumbnail(255), 0.0, base.view),
+        frames.request(Consumer::Thumbnail(255), 0., base.inputs),
         Err(Error::InvalidRequest)
     );
     drop(frames);
-    while spawner.run_next() {}
+    while jobs.run_next() {}
 }
 
 #[test]
@@ -699,7 +816,7 @@ fn latency_uses_the_injected_clock() {
     )
     .unwrap();
     frames
-        .request(Consumer::Stage, 0.0, Arc::new(View::default()))
+        .request(Consumer::Stage, 0.0, Arc::new(Inputs::default()))
         .unwrap();
     clock.advance(Duration::from_millis(3));
     drain(&frames);
@@ -768,7 +885,7 @@ fn decoded_resource_bounds_replace_every_retained_frame_of_the_old_epoch() {
     });
     let (mut frames, spawner) = frames(source, Config::default());
     let mut builder = FrameBuilder::default();
-    let view = Arc::new(View::default());
+    let view = Arc::new(Inputs::default());
     frames.request(Consumer::Stage, 0.0, view.clone()).unwrap();
     assert!(frames.shared.step(&mut builder));
     let mut before = Vec::new();

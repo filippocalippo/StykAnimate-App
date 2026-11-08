@@ -5,7 +5,7 @@ mod platform_spawn;
 
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::time::Duration;
-use styk_core::frames::{Config, Consumer, FrameDocument, Frames, Key, Status, View};
+use styk_core::frames::{Config, Consumer, FrameDocument, Frames, Inputs, Key, Status};
 use styk_engine::{Budgets, Engine, Generation};
 use styk_services::{Clock, SystemClock};
 
@@ -80,7 +80,7 @@ fn snapshot_entered(frames: &mut Frames, entered: &mpsc::Receiver<()>, clock: &d
 }
 
 #[test]
-fn platform_workers_deliver_the_last_view_and_close_while_a_snapshot_is_stalled() {
+fn platform_workers_deliver_the_last_preparation_and_close_while_a_snapshot_is_stalled() {
     struct Stalled {
         generation: Arc<Generation>,
         entered: mpsc::SyncSender<()>,
@@ -121,12 +121,12 @@ fn platform_workers_deliver_the_last_view_and_close_while_a_snapshot_is_stalled(
     let (mut frames, wake) = pool(&source, 0, clock.clone());
     drop(source);
     frames
-        .request(Consumer::Stage, 0.0, Arc::new(View::default()))
+        .request(Consumer::Stage, 0.0, Arc::new(Inputs::default()))
         .unwrap();
     snapshot_entered(&mut frames, &waiting, clock.as_ref());
     for x in 1..=1000 {
-        let mut view = View::default();
-        view.pan[0] = f64::from(x);
+        let mut view = Inputs::default();
+        view.scene.translations = vec![(u32::MAX, [f64::from(x), 0.0])];
         frames
             .request(Consumer::Stage, 0.0, Arc::new(view))
             .unwrap();
@@ -134,13 +134,17 @@ fn platform_workers_deliver_the_last_view_and_close_while_a_snapshot_is_stalled(
     *gate.0.lock().unwrap() = true;
     gate.1.notify_all();
     assert_eq!(
-        ready(&mut frames, &wake, clock.as_ref()).view.pan[0],
+        ready(&mut frames, &wake, clock.as_ref())
+            .inputs
+            .scene
+            .translations[0]
+            .1[0],
         1000.0
     );
     while waiting.try_recv().is_ok() {}
     *gate.0.lock().unwrap() = false;
-    let mut view = View::default();
-    view.pan[0] = 2000.0;
+    let mut view = Inputs::default();
+    view.scene.translations = vec![(u32::MAX, [2000.0, 0.0])];
     frames
         .request(Consumer::Stage, 0.5, Arc::new(view))
         .unwrap();
@@ -203,10 +207,7 @@ fn representative_native_frame_readiness() {
         .uid;
     let source: Arc<dyn FrameDocument> = Arc::new(Source(generation));
     let (mut frames, wake) = pool(&source, 1, clock.clone());
-    let mut view = View {
-        size: [1600, 900],
-        ..View::default()
-    };
+    let mut view = Inputs::default();
     view.scene.camera = false;
     let start = clock.now();
     frames

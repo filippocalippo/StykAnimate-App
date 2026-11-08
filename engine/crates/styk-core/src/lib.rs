@@ -20,6 +20,8 @@ pub mod automation;
 pub mod camera_actions;
 #[cfg(feature = "engine")]
 pub mod clipboard;
+pub mod command_queue;
+pub mod error_policy;
 pub mod commands;
 pub mod controls;
 #[cfg(feature = "engine")]
@@ -41,8 +43,10 @@ pub mod history;
 pub mod i18n;
 pub mod inspector;
 pub mod launch;
+pub mod layout;
 pub mod limits;
 pub mod number;
+pub mod overlay;
 #[cfg(feature = "engine")]
 pub mod range;
 pub mod roving;
@@ -50,6 +54,8 @@ pub mod screens;
 #[cfg(feature = "engine")]
 pub mod selection_actions;
 pub mod shell;
+pub mod shortcuts;
+pub mod stage;
 pub mod text_entry;
 #[cfg(feature = "engine")]
 pub mod text;

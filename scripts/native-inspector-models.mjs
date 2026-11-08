@@ -4,7 +4,7 @@ import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {catalogueIds} from './native-screen-guards.mjs';
 
-const files = ['inspector/model', 'inspector/property', 'inspector/order', 'commands', 'i18n'];
+const files = ['inspector/model', 'inspector/property', 'inspector/order', 'commands/metadata', 'i18n'];
 const schema = new Map();
 const tokens = text => text.match(/"(?:\\.|[^"\\])*"|'static|[A-Za-z_][A-Za-z_0-9]*|-?(?:\d+\.?\d*(?:e[+-]?\d+)?|inf)|[^\s]/g) ?? [];
 function split(list, separator = ',') {
@@ -30,6 +30,11 @@ for (const file of files) {
     i = end - 1;
   }
 }
+// CommandId is declared by the registry macro; read its one row list, not the macro placeholder.
+const registry = readFileSync('engine/crates/styk-core/src/commands/metadata/data.rs', 'utf8');
+const variants = [...registry.matchAll(/^\s*(\w+)\s*=>/gm)].map(match => [match[1], {shape: undefined, fields: []}]);
+if (!variants.length) throw Error('command registry supplied no variants');
+schema.set('CommandId', {kind: 'enum', path: 'styk_core::commands::CommandId', fields: new Map(variants)});
 function expression(source) {
   const ts = tokens(source); let at = 0;
   const take = expected => { const got = ts[at++]; if (expected && expected !== got) throw Error(`expected ${expected}, got ${got} at ${at}`); return got; };

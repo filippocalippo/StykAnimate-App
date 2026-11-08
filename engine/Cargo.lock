@@ -2817,6 +2817,7 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "iced_runtime",
+ "iced_wgpu",
  "iced_winit",
  "pollster",
  "styk-core",
@@ -2882,8 +2883,10 @@ dependencies = [
  "styk-edit",
  "styk-engine",
  "styk-eval",
+ "styk-export",
  "styk-formats",
  "styk-math",
+ "styk-render",
  "styk-services",
  "styk-trace",
  "unicode-normalization",
