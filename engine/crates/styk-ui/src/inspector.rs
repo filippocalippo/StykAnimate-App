@@ -307,7 +307,7 @@ impl Kit<'_> {
     fn color(&self, row: &m::ColorRow) -> Element<'static, Message> {
         let first = match &row.paint {
             Paint::Solid(rgb) => *rgb,
-            Paint::Gradient(stops) => stops.first().map_or([0; 3], |stop| stop.1),
+            Paint::Gradient(paint) => paint.stops.first().map_or([0; 3], styk_core::inspector::paint::Stop::rgb),
         };
         let caption = match (&row.caption, row.mixed) {
             (_, true) => self.say(&Msg::new("inspector.mixed")),
@@ -398,7 +398,7 @@ impl Kit<'_> {
                 Row::with_children(line).align_y(Alignment::Center).boxed()
             }
             m::Row::Swatches { items, .. } => {
-                let swatches: Vec<Element<'static, Message>> = items.iter().map(|(rgb, _)| swatch(self.palette, *rgb, SwatchSize::Md, 1.0)).collect();
+                let swatches: Vec<Element<'static, Message>> = items.iter().map(|item| swatch(self.palette, item.rgb, SwatchSize::Md, 1.0)).collect();
                 Row::with_children(swatches).spacing(tokens::scale::SPACE_1).wrap().boxed()
             }
             m::Row::Pager { text: page, previous, next, .. } => row![self.button(previous, ButtonSize::Small), Space::new().width(Length::Fill), self.small(page.to_string()), Space::new().width(Length::Fill), self.button(next, ButtonSize::Small)].align_y(Alignment::Center).boxed(),

@@ -5,6 +5,8 @@
 //!   `src/inspector-view.mjs`).
 //! - [`property`]: the number properties and the gesture that edits one through the session; [`order`] the draw order.
 //! - [`memory`]: which titled sections are open.
+//! - [`paint`]: the paint model and the gradient editor's data; [`Panel::picker`] is the colour row's open picker,
+//!   which commits each chosen paint as one edit ([`PaintEvent`]).
 //! - [`Panel`]: the panel's own state (the field being edited and its gesture, pages, tabs) and [`Panel::update`], which
 //!   turns an [`Event`] from the view into session calls and [`Effect`]s.
 //!
@@ -24,6 +26,7 @@ pub mod facts;
 pub mod memory;
 pub mod model;
 pub mod order;
+pub mod paint;
 pub mod property;
 
 use std::sync::Arc;
@@ -121,6 +124,33 @@ pub enum Event {
     Color(ColorTarget),
     Rename(RenameEvent),
     Text(TextKey, TextEvent),
+    /// The colour picker opened by [`Event::Color`] ([`Panel::picker`]).
+    Paint(PaintEvent),
+}
+
+/// What the colour picker sends about the request it was opened for ([`PaintRequest::id`]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum PaintEvent {
+    /// A paint chosen (a release, a swatch, the hex field, a stop added): applied as one edit, every chosen frame
+    /// with Edit together where today's row does so. The picker stays open; a refusal shows in [`PaintRequest::error`].
+    Commit { request: u64, paint: paint::PaintSpec },
+    /// The picker closed (Escape, a press outside, its close button).
+    Close { request: u64 },
+}
+
+/// The open colour picker, as its view reads it: what it starts from and what it allows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PaintRequest {
+    /// This opening's identity: events naming another one change nothing.
+    pub id: u64,
+    pub target: ColorTarget,
+    /// The paint it starts from.
+    pub paint: paint::PaintSpec,
+    /// Whether the Solid │ Gradient tabs show (`gradients`) and the opacity slider and field (`alpha`).
+    pub gradients: bool,
+    pub alpha: bool,
+    /// The last commit's refusal, shown inline; the next commit that lands clears it.
+    pub error: Option<Msg>,
 }
 
 /// Where the panel asks focus to go (the interface maps each to its focus target).
@@ -188,6 +218,24 @@ pub struct FieldView {
     pub invalid: Option<Msg>,
 }
 
+/// The open colour picker and what it was opened on.
+#[cfg(feature = "engine")]
+#[derive(Clone, Debug)]
+struct Picker {
+    request: PaintRequest,
+    document: DocumentId,
+    /// The selection (uid, uids, joint), the playhead and the figure it was opened on: a commit that finds the ones its
+    /// row checks changed is refused ("Selection changed, reopen the colour picker").
+    selection: (Option<u32>, Vec<u32>, i64),
+    tick: u64,
+    figure: Option<u32>,
+    /// The palette colour a swatch replaces.
+    from: Option<String>,
+    /// The figure colour and opacity last applied (`previous`, `previousOpacity`): an opacity-only change keeps the
+    /// colours.
+    previous: (String, f64),
+}
+
 /// The name being typed in the header (rename in place).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenameView {
@@ -249,6 +297,9 @@ pub struct Panel {
     memory: SectionMemory,
     field: Option<Field>,
     name: Option<NameDraft>,
+    picker: Option<Picker>,
+    /// The last picker request's id.
+    requests: u64,
     hinted: bool,
     model: Option<Arc<Inspector>>,
     key: Option<Key>,
@@ -330,6 +381,11 @@ impl Panel {
         }
     }
 
+    /// The open colour picker's request.
+    pub fn picker(&self) -> Option<&PaintRequest> {
+        self.picker.as_ref().map(|picker| &picker.request)
+    }
+
     /// Whether a property gesture is open.
     pub fn gesture_open(&self) -> bool {
         self.field.as_ref().is_some_and(|field| field.gesture.is_some())
@@ -390,6 +446,10 @@ impl Panel {
             if self.field.as_ref().is_some_and(|field| field.gesture.is_none()) {
                 self.field = None;
             }
+        }
+        // A picker belongs to the document it was opened on.
+        if self.picker.as_ref().is_some_and(|picker| Some(picker.document) != active) {
+            self.picker = None;
         }
         if self.gesture_open() && self.model.is_some() {
             return;
@@ -585,9 +645,11 @@ impl Panel {
                     Choice::SegmentShape => answers::call(documents, id, "convertSegment", &[Value::str(&value)], session).map(|_| ()),
                     Choice::FigureLayer => {
                         let uids = documents.get(id).map(|document| facts::selection(document).uids.iter().map(|uid| Value::Num(f64::from(*uid))).collect()).unwrap_or_default();
+                        // One history entry; then the layer becomes the active one and its track is selected.
                         answers::call(documents, id, "assignFiguresToLayer", &[Value::array(uids), Value::str(&value)], session).and_then(|changed| {
                             if changed.truthy() {
                                 answers::call(documents, id, "setActiveLayer", &[Value::str(&value)], session)?;
+                                view.set_layers(vec![value.to_string()]);
                             }
                             Ok(())
                         })
@@ -611,10 +673,8 @@ impl Panel {
                 self.state.connector_part = if value == "segment" { ConnectorPart::Segment } else { ConnectorPart::Slider };
                 self.bump();
             }
-            Event::Color(target) => {
-                self.finish(documents, session, &mut effects);
-                effects.push(Effect::PickColor(target));
-            }
+            Event::Color(target) => self.open_picker(documents, session, id, target, &mut effects),
+            Event::Paint(event) => self.paint_event(documents, view, session, event, &mut effects),
             Event::Rename(event) => self.rename_event(documents, session, presentation, id, event, &mut effects),
             Event::Text(key, event) => self.text_event(documents, session, id, key, event, &mut effects),
             Event::ChooseStep(..) => {}
@@ -676,6 +736,120 @@ impl Panel {
                 let target = object(&[("kind", Value::str(kind)), ("index", Value::Num(f64::from(index)))]);
                 let result = answers::call(documents, id, "moveBuilderOrder", &[target, Value::str(direction), object(&[("branch", Value::Bool(false))])], session);
                 Self::report(result.map(|_| ()), effects);
+            }
+        }
+    }
+
+    /// A colour row pressed: the open edit finishes and the picker opens on what the row shows (`installColorPickers`).
+    fn open_picker(&mut self, documents: &mut Documents, session: &mut Session, id: DocumentId, target: ColorTarget, effects: &mut Vec<Effect>) {
+        self.finish(documents, session, effects);
+        let Some(document) = documents.get(id) else { return };
+        let Some(frame) = document.frame_records_ready() else { return };
+        let shown = self.model.as_ref().and_then(|model| model.color(target)).and_then(|row| match &row.paint {
+            model::Paint::Solid(rgb) => Some(*rgb),
+            model::Paint::Gradient(paint) => paint.stops.first().map(paint::Stop::rgb),
+        });
+        // A row whose target is gone opens nothing, as the resolver's `false` did.
+        let Some(picked) = contexts::picker(document, &frame, target, shown) else { return };
+        let selection = facts::selection(document);
+        let figure = facts::figure_of_selection(document).map(|(figure, _)| figure.id);
+        let first = picked.paint.stops.first().copied().unwrap_or(paint::Stop::new(0.0, [0, 0, 0], 1.0));
+        self.requests += 1;
+        self.picker = Some(Picker {
+            request: PaintRequest { id: self.requests, target, paint: picked.paint, gradients: picked.gradients, alpha: picked.alpha, error: None },
+            document: id,
+            selection: (selection.uid, selection.uids.clone(), selection.joint),
+            tick: facts::tick(document).to_bits(),
+            figure,
+            from: picked.from,
+            previous: (paint::hex(first.color), first.opacity),
+        });
+        effects.push(Effect::PickColor(target));
+    }
+
+    fn paint_event(&mut self, documents: &mut Documents, view: &ViewState, session: &mut Session, event: PaintEvent, effects: &mut Vec<Effect>) {
+        match event {
+            PaintEvent::Close { request } => {
+                if self.picker.as_ref().is_some_and(|picker| picker.request.id == request) {
+                    self.picker = None;
+                }
+            }
+            PaintEvent::Commit { request, paint } => {
+                let Some(mut picker) = self.picker.take().filter(|picker| picker.request.id == request) else { return };
+                // An open number or name edit ends first, as the inspector's change does today.
+                self.finish(documents, session, effects);
+                match Self::apply_paint(documents, view, session, &mut picker, &paint) {
+                    Ok(()) => {
+                        picker.request.error = None;
+                        effects.push(Effect::RequestFrame);
+                    }
+                    Err(message) => picker.request.error = Some(message),
+                }
+                self.picker = Some(picker);
+            }
+        }
+    }
+
+    /// One picked paint applied to the picker's row: one session command, one history entry.
+    fn apply_paint(documents: &mut Documents, view: &ViewState, session: &mut Session, picker: &mut Picker, paint: &paint::PaintSpec) -> Result<(), Msg> {
+        let paint = paint.normalize()?;
+        let id = picker.document;
+        let document = documents.get(id).ok_or_else(|| Msg::new("errors.editorSessions.thisProjectIsNoLongerOpen"))?;
+        let selection = facts::selection(document);
+        let now = (selection.uid, selection.uids.clone(), selection.joint);
+        let tick = facts::tick(document).to_bits();
+        let figure = facts::figure_of_selection(document).map(|(figure, _)| figure.id);
+        // Each row checks what today's resolver checks before it applies.
+        let changed = match picker.request.target {
+            ColorTarget::Palette(_) => now.0 != picker.selection.0 || figure != picker.figure || tick != picker.tick,
+            ColorTarget::Figure => tick != picker.tick || now.1 != picker.selection.1,
+            ColorTarget::Segment => now.0 != picker.selection.0 || now.2 != picker.selection.2 || figure != picker.figure,
+            ColorTarget::Background | ColorTarget::SegmentGradient | ColorTarget::Polygon(_) => false,
+        };
+        if changed {
+            let key = if matches!(picker.request.target, ColorTarget::Palette(_)) { "errors.app.selectionChangedReopenThePalette" } else { "errors.app.selectionChangedReopenTheColorPicker" };
+            return Err(Msg::new(key));
+        }
+        let range = Range::of(view, document).map(|range| range.value());
+        let ranged = |pairs: &[(&str, Value)]| {
+            let mut options = Obj::new();
+            if let Some(range) = &range {
+                options.set("indices", range.clone());
+            }
+            for (key, value) in pairs {
+                options.set(key, value.clone());
+            }
+            Value::object(options)
+        };
+        let first = paint.stops[0];
+        let rgb = Value::array(first.color.iter().map(|channel| Value::Num(*channel)).collect());
+        let no_branch = object(&[("branch", Value::Bool(false))]);
+        let mut call = |method: &str, args: &[Value]| answers::call(documents, id, method, args, session).map(|_| ());
+        match picker.request.target {
+            ColorTarget::Background => {
+                if paint.is_solid() {
+                    let background = paint.background(None)?;
+                    call("setSceneColor", &[background.get("color").cloned().unwrap_or(Value::Null), ranged(&[])])
+                } else {
+                    let background = paint.background(Some(&format!("{} gradient", paint.kind.id())))?;
+                    call("importSceneBackground", &[background, ranged(&[])])
+                }
+            }
+            ColorTarget::Figure => {
+                let value = paint::hex(first.color);
+                let (previous, previous_opacity) = &picker.previous;
+                // An opacity-only change keeps each segment's own colour.
+                let color = if &value == previous && first.opacity != *previous_opacity { Value::Null } else { Value::str(&value) };
+                call("setFigureColor", &[color, ranged(&[("opacity", Value::Num(first.opacity))])])?;
+                picker.previous = (value, first.opacity);
+                Ok(())
+            }
+            ColorTarget::Segment => call("updateBuilderSegmentStyle", &[object(&[("paint", paint.to_value())]), no_branch]),
+            ColorTarget::SegmentGradient => call("updateBuilderSegmentStyle", &[object(&[("gradient", object(&[("color", Value::str(&paint::hex(first.color)))]))]), no_branch]),
+            ColorTarget::Polygon(index) => call("updatePolygon", &[Value::Num(f64::from(index)), object(&[("color", rgb), ("opacity", Value::Num(first.opacity))])]),
+            ColorTarget::Palette(_) => {
+                let from = picker.from.clone().ok_or_else(|| Msg::new("errors.app.selectionChangedReopenThePalette"))?;
+                call("replaceFigureColor", &[Value::str(&from), rgb, ranged(&[])])
             }
         }
     }

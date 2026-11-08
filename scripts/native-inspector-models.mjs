@@ -4,7 +4,7 @@ import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {catalogueIds} from './native-screen-guards.mjs';
 
-const files = ['inspector/model', 'inspector/property', 'inspector/order', 'commands/metadata', 'i18n'];
+const files = ['inspector/model', 'inspector/paint', 'inspector/property', 'inspector/order', 'commands/metadata', 'i18n'];
 const schema = new Map();
 const tokens = text => text.match(/"(?:\\.|[^"\\])*"|'static|[A-Za-z_][A-Za-z_0-9]*|-?(?:\d+\.?\d*(?:e[+-]?\d+)?|inf)|[^\s]/g) ?? [];
 function split(list, separator = ',') {

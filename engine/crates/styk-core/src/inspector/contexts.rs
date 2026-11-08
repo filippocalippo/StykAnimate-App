@@ -11,6 +11,7 @@ use styk_eval::doc::{Figure, PaintKind, Prim, Segment};
 use super::facts::{self, FigureKind, degrees, item_f64, num};
 use super::memory::SectionMemory;
 use super::model::*;
+use super::paint::{PaintSpec as Paint2, PaintType, Stop};
 use super::property::PropertyKey;
 use super::{CameraTab, ConnectorPart, PanelState};
 use crate::commands::CommandId;
@@ -475,11 +476,16 @@ fn layer_select(document: &Document, records: &Value, span: bool) -> Row {
     })
 }
 
+/// `usesSegmentColors`: the figure keeps its own segment colours under a pose's colour override.
+fn uses_segment_colors(version: f64, figure: &Figure, object: &Value) -> bool {
+    version >= 5.0 || figure.segment_colors || object.path(&["_styk", "colorMode"]).and_then(Value::as_str) == Some("segments")
+}
+
 /// `displayedColor`: the colour a figure shows for `rgb` under its pose's colour override.
 fn displayed_color(version: f64, figure: &Figure, object: &Value, rgb: [u8; 3]) -> [u8; 3] {
     let raw = num(object.get("color_override_raw")).unwrap_or(0.0);
     let raw_bits = raw as i64 as u32;
-    let segment_colors = version >= 5.0 || figure.segment_colors || object.path(&["_styk", "colorMode"]).and_then(Value::as_str) == Some("segments");
+    let segment_colors = uses_segment_colors(version, figure, object);
     let override_rgb = [raw_bits as u8, (raw_bits >> 8) as u8, (raw_bits >> 16) as u8];
     if !segment_colors {
         return if (raw as i64 as i32) < 0 { [0, 0, 0] } else { override_rgb };
@@ -508,8 +514,8 @@ fn palette(version: f64, figure: &Figure, object: &Value) -> Vec<([u8; 3], usize
     };
     for segment in &figure.segments {
         let mut seen: Vec<[u8; 3]> = Vec::new();
-        for stop in segment_stops(segment) {
-            let shown = displayed_color(version, figure, object, stop);
+        for stop in displayed_segment_paint(version, figure, object, segment).stops {
+            let shown = stop.rgb();
             if !seen.contains(&shown) {
                 seen.push(shown);
                 add(shown, true);
@@ -523,20 +529,49 @@ fn palette(version: f64, figure: &Figure, object: &Value) -> Vec<([u8; 3], usize
     entries
 }
 
-/// The colours of a segment's paint stops (`segmentPaint`): its colour, and the secondary end of a gradient.
-fn segment_stops(segment: &Segment) -> Vec<[u8; 3]> {
-    let mut stops = vec![segment.rgb];
-    match (&segment.paint, segment.secondary) {
-        (Some(paint), secondary) if paint.kind != PaintKind::Solid => {
-            stops.extend(paint.stops.iter().skip(1).map(|stop| stop.rgb));
-            if let (Some((rgb, _)), Some(last)) = (secondary, stops.last_mut()) {
-                *last = rgb;
-            }
+/// `segmentPaint(segment)`: the segment's own paint with its colour and opacity as the first stop and a two-tone's
+/// secondary as the last; without one, solid, or linear to the secondary.
+fn segment_paint(segment: &Segment) -> Paint2 {
+    let first = Stop::new(0.0, segment.rgb, segment.alpha);
+    let secondary = segment.secondary.map(|(rgb, a)| Stop::new(1.0, rgb, 1.0 - f64::from(a) / 255.0));
+    if let Some(paint) = &segment.paint {
+        let kind = match paint.kind {
+            PaintKind::Solid => PaintType::Solid,
+            PaintKind::Linear => PaintType::Linear,
+            PaintKind::Radial => PaintType::Radial,
+            PaintKind::Angular => PaintType::Angular,
+            PaintKind::Diamond => PaintType::Diamond,
+        };
+        let mut stops: Vec<Stop> = paint.stops.iter().map(|stop| Stop::new(stop.offset, stop.rgb, stop.opacity)).collect();
+        if let Some(stop) = stops.first_mut() {
+            stop.color = first.color;
+            stop.opacity = first.opacity;
         }
-        (None, Some((rgb, _))) => stops.push(rgb),
-        _ => {}
+        if let (Some(secondary), Some(last), false) = (secondary, stops.last_mut(), kind == PaintType::Solid) {
+            last.color = secondary.color;
+            last.opacity = secondary.opacity;
+        }
+        return Paint2 { kind, angle: paint.angle, stops };
     }
-    stops
+    match secondary {
+        Some(secondary) => Paint2 { kind: PaintType::Linear, angle: 0.0, stops: vec![first, secondary] },
+        None => Paint2 { kind: PaintType::Solid, angle: 0.0, stops: vec![first] },
+    }
+}
+
+/// `displayedSegmentPaint`: the segment's paint under its pose's colour override; a full override shows the first
+/// stop alone (the secondary end is suppressed, alpha included).
+pub(crate) fn displayed_segment_paint(version: f64, figure: &Figure, object: &Value, segment: &Segment) -> Paint2 {
+    let mut paint = segment_paint(segment);
+    let raw = num(object.get("color_override_raw")).unwrap_or(0.0);
+    if uses_segment_colors(version, figure, object) && (raw as i64 as u32) >> 24 == 255 {
+        paint.kind = PaintType::Solid;
+        paint.stops.truncate(1);
+    }
+    for stop in &mut paint.stops {
+        stop.color = displayed_color(version, figure, object, stop.rgb()).map(f64::from);
+    }
+    paint
 }
 
 /// One figure, text or image: Transform, Appearance and Arrange are open; Connection and Colours are titled.
@@ -670,10 +705,11 @@ fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Fi
     if !palette.is_empty() {
         let items = palette[palette_start..(palette_start + PALETTE_PAGE).min(palette.len())]
             .iter()
-            .map(|(rgb, segments, fills)| {
+            .enumerate()
+            .map(|(offset, (rgb, segments, fills))| {
                 let color = facts::hex(*rgb).to_uppercase();
                 let key = if *fills > 0 { "inspectorView.replaceColorSegmentsAndFills" } else { "inspectorView.replaceColorSegments" };
-                (*rgb, Msg::new(key).with("color", color).with("segments", Msg::count("counts.segments", *segments as f64)).with("fills", Msg::count("counts.fills", *fills as f64)))
+                Swatch { target: ColorTarget::Palette((palette_start + offset) as u32), rgb: *rgb, description: Msg::new(key).with("color", color).with("segments", Msg::count("counts.segments", *segments as f64)).with("fills", Msg::count("counts.fills", *fills as f64)) }
             })
             .collect();
         rows.push(Row::Swatches { label: msg("inspectorView.figureColorPalette"), items });
@@ -843,7 +879,6 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
     let secondary = two_tone && segment.secondary.is_some();
     let fixed = matches!(segment.prim, Prim::Image | Prim::Text);
     let lock = segment.rig.as_ref().is_some_and(|rig| rig.lock.is_some());
-    let solid = segment.paint.as_ref().is_none_or(|paint| paint.kind == PaintKind::Solid) && segment.secondary.is_none();
     let len_flag = num(object.get("len_flag")).unwrap_or(0.0) != 0.0;
     let bend_flag = num(object.get("bend_flag")).unwrap_or(0.0) != 0.0;
     let position = if len_flag { item_f64(object.get("lengths"), joint).unwrap_or(segment.length) } else { segment.length };
@@ -851,14 +886,10 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
     let bend = if bend_flag { item_f64(object.get("bends"), joint).unwrap_or(0.0) } else { segment.bend };
     let title = segment.name.as_deref().filter(|name| !name.is_empty()).map_or_else(|| Label::Msg(Msg::new("builderSurfaceUi.jointNumber").with("id", f64::from(segment.id))), Label::plain);
     let static_switch = SwitchRow { toggle: Toggle::StaticJoint, label: msg("inspectorView.static"), checked: segment.is_static, disabled: false, tip: Some(msg("inspectorView.doesNotTurnWithItsParent")), span: false };
-    let stops: Vec<[u8; 3]> = segment_stops(segment).into_iter().map(|rgb| displayed_color(version, figure, object, rgb)).collect();
-    let paint = if solid { Paint::Solid(stops[0]) } else { Paint::Gradient(stops.iter().enumerate().map(|(index, rgb)| (index as f64 / (stops.len().max(2) - 1) as f64, *rgb)).collect()) };
-    let gradient_kind = segment.paint.as_ref().map_or("linear", |paint| match paint.kind {
-        PaintKind::Solid | PaintKind::Linear => "linear",
-        PaintKind::Radial => "radial",
-        PaintKind::Angular => "angular",
-        PaintKind::Diamond => "diamond",
-    });
+    let shown = displayed_segment_paint(version, figure, object, segment);
+    let solid = shown.is_solid();
+    let gradient_kind = shown.kind.id();
+    let paint = if solid { Paint::Solid(shown.stops[0].rgb()) } else { Paint::Gradient(shown) };
     let colour = ColorRow { paint_picker: true, disabled: false,
         target: ColorTarget::Segment,
         label: msg("inspectorView.colour"),
@@ -1003,6 +1034,64 @@ fn drawing(tool: &'static str) -> Inspector {
         library: false,
         quick: None,
         sections: vec![section("drawing", None, vec![Row::Slot(Slot::DrawTools)])],
+    }
+}
+
+/// What a colour row's picker opens with (`installColorPickers`' resolver in `src/app.mjs`).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Picked {
+    pub paint: Paint2,
+    pub gradients: bool,
+    pub alpha: bool,
+    /// The palette colour a swatch replaces (`entry.color`).
+    pub from: Option<String>,
+}
+
+/// The paint a colour row's picker starts from, read as the row was built: the background's paint (its own colour
+/// override first), the figure's colour and opacity, the segment's displayed paint, a two-tone's secondary colour, a
+/// fill's colour and opacity, a palette colour. `shown` is the colour the row shows (the figure's, or several
+/// figures' shared one), as today's picker starts from the field's value. `None` when the row's target is gone.
+pub(crate) fn picker(document: &Document, frame: &Value, target: ColorTarget, shown: Option<[u8; 3]>) -> Option<Picked> {
+    let records = facts::records(document);
+    let version = num(records.get("version")).unwrap_or(0.0);
+    let solid = |rgb: [u8; 3], opacity: f64, alpha: bool| Picked { paint: Paint2::solid(rgb, opacity), gradients: false, alpha, from: None };
+    if target == ColorTarget::Background {
+        let background_id = num(frame.get("background_id"));
+        let background = records.get("backgrounds").and_then(Value::elements).and_then(|items| items.iter().find(|item| num(item.get("background_id")) == background_id));
+        let paint = match num(frame.get("_stykBackgroundColor")) {
+            Some(color) => {
+                let mut solid = styk_doc::Obj::new();
+                solid.set("kind", Value::Num(2.0));
+                solid.set("color", Value::Num(color));
+                Paint2::of_background(Some(&Value::object(solid)))
+            }
+            None => Paint2::of_background(background.as_ref()),
+        };
+        return paint.ok().map(|paint| Picked { paint, gradients: true, alpha: true, from: None });
+    }
+    let object = facts::selected_object(document, frame)?;
+    let figure = facts::figure_of(document, &object)?;
+    match target {
+        ColorTarget::Background => None,
+        ColorTarget::Figure => Some(solid(shown?, 1.0 - num(object.get("field28")).unwrap_or(0.0) / 255.0, true)),
+        ColorTarget::Segment => {
+            let segment = usize::try_from(facts::selection(document).joint).ok().and_then(|joint| figure.segments.get(joint))?;
+            Some(Picked { paint: displayed_segment_paint(version, &figure, &object, segment), gradients: true, alpha: true, from: None })
+        }
+        ColorTarget::SegmentGradient => {
+            let segment = usize::try_from(facts::selection(document).joint).ok().and_then(|joint| figure.segments.get(joint))?;
+            let (rgb, _) = segment.secondary?;
+            // The secondary colour is a plain colour field: today's default picker, opaque, without gradients.
+            Some(solid(displayed_color(version, &figure, &object, rgb), 1.0, false))
+        }
+        ColorTarget::Polygon(index) => {
+            let polygon = figure.polyfills.get(index as usize)?;
+            Some(solid(displayed_color(version, &figure, &object, polygon.rgb), polygon.alpha, true))
+        }
+        ColorTarget::Palette(index) => {
+            let (rgb, ..) = *palette(version, &figure, &object).get(index as usize)?;
+            Some(Picked { from: Some(facts::hex(rgb)), ..solid(rgb, 1.0, false) })
+        }
     }
 }
 
