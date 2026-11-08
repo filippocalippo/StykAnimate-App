@@ -143,6 +143,7 @@ fn fitted_resizes_follow_until_manual_navigation_and_every_view_input_keys_the_r
     assert!(host.fitted());
     let second = host.request(0.0, 1.0, 4, options.clone()).unwrap();
     assert_ne!(first, second);
+    assert_eq!(first.prepared, second.prepared);
     host.pan_by([13.5, -4.25]).unwrap();
     let manual = host.view();
     host.resize(Viewport {

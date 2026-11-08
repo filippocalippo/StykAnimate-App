@@ -1107,3 +1107,14 @@ finer curves for large text; each fails without its rule), `-p styk-render --tes
 the `styk-draw` unit test of `GlyphMask::layout`; `styk render` prints the rounds, layer
 memory and glyph masks of a frame; `styk render` / `styk raster` /
 `styk diff` for native comparisons ([D13](decisions/0013-app-parity-rule.md)).
+
+### Native host presentation
+
+A detached `RenderedFrame` composites premultiplied RGBA over its host's pass.
+`Renderer::present` still copies the browser surface. Native preparation keys are
+world-space inputs; navigation changes only the painter key and drawing view, so
+`set_list` receives the same Arc and retains geometry uploads. The native worker
+records one `FramePlan`, admits its concrete working-set bound, keeps it while
+picture services finish, then consumes it in `render_planned`. The browser/export
+`render` entry builds and consumes the same plan internally. See
+[native stage](../native/stage.md) for byte and lifetime ownership.

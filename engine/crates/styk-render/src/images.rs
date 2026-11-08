@@ -197,6 +197,19 @@ impl Renderer {
         true
     }
 
+    /// Extend a native resident-only table without replacing unchanged sprite
+    /// placements or allocating a soft atlas. Admission precedes replacement.
+    pub fn sync_pictures_bounded(&mut self, assets: &Assets, table_bytes: u64) -> Result<(), u64> {
+        if assets.atlas.len() == self.pictures.known { return Ok(()); }
+        let values = self.pictures.values();
+        let device_limit = u64::from(self.device.limits().max_texture_dimension_2d) * u64::from(crate::resources::TABLE_WIDTH) * 16;
+        let held = PictureState::new_bounded(&self.device, &self.queue, assets, 0, false,
+            |entry| values.get(&(entry.layer, entry.y << 12 | entry.x)).and_then(|v| v.checked_sub(1)), table_bytes.min(device_limit))?;
+        std::mem::replace(&mut self.pictures, held).destroy();
+        self.rebind_sprites();
+        Ok(())
+    }
+
     /// The picture at `entry` is in layer `layer` of the sprite texture (`None`: it is not, its soft copy draws). Takes
     /// effect with [`Renderer::flush_pictures`].
     pub fn set_picture(&mut self, entry: &styk_eval::assets::AtlasEntry, layer: Option<u32>) {

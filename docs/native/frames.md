@@ -17,16 +17,20 @@ not stop the document engine or its other jobs.
 
 ## Interface contract
 
-- `request(consumer, tick, view)` replaces that consumer's demand. Stage has a reserved
+- `request(consumer, tick, inputs)` replaces that consumer's demand. Stage has a reserved
   slot; then come 48 playback, 48 onion, eight preview and eight thumbnail slots.
   There is no queue node per pointer move. Invalid slots and inputs are refused.
-- A key contains document identity, revision, resource epoch, exact fractional tick,
-  size, zoom, pan, rotation, flip, backing quality, MSAA samples, hidden figures, effects, camera, clipping,
-  background, figure translations and ordered onion settings (including per-ghost
-  hidden figures). Zero has numeric identity; NaN and infinity
-  are refused. Raster size and transform travel to presentation even though geometry
-  itself is in world coordinates. Admission hashes the key once, outside the queue
-  lock. Workers resolve hash collisions with complete key equality.
+- A preparation key contains document lifetime, revision, resource epoch, exact
+  fractional tick, hidden figures, effects, camera application, canvas culling,
+  background override, figure translations and ordered onion settings (including
+  per-ghost hidden figures). Zero has numeric identity; NaN/infinity are refused.
+  Navigation is absent: backing size/density, zoom, pan, rotation, flip, quality and
+  samples belong to the painter's presentation key. Camera and clipping also supply
+  its drawing policy. Repeating a consumer's preparation key preserves its request
+  token, including while preparation is in flight. Pan/zoom neither cancel nor
+  rebuild a list; the same Arc reaches Renderer::set_list for upload reuse.
+  Admission hashes preparation inputs outside the queue lock. Workers resolve hash
+  collisions with complete key equality.
 - `revise` cancels all old requests immediately through atomic identities. The
   resource epoch must advance when image/cel bounds change without an edit. Revision
   and resource changes are not inferred by reading the engine on the interface.
@@ -66,15 +70,19 @@ and `encode_composed_remembering`. Large object/encoding maps retain styk-eval's
 existing parallel implementation. Onion composition uses `styk_eval::onion::compose`
 and the normal encoder, with camera mode hiding onions as in the editor.
 
-Each worker keeps one reuse builder while draining a work burst and releases it
-before sleeping. This bounds the number of working scenes and avoids idle workers
-pinning closed documents. It does not promise reuse across an idle gap. Cancellation
-is checked between evaluation, geometry, effect and onion preparation, and encoding;
-an already-running engine phase finishes before its scratch can be freed.
+Each worker retains its FrameBuilder across short sleeps. Its derived geometry,
+scene and encoder buffers are bounded by `cache_bytes / workers`; larger reuse
+state is discarded after the work unit without refusing the prepared frame. One
+second without work releases reuse state; close releases it immediately at the next
+worker boundary. Geometry/encoder owners account vector capacities, nested buffers,
+resolved effects and glyph slices, not a multiplier of input size. Shared authored
+figures/documents and allocator overhead are separate, as in the existing scene
+cache accounting. Cancellation is checked between preparation phases; an executing
+engine phase finishes before its scratch can be freed.
 
 The ready cache has a hard byte limit and at most 113 entries. Charges use
 `drawlist::retained_bytes_checked`, including buffer capacities, effect stacks and
-glyph slices, plus entry and view metadata. Request vector capacities are validated
+glyph slices, plus entry and preparation metadata. Request vector capacities are validated
 as well as lengths, so a short vector with a huge spare allocation is refused.
 Shared allocations across different entries
 are conservatively charged again. Oversized single frames are explicitly refused;
@@ -83,8 +91,7 @@ prefers entries at the requesting priority or below; background work cannot
 remove the visible stage to make itself fit. Results always carry their full key.
 
 The byte limit describes retained ready frames, not total process memory. Engine
-evaluation scratch, document/assets, movieclip and anchor caches, reusable geometry
-within a work burst, and renderer/GPU resources have their existing owners and
+evaluation scratch, document/assets, movieclip and anchor caches, and renderer/GPU resources have their existing owners and
 budgets. At most the configured worker count can prepare frames simultaneously.
 No claim is made that a ready-cache limit bounds an individual evaluator allocation.
 
@@ -100,7 +107,7 @@ ready. A frame also requested by the stage is protected and charged as stage wor
 ## Coverage and remaining integration
 
 Core tests exercise real worker units with `ManualSpawner`, exact draw-list parity
-against the engine, a revision change during a snapshot, 1,000 superseding views,
+against the engine, a revision change during a snapshot, 1,000 superseding preparation requests,
 queue contention, priorities, stage protection, byte refusal, bounded lookahead,
 spawn failure, injected time and close during preparation. Engine tests compare
 reused output with the original evaluate/build/encode composition on repository
@@ -108,8 +115,12 @@ fixtures, including fractional ticks, cameras, effects and onion skins. Test-onl
 lossless encoding compares every typed payload field, including effect parameters,
 gradient paints and float bits. Coverage assertions prove generated birth-anchor
 sampling and offsets, nonzero parallax, hidden primitives and actual culling.
-Dense same-tick views (65,536 translations) verify that readiness performs zero
+Dense same-tick preparation inputs (65,536 translations) verify that readiness performs zero
 full-key comparisons; collision, cache compaction and reused-slot cases cover tickets.
+
+`FrameDocument::picture_engine` supplies the same document engine to the paint
+worker. Its picture workers must already be running through the application's
+spawner; a source without that service can still prepare vector-only documents.
 
 This is scheduling infrastructure. K-doc connects the source and revision/resource
 notifications; K-stage connects draw submission, picture readiness and live session

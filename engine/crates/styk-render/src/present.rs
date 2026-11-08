@@ -25,7 +25,7 @@ impl Renderer {
     /// Move, never copy, the last output to a presenter. Submit its encoder
     /// before publishing it to another thread on the same device/queue.
     pub fn take_frame(&mut self) -> Option<RenderedFrame> {
-        self.output.take().map(|output| RenderedFrame { output, pipeline: self.blit.clone() })
+        self.output.take().map(|output| RenderedFrame { output, pipeline: self.composite.clone() })
     }
 
     /// Worker-only recycling after the presenter's submission. Queue ordering

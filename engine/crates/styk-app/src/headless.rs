@@ -12,15 +12,16 @@ use iced_runtime::user_interface::Cache;
 use styk_design::{Theme, warm_up, widgets};
 use styk_platform::window::Image;
 use styk_ui::component_sheet::Sheet;
+use styk_ui::screens::Screen;
 
 /// Draws the interface in `theme`, `size` logical pixels at `scale`, and returns the picture (RGBA, top row first).
 ///
 /// Fails when the machine has no graphics adapter the renderer can use.
-pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>) -> Result<Image, String> {
-    pollster::block_on(screenshot_async(theme, size, scale, sheet))
+pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>) -> Result<Image, String> {
+    pollster::block_on(screenshot_async(theme, size, scale, sheet, band))
 }
 
-async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>) -> Result<Image, String> {
+async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>) -> Result<Image, String> {
     let settings = iced::Settings { font: widgets::INTER, text_size: Pixels(16.0), ..iced::Settings::default() };
     let mut renderer = <iced::Renderer as Headless>::new(renderer::Settings::from(&settings), None).await.ok_or("no graphics adapter is available to draw offscreen")?;
     // Nothing here is an event loop to keep responsive: the font system is built and the bundled fonts installed in place.
@@ -28,9 +29,12 @@ async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Opt
     let bounds = Size::new(size.0 as f32, size.1 as f32);
     let style = styk_ui::window_style(theme);
     let iced_theme = styk_ui::base_theme(theme);
-    let view: iced::Element<'_, ()> = match sheet {
-        Some(sheet) => sheet.view().map(|_| ()).boxed(),
-        None => styk_ui::view(theme, ready),
+    // A band screen: the band over its window, laid out for this size with its words measured.
+    let shell = band.map(|screen| styk_ui::screens::band_shell(screen, size, styk_ui::shell::measure_labels(ready)));
+    let view: iced::Element<'_, ()> = match (sheet, shell.as_ref()) {
+        (Some(sheet), _) => sheet.view().map(|_| ()).boxed(),
+        (None, Some(shell)) => styk_ui::shell::window(styk_ui::shell::Params { shell, theme, ready, maximize: styk_services::shell::chrome::MaxButtonState::Idle }, styk_ui::loading(theme)).map(|_| ()).boxed(),
+        (None, None) => styk_ui::view(theme, ready),
     };
     let mut interface: UserInterface<'_, (), iced::Theme, iced::Renderer> = UserInterface::build(view, bounds, Cache::default(), &mut renderer);
     // One redraw, so widgets that lay themselves out on their first frame have.
@@ -66,7 +70,7 @@ mod tests {
 
     /// The picture, or nothing on a machine without a graphics adapter (a bare CI container), which cannot run this.
     fn picture(theme: Theme, size: (u32, u32), scale: f32) -> Option<Image> {
-        match screenshot(theme, size, scale, None) {
+        match screenshot(theme, size, scale, None, None) {
             Ok(image) => Some(image),
             Err(error) if error.contains("no graphics adapter") => {
                 eprintln!("skipped: {error}");

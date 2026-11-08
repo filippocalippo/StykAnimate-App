@@ -18,6 +18,13 @@ pub(crate) struct Decoded {
     pub(crate) cleared: Vec<(u32, u64)>,
 }
 
+/// One bounded upload batch. Refused placements contain clearing tiles, not
+/// successful picture data; a complete-frame presenter must not acknowledge them.
+pub struct PictureBatch {
+    pub images: Vec<Arc<DecodedImage>>,
+    pub refused: Vec<u64>,
+}
+
 /// Takes from `cleared` the places that `max_bytes` of pixels leave room for after `bytes` were taken (one at least when `first`: nothing
 /// else was), for the caller to make tiles of with [`styk_eval::assets::blank_tile`] once it has let go of its lock.
 pub(crate) fn take_cleared(cleared: &mut Vec<(u32, u64)>, first: bool, bytes: usize, max_bytes: usize) -> Vec<(u32, u64)> {
@@ -210,6 +217,7 @@ pub(crate) struct Store {
     redecode_pending: bool,
     preparing: Option<DecodeScope>,
     remaining: usize,
+    refused_images: HashSet<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -283,12 +291,17 @@ impl Engine {
     /// allocate in pieces nothing can refuse, so a picture is decoded only when the memory can hold its work; one it
     /// cannot hold is not shown (like one that cannot be decoded) and the engine goes on ([`Engine::pictures_refused`]).
     pub(crate) fn decode_pixels(&self, generation: &Generation, picture: Picture) -> Decoded {
+        self.inner.pictures_decoded.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let before = match picture {
             Picture::Cel(cel) | Picture::CelChanged(cel) => generation.assets.cels.get(&cel).map(|(tiles, _)| (tiles.clone(), tiles.artwork_bounds())),
             Picture::Image(_) | Picture::Soft(_) => None,
         };
         match styk_eval::assets::decode_picture(&generation.prepared.doc, &generation.assets, picture) {
             Ok(decoded) => {
+                if let Picture::Image(index) = picture {
+                    let mut state = self.inner.state.lock();
+                    if state.images.lineage == generation.lineage { state.images.refused_images.remove(&index); }
+                }
                 if let Some((tiles, bounds)) = before
                     && tiles.artwork_bounds() != bounds
                 {
@@ -297,6 +310,10 @@ impl Engine {
                 Decoded { images: decoded, cleared: Vec::new() }
             }
             Err(_) => {
+                if let Picture::Image(index) = picture {
+                    let mut state = self.inner.state.lock();
+                    if state.images.lineage == generation.lineage { state.images.refused_images.insert(index); }
+                }
                 self.inner.pictures_refused.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 // A cel placed among slots the document had is drawn from slots that hold the pixels of the cel before, until its own are written:
                 // a refused cel is written over with nothing, like a picture that cannot be decoded is not shown, so a frame never draws the old.
@@ -358,6 +375,11 @@ impl Engine {
     /// Decoded images the renderer has not uploaded yet, up to `max_bytes` of pixels
     /// (at least one image), so one frame never uploads more than it can afford.
     pub fn take_images(&self, max_bytes: usize) -> Vec<Arc<DecodedImage>> {
+        self.take_picture_batch(max_bytes).images
+    }
+
+    /// As take_images, with explicit refusal provenance for complete-frame hosts.
+    pub fn take_picture_batch(&self, max_bytes: usize) -> PictureBatch {
         let mut taken = std::collections::LinkedList::new();
         let mut stale = std::collections::LinkedList::new();
         let mut bytes = 0;
@@ -390,7 +412,9 @@ impl Engine {
         if released { self.inner.state.notify_all(); }
         // Node disposal and output allocation happen after the shared lock.
         drop(stale);
-        taken.into_iter().chain(blanks.into_iter().map(|(slot, placement)| Arc::new(styk_eval::assets::blank_tile(slot, placement)))).collect()
+        let refused = blanks.iter().map(|(_, placement)| *placement).collect();
+        let images = taken.into_iter().chain(blanks.into_iter().map(|(slot, placement)| Arc::new(styk_eval::assets::blank_tile(slot, placement)))).collect();
+        PictureBatch { images, refused }
     }
 
     /// Decodes pictures of `generation`'s document that a document kept a few pages at a time ([`Residency`]) needs:
@@ -398,13 +422,24 @@ impl Engine {
     /// the ticks ahead) behind it. Their pixels reach the renderer through [`Engine::take_images`] like the rest, under
     /// the picture budget ([`DEMAND_DECODES`] times it, for a document kept this way).
     pub fn decode_images(&self, generation: &Arc<Generation>, indices: &[usize], urgent: bool) {
-        if indices.is_empty() { return }
+        self.request_picture_jobs(generation, indices.iter().copied().map(Picture::Image), urgent);
+    }
+
+    /// Refill evicted drawing cels through the same bounded picture queue and
+    /// decoder as initial publication. Callers coalesce requests by placement.
+    pub fn decode_cels(&self, generation: &Arc<Generation>, cels: &[usize]) {
+        self.request_picture_jobs(generation, cels.iter().copied().map(Picture::Cel), true);
+    }
+
+    fn request_picture_jobs(&self, generation: &Arc<Generation>, pictures: impl Iterator<Item=Picture>, urgent: bool) {
         let mut job = crate::TaskQueue::new();
-        for &index in indices { job.push_back(crate::OrdinaryTask::Decode(generation.clone(), Picture::Image(index))); }
+        let mut count = 0;
+        for picture in pictures { job.push_back(crate::OrdinaryTask::Decode(generation.clone(), picture)); count += 1; }
+        if count == 0 { return; }
         {
             let mut state = self.inner.state.lock();
             if self.inner.stopping.load(std::sync::atomic::Ordering::SeqCst) || state.images.lineage != generation.lineage { return }
-            state.images.remaining += indices.len();
+            state.images.remaining += count;
             state.images.demand = true;
             if urgent {
                 job.append(&mut state.tasks);
@@ -487,6 +522,16 @@ impl Engine {
             if let Some(retired) = retired { drop(retired); self.inner.state.notify_all(); return }
         }
     }
+
+    /// Refusal is distinct from a malformed/empty picture. Complete-frame hosts
+    /// preserve their last picture on refusal instead of acknowledging blanks.
+    pub fn images_refused(&self, generation: &Generation, indices: &[u32]) -> bool {
+        let state = self.inner.state.lock();
+        state.images.lineage == generation.lineage && indices.iter().any(|i| state.images.refused_images.contains(&(*i as usize)))
+    }
+
+    /// Actual decoder executions, for worker diagnostics and reuse measurements.
+    pub fn pictures_decoded(&self) -> usize { self.inner.pictures_decoded.load(std::sync::atomic::Ordering::Relaxed) }
 
     /// Pictures the engine did not decode because it was too low on memory.
     pub fn pictures_refused(&self) -> usize { self.inner.pictures_refused.load(std::sync::atomic::Ordering::Relaxed) }

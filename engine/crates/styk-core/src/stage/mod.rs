@@ -27,11 +27,35 @@ pub fn gpu_instances() -> Vec<wgpu::InstanceDescriptor> {
 
 use crate::engine::SceneOptions;
 use crate::frames::{self, Consumer, Frames};
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+
+/// Painter-only inputs, independent of world-space preparation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Presentation {
+    pub size: [u32; 2],
+    pub density: f64,
+    pub zoom: f64,
+    pub pan: [f64; 2],
+    pub rotation: f64,
+    pub flip: bool,
+    pub quality: f64,
+    pub samples: u8,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct PaintKey {
+    pub prepared: frames::Key,
+    pub view: Presentation,
+}
 
 /// One document's stage; document and frame workers keep their existing owners.
 pub struct Host {
     frames: Frames,
+    pub(crate) navigation: Arc<AtomicU64>,
+    pub(crate) presentation: Option<Presentation>,
+    closed: bool,
     canvas: [u32; 2],
     viewport: Viewport,
     view: View,
@@ -53,6 +77,9 @@ impl Host {
         let view = View::fit_canvas(canvas, &viewport);
         Ok(Self {
             frames,
+            navigation: Arc::new(AtomicU64::new(1)),
+            presentation: None,
+            closed: false,
             canvas,
             viewport,
             view,
@@ -89,7 +116,15 @@ impl Host {
     }
 
     fn changed(&mut self) -> Result<(), frames::Error> {
-        self.frames.cancel(Consumer::Stage)
+        if self.closed {
+            return Err(frames::Error::Closed);
+        }
+        self.navigation
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                value.checked_add(1)
+            })
+            .map(|_| ())
+            .map_err(|_| frames::Error::IdentityExhausted)
     }
 
     pub fn set_view(&mut self, view: View) -> Result<(), frames::Error> {
@@ -226,28 +261,37 @@ impl Host {
         quality: f64,
         samples: u8,
         scene: SceneOptions,
-    ) -> Result<frames::Key, frames::Error> {
+    ) -> Result<PaintKey, frames::Error> {
         let size = self
             .viewport
             .backing_size(quality)
             .ok_or(frames::Error::InvalidRequest)?;
         let density = self.viewport.dpr * quality;
-        self.frames.request(
-            Consumer::Stage,
-            tick,
-            Arc::new(frames::View {
-                size,
-                zoom: self.view.zoom * density,
-                pan: self.view.pan.map(|x| x * density),
-                rotation: self.view.rotation,
-                flip: self.view.flip,
-                quality,
-                samples,
-                scene,
-            }),
-        )
+        if !matches!(samples, 1 | 4) {
+            return Err(frames::Error::InvalidRequest);
+        }
+        let view = Presentation {
+            size,
+            density,
+            zoom: self.view.zoom * density,
+            pan: self.view.pan.map(|x| x * density),
+            rotation: self.view.rotation,
+            flip: self.view.flip,
+            quality,
+            samples,
+        };
+        if self.presentation.as_ref() != Some(&view) {
+            self.changed()?;
+        }
+        let prepared =
+            self.frames
+                .request(Consumer::Stage, tick, Arc::new(frames::Inputs { scene }))?;
+        self.presentation = Some(view.clone());
+        Ok(PaintKey { prepared, view })
     }
+
     pub fn close(&mut self) {
+        self.closed = true;
         self.frames.close();
     }
 }

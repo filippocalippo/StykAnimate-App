@@ -179,3 +179,14 @@ document or evaluation cache. Only revision and dirty scalars for tab chrome ret
 values; editing, saving, switching and closing are refused until the owner returns. API names remain fixed.
 `Effect::Called` carries the session's actual answer and effects. Tests cover the blocked worker, busy
 queries, cancellation during bake and at commit, retry, one undo entry and save bytes against today's bake.
+
+## The band's use of it (K-shell)
+
+The top band (`styk_core::shell`, [shell-band.md](shell-band.md)) reads tab order and recency from this owner
+(`Documents::tabs`, `recency`, `successor`, `neighbour`, `reorder`) and holds none of them itself; `documents/tabs.rs`
+adds only `drop_index`, where a dragged tab lands. `styk-app/src/top_band.rs` attaches the host (`HostOptions`: the engine
+through `styk_core::engine`, the platform's `Spawner` and `LocalFiles`, the one application clock) and opens the files the
+command line and a script name with `Request::OpenFile`, one at a time, polling the host on the frames it draws while an
+open runs. A project the tabs refuse comes back as a failure and is disposed of on the host's worker. The band's other
+commands (Save, Close, New, Rename) are still dropped until the command registry and the dialogs exist; `Event::Closed`
+tells the band when a project closed.

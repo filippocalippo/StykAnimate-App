@@ -1,45 +1,56 @@
-//! Worker-owned sprite residency, using the engine's existing page owner.
+//! Worker-owned residency; pixels arrive from the document engine's bounded queue.
 use super::{PaintError, PaintLimits};
 use std::collections::{HashMap, HashSet};
-use styk_engine::{Acquired, Generation, PlaceIndex, Residency, pictures_of};
-use styk_eval::assets::{PAGE, Picture, decode_picture};
+use std::sync::Arc;
+use styk_engine::{Acquired, Engine, Generation, PlaceIndex, Residency, Uploaded, pictures_of};
+use styk_eval::assets::PAGE;
 use styk_eval::drawlist::DrawList;
 use styk_render::Renderer;
 
 #[derive(Default)]
 pub(super) struct Pictures {
-    identity: Option<(u64, u64, u64, u64)>,
+    lineage: Option<u64>,
+    assets: Option<u64>,
     residency: Option<Residency>,
     index: PlaceIndex,
     cel_at: HashMap<(u32, u32, u32), usize>,
     cel_pages: HashMap<usize, Vec<u32>>,
-    loaded_images: HashSet<u32>,
-    loaded_cels: HashSet<usize>,
+    uploaded: Uploaded,
+    blank_images: HashSet<u32>,
+    requested_images: HashSet<u32>,
+    requested_cels: HashSet<usize>,
+    refused: HashSet<u64>,
+    pub uploaded_bytes: u64,
 }
 impl Pictures {
+    pub(super) fn begin(&mut self) {
+        self.requested_images.clear();
+        self.requested_cels.clear();
+        self.refused.clear();
+    }
+    /// One upload slice. False keeps the admitted candidate pending; the caller
+    /// submits this slice and yields while existing engine workers decode ahead.
     pub(super) fn prepare(
         &mut self,
         renderer: &mut Renderer,
-        generation: &Generation,
-        resource_epoch: u64,
+        generation: &Arc<Generation>,
+        engine: Option<&Engine>,
         list: &DrawList,
         limits: PaintLimits,
-        cancelled: impl Fn() -> bool,
-    ) -> Result<(), PaintError> {
+    ) -> Result<bool, PaintError> {
         let assets = &generation.assets;
         let budget = limits.sprite_bytes;
-        let identity = (
-            generation.lineage,
-            generation.revision,
-            assets.id(),
-            resource_epoch,
-        );
-        if self.identity != Some(identity) {
+        if self.lineage != Some(generation.lineage) {
             *self = Self {
-                identity: Some(identity),
-                index: PlaceIndex::new(assets),
+                lineage: Some(generation.lineage),
+                uploaded_bytes: self.uploaded_bytes,
                 ..Self::default()
             };
+        }
+        if self.assets != Some(assets.id()) {
+            self.index = PlaceIndex::new(assets);
+            self.cel_at.clear();
+            self.cel_pages.clear();
             for (&id, (_, levels)) in &assets.cels {
                 let mut pages = Vec::new();
                 for &slot in levels.iter().flatten() {
@@ -52,33 +63,47 @@ impl Pictures {
                 pages.dedup();
                 self.cel_pages.insert(id, pages);
             }
-            if assets.pages == 0 {
-                renderer.prepare_sprites(assets);
-            } else {
-                // Texture arrays have two layers minimum (D11). Refuse before allocation.
-                let required = 2 * u64::from(PAGE).pow(2) * 4;
-                if required > budget {
-                    self.identity = None;
-                    return Err(PaintError::Budget {
-                        required,
-                        limit: budget,
-                    });
+            if self.residency.is_none() {
+                if assets.pages == 0 {
+                    renderer.prepare_sprites(assets);
+                } else {
+                    let required = 2 * u64::from(PAGE).pow(2) * 4;
+                    if required > budget {
+                        return Err(PaintError::Budget {
+                            required,
+                            limit: budget,
+                        });
+                    }
+                    renderer
+                        .prepare_sprites_export_bounded(assets, 2, limits.working_bytes)
+                        .map_err(|required| PaintError::Budget {
+                            required,
+                            limit: limits.working_bytes,
+                        })?;
+                    self.residency = Some(Residency::new(assets.pages, 2));
                 }
-                if let Err(required) =
-                    renderer.prepare_sprites_export_bounded(assets, 2, limits.working_bytes)
-                {
-                    self.identity = None;
-                    return Err(PaintError::Budget {
+            } else {
+                renderer
+                    .sync_pictures_bounded(assets, limits.working_bytes)
+                    .map_err(|required| PaintError::Budget {
                         required,
                         limit: limits.working_bytes,
-                    });
+                    })?;
+                if let Some(residency) = &mut self.residency {
+                    residency.extend(assets.pages);
                 }
-                self.residency = Some(Residency::new(assets.pages, 2));
             }
+            // The assets owner assigns stable serials to unchanged cel payloads.
+            // Only new placements invalidate their previous texels, not revisions
+            // or resource epochs (bounds changes have no new image pixels).
+            self.uploaded.observe(assets);
+            self.assets = Some(assets.id());
         }
         if assets.pages == 0 {
-            return Ok(());
+            return Ok(true);
         }
+        let engine = engine
+            .ok_or_else(|| PaintError::Device("document picture service unavailable".into()))?;
         let images = pictures_of(list, &self.index);
         let mut cels = HashSet::new();
         for prim in &list.prims {
@@ -135,10 +160,9 @@ impl Pictures {
                 Acquired::Given { layer, evicted } => {
                     if let Some(old) = evicted {
                         renderer.map_sprite_page(old, None);
-                        self.loaded_images
+                        self.uploaded.forget_page(old);
+                        self.blank_images
                             .retain(|&i| assets.atlas[i as usize].layer != old);
-                        self.loaded_cels
-                            .retain(|id| !self.cel_pages[id].contains(&old));
                         for image in styk_engine::images_on(assets, old) {
                             renderer.set_picture(&assets.atlas[image], None);
                         }
@@ -155,50 +179,106 @@ impl Pictures {
         }
         renderer.flush_sprite_map();
         renderer.flush_pictures();
-        for image in images {
-            if cancelled() {
-                return Err(PaintError::Closed);
-            }
-            if self.loaded_images.contains(&image) {
+
+        let batch = engine.take_picture_batch(4 << 20);
+        self.refused.extend(batch.refused);
+        for image in batch.images {
+            if image.soft {
                 continue;
             }
-            let decoded = decode_picture(
-                &generation.prepared.doc,
-                assets,
-                Picture::Image(image as usize),
-            )
-            .map_err(|_| PaintError::Decode)?;
-            renderer.upload_images(assets, decoded.iter());
-            let entry = &assets.atlas[image as usize];
-            // A malformed image is blank, as in export. Never expose old texels.
-            renderer.set_picture(
-                entry,
-                if decoded.is_empty() {
-                    None
-                } else {
-                    residency.layer_of(entry.layer)
-                },
-            );
-            self.loaded_images.insert(image);
-        }
-        let mut cels: Vec<_> = cels.into_iter().collect();
-        cels.sort_unstable();
-        for cel in cels {
-            if cancelled() {
-                return Err(PaintError::Closed);
-            }
-            if self.loaded_cels.contains(&cel) {
+            let entry = if image.drawing {
+                assets.drawing.get(image.index as usize)
+            } else {
+                assets.atlas.get(image.index as usize)
+            };
+            let Some(entry) = entry.filter(|e| e.valid) else {
+                continue;
+            };
+            if image.placement != 0 && !assets.holds_placement(image.placement) {
                 continue;
             }
-            // Refusal never marks a cel ready or publishes the candidate. A later
-            // successful request overwrites all its slots before showing it.
-            let decoded = decode_picture(&generation.prepared.doc, assets, Picture::Cel(cel))
-                .map_err(|_| PaintError::Decode)?;
-            renderer.upload_images(assets, decoded.iter());
-            self.loaded_cels.insert(cel);
+            if residency.layer_of(entry.layer).is_none() {
+                continue;
+            }
+            if !self.refused.contains(&image.placement) && self.uploaded.has(entry) {
+                continue;
+            }
+            renderer.upload_images(assets, std::iter::once(image.as_ref()));
+            self.uploaded_bytes = self.uploaded_bytes.saturating_add(image.rgba.len() as u64);
+            if !self.refused.contains(&image.placement) {
+                self.uploaded.record(assets, &image);
+                if !image.drawing {
+                    renderer.set_picture(entry, residency.layer_of(entry.layer));
+                }
+            }
         }
         renderer.flush_pictures();
-        residency.touch(&pages);
-        Ok(())
+        if cels
+            .iter()
+            .any(|&id| self.refused.contains(&assets.placement(id)))
+        {
+            return Err(PaintError::Decode);
+        }
+        let missing_images: Vec<_> = images
+            .iter()
+            .copied()
+            .filter(|i| {
+                !self.blank_images.contains(i)
+                    && assets
+                        .atlas
+                        .get(*i as usize)
+                        .is_some_and(|e| e.valid && !self.uploaded.has(e))
+            })
+            .collect();
+        let missing_cels: Vec<_> = cels
+            .iter()
+            .copied()
+            .filter(|id| {
+                assets.cels[id].1.iter().flatten().any(|&slot| {
+                    assets
+                        .drawing
+                        .get(slot as usize)
+                        .is_some_and(|e| e.valid && !self.uploaded.has(e))
+                })
+            })
+            .collect();
+        if missing_images.is_empty() && missing_cels.is_empty() {
+            residency.touch(&pages);
+            return Ok(true);
+        }
+        if engine.images_backlog() == (0, 0) {
+            if engine.images_refused(generation, &missing_images)
+                && missing_images.iter().any(|i| self.requested_images.contains(i)) {
+                return Err(PaintError::Decode);
+            }
+            // Initial publication already queues decodes. Only missing/evicted
+            // resources need demand jobs, once; malformed images stay blank.
+            for &image in &missing_images {
+                if !self.requested_images.insert(image) {
+                    self.blank_images.insert(image);
+                    renderer.set_picture(&assets.atlas[image as usize], None);
+                }
+            }
+            if missing_cels
+                .iter()
+                .any(|cel| self.requested_cels.contains(cel))
+            {
+                return Err(PaintError::Decode);
+            }
+            let demand: Vec<_> = missing_images
+                .iter()
+                .copied()
+                .filter(|i| !self.blank_images.contains(i))
+                .map(|i| i as usize)
+                .collect();
+            self.requested_cels.extend(&missing_cels);
+            engine.decode_images(generation, &demand, true);
+            engine.decode_cels(generation, &missing_cels);
+            renderer.flush_pictures();
+            if demand.is_empty() && missing_cels.is_empty() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }

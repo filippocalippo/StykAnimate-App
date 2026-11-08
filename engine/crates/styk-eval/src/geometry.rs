@@ -442,8 +442,10 @@ struct Built {
 /// What a build keeps of one object for the next build over the same document.
 #[derive(Clone)]
 struct Kept {
-    object: Arc<Object>,
-    figure: Arc<Figure>,
+    // Identity only: a sleeping reuse owner must not pin sampled pose graphs.
+    // Weak keeps the allocation identity stable even after its payload is gone.
+    object: std::sync::Weak<Object>,
+    figure: std::sync::Weak<Figure>,
     /// Where the figure stood in the scene's table (the items name it).
     table: u32,
     root: [u64; 2],
@@ -455,7 +457,7 @@ struct Kept {
 
 impl Kept {
     fn new(object: &Arc<Object>, figure: &Arc<Figure>, table: u32, root: [f64; 2], ik: Option<crate::ik::Solution>, built: Arc<Built>) -> Kept {
-        Kept { object: object.clone(), figure: figure.clone(), table, root: root.map(f64::to_bits), ik, built, serial: 0 }
+        Kept { object: Arc::downgrade(object), figure: Arc::downgrade(figure), table, root: root.map(f64::to_bits), ik, built, serial: 0 }
     }
 }
 
@@ -463,7 +465,7 @@ impl Kept {
 /// (the same node of the typed frame), its figure, the root it hangs from and the pose inverse kinematics gave it.
 fn reuse(previous: Option<&[Option<Kept>]>, slot: usize, object: &Arc<Object>, figure: &Arc<Figure>, table: u32, root: [f64; 2], ik: Option<&crate::ik::Solution>) -> Option<Arc<Built>> {
     let kept = previous?.get(slot)?.as_ref()?;
-    (Arc::ptr_eq(&kept.object, object) && Arc::ptr_eq(&kept.figure, figure) && kept.table == table && kept.root == root.map(f64::to_bits) && kept.ik.as_ref() == ik).then(|| kept.built.clone())
+    (kept.object.as_ptr() == Arc::as_ptr(object) && kept.figure.as_ptr() == Arc::as_ptr(figure) && kept.table == table && kept.root == root.map(f64::to_bits) && kept.ik.as_ref() == ik).then(|| kept.built.clone())
 }
 
 /// Numbers the builds of every memory: an object's build is never taken for another memory's.

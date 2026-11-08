@@ -1,10 +1,8 @@
 //! Conservative byte admission for a worker-driven stage. This counts concrete
 //! textures/buffers and their replacement overlap, not a multiplier of the input
 //! file. Driver pipeline/command bookkeeping is outside the texture budget.
-use crate::effects::{self, plan, recipe};
-use crate::isolation::{page_size, plan_rounds};
-use crate::{Renderer, UNIFORM_STRIDE, ViewParams};
-use styk_draw::DrawList;
+use crate::effects::{plan, recipe};
+use crate::{FramePlan, Renderer, UNIFORM_STRIDE};
 
 fn pixels(size: [u32; 2]) -> u64 {
     u64::from(size[0])
@@ -26,9 +24,13 @@ impl Renderer {
     /// Upper bound for scratch plus retained resources during this frame, before
     /// `set_list` or `render` allocates. Only the stage worker calls this. Output
     /// pictures and sprite pixels have separate budgets at their owning lifetime.
-    /// Uses the same placement/round/effect planners as render, including scaling
+    /// Consumes the already recorded placement/round/effect plan, including scaling
     /// of oversized groups and the executor's 256-pixel size buckets.
-    pub fn working_set_bound(&self, list: &DrawList, view: &ViewParams, size: [u32; 2]) -> u64 {
+    pub fn working_set_bound(&self, frame: &FramePlan) -> u64 {
+        let list = &frame.list;
+        let view = &frame.view;
+        let size = frame.size;
+        let page = frame.page;
         let retained = self
             .prims
             .size()
@@ -49,68 +51,16 @@ impl Renderer {
             .saturating_add(self.target_bytes())
             .saturating_add(self.stats.depth_bytes)
             .saturating_add(self.executor.as_ref().map_or(0, |e| e.retained_bytes()));
-        let planned = plan::plan_with_grid(
-            list,
-            &plan::View {
-                matrix: view.matrix,
-                size,
-                zoom: view.zoom,
-                pan: view.pan,
-                orient: self.orientation.unwrap_or(plan::IDENTITY),
-                stretch: view.stretch,
-                camera_view: view.camera_view,
-                camera_limit: view.camera_limit,
-                max_texture: self.device.limits().max_texture_dimension_2d,
-            },
-            self.drawing_grid,
-        );
-        let sizes: Vec<_> = planned.iter().map(plan::Placement::size).collect();
-        let largest = sizes
-            .iter()
-            .skip(1)
-            .fold([0u32; 2], |a, s| [a[0].max(s[0]), a[1].max(s[1])]);
-        let wanted = page_size(size, largest);
-        let page = if self.exact_sizes {
-            wanted
-        } else {
-            [wanted[0].max(self.page[0]), wanted[1].max(self.page[1])]
-        };
-        let rounds = plan_rounds(list, &sizes, page);
         let mut pages = [self.layers[0].pages, self.layers[1].pages];
         let mut passes = 1u64;
-        let mut effect_size = [0u32; 2];
-        let mut records = Vec::new();
-        for round in &rounds {
+        for round in &frame.rounds {
             for (depth, &count) in round.pages_per_depth.iter().enumerate().skip(1) {
                 pages[depth % 2] = pages[depth % 2].max(count);
                 passes = passes.saturating_add(count as u64);
             }
-            for &(g, slot) in &round.placed {
-                let Some(filter) = planned[g].filter else {
-                    continue;
-                };
-                let stack = list
-                    .layers
-                    .get(list.groups[g].layer as usize)
-                    .map_or(&[][..], styk_eval::drawlist::layer_effects);
-                if stack.is_empty() {
-                    continue;
-                }
-                let at = sizes[g].map(|n| (f64::from(n) * slot.scale).ceil().max(1.0) as u32);
-                let f = effects::scaled(filter, slot.scale);
-                let _run = recipe::record(
-                    &mut records,
-                    stack,
-                    recipe::Frame {
-                        scale: f.scale,
-                        origin: f.origin,
-                        output_size: f.output_size,
-                    },
-                    at,
-                );
-                effect_size = [effect_size[0].max(at[0]), effect_size[1].max(at[1])];
-            }
         }
+        let records = &frame.records;
+        let effect_size = frame.biggest;
         // Both layer parities may be replaced; each array has at least two layers.
         let mut prospective =
             pixels(page).saturating_mul(u64::from(pages[0].max(2)) + u64::from(pages[1].max(2)));

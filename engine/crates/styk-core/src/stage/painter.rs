@@ -1,6 +1,6 @@
 //! One paint worker, one engine renderer, the interface's last complete picture.
 //! No renderer preparation, CPU frame ownership or GPU wait crosses to the UI.
-use super::Host;
+use super::{Host, PaintKey};
 use crate::frames::{self, WorkerFrame, WorkerTicket};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
@@ -81,17 +81,40 @@ impl<T> Drop for Slot<T> {
     }
 }
 
+#[derive(Clone)]
+struct Ticket {
+    frame: WorkerTicket,
+    key: PaintKey,
+    navigation: Arc<std::sync::atomic::AtomicU64>,
+    serial: u64,
+}
+impl Ticket {
+    fn current(&self) -> bool {
+        self.frame.current() && self.navigation.load(Ordering::Acquire) == self.serial
+    }
+    fn identity(&self) -> (u64, u64, u64, u64) {
+        let (document, epoch, stamp) = self.frame.identity();
+        (document, epoch, stamp, self.serial)
+    }
+    fn key(&self) -> &PaintKey {
+        &self.key
+    }
+    fn read(&self) -> Result<Option<WorkerFrame>, frames::Error> {
+        self.frame.read()
+    }
+}
+
 struct Picture {
-    ticket: WorkerTicket,
+    ticket: Ticket,
     frame: RenderedFrame,
     paint_ms: f64,
 }
 struct Delivery {
-    ticket: Option<WorkerTicket>,
+    ticket: Option<Ticket>,
     picture: Result<Picture, PaintError>,
 }
 struct Shared {
-    request: Slot<WorkerTicket>,
+    request: Slot<Ticket>,
     ready: Slot<Delivery>,
     returned: Slot<Delivery>,
     shutdown_frame: Slot<Delivery>,
@@ -114,7 +137,7 @@ impl Shared {
 pub struct Painter {
     shared: Arc<Shared>,
     shown: Option<Box<Delivery>>,
-    requested: Option<(u64, u64, u64)>,
+    requested: Option<(u64, u64, u64, u64)>,
     status: PaintStatus,
 }
 
@@ -165,12 +188,24 @@ impl Painter {
             .frames()
             .stage_ticket()
             .ok_or(PaintError::Frame(frames::Error::InvalidRequest))?;
+        let ticket = Ticket {
+            key: PaintKey {
+                prepared: ticket.key().clone(),
+                view: host
+                    .presentation
+                    .clone()
+                    .ok_or(PaintError::Frame(frames::Error::InvalidRequest))?,
+            },
+            frame: ticket,
+            navigation: host.navigation.clone(),
+            serial: host.navigation.load(Ordering::Acquire),
+        };
         if self.requested.is_some_and(|id| id.0 != ticket.identity().0) {
             return Err(PaintError::Device(
                 "a painter belongs to one document lifetime".into(),
             ));
         }
-        if self.requested == Some(ticket.identity()) {
+        if self.requested == Some(ticket.identity()) && !matches!(self.status, PaintStatus::Failed(_)) {
             return Ok(());
         }
         self.requested = Some(ticket.identity());
@@ -225,7 +260,7 @@ impl Painter {
         picture.frame.present(pass);
         true
     }
-    pub fn shown_key(&self) -> Option<&frames::Key> {
+    pub fn shown_key(&self) -> Option<&PaintKey> {
         self.shown
             .as_ref()
             .and_then(|d| d.picture.as_ref().ok())
@@ -359,7 +394,7 @@ fn run(
     (shared.wake)();
 }
 
-fn publish(shared: &Shared, ticket: WorkerTicket, picture: Result<Picture, PaintError>) {
+fn publish(shared: &Shared, ticket: Ticket, picture: Result<Picture, PaintError>) {
     debug_assert!(shared.ready.0.load(Ordering::Acquire).is_null());
     drop(shared.ready.replace(Some(Box::new(Delivery {
         ticket: Some(ticket),
@@ -372,11 +407,12 @@ fn paint(
     renderer: &mut Renderer,
     pictures: &mut pictures::Pictures,
     ready: &WorkerFrame,
-    ticket: &WorkerTicket,
+    ticket: &Ticket,
     limits: PaintLimits,
     shared: &Shared,
 ) -> Result<RenderedFrame, PaintError> {
-    let input = &ready.key.view;
+    let input = &ticket.key.view;
+    let scene = &ready.key.inputs.scene;
     let bytes = u64::from(input.size[0]) * u64::from(input.size[1]) * 4;
     let required = bytes.saturating_mul(3);
     if required > limits.output_bytes {
@@ -395,7 +431,7 @@ fn paint(
         ));
     }
     let doc = &ready.generation.prepared.doc;
-    let camera = ready.frame.camera.as_ref().filter(|_| input.scene.camera);
+    let camera = ready.frame.camera.as_ref().filter(|_| scene.camera);
     let upright = styk_eval::view::camera_matrix(doc, camera, input.zoom, input.pan);
     let orient = styk_eval::view::orientation(
         input.rotation,
@@ -413,7 +449,7 @@ fn paint(
             input.pan[0] + doc.canvas[0] as f64 * input.zoom,
             input.pan[1] + doc.canvas[1] as f64 * input.zoom,
         ],
-        clip_to_artboard: input.scene.clip_to_canvas,
+        clip_to_artboard: scene.clip_to_canvas,
         clear: [0.0; 4],
         zoom: input.zoom,
         pan: input.pan,
@@ -423,24 +459,38 @@ fn paint(
     };
     renderer.set_orientation(orient);
     renderer.set_multisampled(input.samples == 4);
-    let required = renderer.working_set_bound(&ready.frame.list, &view, input.size);
+    let plan = renderer.plan_frame(&ready.frame.list, &view, input.size);
+    let required = renderer.working_set_bound(&plan);
     if required > limits.working_bytes {
         return Err(PaintError::Budget {
             required,
             limit: limits.working_bytes,
         });
     }
-    pictures.prepare(
-        renderer,
-        &ready.generation,
-        ready.key.resource_epoch,
-        &ready.frame.list,
-        PaintLimits {
-            working_bytes: limits.working_bytes - required,
-            ..limits
-        },
-        || !ticket.current() || shared.closed.load(Ordering::Acquire),
-    )?;
+    pictures.begin();
+    loop {
+        if !ticket.current() || shared.closed.load(Ordering::Acquire) {
+            return Err(PaintError::Closed);
+        }
+        let complete = pictures.prepare(
+            renderer,
+            &ready.generation,
+            ready.pictures.as_ref(),
+            &ready.frame.list,
+            PaintLimits {
+                working_bytes: limits.working_bytes - required,
+                ..limits
+            },
+        )?;
+        if complete {
+            break;
+        }
+        // Bound upload staging while decodes run on the engine's workers. The
+        // admitted rendering plan stays owned here throughout resource readiness.
+        renderer.queue().submit([]);
+        finish_gpu(renderer, shared)?;
+        shared.wait();
+    }
     if !ticket.current() || shared.closed.load(Ordering::Acquire) {
         return Err(PaintError::Closed);
     }
@@ -450,7 +500,7 @@ fn paint(
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("styk stage"),
         });
-    renderer.render(&mut encoder, &view, input.size);
+    renderer.render_planned(&mut encoder, plan);
     renderer.queue().submit([encoder.finish()]);
     finish_gpu(renderer, shared)?;
     renderer

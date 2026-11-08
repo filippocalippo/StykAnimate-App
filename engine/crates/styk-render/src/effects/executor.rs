@@ -143,6 +143,11 @@ impl Executor {
         self.stats = Stats { slot_bytes: self.stats.slot_bytes, ..Default::default() };
     }
 
+    pub(crate) fn begin_recorded(&mut self, records: Vec<Uniform>, layers: u32) {
+        self.records = records;
+        self.stats = Stats { layers, slot_bytes: self.stats.slot_bytes, ..Default::default() };
+    }
+
     /// Records `stack` on a `size` layer (in slot 0). Mirrors `VfxWebGPU.run`.
     pub fn record(&mut self, stack: &[Arc<Effect>], frame: Frame, size: [u32; 2]) -> Run {
         let run = record(&mut self.records, stack, frame, size);

@@ -61,6 +61,8 @@ mod view;
 #[cfg(feature = "gpu")]
 pub use images::{decode_images, DecodedImage, MAX_PAGES};
 #[cfg(feature = "gpu")]
+pub use frame::FramePlan;
+#[cfg(feature = "gpu")]
 pub use present::{read_frame, RenderedFrame};
 pub use view::{ViewParams, CAMERA_PREVIEW_LIMIT};
 pub use effects::plan::DrawingGrid;
@@ -123,6 +125,7 @@ pub struct Renderer {
     pub(crate) queue: wgpu::Queue,
     pub(crate) pipeline: wgpu::RenderPipeline,
     pub(crate) blit: wgpu::RenderPipeline,
+    pub(crate) composite: wgpu::RenderPipeline,
     pub(crate) blit_layout: wgpu::BindGroupLayout,
     pub(crate) layout0: wgpu::BindGroupLayout,
     pub(crate) layout1: wgpu::BindGroupLayout,

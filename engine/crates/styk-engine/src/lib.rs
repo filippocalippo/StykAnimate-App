@@ -168,6 +168,7 @@ struct Inner {
     picture_table: std::sync::Mutex<picture_table::PictureTable>,
     /// Pictures not decoded because the module was too low on memory ([`Engine::pictures_refused`]).
     pictures_refused: std::sync::atomic::AtomicUsize,
+    pictures_decoded: std::sync::atomic::AtomicUsize,
     progress: std::sync::atomic::AtomicU32,
     /// Worker threads that stopped under the engine ([`Engine::note_worker_lost`]).
     workers_lost: std::sync::atomic::AtomicU32,
@@ -205,6 +206,7 @@ impl Engine {
                 atlas_pages: std::sync::atomic::AtomicU32::new(ATLAS_PAGES),
                 picture_table: Default::default(),
                 pictures_refused: Default::default(),
+                pictures_decoded: Default::default(),
                 progress: std::sync::atomic::AtomicU32::new(0),
                 workers_lost: std::sync::atomic::AtomicU32::new(0),
                 notifier,

@@ -132,6 +132,31 @@ pub fn after(duration: std::time::Duration, done: impl FnOnce() + Send + 'static
     })
 }
 
+/// Reads at most `limit` bytes of a file, never more than one byte past it: a file that is longer is refused (a script's
+/// size bound), and a limit of `None` reads the file whole (the opening of a project, until K-doc's files service).
+pub fn read_file(path: &std::path::Path, limit: Option<usize>) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    read_up_to(file, limit).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+fn read_up_to(reader: impl std::io::Read, limit: Option<usize>) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    match limit {
+        Some(limit) => {
+            reader.take(limit as u64 + 1).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+            if bytes.len() > limit {
+                return Err(format!("the file is longer than {limit} bytes"));
+            }
+        }
+        None => {
+            let mut reader = reader;
+            reader.read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(bytes)
+}
+
 /// Write a diagnostic report. Interactive callers must run this through `spawn`.
 pub fn write_report(path: &std::path::Path, text: &str) -> Result<(), String> {
     std::fs::write(path, text).map_err(|error| format!("{}: {error}", path.display()))
@@ -162,6 +187,26 @@ pub fn deadline(duration: std::time::Duration) -> Result<Deadline, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_file_over_the_limit_is_refused_after_reading_one_byte_past_it() {
+        struct Counting(usize, std::cell::Cell<usize>);
+        impl std::io::Read for &Counting {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let n = (self.0 - self.1.get()).min(buffer.len());
+                buffer[..n].fill(b'#');
+                self.1.set(self.1.get() + n);
+                Ok(n)
+            }
+        }
+        let huge = Counting(1_000_000, std::cell::Cell::new(0));
+        assert!(super::read_up_to(&huge, Some(65_536)).unwrap_err().contains("longer than 65536"));
+        assert_eq!(huge.1.get(), 65_537, "no more than one byte past the limit was read");
+        let exact = Counting(65_536, std::cell::Cell::new(0));
+        assert_eq!(super::read_up_to(&exact, Some(65_536)).unwrap().len(), 65_536);
+        let whole = Counting(100, std::cell::Cell::new(0));
+        assert_eq!(super::read_up_to(&whole, None).unwrap().len(), 100);
+    }
+
     use super::*;
 
     #[test]

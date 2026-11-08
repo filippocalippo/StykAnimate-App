@@ -44,8 +44,10 @@ descriptors, selection policy and async artwork picking.
    starts one worker through the supplied spawner; reserve that worker in the app's
    global worker budget. It belongs to this document lifetime, not to a widget draw.
 3. After navigation, request the tick through `Host::request`, then `Painter::request`.
-   Call `Frames::flush` on progress/event-loop turns. Every view change invalidates
-   the prior stage demand immediately; replacement requests carry the full view key.
+   Call `Frames::flush` on progress/event-loop turns. View changes invalidate
+   painter tickets immediately while leaving the world-space preparation request
+   intact. The painter key combines that prepared identity with backing size,
+   density, zoom/pan, rotation, flip, quality and sample count.
 4. Call `Painter::update` after submitting the previous presentation encoder. It
    consumes at most one reply. `present` records three commands into the widget's
    pass; the widget supplies viewport/scissor. Pending or failed candidates leave
@@ -55,14 +57,15 @@ descriptors, selection policy and async artwork picking.
 
 The worker borrows a scheduler ticket, takes an immutable ready-list handle under
 a short try-lock, then obtains the matching document generation outside that lock.
-All sprite decoding, uploads, effect/glyph preparation, renderer calls and GPU
-completion polling happen there. The UI exchanges owning pointers in bounded
+Sprite decoding runs ahead on the document engine's existing workers; the paint
+worker drains bounded batches, uploads, prepares effects/glyphs and polls GPU completion. The UI exchanges owning pointers in bounded
 single-item slots; it never locks the renderer or receives dense CPU scene data.
 Only a current, completely rendered candidate is published. A cancelled error is
 discarded just like cancelled pixels. Returning the previous picture acknowledges
 the handoff and allows the next publication. The renderer's output texture is moved
 into `RenderedFrame`, then recycled on its worker; it is never copied or overwritten
-while displayed. A close during decoding finishes that indivisible decode; a close
+while displayed. Detached presentation blends premultiplied alpha over the host;
+the browser surface retains its copy pipeline. A close
 during GPU polling wakes and exits without waiting for a map/readback.
 
 `PaintLimits` admits bytes before allocations: output pictures (default 192 MiB,
@@ -70,14 +73,25 @@ at most three), resident sprite pixels (512 MiB), and working textures/buffers
 (1 GiB, including picture lookup tables and old/new replacement overlap). Sprite arrays grow once per
 candidate; old/new arrays plus queued uploads are bounded multiples of the resident
 limit. Even failed or cancelled candidates submit/drain their pending uploads
-before another candidate starts. The working bound uses the renderer's own group,
-isolation, glyph and effect planners; driver/pipeline bookkeeping is outside it.
+before another candidate starts. The renderer records one owned `FramePlan`
+(group placement, isolation rounds and effect recipes). Admission inspects it and
+drawing consumes that same plan after resource readiness; driver/pipeline bookkeeping is outside it.
 Document/assets and decode reservations remain engine-owned. The scheduler cache
 keeps its own byte bound; the worker/renderer may additionally retain at most two
 cache-sized lists (previous renderer list plus candidate) until replacement/close.
 Refusal is explicit and preserves the previous picture; no partial sprite set is
 published. Exact-size render targets preserve export's sizing independently of
 previous views. This is admission and lifetime accounting, not a process-RSS limit.
+
+Sprite residency uses document lineage and asset placements, never document revision.
+Unchanged cel payloads keep placement serials and texels through pose edits; new
+placements explicitly invalidate only replaced slots. Bounds/resource-epoch changes
+invalidate prepared geometry without discarding unchanged pixels. The engine's
+picture queue supplies bounded batches, including refusal provenance. A refused
+replacement is never acknowledged as complete; the last rendered picture remains.
+Evicted resources re-enter that same queue. The painter owns its resident page set,
+not another decoder or renderer. K-doc provides `FrameDocument::picture_engine`
+and runs those workers through the injected service spawner.
 
 The app installs a generic policy hook in vendored `iced_wgpu` before creating a
 compositor. Both windowed and headless creation try the engine's `native_gpu`
@@ -86,21 +100,26 @@ iced still owns surface, device, features and limits. See `vendor/iced/VENDOR.md
 
 ## Automation and verification
 
-K-shell's shared parser was not present at implementation base. The minimal
-`styk_core::automation` seam parses `styk-auto/1` timestamped stage steps; runners
-own file access, pacing and measurement. K-shell/K-dev extend this module, not a
-parallel script format. `scenarios/stage.json` uses local aliases `scene_a` and
-`scene_b`: the runner binds them to private inputs read in place. No input contents,
-names or paths belong in the scenario or generated reports.
+The shared K-shell `styk_core::automation` parser owns the line-oriented
+`styk-auto/1` language. Stage steps are `pan dx dy`, `zoom factor x y`,
+`pointer id down|move|up|cancel left|middle|right x y`,
+`pen id hover|down|move|up pen|eraser x y pressure`, `frame tick`,
+`play from count` and `measure label`. `advance nanoseconds` supplies input time
+with `--clock fixed`; runners timestamp pen samples from that clock. File access,
+pacing and measurements remain runner responsibilities. There is no parallel parser.
 
-The ignored `stage_benchmark_scenario` test is its headless runner. Set local
-`STYK_STAGE_INPUT_A` and `STYK_STAGE_INPUT_B`, then run through the machine queue:
+`scenarios/stage.styk-auto` uses local aliases `scene_a`/`scene_b`; the runner binds
+private inputs read in place. No private contents, names or paths belong in reports.
+The ignored `stage_benchmark_scenario` is its offscreen runner. Set local
+`STYK_STAGE_INPUT_A` and `STYK_STAGE_INPUT_B`, then use the machine queue:
 `cargo test --manifest-path engine/Cargo.toml -p styk-core --release --test stage_painter stage_benchmark_scenario -- --ignored --nocapture`.
-It reports open-to-first-ready time and 19 request-to-GPU-ready samples per input
-(pan, zoom and 16 consecutive playback ticks), at 1280x720, DPR 1, quality 1, 4x MSAA.
-It awaits each candidate rather than simulating display deadlines: numbers are
-directional worker latency, not window presentation, input latency or playback FPS.
-K-dev supplies paced automation and exclusive comparative measurements.
+It reports cold request and open-to-first-ready time separately, every steady
+step latency, and per-operation p50/p95 from 120 pan, 120 zoom and 120 playback
+samples per input (nearest-rank p95). Settings: 1280x720, DPR/quality 1, 4x MSAA.
+Input time is fixed; latency uses an independent real measurement clock. Playback
+wraps at the document end. Each candidate completes before the next request:
+these are directional worker latencies, not display deadlines or playback FPS.
+K-dev owns paced automation and exclusive comparative measurements.
 
 `tests/stage.rs` checks transforms at odd DPRs, fitted/zoom limits, wheel and pointer
 semantics, request supersession and frozen browser picking answers. `stage_painter`

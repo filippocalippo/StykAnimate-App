@@ -404,16 +404,25 @@ fn the_time_to_generate_dabs_is_the_time_the_brush_took() {
     object.set("erase", Value::Bool(false));
     object.set("seed", Value::Num(1.0));
     let brush = Brush::normalize(&value).unwrap();
-    let mut path = BrushStroke::new(brush.clone(), Some(brush.seed));
     let clock = clock();
-    let started = clock.now();
-    for (i, x) in [0.0, 20_000.0].into_iter().enumerate() {
-        path.sample(&Sample { x, y: 30.0, pressure: Some(1.0), time: Some(i as f64), ax: Some(0.0), ay: Some(0.0) }, &mut |_| {}).unwrap();
-    }
-    let direct_ms = (clock.now() - started).as_secs_f64() * 1e3;
+    // A gap long enough to time on this machine: doubled until the brush takes over 5 ms to fill it, so the comparison
+    // below measures something however fast the machine is (a fixed 20,000 px gap took under 5 ms on a quiet run).
+    let mut gap = 20_000.0;
+    let direct_ms = loop {
+        let mut path = BrushStroke::new(brush.clone(), Some(brush.seed));
+        let started = clock.now();
+        for (i, x) in [0.0, gap].into_iter().enumerate() {
+            path.sample(&Sample { x, y: 30.0, pressure: Some(1.0), time: Some(i as f64), ax: Some(0.0), ay: Some(0.0) }, &mut |_| {}).unwrap();
+        }
+        let ms = (clock.now() - started).as_secs_f64() * 1e3;
+        if ms > 5.0 || gap >= 1_280_000.0 {
+            break ms;
+        }
+        gap *= 2.0;
+    };
     begin(&worker, 1, false, Mapping::default(), &settings);
     worker.command(StrokeCommand::Sample { id: 1, x: 0.0, y: 30.0, pressure: 1.0, time_ms: 0.0, lean: None }, &settings);
-    worker.command(StrokeCommand::Sample { id: 1, x: 20_000.0, y: 30.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
+    worker.command(StrokeCommand::Sample { id: 1, x: gap, y: 30.0, pressure: 1.0, time_ms: 1.0, lean: None }, &settings);
     worker.command(StrokeCommand::End { id: 1 }, &settings);
     let replies = until(&worker, |r| matches!(r, Reply::Finished { .. }));
     let reported: f64 = replies.iter().filter_map(|r| if let Reply::Dabs { generate_ms, .. } = r { Some(*generate_ms) } else { None }).sum();

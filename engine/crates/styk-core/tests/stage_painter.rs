@@ -11,10 +11,18 @@ use styk_core::{
 use styk_engine::{Budgets, Engine, Generation};
 use styk_services::{Clock, SystemClock};
 
-struct Source(Arc<Generation>);
+struct Source(Engine);
+impl Drop for Source {
+    fn drop(&mut self) {
+        self.0.stop();
+    }
+}
 impl FrameDocument for Source {
+    fn picture_engine(&self) -> Option<Engine> {
+        Some(self.0.clone())
+    }
     fn snapshot(&self, revision: u64, _: u64) -> Option<Arc<Generation>> {
-        (revision == self.0.revision).then(|| self.0.clone())
+        self.0.generation().filter(|g| g.revision == revision)
     }
 }
 fn wait(
@@ -80,7 +88,16 @@ fn setup_bytes(
     let engine = Engine::new(|| 0.0, Budgets::for_device(None));
     engine.open(bytes, extension, "stage scenario").unwrap();
     let generation = engine.generation().unwrap();
-    let source: Arc<dyn FrameDocument> = Arc::new(Source(generation.clone()));
+    for _ in 0..2 {
+        let worker = engine.clone();
+        styk_services::Spawner::spawn(
+            &platform_spawn::ThreadSpawner,
+            "stage-test-pictures",
+            Box::new(move || worker.work()),
+        )
+        .unwrap();
+    }
+    let source: Arc<dyn FrameDocument> = Arc::new(Source(engine));
     let (tx, rx) = mpsc::sync_channel(1);
     let wake: styk_core::frames::Wake = Arc::new(move || match tx.try_send(()) {
         Ok(()) | Err(mpsc::TrySendError::Full(())) | Err(mpsc::TrySendError::Disconnected(())) => {}
@@ -401,22 +418,22 @@ fn working_budget_refuses_before_overwriting_the_last_complete_frame() {
     shutdown(&mut host, &mut painter, &wake, clock.as_ref());
 }
 
-/// K-dev consumes the same Script and commands. Inputs are provided locally;
-/// private paths and project bytes are never written to the repository.
+/// The same styk-auto/1 steps as the app; paths remain private runner bindings.
 #[test]
 #[ignore = "in-place stage benchmark; requires STYK_STAGE_INPUT_A and STYK_STAGE_INPUT_B"]
 fn stage_benchmark_scenario() {
-    use styk_core::automation::{Action, Script};
+    use styk_core::automation::{Script, Step};
     let paths = [
-        std::env::var("STYK_STAGE_INPUT_A").expect("scene_a path is required"),
-        std::env::var("STYK_STAGE_INPUT_B").expect("scene_b path is required"),
+        std::env::var("STYK_STAGE_INPUT_A").expect("scene_a required"),
+        std::env::var("STYK_STAGE_INPUT_B").expect("scene_b required"),
     ];
-    let script = Script::parse(include_bytes!(
-        "../../../../docs/native/scenarios/stage.json"
+    let script = Script::parse(include_str!(
+        "../../../../docs/native/scenarios/stage.styk-auto"
     ))
     .unwrap();
     let gpu = gpu();
     let measured = SystemClock::new();
+    let fixed = styk_services::FixedClock::new();
     let mut current: Option<(
         Host,
         Painter,
@@ -426,24 +443,25 @@ fn stage_benchmark_scenario() {
     )> = None;
     let mut label = String::new();
     let mut opened = Duration::ZERO;
-    let mut first = None;
-    let mut samples = Vec::<f64>::new();
-    for step in script.steps {
-        if let Action::Open { input } = step.action {
+    let mut cold = true;
+    let mut operation = "frame";
+    let mut samples = std::collections::BTreeMap::<&str, Vec<f64>>::new();
+    for (line, step) in script.steps {
+        if let Step::Open(input) = step {
             if let Some((mut host, mut painter, _, wake, clock)) = current.take() {
                 shutdown(&mut host, &mut painter, &wake, clock.as_ref());
             }
-            let index = match input.as_str() {
+            let index = match input.to_str().unwrap() {
                 "scene_a" => 0,
                 "scene_b" => 1,
-                _ => panic!("unknown scenario input"),
+                _ => panic!("unknown input"),
             };
             opened = measured.now();
-            let bytes = std::fs::read(&paths[index]).expect("cannot read in-place scenario input");
+            let bytes = std::fs::read(&paths[index]).expect("read input in place");
             let extension = std::path::Path::new(&paths[index])
                 .extension()
                 .and_then(|x| x.to_str())
-                .expect("input extension");
+                .unwrap();
             let mut state = setup_bytes(&gpu, PaintLimits::default(), &bytes, extension);
             state
                 .0
@@ -454,72 +472,98 @@ fn stage_benchmark_scenario() {
                 .unwrap();
             state.0.fit_canvas().unwrap();
             current = Some(state);
-            label = input;
-            first = None;
+            label = input.to_str().unwrap().to_owned();
+            cold = true;
+            operation = "frame";
             samples.clear();
             continue;
         }
-        let (host, painter, _, wake, clock) =
-            current.as_mut().expect("scenario opens before input");
-        match step.action {
-            Action::Pan { delta } => host.pan_by(delta).unwrap(),
-            Action::Zoom { factor, at } => host.zoom_by(factor, Some(at)).unwrap(),
-            Action::Pointer(pointer) => {
-                host.pointer(pointer, Default::default()).unwrap();
+        let (host, painter, generation, wake, clock) = current.as_mut().expect("open before input");
+        match step {
+            Step::Advance(ns) => {
+                fixed.advance(Duration::from_nanos(ns));
+                host.advance(fixed.now().as_secs_f64() * 1000.0).unwrap();
             }
-            Action::Pen(sample) => {
+            Step::Pan(delta) => {
+                host.pan_by(delta).unwrap();
+                operation = "pan";
+            }
+            Step::Zoom { factor, at } => {
+                host.zoom_by(factor, Some(at)).unwrap();
+                operation = "zoom";
+            }
+            Step::Pointer(pointer) => {
+                host.pointer(pointer, Default::default()).unwrap();
+                operation = "pointer";
+            }
+            Step::Pen(mut sample) => {
+                sample.time_ns = fixed.now().as_nanos() as u64;
                 let event = host.automation_pen(sample);
                 host.pen_navigation(event, Default::default()).unwrap();
             }
-            Action::Frame { .. } | Action::Play { .. } => {
-                let (from, count) = match step.action {
-                    Action::Frame { tick } => (tick, 1),
-                    Action::Play { from, frames } => (from, frames),
+            Step::Frame(_) | Step::Play { .. } => {
+                let (from, count) = match step {
+                    Step::Frame(tick) => (tick, 1),
+                    Step::Play { from, frames } => {
+                        operation = "play";
+                        (from, frames)
+                    }
                     _ => unreachable!(),
                 };
-                for tick in 0..count {
+                for offset in 0..count {
+                    let tick = (from + f64::from(offset)) % f64::from(generation.playable_ticks());
                     let start = measured.now();
-                    host.request(from + tick as f64, 1.0, 4, SceneOptions::default())
-                        .unwrap();
+                    host.request(tick, 1.0, 4, SceneOptions::default()).unwrap();
                     painter.request(host).unwrap();
                     assert_eq!(
                         wait(host, painter, wake, clock.as_ref()),
                         PaintStatus::Ready
                     );
-                    let elapsed = (measured.now() - start).as_secs_f64() * 1000.0;
-                    samples.push(elapsed);
-                    if first.is_none() {
-                        first = Some((measured.now() - opened).as_secs_f64() * 1000.0);
+                    let elapsed = measured.now().saturating_sub(start).as_secs_f64() * 1000.0;
+                    if cold {
+                        println!(
+                            "styk-auto/1 {label}: cold_request_ms={elapsed:.3}, open_to_first_ms={:.3}",
+                            measured.now().saturating_sub(opened).as_secs_f64() * 1000.0
+                        );
+                        cold = false;
+                    } else {
+                        let values = samples.entry(operation).or_default();
+                        values.push(elapsed);
+                        println!(
+                            "styk-auto/1 {label}: line={line}, step={operation}, sample={}, tick={tick}, request_to_ready_ms={elapsed:.3}",
+                            values.len()
+                        );
                     }
-                    assert!(painter.texture().is_some());
                 }
             }
-            Action::Measure { label: metric } => {
-                if metric == "first_frame" {
-                    println!(
-                        "styk-auto/1 {label}: first_frame_ms={:.3}",
-                        first.expect("first frame")
-                    );
-                } else {
-                    let mut ordered = samples.clone();
+            Step::Measure(metric) => {
+                assert_eq!(metric, "frame_time");
+                for (operation, values) in &samples {
+                    let mut ordered = values.clone();
                     ordered.sort_by(f64::total_cmp);
-                    assert_eq!(ordered.len(), 19);
+                    if *operation != "pointer" {
+                        assert!(ordered.len() >= 100, "enough steady samples for p95");
+                    }
                     println!(
-                        "styk-auto/1 {label}: frames={}, request_to_ready_p50_ms={:.3}, p95_ms={:.3}, profile={}",
+                        "styk-auto/1 {label}: step={operation}, steady_samples={}, p50_ms={:.3}, p95_ms={:.3}, profile={}",
                         ordered.len(),
                         ordered[ordered.len() / 2],
-                        ordered[(ordered.len() * 95 / 100).min(ordered.len() - 1)],
+                        ordered[(ordered.len() * 95).div_ceil(100) - 1],
                         if cfg!(debug_assertions) {
                             "test (directional)"
                         } else {
-                            "release"
+                            "release (directional)"
                         }
                     );
                 }
+                println!(
+                    "styk-auto/1 {label}: prepared={}",
+                    host.frames().stats().unwrap().prepared
+                );
             }
-            Action::Open { .. } => unreachable!(),
+            _ => panic!("unsupported benchmark step on line {line}"),
         }
     }
-    let (mut host, mut painter, _, wake, clock) = current.expect("scenario inputs");
+    let (mut host, mut painter, _, wake, clock) = current.unwrap();
     shutdown(&mut host, &mut painter, &wake, clock.as_ref());
 }
