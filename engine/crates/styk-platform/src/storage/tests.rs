@@ -61,7 +61,7 @@ impl Folder {
 }
 impl Drop for Folder {
     fn drop(&mut self) {
-        for name in [NAME, LOCK_NAME, ".styk-doc-unrelated.tmp"] {
+        for name in [NAME, LOCK_NAME, "window-state.txt", ".styk-doc-unrelated.tmp"] {
             match fs::remove_file(self.0.join(name)) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -834,3 +834,79 @@ fn killing_a_lock_holder_releases_the_lock_for_the_next_update() {
     finish(next).unwrap();
     assert_eq!(&*finish(storage.load(NAME, 32)).unwrap().unwrap(), b"[8]");
 }
+
+
+// Shell lifecycle against the real profile lock, with worker-only instrumentation.
+struct ShellWorkers {
+    starts: Arc<std::sync::atomic::AtomicUsize>,
+    commits: Arc<std::sync::atomic::AtomicUsize>,
+    waited: std::sync::mpsc::Sender<()>,
+    ended: std::sync::mpsc::Sender<()>,
+}
+impl Spawner for ShellWorkers {
+    fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        let (waited, ended, commits) = (self.waited.clone(), self.ended.clone(), self.commits.clone());
+        ThreadSpawner.spawn(name, Box::new(move || {
+            WAIT_OBSERVER.with(|o| *o.borrow_mut() = Some(Box::new(move || { let _ = waited.send(()); })));
+            WRITE_OBSERVER.with(|o| *o.borrow_mut() = Some(Box::new(move |step, _, _| {
+                if matches!(step, WriteStep::Renamed) { commits.fetch_add(1, Ordering::SeqCst); }
+            })));
+            job();
+            let _ = ended.send(());
+        }))
+    }
+}
+
+fn shell_lifecycle(moves: i32, cancel: bool) {
+    use crate::shell::{self, Wake, Wakes};
+    use styk_services::shell::{Rect, window_state::{WindowFrame, WindowStateFile}};
+    let folder = Folder::new();
+    let lock = acquire(&folder.0, &Cancel::new()).unwrap();
+    let (waited, waits) = channel(); let (ended, ends) = channel(); let (wake, wakes) = channel();
+    let counts = ShellWorkers { starts: Arc::default(), commits: Arc::default(), waited, ended };
+    let notify = Wakes(Arc::new(move |w| { let _ = wake.send(w); }));
+    let storage = Arc::new(LocalStorage::new(&folder.0, &counts).unwrap());
+    let shell::Start::Run(mut shell) = shell::start(&[], true, &notify) else { panic!("test shell") };
+    shell.set_window_state_storage(storage, &counts, &notify).unwrap();
+    let frame = |x| WindowFrame { rect: Rect::new(x, 20, 1234, 777), maximized: false, scale_milli: 1000 };
+    for n in 0..moves {
+        shell.assume(&frame(n)); shell.changed(&notify);
+        // Consume the actual debounce wake, not a fabricated completion or a changed deadline.
+        loop {
+            match wakes.recv_timeout(HANG).unwrap() {
+                Wake::SaveCheck => { shell.save_check(&notify); break; }
+                Wake::WindowState => shell.window_state_progress(&notify),
+                _ => panic!("unexpected wake"),
+            }
+        }
+    }
+    waits.recv_timeout(HANG).unwrap(); // The real storage worker reached LockFileEx contention.
+    assert_eq!(counts.starts.load(Ordering::SeqCst), 2, "one lane and one reused storage worker");
+    if cancel {
+        shell.cancel_window_state();
+        assert!(!shell.flush_window_state(&notify).unwrap());
+        // Both workers terminate while the competing lock is STILL held: no latency threshold.
+        ends.recv_timeout(HANG).unwrap(); ends.recv_timeout(HANG).unwrap();
+        assert_eq!(counts.commits.load(Ordering::SeqCst), 0);
+        assert!(!folder.0.join("window-state.txt").exists());
+        assert_eq!(fs::read_dir(&folder.0).unwrap().count(), 1, "only the persistent OS lock remains");
+        drop(lock);
+    } else {
+        assert!(shell.flush_window_state(&notify).unwrap(), "close must retain an outstanding debounce save");
+        drop(lock);
+        while shell.flush_window_state(&notify).unwrap() { wakes.recv_timeout(HANG).unwrap(); }
+        let bytes = fs::read_to_string(folder.0.join("window-state.txt")).unwrap();
+        assert_eq!(WindowStateFile::parse(&bytes).last, Some(frame(moves - 1)));
+        assert_eq!(counts.commits.load(Ordering::SeqCst), 1, "superseded placements never commit");
+        drop(shell);
+        ends.recv_timeout(HANG).unwrap(); ends.recv_timeout(HANG).unwrap();
+        fs::remove_file(folder.0.join("window-state.txt")).unwrap();
+    }
+}
+#[test]
+fn shell_close_drains_a_debounced_save_waiting_on_the_profile_lock() { shell_lifecycle(1, false); }
+#[test]
+fn shell_moves_coalesce_without_growing_workers_under_the_profile_lock() { shell_lifecycle(8, false); }
+#[test]
+fn shell_session_end_cancels_waiters_before_the_profile_lock_is_released() { shell_lifecycle(1, true); }

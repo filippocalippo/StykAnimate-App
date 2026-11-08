@@ -66,9 +66,22 @@ keeps the logical size; the subclass only reads the DPI for its border.
 
 ## Window state (new; today saves none)
 
-Replaced atomically (write a temporary file, then rename): `window-state.txt`, a small, capped file. Geometry is in
+Persisted through K-store's `Storage::update`: `window-state.txt`, a small, capped file. Geometry is in
 physical pixels in screen coordinates, per monitor setup: the `SetupKey` is a hash of the sorted `(x, y, w, h, scale)` of
 every monitor; a setup never seen uses `last`.
+
+The shell keeps its existing roaming profile location (including `STYK_USER_DATA_DIR`) and version-1 text
+format; there is no migration. Its one save lane reuses `LocalStorage` with that explicit directory.
+The OS-held `.storage.lock` covers the bounded read, merge of only the current setup, staging, flush and
+atomic replacement. Concurrent windows retain each other's setups, subject to the existing 16-setup
+retention rule. Each save uses a fresh cancellation token and K-store's commit boundary; errors reach
+the existing background diagnostic or close completion. Startup still reads before the interface loop.
+One bounded `Worker` runs at most one transaction, and the shell holds at most one newer pending snapshot.
+New snapshots cancel a superseded transaction before its commit boundary; a committed transaction finishes
+before the newer one starts. Dirty state lasts through the worker receipt, independently of the debounce timer.
+Receipts have a separate coalesced wake, so they cannot multiply debounce timers. Ordinary quit drains the
+lane after layout flush; session end and shell teardown cancel it without joining workers on the interface thread.
+There is no second shell rename or lock implementation.
 
 - **Coordinates.** `WINDOWPLACEMENT` is in workspace coordinates (relative to a work area), which a top or left taskbar
   displaces, and which is documented differently for tool windows; it is not used. The normal rectangle is read with

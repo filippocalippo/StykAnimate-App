@@ -601,3 +601,46 @@ fn legacy_restore_from_mounted_offer_adopts_only_an_orphan() {
         if read_only { assert_eq!(std::fs::read(rt.root.0.join("recovery.styk")).unwrap(), STARTUP); }
     }
 }
+
+
+#[test]
+fn window_placement_receipts_finish_quit_and_session_end_cancels_the_lane() {
+    use styk_services::storage::fake::{Failure, MemoryStorage};
+    use styk_services::shell::{Rect, window_state::{WindowFrame, WindowStateFile}};
+    for session_end in [false, true] {
+        let (paused, receive) = mpsc::sync_channel(2);
+        let store = Arc::new(LayoutStorage { inner: MemoryStorage::default(), paused, load_gate: None });
+        store.inner.fail(Failure::PauseBeforeCommit);
+        let (layout_paused, layout_receive) = mpsc::sync_channel(2);
+        let layouts = Arc::new(LayoutStorage { inner: MemoryStorage::default(), paused: layout_paused, load_gate: None });
+        layouts.inner.put("layouts.json", styk_core::layout::store::LayoutFile::default().encode().unwrap());
+        let mut rt = Runtime::with_layouts(Some(layouts.clone())); rt.settled();
+        let load = rt.app.band.load_layouts(); rt.task(load.map(Message::Band));
+        rt.until(|app| app.band.layouts_idle());
+        rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Dock(styk_core::dock::Event::Close(styk_core::layout::PanelId::new("vfx")))))));
+        layouts.inner.fail(Failure::PauseBeforeCommit);
+        rt.app.shell.set_window_state_storage(store.clone(), &styk_platform::spawn::ThreadSpawner, &rt.app.wakes.callback()).unwrap();
+        let frame = WindowFrame { rect: Rect::new(123, 20, 1234, 777), maximized: false, scale_milli: 1000 };
+        rt.app.shell.assume(&frame);
+        rt.app.shell.changed(&rt.app.wakes.callback());
+        rt.close(); rt.until(|app| app.quit_cleared);
+        layout_receive.recv_timeout(HANG_GUARD).unwrap();
+        assert!(!store.inner.staged(), "placement drain follows the layout receipt");
+        layouts.inner.fail(Failure::None);
+        rt.until(|app| app.band.layouts_idle());
+        receive.recv_timeout(HANG_GUARD).unwrap();
+        assert!(!rt.app.closing, "the placement receipt is part of the approved quit fence");
+        if session_end {
+            rt.message(Message::SessionEnd);
+            rt.until(|app| app.closing);
+            receive.recv_timeout(HANG_GUARD).expect("session end cancelled the placement worker");
+            assert!(!store.inner.staged());
+            assert!(store.inner.get("window-state.txt").is_none());
+        } else {
+            store.inner.fail(Failure::None);
+            rt.until(|app| app.closing);
+            let bytes = store.inner.get("window-state.txt").unwrap();
+            assert_eq!(WindowStateFile::parse(std::str::from_utf8(&bytes).unwrap()).last, Some(frame));
+        }
+    }
+}
