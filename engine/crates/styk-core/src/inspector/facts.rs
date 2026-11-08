@@ -67,17 +67,21 @@ pub(crate) fn selected_objects(document: &Document, frame: &Value) -> Vec<Value>
     frame_objects(frame).into_iter().filter(|object| uid_of(object).is_some_and(|uid| selection.uids.contains(&uid))).collect()
 }
 
-/// The typed figure of a pose record.
+/// The typed figure of a pose record, from the views the session holds (the model is built only once they are ready:
+/// never a conversion on the interface thread).
 pub(crate) fn figure_of(document: &Document, object: &Value) -> Option<Arc<Figure>> {
     let id = object.get("figure_type_id").and_then(Value::as_f64)? as u32;
-    document.with_document(|typed| typed.figure(id).cloned()).ok().flatten()
+    document.with_document_ready(|typed| typed.figure(id).cloned()).flatten()
 }
 
-/// The selected figure's definition and pose.
+/// The selected figure's definition and pose, for a gesture: it runs inside a dispatch, where the session's calls
+/// evaluate anyway, so these reads may too.
 pub(crate) fn figure_of_selection(document: &Document) -> Option<(Arc<Figure>, Value)> {
     let frame = document.frame_records().ok()?;
     let object = selected_object(document, &frame)?;
-    Some((figure_of(document, &object)?, object))
+    let id = object.get("figure_type_id").and_then(Value::as_f64)? as u32;
+    let figure = document.with_document(|typed| typed.figure(id).cloned()).ok().flatten()?;
+    Some((figure, object))
 }
 
 /// The Angle row: the pose's rotation relative to the figure's first segment, in degrees.

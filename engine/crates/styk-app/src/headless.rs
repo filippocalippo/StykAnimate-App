@@ -21,15 +21,18 @@ pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&She
     pollster::block_on(screenshot_async(theme, size, scale, sheet, band, None))
 }
 
-/// A Properties panel screen: its fixture's core, refreshed (never waited on) until the facts its context shows landed.
+/// A Properties panel screen: its fixture's core, refreshed (never waited on) until the facts lane made what it shows.
 pub fn inspector_screenshot(screen: Screen, size: (u32, u32), scale: f32) -> Result<Image, String> {
     let Screen::Inspector(context, _) = screen else { return Err("not a Properties panel screen".into()) };
     let mut core = styk_core::screens::inspector(context, std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(|| {}))?;
     pollster::block_on(async {
-        // The figures' bounds come from the facts lane: refresh until they are shown, at most two seconds.
+        // The frame on show, the views and the figures' bounds come from the facts lane: refresh until the panel is no
+        // longer pending and what its context shows landed, at most two seconds.
         for _ in 0..400 {
             core.refresh();
-            if context != styk_core::screens::InspectorScreen::Figures || core.inspector().shown().bounds.is_some() {
+            let panel = core.inspector();
+            let ready = panel.model().is_some() && !panel.pending();
+            if ready && (context != styk_core::screens::InspectorScreen::Figures || panel.shown().bounds.is_some()) {
                 break;
             }
             pause().await?;
@@ -57,13 +60,10 @@ async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Opt
     let iced_theme = styk_ui::base_theme(theme);
     // A band screen: the band over its window, laid out for this size with its words measured.
     let shell = band.map(|screen| styk_ui::screens::band_shell(screen, size, styk_ui::shell::measure_labels(ready)));
-    let panel = inspector.and_then(|core| core.inspector().model().map(|model| (core, model)));
+    let panel = inspector.and_then(|core| styk_ui::inspector::View::of(core, theme));
     let view: iced::Element<'_, ()> = match (sheet, shell.as_ref()) {
         _ if panel.is_some() => match panel {
-            Some((core, model)) => {
-                let panel = styk_ui::inspector::View { model, presentation: core.presentation(), field: None, rename: None, theme, button_probe: None };
-                styk_ui::dock::docked(styk_ui::inspector::view(panel), theme).map(|_| ()).boxed()
-            }
+            Some(panel) => styk_ui::dock::docked(styk_ui::inspector::view(panel), theme).map(|_| ()).boxed(),
             None => styk_ui::loading(theme),
         },
         (Some(sheet), _) => sheet.view().map(|_| ()).boxed(),

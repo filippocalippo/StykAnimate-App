@@ -11,8 +11,10 @@
 //! The view model is rebuilt only when its key changes (the document, its revision, the frame on show, the selection,
 //! the playhead, the view state, the section memory, the panel state, the facts shown) and never while a property
 //! gesture of the active document is open: today the Inspector defers its refresh during a gesture and never reflows a
-//! field being typed in. Facts that need geometry (the selection's bounds) come from [`crate::facts`]; the panel shows
-//! the last ready ones until newer ones land.
+//! field being typed in. The refresh reads only what the session holds ready (`Document::frame_records_ready` and
+//! friends): the frame on show, the document's views and the selection's bounds, when they need evaluating, come from
+//! [`crate::facts`]; until they land the panel is pending (its last model, values cleared and controls disabled), and
+//! a fact is shown only under its complete current key.
 
 pub mod contexts;
 pub mod facts;
@@ -36,7 +38,7 @@ use crate::number::{NumberEdit, Range as FieldRange, Settled, StepKeys};
 use crate::range::Range;
 use crate::view_state::ViewState;
 use memory::SectionMemory;
-use model::{Choice, ColorTarget, Inspector, OrderDirection, PanelAction, Pager, RenameTarget, Segments, Toggle};
+use model::{Choice, ColorTarget, Inspector, OrderDirection, PanelAction, Pager, RenameTarget, Segments, TextKey, Toggle};
 use order::DrawKind;
 use property::{Gesture, PropertyKey};
 
@@ -70,6 +72,19 @@ pub enum RenameEvent {
     Cancel,
 }
 
+/// What a text row reports (its input's focus, typing and keys).
+#[derive(Clone, Debug, PartialEq)]
+pub enum TextEvent {
+    Focus,
+    Input(String),
+    /// Enter commits what changed and keeps focus, as an input's `change` on Enter does.
+    Enter,
+    /// Escape puts the name back.
+    Escape,
+    /// Leaving the field commits what changed.
+    Blur,
+}
+
 /// What the Properties panel's view sends.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -83,6 +98,7 @@ pub enum Event {
     Segment(Segments, &'static str),
     Color(ColorTarget),
     Rename(RenameEvent),
+    Text(TextKey, TextEvent),
 }
 
 /// Where the panel asks focus to go (the interface maps each to its focus target).
@@ -118,13 +134,12 @@ pub struct PanelState {
     version: u64,
 }
 
-/// The facts the model shows, as of the last refresh.
+/// The facts the model shows, as of the last refresh: only facts made for the state on show (document, revision,
+/// playhead, selection); anything else is not shown, and the rows built from it are pending.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Shown {
-    /// The selection's bounds; `None` while none are ready for this selection.
+    /// The selection's bounds; `None` while none are ready for exactly this state.
     pub bounds: Option<[f64; 4]>,
-    /// The facts were made for an older revision or tick than the one on show.
-    pub stale: bool,
     key: Option<FactsKey>,
 }
 
@@ -154,6 +169,35 @@ pub struct RenameView {
     pub text: String,
 }
 
+/// Where a name is being typed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NamePlace {
+    Header,
+    Text(TextKey),
+}
+
+/// What a name renames, fixed when typing began.
+#[derive(Clone, Debug, PartialEq)]
+enum NameTarget {
+    /// The selected figure's definition (`updateFigureStyle({name})`).
+    Figure,
+    /// A layer, by its id (`renameLayer(id, name)`).
+    Layer(Arc<str>),
+}
+
+/// A name being typed, in the header or in a text row. It keeps the document and the target it began on, so whatever
+/// ends it (Enter, leaving the field, a command, another document becoming active) settles it there, as the input's
+/// `change` event does today when it loses focus.
+#[derive(Clone, Debug)]
+struct NameDraft {
+    document: DocumentId,
+    target: NameTarget,
+    place: NamePlace,
+    original: String,
+    text: String,
+    max_chars: Option<usize>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct Key {
     document: DocumentId,
@@ -174,11 +218,13 @@ pub struct Panel {
     state: PanelState,
     memory: SectionMemory,
     field: Option<Field>,
-    rename: Option<String>,
+    name: Option<NameDraft>,
     hinted: bool,
     model: Option<Arc<Inspector>>,
     key: Option<Key>,
     shown: Shown,
+    /// The frame on show or the views are being made on a worker: the model is the pending copy of the last one.
+    pending: bool,
     /// How many times the model was built (tests and the timing read it).
     pub builds: u64,
 }
@@ -220,6 +266,11 @@ impl Panel {
         &self.shown
     }
 
+    /// Whether the panel waits for the frame on show or the document's views from a worker.
+    pub fn pending(&self) -> bool {
+        self.pending
+    }
+
     /// The field being edited, as the view shows it.
     pub fn field(&self) -> Option<FieldView> {
         let field = self.field.as_ref()?;
@@ -231,8 +282,18 @@ impl Panel {
         Some(FieldView { key: field.key, text, invalid })
     }
 
+    /// The header's name while it is renamed in place.
     pub fn rename(&self) -> Option<RenameView> {
-        self.rename.as_ref().map(|text| RenameView { text: text.clone() })
+        self.name.as_ref().filter(|draft| draft.place == NamePlace::Header).map(|draft| RenameView { text: draft.text.clone() })
+    }
+
+    /// The text row being typed in and its text.
+    pub fn text_draft(&self) -> Option<(TextKey, String)> {
+        let draft = self.name.as_ref()?;
+        match draft.place {
+            NamePlace::Text(key) => Some((key, draft.text.clone())),
+            NamePlace::Header => None,
+        }
     }
 
     /// Whether a property gesture is open.
@@ -244,30 +305,40 @@ impl Panel {
         self.state.version = self.state.version.wrapping_add(1);
     }
 
-    /// Asks for the facts of the active document's selection and takes what is ready; never waits.
+    /// Takes what the facts lane made and asks it for what the active document's state needs: the frame on show and the
+    /// views when the session lacks them (`ready` false), and the bounds of two or more selected figures. A landed
+    /// evaluation is adopted by the document it was made for while it is still at that revision. Never waits.
     fn facts(&mut self, documents: &Documents, facts: Option<&mut Facts>, source: Option<Arc<dyn FrameDocument>>) {
         let Some(document) = documents.active() else { return };
-        let selection = facts::selection(document);
-        let (Some(facts), true) = (facts, selection.uids.len() > 1) else {
+        let Some(facts) = facts else {
             self.shown = Shown::default();
             return;
         };
+        let selection = facts::selection(document);
         let key = FactsKey::new(document.id().get(), document.revision(), facts::tick(document), &selection.uids);
-        // Take what landed first (an "unpublished" answer frees the key to be asked again), then ask for this state.
-        facts.latest();
-        if let Some(source) = source {
-            facts.request(key.clone(), source);
+        // Take what landed first (an "unpublished" answer frees the key to be asked again).
+        if let Some(landed) = facts.latest()
+            && landed.key.document == key.document
+            && let Some((views, frame)) = &landed.evaluation
+        {
+            document.adopt_evaluation(landed.key.revision, views.clone(), f64::from_bits(landed.key.tick), frame.clone());
+        }
+        let ready = document.frame_records_ready().is_some() && document.with_document_ready(|_| ()).is_some();
+        let measure = selection.uids.len() > 1;
+        if (!ready || measure) && let Some(source) = source {
+            facts.request(key.clone(), source, facts::records(document).clone());
         }
         facts.flush();
-        // The last ready facts of this document and selection are shown until the ones for this state land.
+        // A fact is shown only for exactly this state; otherwise nothing is, and its rows are pending.
         self.shown = match facts.latest() {
-            Some(ready) if ready.key.document == key.document && ready.key.uids == key.uids => Shown { bounds: ready.bounds, stale: ready.key != key, key: Some(ready.key.clone()) },
+            Some(landed) if measure && landed.key == key => Shown { bounds: landed.bounds, key: Some(landed.key.clone()) },
             _ => Shown::default(),
         };
     }
 
-    /// Rebuilds the view model if anything it is built from changed. Cheap when nothing did: a key comparison and
-    /// typed reads; geometry comes ready from the facts worker.
+    /// Rebuilds the view model if anything it is built from changed. It reads only what the session holds ready and
+    /// never evaluates, converts or measures (D7): until the frame on show and the views are ready the model is the
+    /// pending copy of the last one.
     pub fn refresh(&mut self, documents: &mut Documents, view: &ViewState, facts: Option<&mut Facts>, source: Option<Arc<dyn FrameDocument>>, session: &mut Session) {
         let active = documents.active().map(|document| document.id());
         // A field whose gesture belongs to a document that is no longer active (a switch that bypassed the lifecycle, a
@@ -277,7 +348,11 @@ impl Panel {
             gesture.cancel(documents, session);
         }
         if self.key.as_ref().map(|key| key.document) != active {
-            self.rename = None;
+            // The lifecycle settles a name before another document becomes active; one left here belongs to a document
+            // that went away.
+            if self.name.as_ref().is_some_and(|draft| Some(draft.document) != active) {
+                self.name = None;
+            }
             if self.field.as_ref().is_some_and(|field| field.gesture.is_none()) {
                 self.field = None;
             }
@@ -293,9 +368,19 @@ impl Panel {
         let Some(document) = documents.active() else {
             self.model = None;
             self.key = None;
+            self.pending = false;
             return;
         };
-        let frame = document.frame_records().unwrap_or(Value::Null);
+        let Some(frame) = document.frame_records_ready().filter(|_| document.with_document_ready(|_| ()).is_some()) else {
+            // Not ready: the facts lane makes them; nothing is evaluated here.
+            if !self.pending {
+                self.model = self.model.as_deref().map(|model| Arc::new(contexts::pending(model)));
+                self.pending = true;
+            }
+            self.key = None;
+            return;
+        };
+        self.pending = false;
         let selection = facts::selection(document);
         let key = Key {
             document: document.id(),
@@ -313,7 +398,7 @@ impl Panel {
         if same && self.model.is_some() {
             return;
         }
-        let built = contexts::build(document, &contexts::Inputs { view, memory: &self.memory, panel: &self.state, shown: &self.shown, can_paste: key.paste });
+        let built = contexts::build(document, &frame, &contexts::Inputs { view, memory: &self.memory, panel: &self.state, shown: &self.shown, can_paste: key.paste });
         for section in &built.sections {
             if section.place == model::Place::Titled && !section.auto {
                 self.memory.rule_released(built.kind.id(), section.id);
@@ -408,8 +493,16 @@ impl Panel {
         true
     }
 
-    /// Commits whatever the panel has open (`propertyControls.commit()` before another edit, a command, a tab switch).
+    /// Commits whatever the panel has open (`propertyControls.commit()` before another edit, a command, a tab switch):
+    /// the number field's gesture, then a name being typed, on the document it began on.
     pub fn finish(&mut self, documents: &mut Documents, session: &mut Session, effects: &mut Vec<Effect>) {
+        self.finish_field(documents, session, effects);
+        if let Some(draft) = self.name.take() {
+            Self::commit_name(documents, session, draft, effects);
+        }
+    }
+
+    fn finish_field(&mut self, documents: &mut Documents, session: &mut Session, effects: &mut Vec<Effect>) {
         let Some(field) = self.field.as_mut() else { return };
         // Whichever of the field's gestures is open ends committed: typing (or a held key), else a scrub.
         let settled = match field.edit.blur() {
@@ -489,6 +582,7 @@ impl Panel {
                 effects.push(Effect::PickColor(target));
             }
             Event::Rename(event) => self.rename_event(documents, session, presentation, id, event, &mut effects),
+            Event::Text(key, event) => self.text_event(documents, session, id, key, event, &mut effects),
             Event::ChooseStep(..) => {}
         }
         effects
@@ -559,50 +653,98 @@ impl Panel {
         }
     }
 
+    /// Commits a name where it began: once, when it changed and is not blank (a blank name keeps the old one).
+    fn commit_name(documents: &mut Documents, session: &mut Session, draft: NameDraft, effects: &mut Vec<Effect>) {
+        let text = draft.text;
+        if text.trim().is_empty() || text == draft.original || documents.get(draft.document).is_none() {
+            return;
+        }
+        let result = match draft.target {
+            NameTarget::Figure => answers::call(documents, draft.document, "updateFigureStyle", &[object(&[("name", Value::str(&text))])], session),
+            NameTarget::Layer(layer) => answers::call(documents, draft.document, "renameLayer", &[Value::str(&layer), Value::str(&text)], session),
+        };
+        Self::report(result.map(|_| ()), effects);
+    }
+
+    fn begin_name(&mut self, documents: &Documents, id: DocumentId, target: RenameTarget, place: NamePlace, original: String, max_chars: Option<usize>) {
+        let target = match target {
+            RenameTarget::Figure => NameTarget::Figure,
+            RenameTarget::Layer => NameTarget::Layer(documents.get(id).map(|document| facts::active_layer(facts::records(document))).unwrap_or_else(|| Arc::from("layer-1"))),
+        };
+        self.name = Some(NameDraft { document: id, target, place, text: original.clone(), original, max_chars });
+    }
+
+    fn type_name(&mut self, place: NamePlace, text: String) {
+        if let Some(draft) = self.name.as_mut().filter(|draft| draft.place == place) {
+            draft.text = match draft.max_chars {
+                Some(limit) => text.chars().take(limit).collect(),
+                None => text,
+            };
+        }
+    }
+
     fn rename_event(&mut self, documents: &mut Documents, session: &mut Session, presentation: &Presentation, id: DocumentId, event: RenameEvent, effects: &mut Vec<Effect>) {
         let Some(rename) = self.model.as_ref().and_then(|model| model.target.rename.clone()) else {
-            self.rename = None;
+            self.name = None;
             return;
         };
+        let header = self.name.as_ref().is_some_and(|draft| draft.place == NamePlace::Header);
         match event {
             RenameEvent::Begin => {
-                if self.rename.is_some() {
+                if header {
                     return;
                 }
                 self.finish(documents, session, effects);
-                self.rename = Some(self.model.as_ref().map(|model| presentation.label(&model.target.name)).unwrap_or_default());
+                let original = self.model.as_ref().map(|model| presentation.label(&model.target.name)).unwrap_or_default();
+                self.begin_name(documents, id, rename.target, NamePlace::Header, original, rename.max_chars);
                 effects.push(Effect::Focus(FocusRequest::Rename));
             }
-            RenameEvent::Input(text) => {
-                if self.rename.is_some() {
-                    let text = match rename.max_chars {
-                        Some(limit) => text.chars().take(limit).collect(),
-                        None => text,
-                    };
-                    self.rename = Some(text);
-                }
-            }
+            RenameEvent::Input(text) => self.type_name(NamePlace::Header, text),
             RenameEvent::Cancel => {
-                if self.rename.take().is_some() {
+                if header {
+                    self.name = None;
                     effects.push(Effect::Focus(FocusRequest::TargetName));
                 }
             }
             RenameEvent::Commit => {
-                // Enter or leaving the field commits; a blank name keeps the old one.
-                let Some(text) = self.rename.take() else { return };
-                effects.push(Effect::Focus(FocusRequest::TargetName));
-                if text.trim().is_empty() {
+                // Enter or leaving the field commits; a blank or unchanged name keeps the old one.
+                if !header {
                     return;
                 }
-                let result = match rename.target {
-                    RenameTarget::Figure => answers::call(documents, id, "updateFigureStyle", &[object(&[("name", Value::str(&text))])], session),
-                    RenameTarget::Layer => {
-                        let layer = documents.get(id).map(|document| facts::active_layer(facts::records(document))).unwrap_or_else(|| Arc::from("layer-1"));
-                        answers::call(documents, id, "renameLayer", &[Value::str(&layer), Value::str(&text)], session)
-                    }
-                };
-                Self::report(result.map(|_| ()), effects);
+                effects.push(Effect::Focus(FocusRequest::TargetName));
+                if let Some(draft) = self.name.take() {
+                    Self::commit_name(documents, session, draft, effects);
+                }
             }
+        }
+    }
+
+    fn text_event(&mut self, documents: &mut Documents, session: &mut Session, id: DocumentId, key: TextKey, event: TextEvent, effects: &mut Vec<Effect>) {
+        let place = NamePlace::Text(key);
+        let typing = self.name.as_ref().is_some_and(|draft| draft.place == place);
+        let begin = |panel: &mut Panel, documents: &mut Documents, session: &mut Session, effects: &mut Vec<Effect>| {
+            panel.finish(documents, session, effects);
+            let Some(row) = panel.model.as_ref().and_then(|model| model.text(key)).cloned() else { return };
+            let target = match key {
+                TextKey::LayerName => RenameTarget::Layer,
+            };
+            panel.begin_name(documents, id, target, place, row.value.to_string(), row.max_chars);
+        };
+        match event {
+            TextEvent::Focus if !typing => begin(self, documents, session, effects),
+            TextEvent::Input(text) => {
+                if !typing {
+                    begin(self, documents, session, effects);
+                }
+                self.type_name(place, text);
+            }
+            TextEvent::Enter | TextEvent::Blur if typing => {
+                if let Some(draft) = self.name.take() {
+                    Self::commit_name(documents, session, draft, effects);
+                }
+            }
+            TextEvent::Escape if typing => self.name = None,
+            TextEvent::Focus | TextEvent::Enter | TextEvent::Escape | TextEvent::Blur => {}
         }
     }
 

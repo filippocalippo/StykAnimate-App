@@ -1,5 +1,6 @@
-//! Derived facts a panel shows that need evaluation or geometry (a selection's bounds), made on a background lane from
-//! the document's published generation and handed to the interface ready and stamped with what they were made for.
+//! Derived facts a panel shows that need evaluation or geometry (the frame on show, the typed views of the document, a
+//! selection's bounds), made on a background lane from the document's published generation and handed to the interface
+//! ready and stamped with what they were made for.
 //!
 //! The interface thread never builds geometry (D7). A panel asks for the facts of a [`FactsKey`] (document, revision,
 //! tick, selection), keeps showing the last ready value meanwhile, and takes the new one when it lands. The lane is the
@@ -33,12 +34,15 @@ impl FactsKey {
 }
 
 /// Facts made for one key.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct Ready {
     pub key: FactsKey,
     /// The app's `selectionBounds()`: `[minX, minY, maxX, maxY]` of the selected figures' `boundsOf` at the tick, `None`
-    /// when none of them is drawn there.
+    /// when none of them is drawn there (or fewer than two are selected: nothing asks).
     pub bounds: Option<[f64; 4]>,
+    /// The frame on show at the key's tick and the views it was made from, for the session to adopt
+    /// ([`crate::documents::Document::adopt_evaluation`]); `None` when the evaluation failed.
+    pub evaluation: Option<(Arc<crate::engine::Prepared>, crate::engine::Value)>,
 }
 
 /// What the lane answers: facts, or that the revision's generation is not published yet (K-doc publishes after the
@@ -52,14 +56,18 @@ pub enum Answer {
 pub struct Request {
     key: FactsKey,
     source: Arc<dyn FrameDocument>,
+    /// The document's records at the key's revision (a handle, not a copy): what the frame on show is evaluated from.
+    report: crate::engine::Value,
 }
 
-/// The selection's bounds at the key's tick, from the generation: the same evaluation, geometry and effect reach the
-/// app's `boundsOf` measures (`styk_eval::drawlist::app_bounds_of`), for the selected figures only. Lane-only.
+/// The frame on show at the key's tick, as the session evaluates it (`styk_edit::editor_frame`), from the generation's
+/// views; and, for two or more selected figures, their bounds: the same evaluation, geometry and effect reach the app's
+/// `boundsOf` measures (`styk_eval::drawlist::app_bounds_of`), for the selected figures only. Lane-only.
 fn make(request: Request) -> Answer {
-    let Request { key, source } = request;
+    let Request { key, source, report } = request;
     let Some(generation) = source.snapshot(key.revision, 0) else { return Answer::Unpublished(key) };
-    let bounds = {
+    let evaluation = styk_edit::editor_frame(&report, &generation.prepared, f64::from_bits(key.tick)).ok().map(|frame| (generation.prepared.clone(), frame));
+    let bounds = if key.uids.len() < 2 { None } else {
         let prepared = &generation.prepared;
         let frame = prepared.evaluate(f64::from_bits(key.tick));
         let slots: Vec<usize> = frame.objects.iter().enumerate().filter(|(_, object)| key.uids.contains(&object.uid)).map(|(slot, _)| slot).collect();
@@ -70,7 +78,7 @@ fn make(request: Request) -> Answer {
             Some(union.map_or(b, |u| [u[0].min(b[0]), u[1].min(b[1]), u[2].max(b[2]), u[3].max(b[3])]))
         })
     };
-    Answer::Ready(Ready { key, bounds })
+    Answer::Ready(Ready { key, bounds, evaluation })
 }
 
 /// The interface's handle on the facts lane.
@@ -85,6 +93,12 @@ pub struct Facts {
     latest: Option<Ready>,
 }
 
+impl std::fmt::Debug for Ready {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Ready").field("key", &self.key).field("bounds", &self.bounds).field("evaluated", &self.evaluation.is_some()).finish()
+    }
+}
+
 impl Facts {
     /// Starts the lane through the host's spawner. `wake` is called on the lane when facts are ready; the host turns it
     /// into an event, never a synchronous call back into update.
@@ -92,13 +106,14 @@ impl Facts {
         Ok(Facts { lane: Worker::start(spawner, "styk-facts", make, wake)?, waiting: None, asked: None, submitted: false, latest: None })
     }
 
-    /// Facts for `key`, made from `source`. A newer request replaces an older one still waiting.
-    pub fn request(&mut self, key: FactsKey, source: Arc<dyn FrameDocument>) {
+    /// Facts for `key`, made from `source` and the document's records at the key's revision. A newer request replaces
+    /// an older one still waiting.
+    pub fn request(&mut self, key: FactsKey, source: Arc<dyn FrameDocument>, report: crate::engine::Value) {
         if self.asked.as_ref() == Some(&key) {
             return;
         }
         self.asked = Some(key.clone());
-        self.waiting = Some(Request { key, source });
+        self.waiting = Some(Request { key, source, report });
         self.flush();
     }
 

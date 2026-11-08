@@ -63,6 +63,9 @@ pub struct Inspector {
     pub scope: Option<Scope>,
     /// The quick actions' context (`figure`, `joint`, `camera`, ...): the command registry fills the row (K-cmd).
     pub quick: Option<&'static str>,
+    /// The Library's footer ("Add to library", a later chunk fills it) shows under the body: something is selected
+    /// (`user-library.mjs` `syncSelection`, in the desktop app).
+    pub library: bool,
     pub sections: Vec<Section>,
 }
 
@@ -253,6 +256,27 @@ pub enum Toggle {
     BuilderBranch,
 }
 
+/// Which name a text row edits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TextKey {
+    /// The active layer's name (`#inspector-layer-name`: `renameLayer`).
+    LayerName,
+}
+
+/// A text field (`.ui-field` with a text input): a name typed in place, committed when it changed on Enter or when
+/// focus leaves, as an input's `change` event does today.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextRow {
+    pub key: TextKey,
+    pub label: Msg,
+    /// The accessible name (`description`).
+    pub description: Msg,
+    pub value: Arc<str>,
+    pub max_chars: Option<usize>,
+    pub span: bool,
+    pub disabled: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SwitchRow {
     pub toggle: Toggle,
@@ -292,6 +316,10 @@ pub struct ColorRow {
     pub caption: Option<Label>,
     pub mixed: bool,
     pub span: bool,
+    /// Opens the paint picker (`picker: 'paint'`, the segment colour): a button, which centres its swatch and hex
+    /// unless it spans the row.
+    pub paint_picker: bool,
+    pub disabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -336,6 +364,7 @@ pub enum Row {
     Stepper(StepperRow),
     Select(SelectRow),
     Switch(SwitchRow),
+    Text(TextRow),
     Color(ColorRow),
     Actions(ActionsRow),
     Segmented(SegmentedRow),
@@ -381,5 +410,17 @@ impl Inspector {
     /// The number row of `key`, when the panel shows one.
     pub fn number(&self, key: PropertyKey) -> Option<&NumberRow> {
         self.numbers().into_iter().find(|row| row.key == key)
+    }
+
+    /// The text row of `key`, when the panel shows one.
+    pub fn text(&self, key: TextKey) -> Option<&TextRow> {
+        fn find(rows: &[Row], key: TextKey) -> Option<&TextRow> {
+            rows.iter().find_map(|row| match row {
+                Row::Text(text) if text.key == key => Some(text),
+                Row::Grid { rows, .. } | Row::Group { rows, .. } => find(rows, key),
+                _ => None,
+            })
+        }
+        self.sections.iter().find_map(|section| find(&section.rows, key))
     }
 }

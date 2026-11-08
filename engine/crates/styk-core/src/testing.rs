@@ -4,6 +4,7 @@
 //! arguments, so a panel's headless test never names an engine type.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
@@ -13,7 +14,8 @@ use crate::screens::FixturePublication;
 
 struct Fixture {
     publication: Arc<FixturePublication>,
-    ready: Receiver<()>,
+    /// The core's facts lane says it answered (one receiver per core, shared by its documents).
+    ready: Rc<Receiver<()>>,
 }
 
 thread_local! {
@@ -30,8 +32,24 @@ pub fn core_with_document(bytes: &[u8], name: &str, spawner: Arc<dyn styk_servic
         let _ = notify.send(());
     }))?;
     let id = core.documents.active().ok_or("no document is open")?.id().get();
-    FIXTURES.with(|fixtures| fixtures.borrow_mut().entry(id).or_default().push(Fixture { publication, ready }));
+    FIXTURES.with(|fixtures| fixtures.borrow_mut().entry(id).or_default().push(Fixture { publication, ready: Rc::new(ready) }));
+    let mut core = core;
+    settle_facts(&mut core)?;
     Ok(core)
+}
+
+/// Opens `bytes` (named `name`) in another tab of `core`, which makes it active, with its own publication, and lets
+/// the facts lane answer for it.
+pub fn open_document(core: &mut Core, bytes: &[u8], name: &str) -> Result<crate::documents::DocumentId, String> {
+    let ready = with_fixture(core, |fixture| Ok(fixture.ready.clone()))?;
+    let engine = crate::engine::Engine::new(|| 0.0, crate::engine::Budgets::for_device(None));
+    let prepared = crate::documents::PreparedDocument::open_bytes(&engine, Arc::from(bytes), name, &|| false).map_err(|error| error.message)?;
+    let id = core.documents.open(prepared).map_err(|(error, _)| error.to_string())?;
+    let publication = Arc::new(FixturePublication::open(bytes, name)?);
+    core.set_source(id, publication.clone());
+    FIXTURES.with(|fixtures| fixtures.borrow_mut().entry(id.get()).or_default().push(Fixture { publication, ready }));
+    settle_facts(core)?;
+    Ok(id)
 }
 
 fn with_fixture<T>(core: &Core, run: impl FnOnce(&Fixture) -> Result<T, String>) -> Result<T, String> {
@@ -57,18 +75,28 @@ pub fn wait_facts(core: &mut Core) -> Result<(), String> {
     Ok(())
 }
 
-/// Lets the facts lane answer what the panels asked for: publish, then wait (an answer for an earlier request may come
-/// first; three rounds cover it and the one asked now).
+/// Lets the facts lane answer what the panels asked for: publish, then wait until the panel is not pending and the lane
+/// has nothing in flight (an answer for an earlier request may come first).
 pub fn settle_facts(core: &mut Core) -> Result<(), String> {
     publish(core)?;
-    for _ in 0..3 {
+    for _ in 0..8 {
         wait_facts(core)?;
+        if !core.inspector().pending() && !core.facts().is_some_and(Facts::in_flight) {
+            return Ok(());
+        }
     }
-    Ok(())
+    Err("the panel was still pending after eight answers of the facts lane".to_string())
 }
 
-/// Runs a session command on the active document with JSON arguments (`"[1,-1]"`) and refreshes the view models.
+/// Runs a session command on the active document with JSON arguments (`"[1,-1]"`), then publishes the new state and
+/// lets the facts lane answer, as the app's publication and lane do between frames: the panel is ready after it.
 pub fn call(core: &mut Core, method: &str, args: &str) -> Result<(), String> {
+    call_unsettled(core, method, args)?;
+    settle_facts(core)
+}
+
+/// Runs a session command and refreshes once, without letting the workers answer: the panel as it is right after.
+pub fn call_unsettled(core: &mut Core, method: &str, args: &str) -> Result<(), String> {
     let id = core.documents.active().ok_or("no document is open")?.id();
     let args = styk_doc::json::parse(args.as_bytes()).map_err(|error| error.to_string())?;
     let args: Vec<styk_doc::Value> = args.elements().map(|items| items.iter().collect()).unwrap_or_default();

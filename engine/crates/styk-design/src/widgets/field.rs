@@ -43,6 +43,7 @@ pub struct EditField<'a, Message> {
     width: Length,
     height: Option<f32>,
     embedded: bool,
+    proportional: bool,
     on_input: Option<Box<dyn Fn(String) -> Message + 'a>>,
     on_enter: Option<Message>,
     on_escape: Option<Message>,
@@ -77,6 +78,7 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             width: Length::Fill,
             height: None,
             embedded: false,
+            proportional: false,
             on_input: None,
             on_enter: None,
             on_escape: None,
@@ -132,6 +134,12 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
     /// no background, border or padding of its own, the value type role (`--type-value`).
     pub fn embedded(mut self) -> Self {
         self.embedded = true;
+        self
+    }
+
+    /// An embedded field of names and paths: proportional figures (`.ui-field-input[type="text"]`), not tabular.
+    pub fn proportional(mut self) -> Self {
+        self.proportional = true;
         self
     }
 
@@ -241,6 +249,7 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             width,
             height,
             embedded,
+            proportional,
             on_input,
             on_enter,
             on_escape,
@@ -255,11 +264,13 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
         let is_empty = value.is_empty();
         let limits = Limits { single_line: role.single_line(), ..limits };
 
-        let (font, size, padding) = if embedded {
-            let value = crate::typography::TextStyle::from_role(&tokens::scale::TYPE_VALUE).tabular();
-            (value.font, value.size, Padding::ZERO)
+        // An embedded value sets its line as `--type-value` does (18 px), so it sits where today's does in its field.
+        let (font, size, padding, line) = if embedded {
+            let value = crate::typography::TextStyle::from_role(&tokens::scale::TYPE_VALUE);
+            let value = if proportional { value } else { value.tabular() };
+            (value.font, value.size, Padding::ZERO, Some(value.line()))
         } else {
-            (super::INTER, tokens::scale::TYPE_UI.size, Padding { top: 6.0, right: 8.0, bottom: 6.0, left: 8.0 })
+            (super::INTER, tokens::scale::TYPE_UI.size, Padding { top: 6.0, right: 8.0, bottom: 6.0, left: 8.0 }, None)
         };
         let mut input = text_input(placeholder, value)
             .id(widget_id(id))
@@ -275,6 +286,9 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
                 _ => editor_core::BaseDirection::Auto,
             });
 
+        if let Some(line) = line {
+            input = input.line_height(line);
+        }
         if role == Role::Multiline {
             input = input.multiline(Some(iced::advanced::text::Wrapping::WordOrGlyph));
         }

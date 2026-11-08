@@ -24,6 +24,9 @@ pub enum Message {
     Key(iced::Event),
     /// What a walk of the tree found of the focus targets, for the core's focus state.
     Snapshot(focus::Snapshot),
+    /// An input method opened (true) or closed (false) a composition in the focused field: while one is open, Enter and
+    /// Escape belong to the input method (`docs/native/text-input.md`).
+    Compose(bool),
 }
 
 impl From<Command> for Message {
@@ -42,6 +45,10 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
         }
         Message::FocusField(key) => operate(focus::focus(crate::inspector::input_id(key))).discard(),
         Message::Idle => Task::none(),
+        Message::Compose(composing) => {
+            core.focus_mut().set_composing(composing);
+            Task::none()
+        }
         Message::Key(event) => match focus::navigate(core.focus_mut(), &event) {
             Some(id) => operate(focus::focus(id)).discard(),
             None => Task::none(),

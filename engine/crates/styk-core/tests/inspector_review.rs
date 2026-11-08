@@ -7,7 +7,8 @@ use styk_core::engine::Value;
 use styk_core::i18n::english;
 use styk_core::inspector::model::Inspector;
 use styk_core::inspector::property::PropertyKey;
-use styk_core::inspector::{Event, FieldEvent};
+use styk_core::inspector::model::TextKey;
+use styk_core::inspector::{Event, FieldEvent, RenameEvent, TextEvent};
 use styk_core::testing;
 use styk_core::view_state::InspectorContext;
 use styk_doc::json;
@@ -43,15 +44,16 @@ fn value(core: &Core, key: PropertyKey) -> f64 {
     model(core).number(key).unwrap_or_else(|| panic!("{key:?} is shown")).value
 }
 
+/// One event, then what the app does between frames: the new state is published and the facts lane answers.
 fn field(core: &mut Core, key: PropertyKey, event: FieldEvent) -> Vec<Effect> {
     let effects = core.dispatch(Command::Inspector(Event::Field(key, event)));
-    core.refresh();
+    testing::settle_facts(core).unwrap();
     effects
 }
 
 fn run(core: &mut Core, command: CommandId) -> Vec<Effect> {
     let effects = core.dispatch(Command::Run(command));
-    core.refresh();
+    testing::settle_facts(core).unwrap();
     effects
 }
 
@@ -90,17 +92,15 @@ fn switching_documents_finishes_the_edit_and_shows_the_new_document() {
     let first = core.documents.active().unwrap().id();
     let mut thirty = json::parse(STARTUP).unwrap();
     thirty.make_obj().unwrap().set("fps", Value::Num(30.0));
-    let engine = styk_engine::Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
-    let prepared = styk_core::documents::PreparedDocument::open_bytes(&engine, Arc::from(json::to_string(&thirty).into_bytes()), "Thirty.styk", &|| false).unwrap();
-    let second = core.documents.open(prepared).map_err(|(error, _)| error).unwrap();
+    let second = testing::open_document(&mut core, json::to_string(&thirty).as_bytes(), "Thirty.styk").unwrap();
     core.dispatch(Command::Activate(first));
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     session(&mut core, "select", "[null,-1]");
     assert_eq!(value(&core, PropertyKey::Fps), 24.0);
     field(&mut core, PropertyKey::Fps, FieldEvent::Focus);
     field(&mut core, PropertyKey::Fps, FieldEvent::Input("25".into()));
     core.dispatch(Command::Activate(second));
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     assert_eq!(core.documents.active().unwrap().id(), second);
     session(&mut core, "select", "[null,-1]");
     assert_eq!(value(&core, PropertyKey::Fps), 30.0, "the new document's model");
@@ -109,13 +109,13 @@ fn switching_documents_finishes_the_edit_and_shows_the_new_document() {
 
     // An open pose gesture is finished (one entry on its own document) before the switch, which then succeeds.
     core.dispatch(Command::Activate(first));
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     session(&mut core, "select", "[1,-1]");
     field(&mut core, PropertyKey::RootX, FieldEvent::Focus);
     field(&mut core, PropertyKey::RootX, FieldEvent::Input("300".into()));
     assert!(core.documents.get(first).unwrap().view().unwrap().editing);
     let effects = core.dispatch(Command::Activate(second));
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     assert!(notices(&effects).is_empty(), "{:?}", notices(&effects));
     assert_eq!(core.documents.active().unwrap().id(), second);
     assert!(!core.documents.get(first).unwrap().view().unwrap().editing);
@@ -134,7 +134,7 @@ fn edit_together_keys_the_chosen_ticks_and_the_playhead() {
     field(&mut core, PropertyKey::RootX, FieldEvent::Blur);
     core.view_state_mut().set_range(vec![0, 6]);
     core.view_state_mut().set_apply_range(true);
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     let range = styk_core::range::Range::of(core.view_state(), core.documents.active().unwrap()).unwrap();
     assert_eq!(range.sheet_ticks, Some(vec![0.0, 6.0, 3.0]), "the chosen ticks, then the playhead's");
     field(&mut core, PropertyKey::Scale, FieldEvent::Focus);
@@ -168,7 +168,7 @@ fn align_reaches_every_chosen_frame_in_one_entry() {
     session(&mut core, "selectMany", "[[1,3]]");
     core.view_state_mut().set_range(vec![0, 3]);
     core.view_state_mut().set_apply_range(true);
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     let effects = run(&mut core, CommandId::AlignRight);
     assert!(notices(&effects).is_empty(), "{:?}", notices(&effects));
     assert_eq!(testing::undo_depth(&core), 2, "the move, then one entry for the alignment");
@@ -189,11 +189,11 @@ fn fill_actions_and_draw_orders_are_one_entry_each() {
     assert!(fills > 1);
     let order = value(&core, PropertyKey::PolygonZOrder(0));
     core.dispatch(Command::Inspector(Event::Act(PanelAction::Order { kind: DrawKind::Polygon, index: 0, direction: OrderDirection::Front })));
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     assert_eq!(testing::undo_depth(&core), 1);
     assert!(value(&core, PropertyKey::PolygonZOrder(0)) > order, "sent to the front");
     core.dispatch(Command::Inspector(Event::Act(PanelAction::DeletePolygon(0))));
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     assert_eq!(testing::undo_depth(&core), 2);
     assert_eq!(polygons(&core), fills - 1);
     run(&mut core, CommandId::Undo);
@@ -209,7 +209,7 @@ fn fill_actions_and_draw_orders_are_one_entry_each() {
 fn camera_copy_and_paste_use_the_session_clipboard() {
     let mut core = core_with(STARTUP);
     core.view_state_mut().set_context(InspectorContext::Camera);
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     assert!(model(&core).section("transform").unwrap().actions[1].disabled);
     run(&mut core, CommandId::CameraCopy);
     assert!(!model(&core).section("transform").unwrap().actions[1].disabled, "the session holds a pose");
@@ -222,27 +222,155 @@ fn camera_copy_and_paste_use_the_session_clipboard() {
     assert_eq!(value(&core, PropertyKey::CameraX), 0.0, "the copied pose is back");
 }
 
-/// Finding 1: bounds come from the worker, stamped with what they were made for; the last ready value is shown while a
-/// newer one is pending.
+/// Finding 1, and the re-check's finding 2: bounds come from the worker, stamped with what they were made for, and are
+/// shown only for exactly the state on show. A moved selection or a new revision clears them and leaves their rows
+/// pending: empty, disabled, and never the origin or denominator of a gesture.
 #[test]
-fn bounds_are_made_on_the_worker_and_shown_until_newer_ones_land() {
+fn bounds_are_shown_only_for_the_state_they_were_made_for() {
     let mut core = core_with(SHEET);
     session(&mut core, "selectMany", "[[1,2,3]]");
-    assert!(core.inspector().shown().bounds.is_none(), "nothing ready before the worker ran");
+    let first = core.inspector().shown().bounds.expect("the worker measured the selection");
+    assert!(!model(&core).number(PropertyKey::GroupX).unwrap().pending);
+
+    // Sol's reproduction: the selection moves; the lane has not answered for it yet.
+    testing::call_unsettled(&mut core, "selectMany", "[[1,2]]").unwrap();
+    assert_eq!(core.inspector().shown().bounds, None, "bounds of another selection are not shown");
+    let row = model(&core).number(PropertyKey::GroupX).unwrap().clone();
+    assert!(row.pending, "the row is pending: {row:?}");
+    for event in [FieldEvent::Focus, FieldEvent::Input("10".into())] {
+        core.dispatch(Command::Inspector(Event::Field(PropertyKey::GroupX, event)));
+        core.refresh();
+    }
+    assert!(core.inspector().field().is_none(), "a pending row never opens a gesture");
+    assert_eq!(testing::undo_depth(&core), 0);
     testing::settle_facts(&mut core).unwrap();
-    let first = core.inspector().shown().bounds.unwrap();
-    assert!(!core.inspector().shown().stale);
-    // Move the figures: the revision changes; until the worker runs the old bounds stay, marked stale.
+    let two = core.inspector().shown().bounds.expect("the worker measured the new selection");
+    assert_ne!(two, first);
+
+    // A new revision: the bounds of the old one are not shown either, until the worker measured the new one.
+    session(&mut core, "selectMany", "[[1,2,3]]");
     field(&mut core, PropertyKey::GroupX, FieldEvent::Focus);
     field(&mut core, PropertyKey::GroupX, FieldEvent::Input(format!("{}", first[0] + 50.0)));
-    field(&mut core, PropertyKey::GroupX, FieldEvent::Blur);
-    // The lane is asked before the new revision is published: that is not an answer, the old bounds stay.
-    testing::wait_facts(&mut core).unwrap();
-    assert_eq!(core.inspector().shown().bounds, Some(first));
-    assert!(core.inspector().shown().stale);
+    core.dispatch(Command::Inspector(Event::Field(PropertyKey::GroupX, FieldEvent::Blur)));
+    core.refresh();
+    assert_eq!(core.inspector().shown().bounds, None, "the old revision's bounds are not shown");
+    assert!(model(&core).number(PropertyKey::GroupX).unwrap().pending);
     testing::settle_facts(&mut core).unwrap();
     let moved = core.inspector().shown().bounds.unwrap();
     assert!((moved[0] - (first[0] + 50.0)).abs() < 1e-6, "{moved:?}");
-    assert!(!core.inspector().shown().stale);
 }
 
+/// The re-check's finding 1: the refresh never evaluates. A project setting changes the document, so the session holds
+/// no evaluation of it; refreshing leaves it so and shows the panel pending (values cleared, controls disabled) until
+/// the facts lane has made the frame on show from the published generation, which the session then adopts.
+#[test]
+fn the_refresh_never_evaluates_and_the_panel_is_pending_until_the_worker_answers() {
+    let mut core = core_with(STARTUP);
+    session(&mut core, "select", "[1,-1]");
+    assert!(!core.inspector().pending());
+    assert_eq!(value(&core, PropertyKey::RootX), 480.0);
+    testing::call_unsettled(&mut core, "setFPS", "[30]").unwrap();
+    for _ in 0..3 {
+        core.refresh();
+    }
+    let document = core.documents.active().unwrap();
+    assert!(document.frame_records_ready().is_none() || document.with_document_ready(|_| ()).is_none(), "the refresh evaluated or converted the document");
+    assert!(core.inspector().pending());
+    let row = model(&core).number(PropertyKey::RootX).unwrap().clone();
+    assert!(row.pending, "a pending panel shows no value of the frame on show: {row:?}");
+    assert!(model(&core).sections.iter().all(|section| section.actions.iter().all(|action| action.disabled)), "and edits nothing");
+    testing::settle_facts(&mut core).unwrap();
+    assert!(!core.inspector().pending());
+    assert!(core.documents.active().unwrap().frame_records_ready().is_some(), "the worker's frame was adopted");
+    assert_eq!(value(&core, PropertyKey::RootX), 480.0);
+    assert_eq!(core.documents.active().unwrap().with_document_ready(|typed| typed.fps), Some(30.0));
+}
+
+fn open_second(core: &mut Core) -> styk_core::documents::DocumentId {
+    testing::open_document(core, STARTUP, "Second.styk").unwrap()
+}
+
+fn figure_name(core: &Core, document: styk_core::documents::DocumentId) -> String {
+    let records = core.documents.get(document).unwrap().records().unwrap().clone();
+    records.get("figure_types").unwrap().item(0).unwrap().get("name").unwrap().as_str().unwrap().to_string()
+}
+
+fn layer_name(core: &Core) -> String {
+    let records = core.documents.active().unwrap().records().unwrap().clone();
+    records.path(&["_styk", "layers", "byId", "layer-1", "name"]).unwrap().as_str().unwrap().to_string()
+}
+
+fn panel(core: &mut Core, event: Event) {
+    core.dispatch(Command::Inspector(event));
+    testing::settle_facts(core).unwrap();
+}
+
+/// Re-check finding 3: a name being typed in the header when another document becomes active is committed on the
+/// document it began on, as today's field commits when it loses focus (`inspector-header.mjs` `finish(true)` on blur).
+#[test]
+fn a_rename_being_typed_is_committed_on_its_own_document_before_another_becomes_active() {
+    let mut core = core_with(STARTUP);
+    let first = core.documents.active().unwrap().id();
+    let second = open_second(&mut core);
+    core.dispatch(Command::Activate(first));
+    testing::settle_facts(&mut core).unwrap();
+    session(&mut core, "select", "[1,-1]");
+    let before = figure_name(&core, first);
+    panel(&mut core, Event::Rename(RenameEvent::Begin));
+    panel(&mut core, Event::Rename(RenameEvent::Input("Ink".into())));
+    assert_eq!(core.inspector().rename().unwrap().text, "Ink");
+    core.dispatch(Command::Activate(second));
+    testing::settle_facts(&mut core).unwrap();
+    assert_eq!(core.documents.active().unwrap().id(), second);
+    assert!(core.inspector().rename().is_none(), "no draft follows into the other document");
+    assert_eq!(figure_name(&core, first), "Ink", "committed on the document it began on");
+    assert_eq!(figure_name(&core, second), before, "the other document is untouched");
+    assert_eq!(core.documents.get(first).unwrap().view().unwrap().history.undo, 1, "one entry");
+}
+
+/// Re-check finding 3: a command finishes a name being typed first (commits it), so Undo then takes the new name back.
+#[test]
+fn a_rename_being_typed_is_committed_before_a_command() {
+    let mut core = core_with(STARTUP);
+    session(&mut core, "select", "[1,-1]");
+    let id = core.documents.active().unwrap().id();
+    let before = figure_name(&core, id);
+    panel(&mut core, Event::Rename(RenameEvent::Begin));
+    panel(&mut core, Event::Rename(RenameEvent::Input("Ink".into())));
+    run(&mut core, CommandId::Undo);
+    assert!(core.inspector().rename().is_none());
+    assert_eq!(figure_name(&core, id), before, "the rename was one entry, and Undo took it back");
+    run(&mut core, CommandId::Redo);
+    assert_eq!(figure_name(&core, id), "Ink");
+}
+
+/// The layer's Name field (today's `#inspector-layer-name`, `renameLayer` on `change`): typing is a draft the field
+/// shows; leaving the field renames the layer once; Escape keeps the name; undo and redo restore it.
+#[test]
+fn the_layer_name_field_renames_the_layer_once_when_focus_leaves() {
+    let mut core = core_with(STARTUP);
+    session(&mut core, "select", "[1,-1]");
+    core.view_state_mut().set_context(InspectorContext::Layer);
+    testing::settle_facts(&mut core).unwrap();
+    assert_eq!(model(&core).text(TextKey::LayerName).unwrap().value.as_ref(), "Layer 1");
+    panel(&mut core, Event::Text(TextKey::LayerName, TextEvent::Focus));
+    panel(&mut core, Event::Text(TextKey::LayerName, TextEvent::Input("Ink".into())));
+    assert_eq!(core.inspector().text_draft(), Some((TextKey::LayerName, "Ink".to_string())));
+    assert_eq!(layer_name(&core), "Layer 1", "typing is a draft");
+    panel(&mut core, Event::Text(TextKey::LayerName, TextEvent::Blur));
+    assert_eq!(layer_name(&core), "Ink");
+    assert_eq!(testing::undo_depth(&core), 1);
+    assert_eq!(model(&core).text(TextKey::LayerName).unwrap().value.as_ref(), "Ink");
+
+    panel(&mut core, Event::Text(TextKey::LayerName, TextEvent::Focus));
+    panel(&mut core, Event::Text(TextKey::LayerName, TextEvent::Input("Wash".into())));
+    panel(&mut core, Event::Text(TextKey::LayerName, TextEvent::Escape));
+    panel(&mut core, Event::Text(TextKey::LayerName, TextEvent::Blur));
+    assert_eq!(layer_name(&core), "Ink", "Escape keeps the name");
+    assert_eq!(testing::undo_depth(&core), 1);
+
+    run(&mut core, CommandId::Undo);
+    assert_eq!(layer_name(&core), "Layer 1");
+    run(&mut core, CommandId::Redo);
+    assert_eq!(layer_name(&core), "Ink");
+}

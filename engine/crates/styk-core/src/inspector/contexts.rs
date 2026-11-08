@@ -169,8 +169,8 @@ fn channel(document: &Document, target: &[(&str, Value)], property: &str, factor
     for (key, value) in target {
         object.set(key, value.clone());
     }
-    let args = Value::array(vec![Value::object(object), Value::str(property)]);
-    match document.read("animationValue", &args) {
+    // Read ready: the model is built only when the frame on show and the views are.
+    match document.animation_value_ready(&Value::object(object), property) {
         Some(Ok(Some(Value::Num(value)))) if value.is_finite() => Some(value * factor),
         _ => None,
     }
@@ -195,9 +195,11 @@ fn resolve(view: &ViewState, has_object: bool) -> InspectorContext {
 }
 
 /// The Inspector for `document` in this view state.
-pub(crate) fn build(document: &Document, inputs: &Inputs<'_>) -> Inspector {
+/// `frame` is the frame on show, read ready ([`Document::frame_records_ready`]): the model is never built from an
+/// evaluation made on the interface thread.
+pub(crate) fn build(document: &Document, frame: &Value, inputs: &Inputs<'_>) -> Inspector {
     let records = facts::records(document);
-    let frame = document.frame_records().unwrap_or(Value::Null);
+    let frame = frame.clone();
     let object = facts::selected_object(document, &frame);
     let count = facts::selection(document).uids.len();
     if let Some(tool) = inputs.view.drawing() {
@@ -224,6 +226,7 @@ pub(crate) fn build(document: &Document, inputs: &Inputs<'_>) -> Inspector {
         },
     };
     finish(&mut inspector, inputs.memory);
+    inspector.library = count > 0;
     inspector
 }
 
@@ -302,6 +305,7 @@ fn scene(records: &Value, frame: &Value) -> Inspector {
         kind: Kind::Scene,
         target: target("inspectorView.scene", Label::key("inspectorView.scene"), Some("scene"), "scene"),
         scope: None,
+        library: false,
         quick: None,
         sections: vec![
             section("summary", None, vec![Row::Meta(summary)]),
@@ -310,7 +314,7 @@ fn scene(records: &Value, frame: &Value) -> Inspector {
                 Row::Number(number(PropertyKey::CanvasHeight, msg("inspectorView.height"), num(records.get("canvas_height")).unwrap_or(0.0), "px").range(1.0, 16384.0)),
             ])]),
             section("background", Some(msg("inspectorView.background")), vec![grid(vec![
-                Row::Color(ColorRow {
+                Row::Color(ColorRow { paint_picker: false, disabled: false,
                     target: ColorTarget::Background,
                     label: msg("inspectorView.backgroundColor"),
                     description: None,
@@ -384,7 +388,7 @@ fn camera(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<'
             .titled(false),
         );
     }
-    Inspector { kind: Kind::Camera, target: target("inspectorView.camera", Label::key("inspectorView.camera"), Some("camera"), "camera"), scope: None, quick: Some("camera"), sections }
+    Inspector { kind: Kind::Camera, target: target("inspectorView.camera", Label::key("inspectorView.camera"), Some("camera"), "camera"), scope: None, library: false, quick: Some("camera"), sections }
 }
 
 /// A keyframe's hold (classic documents) or a sheet frame's exposure (layer sheets).
@@ -401,13 +405,14 @@ fn frame_context(document: &Document, records: &Value) -> Inspector {
         let exposure = end - at.unwrap_or(facts::tick(document));
         let name = facts::layers(records).into_iter().find(|layer| layer.id == layer_id).map_or_else(|| Label::key("inspectorView.layer"), |layer| Label::Plain(layer.name));
         let mut exposure = section("exposure", None, vec![grid(vec![Row::Number(number(PropertyKey::Duration, msg("inspectorView.exposure"), exposure, "frames").range(1.0, 65535.0))])])
-            .actions(vec![button(CommandId::AddFrame, Some("frame-plus"), "inspectorView.insertKeyframeF6").tip("inspectorView.addFrame")]);
+            .actions(vec![button(CommandId::AddFrame, Some("plus"), "inspectorView.insertKeyframeF6").tip("inspectorView.addFrame")]);
         // The section is titled by the layer's own name.
         exposure.title = Some(name);
         return Inspector {
             kind: Kind::Frame,
             target: target("inspectorView.timing", Label::Msg(Msg::new("filmstrip.card").with("frame", facts::tick(document) + 1.0)), None, "frame"),
             scope: None,
+            library: false,
             quick: None,
             sections: vec![exposure],
         };
@@ -417,12 +422,13 @@ fn frame_context(document: &Document, records: &Value) -> Inspector {
         kind: Kind::Keyframe,
         target: target("inspectorView.timing", Label::Msg(Msg::new("inspectorView.keyframe").with("frame", frame_index + 1)), None, "frame"),
         scope: None,
+        library: false,
         quick: None,
         sections: vec![section("timing", Some(msg("inspectorView.timing")), vec![grid(vec![Row::Number(number(PropertyKey::Duration, msg("inspectorView.duration"), duration, "ticks").range(0.0, 65535.0))])])],
     }
 }
 
-/// A layer: its name; its Parallax belongs to the camera-motion chunk.
+/// A layer: its name, in the header and in its Name field; its Parallax belongs to the camera-motion chunk.
 fn layer(records: &Value) -> Inspector {
     let id = facts::active_layer(records);
     let name = facts::layers(records).into_iter().find(|layer| layer.id == id).map_or_else(|| Arc::from("Layer"), |layer| layer.name);
@@ -430,14 +436,19 @@ fn layer(records: &Value) -> Inspector {
         kind: Kind::Layer,
         target: Target {
             kind_label: Label::key("inspectorView.layer"),
-            name: Label::Plain(name),
+            name: Label::Plain(name.clone()),
             glyph: Some("layers"),
             rename: Some(Rename { target: RenameTarget::Layer, description: msg("inspectorView.layerName"), tip: msg("inspectorHeader.doubleClickToRename"), max_chars: Some(160) }),
             selection: "layer",
         },
         scope: None,
+        library: false,
         quick: None,
-        sections: vec![section("parallax", None, vec![Row::Slot(Slot::Parallax)])],
+        sections: vec![
+            section("layer", Some(msg("inspectorView.layer")), vec![grid(vec![Row::Text(TextRow { key: TextKey::LayerName, label: msg("common.name"), description: msg("inspectorView.layerName"), value: name.clone(), max_chars: Some(160), span: true, disabled: false })])]),
+            // Bare, edge to edge (`inspector-bare`), as today: the camera-motion chunk draws it.
+            section("parallax", None, vec![Row::Slot(Slot::Parallax)]),
+        ],
     }
 }
 
@@ -556,7 +567,8 @@ fn figure_context(document: &Document, records: &Value, frame: &Value, figure: &
         Row::Number(number(PropertyKey::Scale, msg("inspectorView.scale"), scale, "%").range(0.01, f64::INFINITY)),
     ])]);
     let join_label = if parent.is_some() { "inspectorView.unjoin" } else { "inspectorView.join" };
-    let mut join = button(CommandId::JoinFigure, None, join_label).text().disabled(objects.len() < 2 && parent.is_none());
+    // `figureJoinAction`: one figure selected (a branch is a joint, another context).
+    let mut join = button(CommandId::JoinFigure, None, join_label).text().disabled(facts::selection(document).uids.len() != 1);
     join.tip = Some(msg(if parent.is_some() { "inspectorView.unjoinFigure" } else { "inspectorView.joinToFigure" }));
     let z = channel_of("zIndex", 1.0).unwrap_or_else(|| num(object.get("_stykZIndex")).unwrap_or(0.0));
     let mut sections: Vec<Section> = Vec::new();
@@ -567,7 +579,7 @@ fn figure_context(document: &Document, records: &Value, frame: &Value, figure: &
     sections.push(transform);
     sections.push(
         section("appearance", Some(msg("inspectorView.appearance")), vec![grid(vec![
-            Row::Color(ColorRow {
+            Row::Color(ColorRow { paint_picker: false, disabled: false,
                 target: ColorTarget::Figure,
                 label: msg("inspectorView.colour"),
                 description: Some(msg("inspectorView.recolorAllSegments")),
@@ -618,6 +630,7 @@ fn figure_context(document: &Document, records: &Value, frame: &Value, figure: &
         kind: kind_id,
         target: Target { kind_label: Label::key("inspectorView.figure"), name, glyph: Some(glyph), rename: Some(figure_rename()), selection: "figure" },
         scope: scope_line(inputs.view),
+        library: false,
         quick: Some(kind_id.id()),
         sections,
     }
@@ -691,7 +704,7 @@ fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Fi
         rows.push(Row::Group {
             label: name.clone(),
             rows: vec![
-                Row::Color(ColorRow {
+                Row::Color(ColorRow { paint_picker: false, disabled: false,
                     target: ColorTarget::Polygon(at),
                     label: Msg::new("inspectorView.color").with("name", name),
                     description: None,
@@ -766,7 +779,7 @@ fn figures(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<
     })]));
     sections.push(
         section("appearance", Some(msg("inspectorView.appearance")), vec![grid(vec![
-            Row::Color(ColorRow {
+            Row::Color(ColorRow { paint_picker: false, disabled: false,
                 target: ColorTarget::Figure,
                 label: msg("inspectorView.colour"),
                 description: Some(msg("inspectorView.figureColor")),
@@ -793,6 +806,7 @@ fn figures(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<
         kind: Kind::Figures,
         target: target("inspectorView.figures", Label::Msg(Msg::count("inspectorView.selectedFigures", count as f64)), None, "figures"),
         scope: scope_line(inputs.view),
+        library: false,
         quick: Some("figures"),
         sections,
     }
@@ -845,7 +859,7 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
         PaintKind::Angular => "angular",
         PaintKind::Diamond => "diamond",
     });
-    let colour = ColorRow {
+    let colour = ColorRow { paint_picker: true, disabled: false,
         target: ColorTarget::Segment,
         label: msg("inspectorView.colour"),
         description: Some(msg("inspectorView.segmentColor")),
@@ -923,7 +937,7 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
         let mut rows = Vec::new();
         if let Some((rgb, a)) = segment.secondary {
             rows.push(grid(vec![
-                Row::Color(ColorRow { target: ColorTarget::SegmentGradient, label: msg("inspectorView.colour"), description: Some(msg("inspectorView.secondaryColor")), paint: Paint::Solid(displayed_color(version, figure, object, rgb)), caption: None, mixed: false, span: false }),
+                Row::Color(ColorRow { paint_picker: false, disabled: false, target: ColorTarget::SegmentGradient, label: msg("inspectorView.colour"), description: Some(msg("inspectorView.secondaryColor")), paint: Paint::Solid(displayed_color(version, figure, object, rgb)), caption: None, mixed: false, span: false }),
                 Row::Number(
                     number(PropertyKey::SegmentGradientOpacity, msg("inspectorView.secondaryOpacity"), override_of("gradientOpacity").map_or(pct_of_transparency(f64::from(a)), |opacity| opacity * 100.0), "%")
                         .range(0.0, 100.0)
@@ -940,6 +954,7 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
         kind: Kind::Joint,
         target: Target { kind_label: Label::key("inspectorView.joint"), name: title, glyph: Some(if part.is_some() { "link" } else { "nodes" }), rename: None, selection: "joint" },
         scope: scope_line(inputs.view),
+        library: false,
         quick: Some("joint"),
         sections,
     }
@@ -952,6 +967,7 @@ fn movieclip(figure: &Figure, _records: &Value) -> Inspector {
         kind: Kind::Movieclip,
         target: Target { kind_label: Label::key("inspectorView.figure"), name, glyph: Some("frame"), rename: None, selection: "figure" },
         scope: None,
+        library: false,
         quick: Some("movieclip"),
         sections: vec![section("movieclip", None, vec![Row::Slot(Slot::Movieclip)])],
     }
@@ -964,6 +980,7 @@ fn spatial_rig(figure: &Figure, object: &Value) -> Inspector {
         kind: Kind::SpatialRig,
         target: Target { kind_label: Label::key("inspectorView.figure"), name, glyph: Some("person"), rename: Some(figure_rename()), selection: "figure" },
         scope: None,
+        library: false,
         quick: Some("figure"),
         sections: vec![
             section("spatial", None, vec![Row::Slot(Slot::Spatial)]),
@@ -983,7 +1000,45 @@ fn drawing(tool: &'static str) -> Inspector {
         kind: Kind::Drawing,
         target: Target { kind_label: Label::key("inspectorView.drawing"), name: Label::Msg(Msg::new("inspectorView.drawing")), glyph: Some(if tool.is_empty() { "brush" } else { tool }), rename: None, selection: "drawing" },
         scope: None,
+        library: false,
         quick: None,
         sections: vec![section("drawing", None, vec![Row::Slot(Slot::DrawTools)])],
     }
+}
+
+/// The model while the frame on show and the document's views are being made on a worker: the last model with every
+/// value read from the frame cleared and every control disabled, so nothing stale is shown as current or edited.
+pub(crate) fn pending(model: &Inspector) -> Inspector {
+    fn disable(rows: &mut [Row]) {
+        for row in rows {
+            match row {
+                Row::Grid { rows: inner, .. } | Row::Group { rows: inner, .. } => disable(inner),
+                Row::Number(number) => number.pending = true,
+                Row::Stepper(stepper) => {
+                    stepper.field.pending = true;
+                    stepper.down.disabled = true;
+                    stepper.up.disabled = true;
+                }
+                Row::Select(select) => select.disabled = true,
+                Row::Switch(switch) => switch.disabled = true,
+                Row::Color(color) => color.disabled = true,
+                Row::Text(text) => text.disabled = true,
+                Row::Actions(actions) => actions.items.iter_mut().for_each(|item| item.disabled = true),
+                Row::Pager { previous, next, .. } => {
+                    previous.disabled = true;
+                    next.disabled = true;
+                }
+                Row::Segmented(_) | Row::Value { .. } | Row::Meta(_) | Row::Caption(_) | Row::Swatches { .. } | Row::Slot(_) => {}
+            }
+        }
+    }
+    let mut model = model.clone();
+    for section in &mut model.sections {
+        section.actions.iter_mut().for_each(|action| action.disabled = true);
+        if let Some(switch) = section.switch.as_mut() {
+            switch.disabled = true;
+        }
+        disable(&mut section.rows);
+    }
+    model
 }

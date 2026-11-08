@@ -3,14 +3,14 @@
 // Chromium, LCD text on, opaque surfaces, device scale 1), from today's app served with its engine module
 // (`node scripts/serve.mjs` in a checkout whose src/engine/pkg is built).
 //
-//   node engine/crates/styk-app/automation/inspector-reference/screens.mjs http://127.0.0.1:47831
+//   node engine/crates/styk-app/automation/inspector-reference/screens.mjs http://127.0.0.1:47831 [screen id...]
 //
 // It also writes engine/crates/styk-core/tests/support/today_bounds.rs, the selection's bounds of the figures screen's
 // document, which the native tests compare with. (Numbers and plural forms come from today's runtime itself: intl.cjs.)
 import {chromium} from 'playwright';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import {SCREENS, document} from './contexts.mjs';
+import {SCREENS, document, enter} from './contexts.mjs';
 
 const url = process.argv[2] ?? 'http://127.0.0.1:47831';
 const root = path.resolve(import.meta.dirname, '../../../../..');
@@ -31,18 +31,22 @@ async function open(theme) {
   return {context, page};
 }
 
-for (const screen of SCREENS) {
+const only = process.argv.slice(3);
+for (const screen of SCREENS.filter(screen => !only.length || only.includes(screen.id))) {
   const {context, page} = await open(screen.theme);
   await page.evaluate(async ({report, screen}) => {
     const editor = window.styk.editor;
     editor.load(report, 'Reference');
     editor.markSaved();
-    Object.assign(window.styk.state, screen.state ?? {});
     if (screen.many) editor.selectMany(screen.many); else editor.select(...screen.select);
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     await document.fonts.ready;
     for (const element of document.querySelectorAll('*')) element.style.caretColor = 'transparent';
   }, {report: document(await fixture(screen.fixture), screen), screen});
+  if (screen.enter) {
+    await page.evaluate(enter, screen.enter);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  }
   await page.waitForTimeout(500);
   const panel = page.locator('.shell-panel:has([data-slot=inspector-target])').first();
   const box = await panel.boundingBox();

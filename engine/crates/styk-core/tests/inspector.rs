@@ -52,7 +52,7 @@ fn session(core: &mut Core, method: &str, args: &str) -> Value {
     let id = core.documents.active().unwrap().id();
     let args: Vec<Value> = json::parse(args.as_bytes()).unwrap().elements().unwrap().iter().collect();
     let answer = core.documents.call(id, method, &args, &Value::Null).unwrap();
-    core.refresh();
+    testing::settle_facts(core).unwrap();
     answer.result.unwrap()
 }
 
@@ -64,15 +64,16 @@ fn value(core: &Core, key: PropertyKey) -> f64 {
     model(core).number(key).unwrap_or_else(|| panic!("{key:?} is shown")).value
 }
 
+/// One event, then what the app does between frames: the new state is published and the facts lane answers.
 fn field(core: &mut Core, key: PropertyKey, event: FieldEvent) -> Vec<Effect> {
     let effects = core.dispatch(Command::Inspector(Event::Field(key, event)));
-    core.refresh();
+    testing::settle_facts(core).unwrap();
     effects
 }
 
 fn run(core: &mut Core, command: CommandId) -> Vec<Effect> {
     let effects = core.dispatch(Command::Run(command));
-    core.refresh();
+    testing::settle_facts(core).unwrap();
     effects
 }
 
@@ -174,7 +175,7 @@ fn a_joint_shows_joint_style_and_its_figure_s_layer() {
 #[test]
 fn several_figures_show_their_bounds_align_and_mixed_values() {
     let mut core = core_with(SHEET);
-    session(&mut core, "selectMany", "[[1,2,3]]");
+    testing::call_unsettled(&mut core, "selectMany", "[[1,2,3]]").unwrap();
     let figures = model(&core);
     assert_eq!(figures.kind, Kind::Figures);
     assert_eq!(figures.target.name.english(), "3 figures");
@@ -199,24 +200,24 @@ fn several_figures_show_their_bounds_align_and_mixed_values() {
 fn the_camera_layer_and_frame_contexts() {
     let mut core = core_with(STARTUP);
     core.view_state_mut().set_context(InspectorContext::Camera);
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     let camera = model(&core);
     assert_eq!(camera.kind, Kind::Camera);
     assert_eq!(section_ids(&camera), ["preview", "tabs", "transform", "framing"]);
     assert_eq!(value(&core, PropertyKey::CameraScale), 100.0);
     assert!(camera.section("transform").unwrap().actions[1].disabled, "Paste waits for a copied pose");
     core.dispatch(Command::Inspector(Event::Segment(styk_core::inspector::model::Segments::CameraTab, "motion")));
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     assert_eq!(section_ids(&model(&core)), ["preview", "tabs", "motion"]);
 
     core.view_state_mut().set_context(InspectorContext::Layer);
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     let layer = model(&core);
     assert_eq!((layer.kind, layer.target.name.english()), (Kind::Layer, "Layer 1".to_string()));
 
     core.view_state_mut().set_context(InspectorContext::Auto);
     core.view_state_mut().set_tab(InspectorTab::Animation);
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     let frame = model(&core);
     assert_eq!(frame.kind, Kind::Frame, "a layer sheet's frame");
     assert_eq!(frame.section("exposure").unwrap().title.as_ref().map(Label::english).as_deref(), Some("Layer 1"));
@@ -358,7 +359,7 @@ fn every_kind_of_edit_is_one_entry_that_undoes_and_redoes() {
         session(&mut core, select, selection);
         if let Some(context) = context {
             core.view_state_mut().set_context(*context);
-            core.refresh();
+            testing::settle_facts(&mut core).unwrap();
         }
         testing::settle_facts(&mut core).unwrap();
         let before = records(&core);
@@ -406,7 +407,7 @@ fn edit_together_reaches_every_chosen_frame_in_one_entry() {
     // On a layer sheet the chosen frames are ticks: the two keyframes start at 0 and 6.
     core.view_state_mut().set_range(vec![0, 6]);
     core.dispatch(Command::Inspector(Event::Toggle(Toggle::ApplyRange, true)));
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     let inspector = model(&core);
     // Ticks 0 and 6 are not consecutive: the scope line counts them (`scopeLine`).
     assert_eq!(inspector.scope.as_ref().map(|scope| english(&scope.label)).as_deref(), Some("Editing 2 frames"));
@@ -439,7 +440,7 @@ fn panel_commands_run_through_the_session() {
     assert!(matches!(run(&mut core, CommandId::CombineFigures).as_slice(), [Effect::NotAvailable(CommandId::CombineFigures)]), "a later chunk's command says so");
 
     core.view_state_mut().set_context(InspectorContext::Camera);
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     run(&mut core, CommandId::CameraCopy);
     assert!(!model(&core).section("transform").unwrap().actions[1].disabled, "a copied pose enables Paste");
 
@@ -462,12 +463,12 @@ fn switches_and_selects_are_one_entry_each() {
     let mut core = core_with(STARTUP);
     session(&mut core, "select", "[1,1]");
     core.dispatch(Command::Inspector(Event::Toggle(Toggle::StaticJoint, true)));
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     assert_eq!(undo_depth(&core), 1);
     let Some(Row::Grid { rows, .. }) = model(&core).section("joint").map(|section| section.rows[0].clone()) else { panic!("joint grid") };
     assert!(rows.iter().any(|row| matches!(row, Row::Switch(switch) if switch.toggle == Toggle::StaticJoint && switch.checked)));
     core.dispatch(Command::Inspector(Event::Choose(styk_core::inspector::model::Choice::SegmentShape, Arc::from("circle"))));
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     assert_eq!(undo_depth(&core), 2);
     run(&mut core, CommandId::Undo);
     run(&mut core, CommandId::Undo);
@@ -480,7 +481,7 @@ fn renaming_in_the_header_is_one_entry_and_a_blank_name_keeps_the_old() {
     let mut core = core_with(STARTUP);
     let rename = |core: &mut Core, event| {
         core.dispatch(Command::Inspector(Event::Rename(event)));
-        core.refresh();
+        testing::settle_facts(core).unwrap();
     };
     rename(&mut core, RenameEvent::Begin);
     assert_eq!(core.inspector().rename().unwrap().text, "Blue");
@@ -498,11 +499,11 @@ fn renaming_in_the_header_is_one_entry_and_a_blank_name_keeps_the_old() {
 fn the_model_is_rebuilt_only_when_its_inputs_change_and_held_during_a_gesture() {
     let mut core = core_with(STARTUP);
     let builds = core.inspector().builds;
-    core.refresh();
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
+    testing::settle_facts(&mut core).unwrap();
     assert_eq!(core.inspector().builds, builds, "nothing changed");
     core.dispatch(Command::Inspector(Event::Section { id: "colours", open: true }));
-    core.refresh();
+    testing::settle_facts(&mut core).unwrap();
     assert!(model(&core).section("colours").unwrap().open, "the section opened");
     assert_eq!(core.inspector().memory().saved().get("figure").map(|open| open.contains("colours")), Some(true));
     let builds = core.inspector().builds;
@@ -555,7 +556,7 @@ fn every_message_the_inspector_shows_is_in_today_s_catalogue() {
     collect(&core);
     for context in [InspectorContext::Camera, InspectorContext::Layer, InspectorContext::Frame] {
         core.view_state_mut().set_context(context);
-        core.refresh();
+        testing::settle_facts(&mut core).unwrap();
         collect(&core);
     }
     let mut sheet = core_with(SHEET);
@@ -563,4 +564,20 @@ fn every_message_the_inspector_shows_is_in_today_s_catalogue() {
     collect(&sheet);
     let missing: Vec<&String> = keys.iter().filter(|key| !styk_core::i18n::has(key)).collect();
     assert!(missing.is_empty(), "keys missing from src/locales/en.mjs: {missing:?}");
+}
+
+/// `figureJoinAction`: Join… is offered whenever one figure is selected, though the frame holds no other figure yet (the
+/// join tool then asks for a joint); several figures selected leave it off. The library footer shows under any
+/// selection (`user-library.mjs` `syncSelection`).
+#[test]
+fn join_follows_the_selection_and_the_library_footer_shows_under_one() {
+    let mut core = core_with(STARTUP);
+    session(&mut core, "select", "[null,-1]");
+    assert!(!model(&core).library, "nothing selected: no footer");
+    session(&mut core, "select", "[1,-1]");
+    let figure = model(&core);
+    let join = &figure.section("arrange").unwrap().actions[0];
+    assert_eq!(join.label.key, "inspectorView.join");
+    assert!(!join.disabled, "one figure selected: Join… is offered");
+    assert!(figure.library, "a selection shows the Library's footer");
 }

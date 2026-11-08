@@ -27,8 +27,7 @@ fn screen_core(context: InspectorScreen) -> Core {
 }
 
 fn element(core: &Core, theme: Theme) -> iced::Element<'static, Message> {
-    let panel = core.inspector();
-    let view = inspector::view(View { model: panel.model().unwrap(), presentation: core.presentation(), field: panel.field(), rename: panel.rename(), theme, button_probe: None });
+    let view = inspector::view(View::of(core, theme).unwrap());
     styk_ui::dock::docked(view, theme)
 }
 
@@ -38,9 +37,12 @@ fn deliver(core: &mut Core, driver: &mut Driver<'static, Message>) {
         // The tasks are the runtime's; the test carries out the focus ones it needs through the driver.
         let _ = update(core, message);
     }
+    // Between frames the app publishes the new state and the facts lane answers.
+    styk_core::testing::settle_facts(core).unwrap();
 }
 
 fn value(core: &Core, key: PropertyKey) -> f64 {
+    assert!(!core.inspector().pending(), "the panel shows the state on show");
     core.inspector().model().unwrap().number(key).unwrap().value
 }
 
@@ -60,16 +62,16 @@ fn tab_event() -> Event {
 fn every_catalogue_context_draws_in_both_themes() {
     for context in InspectorScreen::ALL {
         let mut core = screen_core(context);
-        if context == InspectorScreen::Figures {
-            for _ in 0..200_000 {
-                core.refresh();
-                if core.inspector().shown().bounds.is_some() {
-                    break;
-                }
-                std::thread::yield_now();
+        // The frame on show, the views and the figures' bounds come from the facts lane, as the app's screens wait.
+        let landed = |core: &Core| core.inspector().model().is_some() && !core.inspector().pending() && (context != InspectorScreen::Figures || core.inspector().shown().bounds.is_some());
+        for _ in 0..200_000 {
+            core.refresh();
+            if landed(&core) {
+                break;
             }
-            assert!(core.inspector().shown().bounds.is_some(), "the facts lane delivered the bounds");
+            std::thread::yield_now();
         }
+        assert!(landed(&core), "the facts lane delivered what {context:?} shows");
         for theme in [Theme::Light, Theme::Dark] {
             let mut driver = Driver::new(element(&core, theme), SIZE, &styk_design::fonts::ALL);
             let (pixels, size) = driver.render(&styk_ui::base_theme(theme), iced::Color::from(theme.palette().surface_field), 1.0);
@@ -139,7 +141,11 @@ fn the_interaction_script_runs_through_the_widgets() {
             }
             Step::Click(Target::Undo) => drop(update(&mut core, Message::Command(Command::Run(CommandId::Undo)))),
             Step::Click(Target::Redo) => drop(update(&mut core, Message::Command(Command::Run(CommandId::Redo)))),
-            Step::Expect(Expect::Property(name, expected)) => assert_eq!(format(value(&core, key(&name)), 3), expected, "line {line}: {name}"),
+            Step::Expect(Expect::Property(name, expected)) => {
+                // The app publishes and its facts lane answers between frames; the panel then shows the new state.
+                styk_core::testing::settle_facts(&mut core).unwrap();
+                assert_eq!(format(value(&core, key(&name)), 3), expected, "line {line}: {name}")
+            }
             Step::Expect(Expect::History(entries)) => assert_eq!(styk_core::testing::undo_depth(&core), entries, "line {line}: history"),
             other => panic!("line {line}: the panel's runner has no {other:?}"),
         }
@@ -198,7 +204,7 @@ fn tab_reaches_every_control_and_rename_moves_focus_in_and_out() {
     driver.press(Named::Enter);
     assert!(driver.messages().contains(&Message::Command(Command::Inspector(Panel::Rename(RenameEvent::Begin)))), "Enter on the name renames");
     let effects = core.dispatch(Command::Inspector(Panel::Rename(RenameEvent::Begin)));
-    core.refresh();
+    styk_core::testing::settle_facts(&mut core).unwrap();
     assert!(effects.contains(&Effect::Focus(FocusRequest::Rename)), "renaming asks for focus in the field: {effects:?}");
     let mut driver = driver.rebuild(element(&core, Theme::Light));
     driver.focus(RENAME_ID);
@@ -213,7 +219,7 @@ fn tab_reaches_every_control_and_rename_moves_focus_in_and_out() {
         }
     }
     let effects = core.dispatch(Command::Inspector(Panel::Rename(RenameEvent::Commit)));
-    core.refresh();
+    styk_core::testing::settle_facts(&mut core).unwrap();
     assert!(effects.contains(&Effect::Focus(FocusRequest::TargetName)), "focus comes back to the name: {effects:?}");
     assert_eq!(core.inspector().model().unwrap().target.name, styk_core::i18n::Label::plain("Walker"));
     let mut driver = driver.rebuild(element(&core, Theme::Light));
@@ -262,4 +268,43 @@ fn timing_a_scrub_of_a_large_selection() {
     println!("{selected} figures selected; open {open_ms:.0} ms");
     summary("update (dispatch + refresh)", &mut updates);
     summary("view (build + layout + draw, software renderer)", &mut views);
+}
+
+/// The re-check's finding 4: while an input method composes in a field (a pre-edit is open), Enter belongs to the
+/// input method: it commits nothing, and the core's focus state knows a composition is open
+/// (`docs/native/text-input.md`).
+#[test]
+fn enter_during_a_composition_belongs_to_the_input_method() {
+    use iced::advanced::input_method;
+    let mut core = styk_core::testing::core_with_document(STARTUP, "Test.styk", std::sync::Arc::new(styk_platform::spawn::ThreadSpawner)).unwrap();
+    styk_core::testing::call(&mut core, "select", "[1,-1]").unwrap();
+    let field = input_id(PropertyKey::RootY);
+    let mut driver = Driver::new(element(&core, Theme::Light), SIZE, &styk_design::fonts::ALL);
+    driver.redraw();
+    driver.focus(field);
+    driver.events(&[]);
+    deliver(&mut core, &mut driver);
+    driver = driver.rebuild(element(&core, Theme::Light));
+    driver.focus(field);
+    for _ in 0..4 {
+        driver.tap(iced::keyboard::Key::Named(Named::Backspace), None);
+    }
+    driver.typewrite("300");
+    deliver(&mut core, &mut driver);
+    driver = driver.rebuild(element(&core, Theme::Light));
+    driver.focus(field);
+    // An input takes input-method events once it has drawn focused (S2a's harness redraws the same way).
+    driver.redraw();
+    // The app tells the core where focus is from the tree (a focus snapshot), as every frame does.
+    let _ = update(&mut core, Message::Snapshot(driver.snapshot()));
+    driver.events(&[Event::InputMethod(input_method::Event::Opened)]);
+    driver.events(&[Event::InputMethod(input_method::Event::Preedit("５".to_owned(), Some(0..3)))]);
+    deliver(&mut core, &mut driver);
+    assert!(core.focus().composing(), "the core knows a composition is open");
+    driver = driver.rebuild(element(&core, Theme::Light));
+    driver.focus(field);
+    driver.press(Named::Enter);
+    deliver(&mut core, &mut driver);
+    assert_eq!(styk_core::testing::undo_depth(&core), 0, "Enter during a composition commits nothing");
+    assert!(core.inspector().field().is_some(), "the field is still being edited");
 }

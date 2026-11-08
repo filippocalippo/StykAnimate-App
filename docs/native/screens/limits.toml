@@ -43,116 +43,228 @@ height = 900
 
 # The Properties panel (reference slice), docked at today's default size. The references are today's panel in each
 # context, captured as the band's are (bundled Chromium through Playwright, LCD text on, opaque surfaces, device scale 1)
-# by engine/crates/styk-app/automation/inspector-reference/screens.mjs on the same fixtures styk_core::screens opens.
-# The limits are the differing-pixel fractions measured on 2026-11-08 (debug build, headless, `styk image-diff`) rounded up
-# to three places. Most of each is rows shifted by what other chunks own and the native panel does not draw yet:
-# today's quick-actions row under the header (K-cmd), the header's menu button and the panel's Add to library footer.
-# They are to be tightened as those land, never loosened.
+# by engine/crates/styk-app/automation/inspector-reference/screens.mjs on the same fixtures styk_core::screens opens;
+# camera, layer and frame are entered as a person does (the camera's row, the layer's row, a key on the timeline).
+# The masks are the parts other chunks own; each comes out when its chunk lands. The limits sit a little above what
+# each screen measured on 2026-11-08 (debug build, headless, `styk image-diff` past a channel difference of 24, masks
+# applied): the measurement rounded up to three places, plus 0.002. Looked at side by side at 100 % and 200 %, what
+# remains is glyph rasterisation; a limit above 0.02 says why. They are re-set once K-cmd's quick actions, the menu and
+# the footer are in.
 
 ["inspector-scene"]
+# 0.022: mostly text: the meta line, labels and values, whose glyph edges the native renderer and Chromium rasterise differently by more than 24 levels; nothing visibly differs at 100 % or 200 %.
 reference = "docs/native/screens/inspector/inspector-scene.png"
-max_difference = 0.156
+max_difference = 0.022
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [0, 490, 12, 12, "K-dock: the dock's rounded corner"],
+  [308, 490, 12, 12, "K-dock: the dock's rounded corner"],
+]
 
 ["inspector-scene-dark"]
+# 0.021: mostly text: the meta line, labels and values, whose glyph edges the native renderer and Chromium rasterise differently by more than 24 levels; nothing visibly differs at 100 % or 200 %.
 reference = "docs/native/screens/inspector/inspector-scene-dark.png"
-max_difference = 0.173
+max_difference = 0.021
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [0, 490, 12, 12, "K-dock: the dock's rounded corner"],
+  [308, 490, 12, 12, "K-dock: the dock's rounded corner"],
+]
 
 ["inspector-figure"]
 reference = "docs/native/screens/inspector/inspector-figure.png"
-max_difference = 0.508
+max_difference = 0.020
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-figure-dark"]
 reference = "docs/native/screens/inspector/inspector-figure-dark.png"
-max_difference = 0.524
+max_difference = 0.019
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-joint"]
 reference = "docs/native/screens/inspector/inspector-joint.png"
-max_difference = 0.556
+max_difference = 0.012
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [16, 276, 278, 76, "the IK chunk: the IK section (its title and Use IK)"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-joint-dark"]
 reference = "docs/native/screens/inspector/inspector-joint-dark.png"
-max_difference = 0.557
+max_difference = 0.011
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [16, 276, 278, 76, "the IK chunk: the IK section (its title and Use IK)"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-figures"]
 reference = "docs/native/screens/inspector/inspector-figures.png"
-max_difference = 0.460
+max_difference = 0.019
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-figures-dark"]
 reference = "docs/native/screens/inspector/inspector-figures-dark.png"
-max_difference = 0.468
+max_difference = 0.019
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-text"]
 reference = "docs/native/screens/inspector/inspector-text.png"
-max_difference = 0.471
+max_difference = 0.017
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-text-dark"]
 reference = "docs/native/screens/inspector/inspector-text-dark.png"
-max_difference = 0.486
+max_difference = 0.016
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-image"]
+# 0.022: mostly text: every row is a labelled value, whose glyph edges the native renderer and Chromium rasterise differently by more than 24 levels; nothing visibly differs at 100 % or 200 %.
 reference = "docs/native/screens/inspector/inspector-image.png"
-max_difference = 0.514
+max_difference = 0.022
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-image-dark"]
+# 0.021: mostly text: every row is a labelled value, whose glyph edges the native renderer and Chromium rasterise differently by more than 24 levels; nothing visibly differs at 100 % or 200 %.
 reference = "docs/native/screens/inspector/inspector-image-dark.png"
-max_difference = 0.529
+max_difference = 0.021
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-camera"]
 reference = "docs/native/screens/inspector/inspector-camera.png"
-max_difference = 0.420
+max_difference = 0.010
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [16, 164, 278, 139, "K-stage: the camera monitor"],
+  [16, 357, 278, 32, "the camera motion chunk: the Transform and Motion switch"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-camera-dark"]
 reference = "docs/native/screens/inspector/inspector-camera-dark.png"
-max_difference = 0.443
+max_difference = 0.010
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [16, 164, 278, 139, "K-stage: the camera monitor"],
+  [16, 357, 278, 32, "the camera motion chunk: the Transform and Motion switch"],
+  [0, 428, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-layer"]
 reference = "docs/native/screens/inspector/inspector-layer.png"
-max_difference = 0.357
+max_difference = 0.007
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [0, 148, 320, 56, "the camera motion chunk: Parallax (closed, edge to edge)"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-layer-dark"]
 reference = "docs/native/screens/inspector/inspector-layer-dark.png"
-max_difference = 0.372
+max_difference = 0.007
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [0, 148, 320, 56, "the camera motion chunk: Parallax (closed, edge to edge)"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-frame"]
 reference = "docs/native/screens/inspector/inspector-frame.png"
-max_difference = 0.373
+max_difference = 0.008
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
 
 ["inspector-frame-dark"]
 reference = "docs/native/screens/inspector/inspector-frame-dark.png"
-max_difference = 0.388
+max_difference = 0.008
 width = 320
 height = 502
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
