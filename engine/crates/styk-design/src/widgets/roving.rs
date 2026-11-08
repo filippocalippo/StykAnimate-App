@@ -11,7 +11,7 @@ use iced::keyboard::{self, Key, key::Named};
 use iced::widget::Column;
 use iced::{Element, Length, Widget as _};
 use std::sync::Arc;
-use styk_core::focus::{FocusArea, FocusId};
+use styk_core::focus::{FocusArea, FocusId, InputRole};
 use styk_core::roving::{NavKey, Orientation, next_index};
 
 /// One item of a roving group.
@@ -33,6 +33,9 @@ pub struct RovingGroup<'a, Message> {
     wrap: bool,
     spacing: f32,
     ring: Ring,
+    width: Length,
+    role: InputRole,
+    shown: Option<usize>,
     on_move: Arc<dyn Fn(usize) -> Message + 'a>,
 }
 
@@ -55,6 +58,9 @@ impl<'a, Message: Clone + 'a> RovingGroup<'a, Message> {
             wrap: true,
             spacing: 0.0,
             ring,
+            width: Length::Shrink,
+            role: InputRole::None,
+            shown: None,
             on_move: Arc::new(on_move),
         }
     }
@@ -76,6 +82,24 @@ impl<'a, Message: Clone + 'a> RovingGroup<'a, Message> {
 
     pub fn spacing(mut self, spacing: f32) -> Self {
         self.spacing = spacing;
+        self
+    }
+
+    /// The width of a horizontal group (`Length::Fill` for items that share the row).
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        self.width = width.into();
+        self
+    }
+
+    /// Shows the focus ring on item `index` whatever holds focus (a preview of the focus state).
+    pub fn ring_shown(mut self, index: Option<usize>) -> Self {
+        self.shown = index;
+        self
+    }
+
+    /// The input role of every item (a radio group's items are radios to the shortcut routing).
+    pub fn input_role(mut self, role: InputRole) -> Self {
+        self.role = role;
         self
     }
 }
@@ -101,7 +125,7 @@ impl<'a, Message: Clone + 'a> RovingGroup<'a, Message> {
     /// The group as an element.
     pub fn into_element(self) -> Element<'a, Message> {
         let group = self;
-        let RovingGroup { area, items, active, orientation, dir, wrap, spacing, ring, on_move } = group;
+        let RovingGroup { area, items, active, orientation, dir, wrap, spacing, ring, width, role, shown, on_move } = group;
         let count = items.len();
         let enabled: Arc<[bool]> = items.iter().map(|item| item.enabled).collect();
 
@@ -128,7 +152,9 @@ impl<'a, Message: Clone + 'a> RovingGroup<'a, Message> {
                 let mut target = Focusable::new(item.id, area, item.content, ring)
                     .keys(keys)
                     .enabled(item.enabled)
-                    .tab_stop(index == active);
+                    .tab_stop(index == active)
+                    .input_role(role)
+                    .ring_shown(shown == Some(index));
                 if let Some(message) = item.on_activate {
                     target = target.on_activate(message);
                 }
@@ -138,7 +164,7 @@ impl<'a, Message: Clone + 'a> RovingGroup<'a, Message> {
 
         match orientation {
             Orientation::Vertical => Column::with_children(children).spacing(spacing).width(Length::Fit).boxed(),
-            _ => dir.row(children).spacing(spacing).boxed(),
+            _ => dir.row(children).spacing(spacing).width(width).boxed(),
         }
     }
 }

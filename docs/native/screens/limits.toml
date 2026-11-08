@@ -289,3 +289,18 @@ reference = "docs/native/screens/stage/stage-fit-dark.png"
 max_difference = 0.001
 width = 900
 height = 560
+
+# The design system's controls in every state (K-widgets-a): one table of five state columns, today's components drawn by
+# today's stylesheets with hover, pressed and focus forced through the DevTools protocol (bundled Chromium, LCD text on,
+# opaque surfaces, device scale 1) by engine/crates/styk-app/automation/controls-reference/screens.mjs.
+["controls"]
+reference = "docs/native/screens/controls/controls.png"
+max_difference = 0.011
+width = 938
+height = 2120
+
+["controls-dark"]
+reference = "docs/native/screens/controls/controls-dark.png"
+max_difference = 0.011
+width = 938
+height = 2120

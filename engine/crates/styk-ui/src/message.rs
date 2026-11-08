@@ -24,6 +24,8 @@ pub enum Message {
     Command(Command),
     /// Focus a number field's input (a click on its scrub label).
     FocusField(PropertyKey),
+    /// A message, then focus on a target: a roving group that chose an item with an arrow key moves focus to it.
+    Focusing(Box<Message>, styk_core::focus::FocusId),
     /// Nothing to do (a widget reports a change the core does not need, such as a field gaining focus it already knows).
     Idle,
     /// A key no widget took: the core's focus state may move focus (Tab, F6).
@@ -51,6 +53,7 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
             Task::batch(effects.into_iter().map(effect))
         }
         Message::FocusField(key) => operate(focus::focus(crate::inspector::input_id(key))).discard(),
+        Message::Focusing(inner, id) => Task::batch([update(core, *inner), operate(focus::focus(id)).discard()]),
         Message::Idle => Task::none(),
         Message::Compose(composing) => {
             core.focus_mut().set_composing(composing);
