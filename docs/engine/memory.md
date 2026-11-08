@@ -23,6 +23,15 @@ uploaded under the same readiness/refusal protocol as other resident exports.
 Uploads wait on the exporter's interruptible GPU poller, so cancellation or device
 loss also wakes a pending upload batch. A frame never draws partial residency.
 
+The native video worker prefetches exactly its next ordered frame after submitting
+the current frame's last tile and before waiting for readback. Evaluation/decode
+and uploads can overlap the submitted drawing. An empty upload batch never waits
+for the GPU; actual staging batches retain their existing byte bound and wait.
+All of this work remains inside the producer's draw-time measurement. The next
+frame stays in the existing bounded `ExportFrames` cache until taken. Reverse and
+shuffled orders use the caller's actual successor. No extra decode thread or queue
+is created; cancellation uses the same interrupt and disposer.
+
 Native devices requested by `native_gpu` and the video tool start at 8 MiB device
 allocator blocks (4 MiB host), doubling as each memory type's live usage grows,
 up to the previous 256 MiB device / 128 MiB host ceilings. The existing wgpu

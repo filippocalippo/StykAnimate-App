@@ -773,6 +773,24 @@ pub(crate) struct WorkerFrame {
 }
 
 impl WorkerTicket {
+    /// The next requested playback frame, in consumer order, on the paint worker.
+    pub(crate) fn next_playback(&self) -> Option<Self> {
+        if !self.current() { return None; }
+        let request = {
+            let state = self.shared.state.try_lock().ok()?;
+            let demands = &state.demands[1..=LOOKAHEAD];
+            let compatible = |request: &Request| request.key.document == self.request.key.document
+                && request.key.revision == self.request.key.revision
+                && request.key.resource_epoch == self.request.key.resource_epoch
+                && self.shared.current(request);
+            let after = demands.iter().position(|d| d.as_ref().is_some_and(|d|
+                compatible(&d.request) && d.request.key.tick == self.request.key.tick)).map_or(0,|i|i+1);
+            demands.iter().skip(after).flatten().find(|d| compatible(&d.request))?.request.clone()
+        };
+        // Dense input equality stays outside the queue lock and on this worker.
+        if request.key.inputs != self.request.key.inputs || !self.current() { return None; }
+        Some(Self { shared:self.shared.clone(), request })
+    }
     pub fn current(&self) -> bool {
         self.shared.current(&self.request)
     }
@@ -788,8 +806,9 @@ impl WorkerTicket {
     }
 
     /// Paint worker only. Clone the immutable list handle under a short lock,
-    /// then ask the document source outside it. The sole paint worker can hold
-    /// at most one extra frame (at most cache_bytes); it drops it itself.
+    /// then ask the document source outside it. The sole paint worker holds its
+    /// current frame and at most one cached playback successor for prefetch;
+    /// each is admitted by the existing cache byte bound and dropped on the worker.
     pub fn read(&self) -> Result<Option<WorkerFrame>, Error> {
         if !self.current() {
             return Ok(None);

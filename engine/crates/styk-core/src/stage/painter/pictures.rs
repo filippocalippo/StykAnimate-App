@@ -23,6 +23,11 @@ pub(super) struct Pictures {
     pub uploaded_bytes: u64,
 }
 impl Pictures {
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn prefetch(&mut self, renderer: &mut Renderer, generation: &Arc<Generation>, engine: Option<&Engine>,
+        current: &DrawList, next: &DrawList, limits: PaintLimits) -> Result<bool,PaintError> {
+        self.prepare_for(renderer,generation,engine,next,limits,Some(current))
+    }
     pub(super) fn begin(&mut self) {
         self.requested_images.clear();
         self.requested_cels.clear();
@@ -38,6 +43,19 @@ impl Pictures {
         list: &DrawList,
         limits: PaintLimits,
     ) -> Result<bool, PaintError> {
+        self.prepare_for(renderer,generation,engine,list,limits,None)
+    }
+
+    fn needed(&self, list: &DrawList) -> (Vec<u32>, HashSet<usize>) {
+        let images = pictures_of(list, &self.index);
+        let cels = list.prims.iter().filter(|p| p.kind & 255 == styk_eval::drawlist::K_IMAGE && p.kind & styk_eval::drawlist::F_DRAWING != 0)
+            .filter_map(|p| self.cel_at.get(&(p.b[2] as u32,(p.c[0]*PAGE as f32).round() as u32,(p.c[1]*PAGE as f32).round() as u32)).copied()).collect();
+        (images,cels)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_for(&mut self, renderer: &mut Renderer, generation: &Arc<Generation>, engine: Option<&Engine>,
+        list: &DrawList, limits: PaintLimits, protect: Option<&DrawList>) -> Result<bool, PaintError> {
         let assets = &generation.assets;
         let budget = limits.sprite_bytes;
         if self.lineage != Some(generation.lineage) {
@@ -104,22 +122,7 @@ impl Pictures {
         }
         let engine = engine
             .ok_or_else(|| PaintError::Device("document picture service unavailable".into()))?;
-        let images = pictures_of(list, &self.index);
-        let mut cels = HashSet::new();
-        for prim in &list.prims {
-            if prim.kind & 255 == styk_eval::drawlist::K_IMAGE
-                && prim.kind & styk_eval::drawlist::F_DRAWING != 0
-            {
-                let place = (
-                    prim.b[2] as u32,
-                    (prim.c[0] * PAGE as f32).round() as u32,
-                    (prim.c[1] * PAGE as f32).round() as u32,
-                );
-                if let Some(&cel) = self.cel_at.get(&place) {
-                    cels.insert(cel);
-                }
-            }
-        }
+        let (images,cels) = self.needed(list);
         let mut pages: Vec<u32> = images
             .iter()
             .filter_map(|&i| assets.atlas.get(i as usize).map(|a| a.layer))
@@ -128,16 +131,21 @@ impl Pictures {
                     .flat_map(|id| self.cel_pages.get(id).into_iter().flatten().copied()),
             )
             .collect();
+        if let Some(protect) = protect {
+            let (images,cels) = self.needed(protect);
+            pages.extend(images.iter().filter_map(|&i|assets.atlas.get(i as usize).map(|a|a.layer)));
+            pages.extend(cels.iter().flat_map(|id|self.cel_pages.get(id).into_iter().flatten().copied()));
+        }
         pages.sort_unstable();
         pages.dedup();
-        let required = (pages.len() as u64).max(2) * u64::from(PAGE).pow(2) * 4;
+        let wanted_layers = (pages.len() as u32).max(2).max(self.residency.as_ref().map_or(0,Residency::layers));
+        let required = u64::from(wanted_layers) * u64::from(PAGE).pow(2) * 4;
         if required > budget {
             return Err(PaintError::Budget {
                 required,
                 limit: budget,
             });
         }
-        let wanted_layers = (pages.len() as u32).max(2);
         if wanted_layers > renderer.device().limits().max_texture_array_layers
             || pages.iter().any(|&page| page >= styk_render::MAX_PAGES)
         {

@@ -70,14 +70,7 @@ impl FrameRenderer {
     /// No frame is rendered until all its pictures and cel tiles have landed.
     pub fn prepare_frame(&mut self, engine: &styk_engine::Engine, frames: &styk_engine::export::ExportFrames, list: &DrawList) -> Result<(), String> {
         if let Self::Gpu(gpu, Some(resident)) = self {
-            loop {
-                if gpu.interrupt().is_interrupted() { return Err(crate::interrupt::INTERRUPTED.into()); }
-                if resident.ready(gpu, frames, list, None, 0) { break; }
-                gpu.flush_uploads()?;
-                if !engine.step() && frames.pictures_in_flight() == 0 {
-                    return Err("export pictures are missing without runnable decoding work".into());
-                }
-            }
+            prepare_resident(gpu, resident, engine, frames, list)?;
         }
         Ok(())
     }
@@ -99,10 +92,45 @@ impl FrameRenderer {
         }
     }
 
+    /// Prepare one successor while this frame's submitted tiles draw. The caller
+    /// supplies the actual next list (including reverse/shuffled order and matte
+    /// policy). No second renderer, decode queue or unbounded look-ahead is made.
+    #[allow(clippy::too_many_arguments)]
+    pub fn frame_with_prefetch(&mut self, engine: &styk_engine::Engine, frames: &styk_engine::export::ExportFrames,
+        list: &Arc<DrawList>, camera: Option<&Camera>, matte: bool, out: &mut Vec<u8>,
+        next: impl FnOnce() -> Result<Option<Arc<DrawList>>, String>) -> Result<(), String> {
+        let doc = &frames.generation().prepared.doc;
+        if let Self::Gpu(gpu, Some(resident)) = self {
+            gpu.frame_into_with(doc, list, camera, matte, out, |gpu| {
+                if let Some(list) = next()? {
+                    prepare_resident(gpu, resident, engine, frames, &list)?;
+                    // Submit the last partial upload batch before readback.
+                    gpu.queue().submit([]);
+                }
+                Ok(())
+            })
+        } else { self.frame_into(doc, list, camera, matte, out) }
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             FrameRenderer::Gpu(..) => "GPU",
             FrameRenderer::Cpu(_) => "CPU (styk-raster)",
+        }
+    }
+}
+
+fn prepare_resident(gpu: &mut GpuExport, resident: &mut crate::resident::Resident, engine: &styk_engine::Engine,
+    frames: &styk_engine::export::ExportFrames, list: &DrawList) -> Result<(), String> {
+    loop {
+        if gpu.interrupt().is_interrupted() { return Err(crate::interrupt::INTERRUPTED.into()); }
+        let before = gpu.uploaded_bytes();
+        if resident.ready(gpu, frames, list, None, 0) { return Ok(()); }
+        // No staging pixels were created while only requesting a decode. Waiting
+        // here would serialize that decode behind the current frame's GPU draw.
+        if gpu.uploaded_bytes() != before { gpu.flush_uploads()?; }
+        if !engine.step() && frames.pictures_in_flight() == 0 {
+            return Err("export pictures are missing without runnable decoding work".into());
         }
     }
 }

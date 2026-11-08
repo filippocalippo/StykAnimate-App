@@ -453,6 +453,43 @@ fn native_adjacent_frames_keep_their_sprite_pages_until_export_end() {
     assert!(!gpu.device.generate_allocator_report().unwrap().allocations.iter().any(|a| a.name == "styk sprites"));
 }
 
+#[test]
+fn prefetched_frame_draws_without_uploading_again() {
+    let gpu = gpu().unwrap();
+    let engine = Engine::for_export(clock,Budgets::for_device(None));
+    engine.open(&cel_document(3),"json","prefetch").unwrap();
+    let frames = engine.export_frames(0).unwrap();
+    let settings = Settings::new(64,64,Smoothing::Edges,MAX_PIXELS).unwrap();
+    let mut source = styk_export::FrameRenderer::Gpu(GpuExport::new(&gpu.device,&gpu.queue,settings,64),None);
+    source.load_images(&engine,&frames).unwrap();
+    let current = picture_list(&frames.generation().assets,0);
+    let next = picture_list(&frames.generation().assets,1);
+    source.prepare_frame(&engine,&frames,&current).unwrap();
+    let uploaded = |source: &styk_export::FrameRenderer| {
+        let styk_export::FrameRenderer::Gpu(gpu,_) = source else { unreachable!() }; gpu.uploaded_bytes()
+    };
+    let cold = uploaded(&source);
+    assert!(cold > 0);
+    let mut reference = Vec::new();
+    source.frame_into(&frames.generation().prepared.doc,&current,None,true,&mut reference).unwrap();
+    let mut pixels = Vec::new();
+    source.frame_with_prefetch(&engine,&frames,&current,None,true,&mut pixels,||Ok(Some(next.clone()))).unwrap();
+    assert_eq!(pixels,reference,"future uploads cannot change the submitted frame");
+    assert!(uploaded(&source)>cold,"the next frame must upload while the current frame is submitted");
+    let warm = uploaded(&source);
+    source.prepare_frame(&engine,&frames,&next).unwrap();
+    source.frame_into(&frames.generation().prepared.doc,&next,None,true,&mut pixels).unwrap();
+    assert_eq!(uploaded(&source),warm,"a prefetched frame records no upload in its draw");
+    let styk_export::FrameRenderer::Gpu(gpu,Some(resident)) = &source else { unreachable!() };
+    assert_eq!(gpu.sprite_layers(),2);
+    assert_eq!(resident.stats().3,0);
+    let interrupt = source.interrupt();
+    let error = source.frame_with_prefetch(&engine,&frames,&current,None,true,&mut pixels,|| {
+        interrupt.interrupt(); Ok(Some(next))
+    }).unwrap_err();
+    assert_eq!(error,styk_export::interrupt::INTERRUPTED,"cancellation during prefetch ends the frame before arming readback");
+}
+
 /// An export of the cel document in two layers, with the pictures and the cel it is driven by.
 struct CelScene {
     engine: Engine,

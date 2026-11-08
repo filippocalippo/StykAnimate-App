@@ -2,6 +2,34 @@ use super::*;
 use styk_services::{FixedClock, ManualSpawner};
 
 #[test]
+fn prefetched_stage_frame_records_no_upload_when_drawn() {
+    let engine = styk_engine::Engine::new(||0.,styk_engine::Budgets::for_device(None));
+    engine.open(include_bytes!("../../../../styk-eval/tests/fixtures/drawlist/drawing-cel.json"),"json","stage prefetch").unwrap();
+    let generation = engine.generation().unwrap();
+    while engine.step() {}
+    let mut builder = styk_engine::frame_builder::FrameBuilder::default();
+    let next = builder.prepare(&generation,0.,&Default::default(),||0.,||false).unwrap();
+    let gpu = styk_render::native_gpu::native_gpu(false,"stage prefetch",|a|wgpu::Limits::default().using_resolution(a.limits())).unwrap();
+    let mut renderer = Renderer::new(&gpu.device,&gpu.queue,wgpu::TextureFormat::Rgba8Unorm);
+    let mut pictures = pictures::Pictures::default();
+    let current = styk_eval::drawlist::DrawList::default();
+    load_pictures(&mut pictures,&mut renderer,&engine,&generation,&current);
+    let cold = pictures.uploaded_bytes;
+    pictures.begin();
+    assert!(matches!(pictures.prefetch(&mut renderer,&generation,Some(&engine),&current,&next.list,
+        PaintLimits { sprite_bytes:1,..PaintLimits::default() }), Err(PaintError::Budget { .. })));
+    assert_eq!(pictures.uploaded_bytes,cold,"refused speculation cannot upload partial pixels");
+    for _ in 0..1000 {
+        if pictures.prefetch(&mut renderer,&generation,Some(&engine),&current,&next.list,PaintLimits::default()).unwrap() { break; }
+        renderer.queue().submit([]); engine.step();
+    }
+    assert!(pictures.uploaded_bytes>cold,"future pixels must be uploaded before that frame is drawn");
+    let warm = pictures.uploaded_bytes;
+    load_pictures(&mut pictures,&mut renderer,&engine,&generation,&next.list);
+    assert_eq!(pictures.uploaded_bytes,warm,"no upload in the prefetched frame");
+}
+
+#[test]
 fn pose_only_revision_keeps_picture_payloads_and_uploads_warm() {
     use styk_engine::{
         Budgets, Engine,

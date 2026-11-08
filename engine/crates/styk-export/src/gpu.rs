@@ -48,6 +48,7 @@ pub struct GpuExport {
     atlas: Option<(u64, u32, usize)>,
     /// The last resolved tile, straight RGBA.
     resolved: Vec<u8>,
+    uploaded_bytes: u64,
     /// Ends a frame's wait for the GPU from any thread ([`GpuExport::interrupt`]).
     interrupt: Interrupt,
     /// Asks the poller thread to wait for the GPU (the frame's wait is on the interrupt, not on the GPU).
@@ -98,6 +99,7 @@ impl GpuExport {
             stride,
             atlas: None,
             resolved: Vec::new(),
+            uploaded_bytes: 0,
             interrupt,
             #[cfg(not(target_arch = "wasm32"))]
             poller,
@@ -199,8 +201,14 @@ impl GpuExport {
     }
 
     pub fn upload_images<'a>(&mut self, assets: &Assets, images: impl IntoIterator<Item = &'a DecodedImage>) {
-        self.renderer.upload_images(assets, images);
+        let bytes = &mut self.uploaded_bytes;
+        self.renderer.upload_images(assets, images.into_iter().inspect(|image| {
+            *bytes = bytes.saturating_add(image.rgba.len() as u64);
+        }));
     }
+
+    /// Cumulative picture bytes handed to the renderer, including prefetch.
+    pub fn uploaded_bytes(&self) -> u64 { self.uploaded_bytes }
 
     /// Draws tile `index` of `list` seen through `camera`, and copies it into read-back `slot`.
     pub fn draw(&mut self, doc: &Document, list: &Arc<DrawList>, camera: Option<&Camera>, index: usize, slot: usize) {
@@ -271,6 +279,15 @@ impl GpuExport {
     /// are those of [`GpuExport::frame_blocking`].
     #[cfg(not(target_arch = "wasm32"))]
     pub fn frame_into(&mut self, doc: &Document, list: &Arc<DrawList>, camera: Option<&Camera>, matte: bool, out: &mut Vec<u8>) -> Result<(), String> {
+        self.frame_into_with(doc, list, camera, matte, out, |_| Ok(()))
+    }
+
+    /// Run worker preparation after every tile has been submitted, while the GPU
+    /// draws it, before arming the readback latch. The callback may submit uploads
+    /// and use the upload latch; no current tile can see those later queue writes.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn frame_into_with(&mut self, doc: &Document, list: &Arc<DrawList>, camera: Option<&Camera>, matte: bool, out: &mut Vec<u8>, submitted: impl FnOnce(&mut Self) -> Result<(), String>) -> Result<(), String> {
+        let mut submitted = Some(submitted);
         let (width, height) = (self.settings.width as usize, self.settings.height as usize);
         let factor = self.settings.smoothing.factor();
         out.clear();
@@ -284,6 +301,9 @@ impl GpuExport {
             let batch = slots.min(self.tiles.len() - first);
             for k in 0..batch {
                 self.draw(doc, list, camera, first + k, k);
+            }
+            if first + batch == self.tiles.len() && let Some(submitted) = submitted.take() {
+                submitted(self)?;
             }
             self.interrupt.expect(batch);
             for k in 0..batch {

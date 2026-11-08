@@ -55,6 +55,16 @@ descriptors, selection policy and async artwork picking.
 5. Close/drop the painter and host when the document closes. Neither joins a worker.
    `worker_exited` is a diagnostic, never something the interface waits for.
 
+After submitting a frame, the paint worker reads at most one cached successor in
+playback consumer order (including reverse requests and loop boundaries). While
+the submitted frame is drawing, it prepares that successor's sprites through the
+same bounded upload slices. Current and next pages are protected together, within
+the existing sprite and working-byte limits; atlas capacity stays until teardown.
+Speculation stops when the current GPU submission completes, on a replaced ticket,
+or on refusal. It never waits for a future decode after the current draw finishes,
+and a future decode/budget refusal does not discard the current complete picture.
+No new UI work, thread, frame cache or decode queue is introduced.
+
 The worker borrows a scheduler ticket, takes an immutable ready-list handle under
 a short try-lock, then obtains the matching document generation outside that lock.
 Sprite decoding runs ahead on the document engine's existing workers; the paint

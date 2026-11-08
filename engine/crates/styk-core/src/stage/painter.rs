@@ -502,6 +502,28 @@ fn paint(
         });
     renderer.render_planned(&mut encoder, plan);
     renderer.queue().submit([encoder.finish()]);
+    // One cached successor, in the scheduler's playback order. Decode workers
+    // already run independently. Use only the time this submitted frame needs;
+    // speculation must not delay its publication waiting for a future decode.
+    if let Some(next_ticket) = ticket.frame.next_playback()
+        && let Ok(Some(next)) = next_ticket.read()
+    {
+        let drawn = Arc::new(AtomicBool::new(false));
+        let signal = drawn.clone();
+        renderer.queue().on_submitted_work_done(move || { signal.store(true,Ordering::Release); });
+        pictures.begin();
+        loop {
+            if !ticket.current() || shared.closed.load(Ordering::Acquire) { return Err(PaintError::Closed); }
+            if !next_ticket.current() { break; }
+            let more = matches!(pictures.prefetch(renderer,&next.generation,next.pictures.as_ref(),&ready.frame.list,&next.frame.list,
+                PaintLimits { working_bytes:limits.working_bytes-required,..limits }), Ok(false));
+            // Budget/decode refusal belongs to that future frame, not this one.
+            renderer.queue().submit([]);
+            renderer.device().poll(wgpu::PollType::Poll).map_err(|e|PaintError::Device(e.to_string()))?;
+            if !more || drawn.load(Ordering::Acquire) { break; }
+            shared.wait();
+        }
+    }
     finish_gpu(renderer, shared)?;
     renderer
         .take_frame()

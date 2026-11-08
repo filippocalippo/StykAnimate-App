@@ -104,7 +104,6 @@ struct Timings {
 struct Producer {
     engine: Engine,
     frames: styk_engine::export::ExportFrames,
-    generation: Arc<styk_engine::Generation>,
     renderer: FrameRenderer,
     order: Vec<u32>,
     pause: Option<(u32, f64)>,
@@ -133,10 +132,21 @@ impl FrameProducer for Producer {
         let started = Instant::now();
         let frame = self.frames.take(tick).ok_or("no frame")?;
         let drawing = Instant::now();
-        let doc = &self.generation.prepared.doc;
         let list = if self.transparent { styk_export::without_background(&frame.list) } else { frame.list.clone() };
         self.renderer.prepare_frame(&self.engine, &self.frames, &list)?;
-        self.renderer.frame_into(doc, &list, frame.camera.as_ref(), layout.matte, out)?;
+        let next_tick = self.order.get(index as usize + 1).copied();
+        let interrupt = self.renderer.interrupt();
+        self.renderer.frame_with_prefetch(&self.engine, &self.frames, &list, frame.camera.as_ref(), layout.matte, out, || {
+            let Some(tick) = next_tick else { return Ok(None) };
+            self.frames.prefetch([tick]);
+            loop {
+                if interrupt.is_interrupted() { return Err(styk_export::interrupt::INTERRUPTED.into()); }
+                if let Some(next) = self.frames.ready(tick) {
+                    return Ok(Some(if self.transparent { styk_export::without_background(&next.list) } else { next.list.clone() }));
+                }
+                if !self.engine.step() { return Err("next export frame has no runnable preparation".into()); }
+            }
+        })?;
         finish_frame(layout, out);
         let mut timings = self.timings.lock().unwrap();
         timings.evaluate_ms += (drawing - started).as_secs_f64() * 1000.0;
@@ -396,7 +406,6 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     let mut producer = Producer {
         engine: engine.clone(),
         frames,
-        generation: generation.clone(),
         renderer,
         order,
         pause: number(rest, "--pause-producer-at-frame").map_err(fail)?.zip(number(rest, "--pause-secs").map_err(fail)?),
