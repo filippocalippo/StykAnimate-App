@@ -125,7 +125,7 @@ fn fixture_parameters() -> ParametersModel {
     let descriptor = |name: &str, kind: ParameterKind, default: crate::ParameterValue, unit: &str, restart: bool| Descriptor { name: name.into(), kind, default, unit: unit.into(), restart };
     let rows = vec![
         Parameter { descriptor: descriptor("capture.cap_mb", ParameterKind::Integer { min: 1, max: 256 }, 8.into(), "MiB", false), effective: 24.into(), pending: None, modified: true },
-        Parameter { descriptor: descriptor("overlay.budget_ms", ParameterKind::Float { min: 4.0, max: 33.3 }, serde_json::json!(16.7), "ms", false), effective: serde_json::json!(16.7), pending: None, modified: false },
+        Parameter { descriptor: descriptor("overlay.budget_ms", ParameterKind::Float { min: 4.0, max: 33.3 }, crate::ParameterValue::from(16.7), "ms", false), effective: crate::ParameterValue::from(16.7), pending: None, modified: false },
         Parameter { descriptor: descriptor("drag.preview", ParameterKind::Bool, true.into(), "", true), effective: false.into(), pending: Some(true.into()), modified: true },
         Parameter { descriptor: descriptor("brush.smoothing", ParameterKind::Enum(vec!["off".into(), "light".into(), "heavy".into()]), "light".into(), "", false), effective: "heavy".into(), pending: None, modified: true },
     ];
@@ -133,7 +133,8 @@ fn fixture_parameters() -> ParametersModel {
 }
 
 fn fixture_summary() -> crate::ParameterValue {
-    serde_json::json!({"n": 18_432, "mean": 0.412, "p50": 0.31, "p95": 1.204, "p99": 2.87, "max": 14.6, "truncated": false})
+    let figures: [(&str, crate::ParameterValue); 7] = [("n", 18_432.into()), ("mean", 0.412.into()), ("p50", 0.31.into()), ("p95", 1.204.into()), ("p99", 2.87.into()), ("max", 14.6.into()), ("truncated", false.into())];
+    crate::ParameterValue::Object(figures.into_iter().map(|(key, value)| (key.to_string(), value)).collect())
 }
 
 /// The screen as an element of the size `Screen::size` names.

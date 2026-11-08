@@ -13,10 +13,9 @@ styk-core = { path = "../styk-core", features = ["inspect"] }
 styk-design = { path = "../styk-design", features = ["widgets"], optional = true }
 styk-trace = { path = "../styk-trace", features = ["enabled"] }
 styk-ui = { path = "../styk-ui", optional = true }
-serde_json = { version = "1", optional = true }
 
 
 [features]
 default = []
 panels = ["styk-core/devtools"]
-ui = ["panels", "dep:serde_json", "dep:iced", "dep:styk-design", "dep:styk-ui", "styk-ui/devtools"]
+ui = ["panels", "dep:iced", "dep:styk-design", "dep:styk-ui", "styk-ui/devtools"]
