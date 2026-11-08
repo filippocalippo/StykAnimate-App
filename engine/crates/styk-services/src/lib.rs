@@ -36,3 +36,4 @@ pub mod worker;
 pub mod memory;
 
 pub mod text_environment;
+pub mod storage;

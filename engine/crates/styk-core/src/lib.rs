@@ -28,6 +28,7 @@ pub mod history;
 pub mod i18n;
 pub mod inspector;
 pub mod launch;
+pub mod layout;
 pub mod limits;
 pub mod number;
 pub mod overlay;
