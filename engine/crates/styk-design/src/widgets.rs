@@ -55,11 +55,21 @@ mod tests {
     }
 }
 
+pub mod badge;
+pub mod button;
+pub mod color;
+pub mod control;
 pub mod dir;
 pub mod field;
 pub mod focus;
+pub mod frame;
 pub mod number_field;
 pub mod roving;
+pub mod segmented;
+pub mod select;
+pub mod slider;
+pub mod surface;
+pub mod toggle;
 #[cfg(feature = "testing")]
 #[path = "../tests/support/testing.rs"]
 pub mod testing;

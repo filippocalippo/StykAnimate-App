@@ -38,6 +38,11 @@ pub struct Meta {
     pub tab_stop: bool,
 }
 
+/// Whether a [`Focusable`] shows its ring now (it holds focus that came from the keyboard), told to an operation as a
+/// custom state: a control that draws its own focus look (the slider's thumb) asks for it.
+#[derive(Clone, Copy, Debug)]
+pub struct RingVisible(pub bool);
+
 struct ScopeMark {
     scope: ScopeId,
     enter: bool,
@@ -238,6 +243,8 @@ pub struct Focusable<'a, Message> {
     on_activate: Option<Message>,
     on_focus_change: Option<Box<dyn Fn(bool) -> Message + 'a>>,
     ring: Ring,
+    /// The ring shows whatever the focus is (the component sheet's focus state, a test).
+    shown: bool,
 }
 
 impl<'a, Message: Clone + 'a> Focusable<'a, Message> {
@@ -255,7 +262,14 @@ impl<'a, Message: Clone + 'a> Focusable<'a, Message> {
             on_activate: None,
             on_focus_change: None,
             ring,
+            shown: false,
         }
+    }
+
+    /// Draws the ring whether or not the control holds focus (a preview of the focus state).
+    pub fn ring_shown(mut self, shown: bool) -> Self {
+        self.shown = shown;
+        self
     }
 
     /// The message Enter/Space publish (with [`Keys::Button`] and [`Keys::Toggle`]).
@@ -333,6 +347,8 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Focusable<'a,
         let id = widget_id(self.id);
         let mut meta = self.meta();
         operation.custom(Some(&id), layout.bounds(), &mut meta);
+        let mut visible = RingVisible(tree.state.downcast_ref::<State>().visible && tree.state.downcast_ref::<State>().focused);
+        operation.custom(Some(&id), layout.bounds(), &mut visible);
         if self.enabled {
             let state = tree.state.downcast_mut::<State>();
             operation.focusable(Some(&id), layout.bounds(), state);
@@ -456,7 +472,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Focusable<'a,
         self.content.draw(&tree.children[0], renderer, theme, style, layout, cursor, viewport);
 
         let state = tree.state.downcast_ref::<State>();
-        if state.focused && state.visible {
+        if (state.focused && state.visible) || self.shown {
             use iced::advanced::Renderer as _;
             // An outline: `width` thick, `offset` away from the control's edge, drawn outside it.
             let grow = self.ring.offset + self.ring.width;

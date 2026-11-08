@@ -5,9 +5,11 @@
 //! outside the widget and the window too). It ends exactly once: release (`End`), Escape, the window losing focus or a
 //! touch cancel (`Cancel`). A press that never moves past the drag slop is a click (`Click`).
 
-use super::dir::Dir;
+use super::control::{FIELD_DISABLED, Preview, words};
 use super::field::EditField;
 use super::focus::{Focusable, Keys, Ring};
+use super::frame::{self, FieldFrame};
+use crate::typography::TextStyle;
 use crate::{Palette, tokens};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::overlay;
@@ -15,8 +17,9 @@ use iced::advanced::renderer;
 use iced::advanced::widget::{self, Operation, Tree, tree};
 use iced::advanced::{Shell, Widget};
 use iced::keyboard::{self, Key, Modifiers, key::Named};
-use iced::widget::{Row, text};
-use iced::{Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, Widget as _, mouse, touch};
+use iced::widget::{Row, Space, container};
+use iced::{Alignment, Element, Event, Length, Padding, Rectangle, Renderer, Size, Theme, Vector, Widget as _, mouse, touch};
+use std::borrow::Cow;
 use std::sync::Arc;
 use styk_core::field::Role;
 use styk_core::focus::{FocusArea, FocusId};
@@ -248,18 +251,53 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for ScrubLabel<'a, Messag
     }
 }
 
-/// A number field: a scrub label, the input and an optional unit. Numbers stay left to right.
+
+/// Whether a unit sits against its value ("100%", "172°", "2×") rather than after a space ("8 px"): today's `GLUED_UNITS`.
+pub fn unit_is_glued(unit: &str) -> bool {
+    matches!(unit, "%" | "°" | "×")
+}
+
+/// How wide a field's value is set (`--type-value`, tabular, `field-sizing: content`): its text's width, at least one `0`.
+pub fn value_width(value: &str) -> f32 {
+    use iced::advanced::graphics::text::Paragraph;
+    use iced::advanced::text::{Alignment as TextAlignment, Ellipsis, Paragraph as _, Shaping, Text, Wrapping};
+    let style = TextStyle::from_role(&tokens::scale::TYPE_VALUE).tabular();
+    let width = |content: &str| {
+        Paragraph::with_text(Text {
+            content,
+            bounds: iced::Size::new(f32::INFINITY, f32::INFINITY),
+            size: style.pixels(),
+            line_height: style.line(),
+            font: style.font,
+            align_x: TextAlignment::Default,
+            align_y: iced::alignment::Vertical::Top,
+            shaping: Shaping::Advanced,
+            wrapping: Wrapping::None,
+            ellipsis: Ellipsis::None,
+            hint_factor: None,
+        })
+        .min_width()
+    };
+    width(value).max(width("0"))
+}
+
+/// A number field: its label (which scrubs), the value (typed, as wide as its text), the unit after it, in the field box.
+/// Numbers stay left to right. The input declares the text role, so a focused field keeps editing keys from the document.
 pub struct NumberField<'a, Message> {
     label_id: FocusId,
     field_id: FocusId,
     area: FocusArea,
-    label: &'a str,
-    value: std::borrow::Cow<'a, str>,
-    unit: Option<&'a str>,
+    label: Cow<'a, str>,
+    value: Cow<'a, str>,
+    unit: Option<Cow<'a, str>>,
+    placeholder: Cow<'a, str>,
     palette: &'static Palette,
     enabled: bool,
     invalid: bool,
     composing: bool,
+    in_grid: bool,
+    scrubbing: bool,
+    preview: Option<Preview>,
     on_input: Option<Box<dyn Fn(String) -> Message + 'a>>,
     on_enter: Option<Message>,
     on_escape: Option<Message>,
@@ -269,27 +307,31 @@ pub struct NumberField<'a, Message> {
     button_probe: Option<fn() -> bool>,
 }
 
+/// The parts of a number field before they are framed: the label, the value with its unit, and the value's width.
+pub struct Parts<'a, Message> {
+    pub label: Element<'a, Message>,
+    pub value: Element<'a, Message>,
+    pub value_width: f32,
+}
+
 impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
     /// A number field showing the text `value`, its label focusable as `label_id` and its input as `field_id`.
-    pub fn new(
-        label_id: FocusId,
-        field_id: FocusId,
-        area: FocusArea,
-        label: &'a str,
-        value: impl Into<std::borrow::Cow<'a, str>>,
-        palette: &'static Palette,
-    ) -> Self {
+    pub fn new(label_id: FocusId, field_id: FocusId, area: FocusArea, label: impl Into<Cow<'a, str>>, value: impl Into<Cow<'a, str>>, palette: &'static Palette) -> Self {
         NumberField {
             label_id,
             field_id,
             area,
-            label,
+            label: label.into(),
             value: value.into(),
             unit: None,
+            placeholder: Cow::Borrowed(""),
             palette,
             enabled: true,
             invalid: false,
             composing: false,
+            in_grid: false,
+            scrubbing: false,
+            preview: None,
             on_input: None,
             on_enter: None,
             on_escape: None,
@@ -306,8 +348,14 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
         self
     }
 
-    pub fn unit(mut self, unit: &'a str) -> Self {
-        self.unit = Some(unit);
+    pub fn unit(mut self, unit: impl Into<Cow<'a, str>>) -> Self {
+        self.unit = Some(unit.into());
+        self
+    }
+
+    /// Shown while the value is empty ("Mixed" for a selection whose values differ).
+    pub fn placeholder(mut self, placeholder: impl Into<Cow<'a, str>>) -> Self {
+        self.placeholder = placeholder.into();
         self
     }
 
@@ -323,6 +371,24 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
 
     pub fn composing(mut self, composing: bool) -> Self {
         self.composing = composing;
+        self
+    }
+
+    /// The field is a cell of a grid of fields (`.ui-field-grid > .ui-field`: tighter padding and gaps).
+    pub fn in_grid(mut self, in_grid: bool) -> Self {
+        self.in_grid = in_grid;
+        self
+    }
+
+    /// A scrub is under way (`[data-scrubbing]`): the field draws as focused.
+    pub fn scrubbing(mut self, scrubbing: bool) -> Self {
+        self.scrubbing = scrubbing;
+        self
+    }
+
+    /// Holds a state of the field's frame fixed (the component sheet and tests).
+    pub fn preview(mut self, preview: Option<Preview>) -> Self {
+        self.preview = preview;
         self
     }
 
@@ -358,36 +424,24 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
         self.on_compose = Some(Box::new(on_compose));
         self
     }
-}
 
-impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
-    /// The field as an element.
-    pub fn into_element(self) -> Element<'a, Message> {
-        let field = self;
-        let NumberField {
-            label_id,
-            field_id,
-            area,
-            label,
-            value,
-            unit,
-            palette,
-            enabled,
-            invalid,
-            composing,
-            on_input,
-            on_enter,
-            on_escape,
-            on_scrub,
-            on_focus_change,
-            on_compose,
-            button_probe,
-        } = field;
+    /// The gap between a field's parts (`--_gap`): 4 px in a grid, 8 px elsewhere.
+    fn gap(&self) -> f32 {
+        if self.in_grid { tokens::scale::SPACE_1 } else { tokens::scale::SPACE_2 }
+    }
 
+    /// The label and the value with its unit, unframed.
+    pub fn parts(self) -> Parts<'a, Message> {
+        let NumberField { label_id, field_id, area, label, value, unit, placeholder, palette, enabled, invalid, composing, on_input, on_enter, on_escape, on_scrub, on_focus_change, on_compose, button_probe, .. } = self;
+        let fade = |color: crate::Rgba| if enabled { color } else { color.faded(FIELD_DISABLED) };
+        let shown = if value.is_empty() { placeholder.to_string() } else { value.to_string() };
+        let value_width = value_width(&shown);
         let mut input = EditField::new(field_id, area, Role::Number, value, palette)
-            .dir(Dir::Ltr)
+            .embedded()
+            .width(Length::Fixed(value_width))
             .enabled(enabled)
             .invalid(invalid)
+            .placeholder(placeholder)
             .composing(composing);
         if let Some(on_input) = on_input {
             input = input.on_input(on_input);
@@ -405,10 +459,8 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
             input = input.on_compose(on_compose);
         }
 
-        let label_text = text(label).size(tokens::scale::TYPE_SMALL.size).font(super::INTER).color(iced::Color::from(palette.text_2));
-        let mut label_element: Element<'a, Message> = label_text.boxed();
+        let mut label_element: Element<'a, Message> = words(label.into_owned(), TextStyle::from_role(&tokens::scale::TYPE_SMALL), fade(palette.text_3));
         let mut keys: Keys<'a, Message> = Keys::Button;
-
         if let Some(on_scrub) = on_scrub {
             label_element = ScrubLabel::new(label_element, on_scrub.clone()).held(button_probe).boxed();
             let on_scrub_keys = on_scrub.clone();
@@ -423,9 +475,7 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
                         _ => None,
                     }
                 }
-                keyboard::Event::KeyReleased { key: Key::Named(Named::ArrowUp | Named::ArrowDown | Named::ArrowLeft | Named::ArrowRight), .. } => {
-                    Some(on_scrub_keys(Scrub::KeyEnd))
-                }
+                keyboard::Event::KeyReleased { key: Key::Named(Named::ArrowUp | Named::ArrowDown | Named::ArrowLeft | Named::ArrowRight), .. } => Some(on_scrub_keys(Scrub::KeyEnd)),
                 _ => None,
             }));
             input = input
@@ -435,15 +485,38 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
                 })
                 .on_step_end(on_scrub(Scrub::KeyEnd));
         }
+        let label = Focusable::new(label_id, area, label_element, Ring::of(palette, tokens::scale::RADIUS_2XS)).keys(keys).enabled(enabled);
 
-        let label_target = Focusable::new(label_id, area, label_element, Ring::of(palette, tokens::scale::RADIUS_2XS))
-            .keys(keys)
-            .enabled(enabled);
-
-        let mut children: Vec<Element<'a, Message>> = vec![label_target.boxed(), input.into_element()];
-        if let Some(unit) = unit {
-            children.push(text(unit).size(tokens::scale::TYPE_SMALL.size).font(super::INTER).color(iced::Color::from(palette.text_3)).boxed());
+        // The unit follows its value (`.ui-field-suffix`): against it for `%`, `°` and `×`, a quarter em away otherwise.
+        let mut value_row: Vec<Element<'a, Message>> = vec![input.into_element()];
+        let mut spacing = 0.0;
+        if let Some(unit) = &unit
+            && !unit.is_empty()
+        {
+            value_row.push(words(unit.to_string(), TextStyle::from_role(&tokens::scale::TYPE_VALUE), fade(palette.text_2)));
+            spacing = if unit_is_glued(unit) { 0.0 } else { 0.25 * tokens::scale::TYPE_VALUE.size };
         }
-        Row::with_children(children).spacing(tokens::scale::SPACE_1).align_y(iced::alignment::Vertical::Center).boxed()
+        let value = Row::with_children(value_row).spacing(spacing).align_y(Alignment::Center).boxed();
+        Parts { label: label.boxed(), value, value_width }
+    }
+
+    /// The field as an element: a field box holding the label, the value and the unit.
+    pub fn into_element(self) -> Element<'a, Message> {
+        let (palette, disabled, invalid, scrubbing, in_grid, preview, gap) = (self.palette, !self.enabled, self.invalid, self.scrubbing, self.in_grid, self.preview, self.gap());
+        let Parts { label, value, .. } = self.parts();
+        let line = Row::with_children([label, value, Space::new().width(Length::Fill).boxed()]).spacing(gap).align_y(Alignment::Center);
+        let (left, right) = frame::padding(in_grid);
+        FieldFrame::new(line.boxed(), palette, Length::Fill, frame::HEIGHT, Padding { top: 0.0, right, bottom: 0.0, left }).disabled(disabled).invalid(invalid).engaged(scrubbing).preview(preview).boxed()
+    }
+
+    /// The field with a step button each side of the value (`.ui-field[data-steps]`: "Order ↓ 2 ↑"): the label, the step
+    /// down, the value centred in at least three digits, the step up; 2 px of padding, no gaps, as wide as its parts.
+    pub fn stepper(self, down: Element<'a, Message>, up: Element<'a, Message>) -> Element<'a, Message> {
+        let (palette, disabled, invalid, scrubbing, preview) = (self.palette, !self.enabled, self.invalid, self.scrubbing, self.preview);
+        let Parts { label, value, value_width: shown } = self.parts();
+        let label = container(label).padding(Padding { top: 0.0, right: tokens::scale::SPACE_0_5, bottom: 0.0, left: tokens::scale::SPACE_1 });
+        let value = container(value).center_x(Length::Fixed(shown.max(3.0 * value_width("0"))));
+        let line = Row::with_children([label.boxed(), down, value.boxed(), up]).align_y(Alignment::Center);
+        FieldFrame::new(line.boxed(), palette, Length::Shrink, frame::HEIGHT, Padding::from([0.0, tokens::scale::SPACE_0_5 + 1.0])).disabled(disabled).invalid(invalid).engaged(scrubbing).preview(preview).boxed()
     }
 }

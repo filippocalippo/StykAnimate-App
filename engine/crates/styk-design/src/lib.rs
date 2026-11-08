@@ -53,6 +53,22 @@ impl Rgba {
         Rgba { r, g, b, a }
     }
 
+    /// The colour with its opacity multiplied by `factor` (`opacity: .42` on an element draws each of its colours so).
+    pub fn faded(self, factor: f32) -> Rgba {
+        Rgba { a: self.a * factor, ..self }
+    }
+
+    /// `color-mix(in srgb, self percent%, other)`: the two interpolated in premultiplied sRGB, as CSS does.
+    pub fn mix(self, percent: f32, other: Rgba) -> Rgba {
+        let (p, q) = (percent / 100.0, 1.0 - percent / 100.0);
+        let alpha = self.a * p + other.a * q;
+        if alpha <= 0.0 {
+            return Rgba::new(0, 0, 0, 0.0);
+        }
+        let channel = |a: u8, b: u8| ((f32::from(a) * self.a * p + f32::from(b) * other.a * q) / alpha).round().clamp(0.0, 255.0) as u8;
+        Rgba { r: channel(self.r, other.r), g: channel(self.g, other.g), b: channel(self.b, other.b), a: alpha }
+    }
+
     /// `#rrggbb`, or `#rrggbbaa` when not opaque (the alpha rounded to a byte, as CSS serializes it).
     pub fn to_hex(self) -> String {
         if self.a >= 1.0 {
