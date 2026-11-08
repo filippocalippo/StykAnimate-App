@@ -42,6 +42,10 @@ pub enum Message {
     Overlay(styk_design::widgets::menu::Event),
     /// A stage message's action or close button.
     Toast(styk_design::widgets::toast::Event),
+    OverlayEffect(styk_core::overlay::Effect),
+    OverlayChoice { invoker: styk_core::focus::FocusId, index: usize },
+    MessageDismissed(u64),
+    ShortcutReleased(styk_core::shortcuts::Release),
 }
 
 /// A select asking for its list.
@@ -82,17 +86,40 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
             core.focus_mut().set_composing(composing);
             Task::none()
         }
-        Message::Key(event) => match focus::navigate(core.focus_mut(), &event) {
-            Some(id) => operate(focus::focus(id)).discard(),
-            None => Task::none(),
+        Message::Key(event) => {
+            let task = match focus::navigate(core.focus_mut(), &event) { Some(id) => operate(focus::focus(id)).discard(), None => Task::none() };
+            Task::batch([task, overlay(core, styk_core::overlay::host::Event::FocusChanged)])
         },
-        Message::OpenSelect(_) | Message::Overlay(_) | Message::Toast(_) => Task::none(),
+        Message::OpenSelect(request) => {
+            let choices = request.picks.iter().map(|m| if let Message::Command(c) = m { Some(c.clone()) } else { None }).collect::<Vec<_>>();
+            core.bind_select(request.invoker, choices);
+            let event = styk_core::overlay::host::Event::Select { invoker: request.invoker, anchor: styk_design::widgets::menu::rect_of(request.anchor), options: request.options, chosen: request.chosen, keyboard: request.keyboard, press: core.overlays().press_sequence() };
+            overlay(core, event)
+        }
+        Message::Overlay(event) => {
+            use styk_design::widgets::menu::Event as View;
+            use styk_core::overlay::host::Event;
+            let event = match event {
+                View::Key(k) => Event::Key { key: k.key, ctrl: k.ctrl, meta: k.meta, alt: k.alt },
+                View::Hover { menu, index } => Event::Hover { menu, index },
+                View::Press { menu, index } => Event::Press { menu, index },
+                View::Pointer { press, inside, x, y } => Event::Pointer { pressed: press, inside, anchor: core.overlays().anchor_at(f64::from(x), f64::from(y)), press: core.overlays().press_sequence() },
+            };
+            overlay(core, event)
+        }
+        Message::Toast(event) => {
+            use styk_design::widgets::toast::Event as View;
+            use styk_core::overlay::host::Event;
+            overlay(core, match event { View::Hover(h) => Event::MessageHover(h), View::Focus(_) => Event::FocusChanged, View::Dismiss(id) => Event::MessageDismiss(id), View::Action { id, index } => Event::MessageAction { id, index } })
+        }
+        Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) => Task::none(),
         Message::Snapshot(snapshot) => {
             let synced = focus::sync(core.focus_mut(), &snapshot);
-            match synced.unfocus {
+            let effects = core.dispatch(Command::Overlay { now: core.overlays().now(), event: styk_core::overlay::host::Event::Bounds(snapshot.bounds.iter().map(|(id, b)| (*id, styk_design::widgets::menu::rect_of(*b))).collect()) });
+            Task::batch([Task::batch(effects.into_iter().map(effect)), match synced.unfocus {
                 Some(_) => operate(focus::unfocus()).discard(),
                 None => Task::none(),
-            }
+            }])
         }
     }
 }
@@ -102,6 +129,11 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
 #[cfg(feature = "engine")]
 fn effect(effect: Effect) -> Task<Message> {
     match effect {
+        Effect::Overlay(styk_core::overlay::Effect::Focus(id)) => match id { Some(id) => operate(focus::focus(id)).discard(), None => operate(focus::unfocus()).discard() },
+        Effect::Overlay(effect) => Task::done(Message::OverlayEffect(effect)),
+        Effect::OverlayChoice { invoker, index } => Task::done(Message::OverlayChoice { invoker, index }),
+        Effect::ShortcutReleased(release) => Task::done(Message::ShortcutReleased(release)),
+        Effect::MessageDismissed(id) => Task::done(Message::MessageDismissed(id)),
         Effect::Blur => operate(focus::unfocus()).discard(),
         Effect::Focus(request) => operate(focus::focus(match request {
             FocusRequest::Rename => crate::inspector::RENAME_ID,
@@ -110,4 +142,17 @@ fn effect(effect: Effect) -> Task<Message> {
         .discard(),
         Effect::Notice(_) | Effect::NotAvailable(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
     }
+}
+
+#[cfg(feature = "engine")]
+fn overlay(core: &mut Core, event: styk_core::overlay::host::Event) -> Task<Message> {
+    let now = core.overlays().now();
+    update(core, Message::Command(Command::Overlay { event, now }))
+}
+
+/// Runtime entry: inject the application clock before routing an input. No view reads a clock.
+#[cfg(feature = "engine")]
+pub fn update_at(core: &mut Core, message: Message, now: u64) -> Task<Message> {
+    let effects = core.dispatch(Command::Overlay { event: styk_core::overlay::host::Event::Time, now });
+    Task::batch([Task::batch(effects.into_iter().map(effect)), update(core, message)])
 }

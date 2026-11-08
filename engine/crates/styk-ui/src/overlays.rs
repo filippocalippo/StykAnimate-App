@@ -54,9 +54,7 @@ pub struct Overlays {
     bounds: Vec<(FocusId, Rectangle)>,
     /// The select whose list is open (the menu's ID) and the message each option stands for.
     picks: Option<(u64, Vec<Message>)>,
-    /// The pointer is over the visible message, or focus is on one of its buttons: its timeout waits.
-    message_hovered: bool,
-    message_focused: bool,
+
 }
 
 fn rect(bounds: Rectangle) -> Rect {
@@ -65,7 +63,7 @@ fn rect(bounds: Rectangle) -> Rect {
 
 impl Overlays {
     pub fn new(hints: Hints, rtl: bool) -> Overlays {
-        Overlays { host: Host::new(hints, rtl), bounds: Vec::new(), picks: None, message_hovered: false, message_focused: false }
+        Overlays { host: Host::new(hints, rtl), bounds: Vec::new(), picks: None }
     }
 
     pub fn host(&self) -> &Host {
@@ -175,30 +173,11 @@ impl Overlays {
                 let update = self.host.pointer(press, inside, hit, focus);
                 self.carry(update)
             }
-            Message::Toast(toast::Event::Hover(hovered)) => {
-                self.message_hovered = hovered;
-                self.host.messages_mut().interaction(self.message_hovered, self.message_focused, now);
-                Outcome::none()
-            }
-            Message::Toast(toast::Event::Focus(focused)) => {
-                self.message_focused = focused;
-                self.host.messages_mut().interaction(self.message_hovered, self.message_focused, now);
-                Outcome::none()
-            }
-            Message::Toast(toast::Event::Dismiss(id)) => {
-                self.host.messages_mut().dismiss(id, now);
-                Outcome::none()
-            }
-            Message::Toast(toast::Event::Action { id, index }) => {
-                let action = self.host.messages().current().filter(|message| message.id == id).and_then(|message| message.actions.get(index).cloned());
-                let mut out = Outcome::none();
-                if let Some(action) = action {
-                    out.run = Some(action.command);
-                    if action.dismiss {
-                        self.host.messages_mut().dismiss(id, now);
-                    }
-                }
-                out
+            Message::Toast(event) => {
+                use styk_core::overlay::host::Event;
+                let event = match event { toast::Event::Hover(h) => Event::MessageHover(h), toast::Event::Focus(_) => Event::FocusChanged, toast::Event::Dismiss(id) => Event::MessageDismiss(id), toast::Event::Action { id, index } => Event::MessageAction { id, index } };
+                let update = self.host.event(event, focus, now);
+                self.carry(update)
             }
             _ => Outcome::none(),
         }
@@ -231,4 +210,11 @@ impl Overlays {
         let extra = self.host.messages().current().map(|current| toast::placed(palette, current, stage, Message::Toast)).into_iter().collect();
         menu::layer(palette, &self.host, focus.focus_visible(), top_inset, extra, Message::Overlay)
     }
+}
+
+/// The production layer reads the Core-owned host. The dock composes this above its content.
+#[cfg(feature = "engine")]
+pub fn layer<'a>(core: &'a styk_core::app::Core, palette: &'static Palette, top_inset: f32, stage: Option<Rectangle>) -> Element<'a, Message> {
+    let extra = core.overlays().messages().current().map(|current| toast::placed(palette, current, stage, Message::Toast)).into_iter().collect();
+    menu::layer(palette, core.overlays(), core.focus().focus_visible(), top_inset, extra, Message::Overlay)
 }

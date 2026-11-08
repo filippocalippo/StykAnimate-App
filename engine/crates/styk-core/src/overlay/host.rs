@@ -15,7 +15,7 @@
 //!
 //! Geometry comes in as rectangles the views measured (an anchor's, a row's); placement arithmetic is `Menu::place`.
 
-use super::menu::{self, Action, Anchor, Entry, Item, Menu, ShortcutHint};
+use super::menu::{self, Action, Anchor, Entry, Item, Menu, RowAction, ShortcutHint};
 use super::messages::Messages;
 use super::placement::Rect;
 use super::tooltip::Tooltip;
@@ -135,6 +135,7 @@ pub struct Update {
     pub chose: Option<usize>,
     /// The event belonged to the menus and nothing else may act on it.
     pub consumed: bool,
+    pub dismissed: Option<u64>,
 }
 
 impl Update {
@@ -165,6 +166,13 @@ pub struct Host {
     hints: Hints,
     rtl: bool,
     next: u64,
+    now: u64,
+    message_hovered: bool,
+    last_activation: Option<(FocusId, u64)>,
+    press_sequence: u64,
+    animations: Vec<(u64, Animation, u64)>,
+    animation_deadline: Option<u64>,
+    bounds: Vec<(FocusId, Rect)>,
 }
 
 impl Host {
@@ -293,6 +301,7 @@ impl Host {
             if let Effect::Closed { id, .. } = effect
                 && let Some(at) = self.index(*id)
             {
+                self.animations.retain(|(key, _, _)| key != id);
                 let gone = self.menus.remove(at);
                 if let Some(parent) = gone.parent.and_then(|parent| self.index(parent)) {
                     self.menus[parent].menu.submenu_closed();
@@ -304,12 +313,14 @@ impl Host {
     fn close(&mut self, id: u64, reason: Reason, focus: &mut FocusState) -> Update {
         let effects = self.stack.request_close(id, reason, focus);
         self.sync(&effects);
+        self.schedule_animation(self.now, false);
         Update { effects, consumed: true, ..Update::default() }
     }
 
     fn finish(&mut self, id: u64, reason: Reason, focus: &mut FocusState) -> Update {
         let effects = self.stack.finish(id, reason, focus);
         self.sync(&effects);
+        self.schedule_animation(self.now, false);
         Update { effects, consumed: true, ..Update::default() }
     }
 
@@ -377,14 +388,10 @@ impl Host {
                 let root = self.root_of(id);
                 update.merge(self.close(root, Reason::Tab, focus));
             }
-            Action::Activate { index, command, close } => {
-                let select = self.index(id).and_then(|at| match self.menus[at].purpose {
-                    Purpose::Select { .. } => Some(index),
-                    Purpose::Commands => None,
-                });
-                match select {
-                    Some(chosen) => update.chose = Some(chosen),
-                    None => update.run = Some(command),
+            Action::Activate { action, close, .. } => {
+                match action {
+                    RowAction::Choice(chosen) => update.chose = Some(chosen),
+                    RowAction::Command(command) => update.run = Some(command),
                 }
                 if close {
                     let root = self.root_of(id);
@@ -457,6 +464,9 @@ impl Host {
     /// Time reached `now`: due hover intents fire, a message whose time is up goes, a tooltip whose delay passed shows.
     /// Returns the ID of a message that expired, if one did.
     pub fn tick(&mut self, now: u64, bounds: &dyn Fn(FocusId) -> Option<Rect>, focus: &mut FocusState) -> (Update, Option<u64>) {
+        self.now = now;
+        self.focus_changed(focus, now);
+        self.animations.retain(|(_, kind, start)| kind.looping() || now.saturating_sub(*start) < kind.duration());
         let mut update = Update::default();
         let before = focus.focused();
         let ids: Vec<u64> = self.menus.iter().map(|menu| menu.id).collect();
@@ -467,6 +477,7 @@ impl Host {
                 update.merge(self.apply(id, action, bounds, focus));
             }
         }
+        self.schedule_animation(now, true);
         let expired = self.messages.tick(now);
         self.tooltip.tick(now);
         (update.follow(before, focus), expired)
@@ -475,7 +486,7 @@ impl Host {
     /// When the runtime must next call [`Host::tick`]: the earliest of every menu's hover intent, the visible message's
     /// timeout and the tooltip's delay.
     pub fn next_deadline(&self) -> Option<u64> {
-        self.menus.iter().filter_map(|open| open.menu.deadline()).chain(self.messages.deadline()).chain(self.tooltip.deadline()).min()
+        self.menus.iter().filter_map(|open| open.menu.deadline()).chain(self.messages.deadline()).chain(self.tooltip.deadline()).chain(self.animation_deadline).min()
     }
 
     /// The top overlay (the one Escape and outside presses address).
@@ -484,9 +495,135 @@ impl Host {
     }
 }
 
-/// The rows of a select's list: one per option, a disabled option a disabled row. A select's rows are not registry
-/// commands, so they carry the registry's `Menu` identity as a placeholder, which [`Host`] never reports for a select (it
-/// reports the chosen index instead).
+/// Select rows retain their original option identity through menu normalization.
 pub fn option_rows<'a>(options: impl IntoIterator<Item = (&'a str, bool)>) -> Vec<Entry> {
-    options.into_iter().map(|(label, disabled)| Entry::Item(Item { disabled, ..Item::new(CommandId::Menu, label) })).collect()
+    options.into_iter().enumerate().map(|(index, (label, disabled))| Entry::Item(Item { disabled, ..Item::new(RowAction::Choice(index), label) })).collect()
 }
+
+/// Animation identifiers belong to the mounting owner; stop them on unmount.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Animation { Progress, Spinner, Entry(Kind) }
+impl Animation {
+    pub fn duration(self) -> u64 { match self { Self::Progress => 1300, Self::Spinner => 800, Self::Entry(Kind::Menu | Kind::Popover) => 160, Self::Entry(_) => 240 } }
+    fn looping(self) -> bool { matches!(self, Self::Progress | Self::Spinner) }
+}
+/// Events carry injected time separately, and physical press identity when available.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Event {
+    OpenMenu { entries: Vec<Entry>, anchor: Anchor, invoker: Option<FocusId>, keyboard: bool },
+    Environment(Reason),
+    ResolveClose { id: u64, allow: bool },
+    Select { invoker: FocusId, anchor: Rect, options: Vec<(String, bool)>, chosen: Option<usize>, keyboard: bool, press: u64 },
+    Key { key: String, ctrl: bool, meta: bool, alt: bool },
+    Hover { menu: u64, index: usize },
+    Leave { menu: Option<u64> },
+    Press { menu: u64, index: usize },
+    Pointer { pressed: bool, inside: bool, anchor: Option<FocusId>, press: u64 },
+    Bounds(Vec<(FocusId, Rect)>),
+    FocusChanged,
+    MessageHover(bool),
+    MessageAction { id: u64, index: usize },
+    MessageDismiss(u64),
+    ShowMessage(super::messages::Message),
+    Animate { id: u64, kind: Option<Animation> },
+    Tick,
+    Time,
+}
+/// Shared identity of a message action (slot 15 is its close button).
+pub fn message_button_id(message: u64, slot: usize) -> FocusId { FocusId((1 << 41) + (message << 4) + slot.min(15) as u64) }
+impl Host {
+    pub fn anchor_at(&self, x: f64, y: f64) -> Option<FocusId> {
+        self.top().and_then(|top| top.anchor).filter(|id| self.bounds.iter().any(|(key, b)| key == id && x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height))
+    }
+    pub fn press_sequence(&self) -> u64 { self.press_sequence }
+    pub fn now(&self) -> u64 { self.now }
+    fn schedule_animation(&mut self, now: u64, fired: bool) {
+        if self.animations.is_empty() { self.animation_deadline = None; }
+        else if fired || self.animation_deadline.is_none() {
+            self.animation_deadline = Some(self.animations.iter().filter(|(_, kind, _)| !kind.looping())
+                .map(|(_, kind, start)| start.saturating_add(kind.duration()))
+                .fold(now.saturating_add(16), u64::min));
+        }
+    }
+    pub fn phase(&self, id: u64) -> f32 {
+        self.animations.iter().find(|(key, _, _)| *key == id).map_or(1.0, |(_, kind, start)| {
+            let elapsed = self.now.saturating_sub(*start);
+            if kind.looping() { (elapsed % kind.duration()) as f32 / kind.duration() as f32 }
+            else { (elapsed as f32 / kind.duration() as f32).min(1.0) }
+        })
+    }
+    pub fn focus_changed(&mut self, focus: &FocusState, now: u64) {
+        let within = self.messages.current().is_some_and(|m| focus.focused().is_some_and(|id|
+            (0..m.actions.len()).any(|slot| message_button_id(m.id, slot) == id) || message_button_id(m.id, 15) == id));
+        self.messages.interaction(self.message_hovered, within, now);
+    }
+    pub fn event(&mut self, event: Event, focus: &mut FocusState, now: u64) -> Update {
+        self.now = now;
+        let previous_menus: Vec<u64> = self.menus.iter().map(|m| m.id).collect();
+        let previous_message = self.messages.current().map(|m| m.id);
+        let bounds = self.bounds.clone();
+        let lookup = |id| bounds.iter().find(|(key, _)| *key == id).map(|(_, rect)| *rect);
+        let mut out = Update::default();
+        match event {
+            Event::OpenMenu { entries, anchor, invoker, keyboard } => out = self.open(entries, anchor, Purpose::Commands, invoker, keyboard, None, focus),
+            Event::Environment(reason) => out = self.environment(reason, focus),
+            Event::ResolveClose { id, allow } => { out.effects = self.stack.resolve_close(id, allow, focus); self.sync(&out.effects); }
+            Event::Select { invoker, anchor, options, chosen, keyboard, press } => {
+                if !keyboard && self.last_activation == Some((invoker, press)) { return out; }
+                if !keyboard { self.last_activation = Some((invoker, press)); }
+                if let Some(id) = self.menus.iter().find(|m| m.purpose == Purpose::Select { invoker }).map(|m| m.id) {
+                    out = self.close(id, Reason::Toggle, focus);
+                } else {
+                    out = self.open(option_rows(options.iter().map(|(s, d)| (s.as_str(), *d))), Anchor::Root(anchor), Purpose::Select { invoker }, Some(invoker), keyboard, chosen, focus);
+                }
+            }
+            Event::Pointer { pressed, inside, anchor, press } => {
+                if !pressed { self.press_sequence = self.press_sequence.wrapping_add(1); self.last_activation = None; }
+                if pressed && let Some(invoker) = anchor {
+                    if self.last_activation == Some((invoker, press)) { return out; }
+                    self.last_activation = Some((invoker, press));
+                }
+                out = self.pointer(pressed, inside, anchor, focus);
+            }
+            Event::Key { key, ctrl, meta, alt } => out = self.key(menu::Key { key: &key, ctrl, meta, alt, composing: focus.composing() }, &lookup, focus, now),
+            Event::Hover { menu, index } => { self.leave(); out = self.hover(menu, index, focus, now); }
+            Event::Leave { menu } => {
+                for open in &mut self.menus { if menu.is_none_or(|id| id == open.id) { open.menu.cancel_hover(); open.hovered = None; } }
+            }
+            Event::Press { menu, index } => out = self.press(menu, index, &lookup, focus, now),
+            Event::Bounds(bounds) => self.bounds = bounds,
+            Event::FocusChanged | Event::Time => {},
+            Event::MessageHover(hover) => self.message_hovered = hover,
+            Event::MessageAction { id, index } => {
+                if let Some(action) = self.messages.current().filter(|m| m.id == id).and_then(|m| m.actions.get(index)).cloned() {
+                    out.run = Some(action.command);
+                    if action.dismiss { out.dismissed = self.messages.dismiss(id, now); }
+                }
+            }
+            Event::MessageDismiss(id) => out.dismissed = self.messages.dismiss(id, now),
+            Event::ShowMessage(message) => {
+                let push = self.messages.push(message, now);
+                out.dismissed = push.dropped;
+            }
+            Event::Animate { id, kind } => {
+                self.animations.retain(|(key, _, _)| *key != id);
+                if let Some(kind) = kind { self.animations.push((id, kind, now)); }
+            }
+            Event::Tick => { let (update, expired) = self.tick(now, &lookup, focus); out = update; out.dismissed = expired; }
+        }
+        for menu in &self.menus {
+            if !previous_menus.contains(&menu.id) { self.animations.push((menu.id, Animation::Entry(Kind::Menu), now)); }
+        }
+        if previous_message != self.messages.current().map(|m| m.id) {
+            self.message_hovered = false;
+            if let Some(id) = previous_message { self.animations.retain(|(key, _, _)| *key != message_animation_id(id)); }
+            if let Some(m) = self.messages.current() { self.animations.push((message_animation_id(m.id), Animation::Entry(Kind::Toast), now)); }
+        }
+        self.schedule_animation(now, false);
+        self.focus_changed(focus, now);
+        out
+    }
+}
+
+/// Entry animation key for the visible message, separate from menu IDs.
+pub fn message_animation_id(id: u64) -> u64 { (1 << 63) | id }

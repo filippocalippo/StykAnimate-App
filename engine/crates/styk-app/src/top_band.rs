@@ -42,6 +42,7 @@ const SETTLE_FRAMES: u32 = 3;
 
 #[derive(Clone, Debug)]
 pub enum Message {
+    Editor(styk_ui::message::Message),
     /// A message of the band's views.
     Ui(view::Message),
     /// A key, a button or the window losing focus; the flag says no widget used the event.
@@ -85,7 +86,7 @@ struct Run {
 
 pub struct TopBand {
     /// The open projects.
-    pub documents: Documents,
+    pub core: styk_core::app::Core,
     /// The core's layout persistence service, ready for the docking view's host.
     #[expect(dead_code, reason = "The docking view host is a separate chunk; retain its injected service.")]
     pub layouts: styk_core::layout::LayoutStore,
@@ -180,7 +181,7 @@ impl TopBand {
                 notify: Arc::new(|| {}),
             })
             .map_err(|error| format!("the document host did not start: {error}"))?;
-        Ok(TopBand { documents, layouts, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None })
+        Ok(TopBand { core: styk_core::app::Core::new(documents), layouts, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None })
     }
 
     /// Starts the script the command line named.
@@ -250,6 +251,15 @@ impl TopBand {
         view::window(view::Params { shell: &self.shell, theme, ready, maximize }, content).map(Message::Ui).boxed()
     }
 
+    /// The runtime maps the core's injected deadline onto iced's one scheduled redraw.
+    pub fn overlay_wake(&self) -> iced::Element<'_, Message> {
+        crate::overlay_wake::element(self.core.overlay_deadline().filter(|_| self.fixed.is_none()), self.clock.clone(), |now| {
+            Message::Editor(styk_ui::message::Message::Command(styk_core::commands::Command::Overlay {
+                event: styk_core::overlay::host::Event::Tick, now,
+            }))
+        })
+    }
+
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![event::listen_with(|event, status, _| match &event {
             Event::Keyboard(keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }) | Event::Mouse(mouse::Event::ButtonPressed(_)) | Event::Window(window::Event::Unfocused) => Some(Message::Raw(event.clone(), status == event::Status::Ignored)),
@@ -291,7 +301,7 @@ impl TopBand {
         let mut tasks = Vec::new();
         let mut queue = vec![event];
         while let Some(event) = queue.pop() {
-            for effect in self.shell.handle(&mut self.documents, event) {
+            for effect in self.shell.handle(&mut self.core.documents, event) {
                 match effect {
                     Effect::Workspace(ask) => queue.extend(Self::sessions(ask).into_iter().map(|answer| match answer {
                         Answer::Report(report) => shell::Event::Report(report),
@@ -321,6 +331,10 @@ impl TopBand {
         // The tree's focus state is read after anything that can change the tree.
         let reads_focus = !matches!(message, Message::Cursor(..) | Message::Frame | Message::Snapshot(_));
         let (requests, task) = match message {
+            Message::Editor(message) => {
+                let now = self.now();
+                (Vec::new(), styk_ui::message::update_at(&mut self.core, message, now).map(Message::Editor))
+            }
             Message::Ui(view::Message::Shell(event)) => (Vec::new(), self.dispatch(event)),
             Message::Ui(view::Message::Minimize) => (vec![Request::Minimize], Task::none()),
             Message::Ui(view::Message::CloseWindow) => (vec![Request::Close], Task::none()),
@@ -390,7 +404,7 @@ impl TopBand {
     /// project the tabs refuse (the thirteenth) is the host's to dispose of on its worker, and comes back as a failure.
     fn pump(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
-        while let Some(effect) = self.documents.poll() {
+        while let Some(effect) = self.core.documents.poll() {
             match effect {
                 Opened::Opened(id) => {
                     self.busy = false;
@@ -408,7 +422,7 @@ impl TopBand {
         if !self.busy
             && let Some(request) = self.requests.pop_front()
         {
-            match self.documents.dispatch(request) {
+            match self.core.documents.dispatch(request) {
                 Ok(Opened::Started(_)) => self.busy = true,
                 Ok(_) => {}
                 // The host is not ready for another request yet: ask again next frame.
@@ -416,7 +430,7 @@ impl TopBand {
                 Err((error, _)) => self.fail(error.to_string()),
             }
         }
-        self.shell.sync(&self.documents);
+        self.shell.sync(&self.core.documents);
         Task::batch(tasks)
     }
 
@@ -508,10 +522,10 @@ impl TopBand {
                     (Vec::new(), Task::batch(tasks))
                 }
                 Step::Edit(fps) => {
-                    let id = self.documents.active().map(|document| document.id()).ok_or("no project is open")?;
-                    let answer = self.documents.call(id, "setFPS", &[Value::Num(f64::from(fps))], &Value::Null).map_err(|error| error.to_string())?;
+                    let id = self.core.documents.active().map(|document| document.id()).ok_or("no project is open")?;
+                    let answer = self.core.documents.call(id, "setFPS", &[Value::Num(f64::from(fps))], &Value::Null).map_err(|error| error.to_string())?;
                     answer.result.map_err(|error| error.to_string())?;
-                    self.shell.sync(&self.documents);
+                    self.shell.sync(&self.core.documents);
                     (Vec::new(), Task::none())
                 }
                 Step::Advance(nanos) => {
@@ -519,10 +533,11 @@ impl TopBand {
                     fixed.advance(std::time::Duration::from_nanos(nanos));
                     // The strip's deadlines follow the clock at once, not at the next frame.
                     let now = self.now();
-                    (Vec::new(), self.dispatch(E::Tick(now)))
+                    (Vec::new(), Task::batch([self.dispatch(E::Tick(now)), styk_ui::message::update_at(&mut self.core,
+                        styk_ui::message::Message::Command(styk_core::commands::Command::Overlay { event: styk_core::overlay::host::Event::Tick, now }), now).map(Message::Editor)]))
                 }
                 Step::SaveLanded => {
-                    let id = self.documents.active().map(|document| document.id()).ok_or("no project is open")?;
+                    let id = self.core.documents.active().map(|document| document.id()).ok_or("no project is open")?;
                     let now = self.now();
                     (Vec::new(), self.dispatch(E::SaveLanded(id, now)))
                 }
@@ -584,8 +599,8 @@ impl TopBand {
         let number_of = |id: DocumentId| self.opened.iter().position(|opened| *opened == id).map_or(0, |at| at + 1);
         let same = |what: &str, wanted: String, found: String| if wanted == found { Ok(()) } else { Err(format!("expected {what} {wanted}, found {found}")) };
         match expectation {
-            Expect::Front(n) => same("the tab in front", n.to_string(), self.documents.active().map_or(0, |d| number_of(d.id())).to_string()),
-            Expect::Order(order) => same("the tabs' order", format!("{order:?}"), format!("{:?}", self.documents.tabs().iter().map(|d| number_of(d.id())).collect::<Vec<_>>())),
+            Expect::Front(n) => same("the tab in front", n.to_string(), self.core.documents.active().map_or(0, |d| number_of(d.id())).to_string()),
+            Expect::Order(order) => same("the tabs' order", format!("{order:?}"), format!("{:?}", self.core.documents.tabs().iter().map(|d| number_of(d.id())).collect::<Vec<_>>())),
             Expect::Tabs(count) => same("the tabs in the band", count.to_string(), self.shell.layout().tabs().count().to_string()),
             Expect::Workspace(name) => {
                 let found = match self.shell.pressed() {
@@ -668,15 +683,15 @@ mod tests {
     fn projects_open_through_the_document_host_in_order_and_the_thirteenth_is_refused_by_it() {
         let (mut top, _) = band();
         open(&mut top, 12);
-        assert_eq!(top.documents.tabs().len(), 12);
+        assert_eq!(top.core.documents.tabs().len(), 12);
         assert_eq!(top.opened.len(), 12, "one tab per open, numbered in the order they opened");
         assert_eq!(top.shell.tabs().len(), 12);
         // The thirteenth comes back from the host as a failure; its prepared session was the host's to dispose of on its
         // worker, so the interface thread never drops it, and the tabs are as they were.
-        let ids: Vec<DocumentId> = top.documents.tabs().iter().map(|tab| tab.id()).collect();
+        let ids: Vec<DocumentId> = top.core.documents.tabs().iter().map(|tab| tab.id()).collect();
         top.open_all(&[fixture()]);
         settle(&mut top);
-        assert_eq!(top.documents.tabs().iter().map(|tab| tab.id()).collect::<Vec<_>>(), ids);
+        assert_eq!(top.core.documents.tabs().iter().map(|tab| tab.id()).collect::<Vec<_>>(), ids);
         assert_eq!(top.opened.len(), 12);
     }
 

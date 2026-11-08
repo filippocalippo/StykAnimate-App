@@ -298,3 +298,85 @@ fn only_a_hovered_row_or_a_keyboard_focused_one_takes_the_fill() {
     host.leave();
     assert_eq!(host.menus()[0].hovered(), None, "leaving the menus clears it");
 }
+
+#[test]
+fn opener_activation_and_outside_press_are_one_toggle() {
+    let (mut host, mut focus) = (Host::default(), page());
+    let select = |press| Event::Select { invoker: INVOKER, anchor: Rect::default(), options: vec![("A".into(), false)], chosen: None, keyboard: false, press };
+    host.event(select(1), &mut focus, 0);
+    assert_eq!(host.menus().len(), 1);
+    host.event(Event::Pointer { pressed: true, inside: false, anchor: Some(INVOKER), press: 2 }, &mut focus, 10);
+    host.event(select(2), &mut focus, 10);
+    assert!(host.menus().is_empty(), "the opener event must not reopen the list closed by the same press");
+    host.event(select(3), &mut focus, 20);
+    host.event(Event::Pointer { pressed: true, inside: false, anchor: Some(INVOKER), press: 3 }, &mut focus, 20);
+    assert_eq!(host.menus().len(), 1, "reverse event order also applies only once");
+}
+
+#[test]
+fn departure_cancels_intent_even_when_a_deadline_is_already_queued() {
+    let (mut host, mut focus) = (Host::default(), page());
+    let id = open(&mut host, &mut focus, false);
+    host.event(Event::Hover { menu: id, index: 2 }, &mut focus, 0);
+    host.event(Event::Leave { menu: Some(id) }, &mut focus, 100);
+    host.event(Event::Tick, &mut focus, 150);
+    assert_eq!(host.menus().len(), 1);
+    assert_eq!(host.menus()[0].hovered(), None);
+}
+
+#[test]
+fn normalized_choices_keep_original_identity_and_have_no_command_hint() {
+    let (mut host, mut focus) = (Host::default(), page());
+    let mut rows = option_rows([("hidden", false), ("B", false)]);
+    if let Entry::Item(item) = &mut rows[0] { item.hidden = true; }
+    host.open(rows, anchor(), Purpose::Select { invoker: INVOKER }, Some(INVOKER), true, None, &mut focus);
+    assert_eq!(host.menus()[0].hint(0).text, "");
+    let update = host.key(key("Enter"), &bounds, &mut focus, 0);
+    assert_eq!(update.chose, Some(1));
+    assert_eq!(update.run, None);
+}
+
+#[test]
+fn animation_phases_and_deadlines_stop_at_unmount_or_completion() {
+    let (mut host, mut focus) = (Host::default(), page());
+    assert_eq!(host.next_deadline(), None);
+    for (id, kind, half) in [(1, Animation::Progress, 650), (2, Animation::Spinner, 400), (3, Animation::Entry(super::Kind::Menu), 80), (4, Animation::Entry(super::Kind::Dialog), 120), (5, Animation::Entry(super::Kind::Popover), 80), (6, Animation::Entry(super::Kind::Toast), 120), (7, Animation::Entry(super::Kind::Sheet), 120)] {
+        host.event(Event::Animate { id, kind: Some(kind) }, &mut focus, 0);
+        host.event(Event::Tick, &mut focus, half);
+        assert_eq!(host.phase(id), 0.5);
+        assert!(host.next_deadline().is_some());
+        host.event(Event::Animate { id, kind: None }, &mut focus, half);
+        assert_eq!(host.next_deadline(), None);
+    }
+    host.event(Event::Animate { id: 8, kind: Some(Animation::Entry(super::Kind::Dialog)) }, &mut focus, 0);
+    host.event(Event::Tick, &mut focus, 240);
+    assert_eq!(host.phase(8), 1.0);
+    assert_eq!(host.next_deadline(), None);
+}
+
+#[test]
+fn message_action_lookup_dismissal_and_keyboard_pause_belong_to_host() {
+    use super::messages::{Message, Tone, Action};
+    let (mut host, mut focus) = (Host::default(), page());
+    let action = message_button_id(9, 0);
+    focus.register(ScopeId::ROOT, vec![FocusTarget::new(INVOKER.0, FocusArea::TopBand, TargetKind::Control), FocusTarget::new(action.0, FocusArea::TopBand, TargetKind::Control)]);
+    host.event(Event::ShowMessage(Message::new(9, "save", Tone::Info, false, vec![Action { command: CommandId::Save, label: "Save".into(), dismiss: true }])), &mut focus, 0);
+    assert_eq!(focus.tab(true), Some(action));
+    host.event(Event::FocusChanged, &mut focus, 100);
+    assert_eq!(host.messages().deadline(), None);
+    host.event(Event::Tick, &mut focus, 9000);
+    assert!(host.messages().current().is_some());
+    assert_eq!(host.event(Event::MessageAction { id: 8, index: 0 }, &mut focus, 9000).run, None);
+    let out = host.event(Event::MessageAction { id: 9, index: 0 }, &mut focus, 9000);
+    assert_eq!(out.run, Some(CommandId::Save));
+    assert_eq!(out.dismissed, Some(9));
+    assert!(host.messages().current().is_none());
+}
+
+#[test]
+fn unrelated_input_does_not_postpone_an_animation_wake() {
+    let (mut host, mut focus) = (Host::default(), page());
+    host.event(Event::Animate { id: 3, kind: Some(Animation::Spinner) }, &mut focus, 0);
+    host.event(Event::Time, &mut focus, 15);
+    assert_eq!(host.next_deadline(), Some(16));
+}

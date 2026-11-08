@@ -24,6 +24,7 @@ mod stage_widget_tests;
 mod input_check;
 use styk_platform::{screenshot, shell, shell_check};
 mod top_band;
+mod overlay_wake;
 mod wakes;
 mod window;
 
@@ -530,7 +531,7 @@ impl App {
         // Text is laid out only once the font system is ready: until then the view holds none.
         match (warm_up::proof(), self.sheet.as_ref()) {
             (Some(_), Some(sheet)) => sheet.view().map(Message::Sheet).boxed(),
-            (Some(ready), None) => self.band.view(self.theme, ready, self.max_button, styk_ui::loading(self.theme)).map(Message::Band).boxed(),
+            (Some(ready), None) => iced::widget::stack![self.band.view(self.theme, ready, self.max_button, styk_ui::loading(self.theme)), self.band.overlay_wake()].map(Message::Band).boxed(),
             (None, _) => styk_ui::prepaint(),
         }
     }

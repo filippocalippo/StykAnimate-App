@@ -190,7 +190,7 @@ fn menu_submenu_hover_rtl_and_keep_open() {
         menu::Entry::Item(menu::Item {
             keep_open: true,
             checked: Some(false),
-            command: CommandId::ToggleGrid,
+            action: menu::RowAction::Command(CommandId::ToggleGrid),
             ..menu::Item::new(CommandId::Menu, "")
         }),
     ]);
@@ -205,7 +205,7 @@ fn menu_submenu_hover_rtl_and_keep_open() {
         m.activate(),
         menu::Action::Activate {
             index: 1,
-            command: CommandId::ToggleGrid,
+            action: menu::RowAction::Command(CommandId::ToggleGrid),
             close: false
         }
     );
@@ -846,7 +846,7 @@ fn menu_shortcuts_follow_the_command_and_submenus_have_no_hint() {
 
     let mut row = menu::Item::new(CommandId::Undo, "Undo");
     assert_eq!(row.shortcuts(Platform::Control, true, &[]).text, "Ctrl+Z");
-    row.command = CommandId::Redo;
+    row.action = menu::RowAction::Command(CommandId::Redo);
     let hint = row.shortcuts(Platform::Control, true, &[]);
     assert_eq!(hint.text, "Ctrl+Shift+Z");
     assert_eq!(hint.keyshortcuts, "Control+Shift+Z Control+Y");

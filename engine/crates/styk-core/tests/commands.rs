@@ -66,7 +66,7 @@ fn menu_and_message_actions_reach_dispatch_with_their_registry_identity() {
     let mut core = Core::default();
     let mut menu = menu::Menu::new(vec![menu::Entry::Item(menu::Item::new(CommandId::Save, "Save"))]);
     menu.focus(0);
-    let menu::Action::Activate { command, close: true, .. } = menu.activate() else { panic!("menu activation"); };
+    let menu::Action::Activate { action: menu::RowAction::Command(command), close: true, .. } = menu.activate() else { panic!("menu activation"); };
     assert_eq!(core.dispatch(AppCommand::Run(command)), [Effect::NotAvailable(CommandId::Save)]);
 
     let mut slot = messages::Messages::default();

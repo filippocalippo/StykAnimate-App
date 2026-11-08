@@ -42,6 +42,9 @@ pub struct Core {
     stages: HashMap<DocumentId, (u64, Arc<Surface>)>,
     session: Session,
     focus: FocusState,
+    overlays: crate::overlay::host::Host,
+    shortcuts: crate::shortcuts::Shortcuts,
+    select_commands: Option<(crate::focus::FocusId, Vec<Option<Command>>)>,
     presentation: Presentation,
 }
 
@@ -56,6 +59,9 @@ impl Default for Core {
             stages: HashMap::new(),
             session: Session::default(),
             focus: FocusState::default(),
+            overlays: crate::overlay::host::Host::default(),
+            shortcuts: crate::shortcuts::Shortcuts::new(crate::shortcuts::Platform::Control, true),
+            select_commands: None,
             presentation: Presentation::english(),
         }
     }
@@ -171,10 +177,50 @@ impl Core {
         self.inspector.refresh(&mut self.documents, &self.view, self.facts.as_mut(), source, &mut self.session);
     }
 
+    /// Toolkit adapters bind command choices; arbitrary owners receive `OverlayChoice` effects.
+    pub fn bind_select(&mut self, invoker: crate::focus::FocusId, choices: Vec<Option<Command>>) {
+        self.select_commands = Some((invoker, choices));
+    }
+
+    pub fn overlays(&self) -> &crate::overlay::host::Host { &self.overlays }
+    pub fn shortcuts_mut(&mut self) -> &mut crate::shortcuts::Shortcuts { &mut self.shortcuts }
+
+    /// Replace the window's single wake with this deadline, or cancel it for `None`.
+    /// At that wake dispatch `Command::Overlay { event: Event::Tick, now }`.
+    pub fn overlay_deadline(&self) -> Option<u64> { self.overlays.next_deadline() }
+
+    fn overlay_event(&mut self, event: crate::overlay::host::Event, now: u64) -> Vec<Effect> {
+        use crate::overlay::host::Purpose;
+        let invoker = self.overlays.menus().iter().find_map(|m| match m.purpose() {
+            Purpose::Select { invoker } => Some(invoker),
+            Purpose::Commands => None,
+        });
+        let update = self.overlays.event(event, &mut self.focus, now);
+        let mut effects = Vec::new();
+        let choice = invoker.zip(update.chose);
+        let command = choice.and_then(|(invoker, index)| {
+            self.select_commands.as_ref().filter(|(id, _)| *id == invoker)
+                .and_then(|(_, commands)| commands.get(index)).cloned().flatten()
+        });
+        if let Some((invoker, index)) = choice {
+            effects.push(Effect::OverlayChoice { invoker, index });
+        }
+        if self.overlays.menus().is_empty() { self.select_commands = None; }
+        if update.effects.contains(&crate::overlay::Effect::ReleaseHeldKeys) {
+            effects.extend(self.shortcuts.release_all().map(Effect::ShortcutReleased));
+        }
+        effects.extend(update.effects.into_iter().map(Effect::Overlay));
+        if let Some(id) = update.dismissed { effects.push(Effect::MessageDismissed(id)); }
+        if let Some(command) = update.run { effects.extend(self.run(command)); }
+        if let Some(command) = command { effects.extend(self.dispatch(command)); }
+        effects
+    }
+
     /// Runs one command.
     pub fn dispatch(&mut self, command: Command) -> Vec<Effect> {
         self.session = Session::default();
         match command {
+            Command::Overlay { event, now } => self.overlay_event(event, now),
             Command::Inspector(event) => self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event),
             Command::Run(id) => self.run(id),
             Command::Activate(id) => self.activate(id),

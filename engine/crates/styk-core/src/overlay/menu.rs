@@ -8,8 +8,12 @@ pub enum Entry {
     Item(Item),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RowAction { Command(CommandId), Choice(usize) }
+impl From<CommandId> for RowAction { fn from(id: CommandId) -> Self { Self::Command(id) } }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
-    pub command: CommandId,
+    pub action: RowAction,
     pub label: String,
     pub icon: Option<String>,
     pub checked: Option<bool>,
@@ -28,9 +32,9 @@ pub struct ShortcutHint {
     pub keyshortcuts: String,
 }
 impl Item {
-    /// A row must name a registry command, even when its current label is contextual.
-    pub fn new(command: CommandId, label: impl Into<String>) -> Self {
-        Self { command, label: label.into(), icon: None, checked: None, radio: false,
+    /// A row names a registry command or a stable choice identity; its label may be contextual.
+    pub fn new(command: impl Into<RowAction>, label: impl Into<String>) -> Self {
+        Self { action: command.into(), label: label.into(), icon: None, checked: None, radio: false,
             group: None, danger: false, disabled: false, reason: String::new(), hidden: false,
             keep_open: false, submenu: None }
     }
@@ -38,7 +42,8 @@ impl Item {
     /// Hints are derived from the one registry at display time, including aliases and scope precedence.
     pub fn shortcuts(&self, platform: Platform, desktop: bool, active: &[Scope]) -> ShortcutHint {
         if self.submenu.is_some() { return ShortcutHint::default(); }
-        let bindings = self.command.info().visible_bindings(platform, desktop, active);
+        let RowAction::Command(command) = self.action else { return ShortcutHint::default(); };
+        let bindings = command.info().visible_bindings(platform, desktop, active);
         ShortcutHint {
             text: bindings.first().map_or_else(String::new, |key| format_binding(key, platform)),
             keyshortcuts: bindings.iter().map(|key| aria_binding(key, platform)).collect::<Vec<_>>().join(" "),
@@ -99,7 +104,7 @@ pub enum Action {
     Menubar(i8),
     Activate {
         index: usize,
-        command: CommandId,
+        action: RowAction,
         close: bool,
     },
 }
@@ -172,7 +177,7 @@ impl Menu {
         let keep = i.keep_open && (i.radio || i.checked.is_some());
         let radio = i.radio;
         let group = i.group.clone();
-        let command = i.command;
+        let action = i.action.clone();
         if keep {
             for (n, e) in self
                 .entries
@@ -199,7 +204,7 @@ impl Menu {
         }
         Action::Activate {
             index,
-            command,
+            action,
             close: !keep,
         }
     }
@@ -339,7 +344,7 @@ pub fn find_typeahead<'a>(
 }
 
 use super::placement::{self, Align, Placement, Positioned, Rect, Side, Size};
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor {
     Root(Rect),
     Point { x: f64, y: f64 },

@@ -450,6 +450,10 @@ fn a_message_waits_while_the_pointer_or_focus_is_on_it_and_resumes_with_the_time
     let outcome = w.overlays.update(Message::Toast(ToastEvent::Hover(false)), &mut w.focus, 2000);
     w.carry(outcome);
     assert_eq!(w.overlays.next_deadline(), Some(5100), "the 3.1 s that were left start again");
+    // Focus is authoritative; a widget notification alone cannot pause expiry.
+    let id = styk_core::overlay::host::message_button_id(1, 15);
+    w.focus.register(styk_core::focus::ScopeId::ROOT, vec![styk_core::focus::FocusTarget::new(id.0, styk_core::focus::FocusArea::Stage, styk_core::focus::TargetKind::Control)]);
+    w.focus.focus(id);
     let outcome = w.overlays.update(Message::Toast(ToastEvent::Focus(true)), &mut w.focus, 3000);
     w.carry(outcome);
     assert_eq!(w.overlays.next_deadline(), None, "focus on a button waits too");

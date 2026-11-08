@@ -22,7 +22,7 @@ pub struct Action {
     pub label: String,
     pub dismiss: bool,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Message {
     pub id: u64,
     pub key: String,
