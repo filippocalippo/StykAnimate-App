@@ -5,7 +5,7 @@ use super::{Context, Message, icon_button, id, send};
 use crate::params::{Kind, Parameter};
 use iced::widget::{Column, Row, container};
 use iced::{Widget as _, Alignment, Element, Length};
-use styk_core::dev_extension::{Event, Panel, Value};
+use styk_core::dev_extension::{Event, Panel};
 use styk_core::focus::{FocusArea, FocusId};
 use styk_core::i18n::Msg;
 use styk_design::tokens::scale;
@@ -79,20 +79,19 @@ fn parameter<'a>(context: &Context<'_>, index: usize, row: &Parameter) -> Elemen
     let area = FocusArea::Panels;
     let set = {
         let name = name.clone();
-        std::rc::Rc::new(move |value: Value| send(Event::Set { name: name.clone(), value }))
+        std::rc::Rc::new(move |step: Option<i32>, choice: Option<usize>| send(match (step, choice) { (Some(direction), _) => Event::Step { name: name.clone(), direction }, (_, Some(index)) => Event::Choose { name: name.clone(), index }, _ => Event::Toggle(name.clone()) }))
     };
     let control: Element<'a, Message> = match &row.descriptor.kind {
         // One press is one request: a drag would send a request per move, and the host refuses while one is pending.
-        Kind::Float { min, max } => {
-            let step = if max > min { (max - min) / 100.0 } else { 1.0 };
+        Kind::Float { min, .. } => {
             let value = row.effective.as_f64().unwrap_or(*min);
-            stepper(palette, first, area, context.presentation.number((value * 1000.0).round() / 1000.0), !enabled, false, move |direction| set(Value::Float(value + step * f64::from(direction))))
+            stepper(palette, first, area, context.presentation.number((value * 1000.0).round() / 1000.0), !enabled, false, move |direction| set(Some(direction), None))
         }
         Kind::Integer { min, max } => {
             let value = row.effective.as_i64().unwrap_or(*min).clamp(*min, *max);
-            stepper(palette, first, area, context.presentation.number(value as f64), !enabled, false, move |direction| set(Value::Integer(value.saturating_add(i64::from(direction)))))
+            stepper(palette, first, area, context.presentation.number(value as f64), !enabled, false, move |direction| set(Some(direction), None))
         }
-        Kind::Bool => Switch::new(first, area, palette, row.effective.as_bool().unwrap_or(false), move |on| set(Value::Bool(on))).disabled(!enabled).into_element(),
+        Kind::Bool => Switch::new(first, area, palette, row.effective.as_bool().unwrap_or(false), move |_| set(None, None)).disabled(!enabled).into_element(),
         Kind::Enum(options) => {
             let chosen = row.effective.as_str().and_then(|current| options.iter().position(|option| option == current));
             Row::with_children(
@@ -101,7 +100,7 @@ fn parameter<'a>(context: &Context<'_>, index: usize, row: &Parameter) -> Elemen
                     .enumerate()
                     .map(|(position, option)| {
                         let set = set.clone();
-                        Chip::new(FocusId(first.0 + position as u64), area, palette, option.clone(), set(Value::Enum(option.clone()))).on(chosen == Some(position)).disabled(!enabled).into_element()
+                        Chip::new(FocusId(first.0 + position as u64), area, palette, option.clone(), set(None, Some(position))).on(chosen == Some(position)).disabled(!enabled).into_element()
                     })
                     .collect::<Vec<_>>(),
             )

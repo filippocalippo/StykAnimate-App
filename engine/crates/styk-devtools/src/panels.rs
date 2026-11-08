@@ -36,6 +36,7 @@ pub struct ProfilerModel {
 pub struct LogsModel {
     pub filter: Filter,
     pub page: Page,
+    pub previous: Option<usize>,
 }
 impl LogsModel {
     /// The offset of the page after this one (the documented cursor: offset plus the rows returned).
@@ -45,7 +46,7 @@ impl LogsModel {
     }
     /// The offset of the page before this one.
     pub fn previous(&self) -> Option<usize> {
-        (self.filter.offset > 0).then(|| self.filter.offset.saturating_sub(self.page.lines.len().max(1)))
+        self.previous
     }
 }
 #[derive(Clone, Debug, Default)]
@@ -54,11 +55,12 @@ pub struct ParametersModel {
     pub offset: usize,
     pub total: usize,
     pub next: Option<usize>,
+    pub previous: Option<usize>,
 }
 impl ParametersModel {
     /// The offset of the page before this one.
     pub fn previous(&self) -> Option<usize> {
-        (self.offset > 0).then(|| self.offset.saturating_sub(self.rows.len().max(1)))
+        self.previous
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,7 +107,32 @@ enum Intent {
     Channel,
     Refresh(u64),
 }
+#[derive(Default)]
+struct Cursors {
+    current: usize,
+    previous: std::collections::VecDeque<usize>,
+}
+impl Cursors {
+    fn visit(&mut self, offset: usize) -> Option<usize> {
+        if offset == 0 {
+            self.previous.clear();
+        } else if offset != self.current {
+            if let Some(at) = self.previous.iter().position(|v| *v == offset) {
+                self.previous.truncate(at);
+            } else {
+                if self.previous.len() == 256 {
+                    self.previous.pop_front();
+                }
+                self.previous.push_back(self.current);
+            }
+        }
+        self.current = offset;
+        self.previous.back().copied()
+    }
+}
 pub struct Host {
+    log_cursors: Cursors,
+    parameter_cursors: Cursors,
     runtime: Runtime,
     notify: Arc<dyn Fn() + Send + Sync>,
     open: [bool; 3],
@@ -133,6 +160,8 @@ pub struct Host {
 impl Host {
     pub fn new(runtime: Runtime, notify: Arc<dyn Fn() + Send + Sync>) -> Self {
         Self {
+            log_cursors: Cursors::default(),
+            parameter_cursors: Cursors::default(),
             runtime: runtime.client(),
             notify,
             open: [false; 3],
@@ -182,6 +211,7 @@ impl Host {
         }
         if self.open[2] && !open[2] {
             self.parameters = ParametersModel::default();
+            self.parameter_cursors = Cursors::default();
             self.refresh = None;
             self.refresh_retry = None;
             if self
@@ -262,12 +292,13 @@ impl Host {
                     self.error = Some(notice("text exceeds 2 KiB"));
                     return;
                 }
-                self.draft = text;
+                self.draft = text.as_str().to_owned();
             }
             Event::Panel { .. } => {
                 // Membership was accepted by the dock before this effect.
                 if self.input == Some(styk_core::dev_extension::CommandId::DevPanelClose) {
                     self.input = None;
+                    self.draft.clear();
                 }
             }
             Event::Overlay(on) => {
@@ -335,6 +366,9 @@ impl Host {
                     Intent::Channel,
                 );
             }
+            Event::Step { name, direction } => self.edit_parameter(&name, Some(direction), None),
+            Event::Toggle(name) => self.edit_parameter(&name, None, None),
+            Event::Choose { name, index } => self.edit_parameter(&name, None, Some(index)),
             Event::Reset(name) => self.issue(Request::Reset(name), Intent::Other),
             Event::ParametersPage(offset) => self.request_refresh(offset, now),
             Event::SaveProfile(name) => self.issue(Request::SaveProfile(name), Intent::Other),
@@ -343,7 +377,6 @@ impl Host {
                 level,
                 module,
                 text,
-                offset,
             } => {
                 if module.len() + text.len() > 2048 {
                     self.error = Some(notice("log filter exceeds 2 KiB"));
@@ -351,12 +384,15 @@ impl Host {
                 }
                 self.logs.filter = Filter {
                     level,
-                    module,
-                    text,
-                    offset,
+                    module: module.as_str().to_owned(),
+                    text: text.as_str().to_owned(),
+                    offset: 0,
                 };
+                self.log_cursors = Cursors::default();
+                self.logs.previous = None;
                 if self.input == Some(styk_core::dev_extension::CommandId::DevLogsFilter) {
                     self.input = None;
+                    self.draft.clear();
                 }
                 self.sample = None;
                 self.logs.page = Page::default();
@@ -364,8 +400,57 @@ impl Host {
                     self.next_sample = Some(now);
                 }
             }
+            Event::LogsPage(offset) => {
+                if Some(offset) == self.logs.next() || Some(offset) == self.logs.previous() {
+                    self.logs.filter.offset = offset;
+                    self.sample = None;
+                    self.logs.page = Page::default();
+                    if self.open[1] {
+                        self.next_sample = Some(now);
+                    }
+                }
+            }
             Event::Poll => self.poll(now),
             Event::Tick(at) => self.tick(at),
+        }
+    }
+    fn edit_parameter(&mut self, name: &str, step: Option<i32>, choice: Option<usize>) {
+        use styk_devtools_engine::params::Kind;
+        let Some(row) = self
+            .parameters
+            .rows
+            .iter()
+            .find(|p| p.descriptor.name == name)
+        else {
+            self.error = Some(notice("parameter is not on the current page"));
+            return;
+        };
+        let value = row.pending.as_ref().unwrap_or(&row.effective);
+        let value = match (&row.descriptor.kind, step, choice) {
+            (Kind::Integer { .. }, Some(n), None) => value
+                .as_i64()
+                .map(|v| ParameterValue::from(v.saturating_add(i64::from(n.signum())))),
+            (Kind::Float { min, max }, Some(n), None) => value.as_f64().map(|v| {
+                ParameterValue::from(
+                    v + (if max > min { (max - min) / 100.0 } else { 1.0 }) * f64::from(n.signum()),
+                )
+            }),
+            (Kind::Bool, None, None) => value.as_bool().map(|v| ParameterValue::from(!v)),
+            (Kind::Enum(options), None, Some(i)) => {
+                options.get(i).cloned().map(ParameterValue::from)
+            }
+            _ => None,
+        };
+        if let Some(value) = value {
+            self.issue(
+                Request::Set {
+                    name: name.into(),
+                    value,
+                },
+                Intent::Other,
+            );
+        } else {
+            self.error = Some(notice("invalid parameter operation"));
         }
     }
     fn request_refresh(&mut self, offset: usize, now: u64) {
@@ -412,13 +497,14 @@ impl Host {
         }
     }
     fn issue(&mut self, request: Request, intent: Intent) {
+        use styk_core::dev_extension::CommandId as Id;
         let consumes_input = matches!(
-            &request,
-            Request::Set { .. }
-                | Request::Reset(_)
-                | Request::SaveProfile(_)
-                | Request::LoadProfile(_)
-                | Request::Export(_)
+            (&request, self.input),
+            (Request::Set { .. }, Some(Id::DevParameterSet))
+                | (Request::Reset(_), Some(Id::DevParameterReset))
+                | (Request::SaveProfile(_), Some(Id::DevProfileSave))
+                | (Request::LoadProfile(_), Some(Id::DevProfileLoad))
+                | (Request::Export(_), Some(Id::DevCaptureExport))
         );
         if self.pending.is_some() {
             let e = "developer action is busy; retry when complete";
@@ -493,6 +579,7 @@ impl Host {
                         self.overlay.sample = s.sample;
                     }
                     if let Some(p) = s.logs {
+                        self.logs.previous = self.log_cursors.visit(self.logs.filter.offset);
                         self.logs.page = p;
                     }
                 }
@@ -553,6 +640,7 @@ impl Host {
                     offset,
                     total,
                     next: (end < total).then_some(end),
+                    previous: self.parameter_cursors.visit(offset),
                 };
             }
             Ok(Reply::Stopped {
@@ -598,25 +686,54 @@ mod tests {
     use super::*;
     use styk_devtools_engine::logs::Line;
     fn line(sequence: u64) -> Line {
-        Line { sequence, time_ns: 0, level: 3, module: "m".into(), text: "t".into(), truncated: false }
+        Line {
+            sequence,
+            time_ns: 0,
+            level: 3,
+            module: "m".into(),
+            text: "t".into(),
+            truncated: false,
+        }
     }
     #[test]
     fn log_pager_cursors_follow_the_returned_rows() {
         let mut model = LogsModel::default();
-        assert_eq!((model.next(), model.previous()), (None, None), "an empty page has neither");
-        model.page = Page { lines: (0..50).map(line).collect(), total: 120, dropped: 0 };
+        assert_eq!(
+            (model.next(), model.previous()),
+            (None, None),
+            "an empty page has neither"
+        );
+        model.page = Page {
+            lines: (0..50).map(line).collect(),
+            total: 120,
+            dropped: 0,
+        };
         assert_eq!((model.next(), model.previous()), (Some(50), None));
         model.filter.offset = 50;
+        model.previous = Some(0);
         assert_eq!((model.next(), model.previous()), (Some(100), Some(0)));
         model.filter.offset = 100;
-        model.page = Page { lines: (0..20).map(line).collect(), total: 120, dropped: 0 };
-        assert_eq!((model.next(), model.previous()), (None, Some(80)), "the last page has no next");
+        model.previous = Some(50);
+        model.page = Page {
+            lines: (0..20).map(line).collect(),
+            total: 120,
+            dropped: 0,
+        };
+        assert_eq!(
+            (model.next(), model.previous()),
+            (None, Some(50)),
+            "the last page has no next"
+        );
     }
     #[test]
     fn parameter_pager_previous_steps_back_by_the_rows_shown() {
         let mut model = ParametersModel::default();
         assert_eq!(model.previous(), None);
         model.offset = 7;
-        assert_eq!(model.previous(), Some(6), "an empty page still steps back");
+        assert_eq!(
+            model.previous(),
+            None,
+            "unknown predecessors are not guessed"
+        );
     }
 }

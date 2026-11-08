@@ -90,6 +90,20 @@ adopted. Closing cancels that refresh; reopening requests a fresh first page.
 
 ## Parameters and persistence
 
+Views send `Step { name, direction }`, `Toggle(name)` or `Choose { name, index }`.
+Host derives the edit from the acknowledged pending value, falling back to the
+effective value, and submits it through the shared registry. Explicit owner
+registrations can be supplied to `Runtime::start_registered` before startup.
+An admitted action retires input/draft only when its kind answers that request;
+editing another panel preserves an export draft. Draft storage is capped at 2 KiB.
+
+Log criteria use `Filter { level, module, text }`; pagination uses `LogsPage`.
+Host resets criteria to offset zero, drops obsolete sample replies and retains
+the refresh deadline. Both models supply `previous()`; views must never derive
+it from row counts. Host retains at most 256 acknowledged predecessor cursors
+per panel, including byte-limited pages; older unknown predecessors are unavailable.
+Views use these operations and supplied cursors without adding decisions to widgets.
+
 `params::Registry` owns finite float/integer, bool and enum descriptors, defaults,
 units, numeric ranges and acknowledged setters. Numeric values clamp; bad types,
 unknown names/options and nonfinite values refuse. Setter failure retains the old
@@ -167,8 +181,8 @@ is the layer the application stacks above the dock and below menus and messages.
   and the summary statistics of `ProfilerModel.summary`.
 - **Logs.** Level chips and the module and text fields send `Event::Filter` (every change starts at offset 0; the host
   clears the page and resamples); the page's rows, `LogsModel::next`/`previous` for the pager, the counts and the ring's drops.
-- **Parameters.** One block per row: integers and floats a stepper (one press, one `Event::Set` of the value one step away;
-  the registry clamps), bools a switch, enums a row of chips, a reset that is enabled only for a modified value, the default,
+- **Parameters.** One block per row: integers and floats a stepper (one press, one `Event::Step`; Host derives the value and
+  the registry clamps), bools send `Event::Toggle`, enum chips send `Event::Choose`, a reset is enabled only for a modified value, the default,
   a pending value and a restart note. Controls disable while the host is busy.
 - **Overlay.** A passive `Layer` child at the host's `bounds` (inset 12 px) while `visible`: the frame sparkline with the
   16.7 ms line (late frames, over 1.5 budgets, in the danger colour), the quantiles of each timing stream (a stream with no

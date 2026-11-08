@@ -28,13 +28,13 @@ const LEVELS: [&str; 6] = ["dev.level.all", "dev.level.error", "dev.level.warn",
 
 /// The same filter with one field changed, as the typed event that reaches the host. A new filter starts at the first page.
 fn filter(model: &LogsModel, change: impl FnOnce(&mut Event)) -> Message {
-    let mut event = Event::Filter { level: model.filter.level, module: model.filter.module.clone(), text: model.filter.text.clone(), offset: 0 };
+    let mut event = Event::Filter { level: model.filter.level, module: model.filter.module.clone(), text: model.filter.text.clone() };
     change(&mut event);
     send(event)
 }
 
-fn page(model: &LogsModel, offset: usize) -> Message {
-    send(Event::Filter { level: model.filter.level, module: model.filter.module.clone(), text: model.filter.text.clone(), offset })
+fn page(_model: &LogsModel, offset: usize) -> Message {
+    send(Event::LogsPage(offset))
 }
 
 pub fn view<'a>(context: &Context<'_>) -> Element<'a, Message> {

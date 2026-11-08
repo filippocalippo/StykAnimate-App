@@ -19,6 +19,226 @@ use styk_devtools::{
 #[path = "developer_view_tests.rs"]
 mod views;
 struct Memory;
+fn registered() -> (TopBand, FixedClock, Runtime, Driver<'static, Message>) {
+    use styk_devtools::params::{Descriptor, Kind, Registry};
+    let (mut top, clock, _, driver) = setup();
+    let mut registry = Registry::default();
+    for (name, kind, default) in [
+        (
+            "a.integer",
+            Kind::Integer { min: 0, max: 100 },
+            ParameterValue::from(8),
+        ),
+        ("b.bool", Kind::Bool, ParameterValue::from(false)),
+        (
+            "c.enum",
+            Kind::Enum(vec!["a".into(), "b".into()]),
+            ParameterValue::from("a"),
+        ),
+    ] {
+        registry
+            .register(
+                Descriptor {
+                    name: name.into(),
+                    kind,
+                    default,
+                    unit: String::new(),
+                    restart: true,
+                },
+                |_| Ok(()),
+            )
+            .unwrap();
+    }
+    for i in 0..100 {
+        registry
+            .register(
+                Descriptor {
+                    name: format!("z{i:03}"),
+                    kind: Kind::Integer { min: 0, max: 10 },
+                    default: ParameterValue::from(0),
+                    unit: String::new(),
+                    restart: false,
+                },
+                |_| Ok(()),
+            )
+            .unwrap();
+    }
+    let runtime = Runtime::start_registered(
+        Services {
+            spawner: Arc::new(styk_platform::spawn::ThreadSpawner),
+            clock: Arc::new(clock.clone()),
+            files: Arc::new(styk_services::files::fake::MemoryFiles::default()),
+            output: Arc::new(ExportProbe::default()),
+            storage: Arc::new(styk_services::storage::fake::MemoryStorage::default()),
+            memory: Arc::new(Memory),
+        },
+        Startup {
+            profiles: vec![],
+            overrides: vec![],
+        },
+        registry,
+    )
+    .unwrap();
+    top.attach_developer(runtime.clone());
+    (top, clock, runtime, driver)
+}
+#[test]
+fn owner_pending_edits_and_export_draft() {
+    let (mut top, _, _, mut driver) = registered();
+    panel(
+        &mut top,
+        &mut driver,
+        styk_core::dev_extension::Panel::Parameters,
+        true,
+    );
+    settle(&mut top, &mut driver);
+    send(
+        &mut top,
+        &mut driver,
+        Dev::Input(Some(CommandId::DevCaptureExport)),
+    );
+    send(&mut top, &mut driver, Dev::Draft("keep.json".into()));
+    for _ in 0..2 {
+        send(
+            &mut top,
+            &mut driver,
+            Dev::Step {
+                name: "a.integer".into(),
+                direction: 1,
+            },
+        );
+        settle(&mut top, &mut driver);
+    }
+    let host = top.developer.as_ref().unwrap();
+    assert_eq!(
+        host.parameters.rows[0].pending,
+        Some(ParameterValue::from(10))
+    );
+    assert_eq!(host.input, Some(CommandId::DevCaptureExport));
+    assert_eq!(host.draft, "keep.json");
+    for expected in [true, false] {
+        send(&mut top, &mut driver, Dev::Toggle("b.bool".into()));
+        settle(&mut top, &mut driver);
+        assert_eq!(
+            top.developer.as_ref().unwrap().parameters.rows[1].pending,
+            Some(ParameterValue::from(expected))
+        );
+    }
+    send(
+        &mut top,
+        &mut driver,
+        Dev::Choose {
+            name: "c.enum".into(),
+            index: 1,
+        },
+    );
+    settle(&mut top, &mut driver);
+    assert_eq!(
+        top.developer.as_ref().unwrap().parameters.rows[2].pending,
+        Some(ParameterValue::from("b"))
+    );
+}
+#[test]
+fn owner_parameter_page_round_trip() {
+    let (mut top, _, _, mut driver) = registered();
+    panel(
+        &mut top,
+        &mut driver,
+        styk_core::dev_extension::Panel::Parameters,
+        true,
+    );
+    settle(&mut top, &mut driver);
+    let mut starts = vec![0];
+    while let Some(next) = top.developer.as_ref().unwrap().parameters.next {
+        starts.push(next);
+        send(&mut top, &mut driver, Dev::ParametersPage(next));
+        settle(&mut top, &mut driver);
+    }
+    assert!(starts.len() > 2);
+    starts.pop();
+    for previous in starts.into_iter().rev() {
+        assert_eq!(
+            top.developer.as_ref().unwrap().parameters.previous(),
+            Some(previous)
+        );
+        send(&mut top, &mut driver, Dev::ParametersPage(previous));
+        settle(&mut top, &mut driver);
+    }
+    assert_eq!(top.developer.as_ref().unwrap().parameters.previous(), None);
+}
+fn log_page(top: &mut TopBand, clock: &FixedClock, driver: &mut Driver<'static, Message>) {
+    deadline(top, clock, driver);
+    for _ in 0..16 {
+        if !top.developer.as_ref().unwrap().logs.page.lines.is_empty() {
+            return;
+        }
+        let m = wake_message(top);
+        deliver(top, driver, m);
+    }
+    panic!("log page missing");
+}
+#[test]
+fn owner_log_round_trips_and_filter_during_sample() {
+    for bytes in [10, 2048] {
+        let (mut top, clock, runtime, mut driver) = setup();
+        for i in 0..120 {
+            runtime
+                .logs
+                .record(i, 3, "owner", format_args!("{}", "x".repeat(bytes)));
+        }
+        send(
+            &mut top,
+            &mut driver,
+            Dev::Filter {
+                level: 3,
+                module: "owner".into(),
+                text: String::new(),
+            },
+        );
+        panel(
+            &mut top,
+            &mut driver,
+            styk_core::dev_extension::Panel::Logs,
+            true,
+        );
+        log_page(&mut top, &clock, &mut driver);
+        let mut starts = vec![0];
+        while let Some(next) = top.developer.as_ref().unwrap().logs.next() {
+            starts.push(next);
+            send(&mut top, &mut driver, Dev::LogsPage(next));
+            log_page(&mut top, &clock, &mut driver);
+        }
+        starts.pop();
+        for previous in starts.into_iter().rev() {
+            assert_eq!(
+                top.developer.as_ref().unwrap().logs.previous(),
+                Some(previous)
+            );
+            send(&mut top, &mut driver, Dev::LogsPage(previous));
+            log_page(&mut top, &clock, &mut driver);
+        }
+        let next = top.developer.as_ref().unwrap().logs.next().unwrap();
+        send(&mut top, &mut driver, Dev::LogsPage(next));
+        deadline(&mut top, &clock, &mut driver); // leave the old sample pending
+        send(
+            &mut top,
+            &mut driver,
+            Dev::Filter {
+                level: 3,
+                module: "owner".into(),
+                text: "x".into(),
+            },
+        );
+        assert_eq!(top.developer.as_ref().unwrap().logs.filter.offset, 0);
+        assert!(top.developer.as_ref().unwrap().logs.page.lines.is_empty());
+        log_page(&mut top, &clock, &mut driver);
+        assert_eq!(
+            top.developer.as_ref().unwrap().logs.page.lines[0].time_ns,
+            0
+        );
+        assert_eq!(top.developer.as_ref().unwrap().logs.previous(), None);
+    }
+}
 // Captures share trace admission; keep these lifetime tests deterministic without timing thresholds.
 static CAPTURE_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[derive(Default)]

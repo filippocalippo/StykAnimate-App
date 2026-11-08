@@ -56,6 +56,15 @@ pub enum Event {
         name: String,
         value: Value,
     },
+    Step {
+        name: String,
+        direction: i32,
+    },
+    Toggle(String),
+    Choose {
+        name: String,
+        index: usize,
+    },
     Reset(String),
     ChannelSet {
         name: String,
@@ -64,11 +73,11 @@ pub enum Event {
     SaveProfile(String),
     LoadProfile(String),
     ParametersPage(usize),
+    LogsPage(usize),
     Filter {
         level: u8,
         module: String,
         text: String,
-        offset: usize,
     },
     Poll,
     Tick(u64),

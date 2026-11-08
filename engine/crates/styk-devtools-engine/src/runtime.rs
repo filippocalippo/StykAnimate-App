@@ -213,6 +213,14 @@ pub struct Startup {
 }
 impl Runtime {
     pub fn start(services: Services, startup: Startup) -> Result<Self, String> {
+        Self::start_registered(services, startup, Registry::default())
+    }
+    /// Install explicitly registered owner setters before startup overrides and worker requests.
+    pub fn start_registered(
+        services: Services,
+        startup: Startup,
+        registry: Registry,
+    ) -> Result<Self, String> {
         if startup.profiles.len() > 256
             || startup.overrides.len() > 256
             || startup
@@ -239,7 +247,7 @@ impl Runtime {
         let worker_logs = logs.clone();
         let spawner = services.spawner.clone();
         spawner.spawn("devtools.panels",Box::new(move || {
-            let mut state=State::new(services,worker_logs);
+            let mut state=State::new(services,worker_logs,registry);
             let initialized=state.startup(startup);
             let mut capture_owner:Option<(Arc<AtomicU64>,u64)>=None;
             while !stopping.load(Ordering::Acquire) {
@@ -341,7 +349,7 @@ struct State {
     logs: Arc<Logs>,
 }
 impl State {
-    fn new(services: Services, logs: Arc<Logs>) -> Self {
+    fn new(services: Services, logs: Arc<Logs>, registry: Registry) -> Self {
         let reader = ReadHost::new(
             Arc::new(styk_services::inspection::Slot::default()),
             services.spawner.clone(),
@@ -350,7 +358,7 @@ impl State {
         Self {
             services,
             reader,
-            registry: Registry::default(),
+            registry,
             logs,
         }
     }

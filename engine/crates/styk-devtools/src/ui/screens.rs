@@ -118,7 +118,7 @@ fn fixture_logs() -> LogsModel {
         line(4, 1, "styk_core::stage", "the stage's paint worker restarted after a device loss"),
         line(5, 3, "styk_app::top_band", "workspace Animate"),
     ];
-    LogsModel { filter: Filter { level: 4, module: "styk_".into(), text: String::new(), offset: 0 }, page: Page { total: 5, dropped: 12, lines } }
+    LogsModel { previous: None, filter: Filter { level: 4, module: "styk_".into(), text: String::new(), offset: 0 }, page: Page { total: 5, dropped: 12, lines } }
 }
 
 fn fixture_parameters() -> ParametersModel {
@@ -129,7 +129,7 @@ fn fixture_parameters() -> ParametersModel {
         Parameter { descriptor: descriptor("drag.preview", ParameterKind::Bool, true.into(), "", true), effective: false.into(), pending: Some(true.into()), modified: true },
         Parameter { descriptor: descriptor("brush.smoothing", ParameterKind::Enum(vec!["off".into(), "light".into(), "heavy".into()]), "light".into(), "", false), effective: "heavy".into(), pending: None, modified: true },
     ];
-    ParametersModel { total: rows.len(), offset: 0, next: None, rows }
+    ParametersModel { previous: None, total: rows.len(), offset: 0, next: None, rows }
 }
 
 fn fixture_summary() -> crate::ParameterValue {
