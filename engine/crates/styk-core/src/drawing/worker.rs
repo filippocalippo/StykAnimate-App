@@ -89,7 +89,7 @@ pub enum Request {
     Shutdown,
     /// Holds the worker until released, so a test can queue work behind it.
     #[cfg(test)]
-    Hold(Arc<(Mutex<bool>, Condvar)>),
+    Hold { release: Arc<(Mutex<bool>, Condvar)>, entered: Sender<()> },
 }
 
 /// A change of the cel's history: the three requests a person can lose by a refusal, so the caller keeps them (see [`Worker::send`]).
@@ -590,9 +590,10 @@ impl State {
             }
             Request::Ping { token } => self.reply(Reply::Pong { token }),
             #[cfg(test)]
-            Request::Hold(hold) => {
+            Request::Hold { release: hold, entered } => {
                 let (released, signal) = &*hold;
                 let mut released = lock(released);
+                entered.send(()).expect("the test waits for the hold");
                 while !*released {
                     released = signal.wait(released).unwrap_or_else(|p| p.into_inner());
                 }
