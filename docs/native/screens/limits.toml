@@ -484,20 +484,10 @@ masks = [
 ]
 
 ["dock-folded"]
+# Design difference, not a part another chunk owns: at compact width the design (docs/native/designs/docking.md 3.2, restored in the
+# core) folds the bottom group to a strip, so the timeline is a 40 px strip and the stage takes its room; today's window keeps the
+# timeline docked there. The mask covers the stage's lower part, the strip and the tool rail's two places; the rest is compared.
 reference = "docs/native/screens/dock/dock-folded.png"
-max_difference = 0.004
-width = 720
-height = 800
-masks = [
-  [0, 0, 720, 44, "K-shell: the band (compared in its own screens)"],
-  [8, 50, 704, 40, "the stage chunk: the stage header (scene, view toggles, zoom)"],
-  [70, 130, 624, 353, "the stage: the artboard and the scene the engine draws (no project is open in a screen)"],
-  [18, 208, 50, 200, "the tools chunk: the compact tool rail's tools (the dock keeps its place)"],
-  [12, 532, 696, 256, "the timeline chunk: the timeline panel (the dock keeps its island)"],
-]
-
-["dock-folded-dark"]
-reference = "docs/native/screens/dock/dock-folded-dark.png"
 max_difference = 0.003
 width = 720
 height = 800
@@ -505,6 +495,22 @@ masks = [
   [0, 0, 720, 44, "K-shell: the band (compared in its own screens)"],
   [8, 50, 704, 40, "the stage chunk: the stage header (scene, view toggles, zoom)"],
   [70, 130, 624, 353, "the stage: the artboard and the scene the engine draws (no project is open in a screen)"],
-  [18, 208, 50, 200, "the tools chunk: the compact tool rail's tools (the dock keeps its place)"],
-  [12, 532, 696, 256, "the timeline chunk: the timeline panel (the dock keeps its island)"],
+  [18, 205, 50, 330, "the tools chunk: the compact tool rail's tools; the rail is centred on a taller stage here (design difference)"],
+  [8, 520, 704, 276, "design difference: the timeline strip and the stage room it frees (today's window keeps the timeline docked at 720 px)"],
+]
+
+["dock-folded-dark"]
+# Design difference, not a part another chunk owns: at compact width the design (docs/native/designs/docking.md 3.2, restored in the
+# core) folds the bottom group to a strip, so the timeline is a 40 px strip and the stage takes its room; today's window keeps the
+# timeline docked there. The mask covers the stage's lower part, the strip and the tool rail's two places; the rest is compared.
+reference = "docs/native/screens/dock/dock-folded-dark.png"
+max_difference = 0.002
+width = 720
+height = 800
+masks = [
+  [0, 0, 720, 44, "K-shell: the band (compared in its own screens)"],
+  [8, 50, 704, 40, "the stage chunk: the stage header (scene, view toggles, zoom)"],
+  [70, 130, 624, 353, "the stage: the artboard and the scene the engine draws (no project is open in a screen)"],
+  [18, 205, 50, 330, "the tools chunk: the compact tool rail's tools; the rail is centred on a taller stage here (design difference)"],
+  [8, 520, 704, 276, "design difference: the timeline strip and the stage room it frees (today's window keeps the timeline docked at 720 px)"],
 ]

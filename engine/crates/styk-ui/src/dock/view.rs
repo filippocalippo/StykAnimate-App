@@ -6,7 +6,7 @@
 
 use super::probe::probe;
 use crate::message::Message;
-use iced::widget::{Column, Space, container, mouse_area, stack};
+use iced::widget::{Column, Space, container, mouse_area};
 use iced::advanced::Widget;
 use iced::{Alignment, Element, Length, Padding, Widget as _};
 use styk_core::commands::Command;
@@ -45,17 +45,9 @@ fn send(event: Event) -> Message {
     Message::Command(Command::Dock(event))
 }
 
-/// The panel's name as the interface writes it.
+/// The panel's name as the interface writes it (the catalogue's: `Dock::title_key`).
 fn title(presentation: &Presentation, panel: &PanelId) -> String {
-    match Dock::title_key(&panel.kind) {
-        Some(key) => presentation.text(&Msg::new(key)),
-        None => match panel.kind.as_str() {
-            "stage" => "Stage".into(),
-            "layers" => "Layers".into(),
-            "tools" => "Tools".into(),
-            other => other.to_string(),
-        },
-    }
+    Dock::title_key(&panel.kind).map_or_else(|| panel.kind.clone(), |key| presentation.text(&Msg::new(key)))
 }
 
 /// The panel's glyph (`panel-registry.mjs`).
@@ -87,6 +79,13 @@ fn empty<'a>(params: &Params<'_>, panel: &PanelId) -> Element<'a, Message> {
     container(empty_state(palette, Some(icon_of(panel)), title(params.presentation, panel), None, None, false)).width(Length::Fill).height(Length::Fill).center_y(Length::Fill).boxed()
 }
 
+/// A focus anchor: a target F6 can land on that owns no keys and wraps nothing, so the panel's own controls keep their focus,
+/// their keys and their input roles. It sits under the panel's view and fills the region it stands for.
+fn anchor<'a>(palette: &'static Palette, id: styk_core::focus::FocusId, area: FocusArea) -> Element<'a, Message> {
+    let ring = Ring { color: palette.focus_ring.into(), width: 2.0, offset: -3.0, radius: scale::RADIUS_XL - 2.0 };
+    Focusable::new(id, area, Space::new().width(Length::Fill).height(Length::Fill).boxed(), ring).boxed()
+}
+
 /// The island of a group at `rect`: its header, then the active panel's view.
 fn island<'a>(params: &Params<'_>, group: &TabGroup, rect: Rect, body: Element<'a, Message>) -> Placed<'a, Message> {
     let palette = params.theme.palette();
@@ -94,29 +93,36 @@ fn island<'a>(params: &Params<'_>, group: &TabGroup, rect: Rect, body: Element<'
     let active = &group.tabs[group.active];
     let (width, height) = (rect.w as f32, rect.h as f32);
     let area = Dock::area_of(active);
+    let press = move |at: iced::Point| send(Event::HeaderPressed { group: id, tab: None, x: f64::from(at.x), y: f64::from(at.y) });
+    let stage = active.kind == "stage";
+    let solo = group.tabs.len() == 1;
     let mut column: Vec<Element<'a, Message>> = Vec::new();
-    let solo_stage = group.tabs.len() == 1 && active.kind == "stage";
-    if group.tabs.len() > 1 {
+    if !solo {
+        let panels = group.tabs.clone();
         let tabs: Vec<Tab> = group.tabs.iter().map(|panel| Tab { label: title(params.presentation, panel), icon: None }).collect();
-        let strip = Tabs::new(ids::tabs(id), FocusArea::Panels, palette, tabs, group.active, move |index| send(Event::TabSelected { group: id, index })).into_element();
+        let strip = Tabs::new(ids::tabs(id), area, palette, tabs, group.active, move |index| send(Event::TabSelected { group: id, index })).closable(move |index| send(Event::Close(panels[index].clone()))).into_element();
         let header = fixed(container(strip).padding(Padding { top: scale::SPACE_1_5, right: scale::SPACE_2, bottom: scale::SPACE_1_5, left: scale::SPACE_2 }), width, HEADER_HEIGHT);
-        column.push(probe(header, move |at| send(Event::HeaderPressed { group: id, tab: None, x: f64::from(at.x), y: f64::from(at.y) })));
-    } else if solo_stage {
-        // The stage's own header (scene, view toggles, zoom) is the stage chunk's: its place is kept, and it drags the group.
-        let blank = fixed(Space::new(), width, HEADER_HEIGHT);
-        column.push(probe(blank, move |at| send(Event::HeaderPressed { group: id, tab: None, x: f64::from(at.x), y: f64::from(at.y) })));
+        column.push(probe(header, press));
+    } else if stage {
+        // The stage's own header (scene, view toggles, zoom) is the stage chunk's: its place and its focus target are kept,
+        // and it drags the group.
+        let blank = iced::widget::stack![anchor(palette, ids::stage_header(id), area), Space::new().width(Length::Fill).height(Length::Fill)];
+        column.push(probe(fixed(blank, width, HEADER_HEIGHT), press));
     }
-    // The body: the stage and the Properties panel's views, or the panel's empty state.
-    let body: Element<'a, Message> = if group.tabs.len() == 1 && !solo_stage {
-        // A panel that draws its own header is dragged by the strip along its top, under whatever it puts there.
-        let grip = probe(fixed(Space::new(), width, HEADER_HEIGHT), move |at| send(Event::HeaderPressed { group: id, tab: None, x: f64::from(at.x), y: f64::from(at.y) }));
-        stack![grip, body].width(Length::Fill).height(Length::Fill).boxed()
-    } else {
-        body
-    };
-    let ring = Ring { color: palette.focus_ring.into(), width: 2.0, offset: -3.0, radius: scale::RADIUS_XL - 2.0 };
-    let body: Element<'a, Message> = if group.tabs.len() == 1 { Focusable::new(ids::body(id), area, container(body).width(Length::Fill).height(Length::Fill).boxed(), ring).boxed() } else { body };
-    column.push(container(body).width(Length::Fill).height(Length::Fill).boxed());
+    // Under the panel's view: the region's anchors, and for a panel that draws its own header the strip along its top that
+    // drags the group (under whatever the panel puts there).
+    let mut layers: Vec<Element<'a, Message>> = Vec::new();
+    if solo || stage {
+        layers.push(anchor(palette, ids::body(id), area));
+    }
+    if stage && !solo {
+        layers.push(fixed(anchor(palette, ids::stage_header(id), area), width, HEADER_HEIGHT));
+    }
+    if solo && !stage {
+        layers.push(probe(fixed(Space::new(), width, HEADER_HEIGHT), press));
+    }
+    layers.push(container(body).width(Length::Fill).height(Length::Fill).boxed());
+    column.push(iced::widget::Stack::with_children(layers).width(Length::Fill).height(Length::Fill).boxed());
     let card = Card::new(Column::with_children(column).width(Length::Fill).height(Length::Fill)).fill(palette.surface).radius(scale::RADIUS_XL).shadows(palette.elevation_island).width(Length::Fixed(width)).height(Length::Fixed(height)).clip(true);
     Placed::new(card, at(rect.x as f32, rect.y as f32 - params.top))
 }
@@ -132,7 +138,7 @@ fn strip<'a>(params: &Params<'_>, group: &TabGroup, rect: Rect, side: Side) -> P
         .enumerate()
         .map(|(index, panel)| {
             let name = title(params.presentation, panel);
-            IconButton::new(ids::strip(id, index), FocusArea::Panels, palette, icon_of(panel), send(Event::Open { group: id, tab: index }))
+            IconButton::new(ids::strip(id, index), Dock::area_of(panel), palette, icon_of(panel), send(Event::Open { group: id, tab: index }))
                 .toggled(params.dock.open() == Some(id) && group.active == index)
                 .tooltip(Content { label: name, shortcut: String::new() }, Message::Tooltip)
                 .into_element()
@@ -154,7 +160,7 @@ fn divider<'a>(params: &Params<'_>, divider: &styk_core::layout::Divider) -> Pla
     let palette = params.theme.palette();
     let (split, index) = (divider.split, divider.index);
     let vertical_bar = divider.axis == Axis::Horizontal;
-    let bar = splitter::splitter(palette, ids::divider(split, index), FocusArea::Panels, if vertical_bar { splitter::Axis::Vertical } else { splitter::Axis::Horizontal }, params.dock.resizing() == Some((split, index)), move |event| {
+    let bar = splitter::splitter(palette, ids::divider(split, index), params.dock.divider_area(split, index).unwrap_or(FocusArea::Panels), if vertical_bar { splitter::Axis::Vertical } else { splitter::Axis::Horizontal }, params.dock.resizing() == Some((split, index)), move |event| {
         send(match event {
             Drag::DragStart => Event::DividerPressed { split, index },
             Drag::DragMove(delta) => Event::DividerMoved(f64::from(delta)),
@@ -171,52 +177,30 @@ fn divider<'a>(params: &Params<'_>, divider: &styk_core::layout::Divider) -> Pla
     Placed::new(fixed(bar, w, h), at(x, y - params.top))
 }
 
-/// The flyout or sheet of the open group: a press anywhere else closes it.
+/// The flyout or sheet of the open group, at the rectangle the solver gave it: a press anywhere else closes it.
 fn flyout<'a>(params: &Params<'_>, group: &TabGroup, body: Element<'a, Message>, out: &mut Vec<Placed<'a, Message>>) {
-    let dock = params.dock;
-    let solution = dock.solution();
-    let (Some(sheet), palette) = (solution.sheets.get(&group.id), params.theme.palette()) else { return };
-    let side = solution.fit.sides.get(&group.id).copied().unwrap_or(Side::Right);
-    let window = dock.window();
-    // Beside the strip when there is one, else at the window's edge (a sheet).
-    let edge = |side: Side| solution.strips.get(&group.id).map(|s| match side {
-        Side::Left => s.x + s.w + 8.0,
-        Side::Right => s.x - 8.0,
-        Side::Top => s.y + s.h + 8.0,
-        Side::Bottom => s.y - 8.0,
-    });
-    let (w, h) = (sheet.w, sheet.h);
-    let (x, y, w, h) = match side {
-        Side::Left => (edge(Side::Left).unwrap_or(sheet.x), sheet.y, w, h),
-        Side::Right => (edge(Side::Right).unwrap_or(window.w - 8.0) - w, sheet.y, w, h),
-        Side::Top | Side::Bottom => {
-            let width = window.w - 16.0;
-            let height = group.flyout_px.min(sheet.h * 0.6).max(120.0);
-            (8.0, edge(Side::Bottom).unwrap_or(window.h - 8.0) - height, width, height)
-        }
-    };
+    let Some(rect) = params.dock.open_rect() else { return };
+    let palette = params.theme.palette();
+    let (w, h) = (rect.w as f32, rect.h as f32);
     let id = group.id;
     let scrim = mouse_area(Space::new().width(Length::Fill).height(Length::Fill)).on_press(send(Event::Escape));
     out.push(Placed::new(container(scrim).width(Length::Fill).height(Length::Fill), at(0.0, 0.0)));
     let mut column: Vec<Element<'a, Message>> = Vec::new();
     let tabs: Vec<Tab> = group.tabs.iter().map(|panel| Tab { label: title(params.presentation, panel), icon: None }).collect();
-    let tabs = Tabs::new(ids::tabs(id), FocusArea::Panels, palette, tabs, group.active, move |index| send(Event::Open { group: id, tab: index })).into_element();
-    let pin = IconButton::new(ids::pin(id), FocusArea::Panels, palette, "pin", send(Event::Pin(id))).size(IconSize::Sm).into_element();
+    let tabs = Tabs::new(ids::tabs(id), Dock::area_of(&group.tabs[group.active]), palette, tabs, group.active, move |index| send(Event::Open { group: id, tab: index })).into_element();
+    let pin = IconButton::new(ids::pin(id), Dock::area_of(&group.tabs[group.active]), palette, "pin", send(Event::Pin(id))).size(IconSize::Sm).into_element();
     let header = iced::widget::Row::with_children(vec![container(tabs).width(Length::Fill).boxed(), pin]).align_y(Alignment::Center).spacing(scale::SPACE_1);
-    column.push(fixed(container(header).padding(Padding { top: scale::SPACE_1_5, right: scale::SPACE_2, bottom: scale::SPACE_1_5, left: scale::SPACE_2 }), w as f32, HEADER_HEIGHT));
+    column.push(fixed(container(header).padding(Padding { top: scale::SPACE_1_5, right: scale::SPACE_2, bottom: scale::SPACE_1_5, left: scale::SPACE_2 }), w, HEADER_HEIGHT));
     column.push(container(body).width(Length::Fill).height(Length::Fill).boxed());
-    let card = Card::new(Column::with_children(column)).fill(palette.surface).radius(scale::RADIUS_XL).shadows(palette.elevation_3).width(Length::Fixed(w as f32)).height(Length::Fixed(h as f32)).clip(true);
-    out.push(Placed::new(card, at(x as f32, y as f32 - params.top)));
+    let card = Card::new(Column::with_children(column)).fill(palette.surface).radius(scale::RADIUS_XL).shadows(palette.elevation_3).width(Length::Fixed(w)).height(Length::Fixed(h)).clip(true);
+    out.push(Placed::new(card, at(rect.x as f32, rect.y as f32 - params.top)));
 }
 
-/// The tool rail's place over the stage (`.studio-rail`: 52 px wide, 12 px inside the stage, centred on its height): a
-/// bare bar until the tools chunk fills it.
-fn rail<'a>(params: &Params<'_>, stage: Rect, side: Side) -> Placed<'a, Message> {
+/// The tool rail's place over the stage, where the core put it: a bare bar until the tools chunk fills it.
+fn rail<'a>(params: &Params<'_>, place: Rect) -> Placed<'a, Message> {
     let palette = params.theme.palette();
-    let (w, h) = (52.0_f32, 220.0_f32);
-    let (x, y) = (if side == Side::Right { (stage.x + stage.w) as f32 - 12.0 - w } else { stage.x as f32 + 12.0 }, (stage.y as f32 + stage.h as f32 / 2.0 - h / 2.0).round());
-    let card = Card::new(Space::new()).fill(palette.surface).radius(20.0).shadows(palette.elevation_2).width(Length::Fixed(w)).height(Length::Fixed(h));
-    Placed::new(card, at(x, y - params.top)).passive()
+    let card = Card::new(Space::new()).fill(palette.surface).radius(20.0).shadows(palette.elevation_2).width(Length::Fixed(place.w as f32)).height(Length::Fixed(place.h as f32));
+    Placed::new(card, at(place.x as f32, place.y as f32 - params.top)).passive()
 }
 
 /// The drop overlay: the rectangle the panel would take, named, and the title following the pointer.
@@ -276,10 +260,8 @@ pub fn view<'a>(params: &Params<'_>, panel: &mut dyn FnMut(&PanelId) -> Option<E
     for d in dock.dividers() {
         children.push(divider(params, d));
     }
-    if let Some(side) = layout.stage_tools {
-        for stage in solution.stages.values() {
-            children.push(rail(params, *stage, side));
-        }
+    if let Some(place) = dock.tool_rail() {
+        children.push(rail(params, place));
     }
     if let Some((group, body)) = open_body {
         flyout(params, &group, body, &mut children);

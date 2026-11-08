@@ -83,8 +83,10 @@ pub enum Key {
     Note(styk_core::dock::Event),
 }
 
-/// The dock's keys: Escape over a gesture or a flyout, Shift, and while a panel moves its arrows, Enter and Escape. `focused` is the target that holds focus.
-pub fn key(dock: &styk_core::dock::Dock, _focused: Option<styk_core::focus::FocusId>, key: &iced::keyboard::Key, _modifiers: iced::keyboard::Modifiers) -> Key {
+/// The keys of a gesture in progress, which are not shortcuts: Escape over a gesture or a flyout, Shift (a drop with it held
+/// floats), and while a panel moves its arrows, Enter and Escape. Every shortcut (undo, the keyboard move, the panel
+/// commands, F6) is a registry command (`message::dock_shortcut_at`).
+pub fn key(dock: &styk_core::dock::Dock, key: &iced::keyboard::Key) -> Key {
     use iced::keyboard::Key as K;
     use iced::keyboard::key::Named;
     use styk_core::dock::Event;

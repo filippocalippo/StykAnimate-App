@@ -507,7 +507,7 @@ impl TopBand {
                         None => Task::none(),
                     };
                 }
-                if let Some(task) = self.dock_key(key, *modifiers) {
+                if let Some(task) = self.dock_key(key) {
                     return task;
                 }
                 if let Some(task) = styk_ui::message::dock_shortcut_at(&mut self.core, event, ignored, now) {
@@ -541,9 +541,9 @@ impl TopBand {
     }
 
     /// A key that belongs to the dock (`styk_ui::dock::key`): what the dock sends it is sent, what it only notes is noted.
-    fn dock_key(&mut self, key: &Key, modifiers: keyboard::Modifiers) -> Option<Task<Message>> {
+    fn dock_key(&mut self, key: &Key) -> Option<Task<Message>> {
         let now = self.now();
-        match styk_ui::dock::key(self.core.dock(), self.core.focus().focused(), key, modifiers) {
+        match styk_ui::dock::key(self.core.dock(), key) {
             styk_ui::dock::Key::Pass => None,
             styk_ui::dock::Key::Swallow => Some(Task::none()),
             styk_ui::dock::Key::Send(event) => Some(self.dock(event, now)),

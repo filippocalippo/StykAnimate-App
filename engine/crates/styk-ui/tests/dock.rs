@@ -8,10 +8,10 @@ use iced::keyboard::{Key, Modifiers};
 use iced::{Event, Point, Size, mouse};
 use styk_core::app::Core;
 use styk_core::commands::Command;
+use styk_core::inspector::property::PropertyKey;
 use styk_core::dock::{self, ids};
 use styk_core::layout::{Axis, GroupId, Rect, Zone};
 use styk_design::Theme;
-use styk_design::widgets::focus;
 use styk_design::widgets::testing::{Driver, key_event};
 use styk_ui::dock::{Key as DockKey, Params};
 use styk_ui::message::{Message, update_at};
@@ -45,8 +45,8 @@ struct World {
     driver: Option<Driver<'static, Message>>,
     now: u64,
     size: Size,
-    /// The shell's focus state: F6 and Tab move it, from the same walks.
-    focus: styk_core::focus::FocusState,
+    /// What the handler asked of the toolkit (focus moves), run on the rebuilt tree as the runtime runs them.
+    tasks: Vec<iced::Task<Message>>,
 }
 
 fn element(core: &Core) -> iced::Element<'static, Message> {
@@ -61,7 +61,7 @@ impl World {
         let mut core = Core::default();
         let size = Size::new(width, height);
         core.dispatch(Command::Dock(dock::Event::Resized { width: f64::from(width), height: f64::from(height), scale: 1.0 }));
-        let mut world = World { driver: Some(Driver::new(element(&core), size, &styk_design::fonts::ALL)), core, now: 1_000, size, focus: styk_core::focus::FocusState::new() };
+        let mut world = World { driver: Some(Driver::new(element(&core), size, &styk_design::fonts::ALL)), core, now: 1_000, size, tasks: Vec::new() };
         world.walk();
         world
     }
@@ -70,11 +70,17 @@ impl World {
         self.driver.as_mut().expect("a driver")
     }
 
-    /// The application's walk after a message: the tree's measured bounds and focus reach the core and the shell's state.
+    /// The application's walk after a message: the tree's measured bounds and focus reach the core.
     fn walk(&mut self) {
         let snapshot = self.driver().snapshot();
-        focus::sync(&mut self.focus, &snapshot);
-        let _ = update_at(&mut self.core, Message::Snapshot(snapshot), self.now);
+        let task = update_at(&mut self.core, Message::Snapshot(snapshot), self.now);
+        self.tasks.push(task);
+    }
+
+    /// A message through the production handler; what it asks of the toolkit runs after the view is rebuilt.
+    fn send(&mut self, message: Message) {
+        let task = update_at(&mut self.core, message, self.now);
+        self.tasks.push(task);
     }
 
     /// Delivers what the interface published, rebuilds the view from the core and walks it.
@@ -85,12 +91,21 @@ impl World {
                 break;
             }
             for message in messages {
-                let _ = update_at(&mut self.core, message, self.now);
+                self.send(message);
             }
         }
         let driver = self.driver.take().expect("a driver");
         self.driver = Some(driver.rebuild(element(&self.core)));
+        let tasks = std::mem::take(&mut self.tasks);
+        let produced: Vec<Message> = tasks.into_iter().flat_map(|task| self.driver().run(task)).collect();
+        let again = !produced.is_empty();
+        for message in produced {
+            self.send(message);
+        }
         self.walk();
+        if again {
+            self.deliver();
+        }
     }
 
     /// A pointer event as the window delivers it: the widgets take it, then, while the dock tracks a press or a drag, the
@@ -104,7 +119,7 @@ impl World {
         self.deliver();
         if tracking && let Some(message) = styk_ui::dock::track(&Event::Mouse(event)) {
             self.now += 5;
-            let _ = update_at(&mut self.core, message, self.now);
+            self.send(message);
             self.deliver();
         }
     }
@@ -140,18 +155,22 @@ impl World {
     /// A key as the window delivers it: the dock's mapping first (the application's `dock_key`), then the widgets.
     fn key(&mut self, key: Key, modifiers: Modifiers) {
         let event = key_event(key.clone(), None, modifiers, true);
-        match styk_ui::dock::key(self.core.dock(), self.focus.focused(), &key, modifiers) {
+        match styk_ui::dock::key(self.core.dock(), &key) {
             DockKey::Send(event) => {
                 self.now += 5;
-                let _ = update_at(&mut self.core, Message::Command(Command::Dock(event)), self.now);
+                self.send(Message::Command(Command::Dock(event)));
             }
             DockKey::Note(event) => {
-                let _ = update_at(&mut self.core, Message::Command(Command::Dock(event)), self.now);
+                self.send(Message::Command(Command::Dock(event)));
                 self.driver().events(&[event_of(&key, modifiers)]);
             }
             DockKey::Pass => {
-                if styk_ui::message::dock_shortcut_at(&mut self.core, &event, true, self.now).is_none() {
-                    self.driver().events(&[event]);
+                // The registry's shortcuts first (undo, the keyboard move, the panel commands, F6), then the widgets.
+                match styk_ui::message::dock_shortcut_at(&mut self.core, &event, true, self.now) {
+                    Some(task) => self.tasks.push(task),
+                    None => {
+                        self.driver().events(&[event]);
+                    }
                 }
             }
             DockKey::Swallow => {}
@@ -189,6 +208,11 @@ impl World {
         let driver = Driver::new(element(&self.core), self.size, &styk_design::fonts::ALL);
         self.driver = Some(driver);
         self.walk();
+    }
+
+    /// The target that holds focus, as the core holds it after the last walk.
+    fn focused(&self) -> Option<styk_core::focus::FocusId> {
+        self.core.focus().focused()
     }
 
     fn layout_now(&self) -> styk_core::layout::Layout {
@@ -352,10 +376,14 @@ fn the_right_dock_folds_at_800_and_unfolds_at_816_through_the_mounted_widgets() 
     assert!(has_tabs(&mut world), "and 805 does not fold it again");
     world.resize(790.0, 800.0);
     assert!(!has_tabs(&mut world));
-    // The sheet opens over the stage, shows the group's tabs and closes with Escape.
-    world.core.dispatch(Command::Dock(dock::Event::Open { group: PROPERTIES, tab: 0 }));
-    world.deliver();
+    // Ctrl+1 (the registry's Properties command, as the band's button sends it) opens the sheet over the stage at the
+    // rectangle the solver gave it; Escape closes it.
+    world.key(Key::Character("1".into()), Modifiers::CTRL);
+    assert_eq!(world.core.dock().open(), Some(PROPERTIES));
     assert!(has_tabs(&mut world), "the sheet is mounted");
+    let sheet = world.core.dock().open_rect().expect("the solver placed the sheet");
+    let pin = world.bounds(ids::pin(PROPERTIES)).expect("the sheet's pin");
+    assert!(pin.x >= sheet.x as f32 && pin.x + pin.width <= (sheet.x + sheet.w) as f32 + 0.5 && pin.y >= sheet.y as f32 && pin.y <= (sheet.y + sheet.h) as f32, "the pin {pin:?} is inside the solver's rectangle {sheet:?}");
     world.key(Key::Named(Named::Escape), Modifiers::default());
     assert!(!has_tabs(&mut world));
     assert!(!world.core.dock().modified() && !world.core.dock().can_undo(), "folding never wrote the arrangement");
@@ -379,22 +407,130 @@ fn escape_cancels_a_drag_in_progress_and_leaves_the_arrangement_and_its_history_
     assert!(!world.core.dock().can_undo() && !world.core.dock().modified());
 }
 
-#[test]
-fn f6_moves_between_the_stage_the_inspector_and_the_timeline_and_ctrl_f6_back() {
-    let mut world = World::new(1560.0, 1000.0);
-    world.driver().focus(ids::tab(PROPERTIES, 0));
-    world.walk();
-    let f6 = |modifiers| key_event(Key::Named(Named::F6), None, modifiers, true);
+/// F6 and Ctrl+F6 through the application's handler (the registry's commands into the focus owner).
+fn f6_sequence(world: &mut World, ctrl: bool, presses: usize) -> Vec<styk_core::focus::FocusId> {
     let mut visited = Vec::new();
-    for _ in 0..3 {
-        let target = focus::navigate(&mut world.focus, &f6(Modifiers::default())).expect("F6 lands on a group");
-        world.driver().focus(target);
-        world.walk();
-        visited.push(target);
+    for _ in 0..presses {
+        world.key(Key::Named(Named::F6), if ctrl { Modifiers::CTRL } else { Modifiers::default() });
+        visited.push(world.focused().expect("F6 lands on a region"));
     }
-    assert_eq!(visited, [ids::body(STAGE), ids::body(TIMELINE), ids::tab(PROPERTIES, 0)], "the inspector, then the stage, the timeline and round again");
-    let back = focus::navigate(&mut world.focus, &f6(Modifiers::CTRL)).expect("Ctrl+F6 goes back");
-    assert_eq!(back, ids::body(TIMELINE));
+    visited
+}
+
+/// The regions the dock lists, in its tree order, that are mounted.
+fn mounted_regions(world: &mut World) -> Vec<styk_core::focus::FocusId> {
+    let regions = world.core.dock().regions();
+    regions.into_iter().filter_map(|r| r.target).filter(|id| world.bounds(*id).is_some()).collect()
+}
+
+#[test]
+fn f6_and_ctrl_f6_visit_each_group_in_tree_order_after_the_groups_are_rearranged() {
+    let mut world = World::new(1560.0, 1000.0);
+    // Library below the stage, and VFX in a column of its own on the left: five groups.
+    let library = world.centre_of(ids::tab(PROPERTIES, 2));
+    let stage = world.core.dock().solution().groups[&STAGE];
+    world.drag(library, &[(library.x - 40.0, library.y + 60.0), ((stage.x + stage.w / 2.0) as f32, (stage.y + stage.h - 20.0) as f32)]);
+    let vfx = world.centre_of(ids::tab(PROPERTIES, 1));
+    world.drag(vfx, &[(vfx.x - 40.0, vfx.y + 60.0), (4.0, 400.0)]);
+    let expected = mounted_regions(&mut world);
+    assert!(expected.len() >= 6, "{expected:?}");
+    assert!(expected.contains(&ids::stage_header(STAGE)) && expected.contains(&ids::body(STAGE)), "the stage's two regions");
+    // From the last region F6 goes round to the first and on through every one in the dock's order.
+    world.driver().focus(expected[expected.len() - 1]);
+    world.walk();
+    world.deliver();
+    let forward = f6_sequence(&mut world, false, expected.len());
+    assert_eq!(forward, expected, "F6 follows the dock's order");
+    // Ctrl+F6 goes back through them.
+    let back = f6_sequence(&mut world, true, expected.len());
+    let mut reversed = expected.clone();
+    reversed.reverse();
+    let mut wanted: Vec<_> = reversed[1..].to_vec();
+    wanted.push(reversed[0]);
+    assert_eq!(back, wanted, "Ctrl+F6 goes back through the same order");
+}
+
+#[test]
+fn a_stage_tabbed_with_another_panel_keeps_its_header_and_body_targets() {
+    let mut world = World::new(1560.0, 1000.0);
+    let library = world.centre_of(ids::tab(PROPERTIES, 2));
+    let stage = world.core.dock().solution().groups[&STAGE];
+    world.drag(library, &[(library.x - 40.0, library.y + 60.0), ((stage.x + stage.w / 2.0) as f32, (stage.y + stage.h / 2.0) as f32)]);
+    assert_eq!(world.tabs_of(STAGE), ["stage", "library"]);
+    // Library is in front; the stage's tab brings it forward.
+    let tab = world.centre_of(ids::tab(STAGE, 0));
+    world.click(tab);
+    for id in [ids::stage_header(STAGE), ids::body(STAGE)] {
+        assert!(world.bounds(id).is_some(), "{id:?} is mounted with the stage tabbed");
+    }
+    let regions: Vec<_> = world.core.dock().regions().into_iter().filter_map(|r| r.target).collect();
+    assert!(regions.contains(&ids::stage_header(STAGE)) && regions.contains(&ids::body(STAGE)));
+}
+
+#[test]
+fn the_inspector_in_a_group_of_its_own_keeps_its_keys_when_the_group_is_not_the_focus() {
+    let mut world = World::new(1560.0, 1000.0);
+    // The Properties tab dragged to the left edge: the Inspector alone in its group.
+    let properties = world.centre_of(ids::tab(PROPERTIES, 0));
+    world.drag(properties, &[(properties.x - 40.0, properties.y + 60.0), (4.0, 400.0)]);
+    let group = world.group_of("properties");
+    assert_eq!(world.tabs_of(group), ["properties"]);
+    // Tab into the panel from its group's region, and press a key on a field.
+    world.driver().focus(ids::body(group));
+    world.walk();
+    world.deliver();
+    let inside = |id: styk_core::focus::FocusId| (0x1_0000..0x2_0000).contains(&id.0);
+    let mut landed = false;
+    for _ in 0..40 {
+        // Tab is the focus owner's: the key no widget took reaches `Core::focus` as `Message::Key`.
+        world.send(Message::Key(key_event(Key::Named(Named::Tab), None, Modifiers::default(), true)));
+        world.deliver();
+        if world.focused().is_some_and(inside) {
+            landed = true;
+            break;
+        }
+    }
+    assert!(landed, "Tab goes from the group's region into the Inspector's own controls");
+    // The X field's scrub label, focused as a person's Tab or click would, takes an arrow key: the wrapper that held the
+    // panel's keys while it was not focused is gone.
+    world.driver().focus(styk_ui::inspector::label_id(PropertyKey::RootX));
+    world.walk();
+    world.deliver();
+    world.driver().press(Named::ArrowUp);
+    let messages = world.driver().messages();
+    assert!(messages.iter().any(|m| matches!(m, Message::Command(Command::Inspector(_)))), "the field took the key: {messages:?}");
+}
+
+#[test]
+fn a_tabs_x_and_a_middle_click_close_it_and_the_last_stage_stays_with_a_message() {
+    let mut world = World::new(1560.0, 1000.0);
+    // The x sits at the right end of the tab in front.
+    let tab = world.bounds(ids::tab(PROPERTIES, 0)).unwrap();
+    world.click(Point::new(tab.x + tab.width - 7.0, tab.y + tab.height / 2.0));
+    assert_eq!(world.tabs_of(PROPERTIES), ["vfx", "library"], "the x closed Properties");
+    // A middle click on the Library tab closes it.
+    let library = world.centre_of(ids::tab(PROPERTIES, 1));
+    world.moved(library.x, library.y);
+    world.pointer(mouse::Event::ButtonPressed(mouse::Button::Middle));
+    world.pointer(mouse::Event::ButtonReleased(mouse::Button::Middle));
+    assert_eq!(world.tabs_of(PROPERTIES), ["vfx"]);
+    assert!(world.core.dock().can_undo(), "closing is a layout change, undone as one");
+}
+
+#[test]
+fn closing_the_last_stage_is_refused_with_a_message_and_changes_nothing() {
+    let mut world = World::new(1560.0, 1000.0);
+    let vfx = world.centre_of(ids::tab(PROPERTIES, 1));
+    let stage = world.core.dock().solution().groups[&STAGE];
+    // VFX joins the stage's group, so the stage has a tab to close.
+    world.drag(vfx, &[(vfx.x - 40.0, vfx.y + 60.0), ((stage.x + stage.w / 2.0) as f32, (stage.y + stage.h / 2.0) as f32)]);
+    assert_eq!(world.tabs_of(STAGE), ["stage", "vfx"]);
+    let before = world.layout_now();
+    let tab = world.bounds(ids::tab(STAGE, 0)).unwrap();
+    world.click(Point::new(tab.x + tab.width - 7.0, tab.y + tab.height / 2.0));
+    assert_eq!(world.layout_now(), before, "the last stage stays");
+    let shown = world.core.overlays().messages().current().map(|m| m.text.clone());
+    assert!(shown.is_some_and(|text| !text.is_empty()), "the refusal is said over the stage");
 }
 
 #[test]

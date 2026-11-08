@@ -19,7 +19,7 @@ pub use place::{keyboard_places, zone_label};
 pub use crate::layout::{default_layout, default_timeline_height, set_timeline};
 
 use crate::layout::store::{Entry, ImportResult, LayoutFile, MigrationGeometry, SaveQueue, Stamp, import_v2, state_from_value, state_to_value};
-use crate::layout::{DragSession, Env, GroupId, Layout, LayoutError, LayoutState, Node, NodeId, Operation, PanelId, Rect, Size, Solution, Workspace, Zone, solve};
+use crate::layout::{DragSession, Env, Side, GroupId, Layout, LayoutError, LayoutState, Node, NodeId, Operation, PanelId, Rect, Size, Solution, Workspace, Zone, solve};
 use styk_doc::Value;
 use crate::i18n::Msg;
 
@@ -319,6 +319,45 @@ impl Dock {
                 self.layout().main.as_ref().and_then(|root| kids_of(root, d.split)).is_none_or(|kids| kids.get(d.index).is_some_and(|a| shown(&a.node)) && kids.get(d.index + 1).is_some_and(|b| shown(&b.node)))
             })
             .collect()
+    }
+
+    /// The F6 region a divider's focus target belongs to: a stop inside the first region of its two neighbours (a group, or a
+    /// stage's body), never a region of its own.
+    pub fn divider_area(&self, split: NodeId, index: usize) -> Option<crate::focus::FocusArea> {
+        use crate::focus::FocusArea as A;
+        fn find(node: &Node, split: NodeId, index: usize) -> Option<Vec<GroupId>> {
+            match node {
+                Node::Split { id, kids, .. } if *id == split => {
+                    let mut groups = Vec::new();
+                    for kid in [kids.get(index)?, kids.get(index + 1)?] {
+                        let mut found = Vec::new();
+                        kid.node.groups(&mut found);
+                        groups.extend(found.iter().map(|g| g.id));
+                    }
+                    Some(groups)
+                }
+                Node::Split { kids, .. } => kids.iter().find_map(|k| find(&k.node, split, index)),
+                Node::Tabs(_) => None,
+            }
+        }
+        let groups = find(self.layout().main.as_ref()?, split, index)?;
+        let region = |id: GroupId, wanted: bool| {
+            let g = self.layout().groups().into_iter().find(|g| g.id == id)?;
+            let has = self.solution.groups.contains_key(&id) && (g.tabs.len() > 1 || g.tabs[g.active].kind != "stage");
+            (has == wanted).then_some(if wanted { A::DockGroup(id) } else { A::StageBody(id) })
+        };
+        groups.iter().find_map(|id| region(*id, true)).or_else(|| groups.iter().find_map(|id| region(*id, false)))
+    }
+
+    /// Where the tool rail's overlay sits over the primary stage (`.studio-rail`: 52 px wide and 220 tall, 12 px inside the stage
+    /// on the side `stage_tools` names, centred on its height; 44 and 187 in a compact or low window).
+    pub fn tool_rail(&self) -> Option<Rect> {
+        let side = self.layout().stage_tools?;
+        let stage = self.solution.stages.iter().min_by_key(|(panel, _)| (panel.n, panel.kind.clone())).map(|(_, rect)| *rect)?;
+        let compact = self.window.w <= 800.0 || self.window.h <= 568.0;
+        let (w, h) = if compact { (44.0, 187.0) } else { (52.0, 220.0) };
+        let x = if side == Side::Right { stage.x + stage.w - 12.0 - w } else { stage.x + 12.0 };
+        Some(Rect { x, y: (stage.y + stage.h / 2.0 - h / 2.0).round(), w, h })
     }
 
     /// The panel a pointer press on group `group` at tab `tab` stands for.

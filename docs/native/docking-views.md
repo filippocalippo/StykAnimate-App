@@ -34,8 +34,14 @@ UI (the Layout and Window menus) are part 2.
   dock to. The solver's 16 px hysteresis holds the fold: folded at 800, unfolded at 816.
 - **Layout undo** (Ctrl+Alt+Z) is the layout's own 20 steps, separate from the document's. **Ctrl+Alt+M** moves the focused panel
   by keyboard: arrows step through every place the core accepts, Enter moves, Escape cancels, other keys are swallowed.
-  **F6** and Ctrl+F6 move between the panels' regions through the core's focus areas: every group's tab strip or body is a target
-  with core-owned tree order (`Dock::regions`); the views handoff below lists the remaining targets to mount.
+  **F6** and Ctrl+F6 move between the panels' regions in the order the core lists them (`Dock::regions`); the views mount one
+  anchor per region under the panel's view (`ids::body`, `ids::stage_header`, a tab strip's tabs, a strip's icons, a divider as a
+  stop inside its neighbour's region). An anchor wraps nothing, so the panel's own controls keep their focus, keys and input
+  roles. Ctrl+Alt+Z, Ctrl+Alt+M, F6 and the panel commands are registry commands (`message::dock_shortcut_at`); the views hold no
+  shortcut predicate.
+- **Closing**: the tab in front shows an x in its right padding, a hovered tab shows one too, and a middle click closes; both
+  send `Event::Close`, and the layout's close refuses the last stage with a message over the stage.
+- **The flyout and the sheet** are drawn at `Dock::open_rect()`, unchanged, on every side.
 - **Persistence**: `LayoutStore::load` at start; no stored file means today's `workspace-preferences.json` is imported once
   (`import_v2`, the saved layouts included) with today's default timeline height where the profile has none; a newer file is
   read-only; a layout changed before the file arrived keeps the person's change. Each change queues one write 200 ms later
@@ -55,10 +61,11 @@ UI (the Layout and Window menus) are part 2.
 - **The tab under a press** comes from the bounds the last walk of the tree measured (`Host::target_at`): the probe reports the
   window position, the core resolves the tab.
 - **Floats are refused visibly** in part 1: a message over the stage, the panel stays. Messages and zone labels use `i18n::Msg`; see the native catalogue additions in the core handoff.
+- **At compact width the timeline is a strip** (design 3.2, restored in the core): `dock-folded` differs from today's window there
+  by design, and `limits.toml` says so.
 - **Not in part 1 and left open**: the drop overlay's rectangle jumps between zones (the design animates it over `--dur-fast`);
   a tab's insertion index follows thirds of the header, not the pills' real positions (the core's `drop_zone`); default column
-  widths per width tier (296 and 256 px today, one stored width here); close and reopen exist in the core and the handler
-  (`Event::Close`, `Event::Reopen`) but have no control until the Window menu (part 2); the Layout button's dot has no button.
+  widths per width tier (296 and 256 px today, one stored width here); reopening a closed panel has no control until the Window menu (part 2); the Layout button's dot has no button.
 
 ## Screens
 
@@ -67,7 +74,8 @@ layout at 1560 x 1000, 1440 x 900 and 720 x 800, compared with today's window ca
 `engine/crates/styk-app/automation/dock-reference/screens.mjs`. The band, the stage header, the artboard, the tool rail, the
 timeline and the Properties panel's quick actions, menu button and footer are other chunks' and masked in `limits.toml`. The
 preview (`styk-screens`) draws the same PNGs byte for byte. Measured on 2026-11-08 (debug, headless, channel difference past 24,
-masks applied): 0.0035, 0.0028 (dark), 0.0041 (1440), 0.0033 (1440 dark), 0.0016 (folded), 0.0003 (folded dark).
+masks applied): 0.0036, 0.0028 (dark), 0.0041 (1440), 0.0033 (1440 dark), 0.0006 (folded), 0.0000 (folded dark). The folded
+screens mask the stage's lower part, the timeline strip and the tool rail as a design difference.
 
 ## Tests
 
@@ -78,21 +86,13 @@ masks applied): 0.0035, 0.0028 (dark), 0.0041 (1440), 0.0033 (1440 dark), 0.0016
   the dividers worth drawing, the script steps.
 - `styk-ui/tests/dock.rs`: the same on mounted widgets through the production handler (`update_at`, the tree's walk handed back
   to the core, `dock::track` and `dock::key`): docking a tab to each edge and one undo, the split and join drops, reorder,
-  click and double click, a splitter drag with Escape and its keys, the fold across the hysteresis, F6 and Ctrl+F6, the keyboard
-  move, a change saved and loaded back. With the probe's publish removed, six of them fail.
+  click and double click, a splitter drag with Escape and its keys, the fold across the hysteresis with the sheet opened by Ctrl+1,
+  F6 and Ctrl+F6 over five rearranged groups, the stage tabbed with another panel, the Inspector's keys in a group of its own,
+  the x and the middle click, the last stage refused, the keyboard move, a change saved and loaded back. Without the probe's
+  publish six fail; with the focus wrapper back, the Inspector test fails; without the middle click, the close test fails; with
+  the flyout moved by the view, the sheet test fails.
 - `styk-app` (`top_band.rs`): `automation/dock-interaction.script` runs through the dock's handler, and the band's workspace
   switch changes the arrangement.
 
 The automated interaction is `automation/dock-interaction.script`; run it with a profile of its own so it writes nothing of the
 person's (the header of the script gives the command).
-
-## Pending views work after the core review
-
-Use [the core API handoff](docking-core.md#core-review-handoff-for-the-views-step-2026-11-08):
-consume `Dock::open_rect()` without repositioning/resizing; mount `ids::stage_header(group)` and
-`ids::body(group)` for a visible stage even when tabbed; wire x/middle-click to `Event::Close`.
-When a dock is mounted, root-scope snapshot routing assigns measured targets to its group regions,
-preserving field roles. Standalone panel snapshots retain their original regions. Exercise multiple reordered groups through the production F6/shortcut adapter on mounted
-widgets. `dock_shortcut_at` is the keyboard adapter for registered layout/panel/focus commands;
-`dock::key` now handles gestures only. Recheck folded screens against the authoritative design;
-the earlier screenshot measurements above certify the previous commit only.

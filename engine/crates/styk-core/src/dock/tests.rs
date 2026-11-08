@@ -529,3 +529,11 @@ fn the_scripts_dock_steps_and_expectations_parse_and_a_bad_one_names_what_it_wan
         assert!(Script::parse(&format!("styk-auto/1\n{bad}\n")).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn the_tool_rails_place_is_todays_over_the_primary_stage() {
+    // Measured in today's window: 52 x 220, 12 px inside the stage and centred on its height; 44 x 187 when compact.
+    assert_eq!(dock(1560.0, 1000.0).tool_rail(), Some(Rect { x: 20.0, y: 295.0, w: 52.0, h: 220.0 }));
+    assert_eq!(dock(1440.0, 900.0).tool_rail(), Some(Rect { x: 20.0, y: 245.0, w: 52.0, h: 220.0 }));
+    assert_eq!(dock(720.0, 800.0).tool_rail().map(|r| (r.w, r.h)), Some((44.0, 187.0)));
+}
