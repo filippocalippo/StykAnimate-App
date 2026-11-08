@@ -196,17 +196,7 @@ impl<'a, Message: Clone + 'a> Checkbox<'a, Message> {
         };
         let message = on_toggle(checked != Checked::Yes);
         let surface = Surface::new(face, look).on_press_maybe((!disabled).then(|| message.clone())).preview(preview).width(Length::Fixed(BOX)).height(Length::Fixed(BOX));
-        let target: Element<'a, Message> = Focusable::new(id, area, surface.boxed(), Ring::of(palette, radius))
-            .input_role(InputRole::Checkbox)
-            .keys(Keys::Toggle)
-            .on_activate(message.clone())
-            .enabled(!disabled)
-            .ring_shown(preview == Some(Preview::Focus))
-            .boxed();
-        match label {
-            None => target,
-            Some(label) => check_row(palette, target, label, disabled, message),
-        }
+        control(id, area, palette, InputRole::Checkbox, radius, surface.boxed(), label, disabled, message, preview == Some(Preview::Focus))
     }
 }
 
@@ -263,26 +253,25 @@ impl<'a, Message: Clone + 'a> Radio<'a, Message> {
             .preview(preview)
             .width(Length::Fixed(BOX))
             .height(Length::Fixed(BOX));
-        let target: Element<'a, Message> = Focusable::new(id, area, surface.boxed(), Ring::of(palette, radius))
-            .input_role(InputRole::Radio)
-            .keys(Keys::Toggle)
-            .on_activate(on_select.clone())
-            .enabled(!disabled)
-            .ring_shown(preview == Some(Preview::Focus))
-            .boxed();
-        match label {
-            None => target,
-            Some(label) => check_row(palette, target, label, disabled, on_select),
-        }
+        control(id, area, palette, InputRole::Radio, radius, surface.boxed(), label, disabled, on_select, preview == Some(Preview::Focus))
     }
 }
 
-/// `.ui-check-row`: the box first, its words after it, 8 px apart, 36 px at least; a press on the words presses the box.
-fn check_row<'a, Message: Clone + 'a>(palette: &'static Palette, control: Element<'a, Message>, label: String, disabled: bool, message: Message) -> Element<'a, Message> {
-    let ink = if disabled { palette.text_disabled } else { palette.text_1 };
-    let line = Row::with_children([control, words(label, TextStyle::from_role(&scale::TYPE_UI), ink)]).spacing(scale::SPACE_2).align_y(Alignment::Center);
-    let row = container(line).height(Length::Fixed(scale::CONTROL_LG)).center_y(Length::Fixed(scale::CONTROL_LG));
-    Surface::new(row.boxed(), |_| Look::plain(0.0)).on_press_maybe((!disabled).then_some(message)).boxed()
+/// A checkbox or radio as one focus target of one input role: the box alone, or `.ui-check-row` (the box first, its words
+/// after it, 8 px apart, 36 px at least). A press on the words presses the box and focuses the control, as a native label
+/// does, because the row is inside the target: the ring and the keys belong to the whole row.
+#[allow(clippy::too_many_arguments)]
+fn control<'a, Message: Clone + 'a>(id: FocusId, area: FocusArea, palette: &'static Palette, role: InputRole, ring_radius: f32, control_box: Element<'a, Message>, label: Option<String>, disabled: bool, message: Message, ring_shown: bool) -> Element<'a, Message> {
+    let content = match label {
+        None => control_box,
+        Some(label) => {
+            let ink = if disabled { palette.text_disabled } else { palette.text_1 };
+            let line = Row::with_children([control_box, words(label, TextStyle::from_role(&scale::TYPE_UI), ink)]).spacing(scale::SPACE_2).align_y(Alignment::Center);
+            let row = container(line).height(Length::Fixed(scale::CONTROL_LG)).center_y(Length::Fixed(scale::CONTROL_LG));
+            Surface::new(row.boxed(), |_| Look::plain(0.0)).on_press_maybe((!disabled).then(|| message.clone())).boxed()
+        }
+    };
+    Focusable::new(id, area, content, Ring::of(palette, ring_radius)).input_role(role).keys(Keys::Toggle).on_activate(message).enabled(!disabled).ring_shown(ring_shown).boxed()
 }
 
 /// What an opaque part `color` of a control looks like when the whole control is one layer at `opacity` over `page`: the parts

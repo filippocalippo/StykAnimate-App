@@ -8,7 +8,7 @@
 use super::control::{Interaction, Preview, paint_fill, paint_ring, paint_shadows};
 use crate::{BoxShadow, Rgba};
 use iced::advanced::layout::{self, Layout};
-use iced::advanced::renderer;
+use iced::advanced::{overlay, renderer};
 use iced::advanced::widget::{self, Operation, Tree, tree};
 use iced::advanced::{Shell, Widget};
 use iced::{Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, mouse, touch};
@@ -196,5 +196,9 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Surface<'a, M
             (Some(hover), Interaction::Hover | Interaction::Pressed) => hover.draw(&tree.children[1], renderer, theme, style, layout, cursor, viewport),
             _ => self.rest.draw(&tree.children[0], renderer, theme, style, layout, cursor, viewport),
         }
+    }
+
+    fn overlay<'b>(&'b mut self, tree: &'b mut Tree, layout: Layout, renderer: &Renderer, viewport: &Rectangle, translation: Vector, window: Size) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.rest.overlay(&mut tree.children[0], layout, renderer, viewport, translation, window)
     }
 }

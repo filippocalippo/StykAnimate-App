@@ -15,6 +15,12 @@ pub fn step(step: f64, keys: StepKeys) -> f64 {
     step * if keys.shift { 0.1 } else { 1.0 } * if keys.alt { 0.01 } else { 1.0 }
 }
 
+/// Whether a unit sits against its value ("100%", "172°", "2×") rather than after a space ("8 px"): today's `GLUED_UNITS`
+/// (`src/inspector-kit.mjs`).
+pub fn unit_is_glued(unit: &str) -> bool {
+    matches!(unit, "%" | "°" | "×")
+}
+
 /// A value as the field shows it: rounded to `precision` digits (0 to 8) with trailing zeros stripped; `-0` is `0` and a
 /// value that is not finite is empty.
 pub fn format(value: f64, precision: u32) -> String {
@@ -345,6 +351,16 @@ impl NumberEdit {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_percent_degrees_and_times_sit_against_their_value() {
+        for unit in ["%", "°", "×"] {
+            assert!(unit_is_glued(unit), "{unit}");
+        }
+        for unit in ["px", "fps", "s", "", "x"] {
+            assert!(!unit_is_glued(unit), "{unit}");
+        }
+    }
+
     use super::*;
 
     const PLAIN: StepKeys = StepKeys { shift: false, alt: false };

@@ -20,13 +20,13 @@ use crate::tokens::scale;
 use crate::typography::TextStyle;
 use crate::{Palette, Rgba};
 use iced::advanced::layout::{self, Layout};
-use iced::advanced::renderer;
+use iced::advanced::{overlay, renderer};
 use iced::advanced::widget::{self, Operation, Tree, tree};
 use iced::advanced::{Shell, Widget};
 use iced::keyboard::{self, Key, key::Named};
 use iced::widget::{Row, Space, container};
-use iced::{Alignment, Color, Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, mouse, touch};
-use styk_core::controls::{SliderKey, slider_value};
+use iced::{Alignment, Color, Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, mouse, touch};
+use styk_core::controls::{SliderKey, slider_at, slider_fraction, slider_value, slider_wheel};
 use styk_core::focus::{FocusArea, FocusId, InputRole};
 use styk_core::number::StepKeys;
 
@@ -74,22 +74,24 @@ struct Track<'a, Message> {
 }
 
 impl<Message> Track<'_, Message> {
-    /// The thumb's centre for the value.
-    fn thumb_x(&self, bounds: Rectangle) -> f32 {
-        let span = (self.max - self.min).max(f64::EPSILON);
-        let fraction = ((self.value - self.min) / span).clamp(0.0, 1.0) as f32;
-        let fraction = if self.dir.is_rtl() { 1.0 - fraction } else { fraction };
-        bounds.x + THUMB / 2.0 + fraction * (bounds.width - THUMB).max(0.0)
+    /// The share of the track, from its start edge, a position `fraction` of the value's range along is at (a right-to-left
+    /// track starts at its right).
+    fn along(&self, fraction: f64) -> f32 {
+        let fraction = fraction as f32;
+        if self.dir.is_rtl() { 1.0 - fraction } else { fraction }
     }
 
-    /// The value the pointer at `x` asks for, on the step grid.
+    /// The thumb's centre for the value: geometry only; where the value sits is the core's (`slider_fraction`).
+    fn thumb_x(&self, bounds: Rectangle) -> f32 {
+        bounds.x + THUMB / 2.0 + self.along(slider_fraction(self.value, self.min, self.max)) * (bounds.width - THUMB).max(0.0)
+    }
+
+    /// The value the pointer at `x` asks for: the pointer's position along the thumb's travel, which the core turns into a
+    /// value (`slider_at`: the step grid, the range, the rounding).
     fn value_at(&self, bounds: Rectangle, x: f32) -> f64 {
         let travel = (bounds.width - THUMB).max(f32::EPSILON);
-        let fraction = f64::from(((x - bounds.x - THUMB / 2.0) / travel).clamp(0.0, 1.0));
-        let fraction = if self.dir.is_rtl() { 1.0 - fraction } else { fraction };
-        let raw = self.min + fraction * (self.max - self.min);
-        let snapped = if self.step > 0.0 { self.min + ((raw - self.min) / self.step).round() * self.step } else { raw };
-        ((snapped.clamp(self.min, self.max)) * 1e9).round() / 1e9
+        let fraction = f64::from(self.along(f64::from(((x - bounds.x - THUMB / 2.0) / travel).clamp(0.0, 1.0))));
+        slider_at(fraction, self.min, self.max, self.step)
     }
 }
 
@@ -187,8 +189,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Track<'a, Mes
                         mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. } => *y,
                     };
                     if y != 0.0 {
-                        let toward = if y > 0.0 { notch } else { -notch };
-                        let value = ((self.value + toward).clamp(self.min, self.max) * 1e9).round() / 1e9;
+                        let value = slider_wheel(self.value, self.min, self.max, notch, y > 0.0);
                         shell.publish(slide(value, true));
                         shell.capture_event();
                     }
@@ -213,7 +214,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Track<'a, Mes
         let track = Rectangle { x: bounds.x, y: centre_y - TRACK / 2.0, width: bounds.width, height: TRACK };
         paint_fill(renderer, track, TRACK / 2.0, rest.faded(opacity));
         // `--_p` is the value's share of the whole track (the inspector kit writes it), not where the thumb's centre is.
-        let share = (((self.value - self.min) / (self.max - self.min).max(f64::EPSILON)).clamp(0.0, 1.0) as f32) * bounds.width;
+        let share = slider_fraction(self.value, self.min, self.max) as f32 * bounds.width;
         let filled = if self.dir.is_rtl() {
             Rectangle { x: bounds.x + bounds.width - share, y: track.y, width: share, height: TRACK }
         } else {
@@ -251,6 +252,10 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Track<'a, Mes
             disc(renderer, 0.0, palette.slider_thumb);
         }
         self.inner.draw(&tree.children[0], renderer, theme, style, layout, cursor, viewport);
+    }
+
+    fn overlay<'b>(&'b mut self, tree: &'b mut Tree, layout: Layout, renderer: &Renderer, viewport: &Rectangle, translation: Vector, window: Size) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.inner.overlay(&mut tree.children[0], layout, renderer, viewport, translation, window)
     }
 }
 

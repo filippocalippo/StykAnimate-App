@@ -28,9 +28,30 @@ pub fn slider_value(value: f64, min: f64, max: f64, base_step: f64, key: SliderK
         SliderKey::Home => min,
         SliderKey::End => max,
     };
-    let clamped = moved.clamp(min, max);
-    // Snap away floating-point dust from repeated 0.1 steps.
-    (clamped * 1e9).round() / 1e9
+    settle(moved, min, max)
+}
+
+/// A value kept inside `[min, max]` with the floating-point dust of repeated tenths snapped away.
+fn settle(value: f64, min: f64, max: f64) -> f64 {
+    (value.clamp(min, max) * 1e9).round() / 1e9
+}
+
+/// Where `value` sits along the track, 0 at `min` and 1 at `max` (a track of no length reads 0).
+pub fn slider_fraction(value: f64, min: f64, max: f64) -> f64 {
+    if max > min { ((value - min) / (max - min)).clamp(0.0, 1.0) } else { 0.0 }
+}
+
+/// The value a position along the track asks for (`fraction`, 0 at `min` and 1 at `max`, out of range clamped): the nearest
+/// point of the step grid from `min`, inside the range. A drag reports positions; this is the one place they become values.
+pub fn slider_at(fraction: f64, min: f64, max: f64, base_step: f64) -> f64 {
+    let raw = min + fraction.clamp(0.0, 1.0) * (max - min);
+    let on_grid = if base_step > 0.0 { min + ((raw - min) / base_step).round() * base_step } else { raw };
+    settle(on_grid, min, max)
+}
+
+/// The value after one wheel notch of `notch` (up raises it, down lowers it), inside the range.
+pub fn slider_wheel(value: f64, min: f64, max: f64, notch: f64, up: bool) -> f64 {
+    settle(if up { value + notch } else { value - notch }, min, max)
 }
 
 /// The keys a select answers.
@@ -137,6 +158,27 @@ mod tests {
         assert_eq!(slider_value(0.5, 0.0, 10.0, 1.0, SliderKey::Decrease, PLAIN), 0.0);
         assert_eq!(slider_value(4.0, 2.0, 8.0, 1.0, SliderKey::Home, PLAIN), 2.0);
         assert_eq!(slider_value(4.0, 2.0, 8.0, 1.0, SliderKey::End, PLAIN), 8.0);
+    }
+
+    #[test]
+    fn a_position_along_the_track_is_the_nearest_step_inside_the_range() {
+        assert_eq!(slider_at(0.5, 0.0, 100.0, 1.0), 50.0);
+        assert_eq!(slider_at(0.123, 0.0, 100.0, 5.0), 10.0);
+        assert_eq!(slider_at(0.13, 0.0, 100.0, 5.0), 15.0);
+        assert_eq!(slider_at(-3.0, 0.0, 100.0, 5.0), 0.0, "left of the track is the minimum");
+        assert_eq!(slider_at(9.0, 2.0, 8.0, 1.0), 8.0, "right of it the maximum");
+        assert_eq!(slider_at(0.5, 2.0, 7.0, 2.0), 4.0, "the grid starts at the minimum, not at zero");
+        assert_eq!(slider_at(0.333, 0.0, 1.0, 0.0), 0.333, "a slider with no step is continuous");
+    }
+
+    #[test]
+    fn the_wheel_steps_toward_the_ends_and_stops_there() {
+        assert_eq!(slider_wheel(50.0, 0.0, 100.0, 5.0, true), 55.0);
+        assert_eq!(slider_wheel(50.0, 0.0, 100.0, 5.0, false), 45.0);
+        assert_eq!(slider_wheel(98.0, 0.0, 100.0, 5.0, true), 100.0);
+        assert_eq!(slider_wheel(0.1 + 0.2, 0.0, 1.0, 0.1, true), 0.4, "no floating-point dust");
+        assert_eq!(slider_fraction(25.0, 0.0, 100.0), 0.25);
+        assert_eq!(slider_fraction(5.0, 5.0, 5.0), 0.0);
     }
 
     #[test]

@@ -252,10 +252,6 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for ScrubLabel<'a, Messag
 }
 
 
-/// Whether a unit sits against its value ("100%", "172°", "2×") rather than after a space ("8 px"): today's `GLUED_UNITS`.
-pub fn unit_is_glued(unit: &str) -> bool {
-    matches!(unit, "%" | "°" | "×")
-}
 
 /// How wide a field's value is set (`--type-value`, tabular, `field-sizing: content`): its text's width, at least one `0`.
 pub fn value_width(value: &str) -> f32 {
@@ -494,7 +490,7 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
             && !unit.is_empty()
         {
             value_row.push(words(unit.to_string(), TextStyle::from_role(&tokens::scale::TYPE_VALUE), fade(palette.text_2)));
-            spacing = if unit_is_glued(unit) { 0.0 } else { 0.25 * tokens::scale::TYPE_VALUE.size };
+            spacing = if styk_core::number::unit_is_glued(unit) { 0.0 } else { 0.25 * tokens::scale::TYPE_VALUE.size };
         }
         let value = Row::with_children(value_row).spacing(spacing).align_y(Alignment::Center).boxed();
         Parts { label: label.boxed(), value, value_width }

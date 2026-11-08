@@ -8,7 +8,7 @@ use super::button::{Button, IconButton};
 use super::color::ColorField;
 use super::dir::Dir;
 use super::field::EditField;
-use super::number_field::{NumberField, unit_is_glued, value_width};
+use super::number_field::{NumberField, value_width};
 use super::segmented::{Segment, Segmented};
 use super::select::{Choice, Select};
 use super::slider::{Slide, Slider};
@@ -249,13 +249,7 @@ fn the_wheel_stops_at_the_ends() {
 }
 
 #[test]
-fn a_units_glue_follows_todays_list_and_a_value_is_at_least_one_digit_wide() {
-    for unit in ["%", "°", "×"] {
-        assert!(unit_is_glued(unit), "{unit} sits against its value");
-    }
-    for unit in ["px", "fps", "s", ""] {
-        assert!(!unit_is_glued(unit), "{unit} reads after a space");
-    }
+fn a_value_is_at_least_one_digit_wide_and_as_wide_as_its_text() {
     assert_eq!(value_width(""), value_width("0"), "an empty value holds one zero");
     assert!(value_width("1234") > value_width("12"), "a value is as wide as its text");
 }
@@ -390,4 +384,87 @@ fn rgba_mix_is_css_color_mix_in_srgb() {
     assert_eq!(white.mix(50.0, black), crate::Rgba::new(128, 128, 128, 1.0));
     assert_eq!(white.mix(100.0, black), white);
     assert_eq!(white.faded(0.42).a, 0.42);
+}
+
+fn select_element<'a>() -> Element<'a, Msg> {
+    let options = vec![Choice { label: "Linear".into(), disabled: false }, Choice { label: "Hold".into(), disabled: false }];
+    Select::new(FocusId(4), FocusArea::Panels, palette(), options, Some(0), Msg::Pick, Msg::Step).label("Easing").into_element()
+}
+
+/// Opens the select by a click, then clicks `below` pixels under the field: what the list answers.
+fn pick_below(below: f32) -> Vec<Msg> {
+    let mut driver = driver(select_element());
+    let bounds = driver.snapshot().bounds_of(FocusId(4)).expect("the select is laid out");
+    driver.click(Point::new(bounds.x + 60.0, bounds.y + bounds.height / 2.0));
+    driver.messages();
+    // The menu is an overlay: it is laid out by the update after the one that opened it.
+    driver.redraw();
+    driver.click(Point::new(bounds.x + 60.0, bounds.y + bounds.height + below));
+    driver.messages()
+}
+
+#[test]
+fn a_select_opened_by_a_click_shows_a_menu_whose_options_can_be_picked() {
+    let picked: Vec<Msg> = (4..90).step_by(2).flat_map(|below| pick_below(below as f32)).collect();
+    assert!(picked.contains(&Msg::Pick(1)), "the second option can be picked from the menu: {picked:?}");
+    assert!(picked.contains(&Msg::Pick(0)), "and the first: {picked:?}");
+}
+
+#[test]
+fn a_focused_select_asks_for_the_neighbouring_option_with_the_arrow_keys_and_a_disabled_one_is_inert() {
+    let mut driver = driver(select_element());
+    driver.focus(FocusId(4));
+    driver.press(Named::ArrowDown);
+    driver.press(Named::ArrowUp);
+    assert_eq!(driver.messages(), [Msg::Step(1), Msg::Step(-1)]);
+    let options = vec![Choice { label: "Linear".into(), disabled: false }, Choice { label: "Hold".into(), disabled: false }];
+    let off = Select::new(FocusId(4), FocusArea::Panels, palette(), options, Some(0), Msg::Pick, Msg::Step).disabled(true).into_element();
+    let mut disabled = super::testing::Driver::new(off, Size::new(420.0, 300.0), &crate::fonts::ALL);
+    let bounds = disabled.snapshot().bounds_of(FocusId(4)).expect("laid out");
+    disabled.click(Point::new(bounds.x + 60.0, bounds.y + 10.0));
+    disabled.redraw();
+    disabled.click(Point::new(bounds.x + 60.0, bounds.y + bounds.height + 14.0));
+    disabled.focus(FocusId(4));
+    disabled.press(Named::ArrowDown);
+    assert!(disabled.messages().is_empty());
+}
+
+fn labelled<'a>(radio: bool) -> Element<'a, Msg> {
+    if radio {
+        Radio::new(FocusId(7), FocusArea::Panels, palette(), false, Msg::Press("radio")).label("Linear").into_element()
+    } else {
+        Checkbox::new(FocusId(5), FocusArea::Panels, palette(), Checked::No, Msg::Toggle).label("Visible").into_element()
+    }
+}
+
+#[test]
+fn a_click_on_a_checks_or_radios_label_focuses_it_so_space_and_delete_are_its_own() {
+    for (radio, id, role) in [(false, FocusId(5), InputRole::Checkbox), (true, FocusId(7), InputRole::Radio)] {
+        let mut driver = driver(labelled(radio));
+        let bounds = driver.snapshot().bounds_of(id).expect("the control is laid out");
+        // The words start 24 px in, after the 16 px box and the 8 px gap: 40 px in is on them, not on the box.
+        let on_the_words = Point::new(bounds.x + 40.0, bounds.y + bounds.height / 2.0);
+        driver.click(on_the_words);
+        let first = driver.messages();
+        assert_eq!(first.len(), 1, "a click on the words presses the control once: {first:?}");
+        let snapshot = driver.snapshot();
+        assert_eq!(snapshot.focused, Some(id), "the click focused the control");
+        driver.press(Named::Space);
+        driver.release(Named::Space);
+        assert_eq!(driver.messages(), first, "Space activates it again");
+        let mut focus = FocusState::new();
+        focus.register(ScopeId::ROOT, snapshot.targets(ScopeId::ROOT).to_vec());
+        focus.reconcile(snapshot.focused);
+        assert_eq!(focus.input_role(), role);
+        let delete = Chord::new("Delete", false, false, false);
+        let press = Shortcuts::new(Platform::Control, true).press(&focus, &delete, &[], styk_core::shortcuts::Input::default(), |_| true);
+        assert_eq!(press, Press::Ignored, "Delete stays with the focused control");
+    }
+}
+
+#[test]
+fn a_labelled_control_is_one_focus_target() {
+    let mut driver = driver(labelled(false));
+    let targets: Vec<u64> = driver.snapshot().targets(ScopeId::ROOT).iter().map(|target| target.id.0).collect();
+    assert_eq!(targets, [5]);
 }

@@ -9,12 +9,12 @@ use iced::Widget as _;
 use super::control::{FIELD_DISABLED, Preview, paint_fill, paint_ring};
 use crate::{Palette, Rgba, tokens};
 use iced::advanced::layout::{self, Layout};
-use iced::advanced::renderer;
+use iced::advanced::{overlay, renderer};
 use iced::advanced::widget::operation::{self, Outcome};
 use iced::advanced::widget::{self, Operation, Tree, tree};
 use iced::advanced::{Shell, Widget};
 use iced::widget::container;
-use iced::{Alignment, Element, Event, Length, Padding, Rectangle, Renderer, Size, Theme, mouse};
+use iced::{Alignment, Element, Event, Length, Padding, Rectangle, Renderer, Size, Theme, Vector, mouse};
 
 /// The frame's height at the default size (`--control-lg`).
 pub const HEIGHT: f32 = tokens::scale::CONTROL_LG;
@@ -164,5 +164,9 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for FieldFrame<'a, Messag
         }
         // A disabled field's parts fade themselves (`FIELD_DISABLED`): the frame cannot fade what other widgets draw.
         self.inner.draw(&tree.children[0], renderer, theme, style, layout, cursor, viewport);
+    }
+
+    fn overlay<'b>(&'b mut self, tree: &'b mut Tree, layout: Layout, renderer: &Renderer, viewport: &Rectangle, translation: Vector, window: Size) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.inner.overlay(&mut tree.children[0], layout, renderer, viewport, translation, window)
     }
 }
