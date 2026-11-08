@@ -26,11 +26,16 @@ thread_local! {
 /// A core with `bytes` (a project file named `name`) open in one tab, its facts lane started through `spawner` (it
 /// must run the lane on a thread of its own) and its first revision published.
 pub fn core_with_document(bytes: &[u8], name: &str, spawner: Arc<dyn styk_services::Spawner>) -> Result<Core, String> {
+    core_with_files(bytes, name, spawner, Arc::new(styk_services::files::fake::MemoryFiles::default()))
+}
+
+/// [`core_with_document`] whose saves land in `files`.
+pub fn core_with_files(bytes: &[u8], name: &str, spawner: Arc<dyn styk_services::Spawner>, files: Arc<styk_services::files::fake::MemoryFiles>) -> Result<Core, String> {
     let (notify, ready) = std::sync::mpsc::channel();
-    let (core, publication) = crate::screens::core_with_document(bytes, name, spawner, Arc::new(move || {
+    let (core, publication) = crate::screens::core_with_files(bytes, name, spawner, Arc::new(move || {
         // A test that ended has dropped its receiver: nothing to tell.
         let _ = notify.send(());
-    }))?;
+    }), files)?;
     let id = core.documents.active().ok_or("no document is open")?.id().get();
     FIXTURES.with(|fixtures| fixtures.borrow_mut().entry(id).or_default().push(Fixture { publication, ready: Rc::new(ready) }));
     let mut core = core;

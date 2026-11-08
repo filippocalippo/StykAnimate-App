@@ -775,7 +775,11 @@ impl Panel {
                 }
             }
             PaintEvent::Commit { request, paint } => {
-                let Some(mut picker) = self.picker.take().filter(|picker| picker.request.id == request) else { return };
+                // Only the open picker's own request applies; another one leaves it as it is.
+                if !self.picker.as_ref().is_some_and(|picker| picker.request.id == request) {
+                    return;
+                }
+                let Some(mut picker) = self.picker.take() else { return };
                 // An open number or name edit ends first, as the inspector's change does today.
                 self.finish(documents, session, effects);
                 match Self::apply_paint(documents, view, session, &mut picker, &paint) {

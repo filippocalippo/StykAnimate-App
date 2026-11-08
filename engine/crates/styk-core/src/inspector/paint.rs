@@ -78,7 +78,7 @@ pub struct PaintSpec {
 }
 
 /// `Math.round`: halves round up, toward positive infinity.
-fn js_round(value: f64) -> f64 {
+pub fn js_round(value: f64) -> f64 {
     let floor = value.floor();
     if value - floor >= 0.5 { floor + 1.0 } else { floor }
 }
@@ -389,29 +389,22 @@ mod document {
             Value::object(paint)
         }
 
-        /// A stored paint, normalised (`normalizePaint(value)`): refused as today when it is not one.
+        /// A stored paint, normalised (`normalizePaint(value)`, read by the evaluator's own port): refused as today
+        /// when it is not one.
         pub fn from_value(value: &Value) -> Result<PaintSpec, Msg> {
-            let kind = value.get("type").and_then(Value::as_str).and_then(PaintType::from_id).ok_or_else(|| Msg::new("errors.paint.invalidPaintType"))?;
-            let stops = value.get("stops").and_then(Value::elements).ok_or_else(|| Msg::new("errors.paint.useBetween2And32GradientStops"))?;
-            let stops = stops
-                .iter()
-                .map(|stop| {
-                    let color = stop.get("color").and_then(Value::elements).filter(|color| color.len() == 3).ok_or_else(|| Msg::new("errors.paint.invalidRgbColor"))?;
-                    let channel = |at: usize| color.get(at).and_then(|value| value.as_f64()).unwrap_or(f64::NAN);
-                    Ok(Stop { offset: num(stop.get("offset")).unwrap_or(f64::NAN), color: [channel(0), channel(1), channel(2)], opacity: num(stop.get("opacity")).unwrap_or(f64::NAN) })
-                })
-                .collect::<Result<Vec<Stop>, Msg>>()?;
-            let angle = match value.get("angle") {
-                None | Some(Value::Null) => 0.0,
-                Some(angle) => angle.as_f64().unwrap_or(f64::NAN),
-            };
-            PaintSpec { kind, angle, stops }.normalize()
+            let paint = styk_eval::records::paint::normalize_paint(value).map_err(|error| match error {
+                styk_eval::records::Error::Invalid(key) => Msg::owned(key),
+                _ => super::invalid_value(),
+            })?;
+            let kind = PaintType::from_id(&paint.kind).ok_or_else(|| Msg::new("errors.paint.invalidPaintType"))?;
+            let stops = paint.stops.iter().map(|stop| Stop { offset: stop.offset, color: stop.rgb(), opacity: stop.opacity }).collect();
+            Ok(PaintSpec { kind, angle: paint.angle, stops })
         }
 
         /// `backgroundPaint(bg)`: a background's own paint, or the paint its kind and colours describe (kind 3 linear,
         /// 4 radial, anything else solid; no background is opaque white).
         pub fn of_background(background: Option<&Value>) -> Result<PaintSpec, Msg> {
-            if let Some(paint) = background.and_then(|bg| bg.get("paint")).filter(|paint| !paint.is_null()) {
+            if let Some(paint) = background.and_then(|bg| bg.get("paint")).filter(|paint| paint.truthy()) {
                 return PaintSpec::from_value(paint);
             }
             let field = |name: &str| background.and_then(|bg| num(bg.get(name)));
@@ -458,5 +451,116 @@ mod document {
             }
             Ok(Value::object(out))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stop(offset: f64, rgb: [u8; 3], opacity: f64) -> Stop {
+        Stop::new(offset, rgb, opacity)
+    }
+
+    fn linear(stops: Vec<Stop>) -> PaintSpec {
+        PaintSpec { kind: PaintType::Linear, angle: 0.0, stops }
+    }
+
+    #[test]
+    fn normalize_validates_rounds_and_sorts_as_normalize_paint() {
+        let paint = PaintSpec { kind: PaintType::Radial, angle: 30.0, stops: vec![Stop { offset: 1.0, color: [254.5, 0.4, 3.0], opacity: 1.0 }, stop(0.0, [1, 2, 3], 0.5)] };
+        let normalized = paint.normalize().unwrap();
+        assert_eq!(normalized.stops.iter().map(|stop| stop.offset).collect::<Vec<_>>(), [0.0, 1.0]);
+        assert_eq!(normalized.stops[1].color, [255.0, 0.0, 3.0], "Math.round");
+        let key = |paint: PaintSpec| paint.normalize().unwrap_err().key;
+        assert_eq!(key(linear(vec![stop(0.0, [0, 0, 0], 1.0)])), "errors.paint.useBetween2And32GradientStops");
+        assert_eq!(key(PaintSpec { kind: PaintType::Solid, angle: 0.0, stops: Vec::new() }), "errors.paint.useBetween2And32GradientStops");
+        assert_eq!(key(linear(vec![stop(0.0, [0, 0, 0], 1.0); 33])), "errors.paint.useBetween2And32GradientStops");
+        assert_eq!(key(linear(vec![stop(0.0, [0, 0, 0], 1.5), stop(1.0, [0, 0, 0], 1.0)])), "errors.paint.invalidPaintValue");
+        assert_eq!(key(PaintSpec { angle: 36001.0, ..linear(vec![stop(0.0, [0, 0, 0], 1.0), stop(1.0, [0, 0, 0], 1.0)]) }), "errors.paint.invalidPaintValue");
+        assert!(linear(vec![stop(0.0, [0, 0, 0], 1.0); 32]).normalize().is_ok());
+    }
+
+    #[test]
+    fn sample_interpolates_colour_and_opacity_between_stops() {
+        let paint = linear(vec![stop(0.25, [0, 0, 0], 0.0), stop(0.75, [200, 100, 50], 1.0)]);
+        assert_eq!(paint.sample(0.1), paint.stops[0], "before the first stop");
+        assert_eq!(paint.sample(0.9), paint.stops[1], "after the last");
+        let mid = paint.sample(0.5);
+        assert_eq!((mid.offset, mid.color, mid.opacity), (0.5, [100.0, 50.0, 25.0], 0.5));
+        // Today's order of operations: `a + (b - a) * ((t - a.offset) / (b.offset - a.offset))`.
+        let third = paint.sample(0.4);
+        let f = (0.4 - 0.25) / (0.75 - 0.25);
+        assert_eq!(third.color[0], 0.0 + (200.0 - 0.0) * f);
+    }
+
+    #[test]
+    fn hex_parsing_and_formatting_match_paint_mjs() {
+        assert_eq!(parse_color("#abc").unwrap(), ([0xaa, 0xbb, 0xcc], 1.0));
+        assert_eq!(parse_color("ABCD").unwrap(), ([0xaa, 0xbb, 0xcc], f64::from(0xdd_u8) / 255.0));
+        assert_eq!(parse_color("#102030").unwrap(), ([0x10, 0x20, 0x30], 1.0));
+        assert_eq!(parse_color("#10203080").unwrap().1, 128.0 / 255.0);
+        for bad in ["#12", "#12345", "#ggg", "", "#1234567"] {
+            assert_eq!(parse_color(bad).unwrap_err().key, "errors.paint.useAValidHexColorOptionallyIncludingAlpha", "{bad}");
+        }
+        assert_eq!(hex([255.0, 0.4, 15.5]), "#ff0010");
+    }
+
+    #[test]
+    fn the_gradient_editor_keeps_today_s_draft_rules() {
+        let mut draft = Draft::new(&PaintSpec::solid([250, 250, 250], 0.8)).unwrap();
+        assert!(draft.set_gradient(true));
+        assert_eq!(draft.draft().kind, PaintType::Linear);
+        assert_eq!(draft.draft().stops[1], Stop { offset: 1.0, color: [32.0; 3], opacity: 0.8 }, "a light colour fades to dark grey");
+        assert!(!draft.can_remove() && !draft.remove(), "never below two stops");
+        assert!(draft.add(0.5));
+        assert_eq!(draft.selected(), 2);
+        assert_eq!(draft.stop().color, [141.0; 3], "the colour sampled at the offset");
+        assert!(draft.set_angle(-30.0));
+        assert_eq!(draft.draft().angle, 330.0, "the angle wraps");
+        assert!(draft.rotate());
+        assert_eq!(draft.draft().angle, 60.0);
+        draft.select(0);
+        assert!(draft.reverse());
+        assert_eq!(draft.selected(), 2, "the same stop stays selected");
+        assert_eq!(draft.stop().offset, 1.0);
+        assert_eq!(draft.paint().unwrap().stops.iter().map(|stop| stop.offset).collect::<Vec<_>>(), [0.0, 0.5, 1.0], "the committed paint is sorted");
+        assert!(draft.remove());
+        assert_eq!(draft.selected(), 1, "the last remaining one is selected");
+        // Solid remembers the gradient; Gradient brings it back.
+        let gradient = draft.draft().clone();
+        draft.set_gradient(false);
+        assert_eq!(draft.draft().stops.len(), 1);
+        draft.set_gradient(true);
+        assert_eq!(draft.draft(), &gradient);
+        assert!(draft.set_position(150.0));
+        assert_eq!(draft.stop().offset, 1.0, "clamped");
+        let mut full = Draft::new(&linear(vec![stop(0.0, [0, 0, 0], 1.0); 32])).unwrap();
+        assert!(!full.can_add() && !full.add(0.5), "nothing past 32 stops");
+    }
+
+    #[cfg(feature = "engine")]
+    #[test]
+    fn backgrounds_read_and_write_as_background_paint_and_paint_background() {
+        use styk_doc::json;
+        let linear_bg = json::parse(br#"{"kind":3,"color_a":4278190335,"color_b":2164195328,"x1":0,"y1":0,"x2":1,"y2":1}"#).unwrap();
+        let paint = PaintSpec::of_background(Some(&linear_bg)).unwrap();
+        assert_eq!(paint.kind, PaintType::Linear);
+        assert_eq!(paint.angle, styk_math::atan2(1.0, 1.0) * 180.0 / std::f64::consts::PI);
+        assert_eq!((paint.stops[0].rgb(), paint.stops[0].opacity), ([0, 0, 255], 1.0));
+        assert_eq!((paint.stops[1].rgb(), paint.stops[1].opacity), ([255, 0, 0], 128.0 / 255.0));
+        let radial = json::parse(br#"{"kind":4,"color_a":4278190335,"color_b":4294901760}"#).unwrap();
+        assert_eq!(PaintSpec::of_background(Some(&radial)).unwrap().stops[0].rgb(), [255, 0, 0], "a radial starts at its outer colour b");
+        let white = PaintSpec::of_background(None).unwrap();
+        assert_eq!((white.kind, white.stops[0].rgb(), white.stops[0].opacity), (PaintType::Solid, [255, 255, 255], 1.0));
+        let made = PaintSpec::solid([1, 2, 3], 0.5).background(Some("solid gradient")).unwrap();
+        assert_eq!(json::to_string(&made), r#"{"kind":2,"paint":{"type":"solid","angle":0,"stops":[{"offset":0,"color":[1,2,3],"opacity":0.5}]},"color":2147549699,"color_a":2147549699,"color_b":2147549699,"x1":0,"y1":0.5,"x2":1,"y2":0.5,"name":"solid gradient"}"#);
+        // The stored reading (the evaluator's normalizePaint) and the draft's agree, refusals included.
+        let typed = PaintSpec { kind: PaintType::Angular, angle: 12.5, stops: vec![stop(1.0, [9, 8, 7], 0.25), Stop { offset: 0.5, color: [1.4, 2.5, 3.0], opacity: 1.0 }] };
+        assert_eq!(PaintSpec::from_value(&typed.to_value()).unwrap(), typed.normalize().unwrap());
+        let one = linear(vec![stop(0.0, [0, 0, 0], 1.0)]);
+        assert_eq!(PaintSpec::from_value(&one.to_value()).unwrap_err().key, one.normalize().unwrap_err().key);
+        let stored = PaintSpec::of_background(Some(&made)).unwrap();
+        assert_eq!(stored, PaintSpec::solid([1, 2, 3], 0.5), "a background's own paint wins");
     }
 }
