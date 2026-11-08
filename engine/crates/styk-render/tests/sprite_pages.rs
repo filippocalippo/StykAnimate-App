@@ -87,9 +87,12 @@ fn close(pixel: [u8; 4], color: [u8; 4]) -> bool {
 }
 
 fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    // Exact frame comparisons use Vulkan: docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor.
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::VULKAN;
+    let instance = wgpu::Instance::new(descriptor);
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return None;
     };
     Some(pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device"))

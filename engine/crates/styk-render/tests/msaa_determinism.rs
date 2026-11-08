@@ -146,25 +146,23 @@ fn equality(backend: wgpu::Backends, unoptimized: bool, opaque: bool, split: boo
 }
 
 #[test]
-#[ignore = "ND platform floor: DX12/FXC + NVIDIA 617.42 changes MSAA bytes; run explicitly to recheck"]
+#[ignore = "DX12 MSAA repeatability driver floor; see docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor"]
 fn dx12_repeated_frames_are_identical() { equality(wgpu::Backends::DX12, false, false, false); }
 
 #[test]
-#[ignore = "ND platform floor persists with FXC optimization disabled; run explicitly to recheck"]
+#[ignore = "DX12 MSAA repeatability driver floor; see docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor"]
 fn dx12_unoptimized_repeated_frames_are_identical() { equality(wgpu::Backends::DX12, true, false, false); }
 
 #[test]
-#[ignore = "ND platform floor: order-preserving draw partition changes DX12 MSAA bytes"]
+#[ignore = "DX12 MSAA repeatability driver floor; see docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor"]
 fn dx12_draw_partition_preserves_bytes() { equality(wgpu::Backends::DX12, false, false, true); }
 
 #[test]
-#[ignore = "Explicit GPU control for ND; needs Vulkan on the same hardware as the DX12 reproducer"]
 fn vulkan_repeated_frames_are_identical() { equality(wgpu::Backends::VULKAN, false, false, false); }
 
 #[test]
-#[ignore = "Explicit GPU control for ND; needs Vulkan on the same hardware as the DX12 reproducer"]
 fn vulkan_draw_partition_preserves_bytes() { equality(wgpu::Backends::VULKAN, false, false, true); }
 
 #[test]
-#[ignore = "Explicit opaque control for ND; needs DX12"]
+#[ignore = "DX12 MSAA repeatability driver floor; see docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor"]
 fn dx12_opaque_frames_are_identical() { equality(wgpu::Backends::DX12, false, true, false); }

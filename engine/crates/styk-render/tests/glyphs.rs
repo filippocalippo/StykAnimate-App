@@ -58,9 +58,12 @@ fn lone_glyphs_draw_from_masks_kept_across_frames() {
     let mut empty = (*with).clone();
     empty.prims.iter_mut().filter(|p| p.kind & F_GLYPH_VECTOR != 0 || p.kind == K_GLYPH).for_each(|p| p.kind = 0);
     let empty = Arc::new(empty);
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    // Exact frame comparisons use Vulkan: docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor.
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::VULKAN;
+    let instance = wgpu::Instance::new(descriptor);
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
@@ -85,9 +88,12 @@ fn lone_glyphs_draw_from_masks_kept_across_frames() {
 
 #[test]
 fn crisp_edges_draw_lone_glyphs_from_their_outlines() {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    // Exact frame comparisons use Vulkan: docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor.
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::VULKAN;
+    let instance = wgpu::Instance::new(descriptor);
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
@@ -128,9 +134,12 @@ fn glyphs(count: usize, scale: f64) -> Arc<DrawList> {
 /// then the large one again measured 32, 5 and 80 MiB).
 #[test]
 fn the_glyph_atlas_stays_in_its_budget_when_the_side_of_its_pages_changes() {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    // Exact frame comparisons use Vulkan: docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor.
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::VULKAN;
+    let instance = wgpu::Instance::new(descriptor);
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");

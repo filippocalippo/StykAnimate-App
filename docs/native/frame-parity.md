@@ -119,7 +119,7 @@ follow-up once S3 folds it.
 
 ## Floor: what remains, per cause
 
-**All of it is stable**: of the 1,286 differing pixels, none differs between today's two runs, and today's app differs from itself
+**The recorded nine-set FP comparison was stable**: of the 1,286 differing pixels, none differs between today's two runs, and today's app differs from itself
 in 1 pixel of 21 million (tdd2 180-190), so the reference's own variability (X2) explains none of the residue. D13 holds: no
 threshold was touched. Every cause below is outside what the shader can name: the two stacks compile the same WGSL with different
 compilers (FXC through wgpu; Chromium's own path, DXC being unusable here) and differ in the last bit of float arithmetic.
@@ -138,3 +138,70 @@ compilers (FXC through wgpu; Chromium's own path, DXC being unusable here) and d
   text are bit-identical in the probe and in the frames: **no residue**.
 - **tdd2 ticks 180-190** (95 pixels, two at two levels): the reddish translucent shapes of the effect layer; stable in both runs
   of today's app. Not isolated to a primitive kind; presumably the strokes of the figures drawn over them.
+
+### DX12 MSAA repeatability driver floor
+
+ND (2026-11-08) established a separate **run-to-run driver floor** on NVIDIA GeForce RTX 4070 SUPER,
+Windows driver 32.0.16.1742 (617.42), wgpu 30.0.1 with DX12/FXC. The trigger is
+`D3D12_RASTERIZER_DESC::MultisampleEnable = TRUE` with translucent triangles, four-sample
+RGBA8 UNORM targets and premultiplied blending. It is not a new tolerance for frame comparisons.
+The stage and PNG export keep DX12/FXC because parity with today's Chromium frames wins.
+
+A frozen evaluated draw list on one device still differed: A/131 at 1080p in 29/29 comparisons,
+D/541 at 4K in 16/29. Main-target samples differ before resolve; isolated layers remain identical.
+An independent constant-color triangle/quad grid removes the renderer, evaluator, assets and
+analytic coverage. A **plain C++/HLSL D3D12 reproducer**, with FXC shader model 5.1, feature level
+11.0, explicit clears, transitions, resolve, fences and checked readback, removes wgpu and Naga
+too. With the flag set it changes two pixels by one channel level in **2/29 draws per fresh
+device**, at iterations 12 and 26, on each of three devices. With only the flag cleared (still
+four samples), all three devices give **0/29**, including partitioned draws. With the flag set,
+partitioned draws differ in 29/29 comparisons. Unoptimized FXC and `IndependentBlendEnable`
+controls do not cure it. This proves the platform/driver cause on this stack, not a particular
+driver optimization. The temporary direct-D3D12 source was removed; logs and the retained portable
+reproducer are described in [ND's evidence](../../engine/crates/styk-render/tests/msaa-determinism.md).
+
+Observed native ticks are A at 1080p **131, 138, 181**, D at 1080p **571**, and D at 4K **541, 544**.
+Every observed native repeat difference is at most **one channel level**. RM first saw 36 pixels
+on A/131 and four on D/541; ND's three-process comparisons saw up to **89 pixels** on A/131.
+These are observations, not bounds or allowances. D/571 was reported by RM but did not recur in
+ND's short runs. Vulkan's repeated and partitioned controls are byte-identical, as were RM's
+960 RGBA hashes. Chromium/D3D12's X2 frames 183, 184, 185, 186 and 188 differ in 1–3 pixels by
+one level; the shared driver cause is **very likely**, not independently proven for the browser.
+
+Clearing the flag in a temporary vendored wgpu-hal 30.0.1 made all six diagnostics pass, but
+worsened FP's nine-set comparison from **1,286 to 2,053 / 21,120,000 pixels** (59 frames), with
+**767 newly differing pixels** and maximum error **2 to 11 levels**. Counts in the table's order
+became `71,207,134,242,489,5,467,270,168`. The old differences remained. The owner rejected that
+workaround; the vendor folder and Cargo patch were removed. No version, fixture or threshold changed.
+
+**Test policy:** byte-for-byte export comparisons run on **Vulkan**. Renderer glyph/sprite repeat
+tests, export/frame-buffer/policy tests, core stage/export comparisons and app/preview PNG identity
+explicitly select Vulkan. Shipping backend selection and FP's Chromium comparison still use DX12.
+The four DX12 MSAA diagnostics are explicitly ignored with this section as their reason; their
+assertions remain exact. Run them through the machine queue after a driver update:
+
+```text
+cargo test -p styk-render --test msaa_determinism dx12_ -- --ignored --test-threads=1 --nocapture
+```
+
+The Vulkan repeat/fresh-device and partition controls run in normal renderer suites. `styk export
+--verify` remains an exact backend diagnostic: on DX12 it names this floor and may fail; set
+`WGPU_BACKEND=vulkan` for the repeatability gate. The Electron determinism smoke also remains an
+exact diagnostic and names the floor. Neither tool silently accepts differences. The clip-position
+test still compares opaque triangles across DX12/Vulkan (a different compiler regression); clear-only
+host presentation, texture upload/readback and single-sample ink tests do not repeat blended MSAA.
+
+#### Upstream issue draft (not submitted)
+
+**DX12 MultisampleEnable causes nondeterministic translucent triangle MSAA on NVIDIA 617.42**
+
+wgpu-hal 30.0.1 sets `D3D12_RASTERIZER_DESC::MultisampleEnable` whenever sample count exceeds one.
+On RTX 4070 SUPER / driver 617.42 (32.0.16.1742), a constant-color triangle/quad grid with RGBA8
+UNORM, four samples and premultiplied blending changes two pixels by one level in two of 29 draws
+on each fresh device. Direct D3D12 without Naga or wgpu, and unoptimized FXC, reproduce it.
+Vulkan and opaque DX12 controls are stable. Keeping four samples but clearing only this flag
+removes the direct reproduction. Microsoft's [rasterizer contract](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ns-d3d12-d3d12_rasterizer_desc)
+says the flag selects the line algorithm and does not affect triangle MSAA at feature level 10.1+.
+Please investigate the driver behavior: clearing it changes our Chromium parity from 1,286 to
+2,053 differing pixels, maximum 2 to 11 levels, so that workaround was rejected. The portable exact
+reproduction is `styk-render/tests/msaa_determinism.rs` and its WGSL grid. No private input is needed.

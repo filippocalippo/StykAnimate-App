@@ -156,12 +156,16 @@ fn the_artboard_follows_the_view_and_bad_input_is_refused_without_moving_the_vie
 }
 
 fn gpu() -> styk_render::native_gpu::NativeGpu {
-    styk_render::native_gpu::native_gpu(
-        wgpu::Instance::enabled_backend_features().contains(wgpu::Backends::DX12),
+    // Exact frame comparisons use Vulkan: docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor.
+    use styk_render::native_gpu::{Attempt, NativeGpu, open_attempt};
+    let attempt = Attempt { name: "Vulkan repeatability test".into(), backends: wgpu::Backends::VULKAN, fxc: false, from_env: false };
+    let (instance, adapter, device, queue) = open_attempt(
+        &attempt,
         "stage surface test",
-        |a| wgpu::Limits::default().using_resolution(a.limits()),
+        &|a| wgpu::Limits::default().using_resolution(a.limits()),
     )
-    .expect("GPU required; do not silently pass a missing device")
+    .expect("Vulkan required for exact frame comparisons");
+    NativeGpu { instance, adapter, device, queue, attempt }
 }
 
 fn target(gpu: &styk_render::native_gpu::NativeGpu, size: [u32; 2]) -> wgpu::Texture {

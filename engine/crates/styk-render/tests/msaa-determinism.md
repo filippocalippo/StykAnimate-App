@@ -74,27 +74,28 @@ disable antialiasing to hide the error.
   in the controls, but FP already measures a worse native/reference floor on Vulkan. Neither
   change meets the unchanged-frame contract, so the shipping choice remains DX12/FXC.
 
-**Why no application patch:** wgpu's public `MultisampleState` exposes count, mask and
-alpha-to-coverage, not the DX12 rasterizer flag. In wgpu-hal 30.0.1, `src/dx12/device.rs` sets
-`MultisampleEnable` to `desc.multisample.count > 1`. A backend change to leave it false for
-triangle pipelines is the concrete next workaround to investigate. It cannot be selected through
-our renderer's wgpu API. No registry dependency was patched, no Windows API was added to the
-portable engine, and no dependency fork was introduced outside ND's allowed engine-crate scope.
-That backend change would still need the full six-tick/FP/timing checks; the standalone result
-does not certify its production parity or performance.
+**Rejected dependency workaround:** with the owner's authorization, wgpu-hal 30.0.1 was temporarily
+vendored and changed only to set `MultisampleEnable` for multisampled line topologies. All six
+diagnostics then passed, but FP's nine sets worsened from 1,286 to 2,053 differing pixels, with 767
+newly differing pixels and maximum error 2 to 11. Counts became `71,207,134,242,489,5,467,270,168`.
+The FP stop gate prevented further export/timing sweeps. The owner chose the proven driver floor
+over that parity loss, so the vendor folder and Cargo changes were removed. Shipping DX12 is
+unchanged. The full decision and preserved upstream issue draft are in
+[the accepted floor](../../../../docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor).
 
 ## Exact reproducer
 
 Run from `engine/` through the machine queue:
 
 ```text
-cargo test -p styk-render --test msaa_determinism -- --ignored --test-threads=1 --nocapture
+cargo test -p styk-render --test msaa_determinism dx12_ -- --ignored --test-threads=1 --nocapture
 ```
 
 The DX12 tests are marked ignored **because they document an unresolved platform floor**, not
 because one-level errors are acceptable. Their predicates require zero differing pixels and
-fail with the measured stack. The controls are also explicit GPU diagnostics so ordinary test
-runs do not acquire a new mandatory pair of graphics backends. A requested backend or failed
+fail with the measured stack. The opaque DX12 control is also ignored with the same floor link.
+The Vulkan repeat/fresh-device and partition controls run in normal renderer suites; byte-for-byte
+export comparisons explicitly select Vulkan. A requested backend or failed
 map is an error, never a silently passing test. Compiler selection and flags are pinned in the
 test, regardless of environment or Cargo profile. Same-device repeats, fresh-device comparisons
 and order-preserving draw partitioning all assert exact bytes.
@@ -103,7 +104,7 @@ After a driver/wgpu update or an actual remedy, rerun these tests and the six pr
 three times. Also rerun FP's nine sets and paired timings before changing the production policy.
 Passing one short repeat does not establish determinism: the standalone discrepancy is intermittent.
 
-## Verification
+## Initial floor verification (32c41019, before the rejected workaround)
 
 Production source is unchanged. The before and rebuilt-after executables have SHA-256:
 
@@ -158,3 +159,46 @@ Individual values and binary hashes are in `timing/summary.json`.
 All builds, GPU checks and measurements used the machine queue. Frozen references, thresholds,
 shipping backend policy and production sources remain unchanged. The retained test and this
 record are the ND deliverable; identical DX12 export frames remain an open platform limitation.
+
+## Accepted-floor audit (2026-11-08)
+
+The current policy is the linked floor in `docs/native/frame-parity.md`. Exact comparison sites
+were traced through renderer/export/core tests and repository tools. These now select Vulkan
+explicitly, independent of `WGPU_BACKEND`: `styk-render/tests/{glyphs,sprite_pages}.rs`,
+`styk-export/tests/{export,frame_into,policy_gpu}.rs`, `styk-core/tests/{stage_painter,stage_surface}.rs`
+and `scripts/native-preview-check.mjs` (only app/preview byte identity). The two Vulkan controls
+in `msaa_determinism.rs` are normal tests; all four DX12 diagnostics remain explicitly ignored.
+
+`styk export --verify` and `scripts/smoke-export-determinism.mjs` remain exact diagnostic tools,
+with a message linking the floor; differences still fail. The generic image-diff and PNG-compare
+tools compare supplied files without asserting any backend's repeatability. Video hash output
+records the selected adapter and does not itself assert equality. CPU/cel, DOM screenshot,
+serialized-file and draw-list comparisons do not repeat DX12 MSAA frames. Texture uploads,
+single-sample ink, clear-only host presentation and the opaque cross-backend clip-position
+regression keep their existing coverage. The separate reference screenshot check and production
+GPU preference remain unchanged.
+
+Decisions: retain the opaque DX12 control with the ignored diagnostic family so a future driver
+check runs the controls together; promote Vulkan controls to normal tests to keep an exact
+repeat/fresh-device regression. Preserve the preview guard's existing headless capture mode
+(no window) while all queued jobs retain `STYK_BACKGROUND_WINDOW=1`. Do not repeat private export
+or timing sweeps after the owner accepted the floor; the historical evidence above remains labeled.
+
+### Accepted-floor verification
+
+One heavy queue job, label `D2 accepted DX12 floor verification`; logs in `artifacts/nd-floor/`:
+
+- Targeted `cargo check` and `cargo clippy --no-deps`: exit 0 (existing warnings only).
+- `cargo test -p styk-render -p styk-export`, once: renderer **61 passed, 0 failed, 4 ignored**
+  DX12 diagnostics; export **47 passed, 0 failed**. Both normal Vulkan controls pass.
+- `cargo test -p styk-core --test stage_painter --test stage_surface`: **17 passed, 0 failed**;
+  the existing private-input stage benchmark remains ignored.
+- Both modified scripts pass `node --check`; native guard unit tests **20 passed, 0 failed**.
+- `cargo xtask check`, once: exit 0; dependency allow-list and source guards pass, **24 reference
+  screenshots** pass, **23 preview PNGs byte-identical**, two stage screens explicitly app-only.
+- Rebuilt debug CLI on the public color-transitions fixture, DX12 `--verify 2`: **1 frame x 2 runs,
+  0 differing frames**, with the floor explanation printed. This checks the diagnostic message,
+  not the absence of the intermittent driver floor. The old release executable in the target
+  folder is not a verified artifact of this change.
+- `vendor/wgpu-hal` absent; `engine/Cargo.toml` and `engine/Cargo.lock` match the accepted base.
+  No dependency allow-list entry is needed. Frozen fixtures and thresholds are unchanged.
