@@ -181,6 +181,12 @@ values; editing, saving, switching and closing are refused until the owner retur
 `Effect::Called` carries the session's actual answer and effects. Tests cover the blocked worker, busy
 queries, cancellation during bake and at commit, retry, one undo entry and save bytes against today's bake.
 
+The document and recovery lanes both report `HostError::ScheduledJobLost` when a
+scheduled closure disappears without returning (for example, a native worker
+unwinds). Recovery presents this as an unavailable operation with that reason;
+`NoHost` is reserved for document services that were never attached. Publishing
+another document does not cancel either lane's queued jobs.
+
 ## The band's use of it (K-shell)
 
 The top band (`styk_core::shell`, [shell-band.md](shell-band.md)) reads tab order and recency from this owner

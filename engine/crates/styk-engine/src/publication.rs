@@ -1,5 +1,5 @@
-//! Publishing a generation: the replaced generation, its frame cache, image store and queued tasks leave
-//! the state in one exchange of pointers, and are dropped later by a worker.
+//! Publishing a generation: the replaced generation, its frame cache, image store and owned queued
+//! decodes leave the state by moving pointers, and are dropped later by a worker.
 //!
 //! Everything fresh (the frame cache, the image store, the decode tasks of images the new generation adds) is
 //! built before the state lock is taken; under it nothing is allocated or dropped.
@@ -87,7 +87,23 @@ impl Prepared {
             state.tasks.append(&mut self.tasks);
             TaskQueue::new()
         } else {
-            std::mem::replace(&mut state.tasks, std::mem::take(&mut self.tasks))
+            let lineage = state.current.as_ref().map(|generation| generation.lineage);
+            let mut retired = TaskQueue::new();
+            let mut surviving = TaskQueue::new();
+            // Run closures have their own owners. Only this lineage's decodes belong to the
+            // replaced publication. Move existing nodes, preserving FIFO and deferring every
+            // payload/node destruction until retirement runs outside the shared lock.
+            while let Some(mut node) = crate::detach_task(&mut state.tasks) {
+                let owned = match node.front().expect("detached task") {
+                    crate::OrdinaryTask::Run(_) => false,
+                    crate::OrdinaryTask::Decode(generation, _) => Some(generation.lineage) == lineage,
+                    crate::OrdinaryTask::Redecode(scope) => Some(scope.lineage) == lineage,
+                };
+                if owned { retired.append(&mut node); } else { surviving.append(&mut node); }
+            }
+            surviving.append(&mut self.tasks);
+            state.tasks = surviving;
+            retired
         };
         let generation = state.current.replace(self.generation.clone());
         PublicationRetirement { generation, frames, images, tasks }
@@ -117,5 +133,86 @@ impl Engine {
                 return (id, retirement);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Budgets, OrdinaryTask};
+    use std::sync::{Barrier, atomic::{AtomicUsize, Ordering}};
+
+    const DOCUMENT: &[u8] = br#"{"version":5,"canvas_width":20,"canvas_height":20,"fps":12,"figure_types":[],"keyframes":[{"duration_raw":1,"objects":[]}],"backgrounds":[]}"#;
+
+    fn engine() -> Engine {
+        let engine = Engine::new(|| 0.0, Budgets::for_device(None));
+        engine.open(DOCUMENT, "json", "first").unwrap();
+        while engine.step() {}
+        engine
+    }
+
+    fn held_worker(engine: &Engine) -> (Arc<Barrier>, std::thread::JoinHandle<()>) {
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let (start, end) = (entered.clone(), release.clone());
+        engine.spawn(move |_| { start.wait(); end.wait(); });
+        let engine = engine.clone();
+        let worker = std::thread::spawn(move || while engine.step() {});
+        entered.wait();
+        (release, worker)
+    }
+
+    #[test]
+    fn publication_preserves_queued_runs_before_frames_and_idle_work() {
+        let engine = engine();
+        let (release, worker) = held_worker(&engine);
+        let ran = Arc::new(AtomicUsize::new(0));
+        for expected in 0..2 {
+            let ran = ran.clone();
+            engine.spawn(move |engine| {
+                assert!(engine.frame(0).is_none(), "ordinary jobs precede frames");
+                assert_eq!(ran.fetch_add(1, Ordering::SeqCst), expected);
+            });
+        }
+        let idle = ran.clone();
+        engine.spawn_idle(move |engine| {
+            assert!(engine.frame(0).is_some(), "idle work follows frames");
+            assert_eq!(idle.load(Ordering::SeqCst), 2);
+        });
+        engine.open(DOCUMENT, "json", "replacement").unwrap();
+        engine.request(0, &[0]);
+        release.wait();
+        worker.join().unwrap();
+        assert_eq!(ran.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn publication_retires_only_replaced_lineage_decodes_and_redecodes() {
+        let engine = engine();
+        let (release, worker) = held_worker(&engine);
+        let old = engine.generation().unwrap();
+        let weak = Arc::downgrade(&old);
+        let other = Arc::new(Generation { lineage: old.lineage + 100, id: 0, revision: 0,
+            prepared: old.prepared.clone(), assets: old.assets.clone(), open_ms: 0.0, anchors: None });
+        let mut jobs = TaskQueue::new();
+        jobs.push_back(OrdinaryTask::Decode(old.clone(), images::Picture::Image(0)));
+        jobs.push_back(OrdinaryTask::Redecode(images::DecodeScope { lineage: old.lineage, epoch: 0 }));
+        jobs.push_back(OrdinaryTask::Decode(other.clone(), images::Picture::Image(0)));
+        jobs.push_back(OrdinaryTask::Redecode(images::DecodeScope { lineage: other.lineage, epoch: 0 }));
+        engine.inner.state.lock().tasks.append(&mut jobs);
+        let pointer = &engine.inner.state as *const _ as usize;
+        let (_, counts) = crate::allocation::watch(pointer, || engine.open(DOCUMENT, "json", "replacement").unwrap());
+        assert_eq!((counts.allocations, counts.deallocations), (0, 0), "{counts:?}");
+        // Inspect before releasing the worker: cancellation must detach old work, not merely reject its result.
+        let remaining: Vec<_> = engine.inner.state.lock().tasks.iter().map(|task| match task {
+            OrdinaryTask::Decode(g, _) => g.lineage, OrdinaryTask::Redecode(s) => s.lineage,
+            OrdinaryTask::Run(_) => panic!("unexpected run"),
+        }).collect();
+        drop(old);
+        release.wait();
+        worker.join().unwrap();
+        assert_eq!(remaining, vec![other.lineage, other.lineage]);
+        assert!(weak.upgrade().is_none(), "retirement releases the old generation on the worker");
+        assert_eq!(engine.pictures_decoded(), 0);
     }
 }

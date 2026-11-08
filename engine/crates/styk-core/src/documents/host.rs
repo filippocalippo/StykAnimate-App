@@ -53,7 +53,7 @@ pub enum Request {
 #[derive(Debug)]
 pub enum HostError {
     Documents(DocumentsError), Open(Box<OpenError>), Save(Box<SaveError>), File(FileError), Edit(EditError),
-    NoHost, Stale, Spawn(String), Recovery(styk_services::recovery::RecoveryError),
+    NoHost, ScheduledJobLost, Stale, Spawn(String), Recovery(styk_services::recovery::RecoveryError),
 }
 impl From<DocumentsError> for HostError { fn from(value: DocumentsError) -> Self { Self::Documents(value) } }
 impl From<EditError> for HostError { fn from(value: EditError) -> Self { Self::Edit(value) } }
@@ -65,6 +65,7 @@ impl std::fmt::Display for HostError {
             Self::Documents(e) => e.fmt(f), Self::Open(e) => e.fmt(f), Self::Save(e) => e.fmt(f),
             Self::File(e) => e.fmt(f), Self::Edit(e) => write!(f, "{e}"),
             Self::Recovery(e) => e.fmt(f),
+            Self::ScheduledJobLost => f.write_str("scheduled document work ended without a result"),
             Self::NoHost => f.write_str("document services are not attached"), Self::Stale => f.write_str("the document changed"), Self::Spawn(e) => f.write_str(e),
         }
     }
@@ -256,7 +257,7 @@ impl Documents {
             let id = work.id;
             let job_options = options.clone();
             run_scheduled(|job| options.engine.spawn(move |_| job()), move || execute(&job_options, work))
-                .unwrap_or(Reply { id, result: Err(HostError::NoHost) })
+                .unwrap_or(Reply { id, result: Err(HostError::ScheduledJobLost) })
         }, notify).map_err(|e| HostError::Spawn(e.to_string()))?;
         // The engine's own jobs (decode, publication retirement, frames) have a bounded worker too.
         // Shutdown happens on the document worker, never by joining from the interface.
