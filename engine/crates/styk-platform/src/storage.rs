@@ -29,6 +29,7 @@ type Job = Box<dyn FnOnce(&Path) + Send>;
 /// One running request and at most one queued request. Overflow is a visible error, never a lost write.
 pub struct LocalStorage {
     send: SyncSender<Job>,
+    legacy: Option<PathBuf>,
 }
 
 impl LocalStorage {
@@ -38,15 +39,19 @@ impl LocalStorage {
         let base = std::env::var_os("LOCALAPPDATA")
             .filter(|value| !value.is_empty())
             .ok_or_else(|| FileError::Io("LOCALAPPDATA is unavailable".into()))?;
-        Self::new(
+        let mut store = Self::new(
             PathBuf::from(base).join("StykAnimate").join("settings"),
             spawner,
-        )
+        )?;
+        store.legacy = std::env::var_os("STYK_USER_DATA_DIR").filter(|v| !v.is_empty()).map(PathBuf::from)
+            .or_else(|| std::env::var_os("APPDATA").filter(|v| !v.is_empty()).map(|p| PathBuf::from(p).join("StykAnimate")));
+        Ok(store)
     }
 
     /// Explicit profile for hosts and isolated tests. The caller owns the choice of directory.
     pub fn new(directory: impl Into<PathBuf>, spawner: &dyn Spawner) -> Result<Self, FileError> {
         let directory = directory.into();
+        let legacy = Some(directory.clone());
         let (send, receive) = sync_channel::<Job>(1);
         spawner
             .spawn(
@@ -58,7 +63,14 @@ impl LocalStorage {
                 }),
             )
             .map_err(|error| FileError::Io(error.to_string()))?;
-        Ok(Self { send })
+        Ok(Self { send, legacy })
+    }
+
+    /// Explicit native and read-only legacy roots, also used by migration tests.
+    pub fn with_legacy(directory: impl Into<PathBuf>, legacy: impl Into<PathBuf>, spawner: &dyn Spawner) -> Result<Self, FileError> {
+        let mut store = Self::new(directory, spawner)?;
+        store.legacy = Some(legacy.into());
+        Ok(store)
     }
 
     fn request<'a, T: Send + 'static>(
@@ -260,6 +272,12 @@ fn lock_file(file: File, cancel: &Cancel) -> Result<File, FileError> {
 }
 
 impl Storage for LocalStorage {
+    fn load_legacy<'a>(&'a self, name: &'a str, maximum: usize) -> FileFuture<'a, Option<Arc<[u8]>>> {
+        if let Err(error) = validate_name(name) { return Box::pin(async move { Err(error) }); }
+        let Some(directory) = self.legacy.clone() else { return Box::pin(async { Ok(None) }); };
+        let target = FileTarget::new(directory.join(name));
+        self.request(Cancel::new(), move |_, cancel| load(&target, maximum, cancel))
+    }
     fn load<'a>(&'a self, name: &'a str, maximum: usize) -> FileFuture<'a, Option<Arc<[u8]>>> {
         if let Err(error) = validate_name(name) {
             return Box::pin(async move { Err(error) });

@@ -28,7 +28,7 @@ use styk_core::shell::workspace::{self, Workspace};
 use styk_core::shell::{self, Effect, ids};
 use styk_design::widgets::focus;
 use styk_design::{Theme, warm_up};
-use styk_core::engine::{Budgets, Engine, Value, json};
+use styk_core::engine::{Budgets, Engine, json};
 use styk_services::Spawner;
 use styk_services::{Cancel, worker::{Worker, run_future}};
 use styk_services::clock::{Clock, FixedClock, WallClock};
@@ -43,6 +43,7 @@ const SETTLE_FRAMES: u32 = 3;
 
 #[derive(Clone, Debug)]
 pub enum Message {
+    Progress,
     Editor(styk_ui::message::Message),
     /// A message of the band's views.
     Ui(view::Message),
@@ -82,7 +83,7 @@ pub enum Request {
     /// Every project is answered for and the recovery lane is done: the program may end.
     QuitReady,
     SessionCheckpointFinished,
-    LayoutProgress,
+    PreferencesProgress,
 }
 
 /// A script being run.
@@ -120,6 +121,18 @@ pub struct TopBand {
     screen: Option<Screen>,
     /// The Properties panel's prepared model while a window screen of the catalogue shows (`--screen dock`).
     fixture: Option<styk_core::inspector::model::Inspector>,
+    progress: ProgressWatch,
+}
+#[derive(Clone)]
+struct ProgressWatch(Arc<styk_core::stage::Progress>);
+impl std::hash::Hash for ProgressWatch {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) { std::hash::Hash::hash(&Arc::as_ptr(&self.0), state); }
+}
+fn progress_stream(watch: &ProgressWatch) -> impl iced::futures::Stream<Item = Message> + use<> {
+    iced::futures::stream::unfold(watch.0.clone(), |progress| async move {
+        iced::futures::future::poll_fn(|cx| if progress.poll(cx.waker()) { std::task::Poll::Ready(()) } else { std::task::Poll::Pending }).await;
+        Some((Message::Progress, progress))
+    })
 }
 
 /// What the stand-in for the workspace sessions answers.
@@ -148,7 +161,7 @@ fn load_layouts(store: &styk_core::layout::LayoutStore) -> styk_core::dock::Stor
 }
 
 impl Drop for TopBand {
-    fn drop(&mut self) { self.abandon_layouts(); }
+    fn drop(&mut self) { self.abandon_layouts(); self.abandon_settings(); }
 }
 
 /// The startup document the host is given (see `TopBand::new`).
@@ -196,15 +209,15 @@ fn workspace_named(name: &str) -> Workspace {
 impl TopBand {
     /// The band over a new, empty set of projects, with K-doc's document host attached: its worker, the local files and the
     /// one application clock.
-    /// `wakes` carries document and layout receipts to the window (it may be called from any thread); `recovery` is the
+    /// `wakes` carries layout receipts; the shared Progress subscription carries document, frame and Settings work. `recovery` is the
     /// store where the lane keeps this window's copies and lists the ones an earlier run left (`None`:
-    /// no recovery, as in a run that must not touch the person's folders).
-    pub fn new(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>, wakes: styk_platform::shell::Wakes, recovery: Option<Arc<dyn styk_services::recovery::Recovery>>, layouts: Option<Arc<styk_core::layout::LayoutStore>>) -> Result<TopBand, String> {
+    /// no recovery, as in a run that must not touch the person's folders). `storage` is also absent for unattended runs.
+    pub fn new(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>, wakes: styk_platform::shell::Wakes, recovery: Option<Arc<dyn styk_services::recovery::Recovery>>, layouts: Option<Arc<styk_core::layout::LayoutStore>>, storage: Option<Arc<dyn styk_services::storage::Storage>>) -> Result<TopBand, String> {
         let window = shell::Window { width: window_size.width, height: window_size.height, ui_scale: 1.0, controls: !cfg!(target_os = "macos") };
         let unmeasured = shell::band::Labels { animate: 0.0, draw: 0.0, build: 0.0, export: 0.0, cancel: 0.0, test_rig: 0.0, done: 0.0 };
         let mut documents = Documents::new();
-        let documents_wake = wakes.clone();
-        let notify: Arc<dyn Fn() + Send + Sync> = Arc::new(move || documents_wake.send(styk_platform::shell::Wake::Documents));
+        let progress = styk_core::stage::Progress::new();
+        let notify = progress.wake();
         let layouts = layouts.map(|store| Worker::start(spawner.as_ref(), "styk-layouts", move |work| match work {
             LayoutWork::Load => LayoutReply::Loaded(load_layouts(&store)),
             LayoutWork::Save(file, wall, cancel) => LayoutReply::Saved(run_future(store.save(&file, wall, &cancel)).is_ok()),
@@ -216,11 +229,11 @@ impl TopBand {
         documents
             .attach_host(HostOptions {
                 engine: Engine::new(engine_clock, Budgets::for_device(None)),
-                spawner,
+                spawner: spawner.clone(),
                 files: Arc::new(styk_platform::files::LocalFiles),
                 startup,
                 clock: engine_clock,
-                // The workers wake the window, which polls the host (`Message::Documents`).
+                // The shared Progress subscription polls the exclusive document lane.
                 notify: notify.clone(),
             })
             .map_err(|error| format!("the document host did not start: {error}"))?;
@@ -230,11 +243,20 @@ impl TopBand {
             notify();
         }
         let mut core = styk_core::app::Core::new(documents);
+        core.start_runtime(spawner.clone(), clock.clone(), progress.clone()).map_err(|e| e.to_string())?;
+        if let Some(storage) = storage { core.start_settings(spawner.as_ref(), storage, progress.wake()).map_err(|e| e.to_string())?; }
+        let audio_spawner = spawner.clone();
+        let audio_wake = progress.wake();
+        core.start_audio(spawner.as_ref(), move || {
+            let output = styk_platform::audio::WasapiOutput::new().map_err(|e| e.to_string())?;
+            let decoder = styk_platform::audio::FfmpegAudioDecoder::native();
+            styk_core::audio::AudioTransport::new_notifying(audio_spawner, Box::new(output), Arc::new(styk_platform::audio::QpcClock::new()), Arc::new(decoder), styk_core::audio::CACHE_BYTES, audio_wake).map_err(|e| e.to_string())
+        }, progress.wake()).map_err(|e| e.to_string())?;
         let wall: Arc<dyn WallClock> = Arc::new(styk_platform::clock::SystemWallClock::default());
         core.dock_mut().set_writer(wall.writer());
         core.dock_mut().set_wall_time(wall.unix_millis());
         core.dock_mut().handle(styk_core::dock::Event::Resized { width: f64::from(window_size.width), height: f64::from(window_size.height), scale: 1.0 }, 0);
-        Ok(TopBand { core, layouts, layout_pending: None, fixture: None, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, wall, fixed, run: None, measured: false, screen: None })
+        Ok(TopBand { core, layouts, layout_pending: None, progress: ProgressWatch(progress), fixture: None, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, wall, fixed, run: None, measured: false, screen: None })
     }
 
     /// Starts the script the command line named.
@@ -255,7 +277,21 @@ impl TopBand {
 
     /// Nothing is opening, so what the window shows is complete.
     pub fn idle(&self) -> bool {
-        self.requests.is_empty() && !self.busy
+        self.requests.is_empty() && !self.busy && (self.core.documents.active().is_none() || (!self.core.timeline().model().pending && self.core.stage().is_some()))
+    }
+    /// Final maintenance after QuitReady, through the same core dispatch fence.
+    pub fn flush_settings(&mut self) -> bool {
+        let now = self.now();
+        // A final failure settles the lane. The last committed settings remain intact.
+        drop(self.core.dispatch(styk_core::commands::Command::Settings(styk_core::settings::Event::Finish { now })));
+        !self.core.settings_idle()
+    }
+    pub fn abandon_settings(&mut self) {
+        drop(self.core.dispatch(styk_core::commands::Command::Settings(styk_core::settings::Event::Abandon)));
+    }
+    #[cfg(test)]
+    fn with_storage(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>, storage: Arc<dyn styk_services::storage::Storage>) -> Result<TopBand, String> {
+        Self::new(window_size, clock, fixed, spawner, styk_platform::shell::Wakes(Arc::new(|_| {})), None, None, Some(storage))
     }
 
     /// Shows a band screen of the catalogue (`--screen band`) instead of the open projects.
@@ -408,9 +444,7 @@ impl TopBand {
         let now = self.now();
         let documents = self.pump();
         if self.core.session_end_expired() { return documents; }
-        let overlays = styk_ui::message::update_at(&mut self.core, styk_ui::Message::Command(styk_core::commands::Command::Overlay {
-            event: styk_core::overlay::host::Event::Tick, now,
-        }), now).map(Message::Editor);
+        let overlays = styk_ui::message::update_at(&mut self.core, styk_ui::Message::Command(styk_core::commands::Command::Wake { now }), now).map(Message::Editor);
         let layouts = self.poll_layouts();
         Task::batch([documents, overlays, layouts])
     }
@@ -431,6 +465,7 @@ impl TopBand {
             Event::Keyboard(keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }) | Event::Mouse(mouse::Event::ButtonPressed(_) | mouse::Event::ButtonReleased(_)) | Event::Window(window::Event::Unfocused) => Some(Message::Raw(event.clone(), status == event::Status::Ignored)),
             _ => None,
         })];
+        subscriptions.push(Subscription::run_with(self.progress.clone(), progress_stream));
         if self.shell.tracking() {
             subscriptions.push(event::listen_with(|event, _, _| match event {
                 Event::Mouse(mouse::Event::CursorMoved { position }) => Some(Message::Cursor(position.x, position.y)),
@@ -441,9 +476,9 @@ impl TopBand {
         if self.core.dock().tracking() {
             subscriptions.push(event::listen_with(|event, _, _| styk_ui::dock::track(&event).map(Message::Editor)));
         }
-        // The stage's picture is ready or the pen has drawn: its one redraw, while a stage is shown.
-        subscriptions.push(styk_ui::stage::subscription(&self.core).map(Message::Editor));
-        if self.run.is_some() || self.shell.next_deadline().is_some() || !self.idle() {
+        // Readiness gates automation, not redraws. Slow workers wake this subscription
+        // through Progress; a script samples its finite settling frames only when ready.
+        if (self.run.is_some() && self.idle()) || self.shell.next_deadline().is_some() || self.core.timeline().playing() {
             subscriptions.push(window::frames().map(|_| Message::Frame));
         }
         Subscription::batch(subscriptions)
@@ -470,6 +505,19 @@ impl TopBand {
     /// commands the band's buttons ask for (Save, Export, Close, Rename, New, Done...) are K-cmd's and K-doc's: they are
     /// dropped here.
     fn dispatch(&mut self, event: shell::Event) -> Task<Message> {
+        use shell::Event as E;
+        if matches!(event, E::PointerReleased | E::TabKey(..) | E::TabClose(_) | E::Workspace(_) | E::Undo | E::Redo | E::Save | E::Export | E::Cancel | E::Done(_) | E::CtrlTab { .. } | E::SwitcherKey(_) | E::SwitcherPick(_) | E::ModifierReleased | E::Neighbour(_) | E::Home | E::New) {
+            let effects = self.core.dispatch(styk_core::commands::Command::Shell(event));
+            let tasks: Vec<_> = effects.into_iter().map(|effect| match effect {
+                styk_core::commands::Effect::ShellReady(event) => self.dispatch_ready(event),
+                effect => styk_ui::message::effect(effect).map(Message::Editor),
+            }).collect();
+            return Task::batch(tasks);
+        }
+        self.dispatch_ready(event)
+    }
+
+    fn dispatch_ready(&mut self, event: shell::Event) -> Task<Message> {
         let mut tasks = Vec::new();
         let mut queue = vec![event];
         while let Some(event) = queue.pop() {
@@ -480,12 +528,14 @@ impl TopBand {
                         Answer::Session(session) => shell::Event::Session(session),
                     })),
                     Effect::FocusTab(id) => tasks.push(TopBand::focus(ids::tab(id))),
-                    Effect::Command(command) => {
-                        let now = self.now();
-                        tasks.push(styk_ui::message::update_at(&mut self.core, styk_ui::Message::Command(command), now).map(Message::Editor).chain(TopBand::snapshot()));
+                    Effect::Activated(_) | Effect::Edited => tasks.push(styk_ui::message::run(self.core.refresh()).map(Message::Editor)),
+                    Effect::Command(command) => tasks.push(styk_ui::message::update(&mut self.core, command.into()).map(Message::Editor)),
+                    Effect::DocumentCommand { command, document } => {
+                        tasks.push(styk_ui::message::update(&mut self.core, styk_core::commands::Command::Activate(document).into()).map(Message::Editor));
+                        tasks.push(styk_ui::message::update(&mut self.core, command.into()).map(Message::Editor));
                     }
-                    Effect::Activated(_) | Effect::Moved(..) | Effect::Edited
-                    | Effect::DocumentCommand { .. } | Effect::FinishBuild | Effect::Refused(_) => {}
+                    Effect::Refused(error) => self.fail(error.to_string()),
+                    Effect::Moved(..) | Effect::FinishBuild => {}
                 }
             }
         }
@@ -507,6 +557,13 @@ impl TopBand {
         // The tree's focus state is read after anything that can change the tree.
         let reads_focus = !matches!(message, Message::Cursor(..) | Message::Frame | Message::Snapshot(_) | Message::Editor(_));
         let (requests, task) = match message {
+            Message::Progress => {
+                let now = self.now();
+                let task = self.pump();
+                let wake = styk_ui::message::update(&mut self.core, styk_core::commands::Command::Wake { now }.into()).map(Message::Editor);
+                (vec![Request::PreferencesProgress], Task::batch([task, wake]))
+            }
+            Message::Editor(styk_ui::message::Message::ShellReady(event)) => (Vec::new(), self.dispatch_ready(event)),
             Message::Editor(styk_ui::message::Message::PollDocuments) => (Vec::new(), self.pump()),
             Message::Editor(styk_ui::message::Message::QuitReady) => (vec![Request::QuitReady], Task::none()),
             Message::Editor(styk_ui::message::Message::SessionCheckpointFinished) => (vec![Request::SessionCheckpointFinished], Task::none()),
@@ -531,9 +588,14 @@ impl TopBand {
                 (Vec::new(), Task::batch([task, overlays]))
             }
             Message::Frame => self.frame(),
-            Message::Documents => (Vec::new(), self.pump()),
-            Message::Layouts => (vec![Request::LayoutProgress], self.poll_layouts()),
-            Message::Deadline => (vec![Request::LayoutProgress], self.deadline()),
+            Message::Documents => {
+                let task = self.pump();
+                let now = self.now();
+                let wake = styk_ui::message::update_at(&mut self.core, styk_core::commands::Command::Wake { now }.into(), now).map(Message::Editor);
+                (vec![Request::PreferencesProgress], Task::batch([task, wake]))
+            },
+            Message::Layouts => (vec![Request::PreferencesProgress], self.poll_layouts()),
+            Message::Deadline => (vec![Request::PreferencesProgress], self.deadline()),
         };
         let task = if reads_focus { Task::batch([task, TopBand::snapshot()]) } else { task };
         (requests, Task::batch([task, self.follow_workspace()]))
@@ -599,22 +661,26 @@ impl TopBand {
                     Key::Named(Named::PageUp) if modifiers.control() => self.dispatch(E::Neighbour(-1)),
                     Key::Named(Named::Escape) if self.shell.tracking() => self.dispatch(E::DragCancelled),
                     Key::Named(Named::Escape) if self.shell.menu().is_some() => self.dispatch(E::CloseMenu),
-                    _ if ignored => focus::navigate(&mut self.shell.focus, event).map_or_else(Task::none, TopBand::focus),
-                    _ => Task::none(),
+                    _ => {
+                        let navigation = if ignored { focus::navigate(&mut self.shell.focus, event).map_or_else(Task::none, TopBand::focus) } else { Task::none() };
+                        let key = styk_ui::message::editor_key(event, ignored).map_or_else(Task::none, |message| styk_ui::message::update_at(&mut self.core, message, now).map(Message::Editor));
+                        Task::batch([navigation, key])
+                    }
                 }
             }
             Event::Keyboard(keyboard::Event::KeyReleased { key: Key::Named(Named::Control), .. }) if self.shell.board_open() => self.dispatch(E::ModifierReleased),
+            Event::Keyboard(keyboard::Event::KeyReleased { .. }) => {
+                let shift = matches!(event, Event::Keyboard(keyboard::Event::KeyReleased { key: Key::Named(Named::Shift), .. }));
+                let key = styk_ui::message::editor_key(event, ignored).map_or_else(Task::none, |message| styk_ui::message::update_at(&mut self.core, message, now).map(Message::Editor));
+                if shift { Task::batch([key, self.dock(styk_core::dock::Event::Shift(false), now)]) } else { key }
+            }
             Event::Mouse(mouse::Event::ButtonPressed(_)) => {
                 self.shell.focus.pointer_pressed();
                 Task::none()
             }
-            Event::Keyboard(keyboard::Event::KeyReleased { key: Key::Named(Named::Shift), .. }) => {
-                let now = self.now();
-                self.dock(styk_core::dock::Event::Shift(false), now)
-            }
             Event::Window(window::Event::Unfocused) => {
-                let now = self.now();
-                Task::batch([self.dispatch(E::Blurred), self.dock(styk_core::dock::Event::Blur, now)])
+                let shell = self.dispatch(E::Blurred);
+                Task::batch([shell, self.dock(styk_core::dock::Event::Blur, now), styk_ui::message::update_at(&mut self.core, styk_core::commands::Command::Blur.into(), now).map(Message::Editor)])
             }
             _ => Task::none(),
         }
@@ -641,7 +707,7 @@ impl TopBand {
         let expired = self.core.session_end_tick(self.clock.now());
         if self.core.session_end_expired() { return styk_ui::message::run(expired).map(Message::Editor); }
         let mut tasks = Vec::new();
-        if let Some(effect) = self.core.documents.poll() {
+        if let Some(effect) = self.core.poll_document() {
             // One completion per update. A real transition can queue the next stage without
             // starting a worker; give it one poll, then follow notifications/deadlines.
             if !matches!(effect, Opened::None) { tasks.push(Task::done(Message::Documents)); }
@@ -665,7 +731,7 @@ impl TopBand {
         if !self.busy
             && let Some(request) = self.requests.pop_front()
         {
-            match self.core.documents.dispatch(request) {
+            match self.core.dispatch_document(request) {
                 Ok(Opened::Started(_)) => self.busy = true,
                 Ok(_) => {}
                 // The host is not ready for another request yet: ask again next frame.
@@ -680,7 +746,8 @@ impl TopBand {
     fn frame(&mut self) -> (Vec<Request>, Task<Message>) {
         let now = self.now();
         let pumped = self.pump();
-        let tick = Task::batch([pumped, self.dispatch(shell::Event::Tick(now))]);
+        let wake = styk_ui::message::update(&mut self.core, styk_core::commands::Command::Wake { now }.into()).map(Message::Editor);
+        let tick = Task::batch([pumped, wake, self.dispatch(shell::Event::Tick(now))]);
         let (requests, step) = self.step();
         (requests, Task::batch([tick, step]))
     }
@@ -765,18 +832,18 @@ impl TopBand {
                     (Vec::new(), Task::batch(tasks))
                 }
                 Step::Edit(fps) => {
-                    let id = self.core.documents.active().map(|document| document.id()).ok_or("no project is open")?;
-                    let answer = self.core.documents.call(id, "setFPS", &[Value::Num(f64::from(fps))], &Value::Null).map_err(|error| error.to_string())?;
-                    answer.result.map_err(|error| error.to_string())?;
-                    self.shell.sync(&self.core.documents);
-                    (Vec::new(), Task::none())
+                    if self.core.documents.active().is_none() { return Err("no project is open".into()); }
+                    let now = self.now();
+                    let command = styk_core::commands::Command::Timeline(styk_core::timeline::Event::Action { id: styk_core::commands::CommandId::TimelineSetFps, payload: styk_core::timeline::Payload::Number(f64::from(fps)), now });
+                    (Vec::new(), styk_ui::message::update(&mut self.core, command.into()).map(Message::Editor))
                 }
                 Step::Advance(nanos) => {
                     let Some(fixed) = &self.fixed else { return Err("advance needs --clock fixed: the system clock cannot be moved".to_string()) };
                     fixed.advance(std::time::Duration::from_nanos(nanos));
                     // The strip's deadlines follow the clock at once, not at the next frame.
                     let now = self.now();
-                    (Vec::new(), Task::batch([self.dispatch(E::Tick(now)), styk_ui::message::update_at(&mut self.core,
+                    let wake = styk_ui::message::update_at(&mut self.core, styk_core::commands::Command::Wake { now }.into(), now).map(Message::Editor);
+                    (Vec::new(), Task::batch([wake, self.dispatch(E::Tick(now)), styk_ui::message::update_at(&mut self.core,
                         styk_ui::message::Message::Command(styk_core::commands::Command::Overlay { event: styk_core::overlay::host::Event::Tick, now }), now).map(Message::Editor)]))
                 }
                 Step::SaveLanded => {
@@ -795,7 +862,10 @@ impl TopBand {
                     }
                     (vec![Request::Capture(resolved(path))], Task::none())
                 }
-                other => return Err(format!("this build cannot run the step {other:?}")),
+                other => {
+                    let event = styk_core::stage::Event::from_step(&other).ok_or_else(|| format!("this build cannot run the step {other:?}"))?;
+                    (Vec::new(), styk_ui::message::update(&mut self.core, styk_core::commands::Command::Stage(event).into()).map(Message::Editor))
+                }
             })
         })();
         outcome.unwrap_or_else(|message| {
@@ -975,7 +1045,7 @@ mod tests {
 
     fn band() -> (TopBand, FixedClock) {
         let fixed = FixedClock::new();
-        let top = match TopBand::new(Size::new(1560.0, 900.0), Arc::new(fixed.clone()), Some(fixed.clone()), Arc::new(styk_platform::spawn::ThreadSpawner), styk_platform::shell::Wakes(Arc::new(|_| {})), None, None) {
+        let top = match TopBand::with_storage(Size::new(1560.0, 900.0), Arc::new(fixed.clone()), Some(fixed.clone()), Arc::new(styk_platform::spawn::ThreadSpawner), Arc::new(styk_services::storage::fake::MemoryStorage::default())) {
             Ok(top) => top,
             Err(error) => panic!("{error}"),
         };
@@ -1065,7 +1135,7 @@ mod tests {
         assert_eq!(fixed.now(), Duration::from_millis(2200));
         assert_eq!(engine_clock(), 2200.0, "the engine reads the same clock");
         // With the real clock there is nothing to advance, and saying so is a failure, not a no-op.
-        let mut real = match TopBand::new(Size::new(1560.0, 900.0), Arc::new(styk_platform::clock::SystemClock::new()), None, Arc::new(styk_platform::spawn::ThreadSpawner), styk_platform::shell::Wakes(Arc::new(|_| {})), None, None) {
+        let mut real = match TopBand::with_storage(Size::new(1560.0, 900.0), Arc::new(styk_platform::clock::SystemClock::new()), None, Arc::new(styk_platform::spawn::ThreadSpawner), Arc::new(styk_services::storage::fake::MemoryStorage::default())) {
             Ok(top) => top,
             Err(error) => panic!("{error}"),
         };
@@ -1163,4 +1233,114 @@ mod tests {
         let _ = top.raw(&arrow(Named::ArrowDown, Modifiers::default()), true);
         assert_eq!(selected(&top), Some(2));
     }
+    // The same stream subscribed by the window, with a generous hang guard instead of synthetic frame polls.
+    fn worker_message(top: &TopBand) -> Message {
+        use iced::futures::Stream;
+        struct Wake(std::sync::mpsc::SyncSender<()>);
+        impl std::task::Wake for Wake { fn wake(self: Arc<Self>) { let _ = self.0.try_send(()); } }
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let waker = std::task::Waker::from(Arc::new(Wake(send)));
+        let mut stream = std::pin::pin!(progress_stream(&top.progress));
+        loop {
+            if let std::task::Poll::Ready(Some(message)) = stream.as_mut().poll_next(&mut std::task::Context::from_waker(&waker)) { return message; }
+            receive.recv_timeout(Duration::from_secs(30)).expect("production worker must wake the subscribed window");
+        }
+    }
+    fn settle_from_workers(top: &mut TopBand) {
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        while !top.idle() {
+            assert!(std::time::Instant::now() < until, "worker completions must settle through the real handler");
+            let message = worker_message(top);
+            let _ = top.update(message);
+        }
+    }
+    #[test]
+    fn pending_document_work_keeps_progress_subscription_without_polling_frames() {
+        use iced::{advanced::subscription::{into_recipes, Event as SubscriptionEvent}, futures::{StreamExt, task::noop_waker}};
+        use styk_services::Spawner;
+        #[derive(Default)]
+        struct HeldDocuments(std::sync::Mutex<Option<styk_services::Job>>);
+        impl Spawner for HeldDocuments {
+            fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+                if name == "styk-documents" { assert!(self.0.lock().unwrap().replace(job).is_none()); Ok(()) }
+                else { styk_platform::spawn::ThreadSpawner.spawn(name, job) }
+            }
+        }
+        struct Release(Arc<HeldDocuments>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                if let Some(job) = self.0.0.lock().unwrap().take() {
+                    styk_platform::spawn::ThreadSpawner.spawn("styk-documents", job).unwrap();
+                }
+            }
+        }
+        // Feed one real redraw to the installed recipes. Inspect emitted messages,
+        // not their number: additional worker subscriptions must remain harmless.
+        let redraw = |top: &TopBand| {
+            let waker = noop_waker();
+            let mut context = std::task::Context::from_waker(&waker);
+            into_recipes(top.subscription()).into_iter().filter_map(|recipe| {
+                let event = SubscriptionEvent::Interaction {
+                    window: window::Id::unique(),
+                    event: Event::Window(window::Event::RedrawRequested(std::time::Instant::now())),
+                    status: iced::event::Status::Ignored,
+                };
+                let input = iced::futures::stream::iter([event]).chain(iced::futures::stream::pending());
+                let mut stream = recipe.stream(Box::pin(input));
+                match stream.as_mut().poll_next(&mut context) {
+                    std::task::Poll::Ready(Some(message)) => Some(message), _ => None,
+                }
+            }).collect::<Vec<_>>()
+        };
+        let held = Arc::new(HeldDocuments::default());
+        let release = Release(held.clone());
+        let clock = FixedClock::new();
+        let mut top = TopBand::with_storage(Size::new(1560., 900.), Arc::new(clock.clone()), Some(clock), held, Arc::new(styk_services::storage::fake::MemoryStorage::default())).unwrap();
+        top.open_all(&[fixture()]);
+        let _ = top.pump();
+        assert!(!top.idle(), "automation must still wait for the pending document");
+        let mut messages = redraw(&top);
+        assert!(!messages.iter().any(|message| matches!(message, Message::Frame)), "pending workers must not poll frames on redraw");
+        top.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false });
+        messages.extend(redraw(&top));
+        assert!(!messages.iter().any(|message| matches!(message, Message::Frame)), "automation also waits for Progress during work");
+        top.run = None;
+        // Preserve any actual worker message consumed while inspecting the subscriptions.
+        for message in messages { let _ = top.update(message); }
+        drop(release);
+        settle_from_workers(&mut top);
+        assert!(top.core.stage().is_some(), "the production Progress handler completes opening without frame polling");
+    }
+
+    #[test]
+    fn mounted_stage_keyboard_uses_registry_and_worker_wake_without_frame_polling() {
+        use styk_design::widgets::testing::Driver;
+        let (mut top, _) = band();
+        top.open_all(&[fixture()]); let _ = top.pump(); settle_from_workers(&mut top);
+        let element = styk_ui::stage::view(&top.core, Theme::Light).expect("published document has the real stage widget");
+        let mut driver = Driver::new(element, Size::new(960.,540.), &styk_design::fonts::ALL);
+        driver.point_at((300.,200.));
+        let mut event = arrow(Named::ArrowRight, Modifiers::default());
+        if let Event::Keyboard(keyboard::Event::KeyPressed { physical_key, key, modified_key, .. }) = &mut event {
+            *physical_key = Physical::Code(iced::keyboard::key::Code::Period);
+            *key = Key::Character(".".into()); *modified_key = key.clone();
+        }
+        let statuses = driver.events(&[event.clone()]);
+        for message in driver.messages() { let _ = top.update(Message::Editor(message)); }
+        let _ = top.update(Message::Raw(event.clone(), statuses[0] == iced::event::Status::Ignored));
+        assert!(top.core.timeline().model().pending, "native command runs on the document worker");
+        settle_from_workers(&mut top);
+        assert_eq!(top.core.documents.active().unwrap().view().unwrap().tick, 1., "physical Period traversed the production adapter, registry, Core and completion handler");
+        assert_eq!(top.core.timeline().model().tick, 1.);
+        // A child that handled its input keeps it: the global adapter must not execute it again.
+        let _ = top.update(Message::Raw(event, false));
+        assert!(!top.core.timeline().model().pending);
+        assert_eq!(top.core.timeline().model().tick, 1.);
+        let _ = top.execute(1, Step::Edit(31)); settle_from_workers(&mut top);
+        assert_eq!(top.core.timeline().model().fps, 31.);
+        assert_eq!(styk_core::testing::undo_depth(&top.core), 1);
+        let _ = top.execute(2, Step::Frame(4.)); settle_from_workers(&mut top);
+        assert_eq!(top.core.documents.active().unwrap().view().unwrap().tick, 4., "automation uses the same session playhead");
+    }
+
 }

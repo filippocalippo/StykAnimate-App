@@ -29,19 +29,13 @@ impl Range {
         let (tick, frame_index) = (crate::inspector::facts::tick(document), crate::inspector::facts::frame_index(document));
         if sheet(document) {
             let mut ticks: Vec<f64> = Vec::with_capacity(chosen.len() + 1);
-            for tick in chosen.iter().map(|tick| *tick as f64).chain(std::iter::once(tick)) {
-                if !ticks.contains(&tick) {
-                    ticks.push(tick);
-                }
-            }
+            ticks.extend(chosen.iter().map(|tick| tick as f64));
+            if !ticks.contains(&tick) { ticks.push(tick); }
             return Some(Range { indices: vec![frame_index], sheet_ticks: Some(ticks) });
         }
         let mut indices: Vec<usize> = Vec::with_capacity(chosen.len() + 1);
-        for index in chosen.iter().copied().chain(std::iter::once(frame_index)) {
-            if !indices.contains(&index) {
-                indices.push(index);
-            }
-        }
+        indices.extend(chosen.iter());
+        if !indices.contains(&frame_index) { indices.push(frame_index); }
         Some(Range { indices, sheet_ticks: None })
     }
 

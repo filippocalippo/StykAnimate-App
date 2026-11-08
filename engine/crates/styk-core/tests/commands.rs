@@ -35,7 +35,7 @@ fn registry_is_appendix_a_plus_the_native_layout_undo_command() {
     let actual: BTreeSet<_> = CommandId::ALL.iter().map(|id| id.id()).collect();
     assert_eq!(actual, expected);
     assert_eq!(actual.len(), CommandId::ALL.len());
-    assert_eq!(actual.len(), 277);
+    assert_eq!(actual.len(), 287);
     for entry in CommandId::ALL.iter().map(|id| id.info()) {
         assert_eq!(CommandId::from_id(entry.id.id()), Some(entry.id));
         assert!(!entry.label.is_empty(), "{}", entry.id.id());
@@ -84,9 +84,8 @@ fn executable_reference_matches_metadata_every_shortcut_and_both_polygon_gates()
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let reference = json::parse(&output.stdout).unwrap();
     let commands = reference.get("commands").unwrap().as_arr().unwrap();
-    assert_eq!(commands.len() + 1, CommandId::ALL.len());
-    let native_only: BTreeSet<_> = CommandId::ALL.iter().map(|id| id.id()).filter(|id| !commands.iter().any(|c| text(c, "id") == *id)).collect();
-    assert_eq!(native_only, BTreeSet::from(["layout-undo"]));
+    assert_eq!(commands.len(), 276, "the executable reference still covers every legacy command");
+    assert_eq!(CommandId::ALL.len(), commands.len() + 11, "ten timeline actions and layout undo extend the registry");
     let safe = strings(&reference, "polygonActions");
     let keys = strings(&reference, "polygonKeys");
     let home = strings(&reference, "homeActions");

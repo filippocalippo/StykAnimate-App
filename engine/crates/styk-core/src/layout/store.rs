@@ -749,13 +749,23 @@ pub struct SaveQueue {
     closing: bool,
 }
 impl SaveQueue {
+    /// Expedite an ordinary save without switching to final-drain failure policy.
+    pub fn expedite(&mut self, now: u64) {
+        if let Some((at, _)) = &mut self.pending { *at = now; }
+    }
+    pub fn idle(&self) -> bool { self.pending.is_none() && self.in_flight.is_none() }
     pub fn changed(&mut self, now: u64, bytes: Vec<u8>) -> Result<(), LayoutError> {
         if bytes.len() > MAX_BYTES {
             return Err(LayoutError::Limit);
         }
+        self.replace(now, bytes);
+        Ok(())
+    }
+    /// Reuse the same scheduling/backoff when an owner holds its typed payload elsewhere.
+    pub(crate) fn mark_changed(&mut self, now: u64) { self.replace(now, Vec::new()); }
+    fn replace(&mut self, now: u64, bytes: Vec<u8>) {
         self.pending = Some((if self.closing { now } else { now.saturating_add(SAVE_DELAY_MS) }, bytes));
         self.retry_ms = 0;
-        Ok(())
     }
     /// When the runtime must wake to take the next write: the debounce or the retry delay of the newest pending edit.
     /// `None` while a write is in flight (its completion is the wake) or nothing is pending.

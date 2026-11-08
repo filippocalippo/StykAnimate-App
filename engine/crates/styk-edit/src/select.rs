@@ -276,6 +276,9 @@ impl Editor {
 
     pub(crate) fn seek(&mut self, tick: f64) -> Result<Value, EditError> { self.seek_checked(tick,&mut || Ok(())) }
     pub(crate) fn seek_checked(&mut self, tick: f64, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<Value, EditError> {
+        self.seek_options_checked(tick, false, check)
+    }
+    pub(crate) fn seek_options_checked(&mut self, tick: f64, beyond: bool, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<Value, EditError> {
         check()?;
         if !tick.is_finite() {
             return Err(crate::transform::not_finite("Timeline tick"));
@@ -284,7 +287,7 @@ impl Editor {
             self.commit_drag_checked(check)?;
         }
         let rows = rows(&self.report);
-        let next = tick.clamp(0.0, (total_ticks(&rows) - 1.0).max(0.0));
+        let next = tick.clamp(0.0, if beyond { 10_000_000.0 } else { (total_ticks(&rows) - 1.0).max(0.0) });
         let index = rows.partition_point(|r| r.start <= next).saturating_sub(1);
         self.tick = next;
         self.frame_index = index;

@@ -14,6 +14,9 @@ use styk_services::{Clock, FixedClock, Cancel};
 use styk_services::recovery::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[path = "timeline_quit_tests.rs"]
+mod timeline;
+
 #[derive(Default)]
 struct Gate { fail: AtomicBool, pause: AtomicBool, ignore_cancel: AtomicBool, after_commit: AtomicBool, read_only: AtomicBool, observer: std::sync::Mutex<Option<mpsc::SyncSender<()>>>, wake: iced::futures::task::AtomicWaker }
 impl Gate { fn release(&self) { self.pause.store(false, Ordering::SeqCst); self.wake.wake(); } }
@@ -113,6 +116,9 @@ impl Runtime {
         Self::with_layouts(None)
     }
     fn with_layouts(layouts: Option<Arc<dyn styk_services::storage::Storage>>) -> Self {
+        Self::with_preferences(layouts, None)
+    }
+    fn with_preferences(layouts: Option<Arc<dyn styk_services::storage::Storage>>, settings: Option<Arc<dyn styk_services::storage::Storage>>) -> Self {
         let root = Root::new(); let wakes = wakes::Wakes::new();
         let shell::Start::Run(shell) = shell::start(&[], true, &wakes.callback()) else { panic!("sandbox shell") };
         let (outcome, receive) = mpsc::sync_channel(1);
@@ -120,11 +126,14 @@ impl Runtime {
         let clock = FixedClock::new(); let callback = wakes.callback();
         let gate = Arc::new(Gate::default());
         let store = Arc::new(Store { local: styk_platform::recovery::LocalRecovery::new(root.0.clone()), gate: gate.clone() });
-        app.band = top_band::TopBand::new(WINDOW, Arc::new(clock.clone()), None, Arc::new(styk_platform::spawn::ThreadSpawner), callback, Some(store), layouts.map(|store| Arc::new(styk_core::layout::LayoutStore::new(store)))).unwrap();
+        app.band = top_band::TopBand::new(WINDOW, Arc::new(clock.clone()), None, Arc::new(styk_platform::spawn::ThreadSpawner), callback, Some(store), layouts.map(|store| Arc::new(styk_core::layout::LayoutStore::new(store))), settings).unwrap();
         app.band.core.documents.set_autosave_seconds(0.0);
         app.strategy = None; // Test the interactive guard without a real profile or a visible window.
         let (signal, ready) = mpsc::sync_channel(1);
-        Self { app, root, clock, gate, checkpoint_finished: false, stream: Box::pin(wake_stream(&wakes)), messages: VecDeque::new(), signal: waker(Arc::new(Signal(signal))), ready, _outcome: receive }
+        let streams = iced::advanced::subscription::into_recipes(app.subscription()).into_iter()
+            .map(|recipe| recipe.stream(Box::pin(iced::futures::stream::pending())));
+        let stream = Box::pin(iced::futures::stream::select_all(streams));
+        Self { app, root, clock, gate, checkpoint_finished: false, stream, messages: VecDeque::new(), signal: waker(Arc::new(Signal(signal))), ready, _outcome: receive }
     }
     fn task(&mut self, task: Task<Message>) {
         let view = iced::widget::stack![self.app.band.wake_widget(), self.app.band.overlay_layer(Theme::Light)].map(Message::Band).boxed();

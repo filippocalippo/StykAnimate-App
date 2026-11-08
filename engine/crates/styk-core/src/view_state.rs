@@ -35,7 +35,11 @@ pub struct ViewState {
     apply_range: bool,
     /// The frames chosen on the timeline, which Edit together reaches: ticks on a layer sheet (`timelineUI.selectedTicks`),
     /// keyframe indices on a classic document (`state.rangeIndices`).
-    range: Vec<usize>,
+    range: crate::timeline::Selection,
+    range_epoch: u64,
+    // Derived edit targets, resolved off-thread from the canonical selection and its current revision.
+    edit_range: crate::timeline::Selection,
+    layers: std::sync::Arc<[String]>,
     /// A Draw tool is active: the Inspector shows its options.
     drawing: Option<&'static str>,
 }
@@ -63,7 +67,7 @@ impl ViewState {
     pub fn apply_range(&self) -> bool {
         self.apply_range
     }
-    pub fn range(&self) -> &[usize] {
+    pub fn range(&self) -> &crate::timeline::Selection {
         &self.range
     }
     pub fn drawing(&self) -> Option<&'static str> {
@@ -93,14 +97,24 @@ impl ViewState {
 
     /// The frames chosen on the timeline, in the order the timeline reports them; duplicates collapse.
     pub fn set_range(&mut self, chosen: Vec<usize>) {
-        let mut frames: Vec<usize> = Vec::with_capacity(chosen.len());
-        for frame in chosen {
-            if !frames.contains(&frame) {
-                frames.push(frame);
-            }
-        }
+        self.set_timeline_selection(crate::timeline::Selection::items(chosen));
+        self.edit_range = self.range.clone();
+    }
+    pub(crate) fn range_epoch(&self) -> u64 { self.range_epoch }
+    pub fn edit_range(&self) -> &crate::timeline::Selection { &self.edit_range }
+    pub(crate) fn resolve_range(&mut self, range: crate::timeline::Selection) -> crate::timeline::Selection {
+        self.bump(); std::mem::replace(&mut self.edit_range, range)
+    }
+    pub fn layers(&self) -> &[String] { &self.layers }
+    pub fn layer_selection(&self) -> std::sync::Arc<[String]> { self.layers.clone() }
+    pub fn set_layers(&mut self, mut layers: Vec<String>) {
+        let mut seen = std::collections::HashSet::new(); layers.retain(|id| seen.insert(id.clone()));
+        if self.layers.as_ref() != layers { self.layers = layers.into(); self.range_epoch = self.range_epoch.wrapping_add(1); self.bump(); }
+    }
+    pub fn set_timeline_selection(&mut self, frames: crate::timeline::Selection) {
         if self.range != frames {
             self.range = frames;
+            self.range_epoch = self.range_epoch.wrapping_add(1);
             self.bump();
         }
     }
@@ -113,7 +127,7 @@ impl ViewState {
     }
 
     /// `rangeFrames()`: the frames an edit reaches while Edit together is on and two or more are chosen.
-    pub fn range_frames(&self) -> Option<&[usize]> {
-        (self.apply_range && self.range.len() > 1).then_some(self.range.as_slice())
+    pub fn range_frames(&self) -> Option<&crate::timeline::Selection> {
+        (self.apply_range && self.edit_range.len() > 1).then_some(&self.edit_range)
     }
 }

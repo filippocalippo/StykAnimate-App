@@ -22,6 +22,7 @@ struct Shared<I, O> {
 pub struct Worker<I: Send + 'static, O: Send + 'static> {
     shared: Arc<Shared<I, O>>,
     wake: SyncSender<()>,
+    notify: Arc<dyn Fn() + Send + Sync>,
 }
 
 impl<I: Send + 'static, O: Send + 'static> Worker<I, O> {
@@ -29,6 +30,7 @@ impl<I: Send + 'static, O: Send + 'static> Worker<I, O> {
         let shared = Arc::new(Shared { state: Mutex::new(State { input: None, output: None, retired: None, busy: false }), stopping: AtomicBool::new(false), final_owner: AtomicPtr::new(ptr::null_mut()) });
         let (wake, receive) = sync_channel(1);
         let worker = shared.clone();
+        let retry = notify.clone();
         spawner.spawn(name, Box::new(move || {
             // Only this background task waits. No resource is freed while the exchange is locked.
             while receive.recv().is_ok() {
@@ -62,12 +64,12 @@ impl<I: Send + 'static, O: Send + 'static> Worker<I, O> {
                 drop(unsafe { Box::from_raw(final_owner) });
             }
         }))?;
-        Ok(Self { shared, wake })
+        Ok(Self { shared, wake, notify: retry })
     }
 
     /// A refusal gives the input back. Nothing is submitted and no terminal request is silently lost.
     pub fn submit(&self, input: I) -> Result<(), I> {
-        let Ok(mut state) = self.shared.state.try_lock() else { return Err(input); };
+        let Ok(mut state) = self.shared.state.try_lock() else { (self.notify)(); return Err(input); };
         if state.busy || self.shared.stopping.load(Ordering::Acquire) { return Err(input); }
         state.busy = true;
         state.input = Some(input);
@@ -78,14 +80,14 @@ impl<I: Send + 'static, O: Send + 'static> Worker<I, O> {
 
     /// Poll at most one completion. A contended exchange is simply not ready this frame.
     pub fn take(&self) -> Option<O> {
-        let mut state = self.shared.state.try_lock().ok()?;
+        let Ok(mut state) = self.shared.state.try_lock() else { (self.notify)(); return None; };
         let output = state.output.take()?;
         state.busy = false;
         Some(output)
     }
 
     pub fn retire(&self, value: Vec<Retired>) -> Result<(), Vec<Retired>> {
-        let Ok(mut state) = self.shared.state.try_lock() else { return Err(value); };
+        let Ok(mut state) = self.shared.state.try_lock() else { (self.notify)(); return Err(value); };
         if state.retired.is_some() { return Err(value); }
         state.retired = Some(value);
         drop(state);
@@ -109,6 +111,35 @@ impl<I: Send + 'static, O: Send + 'static> Worker<I, O> {
 
 impl<I: Send + 'static, O: Send + 'static> Drop for Worker<I, O> {
     fn drop(&mut self) { self.stop(None); }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    #[derive(Default)]
+    struct Queued(Mutex<Option<crate::Job>>);
+    impl Spawner for Queued {
+        fn spawn(&self, _: &str, job: crate::Job) -> Result<(), SpawnError> {
+            *self.0.lock().unwrap() = Some(job); Ok(())
+        }
+    }
+    #[test]
+    fn contended_exchange_retains_operands_and_notifies_retry_without_waiting() {
+        let spawner = Queued::default();
+        let notified = Arc::new(AtomicUsize::new(0));
+        let count = notified.clone();
+        let worker = Worker::start(&spawner, "exchange", |n: u32| n, Arc::new(move || { count.fetch_add(1, Ordering::SeqCst); })).unwrap();
+        let guard = worker.shared.state.lock().unwrap();
+        assert_eq!(worker.submit(7), Err(7));
+        assert_eq!(worker.take(), None);
+        assert_eq!(worker.retire(vec![Box::new(9u32)]).err().unwrap().len(), 1);
+        assert_eq!(notified.load(Ordering::SeqCst), 3, "each refused exchange must schedule its retry even with no running job");
+        drop(guard);
+        assert!(worker.submit(7).is_ok());
+        assert_eq!(worker.take(), None);
+        assert_eq!(notified.load(Ordering::SeqCst), 3, "an ordinary pending result must not busy-poll");
+    }
 }
 
 struct FutureWake(SyncSender<()>);

@@ -30,7 +30,7 @@ them headless, and each area's "Screens and states to capture" table lists their
 | Desktop main process, shell, web build and platform features | DK | 112 |
 | Documents and the engine host | DO | 94 |
 | Gaps found by the coverage check | GP | 10 |
-| Appendix A: every command | CMD | 276 |
+| Appendix A: every command | CMD | 286 |
 | Appendix B: every desktop IPC channel | IPC | 129 |
 | Appendix C: every stylesheet | CSS | 93 |
 | **Feature rows (areas and gaps)** | | **1270** |
@@ -3278,6 +3278,16 @@ Generated from `src/ui/command-catalog.mjs` (`COMMAND_CATALOG`) and `src/hotkeys
 | CMD-274 | `zoom-out` | Zoom out | view | Minus | global |  |  | styk-core::commands; styk-core::stage | todo |
 | CMD-275 | `zoom-reset` | Fit canvas | view | Shift+Digit1 | global |  |  | styk-core::commands; styk-core::stage | todo |
 | CMD-276 | `zoom-selection` | Fit selection | view | Shift+Digit2 | global |  |  | styk-core::commands; styk-core::stage | todo |
+| CMD-277 | `timeline-simple` | Simple mode | animation |  |  | animate |  | styk-core::timeline | core part 1 |
+| CMD-278 | `timeline-advanced` | Advanced mode | animation |  |  | animate |  | styk-core::timeline | core part 1 |
+| CMD-279 | `timeline-go-to-frame` | Go to frame | animation |  |  | animate |  | styk-core::timeline | core part 1 |
+| CMD-280 | `timeline-playback-range` | Playback range | animation |  |  | animate |  | styk-core::timeline | core part 1 |
+| CMD-281 | `timeline-set-fps` | Set FPS | animation |  |  | animate | not in palette | styk-core::timeline | core part 1 |
+| CMD-282 | `timeline-seek` | Seek | animation |  |  | animate | not in palette | styk-core::timeline | core part 1 |
+| CMD-283 | `timeline-select-layer` | Select layer | animation |  |  | animate | not in palette | styk-core::timeline | core part 1 |
+| CMD-284 | `timeline-select-cell` | Select cell | animation |  |  | animate | not in palette | styk-core::timeline | core part 1 |
+| CMD-285 | `timeline-select-card` | Select card | animation |  |  | animate | not in palette | styk-core::timeline | core part 1 |
+| CMD-286 | `timeline-scrub` | Scrub | animation |  |  | animate | not in palette | styk-core::timeline | core part 1 |
 
 ## Appendix B: every desktop IPC channel (IPC)
 

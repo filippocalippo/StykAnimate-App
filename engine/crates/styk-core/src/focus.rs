@@ -168,6 +168,9 @@ impl FocusState {
     pub fn focused(&self) -> Option<FocusId> {
         self.focused
     }
+    pub fn area(&self) -> Option<FocusArea> {
+        self.focused.and_then(|id| self.find(id)).map(|(_, target)| target.area)
+    }
 
     pub fn focused_area(&self) -> Option<FocusArea> {
         self.focused.and_then(|id| self.find(id)).map(|(_, target)| target.area)

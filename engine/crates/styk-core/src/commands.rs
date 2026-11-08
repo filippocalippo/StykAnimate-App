@@ -20,6 +20,17 @@ use crate::{i18n::Msg, inspector};
 /// What the interface asks the core to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    /// Settle the editor before the shell performs a tab/workspace/history transition.
+    Shell(crate::shell::Event),
+    /// Retain quit through panel settlement, then ask the recovery/document owner for clearance.
+    Quit,
+    KeyPressed { chord: crate::text_entry::Chord, repeat: bool, prevented: bool },
+    KeyReleased { key: String, cancelled: bool },
+    Blur,
+    Timeline(crate::timeline::Event),
+    Settings(crate::settings::Event),
+    /// Application clock or a coalesced worker wake. Every owner shares this dispatch entry.
+    Wake { now: u64 },
     Overlay { event: crate::overlay::host::Event, now: u64 },
     /// A registry command (a button, a menu item, a shortcut, a quick action, an automation step).
     Run(CommandId),
@@ -54,6 +65,8 @@ pub enum Severity {
 /// change). Effects carry plain data, never a borrowed document.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
+    ShellReady(crate::shell::Event),
+    SettingsChanged(crate::settings::Change),
     /// One bounded documents poll; subsequent progress follows host notifications/deadlines.
     PollDocuments,
     QuitReady,

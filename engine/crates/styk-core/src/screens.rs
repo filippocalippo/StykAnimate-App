@@ -128,7 +128,7 @@ pub fn core_with_document(bytes: &[u8], name: &str, spawner: Arc<dyn Spawner>, w
     let id = documents.open(prepared).map_err(|(error, _)| error.to_string())?;
     let startup = styk_doc::json::parse(STARTUP).map_err(|error| error.to_string())?;
     documents
-        .attach_host(HostOptions { engine: opener, spawner: spawner.clone(), files: Arc::new(styk_services::files::fake::MemoryFiles::default()), startup, clock: || 0.0, notify: Arc::new(|| {}) })
+        .attach_host(HostOptions { engine: opener, spawner: spawner.clone(), files: Arc::new(styk_services::files::fake::MemoryFiles::default()), startup, clock: || 0.0, notify: wake.clone() })
         .map_err(|error| format!("{error:?}"))?;
     let mut core = Core::new(documents);
     core.set_facts(Facts::start(spawner.as_ref(), wake).map_err(|error| error.0)?);
@@ -240,7 +240,8 @@ pub fn stage_gated(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Cloc
 #[cfg(feature = "engine")]
 fn build_stage(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, viewport: crate::stage::Viewport, gate: Option<Arc<Gate>>) -> Result<Core, String> {
     let progress = crate::stage::Progress::new();
-    let (mut core, publication) = core_with_document(STARTUP, "Reference.styk", spawner.clone(), Arc::new(|| {}))?;
+    let (mut core, publication) = core_with_document(STARTUP, "Reference.styk", spawner.clone(), progress.wake())?;
+    core.start_timeline(spawner.as_ref(), progress.wake()).map_err(|error| error.to_string())?;
     let document = core.documents.active().ok_or("no document is open")?;
     let (id, lineage, revision) = (document.id(), document.lineage(), document.revision());
     let published: Arc<dyn FrameDocument> = publication;

@@ -25,6 +25,13 @@ pub struct HostOptions {
 
 pub(super) struct EngineLifetime(Engine);
 impl Drop for EngineLifetime { fn drop(&mut self) { self.0.stop(); } }
+struct PublishedFrames { lifetime: Arc<EngineLifetime>, lineage: u64 }
+impl crate::frames::FrameDocument for PublishedFrames {
+    fn snapshot(&self, revision: u64, epoch: u64) -> Option<Arc<styk_engine::Generation>> {
+        self.lifetime.0.generation().filter(|g| epoch == 0 && g.lineage == self.lineage && g.revision == revision)
+    }
+    fn picture_engine(&self) -> Option<Engine> { Some(self.lifetime.0.clone()) }
+}
 
 pub enum Request {
     Recovery(recovery::Command),
@@ -97,7 +104,7 @@ struct CallWork { session: Box<Session>, method: String, args: Vec<Value>, view:
 enum Input {
     Call(Box<CallWork>),
     Bytes(Arc<[u8]>, String), File(FileTarget), Tree(Value, String),
-    Save { tree: Value, name: String, original_first: bool, target: FileTarget },
+    Save { snapshot: Box<dyn FnOnce() -> Value + Send>, name: String, original_first: bool, target: FileTarget },
     Publish { lineage: u64, tree: Value, revision: u64, views: Option<Arc<styk_eval::eval::Prepared>> },
     Leave { tree: Value },
 }
@@ -214,7 +221,8 @@ fn execute(options: &HostOptions, work: Work) -> Reply {
                 let opened = options.engine.open_document(OpenSource::Tree { document, name: &name }, OpenOptions { layer_timeline: true }, cancel).map_err(HostError::from)?;
                 PreparedDocument::prepare(opened, true, cancel).map(Output::Open).map_err(HostError::from)
             }
-            Input::Save { tree, name, original_first, target } => {
+            Input::Save { snapshot, name, original_first, target } => {
+                let tree = snapshot();
                 // No helper is borrowed until an engine worker pool has explicitly supplied one.
                 let host = EngineHost { engine: Some(&options.engine), cancel, clock: options.clock, helpers: 0, aside: false };
                 let written = save_project(&[tree], &[], ProjectRequest { reservation: None, name: Some(name), original_first }, &host).map_err(HostError::from)?;
@@ -241,6 +249,12 @@ fn import_limit(name: &str) -> usize {
 }
 
 impl Documents {
+    /// A publication adapter, never a second store. Only frame workers call snapshot.
+    pub fn frame_source(&self, id: DocumentId) -> Option<Arc<dyn crate::frames::FrameDocument>> {
+        let host = self.host.as_ref()?;
+        let lineage = self.get(id)?.lineage();
+        Some(Arc::new(PublishedFrames { lifetime: host.lifetime.clone(), lineage }))
+    }
     /// Start the bounded document lane before accepting work; a refused spawn leaves this owner unchanged.
     pub fn attach_host(&mut self, options: HostOptions) -> Result<(), HostError> {
         if self.host.is_some() { return Err(DocumentsError::Busy.into()); }
@@ -452,7 +466,7 @@ impl Documents {
         let tab = self.get(id).ok_or(DocumentsError::NotOpen)?;
         let stamp = Stamp::of(tab);
         if !tab.scopes.is_empty() || tab.view()?.editing { return Err(DocumentsError::FinishEdit.into()); }
-        let input = Input::Save { tree: tab.records()?.clone(), name: tab.project_name().to_owned(), original_first: tab.original_first(), target: target.clone() };
+        let input = Input::Save { snapshot: Box::new(tab.prepared.session.get()?.native_save_snapshot()), name: tab.project_name().to_owned(), original_first: tab.original_first(), target: target.clone() };
         let host = self.host()?;
         host.start(Action::Save { stamp, target }, input).map_err(|(error, input)| { host.retired.push(Box::new(input)); error })
     }

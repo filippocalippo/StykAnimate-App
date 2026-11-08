@@ -936,7 +936,7 @@ impl Editor {
             "selectPolygon" => self.select_polygon(select::index(args.first()).and_then(|id| u32::try_from(id).ok()), select::index(args.get(1))).map(Value::Bool),
             "toggleSegment" => self.toggle_segment(select::index(args.first()).and_then(|id| u32::try_from(id).ok()), select::index(args.get(1))).map(Value::Bool),
             "selectBranch" => self.select_branch(select::index(args.first()).and_then(|id| u32::try_from(id).ok()), select::index(args.get(1))).map(Value::Bool),
-            "seek" | "@seek" => self.seek_checked(arg(0).as_f64().unwrap_or(0.0),check),
+            "seek" | "@seek" => self.seek_options_checked(arg(0).as_f64().unwrap_or(0.0), arg(1).get("allowBeyondEnd").is_some_and(Value::truthy), check),
             "beginDrag" => {
                 let translation = match arg(1).get("scope").and_then(Value::as_str) {
                     None | Some("selection") => false,

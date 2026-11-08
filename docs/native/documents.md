@@ -207,6 +207,12 @@ open runs. A project the tabs refuse comes back as a failure and is disposed of 
 commands (Save, Close, New, Rename) are still dropped until the command registry and the dialogs exist; `Event::Closed`
 tells the band when a project closed.
 
+K-timeline adds `Core::dispatch_document` as the shared panel lifecycle barrier and
+`Core::poll_document` as the completion adapter. The band now also polls from its coalesced
+worker Progress subscription. Native `@timeline` batches reuse the exclusive session worker;
+ready completion drives the stage and never creates a second session or history. The host exposes
+a revision/lineage-checked `FrameDocument` adapter over its existing publication. See [timeline.md](timeline.md).
+
 The recovery panel retains a refused Quit or prompt response until a documents-host progress wake;
 `Core::documents_progress` makes one retry, following the `continue_save` pattern. It never consumes
 a visible prompt on Busy. K-shell currently has no save-file dialog consumer, so its close prompt

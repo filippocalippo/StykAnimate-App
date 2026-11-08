@@ -53,12 +53,14 @@ pub mod recovery;
 pub mod range;
 pub mod roving;
 pub mod screens;
+pub mod settings;
 #[cfg(feature = "engine")]
 pub mod selection_actions;
 pub mod shell;
 pub mod shortcuts;
 pub mod stage;
 pub mod text_entry;
+pub mod timeline;
 #[cfg(feature = "engine")]
 pub mod text;
 #[cfg(feature = "testing")]

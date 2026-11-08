@@ -179,17 +179,21 @@ request (`Request::Recovery(Command::..)`, `Request::Respond`); nothing in a vie
 accepted, and Save/Discard/Cancel and recovery finish before `QuitReady` grants window exit. The documents host fences edits
 from accepted Save/Discard through cleanup and window teardown; the core uses that permission for all input commands. A failed
 or cancelled save releases the fence with its continuation. The fence also covers the later preference drain. An ordinary quit
-flushes the layout `SaveQueue` without its debounce, waits for its worker receipt, then drains the shell's ordered
-window-placement lane and ends. Placement includes a previously debounced write still waiting on the profile lock,
-plus the newest coalesced frame. Its receipt resumes the same quit sequence through `Wake::WindowState`; the quit
-fence rejects late window samples as well as document edits. A failed final placement write is reported before exit.
-A refused final layout write abandons the proposal while atomic
-storage preserves the last complete file, including layouts a later launch needs. Session end retains its identity after the
-checkpoint: once documents grant `QuitReady` (including bound expiry), the app cancels and detaches layout work,
-cancels the shell's active placement token, discards its pending snapshot, releases the shutdown block and ends immediately.
-Cancellation wakes an OS-lock wait; both placement workers retire asynchronously, with no join on the interface thread.
-A session request during an already approved ordinary quit
+starts both the layout `SaveQueue` flush and Settings `Event::Finish` without debounce, waits for both worker receipts,
+then drains the shell's ordered window-placement lane and ends. Both flushes are maintenance admitted under the core's
+edit fence; input remains fenced, and maintenance wakes cannot replay deferred edits. Placement includes a previously
+debounced write still waiting on the profile lock, plus the newest coalesced frame. Its receipt resumes the same quit
+sequence through `Wake::WindowState`; the quit fence rejects late window samples as well as document edits. A failed
+final placement write is reported before exit. A refused final layout or Settings write abandons only the proposal while
+atomic storage preserves the last complete file, including layouts and preferences a later launch needs. Session end
+retains its identity after the checkpoint: once documents grant `QuitReady` (including bound expiry), the app cancels and
+detaches layout and Settings work, cancels the shell's active placement token, discards its pending snapshot, releases the
+shutdown block and ends immediately. Cancellation wakes an OS-lock wait; the placement and storage workers retire
+asynchronously, with no join on the interface thread. A session request during an already approved ordinary quit
 also takes this path. Neither preference lane extends the platform-derived session bound; detached replies cannot restart quit.
+The app regression `dirty_quit_discards_then_drains_settings_and_layout_under_the_same_fence_and_session_bound`
+drives the mounted Discard button with a dirty document and both preference writes pending. It checks successful drain,
+Settings refusal preserving the old file, and session end cancelling both lanes. Removing Settings from this order must fail it.
 
 **OS session end.** The platform window subclass translates `WM_QUERYENDSESSION` and a forced
 `WM_ENDSESSION` into the same guarded quit. Query replies immediately with refusal while it posts

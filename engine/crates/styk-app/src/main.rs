@@ -183,11 +183,12 @@ impl App {
         let recovery = (screen.is_none() && strategy.is_none() && launch.automation.is_none()).then(|| shell.recovery_directory()).flatten();
         let recovery = recovery.map(|path| Arc::new(styk_platform::recovery::LocalRecovery::new(path)) as Arc<dyn styk_services::recovery::Recovery>);
         let spawner: Arc<dyn styk_services::Spawner> = Arc::new(styk_platform::spawn::ThreadSpawner);
-        // Screens and unattended runs must not read or change the person's layout.
-        let layouts = if screen.is_none() && strategy.is_none() {
-            Some(Arc::new(styk_core::layout::LayoutStore::new(Arc::new(styk_platform::storage::LocalStorage::for_user(spawner.as_ref()).map_err(|error| error.to_string())?))))
+        // Screens and unattended runs never read or change the person's preferences.
+        let preferences: Option<Arc<dyn styk_services::storage::Storage>> = if screen.is_none() && strategy.is_none() && launch.automation.is_none() {
+            Some(Arc::new(styk_platform::storage::LocalStorage::for_user(spawner.as_ref()).map_err(|error| error.to_string())?))
         } else { None };
-        let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, spawner, wakes.callback(), recovery, layouts)?;
+        let layouts = preferences.clone().map(|store| Arc::new(styk_core::layout::LayoutStore::new(store)));
+        let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, spawner, wakes.callback(), recovery, layouts, preferences)?;
         band.show_screen(band_screen);
         Ok(App {
             sheet,
@@ -314,7 +315,7 @@ impl App {
         // otherwise acquire unsaved work after the person's Save/Discard answer.
         // Worker receipts and deadlines still run until the window has ended.
         if self.quit_cleared && !matches!(&message,
-            top_band::Message::Layouts | top_band::Message::Deadline | top_band::Message::Documents
+            top_band::Message::Layouts | top_band::Message::Deadline | top_band::Message::Documents | top_band::Message::Progress
             | top_band::Message::Editor(styk_ui::Message::PollDocuments | styk_ui::Message::QuitReady | styk_ui::Message::SessionCheckpointFinished)
         ) { return Task::none(); }
         let (requests, task) = self.band.update(message);
@@ -330,7 +331,7 @@ impl App {
                 top_band::Request::SessionCheckpointFinished => {
                     if let Some(chrome) = &self.chrome { chrome.finish_session_checkpoint(); }
                 }
-                top_band::Request::LayoutProgress => {
+                top_band::Request::PreferencesProgress => {
                     if self.quit_cleared { tasks.push(self.close()); }
                 },
                 top_band::Request::Resize(size) => tasks.extend(self.window.map(|id| iced_window::resize(id, size))),
@@ -447,9 +448,12 @@ impl App {
             return self.band.ask_to_quit().map(Message::Band);
         }
         if self.band.core.session_end_requested() { return self.finish_session_quit(); }
-        // Documents granted QuitReady. Flush the layout queue once; worker
-        // receipts continue this sequence through the shared wake stream.
-        if self.band.flush_layouts() { return Task::none(); }
+        // Documents granted QuitReady. Start both maintenance lanes (the layout queue and Settings), even if one is busy;
+        // their worker receipts continue this sequence through the shared wake stream, and neither admits input. Then the
+        // shell drains its ordered window-placement lane, whose receipt resumes the sequence the same way.
+        let layouts_pending = self.band.flush_layouts();
+        let settings_pending = self.band.flush_settings();
+        if layouts_pending || settings_pending { return Task::none(); }
         match self.shell.flush_window_state(&self.wakes.callback()) {
             Ok(true) => Task::none(),
             result => {
@@ -467,6 +471,7 @@ impl App {
         // an OS shutdown: cancellation leaves the last atomic commit intact.
         self.shell.cancel_window_state();
         self.band.abandon_layouts();
+        self.band.abandon_settings();
         self.closing = true;
         if let Some(chrome) = &self.chrome { chrome.allow_session_end(); }
         self.finish(Outcome::Done)
