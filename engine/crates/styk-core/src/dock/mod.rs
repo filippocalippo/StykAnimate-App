@@ -19,7 +19,7 @@ pub use place::{keyboard_places, zone_label};
 pub use crate::layout::{default_layout, default_timeline_height, set_timeline};
 
 use crate::layout::store::{Entry, ImportResult, LayoutFile, MigrationGeometry, SaveQueue, Stamp, import_v2, state_from_value, state_to_value};
-use crate::layout::{DragSession, Env, Side, GroupId, Layout, LayoutError, LayoutState, Node, NodeId, Operation, PanelId, Rect, Size, Solution, Workspace, Zone, solve};
+use crate::layout::{DragSession, Env, GroupId, Layout, LayoutError, LayoutState, Node, NodeId, Operation, PanelId, Rect, Size, Solution, Workspace, Zone, solve};
 use styk_doc::Value;
 use crate::i18n::Msg;
 
@@ -349,15 +349,9 @@ impl Dock {
         groups.iter().find_map(|id| region(*id, true)).or_else(|| groups.iter().find_map(|id| region(*id, false)))
     }
 
-    /// Where the tool rail's overlay sits over the primary stage (`.studio-rail`: 52 px wide and 220 tall, 12 px inside the stage
-    /// on the side `stage_tools` names, centred on its height; 44 and 187 in a compact or low window).
+    /// The tool rail's overlay rectangle, as placed by the layout solver.
     pub fn tool_rail(&self) -> Option<Rect> {
-        let side = self.layout().stage_tools?;
-        let stage = self.solution.stages.iter().min_by_key(|(panel, _)| (panel.n, panel.kind.clone())).map(|(_, rect)| *rect)?;
-        let compact = self.window.w <= 800.0 || self.window.h <= 568.0;
-        let (w, h) = if compact { (44.0, 187.0) } else { (52.0, 220.0) };
-        let x = if side == Side::Right { stage.x + stage.w - 12.0 - w } else { stage.x + 12.0 };
-        Some(Rect { x, y: (stage.y + stage.h / 2.0 - h / 2.0).round(), w, h })
+        self.solution.tool_rail
     }
 
     /// The panel a pointer press on group `group` at tab `tab` stands for.

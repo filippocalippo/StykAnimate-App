@@ -98,6 +98,9 @@ pub struct Solution {
     pub hosts: BTreeMap<GroupId, Option<FloatId>>,
     pub visible: BTreeSet<PanelId>,
     pub stages: BTreeMap<PanelId, Rect>,
+    /// Tools overlay in the primary visible stage's host coordinates; absent when Tools is docked or no stage is visible.
+    /// Today's rail is 52 x 220 (44 x 187 in a compact/low window), 12 px inside its side and vertically centred.
+    pub tool_rail: Option<Rect>,
     pub strips: BTreeMap<GroupId, Rect>,
     pub sheets: BTreeMap<GroupId, Rect>,
     pub fit: FitState,
@@ -315,6 +318,13 @@ pub fn solve(l: &Layout, e: &Env) -> Solution {
     if l.stage_tools.is_some() && out.visible.iter().any(|p| p.kind == "stage") {
         out.visible.insert(PanelId::new("tools"));
     }
+    out.tool_rail = l.stage_tools.and_then(|side| {
+        let stage = out.stages.iter().min_by_key(|(panel, _)| (panel.n, &panel.kind)).map(|(_, rect)| *rect)?;
+        let compact = w <= 800. || h <= 568.;
+        let (rail_w, rail_h) = if compact { (44., 187.) } else { (52., 220.) };
+        let x = if side == Side::Right { stage.x + stage.w - 12. - rail_w } else { stage.x + 12. };
+        Some(Rect { x, y: (stage.y + stage.h / 2. - rail_h / 2.).round(), w: rail_w, h: rail_h })
+    });
     if l.joined_layers && out.visible.contains(&PanelId::new("timeline")) {
         out.visible.insert(PanelId::new("layers"));
     }
