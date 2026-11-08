@@ -31,6 +31,7 @@ pub mod control;
 
 pub mod inspection;
 pub mod files;
+pub mod recovery;
 pub mod worker;
 pub mod memory;
 
