@@ -20,6 +20,8 @@ pub struct FfmpegVideoService {
     program: PathBuf,
     probed: Mutex<Option<(Capabilities, String)>>,
     gate: Option<ReaderGate>,
+    audio_before_run: Option<std::sync::Arc<dyn Fn(u32) + Send + Sync>>,
+    audio_started: Option<std::sync::Arc<dyn Fn(super::process::ChildGuard) + Send + Sync>>,
 }
 
 /// `\bname\b` as a regular expression would find it in `text`.
@@ -34,13 +36,22 @@ fn has_word(text: &str, name: &str) -> bool {
 
 impl FfmpegVideoService {
     pub fn new(program: impl Into<PathBuf>) -> FfmpegVideoService {
-        FfmpegVideoService { program: program.into(), probed: Mutex::new(None), gate: None }
+        FfmpegVideoService { program: program.into(), probed: Mutex::new(None), gate: None, audio_started: None, audio_before_run: None }
     }
 
     /// For tests: holds the reader of the encoder's progress back until the gate opens.
     #[doc(hidden)]
     pub fn with_progress_reader_gate(mut self, gate: ReaderGate) -> FfmpegVideoService {
         self.gate = Some(gate);
+        self
+    }
+
+    /// Test synchronization: `before_run` sees the suspended child before its first instruction;
+    /// `observer` sees its guard after the cancellation waker is installed.
+    #[doc(hidden)]
+    pub fn with_audio_started(mut self, before_run: impl Fn(u32) + Send + Sync + 'static, observer: impl Fn(super::process::ChildGuard) + Send + Sync + 'static) -> Self {
+        self.audio_before_run = Some(std::sync::Arc::new(before_run));
+        self.audio_started = Some(std::sync::Arc::new(observer));
         self
     }
 
@@ -132,7 +143,9 @@ impl VideoService for FfmpegVideoService {
         let (encoded_width, encoded_height, edge) = codec_dimensions(request.codec, request.width, request.height);
         let layout = FrameLayout { width: request.width, height: request.height, bytes: request.width as usize * request.height as usize * 4, matte: !request.codec.alpha(), legacy_canvas: request.codec.alpha(), encoded: (encoded_width, encoded_height), edge };
         let arguments = FfmpegVideoService::arguments(request, &output.to_string_lossy());
-        let session = Session::start(&self.program, arguments, Kind::Ffmpeg(request.clone()), layout, stage, output, destination, cancel, self.gate.clone())?;
+        let mut session = Session::start(&self.program, arguments, Kind::Ffmpeg(request.clone()), layout, stage, output, destination, cancel, self.gate.clone())?;
+        session.audio_before_run = self.audio_before_run.clone();
+        session.audio_started = self.audio_started.clone();
         Ok(Box::new(session))
     }
 

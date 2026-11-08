@@ -88,6 +88,8 @@ pub(crate) struct Session {
     progress: Arc<Progress>,
     submitted: u32,
     audio: Option<(File, u64)>,
+    pub(crate) audio_before_run: Option<Arc<dyn Fn(u32) + Send + Sync>>,
+    pub(crate) audio_started: Option<Arc<dyn Fn(ChildGuard) + Send + Sync>>,
     total_frames: u32,
 }
 
@@ -202,6 +204,8 @@ impl Session {
             progress,
             submitted: 0,
             audio: None,
+            audio_started: None,
+            audio_before_run: None,
             total_frames,
         })
     }
@@ -517,9 +521,12 @@ impl Session {
         let arguments = args::mux_args(request, &self.output.to_string_lossy(), &mix.to_string_lossy(), &mixed.to_string_lossy());
         let mut command = Command::new(&self.program);
         command.args(&arguments);
-        let (child, mut pipes) = process::spawn(&mut command, false).map_err(|e| VideoError::Unavailable(format!("Native video encoder could not start: {e}")))?;
+        let (child, mut pipes) = process::spawn_with(&mut command, false, &|pid| {
+            if let Some(observer) = &self.audio_before_run { observer(pid); }
+        }).map_err(|e| VideoError::Unavailable(format!("Native video encoder could not start: {e}")))?;
         let killer = child.clone();
         self.cancel.on_cancel(move || killer.terminate());
+        if let Some(observer) = &self.audio_started { observer(child.clone()); }
         // The pass writes nothing to standard output; its standard error is read to the end.
         drop(pipes.stdout.take());
         let mut text = String::new();
