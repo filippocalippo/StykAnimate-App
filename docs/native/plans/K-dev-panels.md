@@ -19,12 +19,17 @@ Sonnet supplies views in step 3. Contracts: [patterns](../patterns.md),
   Capture buffers never enter view models. Existing inspection APIs remain the
   only route to engine data; MP's `MemoryDiagnostics` remains the memory owner.
 - `Core::dock`/`layout` retain placement, open panel membership, layout history,
-  persistence and focus regions. Add an `inspect`-only descriptor registration
+  persistence and focus regions. Add a `devtools`-only descriptor registration
   seam to the existing static `SPECS` lookup, used by validation, restoration and
   solving alike; supply `Developer` descriptors before loading layouts. There is
   no parallel placement map. Reconcile host subscriptions from accepted dock
   state, including close, undo, restore and workspace changes. Release ignores
   unknown developer IDs. Floating windows remain K-dock part 2's responsibility.
+- Every new production-crate extension seam, route and catalogue entry compiles
+  out without `devtools` (not merely `inspect`). The overlay is not registered
+  with the dock: Host owns its requested visibility, reconciled with the dock's
+  solved stage rectangle; the supplied model includes the resulting bounds and
+  visibility. It is an input-transparent stage layer, outside dock placement.
 
 ## Commands, messages and lifecycle
 
@@ -32,8 +37,9 @@ Extend K-cmd's existing registry with feature-gated identities/metadata for pane
 open/close, overlay toggle (F11), capture start/stop/export, and parameter
 set/reset/profile save/load. `Shortcuts` resolves keys; `Core::dispatch` emits a
 guarded extension effect which the real app handler routes to `Host::update`.
-Typed payload events (filters, parameter values, dialog answers) enter that same
-handler. Core carries only extension routing, never a developer-crate dependency
+Typed payload events (filters, parameter values, reset, dialog answers) first
+enter `Core::dispatch`, then its extension effect reaches the handler; the app
+has no direct payload-to-host route. Core carries only extension routing, never a developer-crate dependency
 or a second registry. Models carry `i18n::Msg`/labels; developer catalogue entries
 are gated too. Focus uses the existing owner and dock tree order.
 
@@ -91,6 +97,12 @@ from effective values. Revert means the registered default. Start with the tools
 capture-cap parameter; do not expose unimplemented engine knobs as working controls.
 Registry/profile admission is 256 entries/64 KiB; captures record acknowledged
 changes and initial values. No document edits, history entries or implicit saves.
+The registry belongs to the process runtime, surviving panel and window closure;
+only process shutdown ends its setters. Panel, `--param`, `--params` and channel
+`param.set` share validation and acknowledged application. Startup precedence is
+defaults, then `--params` profiles in argument order, then `--param` overrides in
+argument order (last value wins). Startup completes before runtime mutations are
+accepted; later panel/channel changes apply in accepted command order.
 
 Dock layout is saved only by `LayoutStore`. Named `{name, params, flags}` profiles
 live in `<profile>/devtools/params/`; explicit Save/Load and startup overrides use
@@ -100,7 +112,8 @@ storage runs on workers, operation IDs protect late replies, and a late load may
 not overwrite subsequent edits. Filters, samples and captures are transient;
 closing a panel does not revert applied parameters. No new product settings file.
 
-Views read `PanelDescriptor` (developer mark, title/icon), dock-solved bounds,
+Views read `PanelDescriptor` (developer mark, title/icon), dock-solved panel bounds,
+and Host-supplied overlay visibility and stage bounds (never place the overlay),
 `OverlayModel`, `ProfilerModel`, `LogsModel`, `ParametersModel`, statuses and
 command availability. They never read services, clocks, trace rings or registry
 mutators. Step 2 wires every event/effect/wake in the production handler; actual
@@ -121,4 +134,9 @@ widgets, badges, menus and mounted-widget checks belong to step 3.
   tests/clippy, relevant xtask guards and `cargo xtask check` through the queue.
   Build shipping and developer artifacts separately; run the shipping graph guard
   and `check-release` on each fresh shipping executable with its matching map.
+  Extend graph checks to reject production-crate `devtools` features and binary
+  checks to reject developer routes/catalogue data even without developer-crate
+  symbols. Negative controls deliberately retain a developer route and catalogue
+  entry in a shipping executable and must fail; also test the production payload
+  dispatch route and startup parameter precedence.
   Frozen fixtures and thresholds stay unchanged. Step 1 needs only diff review.
