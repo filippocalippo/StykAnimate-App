@@ -162,6 +162,8 @@ struct Inner {
     stopping: AtomicBool,
     /// [`Budgets::picture_bytes`].
     picture_bytes: usize,
+    /// A headless exporter has no stage picture consumer.
+    preload_stage: bool,
     /// Pages of a document's sprite layout the stage keeps at a time ([`Engine::atlas_pages`]).
     atlas_pages: std::sync::atomic::AtomicU32,
     /// What each tick of the open document draws ([`Engine::request_picture_table`]).
@@ -186,8 +188,18 @@ impl Engine {
         Engine::with_notifier(clock, budgets, None)
     }
 
+    /// A headless document whose only picture consumer is an export. The export
+    /// owns its decode requests; no stage will consume a second decoded copy.
+    pub fn for_export(clock: Clock, budgets: Budgets) -> Engine {
+        Engine::create(clock, budgets, None, false)
+    }
+
     /// An engine that calls `notifier` whenever background work finishes.
     pub fn with_notifier(clock: Clock, budgets: Budgets, notifier: Option<Notifier>) -> Engine {
+        Engine::create(clock, budgets, notifier, true)
+    }
+
+    fn create(clock: Clock, budgets: Budgets, notifier: Option<Notifier>, preload_stage: bool) -> Engine {
         Engine {
             inner: Arc::new(Inner {
                 state: Shared::new(State {
@@ -203,6 +215,7 @@ impl Engine {
                 next_generation: AtomicU64::new(1),
                 stopping: AtomicBool::new(false),
                 picture_bytes: budgets.picture_bytes,
+                preload_stage,
                 atlas_pages: std::sync::atomic::AtomicU32::new(ATLAS_PAGES),
                 picture_table: Default::default(),
                 pictures_refused: Default::default(),

@@ -51,7 +51,7 @@ impl Renderer {
             .saturating_add(self.target_bytes())
             .saturating_add(self.stats.depth_bytes)
             .saturating_add(self.executor.as_ref().map_or(0, |e| e.retained_bytes()));
-        let mut pages = [self.layers[0].pages, self.layers[1].pages];
+        let mut pages = if self.exact_sizes { [0; 2] } else { [self.layers[0].pages, self.layers[1].pages] };
         let mut passes = 1u64;
         for round in &frame.rounds {
             for (depth, &count) in round.pages_per_depth.iter().enumerate().skip(1) {
@@ -61,13 +61,16 @@ impl Renderer {
         }
         let records = &frame.records;
         let effect_size = frame.biggest;
-        // Both layer parities may be replaced; each array has at least two layers.
-        let mut prospective =
-            pixels(page).saturating_mul(u64::from(pages[0].max(2)) + u64::from(pages[1].max(2)));
+        // Match render_planned: inactive exact parities are 1x1 placeholders,
+        // not full-size pages. Keep the old owners above for replacement overlap.
+        let mut prospective = pages.iter().map(|&count| {
+            if self.exact_sizes && count == 0 { 8 } else { pixels(page).saturating_mul(u64::from(count.max(2))) }
+        }).sum::<u64>();
+        let layer_target = if self.exact_sizes && pages == [0; 2] { 0 } else { pixels(page) };
         if self.samples > 1 {
             prospective = prospective.saturating_add(
                 pixels(size)
-                    .saturating_add(pixels(page))
+                    .saturating_add(layer_target)
                     .saturating_mul(self.samples as u64),
             );
         }

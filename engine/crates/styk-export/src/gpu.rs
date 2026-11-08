@@ -24,7 +24,7 @@ use crate::settings::Settings;
 use crate::tiles::{tiles, Tile};
 use crate::view::tile_view;
 
-/// Read-back slots hold at most this many bytes together (at least two slots).
+/// Read-back slots hold at most this many bytes together (at least two where frames overlap).
 pub const READBACK_BYTES: u64 = 64 << 20;
 /// Read-back slots at most.
 pub const MAX_SLOTS: usize = 8;
@@ -68,6 +68,10 @@ impl GpuExport {
         let stride = (size[0] * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let bytes = stride as u64 * size[1] as u64;
         let slots = ((READBACK_BYTES / bytes.max(1)) as usize).clamp(2, MAX_SLOTS);
+        // Native frame_into completes one frame before starting another. More
+        // slots than tiles can never be in flight; browser hosts pipeline frames.
+        #[cfg(not(target_arch = "wasm32"))]
+        let slots = slots.min(tiles.len());
         let readbacks = (0..slots)
             .map(|_| device.create_buffer(&wgpu::BufferDescriptor { label: Some("styk export read-back"), size: bytes, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false }))
             .collect();

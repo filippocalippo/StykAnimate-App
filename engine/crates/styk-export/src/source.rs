@@ -17,6 +17,41 @@ pub enum FrameRenderer {
 }
 
 impl FrameRenderer {
+    /// Uploads a headless engine's export pictures in bounded batches. Pixels
+    /// leave the decode queue as soon as they have been copied to their owner;
+    /// the CPU renderer deliberately retains its source pixels.
+    ///
+    /// Call on a dedicated export thread, with no other thread stepping this
+    /// engine. A pending decode without runnable work is an error, not success.
+    pub fn load_images(&mut self, engine: &styk_engine::Engine, frames: &styk_engine::export::ExportFrames) -> Result<usize, String> {
+        let generation = frames.generation();
+        match self {
+            Self::Gpu(gpu) => { gpu.prepare_sprites(generation.lineage, &generation.assets); }
+            Self::Cpu(cpu) => cpu.use_assets(generation.assets.clone()),
+        }
+        frames.decode_images();
+        let mut count = 0;
+        loop {
+            let images = frames.take_images(crate::resident::UPLOAD_BYTES);
+            count += images.len();
+            if !images.is_empty() {
+                match self {
+                    Self::Gpu(gpu) => {
+                        gpu.upload_images(&generation.assets, images.iter().map(|image| &**image));
+                        // A write_texture also owns a staging copy. Bound that
+                        // lifetime along with the decoded batch, before taking more.
+                        gpu.queue().submit([]);
+                        gpu.device().poll(styk_render::wgpu::PollType::wait_indefinitely()).map_err(|e| e.to_string())?;
+                    }
+                    Self::Cpu(cpu) => cpu.upload_images(&generation.assets, images.iter().cloned()),
+                }
+            }
+            drop(images);
+            if frames.images_pending() == 0 { return Ok(count); }
+            if !engine.step() { return Err("export pictures are pending without runnable decoding work".into()); }
+        }
+    }
+
     /// A handle that ends the frame in progress and every later one, from any thread (wire it to the job's cancel).
     pub fn interrupt(&self) -> crate::Interrupt {
         match self {

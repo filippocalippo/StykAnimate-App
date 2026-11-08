@@ -2839,6 +2839,7 @@ dependencies = [
  "rayon",
  "serde_json",
  "sha2",
+ "styk-alloc",
  "styk-core",
  "styk-devtools-engine",
  "styk-doc",
@@ -2852,6 +2853,7 @@ dependencies = [
  "styk-raster",
  "styk-render",
  "styk-services",
+ "styk-trace",
  "windows",
 ]
 

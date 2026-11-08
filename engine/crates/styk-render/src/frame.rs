@@ -407,11 +407,22 @@ impl Renderer {
         uniform_data[o..o + std::mem::size_of::<GpuView>()].copy_from_slice(bytemuck::bytes_of(&v));
         self.queue.write_buffer(&self.uniforms, 0, &uniform_data);
 
+        // An atlas is shared by every depth of its parity. Size it once for
+        // this frame, not once per depth (which would discard earlier capacity).
+        let mut layer_pages = [0; 2];
         for depth in 1..=max_depth {
-            let pages = rounds.iter().map(|round| round.pages_per_depth[depth as usize]).max().unwrap_or(0);
+            let parity = depth as usize % 2;
+            layer_pages[parity] = layer_pages[parity].max(rounds.iter().map(|round| round.pages_per_depth[depth as usize]).max().unwrap_or(0));
+        }
+        for (parity, pages) in layer_pages.into_iter().enumerate() {
             if pages > 0 {
-                self.ensure_layers(depth as usize % 2, page, pages);
+                self.ensure_layers(parity, page, pages);
+            } else if self.exact_sizes {
+                self.ensure_layers(parity, [1, 1], 2);
             }
+        }
+        if layer_pages == [0; 2] {
+            Self::let_go(&mut self.msaa_layer, self.exact_sizes);
         }
         // Where the frame stops for the next round: before the first composite of a group the next round draws.
         let mut round_of = vec![usize::MAX; n];

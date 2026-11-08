@@ -78,7 +78,7 @@ pub struct NativeGpu {
 pub fn open_attempt(attempt: &Attempt, label: &str, limits: &impl Fn(&wgpu::Adapter) -> wgpu::Limits) -> Result<(wgpu::Instance, wgpu::Adapter, wgpu::Device, wgpu::Queue), String> {
     let instance = wgpu::Instance::new(attempt.descriptor());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).map_err(|e| format!("no adapter ({e})"))?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some(label), required_limits: limits(&adapter), ..Default::default() })).map_err(|e| format!("no device ({e})"))?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some(label), required_limits: limits(&adapter), memory_hints: wgpu::MemoryHints::MemoryUsage, ..Default::default() })).map_err(|e| format!("no device ({e})"))?;
     Ok((instance, adapter, device, queue))
 }
 

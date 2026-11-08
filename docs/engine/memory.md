@@ -1,5 +1,36 @@
 # Memory
 
+## Native export ownership
+
+`Engine::for_export` creates an engine with no stage picture consumer. Publication
+still prepares the document and generated materials; `ExportFrames` alone requests
+picture pixels and cel bounds. `Engine::new` and `with_notifier` retain their stage
+preloading behavior. The headless commands use a 32 MiB decode queue, drained after
+each engine step; a larger picture is decoded alone under the existing admission
+protocol. GPU upload batches release their decoded and staging copies before taking
+more. CPU exports retain the pixels their rasterizer reads. Input file buffers are
+dropped after opening.
+
+Native devices requested by `native_gpu` and the video tool use wgpu's
+`MemoryHints::MemoryUsage`; the backend, compiler and render calculations are
+unchanged. Live GPU allocations and reserved allocator blocks are separate measures.
+Native readback slots are capped by one frame's tile count, since native frames
+complete before another begins. Browser hosts still pipeline multiple frames.
+
+Exact-size renderers size isolation arrays once for the maximum of all depths of
+each parity in the current frame. Unused parities return to 1x1 placeholders and an
+unused isolation MSAA target is released. Array textures retain the two-layer
+minimum required by D11. Stage admission counts those current requirements plus the
+old owners during replacement, without changing its memory limit.
+
+`styk video --memory-report <report.jsonl>` records process private bytes, counted
+Rust heap bytes and peak, and wgpu allocator totals and allocation labels. It also
+emits `styk-trace` memory counters. `styk stage-memory <input> <frames.styk-auto>
+<WxH> <report.jsonl>` drives the production K-stage host with `frame` automation
+steps, including normal close and reclamation. Both diagnostics require `app-tools`;
+they create no window. These quantities overlap and must not be added as if they
+were independent owners. Measurements and comparisons belong in ignored artifacts.
+
 The engine, its documents, their edit sessions and history, and the decoded pictures share one
 WebAssembly memory with a fixed maximum (2 GiB, else the largest the browser reserves:
 [D14](decisions/0014-shared-memory-maximum.md)). A module that runs out of it aborts

@@ -175,10 +175,10 @@ impl Renderer {
 
     pub(crate) fn ensure_layers(&mut self, parity: usize, size: [u32; 2], pages: u32) {
         let atlas = &self.layers[parity];
-        if atlas.size == size && atlas.pages >= pages {
+        let pages = if self.exact_sizes { pages } else { pages.max(atlas.pages) }.clamp(2, MAX_LAYER_PAGES);
+        if atlas.size == size && atlas.pages.max(2) == pages {
             return;
         }
-        let pages = pages.max(atlas.pages).min(MAX_LAYER_PAGES);
         let (texture, view) = array_texture(&self.device, "styk layers", size, pages, true);
         self.layer_binds[parity] = Self::layer_bind(&self.device, &self.layout2, &view);
         let old = std::mem::replace(&mut self.layers[parity], LayerAtlas { texture, view, size, pages });
