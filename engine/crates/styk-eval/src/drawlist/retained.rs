@@ -143,6 +143,53 @@ pub fn retained_bytes_checked(list: &DrawList) -> Result<usize, RetainedBytesErr
     owner.checked_bytes()
 }
 
+impl AllocationObservation {
+    // HashMap's load factor leaves spare buckets; capacity is the number of
+    // entries before growth. Twice that many buckets plus one SIMD control group
+    // bounds the allocation, including alignment, without an input-size guess.
+    fn map<K,V>(&mut self, map: &std::collections::HashMap<K,V>) -> Result<(), RetainedBytesError> {
+        if map.capacity() == 0 { return Ok(()); }
+        self.add(map.capacity().checked_mul(2).and_then(|n| n.checked_mul(size_of::<(K,V)>() + 1))
+            .and_then(|n| n.checked_add(16 + std::mem::align_of::<(K,V)>())).ok_or(RetainedBytesError::Overflow)?)
+    }
+    fn out(&mut self, out: &super::Out) -> Result<(), RetainedBytesError> {
+        self.buffer(&out.prims)?; self.buffer(&out.paints)?; self.buffer(&out.points)?; self.buffer(&out.glyphs)?;
+        for g in &out.glyphs { self.slice(&g.triangles)?; }
+        Ok(())
+    }
+    fn fx(&mut self, fx: &super::Fx) -> Result<(), RetainedBytesError> {
+        self.buffer(&fx.stack)?;
+        self.resolved.stack(&fx.stack);
+        Ok(())
+    }
+    fn object(&mut self, object: &Arc<super::ObjectOut>) -> Result<(), RetainedBytesError> {
+        if !self.arc(object)? { return Ok(()); }
+        self.out(&object.outline)?; self.out(&object.items)?;
+        self.buffer(&object.nodes)?; self.buffer(&object.extents)?;
+        for node in &object.nodes { self.out(&node.out)?; self.fx(&node.fx)?; }
+        if let Some(fx) = &object.figure { self.add(size_of::<super::Fx>())?; self.fx(fx)?; }
+        Ok(())
+    }
+}
+impl super::EncodeMemory {
+    /// Concrete retained encoder buffers, resolved effects and glyph slices.
+    pub fn retained_bytes_checked(&self) -> Result<usize, RetainedBytesError> {
+        let mut owner = AllocationObservation::default();
+        owner.add(size_of::<Self>())?;
+        owner.map(&self.objects)?;
+        owner.buffer(&self.ghosts)?;
+        for (_,_,object) in self.objects.values() { owner.object(object)?; }
+        for (key, ghost) in &self.ghosts {
+            owner.buffer(&key.hidden)?;
+            if owner.arc(ghost)? {
+                owner.buffer(&ghost.runs)?; owner.buffer(&ghost.objects)?; owner.map(&ghost.of_slot)?;
+                for object in ghost.objects.iter().flatten() { owner.object(object)?; }
+            }
+        }
+        owner.checked_bytes()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -50,8 +50,8 @@ impl Default for Options {
     }
 }
 
-/// One worker's reuse state. Drop it at the end of a work burst: it must not
-/// keep a closed document alive while that worker sleeps. Parallel object maps
+/// One worker's reuse state. The owner bounds retained derived bytes and retires
+/// this state after sustained idleness or document close. Parallel object maps
 /// still run through styk-eval's existing native parallel path.
 #[derive(Default)]
 pub struct FrameBuilder {
@@ -62,6 +62,17 @@ pub struct FrameBuilder {
 }
 
 impl FrameBuilder {
+    /// Derived reuse buffers, using the geometry and encoder owners' accounting.
+    /// Shared authored resources stay in the document's lifetime, not this budget.
+    pub fn retained_bytes(&self) -> usize {
+        self.memory.retained_bytes().saturating_add(self.scene.as_ref().map_or(0, |s| s.retained_bytes))
+            .saturating_add(self.encoded.retained_bytes_checked().unwrap_or(usize::MAX))
+    }
+
+    pub fn release_over(&mut self, bytes: usize) {
+        if self.retained_bytes() > bytes { *self = Self::default(); }
+    }
+
     pub fn prepare(
         &mut self,
         generation: &Generation,

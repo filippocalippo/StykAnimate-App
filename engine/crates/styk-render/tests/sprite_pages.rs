@@ -100,6 +100,29 @@ fn renderer(device: &wgpu::Device, queue: &wgpu::Queue) -> Renderer {
 }
 
 #[test]
+fn a_refused_picture_table_keeps_the_installed_pixels_and_can_retry() {
+    let (device, queue) = device().expect("this stage admission test requires a GPU");
+    let assets = assets();
+    let list = two(&assets);
+    let fulls: Vec<_> = (1..PAGES).map(|p| sharp(&assets, p, SHARP[p as usize])).collect();
+    let mut renderer = renderer(&device, &queue);
+    renderer.prepare_sprites(&assets);
+    renderer.upload_images(&assets, &fulls);
+    let before = draw(&mut renderer, &device, &queue, &list);
+    assert_eq!(centre(&before, 4), SHARP[1]);
+    assert!(renderer.prepare_sprites_export_bounded(&assets, 2, 1).is_err());
+    assert_eq!(draw(&mut renderer, &device, &queue, &list), before);
+    renderer.prepare_sprites_export_bounded(&assets, 3, 1024 * 1024).unwrap();
+    for page in 1..PAGES {
+        renderer.map_sprite_page(page, Some(page));
+        renderer.set_picture(&assets.atlas[page as usize], Some(page));
+    }
+    renderer.flush_sprite_map(); renderer.flush_pictures();
+    renderer.upload_images(&assets, &fulls);
+    assert_eq!(draw(&mut renderer, &device, &queue, &list), before);
+}
+
+#[test]
 fn a_picture_draws_soft_until_it_is_in_and_sharp_after_and_never_blank_between() {
     let Some((device, queue)) = device() else { return };
     let assets = assets();

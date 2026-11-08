@@ -37,6 +37,7 @@ pub mod roving;
 pub mod screens;
 pub mod selection_actions;
 pub mod shell;
+pub mod stage;
 pub mod text_entry;
 pub mod text;
 #[cfg(feature = "testing")]

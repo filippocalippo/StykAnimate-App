@@ -528,6 +528,18 @@ by the engine (an edit frame whose trails are still being sampled asks the app f
 another frame, `Stage::refining`); so are 3D meshes, surfaces, poses and drawings a
 spatial bone turns.
 
+### Native stage host
+
+The native interface draws through `styk_core::stage::Painter` on iced's device
+and queue ([contract](../native/stage.md)). Its worker owns the existing renderer,
+prepares complete scheduler frames and detaches the output with `take_frame`.
+`RenderedFrame::present` uses the same blit in the host pass; `recycle_frame`
+returns ownership on the worker after the preceding presentation was submitted.
+The displayed texture is never mutated by pending work. `working_set_bound`
+admits scratch resources before rendering, and `prepare_sprites_export_bounded`
+admits the picture table before capacity growth; refusal leaves installed atlas
+contents intact. These APIs share the existing render/placement/upload paths.
+
 ### Picking artwork
 
 A click on artwork (`pick` in `src/app.mjs`) asks the stage which figure the frame it drew last paints at the point
@@ -1095,3 +1107,14 @@ finer curves for large text; each fails without its rule), `-p styk-render --tes
 the `styk-draw` unit test of `GlyphMask::layout`; `styk render` prints the rounds, layer
 memory and glyph masks of a frame; `styk render` / `styk raster` /
 `styk diff` for native comparisons ([D13](decisions/0013-app-parity-rule.md)).
+
+### Native host presentation
+
+A detached `RenderedFrame` composites premultiplied RGBA over its host's pass.
+`Renderer::present` still copies the browser surface. Native preparation keys are
+world-space inputs; navigation changes only the painter key and drawing view, so
+`set_list` receives the same Arc and retains geometry uploads. The native worker
+records one `FramePlan`, admits its concrete working-set bound, keeps it while
+picture services finish, then consumes it in `render_planned`. The browser/export
+`render` entry builds and consumes the same plan internally. See
+[native stage](../native/stage.md) for byte and lifetime ownership.
